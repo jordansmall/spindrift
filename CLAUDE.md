@@ -195,11 +195,12 @@ spindrift issue has a writable `/nix/store` and the check/dev closure
 pre-baked. That makes real checks the primary in-box gate — prefer them over
 guessing. But run the **scoped** target, not the full flake check (issue
 #581): `checks-inbox` covers every source-level check (go test/vet/fmt,
-shellcheck, nil-clean, marker/parity checks) and skips the checks that
-build/inspect the OCI image (`dockerTools.buildLayeredImage`) or assert facts
-about the box's own baked toolchain — the box is already built from that
-image, so re-baking it in-box tests nothing the pre-dispatch build didn't,
-and nested image builds are heavy/unreliable in a Box (issue #565 saw one
+the bats suite, shellcheck, nil-clean, marker/parity checks) and skips
+the checks that build/inspect the OCI image
+(`dockerTools.buildLayeredImage`) or assert facts about the box's own
+baked toolchain — the box is already built from that image, so
+re-baking it in-box tests nothing the pre-dispatch build didn't, and
+nested image builds are heavy/unreliable in a Box (issue #565 saw one
 kicked with `EXIT:137`):
 
 ```sh
