@@ -1960,13 +1960,17 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	}
 }
 
+// childStartNoKeyWhy is the rationale both loop tests' child_start
+// assertions cite, kept in one place so the two copies cannot drift.
+const childStartNoKeyWhy = "the daemon cannot know a child's dispatch key until its first box record (see startChild in pool.go)"
+
 // TestLoopBoxSettledAndUnknownRecords drives one child through a box
 // record (with phase), an unknown record, and a settled record over
 // OnRecord (issue #3627), and pins: the box event carries phase and lands
 // the issue in the live status file's slot while the child is still
 // running; the unknown record produces neither an event nor an error; the
-// settled event carries issue/state/note; and child_finish carries the
-// issue the child claimed.
+// settled event carries issue/state/note; child_finish carries the
+// issue the child claimed; and child_start carries no dispatch key.
 func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 	dir := t.TempDir()
 	clk := &testClock{}
@@ -2013,6 +2017,10 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 
 	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
 
+	if !events[0].Key.IsZero() {
+		t.Errorf("child_start event Key = %v, want zero: %s", events[0].Key, childStartNoKeyWhy)
+	}
+
 	box := events[1]
 	if box.Key != dispatchkey.Issue("42") || box.Phase != "initial" {
 		t.Errorf("box event = %+v, want issue 42 phase initial", box)
@@ -2030,9 +2038,9 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 // TestLoopButlerBoxSettledCarryChoreNotIssue is
 // TestLoopBoxSettledAndUnknownRecords' butler counterpart (issue #3878): a
 // Chore-keyed record must carry Chore straight through box, settled, and
-// child_finish, with Issue left empty throughout, and the live status
+// child_finish, with no issue on the key throughout, and the live status
 // file's Issues list — which names tracker issues — must never gain the
-// Chore.
+// Chore. child_start carries neither issue nor chore.
 func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	dir := t.TempDir()
 	clk := &testClock{}
@@ -2076,6 +2084,10 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	}
 
 	events := wantEvents(t, &buf, []string{"child_start", "box", "settled", "child_finish", "halt"}, "")
+
+	if !events[0].Key.IsZero() {
+		t.Errorf("child_start event Key = %v, want zero: %s", events[0].Key, childStartNoKeyWhy)
+	}
 
 	box := events[1]
 	if box.Key != dispatchkey.Chore("bugs") || box.Phase != "initial" {
