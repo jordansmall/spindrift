@@ -579,6 +579,226 @@ in
       { }
       "touch $out";
 
+  # buildTimeSignalFragmentPairViolations (issue #3754) proves each
+  # signalChannel row still has its _LOG/_SOCKET partner, so a deleted half
+  # fails the build instead of passing the per-row verb/marker check above.
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-socket-half-missing =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY_LOG";
+            fragment = "fixture.md";
+            signalChannel = "issue-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 1)
+      "buildTimeSignalFragmentPairViolations must report one violation when a _LOG row has lost its _SOCKET half, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-socket-half-missing"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-log-half-missing =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY_SOCKET";
+            fragment = "fixture-socket.md";
+            signalChannel = "issue-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 1)
+      "buildTimeSignalFragmentPairViolations must report one violation when a _SOCKET row has lost its _LOG half, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-log-half-missing"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-channel-drifted-socket-half =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY_LOG";
+            fragment = "fixture.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "FILER_FILE_RELAY_SOCKET";
+            fragment = "fixture-socket.md";
+            signalChannel = "pr-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 2)
+      "buildTimeSignalFragmentPairViolations must leave both rows unpaired when a _SOCKET row's signalChannel drifts from its _LOG half, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-channel-drifted-socket-half"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-base-drifted-socket-half =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY_LOG";
+            fragment = "fixture.md";
+            signalChannel = "pr-intent";
+          }
+          {
+            gate = "BOX_ACCESS_READ_ONLY_SOCKET";
+            fragment = "fixture-socket.md";
+            signalChannel = "pr-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 2)
+      "buildTimeSignalFragmentPairViolations must leave both rows unpaired when a _SOCKET row's gate base drifts from its _LOG half, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-base-drifted-socket-half"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-duplicate-partner =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "X_LOG";
+            fragment = "x.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "X_SOCKET";
+            fragment = "x-socket.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "X_SOCKET";
+            fragment = "x-socket.md";
+            signalChannel = "issue-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 1 && (builtins.head out).fragment == "x.md")
+      "buildTimeSignalFragmentPairViolations must report only the _LOG row when it has two identical _SOCKET partners, got: ${builtins.toJSON out}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-duplicate-partner"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-misnamed-socket-fragment =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "X_LOG";
+            fragment = "f.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "X_SOCKET";
+            fragment = "f.md";
+            signalChannel = "issue-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 2)
+      "buildTimeSignalFragmentPairViolations must flag both rows when a _SOCKET row's fragment is not named *-socket.md, got: ${toString (builtins.length out)}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-misnamed-socket-fragment"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-unsuffixed-signal-gate =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY";
+            fragment = "fixture.md";
+            signalChannel = "issue-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 1 && !((builtins.head out) ? expectedPartnerFragment))
+      "buildTimeSignalFragmentPairViolations must report a signalChannel row whose gate ends in neither _LOG nor _SOCKET as unpairable, not as a missing partner, got: ${builtins.toJSON out}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-unsuffixed-signal-gate"
+      { }
+      "touch $out";
+
+  # Pairing is by row identity, not (gate base, signalChannel): a sibling pair
+  # sharing both must not mask one pair losing its socket half.
+  prompt-contract-build-time-signal-fragment-pair-violations-detects-one-of-two-same-base-pairs =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY_LOG";
+            fragment = "a.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "FILER_FILE_RELAY_SOCKET";
+            fragment = "a-socket.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "FILER_FILE_RELAY_LOG";
+            fragment = "b.md";
+            signalChannel = "issue-intent";
+          }
+        ];
+      };
+    in
+    assert assertMsg (builtins.length out == 1 && (builtins.head out).fragment == "b.md")
+      "buildTimeSignalFragmentPairViolations must report exactly b.md when only one of two same-base same-channel pairs lost its socket half, got: ${builtins.toJSON out}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-detects-one-of-two-same-base-pairs"
+      { }
+      "touch $out";
+
+  prompt-contract-build-time-signal-fragment-pair-violations-well-formed-pair-passes =
+    let
+      out = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = [
+          {
+            gate = "FILER_FILE_RELAY_LOG";
+            fragment = "fixture.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "FILER_FILE_RELAY_SOCKET";
+            fragment = "fixture-socket.md";
+            signalChannel = "issue-intent";
+          }
+          {
+            gate = "SKILLS_FOUND";
+            fragment = "no-channel.md";
+          }
+        ];
+      };
+    in
+    assert assertMsg (out == [ ])
+      "buildTimeSignalFragmentPairViolations must return no violations for a well-formed pair (and skip rows with no signalChannel), got: ${builtins.toJSON out}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-well-formed-pair-passes"
+      { }
+      "touch $out";
+
   # The real-registry pass: every _LOG/_SOCKET-paired row in lib/fragments.nix
   # against the real on-disk fragment content under
   # templates/default/prompts/fragments/, so a future edit that drops a
@@ -604,6 +824,28 @@ in
     assert assertMsg (out == [ ])
       "buildTimeSignalFragmentViolations must return no violations against the real fragments.nix registry and real fragment content (issue #3726: both carrier modes must instruct the same verb), got: ${builtins.toJSON out}";
     pkgs.runCommand "prompt-contract-build-time-signal-fragment-violations-real-registry-passes" { }
+      "touch $out";
+
+  # The real-registry pass for pairing: every signalChannel row in
+  # lib/fragments.nix must keep its _LOG/_SOCKET partner, so deleting one
+  # carrier's fragment row fails the build (issue #3754).
+  prompt-contract-build-time-signal-fragment-pair-violations-real-registry-passes =
+    let
+      fragments = import ../../lib/fragments.nix;
+      signalFragmentRows = builtins.filter (row: row ? signalChannel) fragments;
+      logRows = builtins.filter (row: hasSuffix "_LOG" row.gate) signalFragmentRows;
+      socketRows = builtins.filter (row: hasSuffix "_SOCKET" row.gate) signalFragmentRows;
+      pairOut = promptContract.buildTimeSignalFragmentPairViolations {
+        fragmentRows = signalFragmentRows;
+      };
+    in
+    assert assertMsg (logRows != [ ] && socketRows != [ ])
+      "prompt-contract-build-time-signal-fragment-pair-violations-real-registry-passes: expected at least one _LOG and one _SOCKET signalChannel row in lib/fragments.nix -- fixture is vacuous";
+    assert assertMsg (pairOut == [ ])
+      "buildTimeSignalFragmentPairViolations must return no violations against the real fragments.nix registry (issue #3754: every _LOG/_SOCKET row needs its partner), got: ${builtins.toJSON pairOut}";
+    pkgs.runCommand
+      "prompt-contract-build-time-signal-fragment-pair-violations-real-registry-passes"
+      { }
       "touch $out";
 
   # issue #2524: outcomeStatusSets' research row must derive from

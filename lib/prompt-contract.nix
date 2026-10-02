@@ -516,6 +516,72 @@ rec {
         ]
     ) fragmentRows;
 
+  # Asserts every signalChannel row still has its _LOG/_SOCKET partner (issue
+  # #3754): a _LOG row `X.md`/`B_LOG` needs exactly one row `X-socket.md`/
+  # `B_SOCKET` on the same channel, and vice versa. Pairing is by row identity
+  # (fragment + gate + channel), never (gate base, channel) -- several pairs
+  # share both, so a coarser key lets one pair losing its half hide behind its
+  # siblings. A _SOCKET fragment not named `*-socket.md` is always a
+  # violation, as is a signalChannel row whose gate ends in neither _LOG nor
+  # _SOCKET (a signal row is by definition one half of a pair). Deleting both
+  # halves together is out of scope: pairing cannot see a whole removed
+  # feature.
+  buildTimeSignalFragmentPairViolations =
+    { fragmentRows }:
+    let
+      isLog = row: builtinsCompat.hasSuffix "_LOG" row.gate;
+      isPairable = row: isLog row || builtinsCompat.hasSuffix "_SOCKET" row.gate;
+      partnerOf =
+        row:
+        if isLog row then
+          {
+            fragment = builtinsCompat.removeSuffix ".md" row.fragment + "-socket.md";
+            gate = builtinsCompat.removeSuffix "_LOG" row.gate + "_SOCKET";
+            inherit (row) signalChannel;
+          }
+        else
+          {
+            # A fragment without the suffix yields "X.md.md", which no row has.
+            fragment = builtinsCompat.removeSuffix "-socket.md" row.fragment + ".md";
+            gate = builtinsCompat.removeSuffix "_SOCKET" row.gate + "_LOG";
+            inherit (row) signalChannel;
+          };
+      matches =
+        partner:
+        builtins.filter (
+          r:
+          r.fragment == partner.fragment
+          && r.gate == partner.gate
+          && (r.signalChannel or null) == partner.signalChannel
+        ) fragmentRows;
+    in
+    builtins.concatMap (
+      row:
+      let
+        partner = partnerOf row;
+      in
+      if !(row ? signalChannel) then
+        [ ]
+      else if !(isPairable row) then
+        [
+          {
+            inherit (row) fragment gate signalChannel;
+            message = "prompt-contract: fragment '${row.fragment}' (gate '${row.gate}', signal channel '${row.signalChannel}') is a signal row whose gate must end in _LOG or _SOCKET so it can pair with its carrier partner (issue #3754).";
+          }
+        ]
+      else if builtins.length (matches partner) == 1 then
+        [ ]
+      else
+        [
+          {
+            inherit (row) fragment gate signalChannel;
+            expectedPartnerFragment = partner.fragment;
+            expectedPartnerGate = partner.gate;
+            message = "prompt-contract: fragment '${row.fragment}' (gate '${row.gate}', signal channel '${row.signalChannel}') has no unique _LOG/_SOCKET partner row (fragment '${partner.fragment}', gate '${partner.gate}', same signal channel) in lib/fragments.nix (issue #3754) -- both carrier modes must keep their fragment.";
+          }
+        ]
+    ) fragmentRows;
+
   # Folds a buildTimeRejectVerdicts verdict to "must the runtime validator NOT
   # block" (issue #2320, parent #2244). The runtime validator sees a resolved
   # gate and has no "advise" state, so only "reject" folds to "must block".
