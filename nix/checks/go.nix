@@ -21,47 +21,21 @@ in
     touch $out
   '';
 
-  nix-fmt = pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-    nixfmt --check \
-      ${../../flake.nix} \
-      ${../../lib/app-wiring-check.nix} \
-      ${../../lib/builtins-compat.nix} \
-      ${../../lib/default-model-fixture.nix} \
-      ${../../lib/env-schema.nix} \
-      ${../../lib/flakeModule.nix} \
-      ${../../lib/fragment-pairs.nix} \
-      ${../../lib/gh-token-intervals.nix} \
-      ${../../lib/jira-status-mapping.nix} \
-      ${../../lib/mkHarness.nix} \
-      ${../../lib/nixpkgs-shared.nix} \
-      ${../../lib/prompt-contract.nix} \
-      ${../../lib/renderers.nix} \
-      ${../fixtures.nix} \
-      ${../../templates/default/flake.nix} \
-      ${./builtins-compat.nix} \
-      ${./code-review-fragment-parity.nix} \
-      ${./commit-fragment-parity.nix} \
-      ${./default.nix} \
-      ${./bats.nix} \
-      ${./changelog.nix} \
-      ${./equivalence.nix} \
-      ${./fragment-pairs.nix} \
-      ${./gh-token-intervals.nix} \
-      ${./go-check-env.nix} \
-      ${./go.nix} \
-      ${./image-nix-cores.nix} \
-      ${./image.nix} \
-      ${./jira-status-mapping.nix} \
-      ${./mk-fragment-parity.nix} \
-      ${./mk-fragment-parity-rejects.nix} \
-      ${./nix-checks-lore-parity.nix} \
-      ${./prompts.nix} \
-      ${./quickstart-golden.nix} \
-      ${./schema-drift.nix} \
-      ${./scout-rationale-parity.nix} \
-      ${./tdd-fragment-parity.nix}
-    touch $out
-  '';
+  # The file set is derived from the tree, so a new .nix file can't escape the
+  # gate. The quickstart golden flake.nix fixtures are included on purpose:
+  # they are rendered from templates/default/flake.nix, which is checked too.
+  nix-fmt =
+    let
+      nixSrc = pkgs.lib.fileset.toSource {
+        root = ../..;
+        fileset = pkgs.lib.fileset.fileFilter (f: f.hasExt "nix") ../..;
+      };
+    in
+    pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
+      cd ${nixSrc}
+      find . -type f -print0 | sort -z | xargs -0 nixfmt --check
+      touch $out
+    '';
 
   # go-check-env.nix's GOMAXPROCS bound (issue #3915), and its unset/0 fallback
   # against lib/image.nix's baked nix.conf `cores` (issue #3965).
