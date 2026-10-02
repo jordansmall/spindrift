@@ -3692,29 +3692,27 @@ verdict contract — the VERDICT bullet list, the verdict enumeration, and the
 configured set at build time (`lib/research-verdicts.nix`, wired through
 `lib/mkHarness.nix`), so a custom set reaches both what the launcher accepts
 and what the Box is told to emit. This is a `flakeOption` like the label
-knobs (baked into the image), not a zero-rebuild runtime switch like
-`SPINDRIFT_PROMPT_DIR` — changing it requires an image rebuild. The prompt's
-surrounding *guidance* prose (for example, the "Open questions — mandatory
-when the verdict is `unclear`" step, which names specific default verdicts
-by name) is not rewritten from a custom set — only the machine-checkable
-contract and each verdict's label render dynamically; rewriting the
-per-verdict semantic guidance itself is out of scope here and applies
-equally to the self-contained research mode's own baked prompt — see
+knobs, so changing the baked prompt's vocabulary requires an image rebuild.
+The prompt's surrounding *guidance* prose (for example, the "Open questions —
+mandatory when the verdict is `unclear`" step, which names specific default
+verdicts by name) is not rewritten from a custom set — only the
+machine-checkable contract and each verdict's label render dynamically;
+rewriting the per-verdict semantic guidance itself is out of scope here and
+applies equally to the self-contained research mode's own baked prompt — see
 [Self-contained research mode](#self-contained-research-mode).
 
-**Caveat for a `SPINDRIFT_PROMPT_DIR` override of `research-prompt.md` /
-`research-self-contained-prompt.md` specifically:** both checked-in
-templates carry two injection markers (`<!-- RESEARCH_VERDICT_BULLETS -->`
-and `` `<RESEARCH_VERDICT_ENUM>` ``) that only `lib/research-verdicts.nix`'s
-`render` resolves, and that resolution happens at nix build/eval time (when
-the harness image is baked), never at container runtime. An unmodified copy
-of either template dropped into a `SPINDRIFT_PROMPT_DIR` override directory
-therefore ships those markers to the agent verbatim, unrendered — the agent
-would be told to "Render exactly one of these verdicts:" followed by
-nothing. An operator overriding either of these two files via
-`SPINDRIFT_PROMPT_DIR` must supply their own fully-written-out VERDICT
-section (no markers) in their override copy, the same as they always had to
-for any other prompt content.
+The launcher also forwards the configured `RESEARCH_VERDICTS` into the Box,
+and prompt assembly renders the same three markers at runtime (issues #4159,
+#2630) — `<!-- RESEARCH_VERDICT_BULLETS -->`, `` `<RESEARCH_VERDICT_ENUM>` ``
+and the `${RESEARCH_STATUS_ENUM}` inside `status=<...>` — in
+`forge.VerdictLabels.RenderPrompt`, a Go port of the build-time renderer that
+a parity test keeps byte-identical. The baked prompt has no markers left, so
+this changes nothing for it. It matters for a `SPINDRIFT_PROMPT_DIR` override
+of `research-prompt.md` / `research-self-contained-prompt.md`: a copy of the
+checked-in template that keeps its markers renders from the configured set
+with no rewriting or rebuild. An override may instead hand-write its own
+VERDICT section with no markers; that still works, but it will not track the
+configured set.
 
 #### Caveat: a killed launcher can strand an issue
 
@@ -4846,11 +4844,11 @@ it's overridable at runtime via the same `SPINDRIFT_PROMPT_DIR` /
 iteration — a custom prompt directory ships
 `research-self-contained-prompt.md` alongside `research-prompt.md` to
 override both. As with the ordinary research prompt, an unmodified copy of
-the checked-in template ships its two verdict injection markers unresolved
-under this override — see the caveat under [Configuring the research
-verdict vocabulary](#configuring-the-research-verdict-vocabulary-research_verdicts).
-Its machine-checkable verdict contract otherwise renders
-from the same [`RESEARCH_VERDICTS`](#configuring-the-research-verdict-vocabulary-research_verdicts)
+the checked-in template renders its verdict markers at prompt assembly under
+this override (see [Configuring the research verdict
+vocabulary](#configuring-the-research-verdict-vocabulary-research_verdicts)).
+Its machine-checkable verdict contract renders from the same
+[`RESEARCH_VERDICTS`](#configuring-the-research-verdict-vocabulary-research_verdicts)
 configured set as the ordinary prompt (issue #2201), so a custom vocabulary
 reaches both. Settle is unchanged: self-contained research still posts
 exactly one required verdict comment through the same configurable-verdict
