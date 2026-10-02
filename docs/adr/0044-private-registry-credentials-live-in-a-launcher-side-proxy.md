@@ -809,7 +809,7 @@ socket-capable.
 > version-drift hint: nothing mounted should be able to produce that
 > answer, so version drift is not the explanation.
 >
-> The fallback this unlocks is not unconditional: `deniesHostLoopback`
+> The fallback this unlocks is not unconditional: `DeniesHostLoopback`
 > still rejects it outright under a network mode that denies the
 > host-loopback route, and `probeRegistryTCPReachable` must still confirm
 > the `--add-host host-gateway` route live before the dispatch falls
@@ -926,12 +926,16 @@ than from a literal argv assignment.
   host-loopback route the operator's own network mode explicitly asked to
   deny. Composing the two knobs silently was wrong in both directions. The
   fix makes them mutually exclusive by construction instead:
-  `RegistryProxyTransport` checks `deniesHostLoopback(networkMode)` — true
+  `RegistryProxyTransport` checks `DeniesHostLoopback(networkMode)` — true
   for `no-host-loopback` and for `none`, which denies the route by having no
   network at all — and when the probe has also found the socket incapable,
   returns an error rather than a usable TCP host. A Dispatch configured with
   a registry proxy in that specific combination now fails loudly, before any
   Box starts, instead of degrading into one of the two silent failures above.
+  The Dispatch re-checks the same rule on the verdict it consumes (issue
+  #3781), as the Signal socket already did, so a TCP verdict that reaches it
+  under a denying mode anyway — a replayed cached one, say (#3775) — still
+  fails closed rather than resting on the probe alone.
 
 **What is unchanged.** The real registry credential still never reaches the
 Box on either transport — the same `Rewrite`-hook `Header.Set` mechanism
