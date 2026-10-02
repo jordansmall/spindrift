@@ -2,6 +2,7 @@ package github
 
 import (
 	_ "embed"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -16,6 +17,17 @@ import (
 //
 //go:embed testdata/fake-gh.sh
 var fakeGHState string
+
+// ghWireComment mirrors gh's native comment JSON independently of the
+// adapter's own ghComment struct, so a tag typo in the adapter fails the
+// contract instead of round-tripping through a shared type.
+type ghWireComment struct {
+	Author struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	CreatedAt string `json:"createdAt"`
+	Body      string `json:"body"`
+}
 
 // githubHarness implements forgetest.Harness over a STATE_DIR/issues/<num>/
 // tree the fakeGHState script reads and mutates, so successive gh calls see
@@ -79,6 +91,23 @@ func (h *githubHarness) SeedNativeDeps(num string, ids []string) {
 
 func (h *githubHarness) FailNativeDeps(num string) {
 	os.WriteFile(filepath.Join(h.issueDir(num), "fail_native"), nil, 0o644)
+}
+
+// SeedComments writes num's thread in gh's native wire shape, which is what
+// pins execClient.Comments's JSON tags against the real CLI's output.
+func (h *githubHarness) SeedComments(num string, comments []forge.Comment) {
+	doc := struct {
+		Comments []ghWireComment `json:"comments"`
+	}{Comments: []ghWireComment{}}
+	for _, c := range comments {
+		var w ghWireComment
+		w.Author.Login = c.Author
+		w.CreatedAt = c.CreatedAt
+		w.Body = c.Body
+		doc.Comments = append(doc.Comments, w)
+	}
+	b, _ := json.Marshal(doc)
+	os.WriteFile(filepath.Join(h.issueDir(num), "comments"), b, 0o644)
 }
 
 func (h *githubHarness) IsolatesNativeFailure() {}

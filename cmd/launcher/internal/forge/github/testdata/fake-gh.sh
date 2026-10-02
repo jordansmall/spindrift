@@ -74,6 +74,15 @@ issue-view)
 	*body*)
 		printf '{"number":%s,"title":"%s","body":"%s","state":"OPEN","labels":%s}' "$num" "$(json_escape "$title")" "$(json_escape "$body")" "$(labels_json "$num")"
 		;;
+	*comments*)
+		# The harness writes the native {"comments":[...]} document, so the wire
+		# shape stays decided on the Go side rather than re-encoded here.
+		if [ -f "$DIR/$num/comments" ]; then
+			cat "$DIR/$num/comments"
+		else
+			printf '{"comments":[]}'
+		fi
+		;;
 	*)
 		printf '{"labels":%s}' "$(labels_json "$num")"
 		;;
