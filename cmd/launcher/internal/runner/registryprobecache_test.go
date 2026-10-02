@@ -35,7 +35,7 @@ func TestRegistryProbeCache_RoundTripUnix(t *testing.T) {
 
 func TestRegistryProbeCache_RoundTripTCP(t *testing.T) {
 	dir := t.TempDir()
-	key := registryProbeCacheKey{runtime: "docker", image: "spindrift:test", networkMode: "no-host-loopback"}
+	key := registryProbeCacheKey{runtime: "docker", image: "spindrift:test", networkMode: "open"}
 
 	if err := storeRegistryProbeCache(dir, key, registrymanifest.NewTCPEndpoint("192.0.2.1", ""), true); err != nil {
 		t.Fatalf("storeRegistryProbeCache: %v", err)
@@ -177,6 +177,33 @@ func TestRegistryProbeCache_MissTCPEmptyHost(t *testing.T) {
 
 	if _, _, ok := loadRegistryProbeCache(dir, key); ok {
 		t.Errorf("loadRegistryProbeCache: got hit, want miss")
+	}
+}
+
+// The cache file is hand-editable, so a well-formed tcp entry keyed to a
+// host-loopback-denying NETWORK_MODE must still miss: the live probe refuses
+// that combination and the cache must not replay what the probe never could.
+func TestRegistryProbeCache_MissTCPUnderDeniedHostLoopback(t *testing.T) {
+	for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			key := registryProbeCacheKey{runtime: "podman", image: "spindrift:test", networkMode: mode}
+
+			entry := registryProbeCacheEntry{
+				Version:     registryProbeCacheVersion,
+				Runtime:     key.runtime,
+				Image:       key.image,
+				NetworkMode: key.networkMode,
+				Transport:   "tcp",
+				TCPHost:     "host.docker.internal",
+				TCPAddHost:  true,
+			}
+			writeRegistryProbeCacheEntry(t, dir, entry)
+
+			if _, _, ok := loadRegistryProbeCache(dir, key); ok {
+				t.Errorf("loadRegistryProbeCache: got hit, want miss")
+			}
+		})
 	}
 }
 

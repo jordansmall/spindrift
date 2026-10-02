@@ -57,8 +57,9 @@ func registryProbeCachePath(pwd string) string {
 
 // loadRegistryProbeCache returns the remembered transport decision for want,
 // or ok=false on any miss: no pwd, no file, an unreadable file, malformed
-// JSON, an unrecognised version or transport, a differing key, or a tcp entry
-// with no host. Every miss path falls through to a fresh probe rather than
+// JSON, an unrecognised version or transport, a differing key, a tcp entry
+// with no host, or a tcp entry under a NETWORK_MODE that denies the host
+// loopback. Every miss path falls through to a fresh probe rather than
 // returning an error, so a damaged cache file can never fail a dispatch.
 func loadRegistryProbeCache(pwd string, want registryProbeCacheKey) (endpoint registrymanifest.Endpoint, tcpAddHost bool, ok bool) {
 	path := registryProbeCachePath(pwd)
@@ -83,7 +84,8 @@ func loadRegistryProbeCache(pwd string, want registryProbeCacheKey) (endpoint re
 	case "unix":
 		return registrymanifest.NewUnixEndpoint(""), entry.TCPAddHost, true
 	case "tcp":
-		if entry.TCPHost == "" {
+		// The file is hand-editable, so re-apply the live probe's loopback guard.
+		if entry.TCPHost == "" || DeniesHostLoopback(entry.NetworkMode) {
 			return registrymanifest.Endpoint{}, false, false
 		}
 		return registrymanifest.NewTCPEndpoint(entry.TCPHost, ""), entry.TCPAddHost, true
