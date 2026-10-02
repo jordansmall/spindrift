@@ -1021,6 +1021,48 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 	}
 }
 
+// TestRunOnce_RegistryProxyTransportTCPVerdictUnderDenyingNetworkMode_Fails
+// pins the registry-proxy TCP arm's backstop (issue #3781): a TCP verdict that
+// reaches runOnce under a host-loopback-denying NETWORK_MODE (e.g. a replayed
+// cached verdict, #3775) must be refused rather than silently served over a
+// route the operator's mode blocks.
+func TestRunOnce_RegistryProxyTransportTCPVerdictUnderDenyingNetworkMode_Fails(t *testing.T) {
+	for _, mode := range []string{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := retryConfig(3, 0, 0)
+			cfg.NetworkMode = mode
+			cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: "http://127.0.0.1:1", EnforcedPaths: []string{"/"}}})
+
+			fr := runner.NewFake()
+			fr.RegistryProxyTransportEndpoint = registrymanifest.NewTCPEndpoint("host.docker.internal", "")
+
+			d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
+
+			env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
+			if err != nil {
+				t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+			}
+			err = d.runOnce(d.logPath(), env, d.cacheDir)
+
+			if err == nil {
+				t.Fatalf("runOnce: want a non-nil error for a TCP verdict under NETWORK_MODE=%s", mode)
+			}
+			if !strings.Contains(err.Error(), "registry proxy") {
+				t.Errorf("runOnce error = %q, want it to name the registry proxy", err.Error())
+			}
+			if !strings.Contains(err.Error(), mode) {
+				t.Errorf("runOnce error = %q, want it to name NETWORK_MODE=%s", err.Error(), mode)
+			}
+			if !strings.Contains(err.Error(), "REGISTRY_PROXY_ROUTES") {
+				t.Errorf("runOnce error = %q, want it to name the REGISTRY_PROXY_ROUTES knob", err.Error())
+			}
+			if len(fr.RunCalls) != 0 {
+				t.Errorf("fr.RunCalls = %d, want 0: the Box must never run when the backstop rejects", len(fr.RunCalls))
+			}
+		})
+	}
+}
+
 // TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation verifies
 // that when the runner cannot carry a connectable unix socket into the Box
 // (issue #3111), runOnce falls back to TCP. Host and port reach the guest
