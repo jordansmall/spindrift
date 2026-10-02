@@ -3309,8 +3309,8 @@ as any other Non-blocking finding above — it needs neither an inline
 fix nor a human, so it is dropped rather than escalated to the filer.
 
 The round-2 tiebreak's narrowing (issue #3611) was calibrated against
-measurement, not intuition; the before/after record, and the re-check
-that closes the loop once runs have dispatched under it, live in
+measurement, not intuition; the before/after record, including the
+after arm's failed `fix`-tier guard (issue #3821), lives in
 [issue #3611's round-2 escalation flip
 recalibration](measurements/3611-round-2-escalation-flip.md).
 
