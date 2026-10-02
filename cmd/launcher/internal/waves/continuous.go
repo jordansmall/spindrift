@@ -11,6 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
@@ -458,7 +459,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		inflight[iss.Number] = true
 		launched = true
 		outstanding++
-		go func() {
+		panicguard.Go(func() {
 			defer d.Close()
 			result := d.Run()
 			switch {
@@ -503,7 +504,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				idle.Broadcast()
 			}
 			mu.Unlock()
-		}()
+		})
 		return true
 	}
 
@@ -525,7 +526,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// shared across a whole Console session.
 	growDone := make(chan struct{})
 	done := make(chan struct{})
-	go func() {
+	panicguard.Go(func() {
 		defer close(done)
 		for {
 			select {
@@ -548,14 +549,14 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				return
 			}
 		}
-	}()
+	})
 
 	// pollDone stops the ticker once this call is finished; pollExited confirms
 	// it has exited before RunContinuous returns.
 	pollInterval := resolvePollInterval(cfg.pollInterval)
 	pollDone := make(chan struct{})
 	pollExited := make(chan struct{})
-	go func() {
+	panicguard.Go(func() {
 		defer close(pollExited)
 		ticker := time.NewTicker(pollInterval)
 		defer ticker.Stop()
@@ -579,7 +580,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				return
 			}
 		}
-	}()
+	})
 
 	// stopWatchDone stops the watcher once this call is finished, whether or
 	// not cfg.Stop was ever closed; stopExited confirms it has exited before
@@ -591,7 +592,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	if cfg.Stop != nil {
 		stopWatchDone = make(chan struct{})
 		stopExited = make(chan struct{})
-		go func() {
+		panicguard.Go(func() {
 			defer close(stopExited)
 			select {
 			case <-cfg.Stop:
@@ -605,7 +606,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				mu.Unlock()
 			case <-stopWatchDone:
 			}
-		}()
+		})
 	}
 
 	// abortWatchDone stops the watcher once this call is finished; abortExited
@@ -623,7 +624,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	if cfg.Abort != nil {
 		abortWatchDone = make(chan struct{})
 		abortExited = make(chan struct{})
-		go func() {
+		panicguard.Go(func() {
 			defer close(abortExited)
 			select {
 			case <-cfg.Abort:
@@ -632,7 +633,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				mu.Unlock()
 			case <-abortWatchDone:
 			}
-		}()
+		})
 	}
 
 	mu.Lock()

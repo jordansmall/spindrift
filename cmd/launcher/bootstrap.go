@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/localloop"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/tokenrefresh"
@@ -114,8 +115,10 @@ func bootstrap(ensureReady bool, kind *dispatchkind.Descriptor, selfContained bo
 	// terminal gh calls (merge, label edits, final comment), so poll the file
 	// the minter rewrites in place (issue #1027). No-op when unset.
 	if c.ghTokenRefreshFile != "" {
-		go tokenrefresh.Watch(c.ghTokenRefreshFile, ghTokenRefreshInterval, nil, func(v string) error {
-			return os.Setenv("GH_TOKEN", v)
+		panicguard.Go(func() {
+			tokenrefresh.Watch(c.ghTokenRefreshFile, ghTokenRefreshInterval, nil, func(v string) error {
+				return os.Setenv("GH_TOKEN", v)
+			})
 		})
 	}
 

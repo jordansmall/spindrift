@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
 	"spindrift.dev/launcher/internal/unixsocket"
@@ -640,12 +641,12 @@ func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, b
 		return registrymanifest.Endpoint{}, false, fmt.Errorf("registry proxy transport probe: listen on %s: %w", probeSocketPath, err)
 	}
 	defer listener.Close()
-	go func() {
+	panicguard.Go(func() {
 		conn, err := listener.Accept()
 		if err == nil {
 			conn.Close()
 		}
-	}()
+	})
 
 	exitCode, socketErr := a.runRegistrySocketProbe(probeSocketPath)
 	if socketErr != nil {
@@ -731,12 +732,12 @@ func (a *ociAdapter) probeRegistryTCPOnce(host string, addHost bool) error {
 		return fmt.Errorf("registry proxy transport probe: tcp-reachability sub-probe: listen: %w: %w", err, errProbeNoVerdict)
 	}
 	defer listener.Close()
-	go func() {
+	panicguard.Go(func() {
 		conn, err := listener.Accept()
 		if err == nil {
 			conn.Close()
 		}
-	}()
+	})
 
 	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
 	if !ok {

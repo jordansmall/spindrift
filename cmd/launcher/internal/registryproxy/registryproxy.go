@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connlimit"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/unixsocket"
@@ -865,9 +866,9 @@ func (p *Proxy) serve(sock net.Listener, h http.Handler) {
 		// package download mid-response.
 	}
 	capped := connlimit.Listener(sock, maxConns)
-	go func() {
+	panicguard.Go(func() {
 		_ = p.server.Serve(capped)
-	}()
+	})
 }
 
 // Addr returns the address the proxy's listener is bound to, or nil when

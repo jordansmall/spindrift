@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/terminate"
 )
 
@@ -252,7 +253,7 @@ func (g *Gate) Watch() {
 	g.watchStarted.Do(func() {
 		g.watchDone = make(chan struct{})
 		g.watchExited = make(chan struct{})
-		go func() {
+		panicguard.Go(func() {
 			defer close(g.watchExited)
 			select {
 			case <-g.abort:
@@ -261,7 +262,7 @@ func (g *Gate) Watch() {
 				g.mu.Unlock()
 			case <-g.watchDone:
 			}
-		}()
+		})
 	})
 }
 

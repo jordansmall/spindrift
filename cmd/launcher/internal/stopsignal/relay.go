@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"spindrift.dev/launcher/internal/panicguard"
 )
 
 // Notify installs a SIGTERM and SIGINT handler and relays them onto the
@@ -47,7 +49,7 @@ func Relay(sig <-chan os.Signal) (stop, abort <-chan struct{}, cleanup func()) {
 	stopCh := make(chan struct{})
 	abortCh := make(chan struct{})
 	quit := make(chan struct{})
-	go func() {
+	panicguard.Go(func() {
 		for n := 0; ; {
 			select {
 			case <-sig:
@@ -63,6 +65,6 @@ func Relay(sig <-chan os.Signal) (stop, abort <-chan struct{}, cleanup func()) {
 				return
 			}
 		}
-	}()
+	})
 	return stopCh, abortCh, func() { close(quit) }
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/connlimit"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -125,9 +126,9 @@ func (l *Listener) serve(sock net.Listener, h http.Handler) {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	capped := connlimit.Listener(sock, maxConns)
-	go func() {
+	panicguard.Go(func() {
 		_ = l.server.Serve(capped)
-	}()
+	})
 }
 
 // Addr returns the address the listener is bound to, or nil when neither
