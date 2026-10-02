@@ -15,7 +15,7 @@ fixing it inline was never an available outcome. If none survived, skip this
 step; do not re-file what you just fixed or dropped.
 
 It is pre-provisioned via --agents; pass it the surviving findings verbatim,
-the issue number, and the branch (or PR URL, once one is open) for provenance.
+the issue number, and the branch for provenance.
 Your token is read-only, so the filer cannot file issues itself — it sends
 each one over the Signal socket via `driver-exec signal issue-intent`
 instead, and the launcher files each one host-side once you exit, so no
