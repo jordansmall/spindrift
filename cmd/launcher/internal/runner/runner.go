@@ -152,12 +152,6 @@ type Runner interface {
 	// error, and a sandbox already running for this box gives ErrAlreadyRunning.
 	Run(box Box) error
 
-	// Reap performs best-effort cleanup of a leftover sandbox by name. It
-	// never touches a live sandbox — one another launcher invocation may own
-	// per IsRunning's not-terminal-and-not-too-young check (issue #3633);
-	// Kill is the counterpart for that.
-	Reap(name string) error
-
 	// Kill force-stops and removes the sandbox named name, whether running or
 	// not (ADR 0024, issue #649). A sandbox already gone is not an error.
 	Kill(name string) error

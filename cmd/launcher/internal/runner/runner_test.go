@@ -51,18 +51,6 @@ func TestFake_ScriptedEnsureReadyErr(t *testing.T) {
 	}
 }
 
-func TestFake_ReapRecordsName(t *testing.T) {
-	f := runner.NewFake()
-	if err := f.Reap("agent-issue-5"); err != nil {
-		t.Fatalf("Reap: %v", err)
-	}
-	if len(f.ReapCalls) != 1 || f.ReapCalls[0] != "agent-issue-5" {
-		t.Errorf("ReapCalls: want [agent-issue-5], got %v", f.ReapCalls)
-	}
-}
-
-// Kill keeps a call log distinct from Reap's because Terminate (issue #649)
-// asserts on Kill alone, and a Reap call must not satisfy that assertion.
 func TestFake_KillRecordsName(t *testing.T) {
 	f := runner.NewFake()
 	if err := f.Kill("agent-issue-5"); err != nil {
@@ -70,9 +58,6 @@ func TestFake_KillRecordsName(t *testing.T) {
 	}
 	if len(f.KillCalls) != 1 || f.KillCalls[0] != "agent-issue-5" {
 		t.Errorf("KillCalls: want [agent-issue-5], got %v", f.KillCalls)
-	}
-	if len(f.ReapCalls) != 0 {
-		t.Errorf("ReapCalls: want none, got %v", f.ReapCalls)
 	}
 }
 

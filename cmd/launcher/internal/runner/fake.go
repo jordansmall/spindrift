@@ -17,8 +17,6 @@ type Fake struct {
 
 	RunCalls []Box
 
-	ReapCalls []string
-
 	KillCalls []string
 	KillErr   error
 
@@ -115,14 +113,6 @@ func (f *Fake) Run(box Box) error {
 		return fn(box)
 	}
 	return err
-}
-
-// Reap records the name.
-func (f *Fake) Reap(name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ReapCalls = append(f.ReapCalls, name)
-	return nil
 }
 
 // Kill records the name and returns KillErr.
