@@ -53,9 +53,7 @@ let
     "vm86old"
   ];
 
-  denylistCArray = builtins.concatStringsSep ", " (
-    map (name: ''"${name}"'') deniedSyscalls
-  );
+  denylistCArray = builtins.concatStringsSep ", " (map (name: ''"${name}"'') deniedSyscalls);
 
   generatorSrc = pkgs.writeText "spindrift-seccomp-gen.c" ''
     #include <errno.h>

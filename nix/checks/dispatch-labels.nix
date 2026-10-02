@@ -109,8 +109,10 @@ let
     "forgejo:agent-dispatch.yml" = builtins.readFile ../../.forgejo/workflows/agent-dispatch.yml;
     "forgejo:agent-recover.yml" = builtins.readFile ../../.forgejo/workflows/agent-recover.yml;
     "forgejo:agent-research.yml" = builtins.readFile ../../.forgejo/workflows/agent-research.yml;
-    "github:agent-research-close.yml" = builtins.readFile ../../.github/workflows/agent-research-close.yml;
-    "forgejo:agent-research-close.yml" = builtins.readFile ../../.forgejo/workflows/agent-research-close.yml;
+    "github:agent-research-close.yml" =
+      builtins.readFile ../../.github/workflows/agent-research-close.yml;
+    "forgejo:agent-research-close.yml" =
+      builtins.readFile ../../.forgejo/workflows/agent-research-close.yml;
   };
   # Takes triggerGuardSrcs as a parameter so the regression check below can
   # exercise this assertion path against a doctored source map without touching
@@ -301,9 +303,7 @@ let
       );
     in
     assert assertMsg (emptyOffenders == [ ])
-      "a harnessSurfaces extractor found zero label literal(s) for: ${
-        concatStringsSep ", " emptyOffenders
-      } — every known surface writes at least one label today, so an empty extraction means the extractor's marker/shape no longer matches the source (requoted, reformatted, or renamed), not that the surface stopped writing labels; fix the extractor in nix/checks/dispatch-labels.nix before trusting label-registry-covers-harness-writes again";
+      "a harnessSurfaces extractor found zero label literal(s) for: ${concatStringsSep ", " emptyOffenders} — every known surface writes at least one label today, so an empty extraction means the extractor's marker/shape no longer matches the source (requoted, reformatted, or renamed), not that the surface stopped writing labels; fix the extractor in nix/checks/dispatch-labels.nix before trusting label-registry-covers-harness-writes again";
     let
       missingFromRegistryBySurface = mapAttrs (
         _: labels: filter (l: !(elem l registryLabels)) labels
@@ -463,7 +463,9 @@ in
   label-registry-covers-harness-writes-quoted-bareword-regression =
     let
       doctoredFilerLabelDirectSrc =
-        replaceStrings [ "label create agent-review-finding" ] [ ''label create "agent-unregistered-label"'' ]
+        replaceStrings
+          [ "label create agent-review-finding" ]
+          [ ''label create "agent-unregistered-label"'' ]
           harnessSurfaces."templates/default/prompts/fragments/filer-label-direct.md".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
         "templates/default/prompts/fragments/filer-label-direct.md" =
@@ -539,7 +541,9 @@ in
   label-registry-covers-harness-writes-named-constant-regression =
     let
       doctoredDispatchkindSrc =
-        replaceStrings [ ''FindingLabel:   "agent-butler-finding"'' ] [ "FindingLabel:   butlerFindingLabel" ]
+        replaceStrings
+          [ ''FindingLabel:   "agent-butler-finding"'' ]
+          [ "FindingLabel:   butlerFindingLabel" ]
           harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
         "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
@@ -553,7 +557,10 @@ in
         registryLabels = allRegistryLabels;
       });
     in
-    assert assertMsg (doctoredDispatchkindSrc != harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src)
+    assert assertMsg
+      (
+        doctoredDispatchkindSrc != harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src
+      )
       "label-registry-covers-harness-writes-named-constant-regression: the butler descriptor's FindingLabel literal no longer matches the doctoring pattern; update the replaceStrings needle";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-named-constant-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the butler's FindingLabel moved to a named constant, but it evaluated successfully";
@@ -570,9 +577,11 @@ in
         replaceStrings [ ''"agent-research-finding"'' ] [ ''"agent-unregistered-label"'' ]
           harnessSurfaces."cmd/launcher/internal/doctor/doctor.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/doctor/doctor.go" = harnessSurfaces."cmd/launcher/internal/doctor/doctor.go" // {
-          src = doctoredDoctorSrc;
-        };
+        "cmd/launcher/internal/doctor/doctor.go" =
+          harnessSurfaces."cmd/launcher/internal/doctor/doctor.go"
+          // {
+            src = doctoredDoctorSrc;
+          };
       };
       extractedLabels = labelsWrittenBy {
         src = doctoredDoctorSrc;
@@ -587,7 +596,8 @@ in
       "label-registry-covers-harness-writes-research-finding-drift-regression: expected extractResearchLabelNamesLiteral to find [ \"agent-unregistered-label\" ] on the doctored ResearchLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-research-finding-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ResearchLabelNames()'s agent-research-finding literal renamed to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-research-finding-drift-regression" { } "touch $out";
+    pkgs.runCommand "label-registry-covers-harness-writes-research-finding-drift-regression" { }
+      "touch $out";
 
   # The converse of the check above (issue #2749 AC3): the registry side is
   # doctored instead, so doctor.go's still-correct literal is no longer a name
@@ -605,7 +615,9 @@ in
     in
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-research-finding-registry-rename-regression: expected assertHarnessWritesInRegistry to reject a synthetic registry with agent-research-finding renamed to agent-research-note, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-research-finding-registry-rename-regression" { } "touch $out";
+    pkgs.runCommand "label-registry-covers-harness-writes-research-finding-registry-rename-regression"
+      { }
+      "touch $out";
 
   # Mirrors the research-finding drift regression above for doctor.go's other
   # literal, AmbiguousLabelNames()'s "agent-ambiguous-spec" (issue #2817).
@@ -617,9 +629,11 @@ in
         replaceStrings [ ''"agent-ambiguous-spec"'' ] [ ''"agent-unregistered-label"'' ]
           harnessSurfaces."cmd/launcher/internal/doctor/doctor.go".src;
       doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/doctor/doctor.go" = harnessSurfaces."cmd/launcher/internal/doctor/doctor.go" // {
-          src = doctoredDoctorSrc;
-        };
+        "cmd/launcher/internal/doctor/doctor.go" =
+          harnessSurfaces."cmd/launcher/internal/doctor/doctor.go"
+          // {
+            src = doctoredDoctorSrc;
+          };
       };
       extractedLabels = labelsWrittenBy {
         src = doctoredDoctorSrc;
@@ -633,11 +647,18 @@ in
     # The shared `return []string{"` marker also matches ButlerLabelNames()'s
     # untouched "agent-butler-finding" literal (ADR 0056), so the doctored
     # source yields both, in file order.
-    assert assertMsg (extractedLabels == [ "agent-unregistered-label" "agent-butler-finding" ])
+    assert assertMsg
+      (
+        extractedLabels == [
+          "agent-unregistered-label"
+          "agent-butler-finding"
+        ]
+      )
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" \"agent-butler-finding\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { } "touch $out";
+    pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { }
+      "touch $out";
 
   # Proves the span-scanned extraction survives a gofmt reformat that moves
   # the FindingLabel: value onto its own line with extra alignment (issues
@@ -672,5 +693,6 @@ in
       "label-registry-covers-harness-writes-finding-label-multiline-regression: expected extractFindingLabelAxis to find \"agent-unregistered-label\" among ${builtins.toJSON extractedLabels} on the reformatted FindingLabel: assignment (value moved to its own line), but it didn't";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-finding-label-multiline-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the FindingLabel: assignment gofmt-reformatted onto its own line and its value swapped to agent-unregistered-label, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-finding-label-multiline-regression" { } "touch $out";
+    pkgs.runCommand "label-registry-covers-harness-writes-finding-label-multiline-regression" { }
+      "touch $out";
 }

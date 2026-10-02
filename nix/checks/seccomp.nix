@@ -8,20 +8,21 @@ let
 in
 {
   seccomp-filter-is-regular-file-multiple-of-8-bytes =
-    pkgs.runCommand "seccomp-filter-is-regular-file-multiple-of-8-bytes" { } ''
-      if [ ! -f ${seccompFilter} ]; then
-        echo "seccomp filter output is not a regular file: ${seccompFilter}" >&2
-        exit 1
-      fi
-      size=$(stat -c %s ${seccompFilter})
-      if [ "$size" -eq 0 ]; then
-        echo "seccomp filter output is empty" >&2
-        exit 1
-      fi
-      if [ $((size % 8)) -ne 0 ]; then
-        echo "seccomp filter output size ($size bytes) is not a multiple of 8 (bwrap requires len % 8 == 0)" >&2
-        exit 1
-      fi
-      touch $out
-    '';
+    pkgs.runCommand "seccomp-filter-is-regular-file-multiple-of-8-bytes" { }
+      ''
+        if [ ! -f ${seccompFilter} ]; then
+          echo "seccomp filter output is not a regular file: ${seccompFilter}" >&2
+          exit 1
+        fi
+        size=$(stat -c %s ${seccompFilter})
+        if [ "$size" -eq 0 ]; then
+          echo "seccomp filter output is empty" >&2
+          exit 1
+        fi
+        if [ $((size % 8)) -ne 0 ]; then
+          echo "seccomp filter output size ($size bytes) is not a multiple of 8 (bwrap requires len % 8 == 0)" >&2
+          exit 1
+        fi
+        touch $out
+      '';
 }

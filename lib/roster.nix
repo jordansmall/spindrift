@@ -49,34 +49,41 @@ rec {
           acc
         else if !(e ? name) then
           acc
-          // violation "missing-name" null
-            "normalizeRoster: entry ${toString idx} is missing a name -- every roster entry must set name"
+          //
+            violation "missing-name" null
+              "normalizeRoster: entry ${toString idx} is missing a name -- every roster entry must set name"
         else if !(builtins.isString e.name) then
           acc
-          // violation "invalid-name" e.name
-            "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- name must be a string"
+          //
+            violation "invalid-name" e.name
+              "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- name must be a string"
         else if builtins.match "[a-z0-9-]+" e.name == null then
           acc
-          // violation "invalid-name" e.name
-            "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- names must match [a-z0-9-]+"
+          //
+            violation "invalid-name" e.name
+              "normalizeRoster: entry ${toString idx} has an invalid name ${builtins.toJSON e.name} -- names must match [a-z0-9-]+"
         else if acc.seen ? ${e.name} then
           acc
-          // violation "duplicate-name" e.name
-            "normalizeRoster: duplicate name ${builtins.toJSON e.name} at entries ${toString acc.seen.${e.name}} and ${toString idx}"
+          //
+            violation "duplicate-name" e.name
+              "normalizeRoster: duplicate name ${builtins.toJSON e.name} at entries ${toString acc.seen.${e.name}} and ${toString idx}"
         else if unknownKeys != [ ] then
           acc
-          // violation "unknown-key" e.name
-            "normalizeRoster: entry ${builtins.toJSON e.name} has unknown key(s) ${builtins.toJSON unknownKeys} -- expected only ${builtins.toJSON knownKeys}"
+          //
+            violation "unknown-key" e.name
+              "normalizeRoster: entry ${builtins.toJSON e.name} has unknown key(s) ${builtins.toJSON unknownKeys} -- expected only ${builtins.toJSON knownKeys}"
         else if !(e ? model) || !(builtins.isString e.model) then
           acc
-          // violation "missing-model" e.name
-            "normalizeRoster: entry ${builtins.toJSON e.name} is missing model -- every roster entry must set model as a string (\"\" is a valid explicit opt-out)"
+          //
+            violation "missing-model" e.name
+              "normalizeRoster: entry ${builtins.toJSON e.name} is missing model -- every roster entry must set model as a string (\"\" is a valid explicit opt-out)"
         # Checked ahead of the promptFile branch, which also reads e.prompt,
         # so an invalid prompt is reported on its own terms (issue #2571).
         else if e ? prompt && e.prompt != null && !(builtins.isString e.prompt) then
           acc
-          // violation "invalid-prompt-type" e.name
-            "normalizeRoster: entry ${builtins.toJSON e.name} prompt must be a string or null, got ${builtins.typeOf e.prompt}"
+          //
+            violation "invalid-prompt-type" e.name
+              "normalizeRoster: entry ${builtins.toJSON e.name} prompt must be a string or null, got ${builtins.typeOf e.prompt}"
         else if e ? promptFile && !(builtins.isString e.promptFile && e.promptFile != "") then
           acc
           // violation "invalid-promptfile-type" e.name (
@@ -87,14 +94,12 @@ rec {
           )
         else
           let
-            entry =
-              if e ? promptFile then e else e // { promptFile = defaultPromptFileFor e.name; };
+            entry = if e ? promptFile then e else e // { promptFile = defaultPromptFileFor e.name; };
             # builtins.pathExists also says yes to a directory or to a
             # traversal escape, so reject ".." segments and absolute paths
             # from the string before touching the filesystem (issue #2571).
             promptFileHasTraversal =
-              builtins.elem ".." (lib.splitString "/" entry.promptFile)
-              || lib.hasPrefix "/" entry.promptFile;
+              builtins.elem ".." (lib.splitString "/" entry.promptFile) || lib.hasPrefix "/" entry.promptFile;
             promptFileResolvedPath = ../templates/default/prompts + "/${entry.promptFile}";
             promptFileExists = builtins.pathExists promptFileResolvedPath;
             # readFileType throws on a nonexistent path, so promptFileExists
@@ -109,8 +114,9 @@ rec {
           in
           if !promptFileUsable && !hasInlinePrompt then
             acc
-            // violation "missing-promptfile" e.name
-              "normalizeRoster: entry ${builtins.toJSON e.name} promptFile ${builtins.toJSON entry.promptFile} does not exist under templates/default/prompts and no inline prompt was supplied"
+            //
+              violation "missing-promptfile" e.name
+                "normalizeRoster: entry ${builtins.toJSON e.name} promptFile ${builtins.toJSON entry.promptFile} does not exist under templates/default/prompts and no inline prompt was supplied"
           else
             {
               seen = acc.seen // {

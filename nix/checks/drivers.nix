@@ -981,9 +981,7 @@ in
       };
       result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
     in
-    assert assertMsg (
-      !result.success
-    ) "assertArgvShape must throw when argvShape.modelFlag is empty";
+    assert assertMsg (!result.success) "assertArgvShape must throw when argvShape.modelFlag is empty";
     pkgs.runCommand "drivers-assert-argv-shape-empty-model-flag-throws" { } "touch $out";
 
   drivers-assert-argv-shape-non-bool-model-omit-empty-throws =
@@ -1025,9 +1023,7 @@ in
       };
       result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
     in
-    assert assertMsg (
-      !result.success
-    ) "assertArgvShape must throw when argvShape.effortFlag is empty";
+    assert assertMsg (!result.success) "assertArgvShape must throw when argvShape.effortFlag is empty";
     pkgs.runCommand "drivers-assert-argv-shape-empty-effort-flag-throws" { } "touch $out";
 
   drivers-assert-argv-shape-order-missing-slot-throws =
@@ -1064,9 +1060,8 @@ in
       };
       result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
     in
-    assert assertMsg (
-      !result.success
-    ) "assertArgvShape must throw when argvShape.order has a duplicated slot name (prompt) and an unknown one (bogus)";
+    assert assertMsg (!result.success)
+      "assertArgvShape must throw when argvShape.order has a duplicated slot name (prompt) and an unknown one (bogus)";
     pkgs.runCommand "drivers-assert-argv-shape-order-duplicate-or-unknown-throws" { } "touch $out";
 
   drivers-assert-argv-shape-succeeds =
@@ -1078,8 +1073,7 @@ in
       };
       result = builtins.tryEval (driverRegistry.assertArgvShape "stub" entry);
     in
-    assert assertMsg (
-      result.success
+    assert assertMsg (result.success
     ) "assertArgvShape must not throw when argvShape is fully well-formed";
     assert assertMsg (
       result.value == entry
@@ -1123,18 +1117,23 @@ in
       claudeEntry = driverRegistry.entries.claude;
       shape = claudeEntry.argvShape;
     in
-    assert assertMsg (shape.promptStyle == "flag")
-      "claude Driver's argvShape.promptStyle must stay \"flag\", got: ${shape.promptStyle}";
-    assert assertMsg (shape.promptFlag == "-p")
-      "claude Driver's argvShape.promptFlag must stay \"-p\", got: ${shape.promptFlag}";
-    assert assertMsg (shape.modelFlag == "--model")
-      "claude Driver's argvShape.modelFlag must stay \"--model\", got: ${shape.modelFlag}";
+    assert assertMsg (
+      shape.promptStyle == "flag"
+    ) "claude Driver's argvShape.promptStyle must stay \"flag\", got: ${shape.promptStyle}";
+    assert assertMsg (
+      shape.promptFlag == "-p"
+    ) "claude Driver's argvShape.promptFlag must stay \"-p\", got: ${shape.promptFlag}";
+    assert assertMsg (
+      shape.modelFlag == "--model"
+    ) "claude Driver's argvShape.modelFlag must stay \"--model\", got: ${shape.modelFlag}";
     assert assertMsg (shape.modelOmitEmpty == false)
       "claude Driver's argvShape.modelOmitEmpty must stay false, got: ${builtins.toJSON shape.modelOmitEmpty}";
-    assert assertMsg (shape.agentsFlag == "--agents")
-      "claude Driver's argvShape.agentsFlag must stay \"--agents\", got: ${shape.agentsFlag}";
-    assert assertMsg (shape.effortFlag == "--effort")
-      "claude Driver's argvShape.effortFlag must stay \"--effort\", got: ${shape.effortFlag}";
+    assert assertMsg (
+      shape.agentsFlag == "--agents"
+    ) "claude Driver's argvShape.agentsFlag must stay \"--agents\", got: ${shape.agentsFlag}";
+    assert assertMsg (
+      shape.effortFlag == "--effort"
+    ) "claude Driver's argvShape.effortFlag must stay \"--effort\", got: ${shape.effortFlag}";
     assert assertMsg (
       shape.order == [
         "prompt"
@@ -1155,18 +1154,21 @@ in
       opencodeEntry = driverRegistry.entries.opencode;
       shape = opencodeEntry.argvShape;
     in
-    assert assertMsg (shape.promptStyle == "positional")
-      "opencode Driver's argvShape.promptStyle must stay \"positional\", got: ${shape.promptStyle}";
+    assert assertMsg (
+      shape.promptStyle == "positional"
+    ) "opencode Driver's argvShape.promptStyle must stay \"positional\", got: ${shape.promptStyle}";
     assert assertMsg (!(shape ? promptFlag))
       "opencode Driver's argvShape must not declare promptFlag for a positional prompt style, got: ${builtins.toJSON shape}";
-    assert assertMsg (shape.modelFlag == "-m")
-      "opencode Driver's argvShape.modelFlag must stay \"-m\", got: ${shape.modelFlag}";
+    assert assertMsg (
+      shape.modelFlag == "-m"
+    ) "opencode Driver's argvShape.modelFlag must stay \"-m\", got: ${shape.modelFlag}";
     assert assertMsg (shape.modelOmitEmpty == true)
       "opencode Driver's argvShape.modelOmitEmpty must stay true, got: ${builtins.toJSON shape.modelOmitEmpty}";
     assert assertMsg (!(shape ? agentsFlag))
       "opencode Driver's argvShape must not declare agentsFlag (opencode has no --agents equivalent), got: ${builtins.toJSON shape}";
-    assert assertMsg (shape.effortFlag == "--variant")
-      "opencode Driver's argvShape.effortFlag must stay \"--variant\", got: ${shape.effortFlag}";
+    assert assertMsg (
+      shape.effortFlag == "--variant"
+    ) "opencode Driver's argvShape.effortFlag must stay \"--variant\", got: ${shape.effortFlag}";
     assert assertMsg (
       shape.order == [
         "driverFlags"

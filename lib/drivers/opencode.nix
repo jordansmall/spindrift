@@ -95,9 +95,7 @@ in
           description: ${builtins.toJSON (e.description or "")}
           mode: ${builtins.toJSON (e.mode or "subagent")}
           model: ${builtins.toJSON e.model}
-          ${lib.optionalString (
-            (e.effort or "") != ""
-          ) "reasoningEffort: ${builtins.toJSON e.effort}\n"}---
+          ${lib.optionalString ((e.effort or "") != "") "reasoningEffort: ${builtins.toJSON e.effort}\n"}---
           ${e.description or ""}
         '';
       }) roster

@@ -87,22 +87,22 @@ let
       modelOmitEmptyOk = shape ? modelOmitEmpty && builtins.isBool shape.modelOmitEmpty;
       # A nullable slot (issue #2534): absent means the Driver has no --agents
       # equivalent (opencode), so only a present-but-empty value is a violation.
-      agentsFlagOk = !(shape ? agentsFlag) || (builtins.isString shape.agentsFlag && shape.agentsFlag != "");
+      agentsFlagOk =
+        !(shape ? agentsFlag) || (builtins.isString shape.agentsFlag && shape.agentsFlag != "");
       effortFlagOk = shape ? effortFlag && builtins.isString shape.effortFlag && shape.effortFlag != "";
       order = shape.order or null;
       orderIsList = builtins.isList order;
       # The expected set tracks agentsFlag's nullability: a Driver with no
       # --agents equivalent has no "agents" position to place, so its order
       # omits that slot too (opencode.nix has 5, claude.nix has 6).
-      expectedSlots = if shape ? agentsFlag then argvOrderSlots else lib.filter (s: s != "agents") argvOrderSlots;
-      missingSlots = if orderIsList then lib.filter (s: !(builtins.elem s order)) expectedSlots else expectedSlots;
+      expectedSlots =
+        if shape ? agentsFlag then argvOrderSlots else lib.filter (s: s != "agents") argvOrderSlots;
+      missingSlots =
+        if orderIsList then lib.filter (s: !(builtins.elem s order)) expectedSlots else expectedSlots;
       extraSlots =
         if orderIsList then lib.unique (lib.filter (s: !(builtins.elem s expectedSlots)) order) else [ ];
       duplicateSlots =
-        if orderIsList then
-          lib.filter (s: (lib.count (x: x == s) order) > 1) (lib.unique order)
-        else
-          [ ];
+        if orderIsList then lib.filter (s: (lib.count (x: x == s) order) > 1) (lib.unique order) else [ ];
       orderOk = orderIsList && missingSlots == [ ] && extraSlots == [ ] && duplicateSlots == [ ];
 
       errors =
@@ -114,9 +114,9 @@ let
         ) "argvShape.promptFlag must be a non-empty string when promptStyle is \"flag\""
         ++ lib.optional (!modelFlagOk) "argvShape.modelFlag must be a non-empty string"
         ++ lib.optional (!modelOmitEmptyOk) "argvShape.modelOmitEmpty must be a bool"
-        ++ lib.optional (
-          !agentsFlagOk
-        ) "argvShape.agentsFlag must be a non-empty string when present (omit it entirely for a Driver with no --agents equivalent)"
+        ++
+          lib.optional (!agentsFlagOk)
+            "argvShape.agentsFlag must be a non-empty string when present (omit it entirely for a Driver with no --agents equivalent)"
         ++ lib.optional (!effortFlagOk) "argvShape.effortFlag must be a non-empty string"
         ++ lib.optional (!orderOk) (
           if !orderIsList then
@@ -125,7 +125,9 @@ let
             "argvShape.order must contain each of ${lib.concatStringsSep ", " expectedSlots} exactly once"
             + lib.optionalString (missingSlots != [ ]) "; missing: ${lib.concatStringsSep ", " missingSlots}"
             + lib.optionalString (extraSlots != [ ]) "; extra/unknown: ${lib.concatStringsSep ", " extraSlots}"
-            + lib.optionalString (duplicateSlots != [ ]) "; duplicated: ${lib.concatStringsSep ", " duplicateSlots}"
+            + lib.optionalString (
+              duplicateSlots != [ ]
+            ) "; duplicated: ${lib.concatStringsSep ", " duplicateSlots}"
         );
     in
     if errors == [ ] then
@@ -135,7 +137,9 @@ let
 
   entries = {
     claude = assertArgvShape "claude" (assertShape "claude" (import ./claude.nix { inherit lib; }));
-    opencode = assertArgvShape "opencode" (assertShape "opencode" (import ./opencode.nix { inherit lib; }));
+    opencode = assertArgvShape "opencode" (
+      assertShape "opencode" (import ./opencode.nix { inherit lib; })
+    );
   };
 
   # The image preamble and the bats harness file share these definitions

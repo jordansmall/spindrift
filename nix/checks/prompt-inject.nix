@@ -20,8 +20,9 @@ in
         promptInject.sliceBetween "# NOPE" "# END" "before\n# START\nmiddle\n# END\nafter\n"
       );
     in
-    assert assertMsg (!result.success)
-      "sliceBetween must throw when startMarker is absent from the source text";
+    assert assertMsg (
+      !result.success
+    ) "sliceBetween must throw when startMarker is absent from the source text";
     pkgs.runCommand "prompt-inject-slice-between-missing-start-marker-throws" { } "touch $out";
 
   prompt-inject-slice-between-duplicate-start-marker-throws =
@@ -30,8 +31,9 @@ in
         promptInject.sliceBetween "# START" "# END" "# START\nmiddle\n# START\nmore\n# END\nafter\n"
       );
     in
-    assert assertMsg (!result.success)
-      "sliceBetween must throw when startMarker appears more than once in the source text";
+    assert assertMsg (
+      !result.success
+    ) "sliceBetween must throw when startMarker appears more than once in the source text";
     pkgs.runCommand "prompt-inject-slice-between-duplicate-start-marker-throws" { } "touch $out";
 
   prompt-inject-slice-from-marker =
@@ -54,8 +56,9 @@ in
     let
       out = promptInject.trimTrailingBlankLine "one\ntwo\n";
     in
-    assert assertMsg (out == "one\ntwo\n")
-      "trimTrailingBlankLine must be a no-op on text ending with a single newline, got: ${out}";
+    assert assertMsg (
+      out == "one\ntwo\n"
+    ) "trimTrailingBlankLine must be a no-op on text ending with a single newline, got: ${out}";
     pkgs.runCommand "prompt-inject-trim-trailing-blank-line-single-newline-is-noop" { } "touch $out";
 
   prompt-inject-inject-section-appends-when-absent =
@@ -71,7 +74,8 @@ in
       promptText = "intro text\n\n# MARKER\nalready here\n";
       out = promptInject.injectSection "# MARKER" "# MARKER\nblock body\n" promptText;
     in
-    assert assertMsg (out == promptText)
-      "injectSection must leave promptText unchanged when it already contains the marker, got: ${out}";
+    assert assertMsg (
+      out == promptText
+    ) "injectSection must leave promptText unchanged when it already contains the marker, got: ${out}";
     pkgs.runCommand "prompt-inject-inject-section-idempotent-when-present" { } "touch $out";
 }

@@ -98,6 +98,8 @@ in
     let
       result = builtins.tryEval (aw.parse "22:00-06:00 Europe/Lon\rdon");
     in
-    assert assertMsg (!result.success) "parse must throw on a carriage return embedded in the zone token";
+    assert assertMsg (
+      !result.success
+    ) "parse must throw on a carriage return embedded in the zone token";
     pkgs.runCommand "awake-window-parse-rejects-carriage-return-in-zone" { } "touch $out";
 }

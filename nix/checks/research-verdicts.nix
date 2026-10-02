@@ -50,10 +50,8 @@ in
   # removed marker in the self-contained sibling template would ship silently.
   # Pin both markers in both templates, ahead of any rendering.
   research-verdicts-templates-carry-both-markers =
-    assert assertMsg (hasInfix rv.bulletsMarker template)
-      "research-prompt.md must carry bulletsMarker";
-    assert assertMsg (hasInfix rv.enumMarker template)
-      "research-prompt.md must carry enumMarker";
+    assert assertMsg (hasInfix rv.bulletsMarker template) "research-prompt.md must carry bulletsMarker";
+    assert assertMsg (hasInfix rv.enumMarker template) "research-prompt.md must carry enumMarker";
     assert assertMsg (hasInfix rv.bulletsMarker templateSelfContained)
       "research-self-contained-prompt.md must carry bulletsMarker";
     assert assertMsg (hasInfix rv.enumMarker templateSelfContained)

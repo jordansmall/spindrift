@@ -794,8 +794,7 @@ in
     in
     assert assertMsg (out == [ ])
       "buildTimeSignalFragmentPairViolations must return no violations for a well-formed pair (and skip rows with no signalChannel), got: ${builtins.toJSON out}";
-    pkgs.runCommand
-      "prompt-contract-build-time-signal-fragment-pair-violations-well-formed-pair-passes"
+    pkgs.runCommand "prompt-contract-build-time-signal-fragment-pair-violations-well-formed-pair-passes"
       { }
       "touch $out";
 
@@ -843,8 +842,7 @@ in
       "prompt-contract-build-time-signal-fragment-pair-violations-real-registry-passes: expected at least one _LOG and one _SOCKET signalChannel row in lib/fragments.nix -- fixture is vacuous";
     assert assertMsg (pairOut == [ ])
       "buildTimeSignalFragmentPairViolations must return no violations against the real fragments.nix registry (issue #3754: every _LOG/_SOCKET row needs its partner), got: ${builtins.toJSON pairOut}";
-    pkgs.runCommand
-      "prompt-contract-build-time-signal-fragment-pair-violations-real-registry-passes"
+    pkgs.runCommand "prompt-contract-build-time-signal-fragment-pair-violations-real-registry-passes"
       { }
       "touch $out";
 
@@ -1062,41 +1060,45 @@ in
   # red (issue #2699). See sharedObligationDriftCheck above for what this
   # actually swaps and asserts.
   prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-commit-folding =
-    sharedObligationDriftCheck {
-      obligationId = "commit-folding";
-      orchestratorFragmentFile = "commit-rework-orchestrator.md";
-      brokenInlineContent = "no folding instruction of any kind in this fragment";
-    };
+    sharedObligationDriftCheck
+      {
+        obligationId = "commit-folding";
+        orchestratorFragmentFile = "commit-rework-orchestrator.md";
+        brokenInlineContent = "no folding instruction of any kind in this fragment";
+      };
 
   # Proves the real sharedObligations registry's "triage-drop-arm" row can go
   # red (issue #3610). See sharedObligationDriftCheck above for what this
   # actually swaps and asserts.
   prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-drop-arm =
-    sharedObligationDriftCheck {
-      obligationId = "triage-drop-arm";
-      orchestratorFragmentFile = "review-loop-orchestrator.md";
-      brokenInlineContent = "no drop outcome of any kind in this fragment";
-    };
+    sharedObligationDriftCheck
+      {
+        obligationId = "triage-drop-arm";
+        orchestratorFragmentFile = "review-loop-orchestrator.md";
+        brokenInlineContent = "no drop outcome of any kind in this fragment";
+      };
 
   # Proves the real sharedObligations registry's "triage-round-2-calibration"
   # row can go red (issue #3611). See sharedObligationDriftCheck above for
   # what this actually swaps and asserts.
   prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-round-2-calibration =
-    sharedObligationDriftCheck {
-      obligationId = "triage-round-2-calibration";
-      orchestratorFragmentFile = "review-loop-orchestrator.md";
-      brokenInlineContent = "no round-2 calibration of any kind in this fragment";
-    };
+    sharedObligationDriftCheck
+      {
+        obligationId = "triage-round-2-calibration";
+        orchestratorFragmentFile = "review-loop-orchestrator.md";
+        brokenInlineContent = "no round-2 calibration of any kind in this fragment";
+      };
 
   # Proves the real sharedObligations registry's "triage-escape-hatch-scope"
   # row can go red (issue #3816). See sharedObligationDriftCheck above for
   # what this actually swaps and asserts.
   prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-escape-hatch-scope =
-    sharedObligationDriftCheck {
-      obligationId = "triage-escape-hatch-scope";
-      orchestratorFragmentFile = "review-loop-orchestrator.md";
-      brokenInlineContent = "no escape-hatch scope gate of any kind in this fragment";
-    };
+    sharedObligationDriftCheck
+      {
+        obligationId = "triage-escape-hatch-scope";
+        orchestratorFragmentFile = "review-loop-orchestrator.md";
+        brokenInlineContent = "no escape-hatch scope gate of any kind in this fragment";
+      };
 
   # Enforcing check (issue #2699): the real registry's rows must hold against
   # the on-disk fragment content every branch declares, so an edit to either

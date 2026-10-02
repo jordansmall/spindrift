@@ -101,14 +101,13 @@ in
       agents = lib.listToAttrs (
         map (e: {
           name = e.name;
-          value =
-            {
-              description = e.description or "";
-              prompt = "";
-              tools = e.tools or [ ];
-              model = e.model;
-            }
-            // (if (e.effort or "") != "" then { effort = e.effort; } else { });
+          value = {
+            description = e.description or "";
+            prompt = "";
+            tools = e.tools or [ ];
+            model = e.model;
+          }
+          // (if (e.effort or "") != "" then { effort = e.effort; } else { });
         }) roster
       );
     in
