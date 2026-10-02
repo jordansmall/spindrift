@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/panicguard"
 )
 
 // fixedPaneScrollDelta is how many lines pgup/pgdown move the drill-in
@@ -95,9 +96,23 @@ func newTeaModel(tracker forge.IssueTracker, pwd string, launch *Launcher) teaMo
 
 // Run drives the console's full-screen Bubble Tea program to completion (issue
 // #784). launch is nil for a launch-less session; production wires a real one.
+//
+// While the program runs, a panic on a goroutine started via panicguard.Go
+// releases the terminal (leaves the alt screen, shows the cursor) before the
+// panic crashes the process, so the trace stays readable. The panic stays
+// fatal. Bubbletea's own goroutines recover themselves; goroutines owned by
+// third-party libraries (net/http handlers, etc.) are not covered.
 func Run(tracker forge.IssueTracker, pwd string, in io.Reader, out io.Writer, launch *Launcher) error {
 	p := tea.NewProgram(newTeaModel(tracker, pwd, launch), tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
+	// ReleaseTerminal, not Kill: Kill would let p.Run return and the caller
+	// exit the process before the panicking goroutine re-panics, losing the trace.
+	// ReleaseTerminal from a foreign goroutine reads program state p.Run mutates
+	// unsynchronized; accepted, since this only runs on the crash path.
+	unset := panicguard.SetRestore(func() { _ = p.ReleaseTerminal() })
 	_, err := p.Run()
+	// Unset before launch.Wait: Run has already restored the terminal, and a
+	// later ReleaseTerminal would re-emit escapes.
+	unset()
 	if launch != nil {
 		launch.Wait()
 	}
