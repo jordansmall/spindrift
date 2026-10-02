@@ -245,7 +245,7 @@ func TestDoctorReport_ConfigAndRunBothBroken_ConfigErrWinsExitCodeButBothReport(
 	if !strings.Contains(stderr.String(), "MERGE_MODE") {
 		t.Errorf("want stderr to contain the configErr explanation, got %q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "forge connectivity check failed") && !strings.Contains(stderr.String(), "auth check failed") {
+	if !strings.Contains(stderr.String(), forge.ErrAuthFailure.Error()) || !strings.Contains(stderr.String(), "GH_TOKEN") {
 		t.Errorf("want stderr to also contain the runErr explanation, got %q", stderr.String())
 	}
 }
