@@ -23,7 +23,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"spindrift.dev/launcher/internal/connlimit"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryvocab"
 	"spindrift.dev/launcher/internal/unixsocket"
@@ -755,6 +757,30 @@ type closer interface {
 	Close()
 }
 
+const (
+	// readHeaderTimeout bounds the header phase alone, so a slowloris drip
+	// that never finishes its headers cannot park a connection (and one of
+	// maxConns' slots) indefinitely.
+	readHeaderTimeout = 5 * time.Second
+
+	// readTimeout bounds reading one whole request. The handler is GET/HEAD
+	// only (405 otherwise), so a request has no meaningful body and this is
+	// generous.
+	readTimeout = 30 * time.Second
+
+	// idleTimeout bounds a keep-alive connection waiting for its next
+	// request. Set explicitly: a zero IdleTimeout would silently fall back
+	// to readTimeout. 90s matches net/http's DefaultTransport.IdleConnTimeout,
+	// the keep-alive window a Go-style client already expects.
+	idleTimeout = 90 * time.Second
+
+	// maxConns caps concurrent connections. It is a file-descriptor guard,
+	// not a rate limit, sized well above the parallel fetches a package
+	// manager opens per host. An undersized cap does not fail loudly:
+	// over-cap connections wait in the kernel backlog and look like a hang.
+	maxConns = 64
+)
+
 // Proxy serves an http.Handler over a unix domain socket or, via
 // ListenAndServeTCP, a secret-gated TCP port bound on every interface.
 type Proxy struct {
@@ -762,6 +788,7 @@ type Proxy struct {
 	Handler http.Handler
 
 	listener net.Listener
+	server   *http.Server
 }
 
 // ListenAndServe removes any stale file at socketPath, listens on a unix
@@ -783,11 +810,7 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 	if err != nil {
 		return fmt.Errorf("registryproxy: listen on %q: %w", socketPath, err)
 	}
-	p.listener = l
-
-	go func() {
-		_ = http.Serve(l, p.Handler)
-	}()
+	p.serve(l, p.Handler)
 
 	return nil
 }
@@ -809,7 +832,6 @@ func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 	if err != nil {
 		return fmt.Errorf("registryproxy: listen on %q: %w", addr, err)
 	}
-	p.listener = l
 
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// subtle.ConstantTimeCompare, not ==: this header is the sole gate on
@@ -823,11 +845,29 @@ func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 		p.Handler.ServeHTTP(w, r)
 	})
 
-	go func() {
-		_ = http.Serve(l, gated)
-	}()
+	p.serve(l, gated)
 
 	return nil
+}
+
+// serve runs h on sock in the background, behind the connection cap and the
+// server timeouts both transports share. Addr keeps reading the raw sock so
+// an ephemeral port is still discoverable.
+func (p *Proxy) serve(sock net.Listener, h http.Handler) {
+	p.listener = sock
+	p.server = &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		IdleTimeout:       idleTimeout,
+		// WriteTimeout is deliberately unset: ReadTimeout bounds only reading
+		// the request, whereas a write deadline would cut off a long streamed
+		// package download mid-response.
+	}
+	capped := connlimit.Listener(sock, maxConns)
+	go func() {
+		_ = p.server.Serve(capped)
+	}()
 }
 
 // Addr returns the address the proxy's listener is bound to, or nil when
@@ -839,13 +879,22 @@ func (p *Proxy) Addr() net.Addr {
 	return p.listener.Addr()
 }
 
-// Close stops the proxy from accepting further connections.
+// Close stops the proxy from accepting connections and drops every
+// in-flight one, then flushes the handler's suppressed-failure summaries.
+// The returned error is the server's; the raw listener's close error is not.
 func (p *Proxy) Close() error {
+	var err error
+	if p.server != nil {
+		err = p.server.Close()
+	}
+	if p.listener != nil {
+		// server.Close only closes the listener once Serve has tracked it; if
+		// Close wins the race against the serve goroutine, this releases the
+		// socket (and unix socket file) now. A second-close error is expected.
+		_ = p.listener.Close()
+	}
 	if c, ok := p.Handler.(closer); ok {
 		c.Close()
 	}
-	if p.listener == nil {
-		return nil
-	}
-	return p.listener.Close()
+	return err
 }
