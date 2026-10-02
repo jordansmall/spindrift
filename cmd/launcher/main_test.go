@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -67,6 +68,13 @@ func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
 	}
 }
 
+// runVerb calls mainRun for argv that reaches a verb handler. Handlers take
+// only stderr (verbHandler), so verb output never reaches mainRun's stdout and
+// there is nothing on it to assert (issue #3699).
+func runVerb(args []string, stderr io.Writer) int {
+	return mainRun(args, io.Discard, stderr)
+}
+
 // Pass-through booleans parseFlags leaves ahead of the verb must not be read
 // as the verb (issue #3784): each case reaches the verb's own handler.
 func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
@@ -83,8 +91,8 @@ func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
 		{[]string{"--no-build", "doctor", "--butler"}, "unrecognized argument: --no-build"},
 	}
 	for _, tc := range cases {
-		var stdout, stderr bytes.Buffer
-		code := mainRun(tc.args, &stdout, &stderr)
+		var stderr bytes.Buffer
+		code := runVerb(tc.args, &stderr)
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", tc.args, code)
 		}
@@ -93,9 +101,6 @@ func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
 		}
 		if !strings.Contains(stderr.String(), tc.want) {
 			t.Errorf("mainRun(%v) stderr = %q, want it to contain %q", tc.args, stderr.String(), tc.want)
-		}
-		if stdout.String() != "" {
-			t.Errorf("mainRun(%v) stdout = %q, want empty", tc.args, stdout.String())
 		}
 	}
 }
@@ -143,7 +148,8 @@ func TestMainRun_LeadingForceBeforeRegistry_PassesDiscoverGate(t *testing.T) {
 // verb-first one (issue #3784). REPO_SLUG empty makes bootstrap fail at
 // validation, so no runner or gh is needed; the default tracker makes
 // reconcile a no-op, and it writes to os.Stderr, so for reconcile the stderr
-// comparison only confirms both buffers stay empty.
+// comparison only confirms both buffers stay empty and the stdout comparison
+// is what catches a leading flag knocking it into mainRun's help branch.
 func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 	t.Setenv("ISSUE_TRACKER", "")
@@ -155,7 +161,7 @@ func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
 		{[]string{"--self-contained", "research"}, []string{"research", "--self-contained"}},
 	}
 	for _, tc := range cases {
-		var lOut, lErr, vOut, vErr bytes.Buffer
+		var lOut, vOut, lErr, vErr bytes.Buffer
 		lCode := mainRun(tc.leading, &lOut, &lErr)
 		vCode := mainRun(tc.verbFirst, &vOut, &vErr)
 		if lCode != vCode {
@@ -165,7 +171,7 @@ func TestMainRun_LeadingFlag_MatchesVerbFirstSpelling(t *testing.T) {
 			t.Errorf("mainRun(%v) stderr = %q, want %q as for %v", tc.leading, lErr.String(), vErr.String(), tc.verbFirst)
 		}
 		if lOut.String() != vOut.String() {
-			t.Errorf("mainRun(%v) stdout = %q, want %q as for %v", tc.leading, lOut.String(), vOut.String(), tc.verbFirst)
+			t.Errorf("mainRun(%v) stdout = %q, want %q as for %v (verb handlers never see stdout, so a leading flag displaced the verb)", tc.leading, lOut.String(), vOut.String(), tc.verbFirst)
 		}
 		if strings.Contains(lErr.String(), "unknown subcommand") {
 			t.Errorf("mainRun(%v) stderr = %q, want the flag not read as the verb", tc.leading, lErr.String())
@@ -239,16 +245,13 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("REPO_SLUG", "")
 
-	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"dispatch"}, &stdout, &stderr)
+	var stderr bytes.Buffer
+	code := runVerb([]string{"dispatch"}, &stderr)
 	if code != exitConfigInvalid {
 		t.Errorf("mainRun(dispatch) code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("mainRun(dispatch) stderr = %q, want a REPO_SLUG validation error", stderr.String())
-	}
-	if stdout.String() != "" {
-		t.Errorf("stdout = %q, want empty (bootstrap fails before any dispatch work runs)", stdout.String())
 	}
 }
 
@@ -302,22 +305,19 @@ func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
 
 // `doctor`'s verb handler rejects an unrecognised positional before ever
 // reaching cmdDoctor/newReadContext (issue #3777), so this stays hermetic —
-// no real network call, and nothing on stdout since the report never runs.
+// no real network call.
 // A "--"-prefixed bogus flag never reaches the verb handler at all: parseFlags
 // (main.go, ahead of the verbHandlers dispatch) already rejects any
 // unrecognised "--flag" for every subcommand, pre-ticket behavior this slice
 // leaves untouched — pinned below so a regression there is still caught.
 func TestDoctor_UnrecognizedArg_UsageError(t *testing.T) {
-	var stdout, stderr bytes.Buffer
-	code := mainRun([]string{"doctor", "extra"}, &stdout, &stderr)
+	var stderr bytes.Buffer
+	code := runVerb([]string{"doctor", "extra"}, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(doctor extra) code = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "usage: spindrift doctor [--verbose|-v]") {
 		t.Errorf("mainRun(doctor extra) stderr = %q, want the usage message", stderr.String())
-	}
-	if stdout.Len() != 0 {
-		t.Errorf("mainRun(doctor extra) stdout = %q, want empty (doctor report must not run)", stdout.String())
 	}
 }
 
@@ -331,7 +331,7 @@ func TestDoctor_UnrecognizedFlag_RejectedUpstreamOfVerbHandler(t *testing.T) {
 		t.Errorf("mainRun(doctor --bogus) stderr = %q, want it to mention the unknown flag", stderr.String())
 	}
 	if stdout.Len() != 0 {
-		t.Errorf("mainRun(doctor --bogus) stdout = %q, want empty (doctor report must not run)", stdout.String())
+		t.Errorf("mainRun(doctor --bogus) stdout = %q, want empty (parseFlags rejects before any verb runs)", stdout.String())
 	}
 }
 
@@ -6407,20 +6407,17 @@ func TestBootstrapExitCode(t *testing.T) {
 func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
-	var dispatchOut, dispatchErr bytes.Buffer
-	dispatchCode := mainRun([]string{"dispatch"}, &dispatchOut, &dispatchErr)
+	var dispatchErr bytes.Buffer
+	dispatchCode := runVerb([]string{"dispatch"}, &dispatchErr)
 
-	var researchOut, researchErr bytes.Buffer
-	researchCode := mainRun([]string{"research"}, &researchOut, &researchErr)
+	var researchErr bytes.Buffer
+	researchCode := runVerb([]string{"research"}, &researchErr)
 
 	if dispatchCode != exitConfigInvalid {
 		t.Fatalf("mainRun(dispatch) code = %d, want %d; stderr=%s", dispatchCode, exitConfigInvalid, dispatchErr.String())
 	}
 	if researchCode != dispatchCode {
 		t.Errorf("mainRun(research) code = %d, want the same as mainRun(dispatch) = %d; stderr=%s", researchCode, dispatchCode, researchErr.String())
-	}
-	if dispatchOut.String() != "" || researchOut.String() != "" {
-		t.Errorf("stdout = %q (dispatch), %q (research), want empty (bootstrap fails before any work runs)", dispatchOut.String(), researchOut.String())
 	}
 }
 
