@@ -126,7 +126,7 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 		if f.Skipped {
 			continue
 		}
-		title := escapeMarkdownLinkText(f.Title)
+		title := escapeMarkdownLinkText(firstLine(f.Title))
 		if f.Failed {
 			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, firstLine(f.Body)))
 			continue

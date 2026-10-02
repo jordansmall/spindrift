@@ -814,6 +814,43 @@ func TestBuildFiledIssuesSection_TitleWithBracketEscaped(t *testing.T) {
 	}
 }
 
+// A multi-line title is agent-chosen text, so only its first line renders; a
+// later line would otherwise start a forged heading in the verdict comment. Each
+// entry takes a different render path (linked, failed, plain) (issue #3834).
+func TestBuildFiledIssuesSection_MultiLineTitleTruncated(t *testing.T) {
+	const title = "fix(x): first line\n## forged heading"
+	cases := []struct {
+		name   string
+		intent filedIntent
+		bullet string
+	}{
+		{
+			name:   "linked",
+			intent: filedIntent{Title: title, URL: "https://github.com/owner/repo/issues/501"},
+			bullet: "- [fix(x): first line](https://github.com/owner/repo/issues/501)",
+		},
+		{
+			name:   "failed",
+			intent: filedIntent{Title: title, Failed: true, Body: "repro"},
+			bullet: "- **fix(x): first line** (filing failed) — repro",
+		},
+		{
+			name:   "plain",
+			intent: filedIntent{Title: title, URL: "local:slug"},
+			bullet: "- **fix(x): first line** — local:slug",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildFiledIssuesSection([]filedIntent{tc.intent})
+
+			if want := "## Filed issues\n\n" + tc.bullet; got != want {
+				t.Errorf("section = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 // The local tracker's PostIssue returns "local:<slug>" rather than a URL, so a
 // non-http identifier renders as a plain bullet instead of a broken Markdown
 // link.
