@@ -56,15 +56,28 @@ _with_nonce() {
   fi
 }
 
-printf '%s\n' "$*" >>"$log"
-[ -n "$issue_num" ] && printf '%s\n' "$*" >>"${log}.issue-${issue_num}"
+# Appends one record to $1 as a single write(). A bash `printf >>file` flushes
+# through stdio in buffer-sized chunks, so a long `podman run` argv from one
+# concurrent invocation can land mid-line inside another's. `cat` is no fix
+# (its buffer is bounded and can be smaller than a long record); `dd` with a
+# large bs reads the whole here-string and writes it back in one O_APPEND
+# write. That holds for records up to bs (1 MiB); longer ones would split.
+_append() {
+  dd of="$1" oflag=append conv=notrunc bs=1M iflag=fullblock status=none <<<"$2"
+}
+
+_log_line() {
+  _append "$log" "$1"
+  if [ -n "$issue_num" ]; then _append "${log}.issue-${issue_num}" "$1"; fi
+}
+
+_log_line "$*"
 
 # bwrap: log secret env vars received via process environment (name only, not value).
 if [ "$runtime" = "bwrap" ]; then
   for _secret in GH_TOKEN CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
     if [ -n "${!_secret:-}" ]; then
-      printf 'ENV_SECRET:%s\n' "$_secret" >>"$log"
-      [ -n "$issue_num" ] && printf 'ENV_SECRET:%s\n' "$_secret" >>"${log}.issue-${issue_num}"
+      _log_line "ENV_SECRET:$_secret"
     fi
   done
 fi
