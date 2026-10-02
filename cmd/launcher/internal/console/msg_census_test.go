@@ -9,6 +9,8 @@ import (
 	"spindrift.dev/launcher/internal/console/msgcensus"
 )
 
+const regenHint = "Regenerate with `cd cmd/launcher && go generate ./internal/console`."
+
 // TestMsgCensusMatchesDeclaredMsgTypes guards against a Msg type being added
 // or removed without regenerating msg_census_gen.go: it independently
 // AST-walks this package's msg_*.go declarations via msgcensus.Collect and
@@ -45,7 +47,7 @@ func TestMsgCensusMatchesDeclaredMsgTypes(t *testing.T) {
 
 	if len(missing) == 0 && len(extra) == 0 {
 		if !reflect.DeepEqual(declared, msgCensus) {
-			t.Errorf("msgCensus lists the same Msg types as declared but out of sorted order: want %v, got %v. Regenerate with `go generate ./cmd/launcher/internal/console`.", declared, msgCensus)
+			t.Errorf("msgCensus lists the same Msg types as declared but out of sorted order: want %v, got %v. %s", declared, msgCensus, regenHint)
 		}
 		return
 	}
@@ -64,7 +66,7 @@ func TestMsgCensusMatchesDeclaredMsgTypes(t *testing.T) {
 			b.WriteString("  - " + name + "\n")
 		}
 	}
-	b.WriteString("Regenerate with `go generate ./cmd/launcher/internal/console`.\n")
+	b.WriteString(regenHint + "\n")
 
 	t.Error(b.String())
 }
