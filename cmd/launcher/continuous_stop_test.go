@@ -45,6 +45,15 @@ func withClosedAbortSignal(t *testing.T) {
 	withStubbedSignals(t, true, true)
 }
 
+// withAbortOnlySignal closes abort but leaves stop open. Deliberately not what
+// a real second Ctrl-C delivers (stopsignal.Relay always closes stop first, see
+// withClosedAbortSignal); it exists only so a test binds to the abort channel
+// instead of short-circuiting on stop (#3639).
+func withAbortOnlySignal(t *testing.T) {
+	t.Helper()
+	withStubbedSignals(t, false, true)
+}
+
 // A pre-closed stop channel must win over the ordinary empty-queue verdict:
 // with no open issues at all, runContinuousDispatch would otherwise exit 2
 // (errQueueEmpty), but RunContinuous observes the stop on its very first

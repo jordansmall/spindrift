@@ -163,6 +163,63 @@ func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 	}
 }
 
+// An abort closed with stop still open must exit like a stop at run's
+// empty-queue early return (#3639).
+func TestRunExitCode_AbortOnly_WinsOverEmptyQueue(t *testing.T) {
+	withAbortOnlySignal(t)
+
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels) // no open issues
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != exitSignalledStop {
+		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, exitSignalledStop)
+	}
+}
+
+// With a dispatchable issue and only abort closed, run must hand abortCh to
+// the wave engine so no Box launches and nothing is claimed (#3639). Runner is
+// a fake, never nil: a Box launching under regression must fail the
+// assertion, not panic the binary.
+func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
+	withAbortOnlySignal(t)
+
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 1
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	if got := runExitCode(lc); got != exitSignalledStop {
+		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, exitSignalledStop)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("TransitionStateCalls: got %+v, want none (a pre-closed abort must claim nothing)", fc.TransitionStateCalls)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0 (no Box may launch)", len(fr.RunCalls))
+	}
+}
+
 // selectiveDispatchExitCode must map a pre-closed stop to exitSignalledStop
 // ahead of its own 3 (ErrOpenNoneDispatchable) and 1 (default) verdicts, and
 // must not print anything to stderr for it -- a requested stop is not a
