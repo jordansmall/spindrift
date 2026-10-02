@@ -1,5 +1,6 @@
 # Negative-path pins for nix/checks/mk-fragment-parity.nix's five asserts and
-# its dogfood-row lookup (issue #3240 review finding): the helper itself only
+# its dogfood-row lookup (issue #3240 review finding), plus positive pins for
+# its comparator fold and per-side needles (issue #3486): the helper itself only
 # has positive callers (commit/tdd/code-review-fragment-parity.nix), so an
 # inverted `hasInfix` or a dropped assert there would still evaluate green.
 # Mirrors nix/checks/fragment-pairs.nix's rejectionCase/rejectionCases shape.
@@ -46,6 +47,35 @@ let
     proseKind = "step prose";
     carriedKind = "step prose";
     discipline = "testing";
+  };
+
+  # Skill and fallback space the comparator differently on purpose (issue #3486).
+  comparatorArgs = baseArgs // {
+    fallbackText = "Keep it short: subject <=50 characters.";
+    sharedClauses = [
+      {
+        name = "shared";
+        clause = "subject ≤50";
+      }
+    ];
+  };
+  comparatorSkillRow = goodSkillRow // {
+    src = "The subject line is subject ≤ 50 characters.";
+  };
+
+  # The two sides state one bound in wording that shares no literal.
+  perSideSkillRow = goodSkillRow // {
+    src = "Body text is wrapped at 72 columns.";
+  };
+  perSideArgs = baseArgs // {
+    fallbackText = "The body ≤72 columns.";
+    sharedClauses = [
+      {
+        name = "shared";
+        skillClause = "wrapped at 72";
+        fallbackClause = "body ≤72";
+      }
+    ];
   };
 
   clauseCheckKey = "reject-fixture-skill-fragment-parity-clause-shared";
@@ -125,37 +155,113 @@ let
       checkKey = clauseCheckKey;
       message = "skillRowByName must throw when skillName names no row in fixtures.dogfoodSkills";
     }
+    {
+      # Pins that a bound change on one side alone stays red even though
+      # comparator spacing is folded -- the number must still be compared.
+      name = "mk-fragment-parity-fallback-bound-change-fails";
+      skillRows = [ comparatorSkillRow ];
+      args = comparatorArgs // {
+        fallbackText = "Keep it short: subject ≤60 characters.";
+      };
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when only the fallback's bound changes";
+    }
+    {
+      # Mirror of the case above for the skill side.
+      name = "mk-fragment-parity-skill-bound-change-fails";
+      skillRows = [ (comparatorSkillRow // { src = "The subject line is subject ≤ 60 characters."; }) ];
+      args = comparatorArgs;
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when only the skill's bound changes";
+    }
+    {
+      # Pins per-side needles -- the fallback's own bound drifting must fail
+      # even though the skill needle shares no literal with it.
+      name = "mk-fragment-parity-per-side-fallback-bound-change-fails";
+      skillRows = [ perSideSkillRow ];
+      args = perSideArgs // {
+        fallbackText = "The body ≤80 columns.";
+      };
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when the fallback-side needle's bound changes";
+    }
+    {
+      # Pins per-side needles -- the skill's own bound drifting must fail.
+      name = "mk-fragment-parity-per-side-skill-bound-change-fails";
+      skillRows = [ (perSideSkillRow // { src = "Body text is wrapped at 80 columns."; }) ];
+      args = perSideArgs;
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when the skill-side needle's bound changes";
+    }
   ];
+
+  mkFor =
+    skillRows:
+    import ./mk-fragment-parity.nix {
+      inherit pkgs;
+      fixtures.dogfoodSkills = skillRows;
+    };
 
   rejectionCase = c: {
     name = c.name;
     value =
       let
-        mk = import ./mk-fragment-parity.nix {
-          inherit pkgs;
-          fixtures = {
-            dogfoodSkills = c.skillRows;
-          };
-        };
+        mk = mkFor c.skillRows;
         result = builtins.tryEval (mk c.args).checks.${c.checkKey};
       in
       assert assertMsg (!result.success) c.message;
       pkgs.runCommand c.name { } "touch $out";
   };
+
+  validationCases = [
+    {
+      # Pins `normalize`'s comparator fold: "≤ 50" and "<=50" are one bound.
+      name = "mk-fragment-parity-comparator-spacing-validates";
+      skillRows = [ comparatorSkillRow ];
+      args = comparatorArgs;
+    }
+    {
+      # Pins the spaced ASCII spelling "<= 50" folding to "≤50".
+      name = "mk-fragment-parity-spaced-ascii-comparator-validates";
+      skillRows = [ (comparatorSkillRow // { src = "The subject line is subject <= 50 characters."; }) ];
+      args = comparatorArgs // {
+        fallbackText = "Keep it short: subject ≤50 characters.";
+      };
+    }
+    {
+      # Pins the "≤ " fold here, and the " ≤" fold through the needle.
+      name = "mk-fragment-parity-comparator-leading-space-validates";
+      skillRows = [ comparatorSkillRow ];
+      args = comparatorArgs // {
+        fallbackText = "Keep it short: subject≤ 50 characters.";
+      };
+    }
+    {
+      # Pins per-side needles: neither side contains the other's needle.
+      name = "mk-fragment-parity-per-side-clauses-validate";
+      skillRows = [ perSideSkillRow ];
+      args = perSideArgs;
+    }
+  ];
+
+  # Forces the check itself: a failing assert aborts inside the seq with the
+  # helper's own drift message, so no assertMsg wrapper is needed.
+  validationCase = c: {
+    name = c.name;
+    value = builtins.seq (mkFor c.skillRows c.args).checks.${clauseCheckKey} (
+      pkgs.runCommand c.name { } "touch $out"
+    );
+  };
 in
 builtins.listToAttrs (map rejectionCase rejectionCases)
+// builtins.listToAttrs (map validationCase validationCases)
 // {
   # Without this, a `mk-fragment-parity.nix` whose asserts always failed (or
   # whose skillRowByName always threw) would satisfy every rejectionCases
   # entry above vacuously.
   mk-fragment-parity-well-formed-input-validates =
     let
-      mk = import ./mk-fragment-parity.nix {
-        inherit pkgs;
-        fixtures = {
-          dogfoodSkills = [ goodSkillRow ];
-        };
-      };
+      mk = mkFor [ goodSkillRow ];
       parity = mk baseArgs;
       checks = parity.checks;
       names = builtins.attrNames checks;
