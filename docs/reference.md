@@ -144,12 +144,12 @@ see [Signal socket](#signal-socket-box_signal_carriersocket).
   Tier is Required or `advisory:` when its Tier is Advisory. Every line
   written outside those two paths spells its own prefix or none — for
   example the launch-gate rows above, the runtime row, the label-section
-  summary and label-creation lines, the label-section error a deferred
-  repo-state failure re-prints, and the connectivity row the fail-fast
-  path drops from the printed set, whose `remedy:` line, when it has one,
-  is all that reaches stdout — so a fatal gap reads apart from an
+  summary and label-creation lines, and the label-section error a deferred
+  repo-state failure re-prints — so a fatal gap reads apart from an
   informational one without waiting for the aggregate summary line (issue
-  #2723, issue #3362).
+  #2723, issue #3362). The connectivity row the fail-fast path stops on
+  writes nothing to stdout at all: its error, carrying the row's remedy
+  when it has one, goes to stderr instead (issue #3792).
 - The one exception to that prefix rule is a Required-tier check whose
   probe couldn't determine the answer (say, a permission error reaching
   the thing being probed, rather than a definitive absence): that row
@@ -6035,11 +6035,12 @@ refuses a daemon that was never going to run the butler. The
 daemon passes no verbosity flag, so doctor's quiet-by-default behavior
 (`--verbose`/`-v` opts back into the full report) governs the preflight: a
 healthy start adds no doctor report at all to the daemon's own stderr, and a
-refused one adds only three things: the failing `MISSING:` rows (a missing
+refused one adds only two things: the failing `MISSING:` rows (a missing
 triage label's row is bare; a failing check's row carries an indented
-`remedy:` line), the standalone `remedy:` line the connectivity fail-fast
-path prints under no row at all (`Run`,
-`cmd/launcher/internal/doctor/doctor.go`), and doctor's own stderr summary. The daemon's stdout stays reserved for
+`remedy:` line) and doctor's own stderr summary — on a connectivity
+fail-fast, which writes no row at all, that summary is the whole report,
+remedy included when the row has one (`Run`,
+`cmd/launcher/internal/doctor/doctor.go`). The daemon's stdout stays reserved for
 the event stream. It runs non-interactively, so a missing label is a refusal,
 never a prompt. A non-zero doctor exit refuses the start outright,
 naming what failed and its remedy both on stderr and in the event stream
