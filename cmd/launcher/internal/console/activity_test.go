@@ -52,9 +52,9 @@ func TestActivityFeed_ReplaysLatestPassLog_ReturnsOrderedDistinctLines(t *testin
 }
 
 // A second Refresh against a pass log whose size matches the cached offset
-// returns the cached feed instead of re-deriving it. syncQueue refreshes on
-// every tea.Msg, so most calls see the same on-disk log as last time (issue
-// #1502, mirroring HeartbeatCache's own skip, issue #731).
+// returns the cached feed instead of re-deriving it. refreshPickDecorations
+// refreshes on every tea.Msg, so most calls see the same on-disk log as last
+// time (issue #1502, mirroring HeartbeatCache's own skip, issue #731).
 func TestSidebarActivityCache_UnchangedStat_SkipsReparse(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
@@ -335,9 +335,9 @@ func TestSidebarActivityCache_IncrementalAppend_FeedsOnlyAppendedBytes(t *testin
 }
 
 // Refresh reports ok=false when number has no pass log on disk yet, matching
-// RunningHeartbeat's no-log contract, so syncQueue's caller can skip sending a
-// refresh rather than clobbering an already-loaded feed with an empty one
-// (issue #1502).
+// RunningHeartbeat's no-log contract, so refreshPickDecorations can skip
+// sending a refresh rather than clobbering an already-loaded feed with an
+// empty one (issue #1502).
 func TestSidebarActivityCache_NoLogsOnDisk_ReturnsFalse(t *testing.T) {
 	dir := t.TempDir()
 	drv, err := driver.New("")

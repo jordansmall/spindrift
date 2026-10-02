@@ -2752,10 +2752,10 @@ func TestTea_WithLauncher_RendersBlockerDespiteLongTitle(t *testing.T) {
 	waitFinished(t, tm)
 }
 
-// TestTea_StaleStatus_RendersBanner verifies the tea layer's per-render sync
-// installs the launcher's live stale verdict onto the view, exactly as
-// syncQueue does for the picks queue. The operator sees the banner without an
-// explicit refresh (issue #652 AC1).
+// TestTea_StaleStatus_RendersBanner verifies the tea layer's per-message
+// syncStale installs the launcher's live stale verdict onto the view, alongside
+// refreshPickDecorations' live pick decorations. The operator sees the banner
+// without an explicit refresh (issue #652 AC1).
 func TestTea_StaleStatus_RendersBanner(t *testing.T) {
 	f := forge.NewFake()
 	launch := newTestLauncher(t, f)
@@ -3584,11 +3584,12 @@ func TestTea_AlreadyActive_ReadsModelPicksOnly(t *testing.T) {
 	})
 }
 
-// TestTea_PickKey_FailedPromotion_SurvivesQueueResync verifies a raced/
-// closed or relabeled promotion's dissolved row stays on screen. The launcher's
-// per-render Queue resync (syncQueue) must not wipe it just because the failed
+// TestTea_PickKey_FailedPromotion_SurvivesRedecoration verifies a raced/
+// closed or relabeled promotion's dissolved row stays on screen. The per-message
+// refreshPickDecorations only re-decorates Model.Picks and never repopulates it
+// from the launcher's Queue, so the row must survive even though the failed
 // pick never landed on the live Queue (issue #785 review).
-func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
+func TestTea_PickKey_FailedPromotion_SurvivesRedecoration(t *testing.T) {
 	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 	f.TransitionStateErr = errBoom
@@ -3607,15 +3608,15 @@ func TestTea_PickKey_FailedPromotion_SurvivesQueueResync(t *testing.T) {
 
 	// Force a second render (a plain refresh, not a pick) to prove the
 	// dissolved row survives more than the render right after the keypress:
-	// the per-render Queue resync must not wipe it just because it never
-	// landed on the live Queue.
+	// refreshPickDecorations only re-decorates Model.Picks, so it cannot drop
+	// a pick that never landed on the live Queue.
 	sendKey(tm, "r")
 	sendKey(tm, "q")
 	waitFinished(t, tm)
 
 	fm := tm.FinalModel(t).(teaModel)
 	if len(fm.m.Picks) != 1 || fm.m.Picks[0].State != PickDissolved {
-		t.Errorf("Picks = %+v, want one dissolved pick surviving the resync", fm.m.Picks)
+		t.Errorf("Picks = %+v, want one dissolved pick surviving refreshPickDecorations", fm.m.Picks)
 	}
 }
 
@@ -4348,9 +4349,10 @@ func newTestLauncher(t *testing.T, cf forge.CodeForge) *Launcher {
 
 // TestTea_Update_ReusesHeartbeatCacheAcrossCalls verifies the tea layer's
 // heartbeat cache survives repeated Update calls on the same session (issue
-// #731), not just one syncQueue call: a second Update, given a log rewritten to
-// different content but pinned to the same size and mtime, still reports the
-// first line. teaModel.Update takes a value receiver, so the cache is a pointer.
+// #731), not just one refreshPickDecorations call: a second Update, given a log
+// rewritten to different content but pinned to the same size and mtime, still
+// reports the first line. teaModel.Update takes a value receiver, so the cache
+// is a pointer.
 func TestTea_Update_ReusesHeartbeatCacheAcrossCalls(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
@@ -4859,8 +4861,8 @@ func TestTea_EnterOnOrphanRow_NoLocalLogs_ShowsGracefulNotice(t *testing.T) {
 // TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive verifies a "no
 // local logs for this dispatch" Notice, shown while an orphan row's sidebar is
 // open on an issue with nothing on disk yet, clears the instant the box's first
-// log line lands and syncQueue's live tail picks it up, so the notice never
-// covers real content that has since arrived (issue #1621).
+// log line lands and refreshPickDecorations' live tail picks it up, so the
+// notice never covers real content that has since arrived (issue #1621).
 func TestTea_OrphanSidebar_NoticeClearsOnceRealActivityArrivesLive(t *testing.T) {
 	f := forge.NewFake()
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
