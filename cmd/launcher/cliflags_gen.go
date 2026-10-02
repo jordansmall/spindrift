@@ -4,14 +4,15 @@ package main
 // cliFlags is the non-schema flag table derived from lib/cli-flags.nix.
 // Regenerate with `nix run .#regen` after editing lib/cli-flags.nix.
 var cliFlags = []cliFlag{
-	{flag: "no-build", verb: "", arg: ""},
-	{flag: "yes", verb: "", arg: ""},
-	{flag: "force", verb: "", arg: ""},
-	{flag: "self-contained", verb: "", arg: ""},
-	{flag: "verbose", verb: "doctor", arg: ""},
-	{flag: "butler", verb: "doctor", arg: ""},
-	{flag: "chore", verb: "butler", arg: "name"},
-	{flag: "help", verb: "", arg: ""},
-	{flag: "version", verb: "", arg: ""},
-	{flag: "secret-cmd", verb: "", arg: "command"},
+	{flag: "no-build", verb: "", arg: "", short: "", intercepted: false},
+	{flag: "yes", verb: "", arg: "", short: "", intercepted: false},
+	{flag: "force", verb: "", arg: "", short: "", intercepted: false},
+	{flag: "self-contained", verb: "", arg: "", short: "", intercepted: false},
+	{flag: "verbose", verb: "doctor", arg: "", short: "v", intercepted: false},
+	{flag: "butler", verb: "doctor", arg: "", short: "", intercepted: false},
+	{flag: "chore", verb: "butler", arg: "name", short: "", intercepted: false},
+	{flag: "help", verb: "", arg: "", short: "h", intercepted: true},
+	{flag: "all", verb: "", arg: "", short: "", intercepted: true},
+	{flag: "version", verb: "", arg: "", short: "", intercepted: true},
+	{flag: "secret-cmd", verb: "", arg: "command", short: "", intercepted: false},
 }

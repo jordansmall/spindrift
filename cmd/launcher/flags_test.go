@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2092,9 +2093,10 @@ func TestParseFlags_ChoreRejectedUnlessAfterButler(t *testing.T) {
 	}
 }
 
-// Every cliFlags entry must be accepted by the parser when preceded by its
-// verb, so a table row the parser silently drops fails here (issue #3795).
-func TestParseFlags_AcceptsEveryCliFlag(t *testing.T) {
+// Every non-intercepted cliFlags entry must be accepted by the parser when
+// preceded by its verb, so a table row the parser silently drops fails here
+// (issue #3795). Intercepted rows are mainRun's, so parseFlags must reject them.
+func TestParseFlags_HonoursEveryCliFlag(t *testing.T) {
 	for _, f := range cliFlags {
 		t.Run(f.flag, func(t *testing.T) {
 			var args []string
@@ -2108,6 +2110,12 @@ func TestParseFlags_AcceptsEveryCliFlag(t *testing.T) {
 				args = append(args, "value")
 			}
 			remaining, err := parseFlags(args)
+			if f.intercepted {
+				if err == nil || !strings.Contains(err.Error(), "unknown flag: --"+f.flag) {
+					t.Fatalf("parseFlags(%v) err = %v, want unknown flag", args, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("parseFlags(%v) err = %v", args, err)
 			}
@@ -2124,17 +2132,93 @@ func TestParseFlags_AcceptsEveryCliFlag(t *testing.T) {
 	}
 }
 
-// mainRun handles --help and --version before parseFlags, so no parse test
-// reaches these rows; pin them so deleting one doesn't silently drop it from
-// the completions.
-func TestCliFlags_HasHelpAndVersion(t *testing.T) {
-	have := map[string]bool{}
-	for _, f := range cliFlags {
-		have[f.flag] = true
+// --all only means something to mainRun's help handling; a verb must not
+// swallow it as a parsed flag.
+func TestParseFlags_RejectsHelpModifierAll(t *testing.T) {
+	for _, args := range [][]string{{"dispatch", "--all"}, {"--all"}} {
+		_, err := parseFlags(args)
+		if err == nil || !strings.Contains(err.Error(), "unknown flag: --all") {
+			t.Errorf("parseFlags(%v) err = %v, want unknown flag: --all", args, err)
+		}
 	}
-	for _, want := range []string{"help", "version"} {
-		if !have[want] {
-			t.Errorf("cliFlags has no %q row", want)
+}
+
+// The same rejection must hold end to end: mainRun only treats --all as a
+// help modifier alongside --help.
+func TestMainRun_AllWithoutHelpIsUnknownFlag(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"dispatch", "--all"}, &stdout, &stderr)
+	if code != 1 {
+		t.Errorf("mainRun code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "unknown flag: --all") {
+		t.Errorf("stderr missing unknown flag: --all, got:\n%s", stderr.String())
+	}
+}
+
+// A row's `short` is table data the generated completions and man page
+// advertise, but each verb's parser spells its own short form, so the verb's
+// parser must treat -<short> exactly like --<flag>. A new short on a verb
+// absent from shortParsers fails here until its parser is registered.
+func TestCliFlags_ShortFormsMatchVerbParsers(t *testing.T) {
+	shortParsers := map[string]func(args []string) string{
+		"doctor": func(args []string) string {
+			opts, bad, ok := doctorFlagArgs(args)
+			return fmt.Sprintf("%+v %q %v", opts, bad, ok)
+		},
+	}
+	for _, f := range cliFlags {
+		if f.intercepted || f.short == "" {
+			continue
+		}
+		t.Run(f.flag, func(t *testing.T) {
+			if f.verb == "" {
+				t.Fatalf("cliFlags row %q has short %q but no verb: only mainRun-intercepted rows may carry a global short form", f.flag, f.short)
+			}
+			parse, ok := shortParsers[f.verb]
+			if !ok {
+				t.Fatalf("cliFlags row %q has short %q on verb %q, which has no entry in shortParsers: add its flag parser there", f.flag, f.short, f.verb)
+			}
+			long, short := parse([]string{"--" + f.flag}), parse([]string{"-" + f.short})
+			if long != short {
+				t.Errorf("-%s parses as %s, but --%s parses as %s", f.short, short, f.flag, long)
+			}
+		})
+	}
+}
+
+// mainRunIntercepts and the intercepted rows of lib/cli-flags.nix must name
+// each other exactly, so a flag mainRun acts on can't miss completions and the
+// man page, nor a row claim interception mainRun doesn't implement.
+func TestMainRunIntercepts_MatchCliFlags(t *testing.T) {
+	rows := map[string]cliFlag{}
+	for _, f := range cliFlags {
+		rows[f.flag] = f
+	}
+	for spelling, name := range mainRunIntercepts {
+		f, ok := rows[name]
+		if !ok {
+			t.Errorf("mainRunIntercepts[%q] = %q: no such cliFlags row", spelling, name)
+			continue
+		}
+		if !f.intercepted {
+			t.Errorf("mainRunIntercepts[%q]: row %q is not intercepted", spelling, name)
+		}
+		if spelling != "--"+f.flag && (f.short == "" || spelling != "-"+f.short) {
+			t.Errorf("mainRunIntercepts key %q is neither --%s nor its short form", spelling, f.flag)
+		}
+	}
+	for _, f := range cliFlags {
+		if !f.intercepted {
+			continue
+		}
+		if _, ok := mainRunIntercepts["--"+f.flag]; !ok {
+			t.Errorf("intercepted row %q: --%s missing from mainRunIntercepts", f.flag, f.flag)
+		}
+		if f.short != "" {
+			if _, ok := mainRunIntercepts["-"+f.short]; !ok {
+				t.Errorf("intercepted row %q: -%s missing from mainRunIntercepts", f.flag, f.short)
+			}
 		}
 	}
 }

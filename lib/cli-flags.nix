@@ -2,13 +2,18 @@
 # lib/env-schema.nix). One row per flag: `flag` (name without the leading --),
 # `doc`, `verb` (the parser accepts the flag only after this verb; null =
 # anywhere) and `arg` (placeholder when the flag takes a value; null = boolean).
+# Two optional fields, defaulted where read: `short` (single-letter short form
+# without the dash, e.g. "h"; absent/null = none) and `intercepted` (bool,
+# default false: mainRun acts on the flag before parseFlags runs, so parseFlags
+# rejects it as unknown and the row only feeds completions and the man page).
+#
+# A short form is a `short` field on its long flag's row, never its own row
+# and never only doc text.
 #
 # `nix run .#regen` renders this into cmd/launcher/cliflags_gen.go, which
 # parseFlags consumes, and the shell-completion renderers and the man page's
 # COMMAND FLAGS section consume it too, so a new non-schema flag added here
-# reaches the parser, completions, and man page together. Exception: the `help`
-# and `version` rows never reach parseFlags (mainRun handles --help/--version
-# first), so they only feed completions and the man page.
+# reaches the parser, completions, and man page together.
 #
 # `--input` (the Launcher input document path, ADR 0020) is deliberately not a
 # row: the Nix wrapper/daemon passes it (lib/mkHarness.nix), users never type it.
@@ -41,9 +46,10 @@
   }
   {
     flag = "verbose";
-    doc = "show the full doctor report, every check and gate row, not just failures (short form: -v)";
+    doc = "show the full doctor report, every check and gate row, not just failures";
     verb = "doctor";
     arg = null;
+    short = "v";
   }
   {
     flag = "butler";
@@ -62,12 +68,22 @@
     doc = "show usage and exit";
     verb = null;
     arg = null;
+    short = "h";
+    intercepted = true;
+  }
+  {
+    flag = "all";
+    doc = "with --help, show the full reference: every subcommand, flag, and knob";
+    verb = null;
+    arg = null;
+    intercepted = true;
   }
   {
     flag = "version";
     doc = "show version and exit";
     verb = null;
     arg = null;
+    intercepted = true;
   }
   {
     flag = "secret-cmd";

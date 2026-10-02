@@ -288,15 +288,22 @@ func verbSoFar(remaining []string) string {
 
 // cliFlag is one row of the non-schema flag table generated from
 // lib/cli-flags.nix. verb, when set, restricts the flag to follow that verb;
-// arg, when set, means the flag consumes the next token as its value.
-type cliFlag struct{ flag, verb, arg string }
+// arg, when set, means the flag consumes the next token as its value. short is
+// the single-letter -x form. intercepted rows are acted on by mainRun before
+// parseFlags, so lookupCliFlag skips them and parseFlags rejects them. They
+// still sit in cliFlags, so any new consumer of it must filter on
+// !f.intercepted as lookupCliFlag does.
+type cliFlag struct {
+	flag, verb, arg, short string
+	intercepted            bool
+}
 
 // lookupCliFlag returns the cliFlags row matching arg that is valid after the
 // verb accumulated in remaining, or nil.
 func lookupCliFlag(arg string, remaining []string) *cliFlag {
 	for i := range cliFlags {
 		f := &cliFlags[i]
-		if arg == "--"+f.flag && (f.verb == "" || verbSoFar(remaining) == f.verb) {
+		if !f.intercepted && arg == "--"+f.flag && (f.verb == "" || verbSoFar(remaining) == f.verb) {
 			return f
 		}
 	}
