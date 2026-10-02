@@ -344,3 +344,39 @@ func TestListener_AddrNilBeforeListen_CloseSafe(t *testing.T) {
 		t.Fatalf("Close() before listening = %v, want nil", err)
 	}
 }
+
+// TestListener_CloseReleasesSocketImmediately pins that Close frees the raw
+// listener even when it wins the race against the serve goroutine: there
+// http.Server.Close has not yet tracked the listener and would leave it
+// accepting (issue #4209). The tcp subtest is the strong proof: closing a
+// UnixListener also unlinks its file, so the unix dial is refused either way.
+func TestListener_CloseReleasesSocketImmediately(t *testing.T) {
+	t.Run("unix", func(t *testing.T) {
+		l, _, _ := newTestListener(t)
+		path := filepath.Join(testSocketDir(t), "signal.sock")
+		if err := l.ListenAndServe(path); err != nil {
+			t.Fatalf("ListenAndServe: %v", err)
+		}
+		if err := l.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if conn, err := net.Dial("unix", path); err == nil {
+			conn.Close()
+			t.Fatal("dial succeeded after Close, want refusal")
+		}
+	})
+	t.Run("tcp", func(t *testing.T) {
+		l, _, _ := newGatedTestListener(t, "s3cret")
+		if err := l.ListenAndServeTCP("127.0.0.1:0"); err != nil {
+			t.Fatalf("ListenAndServeTCP: %v", err)
+		}
+		addr := l.Addr().String()
+		if err := l.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if conn, err := net.Dial("tcp", addr); err == nil {
+			conn.Close()
+			t.Fatal("dial succeeded after Close, want refusal")
+		}
+	})
+}

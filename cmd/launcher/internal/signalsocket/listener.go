@@ -140,11 +140,19 @@ func (l *Listener) Addr() net.Addr {
 }
 
 // Close stops the listener from accepting further connections.
+// The returned error is the server's; the raw listener's close error is not.
 func (l *Listener) Close() error {
 	if l.server == nil {
 		return nil
 	}
-	// Server.Close closes the listener it was handed and every connection it
-	// is holding, so an in-flight request cannot outlive the run.
-	return l.server.Close()
+	// Server.Close closes every connection it is holding, so an in-flight
+	// request cannot outlive the run.
+	err := l.server.Close()
+	if l.listener != nil {
+		// Server.Close only closes the listener once Serve has tracked it; if
+		// Close wins the race against the serve goroutine, this releases the
+		// socket now. A second-close error is expected.
+		_ = l.listener.Close()
+	}
+	return err
 }
