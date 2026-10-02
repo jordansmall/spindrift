@@ -2416,7 +2416,7 @@ func wantTriple(args []string, a0, a1, a2 string) bool {
 	return false
 }
 
-// The safety guard: when the fake CLI reports the container is running, Reap
+// The safety guard: when the fake CLI reports the container is running, reap
 // must not issue `rm -f`.
 func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
@@ -2424,12 +2424,10 @@ func TestReap_NeverRemovesRunningContainer(t *testing.T) {
 	)
 	a := &ociAdapter{cli: script}
 
-	if err := a.Reap("agent-issue-1"); err != nil {
-		t.Fatalf("Reap: %v", err)
-	}
+	a.reap("agent-issue-1")
 
 	if calls := callCount(t, dir); calls != 1 {
-		t.Errorf("Reap: want 1 call (inspect only), got %d", calls)
+		t.Errorf("reap: want 1 call (inspect only), got %d", calls)
 	}
 }
 
@@ -2442,17 +2440,15 @@ func TestReap_NeverRemovesCreatedContainer(t *testing.T) {
 	)
 	a := &ociAdapter{cli: script}
 
-	if err := a.Reap("agent-issue-1"); err != nil {
-		t.Fatalf("Reap: %v", err)
-	}
+	a.reap("agent-issue-1")
 
 	if calls := callCount(t, dir); calls != 1 {
-		t.Errorf("Reap: want 1 call (inspect only), got %d", calls)
+		t.Errorf("reap: want 1 call (inspect only), got %d", calls)
 	}
 }
 
 // The other side of the guard: when the fake CLI reports the container is
-// exited (reapable), Reap issues `rm -f` against the inspected ID, not the
+// exited (reapable), reap issues `rm -f` against the inspected ID, not the
 // name passed in (issue #3633). A terminal status reaps regardless of age.
 func TestReap_RemovesStaleContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
@@ -2461,21 +2457,19 @@ func TestReap_RemovesStaleContainer(t *testing.T) {
 	)
 	a := &ociAdapter{cli: script}
 
-	if err := a.Reap("agent-issue-1"); err != nil {
-		t.Fatalf("Reap: %v", err)
-	}
+	a.reap("agent-issue-1")
 
 	rm := readCall(t, dir, 1)
 	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-cid") {
-		t.Errorf("Reap: want `rm -f stale-cid`, got %v", rm)
+		t.Errorf("reap: want `rm -f stale-cid`, got %v", rm)
 	}
 	if containsArg(rm, "agent-issue-1") {
-		t.Errorf("Reap: rm targeted the name, not the inspected ID: %v", rm)
+		t.Errorf("reap: rm targeted the name, not the inspected ID: %v", rm)
 	}
 }
 
 // A "created" container older than midCreationGrace was abandoned mid-create,
-// not owned by a sibling about to start it, so Reap clears it just as it does
+// not owned by a sibling about to start it, so reap clears it just as it does
 // a terminal container (issue #3633).
 func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
 	script, dir := newFakeCLI(t,
@@ -2484,13 +2478,11 @@ func TestReap_RemovesStaleCreatedContainer(t *testing.T) {
 	)
 	a := &ociAdapter{cli: script}
 
-	if err := a.Reap("agent-issue-1"); err != nil {
-		t.Fatalf("Reap: %v", err)
-	}
+	a.reap("agent-issue-1")
 
 	rm := readCall(t, dir, 1)
 	if !containsArg(rm, "rm") || !containsArg(rm, "-f") || !containsArg(rm, "stale-created-cid") {
-		t.Errorf("Reap: want `rm -f stale-created-cid`, got %v", rm)
+		t.Errorf("reap: want `rm -f stale-created-cid`, got %v", rm)
 	}
 }
 
@@ -2510,9 +2502,9 @@ func TestKill_MissingContainer_ReturnsNilNotError(t *testing.T) {
 	}
 }
 
-// Kill's contract is the opposite of Reap's for a container that does exist: it
+// Kill's contract is the opposite of reap's for a container that does exist: it
 // issues `rm -f` unconditionally once existence is confirmed, so it reaches a
-// genuinely live container Reap would refuse to touch.
+// genuinely live container reap would refuse to touch.
 func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
 	script, dir := newFakeCLI(t,
 		fakeCall{stdout: inspectJSONStdout(t, "kill-existing-id", "running", time.Now())},
@@ -2534,7 +2526,7 @@ func TestKill_RemovesExistingContainerRegardlessOfRunningState(t *testing.T) {
 }
 
 // Kill must target the ID inspectContainer observed, not the name passed in
-// — the same ID-pinning invariant Run and Reap apply — so a sibling that
+// — the same ID-pinning invariant Run and reap apply — so a sibling that
 // replaced the container between inspect and rm is untouched (issue #3633).
 func TestKill_RemovesByIDNotByName(t *testing.T) {
 	script, dir := newFakeCLI(t,

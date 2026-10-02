@@ -332,7 +332,7 @@ func (c container) reapable(now time.Time) bool {
 }
 
 // inspectContainer runs a single inspect and decodes it into a container, so
-// a caller that both classifies and acts on one (Run, Reap, Kill) does it
+// a caller that both classifies and acts on one (Run, reap, Kill) does it
 // from one observation instead of two: acting on the ID this call returns,
 // rather than re-resolving the name later, is what keeps a removal from
 // landing on a container a sibling launcher created in between (issue #3633).
@@ -856,7 +856,7 @@ func (a *ociAdapter) Run(box Box) error {
 		}
 	}
 	if reapAfterSuccess(err) {
-		_ = a.Reap(box.Name)
+		a.reap(box.Name)
 	}
 	return asRunError(err)
 }
@@ -910,24 +910,23 @@ func reapAfterSuccess(err error) bool {
 	return err == nil
 }
 
-// Reap removes a named container (best-effort). Never removes a live
+// reap removes a named container (best-effort). Never removes a live
 // container — one another launcher may own, per the same not-terminal-and-
 // not-too-young check as IsRunning (issue #3633) — and removes only the ID
 // inspectContainer observed (see its doc comment).
-func (a *ociAdapter) Reap(name string) error {
+func (a *ociAdapter) reap(name string) {
 	c, ok := a.inspectContainer(name)
 	if ok && c.reapable(time.Now()) {
 		_ = a.remove(c)
 	}
-	return nil
 }
 
 // Kill force-stops and removes name once confirmed to exist; `rm -f` stops a
 // running container first, so Kill does not need the running/exited
-// distinction Reap's reapable check draws. Unlike Reap, Kill is
+// distinction reap's reapable check draws. Unlike reap, Kill is
 // unconditional — an operator-driven terminate (ADR 0024, issue #649) removes
 // a live container too — but it still pins the removal to the ID
-// inspectContainer observed, not name, for the same reason Run and Reap do.
+// inspectContainer observed, not name, for the same reason Run and reap do.
 // A container that no longer exists is not an error, matching the
 // Runner.Kill contract; that is the common settle-phase case, where
 // reapAfterSuccess already removed the Box.
@@ -940,7 +939,7 @@ func (a *ociAdapter) Kill(name string) error {
 }
 
 // remove force-removes an observed container by ID, the single removal path
-// behind Run, Reap and Kill. An observation carrying no ID came from an
+// behind Run, reap and Kill. An observation carrying no ID came from an
 // inspect whose body would not decode (see inspectContainer): there is
 // nothing safe to target, and falling back to the name would race a sibling
 // launcher's in-flight create, so this removes nothing and leaves Run's

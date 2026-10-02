@@ -43,11 +43,6 @@ var statHostNixDB = func() error {
 // production.
 var lockRaceWindowHook = func() {}
 
-// cgroupProvisionRaceWindowHook runs in Run between cmd.Start() and the
-// cgroup.procs write, so a test can land a Reap inside the provisioning race
-// window (see bwrapAdapter's provisioning field). No-op in production.
-var cgroupProvisionRaceWindowHook = func() {}
-
 // readSelfCgroup returns the launcher's own cgroup v2 path from
 // /proc/self/cgroup's unified-hierarchy line ("0::<path>"). Tests swap this seam
 // because /proc/self/cgroup is not writable in a test sandbox.
@@ -158,11 +153,10 @@ type bwrapAdapter struct {
 
 	// provisioning refcounts box names between Run's beginProvisioning call and
 	// the matching release (issue #2960): the window where a per-Box cgroup dir
-	// exists but IsRunning still reads false, so a Reap landing there would
-	// delete a mid-launch Box's dir. Guarded by mu; refcounted, not a set, so
-	// two concurrent Runs for one name cannot release each other's guard. It also
-	// keeps provisionCgroup from reclaiming a leftover dir a sibling Run is
-	// mid-launch in (issue #4164).
+	// exists but its cgroup.procs is still empty, so provisionCgroup's leftover
+	// reclaim of the same name would delete a sibling Run's mid-launch dir (issue
+	// #4164). Guarded by mu; refcounted, not a set, so two concurrent Runs for one
+	// name cannot release each other's guard.
 	provisioning map[string]int
 }
 
@@ -695,9 +689,9 @@ func MemoryLimitToBytes(limit string) (int64, error) {
 
 // cgroupDirForName computes the per-Box cgroup v2 directory provisionCgroup
 // creates, anchored at the outermost ancestor that delegates the controllers this
-// adapter's limits need. Creation-time only: IsRunning/ListRunning/Reap read back
+// adapter's limits need. Creation-time only: IsRunning/ListRunning read back
 // via findCgroupDir instead, since a Box's creating process and the process later
-// polling or reaping it are often launcher invocations with different anchors.
+// polling it are often launcher invocations with different anchors.
 func (a *bwrapAdapter) cgroupDirForName(name string) (string, error) {
 	parent, err := cgroupParentDir(a.cgroupControllers())
 	if err != nil {
@@ -949,7 +943,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 
 	// Marked before provisionCgroup's mkdir, not after (see the provisioning
 	// field). The deferred release covers every early return; the explicit one
-	// after trackRunning unblocks Reap in the common case.
+	// after trackRunning narrows the guarded window in the common case.
 	releaseProvisioning := a.beginProvisioning(box.Name)
 	defer releaseProvisioning()
 
@@ -1033,7 +1027,6 @@ func (a *bwrapAdapter) Run(box Box) error {
 		unlockSnapshot(nixVarSnapshotLock)
 		return err
 	}
-	cgroupProvisionRaceWindowHook()
 	if cgroupDir != "" {
 		// Best-effort: the box is already running, so failing to move it in
 		// means this Box runs unenforced, never that Run fails.
@@ -1083,8 +1076,8 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 	delete(a.running, name)
 }
 
-// beginProvisioning marks name as mid-launch so Reap skips it; see the
-// provisioning field for the race this closes. The returned release is wrapped
+// beginProvisioning marks name as mid-launch so provisionCgroup's leftover
+// reclaim skips it; see the provisioning field. The returned release is wrapped
 // in sync.Once because Run calls it explicitly after trackRunning and
 // again via defer, and the two must not double-decrement the refcount out from
 // under a second concurrent Run for the same name.
@@ -1107,33 +1100,6 @@ func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
 			a.mu.Unlock()
 		})
 	}
-}
-
-// Reap best-effort removes a leftover per-Box cgroup dir for name, e.g. one
-// orphaned by a launcher that crashed before Run's deferred cleanup ran. It
-// resolves the dir via findCgroupDir, so it cleans up after a different launcher
-// invocation too, and never touches a running sandbox: Kill is the
-// operator-driven counterpart. Every failure degrades to a silent nil return.
-func (a *bwrapAdapter) Reap(name string) error {
-	// a.mu is held across the provisioning check, IsRunning, findCgroupDir and
-	// removeCgroupDir: dropping it in between would let a beginProvisioning
-	// mkdir land right after the check and still get deleted. Neither callee
-	// takes a.mu, so this cannot deadlock. It covers only this launcher process;
-	// ADR 0042's "Amendment (issue #2960)" records the cross-process gap.
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.provisioning[name] > 0 {
-		return nil
-	}
-	if a.IsRunning(name) {
-		return nil
-	}
-	dir, ok := findCgroupDir(name)
-	if !ok {
-		return nil
-	}
-	_ = removeCgroupDir(dir)
-	return nil
 }
 
 // Kill sends SIGKILL to name's tracked live process, if Run has one under that
@@ -1529,9 +1495,6 @@ func (a *bwrapBuildAdapter) IsReady() error { return nil }
 func (a *bwrapBuildAdapter) Run(_ Box) error {
 	return fmt.Errorf("bwrap-build adapter: Run not supported (use bwrap run adapter)")
 }
-
-// Reap is a no-op for the build adapter.
-func (a *bwrapBuildAdapter) Reap(_ string) error { return nil }
 
 // Kill is a no-op for the build adapter: it never launches a box.
 func (a *bwrapBuildAdapter) Kill(_ string) error { return nil }
