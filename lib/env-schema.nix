@@ -892,7 +892,7 @@ in
     env = "RESEARCH_RESERVATION";
     group = "dispatch";
     default = 1;
-    doc = "how many of the daemon's MAX_PARALLEL slots prefer research Dispatches over work -- a floor, not a ceiling: those slots take research only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope";
+    doc = "the minimum number of research Dispatches the daemon keeps running out of its MAX_PARALLEL slots -- a floor, not a ceiling: research is preferred only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope";
     flakeOption = true;
     launcherIgnores = true;
     intKind = "nonneg";

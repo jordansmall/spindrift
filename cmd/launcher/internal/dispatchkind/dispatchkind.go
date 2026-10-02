@@ -65,8 +65,8 @@ const (
 type DaemonPriority int
 
 const (
-	PriorityNormal   DaemonPriority = iota // preferred on every unreserved slot
-	PriorityReserved                       // preferred only on the RESEARCH_RESERVATION slots, last elsewhere
+	PriorityNormal   DaemonPriority = iota // preferred whenever the research floor is met
+	PriorityReserved                       // preferred only while fewer than RESEARCH_RESERVATION of them are running, last otherwise
 	PriorityIdle                           // tried only after every other kind on every slot (butler, ADR 0056: a slot picks it only when nothing else has work)
 )
 
