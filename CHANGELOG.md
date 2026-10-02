@@ -1,5 +1,133 @@
 # Changelog
 
+## [0.21.2](https://github.com/jordansmall/spindrift/compare/v0.21.1...v0.21.2) (2026-10-02)
+
+
+### Features
+
+* **landdelta:** record each hunk's post-image line count ([813bf71](https://github.com/jordansmall/spindrift/commit/813bf71ae8ad13017a6739b47a07b70673e005ab))
+
+
+### Bug Fixes
+
+* **backends:** require read axis with write/filer ([fd46200](https://github.com/jordansmall/spindrift/commit/fd46200e521bb68ed4f98ea554072d4bcca5d1e7)), closes [#4183](https://github.com/jordansmall/spindrift/issues/4183)
+* **bindregistry:** match the in-tree host case-insensitively ([bda71f7](https://github.com/jordansmall/spindrift/commit/bda71f7d16a3093e0ff80c8bac930cd0a251fcdc)), closes [#3706](https://github.com/jordansmall/spindrift/issues/3706)
+* **bwrap:** reclaim a leftover empty cgroup dir ([a71dbc9](https://github.com/jordansmall/spindrift/commit/a71dbc935044990c51bb2c80c6d1c32bc50eb321)), closes [#4164](https://github.com/jordansmall/spindrift/issues/4164)
+* **cargo:** match route upstream host case-insensitively ([01c6f78](https://github.com/jordansmall/spindrift/commit/01c6f7825a2dc48d151e90a28a17b3e198853383)), closes [#3665](https://github.com/jordansmall/spindrift/issues/3665)
+* **checks:** stop --cores 1 matching --cores 16 ([c6bc135](https://github.com/jordansmall/spindrift/commit/c6bc135a905a8d02b88999d3092e8f9846c8bf0b)), closes [#3495](https://github.com/jordansmall/spindrift/issues/3495)
+* **chore:** reject duplicate BUTLER_CHORES names ([6fc79c6](https://github.com/jordansmall/spindrift/commit/6fc79c6157ef224e43657f66b5e2adac2899bff1)), closes [#4143](https://github.com/jordansmall/spindrift/issues/4143)
+* **console:** close the modal on a re-pick unpick ([e819b72](https://github.com/jordansmall/spindrift/commit/e819b72f5b1bb2c679ae39ccf703a3b9e9cf7580)), closes [#4156](https://github.com/jordansmall/spindrift/issues/4156)
+* **console:** hold the newest row for a pick number ([e372774](https://github.com/jordansmall/spindrift/commit/e37277426e81c912f2d6bcb2a480de494b89f83e)), closes [#4155](https://github.com/jordansmall/spindrift/issues/4155)
+* **console:** route Terminate by the pick's kind ([f59e8a4](https://github.com/jordansmall/spindrift/commit/f59e8a4642aca5a57d2b644f427ace737f8689b7)), closes [#4148](https://github.com/jordansmall/spindrift/issues/4148)
+* **console:** see a re-picked issue as running ([1066885](https://github.com/jordansmall/spindrift/commit/1066885d36d54394f873d9d0eaf96d8d84790c18)), closes [#4156](https://github.com/jordansmall/spindrift/issues/4156)
+* **credresolver:** gate cargo store on ecosystem ([9c7a3eb](https://github.com/jordansmall/spindrift/commit/9c7a3eb741663405b51f2cb07d2b7c472fa8bfea)), closes [#3414](https://github.com/jordansmall/spindrift/issues/3414)
+* **daemon:** probe the holder pid before reading live ([b50338b](https://github.com/jordansmall/spindrift/commit/b50338b7b40c79f6ed34a77a83537105bb8351e4)), closes [#3597](https://github.com/jordansmall/spindrift/issues/3597)
+* **daemon:** stop resolving siblings masking jams ([c55cb2c](https://github.com/jordansmall/spindrift/commit/c55cb2c4637391695d0a197539cc7d52fbd60576)), closes [#3735](https://github.com/jordansmall/spindrift/issues/3735)
+* **daemon:** surface an exhausted Awake walk in events and status ([608ae88](https://github.com/jordansmall/spindrift/commit/608ae8879ee1bfedad878f5c5d7352292c336bea)), closes [#3590](https://github.com/jordansmall/spindrift/issues/3590)
+* **daemon:** word the acquire window in status ([4ebb028](https://github.com/jordansmall/spindrift/commit/4ebb028103b6cfa6b3de30d2a9ce82066b962797))
+* **deltareview:** bound a hunk's span by its longer side ([9bd000e](https://github.com/jordansmall/spindrift/commit/9bd000ed331ac11e979ba3dc0ea7f229184bfc0a))
+* **driver-exec:** bound the -patch-file read ([bf293e8](https://github.com/jordansmall/spindrift/commit/bf293e8a42fb970dd1c49d20e550c578424039de)), closes [#4136](https://github.com/jordansmall/spindrift/issues/4136)
+* **driver-exec:** fold host case in in-tree collisions ([12c64ff](https://github.com/jordansmall/spindrift/commit/12c64ffcaf2275159167f5a6d5b269a053611175)), closes [#3706](https://github.com/jordansmall/spindrift/issues/3706)
+* **filer-prompt:** forbid inventing a branch name ([01cf6da](https://github.com/jordansmall/spindrift/commit/01cf6da656cfb9ab35473271a0e77c4c25978ced)), closes [#3825](https://github.com/jordansmall/spindrift/issues/3825)
+* **issue-prompt:** match Grammar line to outcome fieldShape ([48ba69b](https://github.com/jordansmall/spindrift/commit/48ba69b79c49df4c9be2f5a374b34c6b9ef75754)), closes [#3373](https://github.com/jordansmall/spindrift/issues/3373)
+* **launcher:** handle leading flags before verb in mainRun ([c0708db](https://github.com/jordansmall/spindrift/commit/c0708db2ee24244fddd384837fd8a5391ea897d3)), closes [#3784](https://github.com/jordansmall/spindrift/issues/3784)
+* **launcher:** hold a stop-signal registration across Console teardown ([6161e3b](https://github.com/jordansmall/spindrift/commit/6161e3b68457554e8867c4bc63ab8c7eb009f5b9)), closes [#3651](https://github.com/jordansmall/spindrift/issues/3651)
+* **launcher:** list --self-contained in research ([192752c](https://github.com/jordansmall/spindrift/commit/192752c4f7342b8abb0fe34346cf162b6ea9d744)), closes [#3795](https://github.com/jordansmall/spindrift/issues/3795)
+* **launcher:** parse non-schema flags from a table ([9cdbc92](https://github.com/jordansmall/spindrift/commit/9cdbc92f469027425331964f0c67f1a348a45c9c)), closes [#3795](https://github.com/jordansmall/spindrift/issues/3795)
+* **launcher:** print discover report on disambig error ([7909f4a](https://github.com/jordansmall/spindrift/commit/7909f4a91076ef55c6f43be73773278b5ff23e18)), closes [#3508](https://github.com/jordansmall/spindrift/issues/3508)
+* **launcher:** scope issue-text memo per dispatch ([31707a0](https://github.com/jordansmall/spindrift/commit/31707a01486a91614ae6c9437e7ce44ee224e41f)), closes [#4160](https://github.com/jordansmall/spindrift/issues/4160)
+* **prompt-contract:** require every signal row to keep its partner ([999d911](https://github.com/jordansmall/spindrift/commit/999d911be30212926b4adaa6126585869d7f28a7)), closes [#3754](https://github.com/jordansmall/spindrift/issues/3754)
+* **registrydiscover:** keep report on disambig error ([55aff88](https://github.com/jordansmall/spindrift/commit/55aff8802b369e148d36c7af54a68a6d1e06cd4b)), closes [#3508](https://github.com/jordansmall/spindrift/issues/3508)
+* **registryroutes:** validate route before retired-key stanza ([6c9d55a](https://github.com/jordansmall/spindrift/commit/6c9d55ada95164dff8c9781b34bc57c533116e30)), closes [#3436](https://github.com/jordansmall/spindrift/issues/3436)
+* **renderers:** check option-surface path values ([d79d19b](https://github.com/jordansmall/spindrift/commit/d79d19ba81368f69d348bbdd7f8e5bd05c25360b)), closes [#3387](https://github.com/jordansmall/spindrift/issues/3387)
+* **renderers:** derive agent path header count ([b94c76c](https://github.com/jordansmall/spindrift/commit/b94c76c0167e162818afa81755013f946e99a15d)), closes [#3485](https://github.com/jordansmall/spindrift/issues/3485)
+* **renderers:** reject explicit-empty backend fields ([bed31ad](https://github.com/jordansmall/spindrift/commit/bed31adaa1d4e79d5568d0de18a4e226ed4cf4a6)), closes [#3487](https://github.com/jordansmall/spindrift/issues/3487)
+* **renderers:** render non-schema flags from table ([98fdad5](https://github.com/jordansmall/spindrift/commit/98fdad58b4b6c0670bf56f21202c36cc616f0f8d)), closes [#3795](https://github.com/jordansmall/spindrift/issues/3795)
+* **renderers:** stop listing --continuous twice ([4c5e0e3](https://github.com/jordansmall/spindrift/commit/4c5e0e3800a917f8b9019ebc15c9aa6268198d9a)), closes [#3794](https://github.com/jordansmall/spindrift/issues/3794)
+* **research:** derive status enum from verdict set ([7ef3672](https://github.com/jordansmall/spindrift/commit/7ef36724e0c6355c5283332992af0e1784811004)), closes [#4159](https://github.com/jordansmall/spindrift/issues/4159)
+* **research:** forward RESEARCH_VERDICTS into the Box ([4d72f09](https://github.com/jordansmall/spindrift/commit/4d72f09bd586cce967c6c211423a220454f6e3c2)), closes [#4159](https://github.com/jordansmall/spindrift/issues/4159)
+* **research:** render verdict markers in Go ([440d32f](https://github.com/jordansmall/spindrift/commit/440d32ffb077b141272491f91e2b6a6689db77b1)), closes [#2630](https://github.com/jordansmall/spindrift/issues/2630)
+* **settle:** abandon a conflict resolve already in flight ([4784e30](https://github.com/jordansmall/spindrift/commit/4784e3089f79f8a07a7af6cc1e7da39f632ab7dc)), closes [#3655](https://github.com/jordansmall/spindrift/issues/3655)
+* **settle:** skip an already-in-flight fix pass ([feb4c51](https://github.com/jordansmall/spindrift/commit/feb4c5198b99175cd0c682205fd52a0b710d558e)), closes [#3655](https://github.com/jordansmall/spindrift/issues/3655)
+* **signalsocket:** close raw listener in Close ([d2ec4c6](https://github.com/jordansmall/spindrift/commit/d2ec4c65c15303089c2cc1059a4fe64c6b3697c1)), closes [#4209](https://github.com/jordansmall/spindrift/issues/4209)
+* **terminate:** word Reclaim for its real trigger ([caf0062](https://github.com/jordansmall/spindrift/commit/caf0062ef716c03cf76c72c667aa43dfb9ee6144)), closes [#3559](https://github.com/jordansmall/spindrift/issues/3559)
+* **waves:** drop operator wording from abandon print ([9d5e150](https://github.com/jordansmall/spindrift/commit/9d5e1507996caec7b843dc16cd0a33eee047b081)), closes [#3559](https://github.com/jordansmall/spindrift/issues/3559)
+
+
+### Security
+
+* **daemon:** redact URL userinfo from child stderr ([9c0166a](https://github.com/jordansmall/spindrift/commit/9c0166a4d770d1a5595526b561ad41d26bfed4ae)), closes [#3566](https://github.com/jordansmall/spindrift/issues/3566)
+* **dispatch:** fail registry proxy TCP closed ([c827ed8](https://github.com/jordansmall/spindrift/commit/c827ed88c8329cde3e74984b2db1928cd19a09bd)), closes [#3781](https://github.com/jordansmall/spindrift/issues/3781)
+* **gitexec:** keep env out of test failure output ([fd6d1ac](https://github.com/jordansmall/spindrift/commit/fd6d1acc599126e209e44f63bd49dd020d4164bd)), closes [#4197](https://github.com/jordansmall/spindrift/issues/4197)
+* **registryproxy:** bound the proxy's listener ([d0800e7](https://github.com/jordansmall/spindrift/commit/d0800e75b94c32ed59f0571bbd3cfd4a574e1099)), closes [#3749](https://github.com/jordansmall/spindrift/issues/3749)
+* **settle:** escape Markdown in failed intent body ([c14de11](https://github.com/jordansmall/spindrift/commit/c14de11e728c1e2c681b160aab4f353e36a8b313)), closes [#3845](https://github.com/jordansmall/spindrift/issues/3845)
+* **settle:** treat a lone carriage return as a line break in firstLine ([7e511d5](https://github.com/jordansmall/spindrift/commit/7e511d562ca257c1dabbc91d1ad7879442cf9521)), closes [#4172](https://github.com/jordansmall/spindrift/issues/4172)
+* **settle:** truncate filed issue titles to their first line ([31e5dbf](https://github.com/jordansmall/spindrift/commit/31e5dbfd31a13fa3fb29d83982320ae800379dee)), closes [#3834](https://github.com/jordansmall/spindrift/issues/3834)
+
+
+### Documentation
+
+* **adr:** name exec.CommandContext in ADR 0045 ([396258b](https://github.com/jordansmall/spindrift/commit/396258b28cf50085f8873cb6bc4c3d8d5c7709dc)), closes [#3512](https://github.com/jordansmall/spindrift/issues/3512)
+* **adr:** record case-insensitive cargo route binding ([0f7ae5d](https://github.com/jordansmall/spindrift/commit/0f7ae5d7cfa4cccc63691530ce3866705b86eafd))
+* **adr:** record that in-tree binding folds host case ([84980ba](https://github.com/jordansmall/spindrift/commit/84980ba91aeab0c0c741b6b61d0a22b40ad10851)), closes [#3706](https://github.com/jordansmall/spindrift/issues/3706)
+* **adr:** record the cgroup leftover reclaim ([822b2ce](https://github.com/jordansmall/spindrift/commit/822b2ce6169a6e82999d9b4d49f539fd5638615c)), closes [#4164](https://github.com/jordansmall/spindrift/issues/4164)
+* **bindregistry:** drop stale cargo rationale ([f10c1a5](https://github.com/jordansmall/spindrift/commit/f10c1a5a5a2f52ca5707dc1e44217eefa93106fb)), closes [#4146](https://github.com/jordansmall/spindrift/issues/4146)
+* **butler:** note BUTLER_CHORES names must be unique ([744b8ea](https://github.com/jordansmall/spindrift/commit/744b8ea3c347300babe1125fc5cc111bfbd488c4))
+* **checks:** credit the wellFormedNames filter for ADR name skips ([155095c](https://github.com/jordansmall/spindrift/commit/155095c3a15960fc1a9f60a82bbb98148bbc4de9)), closes [#3847](https://github.com/jordansmall/spindrift/issues/3847)
+* **console:** drop stale no-caller note on compositeOverlay ([0f82ae2](https://github.com/jordansmall/spindrift/commit/0f82ae23d1e712ddd6d74b503430c90bd54a3f54)), closes [#4154](https://github.com/jordansmall/spindrift/issues/4154)
+* **console:** fix CursorMoveMsg key sources ([eca25aa](https://github.com/jordansmall/spindrift/commit/eca25aa7689773f33aa7d61f447bb91251cbc58c)), closes [#4151](https://github.com/jordansmall/spindrift/issues/4151)
+* **console:** fix the msg census regen command ([a6585bb](https://github.com/jordansmall/spindrift/commit/a6585bb3c94a5bf3786bf3edad0f2e64ba508b57)), closes [#4150](https://github.com/jordansmall/spindrift/issues/4150)
+* **console:** repoint test comments at refreshPickDecorations ([70807b9](https://github.com/jordansmall/spindrift/commit/70807b9a50282381684ca81abb3788caebd7770f)), closes [#4144](https://github.com/jordansmall/spindrift/issues/4144)
+* **context:** mark butler rungs off by default ([fa8dff1](https://github.com/jordansmall/spindrift/commit/fa8dff123acfcbcf60eae04f0b0f02655f504395)), closes [#4121](https://github.com/jordansmall/spindrift/issues/4121)
+* **daemon:** count a resolving sibling as idle for jam ([f2d00a4](https://github.com/jordansmall/spindrift/commit/f2d00a4fc01011763100bd87d5458475df1195a9)), closes [#3735](https://github.com/jordansmall/spindrift/issues/3735)
+* **daemon:** list release bumps as moving the build ([50cad57](https://github.com/jordansmall/spindrift/commit/50cad578da4d04ebe20469401da4abaabb28c24d)), closes [#3702](https://github.com/jordansmall/spindrift/issues/3702)
+* **daemon:** record the acquire window and pid probe ([8bb79cf](https://github.com/jordansmall/spindrift/commit/8bb79cf31d43aa9d16e04a1bc85b7267ed1c13e1))
+* **daemon:** say a version bump moves the daemon ([b3cf61c](https://github.com/jordansmall/spindrift/commit/b3cf61c15bc21ceaf54e46bdf61c962186934fb2)), closes [#3702](https://github.com/jordansmall/spindrift/issues/3702)
+* **doctor:** mark TCP no-host-loopback arms backstops ([f352388](https://github.com/jordansmall/spindrift/commit/f352388c85c33dadc5da495f236e40077f2423da)), closes [#3768](https://github.com/jordansmall/spindrift/issues/3768)
+* **fragments:** stop hardcoding the signalChannel row count ([d0ee8a0](https://github.com/jordansmall/spindrift/commit/d0ee8a0fe4ccac8b316cf4e8cdb64ea2e500e59b))
+* **nix:** drop hardcoded agent path counts ([837a590](https://github.com/jordansmall/spindrift/commit/837a59066b715ea501f67cf84d6abbd160737d42)), closes [#3485](https://github.com/jordansmall/spindrift/issues/3485)
+* record that a quit Console ignores stop signals ([4bad823](https://github.com/jordansmall/spindrift/commit/4bad8235cd518e512dbdeceff6f4dbc1c6ec57cb))
+* **reference:** describe post_count and the longer-side span ([975c665](https://github.com/jordansmall/spindrift/commit/975c6653c8c2f4b81fa2d87ee39cee2aaac17292))
+* **reference:** name butler promotion and patch rungs ([f582b2b](https://github.com/jordansmall/spindrift/commit/f582b2b2df455bf28bd78ac1ae9d968382f601e8)), closes [#4121](https://github.com/jordansmall/spindrift/issues/4121)
+* **reference:** note the filer never invents a branch ([8779f77](https://github.com/jordansmall/spindrift/commit/8779f77cde5be159e21b666c2bd189e68c8c2944))
+* **reference:** state the event stream reason redaction ([0789886](https://github.com/jordansmall/spindrift/commit/0789886b58a666d893944af48ef2a214c3c7bd4a)), closes [#3566](https://github.com/jordansmall/spindrift/issues/3566)
+* **registryroutes:** note a malformed route fails before the stanza ([7287f57](https://github.com/jordansmall/spindrift/commit/7287f5774cc6e82109cd93e8fea1bb526cab36b9)), closes [#3436](https://github.com/jordansmall/spindrift/issues/3436)
+* **release-notes:** add 0.21.2 highlights ([47368cf](https://github.com/jordansmall/spindrift/commit/47368cf1e8510b8273c0cb0782ba4d146d1eafec))
+* **research:** say verdict markers render at runtime ([4fbd9fb](https://github.com/jordansmall/spindrift/commit/4fbd9fb9ceaae4e4da3f02d3f0bd30c26db5ee65))
+* scope the exec credential visibility claim ([1174e35](https://github.com/jordansmall/spindrift/commit/1174e357303c2e957f97e101573f27c0d9459186)), closes [#3512](https://github.com/jordansmall/spindrift/issues/3512)
+* **settle:** describe DupRef as a reference list ([b2d64c1](https://github.com/jordansmall/spindrift/commit/b2d64c1c9cd13c4fc681f883d3840f512c160d94)), closes [#3831](https://github.com/jordansmall/spindrift/issues/3831)
+
+
+### Code Refactoring
+
+* **connlimit:** share the listener connection cap ([bcf5eb9](https://github.com/jordansmall/spindrift/commit/bcf5eb98993d64d1967b8f96602791f71d7b4ebf)), closes [#3749](https://github.com/jordansmall/spindrift/issues/3749)
+* **daemon:** report untilHorizon exhaustion from Window.Until ([933219b](https://github.com/jordansmall/spindrift/commit/933219b0abe27292fd342191dbee67373f5f2264)), closes [#3590](https://github.com/jordansmall/spindrift/issues/3590)
+* **launcher:** extract verbIndex from verbSoFar ([ff3d720](https://github.com/jordansmall/spindrift/commit/ff3d7200b163e96fe8479171d1d8b6ea76e147e2)), closes [#3784](https://github.com/jordansmall/spindrift/issues/3784)
+* **prompt-contract:** read Grammar token from registry row ([7669957](https://github.com/jordansmall/spindrift/commit/766995700f077a37035d0b606d84d44a02363415)), closes [#3373](https://github.com/jordansmall/spindrift/issues/3373)
+* **runner:** drop Reap from the Runner interface ([21bc814](https://github.com/jordansmall/spindrift/commit/21bc814a502602e6dcb568e22d5ff7693831cac3)), closes [#4164](https://github.com/jordansmall/spindrift/issues/4164)
+* **runner:** export DeniesHostLoopback ([60b9bb1](https://github.com/jordansmall/spindrift/commit/60b9bb1e2bb82e32f2af0368a6a3ec6caddc6494)), closes [#3781](https://github.com/jordansmall/spindrift/issues/3781)
+
+
+### Tests
+
+* **daemon:** keep GH_TOKEN out of env-strip failure output ([0e55f7e](https://github.com/jordansmall/spindrift/commit/0e55f7e308579ab30d0ffa23b21fb97503186dcd)), closes [#4169](https://github.com/jordansmall/spindrift/issues/4169)
+* **daemon:** pin the baton handoff after a no-work exit ([0a306c9](https://github.com/jordansmall/spindrift/commit/0a306c991bf80a8fdb42b904a8c2af11e5684d3b)), closes [#3829](https://github.com/jordansmall/spindrift/issues/3829)
+* **prompt-contract:** pin issue-prompt Grammar line to fieldShape ([a16c315](https://github.com/jordansmall/spindrift/commit/a16c3151235844502489f25d0c504994c20b13e2)), closes [#3373](https://github.com/jordansmall/spindrift/issues/3373)
+* **research:** pin all verdict renderings to nix ([6a7ad19](https://github.com/jordansmall/spindrift/commit/6a7ad191cc4e3ca85f28d193ebd19b9f541eeb0d)), closes [#2630](https://github.com/jordansmall/spindrift/issues/2630)
+* **research:** pin the status enum against nix ([f7e9f8b](https://github.com/jordansmall/spindrift/commit/f7e9f8b35828c65d8992e5ca2b6e93952c026901)), closes [#4159](https://github.com/jordansmall/spindrift/issues/4159)
+* **runner:** pin no TCP endpoint under loopback denial ([763dae5](https://github.com/jordansmall/spindrift/commit/763dae51bdff46829fdb7a25db67eccacb0e2896)), closes [#3768](https://github.com/jordansmall/spindrift/issues/3768)
+* **schema-drift:** guard explicit-empty backend rows ([8ad61ec](https://github.com/jordansmall/spindrift/commit/8ad61ec70f580fc0d89d3c2810e4b0afe024cbf6)), closes [#3487](https://github.com/jordansmall/spindrift/issues/3487)
+* **schema-drift:** guard option-surface path values ([ce4fb38](https://github.com/jordansmall/spindrift/commit/ce4fb3847be0ab161fb48f00df7b95a9e7f732d9)), closes [#3387](https://github.com/jordansmall/spindrift/issues/3387)
+* **schema-drift:** pin unique completion flags ([6f7bc82](https://github.com/jordansmall/spindrift/commit/6f7bc82b724164de527a167f565adca0ddf7285f)), closes [#3794](https://github.com/jordansmall/spindrift/issues/3794)
+* **settle:** pin a mixed-kind DupRef skip ([8d5a76d](https://github.com/jordansmall/spindrift/commit/8d5a76d9be0780dd9ef421fed281376115c49a9c)), closes [#3831](https://github.com/jordansmall/spindrift/issues/3831)
+* **stopsignal:** send a signal after cleanup ([d30dbba](https://github.com/jordansmall/spindrift/commit/d30dbba5f38ca17d992003a6dfae4f22e01fb5d2)), closes [#3640](https://github.com/jordansmall/spindrift/issues/3640)
+
+
+### Miscellaneous Chores
+
+* bump flake lock ([cbc8a6a](https://github.com/jordansmall/spindrift/commit/cbc8a6a2aef99e2e45f4ccaa337b00354614fe9a))
+* **dogfood:** pin the 5.5 models ([8995561](https://github.com/jordansmall/spindrift/commit/8995561555a49c9e799db39ac116f1cf55fa7f73))
+
 ## [0.21.1](https://github.com/jordansmall/spindrift/compare/v0.21.0...v0.21.1) (2026-10-01)
 
 
