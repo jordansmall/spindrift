@@ -233,9 +233,9 @@ func TestRun_IssueTrackerRateLimit_CodeForgeProbeDoesNotRun(t *testing.T) {
 }
 
 // A failing code-forge row must not be written to w as a MISSING line: the
-// caller (cmdDoctor) already prints the returned error, so reporting the row
+// caller (doctorReport) already prints the returned error, so reporting the row
 // too would double-report it. The recoverable-issues probe never runs either.
-func TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck(t *testing.T) {
+func TestRun_CodeForgeProbeFailure_OmitsMissingLineAndSkipsRecoverableCheck(t *testing.T) {
 	it := forge.NewFake()
 	it.ProbeRepo = "owner/repo"
 	cf := forge.NewFake()
@@ -263,6 +263,43 @@ func TestRun_CodeForgeProbeFailure_ReportsMissingLineAndSkipsRecoverableCheck(t 
 	}
 	if len(it.ListIssuesCalls) != 0 {
 		t.Errorf("want ListIssues never called once code-forge probe fails, got calls: %v", it.ListIssuesCalls)
+	}
+}
+
+// A connectivity failure in quiet mode writes nothing to w: the returned error
+// is the only report, so a remedy line or MISSING row on stdout would
+// double-report it.
+func TestRun_ConnectivityFailure_QuietWritesNothingToStdout(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func() (*forge.Fake, *forge.Fake)
+	}{
+		{"issue-tracker", func() (*forge.Fake, *forge.Fake) {
+			it := forge.NewFake()
+			it.ProbeErr = forge.ErrAuthFailure
+			cf := forge.NewFake()
+			cf.ProbeRepo = "owner/repo"
+			return it, cf
+		}},
+		{"code-forge", func() (*forge.Fake, *forge.Fake) {
+			it := forge.NewFake()
+			it.ProbeRepo = "owner/repo"
+			cf := forge.NewFake()
+			cf.ProbeErr = errors.New("boom")
+			return it, cf
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			it, cf := tc.setup()
+			var buf bytes.Buffer
+			err := Run(it, cf, defaultDoctorConfig(), NewReporter(&buf, false), bufio.NewScanner(strings.NewReader("")), false, nil)
+			if !errors.Is(err, ErrConnectivity) {
+				t.Errorf("want ErrConnectivity, got %v", err)
+			}
+			if got := buf.String(); got != "" {
+				t.Errorf("want empty stdout in quiet mode, got:\n%s", got)
+			}
+		})
 	}
 }
 
