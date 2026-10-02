@@ -47,9 +47,9 @@ type PriorityCapable interface {
 }
 
 // CommentCapable is implemented by harnesses whose adapter satisfies
-// forge.CommentLister: github, forgejo, jira, and the Fake. The local adapter
-// has no comment thread, so it does not implement this and the Comments case
-// is skipped for it.
+// forge.CommentLister. The local adapter has no comment thread, so its harness
+// does not implement this and the Comments case is skipped for it. A harness
+// and tracker that disagree on the two interfaces fail the case instead.
 type CommentCapable interface {
 	// SeedComments scripts comments as num's thread, oldest first.
 	SeedComments(num string, comments []forge.Comment)
@@ -380,13 +380,13 @@ func numbers(issues []forge.Issue) []string {
 // compared rather than nil-ness: forgejo returns nil where github returns an
 // empty slice.
 func testComments(t *testing.T, h Harness) {
-	ch, ok := h.(CommentCapable)
-	if !ok {
-		t.Skip("harness has no comment thread (not CommentCapable)")
+	lister, lists := h.Tracker().(forge.CommentLister)
+	ch, capable := h.(CommentCapable)
+	if !lists && !capable {
+		t.Skip("tracker has no comment thread (not a forge.CommentLister)")
 	}
-	lister, ok := h.Tracker().(forge.CommentLister)
-	if !ok {
-		t.Fatalf("tracker %T does not implement forge.CommentLister", h.Tracker())
+	if !lists || !capable {
+		t.Fatalf("tracker %T is a forge.CommentLister: %v; harness %T is CommentCapable: %v; the two must agree", h.Tracker(), lists, h, capable)
 	}
 
 	h.SeedIssue(forge.Issue{Number: "701", Title: "threaded"})
