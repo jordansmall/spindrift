@@ -378,11 +378,11 @@ in
     env = "RESEARCH_VERDICTS";
     group = "issues";
     default = "";
-    doc = "JSON array of research verdict objects [{verdict,label,description}], order preserved, defining the research dispatch's verdict vocabulary and each verdict's terminal label (ADR 0022); empty (default) uses the built-in three, with no behavior change (see lib/research-verdicts.nix's defaultVerdicts for the built-in three and their labels). The launcher validates the posted verdict against this set and applies the mapped label on Settle; the research prompt's verdict contract is rendered from it";
+    doc = "JSON array of research verdict objects [{verdict,label,description}], order preserved, defining the research dispatch's verdict vocabulary and each verdict's terminal label (ADR 0022); empty (default) uses the built-in three, with no behavior change (see lib/research-verdicts.nix's defaultVerdicts for the built-in three and their labels). The launcher validates the posted verdict against this set and applies the mapped label on Settle; the research prompt's verdict contract is rendered from it, and the Box derives the prompt's `status=<...>` enumeration from it, so a prompt-dir override sees the configured set";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "research.verdicts";
-    boxEnv = false;
+    boxEnv = true;
   };
   butlerChores = {
     env = "BUTLER_CHORES";
