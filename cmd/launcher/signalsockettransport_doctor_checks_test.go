@@ -217,3 +217,20 @@ func TestSignalSocketTransportCheck_RemedyNamesBothTheKnobAndTheRuntimeFix(t *te
 		}
 	}
 }
+
+// The gate in signalcarrier_gate.go shares this reason; pinning the full
+// text keeps the rendered operator output unchanged.
+func TestSignalSocketTransportCheck_NetworkModeNoneRendersSharedReason(t *testing.T) {
+	c := minimalValidConfig()
+	c.signalCarrier = "socket"
+	c.networkMode = runner.NetworkModeNone
+
+	_, err := signalSocketTransportCheck(c).Probe()
+	if err == nil {
+		t.Fatal("Probe() error = nil, want an error")
+	}
+	want := "BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=none -- the socket transport needs loopback, which this mode tears down: " + doctor.ErrDegraded.Error()
+	if err.Error() != want {
+		t.Errorf("Probe() error = %q, want %q", err.Error(), want)
+	}
+}

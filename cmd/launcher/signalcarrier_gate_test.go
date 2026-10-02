@@ -58,3 +58,20 @@ func TestSignalCarrierNetworkModeGate_LogCarrierUnderNoneIsNoOp(t *testing.T) {
 		t.Errorf("checkSignalCarrierNetworkModeGate() with signalCarrier=log = %v, want nil", err)
 	}
 }
+
+// The doctor signal-socket-transport row shares this reason; pinning the full
+// text keeps the rendered operator output unchanged.
+func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *testing.T) {
+	c := minimalValidConfig()
+	c.signalCarrier = "socket"
+	c.networkMode = "none"
+
+	err := checkSignalCarrierNetworkModeGate(c)
+	if err == nil {
+		t.Fatal("checkSignalCarrierNetworkModeGate() = nil, want an error")
+	}
+	const want = "BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=none -- the socket transport needs loopback, which this mode tears down; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
