@@ -5,16 +5,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
-)
-
-// promptassemblyTestdataRegistry and promptassemblyPromptsDir mirror
-// promptassembly's own test-only constants (loadTestRegistry, promptsDir),
-// which are unexported and so unreachable from this package. internal/runner
-// sits at the same tree depth as internal/promptassembly, so the same relative
-// path depth applies unchanged.
-const (
-	promptassemblyTestdataRegistry = "../promptassembly/testdata/registry.json"
-	promptassemblyPromptsDir       = "../../../../templates/default/prompts"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 // issueTextValue returns the value of the LAST "ISSUE_TEXT=" entry in env.
@@ -42,7 +33,7 @@ func issueTextValue(t *testing.T, env []string) string {
 func TestIssueTextReachesAssembledPromptUnderBothRunners(t *testing.T) {
 	const issueText = "issue-3470 title line\n\nA multi-line private issue body,\nwith a second paragraph and a trailing note."
 
-	reg, err := promptassembly.LoadRegistryFile(promptassemblyTestdataRegistry)
+	reg, err := promptassembly.LoadRegistryFile(repopath.RegistryJSON())
 	if err != nil {
 		t.Fatalf("LoadRegistryFile: %v", err)
 	}
@@ -66,7 +57,7 @@ func TestIssueTextReachesAssembledPromptUnderBothRunners(t *testing.T) {
 			t.Setenv("ISSUE_TEXT", issueTextValue(t, runEnv))
 
 			env := promptassembly.EnvFromEnviron()
-			env.PromptsDir = promptassemblyPromptsDir
+			env.PromptsDir = repopath.PromptsDir()
 
 			result, err := promptassembly.Assemble(env, reg)
 			if err != nil {

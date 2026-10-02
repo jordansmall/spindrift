@@ -9,16 +9,8 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
-
-// The real prompt tree, not a fixture, so these tests render what ships.
-const promptsDirForTest = "../../../templates/default/prompts"
-
-// Reuses promptassembly's own testdata registry rather than duplicating it.
-const registryPathForTest = "../internal/promptassembly/testdata/registry.json"
-
-// Reuses promptassembly's own validateMarkers registry (issue #2356).
-const validateMarkersRegistryPathForTest = "../internal/promptassembly/testdata/validate-markers.json"
 
 // coveredCellArgs puts runAssemblePrompt's Env in promptassembly.Assemble's
 // covered cell (issue #2540: checkCoveredCell checks only dispatch kind
@@ -51,10 +43,10 @@ func coveredCellArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput
 		"--code-review-skill-baked=true",
 		"--auto-format-skill-baked=true",
 		"--auto-lint-skill-baked=true",
-		"--prompts-dir", promptsDirForTest,
+		"--prompts-dir", repopath.PromptsDir(),
 		"--skills-found", "caveman, tdd, commit, code-review",
-		"--registry", registryPathForTest,
-		"--validate-markers-registry", validateMarkersRegistryPathForTest,
+		"--registry", repopath.RegistryJSON(),
+		"--validate-markers-registry", repopath.ValidateMarkersJSON(),
 		"--prompt-output", promptOutput,
 		"--agents-json-output", agentsJSONOutput,
 		"--handoff-output", handoffOutput,
@@ -134,7 +126,7 @@ func TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 	dir := t.TempDir()
 	var stdout bytes.Buffer
 	rc := runAssemblePrompt([]string{
-		"--registry", registryPathForTest,
+		"--registry", repopath.RegistryJSON(),
 		"--prompt-output", filepath.Join(dir, "prompt.txt"),
 		"--agents-json-output", filepath.Join(dir, "agents.json"),
 	}, &stdout)

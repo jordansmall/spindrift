@@ -2,8 +2,11 @@ package dispatchkey
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 func TestFieldsParseRoundTrip(t *testing.T) {
@@ -86,14 +89,14 @@ func TestChoreSpellingMatchesBoxSeam(t *testing.T) {
 		t.Fatalf("Chore(\"X\").String() prefix = %q, want \"butler-\"", prefix)
 	}
 
-	butlerPrompt, err := os.ReadFile("../../../../templates/default/prompts/butler-prompt.md")
+	butlerPrompt, err := os.ReadFile(filepath.Join(repopath.PromptsDir(), "butler-prompt.md"))
 	if err != nil {
 		t.Fatalf("reading butler-prompt.md: %v", err)
 	}
 	if !strings.Contains(string(butlerPrompt), "issue=${DISPATCH_KEY}") {
-		t.Error("templates/default/prompts/butler-prompt.md does not contain the expected issue=${DISPATCH_KEY} spelling")
+		t.Error("butler-prompt.md does not contain the expected issue=${DISPATCH_KEY} spelling")
 	}
 	if strings.Contains(string(butlerPrompt), "butler-${CHORE_NAME}") {
-		t.Error("templates/default/prompts/butler-prompt.md still spells the butler- prefix itself (should read DISPATCH_KEY instead)")
+		t.Error("butler-prompt.md still spells the butler- prefix itself (should read DISPATCH_KEY instead)")
 	}
 }

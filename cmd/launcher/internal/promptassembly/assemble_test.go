@@ -12,11 +12,10 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/signalwire"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
-// The real templates/default/prompts tree, resolved relative to this
-// package directory, the same convention the testdata paths here use.
-const promptsDir = "../../../../templates/default/prompts"
+var promptsDir = repopath.PromptsDir()
 
 // A verbatim excerpt of caveman-default-research.md's marker-grammar
 // exemption paragraph. One contiguous literal ties "machine-parsed marker

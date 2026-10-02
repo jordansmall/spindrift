@@ -98,6 +98,8 @@ in
         	"path/filepath"
         	"strings"
         	"testing"
+
+        	"spindrift.dev/launcher/internal/testutil/repopath"
         )
 
         // TestBakedSkillsAddRowGuard is spliced into a reconstructed, compiled
@@ -113,7 +115,7 @@ in
         // rendered into the assembled prompt -- not a string comparison
         // against a renderer's raw output.
         func TestBakedSkillsAddRowGuard(t *testing.T) {
-        	registryBytes, err := os.ReadFile(registryPathForTest)
+        	registryBytes, err := os.ReadFile(repopath.RegistryJSON())
         	if err != nil {
         		t.Fatalf("read registry fixture: %v", err)
         	}

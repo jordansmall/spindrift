@@ -6,12 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-)
 
-// forbiddenMarkersRegistryPathForReadonlyGuardsTest reuses promptassembly's own
-// testdata fixture (the real 13-row registry, issue #2464) instead of
-// duplicating it by hand.
-const forbiddenMarkersRegistryPathForReadonlyGuardsTest = "../internal/promptassembly/testdata/forbidden-markers.json"
+	"spindrift.dev/launcher/internal/testutil/repopath"
+)
 
 // stubBinOnPath puts a no-op executable named name on PATH for the test, so
 // exec.LookPath(name), the default readonlyguards.Config.RealBinary, resolves
@@ -38,7 +35,7 @@ func TestRunReadonlyGuards_FullRegistryInstallsShimAndHook(t *testing.T) {
 
 	var stdout bytes.Buffer
 	rc := runReadonlyGuards([]string{
-		"--forbidden-markers-registry", forbiddenMarkersRegistryPathForReadonlyGuardsTest,
+		"--forbidden-markers-registry", repopath.ForbiddenMarkersJSON(),
 		"--repo-dir", repoDir,
 		"--shim-dir", shimDir,
 	}, &stdout)
@@ -97,7 +94,7 @@ func TestRunReadonlyGuards_ExtraRepoDirAlsoGetsHook(t *testing.T) {
 
 	var stdout bytes.Buffer
 	rc := runReadonlyGuards([]string{
-		"--forbidden-markers-registry", forbiddenMarkersRegistryPathForReadonlyGuardsTest,
+		"--forbidden-markers-registry", repopath.ForbiddenMarkersJSON(),
 		"--repo-dir", repoDir,
 		"--extra-repo-dir", extraRepoDir,
 		"--shim-dir", shimDir,
@@ -125,7 +122,7 @@ func TestRunReadonlyGuards_SkipGitHookInstallsShimOnlyNoRepoDir(t *testing.T) {
 
 	var stdout bytes.Buffer
 	rc := runReadonlyGuards([]string{
-		"--forbidden-markers-registry", forbiddenMarkersRegistryPathForReadonlyGuardsTest,
+		"--forbidden-markers-registry", repopath.ForbiddenMarkersJSON(),
 		"--skip-git-hook",
 		"--shim-dir", shimDir,
 	}, &stdout)

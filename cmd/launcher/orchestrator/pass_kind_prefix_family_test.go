@@ -11,15 +11,7 @@ import (
 	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/runstate"
-)
-
-// Both paths are relative to this package's own directory, the same convention
-// promptassembly's own tests use, so this guard renders through the actual
-// templates a later edit could break rather than a fixture that can drift out
-// of sync with them.
-const (
-	guardPromptsDir   = "../../../templates/default/prompts"
-	guardRegistryPath = "../internal/promptassembly/testdata/registry.json"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 // guardEnv builds one orchestrator-on, fresh-work Env sitting in Assemble's
@@ -45,7 +37,7 @@ func guardEnv(issueText string) promptassembly.Env {
 		CodeReviewSkillBaked:   true,
 		AutoFormatSkillBaked:   true,
 		AutoLintSkillBaked:     true,
-		PromptsDir:             guardPromptsDir,
+		PromptsDir:             repopath.PromptsDir(),
 		IssueNumber:            "3445",
 		IssueTitle:             "Guard the pass-kind prefix family",
 		Branch:                 "agent/issue-3445",
@@ -146,11 +138,15 @@ func assertFamilyPrefix(t *testing.T, family string, passes []namedPromptText, e
 // review/delta-review pass with the assembled review prompt, so a fragment or
 // seeder edit that reintroduces a prepend fails here instead of only degrading
 // prompt-cache hit rate. seed_prefix_invariant_test.go covers seeders alone.
+//
+// It renders the real templates tree, not a frozen fixture, so a fragment edit
+// that breaks the prefix fails here instead of hiding behind a stale copy.
 func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
-	if _, err := os.Stat(guardPromptsDir); err != nil {
-		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", guardPromptsDir, err)
+	dir := repopath.PromptsDir()
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", dir, err)
 	}
-	reg, err := promptassembly.LoadRegistryFile(guardRegistryPath)
+	reg, err := promptassembly.LoadRegistryFile(repopath.RegistryJSON())
 	if err != nil {
 		t.Fatalf("load fragment registry: %v", err)
 	}
@@ -284,10 +280,11 @@ func scoutPromptText(t *testing.T, agentsJSON string) string {
 // its own, so the assertion here is layering, not a prefix shared across
 // several passes.
 func TestScoutAndResearchPromptsLeadWithIssueText(t *testing.T) {
-	if _, err := os.Stat(guardPromptsDir); err != nil {
-		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", guardPromptsDir, err)
+	dir := repopath.PromptsDir()
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("templates tree not present at %s: %v -- this guard renders nothing and asserts nothing without the real templates tree", dir, err)
 	}
-	reg, err := promptassembly.LoadRegistryFile(guardRegistryPath)
+	reg, err := promptassembly.LoadRegistryFile(repopath.RegistryJSON())
 	if err != nil {
 		t.Fatalf("load fragment registry: %v", err)
 	}
