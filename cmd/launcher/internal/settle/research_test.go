@@ -1238,3 +1238,81 @@ func TestBuildVerdictCommentSections_EmptyWhenNothing(t *testing.T) {
 		t.Errorf("sections = %q, want empty string", got)
 	}
 }
+
+// A backslash in agent text would otherwise escape the escaping backslash
+// added before a bracket and re-open the bracket as live Markdown (issue #4219).
+func TestEscapeMarkdownLinkText(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"backslash-bracket link", `\[evil\](https://x.example)`, `\\\[evil\\\](https://x.example)`},
+		{"lone backslash", `a\b`, `a\\b`},
+		{"brackets", `[bad]`, `\[bad\]`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := escapeMarkdownLinkText(tc.in); got != tc.want {
+				t.Errorf("escapeMarkdownLinkText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// Every render site that escapes agent text must neutralise a backslash-led
+// bracket link, not just a bare bracket (issue #4219).
+func TestMarkdownBullets_BackslashBracketLinkEscaped(t *testing.T) {
+	const evil = `\[evil\](https://x.example)`
+	const esc = `\\\[evil\\\](https://x.example)`
+	cases := []struct {
+		name   string
+		render func([]filedIntent) string
+		intent filedIntent
+		want   string
+	}{
+		{
+			name:   "filed title linked",
+			render: buildFiledIssuesSection,
+			intent: filedIntent{Title: evil, URL: "https://github.com/owner/repo/issues/501"},
+			want:   "- [" + esc + "](https://github.com/owner/repo/issues/501)",
+		},
+		{
+			name:   "filed title plain",
+			render: buildFiledIssuesSection,
+			intent: filedIntent{Title: evil, URL: "local:slug"},
+			want:   "- **" + esc + "** — local:slug",
+		},
+		{
+			name:   "failed title",
+			render: buildFiledIssuesSection,
+			intent: filedIntent{Title: evil, Failed: true, Body: "repro"},
+			want:   "- **" + esc + "** (filing failed) — repro",
+		},
+		{
+			name:   "failed body",
+			render: buildFiledIssuesSection,
+			intent: filedIntent{Title: "t", Failed: true, Body: evil + "\nmore"},
+			want:   "- **t** (filing failed) — " + esc,
+		},
+		{
+			name:   "skipped title",
+			render: buildSkippedIssuesSection,
+			intent: filedIntent{Title: evil, Skipped: true, DupRef: "#12"},
+			want:   "- **" + esc + "** — already tracked: #12",
+		},
+		{
+			name:   "skipped dupref",
+			render: buildSkippedIssuesSection,
+			intent: filedIntent{Title: "t", Skipped: true, DupRef: evil},
+			want:   "- **t** — already tracked: " + esc,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.render([]filedIntent{tc.intent})
+
+			// Each fixture renders one bullet, always the last line.
+			bullet := got[strings.LastIndex(got, "\n")+1:]
+			if bullet != tc.want {
+				t.Errorf("bullet = %q, want %q", bullet, tc.want)
+			}
+		})
+	}
+}
