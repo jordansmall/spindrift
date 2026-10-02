@@ -1256,18 +1256,21 @@ func TestAwaitWindowPublishesOnEveryIteration(t *testing.T) {
 // TestNoteTipMovedStampsJammedKinds pins tip_moved's Kinds field (issue
 // #3541 review finding) to exactly the kinds jammed at the moment the tip
 // moved, in cfg.Kinds order, whether that's one kind or several — and
-// proves a queue-empty (non-jammed) kind is never included. noteTipMoved is
+// proves a queue-empty (non-jammed) kind is never included and keeps its
+// gate deadline untouched. noteTipMoved is
 // the pool method issue #3625 pulled pollSlices's mutate body into verbatim,
 // so this test moved with it rather than driving the fetch loop that used
 // to call it.
 func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 	cases := []struct {
-		name string
-		jam  []Kind
-		want []Kind
+		name       string
+		jam        []Kind
+		queueEmpty []Kind
+		want       []Kind
 	}{
-		{"only dispatch jammed", []Kind{KindOf(dispatchkind.Work)}, []Kind{KindOf(dispatchkind.Work)}},
-		{"both kinds jammed", []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}, []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}},
+		{"only dispatch jammed", []Kind{KindOf(dispatchkind.Work)}, nil, []Kind{KindOf(dispatchkind.Work)}},
+		{"both kinds jammed", []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}, nil, []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}},
+		{"queue-empty research left gated", []Kind{KindOf(dispatchkind.Work)}, []Kind{KindOf(dispatchkind.Research)}, []Kind{KindOf(dispatchkind.Work)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1283,18 +1286,40 @@ func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 			for _, k := range tc.jam {
 				p.markNoWork(k, clk.Now(), true)
 			}
+			readyAt := func(k Kind) time.Time {
+				until, _ := p.st.kinds[k].readyAt(clk.Now())
+				return until
+			}
+			gateBefore := map[Kind]time.Time{}
+			for _, k := range tc.queueEmpty {
+				p.markNoWork(k, clk.Now(), false)
+				gateBefore[k] = readyAt(k)
+				if gateBefore[k].IsZero() {
+					t.Fatalf("queue-empty gate for %v was never set", k)
+				}
+			}
 
 			p.noteTipMoved(0, "rev2")
+
+			for _, k := range tc.queueEmpty {
+				if got := readyAt(k); !got.Equal(gateBefore[k]) {
+					t.Fatalf("queue-empty %v readyAt = %v after tip move, want untouched %v", k, got, gateBefore[k])
+				}
+			}
 
 			events := decodeEvents(t, &buf)
 			var tipMoved *Event
 			for i := range events {
-				if events[i].Event == "tip_moved" {
-					tipMoved = &events[i]
+				if events[i].Event != "tip_moved" {
+					continue
 				}
+				if tipMoved != nil {
+					t.Fatalf("tip_moved emitted more than once, want exactly 1: %v", eventNames(events))
+				}
+				tipMoved = &events[i]
 			}
 			if tipMoved == nil {
-				t.Fatalf("events = %v, want a tip_moved event", eventNames(events))
+				t.Fatalf("no tip_moved event, want exactly 1: %v", eventNames(events))
 			}
 			if tipMoved.Revision != "rev2" {
 				t.Fatalf("tip_moved revision = %q, want rev2", tipMoved.Revision)
