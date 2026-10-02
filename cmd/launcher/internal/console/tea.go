@@ -851,13 +851,15 @@ func refreshPickDecorations(m Model, launch *Launcher, pwd string, heartbeats *H
 	return Update(m, CapMsg{Cap: launch.Cap(), Live: launch.Live()})
 }
 
-// isRunningNumber reports whether picks carries number in PickRunning state, the
-// gate on refreshing the open sidebar's Activity feed: a settled, terminated, or
-// failed Dispatch's logs never change again (issue #1502).
+// isRunningNumber reports whether number's live row in picks is PickRunning,
+// the gate on refreshing the open sidebar's Activity feed: a settled,
+// terminated, or failed Dispatch's logs never change again (issue #1502). The
+// newest row for a number is the live one, as Queue.newestIndex treats it: a
+// re-pick leaves older terminal rows ahead of it (ADR 0024).
 func isRunningNumber(picks []Pick, number string) bool {
-	for _, p := range picks {
-		if p.Number == number {
-			return p.State == PickRunning
+	for i := len(picks) - 1; i >= 0; i-- {
+		if picks[i].Number == number {
+			return picks[i].State == PickRunning
 		}
 	}
 	return false

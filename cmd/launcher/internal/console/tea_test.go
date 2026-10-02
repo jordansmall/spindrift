@@ -1800,6 +1800,26 @@ func TestTea_Update_ArmsSidebarActivityTick_OnRunningSidebarOpen_DisarmsOnClose(
 	}
 }
 
+// TestTea_Update_ArmsSidebarActivityTick_OnRepickedNumber pins that a re-picked
+// issue, whose older terminal row precedes its newer PickRunning row (the queue
+// keeps terminal rows), still arms the sidebar's activity tick (issue #4156).
+func TestTea_Update_ArmsSidebarActivityTick_OnRepickedNumber(t *testing.T) {
+	m := Update(NewModel(), QueueSnapshotMsg{Picks: []Pick{
+		{Number: "42", State: PickTerminated},
+		{Number: "42", State: PickRunning},
+	}})
+	tm := teaModel{m: m}
+
+	next, cmd := tm.Update(SidebarLoadedMsg{Number: "42"})
+	tm = next.(teaModel)
+	if !tm.sidebarTickArmed {
+		t.Error("sidebarTickArmed = false, want true for a re-picked number whose newest row is running")
+	}
+	if cmd == nil {
+		t.Error("cmd = nil, want a batched sidebarActivityTick Cmd")
+	}
+}
+
 // TestTea_Update_DisarmsSidebarActivityTick_WhenDispatchSettles verifies the
 // tick disarms the moment its Dispatch stops running, even while the sidebar
 // stays open. A Settled/Terminated/Failed Dispatch's logs never change again,
@@ -4443,6 +4463,49 @@ func TestTea_Update_RefreshesOpenTranscriptView_WhenPassLogGrows(t *testing.T) {
 
 	if !strings.Contains(tm.m.Sidebar.TranscriptRendered, "second") {
 		t.Errorf("TranscriptRendered = %q, want it to reflect the grown pass log without reopening the sidebar", tm.m.Sidebar.TranscriptRendered)
+	}
+}
+
+// TestTea_Update_RefreshesSidebar_ForRepickedNumber verifies
+// refreshPickDecorations refreshes the open sidebar's Activity feed and
+// Transcript for a re-picked number: its older terminal row precedes the newer
+// PickRunning one, and the newest row is the live claim (issue #4156, ADR 0024).
+func TestTea_Update_RefreshesSidebar_ForRepickedNumber(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, ".spindrift", "logs", "issue-42.log")
+	first := `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(first), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	launch := newTestLauncher(t, f)
+	tm := newTeaModel(f, dir, launch)
+	tm.m.Picks = append(tm.m.Picks,
+		Pick{Number: "42", Title: "fix the thing", State: PickTerminated},
+		Pick{Number: "42", Title: "fix the thing", State: PickRunning},
+	)
+	tm.m = Update(tm.m, SidebarLoadedMsg{Number: "42"})
+	tm.m = Update(tm.m, SidebarToggleMsg{}) // switch to the rendered Transcript
+
+	second := first + `{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}` + "\n"
+	if err := os.WriteFile(path, []byte(second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	model, _ := tm.Update(struct{}{})
+	tm = model.(teaModel)
+
+	if !strings.Contains(fmt.Sprint(tm.m.Sidebar.Activity), "second") {
+		t.Errorf("Activity = %v, want it refreshed for a re-picked number whose newest row is running", tm.m.Sidebar.Activity)
+	}
+	if !strings.Contains(tm.m.Sidebar.TranscriptRendered, "second") {
+		t.Errorf("TranscriptRendered = %q, want it refreshed for a re-picked number whose newest row is running", tm.m.Sidebar.TranscriptRendered)
 	}
 }
 
