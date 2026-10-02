@@ -137,11 +137,9 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		}
 		var patch string
 		if *patchFile != "" {
-			b, err := os.ReadFile(*patchFile)
-			if err != nil {
+			if patch, err = readLimitedFile(*patchFile, "patch file"); err != nil {
 				return signalFail(stdout, err)
 			}
-			patch = string(b)
 		}
 		// dedupTerms/class/concurrence/patch stay omitempty on the struct: a
 		// term-less, class-less, patch-less call's wire body must stay
@@ -297,25 +295,31 @@ func signalClient(endpoint string) (*http.Client, string, error) {
 }
 
 // readSignalBody reads the body from bodyFile, or from stdin when it is empty
-// or "-". Both sources are bounded the same way (readLimitedBody), so a
+// or "-". Both sources are bounded the same way (readLimited), so a
 // 1 GiB body-file errors exactly like over-limit stdin instead of landing in
 // Box memory.
 func readSignalBody(bodyFile string, stdin io.Reader) (string, error) {
 	if bodyFile == "" || bodyFile == "-" {
-		return readLimitedBody(stdin, "stdin")
+		return readLimited(stdin, "stdin")
 	}
-	f, err := os.Open(bodyFile)
-	if err != nil {
-		return "", fmt.Errorf("read body file: %w", err)
-	}
-	defer f.Close()
-	return readLimitedBody(f, "body file")
+	return readLimitedFile(bodyFile, "body file")
 }
 
-// readLimitedBody reads at most one byte past signalwire.MaxRequestBytes so
+// readLimitedFile reads path through readLimited, so every file-sourced
+// field (body or patch) is bounded before it reaches the socket.
+func readLimitedFile(path, source string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", source, err)
+	}
+	defer f.Close()
+	return readLimited(f, source)
+}
+
+// readLimited reads at most one byte past signalwire.MaxRequestBytes so
 // an over-limit source is caught by length, not by silently truncating to
 // the cap and letting the reject reason describe bytes the agent never sent.
-func readLimitedBody(r io.Reader, source string) (string, error) {
+func readLimited(r io.Reader, source string) (string, error) {
 	b, err := io.ReadAll(io.LimitReader(r, signalwire.MaxRequestBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", source, err)
