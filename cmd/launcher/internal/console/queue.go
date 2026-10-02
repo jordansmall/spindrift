@@ -45,7 +45,7 @@ func (q *Queue) Remove(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	for i, p := range q.picks {
-		if p.Number == num && (p.State == PickQueued || p.State == PickHeld) {
+		if p.Number == num && p.State.unclaimed() {
 			q.picks = append(q.picks[:i], q.picks[i+1:]...)
 			return true
 		}
@@ -165,7 +165,7 @@ func (q *Queue) claimable() []Pick {
 	defer q.mu.Unlock()
 	var out []Pick
 	for _, p := range q.picks {
-		if p.State == PickQueued || p.State == PickHeld {
+		if p.State.unclaimed() {
 			out = append(out, p)
 		}
 	}
@@ -208,7 +208,7 @@ func (q *Queue) tryMarkClaiming(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	i := q.newestIndex(num)
-	if i < 0 || (q.picks[i].State != PickQueued && q.picks[i].State != PickHeld) {
+	if i < 0 || !q.picks[i].State.unclaimed() {
 		return false
 	}
 	q.picks[i].State = PickClaiming

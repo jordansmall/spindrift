@@ -3806,6 +3806,55 @@ func TestTea_DetailModalKey_UnpickNoQueuedPick_NoOpAndModalStaysOpen(t *testing.
 	}
 }
 
+// TestTea_DetailModalKey_UnpickRepickedBehindTerminalRow_ClosesModal verifies
+// "u" closes the modal when an older terminal row for the same number precedes
+// the re-picked queued row: Queue keeps the terminal row (ADR 0024), so the
+// close must key on the queued row leaving, not on the number vanishing
+// (issue #4156).
+func TestTea_DetailModalKey_UnpickRepickedBehindTerminalRow_ClosesModal(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = []Pick{
+		{Number: "42", Title: "fix the thing", State: PickTerminated},
+		{Number: "42", Title: "fix the thing", State: PickQueued},
+	}
+	tm := teaModel{m: m, tracker: f}
+
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v after unpicking a re-picked issue, want nil (modal closed)", tm.m.DetailModal)
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickTerminated {
+		t.Errorf("Picks = %+v, want only the terminal row left", tm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_UnpickOnlyTerminalRow_NoOpAndModalStaysOpen verifies
+// "u" on a modal whose only row is terminal removes nothing, so the modal
+// stays open (issue #4156).
+func TestTea_DetailModalKey_UnpickOnlyTerminalRow_NoOpAndModalStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = []Pick{{Number: "42", Title: "fix the thing", State: PickTerminated}}
+	tm := teaModel{m: m, tracker: f}
+
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after unpicking a terminal-only issue, want the modal to stay open")
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickTerminated {
+		t.Errorf("Picks = %+v, want the terminal row untouched", tm.m.Picks)
+	}
+}
+
 // TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen verifies
 // "u" on a modal whose displayed issue has already been claimed (PickRunning)
 // is a no-op: Launcher.Unpick and Queue.Remove refuse to drop anything but a
@@ -3827,6 +3876,87 @@ func TestTea_DetailModalKey_UnpickAlreadyRunning_NoOpAndModalStaysOpen(t *testin
 	}
 	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickRunning {
 		t.Errorf("Picks = %+v, want the running row untouched", tm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_UnpickLauncherClaimedBehindStalePicks_ModalStaysOpen
+// verifies "u" leaves the modal open when Model.Picks still shows a queued row
+// but the launcher's queue already moved it to PickClaiming: Queue.Remove
+// refuses, and the close must follow that refusal, not Model.Picks' stale view
+// (issue #4156).
+func TestTea_DetailModalKey_UnpickLauncherClaimedBehindStalePicks_ModalStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	if !launch.queue.tryMarkClaiming("42") {
+		t.Fatal("tryMarkClaiming = false, want the queued row claimed")
+	}
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = []Pick{{Number: "42", Title: "fix the thing", State: PickQueued}}
+	tm := teaModel{m: m, tracker: f, launch: launch}
+
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after a refused unpick of a claiming row, want the modal to stay open")
+	}
+	if got := launch.queue.Snapshot(); len(got) != 1 || got[0].State != PickClaiming {
+		t.Errorf("queue = %+v, want the claiming row untouched", got)
+	}
+}
+
+// TestTea_DetailModalKey_UnpickLauncherRepickedBehindTerminalRow_ClosesModal
+// verifies the launcher path closes the modal when Unpick really removes the
+// re-picked queued row that sits behind an older terminal row (issue #4156).
+func TestTea_DetailModalKey_UnpickLauncherRepickedBehindTerminalRow_ClosesModal(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = launch.queue.Snapshot()
+	tm := teaModel{m: m, tracker: f, launch: launch}
+
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal != nil {
+		t.Errorf("DetailModal = %+v after a real unpick, want nil (modal closed)", tm.m.DetailModal)
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickTerminated {
+		t.Errorf("Picks = %+v, want only the terminal row left", tm.m.Picks)
+	}
+}
+
+// TestTea_DetailModalKey_UnpickLauncherOnlyTerminalRow_NoOpAndModalStaysOpen
+// verifies the launcher path leaves the modal open when the queue holds only a
+// terminal row for the issue, since Unpick removes nothing (issue #4156).
+func TestTea_DetailModalKey_UnpickLauncherOnlyTerminalRow_NoOpAndModalStaysOpen(t *testing.T) {
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent"})
+	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
+	launch := &Launcher{CodeForge: f, queue: NewQueue()}
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickTerminated})
+
+	m := Update(NewModel(), SizeChangedMsg{Width: 100, Height: 40})
+	m = Update(m, DetailModalOpenMsg{Number: "42", Title: "fix the thing"})
+	m.Picks = launch.queue.Snapshot()
+	tm := teaModel{m: m, tracker: f, launch: launch}
+
+	tm, _ = tm.handleDetailModalKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("u")})
+
+	if tm.m.DetailModal == nil {
+		t.Error("DetailModal = nil after unpicking a terminal-only row, want the modal to stay open")
+	}
+	if got := launch.queue.Snapshot(); len(got) != 1 || got[0].State != PickTerminated {
+		t.Errorf("queue = %+v, want the terminal row untouched", got)
+	}
+	if len(tm.m.Picks) != 1 || tm.m.Picks[0].State != PickTerminated {
+		t.Errorf("Picks = %+v, want the terminal row untouched", tm.m.Picks)
 	}
 }
 

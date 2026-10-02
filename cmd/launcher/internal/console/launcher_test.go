@@ -95,7 +95,10 @@ func TestLauncher_Unpick_RemovesAndReturnsSnapshot(t *testing.T) {
 	launch := &Launcher{}
 	launch.Pick(f, "42", "fix the thing", KindWork)
 
-	picks := launch.Unpick("42")
+	picks, removed := launch.Unpick("42")
+	if !removed {
+		t.Error("Unpick removed = false, want true for a queued pick")
+	}
 	if len(picks) != 0 {
 		t.Fatalf("Unpick snapshot = %+v, want empty", picks)
 	}

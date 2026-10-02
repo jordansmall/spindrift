@@ -652,43 +652,45 @@ func (t teaModel) unpickHighlighted() teaModel {
 		return t
 	}
 	if t.launch != nil {
-		t = t.apply(QueueSnapshotMsg{Picks: t.launch.Unpick(num)})
+		picks, _ := t.launch.Unpick(num)
+		t = t.apply(QueueSnapshotMsg{Picks: picks})
 		return t
 	}
 	t = t.apply(UnpickMsg{Number: num})
 	return t
 }
 
-// hasPickNumber reports whether picks carries a row for num, in any state. A
-// row only leaves Model.Picks when a Remove call drops it (Queue never purges a
-// terminal row on its own), so comparing this before and after an unpick tells
-// unpickDetailModalIssue whether that call really removed something (#1836).
-func hasPickNumber(picks []Pick, num string) bool {
+// hasUnclaimedPick reports whether picks carries an unclaimed (queued or held)
+// row for num; Queue keeps older terminal rows for a number (ADR 0024), so an
+// any-state match is no answer (#4156).
+func hasUnclaimedPick(picks []Pick, num string) bool {
 	for _, p := range picks {
-		if p.Number == num {
+		if p.Number == num && p.State.unclaimed() {
 			return true
 		}
 	}
 	return false
 }
 
-// unpickDetailModalIssue retracts the open detail modal's displayed issue's
-// queued pick, keyed by DetailModal.Number rather than the Backlog cursor
-// (issue #1835). An issue with nothing to unpick is a no-op: hasPickNumber's
-// before/after comparison reports no removal, so the modal stays open exactly
-// as it does for a rejected pick (issue #1836).
+// unpickDetailModalIssue retracts the open detail modal's queued pick, keyed by
+// DetailModal.Number (issue #1835). It closes only when a row was really
+// removed, else it is a no-op leaving the modal open (#1836). With a Launcher,
+// Unpick's own bool is the answer because Model.Picks lags the queue (#4156).
 func (t teaModel) unpickDetailModalIssue() teaModel {
 	dm := t.m.DetailModal
 	if dm == nil {
 		return t
 	}
-	existed := hasPickNumber(t.m.Picks, dm.Number)
+	var removed bool
 	if t.launch != nil {
-		t = t.apply(QueueSnapshotMsg{Picks: t.launch.Unpick(dm.Number)})
+		var picks []Pick
+		picks, removed = t.launch.Unpick(dm.Number)
+		t = t.apply(QueueSnapshotMsg{Picks: picks})
 	} else {
+		removed = hasUnclaimedPick(t.m.Picks, dm.Number)
 		t = t.apply(UnpickMsg{Number: dm.Number})
 	}
-	if existed && !hasPickNumber(t.m.Picks, dm.Number) {
+	if removed {
 		t = t.apply(DetailModalCloseMsg{})
 	}
 	return t
