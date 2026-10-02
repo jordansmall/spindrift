@@ -2,6 +2,11 @@ package main
 
 import "spindrift.dev/launcher/internal/runner"
 
+// signalSocketNoneModeReason is a const expression, not a var, so go vet's
+// printf check still analyses the formats it composes into. The doctor
+// signal-socket-transport row composes from it too (one %s: the network mode).
+const signalSocketNoneModeReason = "BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- the socket transport needs loopback, which this mode tears down"
+
 // checkSignalCarrierNetworkModeGate backstops the one NETWORK_MODE pairing
 // the socket signal carrier (issue #3725) can never work under:
 // NETWORK_MODE=none tears down the loopback the socket transport needs, so
@@ -19,5 +24,5 @@ func checkSignalCarrierNetworkModeGate(c config) error {
 	if c.networkMode != runner.NetworkModeNone {
 		return nil
 	}
-	return newLaunchGateConfigError("BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- the socket transport needs loopback, which this mode tears down; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", c.networkMode)
+	return newLaunchGateConfigError(signalSocketNoneModeReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", c.networkMode)
 }

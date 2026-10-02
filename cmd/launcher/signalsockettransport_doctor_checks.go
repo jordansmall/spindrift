@@ -37,7 +37,7 @@ func signalSocketTransportCheck(c config) doctor.Check {
 				// checkSignalCarrierNetworkModeGate already refuses the pairing
 				// at launch, and probing would cost a runtime round trip for a
 				// configuration that can never run.
-				return nil, fmt.Errorf("BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- the socket transport needs loopback, which this mode tears down: %w", c.networkMode, doctor.ErrDegraded)
+				return nil, fmt.Errorf(signalSocketNoneModeReason+": %w", c.networkMode, doctor.ErrDegraded)
 			}
 			endpoint, err := registryProxyTransportFn(c)
 			if err != nil {
