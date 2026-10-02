@@ -20,6 +20,18 @@ type jiraIssueRecord struct {
 	labels      []string
 	nativeDeps  []string
 	failGET     bool // simulates the native-API error the issue's GET returns
+	comments    []jiraWireComment
+}
+
+// jiraWireComment mirrors Jira's native comment JSON independently of the
+// adapter's own payload struct, so a tag typo in the adapter fails the
+// contract instead of round-tripping through a shared type.
+type jiraWireComment struct {
+	Author struct {
+		DisplayName string `json:"displayName"`
+	} `json:"author"`
+	Created string `json:"created"`
+	Body    string `json:"body"`
 }
 
 // jiraHarness stands in for the Jira REST API. Jira's DepsOf and Issue share
@@ -73,6 +85,18 @@ func (h *jiraHarness) FailNativeDeps(num string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.issues[num].failGET = true
+}
+
+func (h *jiraHarness) SeedComments(num string, comments []forge.Comment) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	wire := make([]jiraWireComment, len(comments))
+	for i, c := range comments {
+		wire[i].Author.DisplayName = c.Author
+		wire[i].Created = c.CreatedAt
+		wire[i].Body = c.Body
+	}
+	h.issues[num].comments = wire
 }
 
 type jiraPayloadLink struct {
@@ -181,6 +205,15 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(h.payload(num, rec))
 		return
 
+	case r.Method == http.MethodGet && issueCommentPathRe.MatchString(r.URL.Path):
+		num := issueCommentPathRe.FindStringSubmatch(r.URL.Path)[1]
+		out := []jiraWireComment{}
+		if rec, ok := h.issues[num]; ok {
+			out = append(out, rec.comments...)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"comments": out})
+		return
+
 	case r.Method == http.MethodPut && matchIssuePath(r.URL.Path) != "":
 		num := matchIssuePath(r.URL.Path)
 		rec, ok := h.issues[num]
@@ -210,7 +243,10 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var issuePathRe = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)$`)
+var (
+	issuePathRe        = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)$`)
+	issueCommentPathRe = regexp.MustCompile(`^/rest/api/2/issue/([^/]+)/comment$`)
+)
 
 func matchIssuePath(path string) string {
 	m := issuePathRe.FindStringSubmatch(path)
