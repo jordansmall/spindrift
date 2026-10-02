@@ -42,7 +42,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 	// here; this gate is a backstop for a replayed cached TCP verdict
 	// (#3775). Either way it fails capability-style, never falling back to
 	// the log carrier silently.
-	if transport.IsTCP() && (d.cfg.NetworkMode == runner.NetworkModeNoHostLoopback || d.cfg.NetworkMode == runner.NetworkModeNone) {
+	if transport.IsTCP() && runner.DeniesHostLoopback(d.cfg.NetworkMode) {
 		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode)
 	}
 

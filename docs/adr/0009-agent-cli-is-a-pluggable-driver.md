@@ -267,8 +267,8 @@ their own defaults leave reachable:
   `network.mode` unset. Absent that, `no-host-loopback` renders `pasta` on
   podman and `bridge` on docker/nerdctl, `none` renders `none`, and the default
   `NETWORK_MODE=open` renders **no `--network` flag at all**, leaving the
-  runtime's own default network in force — correspondingly `deniesHostLoopback`
-  (`oci.go:568-570`) is true only for `no-host-loopback` and `none`. So the
+  runtime's own default network in force — correspondingly `DeniesHostLoopback`
+  (`runner/config.go`) is true only for `no-host-loopback` and `none`. So the
   **plain default** reachability of host loopback here is
   rootless-podman-version- and `containers.conf`-dependent — a worker wiring
   this must verify it empirically against the podman the flake pins rather than
