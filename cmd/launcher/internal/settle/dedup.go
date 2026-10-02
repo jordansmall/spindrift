@@ -48,6 +48,15 @@ var findingLabels = func() []string {
 // buildDedupMarker appends to a filed finding's body (issue #3609): carrying
 // the intent's own DedupTerms lets a later run recover this issue's dedup key
 // set from the backlog (backlogDedupIndex) without re-parsing prose.
+//
+// Findings filed before #3609 carry no marker, so they add no keys, open or
+// closed. Since #3873 indexes closed findings too, that gap is permanent but
+// bounded: a fixed set that never grows. It is deliberately not backfilled
+// (issue #3813): a backfilled key would be guessed from body prose, and
+// wrong ones covering an intent's every key can make matchDedup skip a
+// genuinely new finding -- indefinitely on a closed issue, without filing
+// anything a human would triage -- worse than a visible duplicate. The
+// Filer's own pre-filing prose search covers those legacy issues instead.
 const (
 	dedupMarkerPrefix = "<!-- spindrift-dedup: "
 	dedupMarkerSuffix = " -->"
