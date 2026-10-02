@@ -73,13 +73,17 @@ func (f *Factory) New(number, title string) *Dispatch {
 func (f *Factory) newDispatch(subj subject) *Dispatch {
 	f.newCalled.Store(true)
 	key := subj.key.String()
+	cfg := f.cfg
+	if cfg.IssueTextFor != nil {
+		cfg.IssueTextFor = memoizeIssueText(cfg.IssueTextFor)
+	}
 	return &Dispatch{
 		number:          key,
 		pwd:             f.pwd,
 		runner:          f.runner,
 		driver:          f.driver,
 		clock:           f.clock,
-		cfg:             f.cfg,
+		cfg:             cfg,
 		cacheDir:        f.cache.dirFor(key),
 		cache:           f.cache,
 		nonce:           newNonce(),

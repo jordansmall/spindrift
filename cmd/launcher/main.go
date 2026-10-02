@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -914,30 +913,9 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 			res, err := forge.ResolveOpenPR(cf, number)
 			return res.Found, err
 		},
-		IssueTextFor: memoizedIssueText(it),
-	}
-}
-
-// memoizedIssueText resolves an issue's injected text at most once per issue
-// number for the life of the closure. One dispatch builds up to three Boxes,
-// and the injected block sits in the prompt's stable prefix (issue #3445): a
-// comment landing mid-run would shift every byte after it and cost the
-// prefix-cache hit. Errors are not cached, so a later dispatch retries fresh.
-func memoizedIssueText(it forge.IssueTracker) func(string) (string, error) {
-	var mu sync.Mutex
-	cache := map[string]string{}
-	return func(number string) (string, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		if text, ok := cache[number]; ok {
-			return text, nil
-		}
-		text, err := forge.IssueText(it, number)
-		if err != nil {
-			return "", err
-		}
-		cache[number] = text
-		return text, nil
+		IssueTextFor: func(number string) (string, error) {
+			return forge.IssueText(it, number)
+		},
 	}
 }
 
