@@ -8,8 +8,7 @@ import (
 
 // compositeOverlay draws box on top of base at display column (x, y),
 // replacing base's span [x, x+boxWidth) on each row box covers and leaving
-// every other row and column untouched. No caller wires it up yet (issue
-// #1757).
+// every other row and column untouched.
 func compositeOverlay(base, box string, x, y int) string {
 	baseLines := strings.Split(base, "\n")
 	boxLines := strings.Split(box, "\n")
