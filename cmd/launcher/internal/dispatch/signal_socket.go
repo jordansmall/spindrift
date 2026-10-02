@@ -46,9 +46,9 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 	// TCP fallback does; NETWORK_MODE=none is already refused earlier at
 	// launcher startup (checkSignalCarrierNetworkModeGate). A live probe under
 	// no-host-loopback already errors in runOnce (box.go) before reaching
-	// here; this gate is a backstop for a replayed cached TCP verdict
-	// (#3775). Either way it fails capability-style, never falling back to
-	// the log carrier silently.
+	// here, and the probe cache refuses to replay one (#3775); this gate
+	// is a backstop. Either way it fails capability-style, never falling
+	// back to the log carrier silently.
 	if transport.IsTCP() && runner.DeniesHostLoopback(d.cfg.NetworkMode) {
 		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- "+tcpFallbackBlockedReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode, "Signal socket")
 	}

@@ -53,8 +53,8 @@ func signalSocketTransportCheck(c config) doctor.Check {
 					// this mode: a TCP-only transport under a mode that blocks
 					// loopback leaves the socket carrier no usable path. A live
 					// probe never gets here: under this mode it errors before its
-					// TCP sub-probe, landing in the probe-error arm above. Kept as
-					// a backstop for a replayed cached TCP verdict (#3775).
+					// TCP sub-probe, landing in the probe-error arm above, and the
+					// probe cache refuses to replay one (#3775). Kept as a backstop.
 					return nil, fmt.Errorf("BOX_SIGNAL_CARRIER=socket has no usable transport under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks: %w", c.networkMode, doctor.ErrDegraded)
 				}
 				return "tcp", nil

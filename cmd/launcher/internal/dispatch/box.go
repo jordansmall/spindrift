@@ -423,8 +423,8 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			// verdict has one to mount at all, TCP dials directly.
 			boxSockets = append(boxSockets, runner.SocketMount{Source: socketPath, Target: runner.RegistryProxySocketTarget})
 		case transport.IsTCP():
-			// Backstop for a TCP verdict the probe never returns under a
-			// denying mode (e.g. a replayed cached verdict, #3775): on docker
+			// Backstop for a TCP verdict the probe never returns, nor its
+			// cache replays (#3775), under a denying mode: on docker
 			// no-host-loopback renders as plain bridge, so the route would
 			// otherwise silently work against the operator's mode (ADR 0044).
 			if runner.DeniesHostLoopback(d.cfg.NetworkMode) {
