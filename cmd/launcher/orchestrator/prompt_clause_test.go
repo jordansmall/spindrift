@@ -15,10 +15,41 @@ import (
 // meaning entirely) rather than sharing this one.
 var repoRoot = filepath.Join("..", "..", "..")
 
+// hyphenLineBreak matches a line ending in a word-internal hyphen, plus the
+// next line's indent. It runs before whitespace is collapsed, because only an
+// actual line break marks a re-wrap: a suspended hyphen like "kernel- or
+// namespace-level" keeps its space, and a bullet's "- " has no letter before
+// the hyphen.
+var hyphenLineBreak = regexp.MustCompile(`([\p{L}\p{N}_])-[ \t]*\r?\n[ \t]*`)
+
 // Collapsing whitespace lets these checks survive a harmless re-wrap of a
-// prompt or fragment file's prose across lines.
+// prompt or fragment file's prose across lines; a line break after a hyphen
+// is a re-wrap too, so it is rejoined.
 func normalizeWhitespace(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	return strings.Join(strings.Fields(hyphenLineBreak.ReplaceAllString(s, "${1}-")), " ")
+}
+
+func TestNormalizeWhitespace(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "hyphen split across a line break", in: "one-\nline why", want: "one-line why"},
+		{name: "chained hyphen splits", in: "a-\nb-\nc", want: "a-b-c"},
+		{name: "multi-line collapse", in: "re-run\nthe   gate\n", want: "re-run the gate"},
+		{name: "bullet keeps its space", in: "a\n- b", want: "a - b"},
+		{name: "suspended hyphen keeps its space", in: "kernel- or\nnamespace-level", want: "kernel- or namespace-level"},
+		{name: "non-ASCII letter before the hyphen", in: "café-\nstyle", want: "café-style"},
+		{name: "indented continuation line", in: "one-\n   line why", want: "one-line why"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := normalizeWhitespace(c.in); got != c.want {
+				t.Errorf("normalizeWhitespace(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
+	}
 }
 
 // promptClause is one clause the prose must keep verbatim, modulo line wraps.
