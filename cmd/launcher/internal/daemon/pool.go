@@ -233,24 +233,19 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 	return p, pctx
 }
 
-// slotOrder returns the kinds slot tries, most preferred first, in three
-// tiers: the reserved kind (dispatchkind.PriorityReserved, i.e. research),
-// normal kinds (dispatchkind.PriorityNormal, e.g. work), and idle kinds
-// (dispatchkind.PriorityIdle, i.e. the butler, ADR 0056) — idle kinds are
-// always tried last, on every slot, since a slot must only pick one once
-// every other kind has reported no work. Within that, slots below the
-// reservation prefer the reserved tier ahead of normal; the rest prefer
-// normal ahead of reserved. The order is derived from kinds — only the
-// reserved kind's position moves relative to normal, so a kind added later
-// keeps its configured place within its own tier instead of silently
-// inheriting one half of a hardcoded pair. A kind with no descriptor (ByVerb
-// misses) is treated as normal priority, not reserved or idle. Static,
-// decided once from cfg rather than a live count of who is running what: the
-// floor is exact without lock-step counting, and two slots choosing
-// concurrently can never both claim the same reserved slot (each computes
-// its own answer independently, off its own slot number, not off shared
-// mutable state).
-func slotOrder(kinds []Kind, reservation, slot int) []Kind {
+// slotOrder returns the kinds a starting slot tries, most preferred first, in
+// three tiers: the reserved kind (dispatchkind.PriorityReserved, i.e.
+// research), normal kinds (dispatchkind.PriorityNormal, e.g. work), and idle
+// kinds (dispatchkind.PriorityIdle, i.e. the butler, ADR 0056) — idle kinds
+// are always tried last, since a slot must only pick one once every other kind
+// has reported no work. Within that, preferReserved puts the reserved tier
+// ahead of normal; otherwise normal comes ahead of reserved. The order is
+// derived from kinds — only the reserved kind's position moves relative to
+// normal, so a kind added later keeps its configured place within its own
+// tier instead of silently inheriting one half of a hardcoded pair. A kind
+// with no descriptor (ByVerb misses) is treated as normal priority, not
+// reserved or idle. preferReserved comes from chooseKind.
+func slotOrder(kinds []Kind, preferReserved bool) []Kind {
 	if len(kinds) < 2 {
 		return kinds
 	}
@@ -258,18 +253,17 @@ func slotOrder(kinds []Kind, reservation, slot int) []Kind {
 	normal := make([]Kind, 0, len(kinds))
 	idle := make([]Kind, 0, 1)
 	for _, k := range kinds {
-		d, ok := dispatchkind.ByVerb(string(k))
-		switch {
-		case ok && d.DaemonPriority == dispatchkind.PriorityReserved:
+		switch kindPriority(k) {
+		case dispatchkind.PriorityReserved:
 			reserved = append(reserved, k)
-		case ok && d.DaemonPriority == dispatchkind.PriorityIdle:
+		case dispatchkind.PriorityIdle:
 			idle = append(idle, k)
 		default:
 			normal = append(normal, k)
 		}
 	}
 	order := make([]Kind, 0, len(kinds))
-	if slot < reservation {
+	if preferReserved {
 		order = append(order, reserved...)
 		order = append(order, normal...)
 		return append(order, idle...)
@@ -279,12 +273,53 @@ func slotOrder(kinds []Kind, reservation, slot int) []Kind {
 	return append(order, idle...)
 }
 
-// pickKind returns the Dispatch kind slot should fill itself with now: the
-// first kind in its preference order that is not currently backed off. ok is
-// false when every configured kind has backed off into an empty result — the
-// daemon is genuinely idle, and the caller sleeps instead of dispatching.
-// A pure read, not a mutate: nothing here changes state.
-func (p *pool) pickKind(slot int) (Kind, bool) {
+// kindPriority is k's daemon priority tier, PriorityNormal for a kind with no
+// descriptor — the one tier rule slotOrder's ordering and chooseKind's
+// reserved count both read.
+func kindPriority(k Kind) dispatchkind.DaemonPriority {
+	if d, ok := dispatchkind.ByVerb(string(k)); ok {
+		return d.DaemonPriority
+	}
+	return dispatchkind.PriorityNormal
+}
+
+// chooseKind returns the first runnable kind in slotOrder's preference, with
+// the reserved tier first while fewer than ResearchReservation reserved-kind
+// children are running — a floor on running research, not a per-slot
+// assignment, so it recovers on whichever slot turns over next. Only running
+// children count: research children that exit early (a run of Continue
+// exits, say) never lift the count, so research can keep taking every
+// turnover while work still has queued work. startChild
+// calls it in the same p.mu hold as the PhaseRunning flip, so two slots can
+// never both take the last reserved seat, and nothing is claimed before
+// startChild, so no early-exit path needs cleanup. The starting slot is not
+// itself PhaseRunning, so the count never includes it. Callers hold p.mu; now
+// is sampled before the lock (never call the Clock under it).
+func (p *pool) chooseKind(s *state, now time.Time) (Kind, bool) {
+	running := 0
+	for _, sl := range s.slots {
+		if sl.phase != PhaseRunning {
+			continue
+		}
+		if kindPriority(sl.flight.kind) == dispatchkind.PriorityReserved {
+			running++
+		}
+	}
+	for _, kind := range slotOrder(p.cfg.Kinds, running < p.cfg.ResearchReservation) {
+		if s.kinds[kind].runnable(now) {
+			return kind, true
+		}
+	}
+	return "", false
+}
+
+// pickKind returns the Dispatch kind the pool should fill a slot with now.
+// ok is false when every configured kind has backed off into an empty result
+// — the daemon is genuinely idle, and the caller sleeps instead of
+// dispatching. A pure read, not a mutate: nothing here changes state. The
+// kind is provisional: startChild re-chooses under its own lock hold, since a
+// sibling can start or finish a child in between.
+func (p *pool) pickKind() (Kind, bool) {
 	// Sample now before taking p.mu: no Clock implementation takes p.mu
 	// itself, but calling one under the lock anyway would hold it for
 	// however long that call takes, for no reason — the lock only needs
@@ -292,12 +327,7 @@ func (p *pool) pickKind(slot int) (Kind, bool) {
 	now := p.clk.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, kind := range slotOrder(p.cfg.Kinds, p.cfg.ResearchReservation, slot) {
-		if p.st.kinds[kind].runnable(now) {
-			return kind, true
-		}
-	}
-	return "", false
+	return p.chooseKind(&p.st, now)
 }
 
 // resetKind clears kind's backoff gate: runSlot calls this on a Continue
@@ -353,21 +383,31 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 	})
 }
 
-// startChild marks slot running for kind at revision and returns the
-// child_start event, together in one mutate: the phase flip is therefore
-// always visible to any snapshot that publishes alongside this event, which
-// a hand-placed write after a separately-emitted child_start could not
-// otherwise guarantee. child_start carries no issue: the daemon cannot know
-// which issue a freshly started child will work until it reports a "box"
-// record, and waiting to emit child_start until then would either hide a
-// started child from the stream for its whole queue scan, or emit nothing
-// at all for a child that never claims — the "box" event is where the
-// slot↔issue binding first appears (see noteBox).
-func (p *pool) startChild(slot int, kind Kind, revision string) {
+// startChild marks slot running at revision and returns the kind it chose,
+// together with the child_start event in one mutate: the phase flip is
+// therefore always visible to any snapshot that publishes alongside this
+// event, which a hand-placed write after a separately-emitted child_start
+// could not otherwise guarantee. The kind is re-chosen inside that same
+// mutate (see chooseKind); provisional, runnable when pickKind returned it,
+// is the fallback if everything has since gated. child_start
+// carries no issue: the daemon cannot know which issue a freshly started
+// child will work until it reports a "box" record, and waiting to emit
+// child_start until then would either hide a started child from the stream
+// for its whole queue scan, or emit nothing at all for a child that never
+// claims — the "box" event is where the slot↔issue binding first appears
+// (see noteBox).
+func (p *pool) startChild(slot int, provisional Kind, revision string) Kind {
+	now := p.clk.Now()
+	var kind Kind
 	p.mutate(func(s *state) []Event {
+		var ok bool
+		if kind, ok = p.chooseKind(s, now); !ok {
+			kind = provisional
+		}
 		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision}}
 		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)}}
 	})
+	return kind
 }
 
 // finishChild moves slot back to idle and zeroes its flight. A slot calls this

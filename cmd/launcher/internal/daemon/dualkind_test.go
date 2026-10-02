@@ -3,12 +3,16 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // dualKindConfig is testConfig's issue #3541 sibling: both kinds, plus the
@@ -150,70 +154,106 @@ func TestPoolBothKindsShareOneSlotCapAcrossThePool(t *testing.T) {
 	}
 }
 
-// TestPoolReservedSlotPrefersResearchWhileResearchHasWork pins
-// ResearchReservation as a per-slot floor: with Slots: 3, ResearchReservation:
-// 1, slot 0 always fills itself with research and slots 1/2 always fill
-// themselves with work, so long as both queues keep dispatching.
-func TestPoolReservedSlotPrefersResearchWhileResearchHasWork(t *testing.T) {
+// TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork pins
+// ResearchReservation as a live floor (issue #3582): with Slots: 3,
+// ResearchReservation: 1 and both queues always dispatching, the pool holds
+// exactly one research and two work children at once, and whichever slot
+// turns over is refilled with the kind that keeps that mix. No slot identity
+// is asserted: the floor follows the running count, not a reserved slot.
+func TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork(t *testing.T) {
 	const slots = 3
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		byKind: map[Kind][]ChildResult{
-			KindOf(dispatchkind.Work):     {{Exit: 0}},
-			KindOf(dispatchkind.Research): {{Exit: 0}},
+			work:     {{Exit: 0}},
+			research: {{Exit: 0}},
 		},
 	}
-	gate := &kindGate{
-		r:        r,
-		limit:    5000, // safety cap: neither kind ever gates, so only the goal below stops the loop
-		cancelFn: cancel,
-		// Goal: every slot has run at least once. A shared call-count budget
-		// would race the scheduler across the 3 slot goroutines; this instead
-		// stops exactly when the state under test has been reached.
-		cancelWhen: func(r *scriptedRunner) bool {
-			seen := map[int]bool{}
-			for _, c := range r.calls() {
-				seen[c.Slot] = true
-			}
-			return len(seen) >= slots
-		},
+	type started struct {
+		kind Kind
+		slot int
 	}
-	r.onStart = gate.onStart
+	starts := make(chan started, 64)
+	release := make([]chan struct{}, slots)
+	for i := range release {
+		release[i] = make(chan struct{}, 1)
+	}
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		// A claim passes the discovery baton on, so the siblings are not
+		// parked behind this held child.
+		req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue(fmt.Sprintf("held-%d", req.Slot))})
+		starts <- started{req.Kind, req.Slot}
+		select {
+		case <-release[req.Slot]:
+		case <-ctx.Done():
+		}
+		return nil
+	}
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
 
-	reason := Loop(ctx, dualKindConfig(slots, 1), r, em, clk).String()
-	if !strings.Contains(reason, "context-cancelled") {
-		t.Fatalf("halt reason = %q, want context-cancelled (the test's own stop)", reason)
-	}
-	gate.requireGoalMet(t)
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(ctx, dualKindConfig(slots, 1), r, em, clk) }()
 
-	calls := r.calls()
-	if len(calls) == 0 {
-		t.Fatalf("no run calls recorded")
-	}
-	perSlot := map[int]int{}
-	for _, c := range calls {
-		perSlot[c.Slot]++
-		switch c.Slot {
-		case 0:
-			if c.Kind != KindOf(dispatchkind.Research) {
-				t.Errorf("slot 0 ran kind %q, want every slot-0 child to be research", c.Kind)
-			}
-		case 1, 2:
-			if c.Kind != KindOf(dispatchkind.Work) {
-				t.Errorf("slot %d ran kind %q, want every slot-1/2 child to be dispatch", c.Slot, c.Kind)
-			}
-		default:
-			t.Errorf("unexpected slot %d", c.Slot)
+	next := func() started {
+		t.Helper()
+		select {
+		case s := <-starts:
+			return s
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no child started within 5s")
+			return started{}
 		}
 	}
-	for s := 0; s < 3; s++ {
-		if perSlot[s] == 0 {
-			t.Errorf("slot %d never ran a child", s)
+	running := map[int]Kind{}
+	for i := 0; i < slots; i++ {
+		s := next()
+		running[s.slot] = s.kind
+	}
+	mix := func() (nResearch, nWork int) {
+		for _, k := range running {
+			if k == research {
+				nResearch++
+			} else {
+				nWork++
+			}
 		}
+		return
+	}
+	if nr, nw := mix(); len(running) != slots || nr != 1 || nw != 2 {
+		t.Fatalf("settled pool = %v, want 1 research + 2 work across %d distinct slots", running, slots)
+	}
+
+	// Release one child of each kind in turn; the replacement must restore
+	// the mix, i.e. match the kind that just left.
+	for _, leaving := range []Kind{work, research, work} {
+		slot := -1
+		for s, k := range running {
+			if k == leaving {
+				slot = s
+				break
+			}
+		}
+		if slot < 0 {
+			t.Fatalf("no running %q child to release in %v", leaving, running)
+		}
+		release[slot] <- struct{}{}
+		s := next()
+		if s.slot != slot || s.kind != leaving {
+			t.Fatalf("after releasing %q on slot %d, next start = %+v, want the same kind refilling the same slot", leaving, slot, s)
+		}
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Loop did not return after cancel")
 	}
 }
 
@@ -270,7 +310,12 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 
 // TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty mirrors
 // TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty: work empties on its
-// first (and only) check, so research ends up running in every slot.
+// first (and only) check, so research ends up running in every slot. The
+// first research child is held open until work has been checked: the
+// reservation is a live count, so with research's floor already filled by
+// that held child, the sibling slot prefers work and gives it the check that
+// gates it. Without the hold, instant research children keep the count at
+// zero and work is never tried.
 func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
@@ -295,7 +340,25 @@ func TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty(t *testing.T) {
 			return seen[0] && seen[1]
 		},
 	}
-	r.onStart = gate.onStart
+	workChecked := make(chan struct{})
+	var workOnce, researchOnce sync.Once
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		switch req.Kind {
+		case KindOf(dispatchkind.Work):
+			workOnce.Do(func() { close(workChecked) })
+		case KindOf(dispatchkind.Research):
+			researchOnce.Do(func() {
+				// A claim passes the discovery baton on, so the sibling is not
+				// parked behind this held child.
+				req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("held")})
+				select {
+				case <-workChecked:
+				case <-ctx.Done():
+				}
+			})
+		}
+		return gate.onStart(ctx, req)
+	}
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -683,4 +746,78 @@ func TestKindGateRequireGoalMet(t *testing.T) {
 			t.Fatalf("requireGoalMet did not fatal with cancelWhen set and never satisfied — the cap fired before the goal, which is exactly the regression it must catch")
 		}
 	})
+}
+
+// TestPoolResearchFloorRecoversWhileReservedSlotHoldsLongWork pins the
+// reservation as a live floor (issue #3582): research gates itself on its
+// first check, slot 0 then takes a work child that stays running for the
+// rest of the test, and once research's gate lapses a sibling slot's own
+// turnover must pick research even though slot 0 never turns over. A
+// per-slot static preference would only re-evaluate the floor when slot 0
+// itself freed up.
+func TestPoolResearchFloorRecoversWhileReservedSlotHoldsLongWork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
+			work: {{Exit: 0}},
+			// Always empty: an Exit 0 would clear research's gate before the clock
+			// advances, and the idle-instant children would keep re-picking it.
+			research: {{Exit: 2}},
+		},
+	}
+	slot0Held := make(chan struct{})
+	researchSlots := make(chan int, 64)
+	var heldOnce sync.Once
+	var lapsed atomic.Bool
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		switch {
+		case req.Kind == work && req.Slot == 0:
+			// A claim passes the discovery baton on, so the siblings are not
+			// parked behind this held child.
+			req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("held")})
+			heldOnce.Do(func() { close(slot0Held) })
+			<-ctx.Done()
+		case req.Kind == research && lapsed.Load():
+			select {
+			case researchSlots <- req.Slot:
+			default:
+			}
+		}
+		return nil
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(ctx, dualKindConfig(3, 1), r, em, clk) }()
+
+	select {
+	case <-slot0Held:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("slot 0 never started a work child")
+	}
+
+	lapsed.Store(true)
+	clk.advanceBy(time.Hour)
+
+	select {
+	case slot := <-researchSlots:
+		if slot == 0 {
+			t.Fatalf("research ran on slot 0, which is still held by a work child")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("no sibling slot picked research after its gate lapsed while slot 0 held a work child: the reservation floor was not re-evaluated")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Loop did not return after cancel")
+	}
 }

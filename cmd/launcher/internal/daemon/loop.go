@@ -120,12 +120,12 @@ type Config struct {
 	// MEMORY_LIMIT x MAX_PARALLEL sizing. Must be non-empty.
 	Kinds []Kind
 
-	// ResearchReservation is the number of slots that prefer research over work.
-	// It is a floor, not a ceiling: those slots take research only while research
-	// has queued work, and either kind bursts into the whole pool when the other
-	// has backed off into an empty result. Zero is work-first with research on
-	// the leftovers; Slots is research-first. Must be 0 <= ResearchReservation <=
-	// Slots.
+	// ResearchReservation is the minimum number of research children the pool
+	// keeps running. It is a floor, not a ceiling: research is preferred only
+	// while research has queued work, and either kind bursts into the whole pool
+	// when the other has backed off into an empty result. Zero is work-first with
+	// research on the leftovers; Slots is research-first. Must be
+	// 0 <= ResearchReservation <= Slots.
 	ResearchReservation int
 
 	Slots int
@@ -394,7 +394,9 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			}
 		}
 
-		kind, ok := p.pickKind(slot)
+		// kind is provisional until startChild re-chooses it below: the
+		// resolve-failure and halt paths in between label this one.
+		kind, ok := p.pickKind()
 		if !ok {
 			// Every configured kind has backed off into an empty result:
 			// this is the daemon genuinely idling, not merely a kind this
@@ -501,7 +503,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			continue
 		}
 
-		p.startChild(slot, kind, revision)
+		kind = p.startChild(slot, kind, revision)
 		req := ChildRequest{
 			Slot:     slot,
 			Kind:     kind,
