@@ -1451,7 +1451,6 @@ rec {
         "--no-build"
         "--yes"
         "--force"
-        "--continuous"
         "--verbose"
         "--butler"
         "--help"
@@ -1572,10 +1571,6 @@ rec {
           doc = "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)";
         }
         {
-          flag = "continuous";
-          doc = "bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)";
-        }
-        {
           flag = "verbose";
           doc = "show the full doctor report — every check and gate row, not just failures (short form: -v)";
         }
@@ -1667,7 +1662,6 @@ rec {
         "    '--no-build:fail fast if the image is absent instead of building it'\n"
         "    '--yes:skip the confirmation prompt when dispatching unlabeled issues'\n"
         "    '--force:alias for --yes'\n"
-        "    '--continuous:bare-flag alias for the deprecated --continuous-dispatch bool (still available, spelled --continuous-dispatch=1)'\n"
         "    '--verbose:show the full doctor report — every check and gate row, not just failures (short form: -v)'\n"
         "    '--butler:make doctor also validate the butler config (exit 2 on failure)'\n"
         "    '--help:show usage'\n"
