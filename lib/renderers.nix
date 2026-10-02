@@ -6,6 +6,7 @@
 let
   builtinsCompat = import ./builtins-compat.nix;
   cliFlags = import ./cli-flags.nix;
+  hasShort = e: (e.short or null) != null;
   inherit (builtinsCompat) concatStrings mapAttrsToList;
   filterAttrs =
     pred: attrs:
@@ -87,6 +88,9 @@ let
     key: registry: "perSystem.spindrift.${builtins.concatStringsSep "." registry.${key}}";
 in
 rec {
+  inherit hasShort;
+  # A cliFlags row's man-page short alias (", \\-x"), or "" without one.
+  manShortToken = r: if hasShort r then ", \\-${r.short}" else "";
   # Env var name -> flag name (e.g. MAX_PARALLEL -> max-parallel).
   toKebab = env: toLower (builtins.replaceStrings [ "_" ] [ "-" ] env);
 
@@ -1469,7 +1473,9 @@ rec {
       secretEntries = builtins.filter (e: e.secret or false) (builtins.attrValues schema);
       subcommands = map (s: s.name) subcommandRegistry;
       issuePositionalSubcommands = issueCompletionSubcommands subcommandRegistry;
-      extraFlags = map (e: "--" + e.flag) cliFlags;
+      extraFlags = builtins.concatMap (
+        e: [ ("--" + e.flag) ] ++ (if hasShort e then [ ("-" + e.short) ] else [ ])
+      ) cliFlags;
       knobFlags = map (e: "--" + flagName e) nonSecret;
       aliasFlags = builtins.concatMap (e: map (n: "--" + n) (secondaryFlagNames e)) nonSecret;
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
@@ -1593,7 +1599,10 @@ rec {
         map (e: "complete -c spindrift -l ${toKebab e.env}-cmd -d \"${e.doc}\"") secretEntries
       );
       extraCompletions = builtins.concatStringsSep "\n" (
-        map (e: "complete -c spindrift -l ${e.flag} -d \"${e.doc}\"") cliFlags
+        map (
+          e:
+          "complete -c spindrift ${if hasShort e then "-s ${e.short} " else ""}-l ${e.flag} -d \"${e.doc}\""
+        ) cliFlags
       );
       # Dynamic positional issue-number completion (issue #556). fish's
       # `complete -a` splits a tab-separated candidate into value and
@@ -1637,7 +1646,11 @@ rec {
       fileSpec = e: "    '--${toKebab e.env}-file:${zshEsc e.doc}'\n";
       cmdSpec = e: "    '--${toKebab e.env}-cmd:${zshEsc e.doc}'\n";
       fileFlags = map (e: "--" + toKebab e.env + "-file") secretEntries;
-      extraFlagSpecs = map (e: "    '--${e.flag}:${zshEsc e.doc}'\n") cliFlags;
+      extraFlagSpecs = map (
+        e:
+        "    '--${e.flag}:${zshEsc e.doc}'\n"
+        + (if hasShort e then "    '-${e.short}:${zshEsc e.doc}'\n" else "")
+      ) cliFlags;
       allFlagSpecs = concatStrings (
         map knobSpec nonSecret
         ++ map secondarySpec nonSecret
@@ -1779,8 +1792,10 @@ rec {
         let
           argToken = if r.arg == null then "" else " \\fI${esc r.arg}\\fR";
           verbSentence = if r.verb == null then "" else " Valid only after the ${r.verb} subcommand.";
+          # Long form first, then the short alias, like optionBlock's canonical-then-aliases order.
+          shortToken = manShortToken r;
         in
-        ".TP\n.B \\-\\-${escFlag r.flag}${argToken}\n\\&${escFlag (esc r.doc)}.${verbSentence}\n";
+        ".TP\n.B \\-\\-${escFlag r.flag}${shortToken}${argToken}\n\\&${escFlag (esc r.doc)}.${verbSentence}\n";
       groupSection =
         g:
         let

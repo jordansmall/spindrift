@@ -80,7 +80,11 @@ nix run .#regen
 
 `nix run .#regen` likewise renders `lib/cli-flags.nix` into
 `cmd/launcher/cliflags_gen.go` and `lib/subcommands.nix` into
-`cmd/launcher/subcommands_gen.go`.
+`cmd/launcher/subcommands_gen.go`. A flag's short form (`-h`, `-v`) is a
+`short` field on its long flag's row in `lib/cli-flags.nix`, never its own row
+and never only doc text; the completions and man page render it from there. An
+`intercepted = true` row marks a flag `mainRun` acts on before `parseFlags`
+runs, so the row feeds only completions and the man page.
 
 The regenerator and the drift-guard checks share one renderer per artifact
 (`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
