@@ -389,13 +389,13 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 // event, which a hand-placed write after a separately-emitted child_start
 // could not otherwise guarantee. The kind is re-chosen inside that same
 // mutate (see chooseKind); provisional, runnable when pickKind returned it,
-// is the fallback if everything has since gated. child_start
-// carries no issue: the daemon cannot know which issue a freshly started
-// child will work until it reports a "box" record, and waiting to emit
-// child_start until then would either hide a started child from the stream
-// for its whole queue scan, or emit nothing at all for a child that never
-// claims — the "box" event is where the slot↔issue binding first appears
-// (see noteBox).
+// is the fallback if everything has since gated. child_start carries no
+// dispatch key (neither issue nor chore): the daemon cannot know which key
+// a freshly started child will work until it reports a "box" record, and
+// waiting to emit child_start until then would either hide a started child
+// from the stream for its whole queue scan, or emit nothing at all for a
+// child that never claims — the "box" event is where the slot↔key binding
+// first appears (see noteBox).
 func (p *pool) startChild(slot int, provisional Kind, revision string) Kind {
 	now := p.clk.Now()
 	var kind Kind
