@@ -752,10 +752,11 @@ func TestLoopRejectsInvalidKindsConfig(t *testing.T) {
 	}
 }
 
-// TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork pins the pool-wide
-// growth this slice adds: consecutive no-work checks (exit 2) each double
-// the wait from the last one, bounded by IdleCap, rather than repeating the
-// same fixed interval forever.
+// TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork pins one kind's
+// backoff growth: testConfig has a single kind, so consecutive no-work checks
+// (exit 2) each double the wait from the last one, bounded by IdleCap, rather
+// than repeating the same fixed interval forever. Per-kind independence is
+// TestPoolPerKindBackoffGrowsIndependently's (dualkind_test.go).
 func TestLoopIdleBackoffGrowsAndCapsAcrossConsecutiveNoWork(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{
 		{Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 2}, {Exit: 5},
