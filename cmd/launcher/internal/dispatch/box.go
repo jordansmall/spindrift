@@ -428,7 +428,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			// no-host-loopback renders as plain bridge, so the route would
 			// otherwise silently work against the operator's mode (ADR 0044).
 			if runner.DeniesHostLoopback(d.cfg.NetworkMode) {
-				return fmt.Errorf("registry proxy: unsupported under NETWORK_MODE=%s -- this runtime can only reach the registry proxy over its TCP fallback, which this mode blocks; use a different NETWORK_MODE or drop REGISTRY_PROXY_ROUTES", d.cfg.NetworkMode)
+				return fmt.Errorf("registry proxy: unsupported under NETWORK_MODE=%s -- "+tcpFallbackBlockedReason+"; use a different NETWORK_MODE or drop REGISTRY_PROXY_ROUTES", d.cfg.NetworkMode, "registry proxy")
 			}
 			tcpHost := transport.Host()
 			secret := newRegistryProxyTCPSecret()

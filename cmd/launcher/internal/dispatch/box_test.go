@@ -1056,6 +1056,10 @@ func TestRunOnce_RegistryProxyTransportTCPVerdictUnderDenyingNetworkMode_Fails(t
 			if !strings.Contains(err.Error(), "REGISTRY_PROXY_ROUTES") {
 				t.Errorf("runOnce error = %q, want it to name the REGISTRY_PROXY_ROUTES knob", err.Error())
 			}
+			wantMsg := "registry proxy: unsupported under NETWORK_MODE=" + mode + " -- this runtime can only reach the registry proxy over its TCP fallback, which this mode blocks; use a different NETWORK_MODE or drop REGISTRY_PROXY_ROUTES"
+			if !strings.Contains(err.Error(), wantMsg) {
+				t.Errorf("runOnce error = %q, want it to contain %q", err.Error(), wantMsg)
+			}
 			if len(fr.RunCalls) != 0 {
 				t.Errorf("fr.RunCalls = %d, want 0: the Box must never run when the backstop rejects", len(fr.RunCalls))
 			}
