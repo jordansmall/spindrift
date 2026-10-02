@@ -1,5 +1,11 @@
 # Runtime orchestration logic is a nix-built Go binary; bash stays thin exec glue
 
+> Superseded in part by [ADR 0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md):
+> tier 3 — "the in-container entrypoint stays thin generated bash" — is
+> reversed. The entrypoint accreted the branching logic this record said it
+> would never have, and the cross-compilation cost it cited is already paid
+> by the baked `driver-exec` and `orchestrator` binaries. Tiers 1 and 2 hold.
+
 ADR 0005 kept the whole runtime in nix-generated bash and explicitly rejected a
 compiled binary, to hold the language count at one. Experience corrected that.
 The launcher accreted real *logic* — a dependency graph, cycle detection, poll

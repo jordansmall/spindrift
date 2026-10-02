@@ -1,5 +1,10 @@
 # The in-box orchestrator loop is a Go program above `driver-exec`, not entrypoint prose
 
+> Amended by [ADR 0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md):
+> the entrypoint did not "shrink back" as this record expected; a `box` Go
+> binary now owns the sequence around the orchestrator, and the
+> `ORCHESTRATOR_ENABLED` switch below is removed with its off-path.
+
 ADR 0007 drew the runtime into three tiers: nix computes everything knowable
 at evaluation time, a nix-built Go binary orchestrates live state, and the
 in-container entrypoint stays thin generated bash — linear exec glue with no
