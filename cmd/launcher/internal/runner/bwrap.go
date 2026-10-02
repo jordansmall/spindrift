@@ -160,7 +160,9 @@ type bwrapAdapter struct {
 	// the matching release (issue #2960): the window where a per-Box cgroup dir
 	// exists but IsRunning still reads false, so a Reap landing there would
 	// delete a mid-launch Box's dir. Guarded by mu; refcounted, not a set, so
-	// two concurrent Runs for one name cannot release each other's guard.
+	// two concurrent Runs for one name cannot release each other's guard. It also
+	// keeps provisionCgroup from reclaiming a leftover dir a sibling Run is
+	// mid-launch in (issue #4164).
 	provisioning map[string]int
 }
 
@@ -866,18 +868,44 @@ func removeCgroupDir(dir string) error {
 	return os.Remove(dir)
 }
 
+// reclaimLeftoverCgroupDir removes dir, a per-Box cgroup that already existed at
+// Mkdir, and reports whether it did. It only does so when nothing can own the
+// dir: no PID in cgroup.procs, no other in-process Run provisioning the name
+// (this Run's own entry makes the count 1), and no tracked sibling in running,
+// whether its Box is still live or has exited with its deferred
+// removeCgroupDir not yet run. A launcher in another process is the documented
+// gap in provisioning (ADR 0042, issue #2960).
+func (a *bwrapAdapter) reclaimLeftoverCgroupDir(name, dir string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.provisioning[name] != 1 || a.running[name] != nil {
+		return false
+	}
+	procs, err := os.ReadFile(filepath.Join(dir, "cgroup.procs"))
+	if err != nil || strings.TrimSpace(string(procs)) != "" {
+		return false
+	}
+	return removeCgroupDir(dir) == nil
+}
+
 // provisionCgroup creates a per-Box cgroup v2 subtree at the anchor
 // cgroupDirForName resolves and writes pids.max/memory.max into it. Failing to
 // create the dir means no usable delegation on this host, which ADR 0042 treats
 // as expected: warn, return "", and let Run proceed unenforced. Once the dir
 // exists it is kept, since a failed limit write leaves it usable for PID tracking.
+// A leftover empty dir from a crashed launcher is reclaimed rather than failing
+// every retry on EEXIST (issue #4164).
 func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 	dir, err := a.cgroupDirForName(box.Name)
 	if err != nil {
 		fmt.Printf("==> bwrap runner: warning: cgroup v2 delegation unavailable (%v); running box %q without cgroup resource containment\n", err, box.Name)
 		return ""
 	}
-	if err := os.Mkdir(dir, 0o755); err != nil {
+	err = os.Mkdir(dir, 0o755)
+	if errors.Is(err, os.ErrExist) && a.reclaimLeftoverCgroupDir(box.Name, dir) {
+		err = os.Mkdir(dir, 0o755)
+	}
+	if err != nil {
 		fmt.Printf("==> bwrap runner: warning: could not create delegated cgroup %s (%v); running box %q without cgroup resource containment\n", dir, err, box.Name)
 		return ""
 	}
@@ -921,7 +949,7 @@ func (a *bwrapAdapter) Run(box Box) error {
 
 	// Marked before provisionCgroup's mkdir, not after (see the provisioning
 	// field). The deferred release covers every early return; the explicit one
-	// past the cgroup.procs write unblocks Reap in the common case.
+	// after trackRunning unblocks Reap in the common case.
 	releaseProvisioning := a.beginProvisioning(box.Name)
 	defer releaseProvisioning()
 
@@ -1014,11 +1042,12 @@ func (a *bwrapAdapter) Run(box Box) error {
 			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
 		}
 	}
-	// Provisioning ends at the cgroup.procs write above, not at trackRunning
-	// below; see the provisioning field for why.
-	releaseProvisioning()
+	// Tracked before the provisioning guard drops so reclaimLeftoverCgroupDir
+	// never sees this name unowned, even when the cgroup.procs write above
+	// failed and the dir still reads empty.
 	a.trackRunning(box.Name, cmd.Process)
 	defer a.untrackRunning(box.Name)
+	releaseProvisioning()
 	// Deferred so the shared lock spans cmd.Wait()'s whole duration: releasing
 	// earlier would let reclaimStaleSnapshots believe this generation is free
 	// while the sandboxed process is still reading it. Flock releases on process
@@ -1056,7 +1085,7 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 
 // beginProvisioning marks name as mid-launch so Reap skips it; see the
 // provisioning field for the race this closes. The returned release is wrapped
-// in sync.Once because Run calls it explicitly after the cgroup.procs write and
+// in sync.Once because Run calls it explicitly after trackRunning and
 // again via defer, and the two must not double-decrement the refcount out from
 // under a second concurrent Run for the same name.
 func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
