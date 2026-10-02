@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
@@ -96,7 +97,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 	for _, iss := range batch {
 		wg.Add(1)
 		iss := iss
-		go func() {
+		panicguard.Go(func() {
 			defer wg.Done()
 			limiter.Acquire()
 			defer limiter.Release()
@@ -144,7 +145,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 				fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 				s.Settle(d, iss.Number, iss.Generation, result)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	gate.Settle()

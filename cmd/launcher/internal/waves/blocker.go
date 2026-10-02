@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/panicguard"
 )
 
 // depsOfConcurrency bounds how many DepsOf calls NewReadiness has in flight at
@@ -43,13 +44,13 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 	var wg sync.WaitGroup
 	for i, iss := range issues {
 		wg.Add(1)
-		go func() {
+		panicguard.Go(func() {
 			defer wg.Done()
 			limiter.Acquire()
 			defer limiter.Release()
 			deps, depsErr := it.DepsOf(iss.Number)
 			results[i] = depsResult{deps: deps, err: depsErr}
-		}()
+		})
 	}
 	wg.Wait()
 

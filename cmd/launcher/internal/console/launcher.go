@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/terminate"
 	"spindrift.dev/launcher/internal/waves"
@@ -333,7 +334,7 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick
 	l.wg.Add(1)
 	l.mu.Unlock()
 
-	go func() {
+	panicguard.Go(func() {
 		defer l.wg.Done()
 		// Return value dropped: Terminate already logs its kill failure to stderr
 		// before returning it, so nothing is lost by not handling it here.
@@ -342,7 +343,7 @@ func (l *Launcher) TerminateAsync(tracker forge.IssueTracker, num string) []Pick
 		l.mu.Lock()
 		delete(inFlight, num)
 		l.mu.Unlock()
-	}()
+	})
 
 	return l.queueRef().Snapshot()
 }
@@ -426,7 +427,7 @@ func (l *Launcher) tryLaunch(tracker forge.IssueTracker, pwd string) {
 	l.wg.Add(1)
 	l.mu.Unlock()
 
-	go l.drain(tracker, pwd)
+	panicguard.Go(func() { l.drain(tracker, pwd) })
 }
 
 // launchStack pairs one Dispatch kind's tracker, dispatch factory, and settle,
@@ -615,7 +616,7 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 	l.signalRefresh()
 
 	l.wg.Add(1)
-	go func() {
+	panicguard.Go(func() {
 		defer l.wg.Done()
 		output, notice, err := l.RebuildFn()
 
@@ -635,7 +636,7 @@ func (l *Launcher) Rebuild(tracker forge.IssueTracker, pwd string) {
 		if err == nil {
 			l.tryLaunch(tracker, pwd)
 		}
-	}()
+	})
 }
 
 // RebuildStatus is the launcher's live image-freshness/rebuild state, carried

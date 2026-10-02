@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/report"
@@ -106,10 +107,10 @@ func (d *Dispatch) sleepOrKilled(dur time.Duration) {
 		return
 	}
 	slept := make(chan struct{})
-	go func() {
+	panicguard.Go(func() {
 		d.clock.Sleep(dur)
 		close(slept)
-	}()
+	})
 	select {
 	case <-slept:
 	case <-d.killed:
