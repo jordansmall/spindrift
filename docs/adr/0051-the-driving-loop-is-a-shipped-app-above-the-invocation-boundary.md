@@ -239,7 +239,7 @@ forwards signals rather than implementing shutdown on its behalf.**
   finish, normal teardown runs, and it returns a distinct exit code meaning
   "signalled drain" so the daemon exits rather than treating it as failure. The
   bound is one Box's runtime, not the queue's.
-- A second `SIGTERM`, or `SIGINT`, escalates to abort: `Runner.Reap` the
+- A second `SIGTERM`, or `SIGINT`, escalates to abort: `Runner.Kill` the
   in-flight Boxes and release their issues off `InProgress` — the work the
   Console's Terminate gesture (ADR 0024) already does for a single Dispatch —
   then exit promptly.
