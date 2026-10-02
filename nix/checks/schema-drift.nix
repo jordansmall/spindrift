@@ -582,6 +582,35 @@ checkedMerge {
       "backend-registry-explicit-empty-guard (issue #3487): trackerAxisWrite = \"\" must still render successfully (local's exemption: Go reads trackerAxisWrite as-is with no == \"\" default), but it failed";
     pkgs.runCommand "backend-registry-explicit-empty-guard" { } "touch $out";
 
+  # checkRow must reject a row that sets trackerAxisWrite or trackerAxisFiler
+  # without trackerAxisRead, since cmd/launcher's trackerAxisSignals drops both
+  # on such a row (issue #4183). The full-axes row proves the rejection keys on
+  # the missing read, so the negative cases are not vacuous.
+  backend-registry-axis-read-guard =
+    let
+      inherit (pkgs.lib) assertMsg;
+      bareRow = {
+        name = "synthetic";
+        goVar = "Synthetic";
+      };
+      render = row: builtins.tryEval (renderers.renderBackendRegistryGo [ row ]);
+      writeOnly = render (bareRow // { trackerAxisWrite = "FORGEJO"; });
+      filerOnly = render (bareRow // { trackerAxisFiler = "FORGEJO"; });
+      fullAxes = render (
+        bareRow
+        // {
+          trackerAxisRead = "LOCAL";
+          trackerAxisWrite = "FORGEJO";
+          trackerAxisFiler = "FORGEJO";
+        }
+      );
+    in
+    assert assertMsg (!writeOnly.success && !filerOnly.success)
+      "backend-registry-axis-read-guard (issue #4183): renderBackendRegistryGo must reject a row that sets trackerAxisWrite or trackerAxisFiler without trackerAxisRead (write-only rendered: ${builtins.toJSON writeOnly.success}, filer-only rendered: ${builtins.toJSON filerOnly.success})";
+    assert assertMsg fullAxes.success
+      "backend-registry-axis-read-guard (issue #4183): a row setting trackerAxisRead, trackerAxisWrite, and trackerAxisFiler must still render successfully, but it failed";
+    pkgs.runCommand "backend-registry-axis-read-guard" { } "touch $out";
+
   # Regenerate with `nix run .#regen` when lib/labels.nix changes. The raw
   # renderer output is gofmt-normalized here the same way regen normalizes it
   # (issue #2528).
