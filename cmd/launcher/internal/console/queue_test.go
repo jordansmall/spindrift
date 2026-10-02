@@ -276,6 +276,55 @@ func TestQueue_Discover_DuplicateNumber_ClaimTargetsNewestRow(t *testing.T) {
 	}
 }
 
+// Holding a re-picked issue must mark the newest row, not resurrect the older
+// terminal row as a permanent PickHeld zombie that keeps the queue non-empty.
+func TestQueue_Discover_DuplicateNumber_HoldTargetsNewestRow(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		first Pick
+	}{
+		{"terminated", Pick{Number: "42", Title: "fix the thing", State: PickTerminated, Reason: "terminated by operator"}},
+		{"dissolved", Pick{Number: "42", Title: "fix the thing", State: PickDissolved, Reason: "skipped"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := NewQueue()
+			q.Add(tc.first)
+			q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+			f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+			f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}, Body: "Blocked by #41"})
+			f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+			oldRowUntouched := func(got Pick) {
+				t.Helper()
+				if got.State != tc.first.State || got.Reason != tc.first.Reason || got.BlockedBy != "" {
+					t.Errorf("old row = %+v, want it untouched at %v %q", got, tc.first.State, tc.first.Reason)
+				}
+			}
+
+			if _, err := q.Discover(f, f, "", KindWork); err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			snap := q.Snapshot()
+			oldRowUntouched(snap[0])
+			if snap[1].State != PickHeld || snap[1].BlockedBy != "#41 (body)" {
+				t.Errorf("new row = %+v, want PickHeld blocked by #41 (body)", snap[1])
+			}
+
+			f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed})
+			if _, err := q.Discover(f, f, "", KindWork); err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			snap = q.Snapshot()
+			if snap[1].State != PickRunning {
+				t.Errorf("new row = %+v, want PickRunning once #41 closes", snap[1])
+			}
+			oldRowUntouched(snap[0])
+			if !q.Empty() {
+				t.Errorf("queue not empty: %+v", snap)
+			}
+		})
+	}
+}
+
 // The console's per-kind drain (#1708) shares one Queue, so a work-kind
 // Discover must never claim a research-kind pick's tracker transition, or
 // vice versa: the two kinds' claims belong on different tracker instances

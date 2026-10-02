@@ -175,19 +175,17 @@ func (q *Queue) claimable() []Pick {
 // setHeld marks the pick numbered num held, rendering unready as the BlockedBy
 // badge and failed as Reason. failed covers every declared blocker carrying
 // the Failed label even when it reads ready, and it shows on the row without
-// dissolving the pick, because the Console never auto-unpicks (#650).
+// dissolving the pick, because the Console never auto-unpicks (#650). It
+// targets the newest row numbered num, like setState.
 func (q *Queue) setHeld(num string, unready, failed []string, sources map[string]forge.DepSource) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for i := range q.picks {
-		if q.picks[i].Number == num {
-			q.picks[i].State = PickHeld
-			q.picks[i].BlockedBy = refList(unready, sources)
-			q.picks[i].Reason = ""
-			if len(failed) > 0 {
-				q.picks[i].Reason = fmt.Sprintf("%s%s failed", blockerFailedPrefix, refList(failed, sources))
-			}
-			return
+	if i := q.newestIndex(num); i >= 0 {
+		q.picks[i].State = PickHeld
+		q.picks[i].BlockedBy = refList(unready, sources)
+		q.picks[i].Reason = ""
+		if len(failed) > 0 {
+			q.picks[i].Reason = fmt.Sprintf("%s%s failed", blockerFailedPrefix, refList(failed, sources))
 		}
 	}
 }
