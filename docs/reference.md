@@ -5369,8 +5369,12 @@ The cache degrades safely on its own. A missing, truncated, corrupt, or
 otherwise unreadable cache file is treated as a miss, not an error — the
 dispatch falls back to probing live and, on success, overwrites the file,
 the same corruption-tolerant idiom the freshness-guard state file uses. A
-probe that itself fails is never cached, either: a transient infrastructure
-hiccup is not a verdict, and remembering one would make it permanent.
+`tcp` entry under a `NETWORK_MODE` that denies the host-loopback route
+(`no-host-loopback`, `none`) is a miss too, since the live probe hard-errors
+on that combination and the cache must not replay a verdict it could never
+have written. A probe that itself fails is never cached, either: a
+transient infrastructure hiccup is not a verdict, and remembering one would
+make it permanent.
 
 ## Dispatch exit codes
 
