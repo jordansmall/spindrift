@@ -8,6 +8,9 @@ import (
 )
 
 func TestCmdArgsAndEnv(t *testing.T) {
+	// An inherited GIT_TERMINAL_PROMPT=0 would satisfy the check below even
+	// if Cmd stopped appending it.
+	t.Setenv("GIT_TERMINAL_PROMPT", "1")
 	gitArgs := []string{"-c", "foo=bar"}
 	cmd := Cmd(gitArgs, "-C", "scratch", "fetch")
 
@@ -28,7 +31,9 @@ func TestCmdArgsAndEnv(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("Env = %v, want GIT_TERMINAL_PROMPT=0", cmd.Env)
+		// cmd.Env is os.Environ() plus one entry, so printing it would put
+		// live credentials such as GH_TOKEN into the test log.
+		t.Fatal("cmd.Env has no GIT_TERMINAL_PROMPT=0 entry")
 	}
 }
 
