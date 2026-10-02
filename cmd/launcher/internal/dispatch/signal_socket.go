@@ -37,10 +37,11 @@ const (
 func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAddHost bool, env map[string]string, logw io.Writer) (*runner.SocketMount, runner.SignalSocketLocation, func() error, error) {
 	// A TCP verdict needs loopback reachability the way the registry proxy's
 	// TCP fallback does; NETWORK_MODE=none is already refused earlier at
-	// launcher startup (checkSignalCarrierNetworkModeGate), but the
-	// no-host-loopback case can only be known now, after the per-Dispatch
-	// probe -- so it fails here instead, capability-style, never falling
-	// back to the log carrier silently.
+	// launcher startup (checkSignalCarrierNetworkModeGate). A live probe under
+	// no-host-loopback already errors in runOnce (box.go) before reaching
+	// here; this gate is a backstop for a replayed cached TCP verdict
+	// (#3775). Either way it fails capability-style, never falling back to
+	// the log carrier silently.
 	if transport.IsTCP() && (d.cfg.NetworkMode == runner.NetworkModeNoHostLoopback || d.cfg.NetworkMode == runner.NetworkModeNone) {
 		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode)
 	}
