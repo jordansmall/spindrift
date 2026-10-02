@@ -503,7 +503,7 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 			defer p.cancel()
 
 			if tt.siblingPhase == PhaseRunning {
-				p.startChild(1, tt.siblingKind, "rev1")
+				startChildAs(p, 1, tt.siblingKind, "rev1")
 			} else {
 				p.setPhase(1, tt.siblingPhase)
 			}
@@ -1531,8 +1531,8 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 
 	// pickKind, not a bare p.st read, is the lock-respecting way to observe
 	// dispatch's gate cleared.
-	if kind, ok := p.pickKind(0); !ok || kind != KindOf(dispatchkind.Work) {
-		t.Fatalf("pickKind(0) after the resolve = (%q, %v), want (dispatch, true): dispatch's gate must be cleared", kind, ok)
+	if kind, ok := p.pickKind(); !ok || kind != KindOf(dispatchkind.Work) {
+		t.Fatalf("pickKind() after the resolve = (%q, %v), want (dispatch, true): dispatch's gate must be cleared", kind, ok)
 	}
 
 	for s := 0; s < slots; s++ {
@@ -1542,65 +1542,58 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 }
 
 // TestSlotOrderDerivesFromKinds pins slotOrder to the kinds argument rather
-// than a hardcoded two-kind pair (issue #3541 review finding): a slot below
-// the reservation puts KindOf(dispatchkind.Research) first and keeps every other kind in its
-// given relative order, a slot at or above the reservation keeps kinds in
-// its given order with KindOf(dispatchkind.Research) moved last, and the input slice must
-// never be mutated.
+// than a hardcoded two-kind pair (issue #3541 review finding): preferReserved
+// puts KindOf(dispatchkind.Research) first and keeps every other kind in its
+// given relative order, otherwise kinds keep their given order with
+// KindOf(dispatchkind.Research) moved last, and the input slice must never be
+// mutated.
 func TestSlotOrderDerivesFromKinds(t *testing.T) {
 	const kindOther Kind = "other"
 
 	tests := []struct {
-		name        string
-		kinds       []Kind
-		reservation int
-		slot        int
-		want        []Kind
+		name           string
+		kinds          []Kind
+		preferReserved bool
+		want           []Kind
 	}{
 		{
-			name:        "single kind unchanged",
-			kinds:       []Kind{KindOf(dispatchkind.Work)},
-			reservation: 0,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Work)},
+			name:           "single kind unchanged",
+			kinds:          []Kind{KindOf(dispatchkind.Work)},
+			preferReserved: false,
+			want:           []Kind{KindOf(dispatchkind.Work)},
 		},
 		{
-			name:        "two kinds below reservation prefers research",
-			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
-			reservation: 1,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)},
+			name:           "two kinds below reservation prefers research",
+			kinds:          []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
+			preferReserved: true,
+			want:           []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)},
 		},
 		{
-			name:        "two kinds at reservation prefers work",
-			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
-			reservation: 1,
-			slot:        1,
-			want:        []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
+			name:           "two kinds at reservation prefers work",
+			kinds:          []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
+			preferReserved: false,
+			want:           []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 		},
 		{
-			name:        "three kinds below reservation keeps non-research relative order",
-			kinds:       []Kind{kindOther, KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
-			reservation: 1,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Research), kindOther, KindOf(dispatchkind.Work)},
+			name:           "three kinds below reservation keeps non-research relative order",
+			kinds:          []Kind{kindOther, KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
+			preferReserved: true,
+			want:           []Kind{KindOf(dispatchkind.Research), kindOther, KindOf(dispatchkind.Work)},
 		},
 		{
-			// A reserved slot in a research-less set must not invent a
-			// preference for a kind the pool has no backoff entry for —
-			// pickKind would nil-deref on it.
-			name:        "no research kind below reservation keeps given order",
-			kinds:       []Kind{KindOf(dispatchkind.Work), kindOther},
-			reservation: 1,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Work), kindOther},
+			// Preferring research in a research-less set must not invent
+			// a kind the pool has no backoff entry for — chooseKind's
+			// s.kinds lookup would nil-deref on it.
+			name:           "no research kind below reservation keeps given order",
+			kinds:          []Kind{KindOf(dispatchkind.Work), kindOther},
+			preferReserved: true,
+			want:           []Kind{KindOf(dispatchkind.Work), kindOther},
 		},
 		{
-			name:        "three kinds at reservation keeps given order with research last",
-			kinds:       []Kind{KindOf(dispatchkind.Research), kindOther, KindOf(dispatchkind.Work)},
-			reservation: 1,
-			slot:        1,
-			want:        []Kind{kindOther, KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
+			name:           "three kinds at reservation keeps given order with research last",
+			kinds:          []Kind{KindOf(dispatchkind.Research), kindOther, KindOf(dispatchkind.Work)},
+			preferReserved: false,
+			want:           []Kind{kindOther, KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)},
 		},
 	}
 
@@ -1608,10 +1601,10 @@ func TestSlotOrderDerivesFromKinds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			orig := append([]Kind(nil), tc.kinds...)
 
-			got := slotOrder(tc.kinds, tc.reservation, tc.slot)
+			got := slotOrder(tc.kinds, tc.preferReserved)
 
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("slotOrder(%v, %d, %d) = %v, want %v", tc.kinds, tc.reservation, tc.slot, got, tc.want)
+				t.Fatalf("slotOrder(%v, %v) = %v, want %v", tc.kinds, tc.preferReserved, got, tc.want)
 			}
 			if !reflect.DeepEqual(tc.kinds, orig) {
 				t.Fatalf("slotOrder mutated its kinds argument: got %v, want %v", tc.kinds, orig)
@@ -1627,46 +1620,41 @@ func TestSlotOrderDerivesFromKinds(t *testing.T) {
 // before the idle tier existed.
 func TestSlotOrderIdleTierAlwaysLast(t *testing.T) {
 	tests := []struct {
-		name        string
-		kinds       []Kind
-		reservation int
-		slot        int
-		want        []Kind
+		name           string
+		kinds          []Kind
+		preferReserved bool
+		want           []Kind
 	}{
 		{
-			name:        "below reservation: reserved, normal, idle",
-			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
-			reservation: 1,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
+			name:           "below reservation: reserved, normal, idle",
+			kinds:          []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
+			preferReserved: true,
+			want:           []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 		},
 		{
-			name:        "at/above reservation: normal, reserved, idle",
-			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
-			reservation: 1,
-			slot:        1,
-			want:        []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
+			name:           "at/above reservation: normal, reserved, idle",
+			kinds:          []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
+			preferReserved: false,
+			want:           []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)},
 		},
 		{
-			name:        "no reservation at all: normal, idle",
-			kinds:       []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
-			reservation: 0,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
+			name:           "no reservation at all: normal, idle",
+			kinds:          []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
+			preferReserved: false,
+			want:           []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 		},
 		{
-			name:        "idle given first in config keeps tier, not position",
-			kinds:       []Kind{KindOf(dispatchkind.Butler), KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)},
-			reservation: 1,
-			slot:        0,
-			want:        []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
+			name:           "idle given first in config keeps tier, not position",
+			kinds:          []Kind{KindOf(dispatchkind.Butler), KindOf(dispatchkind.Research), KindOf(dispatchkind.Work)},
+			preferReserved: true,
+			want:           []Kind{KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := slotOrder(tc.kinds, tc.reservation, tc.slot)
+			got := slotOrder(tc.kinds, tc.preferReserved)
 			if !reflect.DeepEqual(got, tc.want) {
-				t.Fatalf("slotOrder(%v, %d, %d) = %v, want %v", tc.kinds, tc.reservation, tc.slot, got, tc.want)
+				t.Fatalf("slotOrder(%v, %v) = %v, want %v", tc.kinds, tc.preferReserved, got, tc.want)
 			}
 		})
 	}
@@ -2345,7 +2333,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// it the moment dispatch backs off, rather than parking in idleSleep —
 	// this test's synchronization point.
 	p.markNoWork(KindOf(dispatchkind.Research), clk.Now(), false)
-	p.startChild(1, KindOf(dispatchkind.Research), "rev1")
+	startChildAs(p, 1, KindOf(dispatchkind.Research), "rev1")
 
 	done := make(chan struct{})
 	go func() {
@@ -2582,5 +2570,69 @@ func TestPoolSnapshotNextCheckFloorsOnAwakeWindow(t *testing.T) {
 				t.Fatalf("state = %q, want %q", snap.State, tc.wantState)
 			}
 		})
+	}
+}
+
+// startChildAs marks slot running as kind exactly, bypassing startChild's
+// re-choice, for tests that need a sibling of a specific kind in flight
+// whatever the pool's reservation or backoff state would pick.
+func startChildAs(p *pool, slot int, kind Kind, revision string) {
+	p.mutate(func(s *state) []Event {
+		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision}}
+		return nil
+	})
+}
+
+// TestPoolStartChildChoosesKindFromLiveReservedCount pins issue #3582: the
+// research floor is a live count of running research children, not a
+// per-slot preference, so a free slot picks research whenever fewer than
+// ResearchReservation research children are running, whichever slot it is.
+func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
+	tests := []struct {
+		name        string
+		reservation int
+		sibling     Kind // kind of the running child on slot 0; "" for none
+		want        Kind
+	}{
+		{"no research running, floor of 1: research", 1, work, research},
+		{"research already running, floor of 1 met: work", 1, research, work},
+		{"floor of 0: work even with no research running", 0, work, work},
+		{"floor of 2, one research running: research again", 2, research, research},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := dualKindConfig(3, tt.reservation)
+			var buf bytes.Buffer
+			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
+			defer p.cancel()
+			if tt.sibling != "" {
+				startChildAs(p, 0, tt.sibling, "rev1")
+			}
+
+			if got := p.startChild(1, work, "rev1"); got != tt.want {
+				t.Fatalf("startChild chose %q, want %q", got, tt.want)
+			}
+			if got := p.snapshot().Slots[1].Kind; got != tt.want {
+				t.Fatalf("slot 1 flight kind = %q, want the chosen %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPoolStartChildFallsBackToProvisionalKindWhenNothingRunnable pins the
+// fallback: a kind runnable at pick time that a sibling gated since still
+// starts as the provisional kind rather than as an empty one.
+func TestPoolStartChildFallsBackToProvisionalKindWhenNothingRunnable(t *testing.T) {
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
+	clk := &testClock{}
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), dualKindConfig(2, 1), &scriptedRunner{}, newTestEmitter(&buf), clk)
+	defer p.cancel()
+	p.markNoWork(work, clk.Now(), false)
+	p.markNoWork(research, clk.Now(), false)
+
+	if got := p.startChild(0, work, "rev1"); got != work {
+		t.Fatalf("startChild chose %q, want the provisional %q", got, work)
 	}
 }
