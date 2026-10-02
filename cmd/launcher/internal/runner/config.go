@@ -13,6 +13,12 @@ const (
 	NetworkModeHost = "host"
 )
 
+// DeniesHostLoopback reports whether networkMode denies a Box the host-loopback
+// route: pasta without --map-gw blocks it, and "none" has no network at all.
+func DeniesHostLoopback(networkMode string) bool {
+	return networkMode == NetworkModeNoHostLoopback || networkMode == NetworkModeNone
+}
+
 // Config carries the subset of launcher config the runner constructors need.
 // pwd is a per-invocation runtime dependency, so NewOCI takes it separately.
 type Config struct {

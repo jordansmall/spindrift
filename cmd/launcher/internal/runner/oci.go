@@ -563,12 +563,6 @@ func (a *ociAdapter) registryTCPProbeArgs(host string, port int, containerName s
 // (issue #3111). A var, not a const, so tests can shorten it.
 var registryProxyProbeTimeout = 30 * time.Second
 
-// deniesHostLoopback reports whether networkMode denies a Box the host-loopback
-// route: pasta without --map-gw blocks it, and "none" has no network at all.
-func deniesHostLoopback(networkMode string) bool {
-	return networkMode == NetworkModeNoHostLoopback || networkMode == NetworkModeNone
-}
-
 // RegistryProxyTransport reports this runtime's registry-proxy transport
 // decision, reading the on-disk cache before a live probe that costs up to four
 // throwaway containers (issue #3113). The cache replays only a verdict from
@@ -672,7 +666,7 @@ func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, b
 		// once it knows the transport decision.
 		return registrymanifest.NewUnixEndpoint(""), false, nil
 	}
-	if deniesHostLoopback(a.networkMode) {
+	if DeniesHostLoopback(a.networkMode) {
 		// Falling back silently would either leave a pasta Box unable to
 		// reach the proxy with no diagnostic, or wire a host-loopback route
 		// the operator's NETWORK_MODE explicitly denied (issue #3111

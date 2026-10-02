@@ -185,3 +185,22 @@ func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T
 		t.Errorf("NewBwrapBuild(cfg).nixVarSnapshotDir = %q, want %q", a.nixVarSnapshotDir, want)
 	}
 }
+
+// The helper's exact membership: only no-host-loopback and none deny
+// host-loopback reachability; open, unset and any other value do not.
+func TestDeniesHostLoopback(t *testing.T) {
+	tests := []struct {
+		networkMode string
+		want        bool
+	}{
+		{NetworkModeNoHostLoopback, true},
+		{NetworkModeNone, true},
+		{"open", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := DeniesHostLoopback(tc.networkMode); got != tc.want {
+			t.Errorf("DeniesHostLoopback(%q) = %v, want %v", tc.networkMode, got, tc.want)
+		}
+	}
+}

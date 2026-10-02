@@ -1179,7 +1179,7 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 // reachability (no-host-loopback or none), RegistryProxyTransport must refuse
 // the TCP fallback with a descriptive error, not hand back a route the Box
 // cannot reach with no diagnostic (issue #3111 finding B). Scripts one call and
-// asserts callCount stays at 1: deniesHostLoopback hard-errors before any more.
+// asserts callCount stays at 1: DeniesHostLoopback hard-errors before any more.
 func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *testing.T) {
 	for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone} {
 		t.Run(mode, func(t *testing.T) {
@@ -1200,7 +1200,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
 			}
 			if got := callCount(t, dir); got != 1 {
-				t.Errorf("callCount = %d, want 1: the tcp-reachability sub-probe must never run when deniesHostLoopback already hard-errored", got)
+				t.Errorf("callCount = %d, want 1: the tcp-reachability sub-probe must never run when DeniesHostLoopback already hard-errored", got)
 			}
 		})
 	}
@@ -1362,7 +1362,7 @@ func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
 // A verdict cached under one networkMode is never replayed for a different one
 // sharing the same pwd: oci.go's socket-incapable path branches on networkMode
 // and hard-errors under a host-loopback-denying mode instead of falling back to
-// TCP. "open" and "" both reach the live probe rather than deniesHostLoopback's
+// TCP. "open" and "" both reach the live probe rather than DeniesHostLoopback's
 // hard-error branch, so both sides of this comparison actually probe.
 func TestRegistryProxyTransport_NetworkModeChangeInvalidatesCache(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
@@ -1418,25 +1418,6 @@ func TestRegistryProxyTransport_ProbeErrorWritesNoCache(t *testing.T) {
 	}
 	if _, err := os.Stat(registryProbeCachePath(pwd)); !os.IsNotExist(err) {
 		t.Errorf("registryProbeCachePath(pwd): want no file after a probe error, stat err = %v", err)
-	}
-}
-
-// The helper's exact membership: only no-host-loopback and none deny
-// host-loopback reachability; open, unset and any other value do not.
-func TestDeniesHostLoopback(t *testing.T) {
-	tests := []struct {
-		networkMode string
-		want        bool
-	}{
-		{NetworkModeNoHostLoopback, true},
-		{NetworkModeNone, true},
-		{"open", false},
-		{"", false},
-	}
-	for _, tc := range tests {
-		if got := deniesHostLoopback(tc.networkMode); got != tc.want {
-			t.Errorf("deniesHostLoopback(%q) = %v, want %v", tc.networkMode, got, tc.want)
-		}
 	}
 }
 
@@ -1641,7 +1622,7 @@ func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T)
 
 // The other half of issue #3466's deny-host-loopback AC: a control-confirmed
 // incapable verdict (socket no-verdict, control ExitIncapable) must hit the same
-// deniesHostLoopback hard-error a direct ExitIncapable does, not fall through to
+// DeniesHostLoopback hard-error a direct ExitIncapable does, not fall through to
 // TCP because the verdict came from the control probe. Scripts two calls and
 // asserts callCount stays at 2: the TCP sub-probe must never run after that.
 func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_ReturnsError(t *testing.T) {
@@ -1664,13 +1645,13 @@ func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_Returns
 				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
 			}
 			if got := callCount(t, dir); got != 2 {
-				t.Errorf("callCount = %d, want 2 (socket probe + control probe): the tcp-reachability sub-probe must never run when deniesHostLoopback already hard-errored", got)
+				t.Errorf("callCount = %d, want 2 (socket probe + control probe): the tcp-reachability sub-probe must never run when DeniesHostLoopback already hard-errored", got)
 			}
 		})
 	}
 }
 
-// Invariant: no network mode for which deniesHostLoopback holds can get a TCP
+// Invariant: no network mode for which DeniesHostLoopback holds can get a TCP
 // endpoint from the live probe. The doctor check and Dispatch's signal-socket
 // resolver keep a TCP-under-no-host-loopback arm that a live probe can never
 // reach because of this (issue #3768). Each script ends in ExitCapable, which would
@@ -1683,7 +1664,7 @@ func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing
 	}
 	for outcome, calls := range outcomes {
 		for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone, "open", ""} {
-			if !deniesHostLoopback(mode) {
+			if !DeniesHostLoopback(mode) {
 				continue
 			}
 			t.Run(outcome+"/"+mode, func(t *testing.T) {
