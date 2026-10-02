@@ -26,8 +26,8 @@ type FilterChangedMsg struct {
 func (FilterChangedMsg) isConsoleMsg() {}
 
 // CursorMoveMsg moves the cursor one row: Delta is +1 (down) or -1 (up), and
-// Update clamps the result into Visible()'s bounds (issue #784). "k" is not a
-// source of it; that key moved to Terminate in #785.
+// Update clamps the result into Visible()'s bounds (issue #784). Sent by
+// listBindings' row-navigation entry.
 type CursorMoveMsg struct {
 	Delta int
 }
