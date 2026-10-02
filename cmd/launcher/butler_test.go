@@ -649,6 +649,7 @@ func TestParseButlerArgs(t *testing.T) {
 		{"no-build alone: pick a due chore", []string{"--no-build"}, "", true, ""},
 		{"--chore with no value", []string{"--chore"}, "", false, "flag --chore requires a non-empty value"},
 		{"--chore with empty value", []string{"--chore", ""}, "", false, "flag --chore requires a non-empty value"},
+		{"--chore swallowing no-build", []string{"--chore", "--no-build"}, "", false, `flag --chore requires a chore name, got "--no-build"`},
 		{"--chore swallowing a flag", []string{"--chore", "-x"}, "", false, "flag --chore requires a chore name"},
 		{"--chore given twice", []string{"--chore", "bugs", "--chore", "refactor"}, "", false, "flag --chore given more than once"},
 		{"unrecognized token", []string{"bogus"}, "", false, "unrecognized argument: bogus"},

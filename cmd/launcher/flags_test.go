@@ -2061,3 +2061,80 @@ func TestSplitVerb(t *testing.T) {
 		}
 	}
 }
+
+// butler --chore must survive the global flag pass with its value so
+// parseButlerArgs sees it (issue #3795); without a cliFlags entry parseFlags
+// rejected it as an unknown flag.
+func TestParseFlags_ButlerChorePassesThroughWithValue(t *testing.T) {
+	remaining, err := parseFlags([]string{"butler", "--chore", "bugs"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	want := []string{"butler", "--chore", "bugs"}
+	if strings.Join(remaining, " ") != strings.Join(want, " ") {
+		t.Errorf("remaining = %v, want %v", remaining, want)
+	}
+}
+
+// --chore is scoped to the butler verb; elsewhere it stays an unknown flag.
+func TestParseFlags_ChoreRejectedUnlessAfterButler(t *testing.T) {
+	cases := [][]string{
+		{"dispatch", "--chore", "bugs"},
+		{"--chore", "bugs", "butler"},
+	}
+	for _, args := range cases {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, err := parseFlags(args)
+			if err == nil || !strings.Contains(err.Error(), "unknown flag: --chore") {
+				t.Errorf("parseFlags(%v) err = %v, want unknown flag: --chore", args, err)
+			}
+		})
+	}
+}
+
+// Every cliFlags entry must be accepted by the parser when preceded by its
+// verb, so a table row the parser silently drops fails here (issue #3795).
+func TestParseFlags_AcceptsEveryCliFlag(t *testing.T) {
+	for _, f := range cliFlags {
+		t.Run(f.flag, func(t *testing.T) {
+			var args []string
+			if f.verb != "" {
+				args = append(args, f.verb)
+			} else {
+				args = append(args, "dispatch")
+			}
+			args = append(args, "--"+f.flag)
+			if f.arg != "" {
+				args = append(args, "value")
+			}
+			remaining, err := parseFlags(args)
+			if err != nil {
+				t.Fatalf("parseFlags(%v) err = %v", args, err)
+			}
+			if f.flag == "secret-cmd" {
+				if globalSecretCmdTemplate != "value" {
+					t.Errorf("globalSecretCmdTemplate = %q, want value", globalSecretCmdTemplate)
+				}
+				return
+			}
+			if strings.Join(remaining, " ") != strings.Join(args, " ") {
+				t.Errorf("remaining = %v, want %v", remaining, args)
+			}
+		})
+	}
+}
+
+// mainRun handles --help and --version before parseFlags, so no parse test
+// reaches these rows; pin them so deleting one doesn't silently drop it from
+// the completions.
+func TestCliFlags_HasHelpAndVersion(t *testing.T) {
+	have := map[string]bool{}
+	for _, f := range cliFlags {
+		have[f.flag] = true
+	}
+	for _, want := range []string{"help", "version"} {
+		if !have[want] {
+			t.Errorf("cliFlags has no %q row", want)
+		}
+	}
+}

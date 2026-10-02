@@ -41,6 +41,8 @@ let
   quickstartPathsFile = renderers.renderQuickstartPathsGo quickstartPathTable;
   subcommands = import ../lib/subcommands.nix;
   subcommandsFile = renderers.renderSubcommandsGo subcommands;
+  cliFlags = import ../lib/cli-flags.nix;
+  cliFlagsFile = renderers.renderCliFlagsGo cliFlags;
   promptContract = import ../lib/prompt-contract.nix;
   outcomeStatusGoFile = renderers.renderOutcomeStatusGo promptContract.outcomeStatusSets;
   markerChannelsGoFile = renderers.renderMarkerChannelsGo promptContract.markerChannels;
@@ -174,6 +176,7 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/internal/runner/runtimevalues_gen.go" runtimeValuesFile}
     ${writeGenerated "cmd/launcher/quickstart/quickstart_paths_gen.go" quickstartPathsFile}
     ${writeGenerated "cmd/launcher/subcommands_gen.go" subcommandsFile}
+    ${writeGenerated "cmd/launcher/cliflags_gen.go" cliFlagsFile}
     ${writeGenerated "cmd/launcher/internal/outcome/status_gen.go" outcomeStatusGoFile}
     gofmt -w "$root/cmd/launcher/internal/outcome/status_gen.go"
     ${writeGenerated "cmd/launcher/internal/outcome/markerchannels_gen.go" markerChannelsGoFile}
