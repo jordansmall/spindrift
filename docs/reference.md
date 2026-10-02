@@ -132,9 +132,9 @@ where the row does not print at all), a `signal-socket-transport` row naming
 the same transport verdict (`unix socket` or `tcp`) probed through the
 identical seam a dispatch uses for its Signal socket, always Advisory so it
 never affects the exit code, degrading under `NETWORK_MODE=none` regardless
-of transport (no probe run at all), under a TCP verdict paired with
-`NETWORK_MODE=no-host-loopback`, or on an indeterminate probe — see [Signal
-socket](#signal-socket-box_signal_carriersocket).
+of transport (no probe run at all), under `NETWORK_MODE=no-host-loopback`
+when the probe finds no unix socket path, or on an indeterminate probe —
+see [Signal socket](#signal-socket-box_signal_carriersocket).
 
 **Output conventions**
 
@@ -4185,20 +4185,25 @@ its TCP fallback, or an indeterminate/unavailable answer.
 `BOX_SIGNAL_CARRIER=socket` it adds an Advisory `signal-socket-transport`
 row (the row renders only under `socket`; nothing prints under `log`)
 reporting `unix socket` or `tcp`. Three cases degrade that row, each
-with a message naming the knob and the mode: `NETWORK_MODE=none`, which
+with a message naming the mode: `NETWORK_MODE=none`, which
 degrades regardless of the transport and without running the probe at
-all (loopback is torn down outright, so there is nothing to check); a
-TCP verdict under `NETWORK_MODE=no-host-loopback`; and an indeterminate
-probe answer. Advisory means the row never fails `spindrift doctor`
+all (loopback is torn down outright, so there is nothing to check);
+`NETWORK_MODE=no-host-loopback` with a runtime that cannot pass the unix
+socket, where the probe itself fails (it refuses the TCP fallback this mode
+denies) and the row degrades with the probe's error; and an indeterminate
+probe answer. The row's own TCP-under-`no-host-loopback` message is a
+backstop a live probe never reaches — only a replayed cached TCP verdict
+could. Advisory means the row never fails `spindrift doctor`
 itself, it just tells the operator before dispatch what the
 Dispatch-level gate below would otherwise only surface mid-run.
 
 Requesting `socket` where the transport can't work is a startup error,
 never a silent fallback to `log`: `NETWORK_MODE=none` fails at launcher
 startup (the socket transport needs the loopback this mode tears down), and
-`NETWORK_MODE=no-host-loopback` fails when the Dispatch starts — before any
-container — once the per-Dispatch transport probe returns the TCP verdict.
-Both errors name the knob and the mode.
+`NETWORK_MODE=no-host-loopback` fails when the Dispatch starts, before the
+Box container, because the per-Dispatch transport probe refuses the TCP
+fallback under that mode (the Signal-socket gate on a TCP verdict is a
+backstop for a cached verdict). Both errors name the mode.
 
 The three log scanners still run under `socket` mode, but only to warn if a
 marker line is still present in the log; such a line contributes no data —
