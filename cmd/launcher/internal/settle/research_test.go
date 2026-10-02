@@ -795,6 +795,22 @@ func TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine(t *testing.T) {
 	}
 }
 
+// A failed bullet's CR-separated body truncates at its first CR.
+func TestBuildFiledIssuesSection_FailedBodyLoneCRTruncated(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug", Failed: true, Body: "first line of repro\r\r## Heading\r```code fence```"},
+	}
+
+	got := buildFiledIssuesSection(filed)
+
+	if !strings.Contains(got, "first line of repro") {
+		t.Errorf("section = %q, want it to contain the body's first line", got)
+	}
+	if strings.ContainsRune(got, '\r') || strings.Contains(got, "## Heading") || strings.Contains(got, "```code fence```") {
+		t.Errorf("section = %q, want later CR-separated lines truncated away", got)
+	}
+}
+
 // A failed bullet's body is agent-chosen, untrusted text too, so a Markdown
 // link in it must not render as a live link in the posted verdict comment.
 func TestBuildFiledIssuesSection_FailedBodyEscapesLinkText(t *testing.T) {
@@ -1137,6 +1153,22 @@ func TestBuildSkippedIssuesSection_MultiLineTitleTruncated(t *testing.T) {
 	}
 }
 
+// A skipped title forged with a lone CR renders as a single bullet.
+func TestBuildSkippedIssuesSection_LoneCRTitleTruncated(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug\r## forged heading", Skipped: true, DupRef: "#123"},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if strings.ContainsRune(got, '\r') || strings.Contains(got, "## forged heading") {
+		t.Errorf("section = %q, want the title truncated at its first CR", got)
+	}
+	if !strings.HasSuffix(got, "\n\n- **fix(x): bug** — already tracked: #123") {
+		t.Errorf("section = %q, want a single bullet holding the title's first line", got)
+	}
+}
+
 // A filed list with no skips renders no skipped section at all.
 func TestBuildSkippedIssuesSection_NoSkips(t *testing.T) {
 	filed := []filedIntent{
@@ -1165,6 +1197,16 @@ func TestBuildSkippedIssuesSection_LeadCoversIntraRunMatch(t *testing.T) {
 	}
 	if !strings.Contains(got, "already-filed issue") {
 		t.Errorf("section = %q, want the reworded lead covering both a backlog and an intra-run match", got)
+	}
+}
+
+// firstLine cuts at whichever line break comes first — LF, CR or CRLF — for
+// every renderer call site at once.
+func TestFirstLine(t *testing.T) {
+	for _, in := range []string{"a\rb", "a\r\nb", "a\nb", "a"} {
+		if got := firstLine(in); got != "a" {
+			t.Errorf("firstLine(%q) = %q, want %q", in, got, "a")
+		}
 	}
 }
 

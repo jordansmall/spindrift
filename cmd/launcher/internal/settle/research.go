@@ -184,14 +184,15 @@ func buildVerdictCommentSections(filed []filedIntent) string {
 	return strings.Join(sections, "\n\n")
 }
 
-// firstLine truncates s at its first newline and trims a trailing carriage
-// return. A finding's Body can carry headings or fenced code, which rendered
-// whole would break out of the Markdown bullet and inject arbitrary markup.
+// firstLine truncates s at its first line break, LF or CR (CommonMark treats a
+// lone CR as a line ending). A finding's Body can carry headings or fenced
+// code, which rendered whole would break out of the Markdown bullet and inject
+// arbitrary markup.
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
+	if i := strings.IndexAny(s, "\r\n"); i >= 0 {
+		return s[:i]
 	}
-	return strings.TrimSuffix(s, "\r")
+	return s
 }
 
 // escapeMarkdownLinkText escapes s for rendering inside a Markdown bullet --
