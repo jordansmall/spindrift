@@ -278,7 +278,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
+            description = "Map relevant files, seams, and tests; write a structured brief";
             tools = [
               "Read"
               "Bash"
@@ -313,7 +313,7 @@ in
     assert assertMsg (hasInfix ''model: "solo-scout-model"'' scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout model JSON-encoded (issue #2152 slice C), got: ${scoutFile}";
     assert assertMsg
-      (hasInfix "Map relevant files, seams, and tests; return a structured brief" scoutFile)
+      (hasInfix "Map relevant files, seams, and tests; write a structured brief" scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
     pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
 
@@ -335,7 +335,7 @@ in
             model = "solo-scout-model";
             effort = "high";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
+            description = "Map relevant files, seams, and tests; write a structured brief";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -360,7 +360,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
+            description = "Map relevant files, seams, and tests; write a structured brief";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -428,7 +428,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
+            description = "Map relevant files, seams, and tests; write a structured brief";
             tools = [
               "Read"
               "Bash"
@@ -482,7 +482,7 @@ in
             model = "solo-scout-model";
             effort = "high";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
+            description = "Map relevant files, seams, and tests; write a structured brief";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -511,7 +511,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; return a structured brief";
+            description = "Map relevant files, seams, and tests; write a structured brief";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -837,7 +837,7 @@ in
           name = "scout";
           model = "solo-scout-model";
           mode = "subagent";
-          description = "Map relevant files, seams, and tests; return a structured brief";
+          description = "Map relevant files, seams, and tests; write a structured brief";
           tools = [ "Read" ];
           promptFile = "scout-prompt.md";
           prompt = null;
