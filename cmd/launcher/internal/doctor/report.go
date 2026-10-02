@@ -77,10 +77,7 @@ func (r *Reporter) Finding(t Tier, format string, a ...any) {
 
 // remedyLine writes a finding's indented "  remedy: <remedy>" line, or
 // nothing when remedySuffix reports the remedy repeats the error text. It
-// writes unconditionally, ignoring verbose: its standalone call site
-// (doctor.go's connectivity fail-fast path) deliberately drops the row above
-// it and still needs the remedy to reach the operator. Results, which pairs
-// it with a row, is the one that gates it on that row's own visibility.
+// ignores verbose: its only caller, Results, gates it on the row's visibility.
 func (r *Reporter) remedyLine(remedy, msg string) {
 	if suffix := remedySuffix(remedy, msg); suffix != "" {
 		fmt.Fprint(r.w, "  remedy: "+suffix+"\n")
