@@ -327,31 +327,41 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
   assert_cell_golden "research" initial
 }
 
-# Pins Go's pipe-joined ${RESEARCH_STATUS_ENUM} against lib/research-verdicts.nix's
-# renderPrompt (issue #4159). Row 0 is the default set, row 1 a custom one. One
-# entrypoint run per @test: a second run would hit the first's clone in $WORK_DIR.
-assert_research_status_parity() {
-  : "${RESEARCH_STATUS_PARITY_FILE:?RESEARCH_STATUS_PARITY_FILE must be set (nix/research-status-parity.nix)}"
+# Pins forge.VerdictLabels.RenderPrompt's three renderings (the status=<...>
+# alternation, the backtick enum, the verdict bullets) against
+# lib/research-verdicts.nix's renderPrompt (issues #4159, #2630). Row 0 is the
+# default set, row 1 a custom one. One entrypoint run per @test: a second run
+# would hit the first's clone in $WORK_DIR.
+assert_research_verdicts_parity() {
+  : "${RESEARCH_VERDICTS_PARITY_FILE:?RESEARCH_VERDICTS_PARITY_FILE must be set (nix/research-verdicts-parity.nix)}"
   set_dispatch_kind research
 
-  local row want got
-  row="$(jq -c ".[$1]" "$RESEARCH_STATUS_PARITY_FILE")"
-  want="$(jq -r .status <<<"$row")"
+  local row field want prompt
+  row="$(jq -c ".[$1]" "$RESEARCH_VERDICTS_PARITY_FILE")"
   RESEARCH_VERDICTS="$(jq -r .verdicts <<<"$row")"
   export RESEARCH_VERDICTS
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  got="$(grep -E '^SPINDRIFT_OUTCOME .*status=<' "$DRIVER_PROMPT_FILE" | grep -oE 'status=<[^>]*>')"
-  [ "$got" = "$want" ]
+  prompt="$(cat "$DRIVER_PROMPT_FILE")"
+  for field in status enum bullets; do
+    want="$(jq -r ".$field" <<<"$row")"
+    [[ "$prompt" == *"$want"* ]] || {
+      echo "assembled prompt lacks the nix-rendered $field: $want" >&2
+      return 1
+    }
+  done
+  [[ "$prompt" != *RESEARCH_VERDICT_BULLETS* ]]
+  [[ "$prompt" != *RESEARCH_VERDICT_ENUM* ]]
+  [[ "$prompt" != *'${RESEARCH_STATUS_ENUM}'* ]]
 }
 
-@test "research status enumeration matches renderPrompt for the default verdict set" {
-  assert_research_status_parity 0
+@test "research verdict rendering matches renderPrompt for the default verdict set" {
+  assert_research_verdicts_parity 0
 }
 
-@test "research status enumeration matches renderPrompt for a custom verdict set" {
-  assert_research_status_parity 1
+@test "research verdict rendering matches renderPrompt for a custom verdict set" {
+  assert_research_verdicts_parity 1
 }
 
 @test "production path matches the golden fixture for the research filer-on cell" {
