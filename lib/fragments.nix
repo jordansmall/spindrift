@@ -18,8 +18,10 @@
 # markerChannels ("comment" | "pr-intent" | "issue-intent") a _LOG/_SOCKET
 # fragment pair's row belongs to, so buildTimeSignalFragmentViolations can
 # derive the required marker/verb from that registry instead of a
-# hand-listed per-file table. Only the eight _LOG/_SOCKET-paired rows carry
-# it; every other row is silently skipped by that check.
+# hand-listed per-file table. Only the _LOG/_SOCKET-paired rows carry it;
+# every other row is silently skipped by that check, and
+# buildTimeSignalFragmentPairViolations (issue #3754) asserts each keeps its
+# partner.
 let
   rows = [
     {
