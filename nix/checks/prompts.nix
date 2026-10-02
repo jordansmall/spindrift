@@ -386,12 +386,27 @@ let
       touch $out
     '';
 
+  # Shell function behind mkSliceDefinedOncePin; `local count` keeps the
+  # counter private to each call.
+  sliceDefinedOnce = ''
+    slice_defined_once() {
+      local count
+      count=$(grep -oF -- "$2" ${./prompts.nix} | wc -l || true)
+      [ "$count" -eq 1 ] || {
+        echo "expected the $1 defined exactly once in prompts.nix, got $count" >&2
+        exit 1
+      }
+    }
+  '';
+
   # A grep pin body asserting one awk section slice is defined exactly
   # once in this file. The pattern arrives in two halves joined at eval
   # time, so this file's own source text never carries the contiguous
   # pattern the pin counts -- else the pin would count itself. Counts
   # occurrences, not matching lines, since attribute definitions here run
-  # to 200+ columns and two copies could share one physical line.
+  # to 200+ columns and two copies could share one physical line. Expands
+  # to a call of the function in sliceDefinedOnce, which each user
+  # derivation must define first.
   mkSliceDefinedOncePin =
     {
       what,
@@ -399,11 +414,7 @@ let
       half2,
     }:
     ''
-      count=$(grep -oF -- ${pkgs.lib.escapeShellArg (half1 + half2)} ${./prompts.nix} | wc -l || true)
-      [ "$count" -eq 1 ] || {
-        echo "expected the ${what} defined exactly once in prompts.nix, got $count" >&2
-        exit 1
-      }
+      slice_defined_once ${pkgs.lib.escapeShellArg what} ${pkgs.lib.escapeShellArg (half1 + half2)}
     '';
 in
 {
@@ -1238,6 +1249,7 @@ in
   prompts-nix-check-section-awk-defined-once =
     pkgs.runCommand "prompts-nix-check-section-awk-defined-once" { }
       ''
+        ${sliceDefinedOnce}
         ${mkSliceDefinedOncePin {
           what = "CHECK-section awk slice";
           # issue-prompt half is end-of-line-anchored only, not
@@ -1265,6 +1277,7 @@ in
   prompts-nix-research-task-slice-defined-once =
     pkgs.runCommand "prompts-nix-research-task-slice-defined-once" { }
       ''
+        ${sliceDefinedOnce}
         ${mkSliceDefinedOncePin {
           what = "research TASK/CONTEXT awk slice";
           half1 = "/^# TASK$/{f=1}";
