@@ -971,8 +971,8 @@ rec {
     + rows
     + "}\n";
 
-  # cmd/launcher/cliflags_gen.go content (issue #3795). doc stays Nix-side:
-  # the Go parser has no use for it.
+  # cmd/launcher/cliflags_gen.go content (issue #3795). doc is JSON-encoded:
+  # a JSON string is a valid Go string literal, so no escaping is hand-rolled.
   renderCliFlagsGo =
     flags:
     let
@@ -981,7 +981,7 @@ rec {
       rows = concatStrings (
         map (
           e:
-          "\t{flag: \"${e.flag}\", verb: \"${orEmpty e.verb}\", arg: \"${orEmpty e.arg}\", short: \"${orEmpty (e.short or null)}\", intercepted: ${
+          "\t{flag: \"${e.flag}\", verb: \"${orEmpty e.verb}\", arg: \"${orEmpty e.arg}\", short: \"${orEmpty (e.short or null)}\", doc: ${builtins.toJSON e.doc}, intercepted: ${
             boolStr (e.intercepted or false)
           }},\n"
         ) flags

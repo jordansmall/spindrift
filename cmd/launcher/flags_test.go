@@ -1979,6 +1979,33 @@ func TestPrintHelpFull_ShowsContinuousFlag(t *testing.T) {
 	}
 }
 
+// Issue #3793: the Command flags block renders from cliFlags, so every row
+// (intercepted included, like the man page) has a described line.
+func TestPrintHelpFull_RendersEveryCliFlagRow(t *testing.T) {
+	var buf bytes.Buffer
+	printHelpFull(&buf)
+	lines := strings.Split(buf.String(), "\n")
+	for _, f := range cliFlags {
+		if f.doc == "" {
+			t.Errorf("cliFlags row --%s has no doc", f.flag)
+		}
+		var line string
+		for _, l := range lines {
+			if strings.HasPrefix(l, "  --"+f.flag) && strings.Contains(l, f.doc) {
+				line = l
+				break
+			}
+		}
+		if line == "" {
+			t.Errorf("full help has no line carrying --%s and its doc %q", f.flag, f.doc)
+			continue
+		}
+		if f.verb != "" && !strings.Contains(line, f.verb+" subcommand") {
+			t.Errorf("--%s line %q missing its %q verb note", f.flag, line, f.verb)
+		}
+	}
+}
+
 // Issue #2520 slice 2 added the generic choice-knob guard.
 func TestValidateChoice(t *testing.T) {
 	t.Run("valid value is a no-op", func(t *testing.T) {

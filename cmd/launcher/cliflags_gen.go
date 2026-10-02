@@ -4,15 +4,15 @@ package main
 // cliFlags is the non-schema flag table derived from lib/cli-flags.nix.
 // Regenerate with `nix run .#regen` after editing lib/cli-flags.nix.
 var cliFlags = []cliFlag{
-	{flag: "no-build", verb: "", arg: "", short: "", intercepted: false},
-	{flag: "yes", verb: "", arg: "", short: "", intercepted: false},
-	{flag: "force", verb: "", arg: "", short: "", intercepted: false},
-	{flag: "self-contained", verb: "", arg: "", short: "", intercepted: false},
-	{flag: "verbose", verb: "doctor", arg: "", short: "v", intercepted: false},
-	{flag: "butler", verb: "doctor", arg: "", short: "", intercepted: false},
-	{flag: "chore", verb: "butler", arg: "name", short: "", intercepted: false},
-	{flag: "help", verb: "", arg: "", short: "h", intercepted: true},
-	{flag: "all", verb: "", arg: "", short: "", intercepted: true},
-	{flag: "version", verb: "", arg: "", short: "", intercepted: true},
-	{flag: "secret-cmd", verb: "", arg: "command", short: "", intercepted: false},
+	{flag: "no-build", verb: "", arg: "", short: "", doc: "fail fast if the image is absent instead of building; pair with 'spindrift build' for split build/run flows", intercepted: false},
+	{flag: "yes", verb: "", arg: "", short: "", doc: "skip confirmation prompt when dispatching unlabeled issues (alias: --force)", intercepted: false},
+	{flag: "force", verb: "", arg: "", short: "", doc: "skip confirmation prompt when dispatching unlabeled issues (alias: --yes)", intercepted: false},
+	{flag: "self-contained", verb: "", arg: "", short: "", doc: "research only: review the issue from its body and comments alone, cloning no Target repo and needing no REPO_SLUG or GH_TOKEN", intercepted: false},
+	{flag: "verbose", verb: "doctor", arg: "", short: "v", doc: "show the full doctor report, every check and gate row, not just failures", intercepted: false},
+	{flag: "butler", verb: "doctor", arg: "", short: "", doc: "make doctor also validate the butler config (exit 2 on failure)", intercepted: false},
+	{flag: "chore", verb: "butler", arg: "name", short: "", doc: "sweep only the named butler Chore instead of the first due one", intercepted: false},
+	{flag: "help", verb: "", arg: "", short: "h", doc: "show usage and exit", intercepted: true},
+	{flag: "all", verb: "", arg: "", short: "", doc: "with --help, show the full reference: every subcommand, flag, and knob", intercepted: true},
+	{flag: "version", verb: "", arg: "", short: "", doc: "show version and exit", intercepted: true},
+	{flag: "secret-cmd", verb: "", arg: "command", short: "", doc: "templated fetch command for any secret with none of its own set; {name} substitutes the secret's kebab-case env name (sibling SECRET_CMD env var; lowest precedence)", intercepted: false},
 }

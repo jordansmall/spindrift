@@ -85,7 +85,8 @@ nix run .#regen
 `short` field on its long flag's row in `lib/cli-flags.nix`, never its own row
 and never only doc text; the completions and man page render it from there. An
 `intercepted = true` row marks a flag `mainRun` acts on before `parseFlags`
-runs, so the row feeds only completions and the man page.
+runs, so the row feeds only completions, the man page, and
+`spindrift --help --all`.
 
 The regenerator and the drift-guard checks share one renderer per artifact
 (`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
