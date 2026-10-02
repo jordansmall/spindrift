@@ -56,28 +56,42 @@ let
   # shared phrases differently, so a raw substring match would fail over line
   # breaks and case. Each call site's clauses are chosen not to straddle markdown
   # emphasis, so the skills' `**...**` wrappers need no stripping here.
+  # Skills and fallbacks also space the comparator differently ("≤ 50", "<=50",
+  # "subject≤50"), so every spelling folds to "≤" with no space on either side
+  # (issue #3486). replaceStrings tries its patterns in list order and never
+  # rescans its output, so " ≤ " must come before " ≤" and "≤ ".
   normalize =
     text:
     let
       words = builtins.filter (w: builtins.isString w && w != "") (builtins.split "[[:space:]]+" text);
     in
-    toLower (concatStringsSep " " words);
+    builtins.replaceStrings [ " ≤ " " ≤" "≤ " ] [ "≤" "≤" "≤" ] (
+      builtins.replaceStrings [ "<=" ] [ "≤" ] (toLower (concatStringsSep " " words))
+    );
 
   skillText = normalize (skillRowByName skillName).src;
   normalizedFallbackText = normalize fallbackText;
 
   remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
 
+  # `skillClause`/`fallbackClause` default to `clause`. Per-side wording exists
+  # because the two sides sometimes state one bound with no shared literal
+  # (skill "wrapped at 72", fallback "body ≤72"); the number must sit inside
+  # both needles so a one-sided bound change still goes red.
   clauseCheck = c: {
     name = "${skillName}-fragment-parity-clause-${c.name}";
     value =
       let
-        needle = normalize c.clause;
+        skillClause = c.skillClause or c.clause;
+        fallbackClause = c.fallbackClause or c.clause;
+        differs = skillClause != fallbackClause;
+        asFallback = pkgs.lib.optionalString differs " (as \"${fallbackClause}\")";
+        asSkill = pkgs.lib.optionalString differs " (as \"${skillClause}\")";
       in
-      assert assertMsg (hasInfix needle skillText)
-        "${skillName} fallback drift: ${skillDesc} no longer states \"${c.clause}\", which ${fallbackDesc} restates -- ${remedy}";
-      assert assertMsg (hasInfix needle normalizedFallbackText)
-        "${skillName} fallback drift: ${fallbackDesc} no longer states \"${c.clause}\", which ${skillDesc} teaches -- ${remedy}";
+      assert assertMsg (hasInfix (normalize skillClause) skillText)
+        "${skillName} fallback drift: ${skillDesc} no longer states \"${skillClause}\", which ${fallbackDesc} restates${asFallback} -- ${remedy}";
+      assert assertMsg (hasInfix (normalize fallbackClause) normalizedFallbackText)
+        "${skillName} fallback drift: ${fallbackDesc} no longer states \"${fallbackClause}\", which ${skillDesc} teaches${asSkill} -- ${remedy}";
       pkgs.runCommand "${skillName}-fragment-parity-clause-${c.name}" { } "touch $out";
   };
 
