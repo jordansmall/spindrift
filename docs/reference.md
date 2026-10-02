@@ -1525,7 +1525,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `DAEMON_APP`           | `.#`    | — (post-freeze; no legacy alias — set `dispatch.daemonApp`) | flake app attribute the daemon re-invokes for each child Dispatch, pinned to the fetched revision — the Consumer's own CLI app, e.g. `.#` or `.#dogfood-bwrap`; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host; read by the daemon, and by `spindrift butler` for the zone its daily budgets reset in — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
-| `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | how many of `MAX_PARALLEL`'s pool slots prefer research Dispatches over work — a floor, not a ceiling; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
+| `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | the minimum number of research Dispatches the daemon keeps running out of `MAX_PARALLEL`'s pool slots — a floor, not a ceiling; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_IDLE_FLOOR`    | `5m`    | — (post-freeze; no legacy alias — set `dispatch.daemonIdleFloor`) | wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_IDLE_CAP`      | `30m`   | — (post-freeze; no legacy alias — set `dispatch.daemonIdleCap`) | ceiling the daemon's per-kind idle backoff doubles up to, starting from `DAEMON_IDLE_FLOOR`; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start if the cap is below the floor; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_FAILURE_BACKOFF` | `1m`  | — (post-freeze; no legacy alias — set `dispatch.daemonFailureBackoff`) | wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
@@ -6231,25 +6231,31 @@ top-level status is how a reader tells the two apart, whether the pool
 is otherwise `asleep` or still `working` out a child started before the
 window shut.
 
-**Reservation.** `RESEARCH_RESERVATION` (default 1) is how many of the
-pool's `MAX_PARALLEL` slots prefer research over work (`slotOrder`,
-`cmd/launcher/internal/daemon/pool.go`). It is a floor, not a ceiling: a
-reserved slot takes research only while research actually has queued work,
-and either kind bursts into the whole pool the instant the other has
+**Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
+of research children the pool keeps running out of its `MAX_PARALLEL` slots
+(`chooseKind`, `cmd/launcher/internal/daemon/pool.go`). It is a floor, not a
+ceiling: research is preferred only while research actually has queued
+work, and either kind bursts into the whole pool the instant the other has
 backed off into an empty result — reserved capacity never sits idle
 waiting for work that isn't there. 0 is work-first, with research only on
 the leftovers; a value equal to `MAX_PARALLEL` is research-first. The
 reservation binds only while both kinds have work; the moment one runs dry
-every slot, reserved or not, is free to fill itself from the other. The
-preference itself is decided statically, per slot, from the slot's own
-index against the reservation (slot index below the reservation prefers
-research, the rest prefer work) rather than from a live count of who is
-currently running what — a static assignment makes the floor exact without
-lock-step counting across slots, and it means two slots picking a kind
-concurrently can never both claim the same reserved slot, since each
-computes its own answer from its own slot number alone. The knob is inert
-when the daemon's positional verb already restricts it to one kind (there
-is nothing to reserve slots *from*); a value above `MAX_PARALLEL` fails
+every slot is free to fill itself from the other. The preference comes
+from a live count of the research children currently running, re-evaluated
+each time a slot starts: while that count is below the reservation the
+starting slot prefers research, otherwise work. No slot is reserved for
+research, so the floor recovers on whichever slot turns over next rather
+than only when one fixed slot does (issue #3582) — a long work child on
+such a slot would otherwise leave the floor unfilled for its whole run. The
+kind is chosen in the same lock hold that marks the slot running, so two
+slots starting at once can never both take the last reserved seat, and
+nothing is claimed earlier, so a start abandoned before its child launches
+leaves nothing to clean up. Only running children count: research
+children that exit early (a run of exit-4 Continues, say) never lift the
+count, so research can take every turnover while work still has queued
+work. The knob is inert when the daemon's positional verb already
+restricts it to one kind (there is nothing to reserve research children
+*from*); a value above `MAX_PARALLEL` fails
 daemon startup the same way a non-positive `MAX_PARALLEL` does. At
 `MAX_PARALLEL=1` the default of 1 makes a dual-kind daemon research-first —
 its one slot always prefers research when research has work — so an
