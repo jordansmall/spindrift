@@ -4634,13 +4634,14 @@ and a bare citation in code or prose needs no grep to follow.
 `nix/checks/adr-numbers.nix` enforces it at Nix evaluation time —
 `adr-numbers-unique` fails on a shared prefix and
 `adr-numbers-well-formed` fails on an entry that is not a regular file
-named `NNNN-<slug>.md`, without which a badly named ADR would be skipped
-by the uniqueness pin's grouping rather than caught by it. Both reach the
-gate through `sourceChecks`, so `nix build .#checks-inbox` and `nix flake
-check` both carry them. Renumbering an ADR leaves a header note naming its
-old number: `CHANGELOG.md` is release-please-generated and is left as
-shipped, so its release notes keep citing whatever number the ADR was
-published under.
+named `NNNN-<slug>.md`, without which a badly named ADR would escape the
+uniqueness pin: that pin is handed only the well-formed regular files, so
+a malformed name is filtered out before the pin rather than caught by it.
+Both reach the gate through `sourceChecks`, so `nix build .#checks-inbox`
+and `nix flake check` both carry them. Renumbering an ADR leaves a
+header note naming its old number: `CHANGELOG.md` is
+release-please-generated and is left as shipped, so its release notes
+keep citing whatever number the ADR was published under.
 
 ---
 
