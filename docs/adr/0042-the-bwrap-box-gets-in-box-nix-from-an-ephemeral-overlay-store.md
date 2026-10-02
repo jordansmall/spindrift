@@ -163,9 +163,10 @@ mechanism for `PIDS_LIMIT` under bwrap, not one of two.
 `provisionCgroup` previously treated a failed `pids.max`/`memory.max` write,
 or a malformed `MEMORY_LIMIT`, the same as failing to create the cgroup
 directory at all: it removed the just-created dir and reported no cgroup,
-so the Box lost cgroup identity entirely — `IsRunning`/`ListRunning`/`Reap`,
-the `ErrAlreadyRunning` collision guard, and Console's orphan detection all
-stopped seeing it, on top of running that one limit uncapped. This
+so the Box lost cgroup identity entirely — `IsRunning`/`ListRunning`/`Reap`
+(`Reap` was later removed, issue #4164), the `ErrAlreadyRunning` collision
+guard, and Console's orphan detection all stopped seeing it, on top of
+running that one limit uncapped. This
 conflated two independent failures under one all-or-nothing response.
 
 The real-world trigger is an ordinary systemd user session: the launcher's
@@ -339,3 +340,48 @@ in-process guard therefore covers every caller that exists today; the
 cross-process case remains a latent gap that `findCgroupDir`'s
 whole-tree walk makes reachable in principle, should a future caller
 ever `Reap` a Box from a different process than the one that ran it.
+
+Superseded in part by the issue #4164 amendment below: `Reap` is gone, and
+the guard now protects `provisionCgroup`'s own leftover reclaim instead.
+
+## Amendment (issue #4164): provisionCgroup reclaims a leftover cgroup dir; Reap is removed
+
+`bwrapAdapter.Reap` never had a production caller, so the leftover it was
+written to clean up — an empty `spindrift-<box name>` directory from a
+launcher that died before `Run`'s deferred `removeCgroupDir` — was never
+cleaned up at all. Box names are deterministic per issue, so the next
+dispatch of that issue hit `EEXIST` at `provisionCgroup`'s `mkdir`, took
+the no-delegation path, and ran with no `pids.max`/`memory.max`, on every
+retry.
+
+`provisionCgroup` now handles `EEXIST` itself, at the exact path
+`cgroupDirForName` resolved. It removes the existing directory and retries
+the `mkdir` once only when nothing can own it: `cgroup.procs` reads empty,
+this `Run`'s own entry is the only one in the provisioning refcount, and no
+sibling `Run` for the name is still tracked in `running` (whether its Box is
+still live or has exited with its deferred removal not yet run). The check
+and the removal happen under `a.mu`; the retried `mkdir` does not need it.
+Any other case keeps the warn-and-degrade path. On real cgroupfs a resident
+process also makes the `rmdir` fail with `EBUSY`, so a live Box's directory
+is never removed even if the read races a PID write.
+
+The provisioning guard from the #2960 amendment stays, with a new job: it
+keeps this reclaim off a sibling in-process `Run`'s mid-launch directory,
+which has the same empty `cgroup.procs` a leftover has. `Run` now releases
+it after `trackRunning` rather than immediately after the `cgroup.procs`
+write, as the #2960 amendment describes, so a sibling's name is never left
+with neither a provisioning count nor a `running` entry — a gap that matters
+once a failed write can leave a live sibling's directory reading empty. Its
+cross-process gap carries over unchanged: a second launcher process's
+mid-launch directory is still reclaimable here, and the label claim is what
+keeps two launchers off the same issue.
+
+Calling `Reap` from `Run` was rejected. `Reap` returns early for a name
+still provisioning, so it would have to run before `beginProvisioning`; it
+resolves through `findCgroupDir`'s whole-tree walk, whose first match is not
+necessarily the directory `provisionCgroup` is about to create; and it holds
+`a.mu` across two such walks, a cost that would then sit on every launch.
+With the reclaim local to `provisionCgroup`, nothing called `Runner.Reap`
+through the interface, so the method is removed. The OCI adapter keeps its
+exited-container removal as a private helper called from `ociAdapter.Run`,
+and the bwrap and bwrap-build implementations are deleted.
