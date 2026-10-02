@@ -1169,6 +1169,39 @@ func TestBuildSkippedIssuesSection_LoneCRTitleTruncated(t *testing.T) {
 	}
 }
 
+// A DupRef carrying a line break renders as a single bullet: the render
+// site guards itself rather than relying on the producer's %q (issue #3835).
+func TestBuildSkippedIssuesSection_MultiLineDupRefTruncated(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug", Skipped: true, DupRef: "#1, this run's \"x\"\n## forged"},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if strings.Contains(got, "## forged") {
+		t.Errorf("section = %q, want the DupRef truncated at its first newline", got)
+	}
+	if !strings.HasSuffix(got, "\n\n- **fix(x): bug** — already tracked: #1, this run's \"x\"") {
+		t.Errorf("section = %q, want a single bullet holding the DupRef's first line", got)
+	}
+}
+
+// A DupRef forged with a lone CR renders as a single bullet (issue #3835).
+func TestBuildSkippedIssuesSection_LoneCRDupRefTruncated(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "fix(x): bug", Skipped: true, DupRef: "#1, this run's \"x\"\r## forged"},
+	}
+
+	got := buildSkippedIssuesSection(filed)
+
+	if strings.ContainsRune(got, '\r') || strings.Contains(got, "## forged") {
+		t.Errorf("section = %q, want the DupRef truncated at its first CR", got)
+	}
+	if !strings.HasSuffix(got, "\n\n- **fix(x): bug** — already tracked: #1, this run's \"x\"") {
+		t.Errorf("section = %q, want a single bullet holding the DupRef's first line", got)
+	}
+}
+
 // A filed list with no skips renders no skipped section at all.
 func TestBuildSkippedIssuesSection_NoSkips(t *testing.T) {
 	filed := []filedIntent{

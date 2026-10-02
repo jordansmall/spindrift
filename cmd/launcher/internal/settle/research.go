@@ -157,7 +157,7 @@ func buildSkippedIssuesSection(filed []filedIntent) string {
 			continue
 		}
 		title := escapeMarkdownLinkText(firstLine(f.Title))
-		ref := escapeMarkdownLinkText(f.DupRef)
+		ref := escapeMarkdownLinkText(firstLine(f.DupRef))
 		lines = append(lines, fmt.Sprintf("- **%s** — already tracked: %s", title, ref))
 	}
 	if len(lines) == 0 {
