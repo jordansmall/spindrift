@@ -366,7 +366,7 @@ phase_registry_proxy_bindings() {
 
 # intree_binding_apply wraps `driver-exec bind-registry`'s in-tree apply mode for
 # npm, yarn and pnpm under $WORK_DIR (cargo retired, issue #3201; logic and the
-# cargo#5416/ADR 0044 rationale in ApplyInTreeBinding). The same call renders
+# ADR 0044 rationale in ApplyInTreeBinding). The same call renders
 # $CARGO_HOME/config.toml, whose placeholder exports ride the sourced env file.
 # On failure it reverts, leaving no partial apply on disk (issues #2932, #3027).
 intree_binding_apply() {
@@ -1086,9 +1086,10 @@ main() {
     _use_dev_shell=0
   else
     clone_repo
-    # In-tree binding runs right after clone_repo; the Go engine's row table
-    # covers all four ecosystems (issues #2932, #2933). See the revert/re-apply
-    # dance around phase_branch_recovery/phase_prework_rebase just below.
+    # In-tree binding runs right after clone_repo; the Go engine's in-tree
+    # rows cover npm, yarn and pnpm, cargo as intree_binding_apply's header
+    # says (issues #2932, #2933). See the revert/re-apply dance around
+    # phase_branch_recovery/phase_prework_rebase just below.
     intree_binding_apply
     # An advise-only dispatch (research today, ADR 0022, issue #640) explores
     # the clone but never lands code: no branch to cut, adopt, or rebase, so

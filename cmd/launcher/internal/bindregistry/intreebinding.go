@@ -157,9 +157,11 @@ func replaceAllFold(s, old, repl string) string {
 
 // ApplyInTreeBinding rewrites row's in-tree config file, when it exists and is
 // git-tracked, so references to any rewrites' UpstreamHost point at that
-// entry's LocalURL. Cargo has no config-time env-var substitution for a
-// registry URL (cargo#5416), so the value has to be edited into the tracked
-// file itself (ADR 0044).
+// entry's LocalURL. row is one of InTreeBindings()'s: tracked config that
+// would otherwise take precedence over an env override (ADR 0044), or that
+// says what one cannot (a per-scope .npmrc registry, .yarnrc.yml's npmScopes,
+// pnpm-workspace.yaml's registries; ADR 0044's yarn and pnpm updates), so the
+// value has to be edited into the tracked file itself.
 func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrite) (ApplyOutcome, error) {
 	// Internal-consistency guards, not operator-facing outcomes: the verb layer
 	// already drops any route with no upstream host or a host shared with
