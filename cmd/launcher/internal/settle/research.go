@@ -195,13 +195,18 @@ func firstLine(s string) string {
 	return s
 }
 
+// markdownLinkTextEscaper escapes backslashes and brackets in a single pass,
+// so the backslashes it adds before brackets are not re-escaped.
+var markdownLinkTextEscaper = strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]")
+
 // escapeMarkdownLinkText escapes s for rendering inside a Markdown bullet --
 // as link text, as bold text, as a bare dedup reference, or as a failed
 // intent's body line: each of those is agent-chosen, and an unescaped bracket
-// breaks the surrounding syntax.
+// breaks the surrounding syntax. A backslash is escaped too: left raw, one
+// before a bracket would escape the escaping backslash and re-open the
+// bracket as a live link (issue #4219).
 func escapeMarkdownLinkText(s string) string {
-	s = strings.ReplaceAll(s, "[", "\\[")
-	return strings.ReplaceAll(s, "]", "\\]")
+	return markdownLinkTextEscaper.Replace(s)
 }
 
 // commentFailureNote distinguishes "the Box never emitted a comment line" from
