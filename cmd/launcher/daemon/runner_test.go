@@ -503,14 +503,44 @@ const envDumpScript = `{ echo "MODEL=${MODEL-<unset>}"; echo "PATH=${PATH-<unset
 // TestRunChild_EnvStripsKnobsKeepsSecrets and
 // TestRunDoctor_EnvStripsKnobsKeepsSecrets below: the daemon-side knob
 // MODEL must never reach the child, while a non-knob (PATH) and a
-// secret-shaped var (GH_TOKEN) must pass through untouched.
+// secret-shaped var (GH_TOKEN) must pass through untouched. A mismatch
+// never prints a GH_TOKEN value: a child that execs with the raw process
+// env instead of the fixture carries the live token into the test log.
 func assertEnvStripsKnobsKeepsSecrets(t *testing.T, dumped string) {
 	t.Helper()
 	got := strings.Split(strings.TrimRight(dumped, "\n"), "\n")
 	want := []string{"MODEL=<unset>", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("child env = %v, want %v", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("child env dump keys = %v, want %v", envDumpKeys(got, want), envDumpKeys(want, want))
 	}
+	for i, w := range want {
+		if got[i] == w {
+			continue
+		}
+		if key, val, _ := strings.Cut(got[i], "="); key == "GH_TOKEN" && val != "<unset>" {
+			t.Errorf("child env line %d = %q, want %q", i, "GH_TOKEN=<redacted>", w)
+			continue
+		}
+		t.Errorf("child env line %d = %q, want %q", i, got[i], w)
+	}
+}
+
+// envDumpKeys names each dumped line by its key, or "?" for a line whose
+// key is not one want expects: a value carrying a newline splits into
+// extra lines, and a fragment of a live token must not reach the log.
+func envDumpKeys(got, want []string) []string {
+	keys := make([]string, len(got))
+	for i, line := range got {
+		key, _, _ := strings.Cut(line, "=")
+		keys[i] = "?"
+		for _, w := range want {
+			if strings.HasPrefix(w, key+"=") {
+				keys[i] = key
+				break
+			}
+		}
+	}
+	return keys
 }
 
 // TestRunChild_EnvStripsKnobsKeepsSecrets drives the exec seam with a
