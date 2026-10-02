@@ -94,7 +94,7 @@ func childStartSlots(t *testing.T, events []Event) []int {
 	return slots
 }
 
-// siblingSlot is the other slot in the two-slot failure tests below:
+// siblingSlot is the other slot in the two-slot tests below:
 // leadSlot starts out holding the baton, so slot 1 is the one that parks
 // on it and the one a release must hand off to.
 const siblingSlot = 1
@@ -119,34 +119,6 @@ const siblingSlot = 1
 // rather than letting it start anything.
 func pinTheFailingHolder(clk *testClock) {
 	clk.park()
-}
-
-// awaitSiblingStart drains starts until siblingSlot's own round begins,
-// handing each further round leadSlot wins the same again result. It
-// returns with siblingSlot's child in flight, for the caller to release.
-//
-// The two no-work tests below use this rather than pinning the very next
-// start, because on a Wait exit the holder loops straight back around
-// with nothing to block it — no backoff sleep for pinTheFailingHolder to
-// park — and the pool deliberately has no FIFO waiter queue (issue
-// #3684), so awaitBaton's non-blocking receive lets a holder that has
-// just passed the baton re-take it from the buffer before a sibling that
-// has already emitted baton_hold reaches its own blocking receive.
-// Asserting "the next child is the sibling's" there would assert fairness
-// the design does not claim, and it flaked accordingly. What the design
-// does guarantee, and what this pins, is that the sibling is never
-// stranded: the baton reaches it.
-func awaitSiblingStart(t *testing.T, r *scriptedRunner, again ChildResult) {
-	t.Helper()
-	const rounds = 8
-	for i := 0; i < rounds; i++ {
-		slot := r.awaitStart(t)
-		if slot == siblingSlot {
-			return
-		}
-		r.releaseSlot(t, slot, again)
-	}
-	t.Fatalf("slot %d never started across %d rounds: the holder monopolised the baton rather than passing it on", siblingSlot, rounds)
 }
 
 // TestPoolBatonSerializesDiscoveryOnColdStart pins issue #3684's AC1: at
@@ -360,20 +332,24 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 // empty-queue result would let one slot's dry queue stall its sibling's
 // discovery too.
 //
-// cfg carries a second Kind, Research, alongside Dispatch: exit 2 gates
-// Dispatch's own kindBackoff (loop.go's Wait case), and that backoff is
-// pool-wide, not per-slot (issue #3541) — with only one configured Kind the
-// sibling's very next pickKind would find it gated too and bounce the baton
-// straight back rather than starting its own child, which is not the
-// property this test pins. A second, ungated Kind gives the sibling
-// somewhere to go.
+// The clock is parked so the holder cannot re-take its own baton: the pool
+// has no FIFO waiter queue (issue #3684), so nothing else stops it. This is
+// pinTheFailingHolder's move, applied to the idle branch rather than
+// backoffOrHalt. runSlot picks a Kind *before* awaitBaton, so the sibling
+// picked Dispatch at cold start, while still ungated, and parks on
+// baton_hold holding that choice;
+// nothing re-picks once the baton reaches it. The holder is the one that
+// re-picks: exit 2 gates Dispatch's pool-wide kindBackoff (issue #3541), so
+// with the lone configured Kind it takes the batonPassIdle branch and
+// blocks in idleSleep on the parked clock until Loop's halt cancels ctx.
+// The next start is therefore the sibling's, deterministically.
 func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
 	clk := &testClock{}
+	clk.park()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -389,7 +365,9 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 
 	r.releaseSlot(t, leadSlot, ChildResult{Exit: 2})
 
-	awaitSiblingStart(t, r, ChildResult{Exit: 2})
+	if got := r.awaitStart(t); got != siblingSlot {
+		t.Fatalf("next slot to start = %d, want %d: the sibling parked on the baton, not the holder re-acquiring", got, siblingSlot)
+	}
 
 	r.releaseSlot(t, siblingSlot, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
@@ -408,17 +386,17 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 // same post-RunChild release site — the baton must move on both alike, not
 // just the plain empty-queue case.
 //
-// cfg carries a second Kind for the same reason as
-// TestPoolBatonPassesOnQueueEmptyChildEnd: exit 3 gates Dispatch's own
-// pool-wide kindBackoff too, so a lone Kind would bounce the baton straight
-// back to the holder instead of letting the sibling start its own child.
+// The clock is parked for the same reason as in
+// TestPoolBatonPassesOnQueueEmptyChildEnd: exit 3 gates Dispatch's
+// pool-wide kindBackoff too, so the holder's re-pick sleeps on the parked
+// clock and cannot re-take the baton ahead of the sibling.
 func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 	const slots = 2
 	cfg := testConfig(slots)
-	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
 	clk := &testClock{}
+	clk.park()
 	nw := newNotifyWriter()
 	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
 
@@ -434,7 +412,9 @@ func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 
 	r.releaseSlot(t, leadSlot, ChildResult{Exit: 3})
 
-	awaitSiblingStart(t, r, ChildResult{Exit: 3})
+	if got := r.awaitStart(t); got != siblingSlot {
+		t.Fatalf("next slot to start = %d, want %d: the sibling parked on the baton, not the holder re-acquiring", got, siblingSlot)
+	}
 
 	r.releaseSlot(t, siblingSlot, ChildResult{Exit: 5})
 	reason := awaitHalt(t, r, done)
