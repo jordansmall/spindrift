@@ -362,10 +362,14 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	// promise true.
 	cmd.Env = childCmd.Env
 	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
-	// group (daemon, nix run, launcher); the daemon only treats SIGTERM as
-	// a drain request (see forwardSignals below), so without this the group
-	// signal would kill the child outright and abandon a running Box
-	// mid-flight — exactly what issue #3538 forbids. Same reasoning as
+	// group (daemon, nix run, launcher). The daemon catches SIGINT and
+	// SIGTERM alike (stopsignal.Notify) and forwardSignals below relays a
+	// SIGTERM of its own, so without this one Ctrl-C would reach the child
+	// twice: the group SIGINT plus the forwarded SIGTERM, distinct signal
+	// numbers that can't coalesce (see forwardSignals). The child's
+	// stopsignal.Relay counts deliveries, not kinds, so it would escalate
+	// straight past the drain to abort a running Box mid-flight — exactly
+	// what issue #3538 forbids. Same group isolation as
 	// internal/runner/nixrealize.go's background `nix build` fork; see
 	// "Background realize process isolation" in docs/reference.md.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
