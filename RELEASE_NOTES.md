@@ -9,6 +9,51 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.21.2 — 2026-10-02
+
+A broad bug-fix sweep across the Console, the daemon, settle, and registry
+routes, plus a batch of security tightening.
+
+No breaking changes.
+
+- **Re-dispatches see the latest issue text.** The Console and the
+  continuous refill loop used to reuse an issue's text from its first
+  dispatch, so a researcher re-running an `unclear` issue never saw the
+  answers you'd added. Each dispatch now reads the issue fresh. Custom
+  `RESEARCH_VERDICTS` also now reach the Box, and the verdict set the
+  researcher reports against follows your configuration.
+- **Console picks behave.** Re-picking an issue that already finished
+  shows it as running and closes the picker, a pick number always lands
+  on the newest row, and Terminate on a research or butler pick stops the
+  right kind of run. A stop signal that arrives while the Console is
+  shutting down no longer kills the launcher mid-cleanup and orphans
+  running Boxes.
+- **The daemon reports what's really going on.** `status` no longer shows
+  a killed daemon as live during a successor's startup, no longer hides a
+  jam behind a sibling that's busy resolving, and says so when the Awake
+  schedule can't find a future window instead of promising a reopening
+  that will never happen.
+- **No double fix passes.** Settle skips a fix pass or conflict resolve
+  that's already in flight instead of starting a second one on the same
+  PR.
+- **bwrap resource limits stick.** A launcher that died mid-run left an
+  empty cgroup behind, and every later run of that issue quietly lost its
+  pids and memory limits. The leftover is now reclaimed when nothing owns
+  it.
+- **Registry routes are more forgiving and more careful.** Route hosts
+  match case-insensitively, cargo credentials are only set up when the
+  cargo ecosystem is in use, a malformed route reports its own error
+  first, and an ambiguous discovery error now prints the discover report
+  so you can pick. The registry proxy refuses to open a TCP path under
+  `NETWORK_MODE=no-host-loopback` or `none` rather than quietly bypassing
+  the mode, and caps how many connections it accepts.
+- **Smaller security fixes.** The daemon strips credentials embedded in
+  URLs from child output, filed issue titles are cut to their first line,
+  and Markdown in a failed run's summary is escaped before it's posted.
+  On the CLI side, flags before the verb now parse, `--self-contained`
+  shows up in `research` help, and duplicate `BUTLER_CHORES` names are
+  rejected at startup.
+
 ## 0.21.1 — 2026-10-01
 
 Hardening for the new butler patches, plus fewer duplicate issues from the
