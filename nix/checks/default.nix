@@ -98,9 +98,8 @@ let
   # Checks that realize the OCI image, directly or by asserting facts about the
   # box's own baked toolchain. Re-running them inside the box built from that
   # image is redundant and heavy (issue #581), so `checks-inbox` excludes them
-  # while `checks` keeps them for CI's pre-dispatch gate. Each bats-shard-N
-  # (issue #2648) carries the same image dependency.
-  imageOnlyCheckNames = batsShardNames ++ [
+  # while `checks` keeps them for CI's pre-dispatch gate.
+  imageOnlyCheckNames = [
     "nil-baked-in-dogfood"
     "bats-baked-in-dogfood"
     "shellcheck-baked-in-dogfood"
@@ -116,8 +115,8 @@ let
   # bwrapHarness.packages lacks agent-closure and its own assert throws.
   checksInboxSet = removeAttrs portableSourceChecks imageOnlyCheckNames;
 
-  # A narrower axis than imageOnlyCheckNames: source checks whose build closure
-  # embeds the aarch64-linux image through the bats harness internals
+  # A narrower axis than imageOnlyCheckNames: source checks that depend on the
+  # bats harness internals, e.g. the Linux-twin driverExecBin build
   # (issue #2648, issue #2354). mkHarness.nix always instantiates pkgs for the
   # Linux twin of the host system, so a darwin eval still demands a Linux
   # builder and fails with "Required system: aarch64-linux".

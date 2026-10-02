@@ -1571,10 +1571,10 @@ not a valid anchor, so it does not rescue visibility on such a host.
 The bats test suite has its own internal `WAIT_FOR_LOG_LINES_TIMEOUT` knob
 (`tests/helper.bash`'s `wait_for_log_lines` poll helper) for widening its
 default poll patience against a loaded host — a test-only bash env var, not
-part of the Consumer settings surface above. The `bats` check
-(`nix/checks/bats.nix`), excluded from `nix build .#checks-inbox` (it builds
-the OCI image) but run by `nix flake check`, bakes a wider default (10s, vs.
-the shell-level 2s default).
+part of the Consumer settings surface above. The `bats-shard-N`
+checks (`nix/checks/bats.nix`), run by both `nix build .#checks-inbox` and
+`nix flake check`, bake a wider default (10s, vs. the shell-level 2s
+default).
 
 #### Network mode (`NETWORK_MODE`)
 
