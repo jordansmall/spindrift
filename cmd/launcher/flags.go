@@ -247,15 +247,24 @@ type subcommandEntry struct {
 	doc   string
 }
 
-// verbSoFar returns the verb parseFlags has accumulated into remaining so
-// far — the first token that isn't itself a "--"-prefixed flag — or "" if no
-// verb has appeared yet. Dispatch-only booleans like --no-build pass through
-// into remaining ahead of the verb, so the verb is not always remaining[0].
-func verbSoFar(remaining []string) string {
-	for _, tok := range remaining {
+// verbIndex returns the index of the verb in args — the first token that
+// isn't itself a "--"-prefixed flag — or -1 if args has no verb.
+// Dispatch-only booleans like --no-build pass through ahead of the verb, so
+// the verb is not always args[0].
+func verbIndex(args []string) int {
+	for i, tok := range args {
 		if !strings.HasPrefix(tok, "--") {
-			return tok
+			return i
 		}
+	}
+	return -1
+}
+
+// verbSoFar returns the verb parseFlags has accumulated into remaining so
+// far, or "" if none has appeared yet.
+func verbSoFar(remaining []string) string {
+	if i := verbIndex(remaining); i >= 0 {
+		return remaining[i]
 	}
 	return ""
 }
