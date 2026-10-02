@@ -355,19 +355,37 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		if !strings.Contains(relaySocketRecap, wantUntouchedSurface) {
 			t.Errorf("file-issues-relay-socket.md missing the untouched-surface category: want it to contain %q", wantUntouchedSurface)
 		}
+	})
 
-		const recapEndMarker = "do not re-file what you just fixed or dropped."
-		directEnd := strings.Index(directRecap, recapEndMarker)
-		relayEnd := strings.Index(relayRecap, recapEndMarker)
-		relaySocketEnd := strings.Index(relaySocketRecap, recapEndMarker)
-		if directEnd == -1 || relayEnd == -1 || relaySocketEnd == -1 {
-			t.Fatalf("file-issues fragment missing its own recap end marker (direct found=%v, relay found=%v, relay-socket found=%v)", directEnd != -1, relayEnd != -1, relaySocketEnd != -1)
+	t.Run("FILE ISSUES fragments share a byte-identical head", func(t *testing.T) {
+		// The shared head is the triage recap plus the filer-provisioning
+		// sentence up to its provenance clause (issue #3827). That clause is
+		// the first divergence: only the direct carrier can ever hold a PR
+		// URL, so the read-only relay carriers offer the branch alone (issue
+		// #3826).
+		const sharedHeadEndMarker = "the issue number, and the branch"
+		fragments := []struct{ name, tail string }{
+			{"file-issues-direct.md", " (or PR URL, once one is open) for provenance."},
+			{"file-issues-relay.md", " for provenance."},
+			{"file-issues-relay-socket.md", " for provenance."},
 		}
-		directHead := directRecap[:directEnd+len(recapEndMarker)]
-		relayHead := relayRecap[:relayEnd+len(recapEndMarker)]
-		relaySocketHead := relaySocketRecap[:relaySocketEnd+len(recapEndMarker)]
-		if directHead != relayHead || directHead != relaySocketHead {
-			t.Errorf("file-issues-direct.md, file-issues-relay.md, and file-issues-relay-socket.md diverge on their shared triage recap:\ndirect:\n%s\n\nrelay:\n%s\n\nrelay-socket:\n%s", directHead, relayHead, relaySocketHead)
+		heads := make([]string, len(fragments))
+		for i, f := range fragments {
+			text := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/"+f.name))
+			end := strings.Index(text, sharedHeadEndMarker)
+			if end == -1 {
+				t.Fatalf("%s missing the shared-head end marker %q", f.name, sharedHeadEndMarker)
+			}
+			end += len(sharedHeadEndMarker)
+			heads[i] = text[:end]
+			if !strings.HasPrefix(text[end:], f.tail) {
+				t.Errorf("%s provenance clause: want %q followed by %q", f.name, sharedHeadEndMarker, f.tail)
+			}
+		}
+		for i := 1; i < len(heads); i++ {
+			if heads[i] != heads[0] {
+				t.Errorf("%s and %s diverge on their shared head:\n%s:\n%s\n\n%s:\n%s", fragments[0].name, fragments[i].name, fragments[0].name, heads[0], fragments[i].name, heads[i])
+			}
 		}
 	})
 }
