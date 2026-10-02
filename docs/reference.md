@@ -3516,17 +3516,18 @@ combined comment host-side in one call, so the researcher never fabricates
 an issue URL itself. An intent the host-side dedup check (dedup.go, issue
 #3609) matches against an already-filed finding — open or closed (issue
 #3873) — is never filed at all, and gets its own "## Skipped
-(deduplicated)" section instead, naming what it matched — the matched
-issue's number, or the title of a peer this same run filed moments earlier
-— so a run where every finding dedups still says so
-in the posted comment, rather than appending nothing (issue #3811); the
-work path posts that same section as a standalone comment of its own,
-since gate.go has no filed-issues comment to append it to, so a dedup skip
-is visible in the tracker artifact on both paths. Without the Filer
-provisioned, the filing step and its "plus, when the Filer is provisioned"
-closing reference both vanish from both research prompts, and the verdict
-comment posts directly from the Box as always — the filing step and the
-relay-comment change are both gated purely on Filer presence.
+(deduplicated)" section instead, naming every reference it matched, possibly
+several and of either kind in one line — matched issue numbers, and/or
+titles of peers this same run filed moments earlier — so a run where every
+finding dedups still says so in the posted comment, rather than appending
+nothing (issue #3811); the work path posts that same section as a
+standalone comment of its own, since gate.go has no filed-issues comment to
+append it to, so a dedup skip is visible in the tracker artifact on both
+paths. Without the Filer provisioned, the filing step and its "plus, when
+the Filer is provisioned" closing reference both vanish from both research
+prompts, and the verdict comment posts directly from the Box as always — the
+filing step and the relay-comment change are both gated purely on Filer
+presence.
 
 Override the filer's system prompt the same way as `scoutPrompt`/
 `reviewPrompt`: the `filerPrompt` `mkHarness` argument (image rebuild), or

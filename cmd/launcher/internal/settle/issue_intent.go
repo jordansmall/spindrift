@@ -115,10 +115,15 @@ type filedIntent struct {
 	Failed  bool
 	Body    string
 	Skipped bool
-	// DupRef is matchDedup's reference -- "#123" for a backlog match, or
-	// this run's "<title>" for an intra-run match -- carried onto a Skipped
-	// entry so a verdict-comment renderer can name what it matched (issue
-	// #3811), rather than that reference only ever reaching stdout.
+	// DupRef is a comma-joined, display-only list of every reference
+	// covering the intent -- each "#<number>" (an open or closed backlog
+	// finding issue) or this run's "<title>" (an intent this run filed,
+	// matched exactly or by overlapping line range), possibly mixed in one
+	// value -- so a Skipped entry can name what it matched (issue #3811).
+	// It is a string, not a typed reference set, because its one renderer,
+	// buildSkippedIssuesSection, never branches on kind; split it only for
+	// a renderer that must treat a backlog "#<number>" differently from a
+	// this-run peer (issue #3831).
 	DupRef string
 }
 
@@ -198,8 +203,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		ov := matchDedup(dedupIndex, keys)
 		if ov.full {
 			// Every covering ref, not just the first: per-site dedup lets
-			// several issues jointly cover one intent, so a DupRef naming
-			// one of them would point a reader at a partial answer.
+			// several references -- backlog issues, this run's peers, or
+			// both -- jointly cover one intent, so a DupRef naming one of
+			// them would point a reader at a partial answer.
 			ref := strings.Join(ov.refs, ", ")
 			fmt.Printf("    #%s  skipped duplicate issue-intent: %q (already tracked: %s)\n", num, in.Title, ref)
 			out = append(out, filedIntent{Title: in.Title, Skipped: true, DupRef: ref})
