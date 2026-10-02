@@ -678,17 +678,20 @@ func TestRouteLogHandler_LearnEmptyPathNormalizesToRoot(t *testing.T) {
 // Drives the dl rewrite through a real bindregistry.NewTCPForwarder in front
 // of the gated TCP listener, unlike
 // TestHostRooted_ConfigJSONRewrittenPerCargoIndexBase above, which sets
-// req.Host by hand.
+// req.Host by hand, then asserts the same download sent straight to the
+// listener, without the Forwarder, is refused with 401.
 func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing.T) {
 	const secret = "s3kr1t-e2e-secret"
 	const crateBody = "crate-bytes-for-foo"
+	const dlPath = "/api/v1/crates-a"
+	const cratePath = dlPath + "/foo-1.0.0.crate"
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/index-a/config.json":
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com/api/v1/crates-a"}`))
-		case "/api/v1/crates-a/foo-1.0.0.crate":
+			_, _ = w.Write([]byte(`{"dl":"https://crates.example.com` + dlPath + `"}`))
+		case cratePath:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(crateBody))
 		default:
@@ -742,12 +745,12 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 		t.Fatalf("ReadAll(config.json): %v", err)
 	}
 
-	wantDL := "http://" + forwarderHost + "/" + prefix + "/api/v1/crates-a"
+	wantDL := "http://" + forwarderHost + "/" + prefix + dlPath
 	if got, want := string(configBody), `{"dl":"`+wantDL+`"}`; got != want {
 		t.Fatalf("config.json: body = %s, want %s", got, want)
 	}
 
-	downloadResp, err := http.Get(wantDL + "/foo-1.0.0.crate")
+	downloadResp, err := http.Get(wantDL + strings.TrimPrefix(cratePath, dlPath))
 	if err != nil {
 		t.Fatalf("http.Get(download): %v", err)
 	}
@@ -761,6 +764,16 @@ func TestHostRooted_ConfigJSONDLNamesForwarderThroughGatedTCPListener(t *testing
 	}
 	if string(body) != crateBody {
 		t.Errorf("download body = %q, want %q", string(body), crateBody)
+	}
+
+	// Negative control: skipping the Forwarder means no TCP secret header.
+	directResp, err := http.Get("http://" + p.Addr().String() + "/" + prefix + cratePath)
+	if err != nil {
+		t.Fatalf("http.Get(direct): %v", err)
+	}
+	defer directResp.Body.Close()
+	if directResp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("direct: status = %d, want %d", directResp.StatusCode, http.StatusUnauthorized)
 	}
 }
 
