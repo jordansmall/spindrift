@@ -617,3 +617,17 @@ func TestSubjectKeyAndTitle(t *testing.T) {
 		})
 	}
 }
+
+// RESEARCH_VERDICTS is JSON; the Box derives the research prompt's status enum
+// from it (issue #4159), so quotes and spaces must reach the Box unmangled.
+func TestBuildBoxEnvForwardsResearchVerdictsJSONVerbatim(t *testing.T) {
+	const verdicts = `[{"verdict":"accept","label":"l-accept","description":"a b"}]`
+	t.Setenv("RESEARCH_VERDICTS", verdicts)
+
+	cfg := Config{BoxEnvVars: "RESEARCH_VERDICTS"}
+	env := mustBuildBoxEnv(t, cfg, "7", "Test issue", 0, "", "")
+
+	if env["RESEARCH_VERDICTS"] != verdicts {
+		t.Errorf("RESEARCH_VERDICTS: got %q, want %q", env["RESEARCH_VERDICTS"], verdicts)
+	}
+}
