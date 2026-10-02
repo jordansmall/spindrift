@@ -209,17 +209,13 @@ func refList(nums []string, sources map[string]forge.DepSource) string {
 func (q *Queue) tryMarkClaiming(num string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	for i := len(q.picks) - 1; i >= 0; i-- {
-		if q.picks[i].Number == num {
-			if q.picks[i].State != PickQueued && q.picks[i].State != PickHeld {
-				return false
-			}
-			q.picks[i].State = PickClaiming
-			q.picks[i].BlockedBy = ""
-			return true
-		}
+	i := q.newestIndex(num)
+	if i < 0 || (q.picks[i].State != PickQueued && q.picks[i].State != PickHeld) {
+		return false
 	}
-	return false
+	q.picks[i].State = PickClaiming
+	q.picks[i].BlockedBy = ""
+	return true
 }
 
 // setState updates the newest pick numbered num in place. A terminated pick's
@@ -230,14 +226,34 @@ func (q *Queue) tryMarkClaiming(num string) bool {
 func (q *Queue) setState(num string, state PickState, reason string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if i := q.newestIndex(num); i >= 0 {
+		q.picks[i].State = state
+		q.picks[i].Reason = reason
+		q.picks[i].BlockedBy = ""
+	}
+}
+
+// newest returns the newest pick numbered num, the live claim (see setState).
+func (q *Queue) newest(num string) (Pick, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if i := q.newestIndex(num); i >= 0 {
+		return q.picks[i], true
+	}
+	return Pick{}, false
+}
+
+// newestIndex returns the index of the newest pick numbered num, or -1. Caller
+// holds q.mu. It scans back-to-front because a terminated pick's row is never
+// removed, so a re-pick appends a second row and only the newest is the live
+// claim.
+func (q *Queue) newestIndex(num string) int {
 	for i := len(q.picks) - 1; i >= 0; i-- {
 		if q.picks[i].Number == num {
-			q.picks[i].State = state
-			q.picks[i].Reason = reason
-			q.picks[i].BlockedBy = ""
-			return
+			return i
 		}
 	}
+	return -1
 }
 
 func (q *Queue) dissolve(num, reason string) {

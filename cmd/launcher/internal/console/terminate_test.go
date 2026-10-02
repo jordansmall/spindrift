@@ -39,20 +39,7 @@ func newTermTestLauncher(t *testing.T) (launch *Launcher, fc *forge.Fake, fr *ru
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"agent-in-progress"}})
 
-	dir = t.TempDir()
-	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	drv, err := driver.New("")
-	if err != nil {
-		t.Fatalf("driver.New: %v", err)
-	}
-	fr = runner.NewFake()
-	factory, err := dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
-	if err != nil {
-		t.Fatalf("dispatch.NewFactory: %v", err)
-	}
-	t.Cleanup(factory.Cleanup)
+	factory, fr, dir := newTermFactory(t)
 
 	s := settle.New(settle.Config{
 		MergeMode:     "manual",
@@ -427,5 +414,159 @@ func TestLauncher_registry_UsesSettlersOwnRegistry(t *testing.T) {
 	st.Registry().Mark("43")
 	if !launch.registry().Marked("43", gen43) {
 		t.Error("Console registry: want #43 marked through the settler's handle")
+	}
+}
+
+// newTermFactory builds a Factory on its own runner.Fake, so a test can tell
+// which of two Factories a Terminate reaped through.
+func newTermFactory(t *testing.T) (factory *dispatch.Factory, fr *runner.Fake, dir string) {
+	t.Helper()
+	dir = t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr = runner.NewFake()
+	factory, err = dispatch.NewFactory(dispatch.Config{}, dir, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatalf("dispatch.NewFactory: %v", err)
+	}
+	t.Cleanup(factory.Cleanup)
+	return factory, fr, dir
+}
+
+func newResearchFake(nums ...string) *forge.Fake {
+	rf := forge.NewFake(forge.ResearchDispatchLabels())
+	for _, n := range nums {
+		rf.SetIssue(forge.Issue{Number: n, Title: "research it", Labels: []string{"agent-research-in-progress"}})
+	}
+	return rf
+}
+
+// TestLauncher_Terminate_ResearchPick_RoutesToResearchStack pins that a
+// running research pick is reclaimed through the research tracker and reaped
+// by the research Factory, whichever tracker the caller passes (issue #4148),
+// and that its comment never invents a branch note: research is advise-only.
+func TestLauncher_Terminate_ResearchPick_RoutesToResearchStack(t *testing.T) {
+	launch, fc, workRunner, _ := newTermTestLauncher(t)
+	rf := newResearchFake("42")
+	rFactory, researchRunner, _ := newTermFactory(t)
+	launch.ResearchTracker = rf
+	launch.ResearchFactory = rFactory
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "42", Title: "research it", Kind: KindResearch, State: PickRunning})
+
+	if err := launch.Terminate(fc, "42"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+
+	if len(researchRunner.KillCalls) != 1 || researchRunner.KillCalls[0] != "agent-issue-42" {
+		t.Errorf("research KillCalls: want [agent-issue-42], got %v", researchRunner.KillCalls)
+	}
+	if len(workRunner.KillCalls) != 0 {
+		t.Errorf("work KillCalls: want none, got %v", workRunner.KillCalls)
+	}
+	if len(rf.TransitionStateCalls) != 2 {
+		t.Errorf("research TransitionStateCalls: want 2, got %+v", rf.TransitionStateCalls)
+	}
+	if len(fc.TransitionStateCalls) != 0 || len(fc.CommentCalls) != 0 {
+		t.Errorf("work tracker touched: transitions=%+v comments=%+v", fc.TransitionStateCalls, fc.CommentCalls)
+	}
+	if len(rf.CommentCalls) != 1 {
+		t.Fatalf("research CommentCalls: want 1, got %+v", rf.CommentCalls)
+	}
+	if body := rf.CommentCalls[0].Body; strings.Contains(body, "branch=") || strings.Contains(body, "https://") {
+		t.Errorf("advise-only comment must resolve no branch or PR: %q", body)
+	}
+	iss, err := rf.Issue("42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(iss.Labels, "agent-research") || containsString(iss.Labels, "agent-research-in-progress") {
+		t.Errorf("research labels = %v, want agent-research back, in-progress cleared", iss.Labels)
+	}
+	if snap := launch.queue.Snapshot(); len(snap) != 1 || snap[0].State != PickTerminated {
+		t.Errorf("queue pick = %+v, want PickTerminated", snap)
+	}
+}
+
+// TestLauncher_Terminate_ResearchPick_UnwiredFallsBackToWork pins that a
+// research pick with no research stack wired reclaims through the caller's
+// tracker and the work Factory rather than panicking.
+func TestLauncher_Terminate_ResearchPick_UnwiredFallsBackToWork(t *testing.T) {
+	launch, fc, fr, _ := newTermTestLauncher(t)
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "42", Title: "research it", Kind: KindResearch, State: PickRunning})
+
+	if err := launch.Terminate(fc, "42"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+	if len(fr.KillCalls) != 1 {
+		t.Errorf("work KillCalls: want 1, got %v", fr.KillCalls)
+	}
+	if len(fc.TransitionStateCalls) != 2 || len(fc.CommentCalls) != 1 {
+		t.Errorf("work tracker: transitions=%+v comments=%+v", fc.TransitionStateCalls, fc.CommentCalls)
+	}
+}
+
+// TestLauncher_Terminate_ResearchPick_OnlyTrackerWired_ReclaimsThroughResearchTracker
+// pins that a research pick whose Factory is unwired still reclaims through
+// the research tracker Pick claimed it on, reaping via the work Factory.
+func TestLauncher_Terminate_ResearchPick_OnlyTrackerWired_ReclaimsThroughResearchTracker(t *testing.T) {
+	launch, fc, workRunner, _ := newTermTestLauncher(t)
+	rf := newResearchFake("42")
+	launch.ResearchTracker = rf
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "42", Title: "research it", Kind: KindResearch, State: PickRunning})
+
+	if err := launch.Terminate(fc, "42"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+	if len(workRunner.KillCalls) != 1 {
+		t.Errorf("work KillCalls: want 1, got %v", workRunner.KillCalls)
+	}
+	if len(rf.TransitionStateCalls) != 2 || len(rf.CommentCalls) != 1 {
+		t.Errorf("research tracker: transitions=%+v comments=%+v", rf.TransitionStateCalls, rf.CommentCalls)
+	}
+	if len(fc.TransitionStateCalls) != 0 || len(fc.CommentCalls) != 0 {
+		t.Errorf("work tracker touched: transitions=%+v comments=%+v", fc.TransitionStateCalls, fc.CommentCalls)
+	}
+}
+
+// TestLauncher_Terminate_MixedQueue_EachPickRoutesToItsOwnStack pins the
+// terminate-all shape: both picks are handed the work tracker, each lands on
+// its own kind's tracker and Factory.
+func TestLauncher_Terminate_MixedQueue_EachPickRoutesToItsOwnStack(t *testing.T) {
+	launch, fc, workRunner, _ := newTermTestLauncher(t)
+	fc.SetIssue(forge.Issue{Number: "7", Title: "work", Labels: []string{"agent-in-progress"}})
+	rf := newResearchFake("43")
+	rFactory, researchRunner, _ := newTermFactory(t)
+	launch.ResearchTracker = rf
+	launch.ResearchFactory = rFactory
+	launch.queue.Add(Pick{Number: "43", Title: "research it", Kind: KindResearch, State: PickRunning})
+
+	live := launch.LiveIssues()
+	if len(live) != 2 || live[0] != "42" || live[1] != "43" {
+		t.Fatalf("LiveIssues = %v, want [42 43]", live)
+	}
+	for _, num := range live {
+		launch.TerminateAsync(fc, num)
+	}
+	launch.Wait()
+
+	if len(workRunner.KillCalls) != 1 || workRunner.KillCalls[0] != "agent-issue-42" {
+		t.Errorf("work KillCalls: want [agent-issue-42], got %v", workRunner.KillCalls)
+	}
+	if len(researchRunner.KillCalls) != 1 || researchRunner.KillCalls[0] != "agent-issue-43" {
+		t.Errorf("research KillCalls: want [agent-issue-43], got %v", researchRunner.KillCalls)
+	}
+	if len(fc.CommentCalls) != 1 || fc.CommentCalls[0].Num != "42" {
+		t.Errorf("work comments: want one for #42, got %+v", fc.CommentCalls)
+	}
+	if len(rf.CommentCalls) != 1 || rf.CommentCalls[0].Num != "43" {
+		t.Errorf("research comments: want one for #43, got %+v", rf.CommentCalls)
 	}
 }
