@@ -3422,7 +3422,10 @@ keys are only the terms recorded in its hidden
 `<!-- spindrift-dedup: ... -->` marker line — written by the Launcher itself
 at filing time — never its title: two distinct findings can share a
 formulaic conventional-commit title, and keying on prose would merge
-them. The marker records the folded form (e.g.
+them. Findings filed before issue #3609 carry no marker, so only the Filer's
+own search matches them — a permanent, bounded gap, not a transition period,
+and deliberately not backfilled (a guessed key could skip a new finding
+without filing anything a human would triage). The marker records the folded form (e.g.
 `pkg:file:go:type:field`), so a literal body search for the raw site key
 — the Filer prompt's own `gh issue list --search` pre-check — may not
 match the marker text; the Launcher's host-side dedup is the backstop.
