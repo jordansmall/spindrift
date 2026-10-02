@@ -24,6 +24,13 @@ const (
 	signalSocketSecretEnv   = "SIGNAL_SOCKET_SECRET"
 )
 
+// tcpFallbackBlockedReason is the clause the Signal-socket (here) and
+// registry-proxy (box.go) gates share when they reject a TCP verdict under a
+// NETWORK_MODE that denies host loopback. A const so go vet still checks the
+// composed formats. One %s: the target's name, passed after the caller's own
+// NETWORK_MODE=%s argument.
+const tcpFallbackBlockedReason = "this runtime can only reach the %s over its TCP fallback, which this mode blocks"
+
 // startSignalSocket starts the Signal socket for this Dispatch under
 // BOX_SIGNAL_CARRIER=socket (ADR 0052, issue #3725), given the transport
 // verdict runOnce's one probe already took. It mirrors the registry proxy's
@@ -43,7 +50,7 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 	// (#3775). Either way it fails capability-style, never falling back to
 	// the log carrier silently.
 	if transport.IsTCP() && runner.DeniesHostLoopback(d.cfg.NetworkMode) {
-		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode)
+		return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=%s -- "+tcpFallbackBlockedReason+"; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE", d.cfg.NetworkMode, "Signal socket")
 	}
 
 	buf := signalsocket.New(d.signalSocketConfig())
