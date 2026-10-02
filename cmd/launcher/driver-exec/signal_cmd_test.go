@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -202,11 +203,11 @@ func TestRunSignal_BodyFile(t *testing.T) {
 	})
 }
 
-// A body past the verb's own limit must error client-side -- on both sources,
-// not just stdin -- rather than either silently truncating (a body-file read)
-// or reporting a size the agent never sent. Bodies under it still reach the
+// An input past the verb's own limit must error client-side -- on every
+// source (body file, patch file, stdin) -- rather than either silently
+// truncating (a file read) or reporting a size the agent never sent. Bodies under it still reach the
 // socket, which enforces the smaller per-field MaxBodyBytes itself.
-func TestRunSignal_BodyOverLimit(t *testing.T) {
+func TestRunSignal_InputOverLimit(t *testing.T) {
 	t.Setenv("SIGNAL_SOCKET_ENDPOINT", "unix://"+filepath.Join(t.TempDir(), "unused.sock"))
 	t.Setenv("SIGNAL_SOCKET_SECRET", "")
 
@@ -228,6 +229,20 @@ func TestRunSignal_BodyOverLimit(t *testing.T) {
 		}
 		if !strings.Contains(out, "body file") {
 			t.Fatalf("output = %q, want it to name the body file", out)
+		}
+	})
+
+	t.Run("patch file", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "big.patch")
+		if err := os.WriteFile(path, make([]byte, signalwire.MaxRequestBytes+1), 0o600); err != nil {
+			t.Fatalf("write patch file: %v", err)
+		}
+		rc, out := runVerb(t, "body", "issue-intent", "-title", "t", "-type", "bug", "-patch-file", path)
+		if rc != 1 {
+			t.Fatalf("exit = %d, want 1 (out=%q)", rc, out)
+		}
+		if !strings.Contains(out, "patch file") || !strings.Contains(out, strconv.Itoa(signalwire.MaxRequestBytes)) {
+			t.Fatalf("output = %q, want it to name the patch file and the limit", out)
 		}
 	})
 
