@@ -363,7 +363,7 @@ assemble_go_agent_files() {
 # trailing newline the file body carries and the JSON string does not, because
 # command substitution trims it.
 @test "the same roster yields the same effective scout prompt under claude and opencode" {
-  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]
@@ -423,7 +423,7 @@ assemble_go_agent_files() {
   local body
   body="$(agent_file_body "$scout")"
   [ -n "$body" ]
-  [ "$body" != "Map relevant files, seams, and tests; return a structured brief" ]
+  [ "$body" != "Map relevant files, seams, and tests; write a structured brief" ]
   [[ "$body" == *"Return only the brief's path"* ]]
 
   local reviewer="$dir/reviewer.md"
