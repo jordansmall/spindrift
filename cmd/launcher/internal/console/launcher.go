@@ -279,15 +279,34 @@ func (l *Launcher) registry() *terminate.Registry {
 
 // Terminate ends num's live Dispatch by hand (ADR 0024, issue #649), delegating
 // the reap/transition/comment sequence to terminate.Reclaim before marking the
-// pick PickTerminated. The reap error is the only one returned.
+// pick PickTerminated. The reap error is the only one returned. The pick's kind
+// selects the tracker and Factory (issue #4148); tracker is the work stack's. A
+// kind whose stack is unwired falls back to trackerFor, the route Pick claimed
+// through, and the work Factory.
 func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
-	// l.Factory is a *dispatch.Factory: a nil one boxed into the Reaper
-	// interface would compare non-nil, defeating Reclaim's nil guard.
-	var reaper terminate.Reaper
-	if l.Factory != nil {
-		reaper = l.Factory
+	kind := KindWork
+	if p, ok := l.queueRef().newest(num); ok {
+		kind = p.effectiveKind()
 	}
-	killErr := terminate.Reclaim(tracker, l.CodeForge, reaper, l.registry(), num, terminate.Gesture)
+	reclaimTracker, factory := l.trackerFor(kind, tracker), l.Factory
+	for _, s := range l.stacks(tracker) {
+		if s.kind == kind {
+			reclaimTracker, factory = s.tracker, s.factory
+			break
+		}
+	}
+	// factory is a *dispatch.Factory: a nil one boxed into the Reaper
+	// interface would compare non-nil, defeating Reclaim's nil guard. An
+	// advise-only kind never opens a branch, so it gets no CodeForge.
+	var reaper terminate.Reaper
+	if factory != nil {
+		reaper = factory
+	}
+	cf := l.CodeForge
+	if kind.AdviseOnly {
+		cf = nil
+	}
+	killErr := terminate.Reclaim(reclaimTracker, cf, reaper, l.registry(), num, terminate.Gesture)
 
 	l.queueRef().setState(num, PickTerminated, "terminated by operator")
 	l.signalRefresh()
