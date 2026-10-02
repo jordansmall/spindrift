@@ -196,3 +196,46 @@ func TestLimiter_AcquireBlocksUntilReleased(t *testing.T) {
 		t.Fatal("second Acquire never returned after Release")
 	}
 }
+
+// mustPanicUnmatchedRelease fails the test unless fn panics.
+func mustPanicUnmatchedRelease(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("unmatched Release: want panic, got none")
+		}
+	}()
+	fn()
+}
+
+func TestLimiter_ReleaseWithNothingHeldPanics(t *testing.T) {
+	l := NewLimiter(2)
+
+	mustPanicUnmatchedRelease(t, l.Release)
+
+	if got := l.Live(); got != 0 {
+		t.Fatalf("Live after unmatched Release: got %d, want 0", got)
+	}
+}
+
+func TestLimiter_DoubleReleasePanicsAndKeepsBound(t *testing.T) {
+	l := NewLimiter(3)
+	l.Acquire()
+	l.Acquire()
+	l.Release()
+	l.Release()
+
+	mustPanicUnmatchedRelease(t, l.Release)
+
+	if got := l.Live(); got != 0 {
+		t.Fatalf("Live after unmatched Release: got %d, want 0", got)
+	}
+	for i := 0; i < 3; i++ {
+		if !l.TryAcquire() {
+			t.Fatalf("TryAcquire %d: want true, got false", i+1)
+		}
+	}
+	if l.TryAcquire() {
+		t.Fatal("TryAcquire past cap: want false (bound widened by unmatched Release), got true")
+	}
+}
