@@ -172,3 +172,17 @@ func TestFilerFileRelaySocketFragmentSendShape(t *testing.T) {
 	assertClosingDelimiterAtColumnOne(t, "fragments/filer-file-relay-socket.md")
 	assertNoBareEOFDelimiter(t, "fragments/filer-file-relay-socket.md")
 }
+
+// TestButlerFileIssuesRelayFragmentKeysOnEnclosingSymbol pins the butler
+// relay's dedup-key wording to the Filer prompt's step 2 rule (issue #3812):
+// the nearest enclosing symbol, a bare line only when none encloses. Only the
+// log twin is pinned; TestIssueIntentFileIssuesRelayTwinsShareProse keeps the
+// socket twin in step.
+func TestButlerFileIssuesRelayFragmentKeysOnEnclosingSymbol(t *testing.T) {
+	assertPromptClauses(t, "fragments/butler-file-issues-relay.md", []promptClause{
+		{
+			name:   "keys on the nearest enclosing symbol",
+			clause: "(`path/to/file.go:Symbol`, where Symbol is the symbol it names or else the nearest enclosing one, or `path/to/file.go:<line>` only when no symbol encloses the site)",
+		},
+	})
+}

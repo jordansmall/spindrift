@@ -20,3 +20,19 @@ func TestFilerFileRelayFragmentDedupTermsExample(t *testing.T) {
 		},
 	})
 }
+
+// TestFilerFileRelayFragmentsWarnLineKeyGoesStale pins the parenthetical both
+// filer-file-relay fragments carry beside the dedup-key instruction (issue
+// #3812): a line key from step 2 still goes stale once the code around it
+// moves, so the carrier prose doesn't imply any key it is handed is durable.
+func TestFilerFileRelayFragmentsWarnLineKeyGoesStale(t *testing.T) {
+	const clause = "(a line key from step 2 still goes stale once the code around it moves)"
+	for _, name := range []string{"filer-file-relay", "filer-file-relay-socket"} {
+		assertPromptClauses(t, "fragments/"+name+".md", []promptClause{
+			{
+				name:   name + " warns a line key still goes stale",
+				clause: clause,
+			},
+		})
+	}
+}

@@ -27,7 +27,8 @@ SPINDRIFT_SIGNAL_EOF
    the mapping is closed and host-owned, not a way to pick an arbitrary
    label. `-dedup` carries this finding's site key (step 2) so the launcher
    can dedup future findings against this issue even after your title or
-   wording changes — repeat the flag, once per site the finding spans,
+   wording changes (a line key from step 2 still goes stale once the code
+   around it moves) — repeat the flag, once per site the finding spans,
    and always pass it.
 
    A title with backticks needs single quotes, not double: inside double
