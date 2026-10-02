@@ -182,3 +182,60 @@ func TestParseResearchVerdicts_Invalid(t *testing.T) {
 		})
 	}
 }
+
+const verdictPromptTemplate = "Verdicts:\n<!-- RESEARCH_VERDICT_BULLETS -->\n\n" +
+	"1. **Verdict** — `<RESEARCH_VERDICT_ENUM>`, plus a rationale.\n" +
+	"SPINDRIFT_OUTCOME status=<${RESEARCH_STATUS_ENUM}> note=<x>\n"
+
+func TestRenderPromptDefaultSet(t *testing.T) {
+	got := forge.ResearchVerdictLabels().RenderPrompt(verdictPromptTemplate)
+	want := "Verdicts:\n" +
+		"- `recommend` — relevant, now enriched with real context; promote it.\n" +
+		"- `reject` — false positive, not worth doing, or a duplicate. Name the duplicate issue by number in your rationale; duplicate is a reason under `reject`, not a separate verdict.\n" +
+		"- `unclear` — relevance can't be determined without a human's answer.\n\n" +
+		"1. **Verdict** — `recommend` / `reject` / `unclear`, plus a rationale.\n" +
+		"SPINDRIFT_OUTCOME status=<recommend|reject|unclear> note=<x>\n"
+	if got != want {
+		t.Errorf("RenderPrompt =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestRenderPromptCustomSet(t *testing.T) {
+	labels, err := forge.ParseResearchVerdicts(`[{"verdict":"accept","label":"l-a","description":"take it"},{"verdict":"decline","label":"l-d"}]`)
+	if err != nil {
+		t.Fatalf("ParseResearchVerdicts: %v", err)
+	}
+	got := labels.RenderPrompt(verdictPromptTemplate)
+	want := "Verdicts:\n" +
+		"- `accept` — take it\n" +
+		"- `decline` — \n\n" +
+		"1. **Verdict** — `accept` / `decline`, plus a rationale.\n" +
+		"SPINDRIFT_OUTCOME status=<accept|decline> note=<x>\n"
+	if got != want {
+		t.Errorf("RenderPrompt =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestRenderPromptNoMarkersIsNoOp(t *testing.T) {
+	text := "plain prompt with status=<recommend|reject|unclear> and `reject`\n"
+	if got := forge.ResearchVerdictLabels().RenderPrompt(text); got != text {
+		t.Errorf("RenderPrompt changed marker-free text:\n%s", got)
+	}
+	if forge.HasVerdictTargets(text) {
+		t.Error("HasVerdictTargets = true for marker-free text")
+	}
+	if !forge.HasVerdictTargets(verdictPromptTemplate) {
+		t.Error("HasVerdictTargets = false for a templated prompt")
+	}
+}
+
+func TestRenderPromptIdempotent(t *testing.T) {
+	labels := forge.ResearchVerdictLabels()
+	once := labels.RenderPrompt(verdictPromptTemplate)
+	if twice := labels.RenderPrompt(once); twice != once {
+		t.Errorf("second RenderPrompt changed the text:\n%s", twice)
+	}
+	if forge.HasVerdictTargets(once) {
+		t.Error("rendered text still carries a target")
+	}
+}

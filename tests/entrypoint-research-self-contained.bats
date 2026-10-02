@@ -73,11 +73,13 @@ setup() {
   [ -d "$WORK_DIR/.git" ]
 }
 
-# The status list is derived in Go from RESEARCH_VERDICTS (issues #2504, #4159).
-@test "SELF_CONTAINED=1's OUTCOME grammar line renders the registry status enum" {
+# The verdict markers are rendered in Go from RESEARCH_VERDICTS, defaulting to
+# the default set when unset (issues #2504, #4159, #2630).
+@test "SELF_CONTAINED=1's OUTCOME grammar line renders the verdict markers from the default set" {
   set_dispatch_kind research
   export SELF_CONTAINED="1"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>' "$DRIVER_PROMPT_FILE"
+  ! grep -qE 'RESEARCH_VERDICT_(BULLETS|ENUM)|RESEARCH_STATUS_ENUM' "$DRIVER_PROMPT_FILE"
 }
