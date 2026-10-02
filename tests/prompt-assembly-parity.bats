@@ -327,6 +327,33 @@ AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, sea
   assert_cell_golden "research" initial
 }
 
+# Pins Go's pipe-joined ${RESEARCH_STATUS_ENUM} against lib/research-verdicts.nix's
+# renderPrompt (issue #4159). Row 0 is the default set, row 1 a custom one. One
+# entrypoint run per @test: a second run would hit the first's clone in $WORK_DIR.
+assert_research_status_parity() {
+  : "${RESEARCH_STATUS_PARITY_FILE:?RESEARCH_STATUS_PARITY_FILE must be set (nix/research-status-parity.nix)}"
+  set_dispatch_kind research
+
+  local row want got
+  row="$(jq -c ".[$1]" "$RESEARCH_STATUS_PARITY_FILE")"
+  want="$(jq -r .status <<<"$row")"
+  RESEARCH_VERDICTS="$(jq -r .verdicts <<<"$row")"
+  export RESEARCH_VERDICTS
+
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  got="$(grep -E '^SPINDRIFT_OUTCOME .*status=<' "$DRIVER_PROMPT_FILE" | grep -oE 'status=<[^>]*>')"
+  [ "$got" = "$want" ]
+}
+
+@test "research status enumeration matches renderPrompt for the default verdict set" {
+  assert_research_status_parity 0
+}
+
+@test "research status enumeration matches renderPrompt for a custom verdict set" {
+  assert_research_status_parity 1
+}
+
 @test "production path matches the golden fixture for the research filer-on cell" {
   set_dispatch_kind research
   # A filer in the roster with BOX_FILER_ENABLED=1 pins gates_tracker.go's
