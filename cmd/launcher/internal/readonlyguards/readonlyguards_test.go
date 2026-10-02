@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 // runGitCmd duplicates the helper of the same name in
@@ -573,7 +574,7 @@ func TestInstall_CommandShimSkipsMissingBinary(t *testing.T) {
 func TestInstall_FullRegistry(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
-	rows, err := promptassembly.LoadForbiddenMarkersFile("../promptassembly/testdata/forbidden-markers.json")
+	rows, err := promptassembly.LoadForbiddenMarkersFile(repopath.ForbiddenMarkersJSON())
 	if err != nil {
 		t.Fatalf("LoadForbiddenMarkersFile: %v", err)
 	}

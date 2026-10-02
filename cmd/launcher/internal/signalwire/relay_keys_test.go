@@ -2,23 +2,23 @@ package signalwire
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-)
 
-// Resolved the same way internal/promptassembly's promptsDir is.
-const relayPromptsDir = "../../../../templates/default/prompts"
+	"spindrift.dev/launcher/internal/testutil/repopath"
+)
 
 // relayFragments is every fragment teaching the SPINDRIFT_ISSUE_INTENT
 // log carrier's JSON keys; a new one that teaches a key belongs here too.
 // Hand-listed, not globbed: other fragments name SPINDRIFT_ISSUE_INTENT
 // without teaching any key.
 var relayFragments = []string{
-	relayPromptsDir + "/fragments/filer-file-relay.md",
-	relayPromptsDir + "/fragments/filer-label-relay-butler.md",
+	filepath.Join(repopath.PromptsDir(), "fragments", "filer-file-relay.md"),
+	filepath.Join(repopath.PromptsDir(), "fragments", "filer-label-relay-butler.md"),
 }
 
 // extraTaughtAllowed is prose-taught keys that legitimately aren't on
