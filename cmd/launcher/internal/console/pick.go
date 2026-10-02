@@ -73,6 +73,12 @@ const (
 // format change on one side silently breaks the other (issue #1111).
 const blockerFailedPrefix = "blocker "
 
+// unclaimed reports whether s is not yet claimed by a drain: the only states
+// Queue.Remove and removePick drop.
+func (s PickState) unclaimed() bool {
+	return s == PickQueued || s == PickHeld
+}
+
 // String renders s as the word View shows on a queue row.
 func (s PickState) String() string {
 	switch s {

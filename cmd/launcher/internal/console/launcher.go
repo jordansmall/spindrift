@@ -184,10 +184,10 @@ func (l *Launcher) Land(msg Msg) []Pick {
 // Unpick retracts num's queued-but-unlaunched pick and returns the fresh
 // snapshot, with no tracker interaction (ADR 0023). Queue.Remove refuses to drop
 // anything past PickQueued/PickHeld, so calling this for a num that never queued
-// or already launched is safe.
-func (l *Launcher) Unpick(num string) []Pick {
-	l.queueRef().Remove(num)
-	return l.queueRef().Snapshot()
+// or already launched is safe. The bool reports whether a row was removed.
+func (l *Launcher) Unpick(num string) ([]Pick, bool) {
+	removed := l.queueRef().Remove(num)
+	return l.queueRef().Snapshot(), removed
 }
 
 // Cap returns the session's current live parallelism cap.

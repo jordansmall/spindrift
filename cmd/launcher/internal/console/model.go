@@ -879,7 +879,7 @@ func clampSize(dim int) int {
 func removePick(picks []Pick, num string) []Pick {
 	var out []Pick
 	for _, p := range picks {
-		if p.Number == num && (p.State == PickQueued || p.State == PickHeld) {
+		if p.Number == num && p.State.unclaimed() {
 			continue
 		}
 		out = append(out, p)
