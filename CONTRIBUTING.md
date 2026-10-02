@@ -124,10 +124,11 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
 
 - **`lib/`** — the nix engine. `mkHarness.nix` (the function Consumers import),
   `flakeModule.nix` (the flake-parts option surface), `env-schema.nix` (the
-  **source of truth** for every `SPINDRIFT_*` variable; the `launcher-env-coverage`
-  check fails if the launcher and the schema drift), `backends/default.nix`
-  (the backend descriptor registry — one row per ISSUE_TRACKER/CODE_FORGE
-  backend; `env-schema.nix`'s tracker/forge choices derive from it),
+  **source of truth** for every operator-facing `SPINDRIFT_*` knob; the
+  `launcher-env-coverage` check fails if the launcher and the schema drift,
+  and internal non-knob env names sit on that check's own allowlist),
+  `backends/default.nix` (the backend descriptor registry — one row per
+  ISSUE_TRACKER/CODE_FORGE backend; `env-schema.nix`'s tracker/forge choices derive from it),
   `baked-skills.nix` (the registry of skills `entrypoint.sh` probes at
   `DRIVER_SKILLS_DIR/<name>/SKILL.md` — one row per skill drives every
   hand-mirrored consumer copy), `labels.nix` (the label registry — one row
