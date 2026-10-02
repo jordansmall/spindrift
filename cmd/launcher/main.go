@@ -2125,6 +2125,16 @@ var verbHandlers = map[string]verbHandler{
 	},
 }
 
+// mainRunIntercepts maps each spelling mainRun acts on before parseFlags to
+// its lib/cli-flags.nix row name. Every key must be an intercepted row's long
+// or short spelling; TestMainRunIntercepts_MatchCliFlags pins both directions.
+var mainRunIntercepts = map[string]string{
+	"--help":    "help",
+	"-h":        "help",
+	"--all":     "all",
+	"--version": "version",
+}
+
 // mainRun parses argv and dispatches to the selected subcommand, returning the
 // process exit code. stdout and stderr are injected so tests can assert on
 // help and error output without touching the real process streams.
@@ -2135,12 +2145,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	report.Install(report.FromEnv(os.Getenv, stderr))
 	help, helpAll := false, false
 	for _, a := range argv {
-		switch a {
-		case "--help", "-h":
+		switch mainRunIntercepts[a] {
+		case "help":
 			help = true
-		case "--all":
+		case "all":
 			helpAll = true
-		case "--version":
+		case "version":
 			printVersion(stdout)
 			return 0
 		}
