@@ -125,8 +125,9 @@ func BenchmarkHeartbeatCache_ColdRead_LargeLog(b *testing.B) {
 }
 
 // BenchmarkHeartbeatCache_CacheHit_LargeLog warms the cache once, then repeats
-// against the same unchanged 10MB+ pass log. This is the case syncQueue hits
-// on every tea.Msg between actual log growth (issue #731).
+// against the same unchanged 10MB+ pass log. This is the case
+// refreshPickDecorations hits on every tea.Msg between actual log growth
+// (issue #731).
 func BenchmarkHeartbeatCache_CacheHit_LargeLog(b *testing.B) {
 	pwd, drv := newHeartbeatBenchFixture(b)
 	cache := NewHeartbeatCache()

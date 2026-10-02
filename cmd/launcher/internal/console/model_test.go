@@ -794,7 +794,8 @@ func TestUpdate_SidebarJumpToBeginningMsg_NoOpWhenNoSidebarOpen(t *testing.T) {
 	}
 }
 
-// This is syncQueue's per-message live advance (issue #1502, ADR 0030).
+// This is refreshPickDecorations' per-message live advance (issue #1502,
+// ADR 0030).
 func TestUpdate_SidebarActivityMsg_UpdatesActivityAndLines(t *testing.T) {
 	m := NewModel()
 	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "first"}}})
@@ -846,9 +847,9 @@ func TestUpdate_SidebarActivityMsg_PreservesOffsetWhenNotFollowing(t *testing.T)
 	}
 }
 
-// Most syncQueue refreshes re-derive an unchanged on-disk log. A pgdown moves
-// Offset without detaching Follow, so a same-content refresh right afterward
-// must not yank it back to the bottom (issue #1502).
+// Most refreshPickDecorations refreshes re-derive an unchanged on-disk log. A
+// pgdown moves Offset without detaching Follow, so a same-content refresh right
+// afterward must not yank it back to the bottom (issue #1502).
 func TestUpdate_SidebarActivityMsg_UnchangedContentPreservesManualOffset(t *testing.T) {
 	activity := make([]ActivityLine, 50)
 	for i := range activity {
