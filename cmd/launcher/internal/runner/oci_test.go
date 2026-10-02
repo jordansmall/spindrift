@@ -1670,6 +1670,38 @@ func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_Returns
 	}
 }
 
+// Invariant: no network mode for which deniesHostLoopback holds can get a TCP
+// endpoint from the live probe. The doctor check and Dispatch's signal-socket
+// resolver keep a TCP-under-no-host-loopback arm that a live probe can never
+// reach because of this (issue #3768). Each script ends in ExitCapable, which would
+// make the TCP sub-probe succeed if the guard ever let it run. Calls the live
+// probe directly: RegistryProxyTransport reads the on-disk cache first.
+func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing.T) {
+	outcomes := map[string][]fakeCall{
+		"socket-incapable":            {{exit: registryprobe.ExitIncapable}, {exit: registryprobe.ExitCapable}},
+		"control-confirmed-incapable": {{exit: 125}, {exit: registryprobe.ExitIncapable}, {exit: registryprobe.ExitCapable}},
+	}
+	for outcome, calls := range outcomes {
+		for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone, "open", ""} {
+			if !deniesHostLoopback(mode) {
+				continue
+			}
+			t.Run(outcome+"/"+mode, func(t *testing.T) {
+				script, _ := newFakeCLI(t, calls...)
+				a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
+
+				endpoint, _, err := a.probeRegistryProxyTransport()
+				if endpoint.IsTCP() {
+					t.Errorf("probeRegistryProxyTransport: networkMode=%q denies host-loopback but yielded TCP endpoint %+v", mode, endpoint)
+				}
+				if err == nil {
+					t.Errorf("probeRegistryProxyTransport: want error for networkMode=%q, got endpoint=%+v", mode, endpoint)
+				}
+			})
+		}
+	}
+}
+
 // Issue #3466's cache AC: a control-probe-confirmed TCP decision (socket
 // no-verdict, control ExitIncapable, tcp sub-probe ExitCapable) is cached
 // exactly like a direct-91 TCP decision. A second adapter sharing pwd replays
