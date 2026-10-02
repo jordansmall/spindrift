@@ -17,24 +17,31 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// notifyWriter is an Emitter sink that also publishes each write on a
-// channel, so a test can block until a specific event has actually been
-// recorded rather than guessing at goroutine timing.
+// notifyWriter is an Emitter sink that also records each write as a line,
+// so a test can block until a specific event has actually been recorded
+// rather than guessing at goroutine timing. Write must never block: the
+// pool emits while holding p.mu, so a stalled sink would stall every slot.
 type notifyWriter struct {
-	mu    sync.Mutex
-	buf   bytes.Buffer
-	lines chan string
+	mu     sync.Mutex
+	buf    bytes.Buffer
+	lines  []string      // every write, append-only
+	cursor int           // index of the next line waitForLine has not consumed
+	wake   chan struct{} // cap 1; a dropped send is harmless, the waiter rescans
 }
 
 func newNotifyWriter() *notifyWriter {
-	return &notifyWriter{lines: make(chan string, 64)}
+	return &notifyWriter{wake: make(chan struct{}, 1)}
 }
 
 func (w *notifyWriter) Write(p []byte) (int, error) {
 	w.mu.Lock()
 	n, err := w.buf.Write(p)
+	w.lines = append(w.lines, string(p))
 	w.mu.Unlock()
-	w.lines <- string(p)
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
 	return n, err
 }
 
@@ -44,23 +51,63 @@ func (w *notifyWriter) String() string {
 	return w.buf.String()
 }
 
-// waitForLine blocks until a written line contains substr, failing the
-// test if none arrives within a generous bound (a hang here means the
-// event this test is synchronizing on was never emitted, a real bug, not
-// a timing fluke worth retrying).
-func (w *notifyWriter) waitForLine(t *testing.T, substr string) {
+// waitForLineTimeout is a generous bound: a hang in waitForLine means the
+// event a test is synchronizing on was never emitted, a real bug, not a
+// timing fluke worth retrying.
+const waitForLineTimeout = 5 * time.Second
+
+// waitForLine blocks until a line written after the previous match contains
+// substr and returns that line, failing the test if none arrives within
+// waitForLineTimeout.
+func (w *notifyWriter) waitForLine(t *testing.T, substr string) string {
 	t.Helper()
-	for i := 0; i < 64; i++ {
-		select {
-		case line := <-w.lines:
-			if strings.Contains(line, substr) {
-				return
+	deadline := time.After(waitForLineTimeout)
+	for {
+		w.mu.Lock()
+		for i := w.cursor; i < len(w.lines); i++ {
+			if line := w.lines[i]; strings.Contains(line, substr) {
+				w.cursor = i + 1
+				w.mu.Unlock()
+				return line
 			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("waitForLine: no line containing %q within 5s", substr)
+		}
+		w.cursor = len(w.lines)
+		w.mu.Unlock()
+		select {
+		case <-w.wake:
+		case <-deadline:
+			t.Fatalf("waitForLine: no line containing %q within %v", substr, waitForLineTimeout)
 		}
 	}
-	t.Fatalf("waitForLine: no line containing %q within %d lines", substr, 64)
+}
+
+// TestNotifyWriterWriteNeverBlocks pins that Write cannot stall on an
+// unread backlog, and that waitForLine still finds successive matches in
+// order afterward.
+func TestNotifyWriterWriteNeverBlocks(t *testing.T) {
+	w := newNotifyWriter()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 1000; i++ {
+			fmt.Fprintf(w, "noise %d\n", i)
+			if i == 400 || i == 800 {
+				fmt.Fprintf(w, "baton_hold %d\n", i)
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("notifyWriter.Write blocked with no reader")
+	}
+	w.waitForLine(t, "baton_hold")
+	if got := w.waitForLine(t, "baton_hold"); got != "baton_hold 800\n" {
+		t.Fatalf("second waitForLine matched %q, want the second baton_hold", got)
+	}
+	if got := w.String(); !strings.Contains(got, "noise 999") {
+		t.Fatalf("buf lost lines: %q", got)
+	}
 }
 
 // TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild pins the two
