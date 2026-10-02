@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"os"
 	"runtime"
-	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/connlimit"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -124,7 +124,7 @@ func (l *Listener) serve(sock net.Listener, h http.Handler) {
 		ReadTimeout:       readTimeout,
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
-	capped := limitListener(sock, maxConns)
+	capped := connlimit.Listener(sock, maxConns)
 	go func() {
 		_ = l.server.Serve(capped)
 	}()
@@ -147,60 +147,4 @@ func (l *Listener) Close() error {
 	// Server.Close closes the listener it was handed and every connection it
 	// is holding, so an in-flight request cannot outlive the run.
 	return l.server.Close()
-}
-
-// limitListener wraps inner so that at most n connections are live at once.
-// golang.org/x/net/netutil does the same thing, but is not a dependency of
-// this module and is not worth becoming one for a semaphore.
-func limitListener(inner net.Listener, n int) net.Listener {
-	return &limitedListener{Listener: inner, sem: make(chan struct{}, n), done: make(chan struct{})}
-}
-
-type limitedListener struct {
-	net.Listener
-	sem       chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
-}
-
-// Accept takes a slot before accepting, so an over-cap connection waits in
-// the kernel's backlog rather than being accepted and then stalled. The wait
-// aborts on Close: otherwise a full cap would strand this goroutine on the
-// semaphore, and http.Server.Close -- which waits for Serve to return --
-// would deadlock behind it.
-func (l *limitedListener) Accept() (net.Conn, error) {
-	acquired := false
-	select {
-	case <-l.done:
-	case l.sem <- struct{}{}:
-		acquired = true
-	}
-	c, err := l.Listener.Accept()
-	if err != nil {
-		if acquired {
-			<-l.sem
-		}
-		return nil, err
-	}
-	return &limitedConn{Conn: c, release: func() { <-l.sem }}, nil
-}
-
-func (l *limitedListener) Close() error {
-	err := l.Listener.Close()
-	l.closeOnce.Do(func() { close(l.done) })
-	return err
-}
-
-type limitedConn struct {
-	net.Conn
-	once    sync.Once
-	release func()
-}
-
-// Close releases the slot exactly once: http.Server can close a connection
-// more than once, and a second release would raise the effective cap.
-func (c *limitedConn) Close() error {
-	err := c.Conn.Close()
-	c.once.Do(c.release)
-	return err
 }
