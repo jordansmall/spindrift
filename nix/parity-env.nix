@@ -11,7 +11,7 @@ let
 
   fragmentsRegistryJsonFile = pkgs.writeText "fragments-registry.json" (builtins.toJSON registry);
 
-  researchStatusParityFile = import ./research-status-parity.nix { inherit pkgs; };
+  researchVerdictsParityFile = import ./research-verdicts-parity.nix { inherit pkgs; };
 
   promptContractRegistryJsonFile = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).validateMarkers
@@ -48,7 +48,7 @@ in
     # lib/fragments.nix renders only once.
     PROMPTASSEMBLY_REGISTRY_FILE = fragmentsRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-    RESEARCH_STATUS_PARITY_FILE = researchStatusParityFile;
+    RESEARCH_VERDICTS_PARITY_FILE = researchVerdictsParityFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
   };
 }

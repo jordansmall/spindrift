@@ -52,7 +52,7 @@ let
     builtins.toJSON (import ../../lib/fragments.nix)
   );
 
-  researchStatusParityFile = import ../research-status-parity.nix { inherit pkgs; };
+  researchVerdictsParityFile = import ../research-verdicts-parity.nix { inherit pkgs; };
 
   promptContractRegistryJsonFile = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
@@ -236,7 +236,7 @@ let
     ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-    RESEARCH_STATUS_PARITY_FILE = researchStatusParityFile;
+    RESEARCH_VERDICTS_PARITY_FILE = researchVerdictsParityFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
     # Widens wait_for_log_lines' (tests/helper.bash) default poll patience
     # from 2s to 10s for this gate (issue #2649); that function's doc comment
