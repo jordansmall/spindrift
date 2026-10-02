@@ -78,6 +78,10 @@ hand-editing them until the drift-guard checks (`nix/checks/schema-drift.nix`) g
 nix run .#regen
 ```
 
+`nix run .#regen` likewise renders `lib/cli-flags.nix` into
+`cmd/launcher/cliflags_gen.go` and `lib/subcommands.nix` into
+`cmd/launcher/subcommands_gen.go`.
+
 The regenerator and the drift-guard checks share one renderer per artifact
 (`lib/renderers.nix`), so they can't drift from each other. It's repo-internal
 dev tooling, not part of the flake-option/env-schema consumer surface. The man
@@ -125,7 +129,8 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   per label family/role, rendered into
   `cmd/launcher/internal/doctor/labelmeta_gen.go` by `renderers.nix`'s
   `renderLabelRegistryGo`, drift-guarded by `nix/checks/schema-drift.nix`'s
-  `label-registry-gen` check), and `renderers.nix` (the schema → artifact
+  `label-registry-gen` check), `cli-flags.nix` (the non-schema CLI flag table
+  the parser, completions and man page all consume), and `renderers.nix` (the schema → artifact
   render functions shared by the `nix/checks/schema-drift.nix` drift guards and
   `nix run .#regen`). No language-specific tooling belongs here — the core
   is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
@@ -136,8 +141,9 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
   `lib/backends/default.nix`), `usage`. The flag table (`flagtable_gen.go`),
   which also carries each knob's baked-in default (`schemaFlags[].dflt`), is
-  generated and pinned by a check; don't hand-edit it — neither is
-  `registry_gen.go`.
+  generated and pinned by a check; don't hand-edit it — neither are
+  `registry_gen.go` nor `cliflags_gen.go` (generated from `lib/cli-flags.nix`
+  by `renderers.nix`'s `renderCliFlagsGo`, pinned by the `cli-flags-gen` check).
   Go tests use standard `_test` files alongside the code.
 - **`agent/`** — the in-box entrypoint (`entrypoint.sh` and friends). Bash here
   is deliberately thin: nix computes the glue, bash only executes it

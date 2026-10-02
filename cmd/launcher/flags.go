@@ -286,6 +286,23 @@ func verbSoFar(remaining []string) string {
 	return ""
 }
 
+// cliFlag is one row of the non-schema flag table generated from
+// lib/cli-flags.nix. verb, when set, restricts the flag to follow that verb;
+// arg, when set, means the flag consumes the next token as its value.
+type cliFlag struct{ flag, verb, arg string }
+
+// lookupCliFlag returns the cliFlags row matching arg that is valid after the
+// verb accumulated in remaining, or nil.
+func lookupCliFlag(arg string, remaining []string) *cliFlag {
+	for i := range cliFlags {
+		f := &cliFlags[i]
+		if arg == "--"+f.flag && (f.verb == "" || verbSoFar(remaining) == f.verb) {
+			return f
+		}
+	}
+	return nil
+}
+
 // parseFlags injects matching --flag value pairs into the process environment
 // via os.Setenv so loadConfig picks them up. A flag lands in the same env
 // channel as a deprecated ambient knob env var, which is how it wins the
@@ -347,28 +364,26 @@ func parseFlags(args []string) ([]string, error) {
 			i++
 			continue
 		}
-		// Dispatch-only boolean flags pass through to the verb handler
-		// unconditionally.
-		if arg == "--no-build" || arg == "--yes" || arg == "--force" || arg == "--self-contained" {
-			remaining = append(remaining, arg)
+		// Non-schema flags (lib/cli-flags.nix). A flag with a verb is that
+		// verb's own subcommand flag and must follow it on the command line;
+		// anywhere else it falls through to the unknown-flag error below
+		// (issues #3777, #3920, #3795).
+		if f := lookupCliFlag(arg, remaining); f != nil {
 			i++
-			continue
-		}
-		// --verbose and --butler are doctor's own subcommand flags and must
-		// follow the "doctor" verb on the command line; every other verb
-		// falls through to the unknown-flag error below (issues #3777, #3920).
-		if (arg == "--verbose" || arg == "--butler") && verbSoFar(remaining) == "doctor" {
-			remaining = append(remaining, arg)
-			i++
-			continue
-		}
-		if arg == "--secret-cmd" {
-			i++
-			if i >= len(args) {
-				return nil, fmt.Errorf("flag --secret-cmd requires a command")
+			if f.flag == "secret-cmd" {
+				if i >= len(args) {
+					return nil, fmt.Errorf("flag --secret-cmd requires a command")
+				}
+				globalSecretCmdTemplate = args[i]
+				i++
+				continue
 			}
-			globalSecretCmdTemplate = args[i]
-			i++
+			remaining = append(remaining, arg)
+			// A missing value is left for the verb's own parser to report.
+			if f.arg != "" && i < len(args) {
+				remaining = append(remaining, args[i])
+				i++
+			}
 			continue
 		}
 		name, value, hasEquals := strings.Cut(arg, "=")

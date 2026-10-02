@@ -664,6 +664,24 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when lib/cli-flags.nix changes
+  # (issue #3795).
+  cli-flags-gen =
+    let
+      cliFlags = import ../../lib/cli-flags.nix;
+      generated = pkgs.writeText "cliflags_gen.go.generated" (renderers.renderCliFlagsGo cliFlags);
+    in
+    pkgs.runCommand "cli-flags-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/cliflags_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/cliflags_gen.go is out of sync with lib/cli-flags.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regenerate with `nix run .#regen` when lib/prompt-contract.nix's
   # outcomeStatusSets changes. The raw renderer output is intentionally
   # unaligned: gofmt owns the const block's column alignment (issue #2504).

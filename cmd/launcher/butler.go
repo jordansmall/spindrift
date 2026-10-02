@@ -41,23 +41,28 @@ func parseButlerClaimTimeout(value string) (time.Duration, error) {
 // empty chore return means "pick a due Chore" rather than sweep one named
 // explicitly, which is why an explicit empty --chore value must fail here.
 func parseButlerArgs(args []string) (choreName string, noBuild bool, err error) {
-	noBuild, remaining := dispatchNoBuildArgs(args)
 	seen := false
-	for i := 0; i < len(remaining); i++ {
-		if remaining[i] != "--chore" {
-			return "", false, fmt.Errorf("unrecognized argument: %s", remaining[i])
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--no-build" {
+			noBuild = true
+			continue
 		}
-		if i+1 >= len(remaining) || remaining[i+1] == "" {
+		if args[i] != "--chore" {
+			return "", false, fmt.Errorf("unrecognized argument: %s", args[i])
+		}
+		// --no-build is handled above, not pre-stripped, so a --chore
+		// followed by it reports the bad token instead of a missing value.
+		if i+1 >= len(args) || args[i+1] == "" {
 			return "", false, fmt.Errorf("flag --chore requires a non-empty value")
 		}
-		if strings.HasPrefix(remaining[i+1], "-") {
-			return "", false, fmt.Errorf("flag --chore requires a chore name, got %q", remaining[i+1])
+		if strings.HasPrefix(args[i+1], "-") {
+			return "", false, fmt.Errorf("flag --chore requires a chore name, got %q", args[i+1])
 		}
 		if seen {
 			return "", false, fmt.Errorf("flag --chore given more than once")
 		}
 		seen = true
-		choreName = remaining[i+1]
+		choreName = args[i+1]
 		i++
 	}
 	return choreName, noBuild, nil
