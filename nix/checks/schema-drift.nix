@@ -1570,6 +1570,64 @@ checkedMerge {
       "renderZshCompletion's choicesFlagBranch must complete both the canonical flag name and the --ac alias to the choices list in one case arm, got: ${zshOut}";
     pkgs.runCommand "renderer-choices-alias-shape" { } "touch $out";
 
+  # A schema alias already renders through secondaryFlagNames, so re-listing it
+  # by hand in a renderer's extraFlags emits the flag twice (issue #3794). Parses
+  # only the flag-name lists, not whole scripts: bash's prev-word case arms
+  # legitimately repeat flag names.
+  renderer-completion-no-duplicate-flags =
+    let
+      subcommandRegistry = import ../../lib/subcommands.nix;
+      inherit (pkgs.lib)
+        assertMsg
+        elemAt
+        removePrefix
+        splitString
+        ;
+      # Capture group 1 of `re` on every line it matches.
+      captures =
+        re: out:
+        builtins.concatMap (
+          l:
+          let
+            m = builtins.match re l;
+          in
+          if m == null then [ ] else [ (builtins.head m) ]
+        ) (splitString "\n" out);
+      bashFlags = map (removePrefix "--") (
+        builtins.concatMap (line: builtins.filter (w: w != "") (splitString " " line)) (
+          captures ''.*compgen -W "(--[^"]*)" -- "\$cur".*'' (
+            renderers.renderBashCompletion schema subcommandRegistry
+          )
+        )
+      );
+      fishFlags = captures "complete -c spindrift -l ([^ ]+) .*" (
+        renderers.renderFishCompletion schema subcommandRegistry
+      );
+      # Only the `flags=( ... )` block, so a spec-shaped line elsewhere in the
+      # script can't count as a flag.
+      zshOut = renderers.renderZshCompletion schema subcommandRegistry;
+      zshAfterOpener = splitString "flags=(\n" zshOut;
+      zshBlockParts = splitString "\n  )" (elemAt zshAfterOpener 1);
+      zshFlagsBlock =
+        assert assertMsg (builtins.length zshAfterOpener == 2 && builtins.length zshBlockParts > 1)
+          "zsh flag-list extraction expects one `flags=(` block closed by `  )`; parser is stale, got: ${zshOut}";
+        builtins.head zshBlockParts;
+      zshFlags = captures " *'--([^:']+):.*" zshFlagsBlock;
+      # An empty parse would pass the duplicate check vacuously.
+      assertUniqueFlags =
+        shell: flags:
+        assert assertMsg (builtins.elem "issue-number" flags)
+          "${shell} flag-list extraction found no issue-number; parser is stale, got: ${builtins.toJSON flags}";
+        assert assertMsg (
+          duplicateNames flags == [ ]
+        ) "${shell} completion lists flags more than once: ${builtins.toJSON (duplicateNames flags)}";
+        true;
+    in
+    assert assertUniqueFlags "bash" bashFlags;
+    assert assertUniqueFlags "fish" fishFlags;
+    assert assertUniqueFlags "zsh" zshFlags;
+    pkgs.runCommand "renderer-completion-no-duplicate-flags" { } "touch $out";
+
   # Dynamic issue-number completion must derive from each registry entry's
   # dynamicIssueCompletion field, not a list independent of the registry
   # passed in (issue #1603). None of the synthetic names are real subcommands,
