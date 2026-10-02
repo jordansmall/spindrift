@@ -235,6 +235,34 @@ credential = { exec = ["/bin/sh", "-c", "echo x >> `+counterFile+`; echo tok"] }
 	}
 }
 
+// Per-route rows no longer sit behind the aggregate registry-proxy-routes
+// row, so this test guards that an unresolvable route credential still exits
+// 2 "configuration invalid" as it did before issue #3144's split.
+func TestDoctorReport_UnresolvableRouteCredentialExitsTwo(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+	c := minimalValidConfig()
+	c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+		"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+	c.registryProxyRoutesFile = writeRoutesFile(t, `
+[[routes]]
+match-host = "registry.example.com"
+credential = { env = "SPINDRIFT_TEST_DOCTOR_REPORT_UNRESOLVABLE_ROUTE_CREDENTIAL" }
+`)
+
+	var stdout, stderr bytes.Buffer
+	got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: true})
+
+	if got != 2 {
+		t.Errorf("doctorReport() = %d, want 2 (configuration invalid) for an unresolvable route credential, stderr=%q", got, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "registry.example.com") {
+		t.Errorf("stderr = %q, want it to name the broken route", stderr.String())
+	}
+}
+
 // Before the fix, an unresolvable route credential failed both the per-route
 // registry-route-credential[<host>] row and the aggregate registry-proxy-routes
 // row over the identical cause (issue #3144 review finding). Now only the
