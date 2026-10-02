@@ -97,6 +97,13 @@ let
       clause = "--print-build-logs";
     }
     {
+      name = "build-failed";
+      # The bare line a failed check prints without `-L`, which costs a second
+      # turn on `nix log`. Bracketed so unrelated "the build failed" prose
+      # cannot stand in for it.
+      clause = "[build failed]";
+    }
+    {
       name = "deterministic-failure";
       # Why retrying a failed check unchanged is wasted: the failure follows
       # from the derivation hash, not from how the build was scheduled.
