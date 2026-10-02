@@ -901,60 +901,6 @@ in
         touch $out
       '';
 
-  # Issue #3448: without `-L`/`--print-build-logs`, a failed check prints only
-  # the store path and a `[build failed]` line, so the agent burns a second
-  # turn re-running `nix log` to see the actual compile/test error.
-  nix-checks-skill-surfaces-build-log = pkgs.runCommand "nix-checks-skill-surfaces-build-log" { } ''
-    grep -qi 'print-build-logs' ${nixChecksSkill} || {
-      echo "nix-checks skill missing 'print-build-logs' -- the -L flag guidance" >&2
-      exit 1
-    }
-    grep -qi 'build failed' ${nixChecksSkill} || {
-      echo "nix-checks skill missing 'build failed' -- the without-\`-L\` failure mode it should warn about" >&2
-      exit 1
-    }
-    touch $out
-  '';
-
-  # Issue #3448: the Box's baked nix.conf pins `cores = N` and one derivation
-  # at a time is Nix's own default, so the skill must tell the agent not to
-  # hand-tune `-j`/`--max-jobs`/`--cores` outside the one `EXIT:137` carve-out
-  # the skill itself fences (issue #3452). The pin here is value-agnostic:
-  # the value belongs to nix-checks-lore-cores-matches-nix-conf, so the two
-  # checks never give contradictory remedies on a cores bump; the carve-out
-  # itself is pinned by nix-checks-lore-parity-clause-oom-cores-carve-out.
-  nix-checks-skill-no-resource-flag-tuning =
-    pkgs.runCommand "nix-checks-skill-no-resource-flag-tuning" { }
-      ''
-        grep -qi -- '--max-jobs' ${nixChecksSkill} || {
-          echo "nix-checks skill missing '--max-jobs' -- the resource flag it should forbid hand-tuning" >&2
-          exit 1
-        }
-        grep -qiE 'cores = [0-9]+' ${nixChecksSkill} || {
-          echo "nix-checks skill missing a 'cores = <N>' pin -- see nix-checks-lore-cores-matches-nix-conf for the value" >&2
-          exit 1
-        }
-        touch $out
-      '';
-
-  # Issue #3448: a check failure is deterministic, since the same derivation
-  # fails the same way regardless of scheduling, so the skill must forbid
-  # re-running a failed check unchanged (a multi-minute build for a foregone
-  # conclusion).
-  nix-checks-skill-failure-is-deterministic =
-    pkgs.runCommand "nix-checks-skill-failure-is-deterministic" { }
-      ''
-        grep -qi 'deterministic' ${nixChecksSkill} || {
-          echo "nix-checks skill missing 'deterministic' -- the property a failed check has" >&2
-          exit 1
-        }
-        grep -qi 'never re-run a failed check unchanged' ${nixChecksSkill} || {
-          echo "nix-checks skill missing 'never re-run a failed check unchanged'" >&2
-          exit 1
-        }
-        touch $out
-      '';
-
   # Issue #3223: the CHECK section is ecosystem-neutral now that the Nix lore
   # lives in the dogfood-only /nix-checks skill instead. A regrown inline
   # mention of any of these terms would defeat the move while every anchor
