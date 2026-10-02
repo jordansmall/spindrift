@@ -218,7 +218,7 @@ setup_butler_env() {
 
 # issue #2349: a realistic multi-agent roster. The reviewer entry stays even
 # though the covered cell leaves the orchestrator off.
-AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+AGENTS_ROSTER='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 # issue #3157 (AC5): the roster minus its "scout" key, isolating the
 # worker-provisioned and scout-absent combination no other cell here pins.
@@ -226,17 +226,17 @@ AGENTS_ROSTER_NO_SCOUT='{"reviewer":{"description":"Review the branch diff for s
 
 # issue #3163: the roster minus its "worker" key, isolating the
 # scout-provisioned and worker-absent combination no other cell here pins.
-AGENTS_ROSTER_NO_WORKER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+AGENTS_ROSTER_NO_WORKER='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 # issue #2353: AGENTS_ROSTER plus a "filer" entry, so the filer-on cells below
 # actually flip the FILER_ENABLED gate that plain AGENTS_ROSTER leaves off.
-AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]},"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
 # issue #2512: AGENTS_ROSTER whose reviewer carries an explicit "effort". The
 # value "xhigh" is distinct from every other effort and model literal in this
 # file, so a dropped or truncated field fails the diff instead of matching some
 # other cell's default. No "filer" key, keeping this cell off the filer axis.
-AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"xhigh","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"xhigh","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "production path matches the golden fixture for the covered cell, with a populated roster" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
@@ -276,7 +276,7 @@ Expected: each widget counted once. Actual: counted twice on retry.'
 # issue #3447: AGENTS_ROSTER plus the "review-axis" fan-out entry, the one roster
 # shape here that flips code-review-baked.md's ${REVIEW_FANOUT_AGENT} from the
 # general-purpose fallback to the governed name.
-AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, seams, and tests; return a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"review-axis":{"description":"Run one axis (Standards or Spec) of the code-review skill'"'"'s two-axis fan-out","model":"haiku","prompt":"","tools":["Read","Bash","Glob","Grep"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+AGENTS_ROSTER_WITH_REVIEW_AXIS='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"review-axis":{"description":"Run one axis (Standards or Spec) of the code-review skill'"'"'s two-axis fan-out","model":"haiku","prompt":"","tools":["Read","Bash","Glob","Grep"]},"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "production path matches the golden fixture for a roster that provisions review-axis" {
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_REVIEW_AXIS"
