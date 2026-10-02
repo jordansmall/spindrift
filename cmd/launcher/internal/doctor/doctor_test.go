@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
@@ -163,6 +164,41 @@ func TestRun_IssueTrackerAuthFailure_CodeForgeProbeDoesNotRun(t *testing.T) {
 	}
 	if strings.Contains(out, "ok: code forge confirmed") {
 		t.Errorf("want code forge probe to never run (fail-fast, no short-circuit into an extra live call) once the issue-tracker probe fails, got:\n%s", out)
+	}
+}
+
+func TestRun_IssueTrackerProbeError_SentinelTextNotDuplicated(t *testing.T) {
+	const detail = "backend detail XYZ"
+	// echo is the phrase a wrapper prefix would repeat; auth's old prefix
+	// "forge auth check failed" echoed its sentinel without matching it verbatim.
+	for _, tc := range []struct {
+		sentinel error
+		echo     string
+	}{
+		{forge.ErrAuthFailure, "forge auth"},
+		{forge.ErrRepoNotFound, forge.ErrRepoNotFound.Error()},
+		{forge.ErrRateLimit, forge.ErrRateLimit.Error()},
+	} {
+		sentinel := tc.sentinel
+		t.Run(sentinel.Error(), func(t *testing.T) {
+			it := forge.NewFake()
+			it.ProbeErr = fmt.Errorf("%w: %s", sentinel, detail)
+
+			var buf bytes.Buffer
+			err := Run(it, forge.NewFake(), defaultDoctorConfig(), NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if n := strings.Count(err.Error(), tc.echo); n != 1 {
+				t.Errorf("%q appears %d times, want 1: %v", tc.echo, n, err)
+			}
+			if !strings.Contains(err.Error(), detail) {
+				t.Errorf("want backend detail preserved, got: %v", err)
+			}
+			if !errors.Is(err, ErrConnectivity) || !errors.Is(err, sentinel) {
+				t.Errorf("want ErrConnectivity and %v in chain, got %v", sentinel, err)
+			}
+		})
 	}
 }
 

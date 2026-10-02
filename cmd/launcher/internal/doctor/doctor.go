@@ -219,13 +219,13 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 				repo, err := it.Probe()
 				if err != nil {
 					if errors.Is(err, forge.ErrAuthFailure) {
-						return nil, fmt.Errorf("%w: forge auth check failed (check %s is set and valid): %w", ErrConnectivity, tokenHint, err)
+						return nil, fmt.Errorf("%w: check %s is set and valid: %w", ErrConnectivity, tokenHint, err)
 					}
 					if errors.Is(err, forge.ErrRepoNotFound) {
-						return nil, fmt.Errorf("%w: forge repo not found (check %s is correct): %w", ErrConnectivity, slugHint, err)
+						return nil, fmt.Errorf("%w: check %s is correct: %w", ErrConnectivity, slugHint, err)
 					}
 					if errors.Is(err, forge.ErrRateLimit) {
-						return nil, fmt.Errorf("%w: forge rate limited (wait for the quota window to reset, then retry): %w", ErrConnectivity, err)
+						return nil, fmt.Errorf("%w: wait for the quota window to reset, then retry: %w", ErrConnectivity, err)
 					}
 					return nil, fmt.Errorf("%w: forge connectivity check failed: %w", ErrConnectivity, err)
 				}
