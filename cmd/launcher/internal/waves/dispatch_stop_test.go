@@ -614,3 +614,24 @@ func TestDispatch_CycleErrorWithStopPreClosed_ReportsDisplacedCause(t *testing.T
 		t.Fatalf("stderr = %q, want the displaced cycle error reported", stderr)
 	}
 }
+
+// Each arm pinned on its own (#3639): the launcher only ever closes stop
+// first, so no production-shaped fixture reaches the abort arm in isolation.
+func TestSignalledStopAlready(t *testing.T) {
+	closed := func() chan struct{} { c := make(chan struct{}); close(c); return c }
+	for _, tc := range []struct {
+		name        string
+		stop, abort chan struct{}
+		want        bool
+	}{
+		{"neither", make(chan struct{}), make(chan struct{}), false},
+		{"stop only", closed(), make(chan struct{}), true},
+		{"abort only", make(chan struct{}), closed(), true},
+		{"both", closed(), closed(), true},
+		{"nil channels", nil, nil, false},
+	} {
+		if got := SignalledStopAlready(tc.stop, tc.abort); got != tc.want {
+			t.Errorf("%s: SignalledStopAlready = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
