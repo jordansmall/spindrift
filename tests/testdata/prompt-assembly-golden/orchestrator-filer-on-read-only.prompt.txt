@@ -1,0 +1,684 @@
+# TASK
+
+Implement GitHub issue #7: Do the thing
+
+Fresh clone, new branch `agent/issue-7` cut from `main`. This issue only.
+
+# CONTEXT
+
+The issue's body and its last-10-comment snapshot are already in the
+# ISSUE TEXT section after the template body — read there, do not fetch
+it from the tracker. What follows here you still run yourself:
+
+- Pull any parent/linked issue or PRD it references too via GitHub — the
+  subject issue's own body and its last-10-comment snapshot are already in
+  the # ISSUE TEXT section below.
+- `git log -n 10 --oneline` — recent history.
+
+
+# ISSUE COHERENCE GATE
+
+Compare the issue's title against its body before scouting or
+implementing anything: materially unrelated means the body describes
+a different, contradictory piece of work than the title. A body that
+merely elaborates, restates, or adds acceptance criteria to the title's
+own topic is exempt and must pass through untouched — proceed straight
+into # SCOUT below with no further comment about this gate. On a genuine,
+contradictory mismatch, halt immediately: do not scout, do not open a
+branch's worth of commits, do not write any diff.
+
+Put the escalation — naming both interpretations, what the title implies
+and what the body implies, and asking a human which one governs — in the
+SPINDRIFT_OUTCOME line's `note=` field below. Post nothing yourself: the
+launcher posts that note as the issue comment, host-side, once you exit.
+
+Print exactly one line and stop — raw plain text, not wrapped in backticks,
+a code fence, or any other markdown formatting, nothing after it:
+
+SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ambiguous note=<escalation naming both interpretations>
+
+`status=ambiguous` is a distinct, successful, non-crash stop — never
+`status=blocked`, and never a signal that implementation itself failed.
+
+# COMMS
+
+Default to the `/caveman` skill for all narration and prose output this run.
+Code, commands, error messages, and commit messages are exempt and stay
+verbatim. Never route a commit message through `/caveman` or otherwise
+compress it — commit messages are always full human-quality prose.
+
+The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
+line, the `VERDICT: APPROVE` / `VERDICT: BLOCK` line, and any host-relay
+signal line such as `SPINDRIFT_PR_INTENT` or `SPINDRIFT_ISSUE_INTENT`.
+Never route these through `/caveman`. Specifically, the `note=` field of
+the SPINDRIFT_OUTCOME line is exempt and stays human-quality prose, same
+tier as a commit message — on a blocked or ambiguous stop it is posted
+verbatim as a comment on the tracker issue, so caveman-compressing it
+ships caveman prose straight to a human reader.
+
+The payload those signals carry is exempt on that same tier, whichever
+carrier takes it: the draft PR's title and body, and a filed issue's title
+and body, stay full human-quality prose — as the base64 payload of a
+marker line under the `log` carrier, and as the text you hand
+`driver-exec signal pr-intent` or `driver-exec signal issue-intent` under
+the `socket` carrier, where no marker line renders at all. A human reads
+the PR and the filed issue cold, the same reason the `note=` field above
+is exempt.
+
+Where a marker line is the carrier, it must keep its required shape exactly
+intact — never reworded, reflowed, or line-wrapped: the leading token,
+the outcome line's key=value pairs, and the PR-intent line's nonce and
+base64 payload as one unbroken token. The verdict line must additionally
+remain the first line of the agent's final message.
+
+Your text output is a machine-parsed log, not a conversation:
+no pleasantries, acknowledgements, praise, or apologies; never restate what
+a subagent returned; no narrative framing. One terse, data-bearing status
+line per step — what ran, what resulted.
+
+Human-quality prose is reserved exclusively for: commit messages
+(Conventional Commits section), the PR title and body, the issue comment
+required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
+
+# SCOUT
+
+Delegate exploration to the `scout` subagent before reading source yourself:
+
+> scout: map the files, seams, and existing tests relevant to this issue,
+> cited with a verbatim excerpt under a path:line anchor for every
+> load-bearing claim. Write the brief to `/tmp/brief.md` and return a short
+> pointer to it. Do not implement.
+
+The scout writes that brief itself, to `/tmp/brief.md` (outside the repo,
+never commit); read it back from disk before you start work, and never write
+or append to it. Trust it — the citations are the evidence, so jump to the
+pointers. Re-search only when a citation is wrong or missing; re-scout only
+if a finding shows the change belongs elsewhere.
+
+If `/tmp/brief.md` isn't there, explore the repo yourself as usual — that's
+not an error.
+
+# ALREADY RESOLVED
+
+After scouting, check whether the issue's change is already present on the
+*fetched* default branch — not merely on the branch you cut `agent/issue-7` from.
+Run `git fetch origin`, then verify directly against `origin/main`:
+does that ref already contain the fix, feature, or behavior the issue asks
+for?
+
+A partial or speculative match does not qualify — only a demonstrable one
+does. The change must be verifiably in place, ideally with the existing
+check or test that proves it named in the note. A plausible-looking commit
+message or adjacent code is not enough on its own; read the actual diff.
+
+If it is genuinely already resolved, do not implement anything — no commits,
+no push, no PR, no in-box comment, no in-box close: the launcher does the
+rest host-side once you exit. Name the resolving commit SHA or PR, and the
+check or test proving it, in the SPINDRIFT_OUTCOME line's `note=` field.
+
+Print exactly one line and stop — raw plain text, not wrapped in backticks,
+a code fence, or any other markdown formatting, nothing after it:
+
+SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=already-resolved note=<resolving commit or PR, plus the check/test that proves it>
+
+`status=already-resolved` is a distinct, successful, non-crash stop — never
+`status=blocked`, and never a signal that implementation itself failed.
+
+If the change is not already present, proceed straight into # IMPLEMENT
+below with no further comment about this gate.
+
+# IMPLEMENT
+
+A `worker` subagent is provisioned this run, so run IMPLEMENT as its
+**coordinator** rather than editing the source yourself. Break the issue into
+an ordered set of small slices, sized so each worker's run stays bounded — a
+long-running worker replays its whole accumulated context on every turn, so
+cache-read cost grows with the run's length. Then delegate each slice
+**sequentially** to the `worker`, stating the turn budget in the delegation
+itself:
+
+> worker: implement <one slice, with its relevant pointers>. Work
+> test-first. Turn budget for this slice: about <N> turns. Return a
+> concise report — files touched, checks run, outcome — not the diffs.
+
+Hand the worker one slice at a time and wait for its report before starting
+the next. Keep only that summary in your own context — let the bulk diffs,
+file reads, and check logs live in the worker's context, not yours. If a
+slice's report shows it went wrong, refine the delegation and re-run that
+slice before moving on. If the report instead shows the worker stopped
+cleanly at its turn budget with a remaining-work checkpoint, delegate the
+remainder to a **fresh** worker seeded from that checkpoint — never push the
+same worker past its stated budget.
+
+You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
+implements each slice; the coordinator keeps the checks green, reviews, and
+commits. Each delegated slice must satisfy the one-slice, test-first
+discipline below — you enforce it; the worker performs each
+red-green-refactor cycle.
+
+The scout wrote its brief to `/tmp/brief.md` itself — read it back from
+disk. Use its map to break the issue into the ordered set of slices. Quote
+into each delegation, verbatim from the brief, the Map entries, the
+Invariants & gotchas, and the Suggested-approach step that slice needs —
+the brief's own lines, not a paraphrase or a loose pointer — so the worker
+starts editing from the scout's map instead of re-exploring the repo. Scope
+the excerpt to the slice: never paste the whole brief into a delegation.
+
+Verify the scout's load-bearing claims from the cited excerpts already in the
+brief — the quoted lines under each path:line anchor, the same evidence your
+delegations carry. Read the tree yourself only to spot-check a citation that
+looks wrong or is missing, never as a standing sweep over ground the brief
+already covers.
+
+Skills available: caveman, check-hygiene, code-comments, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+
+Work test-first: run `/tdd` for each slice.
+
+A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
+
+# CHECK
+
+Before each commit, run the repo's own checks green. Use what the project
+defines (package scripts, Makefile, CI config).
+
+Read a large output from a file rather than from the conversation, diffs
+included: never stream a bare `git diff` into the conversation — the
+tool-result cap truncates it, so you end up reasoning about a diff whose end
+you cannot see. Write the diff to a file, read `--stat` first for shape, then
+read targeted hunks or grep that file for what you need.
+
+Run every check or build gate in the foreground and block on it yourself —
+never background it (`&`, detached job, background task) and end your turn
+while it is still pending: the turn ends before the gate finishes, so no
+`SPINDRIFT_OUTCOME` line is ever printed and the run is lost even when the
+work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
+(`status=ready` or `status=blocked`) has been printed.
+
+Before running the first gate, invoke the `/check-hygiene` skill.
+
+# COMMIT
+
+Use the `/commit` skill to write every commit message.
+
+Prefer several small focused commits over one big one — commit each logical
+unit (domain change, then wiring, then tests) so each stands alone.
+
+Whether this pass is authoring the first slice or committing fixes for a
+prior review round's findings is read from run-state, not decided here —
+the same seeded "## Run-state handoff" section and its `Last reviewer
+verdict:` line the REVIEW section below reads.
+
+- **No handoff section, or a handoff section with no `Last reviewer
+  verdict:` line** (e.g. a worker-dispatch manifest continuation, or any
+  other carried-forward state short of a resolved review verdict): no
+  review round has reached a verdict on this branch yet. The preference
+  above of "several small focused commits" stands unchanged — commit
+  each logical unit separately as usual.
+- **A handoff section with a `Last reviewer verdict:` line** (`APPROVE`
+  or `BLOCK`): a review round has already run against this branch, and
+  this pass is committing fixes for its findings — blocking ones on
+  `BLOCK`, non-blocking ones REVIEW's own triage below decides to fix
+  on `APPROVE`. That overrides the preference above of "several small
+  focused commits" for this pass: instead,
+  fold each fix into the commit it logically belongs to —
+  `git commit --amend` for the branch tip, an autosquash fixup for an
+  older commit — rather than tacking on a follow-up commit. Add a
+  *new* commit only when the fix is genuinely a separate file or scope.
+
+  Complete a fixup immediately, never leave a dangling `fixup!` commit
+  on the branch: `git commit --fixup=<sha>`, then
+  `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash origin/main`
+  squashes it in without any human reading or editing anything (the
+  sequence editor is a no-op that accepts the autosquash reorder as-is)
+  — an unsquashed `fixup!` commit stays its own separate commit on the
+  branch, the exact outcome folding exists to avoid.
+
+  You are a fresh session and did not author any of this branch's prior
+  commits yourself, but every commit between `origin/main` and
+  `agent/issue-7` is this run's own automated work on this issue — including
+  any a prior, crashed run of this same automated attempt already
+  committed — so all of them are fair game to amend or fixup
+  (`git log origin/main..agent/issue-7` lists them).
+
+  The branch force-pushes, so rewriting that history here is expected.
+
+**Always rebase onto the latest base immediately before finishing** — never
+leave the branch on a stale base. This keeps the branch's tested tree current
+with any siblings that landed while you worked: the launcher merges a green PR
+as-is and does not re-rebase it for you, so a fresh base is the branch's
+freshness guarantee (a stale base also produces phantom diffs that trip push
+guards):
+
+```
+git fetch origin
+git rebase origin/main
+```
+
+Re-run the repo's checks after rebasing.
+
+Your token is read-only and you take no code-out action yourself — do NOT
+`git push` and do NOT run `git bundle create`. Leave your work committed on
+the branch: after you exit the harness relays your committed branch out and
+the launcher pushes it host-side with its own token.
+
+# REVIEW
+
+Review is handled by the orchestrator as a separate, code-owned pass (issue
+#2037) — do not spawn a `reviewer` subagent yourself, and do not loop on
+blocking findings in this turn. Look for a "## Run-state handoff" section
+below, seeded from a prior pass in this run.
+
+- **No handoff yet, or its `Last reviewer verdict:` line is not `APPROVE`
+  (including a `BLOCK` line, with a `Reviewer findings:` block to fix):**
+  Stop your turn now, right after COMMIT. Do not run FILE ISSUES, LAND THE
+  CHANGE, OPEN A PULL REQUEST, or OUTCOME below — a fresh review pass runs
+  next automatically, and the orchestrator invokes you again afterward,
+  seeded with its verdict (and findings, if it blocked).
+- **`Last reviewer verdict:` is `APPROVE`:** The review pass already
+  reviewed this branch and found nothing blocking. Triage any findings the
+  handoff's `Reviewer findings:` block lists under `## Non-blocking` exactly
+  as the loop below describes, then continue straight into FILE ISSUES,
+  LAND THE CHANGE, OPEN A PULL REQUEST, and OUTCOME.
+
+When a check surfaces a failure you want to set aside as pre-existing
+rather than fix, prove it against a genuinely clean checkout of
+`origin/main` first — a cleaning step that reports nothing to
+clean is an unmet precondition, not proof, so do not go on to claim
+pre-existence from that run. `git stash` alone does not establish a
+clean base: once a slice's own edits are committed, the branch tip is
+the dirty state stash cannot touch, so it saves nothing, exits zero, and
+any check you then run is still against your own commits, not the base.
+Fetch first (`git fetch origin`, so the ref isn't stale), then check out
+`origin/main` itself somewhere outside this working tree — a
+sibling worktree (`git worktree add`) or a fresh clone — and re-run the
+same check there; that is what actually proves the failure predates this
+branch. Prove it wherever the check actually ran, not only on the host —
+a failure that reproduces solely in the Box is still real. Report which
+revision you verified against and how you reached the clean tree,
+directly in your own output this turn, so the claim is auditable from
+this log. A failure you cannot prove this way is a failure this branch
+caused: fix it, do not wave it off.
+
+Non-blocking triage — do NOT reflexively file every finding. There are
+three outcomes: fix inline, drop, or escalate. Filing every finding spawns
+more issues than the work ever closes, so resolving a cheap, in-scope
+finding here stays the default regardless of round (item 1 below,
+unchanged by round), and dropping a correct-but-trivial, out-of-scope
+finding (item 2 below) is also unchanged by
+round. Only the tiebreak for an ambiguous finding headed for escalation is
+round-aware (item 3 below): read the highest N among the top-level
+"## Round N (verdict: ...)" section headers in the Findings log file the
+handoff's own Findings log bullet points to — not the Decisions record's own
+"## Round N" headers shown separately above (those number by pass, not by
+review round), and not similar-looking text quoted inside a finding's own
+description. N == 1 means this is the first review round; N > 1 means the
+second review round or later. If the Findings log bullet is absent, or you
+otherwise cannot tell, treat it as the second round or later — under
+item 3 below that default is not a blanket deferral but the narrower
+diff-growth test, so an ambiguous small in-scope finding is still fixed
+inline either way. This round-awareness applies only to the non-blocking
+triage below, not the blocking-verdict handling above:
+
+1. Fix inline, on this branch, every finding whose fix is cheap and in
+   scope for the slice as originally authored and the issue's own
+   acceptance criteria — most nits, smells, dead code, misleading names,
+   and doc updates for a surface the *original* slice touches. Lines this
+   branch itself touched in an earlier round's own absorbed fix count as
+   that surface: they are this branch's own work, so a finding about them
+   is in scope at every round. What stays out of scope is surface this
+   branch never touched at all — that pin, not the round number, is what
+   bounds where the in-scope surface can grow: it widens with this
+   branch's own fixes, never onto code this branch never wrote. Re-run
+   checks, then commit them the same way — amended into the commit each
+   logically belongs to unless it is a reasonably separate scope, which
+   earns its own commit. They never become issues.
+2. Drop a finding that is correct but trivial and out of scope for
+   this slice — the fix would be cheap, but the surface is one this
+   slice never touched, and nobody would ever prioritise it as a tracked
+   issue. Two examples: swapping a bare commit SHA for an issue reference
+   in a test comment, and preferring a numeric sort over a lexical one
+   in one line of list output. Dropping is a legitimate third outcome,
+   not a failure to act — a tracked issue nobody will ever pick up costs
+   more than the nit does. The floor is worth, not certainty: a finding
+   you are merely unsure about is not dropped, it goes to item 3 below.
+   Scope is never the uncertain part — whether this branch touched a
+   surface is a fact the diff answers — so what reaches item 3 this way
+   is still out of scope, and item 3 files it rather than fixing it.
+3. Escalate — to the filer if present, else the PR body — only a
+   finding that genuinely needs a human: a real design trade-off, work
+   outside this issue's scope, or a change too large to fold in without
+   derailing the slice. A finding an earlier round of this run already
+   escalated must never be escalated again, even reworded: a relayed
+   filer's intents file only once the run ends, so its own duplicate
+   search cannot see them yet, and a reworded copy can slip past any
+   search. Item 1's scope pin is absolute here, so the round-aware
+   tiebreak below only ever runs where fixing is available at all —
+   inside the surface this branch already touched. On a surface
+   this branch never touched there is no inline fix to weigh, so an
+   uncertain finding item 2 hands up is filed, at every round. When
+   unsure whether a finding clears that bar: on the first review
+   round, fix it rather than file it. From the second review round on,
+   escalate it only when fixing it would widen the diff — new behaviour,
+   a new surface, or an edit large enough to need its own review; an
+   ambiguous finding whose fix is small and stays inside what this branch
+   already touches is still fixed inline, at every round. Deferring is
+   the safer failure mode precisely where a silently widened diff is
+   the alternative, and only there: elsewhere filing is the costlier
+   failure — a backlog issue nobody picks up, and a duplicate a
+   later run rediscovers and files again. Narrowing the round-2 flip to
+   diff growth is this tiebreak's calibration, not a weakening of it.
+
+Before stopping this turn, either right after COMMIT or after OUTCOME per the
+two cases above, write to `/tmp/pass-summary.md` (outside the repo, never
+commit) a free-form summary of what you did this pass and what remains — the
+next pass, if any, is seeded with this path.
+
+Also write a second, separate file, `/tmp/dispositions.md` (outside the repo,
+never commit) — do not fold this into the pass-summary file above, and do
+not put pass-summary prose into this one. It holds nothing but one terse
+line per Blocking or Non-blocking finding this pass addressed: `<finding>
+-> fixed in commit <SHA>` for one you actually fixed, or `<finding> ->
+won't-fix: <reason>` for one you deliberately left alone (an escalated
+finding, per the non-blocking triage above, is a won't-fix here, with the
+reason `escalated to filer`, or `escalated to PR body` when no filer is
+present, so a later round knows it is already escalated and never escalates
+it again). Reference existing artifacts — the commit SHA, a `file:line`,
+an issue number — rather than restating their content: no narrative, no
+headers, no reasoning beyond that one-line reason, and no pasted diff hunks,
+file contents, or transcript excerpts. A later review round reads this file
+verbatim and treats every line as an unverified claim to check against the
+diff, not settled fact, so write it precisely enough to survive that check,
+and terse enough to stay a reference rather than a restatement — a compact,
+well-formed entry never needs more than a short clause after the arrow.
+
+Also write a third, separate file, `/tmp/decisions.md` (outside the repo,
+never commit) — never fold this into the pass-summary or dispositions file
+above. It holds nothing but one terse line per notable implementation
+decision this pass made: what you chose, what you rejected (if a real
+alternative existed), and the constraint that drove the choice, e.g.
+`<what/where> -> chose <X>, rejected <Y> -- <constraint, with a reference>`.
+Not every trivial choice belongs here — only one a later pass, re-deriving
+intent from the diff alone, could plausibly get wrong or relocate. Reference
+existing artifacts — the commit SHA, a `file:line`, an issue number —
+rather than restating their content: no narrative, no pasted diff hunks,
+file contents, or transcript excerpts. Write only this pass's own new
+decisions; a rejected alternative stays worth keeping even after a later
+pass's own choice looks different, and the run's own decisions record
+already accumulates every pass's entries across rounds without you doing
+anything extra.
+
+If the seeded "## Run-state handoff" section's `Last reviewer verdict:`
+line reads `APPROVE`, this pass is the land pass, and its work follows a
+fixed order below rather than the general COMMIT/REVIEW guidance's own
+ordering.
+
+1. `git fetch origin`, then `git rebase origin/main`, resolving
+   any conflicts, before applying a single non-blocking fix and before
+   running any check. Under immediate-merge landing the base moving while
+   the earlier passes ran is the ordinary case, not an exception, and
+   conflict resolution rewrites the very tree a gate run would have
+   certified — a gate that precedes this rebase is certifying a tree that
+   is about to change, so it buys nothing.
+2. Apply the non-blocking fixes the triage above keeps, folding each into
+   the commit it logically belongs to exactly as the COMMIT section's own
+   fold-into-logical-commits mechanism already describes.
+3. Run the repo's full check gate once, over the resulting tree.
+4. Finish the pass: FILE ISSUES, LAND THE CHANGE, OUTCOME.
+
+Two kinds of edit surface across those steps, and step 2 covers only
+one of them. Folds are the reviewer's own listed non-blocking
+findings, plus the mechanical churn a rebase conflict or a
+formatter/linter run leaves behind. Gate-discovered work is anything
+else: a code or test change not traceable back to a reviewer finding,
+ordinarily surfaced when step 3's check gate first runs red. The two
+are not interchangeable — a fold still folds into the commit it belongs
+to as usual, but gate-discovered work is governed by the default below.
+
+A fold answering a finding about a comment or doc line rewrites that line
+in place, and stays proportional to the change it documents — a two-line
+reword earns no ten-line rationale header above it. A prose fold owes no
+declaration.
+
+The default for gate-discovered work is file, don't fix. When step 3's
+failure is proven pre-existing on the base — the REVIEW section's own
+clean-checkout proof, not a guess — file it through the FILE ISSUES step
+and say so plainly in the outcome note, then leave the change out of the
+landing. A tree the reviewer approved is what lands; a pre-existing
+failure belongs to whichever branch introduced it, not to this one to
+absorb silently.
+
+Fixing gate-discovered work inline is sometimes unavoidable — the gate
+will not go green otherwise — but doing so owes a declaration, not a
+silent commit. Record it in both the outcome note and this pass's own
+`/tmp/decisions.md` — the decisions record the REVIEW section already
+has every pass write — naming the files touched, together with a
+one-line why. Burying the change in the PR body's own prose does not
+satisfy this — a human, and any later delta gate, needs to see
+post-review work without diffing the branch.
+
+This ordering supersedes the COMMIT section's "rebase onto the latest base
+immediately before finishing" for this pass — the rebase already happened
+at step 1, and step 3's gate already covers it.
+
+Fetching again before finishing is still worth doing, but re-run the gate
+only when the tree actually changed since it last ran: a later rebase that
+really moved the branch, or a fix applied after the gate. A rebase that
+reports the branch already up to date changed nothing and earns no second
+run. Never re-run the gate for reassurance — over an unchanged tree it is
+the single largest wall-clock item in the pass, and it tells you nothing
+the first run did not.
+
+# FILE ISSUES
+
+REVIEW's triage has three outcomes, and two of them are already settled by
+the time the filer runs: what was cheap and in scope was fixed inline, and
+what was trivial and out of scope was dropped without filing. Escalation is
+the third, and it is this step. Delegate to the filer subagent only the
+findings that survived that triage — the ones that genuinely need a human
+(a design trade-off, out-of-scope work, or a change too large to fold in),
+plus, from the second review round on and only when fixing it would widen
+the diff, an ambiguous finding REVIEW's own round-aware tiebreak deferred
+rather than fixed — one whose fix is small and stays inside what the branch
+already touches is still fixed inline, at every round. An uncertain finding
+on a surface the branch never touched arrives here at every round instead:
+fixing it inline was never an available outcome. If none survived, skip this
+step; do not re-file what you just fixed or dropped.
+
+It is pre-provisioned via --agents; pass it the surviving findings verbatim,
+the issue number, and the branch (or PR URL, once one is open) for provenance.
+Your token is read-only, so the filer cannot file issues itself — it emits
+`SPINDRIFT_ISSUE_INTENT` lines instead, and the launcher files each one
+host-side once you exit, so no issue URL is known yet.
+
+Best-effort: filing must never block the PR or change the outcome line.
+
+- On success (the filer reports `QUEUED`), just note in the PR body that the
+  finding(s) were queued for filing — never paste the raw findings
+  themselves, they're already tracked.
+- On failure (the filer errors, times out, or returns nothing usable), fall
+  back to pasting the surviving findings into the PR body and proceed — exactly
+  as when the filer is not configured.
+
+# LAND THE CHANGE
+
+Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
+unsure):
+
+**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
+gate): skip OPEN A PULL REQUEST below entirely.
+
+1. Print exactly one line as your final output and stop — raw plain text, not
+   wrapped in backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
+
+   The launcher applies `MERGE_MODE` after this line (push straight to the
+   target branch on `immediate`; leave the branch as pushed on `manual`).
+   Do not open a pull request and do not attempt to merge.
+
+**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
+network; the launcher lands your branch after this container exits): skip
+OPEN A PULL REQUEST below entirely. Do not push directly — the repo you
+cloned from is mounted read-only — and do not bundle your commits yourself:
+the Harness bundles them out of the container after you exit.
+
+1. Print exactly one line as your final output and stop — raw plain text, not
+   wrapped in backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
+
+   The launcher relays the bundle into the Accumulation repo and merges it
+   onto the Integration branch host-side. There is no PR to open, no CI to
+   watch, and nothing further for you to do.
+
+**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
+the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
+0038 + issue #1961): continue with OPEN A PULL REQUEST below.
+
+**`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
+
+# OPEN A PULL REQUEST
+
+1. Your token is read-only and you take no code-out action yourself — do NOT
+   `git push` and do NOT run `git bundle create`. Leave your work committed on
+   the branch: after you exit the harness relays your committed branch out and
+   the launcher pushes it host-side with its own token.
+
+2. Your token is read-only — do NOT `gh pr create`. Print your intended draft
+   PR's title and body as a single line on stdout instead — the launcher
+   finds it by this run's nonce, decodes it, and opens the draft PR
+   host-side, once you exit:
+
+   SPINDRIFT_PR_INTENT test-run-nonce-0001 <base64-encoded title, a blank line,
+   then the body>
+
+   Build the payload by joining the PR title, a blank line, and the PR body,
+   then base64-encoding the result into one unbroken token with no embedded
+   newlines or spaces (e.g. `printf '%s\n\n%s' "<conventional title>"
+   "<summary>" | base64 -w0`). Print exactly ONE such line, before the
+   SPINDRIFT_OUTCOME line below.
+
+3. Body MUST contain `Closes #7`. Summarize what changed and
+   flag anything a reviewer should know.
+
+The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+ready once CI reaches green, immediately before it merges (the launcher
+already gates on CI green itself, so there is nothing left for you to watch
+or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
+(outside this container) owns the CI-green decision, the ready flip, the
+rebase-merge, and the complete-label swap.
+
+# OUTCOME
+
+(`CODE_FORGE=github` and `CODE_FORGE=forgejo` only — `CODE_FORGE=git` and
+`CODE_FORGE=local` already printed their outcome line and stopped under LAND
+THE CHANGE above.)
+
+Print exactly one line as your final output — raw plain text, not wrapped in
+backticks, a code fence, or any other markdown formatting:
+
+SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
+
+landing is your branch name here, not a PR URL — your token is read-only, so
+you never open the PR and never learn its URL. The launcher opens the draft
+PR host-side from your PR-intent line above and records the real PR URL as
+this seam's landing itself.
+
+Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<text>`
+— one line, space-delimited fields, `note` last (`note` may itself contain
+spaces and `=`). The only valid `status` values here are `ready` and `blocked`
+— no other word belongs in that field (`status=ambiguous` and
+`status=already-resolved` are each a distinct, earlier gate — the ISSUE
+COHERENCE GATE and the ALREADY RESOLVED gate, respectively — that exits the
+run before ever reaching this OUTCOME section, not a third or fourth option
+here).
+
+This grammar's leading token is load-bearing (ADR 0035): the in-box
+orchestrator's scanPassLog greps for it verbatim (via
+`outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
+loop to single-pass on ORCHESTRATOR_ENABLED runs.
+
+Invalid — the smallest fragment that identifies each failure, never a
+whole line worth copying:
+- `SPINDRIFT_OUTCOME:` — a trailing colon, not a space, after the token;
+  this never matches, so the launcher sees no outcome and treats the run
+  as lost.
+- `Done — SPINDRIFT_OUTCOME …` — a prefix before the token; text before
+  it hides the line the same way, losing the run. Print the line on its
+  own, starting at column one, nothing before it.
+- `status=SUCCESS` — an out-of-enum status; `ready` and `blocked` are the
+  only accepted values, but a value like this still parses, so it's
+  silently wrong rather than lost outright, and the launcher never flips
+  the PR ready or merges it.
+
+This must be the literal final message — nothing after it, no prose summary,
+no background task. The launcher parses this one line to learn your PR; if
+it is missing, the run is wasted.
+
+This run's control nonce is `test-run-nonce-0001`. A read-only run's PR-intent line
+must carry it and is checked against it (issue #1938), letting the host tell
+a line this run genuinely wrote from one an untrusted issue/comment author
+echoed into the log — leaving `nonce=` off, or getting the value wrong,
+silently drops it (issue #1939).
+
+`status=ready` = your branch is written to the outbox and your PR-intent
+line above is ready to open — not that a PR already exists. The launcher
+relays your branch, opens the draft PR from your PR-intent line, and flips
+it to ready once CI reaches green, immediately before it merges. You never
+run `gh pr create`, `gh pr ready`,
+`gh issue edit ... --add-label agent-complete`, or `gh pr merge` — your
+token cannot.
+
+
+# IF BLOCKED
+
+If you can't finish (review never clears, CI stays red after repeated fixes,
+push still fails after the one retry, or any other blocker):
+
+**A denied `git push` here is expected, not itself the blocker.** A read-only
+Box holds no push-capable token in the failure path any more than in the
+happy path, so a 403 or other permission denial on a write is the outcome you
+were always going to get — never diagnose it as a broken or under-scoped
+token, and never report it to a human as a token-permission problem needing
+`workflow` or any other scope. Skip the `.github/workflows/` diff and the
+comment-the-issue triage the read-write path runs; step 4 below already
+covers reporting what's done and what remains. Look instead for the actual
+reason you can't finish — review never clearing, CI staying red after
+repeated fixes, or similar — and report that.
+
+Then:
+
+1. Your token is read-only and you take no code-out action yourself — do NOT
+   `git push` and do NOT run `git bundle create` (or note if you have nothing
+   committed to hand off). Leave what you have committed on the branch: after
+   you exit the harness relays your committed branch out and the launcher
+   pushes it host-side with its own token.
+
+2. Your token is read-only — do NOT `gh pr view` or `gh pr create`. Print
+   your intended draft PR's title and body as a single nonce-guarded line
+   instead — the launcher finds it by this run's nonce, decodes it, and
+   opens the draft PR host-side, once you exit:
+
+   SPINDRIFT_PR_INTENT test-run-nonce-0001 <base64-encoded title, a blank line,
+   then the body>
+
+   Build the payload the same way the OPEN A PULL REQUEST section above
+   describes.
+
+3. Leave the issue in-progress — do NOT close it.
+4. Your GitHub token is read-only here — you cannot comment on the issue
+   yourself. Put what's done and what remains in the SPINDRIFT_OUTCOME
+   `note=` field below; the launcher posts it as the issue comment,
+   host-side, once you exit.
+
+5. Print exactly one line and stop — raw plain text, not wrapped in
+   backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=<short reason>
+
+   landing is your branch name here, not a PR URL — your token is read-only,
+   so you never open the PR and never learn its URL.
