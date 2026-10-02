@@ -22,7 +22,10 @@
 # trackerAxisWrite, because the generated Go cannot tell "" from omitted, and
 # lib/mkHarness.nix defaults on absence while cmd/launcher defaults on
 # emptiness (issue #3487). trackerAxisWrite = "" is legal (see local) because
-# cmd/launcher reads it as-is.
+# cmd/launcher reads it as-is. A row that sets trackerAxisWrite (even to "")
+# or trackerAxisFiler must also set trackerAxisRead, else
+# renderBackendRegistryGo throws: cmd/launcher's trackerAxisSignals drops both
+# for a row that omits it (issue #4183).
 
 # goVar is an explicit field rather than a derived title-case transform,
 # because "github" must render as "GitHub" and no capitalize-first rule

@@ -448,6 +448,8 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 // nix and Go can never drift (issue #2533). An empty TrackerAxisRead covers
 // both an unregistered name and github/jira's own rows, whose resolved value
 // is "GITHUB" but whose Go zero value leaves the field unset.
+// renderBackendRegistryGo rejects a row that sets write/filer without read, so
+// the early return never drops a declared axis (issue #4183).
 func trackerAxisSignals(issueTracker string) (read, write, filer string) {
 	row, ok := backendByName(issueTracker)
 	if !ok || row.TrackerAxisRead == "" {
