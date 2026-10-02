@@ -2361,8 +2361,8 @@ in
   # them, so they catch an unregenerated edit rather than a deliberate
   # rewording; only a pin encodes the intent. The clauses are upstream's own
   # phrasing, so re-syncing the fragment verbatim to the skill keeps this
-  # green. commit-fragment-parity.nix leaves the column bounds unpinned on
-  # both sides; #3486 tracks pinning them there.
+  # green. commit-fragment-parity.nix pins the column bounds against the
+  # skill (issue #3486); this pin keeps the fallback's exact two-tier wording.
   commit-unbaked-fragment-two-tier-subject-limit =
     pkgs.runCommand "commit-unbaked-fragment-two-tier-subject-limit" { }
       ''

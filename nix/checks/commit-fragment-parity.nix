@@ -11,14 +11,10 @@ let
   fallbackDesc = "templates/default/prompts/fragments/commit-unbaked.md";
   anchorDesc = "templates/default/prompts/fragments/commit-baked.md";
 
-  # Only two clauses are pinned. The skill and the fallback spell the wrap rule
-  # and the column bounds differently ("hard line wraps" against "hard-wrap at
-  # 72 columns", "≤ 50" against "≤50"), so pinning either would go red on a
-  # copy-edit that changed nothing about the discipline. The fallback side's
-  # own column bounds are pinned separately, against its own wording rather
-  # than the skill's, by commit-unbaked-fragment-two-tier-subject-limit in
-  # nix/checks/prompts.nix (issue #3478); #3486 tracks pinning them here,
-  # against the skill.
+  # The column bounds are pinned here against the skill; normalize folds the
+  # comparator spacing ("≤ 50" against "≤50"). The fallback's exact two-tier
+  # wording is pinned separately by commit-unbaked-fragment-two-tier-subject-limit
+  # in nix/checks/prompts.nix (issue #3478).
   sharedClauses = [
     {
       name = "conventional-commits-v1-0-0";
@@ -32,6 +28,38 @@ let
       # in the skill, "hard-wrapped" in the fallback); the header's
       # unhyphenated "hard line wraps" is not.
       clause = "hard-wrap";
+    }
+    # The skill states each bound twice, in the rule section and in the
+    # "Confirm:" checklist, so both are pinned; a change to either alone must
+    # trip the check. The fallback states each once.
+    {
+      name = "subject-bound-rule";
+      # Skill: "keep ≤ 50 characters"; fallback: "subject ≤50".
+      skillClause = "keep ≤50 characters";
+      fallbackClause = "subject ≤50";
+    }
+    {
+      name = "subject-bound-checklist";
+      # Skill: "subject ≤ 50 chars"; fallback: "subject ≤50".
+      clause = "subject ≤50";
+    }
+    {
+      name = "subject-ceiling";
+      # The skill and the fallback wrap "never exceed 72" at different points;
+      # normalize collapses both to one line.
+      clause = "never exceed 72";
+    }
+    {
+      name = "body-bound-rule";
+      # Skill: "hard-wrap at **72 columns**"; the needle stays inside the
+      # emphasis so it does not straddle the markdown.
+      skillClause = "72 columns";
+      fallbackClause = "body ≤72";
+    }
+    {
+      name = "body-bound-checklist";
+      skillClause = "wrapped at 72";
+      fallbackClause = "body ≤72";
     }
   ];
 
