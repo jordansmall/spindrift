@@ -665,12 +665,14 @@ issue).
 A third Dispatch kind (ADR 0056) that keeps a Target repo tidy on its own
 initiative: one advise-only Box scans one [[Chore]] and files what it finds
 through the [[Filer]]. Keyed by chore, not by issue — nothing labels it into
-being; today only the one-shot `spindrift butler` command runs it — itself
-picking a due Chore, or one named on `--chore` — and the [[Daemon]] will
-later run it only when no dispatch or research work is
-waiting. Advise-only for code; an opt-in, host-gated subset of its findings
-may be filed already dispatchable. A further opt-in, host-gated subset may
-be landed by the host itself as a patch PR (ADR 0057).
+being; the one-shot `spindrift butler` command runs it — itself picking a
+due Chore, or one named on `--chore` — and the [[Daemon]] runs it in its
+idle tier, only when no dispatch or research work is waiting. Advise-only
+for code; an opt-in, host-gated subset of its findings may be filed already
+dispatchable (`maxPromotionsPerDay`, default 0 — off). A further opt-in,
+host-gated subset may be landed by the host itself as a patch PR (ADR 0057;
+`maxPatchesPerDay`, default 0 — off). The Box only reports; the host alone
+promotes or patches.
 _Avoid_: sweep, patrol, scheduler, cron, audit.
 
 **Chore**:
