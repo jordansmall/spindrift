@@ -128,7 +128,7 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 		}
 		title := escapeMarkdownLinkText(f.Title)
 		if f.Failed {
-			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, firstLine(f.Body)))
+			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, escapeMarkdownLinkText(firstLine(f.Body))))
 			continue
 		}
 		if strings.HasPrefix(f.URL, "http://") || strings.HasPrefix(f.URL, "https://") {
@@ -195,8 +195,9 @@ func firstLine(s string) string {
 }
 
 // escapeMarkdownLinkText escapes s for rendering inside a Markdown bullet --
-// as link text, as bold text, or as a bare dedup reference: each of those is
-// agent-chosen, and an unescaped bracket breaks the surrounding syntax.
+// as link text, as bold text, as a bare dedup reference, or as a failed
+// intent's body line: each of those is agent-chosen, and an unescaped bracket
+// breaks the surrounding syntax.
 func escapeMarkdownLinkText(s string) string {
 	s = strings.ReplaceAll(s, "[", "\\[")
 	return strings.ReplaceAll(s, "]", "\\]")

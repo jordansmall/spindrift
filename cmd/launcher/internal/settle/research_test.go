@@ -795,6 +795,23 @@ func TestBuildFiledIssuesSection_FailedBodyTruncatedToFirstLine(t *testing.T) {
 	}
 }
 
+// A failed bullet's body is agent-chosen, untrusted text too, so a Markdown
+// link in it must not render as a live link in the posted verdict comment.
+func TestBuildFiledIssuesSection_FailedBodyEscapesLinkText(t *testing.T) {
+	filed := []filedIntent{
+		{Title: "t", Failed: true, Body: "see [text](url) and stray ] here\nmore"},
+	}
+
+	got := buildFiledIssuesSection(filed)
+
+	if !strings.Contains(got, `\[text\](url)`) || !strings.Contains(got, `stray \] here`) {
+		t.Errorf("section = %q, want body brackets escaped", got)
+	}
+	if strings.Contains(got, "[text](url)") {
+		t.Errorf("section = %q, want no raw link in the body", got)
+	}
+}
+
 // A title is agent-chosen, untrusted text, so a bracket in it renders escaped
 // instead of breaking the surrounding Markdown link. The fixture holds both a
 // linked and a failed entry because they render through different paths.
