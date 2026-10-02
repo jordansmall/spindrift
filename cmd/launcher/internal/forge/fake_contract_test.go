@@ -36,6 +36,12 @@ func (h *fakeHarness) SeedNativeDeps(num string, ids []string) {
 	}
 	h.f.NativeDeps[num] = ids
 }
+func (h *fakeHarness) SeedComments(num string, comments []forge.Comment) {
+	if h.f.CommentsFor == nil {
+		h.f.CommentsFor = map[string][]forge.Comment{}
+	}
+	h.f.CommentsFor[num] = comments
+}
 func (h *fakeHarness) IsolatesNativeFailure() {}
 func (h *fakeHarness) IsPriorityCapable()     {}
 

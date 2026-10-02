@@ -46,6 +46,15 @@ type PriorityCapable interface {
 	IsPriorityCapable()
 }
 
+// CommentCapable is implemented by harnesses whose adapter satisfies
+// forge.CommentLister: github, forgejo, jira, and the Fake. The local adapter
+// has no comment thread, so it does not implement this and the Comments case
+// is skipped for it.
+type CommentCapable interface {
+	// SeedComments scripts comments as num's thread, oldest first.
+	SeedComments(num string, comments []forge.Comment)
+}
+
 // RunTrackerContract runs the shared IssueTracker conformance suite against h,
 // backed by the calling adapter's own scripted-backend Harness.
 func RunTrackerContract(t *testing.T, h Harness) {
@@ -56,6 +65,7 @@ func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("ResearchVerdictTerminals", func(t *testing.T) { testResearchVerdictTerminals(t, h) })
 	t.Run("DispatchOrder", func(t *testing.T) { testDispatchOrder(t, h) })
 	t.Run("LabelToPriority", func(t *testing.T) { testLabelToPriority(t, h) })
+	t.Run("Comments", func(t *testing.T) { testComments(t, h) })
 }
 
 // testDispatchLifecycle checks that ListIssues(state) reflects the current
@@ -363,4 +373,49 @@ func numbers(issues []forge.Issue) []string {
 		out[i] = iss.Number
 	}
 	return out
+}
+
+// testComments checks that Comments returns a seeded thread field-for-field,
+// oldest first, and an empty thread for an issue with no comments. Lengths are
+// compared rather than nil-ness: forgejo returns nil where github returns an
+// empty slice.
+func testComments(t *testing.T, h Harness) {
+	ch, ok := h.(CommentCapable)
+	if !ok {
+		t.Skip("harness has no comment thread (not CommentCapable)")
+	}
+	lister, ok := h.Tracker().(forge.CommentLister)
+	if !ok {
+		t.Fatalf("tracker %T does not implement forge.CommentLister", h.Tracker())
+	}
+
+	h.SeedIssue(forge.Issue{Number: "701", Title: "threaded"})
+	want := []forge.Comment{
+		{Author: "alice", CreatedAt: "2026-01-02T03:04:05Z", Body: "first"},
+		{Author: "bob", CreatedAt: "2026-01-03T04:05:06Z", Body: "second"},
+		{Author: "carol", CreatedAt: "2026-01-04T05:06:07Z", Body: "third"},
+	}
+	ch.SeedComments("701", want)
+
+	got, err := lister.Comments("701")
+	if err != nil {
+		t.Fatalf("Comments(701): %v", err)
+	}
+	if len(got) != len(want) {
+		t.Fatalf("Comments(701) returned %d comments, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Comments(701)[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+
+	h.SeedIssue(forge.Issue{Number: "702", Title: "silent"})
+	empty, err := lister.Comments("702")
+	if err != nil {
+		t.Fatalf("Comments(702): %v", err)
+	}
+	if len(empty) != 0 {
+		t.Errorf("Comments(702) = %+v, want no comments", empty)
+	}
 }
