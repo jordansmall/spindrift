@@ -12,8 +12,11 @@ import (
 // TestExtractUsage_MultiSessionFixture pins ExtractUsage's aggregation over a
 // fixture modeled on the nine-session orchestrator log from issue #2058. That
 // log is not in this repo, so the per-session figures are hand-authored to land
-// on the issue's published aggregates. The wall-time target is the turn-scoped
-// span AC#3 asks for, not the issue's wider raw span, which sumInLog excludes.
+// on the issue's published aggregates. They are varied and scaled rather than a
+// uniform block replayed nine times: with identical sessions, a bug that counts
+// one session nine times would still hit every total.
+// The wall-time target is the turn-scoped span AC#3 asks for, not the issue's
+// wider raw span, which sumInLog excludes.
 func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 	path := filepath.Join("testdata", "multi-session-2058.jsonl")
 

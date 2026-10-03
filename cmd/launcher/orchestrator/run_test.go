@@ -121,7 +121,11 @@ func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
 // of usage.Report.SummedByAgent's rows, not Report.Totals, which is separately
 // sourced and documented not to reconcile (issue #3156). OutputTokens is the
 // exception (issue #3213): the result event's own output_tokens lands on the
-// MainLoopAgent row alone, flagged by OutputIsMainLoopOnly.
+// MainLoopAgent row alone, flagged by OutputIsMainLoopOnly. The 999 is
+// deliberately far from either per-message placeholder (5, 8) and the scout
+// row's output is zeroed, so the total is 999, not 5+8; a result output of 5
+// (the main row's per-message value) or 13 (their sum) would let per-message
+// output pass as result-sourced.
 func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")

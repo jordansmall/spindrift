@@ -37,7 +37,9 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 
 	// Opus wants 140, not 180: the result event's own snapshot is excluded, and
 	// fixture line 2 re-emits msg_opus_1 as a second content block, which dedup
-	// collapses to one count.
+	// collapses to one count. That block is deliberately "text", not a Task/Agent
+	// spawn, so the re-emit does not also shift CollectTaskRoles-style role
+	// collection over this fixture and tangle it into the dedup check.
 	opus := byModel["claude-opus-4-8"]
 	if opus.UncachedInputTokens != 140 {
 		t.Errorf("opus.UncachedInputTokens = %d, want 140", opus.UncachedInputTokens)
