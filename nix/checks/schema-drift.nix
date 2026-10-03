@@ -2113,25 +2113,6 @@ checkedMerge {
     pkgs.runCommand "default-model-fixture-schema-sync-completeness-guard" { } "touch $out";
 
   # Regenerate with `nix run .#regen` when lib/default-model-fixture.nix
-  # changes (issue #2514, slice 2 of 3).
-  default-models-gen-bash =
-    let
-      generated = pkgs.writeText "default_models_gen.bash.generated" (
-        renderers.renderDefaultModelFixtureBash defaultModelFixture
-      );
-    in
-    pkgs.runCommand "default-models-gen-bash"
-      {
-        inherit generated;
-        committed = ../../tests/default_models_gen.bash;
-      }
-      ''
-        diff "$generated" "$committed" \
-          || { echo "tests/default_models_gen.bash is out of sync with lib/default-model-fixture.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
-
-  # Regenerate with `nix run .#regen` when lib/default-model-fixture.nix
   # changes; gofmt-normalized the same way regen normalizes it (issue #2514,
   # slice 2 of 3).
   default-models-gen-go =

@@ -51,7 +51,6 @@ let
   labelRegistry = import ../lib/labels.nix;
   labelRegistryFile = renderers.renderLabelRegistryGo labelRegistry;
   defaultModelFixture = import ../lib/default-model-fixture.nix;
-  defaultModelFixtureBash = renderers.renderDefaultModelFixtureBash defaultModelFixture;
   defaultModelFixtureGo = renderers.renderDefaultModelFixtureGo defaultModelFixture;
   daemonKnobDefaultsGo = renderers.renderDaemonKnobDefaultsGo schema;
   legacySettingsSection = import ../lib/legacy-settings-section.nix;
@@ -186,7 +185,6 @@ pkgs.writeShellApplication {
     ${writeGenerated "cmd/launcher/internal/doctor/labelmeta_gen.go" labelRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/doctor/labelmeta_gen.go"
     ${writeGenerated "tests/box_env_gen.bash" boxEnvFixture}
-    ${writeGenerated "tests/default_models_gen.bash" defaultModelFixtureBash}
     ${writeGenerated "cmd/launcher/defaultmodels_gen_test.go" defaultModelFixtureGo}
     gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
     ${writeGenerated "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go" daemonKnobDefaultsGo}
