@@ -19,6 +19,7 @@ func TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles(t *testing.T) {
 		InProgress:   "agent-in-progress",
 		Complete:     "agent-complete",
 		Failed:       "agent-failed",
+		Ambiguous:    "agent-ambiguous-spec",
 	}
 	want := labels.ClaimRemoveLabels(forge.Dispatchable, forge.InProgress)
 	if len(want) == 0 {

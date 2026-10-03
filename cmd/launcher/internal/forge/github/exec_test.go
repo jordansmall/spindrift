@@ -22,6 +22,7 @@ var testLabels = forge.DispatchLabels{
 	InProgress:   "agent-in-progress",
 	Complete:     "agent-complete",
 	Failed:       "agent-failed",
+	Ambiguous:    "agent-ambiguous-spec",
 }
 
 // The github forge opens PRs and watches CI, unlike the push-only git adapter.
@@ -1063,46 +1064,30 @@ esac`)
 	}
 }
 
-// A claim removes the stale agent-failed label a prior run left behind, not
-// just the from-state label, matching the dispatch workflow's
-// claim-remove-labels set (#1985).
-func TestExecClient_TransitionState_ClaimStripsStaleFailedLabel(t *testing.T) {
-	dir := prependFakeGH(t, fakeGHClaimPrecondition)
+// A claim removes each stale terminal label a prior run left behind, not just
+// the from-state label, matching the dispatch workflow's claim-remove-labels
+// set (#1985): agent-failed, agent-complete (the re-research or
+// re-trigger-after-complete case), and agent-ambiguous-spec.
+func TestExecClient_TransitionState_ClaimStripsStaleLabels(t *testing.T) {
+	for _, label := range []string{"agent-failed", "agent-complete", "agent-ambiguous-spec"} {
+		t.Run(label, func(t *testing.T) {
+			dir := prependFakeGH(t, fakeGHClaimPrecondition)
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+			c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+			if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
 
-	// call-00.txt is the precondition's `gh issue view`; call-01.txt is the edit.
-	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
-	if err != nil {
-		t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
-	}
-	argv := string(raw)
-	if !strings.Contains(argv, "--remove-label\nagent-failed") {
-		t.Errorf("argv = %q, want --remove-label agent-failed", argv)
-	}
-}
-
-// A claim also strips a stale agent-complete label, which is the
-// re-research or re-trigger-after-complete case (#1985).
-func TestExecClient_TransitionState_ClaimStripsStaleCompleteLabel(t *testing.T) {
-	dir := prependFakeGH(t, fakeGHClaimPrecondition)
-
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	if err := c.TransitionState("10", forge.Dispatchable, forge.InProgress); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// call-00.txt is the precondition's `gh issue view`; call-01.txt is the edit.
-	raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
-	if err != nil {
-		t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
-	}
-	argv := string(raw)
-	if !strings.Contains(argv, "--remove-label\nagent-complete") {
-		t.Errorf("argv = %q, want --remove-label agent-complete", argv)
+			// call-00.txt is the precondition's `gh issue view`; call-01.txt is the edit.
+			raw, err := os.ReadFile(filepath.Join(dir, "call-01.txt"))
+			if err != nil {
+				t.Fatalf("call-01.txt (gh issue edit) not written: %v", err)
+			}
+			argv := string(raw)
+			if !strings.Contains(argv, "--remove-label\n"+label) {
+				t.Errorf("argv = %q, want --remove-label %s", argv, label)
+			}
+		})
 	}
 }
 

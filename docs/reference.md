@@ -2794,7 +2794,11 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   anything, rather than letting the workflow's unconditional park step demote
   the issue to `agent-failed` (issue #2477). An issue with no prior terminal
   label, or whose prior label was `agent-failed`, still parks `agent-failed`
-  exactly as before.
+  exactly as before. The claim also strips `agent-ambiguous-spec`, which
+  recover does not restore (`PriorClaimState` reads back only
+  `agent-complete`/`agent-failed`), so a recover on an ambiguous-spec issue
+  that adopts nothing parks on the last terminal label its timeline shows
+  removed, else `agent-failed`.
 
 Rename any of these with the `inProgressLabel` / `failedLabel` / `completeLabel`
 knobs under `issues.labels` (baked) or the
