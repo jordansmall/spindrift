@@ -1,5 +1,7 @@
 # The rendered artifacts the Go seam tests (issue #4280) read as fixtures:
-# a pure copy of files the bats harness already renders, no test logic here.
+# a pure copy of what the bats harness already renders (plus the repo's
+# nix-checks skill, which the Go check sandbox cannot reach by relative path),
+# no test logic here.
 # The names are pinned against cmd/launcher/internal/seamtest/fixtures.json by
 # nix/checks/seam-fixtures.nix.
 # There is deliberately no "code-comments" contract fixture: that policy was
@@ -17,11 +19,13 @@ let
     "agent-paths-preamble.sh" = internals.agentPathsPreambleFile;
     "fragment-registry.sh" = internals.fragmentRegistryFile;
     "launcher-run-input.json" = internals.runInputDocumentFile;
+    "prompts" = internals.promptDir;
+    "nix-checks-skill.md" = ../skills/nix-checks/SKILL.md;
   };
 in
 pkgs.runCommand "seam-fixtures" { passthru = { inherit files; }; } ''
   mkdir -p $out
   ${pkgs.lib.concatStringsSep "\n" (
-    pkgs.lib.mapAttrsToList (name: path: "cp ${path} $out/${name}") files
+    pkgs.lib.mapAttrsToList (name: path: "cp -r ${path} $out/${name}") files
   )}
 ''
