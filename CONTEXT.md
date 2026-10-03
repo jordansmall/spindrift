@@ -600,8 +600,10 @@ _Avoid_: scheduler, cron, orchestrator (the in-box review role).
 **Daemon**:
 The shipped [[Driving loop]] (`apps.daemon`): a long-lived host process holding
 a pool of slots, each filled with one single-Box Dispatch invocation pinned to
-a fetched revision, drawing from both Dispatch kinds. It supervises and
-re-invokes; it never runs a Box itself.
+a fetched revision, drawing from every configured [[Dispatch kind]] (`work`,
+`research`, and `butler` once `BUTLER_CHORES` enables a [[Chore]]); a kind
+selector (`dispatch`, `research`, `butler`) narrows it to that one. It
+supervises and re-invokes; it never runs a Box itself.
 _Avoid_: continuous dispatch (the deprecated in-process pool), dogfood loop,
 service, supervisor.
 
@@ -859,11 +861,12 @@ the container-runtime daemon the bwrap runtime is "daemonless" of.
 The shipped unattended [[Driving loop]]: `apps.daemon`, generated per-Consumer
 by `mkHarness` beside `apps.default`. It holds `MAX_PARALLEL` slots and fills
 each with one single-Box launcher invocation pinned to a fetched revision,
-drawing from both [[Dispatch kind]]s against that one pool. This makes it the
-owner of dispatch concurrency, superseding continuous dispatch — deprecated in
-its favour, but kept for operators who want no daemon and retained as the
-Console's engine. Distinct from the *container-runtime* daemon (podman/docker)
-that the bwrap runtime is "daemonless" of: spindrift's Daemon is
+drawing from every configured [[Dispatch kind]] — `work`, `research`, and
+`butler` once `BUTLER_CHORES` enables a [[Chore]] — against that one pool. This
+makes it the owner of dispatch concurrency, superseding continuous dispatch —
+deprecated in its favour, but kept for operators who want no daemon and
+retained as the Console's engine. Distinct from the *container-runtime* daemon
+(podman/docker) that the bwrap runtime is "daemonless" of: spindrift's Daemon is
 runtime-agnostic and drives a bwrap harness as readily as an OCI one.
 _Avoid_: service, scheduler, supervisor, dogfood loop.
 
