@@ -1144,3 +1144,53 @@ func TestRunAssemblePrompt_CompositionCarriedUnreadableFile(t *testing.T) {
 		t.Errorf("stdout = %q, want it to mention the unreadable carried file", stdout.String())
 	}
 }
+
+// --fragments-output writes Result.Fragments one name per line so a harness
+// can pin it per golden cell (issue #3838); omitted, it writes nothing.
+func TestRunAssemblePrompt_FragmentsOutput(t *testing.T) {
+	t.Run("with fragments-output", func(t *testing.T) {
+		dir := t.TempDir()
+		fragmentsOutput := filepath.Join(dir, "fragments.txt")
+		args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
+		args = append(args, "--fragments-output", fragmentsOutput)
+
+		var stdout bytes.Buffer
+		if rc := runAssemblePrompt(args, &stdout); rc != 0 {
+			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		}
+
+		got, err := os.ReadFile(fragmentsOutput)
+		if err != nil {
+			t.Fatalf("read fragments output: %v", err)
+		}
+		if len(got) == 0 || got[len(got)-1] != '\n' {
+			t.Fatalf("fragments output = %q, want non-empty with trailing newline", got)
+		}
+		names := strings.Split(strings.TrimSuffix(string(got), "\n"), "\n")
+		for i, n := range names {
+			if n == "" {
+				t.Errorf("fragments output line %d is empty: %q", i, got)
+			}
+			if i > 0 && names[i-1] >= n {
+				t.Errorf("fragments output not sorted and de-duplicated at line %d: %q", i, got)
+			}
+		}
+	})
+
+	t.Run("without fragments-output", func(t *testing.T) {
+		dir := t.TempDir()
+		args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
+
+		var stdout bytes.Buffer
+		if rc := runAssemblePrompt(args, &stdout); rc != 0 {
+			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Fatalf("read dir: %v", err)
+		}
+		if len(entries) != 3 {
+			t.Errorf("dir has %d entries, want exactly prompt/agents/handoff", len(entries))
+		}
+	})
+}
