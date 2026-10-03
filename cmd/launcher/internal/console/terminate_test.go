@@ -570,3 +570,69 @@ func TestLauncher_Terminate_MixedQueue_EachPickRoutesToItsOwnStack(t *testing.T)
 		t.Errorf("research comments: want one for #43, got %+v", rf.CommentCalls)
 	}
 }
+
+// TestLauncher_Terminate_RunningResearchRowUnderNewerQueuedWork_RoutesToResearch
+// pins that Terminate targets the running Box, not the newest row: LiveIssues
+// reports the running research row, so the kill, reclaim, and PickTerminated
+// mark must all land on it, leaving the newer queued work row untouched.
+func TestLauncher_Terminate_RunningResearchRowUnderNewerQueuedWork_RoutesToResearch(t *testing.T) {
+	launch, fc, workRunner, _ := newTermTestLauncher(t)
+	rf := newResearchFake("42")
+	rFactory, researchRunner, _ := newTermFactory(t)
+	launch.ResearchTracker = rf
+	launch.ResearchFactory = rFactory
+	launch.queue = NewQueue()
+	launch.queue.Add(Pick{Number: "42", Title: "research it", Kind: KindResearch, State: PickRunning})
+	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+
+	if live := launch.LiveIssues(); len(live) != 1 || live[0] != "42" {
+		t.Fatalf("LiveIssues = %v, want [42]", live)
+	}
+	if err := launch.Terminate(fc, "42"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+
+	if len(researchRunner.KillCalls) != 1 || len(workRunner.KillCalls) != 0 {
+		t.Errorf("KillCalls: research=%v work=%v, want research only", researchRunner.KillCalls, workRunner.KillCalls)
+	}
+	if len(rf.TransitionStateCalls) != 2 || len(rf.CommentCalls) != 1 {
+		t.Errorf("research tracker: transitions=%+v comments=%+v", rf.TransitionStateCalls, rf.CommentCalls)
+	}
+	if len(fc.TransitionStateCalls) != 0 || len(fc.CommentCalls) != 0 {
+		t.Errorf("work tracker touched: transitions=%+v comments=%+v", fc.TransitionStateCalls, fc.CommentCalls)
+	}
+	snap := launch.queue.Snapshot()
+	if len(snap) != 2 || snap[0].State != PickTerminated || snap[1].State != PickQueued {
+		t.Errorf("queue = %+v, want [research terminated, work queued]", snap)
+	}
+}
+
+// TestLauncher_Terminate_RunningWorkRowUnderNewerQueuedResearch_RoutesToWork
+// is the mirror: a running work row routes to the work stack even when a newer
+// research row for the same number is queued.
+func TestLauncher_Terminate_RunningWorkRowUnderNewerQueuedResearch_RoutesToWork(t *testing.T) {
+	launch, fc, workRunner, _ := newTermTestLauncher(t)
+	rf := newResearchFake("42")
+	rFactory, researchRunner, _ := newTermFactory(t)
+	launch.ResearchTracker = rf
+	launch.ResearchFactory = rFactory
+	launch.queue.Add(Pick{Number: "42", Title: "research it", Kind: KindResearch, State: PickQueued})
+
+	if err := launch.Terminate(fc, "42"); err != nil {
+		t.Fatalf("Terminate: %v", err)
+	}
+
+	if len(workRunner.KillCalls) != 1 || len(researchRunner.KillCalls) != 0 {
+		t.Errorf("KillCalls: work=%v research=%v, want work only", workRunner.KillCalls, researchRunner.KillCalls)
+	}
+	if len(fc.TransitionStateCalls) != 2 || len(fc.CommentCalls) != 1 {
+		t.Errorf("work tracker: transitions=%+v comments=%+v", fc.TransitionStateCalls, fc.CommentCalls)
+	}
+	if len(rf.TransitionStateCalls) != 0 || len(rf.CommentCalls) != 0 {
+		t.Errorf("research tracker touched: transitions=%+v comments=%+v", rf.TransitionStateCalls, rf.CommentCalls)
+	}
+	snap := launch.queue.Snapshot()
+	if len(snap) != 2 || snap[0].State != PickTerminated || snap[1].State != PickQueued {
+		t.Errorf("queue = %+v, want [work terminated, research queued]", snap)
+	}
+}

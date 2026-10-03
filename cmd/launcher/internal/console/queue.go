@@ -119,17 +119,17 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			// A transient DepsOf failure looks identical to confirmed zero
 			// blockers in edges alone, so hold rather than launch: a blocked
 			// pick must never claim on a tracker hiccup (#752).
-			q.setState(pick.Number, PickHeld, "blocker check failed, will retry")
+			q.setState(pick.Number, kind, PickHeld, "blocker check failed, will retry")
 			continue
 		}
 		cfg := waves.Config{FailedLabel: failedLabel}
 		cfg.SeedScopeOf = localloop.SeedScopeResolver(tracker, caps)
 		ready, failed, unready := readiness.Status(cfg, tracker, cf, caps, pick.Number)
 		if !ready {
-			q.setHeld(pick.Number, unready, failed, readiness.Sources[pick.Number])
+			q.setHeld(pick.Number, kind, unready, failed, readiness.Sources[pick.Number])
 			continue
 		}
-		if !q.tryMarkClaiming(pick.Number) {
+		if !q.tryMarkClaiming(pick.Number, kind) {
 			continue // removed (Unpick) between the readiness snapshot and this claim
 		}
 		// This transition is the real claim (#706), which is why
@@ -140,10 +140,10 @@ func (q *Queue) Discover(tracker forge.IssueTracker, cf forge.CodeForge, failedL
 			if errors.Is(err, forge.ErrAlreadyClaimed) {
 				reason = "skipped: already claimed"
 			}
-			q.dissolve(pick.Number, reason)
+			q.dissolve(pick.Number, kind, reason)
 			continue
 		}
-		q.setState(pick.Number, PickRunning, "")
+		q.setState(pick.Number, kind, PickRunning, "")
 		// Edges/Sources/Failed left nil, not zero-value maps, matching the
 		// fallback below and runContinuousDispatch's sibling Discoverer
 		// (#903). The engine's own blocker gate is then a no-op, so nothing
@@ -172,15 +172,15 @@ func (q *Queue) claimable() []Pick {
 	return out
 }
 
-// setHeld marks the pick numbered num held, rendering unready as the BlockedBy
-// badge and failed as Reason. failed covers every declared blocker carrying
-// the Failed label even when it reads ready, and it shows on the row without
-// dissolving the pick, because the Console never auto-unpicks (#650). It
-// targets the newest row numbered num, like setState.
-func (q *Queue) setHeld(num string, unready, failed []string, sources map[string]forge.DepSource) {
+// setHeld marks the pick numbered num of kind held, rendering unready as the
+// BlockedBy badge and failed as Reason. failed covers every declared blocker
+// carrying the Failed label even when it reads ready, and it shows on the row
+// without dissolving the pick, because the Console never auto-unpicks (#650).
+// It targets the newest row numbered num of kind, like setState.
+func (q *Queue) setHeld(num string, kind Kind, unready, failed []string, sources map[string]forge.DepSource) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if i := q.newestIndex(num); i >= 0 {
+	if i := q.newestIndex(num, kind); i >= 0 {
 		q.picks[i].State = PickHeld
 		q.picks[i].BlockedBy = refList(unready, sources)
 		q.picks[i].Reason = ""
@@ -199,15 +199,15 @@ func refList(nums []string, sources map[string]forge.DepSource) string {
 	return strings.Join(refs, ", ")
 }
 
-// tryMarkClaiming marks the pick numbered num PickClaiming and reports
+// tryMarkClaiming marks the pick numbered num of kind PickClaiming and reports
 // success, only if it still holds at PickQueued or PickHeld. That closes the
 // window between Discover's readiness snapshot and its tracker claim, so a
-// concurrent Unpick always wins (#650). It scans back-to-front like setState,
-// so a duplicate number targets the newest row, not the terminal one.
-func (q *Queue) tryMarkClaiming(num string) bool {
+// concurrent Unpick always wins (#650). Like setState, it targets the newest
+// row numbered num of kind, not an older terminal one.
+func (q *Queue) tryMarkClaiming(num string, kind Kind) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	i := q.newestIndex(num)
+	i := q.newestIndex(num, kind)
 	if i < 0 || !q.picks[i].State.unclaimed() {
 		return false
 	}
@@ -216,44 +216,62 @@ func (q *Queue) tryMarkClaiming(num string) bool {
 	return true
 }
 
-// setState updates the newest pick numbered num in place. A terminated pick's
-// row (ADR 0024, issue #649) is never removed, so a re-pick appends a second
-// row for the same number and only the newest is the live claim, which is why
-// the scan runs back-to-front. BlockedBy is cleared here because it is
-// PickHeld-only data setHeld sets directly.
-func (q *Queue) setState(num string, state PickState, reason string) {
+// setState updates the newest pick numbered num of kind in place. A terminated
+// pick's row (ADR 0024, issue #649) is never removed, so a re-pick appends a
+// second row for the same number and only the newest of a kind is that kind's
+// live claim; a row of the other kind may share the number (issue #4230).
+// BlockedBy is cleared here because it is PickHeld-only data setHeld sets
+// directly.
+func (q *Queue) setState(num string, kind Kind, state PickState, reason string) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if i := q.newestIndex(num); i >= 0 {
+	if i := q.newestIndex(num, kind); i >= 0 {
 		q.picks[i].State = state
 		q.picks[i].Reason = reason
 		q.picks[i].BlockedBy = ""
 	}
 }
 
-// newest returns the newest pick numbered num, the live claim (see setState).
-func (q *Queue) newest(num string) (Pick, bool) {
+// liveRow returns the newest PickRunning pick numbered num of any kind, else
+// the newest pick numbered num of any kind. It is kind-blind on purpose:
+// Launcher.Terminate calls it to learn the pick's kind, so it cannot be given
+// one. Preferring the running row matches LiveIssues, which a newer queued row
+// of another kind must not shadow.
+func (q *Queue) liveRow(num string) (Pick, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if i := q.newestIndex(num); i >= 0 {
-		return q.picks[i], true
+	newest := -1
+	for i := len(q.picks) - 1; i >= 0; i-- {
+		if q.picks[i].Number != num {
+			continue
+		}
+		if q.picks[i].State == PickRunning {
+			return q.picks[i], true
+		}
+		if newest < 0 {
+			newest = i
+		}
 	}
-	return Pick{}, false
+	if newest < 0 {
+		return Pick{}, false
+	}
+	return q.picks[newest], true
 }
 
-// newestIndex returns the index of the newest pick numbered num, or -1. Caller
-// holds q.mu. It scans back-to-front because a terminated pick's row is never
-// removed, so a re-pick appends a second row and only the newest is the live
-// claim.
-func (q *Queue) newestIndex(num string) int {
+// newestIndex returns the index of the newest pick numbered num of kind, or
+// -1. Caller holds q.mu. It scans back-to-front because a terminated pick's row
+// is never removed, so a re-pick appends a second row and only the newest is
+// the live claim. It matches kind too because a work and a research row can
+// share a number (issue #4230).
+func (q *Queue) newestIndex(num string, kind Kind) int {
 	for i := len(q.picks) - 1; i >= 0; i-- {
-		if q.picks[i].Number == num {
+		if q.picks[i].Number == num && q.picks[i].effectiveKind() == kind {
 			return i
 		}
 	}
 	return -1
 }
 
-func (q *Queue) dissolve(num, reason string) {
-	q.setState(num, PickDissolved, reason)
+func (q *Queue) dissolve(num string, kind Kind, reason string) {
+	q.setState(num, kind, PickDissolved, reason)
 }

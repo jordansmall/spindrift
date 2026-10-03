@@ -20,6 +20,9 @@ type queueSettler struct {
 	// is the only way to keep this wrapper from overwriting PickTerminated
 	// with PickSettled. A nil registry means nothing was ever terminated.
 	terminated *terminate.Registry
+	// kind scopes the queue marks to this stack's own rows: a work and a
+	// research row can share a number (issue #4230). Nil means KindWork.
+	kind Kind
 }
 
 // Settle delegates to the wrapped Settler, then marks num settled and notifies
@@ -31,7 +34,7 @@ func (qs queueSettler) Settle(d dispatch.Dispatcher, num string, gen uint64, res
 	if qs.terminated.Marked(num, gen) {
 		return
 	}
-	qs.q.setState(num, PickSettled, "")
+	qs.q.setState(num, qs.rowKind(), PickSettled, "")
 	if qs.notify != nil {
 		qs.notify()
 	}
@@ -46,8 +49,10 @@ func (qs queueSettler) Fail(num string, gen uint64, result dispatch.Result) {
 	if qs.terminated.Marked(num, gen) {
 		return
 	}
-	qs.q.setState(num, PickFailed, "box exited non-zero")
+	qs.q.setState(num, qs.rowKind(), PickFailed, "box exited non-zero")
 	if qs.notify != nil {
 		qs.notify()
 	}
 }
+
+func (qs queueSettler) rowKind() Kind { return orWork(qs.kind) }

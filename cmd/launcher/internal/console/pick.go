@@ -20,11 +20,13 @@ var (
 // effectiveKind defaults an unset Kind to KindWork: every Pick literal built
 // before #1708 (test fixtures included) leaves Kind nil, so a zero value
 // must dispatch as work rather than as an undispatchable third kind.
-func (p Pick) effectiveKind() Kind {
-	if p.Kind == nil {
+func (p Pick) effectiveKind() Kind { return orWork(p.Kind) }
+
+func orWork(k Kind) Kind {
+	if k == nil {
 		return KindWork
 	}
-	return p.Kind
+	return k
 }
 
 // kindMarker is the tag a non-work kind's row carries in View: its Name in

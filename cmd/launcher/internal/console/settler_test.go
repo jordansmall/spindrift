@@ -95,3 +95,41 @@ func TestQueueSettler_Fail_MarksPickFailedAndDelegates(t *testing.T) {
 		t.Errorf("pick state = %v, want failed", got)
 	}
 }
+
+// A settle for one kind never touches a same-number row of the other kind
+// (issue #4230), even though the own-kind row is the older one.
+func TestQueueSettler_SameNumberTwoKinds_OnlyOwnKindRowChanges(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		kind    Kind
+		other   Kind
+		fail    bool
+		wantOwn PickState
+	}{
+		{"research settle, work newer", KindResearch, KindWork, false, PickSettled},
+		{"research fail, work newer", KindResearch, KindWork, true, PickFailed},
+		{"work settle, research newer", KindWork, KindResearch, false, PickSettled},
+		{"work fail, research newer", KindWork, KindResearch, true, PickFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := NewQueue()
+			q.Add(Pick{Number: "42", Title: "own", State: PickRunning, Kind: tc.kind})
+			q.Add(Pick{Number: "42", Title: "other", State: PickRunning, Kind: tc.other})
+			qs := queueSettler{Settler: settle.NewFake(), q: q, kind: tc.kind}
+
+			if tc.fail {
+				qs.Fail("42", 0, dispatch.Result{})
+			} else {
+				qs.Settle(nil, "42", 0, dispatch.Result{Success: true})
+			}
+
+			snap := q.Snapshot()
+			if snap[0].State != tc.wantOwn {
+				t.Errorf("own-kind row = %+v, want %v", snap[0], tc.wantOwn)
+			}
+			if snap[1].State != PickRunning || snap[1].Reason != "" {
+				t.Errorf("other-kind row = %+v, want it left at PickRunning", snap[1])
+			}
+		})
+	}
+}
