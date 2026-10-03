@@ -377,7 +377,8 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 
 // Issue #3726: under BOX_SIGNAL_CARRIER=socket, verdict-comment-relay scans
 // for the verb (driver-exec signal comment) instead of the SPINDRIFT_COMMENT
-// marker, and log mode (the default, empty SignalCarrier) is unaffected.
+// marker, and log mode (empty SignalCarrier, as from an older host launcher)
+// is unaffected.
 func TestValidateVerdictCommentRelaySignalCarrier(t *testing.T) {
 	rows := testValidateMarkerRows()
 	baseEnv := Env{DispatchKind: "research", BoxWriteEnabled: false}

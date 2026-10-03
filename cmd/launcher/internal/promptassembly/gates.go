@@ -79,10 +79,9 @@ func Gates(e Env) map[string]bool {
 		g[k] = v
 	}
 
-	// SignalCarrier arrives empty on an older host launcher that forwards
-	// nothing for this knob, and empty means the schema default "log" (issue
-	// #3726), so only the exact string "socket" moves the carrier: any other
-	// value, including empty and unknown, falls to the log arm.
+	// Empty or unknown means log although the schema default is "socket"
+	// (issue #4376): an older host launcher forwards nothing and still speaks
+	// the log carrier.
 	socket := e.SignalCarrier == "socket"
 	g["SIGNAL_CARRIER_SOCKET"] = socket
 

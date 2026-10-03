@@ -6519,3 +6519,75 @@ func TestValidateConfigChecks_DegradedRequiredRowIsNotAConfigError(t *testing.T)
 		t.Errorf("validateConfigChecks() error = %q, want no mention of the degraded row", err.Error())
 	}
 }
+
+// unsetEnv clears key for the test and restores it afterward (t.Setenv
+// registers the restore; the Unsetenv then makes the knob genuinely unset).
+func unsetEnv(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatalf("os.Unsetenv(%s) = %v", key, err)
+	}
+}
+
+// Issue #4376: an unset BOX_SIGNAL_CARRIER resolves to the schema default
+// "socket" in loadConfig, which feeds dispatch.Config.SignalCarrier and the
+// doctor/choice registries.
+func TestLoadConfig_SignalCarrierDefaultsToSocket(t *testing.T) {
+	unsetEnv(t, "BOX_SIGNAL_CARRIER")
+	c := loadConfig()
+	if c.signalCarrier != "socket" {
+		t.Fatalf("loadConfig().signalCarrier with knob unset = %q, want %q", c.signalCarrier, "socket")
+	}
+	found := false
+	for _, row := range choiceKnobRegistry {
+		if row.Env == "BOX_SIGNAL_CARRIER" {
+			found = true
+			if got := row.Value(c); got != "socket" {
+				t.Errorf("choiceKnobRegistry BOX_SIGNAL_CARRIER value = %q, want %q", got, "socket")
+			}
+		}
+	}
+	if !found {
+		t.Error("choiceKnobRegistry has no BOX_SIGNAL_CARRIER row")
+	}
+}
+
+// Issue #4376: the Box env takes its own path to the knob — dispatchConfig's
+// ResolveEnv chain, falling back to resolveBoxEnvVar's schema default — so an
+// unset knob must reach the Box as "socket", not empty (which the Box reads
+// as log).
+func TestDispatchConfig_SignalCarrierBoxEnv(t *testing.T) {
+	prevDoc := loadedDoc
+	t.Cleanup(func() { loadedDoc = prevDoc })
+	loadedDoc = nil
+	for _, tc := range []struct {
+		name, set, want string
+	}{
+		{name: "unset", want: "socket"},
+		{name: "explicit log", set: "log", want: "log"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.set == "" {
+				unsetEnv(t, "BOX_SIGNAL_CARRIER")
+			} else {
+				t.Setenv("BOX_SIGNAL_CARRIER", tc.set)
+			}
+			it := forge.NewFake()
+			cfg := dispatchConfig(loadConfig(), it, testWired(it), forge.NewFake(), forge.Capabilities{})
+			if cfg.SignalCarrier != tc.want {
+				t.Errorf("dispatchConfig() SignalCarrier = %q, want %q", cfg.SignalCarrier, tc.want)
+			}
+			if got := cfg.ResolveEnv("42", "BOX_SIGNAL_CARRIER"); got != tc.want {
+				t.Errorf("dispatchConfig() ResolveEnv(BOX_SIGNAL_CARRIER) = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
+	t.Setenv("BOX_SIGNAL_CARRIER", "log")
+	if got := loadConfig().signalCarrier; got != "log" {
+		t.Errorf("loadConfig().signalCarrier with BOX_SIGNAL_CARRIER=log = %q, want %q", got, "log")
+	}
+}

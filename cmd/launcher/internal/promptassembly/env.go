@@ -110,8 +110,9 @@ type Env struct {
 	DispatchAnnounceVerb string // entrypoint.sh: $DISPATCH_ANNOUNCE_VERB (Box start-line verb)
 
 	// SignalCarrier is the BOX_SIGNAL_CARRIER knob (ADR 0052, issue #3725) as the
-	// Box sees it: "log" (or empty, the schema default) or "socket". It selects
-	// which variant of each signal fragment renders (issue #3726).
+	// Box sees it: "log" (also what empty means: only an older host launcher
+	// forwards nothing, issue #4376) or "socket" (the schema default). It
+	// selects which variant of each signal fragment renders (issue #3726).
 	SignalCarrier string // entrypoint.sh: $BOX_SIGNAL_CARRIER
 
 	// PromptsDir, AgentsPromptFiles, and DriverAgentFilesDir locate the

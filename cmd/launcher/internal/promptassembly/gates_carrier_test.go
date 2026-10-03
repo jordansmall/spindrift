@@ -4,7 +4,9 @@ import "testing"
 
 // TestGatesSignalCarrierBase covers SIGNAL_CARRIER_SOCKET: exactly the
 // literal "socket" selects it, and an empty or unrecognized SignalCarrier
-// leaves it off, falling to log, the schema default (issue #3726).
+// leaves it off on the log arm. Empty is kept on log deliberately (issue
+// #4376): it only arrives from an older host launcher, even though the schema
+// default is now socket.
 func TestGatesSignalCarrierBase(t *testing.T) {
 	cases := []struct {
 		name          string

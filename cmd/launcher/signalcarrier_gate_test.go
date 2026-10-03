@@ -46,9 +46,8 @@ func TestSignalCarrierNetworkModeGate_SocketUnderOtherModesIsNoOp(t *testing.T) 
 	}
 }
 
-// The log carrier (including an unset/typo'd value, since the gate only ever
-// matches the exact string "socket") never needs loopback, so NETWORK_MODE
-// has nothing to say about it.
+// The log carrier never needs loopback (the gate only ever matches the exact
+// string "socket"), so NETWORK_MODE has nothing to say about it.
 func TestSignalCarrierNetworkModeGate_LogCarrierUnderNoneIsNoOp(t *testing.T) {
 	c := minimalValidConfig()
 	c.signalCarrier = "log"
@@ -73,5 +72,22 @@ func TestSignalCarrierNetworkModeGate_SocketUnderNoneRendersSharedReason(t *test
 	const want = "BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=none -- the socket transport needs loopback, which this mode tears down; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+}
+
+// Issue #4376: the default is socket, so an operator who never set the knob
+// and runs NETWORK_MODE=none gets the startup error naming the remedy.
+func TestSignalCarrierNetworkModeGate_UnsetKnobUnderNoneFailsNamingLogRemedy(t *testing.T) {
+	unsetEnv(t, "BOX_SIGNAL_CARRIER")
+	c := minimalValidConfig()
+	c.signalCarrier = loadConfig().signalCarrier
+	c.networkMode = "none"
+
+	err := checkSignalCarrierNetworkModeGate(c)
+	if err == nil {
+		t.Fatal("checkSignalCarrierNetworkModeGate() with the knob unset under none = nil, want an error")
+	}
+	if !strings.Contains(err.Error(), "BOX_SIGNAL_CARRIER=log") {
+		t.Errorf("error %q should contain %q", err.Error(), "BOX_SIGNAL_CARRIER=log")
 	}
 }
