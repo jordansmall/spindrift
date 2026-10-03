@@ -1,8 +1,9 @@
 # Negative-path pins for nix/checks/mk-fragment-parity.nix's five asserts and
 # its dogfood-row lookup (issue #3240 review finding), plus positive pins for
-# its comparator fold and per-side needles (issue #3486): the helper itself only
+# its comparator fold and per-side needles (issue #3486) and its escaped,
+# digit-bounded clause match (issue #4270): the helper itself only
 # has positive callers (commit/tdd/code-review-fragment-parity.nix), so an
-# inverted `hasInfix` or a dropped assert there would still evaluate green.
+# inverted clause matcher or a dropped assert there would still evaluate green.
 # Mirrors nix/checks/fragment-pairs.nix's rejectionCase/rejectionCases shape.
 #
 # Every case below imports the helper fresh against a synthetic one-row
@@ -74,6 +75,17 @@ let
         name = "shared";
         skillClause = "wrapped at 72";
         fallbackClause = "body ≤72";
+      }
+    ];
+  };
+
+  # The needle carries regex metacharacters (issue #4270).
+  versionArgs = baseArgs // {
+    fallbackText = "Follows Conventional Commits v1.0.0.";
+    sharedClauses = [
+      {
+        name = "shared";
+        clause = "conventional commits v1.0.0";
       }
     ];
   };
@@ -193,6 +205,77 @@ let
       checkKey = clauseCheckKey;
       message = "the clause assert must fail when the skill-side needle's bound changes";
     }
+    {
+      # Pins the digit boundary on a trailing-digit needle -- "subject ≤500" must
+      # not satisfy "subject ≤50".
+      name = "mk-fragment-parity-fallback-appended-digit-fails";
+      skillRows = [ comparatorSkillRow ];
+      args = comparatorArgs // {
+        fallbackText = "Keep it short: subject ≤500 characters.";
+      };
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when the fallback's bound gains a trailing digit";
+    }
+    {
+      # Pins the trailing digit boundary on the per-side fallback needle.
+      name = "mk-fragment-parity-per-side-fallback-appended-digit-fails";
+      skillRows = [ perSideSkillRow ];
+      args = perSideArgs // {
+        fallbackText = "The body ≤720 columns.";
+      };
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when the fallback-side needle gains a trailing digit";
+    }
+    {
+      # Pins the trailing digit boundary on the per-side skill needle.
+      name = "mk-fragment-parity-per-side-skill-appended-digit-fails";
+      skillRows = [ (perSideSkillRow // { src = "Body text is wrapped at 720 columns."; }) ];
+      args = perSideArgs;
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when the skill-side needle gains a trailing digit";
+    }
+    {
+      # Pins the leading digit boundary -- "172 columns" must not satisfy
+      # "72 columns".
+      name = "mk-fragment-parity-prepended-digit-fails";
+      skillRows = [ (goodSkillRow // { src = "Body text is wrapped at 172 columns."; }) ];
+      args = baseArgs // {
+        fallbackText = "The body is 72 columns.";
+        sharedClauses = [
+          {
+            name = "shared";
+            clause = "72 columns";
+          }
+        ];
+      };
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when the needle's leading digit is extended";
+    }
+    {
+      # Pins that a needle's regex metacharacters are escaped -- an unescaped `.`
+      # would let "v1x0x0" satisfy "v1.0.0".
+      name = "mk-fragment-parity-regex-metachar-not-wildcard-fails";
+      skillRows = [ (goodSkillRow // { src = "Follows Conventional Commits v1x0x0."; }) ];
+      args = versionArgs;
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when a needle's `.` would only match as a regex wildcard";
+    }
+    {
+      # Pins containsClause's empty-needle assert ahead of its `substring` --
+      # tryEval cannot catch the negative-start error it would throw instead.
+      name = "mk-fragment-parity-empty-clause-fails";
+      skillRows = [ goodSkillRow ];
+      args = baseArgs // {
+        sharedClauses = [
+          {
+            name = "shared";
+            clause = "";
+          }
+        ];
+      };
+      checkKey = clauseCheckKey;
+      message = "the clause assert must fail when a clause normalizes to empty";
+    }
   ];
 
   mkFor =
@@ -241,6 +324,22 @@ let
       name = "mk-fragment-parity-per-side-clauses-validate";
       skillRows = [ perSideSkillRow ];
       args = perSideArgs;
+    }
+    {
+      # Pins that a needle with regex metacharacters matches its literal text.
+      name = "mk-fragment-parity-regex-metachar-validates";
+      skillRows = [ (goodSkillRow // { src = "Follows Conventional Commits v1.0.0."; }) ];
+      args = versionArgs // {
+        fallbackText = "Follows Conventional Commits v1.0.0, strictly.";
+      };
+    }
+    {
+      # Pins that the digit boundary still admits punctuation around the number.
+      name = "mk-fragment-parity-digit-boundary-punctuation-validates";
+      skillRows = [ (goodSkillRow // { src = "Body text is (wrapped at 72), always."; }) ];
+      args = perSideArgs // {
+        fallbackText = "The (body ≤72).";
+      };
     }
   ];
 
