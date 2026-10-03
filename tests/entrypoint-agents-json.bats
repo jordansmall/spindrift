@@ -18,7 +18,7 @@ setup() {
 }
 
 @test "entrypoint passes --agents with only scout when the template carries scout alone" {
-  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]
@@ -27,7 +27,7 @@ setup() {
 }
 
 @test "entrypoint passes --agents with only reviewer when the template carries reviewer alone" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]
@@ -36,7 +36,7 @@ setup() {
 }
 
 @test "entrypoint passes --agents as a JSON object with scout and reviewer when template is set" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]
@@ -56,7 +56,7 @@ setup() {
 # The filer (issue #393) is opt-in and composed independently of scout and
 # reviewer (#392), never bundled with either.
 @test "entrypoint passes --agents with only filer when the template carries filer alone" {
-  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"File issues from a review'"'"'s non-blocking findings, best-effort","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export AGENTS_JSON_TEMPLATE='{"filer":{"description":"fixture filer'"'"'s description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   export BOX_FILER_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -70,7 +70,7 @@ setup() {
   # reviewer subagent on this path. The template still carries reviewer, since
   # nix bakes it independently of ORCHESTRATOR_ENABLED, but the --agents JSON
   # forwarded to the Driver must not.
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
@@ -96,7 +96,7 @@ setup() {
 # The worker (issue #2054) is provisioned by default and composed independently,
 # like scout, reviewer, and filer.
 @test "entrypoint passes --agents with only worker when the template carries worker alone" {
-  export AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement-capable worker subagent","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"worker":{"description":"fixture worker description","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
   export BOX_WORKER_PROVISIONED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

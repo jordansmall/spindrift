@@ -860,7 +860,7 @@ SKILL
 }
 
 @test "entrypoint includes a read-only tools whitelist in agents JSON" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.tools | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
@@ -1043,7 +1043,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 # issue #2056/#2054: a provisioned `worker` turns IMPLEMENT into a coordinator
 # that delegates each slice; with no worker the section is byte-identical to
 # the single-implementor prompt. Worker presence alone gates it.
-WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it, with full implement-capable tools","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"fixture worker description","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "IMPLEMENT section: a provisioned worker turns the section into a coordinator that delegates slices" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
