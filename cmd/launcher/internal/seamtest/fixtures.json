@@ -1,0 +1,10 @@
+[
+  "agent-paths-preamble.sh",
+  "check-contract.md",
+  "comms-contract.md",
+  "driver-preamble.sh",
+  "fragment-registry.sh",
+  "launcher-run-input.json",
+  "outcome-contract.md",
+  "research-outcome-contract.md"
+]

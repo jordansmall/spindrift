@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -67,17 +68,20 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if strings.HasPrefix(filepath.ToSlash(path), "internal/runner") {
-			if info.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+		exempt := []string{
+			"internal/runner",
+			// driver-exec is a standalone in-box binary (issue #626) that spawns the
+			// Driver from inside the disposable container. That is a different seam
+			// from the host-side runner.Runner this guard polices, which launches
+			// the Box itself.
+			"driver-exec",
+			// seamtest is test support (issue #4280): it shells out to the host's
+			// `nix build` for fixtures, never to a sandbox.
+			"internal/seamtest",
 		}
-		// driver-exec is a standalone in-box binary (issue #626) that spawns the
-		// Driver from inside the disposable container. That is a different seam
-		// from the host-side runner.Runner this guard polices, which launches
-		// the Box itself.
-		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") {
+		if slices.ContainsFunc(exempt, func(p string) bool {
+			return strings.HasPrefix(filepath.ToSlash(path), p)
+		}) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
