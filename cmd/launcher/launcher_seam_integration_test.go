@@ -3,9 +3,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -377,4 +379,53 @@ func TestSeamLauncherSmokeMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSeamSmokeCatchesDroppedKnob is the smoke set's own regression test: a
+// rendering regression must fail at least one check. It runs the launcher on
+// a scratch copy of the work-podman document with one name dropped from
+// BOX_ENV_VARS, the list of settings forwarded into the Box, and takes the
+// expectations from the unmodified document.
+func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
+	const dropped = "MAX_REBASE_ATTEMPTS"
+	c := smokeMatrix[0]
+	docPath := seamtest.Path(t, c.fixture)
+	doc, err := inputdoc.Load(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(strings.Fields(doc.Artifacts["BOX_ENV_VARS"]), dropped) {
+		t.Fatalf("fixture %s does not forward %s; pick another knob", c.fixture, dropped)
+	}
+
+	var raw struct {
+		Settings  map[string]string `json:"settings"`
+		Artifacts map[string]string `json:"artifacts"`
+	}
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	names := slices.DeleteFunc(strings.Fields(raw.Artifacts["BOX_ENV_VARS"]), func(n string) bool { return n == dropped })
+	raw.Artifacts["BOX_ENV_VARS"] = strings.Join(names, " ")
+	scratch := filepath.Join(t.TempDir(), "scratch-input.json")
+	if data, err = json.Marshal(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(scratch, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	boxRun, gh, _ := runSmoke(t, c, scratch)
+	if boxRun == nil {
+		t.Fatalf("%s never ran a Box", c.runtime)
+	}
+	problems := append(checkRuntimeArgv(doc, c.kind, boxRun), checkForgeCalls(doc, c.kind, gh)...)
+	if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, dropped) }) {
+		t.Fatalf("dropping %s from the document went unnoticed by every smoke check; problems: %q", dropped, problems)
+	}
+	t.Logf("caught: %q", problems)
 }
