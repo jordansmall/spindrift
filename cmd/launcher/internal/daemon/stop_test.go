@@ -3,7 +3,9 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -200,31 +202,86 @@ func TestChildRequestCarriesStopThenAbortInOrder(t *testing.T) {
 	}
 }
 
-// TestChildRequestBothAlreadyClosedSeenImmediately drives the public Loop
-// seam, not newPool/runSlot directly: with the mid-iteration admission
-// checks gone (issue #3626), a slot parked in ResolveTip when both
-// latches close goes on to start its child anyway — the very race
-// ChildRequest.Stop/Abort's per-child forwarding exists for — so this is
-// now reachable without reaching around Loop's own Stop watcher.
-func TestChildRequestBothAlreadyClosedSeenImmediately(t *testing.T) {
+// TestLoopStopClosedDuringResolveTipStartsNoChild drives the public Loop
+// seam: a slot parked in ResolveTip when Stop closes must halt at the
+// admission re-check after awaitBaton (issue #4365) rather than start a
+// child on a pool that has stopped.
+func TestLoopStopClosedDuringResolveTipStartsNoChild(t *testing.T) {
+	stop := make(chan struct{})
+	resolving := make(chan struct{})
+
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		onResolve: func(ctx context.Context, call int) error {
+			if call == 1 {
+				close(resolving)
+				<-stop
+			}
+			return nil
+		},
+	}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Stop = stop
+
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(context.Background(), cfg, r, em, clk) }()
+
+	select {
+	case <-resolving:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("ResolveTip was never called")
+	}
+	close(stop)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("Loop did not return after Stop closed")
+	}
+
+	if r.runCount() != 0 {
+		t.Fatalf("run calls = %d, want 0: a closed Stop must halt before the child starts", r.runCount())
+	}
+}
+
+// closeOnChildStartWriter closes Stop and Abort (once) when it sees the
+// child_start event. startChild emits it synchronously on the slot
+// goroutine after the post-awaitBaton re-check and before RunChild, so this
+// lands both latches exactly in the one window the re-check cannot cover.
+type closeOnChildStartWriter struct {
+	w     io.Writer
+	once  sync.Once
+	stop  chan struct{}
+	abort chan struct{}
+}
+
+func (c *closeOnChildStartWriter) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte(`"child_start"`)) {
+		c.once.Do(func() {
+			close(c.stop)
+			close(c.abort)
+		})
+	}
+	return c.w.Write(p)
+}
+
+// TestChildRequestForwardsLatchesClosedAfterAdmission pins
+// ChildRequest.Stop/Abort's per-child forwarding: both latches can still
+// close in the window between the post-awaitBaton re-check and RunChild,
+// and the child's request must carry the pool's own latches, closed.
+func TestChildRequestForwardsLatchesClosedAfterAdmission(t *testing.T) {
 	stop := make(chan struct{})
 	abort := make(chan struct{})
-	resolving := make(chan struct{})
 
 	var seenStop, seenAbort bool
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
-		results:   []ChildResult{{Exit: 5}},
-		onResolve: func(ctx context.Context, call int) error {
-			if call == 1 {
-				close(resolving)
-				// Park here until both latches close, so the child this
-				// resolve unblocks into starts with both already closed.
-				<-stop
-				<-abort
-			}
-			return nil
-		},
+		// Exit 7 with Stop closed halts the pool after this one child.
+		results: []ChildResult{{Exit: 7}},
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			select {
 			case <-req.Stop:
@@ -241,7 +298,7 @@ func TestChildRequestBothAlreadyClosedSeenImmediately(t *testing.T) {
 	}
 	clk := &testClock{}
 	var buf bytes.Buffer
-	em := newTestEmitter(&buf)
+	em := newTestEmitter(&closeOnChildStartWriter{w: &buf, stop: stop, abort: abort})
 
 	cfg := testConfig(1)
 	cfg.Stop = stop
@@ -249,14 +306,6 @@ func TestChildRequestBothAlreadyClosedSeenImmediately(t *testing.T) {
 
 	done := make(chan Halt, 1)
 	go func() { done <- Loop(context.Background(), cfg, r, em, clk) }()
-
-	select {
-	case <-resolving:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("ResolveTip was never called")
-	}
-	close(stop)
-	close(abort)
 
 	select {
 	case <-done:

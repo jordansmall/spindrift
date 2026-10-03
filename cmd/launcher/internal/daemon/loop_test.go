@@ -450,15 +450,12 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 	}
 }
 
-// TestLoopCancelledDuringResolveTipStillHaltsAtTheNextAdmission pins
-// issue #3626's collapse to one admission check: a ctx cancelled mid-fetch
-// (a bare caller cancel, not cfg.Stop — no ChildRequest.Stop exists to
-// forward it to a running child) is no longer re-checked between
-// ResolveTip and RunChild, so this iteration's child still starts and
-// runs to completion; the loop only notices the cancellation back at the
-// top of its next iteration, and still halts with the context-cancelled
-// reason rather than ever reaching the breaker.
-func TestLoopCancelledDuringResolveTipStillHaltsAtTheNextAdmission(t *testing.T) {
+// TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild pins issue
+// #4365's re-check after awaitBaton: a ctx cancelled mid-fetch (a bare
+// caller cancel, not cfg.Stop) is caught between ResolveTip and RunChild,
+// so no child starts and the loop halts with the context-cancelled reason
+// rather than ever reaching the breaker.
+func TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -474,10 +471,10 @@ func TestLoopCancelledDuringResolveTipStillHaltsAtTheNextAdmission(t *testing.T)
 
 	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
-	if r.runCount() != 1 {
-		t.Fatalf("run calls = %d, want 1: nothing re-checks ctx between ResolveTip and RunChild anymore", r.runCount())
+	if r.runCount() != 0 {
+		t.Fatalf("run calls = %d, want 0: ctx is re-checked between ResolveTip and RunChild", r.runCount())
 	}
-	wantEvents(t, &buf, []string{"child_start", "child_finish", "halt"}, "the child that was already admitted still runs and finishes before the halt")
+	wantEvents(t, &buf, []string{"halt"}, "no child starts once the cancelled ctx is seen")
 	if !strings.Contains(reason, "context") {
 		t.Errorf("halt reason = %q, want it to name the cancellation", reason)
 	}

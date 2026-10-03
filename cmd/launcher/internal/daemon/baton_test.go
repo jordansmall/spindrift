@@ -15,32 +15,25 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
-// awaitHalt waits for Loop to return, releasing any further child that
-// starts while it drains. passBaton(batonPassChildEnded) fires
-// unconditionally, before the releasing call's exit is interpreted and
-// before a halt actually lands (runSlot never kills a child it has
-// started), so the slot that takes the baton back can legitimately start
-// one more round in the gap — a bare <-done would hang on it forever.
+// awaitHalt waits for Loop to return, failing the test if any slot starts a
+// further child while it waits: the baton passes only after the round's halt
+// decision, so no sibling can start one more after a halt.
 func awaitHalt(t *testing.T, r *scriptedRunner, done <-chan Halt) string {
 	t.Helper()
 	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case h := <-done:
-			return h.String()
-		case slot := <-r.started:
-			r.releaseSlot(t, slot, ChildResult{Exit: 5})
-		case <-deadline:
-			t.Fatalf("awaitHalt: Loop did not return within 5s")
-			return ""
-		}
+	select {
+	case h := <-done:
+		return h.String()
+	case slot := <-r.started:
+		t.Fatalf("awaitHalt: slot %d started a child while Loop was halting", slot)
+	case <-deadline:
+		t.Fatalf("awaitHalt: Loop did not return within 5s")
 	}
+	return ""
 }
 
 // awaitWG is awaitHalt's counterpart for a test that drives runSlot
-// directly against a WaitGroup rather than through Loop's done channel —
-// the same childEnded-before-halt-interpreted gap applies, so a further
-// start must be drained here too rather than left to hang wg.Wait forever.
+// directly against a WaitGroup rather than through Loop's done channel.
 func awaitWG(t *testing.T, r *scriptedRunner, wg *sync.WaitGroup) {
 	t.Helper()
 	finished := make(chan struct{})
@@ -49,16 +42,12 @@ func awaitWG(t *testing.T, r *scriptedRunner, wg *sync.WaitGroup) {
 		close(finished)
 	}()
 	deadline := time.After(5 * time.Second)
-	for {
-		select {
-		case <-finished:
-			return
-		case slot := <-r.started:
-			r.releaseSlot(t, slot, ChildResult{Exit: 5})
-		case <-deadline:
-			t.Fatalf("awaitWG: goroutines did not finish within 5s")
-			return
-		}
+	select {
+	case <-finished:
+	case slot := <-r.started:
+		t.Fatalf("awaitWG: slot %d started a child while the pool was halting", slot)
+	case <-deadline:
+		t.Fatalf("awaitWG: goroutines did not finish within 5s")
 	}
 }
 
@@ -66,10 +55,10 @@ func awaitWG(t *testing.T, r *scriptedRunner, wg *sync.WaitGroup) {
 // baton_pass stamped with reason — the shared check every release-path test
 // below ends on, once its own setup has driven the holder into that one
 // path.
-func assertBatonPassReason(t *testing.T, events []Event, reason string) {
+func assertBatonPassReason(t *testing.T, events []Event, reason batonReason) {
 	t.Helper()
 	for _, ev := range events {
-		if ev.Event == "baton_pass" && ev.Reason == reason {
+		if ev.Event == "baton_pass" && ev.Reason == string(reason) {
 			return
 		}
 	}
@@ -209,7 +198,7 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	// reason must say so on every one of them — not merely on one of
 	// them, which is all the shared assertBatonPassReason checks.
 	for _, ev := range events {
-		if ev.Event == "baton_pass" && ev.Reason != batonPassClaimed {
+		if ev.Event == "baton_pass" && ev.Reason != string(batonPassClaimed) {
 			t.Errorf("baton_pass reason = %q, want every pass in this test stamped %q", ev.Reason, batonPassClaimed)
 		}
 	}
@@ -379,6 +368,122 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 	assertBatonPassReason(t, events, batonPassChildEnded)
 }
 
+// startParkedSiblingPool starts Loop on a parked clock and returns once the
+// sibling is parked on baton_hold — the setup every issue #4365 test shares:
+// a pass ahead of the holder's halt wakes that sibling deterministically.
+func startParkedSiblingPool(t *testing.T, r *scriptedRunner, cfg Config) <-chan Halt {
+	t.Helper()
+	clk := &testClock{}
+	clk.park()
+	nw := newNotifyWriter()
+	em := newTestEmitter(nw)
+
+	done := make(chan Halt, 1)
+	go func() {
+		done <- Loop(context.Background(), cfg, r, em, clk)
+	}()
+	nw.waitForLine(t, "\"event\":\"baton_hold\"")
+	return done
+}
+
+// TestPoolHaltPoolExitPassesNoBatonBeforeHalt pins issue #4365: a holder whose
+// child exits with a pool-halting code (exit 5 host-tainted, exit 6
+// config-invalid) must not hand the baton to a parked sibling before the
+// halt lands, or that sibling wakes, finds nothing stopping it, and starts a
+// child on a host the pool has just declared unfit.
+//
+// Exit 7 with Stop closed is the third HaltPool exit and is not covered: the
+// closed Stop already halts the pool via Loop's watcher, so the woken
+// sibling's re-check would halt it even under the old ordering and the case
+// could not fail.
+func TestPoolHaltPoolExitPassesNoBatonBeforeHalt(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		exit int
+		want string
+	}{
+		{"host-tainted", 5, "host-tainted"},
+		{"config-invalid", 6, "config-invalid"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const slots = 2
+			r := &scriptedRunner{revisions: []string{"rev1"}}
+			r.holdSlots(slots)
+			done := startParkedSiblingPool(t, r, testConfig(slots))
+
+			if got := r.awaitStart(t); got != leadSlot {
+				t.Fatalf("first slot to start = %d, want %d", got, leadSlot)
+			}
+			r.releaseSlot(t, leadSlot, ChildResult{Exit: tc.exit})
+
+			if got := awaitHalt(t, r, done); !strings.Contains(got, tc.want) {
+				t.Fatalf("halt reason = %q, want it to name %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestPoolBreakerTripPassesNoBatonBeforeHalt pins issue #4365's breaker
+// path: a holder whose own failure crosses the breaker threshold must not
+// hand the baton to a parked sibling before the trip lands, or that sibling
+// wakes, finds nothing stopping it, and starts a child on a pool that is
+// already halting. BreakerThreshold 1 makes the holder's own failure the
+// tripping one; the sibling is parked on baton_hold throughout.
+//
+// A held slot cannot return a seam error, so the seam case gates the lead's
+// RunChild in onStart instead and scripts exit 5 for any child that starts
+// after it: a sibling that wrongly runs surfaces as a host-tainted halt, not
+// the breaker's.
+func TestPoolBreakerTripPassesNoBatonBeforeHalt(t *testing.T) {
+	const slots = 2
+	for _, tc := range []struct {
+		name string
+		// setup configures r and returns the step that makes the lead's
+		// failure happen once the sibling is parked.
+		setup func(r *scriptedRunner) (fail func(t *testing.T))
+	}{
+		{"unrecognised-exit", func(r *scriptedRunner) func(*testing.T) {
+			r.holdSlots(slots)
+			return func(t *testing.T) {
+				if got := r.awaitStart(t); got != leadSlot {
+					t.Fatalf("first slot to start = %d, want %d", got, leadSlot)
+				}
+				r.releaseSlot(t, leadSlot, ChildResult{Exit: 99})
+			}
+		}},
+		{"seam-error", func(r *scriptedRunner) func(*testing.T) {
+			gate := make(chan struct{})
+			r.runErrAt = 1
+			r.runErr = errors.New("boom")
+			r.results = []ChildResult{{Exit: 5}}
+			r.onStart = func(ctx context.Context, req ChildRequest) error {
+				if req.Slot == leadSlot {
+					<-gate
+				}
+				return nil
+			}
+			return func(*testing.T) { close(gate) }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &scriptedRunner{revisions: []string{"rev1"}}
+			fail := tc.setup(r)
+			cfg := testConfig(slots)
+			cfg.BreakerThreshold = 1
+			done := startParkedSiblingPool(t, r, cfg)
+
+			fail(t)
+
+			if got := awaitHalt(t, r, done); !strings.HasPrefix(got, haltRenderings[HaltBreaker].reason) {
+				t.Fatalf("halt = %q, want a breaker halt", got)
+			}
+			if n := r.runCount(); n != 1 {
+				t.Fatalf("RunChild calls = %d, want 1: the sibling must not start a child", n)
+			}
+		})
+	}
+}
+
 // TestPoolBatonPassesOnNoneDispatchableChildEnd is
 // TestPoolBatonPassesOnQueueEmptyChildEnd's sibling for exit 3: work
 // existed but every issue found was claimed or overlap-deferred, a
@@ -474,12 +579,11 @@ func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 	assertBatonPassReason(t, events, batonPassChildEnded)
 }
 
-// TestPoolBatonPassesOnSeamFailure pins the same post-RunChild release site
-// for a RunChild seam error (the child could not even be started/waited on,
-// not a real exit code at all): the release still fires there, before
-// backoffOrHalt's own passBaton call, so the reason on the stream honestly
-// says a child ended rather than claiming the round failed before starting
-// one.
+// TestPoolBatonPassesOnSeamFailure pins the same release reason for a
+// RunChild seam error (the child could not even be started/waited on, not a
+// real exit code at all): backoffOrHalt is handed batonPassChildEnded, so the
+// reason on the stream honestly says a child ended rather than claiming the
+// round failed before starting one.
 func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
@@ -513,7 +617,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	assertBatonPassReason(t, events, batonPassChildEnded)
 	for _, ev := range events {
-		if ev.Event == "baton_pass" && ev.Reason == batonPassFailed {
+		if ev.Event == "baton_pass" && ev.Reason == string(batonPassFailed) {
 			t.Fatalf("baton_pass reason = %q, want batonPassChildEnded: a child_start/child_finish pair already reached the stream for this round, so the holder did not fail before starting one", ev.Reason)
 		}
 	}
@@ -1211,7 +1315,7 @@ func TestReferenceDocBatonReasonsMatchConstants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read pool.go: %v", err)
 	}
-	declared := regexp.MustCompile(`(?m)^\t(baton(?:Pass|Hold)\w*)\s+=\s+"([^"]*)"$`).FindAllStringSubmatch(string(src), -1)
+	declared := regexp.MustCompile(`(?m)^\t(baton(?:Pass|Hold)\w*)(?:\s+batonReason)?\s+=\s+"([^"]*)"$`).FindAllStringSubmatch(string(src), -1)
 	if len(declared) == 0 {
 		// Without this the loop below would pass vacuously if the const
 		// block were ever reshaped out from under the pattern.

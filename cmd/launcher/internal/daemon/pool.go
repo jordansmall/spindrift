@@ -112,6 +112,11 @@ const leadSlot = 0
 // round, not yet claimed by anyone but the pre-assigned leadSlot).
 const noBaton = -1
 
+// batonReason is a baton_pass reason. A distinct type so passBaton and
+// backoffOrHalt, which sit next to a free-form string reason, cannot be
+// handed the two swapped.
+type batonReason string
+
 // Reasons stamped on baton_hold/baton_pass — operator-facing prose in the
 // same documented-string convention as ShutdownDrain (events.go). Every
 // way a slot's discovery round can end without a claim has its own pass
@@ -121,13 +126,15 @@ const (
 	// batonPassClaimed fires when the holder's child announces a Box while
 	// still running: discovery is over, so the next waiting slot starts at
 	// once rather than waiting out the whole of the holder's Box run.
-	batonPassClaimed = "the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"
+	batonPassClaimed batonReason = "the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"
 	// batonPassChildEnded fires when the holder's child returns without
 	// ever announcing a Box (queue empty, none dispatchable, an
-	// unrecognised exit, or a RunChild seam error): the holder's round is
-	// over either way, so the baton passes regardless of which of those it
-	// was.
-	batonPassChildEnded = "the holder's child ended without announcing a Box: passing the baton to the next waiting slot"
+	// unrecognised exit, or a RunChild seam error) and the pool is not
+	// halting: the holder's round is over either way, so the baton passes
+	// regardless of which of those it was. A HaltPool exit or a breaker
+	// trip passes none, since a woken sibling would start a child before the
+	// halt lands (issue #4365).
+	batonPassChildEnded batonReason = "the holder's child ended without announcing a Box: passing the baton to the next waiting slot"
 	// batonPassFailed fires on an unclassified failure that reaches
 	// backoffOrHalt before the holder ever started a child — a
 	// ResolveTip error or a self-build evaluation failure: the holder
@@ -138,25 +145,27 @@ const (
 	// non-holder never reaches this path with the baton to pass — it is
 	// only live for the pre-assigned initial holder's (leadSlot) very
 	// first round, the one round a slot gets here already holding it.
-	batonPassFailed = "the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"
+	batonPassFailed batonReason = "the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"
 	// batonPassWindowClosed fires when the Awake window shuts between the
 	// holder's ResolveTip fetch and starting its child: the holder is
 	// about to loop back around into awaitWindow, and holding the pool
 	// through that whole shut span would stall every sibling's own
 	// discovery for no reason.
-	batonPassWindowClosed = "the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"
+	batonPassWindowClosed batonReason = "the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"
 	// batonPassIdle fires when pickKind finds every configured kind backed
 	// off for the holder: the holder is about to idleSleep, and a slot
 	// must never sleep out an idle wait holding the baton. pickKind runs
 	// before the baton is acquired, so a non-holder never reaches this
 	// path holding it — only the pre-assigned initial holder (leadSlot)
 	// can, on its very first round.
-	batonPassIdle = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
+	batonPassIdle batonReason = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
 	// batonPassStopped fires when the holder returns before any of the
-	// above resolved (a cancelled ctx, a halt, or a self-build mismatch):
+	// above resolved (a cancelled ctx, a halt, a self-build mismatch, or a
+	// HaltPool child exit or breaker trip, whose pass waits until after the
+	// halt lands):
 	// a holder that never gets to run discovery must still not strand the
 	// next waiting slot on a baton nothing else will now ever pass.
-	batonPassStopped = "the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"
+	batonPassStopped batonReason = "the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"
 
 	// batonHoldReason is stamped on every baton_hold event, matching every
 	// other wait event in this stream (awake_close, backoff, idle's own
@@ -670,7 +679,7 @@ func (p *pool) takeBaton(slot int) {
 // holder is the only slot that ever sends, and the batonSlot flip above
 // guarantees it sends at most once per hold, so the capacity-1 channel is
 // always empty at this point.
-func (p *pool) passBaton(slot int, reason string) {
+func (p *pool) passBaton(slot int, reason batonReason) {
 	if p.baton == nil {
 		return
 	}
@@ -682,7 +691,7 @@ func (p *pool) passBaton(slot int, reason string) {
 	}
 	p.mutate(func(s *state) []Event {
 		s.batonSlot = noBaton
-		return []Event{{Event: "baton_pass", Slot: intPtr(slot), Reason: reason}}
+		return []Event{{Event: "baton_pass", Slot: intPtr(slot), Reason: string(reason)}}
 	})
 	p.baton <- struct{}{}
 }
@@ -783,10 +792,12 @@ func (p *pool) halt(h Halt) {
 // lets it retry alone. Returns true if the pool halted (the caller must
 // stop), false if the caller should sleep out the backoff and continue its
 // own loop. When the caller holds the discovery baton and this call is
-// about to back off rather than halt, it also passes the baton before the
-// backoff sleep below (see batonPassFailed) — a holder about to sleep
+// about to back off rather than halt, it also passes the baton, with
+// passReason, just before the backoff sleep — a holder about to sleep
 // alone through FailureBackoff must not strand its sibling's discovery on
-// that sleep.
+// that sleep. The pass comes only after the breaker check and the
+// p.stopped() check: a sibling woken before a trip lands would start a
+// child on a pool that is already halting (issue #4365).
 //
 // This is also the breaker's one carve-out (issue #3595, by construction):
 // a failure that lands while Stop has already closed — or while the pool
@@ -802,25 +813,14 @@ func (p *pool) halt(h Halt) {
 // was still open. The pool halts as an operator stop under either reading,
 // so the wider window changes no operator-visible outcome — only which exit
 // the breaker declines to count on the way down.
-func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string) bool {
-	// Check stopping before touching the baton: a stop closing here means
-	// runSlot's own deferred passBaton(slot, batonPassStopped) (loop.go) is
-	// the pass that should be observed, not a batonPassFailed pass from
-	// this call — an operator stop racing an in-flight fetch must still
-	// read as a stop in the baton_pass event stream.
+func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision, reason string, passReason batonReason) bool {
+	// A halt return passes no baton here: runSlot's deferred
+	// passBaton(slot, batonPassStopped) (loop.go) releases it after the
+	// halt, so an operator stop or breaker trip reads as such in the
+	// baton_pass event stream.
 	if p.haltIfStopping(ctx, kind) {
 		return true
 	}
-
-	// Only an unclassified pre-child failure (a ResolveTip or
-	// self-build evaluation error) can still be holding the baton here:
-	// loop.go releases it unconditionally right after RunChild returns,
-	// before the exit is interpreted, so this call is already a no-op on
-	// every post-child failure path. passBaton is a no-op unless slot
-	// actually holds it, so it's safe to call unconditionally here too,
-	// rather than threading a "did I acquire it" flag through every
-	// caller.
-	p.passBaton(slot, batonPassFailed)
 
 	// Sample now before taking p.mu, same reasoning as pickKind.
 	now := p.clk.Now()
@@ -846,6 +846,10 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 	if p.stopped() {
 		return true
 	}
+
+	// passBaton is a no-op unless slot actually holds it, so callers need
+	// not track whether they acquired it.
+	p.passBaton(slot, passReason)
 
 	p.mutate(func(s *state) []Event {
 		s.slots[slot].phase = PhaseBackingOff
