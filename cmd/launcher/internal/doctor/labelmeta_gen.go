@@ -3,7 +3,7 @@ package doctor
 
 var MetaDispatchable = LabelMeta{Description: "Fully specified; ready for an AFK agent", Color: "0075ca"}
 var MetaInProgress = LabelMeta{Description: "An AFK agent is actively working this issue", Color: "e4e669"}
-var MetaFailed = LabelMeta{Description: "Box exited non-zero; needs human triage", Color: "d93f0b"}
+var MetaFailed = LabelMeta{Description: "Box failed or blocked, or its PR could not land; needs human triage", Color: "d93f0b"}
 var MetaComplete = LabelMeta{Description: "Agent work merged and green", Color: "0e8a16"}
 
 // TriageLabelMeta is the single source of truth for default triage/

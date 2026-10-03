@@ -274,7 +274,7 @@
             #     complete = "agent-complete";
             #     # issues carrying this label are dispatchable (the launch button)
             #     dispatch = "ready-for-agent";
-            #     # label swapped on when the agent box exits non-zero
+            #     # label swapped on when the agent box failed or blocked, or its PR could not land
             #     failed = "agent-failed";
             #     # label swapped on from LABEL when an issue enters the queue
             #     inProgress = "agent-in-progress";

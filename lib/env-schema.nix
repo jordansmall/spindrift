@@ -95,7 +95,7 @@ in
     env = "FAILED_LABEL";
     group = "issues";
     default = "agent-failed";
-    doc = "label swapped on when the agent box exits non-zero";
+    doc = "label swapped on when the agent box failed or blocked, or its PR could not land";
     flakeOption = true;
     nixSubPath = "labels.failed";
     boxEnv = false;

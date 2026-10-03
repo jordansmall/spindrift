@@ -3576,7 +3576,7 @@ create any missing labels. To create them manually:
 gh label create ready-for-agent   --repo owner/repo --color 0075ca --description "Fully specified; ready for an AFK agent"
 gh label create agent-in-progress --repo owner/repo --color e4e669 --description "An AFK agent is actively working this issue"
 gh label create agent-complete    --repo owner/repo --color 0e8a16 --description "Agent work merged and green"
-gh label create agent-failed      --repo owner/repo --color d93f0b --description "Box exited non-zero; needs human triage"
+gh label create agent-failed      --repo owner/repo --color d93f0b --description "Box failed or blocked, or its PR could not land; needs human triage"
 ```
 
 #### Create the research labels on the Target repo
