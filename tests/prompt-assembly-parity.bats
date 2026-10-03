@@ -712,7 +712,7 @@ SKILL
 
 @test "production path matches the golden fixture for the orchestrator-on filer-on read-only cell, log carrier" {
   # Nearest sibling: "orchestrator-filer-on-signal-socket", minus its
-  # BOX_SIGNAL_CARRIER override: the log default gates file-issues-relay.md
+  # BOX_SIGNAL_CARRIER override: the log carrier gates file-issues-relay.md
   # and, through the filer's own prompt in .agents.json,
   # filer-file-relay.md. The drop recap is already pinned by the direct and
   # socket siblings; this cell pins the log/socket carrier fork.
