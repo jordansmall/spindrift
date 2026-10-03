@@ -1596,9 +1596,8 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 	}
 }
 
-// Folded from tests/run-label-lifecycle.bats (issue #4284): IN_PROGRESS_LABEL
-// and FAILED_LABEL env vars reach the dispatch label mapping, beating the
-// document's settings.
+// IN_PROGRESS_LABEL and FAILED_LABEL env vars reach the dispatch label
+// mapping, beating the document's settings (issue #4284).
 func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 
@@ -3451,9 +3450,8 @@ func TestDispatchConfig_ForwardsSignalCarrierAndNetworkMode(t *testing.T) {
 	}
 }
 
-// Folded from tests/run-research-lifecycle.bats (issue #4284): the Dispatch
-// kind name and --self-contained must reach dispatch.Config, since the Box
-// reads DISPATCH_KIND and SELF_CONTAINED off it.
+// The Dispatch kind name and --self-contained must reach dispatch.Config,
+// since the Box reads DISPATCH_KIND and SELF_CONTAINED off it (issue #4284).
 func TestDispatchConfig_ForwardsKindAndSelfContained(t *testing.T) {
 	cases := []struct {
 		name          string
