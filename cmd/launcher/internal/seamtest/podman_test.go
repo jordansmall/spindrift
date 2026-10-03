@@ -2,6 +2,7 @@ package seamtest
 
 import (
 	"bytes"
+	"encoding/base64"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -136,5 +137,18 @@ func TestDockerFakeIgnoresPodmanConfig(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := podmanFake("docker", []string{"run"}, &out, &errb); code != fakeConfigExit {
 		t.Errorf("exit %d; want %d (docker config unset)", code, fakeConfigExit)
+	}
+}
+
+func TestPodmanIntentsRelayAsNoncedIssueIntentLines(t *testing.T) {
+	cfg := PodmanConfig{Record: filepath.Join(t.TempDir(), "rec"), Runs: []PodmanRun{{
+		Intents: []string{`{"title":"t"}`},
+		Outcome: "SPINDRIFT_OUTCOME issue=1 status=ready\n",
+	}}}
+	_, out, _ := runPodman(t, cfg, "run", "-e", "RUN_NONCE=abc", "img")
+	want := "SPINDRIFT_ISSUE_INTENT abc " + base64.StdEncoding.EncodeToString([]byte(`{"title":"t"}`)) +
+		"\nSPINDRIFT_OUTCOME issue=1 status=ready nonce=abc\n"
+	if out != want {
+		t.Errorf("out = %q; want %q", out, want)
 	}
 }
