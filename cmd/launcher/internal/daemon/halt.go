@@ -121,9 +121,12 @@ func (h Halt) String() string {
 // ExitCode maps h to this process's exit code. HaltOperatorStop and
 // HaltChildSignalled are the only two clean stops (0) — every other child
 // halt (host-tainted, config-invalid) is a real failure despite also
-// coming from a child exit, hence 1 alongside every non-child class.
-// HaltNone also exits 1: a zero Halt reaching ExitCode is a halt that was
-// never classified, not a clean stop, so it must not silently exit 0.
+// coming from a child exit. HaltSelfChanged, HaltPreflight, and
+// HaltFeatureBranchGone carry dedicated codes (ExitSelfChanged,
+// ExitPreflightFailed, ExitFeatureBranchGone) so a supervisor can tell
+// them apart. Every other class exits 1, HaltNone included: a zero Halt
+// reaching ExitCode is a halt that was never classified, not a clean
+// stop, so it must not silently exit 0.
 func (h Halt) ExitCode() int {
 	row, ok := haltRenderings[h.Class]
 	if !ok {
@@ -142,9 +145,9 @@ func (h Halt) Event() Event {
 // ExitSelfChanged is the daemon's own exit code for the one halt an
 // operator may want to act on automatically: its build changed at the
 // fetched tip. It is deliberately distinct from every other code this
-// binary returns (0 clean stop, 1 anything else) so a service unit can
-// restart on it alone — see HaltSelfChanged's doc for why that restart,
-// not an automatic re-exec, is how an operator opts into self-update. It
+// binary returns (see Halt.ExitCode) so a service unit can restart on it
+// alone — see HaltSelfChanged's doc for why that restart, not an
+// automatic re-exec, is how an operator opts into self-update. It
 // sits outside the 0-7 band the *child* launcher's exit codes occupy
 // (Interpret, cmd/launcher/internal/daemon/outcome.go) so the two
 // taxonomies cannot be confused when both appear in one log.
