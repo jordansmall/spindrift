@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/landdelta"
@@ -223,27 +224,65 @@ func TestWriterNarrationIncludesPhase(t *testing.T) {
 	}
 }
 
-func TestWriterNarrationTrimming(t *testing.T) {
-	long := strings.Repeat("x", 200)
+// narrationLine feeds one assistant text block and returns the narration row
+// (the line after the header).
+func narrationLine(t *testing.T, issue, text string) string {
+	t.Helper()
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "99", &status)
-
-	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"` + long + `"}]}}` + "\n"
-	fmt.Fprint(w, event)
-
-	out := strings.TrimRight(status.String(), "\n")
-	lines := strings.Split(out, "\n")
+	w := newWriter(issue, &status)
+	b, err := json.Marshal(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"text","text":`+string(b)+`}]}}`+"\n")
+	lines := strings.Split(strings.TrimRight(status.String(), "\n"), "\n")
 	if len(lines) != 2 {
-		t.Errorf("expected 2 lines (header + narration), got %d: %q", len(lines), status.String())
+		t.Fatalf("want 2 lines (header + narration), got %d: %q", len(lines), status.String())
 	}
-	// lines[1] is the narration row "#99 · <text>"; only the text portion is bounded.
-	prefix := "#99 \xc2\xb7 "
-	if !strings.HasPrefix(lines[1], prefix) {
-		t.Errorf("narration line missing prefix %q: %q", prefix, lines[1])
+	return lines[1]
+}
+
+// Agent-controlled narration text must not carry escape sequences or control
+// characters to the operator terminal, and a punctuation byte inside an escape
+// sequence must not end the sentence mid-sequence.
+func TestWriterNarrationSanitized(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"escapes and control", "\x1b[2J\x1b]0;pwned\x07hi", "hi"},
+		{"lone CR is a line break", "hi\rX", "hi"},
+		{"CSI with question mark", "\x1b[?25lHello there.", "Hello there."},
+		{"OSC hyperlink with dot", "\x1b]8;;https://x.com\alink text.", "link text."},
+		{"escape-only first line skipped", "\x1b[0m\nHello.", "Hello."},
 	}
-	textPart := strings.TrimPrefix(lines[1], prefix)
-	if len(textPart) > 120 {
-		t.Errorf("narration text %d chars, want ≤120", len(textPart))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := narrationLine(t, "7", tc.in)
+			if want := "#7 \xc2\xb7 " + tc.want; got != want {
+				t.Errorf("narration = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// The 120-character cap counts runes, so it never splits a multi-byte rune.
+func TestWriterNarrationCapIsRuneSafe(t *testing.T) {
+	prefix := "#7 \xc2\xb7 "
+	cases := []struct{ name, in, want string }{
+		{"under cap", strings.Repeat("é", 70), strings.Repeat("é", 70)},
+		{"exactly at cap", strings.Repeat("é", 120), strings.Repeat("é", 120)},
+		{"one over cap", strings.Repeat("é", 121), strings.Repeat("é", 117) + "..."},
+		{"well over cap", strings.Repeat("é", 130), strings.Repeat("é", 117) + "..."},
+		{"cut just after a space", strings.Repeat("é", 116) + " " + strings.Repeat("é", 10), strings.Repeat("é", 116) + "..."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := narrationLine(t, "7", tc.in)
+			if !utf8.ValidString(got) {
+				t.Errorf("narration is not valid UTF-8: %q", got)
+			}
+			if text := strings.TrimPrefix(got, prefix); text != tc.want {
+				t.Errorf("narration = %q, want %q", text, tc.want)
+			}
+		})
 	}
 }
 
