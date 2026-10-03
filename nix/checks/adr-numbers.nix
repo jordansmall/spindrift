@@ -1,34 +1,40 @@
 # Eval-level pins over docs/adr/'s four-digit ADR number prefix (issue #3631).
-# The uniqueness pin only ever sees wellFormedNames, so without the
-# well-formedness pin a badly named ADR escapes it instead of tripping it.
+# The uniqueness pin only ever sees wellFormed, so without the well-formedness
+# pin a badly named ADR escapes it instead of tripping it.
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
     assertMsg
     concatStringsSep
-    filter
     filterAttrs
     groupBy
     mapAttrsToList
+    partition
     substring
     ;
 
   isWellFormedName = name: builtins.match "[0-9]{4}-.*\\.md" name != null;
 
-  malformedNames = names: filter (name: !(isWellFormedName name)) names;
+  partitionEntries =
+    adrEntries:
+    let
+      parts = partition (name: adrEntries.${name} == "regular" && isWellFormedName name) (
+        builtins.attrNames adrEntries
+      );
+    in
+    {
+      wellFormed = parts.right;
+      malformed = parts.wrong;
+    };
 
   collisionsIn =
-    names: filterAttrs (_: group: builtins.length group > 1) (groupBy (name: substring 0 4 name) names);
+    candidates:
+    filterAttrs (_: group: builtins.length group > 1) (groupBy (name: substring 0 4 name) candidates);
 
   describeCollision = prefix: group: "${prefix} (${concatStringsSep ", " group})";
 
-  entries = builtins.readDir ../../docs/adr;
-  names = builtins.attrNames entries;
-  isRegular = name: entries.${name} == "regular";
-
-  malformed = filter (name: !(isRegular name) || !(isWellFormedName name)) names;
-  wellFormedNames = filter (name: isRegular name && isWellFormedName name) names;
-  collisions = collisionsIn wellFormedNames;
+  inherit (partitionEntries (builtins.readDir ../../docs/adr)) wellFormed malformed;
+  collisions = collisionsIn wellFormed;
 in
 {
   adr-numbers-well-formed =
@@ -60,15 +66,22 @@ in
     ) "collisionsIn must report a colliding pair under its shared four-digit prefix";
     pkgs.runCommand "adr-numbers-collisions-in-detects-shared-prefix" { } "touch $out";
 
-  adr-numbers-malformed-names-detects-bad-shape =
+  adr-numbers-partition-entries-detects-bad-shape =
     let
-      found = malformedNames [
-        "0001-good.md"
-        "not-a-valid-name.md"
-      ];
+      found = partitionEntries {
+        "0001-good.md" = "regular";
+        "not-a-valid-name.md" = "regular";
+        "0002-dir.md" = "directory";
+      };
     in
     assert assertMsg (
-      found == [ "not-a-valid-name.md" ]
-    ) "malformedNames must report a name without a four-digit prefix";
-    pkgs.runCommand "adr-numbers-malformed-names-detects-bad-shape" { } "touch $out";
+      found == {
+        wellFormed = [ "0001-good.md" ];
+        malformed = [
+          "0002-dir.md"
+          "not-a-valid-name.md"
+        ];
+      }
+    ) "partitionEntries must reject a non-regular entry and a name without a four-digit prefix";
+    pkgs.runCommand "adr-numbers-partition-entries-detects-bad-shape" { } "touch $out";
 }
