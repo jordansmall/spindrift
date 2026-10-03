@@ -56,8 +56,9 @@ const (
 // haltRendering is one HaltClass's documented rendering: its Go identifier
 // name (for HaltClass.String()), the reason text, whether that text is a
 // prefix joined to Halt.Detail with ": " or the whole reason on its own,
-// and the wire exit code. Halt.String() and Halt.ExitCode() both read this
-// one table so the two can't drift the way two parallel switches can.
+// whether the daemon's stderr diagnostic is the bare Detail, and the wire
+// exit code. Halt.String(), Halt.Diagnostic() and Halt.ExitCode() all read
+// this one table so they can't drift the way parallel switches can.
 type haltRendering struct {
 	// name is the class's own Go identifier, kept in step by hand:
 	// nothing asserts the two match, so renaming a class means editing
@@ -65,22 +66,25 @@ type haltRendering struct {
 	name     string
 	reason   string
 	detailed bool
-	exit     int
+	// bareDiagnostic: the daemon prints Detail alone on stderr instead of
+	// String()'s prefixed form, while the halt event still carries the prefix.
+	bareDiagnostic bool
+	exit           int
 }
 
 var haltRenderings = map[HaltClass]haltRendering{
-	HaltNone:               {name: "HaltNone", reason: "", detailed: false, exit: 1},
-	HaltOperatorStop:       {name: "HaltOperatorStop", reason: "context-cancelled", detailed: true, exit: 0},
-	HaltChildSignalled:     {name: "HaltChildSignalled", reason: "outcome: signalled-stop", detailed: false, exit: 0},
-	HaltChildHostTainted:   {name: "HaltChildHostTainted", reason: "outcome: host-tainted", detailed: false, exit: 1},
-	HaltChildConfigInvalid: {name: "HaltChildConfigInvalid", reason: "outcome: config-invalid", detailed: false, exit: 1},
-	HaltSelfChanged:        {name: "HaltSelfChanged", reason: "self-changed", detailed: true, exit: ExitSelfChanged},
-	HaltSelfBuild:          {name: "HaltSelfBuild", reason: "self-build", detailed: true, exit: 1},
-	HaltBreaker:            {name: "HaltBreaker", reason: "breaker", detailed: true, exit: 1},
-	HaltInvalidConfig:      {name: "HaltInvalidConfig", reason: "config-invalid", detailed: true, exit: 1},
-	HaltPreflight:          {name: "HaltPreflight", reason: "preflight", detailed: true, exit: ExitPreflightFailed},
-	HaltInstanceLock:       {name: "HaltInstanceLock", reason: "instance-lock", detailed: true, exit: 1},
-	HaltFeatureBranchGone:  {name: "HaltFeatureBranchGone", reason: "feature-branch-gone", detailed: true, exit: ExitFeatureBranchGone},
+	HaltNone:               {name: "HaltNone", reason: "", detailed: false, bareDiagnostic: false, exit: 1},
+	HaltOperatorStop:       {name: "HaltOperatorStop", reason: "context-cancelled", detailed: true, bareDiagnostic: false, exit: 0},
+	HaltChildSignalled:     {name: "HaltChildSignalled", reason: "outcome: signalled-stop", detailed: false, bareDiagnostic: false, exit: 0},
+	HaltChildHostTainted:   {name: "HaltChildHostTainted", reason: "outcome: host-tainted", detailed: false, bareDiagnostic: false, exit: 1},
+	HaltChildConfigInvalid: {name: "HaltChildConfigInvalid", reason: "outcome: config-invalid", detailed: false, bareDiagnostic: false, exit: 1},
+	HaltSelfChanged:        {name: "HaltSelfChanged", reason: "self-changed", detailed: true, bareDiagnostic: false, exit: ExitSelfChanged},
+	HaltSelfBuild:          {name: "HaltSelfBuild", reason: "self-build", detailed: true, bareDiagnostic: false, exit: 1},
+	HaltBreaker:            {name: "HaltBreaker", reason: "breaker", detailed: true, bareDiagnostic: false, exit: 1},
+	HaltInvalidConfig:      {name: "HaltInvalidConfig", reason: "config-invalid", detailed: true, bareDiagnostic: false, exit: 1},
+	HaltPreflight:          {name: "HaltPreflight", reason: "preflight", detailed: true, bareDiagnostic: false, exit: ExitPreflightFailed},
+	HaltInstanceLock:       {name: "HaltInstanceLock", reason: "instance-lock", detailed: true, bareDiagnostic: true, exit: 1},
+	HaltFeatureBranchGone:  {name: "HaltFeatureBranchGone", reason: "feature-branch-gone", detailed: true, bareDiagnostic: false, exit: ExitFeatureBranchGone},
 }
 
 // String returns c's Go identifier name (e.g. "HaltSelfChanged") — not the
@@ -116,6 +120,16 @@ func (h Halt) String() string {
 		return row.reason + ": " + h.Detail
 	}
 	return row.reason
+}
+
+// Diagnostic returns the text the daemon prints after "daemon: " on stderr
+// for a pre-loop halt: String(), except for a class whose row sets
+// bareDiagnostic, which prints Detail as-is.
+func (h Halt) Diagnostic() string {
+	if row, ok := haltRenderings[h.Class]; ok && row.bareDiagnostic {
+		return h.Detail
+	}
+	return h.String()
 }
 
 // ExitCode maps h to this process's exit code. HaltOperatorStop and
