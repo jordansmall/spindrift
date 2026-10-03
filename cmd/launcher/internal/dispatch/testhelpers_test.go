@@ -94,3 +94,7 @@ func (d fakeDriver) RenderTranscript(logPath string, opts driverkit.RenderOption
 func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 	return exitCode, nil
 }
+
+func (d fakeDriver) ResultText(logPath string) (string, error) {
+	return driverclaude.ResultText(logPath)
+}
