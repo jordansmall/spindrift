@@ -45,6 +45,9 @@ let
     packages = p: [ p.hello ];
   };
 
+  # Rendered artifacts for the Go seam tests (issue #4280).
+  seamFixtures = import ./seam-fixtures.nix { inherit pkgs batsHarness; };
+
   # Bound once and shared verbatim by every dogfood mkHarness call below, so a
   # future nix/dogfood-defaults.nix key threaded into only one call site can't
   # turn the podman/bwrap A/B into a comparison of diverging configs instead of
@@ -464,6 +467,7 @@ in
     dogfoodSkills
     ghFakeOverlay
     batsHarness
+    seamFixtures
     harness
     dogfoodBwrapHarness
     nonRustHarness
