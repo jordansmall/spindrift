@@ -819,10 +819,10 @@ socket-capable.
 
 When the probe finds the socket incapable, the Box instead gets a TCP
 endpoint: the launcher binds `registryproxy.Proxy.ListenAndServeTCP` on
-`0.0.0.0:0` and the Box reaches it over `--add-host <host>:host-gateway`,
-resolving to whichever hostname the configured runtime uses for its own
-host-loopback gateway (`host.containers.internal` for podman,
-`host.docker.internal` for docker and nerdctl). An earlier version of this
+`0.0.0.0:0` and the Box dials it by whichever hostname the configured
+runtime uses for its own host-loopback gateway (`host.containers.internal`
+for podman, `host.docker.internal` for docker and nerdctl), resolved either
+by the runtime itself or by `--add-host <host>:host-gateway`. An earlier version of this
 amendment bound `127.0.0.1:0` and simply trusted that route — review caught
 that a plain Linux docker bridge resolves `host-gateway` to the bridge IP
 (e.g. `172.17.0.1`), not loopback, so nothing was listening on the address
