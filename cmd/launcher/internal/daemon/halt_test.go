@@ -45,6 +45,27 @@ func TestHaltString_MatchesDocumentedGrammar(t *testing.T) {
 	}
 }
 
+// TestHaltDiagnostic_BareOnlyForInstanceLock pins the daemon's stderr
+// diagnostic per class: HaltInstanceLock prints AcquireCheckoutLock's error
+// as-is (docs/reference.md **Instance lock**), every other class prints the
+// same prefixed form its halt event carries.
+func TestHaltDiagnostic_BareOnlyForInstanceLock(t *testing.T) {
+	cases := []struct {
+		name string
+		h    Halt
+		want string
+	}{
+		{"instance-lock", Halt{Class: HaltInstanceLock, Detail: "held by pid 123"}, "held by pid 123"},
+		{"preflight", Halt{Class: HaltPreflight, Detail: "doctor exit 4"}, "preflight: doctor exit 4"},
+		{"operator-stop", Halt{Class: HaltOperatorStop, Detail: "ctx cancelled"}, "context-cancelled: ctx cancelled"},
+	}
+	for _, tc := range cases {
+		if got := tc.h.Diagnostic(); got != tc.want {
+			t.Errorf("%s: Halt.Diagnostic() = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
 // TestHaltExitCode_PinsWireNumbers pins the literal exit code each
 // HaltClass maps to. These integers are the daemon process's contract with
 // a process supervisor, so a drift here is a wire-protocol break even
