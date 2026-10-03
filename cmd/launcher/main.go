@@ -524,20 +524,17 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 }
 
 type agentPresence struct {
-	filerEnabled, workerProvisioned, scoutProvisioned, reviewLoopInline, reviewLoopOrchestrator bool
+	filerEnabled, workerProvisioned, scoutProvisioned bool
 }
 
 // resolveAgentPresenceSignals returns the roster and orchestration gate
-// signals for this run, with three independent trust gates rather than one
-// spanning all five (issue #2527, #2533): the gates differ in override
-// semantics, and one shared gate falling back would leave both review-loop
-// bools false, breaking their exactly-one-true invariant.
+// signals for this run, with independent trust gates rather than one spanning
+// all three (issue #2527, #2533): the gates differ in override semantics.
 func resolveAgentPresenceSignals(driver string) agentPresence {
-	var filerEnabled, workerProvisioned, scoutProvisioned, reviewLoopInline, reviewLoopOrchestrator bool
+	var filerEnabled, workerProvisioned, scoutProvisioned bool
 	filerModel := getenvSchema("FILER_MODEL")
 	workerModel := getenvSchema("WORKER_MODEL")
 	scoutModel := getenvSchema("SCOUT_MODEL")
-	orchestratorEnabled := getenvSchema("ORCHESTRATOR_ENABLED")
 
 	// opencode provisions subagents from on-disk agents/*.md rather than
 	// agentsJsonTemplate, so nix bakes both false for that Driver whatever the
@@ -571,26 +568,10 @@ func resolveAgentPresenceSignals(driver string) agentPresence {
 		}
 	}
 
-	// A bool-kind schema knob's live value is "1" or "", never the literal
-	// "true" the docArtifact reads above compare against.
-	orchestratorOn := orchestratorEnabled != ""
-	reviewLoopInline, reviewLoopOrchestrator = !orchestratorOn, orchestratorOn
-	// ORCHESTRATOR_ENABLED is boxEnv=true, so a dispatch-time override really
-	// does change box behavior: gate the artifacts on the live value matching.
-	if loadedDoc != nil && orchestratorEnabled == loadedDoc.Settings["ORCHESTRATOR_ENABLED"] {
-		_, inlineOK := loadedDoc.Artifacts["REVIEW_LOOP_INLINE"]
-		_, orchOK := loadedDoc.Artifacts["REVIEW_LOOP_ORCHESTRATOR"]
-		if inlineOK && orchOK {
-			reviewLoopInline = docArtifact("REVIEW_LOOP_INLINE") == "true"
-			reviewLoopOrchestrator = docArtifact("REVIEW_LOOP_ORCHESTRATOR") == "true"
-		}
-	}
 	return agentPresence{
-		filerEnabled:           filerEnabled,
-		workerProvisioned:      workerProvisioned,
-		scoutProvisioned:       scoutProvisioned,
-		reviewLoopInline:       reviewLoopInline,
-		reviewLoopOrchestrator: reviewLoopOrchestrator,
+		filerEnabled:      filerEnabled,
+		workerProvisioned: workerProvisioned,
+		scoutProvisioned:  scoutProvisioned,
 	}
 }
 
@@ -930,8 +911,6 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		FilerEnabled:           presence.filerEnabled,
 		WorkerProvisioned:      presence.workerProvisioned,
 		ScoutProvisioned:       presence.scoutProvisioned,
-		ReviewLoopInline:       presence.reviewLoopInline,
-		ReviewLoopOrchestrator: presence.reviewLoopOrchestrator,
 		Policy:                 retryPolicy(c),
 		DriverSessionCacheDir:  c.driverSessionCacheDir,
 		RegistryProxyRoutes:    c.registryProxyRoutes,

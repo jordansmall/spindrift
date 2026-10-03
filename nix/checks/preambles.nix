@@ -53,8 +53,6 @@ let
     filerEnabled = true;
     workerProvisioned = true;
     scoutProvisioned = true;
-    reviewLoopInline = true;
-    reviewLoopOrchestrator = false;
     choreCatalog = "chore-a chore-b";
     nixStoreWritable = true;
     syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
@@ -103,8 +101,8 @@ in
     let
       out = preambles.renderDefaultsPreamble {
         flakeOptionEntries = {
-          orchestratorEnabled = {
-            env = "ORCHESTRATOR_ENABLED";
+          autoFormat = {
+            env = "AUTO_FORMAT";
             kind = "bool";
           };
           maxParallel = {
@@ -112,7 +110,7 @@ in
           };
         };
         mergedDefaults = {
-          orchestratorEnabled = true;
+          autoFormat = true;
           maxParallel = 5;
         };
       };
@@ -129,18 +127,18 @@ in
         SCRIPT_HEADER
         printf '%s\n' "$preamble" >>script.sh
         cat >>script.sh <<'SCRIPT_TAIL'
-        printf '%s' "$ORCHESTRATOR_ENABLED,$MAX_PARALLEL"
+        printf '%s' "$AUTO_FORMAT,$MAX_PARALLEL"
         SCRIPT_TAIL
 
         shellcheck script.sh
 
-        got=$(unset ORCHESTRATOR_ENABLED; source script.sh)
+        got=$(unset AUTO_FORMAT; source script.sh)
         [ "$got" = 1,5 ] || { echo "unset: got [$got] want [1,5]" >&2; exit 1; }
 
-        got=$(ORCHESTRATOR_ENABLED="" source script.sh)
+        got=$(AUTO_FORMAT="" source script.sh)
         [ "$got" = ,5 ] || { echo "set-but-empty: got [$got] want [,5]" >&2; exit 1; }
 
-        got=$(ORCHESTRATOR_ENABLED=1 source script.sh)
+        got=$(AUTO_FORMAT=1 source script.sh)
         [ "$got" = 1,5 ] || { echo "set: got [$got] want [1,5]" >&2; exit 1; }
 
         got=$(MAX_PARALLEL="" source script.sh)
@@ -405,10 +403,6 @@ in
       "runArtifacts (bwrap) must render SCOUT_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.CHORE_CATALOG == "chore-a chore-b")
       "runArtifacts (bwrap) must render CHORE_CATALOG from its choreCatalog input, got: ${builtins.toJSON out}";
-    assert assertMsg (out.REVIEW_LOOP_INLINE == "true")
-      "runArtifacts (bwrap) must render REVIEW_LOOP_INLINE as the literal string \"true\", got: ${builtins.toJSON out}";
-    assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "false")
-      "runArtifacts (bwrap) must render REVIEW_LOOP_ORCHESTRATOR as the literal string \"false\", got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? IMAGE_ARCHIVE)
     ) "runArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
@@ -509,8 +503,6 @@ in
         filerEnabled = false;
         workerProvisioned = false;
         scoutProvisioned = false;
-        reviewLoopInline = false;
-        reviewLoopOrchestrator = true;
         choreCatalog = "chore-a chore-b";
         # OCI's writable-store mechanism (lib/image.nix) never reads this
         # artifact, so false is a placeholder, required only because
@@ -573,10 +565,6 @@ in
       "runArtifacts (oci) must render FILER_ENABLED as the literal string \"false\", got: ${builtins.toJSON out}";
     assert assertMsg (out.WORKER_PROVISIONED == "false")
       "runArtifacts (oci) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
-    assert assertMsg (out.REVIEW_LOOP_INLINE == "false")
-      "runArtifacts (oci) must render REVIEW_LOOP_INLINE as the literal string \"false\", got: ${builtins.toJSON out}";
-    assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "true")
-      "runArtifacts (oci) must render REVIEW_LOOP_ORCHESTRATOR as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? AGENT_FILES)
     ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
@@ -643,8 +631,6 @@ in
         filerEnabled = true;
         workerProvisioned = false;
         scoutProvisioned = false;
-        reviewLoopInline = true;
-        reviewLoopOrchestrator = false;
         choreCatalog = "chore-a chore-b";
         nixStoreWritable = false;
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
@@ -676,10 +662,6 @@ in
       "runArtifacts (oci-driver-scoped) must render FILER_ENABLED as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.WORKER_PROVISIONED == "false")
       "runArtifacts (oci-driver-scoped) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
-    assert assertMsg (out.REVIEW_LOOP_INLINE == "true")
-      "runArtifacts (oci-driver-scoped) must render REVIEW_LOOP_INLINE as the literal string \"true\", got: ${builtins.toJSON out}";
-    assert assertMsg (out.REVIEW_LOOP_ORCHESTRATOR == "false")
-      "runArtifacts (oci-driver-scoped) must render REVIEW_LOOP_ORCHESTRATOR as the literal string \"false\", got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci-driver-scoped-image-name" { } "touch $out";
 
   preambles-build-artifacts-bwrap =
@@ -896,8 +878,6 @@ in
         "OUTBOX_RELAY_CAPABLE"
         "PASSWD_FILE"
         "PASSWD_FILE_DRV"
-        "REVIEW_LOOP_INLINE"
-        "REVIEW_LOOP_ORCHESTRATOR"
         "RUNNER_KIND"
         "RUNTIME"
         "SCOUT_PROVISIONED"

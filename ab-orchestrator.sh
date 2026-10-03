@@ -2,9 +2,9 @@
 
 # Paired A/B experiment for the worker/coordinator split (issue #2057).
 # Dispatches the same issue twice against one pinned image, varying only
-# --worker-model (empty on OFF, $AB_WORKER_ON on ON). --orchestrator-enabled
-# stays at $AB_ORCH on both arms, so a difference is attributable to the worker
-# knob rather than to drift. Arm order is randomised per issue.
+# --worker-model (empty on OFF, $AB_WORKER_ON on ON), so a difference is
+# attributable to the worker knob rather than to drift. Arm order is
+# randomised per issue.
 
 # Each arm runs the full implement/review loop but opens no PR and merges
 # nothing (CODE_FORGE=git + MERGE_MODE=manual); it only pushes its branch. The
@@ -36,9 +36,8 @@ AB_PREFIX_ON="${AB_PREFIX_ON:-ab-on/issue-}"
 AB_NO_BUILD="${AB_NO_BUILD:-1}"
 AB_OUTDIR="${AB_OUTDIR:-./ab-results/$(date +%Y%m%d-%H%M%S)}"
 AB_WORKER_ON="${AB_WORKER_ON:-$AB_MODEL}"
-AB_ORCH="${AB_ORCH:-}"
 
-# Sum every "type":"result" event: orchestrator ON emits one per pass and the
+# Sum every "type":"result" event: the orchestrator emits one per pass and the
 # launcher's own comment keeps only the last, so summing is the honest total.
 # fromjson? tolerates the log's bare non-JSON lines (==>, SPINDRIFT_*). Prints
 # one row: cost, input, output, cache read, cache create, turns, duration ms.
@@ -211,8 +210,8 @@ parse_outcome() { # Prints ready, blocked, failed, or none.
 }
 
 run_arm() {
-  local issue="$1" arm="$2" orch="$3" prefix="$4"
-  local wm="$5"
+  local issue="$1" arm="$2" prefix="$3"
+  local wm="$4"
   local armdir="$AB_OUTDIR/$issue/$arm"
   mkdir -p "$armdir"
   local host_log=".spindrift/logs/issue-${issue}.log"
@@ -221,7 +220,7 @@ run_arm() {
 
   local -a nb=(); [ "$AB_NO_BUILD" = "1" ] && nb=(--no-build)
 
-  info "issue #$issue [$arm] worker-model='${wm}' orchestrator-enabled='${orch}' prefix='$prefix'"
+  info "issue #$issue [$arm] worker-model='${wm}' prefix='$prefix'"
   # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
   # before the launcher's ambient-knob check, so they beat whatever harness.env
   # exported, which is how a stray REPO_SLUG would otherwise leak in.
@@ -238,7 +237,6 @@ run_arm() {
     --model "$AB_MODEL"
     --issue-tracker "$tracker"
     --box-forge-and-issue-access read-write
-    --orchestrator-enabled="$orch"
     --worker-model "$wm"
     "$issue"
   )
@@ -371,11 +369,11 @@ EOF
   for issue in "${issues[@]}"; do
     # Randomise arm order per issue for cache hygiene.
     if [ $((RANDOM % 2)) -eq 0 ]; then
-      run_arm "$issue" off "$AB_ORCH" "$AB_PREFIX_OFF" ""
-      run_arm "$issue" on  "$AB_ORCH" "$AB_PREFIX_ON"  "$AB_WORKER_ON"
+      run_arm "$issue" off "$AB_PREFIX_OFF" ""
+      run_arm "$issue" on  "$AB_PREFIX_ON"  "$AB_WORKER_ON"
     else
-      run_arm "$issue" on  "$AB_ORCH" "$AB_PREFIX_ON"  "$AB_WORKER_ON"
-      run_arm "$issue" off "$AB_ORCH" "$AB_PREFIX_OFF" ""
+      run_arm "$issue" on  "$AB_PREFIX_ON"  "$AB_WORKER_ON"
+      run_arm "$issue" off "$AB_PREFIX_OFF" ""
     fi
 
     # Blind judging bundle: neutral variant names and a separate un-blinding key.

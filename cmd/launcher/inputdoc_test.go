@@ -107,15 +107,15 @@ func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
 	orig := schemaFlags
 	t.Cleanup(func() { schemaFlags = orig })
 	schemaFlags = []flagEntry{
-		{env: "ORCHESTRATOR_ENABLED", flag: "orchestrator-enabled", kind: "bool", settingsPath: "orchestrator.enable"},
+		{env: "AUTO_FORMAT", flag: "auto-format", kind: "bool", settingsPath: "agents.format.enable"},
 	}
-	t.Setenv("ORCHESTRATOR_ENABLED", "")
+	t.Setenv("AUTO_FORMAT", "")
 
 	var buf bytes.Buffer
 	warnAmbientKnobEnv(&buf)
 
 	out := buf.String()
-	for _, want := range []string{`ORCHESTRATOR_ENABLED=""`, "orchestrator.enable"} {
+	for _, want := range []string{`AUTO_FORMAT=""`, "agents.format.enable"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("warning = %q, want it to mention %q", out, want)
 		}

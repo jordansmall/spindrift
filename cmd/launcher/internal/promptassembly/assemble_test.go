@@ -27,8 +27,7 @@ const markerGrammarSpindriftCommentExcerpt = "The machine-parsed marker grammar 
 // A fixture Env sitting exactly in Assemble's covered cell (see
 // checkCoveredCell). Gates no longer re-derives the tracker/forge axes
 // in-box (issue #2533), so the axis and backend fields must carry nix's
-// already-resolved values, and ReviewLoopInline must mirror
-// !OrchestratorEnabled. Tests mutate a copy to move one axis off the cell.
+// already-resolved values. Tests mutate a copy to move one axis off the cell.
 func coveredEnv() Env {
 	return Env{
 		IssueTracker:         "github",

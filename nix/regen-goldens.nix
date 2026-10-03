@@ -70,8 +70,8 @@ pkgs.writeShellApplication {
     # A nix build's env is limited to what the derivation attrs declare --
     # unlike this `nix run` process, which otherwise inherits whatever the
     # invoking shell happens to export. Concretely: an agent Box invoking
-    # this app is itself dispatched with BOX_FILER_ENABLED/AGENTS_JSON_TEMPLATE/
-    # ORCHESTRATOR_ENABLED and friends already set for its own run, and every
+    # this app is itself dispatched with BOX_FILER_ENABLED/AGENTS_JSON_TEMPLATE
+    # and friends already set for its own run, and every
     # one of those is a gate input the bats cells set (or deliberately leave
     # unset) themselves per-cell. Left inherited, they leak past a cell's own
     # setup and produce goldens that don't match what the sandboxed check

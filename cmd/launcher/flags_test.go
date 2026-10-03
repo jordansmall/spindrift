@@ -67,14 +67,13 @@ func TestSchemaFlags_PromptDirSettingsPath(t *testing.T) {
 	t.Fatal("SPINDRIFT_PROMPT_DIR entry not found in schemaFlags")
 }
 
-// Issue #2146 slice 1 converted these six knobs from strings to
+// Issue #2146 slice 1 converted these five knobs from strings to
 // presence-style bools.
 func TestSchemaFlags_GenericBoolsAreBool(t *testing.T) {
 	envs := []string{
 		"AUTO_FORMAT",
 		"AUTO_LINT",
 		"LOCAL_ISSUE_REFERENCE",
-		"ORCHESTRATOR_ENABLED",
 		"PREFLIGHT_STALE_BASE",
 		"JIRA_INCLUDE_COMMENTS",
 	}
@@ -781,13 +780,13 @@ func TestParseFlags_DeprecatedAliasSetsSameEnv(t *testing.T) {
 	if got := os.Getenv("MERGE_MODE"); got != "auto" {
 		t.Errorf("MERGE_MODE = %q, want %q (deprecated alias must set same env var)", got, "auto")
 	}
-	// --orchestrator-enabled is the deprecated name of --orchestrator.
-	t.Setenv("ORCHESTRATOR_ENABLED", "")
-	if _, err := parseFlags([]string{"--orchestrator-enabled"}); err != nil {
-		t.Fatalf("parseFlags --orchestrator-enabled: %v", err)
+	// --local-issue-reference is the deprecated name of --local-reference.
+	t.Setenv("LOCAL_ISSUE_REFERENCE", "")
+	if _, err := parseFlags([]string{"--local-issue-reference"}); err != nil {
+		t.Fatalf("parseFlags --local-issue-reference: %v", err)
 	}
-	if got := os.Getenv("ORCHESTRATOR_ENABLED"); got != "1" {
-		t.Errorf("ORCHESTRATOR_ENABLED = %q, want %q", got, "1")
+	if got := os.Getenv("LOCAL_ISSUE_REFERENCE"); got != "1" {
+		t.Errorf("LOCAL_ISSUE_REFERENCE = %q, want %q", got, "1")
 	}
 }
 

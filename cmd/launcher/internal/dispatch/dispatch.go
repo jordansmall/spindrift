@@ -159,15 +159,13 @@ type Config struct {
 
 	// These are nix-resolved static prompt-gate values (issue #2533;
 	// ScoutProvisioned added by #3157), forwarded into the Box unmodified.
-	TrackerAxisRead        string
-	TrackerAxisWrite       string
-	TrackerAxisFiler       string
-	ForgeBackend           string
-	FilerEnabled           bool
-	WorkerProvisioned      bool
-	ScoutProvisioned       bool
-	ReviewLoopInline       bool
-	ReviewLoopOrchestrator bool
+	TrackerAxisRead   string
+	TrackerAxisWrite  string
+	TrackerAxisFiler  string
+	ForgeBackend      string
+	FilerEnabled      bool
+	WorkerProvisioned bool
+	ScoutProvisioned  bool
 
 	// ReviewModelOverride/ReviewEffortOverride carry an operator's explicit
 	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), which the review
@@ -365,12 +363,6 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	}
 	if cfg.ScoutProvisioned {
 		env["BOX_SCOUT_PROVISIONED"] = "1"
-	}
-	if cfg.ReviewLoopInline {
-		env["BOX_REVIEW_LOOP_INLINE"] = "1"
-	}
-	if cfg.ReviewLoopOrchestrator {
-		env["BOX_REVIEW_LOOP_ORCHESTRATOR"] = "1"
 	}
 	// Absent entirely when empty, so the Box reads presence as "the operator
 	// said so at dispatch time" (issue #3171).

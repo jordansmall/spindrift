@@ -165,10 +165,6 @@
             #   maxJobs = 0;
             #   # maximum concurrent agent containers
             #   maxParallel = 3;
-            #   orchestrator = {
-            #     # master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; on by default; setting it off (false) keeps the direct driver-exec path, which is legacy and removed by ADR 0058's port (#4275)
-            #     enable = true;
-            #   };
             #   # declared ## Touches overlap policy: defer (hold a Dispatchable issue whose declared touch-set intersects an InProgress issue's, retrying once the collider completes), off (disable the check)
             #   overlapGate = "defer";
             #   # the minimum number of research Dispatches the daemon keeps running out of its MAX_PARALLEL slots -- a floor, not a ceiling: research is preferred only while research has queued work, and either kind bursts into the whole pool when the other has backed off into an empty result; 0 is work-first with research on the leftovers, and a value equal to MAX_PARALLEL is research-first; read by the daemon only, the launcher itself ignores it, and inert when the daemon is restricted to one kind by its positional verb; must not exceed MAX_PARALLEL, which the daemon rejects at startup. Not a tuned final answer -- issue #3541 put the final default out of scope
