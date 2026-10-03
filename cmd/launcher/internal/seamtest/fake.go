@@ -21,6 +21,8 @@ const fakeConfigExit = 97
 var fakes = map[string]func(args []string) int{
 	"gh":     ghMain,
 	"podman": podmanMain,
+	"docker": podmanMain,
+	"bwrap":  bwrapMain,
 }
 
 // Main is the TestMain hook: invoked under a registered tool name the test
@@ -78,12 +80,29 @@ func WriteFakeConfig(tb testing.TB, tool string, cfg any) map[string]string {
 	return map[string]string{configEnv(tool): path}
 }
 
+// WriteFakeConfigFile writes cfg where loadConfig's working-directory
+// fallback finds it, for fakes the launcher runs with a scrubbed env.
+func WriteFakeConfigFile(tb testing.TB, dir, tool string, cfg any) {
+	tb.Helper()
+	b, err := json.Marshal(cfg)
+	if err != nil {
+		tb.Fatalf("seamtest: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, configFile(tool)), b, 0o644); err != nil {
+		tb.Fatalf("seamtest: %v", err)
+	}
+}
+
+func configFile(tool string) string { return ".seamtest-" + tool + ".json" }
+
 // loadConfig reads the JSON file named by tool's config env var into cfg.
+// With the var unset it reads ./.seamtest-<tool>.json instead: the launcher
+// runs bwrap with an allowlisted env that drops the var but keeps its cwd.
 func loadConfig(tool string, cfg any) error {
 	env := configEnv(tool)
 	path := os.Getenv(env)
 	if path == "" {
-		return fmt.Errorf("%s is not set", env)
+		path = configFile(tool)
 	}
 	b, err := os.ReadFile(path)
 	if err != nil {

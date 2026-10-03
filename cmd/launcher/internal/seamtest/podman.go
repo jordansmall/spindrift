@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -29,21 +30,22 @@ type PodmanRun struct {
 	Outcome string `json:"outcome"`
 }
 
+// podmanMain serves both podman and docker; the invoked name picks the config.
 func podmanMain(args []string) int {
-	return podmanFake(args, os.Stdout, os.Stderr)
+	return podmanFake(filepath.Base(os.Args[0]), args, os.Stdout, os.Stderr)
 }
 
 // podmanFake mirrors tests/fakes/runtime's podman branch: every subcommand
 // succeeds silently except the probes whose failure the launcher branches on.
-func podmanFake(args []string, stdout, stderr io.Writer) int {
+func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 	var cfg PodmanConfig
-	if err := loadConfig("podman", &cfg); err != nil {
-		fmt.Fprintf(stderr, "podman fake: %v\n", err)
+	if err := loadConfig(tool, &cfg); err != nil {
+		fmt.Fprintf(stderr, "%s fake: %v\n", tool, err)
 		return fakeConfigExit
 	}
 	prior, err := appendRecord(cfg.Record, args)
 	if err != nil {
-		fmt.Fprintf(stderr, "podman fake: record: %v\n", err)
+		fmt.Fprintf(stderr, "%s fake: record: %v\n", tool, err)
 		return fakeConfigExit
 	}
 	sub := func(i int) string {
@@ -84,11 +86,24 @@ func withNonce(outcome string, args []string) string {
 	if outcome == "" || strings.Contains(outcome, " nonce=") {
 		return outcome
 	}
+	nonce, ok := runNonce(args)
+	if !ok {
+		return outcome
+	}
+	line := strings.TrimSuffix(outcome, "\n")
+	return line + " nonce=" + nonce + outcome[len(line):]
+}
+
+// runNonce finds RUN_NONCE in a run argv: `-e RUN_NONCE=<v>` for the OCI
+// runtimes, `--setenv RUN_NONCE <v>` for bwrap.
+func runNonce(args []string) (string, bool) {
 	for i, a := range args {
-		if nonce, ok := strings.CutPrefix(a, "RUN_NONCE="); ok && i > 0 && args[i-1] == "-e" {
-			line := strings.TrimSuffix(outcome, "\n")
-			return line + " nonce=" + nonce + outcome[len(line):]
+		if v, ok := strings.CutPrefix(a, "RUN_NONCE="); ok && i > 0 && args[i-1] == "-e" {
+			return v, true
+		}
+		if a == "RUN_NONCE" && i > 0 && args[i-1] == "--setenv" && i+1 < len(args) {
+			return args[i+1], true
 		}
 	}
-	return outcome
+	return "", false
 }

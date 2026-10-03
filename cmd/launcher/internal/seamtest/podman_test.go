@@ -11,12 +11,7 @@ import (
 // exit status and streams.
 func runPodman(t *testing.T, cfg PodmanConfig, args ...string) (code int, stdout, stderr string) {
 	t.Helper()
-	for k, v := range WriteFakeConfig(t, "podman", cfg) {
-		t.Setenv(k, v)
-	}
-	var out, errb bytes.Buffer
-	code = podmanFake(args, &out, &errb)
-	return code, out.String(), errb.String()
+	return runOCIFake(t, "podman", cfg, args...)
 }
 
 func TestPodmanImageExists(t *testing.T) {
@@ -97,8 +92,49 @@ func TestPodmanDefaults(t *testing.T) {
 
 func TestPodmanConfigError(t *testing.T) {
 	t.Setenv(configEnv("podman"), "")
+	t.Chdir(t.TempDir())
 	var out, errb bytes.Buffer
-	if code := podmanFake([]string{"run"}, &out, &errb); code != fakeConfigExit || errb.Len() == 0 {
+	if code := podmanFake("podman", []string{"run"}, &out, &errb); code != fakeConfigExit || errb.Len() == 0 {
 		t.Errorf("exit %d, stderr %q; want %d and a message", code, errb.String(), fakeConfigExit)
+	}
+}
+
+func runOCIFake(t *testing.T, tool string, cfg PodmanConfig, args ...string) (code int, stdout, stderr string) {
+	t.Helper()
+	for k, v := range WriteFakeConfig(t, tool, cfg) {
+		t.Setenv(k, v)
+	}
+	var out, errb bytes.Buffer
+	code = podmanFake(tool, args, &out, &errb)
+	return code, out.String(), errb.String()
+}
+
+func TestDockerFakeRegisteredAndReadsOwnConfig(t *testing.T) {
+	if _, ok := fakes["docker"]; !ok {
+		t.Fatal("no docker fake registered")
+	}
+	rec := filepath.Join(t.TempDir(), "rec")
+	cfg := PodmanConfig{Record: rec, ImagePresent: true, Runs: []PodmanRun{{Exit: 4, Outcome: "SPINDRIFT_OUTCOME issue=1 status=done\n"}}}
+	if code, _, _ := runOCIFake(t, "docker", cfg, "image", "inspect", "img"); code != 0 {
+		t.Errorf("image inspect: exit %d; want 0", code)
+	}
+	code, out, _ := runOCIFake(t, "docker", cfg, "run", "-e", "RUN_NONCE=n1", "img")
+	if want := "SPINDRIFT_OUTCOME issue=1 status=done nonce=n1\n"; code != 4 || out != want {
+		t.Errorf("run: exit %d, out %q; want 4, %q", code, out, want)
+	}
+	if got := ReadRecord(t, rec); len(got) != 2 {
+		t.Errorf("record = %v; want 2 argvs", got)
+	}
+}
+
+func TestDockerFakeIgnoresPodmanConfig(t *testing.T) {
+	t.Setenv(configEnv("docker"), "")
+	for k, v := range WriteFakeConfig(t, "podman", PodmanConfig{Record: filepath.Join(t.TempDir(), "rec")}) {
+		t.Setenv(k, v)
+	}
+	t.Chdir(t.TempDir())
+	var out, errb bytes.Buffer
+	if code := podmanFake("docker", []string{"run"}, &out, &errb); code != fakeConfigExit {
+		t.Errorf("exit %d; want %d (docker config unset)", code, fakeConfigExit)
 	}
 }
