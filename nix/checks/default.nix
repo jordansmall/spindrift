@@ -89,6 +89,7 @@ let
     // (import ./go.nix common)
     // (import ./roster.nix common)
     // (import ./promptassembly.nix common)
+    // (import ./prompt-assembly-golden-coverage.nix common)
     // (import ./baked-skills.nix common)
     // (import ./seccomp.nix common)
     // (import ./adr-numbers.nix common)
