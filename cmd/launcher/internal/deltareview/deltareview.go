@@ -22,18 +22,21 @@ const GateWorkPhrase = "gate-discovered"
 
 var bulletRe = regexp.MustCompile(`^\s*[-*]\s+(.*)$`)
 
-var lineSuffixRe = regexp.MustCompile(`:(\d+)(:\d+)?$`)
+var lineSuffixRe = regexp.MustCompile(`:(\d+)(?:-(\d+)|:\d+)?$`)
 
 // Location is a place a finding named: a repo-relative path and, when the
-// citation carried one, the line it pointed at. Line == 0 means the finding
-// named the path alone, which vouches for the whole file.
+// citation carried one, the span of lines it pointed at. Line and End bound
+// the span inclusively (End == Line for a single-line cite, Line <= End
+// always); Line == 0 and End == 0 mean the finding named the path alone,
+// which vouches for the whole file.
 type Location struct {
 	Path string
 	Line int
+	End  int
 }
 
 // FindingLocations returns the distinct locations findings name, sorted by
-// path then by line, parsing the section format review-prompt.md defines.
+// path, line, then end, parsing the section format review-prompt.md defines.
 // Only bullets under the `## Blocking` and `## Non-blocking` headings count,
 // and it drops a bullet whose leading token does not look like a path rather
 // than widen the set Decide compares the land delta against.
@@ -68,39 +71,68 @@ func FindingLocations(findings string) []Location {
 		if locs[i].Path != locs[j].Path {
 			return locs[i].Path < locs[j].Path
 		}
-		return locs[i].Line < locs[j].Line
+		if locs[i].Line != locs[j].Line {
+			return locs[i].Line < locs[j].Line
+		}
+		return locs[i].End < locs[j].End
 	})
 	return locs
 }
 
 // bulletLocation extracts a bullet's leading token, unwrapping backtick and
-// "**" pairs in either nesting order and parsing off a :<line>[:<col>]
-// suffix. The path shape check runs last, after stripping, so it also
-// rejects the `- none` convention without a special case.
+// "**" pairs in either nesting order and parsing off a :<line>[:<col>] or
+// :<line>-<line> suffix. The unwrap runs again after the strip, so a suffix
+// written outside the backticks (`path`:12) still resolves. The path shape
+// check runs last, so it also rejects the `- none` convention without a
+// special case, and a token that still holds a ':' (an unparseable suffix)
+// is dropped rather than recorded as a bogus path. A cited line that is zero
+// or overflows drops the bullet too (see parseLine).
 func bulletLocation(content string) (Location, bool) {
 	fields := strings.Fields(content)
 	if len(fields) == 0 {
 		return Location{}, false
 	}
-	token := fields[0]
-	for {
-		next := unwrap(unwrap(token, "`", "`"), "**", "**")
-		if next == token {
-			break
-		}
-		token = next
-	}
-	line := 0
+	token := unwrapAll(fields[0])
+	line, end := 0, 0
 	if m := lineSuffixRe.FindStringSubmatchIndex(token); m != nil {
-		if n, err := strconv.Atoi(token[m[2]:m[3]]); err == nil {
-			line = n
+		n, ok := parseLine(token[m[2]:m[3]])
+		if !ok {
+			return Location{}, false
 		}
-		token = token[:m[0]]
+		line, end = n, n
+		if m[4] >= 0 {
+			if end, ok = parseLine(token[m[4]:m[5]]); !ok {
+				return Location{}, false
+			}
+		}
+		if end < line {
+			line, end = end, line
+		}
+		token = unwrapAll(token[:m[0]])
 	}
-	if !strings.ContainsAny(token, "/.") {
+	if !strings.ContainsAny(token, "/.") || strings.Contains(token, ":") {
 		return Location{}, false
 	}
-	return Location{Path: token, Line: line}, true
+	return Location{Path: token, Line: line, End: end}, true
+}
+
+// parseLine parses a 1-based line number. A zero or unparseable (overflowing)
+// number reports !ok so the caller drops the bullet instead of leaving
+// Line == 0, which would read as a whole-file citation.
+func parseLine(s string) (int, bool) {
+	n, err := strconv.Atoi(s)
+	return n, err == nil && n >= 1
+}
+
+// unwrapAll strips backtick and "**" pairs from s until neither applies.
+func unwrapAll(s string) string {
+	for {
+		next := unwrap(unwrap(s, "`", "`"), "**", "**")
+		if next == s {
+			return s
+		}
+		s = next
+	}
 }
 
 // unwrap strips a matching prefix/suffix pair off s only when s is longer than
@@ -260,26 +292,26 @@ func hasBareCitation(locs []Location) bool {
 	return false
 }
 
-// mergeWindows widens each cited line into a ±toleranceLines window and
-// merges overlapping or adjacent windows into sorted disjoint intervals.
+// mergeWindows widens each cited [Line, End] span by toleranceLines at both
+// ends and merges overlapping or adjacent windows into sorted disjoint
+// intervals.
 func mergeWindows(locs []Location) []window {
-	var lines []int
+	var raw []window
 	for _, loc := range locs {
 		if loc.Line > 0 {
-			lines = append(lines, loc.Line)
+			raw = append(raw, window{start: loc.Line - toleranceLines, end: loc.End + toleranceLines})
 		}
 	}
-	sort.Ints(lines)
+	sort.Slice(raw, func(i, j int) bool { return raw[i].start < raw[j].start })
 	var windows []window
-	for _, l := range lines {
-		start, end := l-toleranceLines, l+toleranceLines
-		if n := len(windows); n > 0 && start <= windows[n-1].end+1 {
-			if end > windows[n-1].end {
-				windows[n-1].end = end
+	for _, w := range raw {
+		if n := len(windows); n > 0 && w.start <= windows[n-1].end+1 {
+			if w.end > windows[n-1].end {
+				windows[n-1].end = w.end
 			}
 			continue
 		}
-		windows = append(windows, window{start: start, end: end})
+		windows = append(windows, w)
 	}
 	return windows
 }
