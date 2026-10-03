@@ -1536,4 +1536,55 @@ in
       warnings == [ ]
     ) "the #392 reviewer opt-out must produce no roster warning, got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-reviewer-opt-out-does-not-warn" { } "touch $out";
+
+  # Fixture rosters must not copy a live defaultRoster description (#3463,
+  # #4165, #4166). Fixtures test rendering and escaping, not roster wording, so
+  # a copied description rots silently on every roster edit. Use an obviously
+  # synthetic one, "fixture <role> description". Needles are derived from
+  # defaultRoster, never hardcoded, and include the '"'"'-escaped form that
+  # .bats fixtures use for apostrophes. An empty description is skipped: it
+  # would match every file. The scan runs at build time, with grep -F: reading
+  # and regex-matching every fixture file at eval time segfaulted CI's
+  # evaluator.
+  roster-fixtures-carry-no-live-descriptions =
+    let
+      inherit (pkgs.lib)
+        concatMap
+        concatStringsSep
+        filter
+        replaceStrings
+        unique
+        ;
+      needles = unique (
+        concatMap (e: [
+          e.description
+          (replaceStrings [ "'" ] [ "'\"'\"'" ] e.description)
+        ]) (filter (e: e.description != "") (rosterLib.defaultRoster { }))
+      );
+      src = pkgs.lib.fileset.toSource {
+        root = ../..;
+        fileset = pkgs.lib.fileset.unions [
+          ../../nix/checks
+          ../../tests
+        ];
+      };
+    in
+    pkgs.runCommand "roster-fixtures-carry-no-live-descriptions"
+      {
+        needles = concatStringsSep "\n" needles;
+        passAsFile = [ "needles" ];
+      }
+      ''
+        cd ${src}
+        status=0
+        grep -rnF -f "$needlesPath" nix/checks tests >"$TMPDIR/hits" || status=$?
+        if [ "$status" -eq 0 ]; then
+          echo "fixtures must not copy live defaultRoster descriptions; use a synthetic description such as \"fixture <role> description\". Offenders:" >&2
+          cat "$TMPDIR/hits" >&2
+          exit 1
+        elif [ "$status" -ne 1 ]; then
+          exit "$status"
+        fi
+        touch $out
+      '';
 }
