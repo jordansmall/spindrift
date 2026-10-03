@@ -1327,29 +1327,9 @@ let
   # against the one the current flake would produce.
   launcherCurrencyHash = storeHashOf launcherCurrencyPath;
 
-  # Single-verb wrapper execing `launcher build`. Off the flake outputs
-  # (issue #613); it survives only as a bats/equivalence test fixture for the
-  # build-time preamble baking.
-  build =
-    (hostPkgs.writeShellApplication {
-      name = "build";
-      # sqlite3 backs `launcher build`'s bwrap+nixInBox store-DB snapshot
-      # step (ADR 0042); this fixture mirrors spindriftBin's runtimeInputs.
-      runtimeInputs = [
-        hostPkgs.coreutils
-        hostPkgs.sqlite
-      ];
-      text = ''
-        exec ${launcherBin}/bin/launcher --input ${buildInputDocumentFile} build
-      '';
-    }).overrideAttrs
-      (_: {
-        meta.license = lib.licenses.mit;
-      });
-
-  # Shared by the spindrift CLI and the `run` test fixture: sources
-  # harness.env (secrets, gitignored) from $PWD, since the harness is a store
-  # path with no working tree. Knobs and artifacts flow through the --input
+  # Shared by the spindrift CLI and the daemon wrapper: sources harness.env
+  # (secrets, gitignored) from $PWD, since the harness is a store path with no
+  # working tree. Knobs and artifacts flow through the --input
   # document instead (ADR 0020), so this wrapper bakes nothing per-knob.
   runShellBody = ''
     if [ -f "$PWD/harness.env" ]; then
@@ -1405,8 +1385,7 @@ let
       # sqlite3 backs `launcher build`'s bwrap+nixInBox store-DB snapshot
       # step (ADR 0042). Whether a command needs it is a runtime decision (the
       # Consumer's nixInBox knob), which this derivation cannot gate, so it
-      # carries sqlite3 unconditionally. The `run` wrapper below never runs
-      # `build`, so it alone can omit it.
+      # carries sqlite3 unconditionally.
       runtimeInputs = with hostPkgs; [
         gh
         git
@@ -1471,25 +1450,6 @@ let
         SPINDRIFT_DAEMON_PROGRAM="$0"
         export SPINDRIFT_DAEMON_PROGRAM
         exec ${daemonBin}/bin/daemon --input ${runInputDocumentFile} "$@"
-      '';
-    }).overrideAttrs
-      (_: {
-        meta.license = lib.licenses.mit;
-      });
-
-  # Single-verb wrapper execing `launcher dispatch`. Off the flake outputs
-  # (issue #613); it survives only as a bats/equivalence test fixture for the
-  # dispatch-time preamble baking.
-  run =
-    (hostPkgs.writeShellApplication {
-      name = "run";
-      runtimeInputs = with hostPkgs; [
-        gh
-        git
-        coreutils
-      ];
-      text = runShellBody + ''
-        exec ${launcherBin}/bin/launcher --input ${runInputDocumentFile} dispatch "$@"
       '';
     }).overrideAttrs
       (_: {
@@ -1652,8 +1612,6 @@ else
         agentEnv
         agentFiles
         agentClosurePath
-        build
-        run
         manpage
         bashCompletion
         fishCompletion

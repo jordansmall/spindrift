@@ -96,7 +96,7 @@ rec {
       mapAttrsToList (var: path: "${var}=\${${var}:-${escapeShellArg path}}\n") agentPaths
     );
 
-  # The Launcher input document's `artifacts` section for the `run` wrapper
+  # The Launcher input document's `artifacts` section of the run input
   # (ADR 0020, issue #625). OCI run also carries the build-time vars so
   # EnsureReady can build the image on demand when it is absent: the workflow
   # is `build` first, but `run` must still handle a missing image on any
@@ -198,8 +198,8 @@ rec {
         }
         # cmdBuild reads this same run document, so the bwrap branch carries
         # its own build artifacts the way the OCI branch does (IMAGE_DRV and
-        # friends below). buildArtifacts' bwrap branch only backs the separate
-        # build wrapper script, not `build` run against this doc (issue #2672).
+        # friends below). buildArtifacts' bwrap branch renders the separate build
+        # input document, which `build` does not read (issue #2672).
         // bwrapDrvArtifacts {
           inherit
             agentFilesDrv
@@ -253,7 +253,7 @@ rec {
       CHORE_CATALOG = choreCatalog;
     };
 
-  # The Launcher input document's `artifacts` section for the `build` wrapper
+  # The Launcher input document's `artifacts` section of the build input
   # (ADR 0020, issue #625): everything `build` needs to realize the image or
   # closure.
   buildArtifacts =

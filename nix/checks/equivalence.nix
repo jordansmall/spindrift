@@ -60,20 +60,31 @@ let
 in
 {
   # The image store path is substituted into the generated Launcher input
-  # documents and the placeholder is gone. The wrapper carries no knob or
-  # artifact env of its own, only a single --input flag (ADR 0020).
+  # documents and the placeholder is gone from them and from the shipped CLI
+  # wrapper. The wrapper carries no knob or artifact env of its own, only a
+  # single --input flag (ADR 0020). The toy document keeps the placeholder, so
+  # the negative control proves assertSubstituted can fail.
   mkharness-substitution = pkgs.runCommand "mkharness-substitution" { } ''
-    buildCmd=${harness.internals.build}/bin/build
-    runCmd=${harness.internals.run}/bin/run
+    cliCmd=${harness.spindrift}/bin/spindrift
     buildDoc=${harness.internals.buildInputDocumentFile}
     runDoc=${harness.internals.runInputDocumentFile}
 
-    grep -q -- '--input' "$buildCmd"
-    grep -q -- '--input' "$runCmd"
-    grep -q '${harness.internals.imagePath}' "$buildDoc"
-    grep -q '${harness.internals.imagePath}' "$runDoc"
-    ! grep -q '@imagePath@' "$buildCmd"
-    ! grep -q '@imagePath@' "$runCmd"
+    assertSubstituted() {
+      grep -q '${harness.internals.imagePath}' "$1" &&
+        ! grep -q '@imagePath@' "$1"
+    }
+
+    grep -q -- '--input' "$cliCmd"
+    # A bare `! cmd` never trips set -e, hence the explicit exit.
+    ! grep -q '@imagePath@' "$cliCmd" || exit 1
+    assertSubstituted "$buildDoc"
+    assertSubstituted "$runDoc"
+
+    printf '{"IMAGE":"${harness.internals.imagePath}","LEFT":"@imagePath@"}' >toy-unsubstituted.json
+    if assertSubstituted toy-unsubstituted.json; then
+      echo "negative control: an unsubstituted placeholder passed" >&2
+      exit 1
+    fi
 
     # The default template's chores/*.md stems (issue #3905).
     grep -q '"CHORE_CATALOG":"bugs docs-drift refactor"' "$runDoc"
@@ -1612,8 +1623,6 @@ in
         "agentClosurePath"
         "agentEnv"
         "agentFiles"
-        "build"
-        "run"
         "manpage"
         "bashCompletion"
         "fishCompletion"
