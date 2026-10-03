@@ -185,6 +185,18 @@ func TestResolveLayout_DetailModalFields_MirrorHelpers(t *testing.T) {
 	}
 }
 
+// Issue #4249: with no content room the fullscreen budget still yields one
+// label line, so the scroll budget must clamp at 0 rather than go negative and
+// turn page-down into a backwards scroll.
+func TestDetailModalScrollBudget_FullscreenNoContentRoom_NotNegative(t *testing.T) {
+	for _, h := range []int{1, 2, 3} {
+		m := Model{Width: 30, Height: h, DetailModal: &DetailModalState{Number: "1", Title: "t"}}
+		if got := detailModalScrollBudget(m); got != 0 {
+			t.Errorf("Height %d: detailModalScrollBudget = %d, want 0", h, got)
+		}
+	}
+}
+
 // The wanted value recomputes listContentBudget's formula from l.bodyBudget
 // instead of calling listContentBudget(m), so the assertion still holds once
 // that mirror helper is inlined away.

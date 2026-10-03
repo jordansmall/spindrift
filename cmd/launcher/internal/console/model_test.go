@@ -1871,9 +1871,10 @@ func TestUpdate_DetailModalScroll_Fullscreen_ClampsForWrappedLabelLines(t *testi
 	m = Update(m, DetailModalLoadedMsg{Number: "42", Body: body})
 	m = Update(m, DetailModalScrollMsg{Delta: 1000})
 
-	// The content budget (height 40, less 1 title line and 1 footer line) is 38,
-	// and less 3 wrapped label lines leaves a body budget of 35.
-	if want := len(lines) - 35; m.DetailModal.Offset != want {
+	// The content budget (height 40, less 1 title line, 1 footer line, and 1
+	// trailing-newline row) is 37, and less 3 wrapped label lines leaves a
+	// body budget of 34.
+	if want := len(lines) - 34; m.DetailModal.Offset != want {
 		t.Errorf("Offset = %d after scrolling past the end, want %d (clamped to the fullscreen row budget with 3 wrapped label lines)", m.DetailModal.Offset, want)
 	}
 }
