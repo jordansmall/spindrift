@@ -310,8 +310,8 @@ func TestDoctorCheckSets_PutsPodmanMachineMemoryInBothClassifyAndReport(t *testi
 
 	checkByName(t, classify, podmanMachineMemoryCheckName)
 	// This config is neither bwrap nor route-declaring, and leaves
-	// signalCarrier at its log default, so doctorCheckSets' true append order
-	// (extra, bwrap, podman-machine-memory, perRoute, drift,
+	// signalCarrier pinned to log by minimalValidConfig, so doctorCheckSets'
+	// true append order (extra, bwrap, podman-machine-memory, perRoute, drift,
 	// registry-proxy-transport, signal-socket-transport) collapses to the
 	// extra rows, then podman-machine-memory, then registry-proxy-transport
 	// -- pin that position rather than only presence.

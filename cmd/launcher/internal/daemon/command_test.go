@@ -484,6 +484,11 @@ func TestChildCommandCarriesSignalCarrier(t *testing.T) {
 			want: []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=socket", "SPINDRIFT_REPORT_FD=3"},
 		},
 		{
+			name: "log",
+			env:  []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=log"},
+			want: []string{"PATH=/bin", "BOX_SIGNAL_CARRIER=log", "SPINDRIFT_REPORT_FD=3"},
+		},
+		{
 			name: "absent",
 			env:  []string{"PATH=/bin"},
 			want: []string{"PATH=/bin", "SPINDRIFT_REPORT_FD=3"},

@@ -234,3 +234,24 @@ func TestSignalSocketTransportCheck_NetworkModeNoneRendersSharedReason(t *testin
 		t.Errorf("Probe() error = %q, want %q", err.Error(), want)
 	}
 }
+
+// Issue #4376: with the knob unset the default is socket, so the row is
+// present in the report half and, as under an explicit socket, absent from
+// classify.
+func TestDoctorCheckSets_UnsetCarrierIncludesSignalSocketTransportRow(t *testing.T) {
+	fake := runner.NewFake()
+	fake.RegistryProxyTransportEndpoint = registrymanifest.NewUnixEndpoint("")
+	withRegistryProxyTransportFake(t, fake)
+
+	unsetEnv(t, "BOX_SIGNAL_CARRIER")
+	c := minimalValidConfig()
+	c.signalCarrier = loadConfig().signalCarrier
+
+	classify, report := doctorCheckSets(c)
+	checkByName(t, report, signalSocketTransportCheckName)
+	for _, ch := range classify {
+		if ch.Name == signalSocketTransportCheckName {
+			t.Fatalf("doctorCheckSets() classify half included %q, want it absent (report-only row)", signalSocketTransportCheckName)
+		}
+	}
+}

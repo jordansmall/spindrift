@@ -405,8 +405,9 @@ func TestShouldNudgePRIntent_MalformedOriginalOutcomeLine(t *testing.T) {
 	}
 }
 
-// Log mode (the default, empty SignalCarrier) must never call SignalStatus:
-// a call there would mean the log arm silently gained a network dependency.
+// Log mode (empty SignalCarrier, as from an older host launcher) must never
+// call SignalStatus: a call there would mean the log arm silently gained a
+// network dependency.
 func TestShouldNudgePRIntent_LogCarrierNeverCallsSignalStatus(t *testing.T) {
 	logPath := writeLog(t, outcome.PRIntentToken+" abc123 dGVzdA==\n")
 	called := false
@@ -426,7 +427,7 @@ func TestShouldNudgePRIntent_LogCarrierNeverCallsSignalStatus(t *testing.T) {
 		t.Fatalf("ShouldNudgePRIntent() = true, want false (genuine PR-intent line already present)")
 	}
 	if called {
-		t.Fatalf("ShouldNudgePRIntent() called SignalStatus under the default log carrier, want it left untouched")
+		t.Fatalf("ShouldNudgePRIntent() called SignalStatus under the log carrier, want it left untouched")
 	}
 }
 
