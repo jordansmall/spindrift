@@ -21,7 +21,7 @@ func TestFindingLocations(t *testing.T) {
 				"- run.go:120 — wrong outcome\n\n" +
 				"## Non-blocking\n" +
 				"- other/file.go:5 — nit\n",
-			want: []Location{{Path: "other/file.go", Line: 5}, {Path: "run.go", Line: 120}},
+			want: []Location{{Path: "other/file.go", Line: 5, End: 5}, {Path: "run.go", Line: 120, End: 120}},
 		},
 		{
 			name: "none bullets contribute nothing",
@@ -37,13 +37,13 @@ func TestFindingLocations(t *testing.T) {
 			findings: "## Blocking\n" +
 				"- cmd/launcher/run.go:42 — bug\n" +
 				"- cmd/launcher/other.go — smell\n",
-			want: []Location{{Path: "cmd/launcher/other.go", Line: 0}, {Path: "cmd/launcher/run.go", Line: 42}},
+			want: []Location{{Path: "cmd/launcher/other.go", Line: 0}, {Path: "cmd/launcher/run.go", Line: 42, End: 42}},
 		},
 		{
 			name: "path with line and column suffix",
 			findings: "## Blocking\n" +
 				"- cmd/launcher/run.go:42:7 — bug\n",
-			want: []Location{{Path: "cmd/launcher/run.go", Line: 42}},
+			want: []Location{{Path: "cmd/launcher/run.go", Line: 42, End: 42}},
 		},
 		{
 			name: "backticked and emphasized locations",
@@ -51,7 +51,7 @@ func TestFindingLocations(t *testing.T) {
 				"- `cmd/launcher/run.go:42` — bug\n" +
 				"## Non-blocking\n" +
 				"- **cmd/launcher/other.go** — nit\n",
-			want: []Location{{Path: "cmd/launcher/other.go", Line: 0}, {Path: "cmd/launcher/run.go", Line: 42}},
+			want: []Location{{Path: "cmd/launcher/other.go", Line: 0}, {Path: "cmd/launcher/run.go", Line: 42, End: 42}},
 		},
 		{
 			name: "prose bullet with no path contributes nothing",
@@ -75,35 +75,115 @@ func TestFindingLocations(t *testing.T) {
 			name: "indented bullets and star markers",
 			findings: "## Blocking\n" +
 				"  * nested/dir/file.go:3 — bug\n",
-			want: []Location{{Path: "nested/dir/file.go", Line: 3}},
+			want: []Location{{Path: "nested/dir/file.go", Line: 3, End: 3}},
 		},
 		{
 			name: "same path different lines yields two locations",
 			findings: "## Blocking\n" +
 				"- run.go:1 — bug one\n" +
 				"- run.go:2 — bug two\n",
-			want: []Location{{Path: "run.go", Line: 1}, {Path: "run.go", Line: 2}},
+			want: []Location{{Path: "run.go", Line: 1, End: 1}, {Path: "run.go", Line: 2, End: 2}},
 		},
 		{
 			name: "exact duplicate location collapses to one",
 			findings: "## Blocking\n" +
 				"- run.go:1 — bug one\n" +
 				"- run.go:1 — bug one, again\n",
-			want: []Location{{Path: "run.go", Line: 1}},
+			want: []Location{{Path: "run.go", Line: 1, End: 1}},
 		},
 		{
 			name: "same path cited bare and with a line yields both locations",
 			findings: "## Blocking\n" +
 				"- run.go — smell\n" +
 				"- run.go:42 — bug\n",
-			want: []Location{{Path: "run.go", Line: 0}, {Path: "run.go", Line: 42}},
+			want: []Location{{Path: "run.go", Line: 0}, {Path: "run.go", Line: 42, End: 42}},
 		},
 		{
 			name: "doubly-wrapped locations unwrap fully regardless of nesting order",
 			findings: "## Blocking\n" +
 				"- **`cmd/launcher/run.go:42`** — bug\n" +
 				"- `**cmd/launcher/other.go:5**` — nit\n",
-			want: []Location{{Path: "cmd/launcher/other.go", Line: 5}, {Path: "cmd/launcher/run.go", Line: 42}},
+			want: []Location{{Path: "cmd/launcher/other.go", Line: 5, End: 5}, {Path: "cmd/launcher/run.go", Line: 42, End: 42}},
+		},
+		{
+			name: "zero range start is dropped rather than read as whole-file",
+			findings: "## Blocking\n" +
+				"- run.go:0-5 — bug\n",
+			want: nil,
+		},
+		{
+			name: "zero range end is dropped rather than read as whole-file",
+			findings: "## Blocking\n" +
+				"- run.go:5-0 — bug\n",
+			want: nil,
+		},
+		{
+			name: "zero line is dropped rather than read as whole-file",
+			findings: "## Blocking\n" +
+				"- run.go:0 — bug\n",
+			want: nil,
+		},
+		{
+			name: "overflowing range start is dropped rather than read as whole-file",
+			findings: "## Blocking\n" +
+				"- run.go:99999999999999999999-5 — bug\n",
+			want: nil,
+		},
+		{
+			name: "overflowing range end is dropped rather than read as whole-file",
+			findings: "## Blocking\n" +
+				"- run.go:5-99999999999999999999 — bug\n",
+			want: nil,
+		},
+		{
+			name: "overflowing line is dropped rather than read as whole-file",
+			findings: "## Blocking\n" +
+				"- run.go:99999999999999999999 — bug\n",
+			want: nil,
+		},
+		{
+			name: "line suffix outside bold emphasis",
+			findings: "## Blocking\n" +
+				"- **run.go**:7 — bug\n",
+			want: []Location{{Path: "run.go", Line: 7, End: 7}},
+		},
+		{
+			name: "line range suffix",
+			findings: "## Blocking\n" +
+				"- run.go:12-15 — bug\n",
+			want: []Location{{Path: "run.go", Line: 12, End: 15}},
+		},
+		{
+			name: "backticked line range",
+			findings: "## Blocking\n" +
+				"- `run.go:12-15` — bug\n",
+			want: []Location{{Path: "run.go", Line: 12, End: 15}},
+		},
+		{
+			name: "suffix outside the backticks",
+			findings: "## Blocking\n" +
+				"- `run.go`:12 — bug\n" +
+				"- **`other.go`**:7-9 — nit\n",
+			want: []Location{{Path: "other.go", Line: 7, End: 9}, {Path: "run.go", Line: 12, End: 12}},
+		},
+		{
+			name: "reversed range is normalized",
+			findings: "## Blocking\n" +
+				"- run.go:15-12 — bug\n",
+			want: []Location{{Path: "run.go", Line: 12, End: 15}},
+		},
+		{
+			name: "unparseable suffix drops the bullet",
+			findings: "## Blocking\n" +
+				"- run.go:abc — bug\n",
+			want: nil,
+		},
+		{
+			name: "same start with different ends sorts by end",
+			findings: "## Blocking\n" +
+				"- run.go:12-20 — bug\n" +
+				"- run.go:12-15 — bug\n",
+			want: []Location{{Path: "run.go", Line: 12, End: 15}, {Path: "run.go", Line: 12, End: 20}},
 		},
 	}
 	for _, c := range cases {
@@ -234,6 +314,29 @@ func TestDecide(t *testing.T) {
 			findings:   "## Blocking\n- run.go:10 — bug\n",
 			wantFire:   true,
 			wantBeyond: []string{"run.go:20"},
+		},
+		{
+			name: "delta inside a cited range and its tolerance does not fire",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 10, Count: 1}, {Start: 14, Count: 1}, {Start: 22, Count: 1}}}},
+			findings: "## Blocking\n- run.go:12-20 — bug\n",
+			wantFire: false,
+		},
+		{
+			name: "delta past a cited range's end plus tolerance fires",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 23, Count: 1}}}},
+			findings:   "## Blocking\n- run.go:12-20 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:23"},
+		},
+		{
+			name: "dropped zero-start range cite fires on a delta inside it",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 3, Count: 1}}}},
+			findings:   "## Blocking\n- run.go:0-5 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go"},
 		},
 		{
 			name: "bare path citation covers a far-away range",
@@ -379,18 +482,28 @@ func TestMergeWindows(t *testing.T) {
 	}{
 		{
 			name: "single line widens by tolerance both ways",
-			locs: []Location{{Path: "a", Line: 10}},
+			locs: []Location{{Path: "a", Line: 10, End: 10}},
 			want: []window{{start: 8, end: 12}},
 		},
 		{
 			name: "adjacent windows merge into one",
-			locs: []Location{{Path: "a", Line: 10}, {Path: "a", Line: 14}},
+			locs: []Location{{Path: "a", Line: 10, End: 10}, {Path: "a", Line: 14, End: 14}},
 			want: []window{{start: 8, end: 16}},
 		},
 		{
 			name: "far-apart windows stay disjoint",
-			locs: []Location{{Path: "a", Line: 10}, {Path: "a", Line: 100}},
+			locs: []Location{{Path: "a", Line: 10, End: 10}, {Path: "a", Line: 100, End: 100}},
 			want: []window{{start: 8, end: 12}, {start: 98, end: 102}},
+		},
+		{
+			name: "range widens from its start to its end",
+			locs: []Location{{Path: "a", Line: 10, End: 20}},
+			want: []window{{start: 8, end: 22}},
+		},
+		{
+			name: "range swallows a nested single line",
+			locs: []Location{{Path: "a", Line: 12, End: 12}, {Path: "a", Line: 10, End: 20}},
+			want: []window{{start: 8, end: 22}},
 		},
 		{
 			name: "bare citation (Line 0) contributes no window",
