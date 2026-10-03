@@ -120,8 +120,8 @@ func (d DispatchLabels) AlreadyClaimed(from, to DispatchState, labels []string) 
 }
 
 // ClaimRemoveLabels returns the labels a TransitionState call should remove.
-// A claim (to == InProgress) also strips any stale Complete/Failed label left
-// by a prior run, matching the claim-remove-labels set in
+// A claim (to == InProgress) also strips any stale Complete/Failed/Ambiguous
+// label left by a prior run, matching the claim-remove-labels set in
 // .github/workflows/agent-dispatch.yml (#1985).
 func (d DispatchLabels) ClaimRemoveLabels(from, to DispatchState) []string {
 	seen := map[string]bool{}
@@ -136,6 +136,7 @@ func (d DispatchLabels) ClaimRemoveLabels(from, to DispatchState) []string {
 	if to == InProgress {
 		add(d.Complete)
 		add(d.Failed)
+		add(d.Ambiguous)
 	}
 	return out
 }

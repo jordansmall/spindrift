@@ -230,9 +230,9 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 
 // TransitionState swaps the from-state label for the to-state label on issue
 // num, best-effort on a missing issue (no error) to match the gh CLI. A claim
-// (to == InProgress) also strips any stale Complete/Failed label left by a
-// prior run, as the github adapter does, so a test on the Fake cannot pass
-// while the real adapter misbehaves (#1985).
+// (to == InProgress) also strips the stale terminal labels
+// DispatchLabels.ClaimRemoveLabels names, as the github adapter does, so a
+// test on the Fake cannot pass while the real adapter misbehaves (#1985).
 //
 // A claim also errors on ErrAlreadyClaimed without mutating labels when num
 // already carries InProgress (#3887), so a test on the Fake pins the same

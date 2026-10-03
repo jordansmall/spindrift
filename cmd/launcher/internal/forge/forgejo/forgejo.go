@@ -291,8 +291,8 @@ func appendAbsentLabels(existing, add []string) []string {
 }
 
 // TransitionState replaces num's label set, dropping the from label and adding
-// the to label. A claim to InProgress also drops any stale Complete or Failed
-// terminal label.
+// the to label. A claim to InProgress also drops the stale terminal labels
+// DispatchLabels.ClaimRemoveLabels names.
 //
 // A claim (to == InProgress) errors on forge.ErrAlreadyClaimed without
 // touching labels when num already carries InProgress (#3887). The check is

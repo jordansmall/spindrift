@@ -70,18 +70,19 @@ func TestDispatchLabels_Ambiguous_LabelAndAllLabels(t *testing.T) {
 	}
 }
 
-// A claim (to == InProgress) removes the from-state label plus both terminal
-// labels, deduplicated. Both github's execClient and forge.Fake call this one
-// method, so the two cannot drift apart (#1985).
+// A claim (to == InProgress) removes the from-state label plus the Complete,
+// Failed, and Ambiguous labels, deduplicated. Both github's execClient and
+// forge.Fake call this one method, so the two cannot drift apart (#1985).
 func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
 		InProgress:   "agent-in-progress",
 		Complete:     "agent-complete",
 		Failed:       "agent-failed",
+		Ambiguous:    "agent-ambiguous-spec",
 	}
 	got := d.ClaimRemoveLabels(Dispatchable, InProgress)
-	want := []string{"ready-for-agent", "agent-complete", "agent-failed"}
+	want := []string{"ready-for-agent", "agent-complete", "agent-failed", "agent-ambiguous-spec"}
 	if len(got) != len(want) {
 		t.Fatalf("ClaimRemoveLabels = %v, want %v", got, want)
 	}

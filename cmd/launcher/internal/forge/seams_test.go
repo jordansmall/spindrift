@@ -267,6 +267,26 @@ func TestFake_TransitionState_ClaimStripsStaleTerminalLabels(t *testing.T) {
 	}
 }
 
+// testLabels omits Ambiguous, so this uses a local fixture.
+func TestFake_TransitionState_ClaimStripsStaleAmbiguousLabel(t *testing.T) {
+	labels := testLabels
+	labels.Ambiguous = "agent-ambiguous-spec"
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "7", Labels: []string{"agent-ambiguous-spec", "ready-for-agent"}})
+
+	if err := f.TransitionState("7", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+
+	iss, err := f.Issue("7")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if want := []string{"agent-in-progress"}; !slices.Equal(iss.Labels, want) {
+		t.Errorf("labels = %v, want %v", iss.Labels, want)
+	}
+}
+
 func TestFake_TransitionState_MissingIssueIsNoOp(t *testing.T) {
 	f := forge.NewFake()
 	// Transitions are best-effort, so an unknown issue number must not error.
