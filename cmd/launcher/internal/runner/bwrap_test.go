@@ -2731,8 +2731,8 @@ func TestBeginProvisioning_RefcountsConcurrentCallers(t *testing.T) {
 		defer a.mu.Unlock()
 		return a.provisioning["test-box"]
 	}
-	releaseFirst := a.beginProvisioning("test-box")
-	releaseSecond := a.beginProvisioning("test-box")
+	_, releaseFirst := a.beginProvisioning("test-box")
+	_, releaseSecond := a.beginProvisioning("test-box")
 
 	releaseFirst()
 	releaseFirst()
@@ -2744,6 +2744,54 @@ func TestBeginProvisioning_RefcountsConcurrentCallers(t *testing.T) {
 	if got := count(); got != 0 {
 		t.Errorf("provisioning count after both released = %d, want 0", got)
 	}
+}
+
+// handOff leaves the name in running with its provisioning guard dropped, and
+// the guard's later release must not decrement a sibling's count again.
+func TestBeginProvisioning_HandOffTracksAndDropsGuardOnce(t *testing.T) {
+	proc := &os.Process{}
+	state := func(a *bwrapAdapter) (running *os.Process, count int, present bool) {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		count, present = a.provisioning["test-box"]
+		return a.running["test-box"], count, present
+	}
+
+	t.Run("sole caller", func(t *testing.T) {
+		a := &bwrapAdapter{}
+		handOff, release := a.beginProvisioning("test-box")
+		handOff(proc)
+		running, _, present := state(a)
+		if running != proc {
+			t.Errorf("running after handOff = %p, want %p", running, proc)
+		}
+		if present {
+			t.Error("provisioning entry still present after sole caller's handOff")
+		}
+		release()
+		if _, _, present := state(a); present {
+			t.Error("provisioning entry present after release following handOff")
+		}
+	})
+
+	t.Run("sibling still provisioning", func(t *testing.T) {
+		a := &bwrapAdapter{}
+		handOffFirst, releaseFirst := a.beginProvisioning("test-box")
+		_, releaseSecond := a.beginProvisioning("test-box")
+		handOffFirst(proc)
+		running, count, _ := state(a)
+		if running != proc || count != 1 {
+			t.Errorf("after handOff: running=%p count=%d, want %p and 1", running, count, proc)
+		}
+		releaseFirst()
+		if _, count, _ := state(a); count != 1 {
+			t.Errorf("count after release following handOff = %d, want 1 (no double decrement)", count)
+		}
+		releaseSecond()
+		if _, _, present := state(a); present {
+			t.Error("provisioning entry present after both callers finished")
+		}
+	})
 }
 
 // ListRunning finds a box whose cgroup still has a resident PID and excludes
@@ -3997,7 +4045,7 @@ func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirWithLivePID(t *testing.T) {
 // while its cgroup.procs still reads empty.
 func TestBwrapRun_DoesNotReclaimLeftoverCgroupDirWhileSiblingProvisioning(t *testing.T) {
 	f := newReclaimFixture(t, "")
-	release := f.adapter.beginProvisioning("leftover-box")
+	_, release := f.adapter.beginProvisioning("leftover-box")
 	t.Cleanup(release)
 	out := f.run(t)
 	f.assertNotReclaimed(t, out, "")
@@ -4027,7 +4075,7 @@ func TestBwrapRun_ReclaimRefusedInsideLaunchWindow(t *testing.T) {
 				probed = true
 				_ = os.WriteFile(filepath.Join(dir, "cgroup.procs"), nil, 0o644)
 				// The sibling's own provisioning entry makes the count 2.
-				release := a.beginProvisioning("launch-box")
+				_, release := a.beginProvisioning("launch-box")
 				reclaimed = a.reclaimLeftoverCgroupDir("launch-box", dir)
 				release()
 				_, err := os.Stat(dir)

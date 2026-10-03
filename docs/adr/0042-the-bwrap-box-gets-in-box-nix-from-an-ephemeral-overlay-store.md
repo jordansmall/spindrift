@@ -368,13 +368,14 @@ is never removed even if the read races a PID write.
 The provisioning guard from the #2960 amendment stays, with a new job: it
 keeps this reclaim off a sibling in-process `Run`'s mid-launch directory,
 which has the same empty `cgroup.procs` a leftover has. `Run` now releases
-it after `trackRunning` rather than immediately after the `cgroup.procs`
-write, as the #2960 amendment describes, so a sibling's name is never left
-with neither a provisioning count nor a `running` entry — a gap that matters
-once a failed write can leave a live sibling's directory reading empty. Its
-cross-process gap carries over unchanged: a second launcher process's
-mid-launch directory is still reclaimable here, and the label claim is what
-keeps two launchers off the same issue.
+it in the same critical section that records the `running` entry rather
+than immediately after the `cgroup.procs` write, as the #2960 amendment
+describes, so a sibling's name is never left with neither a provisioning
+count nor a `running` entry — a gap that matters once a failed write
+can leave a live sibling's directory reading empty. Its cross-process gap
+carries over unchanged: a second launcher process's mid-launch directory
+is still reclaimable here, and the label claim is what keeps two launchers
+off the same issue.
 
 Calling `Reap` from `Run` was rejected. `Reap` returns early for a name
 still provisioning, so it would have to run before `beginProvisioning`; it
