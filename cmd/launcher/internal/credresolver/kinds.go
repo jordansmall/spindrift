@@ -2,11 +2,12 @@ package credresolver
 
 import "slices"
 
-// StoreFacts is a dependency-free stand-in for an ecosystem.Declaration:
-// credresolver imports stdlib only and must never grow an import of
-// ecosystem, registrydiscover, or registryvocab. Host and HostKey hold
-// different values: npmrc's store keys on the raw host, gradle-properties'
-// on registryvocab.HostKey(host).
+// StoreFacts is a stand-in for an ecosystem.Declaration: credresolver
+// must never import ecosystem, registrydiscover, or registryvocab.
+// Importing registrydiscover would be a cycle (it imports credresolver);
+// the other two bans keep credresolver below the registry layer.
+// Host and HostKey hold different values: npmrc's store keys on the raw
+// host, gradle-properties' on registryvocab.HostKey(host).
 type StoreFacts struct {
 	Ecosystem       string
 	Host            string
