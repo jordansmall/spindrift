@@ -776,7 +776,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	clk := hostClock{}
-	em := daemon.NewEmitter(stdout, clk.Now)
+	em := daemon.NewEmitter(stdout, stderr, clk.Now)
 
 	gitDirPath, err := gitDir(wd)
 	if err != nil {

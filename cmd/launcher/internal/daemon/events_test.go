@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -21,7 +22,7 @@ func (failWriter) Write(_ []byte) (int, error) { return 0, errors.New("write fai
 func TestEmitterEmit(t *testing.T) {
 	var buf bytes.Buffer
 	fixed := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
-	e := NewEmitter(&buf, func() time.Time { return fixed })
+	e := NewEmitter(&buf, io.Discard, func() time.Time { return fixed })
 
 	exitCode := 0
 	e.Emit(Event{
@@ -107,7 +108,7 @@ func TestEventMarshalJSONProjectsKeyOntoIssueOrChore(t *testing.T) {
 
 func TestEmitterOmitsEmptyExit(t *testing.T) {
 	var buf bytes.Buffer
-	e := NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	e := newTestEmitter(&buf)
 	e.Emit(Event{Event: "idle", Wait: "30s"})
 
 	var got map[string]any
@@ -124,15 +125,11 @@ func TestEmitterOmitsEmptyExit(t *testing.T) {
 
 func TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic(t *testing.T) {
 	var errBuf bytes.Buffer
-	orig := emitErrW
-	emitErrW = &errBuf
-	t.Cleanup(func() { emitErrW = orig })
-
-	e := NewEmitter(failWriter{}, func() time.Time { return time.Unix(0, 0).UTC() })
+	e := newTestEmitterErr(failWriter{}, &errBuf)
 	e.Emit(Event{Event: "child_start"}) // must not panic despite the write failure
 
 	if got := errBuf.String(); !strings.Contains(got, "daemon: event stream write failed") {
-		t.Fatalf("emitErrW = %q, want it to contain %q", got, "daemon: event stream write failed")
+		t.Fatalf("errW = %q, want it to contain %q", got, "daemon: event stream write failed")
 	}
 }
 
@@ -198,7 +195,7 @@ func wantEventPrefix(t *testing.T, buf *bytes.Buffer, want []string, msg string)
 
 func TestWantEventsMatchingSequenceReturnsDecodedEvents(t *testing.T) {
 	var buf bytes.Buffer
-	e := NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	e := newTestEmitter(&buf)
 	e.Emit(Event{Event: "child_start"})
 	e.Emit(Event{Event: "child_finish"})
 
@@ -240,7 +237,7 @@ func TestEventDiffMatchReturnsEmpty(t *testing.T) {
 
 func TestEmitterMultipleEmitsOneLineEach(t *testing.T) {
 	var buf bytes.Buffer
-	e := NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	e := newTestEmitter(&buf)
 	e.Emit(Event{Event: "child_start"})
 	e.Emit(Event{Event: "halt", Reason: "host-tainted"})
 

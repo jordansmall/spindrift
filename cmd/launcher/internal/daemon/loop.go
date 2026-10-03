@@ -327,7 +327,7 @@ func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 	em.Emit(h.Event())
 	if cfg.Status != nil {
 		if err := cfg.Status.Write(Status{Kinds: cfg.Kinds, State: StateHalted, Reason: h.String()}); err != nil {
-			fmt.Fprintf(emitErrW, "daemon: status file write failed: %v\n", err)
+			em.warnf("daemon: status file write failed: %v\n", err)
 		}
 	}
 	return h
