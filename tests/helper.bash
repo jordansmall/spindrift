@@ -1,7 +1,33 @@
 # Shared bats helpers. Sourced by every *.bats file.
 #
-# The nix `checks.<system>.bats` derivation exports the paths these helpers
-# depend on: FAKES_DIR, SPINDRIFT_CMD, ENTRYPOINT, and PROMPTS_DIR.
+# The nix bats check derivations export the paths these helpers depend on:
+# FAKES_DIR, SPINDRIFT_CMD, ENTRYPOINT, PROMPTS_DIR, and
+# SPINDRIFT_SEAM_FIXTURES_DIR (the rendered contracts and preambles).
+
+# The fixtures dir holds the same bytes the Go seam tests read. Each per-file
+# var only defaults from it, so an explicit export still wins, e.g. a
+# non-claude Driver's own DRIVER_PREAMBLE_FILE.
+if [ -n "${SPINDRIFT_SEAM_FIXTURES_DIR:-}" ]; then
+  : "${OUTCOME_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/outcome-contract.md}"
+  : "${COMMS_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/comms-contract.md}"
+  : "${CHECK_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/check-contract.md}"
+  : "${RESEARCH_OUTCOME_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/research-outcome-contract.md}"
+  : "${DRIVER_PREAMBLE_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/driver-preamble.sh}"
+  : "${AGENT_PATHS_PREAMBLE_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/agent-paths-preamble.sh}"
+  : "${FRAGMENT_REGISTRY_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/fragment-registry.sh}"
+  export OUTCOME_CONTRACT_FILE COMMS_CONTRACT_FILE CHECK_CONTRACT_FILE \
+    RESEARCH_OUTCOME_CONTRACT_FILE DRIVER_PREAMBLE_FILE \
+    AGENT_PATHS_PREAMBLE_FILE FRAGMENT_REGISTRY_FILE
+  # The file names are duplicated from nix/seam-fixtures.nix; a rename there
+  # must fail loudly here.
+  for _f in "$OUTCOME_CONTRACT_FILE" "$COMMS_CONTRACT_FILE" \
+    "$CHECK_CONTRACT_FILE" "$RESEARCH_OUTCOME_CONTRACT_FILE" \
+    "$DRIVER_PREAMBLE_FILE" "$AGENT_PATHS_PREAMBLE_FILE" \
+    "$FRAGMENT_REGISTRY_FILE"; do
+    [ -r "$_f" ] || { echo "helper.bash: seam fixture not found: $_f" >&2; exit 1; }
+  done
+  unset _f
+fi
 
 # A missing or unreadable file counts as 0 rather than an empty string, so a
 # caller's integer comparison never throws.
@@ -287,9 +313,9 @@ setup_fakes() {
   : >"$NIX_LOG"
   : >"$ORCHESTRATOR_LOG"
 
-  # The nix check derivation exports the real mkHarness-built contract, which
-  # entrypoint.sh reads when a rendered issue prompt lacks one (issue #420);
-  # a bare `bats` run outside nix has no such file, so fall back to a fixture.
+  # Defaulted from SPINDRIFT_SEAM_FIXTURES_DIR at the top of this file
+  # (entrypoint.sh reads it, issue #420); a bare bats run has none, so fall
+  # back to a fixture.
   # A test exercising the injection overrides it. Spec #2244's registry slice
   # also touches this fallback, so check for conflicts.
   : "${OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/outcome-contract.md}"

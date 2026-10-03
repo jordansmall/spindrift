@@ -31,17 +31,8 @@ in
   env = {
     ENTRYPOINT = ../agent/entrypoint.sh;
     PROMPTS_DIR = ../templates/default/prompts;
-    OUTCOME_CONTRACT_FILE = batsHarness.internals.outcomeContractFile;
-    COMMS_CONTRACT_FILE = batsHarness.internals.commsContractFile;
-    CHECK_CONTRACT_FILE = batsHarness.internals.checkContractFile;
-    RESEARCH_OUTCOME_CONTRACT_FILE = batsHarness.internals.researchOutcomeContractFile;
-    DRIVER_PREAMBLE_FILE = batsHarness.internals.driverPreambleFile;
-    # helper.bash prepends this between DRIVER_PREAMBLE_FILE and
-    # FRAGMENT_REGISTRY_FILE, matching lib/image.nix's concatenation order, so
-    # the suite checks the bytes the image really bakes for the /agent/* path
-    # literals (issue #2531).
-    AGENT_PATHS_PREAMBLE_FILE = batsHarness.internals.agentPathsPreambleFile;
-    FRAGMENT_REGISTRY_FILE = batsHarness.internals.fragmentRegistryFile;
+    # tests/helper.bash derives the per-file contract and preamble vars from it.
+    SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
     # nix/checks/promptassembly.nix's promptassembly-registry-drift check
     # reuses this same `registry` via `inherit (parity) registry`, so
