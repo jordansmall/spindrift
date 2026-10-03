@@ -1,6 +1,7 @@
 package seamtest
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"os"
@@ -28,6 +29,11 @@ type PodmanRun struct {
 	// -e RUN_NONCE=...) unless it already carries one; the launcher rejects
 	// a line without it as spoofed.
 	Outcome string `json:"outcome"`
+	// Intents are raw issue-intent JSON payloads (a butler finding), each
+	// written ahead of Outcome as a "SPINDRIFT_ISSUE_INTENT <RUN_NONCE>
+	// <base64>" line, the log-carrier grammar. Without RUN_NONCE in the run
+	// argv they are omitted: the launcher would reject them as unverified.
+	Intents []string `json:"intents"`
 }
 
 // podmanMain serves both podman and docker; the invoked name picks the config.
@@ -76,10 +82,22 @@ func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 		if n < len(cfg.Runs) {
 			run = cfg.Runs[n]
 		}
-		io.WriteString(stdout, withNonce(run.Outcome, args))
+		io.WriteString(stdout, boxOutput(run, args))
 		return run.Exit
 	}
 	return 0
+}
+
+// boxOutput is what a scripted Box run prints: its intents, then its outcome.
+func boxOutput(run PodmanRun, args []string) string {
+	var b strings.Builder
+	if nonce, ok := runNonce(args); ok {
+		for _, raw := range run.Intents {
+			fmt.Fprintf(&b, "SPINDRIFT_ISSUE_INTENT %s %s\n", nonce, base64.StdEncoding.EncodeToString([]byte(raw)))
+		}
+	}
+	b.WriteString(withNonce(run.Outcome, args))
+	return b.String()
 }
 
 func withNonce(outcome string, args []string) string {
