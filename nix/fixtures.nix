@@ -52,7 +52,21 @@ let
       batsHarness
       dockerHarness
       bwrapHarness
+      butlerHarness
       ;
+  };
+
+  # The batsHarness document with a provisioned Filer and a Chore enabled,
+  # the two things `spindrift butler` preflight needs from the document
+  # (FILER_ENABLED, BUTLER_CHORES). Rendered for the Go seam smoke matrix.
+  butlerHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    overlays = [ ghFakeOverlay ];
+    defaults = {
+      filerModel = "seam-filer";
+      butlerChores = "bugs";
+    };
+    packages = p: [ p.hello ];
   };
 
   # Bound once and shared verbatim by every dogfood mkHarness call below, so a
