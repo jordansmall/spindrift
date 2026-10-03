@@ -22,9 +22,9 @@ func Issue(number string) Key { return Key{issue: number} }
 // Chore builds a Key for a butler Chore-keyed Dispatch (ADR 0056).
 func Chore(name string) Key { return Key{chore: name} }
 
-// String renders the key exactly as today's call sites do: the bare issue
-// number, or "butler-" + chore name (see agent/entrypoint.sh's _issue_ref
-// and butler-prompt.md's OUTCOME line).
+// String renders the key: the bare issue number, or "butler-" + chore name.
+// buildBoxEnv forwards it to the Box as DISPATCH_KEY, which
+// agent/entrypoint.sh and butler-prompt.md's OUTCOME line both read.
 func (k Key) String() string {
 	if k.chore != "" {
 		return "butler-" + k.chore
