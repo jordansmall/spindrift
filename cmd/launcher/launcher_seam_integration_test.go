@@ -28,17 +28,11 @@ func TestSeamLauncherRunReachesPodman(t *testing.T) {
 	bin := seamtest.BuildLauncher(t)
 	fakeDir := seamtest.InstallFakes(t, "podman", "gh")
 	podmanRec := t.TempDir() + "/podman.jsonl"
-	// gh answers the issue reads a dispatch makes before it reaches the Box:
-	// the issue itself, and the label read the claim checks (the claim fails
-	// if the in-progress label is already there). Everything else, such as
-	// the label edit and the closing comment, succeeds silently.
+	// gh answers the issue reads a dispatch makes before it reaches the Box;
+	// the label edit and the closing comment succeed silently.
 	env := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
 		Record: t.TempDir() + "/gh.jsonl",
-		Replies: []seamtest.GhReply{
-			{Args: []string{"issue", "view", "7", "number,title,body,state,labels"}, Stdout: `{"number":7,"title":"T","body":"B","state":"OPEN","labels":[{"name":"` + doc.Settings["LABEL"] + `"}]}`},
-			{Args: []string{"issue", "view", "7", "labels"}, Stdout: `{"labels":[{"name":"` + doc.Settings["LABEL"] + `"}]}`},
-			{Args: []string{"issue", "view", "7", "comments"}, Stdout: `{"comments":[]}`},
-		},
+		Issues: []seamtest.GhIssue{{Number: 7, Title: "T", Body: "B", Labels: []string{doc.Settings["LABEL"]}}},
 	})
 	for k, v := range seamtest.WriteFakeConfig(t, "podman", seamtest.PodmanConfig{
 		Record:       podmanRec,
