@@ -13,6 +13,22 @@ let
     root = ../..;
     fileset = pkgs.lib.fileset.fileFilter (f: f.hasExt "nix") ../..;
   };
+  # Vendored modules, go env and the bwrap LookPath stub shared by the go test
+  # checks. Expects the caller to have copied cmd/launcher to src/cmd/launcher.
+  # Ends with src/cmd/launcher as the working directory.
+  goTestPrologue = ''
+    cp -r ${launcherGoModules} src/cmd/launcher/vendor
+    ${goCheckEnv}
+    mkdir -p "$TMPDIR/fakebin"
+    cat > "$TMPDIR/fakebin/bwrap" <<'EOF'
+    #!/bin/sh
+    echo "fakebin/bwrap: stub for LookPath only, tests never invoke it for real" >&2
+    exit 1
+    EOF
+    chmod +x "$TMPDIR/fakebin/bwrap"
+    export PATH="$TMPDIR/fakebin:$PATH"
+    cd src/cmd/launcher
+  '';
 in
 {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
@@ -118,18 +134,43 @@ in
         cp ${../../README.md} src/README.md
         cp -r ${../../lib} src/lib
         chmod -R +w src
-        cp -r ${launcherGoModules} src/cmd/launcher/vendor
-        ${goCheckEnv}
-        mkdir -p "$TMPDIR/fakebin"
-        cat > "$TMPDIR/fakebin/bwrap" <<'EOF'
-        #!/bin/sh
-        echo "fakebin/bwrap: stub for LookPath only, tests never invoke it for real" >&2
-        exit 1
-        EOF
-        chmod +x "$TMPDIR/fakebin/bwrap"
-        export PATH="$TMPDIR/fakebin:$PATH"
-        cd src/cmd/launcher
+        ${goTestPrologue}
         go test ./...
+        touch $out
+      '';
+
+  # Seam tests (issue #4280): the integration-tagged packages run against the
+  # rendered fixtures the bats harness produces, handed over via
+  # SPINDRIFT_SEAM_FIXTURES_DIR since nix isn't callable in the sandbox. The
+  # other integration tests self-skip without nix/bwrap/podman/docker. The
+  # package list is derived from the tree, so a new tagged file is picked up.
+  launcher-go-seam-test =
+    pkgs.runCommand "launcher-go-seam-test"
+      {
+        nativeBuildInputs = [
+          pkgs.go
+          pkgs.git
+        ];
+        SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
+      }
+      ''
+        mkdir -p src/cmd
+        cp -r ${../../cmd/launcher} src/cmd/launcher
+        chmod -R +w src
+        ${goTestPrologue}
+        files=$(grep -rl --include='*_test.go' --exclude-dir=vendor '^//go:build integration' . || true)
+        if [ -z "$files" ]; then
+          echo "no integration-tagged test files found" >&2
+          exit 1
+        fi
+        # Run each package with only its own tagged test names: its untagged
+        # tests need the full repo tree and already run in launcher-go-test.
+        # A name scraped from the sources is a heuristic, so a tagged test
+        # sharing a name with an untagged one in its package would run both.
+        for pkg in $(echo "$files" | xargs -n1 dirname | sort -u); do
+          tests=$(echo "$files" | grep "^$pkg/[^/]*\$" | xargs grep -h '^func Test' | sed 's/^func \(Test[A-Za-z0-9_]*\).*/\1/' | paste -sd'|')
+          go test -tags integration -run "^($tests)\$" "$pkg"
+        done
         touch $out
       '';
 
