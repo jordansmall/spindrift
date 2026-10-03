@@ -111,6 +111,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	agentsJSONOutput := fs.String("agents-json-output", "", "path to write the (possibly empty) --agents JSON to (required)")
 	handoffOutput := fs.String("handoff-output", "", "path to write the driver hand-off facts as JSON to (required)")
 	reviewPromptOutput := fs.String("review-prompt-output", "", "path to write the rendered review-prompt text to, only when the cell actually renders one")
+	fragmentsOutput := fs.String("fragments-output", "", "path to write Result.Fragments to, one name per line; empty (default) writes nothing")
 	compositionOutput := fs.String("composition-output", "", "path to write promptassembly.Compose's report as JSON, or '-' for stdout; empty (default) skips composition reporting entirely")
 	var compositionCarried carriedTextFlag
 	fs.Var(&compositionCarried, "composition-carried", "[<pass>:]<name>=<path> carried-text block fed to Compose (repeatable); only meaningful with --composition-output")
@@ -258,6 +259,18 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 			return 1
 		}
 		result.Handoff.ReviewPromptFile = *reviewPromptOutput
+	}
+
+	if *fragmentsOutput != "" {
+		var sb strings.Builder
+		for _, name := range result.Fragments {
+			sb.WriteString(name)
+			sb.WriteByte('\n')
+		}
+		if err := os.WriteFile(*fragmentsOutput, []byte(sb.String()), 0o644); err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write fragments output:", err)
+			return 1
+		}
 	}
 
 	handoffJSON, err := json.Marshal(result.Handoff)

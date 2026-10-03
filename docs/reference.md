@@ -2674,6 +2674,12 @@ driver-exec assemble-prompt \
   --composition-output -
 ```
 
+`driver-exec assemble-prompt`'s `--fragments-output <path>` writes
+`Result.Fragments` — the sorted, de-duplicated fragment names that reached
+the prompt, review prompt, or `--agents` JSON — one per line (an empty file
+when none did). Production never passes it; `tests/prompt-assembly-parity.bats`
+pins it per golden cell as `<cell>.fragments.txt` (issue #3838).
+
 ### Hermetic git config
 
 The entrypoint sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
