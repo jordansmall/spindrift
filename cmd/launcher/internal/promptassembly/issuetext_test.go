@@ -121,10 +121,10 @@ func TestAssembleIssueTextVarSubstitution(t *testing.T) {
 	}
 
 	section := issueTextSection(env)
-	if got := bodies.allowlist["ISSUE_TEXT"]; got != section {
-		t.Fatalf("allowlist[ISSUE_TEXT] = %q, want %q", got, section)
+	if got := bodies.vars["ISSUE_TEXT"].text(); got != section {
+		t.Fatalf("vars[ISSUE_TEXT] = %q, want %q", got, section)
 	}
-	// The inline ${ISSUE_TEXT} reference resolves through the allowlist, then
+	// The inline ${ISSUE_TEXT} reference resolves through vars, then
 	// the section is appended again as the run-stable suffix, so the rendered
 	// base carries two copies.
 	want := "# TASK\n\ninline: " + section + "\n\n" + section

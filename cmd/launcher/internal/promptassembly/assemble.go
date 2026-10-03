@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -32,6 +34,11 @@ type Result struct {
 	// path Handoff serializes to disk (issue #2975).
 	ReviewPromptText string
 	Handoff          Handoff
+	// Fragments is the sorted, de-duplicated set of lib/fragments.nix
+	// fragment names whose bytes reach Prompt, ReviewPromptText, or an agent
+	// prompt in AgentsJSON. It is the per-cell coverage record the
+	// prompt-assembly golden suite pins (issue #3838).
+	Fragments []string
 }
 
 // ArgvShape describes how the CLI wrapper assembles the Driver's argv: which
@@ -138,14 +145,14 @@ func checkCoveredCell(e Env) error {
 // variables this way, never bare $NAME (verified against the tree, #2349).
 var substTokenRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
-// substitute replaces every ${NAME} that is a key of allowlist; anything else
+// substitute replaces every ${NAME} that is a key of vars; anything else
 // passes through untouched. The single ReplaceAllStringFunc pass, rather than
 // sequential per-name replacement, keeps a substituted value that itself
 // contains ${NAME}-shaped text from being re-expanded.
-func substitute(text string, allowlist map[string]string) string {
+func substitute(text string, vars map[string]string) string {
 	return substTokenRe.ReplaceAllStringFunc(text, func(tok string) string {
 		name := tok[2 : len(tok)-1]
-		if v, ok := allowlist[name]; ok {
+		if v, ok := vars[name]; ok {
 			return v
 		}
 		return tok
@@ -153,23 +160,11 @@ func substitute(text string, allowlist map[string]string) string {
 }
 
 // RenderText substitutes every ${NAME} token in text through vars and trims
-// trailing newlines, the same treatment renderFile gives an on-disk file.
+// trailing newlines, the same treatment renderFileSegments gives an on-disk file.
 // Exported so a caller that needs only this substitution, not the rest of
 // Assemble's pipeline, does not hand-roll its own strings.ReplaceAll pass.
 func RenderText(text string, vars map[string]string) string {
 	return strings.TrimRight(substitute(text, vars), "\n")
-}
-
-// renderFile reads path, substitutes it through allowlist, and trims the
-// trailing newlines a $(...) command substitution would strip. That invariant
-// lives here alone, not at each of the fragment, base-template, and
-// per-agent call sites.
-func renderFile(path string, allowlist map[string]string) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimRight(substitute(string(data), allowlist), "\n"), nil
 }
 
 // injectSharedBlockSegments appends the rendered contract file to prompt,
@@ -205,9 +200,11 @@ func injectSharedBlockSegments(prompt body, contractPath string, vars map[string
 	return out, nil
 }
 
-// renderFileSegments renders path like renderFile, but the trim must run on
-// segments rather than the joined string to keep per-segment attribution
-// intact, so it can't simply wrap renderFile.
+// renderFileSegments reads path, substitutes it through vars, and trims the
+// trailing newlines a $(...) command substitution would strip. That invariant
+// lives here alone, not at each of the fragment, base-template, and
+// per-agent call sites. The trim runs on segments rather than the joined
+// string so per-segment attribution stays intact.
 func renderFileSegments(path string, owner Source, vars map[string]body) (body, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -232,23 +229,24 @@ type promptBodies struct {
 	review      body   // nil when the cell renders no review prompt
 	reviewName  string // basename review was rendered from; "" when review is nil
 	sessionMode string
-	allowlist   map[string]string
+	vars        map[string]body
 	gates       map[string]bool
 	kind        *dispatchkind.Descriptor
 }
 
 // assemblePromptBodies performs Assemble's prompt path in attributed segment
-// form: gates, the allowlist, the fragment loop, base-template selection,
-// shared-block injection, and the review-prompt render. It also returns
-// allowlist, gates, and kind in plain form, since Assemble's post-prompt
-// steps need no attribution and stay on the string-keyed allowlist.
+// form: gates, the substitution vars, the fragment loop, base-template
+// selection, shared-block injection, and the review-prompt render. It also
+// returns vars, gates, and kind, so Assemble's agent-prompt renders
+// substitute through the same attributed vars and their fragment sources
+// reach Result.Fragments.
 func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	gates := Gates(e)
 	// SKILLS_FOUND is a filesystem-derived presence gate Gates never computes,
 	// because I/O is out of its scope.
 	gates["SKILLS_FOUND"] = e.SkillsFound != ""
 
-	// The substitution allowlist: the fixed scalars below plus every registry
+	// The substitution vars: the fixed scalars below plus every registry
 	// row's var and extraSubstVars, one flat set shared by every render in this
 	// function rather than scoped per-fragment.
 	scalars := map[string]string{
@@ -262,13 +260,11 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		"DISPATCH_KEY":      e.DispatchKey,
 	}
 
-	// vars is the segment-attributed twin of allowlist: same keys, bodies
-	// instead of strings, so a fragment referencing an earlier var carries
-	// that var's attribution through rather than absorbing its bytes.
+	// Each var is an attributed body, so a fragment referencing an earlier
+	// var carries that var's attribution through rather than absorbing its
+	// bytes.
 	vars := make(map[string]body, len(scalars))
-	allowlist := make(map[string]string, len(scalars))
 	for k, v := range scalars {
-		allowlist[k] = v
 		vars[k] = varBody(k, v)
 	}
 
@@ -276,7 +272,6 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// Go-derived (issueTextSection's fenced text, never e.IssueText raw),
 	// while scalars mirrors the raw-env substitution list byte for byte.
 	issueSection := issueTextSection(e)
-	allowlist["ISSUE_TEXT"] = issueSection
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
 	// CHORE_PROMPT (ADR 0056, issue #3875) is the butler's ${CHORE_PROMPT}
@@ -289,7 +284,6 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	if err != nil {
 		return promptBodies{}, err
 	}
-	allowlist["CHORE_PROMPT"] = chorePrompt
 	vars["CHORE_PROMPT"] = varBody("CHORE_PROMPT", chorePrompt)
 
 	scalars["CHORE_NAME"] = e.ChoreName
@@ -300,7 +294,6 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	scalars["CHORE_PATCH_CLASSES"] = e.ChorePatchClasses
 	scalars["CHORE_MAX_FINDINGS"] = e.ChoreMaxFindings
 	for _, k := range []string{"CHORE_NAME", "CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES", "CHORE_PATCH_CLASSES", "CHORE_MAX_FINDINGS"} {
-		allowlist[k] = scalars[k]
 		vars[k] = varBody(k, scalars[k])
 	}
 
@@ -321,7 +314,6 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 			}
 			seenExtra[extra] = true
 			v := extraRaw[extra]
-			allowlist[extra] = v
 			vars[extra] = varBody(extra, v)
 		}
 	}
@@ -345,15 +337,12 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 					return promptBodies{}, fmt.Errorf("read fragment %s: %w", row.Fragment, err)
 				}
 				vars[row.Var] = body{}
-				allowlist[row.Var] = ""
 				continue
 			}
 			fragBody := append(append(body{}, rendered...), segment{src: fragSource, text: "\n\n"})
 			vars[row.Var] = fragBody
-			allowlist[row.Var] = fragBody.text()
 		} else {
 			vars[row.Var] = body{}
-			allowlist[row.Var] = ""
 		}
 	}
 
@@ -467,7 +456,7 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		review:      review,
 		reviewName:  reviewName,
 		sessionMode: sessionMode,
-		allowlist:   allowlist,
+		vars:        vars,
 		gates:       gates,
 		kind:        d,
 	}, nil
@@ -486,13 +475,16 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		return Result{}, err
 	}
 
-	allowlist := bodies.allowlist
 	gates := bodies.gates
 
 	invoker := "driver-exec"
 	if gates["ORCHESTRATOR"] {
 		invoker = "orchestrator"
 	}
+
+	frags := map[string]struct{}{}
+	addFragmentNames(frags, bodies.base)
+	addFragmentNames(frags, bodies.review)
 
 	result := Result{
 		Prompt: bodies.base.text(),
@@ -547,7 +539,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 			agentsTemplate = string(strippedJSON)
 		}
 
-		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, allowlist, bodies.kind.Prompts.Reviewer)
+		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, bodies.vars, frags, bodies.kind.Prompts.Reviewer)
 		if err != nil {
 			return Result{}, err
 		}
@@ -560,10 +552,12 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// model overwrites whatever the JSON path set in ReviewModel, and a
 	// missing reviewer.md leaves the JSON-path value unchanged.
 	if e.DriverAgentFilesDir != "" {
-		if err := rewriteAgentFiles(e, allowlist, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
+		if err := rewriteAgentFiles(e, bodies.vars, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
 		}
 	}
+
+	result.Fragments = slices.Sorted(maps.Keys(frags))
 
 	// Dispatch-time overrides (issue #3171) bind last, over both extraction
 	// paths above: dispatch env beats a baked roster entry beats the
@@ -635,13 +629,24 @@ func reviewerPromptOverride(reviewerPrompt string, promptFiles map[string]string
 	return promptFiles
 }
 
+// addFragmentNames adds the lib/fragments.nix fragment names that b's
+// segments carry to set.
+func addFragmentNames(set map[string]struct{}, b body) {
+	for _, seg := range b {
+		if seg.src.Kind == SourceFragment {
+			set[seg.src.Name] = struct{}{}
+		}
+	}
+}
+
 // renderAgentsJSON sets .{name}.prompt for every key in agentsTemplate whose
 // AgentsPromptFiles entry names a file that exists under PromptsDir.
 // agentsTemplate is a parameter rather than read from e.AgentsJSONTemplate so
 // the caller can pass the reviewer-stripped template the orchestrator-on
 // branch produces (issue #2353). reviewerPrompt is the dispatch kind's own
-// reviewer prompt filename, or "" when it has none.
-func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string, reviewerPrompt string) (string, error) {
+// reviewer prompt filename, or "" when it has none. Every fragment that
+// reaches a rendered agent prompt is added to frags.
+func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string]struct{}, reviewerPrompt string) (string, error) {
 	var template map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
 		return "", fmt.Errorf("parse agents json template: %w", err)
@@ -661,13 +666,15 @@ func renderAgentsJSON(e Env, agentsTemplate string, allowlist map[string]string,
 			continue
 		}
 		path := filepath.Join(e.PromptsDir, promptFile)
-		rendered, err := renderFile(path, allowlist)
+		renderedBody, err := renderFileSegments(path, Source{Kind: SourceTemplate, Name: promptFile}, vars)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return "", fmt.Errorf("read agent prompt file %s: %w", promptFile, err)
 		}
+		addFragmentNames(frags, renderedBody)
+		rendered := renderedBody.text()
 
 		var entry map[string]json.RawMessage
 		if err := json.Unmarshal(template[name], &entry); err != nil {
@@ -737,7 +744,7 @@ func reviewerModelFrontmatter(frontmatter string) string {
 // room for — the rewrite loop below then rewrites it from that kind's prompt
 // like any other agent file. Names are rewritten in sorted order, so Go map
 // order cannot vary results.
-func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, reviewModel *string, reviewerPrompt string) error {
+func rewriteAgentFiles(e Env, vars map[string]body, orchestratorOn bool, reviewModel *string, reviewerPrompt string) error {
 	if orchestratorOn && reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
 		if data, err := os.ReadFile(reviewerPath); err == nil {
@@ -775,13 +782,16 @@ func rewriteAgentFiles(e Env, allowlist map[string]string, orchestratorOn bool, 
 		}
 
 		promptPath := filepath.Join(e.PromptsDir, promptFiles[name])
-		rendered, err := renderFile(promptPath, allowlist)
+		renderedBody, err := renderFileSegments(promptPath, Source{Kind: SourceTemplate, Name: promptFiles[name]}, vars)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
 			return fmt.Errorf("read agent prompt file %s: %w", promptFiles[name], err)
 		}
+		// Unlike renderAgentsJSON, no addFragmentNames: no golden pins opencode
+		// agent files, so recording these would claim coverage no golden backs.
+		rendered := renderedBody.text()
 
 		frontmatter := frontmatterOf(agentFileData)
 		out := frontmatter + "\n" + rendered + "\n"
