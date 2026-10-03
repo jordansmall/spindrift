@@ -1166,49 +1166,22 @@ in
         touch $out
       '';
 
-  # ORCHESTRATOR master-switch fork-well-formedness (issue #2047, ADR 0035
-  # amendment): only the canonical `local ORCHESTRATOR=` computation in
-  # agent/entrypoint.sh may test the raw ORCHESTRATOR_ENABLED env var, and
-  # every fork downstream reads that computed gate. Each $ORCHESTRATOR
-  # conditional needs an explicit else, so a one-sided segment fails here.
-  orchestrator-fork-well-formed = pkgs.runCommand "orchestrator-fork-well-formed" { } ''
-    entrypoint=${../../agent/entrypoint.sh}
+  # The orchestrator is the only Box path (issue #4291), so agent/entrypoint.sh
+  # reads no switch for it: any non-comment ORCHESTRATOR_ENABLED test, or an
+  # $ORCHESTRATOR gate computed from one, means a fork crept back in.
+  entrypoint-reads-no-orchestrator-switch =
+    pkgs.runCommand "entrypoint-reads-no-orchestrator-switch" { }
+      ''
+        entrypoint=${../../agent/entrypoint.sh}
 
-    # Excludes comment-only lines (prose is free to name the env var) so this
-    # doesn't pin one exact bash parameter-expansion form -- any variant
-    # (default-value, alternate-value, ...) counts as the one code reference
-    # this guards.
-    gate_computations=$(awk '/ORCHESTRATOR_ENABLED/ && $0 !~ /^[[:space:]]*#/' "$entrypoint" | wc -l)
-    [ "$gate_computations" -eq 1 ] || {
-      echo "expected exactly one ORCHESTRATOR_ENABLED test (the canonical gate computation) in agent/entrypoint.sh, got $gate_computations" >&2
-      grep -n 'ORCHESTRATOR_ENABLED' "$entrypoint" >&2
-      exit 1
-    }
-
-    # Issue #2356 deleted the one bash if/else $ORCHESTRATOR conditional
-    # this loop used to always find (_validate_prompt_contract's
-    # orchestratorEnabled row) along with the rest of the reject/warn
-    # matrix -- the Go verb now owns that fork's gating end to end, covered
-    # by its own unit tests, not this grep. Every remaining $ORCHESTRATOR
-    # read left in entrypoint.sh is the bare `[ -n "$ORCHESTRATOR" ] && ...`
-    # form, which this pattern doesn't match, so zero sites is now the
-    # expected steady state -- this loop still catches a *future* if/else
-    # $ORCHESTRATOR conditional missing its off-row, it just no longer
-    # requires one to exist.
-    sites=$(grep -n 'if .*\$ORCHESTRATOR\b' "$entrypoint" | cut -d: -f1 || true)
-    for start in $sites; do
-      branch=$(awk -v start="$start" '
-        NR <= start { next }
-        /^[[:space:]]*else[[:space:]]*$/ { print "else"; exit }
-        /^[[:space:]]*fi[[:space:]]*$/ { exit }
-      ' "$entrypoint")
-      [ "$branch" = "else" ] || {
-        echo "agent/entrypoint.sh:$start -- \$ORCHESTRATOR conditional has no else (off-row) before its closing fi" >&2
-        exit 1
-      }
-    done
-    touch $out
-  '';
+        hits=$(grep -nE 'ORCHESTRATOR(_ENABLED)?\b' "$entrypoint" | grep -vE '^[0-9]+:[[:space:]]*#' || true)
+        [ -z "$hits" ] || {
+          echo "agent/entrypoint.sh must not read an orchestrator switch, found:" >&2
+          echo "$hits" >&2
+          exit 1
+        }
+        touch $out
+      '';
 
   # Grep pin (issue #908): the filer's dedup step must search open issues
   # beyond the `agent-review-finding` label, or it stops catching human-filed
@@ -1631,9 +1604,9 @@ in
         touch $out
       '';
 
-  # The read-only counterpart (issue #2019): a read-only Box under
-  # ORCHESTRATOR_ENABLED holds no write token, so the filer's relay fragments
-  # must never invoke `gh label create` and must carry the host-mediated
+  # The read-only counterpart (issue #2019): a read-only Box holds no write
+  # token, so the filer's relay fragments must never invoke
+  # `gh label create` and must carry the host-mediated
   # SPINDRIFT_ISSUE_INTENT relay instead. `gh issue create`'s absence is
   # already covered by the mkHarness eval assert (issues #2510, #2513).
   filer-relay-fragments-never-invoke-gh-write =
@@ -1730,8 +1703,9 @@ in
         }).spindrift
       );
     in
-    assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when reviewPrompt is missing the required VERDICT: marker";
+    assert assertMsg (
+      !broken.success
+    ) "mkHarness.nix must throw when reviewPrompt is missing the required VERDICT: marker";
     pkgs.runCommand "build-time-reject-orchestrator-verdict-missing" { } "touch $out";
 
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):

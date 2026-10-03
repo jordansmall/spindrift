@@ -416,9 +416,6 @@ func TestAssembleHandoff(t *testing.T) {
 				t.Fatalf("Assemble: %v", err)
 			}
 
-			if result.Handoff.Invoker != "orchestrator" {
-				t.Errorf("Handoff.Invoker = %q, want orchestrator", result.Handoff.Invoker)
-			}
 			if result.Handoff.SessionMode != tc.wantMode {
 				t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, tc.wantMode)
 			}
@@ -2304,9 +2301,6 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 
-	if result.Handoff.Invoker != "orchestrator" {
-		t.Errorf("Handoff.Invoker = %q, want orchestrator", result.Handoff.Invoker)
-	}
 	if result.Handoff.ReviewModel != "review-model-x" {
 		t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, "review-model-x")
 	}

@@ -601,12 +601,6 @@ _needs_outbox() {
   [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] || _is_readonly_outbox_relay
 }
 
-# _handoff_field extracts field $2 from the raw Handoff descriptor JSON $1
-# (issue #2355), defaulting to empty when the field is absent or null.
-_handoff_field() {
-  printf '%s' "$1" | jq -r ".$2 // empty"
-}
-
 # _populate_driver_skills_dir copies HARNESS_SKILLS_DIR then OPERATOR_SKILLS_DIR
 # into DRIVER_SKILLS_DIR (issue #2489), so an operator skill wins a name
 # collision but a harness skill the operator didn't override survives. The driver
@@ -700,7 +694,7 @@ phase_conflict_resolve() {
     # _use_dev_shell to 0 for this call only (dynamic scoping, issue #515),
     # since only the main run enters the devShell.
     local _use_dev_shell=0
-    run_driver_in_env "$_cr_prompt" "" "" "" || true
+    run_driver_in_env "$_cr_prompt" "" "" || true
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
       # Best-effort revert before the abort below re-checks out HEAD (ADR 0044,
       # issue #2851). When an in-tree config file is itself one of the unmerged
@@ -824,8 +818,7 @@ phase_prompt_assembly() {
   prompt="$(cat "$_prompt_out")"
   # Plain (non-local) assignment so _handoff escapes to run_driver_in_env and the
   # required-marker gates, which run outside this function's call frame (issue
-  # #515, #2355). ORCHESTRATOR is the deliberate exception: see main's note on
-  # the ORCHESTRATOR/Handoff.Invoker equivalence.
+  # #515, #2355).
   _handoff="$(cat "$_handoff_out")"
   # The handoff file, and the agents/review-prompt files it names by path, must
   # survive the rest of the run: driver-exec reads Handoff.AgentsFile at
@@ -833,9 +826,9 @@ phase_prompt_assembly() {
   # time, both after this function returns. So only _prompt_out is removed here
   # (run_driver_in_env always writes its own per-call --prompt-file).
   _handoff_file="$_handoff_out"
-  # Test-only hook (issue #2395): no fake Driver ever receives SessionMode or
-  # Invoker as CLI args, so this raw JSON is the only place a test can observe
-  # them. A no-op in production, where this var is never set.
+  # Test-only hook (issue #2395): no fake Driver ever receives SessionMode as a
+  # CLI arg, so this raw JSON is the only place a test can observe it. A no-op in
+  # production, where this var is never set.
   [ -n "${DRIVER_HANDOFF_FILE:-}" ] && cp "$_handoff_out" "$DRIVER_HANDOFF_FILE"
   rm -f "$_prompt_out"
   # Test-only hook, same shape as DRIVER_HANDOFF_FILE above: once the cleanup
@@ -889,11 +882,12 @@ _write_env_handoff() {
 
 # run_driver_in_env runs the Driver against $1 (the assembled prompt), $2 (an
 # optional per-call handoff-file override; "" uses the shared $_handoff_file),
-# $3 (session mode, forwarded verbatim to _driver_session_flags), and $4 (the raw
-# Handoff JSON, used only to derive the invoker fork). Delegates to driver-exec
-# (issue #626), which owns running the Driver, optionally inside the devShell.
+# and $3 (session mode, forwarded verbatim to _driver_session_flags). Runs the
+# pass through the orchestrator, which forwards the handoff to driver-exec (issue
+# #626) for each of its own passes; driver-exec owns running the Driver,
+# optionally inside the devShell.
 run_driver_in_env() {
-  local prompt="$1" handoff_file_override="$2" session_mode="$3" handoff_json="${4:-}"
+  local prompt="$1" handoff_file_override="$2" session_mode="$3"
 
   # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
   # pins no session) falls through _driver_session_flags' case with no output,
@@ -929,21 +923,8 @@ run_driver_in_env() {
     _write_env_handoff "$_run_handoff_file"
   fi
 
-  # Invoker comes from handoff_json's Invoker field when a Handoff exists (issue
-  # #2355); the pre-Handoff conflict-resolve pass falls back to $ORCHESTRATOR,
-  # which is mathematically identical to what that field would say. The fork only
-  # swaps which binary receives the same flag set (issues #1996, #2047): the
-  # orchestrator forwards the handoff to driver-exec for each of its own passes.
-  local _driver_invoker=driver-exec
-  if [ -n "$handoff_json" ]; then
-    [ "$(_handoff_field "$handoff_json" Invoker)" = "orchestrator" ] && _driver_invoker=orchestrator
-  else
-    [ -n "$ORCHESTRATOR" ] && _driver_invoker=orchestrator
-  fi
-
-  # --manifest-path (issue #2983) is passed only when the invoker understands it
-  # (driver-exec does not, and hard-fails on an unrecognized flag) and the outbox
-  # is mounted host-side, otherwise the orchestrator would write to a path no one
+  # --manifest-path (issue #2983) is passed only when the outbox is mounted
+  # host-side, otherwise the orchestrator would write to a path no one
   # can read back. Its contract treats an omitted path as "write no manifest, no
   # error", so leaving the flag off is correct rather than a missed feature.
   local -a _driver_argv=(
@@ -952,14 +933,14 @@ run_driver_in_env() {
     --session-file "$_session_file"
     --log-path "$stream_log"
   )
-  if [ "$_driver_invoker" = orchestrator ] && _needs_outbox; then
+  if _needs_outbox; then
     # manifest.json here must match passmanifest.FileName.
     _driver_argv+=(--manifest-path "$OUTBOX_DIR/manifest.json")
   fi
 
   local claude_rc=0
   set +e
-  "$_driver_invoker" "${_driver_argv[@]}"
+  orchestrator "${_driver_argv[@]}"
   claude_rc=$?
   set -e
   rm -f "$_prompt_file" "$_session_file"
@@ -1042,7 +1023,6 @@ main() {
   # assigned only inside the backstop `if` below, and `set -u` treats a bare
   # `local x` as unbound, not empty (issue #2448).
   local _outcome_via_backstop=""
-  local ORCHESTRATOR
   local _advise_only
   local _announce_subject _announce_suffix
 
@@ -1062,14 +1042,6 @@ main() {
   # bind-registry` call this phase already makes (issue #2934), not a separate
   # phase.
   phase_registry_proxy_bindings
-
-  # ORCHESTRATOR (issue #2047, ADR 0035 amendment) is the single master-switch
-  # gate, computed once here; the orchestrator-fork-well-formed check
-  # (nix/checks/prompts.nix) pins this as the only non-comment
-  # ORCHESTRATOR_ENABLED test in this file. Computed before
-  # phase_conflict_resolve, whose pass predates any Handoff to read Invoker off.
-  ORCHESTRATOR=""
-  [ -n "${ORCHESTRATOR_ENABLED:-}" ] && ORCHESTRATOR=1
 
   if _is_self_contained; then
     # No repo to clone or explore (issue #2202): stand up an empty working
@@ -1124,7 +1096,7 @@ main() {
   fi
   echo "==> claude ${DISPATCH_ANNOUNCE_VERB} ${_announce_subject}${_announce_suffix}"
   local claude_rc=0
-  run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" "$_handoff" || claude_rc=$?
+  run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" || claude_rc=$?
 
   # SPINDRIFT_OUTCOME required-marker gate (issues #1607, #2044, #2511, #2978): a
   # Driver pass that exits cleanly but leaves the marker missing most often just
@@ -1147,7 +1119,7 @@ main() {
       # second time under the orchestrator (issues #2065, #2975).
       local _outcome_nudge_handoff_file
       _outcome_nudge_handoff_file="$(_stripped_review_handoff)"
-      run_driver_in_env "$_outcome_nudge_prompt" "$_outcome_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+      run_driver_in_env "$_outcome_nudge_prompt" "$_outcome_nudge_handoff_file" "resume" || claude_rc=$?
     fi
   fi
 
@@ -1195,7 +1167,7 @@ main() {
       # pass too (issues #2065, #2975).
       local _pr_intent_nudge_handoff_file
       _pr_intent_nudge_handoff_file="$(_stripped_review_handoff)"
-      run_driver_in_env "$_pr_intent_nudge_prompt" "$_pr_intent_nudge_handoff_file" "resume" "$(printf '%s' "$_handoff" | jq -c '{Invoker}')" || claude_rc=$?
+      run_driver_in_env "$_pr_intent_nudge_prompt" "$_pr_intent_nudge_handoff_file" "resume" || claude_rc=$?
 
       # Both logs were reassigned by the resume call above, so --log-path scans
       # the resumed pass's own raw log for a genuine PR-intent marker and
