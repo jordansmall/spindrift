@@ -23,6 +23,10 @@ var fakes = map[string]func(args []string) int{
 	"podman": podmanMain,
 	"docker": podmanMain,
 	"bwrap":  bwrapMain,
+	// claude and orchestrator stand in for the Driver CLI and the in-box
+	// orchestrator when a seam test runs the box binary.
+	"claude":       driverMain,
+	"orchestrator": orchestratorMain,
 }
 
 // Main is the TestMain hook: invoked under a registered tool name the test
