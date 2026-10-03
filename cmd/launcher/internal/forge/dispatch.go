@@ -12,7 +12,7 @@ const (
 	Dispatchable DispatchState = iota
 	InProgress
 	Complete    // agent work merged and green
-	Failed      // box exited non-zero; needs human triage
+	Failed      // the run failed; needs human triage (per-kind meaning on each kind's failed label)
 	Recoverable // work is salvageable; needs recovery, not a fresh dispatch
 	Ambiguous   // title/body describe materially unrelated work; needs human triage
 	// Untriaged is not a real tracker state. It is the "from" state that a

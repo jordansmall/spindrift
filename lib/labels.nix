@@ -54,7 +54,7 @@ in
       role = "Failed";
       name = schema.failedLabel.default;
       color = "d93f0b";
-      description = "Box exited non-zero; needs human triage";
+      description = "Box failed or blocked, or its PR could not land; needs human triage";
     }
     {
       role = "Complete";
