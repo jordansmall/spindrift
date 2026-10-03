@@ -242,6 +242,9 @@ wins over the flake setting this release — deprecated, and the launcher warns
 with the flag/settings equivalent when it finds one — but env's role shrinks
 to secrets and internal launcher→Box plumbing from here on; see
 [`MIGRATING.md`](../MIGRATING.md).
+A set-but-empty bool knob (e.g. `--orchestrator=false`, or `AUTO_FORMAT=` in the
+env) is an explicit off that beats a document value of on; for every other knob
+an empty env value still means unset (issue #4290).
 `spindrift --help` stays scannable; the full generated table lives in
 `man spindrift` (and `spindrift --help --all` for the same thing in the
 terminal). Bare `spindrift` with no subcommand — or an unrecognized
@@ -1934,9 +1937,9 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
              ├─ run PREFETCH (optional cache warm-up)
              └─ run_driver_in_env  (assembles the prompt/--agents JSON, mounts
                 the session cache, then hands off to one of:)
-                ├─ driver-exec                 (default: one Driver pass)
+                ├─ driver-exec                 (ORCHESTRATOR_ENABLED off: one Driver pass)
                 │  └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-                └─ orchestrator                (ORCHESTRATOR_ENABLED=1: N passes)
+                └─ orchestrator                (ORCHESTRATOR_ENABLED on, the default: N passes)
                    └─ driver-exec × N, one fresh Driver session per pass,
                       seeded from a run-state handoff file — see [In-box
                       orchestrator](#in-box-orchestrator)
@@ -2037,11 +2040,14 @@ surfaces as a `merge-blocked` comment on the issue, not a crash.
 
 ### In-box orchestrator
 
-`ORCHESTRATOR_ENABLED` (default off, `boxEnv`-only — see `lib/env-schema.nix`)
-swaps which binary `run_driver_in_env` hands the assembled prompt/`--agents`/
-session flags to. Off, `entrypoint.sh` calls `driver-exec` directly and the
-box makes exactly one Driver pass, as it always has. On, the identical flag
-set goes to `orchestrator` (`cmd/launcher/orchestrator`) instead — a second
+`ORCHESTRATOR_ENABLED` (default on since issue #4290, `boxEnv`-only — see
+`lib/env-schema.nix`) swaps which binary `run_driver_in_env` hands the
+assembled prompt/`--agents`/session flags to. Off (`orchestrator.enable =
+false`), `entrypoint.sh` calls `driver-exec` directly and the box makes
+exactly one Driver pass — the legacy path, kept selectable until [ADR
+0058](adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md)'s
+Box-main port removes it. On, the identical flag set goes to
+`orchestrator` (`cmd/launcher/orchestrator`) instead — a second
 in-box Go binary, built the same hermetic way as the launcher itself
 ([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)) — which loops
 `driver-exec` for as many passes as the implementor's own review verdicts and

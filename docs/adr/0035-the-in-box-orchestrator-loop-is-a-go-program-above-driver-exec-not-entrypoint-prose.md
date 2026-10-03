@@ -133,7 +133,8 @@ Concretely:
   the opencode Driver rather than solved speculatively here.
 - Default is off (`ORCHESTRATOR_ENABLED=false`); every existing dispatch
   keeps its current single-pass `driver-exec` behavior unchanged until an
-  operator opts in.
+  operator opts in. (Amended by issue #4290: the default is now on; see the
+  amendment below.)
 
 ## Amendment (issue #2047): `ORCHESTRATOR_ENABLED` is a master feature-flag switch, not merely a binary swap
 
@@ -180,3 +181,23 @@ as the off-arm across a sustained default-on run (the exact dispatch-count/
 duration threshold for "sustained" is fixed when the flag is actually
 flipped to default-on, not speculatively here). The tracking issue for that
 deletion is filed only once the condition is observed to hold, not now.
+(Amended by issue #4290: the default is now on, so the first condition holds;
+see the amendment below for the sustained-run gate.)
+
+## Amendment (issue #4290): the default flips to on
+
+The "Default is off" consequence no longer holds, and the Demolition
+trigger's first condition is now met. The second, the A/B harness's
+sustained-run gate, no longer applies: [ADR
+0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md)'s port
+of the Box main to Go removes the off-path instead, and this flip is its
+prerequisite. Issue #4290 flipped `ORCHESTRATOR_ENABLED` to default on, one
+line in the env schema (`orchestratorEnabled` in `lib/env-schema.nix`),
+shipping in 0.22.0.
+
+Setting it off (`orchestrator.enable = false`) still selects the direct
+`driver-exec` path, so the Migration stance holds as written: the off-path is
+legacy and stays only until that port removes it, with its registry rows and
+gate. Because the default now builds orchestrator-on, a custom `reviewPrompt`
+missing the `VERDICT:` marker fails at build time unless the Consumer sets
+the switch off.

@@ -1,5 +1,21 @@
 # Migration Guide
 
+## `ORCHESTRATOR_ENABLED` defaults to on (issue #4290)
+
+Since v0.22.0, an unset `ORCHESTRATOR_ENABLED` runs the in-box orchestrator
+(a multi-pass implement, code-owned review, fix loop) instead of the direct
+single-pass `driver-exec` path. Set `orchestrator.enable = false` (settings
+`ORCHESTRATOR_ENABLED`) to keep the direct path. That path is legacy: it goes
+away with the Box-main port of [ADR
+0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md)
+(spec #4275).
+
+A Consumer whose custom `reviewPrompt` lacks the `VERDICT:` marker now fails
+at build time by default, because the orchestrator-on build-time reject
+applies to the new default. Add the marker to the prompt, or set
+`orchestrator.enable = false`. See [In-box
+orchestrator](docs/reference.md#in-box-orchestrator).
+
 ## `BOX_SIGNAL_CARRIER` defaults to `socket` (issue #4376)
 
 Since v0.22.0, an unset `BOX_SIGNAL_CARRIER` means the Signal socket: the
