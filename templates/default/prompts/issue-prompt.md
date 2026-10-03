@@ -110,7 +110,7 @@ unit (domain change, then wiring, then tests) so each stands alone.
 
 ${COMMIT_REWORK_ORCHESTRATOR_STEP}${COMMIT_PUSH_READ_WRITE_STEP}${COMMIT_PUSH_READ_ONLY_STEP}# REVIEW
 
-${REVIEW_LOOP_INLINE_STEP}${REVIEW_LOOP_ORCHESTRATOR_STEP}${LAND_PASS_ORDER_ORCHESTRATOR_STEP}${FILE_ISSUES_DIRECT_STEP}${FILE_ISSUES_RELAY_STEP}${FILE_ISSUES_RELAY_SOCKET_STEP}# LAND THE CHANGE
+${REVIEW_LOOP_ORCHESTRATOR_STEP}${LAND_PASS_ORDER_ORCHESTRATOR_STEP}${FILE_ISSUES_DIRECT_STEP}${FILE_ISSUES_RELAY_STEP}${FILE_ISSUES_RELAY_SOCKET_STEP}# LAND THE CHANGE
 
 Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
 unsure):
@@ -166,7 +166,7 @@ here).
 This grammar's leading token is load-bearing (ADR 0035): the in-box
 orchestrator's scanPassLog greps for it verbatim (via
 `outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
-loop to single-pass on ORCHESTRATOR_ENABLED runs.
+loop to single-pass.
 
 Invalid — the smallest fragment that identifies each failure, never a
 whole line worth copying:

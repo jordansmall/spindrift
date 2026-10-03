@@ -530,7 +530,7 @@ let
       null;
   buildTimeRejectVerdicts = promptContract.buildTimeRejectVerdicts {
     staticGates = {
-      orchestratorEnabled = mergedDefaults.orchestratorEnabled == true;
+      reviewPrompt = true;
       readOnlyResearch = mergedDefaults.boxForgeAndIssueAccess == "read-only";
     };
     contentByRowId = {

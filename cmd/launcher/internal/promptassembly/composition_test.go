@@ -14,7 +14,6 @@ func TestComposeReconcilesAgainstAssemble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
 	orchestratorEnv := coveredEnv()
-	orchestratorEnv.OrchestratorEnabled = true
 
 	researchEnv := coveredEnv()
 	researchEnv.DispatchKind = "research"
@@ -73,9 +72,8 @@ func TestComposeReconcilesAgainstAssemble(t *testing.T) {
 func TestComposePassKindDerivation(t *testing.T) {
 	reg := loadTestRegistry(t)
 
-	t.Run("orchestrator on: five passes across two templates", func(t *testing.T) {
+	t.Run("fresh work: five passes across two templates", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 
 		comp, err := Compose(env, reg, nil)
 		if err != nil {
@@ -100,8 +98,10 @@ func TestComposePassKindDerivation(t *testing.T) {
 		}
 	})
 
-	t.Run("legacy: single pass on issue-prompt.md", func(t *testing.T) {
-		comp, err := Compose(coveredEnv(), reg, nil)
+	t.Run("fix pass: single legacy pass on fix-prompt.md", func(t *testing.T) {
+		env := coveredEnv()
+		env.FixPass = 1
+		comp, err := Compose(env, reg, nil)
 		if err != nil {
 			t.Fatalf("Compose: %v", err)
 		}
@@ -111,7 +111,7 @@ func TestComposePassKindDerivation(t *testing.T) {
 		if got, want := comp.Passes[0].Pass, passmachine.KindLegacy.ManifestKind(); got != want {
 			t.Errorf("Passes[0].Pass = %q, want %q", got, want)
 		}
-		if got, want := comp.Passes[0].Template, "issue-prompt.md"; got != want {
+		if got, want := comp.Passes[0].Template, "fix-prompt.md"; got != want {
 			t.Errorf("Passes[0].Template = %q, want %q", got, want)
 		}
 	})
@@ -221,7 +221,6 @@ func TestComposeAttribution(t *testing.T) {
 func TestComposeCarriedTextTargeting(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 
 	const everyText = "shared handoff text"
 	const fixText = "reviewer findings text"
@@ -267,7 +266,6 @@ func TestComposeCarriedTextTargeting(t *testing.T) {
 func TestDiffPasses(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 
 	comp, err := Compose(env, reg, nil)
 	if err != nil {
@@ -451,7 +449,6 @@ func TestDiffPassesHandConstructed(t *testing.T) {
 func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 
 	carried := []CarriedText{
 		{Name: "ISSUE_NUMBER", Text: "carried block text"},
@@ -499,7 +496,6 @@ func TestComposeCarriedNoDuplicateSources(t *testing.T) {
 func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 
 	carried := []CarriedText{{Pass: "settel", Name: "typo", Text: "x"}}
 
@@ -525,7 +521,6 @@ func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
 	baseEnv.IssueText = "issue body text"
 
 	orchestratorEnv := baseEnv
-	orchestratorEnv.OrchestratorEnabled = true
 
 	cases := []struct {
 		name string

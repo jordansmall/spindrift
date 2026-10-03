@@ -40,8 +40,6 @@ func coveredEnv() Env {
 		BoxWriteEnabled:      true,
 		DispatchKind:         "work",
 		FixPass:              0,
-		OrchestratorEnabled:  false,
-		ReviewLoopInline:     true,
 		SkillsFound:          "caveman, tdd, commit, code-review",
 		CavemanSkillBaked:    true,
 		TDDSkillBaked:        true,
@@ -130,11 +128,8 @@ func TestAssembleCoveredCellRendersPrompt(t *testing.T) {
 		t.Errorf("Prompt still contains an unsubstituted ${...} allowlisted token:\n%s", result.Prompt)
 	}
 
-	if !strings.Contains(result.Prompt, "Before the PR, spawn a fresh `reviewer` subagent") {
-		t.Errorf("Prompt missing REVIEW_LOOP_INLINE fragment text")
-	}
-	if strings.Contains(result.Prompt, "REVIEW_LOOP_ORCHESTRATOR_STEP") {
-		t.Errorf("Prompt contains a literal unsubstituted REVIEW_LOOP_ORCHESTRATOR_STEP token")
+	if !strings.Contains(result.Prompt, "Review is handled by the orchestrator as a separate, code-owned pass") {
+		t.Errorf("Prompt missing review-loop-orchestrator.md fragment text")
 	}
 
 	if !strings.Contains(result.Prompt, "via GitHub") {
@@ -421,8 +416,8 @@ func TestAssembleHandoff(t *testing.T) {
 				t.Fatalf("Assemble: %v", err)
 			}
 
-			if result.Handoff.Invoker != "driver-exec" {
-				t.Errorf("Handoff.Invoker = %q, want driver-exec", result.Handoff.Invoker)
+			if result.Handoff.Invoker != "orchestrator" {
+				t.Errorf("Handoff.Invoker = %q, want orchestrator", result.Handoff.Invoker)
 			}
 			if result.Handoff.SessionMode != tc.wantMode {
 				t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, tc.wantMode)
@@ -430,8 +425,8 @@ func TestAssembleHandoff(t *testing.T) {
 			if result.Handoff.ReviewPromptFile != "" {
 				t.Errorf("Handoff.ReviewPromptFile = %q, want empty", result.Handoff.ReviewPromptFile)
 			}
-			if result.ReviewPromptText != "" {
-				t.Errorf("ReviewPromptText = %q, want empty", result.ReviewPromptText)
+			if result.ReviewPromptText == "" {
+				t.Error("ReviewPromptText is empty, want the rendered review-prompt.md")
 			}
 			if result.Handoff.ReviewModel != "" {
 				t.Errorf("Handoff.ReviewModel = %q, want empty", result.Handoff.ReviewModel)
@@ -746,8 +741,8 @@ func TestAssembleWorkerPromptBudgetCheckpointAndBatchedEdits(t *testing.T) {
 }
 
 // Issue #3157's SCOUT_PROVISIONED/SCOUT_ABSENT fork of the `# SCOUT`
-// section, an exactly-one-on pair like REVIEW_LOOP_INLINE and
-// REVIEW_LOOP_ORCHESTRATOR. Each arm must carry only its own text, with no
+// section, an exactly-one-on pair like TDD_BAKED/TDD_UNBAKED. Each arm must
+// carry only its own text, with no
 // unsubstituted ${SCOUT_DELEGATE_STEP}/${SCOUT_ABSENT_STEP} left behind.
 func TestAssembleIssuePromptScoutSection(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -1009,9 +1004,6 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 
 	t.Run("skills present", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
-		env.ReviewLoopInline = false
-		env.ReviewLoopOrchestrator = true
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -1032,9 +1024,6 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 
 	t.Run("skills absent", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
-		env.ReviewLoopInline = false
-		env.ReviewLoopOrchestrator = true
 		env.SkillsFound = ""
 		env.CavemanSkillBaked = false
 		env.TDDSkillBaked = false
@@ -1057,9 +1046,6 @@ func TestAssembleReviewPromptCaveman(t *testing.T) {
 
 	t.Run("only caveman skill absent", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
-		env.ReviewLoopInline = false
-		env.ReviewLoopOrchestrator = true
 		env.CavemanSkillBaked = false
 
 		result, err := Assemble(env, reg)
@@ -1349,7 +1335,7 @@ func TestAssembleResearchSelfContainedRendersSelfContainedPrompt(t *testing.T) {
 
 // Issue #2593 (ADR 0041): with the Filer provisioned, the FILE FINDINGS
 // section renders in both research prompts unconditionally, with no
-// orchestrator or BoxWriteEnabled condition (gates_tracker.go's
+// BoxWriteEnabled condition (gates_tracker.go's
 // researchForceRelay), and never renders without the Filer.
 func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -1367,7 +1353,6 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 			env.SelfContained = selfContained
 			env.FilerEnabled = true
 			env.BoxWriteEnabled = true
-			env.OrchestratorEnabled = false
 
 			result, err := Assemble(env, reg)
 			if err != nil {
@@ -1408,28 +1393,25 @@ func TestAssembleResearchFileFindingsRelay(t *testing.T) {
 		})
 
 		for _, boxWriteEnabled := range []bool{true, false} {
-			for _, orchestratorEnabled := range []bool{true, false} {
-				for _, signalCarrier := range []string{"", "log", "socket"} {
-					boxWriteEnabled, orchestratorEnabled, signalCarrier := boxWriteEnabled, orchestratorEnabled, signalCarrier
-					t.Run(fmt.Sprintf("%s/never direct-file boxWrite=%v orchestrator=%v carrier=%q", name, boxWriteEnabled, orchestratorEnabled, signalCarrier), func(t *testing.T) {
-						env := coveredEnv()
-						env.DispatchKind = "research"
-						env.SelfContained = selfContained
-						env.FilerEnabled = true
-						env.BoxWriteEnabled = boxWriteEnabled
-						env.OrchestratorEnabled = orchestratorEnabled
-						env.SignalCarrier = signalCarrier
+			for _, signalCarrier := range []string{"", "log", "socket"} {
+				boxWriteEnabled, signalCarrier := boxWriteEnabled, signalCarrier
+				t.Run(fmt.Sprintf("%s/never direct-file boxWrite=%v carrier=%q", name, boxWriteEnabled, signalCarrier), func(t *testing.T) {
+					env := coveredEnv()
+					env.DispatchKind = "research"
+					env.SelfContained = selfContained
+					env.FilerEnabled = true
+					env.BoxWriteEnabled = boxWriteEnabled
+					env.SignalCarrier = signalCarrier
 
-						result, err := Assemble(env, reg)
-						if err != nil {
-							t.Fatalf("Assemble: %v", err)
-						}
+					result, err := Assemble(env, reg)
+					if err != nil {
+						t.Fatalf("Assemble: %v", err)
+					}
 
-						if strings.Contains(result.Prompt, "gh issue create --title") {
-							t.Errorf("Prompt contains filer-file-direct.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
-						}
-					})
-				}
+					if strings.Contains(result.Prompt, "gh issue create --title") {
+						t.Errorf("Prompt contains filer-file-direct.md's direct-file literal, want never in a research prompt: %q", result.Prompt)
+					}
+				})
 			}
 		}
 	}
@@ -1448,7 +1430,6 @@ func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 		env.DispatchKind = "research"
 		env.FilerEnabled = true
 		env.BoxWriteEnabled = true
-		env.OrchestratorEnabled = false
 		env.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
 		env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
 
@@ -1473,7 +1454,6 @@ func TestAssembleFilerLabelRelayStepByKind(t *testing.T) {
 		env := coveredEnv()
 		env.FilerEnabled = true
 		env.BoxWriteEnabled = false
-		env.OrchestratorEnabled = true
 		env.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
 		env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
 
@@ -1838,7 +1818,6 @@ func TestAssembleWorkPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *testi
 	base := coveredEnv()
 	base.FilerEnabled = true
 	base.BoxWriteEnabled = false
-	base.OrchestratorEnabled = true
 	base.AgentsJSONTemplate = `{"filer":{"model":"m"}}`
 	base.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
 
@@ -1916,7 +1895,6 @@ func TestAssembleResearchPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *t
 	base.DispatchKind = "research"
 	base.FilerEnabled = true
 	base.BoxWriteEnabled = true
-	base.OrchestratorEnabled = false
 
 	logEnv := base
 	logEnv.SignalCarrier = "log"
@@ -2078,6 +2056,13 @@ func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	if err := os.WriteFile(
 		filepath.Join(promptsFixtureDir, "issue-prompt.md"),
 		[]byte("# TASK\n\nImplement GitHub issue #${ISSUE_NUMBER}.\n\n# COMMS\n\nalready here\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(promptsFixtureDir, "review-prompt.md"),
+		[]byte("# REVIEW\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -2310,7 +2295,6 @@ func TestAssembleUnsupportedCellDefaultsCovered(t *testing.T) {
 func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x","effort":"review-effort-x"},"scout":{"model":"scout-model-y"}}`
 	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md"}`
 	env.IssueText = "issue body text"
@@ -2364,39 +2348,27 @@ func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	}
 }
 
-// Issue #2698's commit-rework-orchestrator.md shares the
-// REVIEW_LOOP_ORCHESTRATOR gate, so it renders only with the orchestrator
-// on. Only the marker is asserted here; byte-identity of the inline prompt
+// Issue #2698's commit-rework-orchestrator.md is an ungated row, so it
+// renders on every fresh-work prompt.
+// Only the marker is asserted here; byte-identity of the prompt
 // is what the golden fixtures in tests/testdata/prompt-assembly-golden pin.
 func TestAssembleOrchestratorCommitReworkFragment(t *testing.T) {
 	reg := loadTestRegistry(t)
 	const marker = "fold each fix into the commit it logically belongs to"
 
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
-	env.ReviewLoopInline = false
-	env.ReviewLoopOrchestrator = true
 
 	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 	if !strings.Contains(result.Prompt, marker) {
-		t.Errorf("Prompt missing commit-rework-orchestrator.md fragment text (orchestrator on):\n%s", result.Prompt)
-	}
-
-	offEnv := coveredEnv()
-	offResult, err := Assemble(offEnv, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-	if strings.Contains(offResult.Prompt, marker) {
-		t.Errorf("Prompt contains commit-rework-orchestrator.md fragment text with orchestrator off, want absent:\n%s", offResult.Prompt)
+		t.Errorf("Prompt missing commit-rework-orchestrator.md fragment text:\n%s", result.Prompt)
 	}
 }
 
-// Issue #3214's land-pass-order-orchestrator.md shares the
-// REVIEW_LOOP_ORCHESTRATOR gate with the two fragments above. This also
+// Issue #3214's land-pass-order-orchestrator.md is ungated like the
+// two fragments above. This also
 // pins the registry row's gate and var, which a marker-presence assertion
 // alone would not catch if the row were registered under the wrong name.
 func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
@@ -2412,8 +2384,8 @@ func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
 	if row == nil {
 		t.Fatalf("registry missing a row for land-pass-order-orchestrator.md")
 	}
-	if row.Gate != "REVIEW_LOOP_ORCHESTRATOR" {
-		t.Errorf("land-pass-order-orchestrator.md row gate = %q, want REVIEW_LOOP_ORCHESTRATOR", row.Gate)
+	if row.Gate != "" {
+		t.Errorf("land-pass-order-orchestrator.md row gate = %q, want ungated", row.Gate)
 	}
 	if row.Var != "LAND_PASS_ORDER_ORCHESTRATOR_STEP" {
 		t.Errorf("land-pass-order-orchestrator.md row var = %q, want LAND_PASS_ORDER_ORCHESTRATOR_STEP", row.Var)
@@ -2422,25 +2394,13 @@ func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
 	const marker = "This ordering supersedes the COMMIT section's"
 
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
-	env.ReviewLoopInline = false
-	env.ReviewLoopOrchestrator = true
 
 	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 	if !strings.Contains(result.Prompt, marker) {
-		t.Errorf("Prompt missing land-pass-order-orchestrator.md fragment text (orchestrator on):\n%s", result.Prompt)
-	}
-
-	offEnv := coveredEnv()
-	offResult, err := Assemble(offEnv, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-	if strings.Contains(offResult.Prompt, marker) {
-		t.Errorf("Prompt contains land-pass-order-orchestrator.md fragment text with orchestrator off, want absent:\n%s", offResult.Prompt)
+		t.Errorf("Prompt missing land-pass-order-orchestrator.md fragment text:\n%s", result.Prompt)
 	}
 }
 
@@ -2450,7 +2410,6 @@ func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
 func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.AgentsJSONTemplate = `{"scout":{"model":"scout-model-y"}}`
 
 	result, err := Assemble(env, reg)
@@ -2478,7 +2437,6 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 
 	result, err := Assemble(env, reg)
 	if err != nil {
@@ -2502,25 +2460,23 @@ func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
 	}
 }
 
-// The orchestrator on a read-only box is a covered cell now, the filer
+// A read-only box is a covered cell now, the filer
 // relay precondition axis from issue #2353.
 func TestAssembleOrchestratorBoxReadOnlyCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.BoxWriteEnabled = false
 
 	if _, err := Assemble(env, reg); err != nil {
-		t.Errorf("Assemble: %v, want nil error (orchestrator on + box read-only is covered)", err)
+		t.Errorf("Assemble: %v, want nil error (box read-only is covered)", err)
 	}
 }
 
-// The skills-absent cell with the orchestrator on (issue #2353) is covered,
+// The skills-absent cell (issue #2353) is covered,
 // and the prompt omits the skill-preamble text.
 func TestAssembleOrchestratorSkillsAbsentCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.SkillsFound = ""
 	env.CavemanSkillBaked = false
 	env.TDDSkillBaked = false
@@ -2530,28 +2486,6 @@ func TestAssembleOrchestratorSkillsAbsentCovered(t *testing.T) {
 	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
-	}
-
-	if strings.Contains(result.Prompt, "Skills available:") {
-		t.Errorf("Prompt contains skill-preamble.md fragment text, want it absent (SKILLS_FOUND gate off):\n%s", result.Prompt)
-	}
-}
-
-// The skills-absent cell for the orchestrator-off branch (issue #2354).
-// Most bats fixtures and many real Consumers bake zero skills, so this cell
-// must be covered whichever way the orchestrator flag points.
-func TestAssembleOrchestratorOffSkillsAbsentCovered(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.SkillsFound = ""
-	env.CavemanSkillBaked = false
-	env.TDDSkillBaked = false
-	env.CommitSkillBaked = false
-	env.CodeReviewSkillBaked = false
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v, want nil error (orchestrator off + skills fully absent is covered)", err)
 	}
 
 	if strings.Contains(result.Prompt, "Skills available:") {
@@ -2597,7 +2531,6 @@ func TestAssemblePartialSkillsCovered(t *testing.T) {
 func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.SkillsFound = "tdd"
 	env.CavemanSkillBaked = false
 	env.TDDSkillBaked = true
@@ -2606,7 +2539,7 @@ func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 
 	result, err := Assemble(env, reg)
 	if err != nil {
-		t.Fatalf("Assemble: %v, want nil error (orchestrator on + partial skill-baked combination is covered)", err)
+		t.Fatalf("Assemble: %v, want nil error (partial skill-baked combination is covered)", err)
 	}
 
 	if !strings.Contains(result.Prompt, tddAnchorClause) {
@@ -2693,7 +2626,6 @@ func TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference(t *testin
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			env := coveredEnv()
-			env.OrchestratorEnabled = true
 			env.WorkerProvisioned = true
 			env.AgentsJSONTemplate = `{"worker":{"model":"x"}}`
 			env.AgentsPromptFiles = `{"worker":"worker-prompt.md"}`
@@ -2719,21 +2651,20 @@ func TestAssembleOrchestratorCoordinatorTDDBakedHasNoDanglingReference(t *testin
 	}
 }
 
-// The orchestrator on a fix pass is a covered cell (issue #2354), reachable
-// in production because ORCHESTRATOR_ENABLED is a static per-Consumer knob
-// forwarded unchanged to fix-pass Boxes. ReviewPromptFile stays empty, since
+// A fix pass is a covered cell (issue #2354), reachable
+// in production because fix-pass Boxes run the same orchestrator path as
+// fresh work. ReviewPromptFile stays empty, since
 // only a fresh work dispatch populates it, but ReviewModel still populates:
-// its extraction is unconditional whenever the orchestrator is on.
+// its extraction is unconditional.
 func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.FixPass = 1
 	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
-		t.Fatalf("Assemble: %v, want nil error (orchestrator on + fix pass is covered)", err)
+		t.Fatalf("Assemble: %v, want nil error (fix pass is covered)", err)
 	}
 
 	if !strings.Contains(result.Prompt, "This is a warm fix pass, not a fresh implementation") {
@@ -2746,23 +2677,22 @@ func TestAssembleOrchestratorFixPassCovered(t *testing.T) {
 		t.Errorf("ReviewPromptText = %q, want empty (fix pass, not the default fresh-work-dispatch path)", result.ReviewPromptText)
 	}
 	if result.Handoff.ReviewModel != "review-model-x" {
-		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
+		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional)", result.Handoff.ReviewModel, "review-model-x")
 	}
 }
 
-// The orchestrator on a research dispatch is a covered cell (issue #2354).
+// A research dispatch is a covered cell (issue #2354).
 // ReviewPromptFile stays empty because research never reviews (ADR 0022),
 // while ReviewModel still populates, as in the fix-pass cell above.
 func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.DispatchKind = "research"
 	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
 
 	result, err := Assemble(env, reg)
 	if err != nil {
-		t.Fatalf("Assemble: %v, want nil error (orchestrator on + research kind is covered)", err)
+		t.Fatalf("Assemble: %v, want nil error (research kind is covered)", err)
 	}
 
 	if !strings.Contains(result.Prompt, "This is a research\ndispatch (ADR 0022)") {
@@ -2775,89 +2705,7 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 		t.Errorf("ReviewPromptText = %q, want empty (research dispatch, not the default fresh-work-dispatch path)", result.ReviewPromptText)
 	}
 	if result.Handoff.ReviewModel != "review-model-x" {
-		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional whenever the orchestrator is on)", result.Handoff.ReviewModel, "review-model-x")
-	}
-}
-
-// Regression guard for renderAgentsJSON's signature change (issue #2353):
-// with the orchestrator off, a reviewer key is not dropped. It flows
-// through the generic per-agent injection loop like any other roster entry.
-func TestAssembleOrchestratorOffReviewerFlowsThroughGenericLoop(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
-	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-baked.md"}`
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
-		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
-	}
-	reviewerRaw, ok := parsed["reviewer"]
-	if !ok {
-		t.Fatal("AgentsJSON missing reviewer key, want it present (orchestrator off, no reviewer-drop)")
-	}
-	var reviewer struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-	}
-	if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
-		t.Fatalf("unmarshal reviewer entry: %v", err)
-	}
-	if !strings.Contains(reviewer.Prompt, "/tdd") {
-		t.Errorf("reviewer.prompt missing substituted tdd-baked.md content: %q", reviewer.Prompt)
-	}
-	if result.Handoff.ReviewModel != "" {
-		t.Errorf("Handoff.ReviewModel = %q, want empty (orchestrator off)", result.Handoff.ReviewModel)
-	}
-	if result.Handoff.ReviewEffort != "" {
-		t.Errorf("Handoff.ReviewEffort = %q, want empty (orchestrator off)", result.Handoff.ReviewEffort)
-	}
-	if result.Handoff.ReviewPromptFile != "" {
-		t.Errorf("Handoff.ReviewPromptFile = %q, want empty (orchestrator off)", result.Handoff.ReviewPromptFile)
-	}
-	if result.ReviewPromptText != "" {
-		t.Errorf("ReviewPromptText = %q, want empty (orchestrator off)", result.ReviewPromptText)
-	}
-}
-
-// Issue #2707: with the orchestrator off, an inline reviewer entry's prompt
-// still flows through the same gated-fragment substitution as any other
-// roster entry. The golden fixture
-// covered-cell-populated-roster.agents.json used to be the only thing
-// pinning this.
-func TestAssembleOrchestratorOffReviewerGetsCavemanFragment(t *testing.T) {
-	reg := loadTestRegistry(t)
-	env := coveredEnv()
-	env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
-	env.AgentsPromptFiles = `{"reviewer":"fragments/caveman-default-review.md"}`
-
-	result, err := Assemble(env, reg)
-	if err != nil {
-		t.Fatalf("Assemble: %v", err)
-	}
-
-	var parsed map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
-		t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
-	}
-	reviewerRaw, ok := parsed["reviewer"]
-	if !ok {
-		t.Fatal("AgentsJSON missing reviewer key, want it present (orchestrator off, no reviewer-drop)")
-	}
-	var reviewer struct {
-		Model  string `json:"model"`
-		Prompt string `json:"prompt"`
-	}
-	if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
-		t.Fatalf("unmarshal reviewer entry: %v", err)
-	}
-	if !strings.Contains(reviewer.Prompt, "Default to the `/caveman` skill") {
-		t.Errorf("reviewer.prompt missing substituted caveman-default-review.md content: %q", reviewer.Prompt)
+		t.Errorf("Handoff.ReviewModel = %q, want %q (extraction is unconditional)", result.Handoff.ReviewModel, "review-model-x")
 	}
 }
 
@@ -3022,18 +2870,16 @@ func TestAssembleDriverAgentFilesWorkerCavemanAndSkillPreamble(t *testing.T) {
 	})
 }
 
-// The file-based reviewer drop (entrypoint.sh: 1141-1156): with the
-// orchestrator on, reviewer.md's `model:` scalar populates
-// Handoff.ReviewModel and the file is removed, while a non-reviewer roster
-// file still gets its body rewritten.
-func TestAssembleDriverAgentFilesReviewerDropOrchestratorOn(t *testing.T) {
+// The file-based reviewer drop (entrypoint.sh: 1141-1156): reviewer.md's
+// `model:` scalar populates Handoff.ReviewModel and the file is removed, while
+// a non-reviewer roster file still gets its body rewritten.
+func TestAssembleDriverAgentFilesReviewerDrop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 	writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"scout":"fragments/tdd-baked.md","reviewer":"fragments/tdd-baked.md"}`
 
@@ -3066,7 +2912,6 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 
@@ -3084,7 +2929,6 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
 
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 
@@ -3108,7 +2952,6 @@ func TestAssembleReviewOverrides(t *testing.T) {
 
 	t.Run("override wins over the baked reviewer entry", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
 		env.ReviewModelOverride = "env-model"
 		env.ReviewEffortOverride = "env-effort"
@@ -3127,7 +2970,6 @@ func TestAssembleReviewOverrides(t *testing.T) {
 
 	t.Run("partial override leaves the other half on the baked value", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
 		env.ReviewModelOverride = "env-model"
 
@@ -3145,7 +2987,6 @@ func TestAssembleReviewOverrides(t *testing.T) {
 
 	t.Run("override applies with the reviewer opted out of the roster", func(t *testing.T) {
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 		env.AgentsJSONTemplate = `{"scout":{"model":"scout-model-y"}}`
 		env.ReviewModelOverride = "env-model"
 		env.ReviewEffortOverride = "env-effort"
@@ -3167,7 +3008,6 @@ func TestAssembleReviewOverrides(t *testing.T) {
 		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
 		env := coveredEnv()
-		env.OrchestratorEnabled = true
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 		env.ReviewModelOverride = "env-model"
@@ -3178,21 +3018,6 @@ func TestAssembleReviewOverrides(t *testing.T) {
 		}
 		if result.Handoff.ReviewModel != "env-model" {
 			t.Errorf("Handoff.ReviewModel = %q, want %q (dispatch env wins over the file path's frontmatter model)", result.Handoff.ReviewModel, "env-model")
-		}
-	})
-
-	t.Run("orchestrator off ignores the override entirely", func(t *testing.T) {
-		env := coveredEnv()
-		env.AgentsJSONTemplate = `{"reviewer":{"model":"baked-model","effort":"baked-effort"}}`
-		env.ReviewModelOverride = "env-model"
-		env.ReviewEffortOverride = "env-effort"
-
-		result, err := Assemble(env, reg)
-		if err != nil {
-			t.Fatalf("Assemble: %v", err)
-		}
-		if result.Handoff.ReviewModel != "" || result.Handoff.ReviewEffort != "" {
-			t.Errorf("Handoff.ReviewModel/ReviewEffort = (%q,%q), want both empty under driver-exec invoker", result.Handoff.ReviewModel, result.Handoff.ReviewEffort)
 		}
 	})
 }
@@ -3310,7 +3135,6 @@ func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 	}
 
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"reviewer":"fragments/tdd-baked.md"}`
 
@@ -3357,33 +3181,8 @@ func TestAssembleSegmentAttributionMatchesResult(t *testing.T) {
 		}
 
 		assertBodyMatches(t, bodies.base, result.Prompt)
-		if bodies.review != nil {
-			t.Fatalf("expected no review body for a non-orchestrator cell, got %+v", bodies.review)
-		}
-		if result.ReviewPromptText != "" {
-			t.Fatalf("ReviewPromptText = %q, want empty", result.ReviewPromptText)
-		}
-	})
-
-	t.Run("orchestrator on", func(t *testing.T) {
-		env := coveredEnv()
-		env.OrchestratorEnabled = true
-		env.ReviewLoopInline = false
-		env.ReviewLoopOrchestrator = true
-
-		result, err := Assemble(env, reg)
-		if err != nil {
-			t.Fatalf("Assemble: %v", err)
-		}
-
-		bodies, err := assemblePromptBodies(env, reg)
-		if err != nil {
-			t.Fatalf("assemblePromptBodies: %v", err)
-		}
-
-		assertBodyMatches(t, bodies.base, result.Prompt)
 		if bodies.review == nil {
-			t.Fatalf("expected a review body for the orchestrator-on/work/FixPass==0 cell")
+			t.Fatalf("expected a review body for the work/FixPass==0 cell")
 		}
 		assertBodyMatches(t, bodies.review, result.ReviewPromptText)
 	})
@@ -3627,7 +3426,6 @@ func TestAssembleButlerFileFindingsRelay(t *testing.T) {
 	t.Run("filer enabled", func(t *testing.T) {
 		env := butlerEnv()
 		env.FilerEnabled = true
-		env.OrchestratorEnabled = false
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -3692,54 +3490,50 @@ func TestGatesFilerFileRelayResearchAndButlerAreDisjoint(t *testing.T) {
 
 // Butler review findings #1 and #2 (ADR 0056, issue #3880): the butler is
 // AdviseOnly, so it never gets the orchestrator's code-owned review pass
-// (line 426's gate), which means its `reviewer` subagent is the only review
-// a promotion candidate gets, orchestrator on or off. Dropping the reviewer
-// key under ORCHESTRATOR (work's behavior) would leave no finding ever
-// reviewed; rendering it from review-prompt.md (a branch-diff rubric) would
-// leave the reviewer judging an issue, branch, and diff it never has.
+// (the AdviseOnly gate on review-prompt.md), which means its `reviewer`
+// subagent is the only review a promotion candidate gets. Dropping the
+// reviewer key (work's behavior) would leave no finding ever reviewed;
+// rendering it from review-prompt.md (a branch-diff rubric) would leave the
+// reviewer judging an issue, branch, and diff it never has.
 func TestAssembleButlerReviewerKeptAndRendersButlerReviewPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 
-	for _, orchestratorOn := range []bool{true, false} {
-		t.Run(fmt.Sprintf("orchestrator=%v", orchestratorOn), func(t *testing.T) {
-			env := butlerEnv()
-			env.OrchestratorEnabled = orchestratorOn
-			env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
-			env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
+	t.Run("butler", func(t *testing.T) {
+		env := butlerEnv()
+		env.AgentsJSONTemplate = `{"reviewer":{"model":"review-model-x"}}`
+		env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
-			result, err := Assemble(env, reg)
-			if err != nil {
-				t.Fatalf("Assemble: %v", err)
-			}
+		result, err := Assemble(env, reg)
+		if err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
 
-			var parsed map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
-				t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
-			}
-			reviewerRaw, ok := parsed["reviewer"]
-			if !ok {
-				t.Fatalf("AgentsJSON missing reviewer key, want kept for the butler's inline review: %s", result.AgentsJSON)
-			}
-			var reviewer struct {
-				Prompt string `json:"prompt"`
-			}
-			if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
-				t.Fatalf("unmarshal reviewer entry: %v", err)
-			}
-			if !strings.Contains(reviewer.Prompt, "one butler finding handed to you") {
-				t.Errorf("reviewer.prompt = %q, want the rendered butler-review-prompt.md, not review-prompt.md", reviewer.Prompt)
-			}
-			if strings.Contains(reviewer.Prompt, "adversarially review a branch diff") {
-				t.Errorf("reviewer.prompt = %q, want no review-prompt.md content", reviewer.Prompt)
-			}
-			// AdvisoryReviewer only matters once the orchestrator's pass loop
-			// exists to be steered, so it hinges on ORCHESTRATOR too, not
-			// merely on the kind owning a reviewer prompt (issue #3925).
-			if result.Handoff.AdvisoryReviewer != orchestratorOn {
-				t.Errorf("Handoff.AdvisoryReviewer = %v, want %v (orchestrator=%v)", result.Handoff.AdvisoryReviewer, orchestratorOn, orchestratorOn)
-			}
-		})
-	}
+		var parsed map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(result.AgentsJSON), &parsed); err != nil {
+			t.Fatalf("unmarshal AgentsJSON: %v\n%s", err, result.AgentsJSON)
+		}
+		reviewerRaw, ok := parsed["reviewer"]
+		if !ok {
+			t.Fatalf("AgentsJSON missing reviewer key, want kept for the butler's inline review: %s", result.AgentsJSON)
+		}
+		var reviewer struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.Unmarshal(reviewerRaw, &reviewer); err != nil {
+			t.Fatalf("unmarshal reviewer entry: %v", err)
+		}
+		if !strings.Contains(reviewer.Prompt, "one butler finding handed to you") {
+			t.Errorf("reviewer.prompt = %q, want the rendered butler-review-prompt.md, not review-prompt.md", reviewer.Prompt)
+		}
+		if strings.Contains(reviewer.Prompt, "adversarially review a branch diff") {
+			t.Errorf("reviewer.prompt = %q, want no review-prompt.md content", reviewer.Prompt)
+		}
+		// A kind owning a reviewer prompt marks its review advisory so its
+		// verdict never steers the orchestrator's pass loop (issue #3925).
+		if !result.Handoff.AdvisoryReviewer {
+			t.Errorf("Handoff.AdvisoryReviewer = false, want true")
+		}
+	})
 }
 
 // The reviewer's "Exact" rubric line (ADR 0057, issue #4073) only belongs
@@ -3789,7 +3583,7 @@ func TestAssembleButlerReviewerPromptCarriesExactRubricOnlyWithPatchClasses(t *t
 }
 
 // A kind with no reviewer prompt of its own (work, research) never sets
-// AdvisoryReviewer, even under ORCHESTRATOR: its inline reviewer subagent is
+// AdvisoryReviewer: its inline reviewer subagent is
 // dropped there, so no advisory verdict exists to suppress (issue #3925).
 func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -3800,60 +3594,54 @@ func TestAssembleAdvisoryReviewerOnlyForKindWithOwnReviewerPrompt(t *testing.T) 
 			env.DispatchKind = kind
 			if kind == "research" {
 			}
-			env.OrchestratorEnabled = true
 
 			result, err := Assemble(env, reg)
 			if err != nil {
 				t.Fatalf("Assemble: %v", err)
 			}
 			if result.Handoff.AdvisoryReviewer {
-				t.Errorf("Handoff.AdvisoryReviewer = true for kind %q under ORCHESTRATOR, want false", kind)
+				t.Errorf("Handoff.AdvisoryReviewer = true for kind %q, want false", kind)
 			}
 		})
 	}
 }
 
 // The opencode agent-files twin of the test above: reviewer.md must survive
-// orchestratorOn (never removed) and its body must come from the kind's own
-// reviewer prompt, both orchestrator states.
+// (never removed) and its body must come from the kind's own reviewer prompt.
 func TestAssembleButlerDriverAgentFilesReviewerKeptAndRewritten(t *testing.T) {
 	reg := loadTestRegistry(t)
 
-	for _, orchestratorOn := range []bool{true, false} {
-		t.Run(fmt.Sprintf("orchestrator=%v", orchestratorOn), func(t *testing.T) {
-			dir := t.TempDir()
-			writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+	t.Run("butler", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
-			env := butlerEnv()
-			env.OrchestratorEnabled = orchestratorOn
-			env.DriverAgentFilesDir = dir
-			env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
+		env := butlerEnv()
+		env.DriverAgentFilesDir = dir
+		env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
-			if _, err := Assemble(env, reg); err != nil {
-				t.Fatalf("Assemble: %v", err)
-			}
+		if _, err := Assemble(env, reg); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
 
-			body := agentFileBody(t, filepath.Join(dir, "reviewer.md"))
-			if !strings.Contains(body, "one butler finding handed to you") {
-				t.Errorf("reviewer.md body = %q, want the rendered butler-review-prompt.md, not review-prompt.md", body)
-			}
-			if strings.Contains(body, "adversarially review a branch diff") {
-				t.Errorf("reviewer.md body = %q, want no review-prompt.md content", body)
-			}
-		})
-	}
+		body := agentFileBody(t, filepath.Join(dir, "reviewer.md"))
+		if !strings.Contains(body, "one butler finding handed to you") {
+			t.Errorf("reviewer.md body = %q, want the rendered butler-review-prompt.md, not review-prompt.md", body)
+		}
+		if strings.Contains(body, "adversarially review a branch diff") {
+			t.Errorf("reviewer.md body = %q, want no review-prompt.md content", body)
+		}
+	})
 }
 
 // work's reviewer-drop stays exactly as it was (TestAssembleOrchestratorReviewerDrop
 // already pins the JSON path); this pins the opencode agent-files path's twin,
 // which this issue's rewriteAgentFiles signature change could otherwise regress.
-func TestAssembleWorkDriverAgentFilesReviewerStillDroppedOrchestratorOn(t *testing.T) {
+func TestAssembleWorkDriverAgentFilesReviewerStillDropped(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
 	writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
 
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
 	env.DriverAgentFilesDir = dir
 	env.AgentsPromptFiles = `{"reviewer":"review-prompt.md"}`
 
@@ -3862,7 +3650,7 @@ func TestAssembleWorkDriverAgentFilesReviewerStillDroppedOrchestratorOn(t *testi
 	}
 
 	if _, err := os.Stat(filepath.Join(dir, "reviewer.md")); !os.IsNotExist(err) {
-		t.Errorf("reviewer.md still exists (or unexpected stat error %v), want removed under work + ORCHESTRATOR", err)
+		t.Errorf("reviewer.md still exists (or unexpected stat error %v), want removed for work", err)
 	}
 }
 
@@ -3985,6 +3773,7 @@ func TestAssembleFragmentsCoverageRecord(t *testing.T) {
 	}
 	files := map[string]string{
 		"issue-prompt.md":       "base ${VAR_Z}\n",
+		"review-prompt.md":      "review\n",
 		"agent.md":              "agent ${VAR_A} ${VAR_Z} ${VAR_A}\n",
 		"fragments/z-frag.md":   "zed\n",
 		"fragments/a-frag.md":   "ay\n",
@@ -4002,7 +3791,7 @@ func TestAssembleFragmentsCoverageRecord(t *testing.T) {
 		{Gate: "CAVEMAN_BAKED", Fragment: "z-frag.md", Var: "VAR_Z"},
 		{Gate: "CAVEMAN_BAKED", Fragment: "a-frag.md", Var: "VAR_A"},
 		{Gate: "CAVEMAN_BAKED", Fragment: "m-frag.md", Var: "VAR_M"},
-		{Gate: "ORCHESTRATOR", Fragment: "off-frag.md", Var: "VAR_OFF"},
+		{Gate: "TDD_UNBAKED", Fragment: "off-frag.md", Var: "VAR_OFF"},
 	}}
 
 	env := coveredEnv()
@@ -4021,5 +3810,26 @@ func TestAssembleFragmentsCoverageRecord(t *testing.T) {
 	want := []string{"a-frag.md", "z-frag.md"}
 	if !slices.Equal(result.Fragments, want) {
 		t.Fatalf("Fragments = %v, want %v", result.Fragments, want)
+	}
+}
+
+// A row that omits its gate renders unconditionally; a row naming an unknown
+// gate stays off. The ungated rule is what lets the orchestrator fragments
+// drop their old switch gate.
+func TestAssembleUngatedRowRendersUnconditionally(t *testing.T) {
+	reg := Registry{Rows: []FragmentRow{
+		{Fragment: "land-pass-order-orchestrator.md", Var: "LAND_PASS_ORDER_ORCHESTRATOR_STEP"},
+		{Gate: "NO_SUCH_GATE", Fragment: "commit-rework-orchestrator.md", Var: "COMMIT_REWORK_ORCHESTRATOR_STEP"},
+	}}
+
+	result, err := Assemble(coveredEnv(), reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, "This ordering supersedes the COMMIT section's") {
+		t.Errorf("Prompt missing the ungated row's fragment text:\n%s", result.Prompt)
+	}
+	if strings.Contains(result.Prompt, fragmentText(t, "commit-rework-orchestrator.md")) {
+		t.Errorf("Prompt contains the fragment of a row whose gate is unknown, want absent")
 	}
 }

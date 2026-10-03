@@ -37,21 +37,6 @@ func Gates(e Env) map[string]bool {
 	// hunt every dimension solo (issue #3222).
 	g["CODE_REVIEW_UNBAKED"] = !e.CodeReviewSkillBaked
 
-	orchestrator := e.OrchestratorEnabled
-	g["ORCHESTRATOR"] = orchestrator
-
-	// Nix resolves this pairing at eval time (issue #2533), but the two forwards
-	// cross a process boundary independently of ORCHESTRATOR_ENABLED, so version
-	// skew can leave them agreeing instead of exactly one true: an older host
-	// launcher forwards neither, and a stuck forward could set both. Repair from
-	// the live gate, whose knob predates issue #2533 and survives that skew.
-	reviewLoopInline, reviewLoopOrchestrator := e.ReviewLoopInline, e.ReviewLoopOrchestrator
-	if reviewLoopInline == reviewLoopOrchestrator {
-		reviewLoopInline, reviewLoopOrchestrator = !orchestrator, orchestrator
-	}
-	g["REVIEW_LOOP_INLINE"] = reviewLoopInline
-	g["REVIEW_LOOP_ORCHESTRATOR"] = reviewLoopOrchestrator
-
 	// FILER_ENABLED and WORKER_PROVISIONED come from agentsJsonTemplate's
 	// rendered output (issue #2533); SCOUT_PROVISIONED keys off roster
 	// membership instead — see lib/mkHarness.nix's scoutProvisioned comment.
@@ -71,7 +56,7 @@ func Gates(e Env) map[string]bool {
 	g["COORDINATOR_SCOUT_BRIEF"] = e.WorkerProvisioned && e.ScoutProvisioned && landsCode
 	g["WORKER_SCOUT_BRIEF"] = e.ScoutProvisioned && landsCode
 
-	for k, v := range trackerGates(e, orchestrator) {
+	for k, v := range trackerGates(e) {
 		g[k] = v
 	}
 

@@ -36,10 +36,6 @@ type Env struct {
 	PrincipleRedesignFromFirstPrinciplesSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" (PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED)
 	// END GENERATED SKILL-BAKED FIELDS
 
-	// OrchestratorEnabled is the master switch every orchestrator-conditioned
-	// fork reads.
-	OrchestratorEnabled bool // entrypoint.sh: $ORCHESTRATOR_ENABLED presence
-
 	// AgentsJSONTemplate is the nix-baked --agents JSON template, empty when no
 	// subagent model is configured. Assemble parses its JSON content, but the
 	// filer/worker presence facts are no longer re-derived from it: they arrive
@@ -52,14 +48,6 @@ type Env struct {
 	FilerEnabled      bool
 	WorkerProvisioned bool
 	ScoutProvisioned  bool
-
-	// ReviewLoopInline is !OrchestratorEnabled and ReviewLoopOrchestrator is
-	// OrchestratorEnabled, both computed in nix (lib/mkHarness.nix) instead of
-	// in-box (issue #2533). The two cross the process boundary independently, so
-	// Gates repairs the self-contradicting cases, both true or both false, from
-	// the live ORCHESTRATOR gate.
-	ReviewLoopInline       bool
-	ReviewLoopOrchestrator bool
 
 	// IssueTracker selects the per-axis issue-tracker gate family, defaulting to
 	// "github" when empty. The PR-body ticket-reference gates switch on the raw
@@ -172,7 +160,7 @@ type Env struct {
 	// ReviewModelOverride and ReviewEffortOverride carry an operator's explicit
 	// dispatch-time REVIEW_MODEL/REVIEW_EFFORT (issue #3171), forwarded only when
 	// the operator set them, never a schema default, so empty means no override.
-	// When non-empty and the ORCHESTRATOR gate is on, Assemble binds them last,
+	// When non-empty, Assemble binds them last,
 	// over both the AgentsJSONTemplate extraction and the agent-files rewrite.
 	ReviewModelOverride  string // dispatch.go: $BOX_REVIEW_MODEL_OVERRIDE
 	ReviewEffortOverride string // dispatch.go: $BOX_REVIEW_EFFORT_OVERRIDE

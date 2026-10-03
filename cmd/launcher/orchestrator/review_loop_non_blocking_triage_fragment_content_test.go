@@ -30,44 +30,32 @@ func nonBlockingTriageParagraph(t *testing.T, content string) string {
 	return normalizeWhitespace(rest[:endMarkerIdx+len(nonBlockingTriageItemListEndMarker)])
 }
 
-// TestNonBlockingTriageIsRoundAwareAndIssueAnchored guards issue #2701: in both
-// review-loop-inline.md and review-loop-orchestrator.md the shared non-blocking
+// TestNonBlockingTriageIsRoundAwareAndIssueAnchored guards issue #2701: in
+// review-loop-orchestrator.md the non-blocking
 // triage item list must anchor "in scope" to the issue's own acceptance criteria
 // and make item 3's fix-vs-escalate default round-aware, while item 1 stays
-// unconditional. The item list text must also match between the two files. It
+// unconditional. It
 // also guards issue #3610: item 2 (Drop) must stand as a genuine third outcome
 // between items 1 and 3, not collapse back into the old binary fix/escalate
 // triage.
 func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	inline := readPromptFile(t, repoRoot, "fragments/review-loop-inline.md")
 	orchestrator := readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator.md")
 	// A hard-wrapped .md file routinely splits a multi-word phrase across a line
 	// break, which a raw strings.Contains treats as absent.
-	inlineNorm := normalizeWhitespace(inline)
 	orchestratorNorm := normalizeWhitespace(orchestrator)
-	inlineParagraph := nonBlockingTriageParagraph(t, inline)
 	orchestratorParagraph := nonBlockingTriageParagraph(t, orchestrator)
 
-	t.Run("issue-anchored and round-aware keywords present in both files", func(t *testing.T) {
+	t.Run("issue-anchored and round-aware keywords present", func(t *testing.T) {
 		for _, want := range []string{
 			"acceptance criteria",
 			"slice as originally authored",
 			"second review round",
 			"escalate it",
 		} {
-			if !strings.Contains(inlineNorm, want) {
-				t.Errorf("review-loop-inline.md missing %q", want)
-			}
 			if !strings.Contains(orchestratorNorm, want) {
 				t.Errorf("review-loop-orchestrator.md missing %q", want)
 			}
-		}
-	})
-
-	t.Run("shared item list matches between both files", func(t *testing.T) {
-		if inlineParagraph != orchestratorParagraph {
-			t.Errorf("non-blocking triage item list diverges between review-loop-inline.md and review-loop-orchestrator.md:\ninline:\n%s\n\norchestrator:\n%s", inlineParagraph, orchestratorParagraph)
 		}
 	})
 
@@ -77,10 +65,10 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// re-file every trivial out-of-scope finding this change exists to
 		// stop filing. This is the item-list-shape guard's counterpart to the
 		// Nix triage-drop-arm obligation in lib/prompt-contract.nix.
-		item2Idx := strings.Index(inlineParagraph, "2. Drop")
-		item3Idx := strings.Index(inlineParagraph, "3. Escalate")
+		item2Idx := strings.Index(orchestratorParagraph, "2. Drop")
+		item3Idx := strings.Index(orchestratorParagraph, "3. Escalate")
 		if item2Idx == -1 || item3Idx == -1 {
-			t.Fatalf("non-blocking triage paragraph missing item 2 (Drop) or item 3 (Escalate) (2=%v, 3=%v): %q", item2Idx != -1, item3Idx != -1, inlineParagraph)
+			t.Fatalf("non-blocking triage paragraph missing item 2 (Drop) or item 3 (Escalate) (2=%v, 3=%v): %q", item2Idx != -1, item3Idx != -1, orchestratorParagraph)
 		}
 		if item2Idx >= item3Idx {
 			t.Errorf("non-blocking triage items are out of order: want 2. Drop before 3. Escalate; got indices %d, %d", item2Idx, item3Idx)
@@ -89,14 +77,14 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 			"The floor is worth, not certainty",
 			"legitimate third outcome",
 		} {
-			if !strings.Contains(inlineParagraph, want) {
-				t.Errorf("non-blocking triage item 2 (Drop) missing %q: %q", want, inlineParagraph)
+			if !strings.Contains(orchestratorParagraph, want) {
+				t.Errorf("non-blocking triage item 2 (Drop) missing %q: %q", want, orchestratorParagraph)
 			}
 		}
 	})
 
 	t.Run("scope gate sits in item 2's span, not item 3's (issue #3816)", func(t *testing.T) {
-		// A whole-file substring check (inlineNorm, the Nix
+		// A whole-file substring check (orchestratorNorm, the Nix
 		// triage-escape-hatch-scope obligation) can't catch the sentence moving
 		// out of item 2 into the fragment preamble or into item 3 — it would
 		// still find the text somewhere in the file. Slicing at the "2. Drop"
@@ -110,7 +98,6 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 			name      string
 			paragraph string
 		}{
-			{"inline", inlineParagraph},
 			{"orchestrator", orchestratorParagraph},
 		} {
 			item2Idx := strings.Index(tc.paragraph, "2. Drop")
@@ -141,15 +128,14 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 	t.Run("item 3 tiebreak is verbatim round-aware", func(t *testing.T) {
 		// This matches the sentences verbatim rather than on loose keywords, so an
 		// inverted default ("first round escalates, second round fixes") cannot
-		// pass. It checks only inlineParagraph, because the shared-item-list
-		// subtest above already catches an inversion identical in both files.
+		// pass.
 		wantTiebreak := "When unsure whether a finding clears that bar: on the first review round, fix it rather than file it."
-		if !strings.Contains(inlineParagraph, wantTiebreak) {
-			t.Errorf("non-blocking triage item 3 missing the exact round-aware tiebreak sentence: got %q, want it to contain %q", inlineParagraph, wantTiebreak)
+		if !strings.Contains(orchestratorParagraph, wantTiebreak) {
+			t.Errorf("non-blocking triage item 3 missing the exact round-aware tiebreak sentence: got %q, want it to contain %q", orchestratorParagraph, wantTiebreak)
 		}
 		wantDiffGrowthGate := "From the second review round on, escalate it only when fixing it would widen the diff"
-		if !strings.Contains(inlineParagraph, wantDiffGrowthGate) {
-			t.Errorf("non-blocking triage item 3 missing the exact diff-growth-gated escalation sentence: got %q, want it to contain %q", inlineParagraph, wantDiffGrowthGate)
+		if !strings.Contains(orchestratorParagraph, wantDiffGrowthGate) {
+			t.Errorf("non-blocking triage item 3 missing the exact diff-growth-gated escalation sentence: got %q, want it to contain %q", orchestratorParagraph, wantDiffGrowthGate)
 		}
 	})
 
@@ -159,11 +145,11 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// silently stop fixing clearly in-scope findings from round 2 on. Item 1
 		// mentions "earlier rounds" in passing, so this checks for the
 		// round-gating phrase "review round", not the bare word.
-		item2Idx := strings.Index(inlineParagraph, "2. Drop")
+		item2Idx := strings.Index(orchestratorParagraph, "2. Drop")
 		if item2Idx == -1 {
-			t.Fatalf("non-blocking triage paragraph missing item 2 (\"2. Drop\"): %q", inlineParagraph)
+			t.Fatalf("non-blocking triage paragraph missing item 2 (\"2. Drop\"): %q", orchestratorParagraph)
 		}
-		item1Only := inlineParagraph[:item2Idx]
+		item1Only := orchestratorParagraph[:item2Idx]
 		if strings.Contains(item1Only, "review round") {
 			t.Errorf("non-blocking triage item 1 must stay unconditional across every review round, not gated by round: %q", item1Only)
 		}
@@ -180,35 +166,12 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// itself", which excludes a line the branch only edited or deleted)
 		// cannot pass on a loose substring.
 		wantHinge := "Lines this branch itself touched in an earlier round's own absorbed fix count as that surface: they are this branch's own work, so a finding about them is in scope at every round."
-		if !strings.Contains(inlineParagraph, wantHinge) {
-			t.Errorf("review-loop-inline.md non-blocking triage item 1 missing the exact hinge sentence: got %q, want it to contain %q", inlineParagraph, wantHinge)
-		}
 		if !strings.Contains(orchestratorParagraph, wantHinge) {
 			t.Errorf("review-loop-orchestrator.md non-blocking triage item 1 missing the exact hinge sentence: got %q, want it to contain %q", orchestratorParagraph, wantHinge)
 		}
 		deleted := "not whatever surface the diff has since grown to touch"
-		if strings.Contains(inlineParagraph, deleted) {
-			t.Errorf("review-loop-inline.md non-blocking triage item 1 still contains the deleted scope-pin wording %q", deleted)
-		}
 		if strings.Contains(orchestratorParagraph, deleted) {
 			t.Errorf("review-loop-orchestrator.md non-blocking triage item 1 still contains the deleted scope-pin wording %q", deleted)
-		}
-	})
-
-	t.Run("inline round-detection is invocation-count-based and orchestrator-only", func(t *testing.T) {
-		// The inline agent invokes the reviewer itself, in the same turn, so it
-		// counts its own invocations. This subtest requires the same substring in
-		// one file and forbids it in the other, so neither variant can silently
-		// adopt the other's mechanism.
-		const inlineRoundPhrase = "invoked the reviewer exactly once this turn"
-		if !strings.Contains(inlineNorm, inlineRoundPhrase) {
-			t.Errorf("review-loop-inline.md missing its own round-detection mechanism (counting reviewer invocations this turn)")
-		}
-		if strings.Contains(orchestratorNorm, inlineRoundPhrase) {
-			t.Errorf("review-loop-orchestrator.md should not reference counting the agent's own reviewer invocations — each orchestrator pass is a fresh session with no memory of prior ones")
-		}
-		if strings.Contains(inlineNorm, "## Round N") {
-			t.Errorf("review-loop-inline.md should not reference the orchestrator's Findings log Round headers — it has no run-state handoff")
 		}
 	})
 
@@ -221,9 +184,6 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		const orchestratorRoundPhrase = `"## Round N (verdict: ...)" section headers`
 		if !strings.Contains(orchestratorNorm, orchestratorRoundPhrase) {
 			t.Errorf("review-loop-orchestrator.md missing its own round-detection mechanism (counting %s in the Findings log)", orchestratorRoundPhrase)
-		}
-		if strings.Contains(inlineNorm, orchestratorRoundPhrase) {
-			t.Errorf("review-loop-inline.md should not reference counting %s — it has no Findings log", orchestratorRoundPhrase)
 		}
 		wantRoundMapping := `N == 1 means this is the first review round; N > 1 means the second review round or later.`
 		if !strings.Contains(orchestratorNorm, wantRoundMapping) {
@@ -258,9 +218,6 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// terminal APPROVE pass, so "every round" would misdescribe how often it
 		// runs.
 		want := "stays the default regardless of round"
-		if !strings.Contains(inlineNorm, want) {
-			t.Errorf("review-loop-inline.md's opening framing missing %q", want)
-		}
 		if !strings.Contains(orchestratorNorm, want) {
 			t.Errorf("review-loop-orchestrator.md's opening framing missing %q", want)
 		}
@@ -277,8 +234,8 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 			"is still fixed inline, at every round",
 			"Narrowing the round-2 flip to diff growth is this tiebreak's calibration, not a weakening of it.",
 		} {
-			if !strings.Contains(inlineParagraph, want) {
-				t.Errorf("non-blocking triage item 3 missing the AC1 diff-growth-gated sentence: got %q, want it to contain %q", inlineParagraph, want)
+			if !strings.Contains(orchestratorParagraph, want) {
+				t.Errorf("non-blocking triage item 3 missing the AC1 diff-growth-gated sentence: got %q, want it to contain %q", orchestratorParagraph, want)
 			}
 		}
 	})
@@ -287,9 +244,6 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// Blocking findings are fixed the round they are raised, every round,
 		// under the separate BLOCK loop and blocking-verdict handling each file
 		// already has above the non-blocking triage section.
-		if !strings.Contains(inlineNorm, "applies only to the non-blocking triage below, not the BLOCK loop above") {
-			t.Errorf("review-loop-inline.md missing the sentence scoping round-awareness to non-blocking triage only, not the BLOCK loop")
-		}
 		if !strings.Contains(orchestratorNorm, "applies only to the non-blocking triage below, not the blocking-verdict handling above") {
 			t.Errorf("review-loop-orchestrator.md missing the sentence scoping round-awareness to non-blocking triage only, not blocking-verdict handling")
 		}

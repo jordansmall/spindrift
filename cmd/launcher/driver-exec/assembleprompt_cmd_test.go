@@ -92,8 +92,8 @@ func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 	if err := json.Unmarshal(handoffBytes, &handoff); err != nil {
 		t.Fatalf("unmarshal handoff output: %v\n%s", err, handoffBytes)
 	}
-	if handoff.Invoker != "driver-exec" {
-		t.Errorf("handoff.Invoker = %q, want driver-exec", handoff.Invoker)
+	if handoff.Invoker != "orchestrator" {
+		t.Errorf("handoff.Invoker = %q, want orchestrator", handoff.Invoker)
 	}
 }
 
@@ -184,6 +184,10 @@ func issuePromptDirLackingSpindriftPRIntent(t *testing.T) string {
 	content := "# TASK\n\nWork issue #${ISSUE_NUMBER}: ${ISSUE_TITLE}\n\nNo PR-intent marker here.\n"
 	if err := os.WriteFile(filepath.Join(dir, "issue-prompt.md"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write issue-prompt.md: %v", err)
+	}
+	// A fresh work dispatch always renders the review prompt, so it must exist.
+	if err := os.WriteFile(filepath.Join(dir, "review-prompt.md"), []byte("VERDICT: APPROVE\n"), 0o644); err != nil {
+		t.Fatalf("write review-prompt.md: %v", err)
 	}
 	return dir
 }
@@ -381,10 +385,8 @@ func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 // prompt is unambiguous. file-issues-direct.md and file-issues-relay.md share
 // filerEnabledMarker, and both forks require e.FilerEnabled.
 const (
-	filerEnabledMarker           = "# FILE ISSUES"
-	workerProvisionedMarker      = "rather than editing the source yourself"
-	reviewLoopInlineMarker       = "Do NOT review inline"
-	reviewLoopOrchestratorMarker = "Review is handled by the orchestrator as a separate"
+	filerEnabledMarker      = "# FILE ISSUES"
+	workerProvisionedMarker = "rather than editing the source yourself"
 )
 
 func assemblePromptForTest(t *testing.T, dir string, args []string) string {
@@ -448,40 +450,6 @@ func TestRunAssemblePrompt_WorkerProvisionedEnvVarReachesPrompt(t *testing.T) {
 			got := strings.Contains(prompt, workerProvisionedMarker)
 			if got != provisioned {
 				t.Errorf("prompt contains %q = %v, want %v (BOX_WORKER_PROVISIONED=%v)", workerProvisionedMarker, got, provisioned, provisioned)
-			}
-		})
-	}
-}
-
-// Each combination must render exactly its own fragment's marker and never
-// the other's, which proves the two review-loop env vars are neither swapped
-// nor aliased (issue #2533 slice 2).
-func TestRunAssemblePrompt_ReviewLoopEnvVarsReachPrompt(t *testing.T) {
-	cases := []struct {
-		name         string
-		inline       bool
-		orchestrator bool
-	}{
-		{"inline on, orchestrator off", true, false},
-		{"inline off, orchestrator on", false, true},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			dir := t.TempDir()
-			promptOutput := filepath.Join(dir, "prompt.txt")
-			agentsJSONOutput := filepath.Join(dir, "agents.json")
-			handoffOutput := filepath.Join(dir, "handoff.json")
-
-			args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-			t.Setenv("BOX_REVIEW_LOOP_INLINE", presenceEnvValue(c.inline))
-			t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", presenceEnvValue(c.orchestrator))
-
-			prompt := assemblePromptForTest(t, dir, args)
-			if gotInline := strings.Contains(prompt, reviewLoopInlineMarker); gotInline != c.inline {
-				t.Errorf("prompt contains %q = %v, want %v (BOX_REVIEW_LOOP_INLINE=%v)", reviewLoopInlineMarker, gotInline, c.inline, c.inline)
-			}
-			if gotOrchestrator := strings.Contains(prompt, reviewLoopOrchestratorMarker); gotOrchestrator != c.orchestrator {
-				t.Errorf("prompt contains %q = %v, want %v (BOX_REVIEW_LOOP_ORCHESTRATOR=%v)", reviewLoopOrchestratorMarker, gotOrchestrator, c.orchestrator, c.orchestrator)
 			}
 		})
 	}
@@ -732,16 +700,13 @@ func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 	}
 }
 
-// The orchestrator-on, default-work, FixPass==0 cell is the only one that
+// The default-work, FixPass==0 cell is the only one that
 // renders a review prompt at all, so both subtests set it up. Omitting the
 // flag on that same cell must still exit 0: a rendered but unrequested review
 // prompt is not an error (issue #2975).
 func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 	orchestratorOnArgs := func(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 		args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-		t.Setenv("ORCHESTRATOR_ENABLED", "1")
-		t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
-		t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
 		return args
 	}
 
@@ -810,15 +775,12 @@ func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 	})
 }
 
-// The orchestrator-on, default-work, FixPass==0 path is the one cell Compose
+// The default-work, FixPass==0 path is the one cell Compose
 // reports five passes for (implement, fix and land share the base body;
 // review and deltaReview share the review body), so the composition tests
 // exercise more than the single-pass legacy default.
 func newOrchestratorOnArgs(t *testing.T, promptOutput, agentsJSONOutput, handoffOutput string) []string {
 	args := coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
-	t.Setenv("ORCHESTRATOR_ENABLED", "1")
-	t.Setenv("BOX_REVIEW_LOOP_INLINE", "")
-	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
 	return args
 }
 

@@ -4,9 +4,8 @@ import "spindrift.dev/launcher/internal/dispatchkind"
 
 // trackerGates computes the Issue-Tracker gate family: the tracker
 // read/write/filer descriptor gates and the PR-body ticket-reference gates.
-// Gates passes orchestratorEnabled in so it stays the one place deriving it;
 // e.FilerEnabled is a plain Env field that nix resolves (issue #2533).
-func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
+func trackerGates(e Env) map[string]bool {
 	g := map[string]bool{}
 
 	// nix resolves the three axis names at eval time (issue #2533). They are
@@ -20,10 +19,10 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	}
 
 	// ADR 0041 / issue #2593: a research dispatch with the Filer provisioned
-	// always uses the relay form, with no ORCHESTRATOR_ENABLED condition and
-	// regardless of BOX_WRITE_ENABLED. Env forwards DispatchKind as the empty
-	// string by default, so the comparison has to resolve that default the
-	// same way every other reader of the field does.
+	// always uses the relay form, regardless of BOX_WRITE_ENABLED. Env
+	// forwards DispatchKind as the empty string by default, so the comparison
+	// has to resolve that default the same way every other reader of the field
+	// does.
 	researchForceRelay := e.descriptor().AdviseOnly && e.FilerEnabled
 
 	// Exactly one of these three ever fires.
@@ -41,17 +40,17 @@ func trackerGates(e Env, orchestratorEnabled bool) map[string]bool {
 	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && (!e.BoxWriteEnabled || researchForceRelay)
 
-	// On a work dispatch the relay activates only on read-only plus the
-	// orchestrator gate; every other combination keeps the direct gh/fj path,
-	// forked further on itFiler. researchForceRelay (ADR 0041, #2593)
-	// activates the relay unconditionally, so it has to be checked first.
+	// On a work dispatch the relay activates on a read-only Box; a writable
+	// Box keeps the direct gh/fj path, forked further on itFiler.
+	// researchForceRelay (ADR 0041, #2593) activates the relay
+	// unconditionally, so it has to be checked first.
 	filerFileRelay := false
 	filerFileDirectGH := false
 	filerFileDirectForgejo := false
 	if e.FilerEnabled {
 		if researchForceRelay {
 			filerFileRelay = true
-		} else if !e.BoxWriteEnabled && orchestratorEnabled {
+		} else if !e.BoxWriteEnabled {
 			filerFileRelay = true
 		} else if itFiler == "FORGEJO" {
 			filerFileDirectForgejo = true

@@ -85,22 +85,17 @@
     "var": "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP"
   },
   {
-    "gate": "REVIEW_LOOP_INLINE",
-    "fragment": "review-loop-inline.md",
-    "var": "REVIEW_LOOP_INLINE_STEP"
-  },
-  {
-    "gate": "REVIEW_LOOP_ORCHESTRATOR",
+    "gate": "",
     "fragment": "review-loop-orchestrator.md",
     "var": "REVIEW_LOOP_ORCHESTRATOR_STEP"
   },
   {
-    "gate": "REVIEW_LOOP_ORCHESTRATOR",
+    "gate": "",
     "fragment": "land-pass-order-orchestrator.md",
     "var": "LAND_PASS_ORDER_ORCHESTRATOR_STEP"
   },
   {
-    "gate": "REVIEW_LOOP_ORCHESTRATOR",
+    "gate": "",
     "fragment": "commit-rework-orchestrator.md",
     "var": "COMMIT_REWORK_ORCHESTRATOR_STEP"
   },

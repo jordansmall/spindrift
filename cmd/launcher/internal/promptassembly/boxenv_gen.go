@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// EnvFromEnviron reads Env's 44 Box-env-sourced fields directly from the
+// EnvFromEnviron reads Env's 41 Box-env-sourced fields directly from the
 // process environment (lib/promptassembly-boxenv.nix, issue #2979): fields
 // driver-exec/assembleprompt_cmd.go previously populated from a
 // hand-declared CLI flag that agent/entrypoint.sh forwarded 1:1 from the
@@ -20,50 +20,47 @@ import (
 // lib/promptassembly-boxenv.nix.
 func EnvFromEnviron() Env {
 	return Env{
-		OrchestratorEnabled:    os.Getenv("ORCHESTRATOR_ENABLED") != "",
-		AgentsJSONTemplate:     os.Getenv("AGENTS_JSON_TEMPLATE"),
-		FilerEnabled:           os.Getenv("BOX_FILER_ENABLED") != "",
-		WorkerProvisioned:      os.Getenv("BOX_WORKER_PROVISIONED") != "",
-		ScoutProvisioned:       os.Getenv("BOX_SCOUT_PROVISIONED") != "",
-		ReviewLoopInline:       os.Getenv("BOX_REVIEW_LOOP_INLINE") != "",
-		ReviewLoopOrchestrator: os.Getenv("BOX_REVIEW_LOOP_ORCHESTRATOR") != "",
-		IssueTracker:           os.Getenv("ISSUE_TRACKER"),
-		TrackerAxisRead:        os.Getenv("BOX_TRACKER_AXIS_READ"),
-		TrackerAxisWrite:       os.Getenv("BOX_TRACKER_AXIS_WRITE"),
-		TrackerAxisFiler:       os.Getenv("BOX_TRACKER_AXIS_FILER"),
-		BoxWriteEnabled:        os.Getenv("BOX_WRITE_ENABLED") != "",
-		LocalIssueReference:    os.Getenv("LOCAL_ISSUE_REFERENCE") != "",
-		CodeForge:              os.Getenv("CODE_FORGE"),
-		ForgeBackend:           os.Getenv("BOX_FORGE_BACKEND"),
-		DispatchKind:           os.Getenv("DISPATCH_KIND"),
-		DispatchKey:            os.Getenv("DISPATCH_KEY"),
-		DispatchKeying:         os.Getenv("DISPATCH_KEYING"),
-		DispatchAnnounceVerb:   os.Getenv("DISPATCH_ANNOUNCE_VERB"),
-		SignalCarrier:          os.Getenv("BOX_SIGNAL_CARRIER"),
-		SelfContained:          os.Getenv("SELF_CONTAINED") == "1",
-		FixPass:                boxenvAtoi(os.Getenv("FIX_PASS")),
-		ResumeAfterHold:        os.Getenv("RESUME_AFTER_HOLD") != "",
-		AutoFormat:             os.Getenv("AUTO_FORMAT") != "",
-		AutoLint:               os.Getenv("AUTO_LINT") != "",
-		CIFailureSummary:       os.Getenv("CI_FAILURE_SUMMARY"),
-		IssueNumber:            os.Getenv("ISSUE_NUMBER"),
-		IssueTitle:             os.Getenv("ISSUE_TITLE"),
-		IssueText:              os.Getenv("ISSUE_TEXT"),
-		Branch:                 os.Getenv("BRANCH"),
-		BaseBranch:             os.Getenv("BASE_BRANCH"),
-		InProgressLabel:        os.Getenv("IN_PROGRESS_LABEL"),
-		CompleteLabel:          os.Getenv("COMPLETE_LABEL"),
-		RunNonce:               os.Getenv("RUN_NONCE"),
-		ResearchVerdicts:       os.Getenv("RESEARCH_VERDICTS"),
-		ReviewModelOverride:    os.Getenv("BOX_REVIEW_MODEL_OVERRIDE"),
-		ReviewEffortOverride:   os.Getenv("BOX_REVIEW_EFFORT_OVERRIDE"),
-		ChoreName:              os.Getenv("CHORE_NAME"),
-		ChoreHead:              os.Getenv("CHORE_HEAD"),
-		ChoreDiffRange:         os.Getenv("CHORE_DIFF_RANGE"),
-		ChoreSlice:             os.Getenv("CHORE_SLICE"),
-		ChoreClasses:           os.Getenv("CHORE_CLASSES"),
-		ChorePatchClasses:      os.Getenv("CHORE_PATCH_CLASSES"),
-		ChoreMaxFindings:       os.Getenv("CHORE_MAX_FINDINGS"),
+		AgentsJSONTemplate:   os.Getenv("AGENTS_JSON_TEMPLATE"),
+		FilerEnabled:         os.Getenv("BOX_FILER_ENABLED") != "",
+		WorkerProvisioned:    os.Getenv("BOX_WORKER_PROVISIONED") != "",
+		ScoutProvisioned:     os.Getenv("BOX_SCOUT_PROVISIONED") != "",
+		IssueTracker:         os.Getenv("ISSUE_TRACKER"),
+		TrackerAxisRead:      os.Getenv("BOX_TRACKER_AXIS_READ"),
+		TrackerAxisWrite:     os.Getenv("BOX_TRACKER_AXIS_WRITE"),
+		TrackerAxisFiler:     os.Getenv("BOX_TRACKER_AXIS_FILER"),
+		BoxWriteEnabled:      os.Getenv("BOX_WRITE_ENABLED") != "",
+		LocalIssueReference:  os.Getenv("LOCAL_ISSUE_REFERENCE") != "",
+		CodeForge:            os.Getenv("CODE_FORGE"),
+		ForgeBackend:         os.Getenv("BOX_FORGE_BACKEND"),
+		DispatchKind:         os.Getenv("DISPATCH_KIND"),
+		DispatchKey:          os.Getenv("DISPATCH_KEY"),
+		DispatchKeying:       os.Getenv("DISPATCH_KEYING"),
+		DispatchAnnounceVerb: os.Getenv("DISPATCH_ANNOUNCE_VERB"),
+		SignalCarrier:        os.Getenv("BOX_SIGNAL_CARRIER"),
+		SelfContained:        os.Getenv("SELF_CONTAINED") == "1",
+		FixPass:              boxenvAtoi(os.Getenv("FIX_PASS")),
+		ResumeAfterHold:      os.Getenv("RESUME_AFTER_HOLD") != "",
+		AutoFormat:           os.Getenv("AUTO_FORMAT") != "",
+		AutoLint:             os.Getenv("AUTO_LINT") != "",
+		CIFailureSummary:     os.Getenv("CI_FAILURE_SUMMARY"),
+		IssueNumber:          os.Getenv("ISSUE_NUMBER"),
+		IssueTitle:           os.Getenv("ISSUE_TITLE"),
+		IssueText:            os.Getenv("ISSUE_TEXT"),
+		Branch:               os.Getenv("BRANCH"),
+		BaseBranch:           os.Getenv("BASE_BRANCH"),
+		InProgressLabel:      os.Getenv("IN_PROGRESS_LABEL"),
+		CompleteLabel:        os.Getenv("COMPLETE_LABEL"),
+		RunNonce:             os.Getenv("RUN_NONCE"),
+		ResearchVerdicts:     os.Getenv("RESEARCH_VERDICTS"),
+		ReviewModelOverride:  os.Getenv("BOX_REVIEW_MODEL_OVERRIDE"),
+		ReviewEffortOverride: os.Getenv("BOX_REVIEW_EFFORT_OVERRIDE"),
+		ChoreName:            os.Getenv("CHORE_NAME"),
+		ChoreHead:            os.Getenv("CHORE_HEAD"),
+		ChoreDiffRange:       os.Getenv("CHORE_DIFF_RANGE"),
+		ChoreSlice:           os.Getenv("CHORE_SLICE"),
+		ChoreClasses:         os.Getenv("CHORE_CLASSES"),
+		ChorePatchClasses:    os.Getenv("CHORE_PATCH_CLASSES"),
+		ChoreMaxFindings:     os.Getenv("CHORE_MAX_FINDINGS"),
 	}
 }
 
@@ -71,13 +68,10 @@ func EnvFromEnviron() Env {
 // test isolating itself from ambient Box env can blank each one instead of
 // hand-maintaining a copy that drifts (issue #4044).
 var BoxEnvVarNames = []string{
-	"ORCHESTRATOR_ENABLED",
 	"AGENTS_JSON_TEMPLATE",
 	"BOX_FILER_ENABLED",
 	"BOX_WORKER_PROVISIONED",
 	"BOX_SCOUT_PROVISIONED",
-	"BOX_REVIEW_LOOP_INLINE",
-	"BOX_REVIEW_LOOP_ORCHESTRATOR",
 	"ISSUE_TRACKER",
 	"BOX_TRACKER_AXIS_READ",
 	"BOX_TRACKER_AXIS_WRITE",
@@ -119,7 +113,7 @@ var BoxEnvVarNames = []string{
 
 // boxenvAtoi parses an int-kind Box env var, degrading to 0 on empty or
 // malformed input. Unlike cmd/launcher/main.go's atoiSchema, which falls
-// back to a per-key schema default (intSchemaDefault), these 44 rows are
+// back to a per-key schema default (intSchemaDefault), these 41 rows are
 // deliberately outside lib/env-schema.nix (see
 // lib/promptassembly-boxenv.nix's header) and so have no schema default
 // to degrade to.

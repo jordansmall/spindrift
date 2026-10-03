@@ -15,11 +15,6 @@
 # DRIVER_SKILLS_DIR, and the output path inputs.
 [
   {
-    field = "OrchestratorEnabled";
-    env = "ORCHESTRATOR_ENABLED";
-    kind = "presence";
-  }
-  {
     field = "AgentsJSONTemplate";
     env = "AGENTS_JSON_TEMPLATE";
     kind = "string";
@@ -37,16 +32,6 @@
   {
     field = "ScoutProvisioned";
     env = "BOX_SCOUT_PROVISIONED";
-    kind = "presence";
-  }
-  {
-    field = "ReviewLoopInline";
-    env = "BOX_REVIEW_LOOP_INLINE";
-    kind = "presence";
-  }
-  {
-    field = "ReviewLoopOrchestrator";
-    env = "BOX_REVIEW_LOOP_ORCHESTRATOR";
     kind = "presence";
   }
   {

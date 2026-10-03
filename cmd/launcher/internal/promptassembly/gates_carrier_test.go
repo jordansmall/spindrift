@@ -56,7 +56,7 @@ func TestGatesSignalCarrierConjunctions(t *testing.T) {
 		},
 		{
 			base: "FILER_FILE_RELAY",
-			env:  Env{FilerEnabled: true, BoxWriteEnabled: false, OrchestratorEnabled: true},
+			env:  Env{FilerEnabled: true, BoxWriteEnabled: false},
 		},
 	}
 	for _, tc := range cases {

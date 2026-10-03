@@ -300,19 +300,18 @@ func TestGatesIssueTrackerWriteAxisResearch(t *testing.T) {
 }
 
 // TestGatesFilerWriteMechanism covers the filer's write-mechanism gates
-// (entrypoint.sh: 816-860): relay only activates on read-only plus the
-// orchestrator gate, and every other combination keeps the direct gh/fj
+// (entrypoint.sh: 816-860): relay only activates on read-only access, and
+// a writable Box keeps the direct gh/fj
 // path, which forks on TrackerAxisFiler. Every case sets a non-empty
 // TrackerAxisRead so the itRead=="" version-skew fallback (issue #2533) stays off.
 func TestGatesFilerWriteMechanism(t *testing.T) {
 	cases := []struct {
-		name                string
-		filerEnabled        bool
-		trackerAxisRead     string
-		trackerAxisFiler    string
-		boxWriteEnabled     bool
-		orchestratorEnabled bool
-		want                map[string]bool
+		name             string
+		filerEnabled     bool
+		trackerAxisRead  string
+		trackerAxisFiler string
+		boxWriteEnabled  bool
+		want             map[string]bool
 	}{
 		{
 			name:            "filer not configured: everything off",
@@ -328,12 +327,11 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 			},
 		},
 		{
-			name:                "read-only + orchestrator on: relay",
-			filerEnabled:        true,
-			trackerAxisRead:     "GITHUB",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     false,
-			orchestratorEnabled: true,
+			name:             "read-only: relay",
+			filerEnabled:     true,
+			trackerAxisRead:  "GITHUB",
+			trackerAxisFiler: "GH",
+			boxWriteEnabled:  false,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -344,12 +342,11 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 			},
 		},
 		{
-			name:                "read-write + orchestrator on: direct gh (github tracker)",
-			filerEnabled:        true,
-			trackerAxisRead:     "GITHUB",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     true,
-			orchestratorEnabled: true,
+			name:             "read-write: direct gh (github tracker)",
+			filerEnabled:     true,
+			trackerAxisRead:  "GITHUB",
+			trackerAxisFiler: "GH",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      true,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -360,28 +357,11 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 			},
 		},
 		{
-			name:                "read-only + orchestrator off: direct gh (github tracker)",
-			filerEnabled:        true,
-			trackerAxisRead:     "GITHUB",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     false,
-			orchestratorEnabled: false,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      true,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          false,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": false,
-				"FILER_FILE_DIRECT_ANY":     true,
-			},
-		},
-		{
-			name:                "read-write + orchestrator on: direct forgejo (forgejo tracker)",
-			filerEnabled:        true,
-			trackerAxisRead:     "FORGEJO",
-			trackerAxisFiler:    "FORGEJO",
-			boxWriteEnabled:     true,
-			orchestratorEnabled: true,
+			name:             "read-write: direct forgejo (forgejo tracker)",
+			filerEnabled:     true,
+			trackerAxisRead:  "FORGEJO",
+			trackerAxisFiler: "FORGEJO",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": true,
@@ -392,12 +372,11 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 			},
 		},
 		{
-			name:                "local tracker's filer suffix rides GH",
-			filerEnabled:        true,
-			trackerAxisRead:     "LOCAL",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     true,
-			orchestratorEnabled: true,
+			name:             "local tracker's filer suffix rides GH",
+			filerEnabled:     true,
+			trackerAxisRead:  "LOCAL",
+			trackerAxisFiler: "GH",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      true,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -412,11 +391,10 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			got := Gates(Env{
-				FilerEnabled:        tc.filerEnabled,
-				TrackerAxisRead:     tc.trackerAxisRead,
-				TrackerAxisFiler:    tc.trackerAxisFiler,
-				BoxWriteEnabled:     tc.boxWriteEnabled,
-				OrchestratorEnabled: tc.orchestratorEnabled,
+				FilerEnabled:     tc.filerEnabled,
+				TrackerAxisRead:  tc.trackerAxisRead,
+				TrackerAxisFiler: tc.trackerAxisFiler,
+				BoxWriteEnabled:  tc.boxWriteEnabled,
 			})
 			for k, want := range tc.want {
 				if got[k] != want {
@@ -429,26 +407,23 @@ func TestGatesFilerWriteMechanism(t *testing.T) {
 
 // TestGatesFilerWriteMechanismResearch covers the research special-case
 // (ADR 0041 / issue #2593): a research dispatch with the Filer provisioned
-// always relays, with no orchestrator condition and regardless of
-// BOX_WRITE_ENABLED. Relay fires even in read-write mode with the
-// orchestrator off, which the pre-#2593 work-path rule would never produce.
+// always relays, regardless of BOX_WRITE_ENABLED. Relay fires even in
+// read-write mode, which the work-path rule would never produce.
 func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 	cases := []struct {
-		name                string
-		filerEnabled        bool
-		trackerAxisRead     string
-		trackerAxisFiler    string
-		boxWriteEnabled     bool
-		orchestratorEnabled bool
-		want                map[string]bool
+		name             string
+		filerEnabled     bool
+		trackerAxisRead  string
+		trackerAxisFiler string
+		boxWriteEnabled  bool
+		want             map[string]bool
 	}{
 		{
-			name:                "read-write + orchestrator off: still relay",
-			filerEnabled:        true,
-			trackerAxisRead:     "GITHUB",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     true,
-			orchestratorEnabled: false,
+			name:             "read-write: still relay",
+			filerEnabled:     true,
+			trackerAxisRead:  "GITHUB",
+			trackerAxisFiler: "GH",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -459,28 +434,11 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 			},
 		},
 		{
-			name:                "read-write + orchestrator on: still relay (no orchestrator condition)",
-			filerEnabled:        true,
-			trackerAxisRead:     "GITHUB",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     true,
-			orchestratorEnabled: true,
-			want: map[string]bool{
-				"FILER_FILE_DIRECT_GH":      false,
-				"FILER_FILE_DIRECT_FORGEJO": false,
-				"FILER_FILE_RELAY":          true,
-				"FILER_FILE_RELAY_WORK":     false,
-				"FILER_FILE_RELAY_RESEARCH": true,
-				"FILER_FILE_DIRECT_ANY":     false,
-			},
-		},
-		{
-			name:                "read-only + orchestrator off: still relay",
-			filerEnabled:        true,
-			trackerAxisRead:     "GITHUB",
-			trackerAxisFiler:    "GH",
-			boxWriteEnabled:     false,
-			orchestratorEnabled: false,
+			name:             "read-only: still relay",
+			filerEnabled:     true,
+			trackerAxisRead:  "GITHUB",
+			trackerAxisFiler: "GH",
+			boxWriteEnabled:  false,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -504,12 +462,11 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 			},
 		},
 		{
-			name:                "forgejo tracker + filer: relay, not direct-forgejo",
-			filerEnabled:        true,
-			trackerAxisRead:     "FORGEJO",
-			trackerAxisFiler:    "FORGEJO",
-			boxWriteEnabled:     true,
-			orchestratorEnabled: true,
+			name:             "forgejo tracker + filer: relay, not direct-forgejo",
+			filerEnabled:     true,
+			trackerAxisRead:  "FORGEJO",
+			trackerAxisFiler: "FORGEJO",
+			boxWriteEnabled:  true,
 			want: map[string]bool{
 				"FILER_FILE_DIRECT_GH":      false,
 				"FILER_FILE_DIRECT_FORGEJO": false,
@@ -524,12 +481,11 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			env := Env{
-				DispatchKind:        "research",
-				FilerEnabled:        tc.filerEnabled,
-				TrackerAxisRead:     tc.trackerAxisRead,
-				TrackerAxisFiler:    tc.trackerAxisFiler,
-				BoxWriteEnabled:     tc.boxWriteEnabled,
-				OrchestratorEnabled: tc.orchestratorEnabled,
+				DispatchKind:     "research",
+				FilerEnabled:     tc.filerEnabled,
+				TrackerAxisRead:  tc.trackerAxisRead,
+				TrackerAxisFiler: tc.trackerAxisFiler,
+				BoxWriteEnabled:  tc.boxWriteEnabled,
 			}
 			got := Gates(env)
 			for k, want := range tc.want {
