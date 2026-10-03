@@ -76,6 +76,11 @@ type Dispatch struct {
 	// buildBoxEnv reads subject.key.IsChore() to forward CHORE_*/BASE_BRANCH
 	// in place of the issue-keyed ISSUE_NUMBER/ISSUE_TITLE/ISSUE_TEXT trio.
 	subject subject
+
+	// releaseClaim drops the claim Run took; only Close calls it, so the
+	// claim spans the caller's settle too (issue #4364). Nil until Run
+	// claims, and again after Close.
+	releaseClaim func()
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -163,7 +168,9 @@ func conflictLogPathFor(pwd, number string) string {
 // touching disk (issue #3885): IsRunning cannot see another launcher's
 // container still being created, so without the claim a racing Run() would
 // quarantine that run's live log. The IsRunning guards still catch a container
-// orphaned by a killed launcher, whose claim died with it.
+// orphaned by a killed launcher, whose claim died with it. The claim is held
+// past Run's return, through the caller's settle, until Close (issue #4364);
+// callers that Run must Close.
 func (d *Dispatch) Run() Result {
 	release, err := ClaimIssue(d.pwd, d.number)
 	if err != nil {
@@ -173,7 +180,7 @@ func (d *Dispatch) Run() Result {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, err)
 		return Result{Success: false}
 	}
-	defer release()
+	d.releaseClaim = release
 
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
@@ -283,9 +290,14 @@ func (d *Dispatch) humanOut() io.Writer {
 	return d.cfg.HeartbeatOut
 }
 
-// Close evicts this issue's driver-cache entry.
+// Close evicts this issue's driver-cache entry and releases the claim Run
+// took, if any. Safe to call more than once.
 func (d *Dispatch) Close() {
 	d.cache.evict(d.number)
+	if d.releaseClaim != nil {
+		d.releaseClaim()
+		d.releaseClaim = nil
+	}
 }
 
 // runOnce opens logPath fresh, dispatches one box with env, and blocks until

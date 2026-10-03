@@ -149,7 +149,8 @@ type Dispatcher interface {
 	// budget gate (issue #2001) reads it before dispatching another fix pass.
 	CumulativeUsage() usage.Usage
 
-	// Close evicts this issue's driver-cache entry; the per-issue caller
-	// defers it once the Dispatch is done.
+	// Close evicts this issue's driver-cache entry and releases the claim
+	// Run took (issue #4364); the per-issue caller defers it once the
+	// Dispatch is done.
 	Close()
 }
