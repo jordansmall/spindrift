@@ -1205,12 +1205,11 @@ func TestGitDir_NotAGitCheckout(t *testing.T) {
 	}
 }
 
-// TestMainRun_InstanceLockRefusal is the acceptance-criterion test: a
-// second daemon against a checkout whose lock is already held must refuse
-// before ever reaching daemon.Loop (no child, no network, no nix — fully
-// deterministic), reporting the refusal both on stderr (naming the holder)
-// and as a "halt" event on stdout's durable JSON-lines stream (issue #3543).
-func TestMainRun_InstanceLockRefusal(t *testing.T) {
+// lockedCheckoutT builds a fresh git checkout whose instance lock is held
+// in-process, chdirs into it, and returns an input document path, so a
+// mainRun call refuses at the lock acquire — no child, no network, no nix.
+func lockedCheckoutT(t *testing.T) string {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -1227,38 +1226,26 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 	// already running against this checkout".
 	holdCheckoutLockT(t, gitDirPath)
 
-	inputPath := filepath.Join(t.TempDir(), "input.json")
 	// A bare invocation draws from both kinds, which makes
 	// RESEARCH_RESERVATION a required knob: without it startup fails there,
-	// short of the lock acquire this test exists to exercise.
-	settings := map[string]string{
+	// short of the lock acquire these tests exist to exercise.
+	inputPath := writeInputDocT(t, map[string]string{
 		"DAEMON_APP":           ".#dogfood",
 		"BASE_BRANCH":          "main",
 		"MAX_PARALLEL":         "1",
 		"RESEARCH_RESERVATION": "0",
-	}
-	maps.Copy(settings, shippedKnobDefaults)
-	doc := inputdoc.Document{Settings: settings}
-	data, err := json.Marshal(doc)
-	if err != nil {
-		t.Fatalf("marshal input document: %v", err)
-	}
-	if err := os.WriteFile(inputPath, data, 0o644); err != nil {
-		t.Fatalf("write input document: %v", err)
-	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(wd); err != nil {
-			t.Fatalf("restore Chdir: %v", err)
-		}
 	})
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir(%q): %v", root, err)
-	}
+	t.Chdir(root)
+	return inputPath
+}
+
+// TestMainRun_InstanceLockRefusal is the acceptance-criterion test: a
+// second daemon against a checkout whose lock is already held must refuse
+// before ever reaching daemon.Loop (no child, no network, no nix — fully
+// deterministic), reporting the refusal both on stderr (naming the holder)
+// and as a "halt" event on stdout's durable JSON-lines stream (issue #3543).
+func TestMainRun_InstanceLockRefusal(t *testing.T) {
+	inputPath := lockedCheckoutT(t)
 
 	var stdout, stderr bytes.Buffer
 	got := mainRun([]string{"--input", inputPath}, &stdout, &stderr)
@@ -1285,6 +1272,26 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 	}
 	if !strings.HasPrefix(ev.Reason, "instance-lock:") {
 		t.Errorf("reason = %q, want it to start with %q", ev.Reason, "instance-lock:")
+	}
+}
+
+// failingWriter stands in for a closed or full stdout pipe.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("broken pipe") }
+
+// TestMainRun_EventWriteFailureReachesInjectedStderr pins that mainRun hands
+// the emitter its injected stderr, not os.Stderr, so a dead event stream is
+// diagnosable by whoever supplied the writers (issue #3711).
+func TestMainRun_EventWriteFailureReachesInjectedStderr(t *testing.T) {
+	inputPath := lockedCheckoutT(t)
+
+	var stderr bytes.Buffer
+	if got := mainRun([]string{"--input", inputPath}, failingWriter{}, &stderr); got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "daemon: event stream write failed: broken pipe") {
+		t.Errorf("stderr = %q, want the event-stream write failure diagnostic", stderr.String())
 	}
 }
 
