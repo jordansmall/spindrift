@@ -2080,7 +2080,8 @@ func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
 // (issue #3622 slice 3): a preflight refusal, an operator Ctrl-C during the
 // preflight, and an instance-lock refusal each emit exactly one "halt"
 // event carrying h.String()'s documented reason and return the exit code
-// their HaltClass derives — 11, 0, and 1 respectively — and only the first
+// their HaltClass derives — 11, 0, and 1 respectively — print their
+// h.Diagnostic() line to stderr unchanged, and only the first
 // two (sw != nil) publish a halted status file; the instance-lock refusal
 // (sw == nil, per finish's doc) leaves no status file behind.
 func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
@@ -2107,11 +2108,19 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 		dir := t.TempDir()
 		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h, h.String()); got != daemon.ExitPreflightFailed {
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != daemon.ExitPreflightFailed {
 			t.Errorf("finish() = %d, want %d", got, daemon.ExitPreflightFailed)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
 			t.Errorf("halt events = %d, want exactly 1", got)
+		}
+		// The tail is doctor's remedy prose, owned elsewhere: pin the prefix
+		// literally and the rest against the event's own reason.
+		if prefix := "daemon: preflight: doctor exit 4: required triage labels are missing — remedy: "; !strings.HasPrefix(stderr.String(), prefix) {
+			t.Errorf("stderr = %q, want prefix %q", stderr.String(), prefix)
+		}
+		if want := "daemon: " + h.String() + "\n"; stderr.String() != want {
+			t.Errorf("stderr = %q, want %q", stderr.String(), want)
 		}
 
 		report, err := daemon.ReadStatus(dir)
@@ -2132,11 +2141,14 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 		dir := t.TempDir()
 		sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h, h.String()); got != 0 {
+		if got := finish(&stderr, em, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != 0 {
 			t.Errorf("finish() = %d, want 0", got)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
 			t.Errorf("halt events = %d, want exactly 1", got)
+		}
+		if want := "daemon: context-cancelled: context canceled\n"; stderr.String() != want {
+			t.Errorf("stderr = %q, want %q", stderr.String(), want)
 		}
 	})
 
@@ -2146,11 +2158,14 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 		h := daemon.Halt{Class: daemon.HaltInstanceLock, Detail: "held by pid 123"}
 
 		dir := t.TempDir()
-		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h, h.Detail); got != 1 {
+		if got := finish(&stderr, em, nil, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, h); got != 1 {
 			t.Errorf("finish() = %d, want 1", got)
 		}
 		if got := countHalts(t, &buf, h); got != 1 {
 			t.Errorf("halt events = %d, want exactly 1", got)
+		}
+		if want := "daemon: held by pid 123\n"; stderr.String() != want {
+			t.Errorf("stderr = %q, want %q", stderr.String(), want)
 		}
 
 		report, err := daemon.ReadStatus(dir)
@@ -3022,7 +3037,7 @@ func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
 			h := startupPreflight(ctx, &fakePreflightRunner{}, em)
 			sw := daemon.NewStatusWriter(tt.statusDir(t), clock)
 
-			if got := finish(&merged, em, sw, kinds, h, h.String()); got != 0 {
+			if got := finish(&merged, em, sw, kinds, h); got != 0 {
 				t.Errorf("finish() = %d, want 0 for an operator cancel", got)
 			}
 
