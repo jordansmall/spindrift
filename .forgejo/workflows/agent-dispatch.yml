@@ -64,7 +64,7 @@ jobs:
           repo: ${{ github.repository }}
           issue-number: ${{ github.event.issue.number }}
           add-labels: agent-in-progress
-          remove-labels: agent-trigger ready-for-agent agent-recover agent-complete agent-failed
+          remove-labels: agent-trigger ready-for-agent agent-recover agent-complete agent-failed agent-ambiguous-spec
 
       # Install Nix and build — plus the plumbing env (RUNTIME + tokens) written
       # to the job env and the bot identity surfaced as step outputs for the
