@@ -127,6 +127,13 @@ let
       clause = "--cores 1";
     }
     {
+      name = "git-add-new-file";
+      # The remedy for the error `not-tracked-by-git` pins (issue #714): that
+      # row arms an agent to recognize the failure, this one to avoid it
+      # (issue #4265).
+      clause = "git add any new file";
+    }
+    {
       name = "not-tracked-by-git";
       # A verbatim fragment of Nix's own error message for a file that is not
       # `git add`-ed yet, so an agent can recognize it.
