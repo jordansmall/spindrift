@@ -78,6 +78,9 @@ func TestResearchSettle_Reject(t *testing.T) {
 	if len(fc.CompleteVerdictCalls) != 1 || fc.CompleteVerdictCalls[0].Verdict != forge.Reject {
 		t.Fatalf("want 1 CompleteVerdict(Reject) call, got %+v", fc.CompleteVerdictCalls)
 	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("verdict path must not call TransitionState; got %+v", fc.TransitionStateCalls)
+	}
 }
 
 func TestResearchSettle_Unclear(t *testing.T) {

@@ -217,6 +217,9 @@ func TestDrainMaxJobs_MaxJobsCapHonored(t *testing.T) {
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1 (maxJobs=1 must cap dispatch)", len(fr.RunCalls))
 	}
+	if fr.RunCalls[0].Issue != "1" {
+		t.Errorf("dispatched issue: got %q, want \"1\" (the first in batch order)", fr.RunCalls[0].Issue)
+	}
 }
 
 // Issues left over when MAX_JOBS caps a wave are past the cap and ready for
@@ -351,12 +354,18 @@ func TestDrainMaxJobs_ReturnsErrOpenNoneDispatchable(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := newSettle(fc, fc)
 	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
-	err := drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
-		{Number: "1", Title: "blocked issue"},
-	}, edges, nil, nil, OriginDiscovered, claimer, nil)
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = drainMaxJobs(c, fc, fc, dir, f, s, []Issue{
+			{Number: "1", Title: "blocked issue"},
+		}, edges, nil, nil, OriginDiscovered, claimer, nil)
+	})
 
 	if !errors.Is(err, ErrOpenNoneDispatchable) {
 		t.Errorf("drainMaxJobs: got %v, want ErrOpenNoneDispatchable", err)
+	}
+	if !strings.Contains(out, "remain blocked or deferred") {
+		t.Errorf("output must say the held issues remain blocked or deferred; got:\n%s", out)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
