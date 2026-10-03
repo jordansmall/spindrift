@@ -1,7 +1,7 @@
 # Shared bats helpers. Sourced by every *.bats file.
 #
 # The nix `checks.<system>.bats` derivation exports the paths these helpers
-# depend on: FAKES_DIR, RUN_CMD, ENTRYPOINT, and PROMPTS_DIR.
+# depend on: FAKES_DIR, SPINDRIFT_CMD, ENTRYPOINT, and PROMPTS_DIR.
 
 # A missing or unreadable file counts as 0 rather than an empty string, so a
 # caller's integer comparison never throws.
@@ -226,11 +226,10 @@ FAKE
   chmod +x "$FAKE_BIN/driver-exec"
 }
 
-# Shared setup for the split run-*.bats suites (issue #519): bats needs a
-# setup() hook per file, so the shared body lives here.
-setup_run_env() {
+# Shared setup for the dispatch-env bats suite (tests/harness-env.bats).
+setup_dispatch_env() {
   setup_fakes
-  set_run_env
+  set_dispatch_env
   cd "$BATS_TEST_TMPDIR" || exit
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
   # Bound the merge gate's poll loop (issue #2424): a test that reaches it
@@ -370,8 +369,8 @@ setup_fakes() {
   fi
 }
 
-# Minimal env so the `run` command's required-var guards pass.
-set_run_env() {
+# Minimal env so `dispatch`'s required-var guards pass.
+set_dispatch_env() {
   export REPO_SLUG="owner/repo"
   export GH_TOKEN="fake-token"
   export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"

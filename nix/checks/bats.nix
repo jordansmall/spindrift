@@ -218,7 +218,6 @@ let
     # The launcher commands under test overlay `gh` with the fake
     # (batsHarness), since the real `gh` is pinned into its runtimeInputs
     # PATH and would otherwise shadow a PATH-injected fake.
-    RUN_CMD = "${batsHarness.internals.run}/bin/run";
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
   };
 
