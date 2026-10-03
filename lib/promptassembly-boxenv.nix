@@ -219,4 +219,14 @@
     env = "CHORE_MAX_FINDINGS";
     kind = "string";
   }
+  {
+    field = "HostMediatedRemote";
+    env = "BOX_HOST_MEDIATED_REMOTE";
+    kind = "presence";
+  }
+  {
+    field = "OutboxRelayCapable";
+    env = "BOX_OUTBOX_RELAY_CAPABLE";
+    kind = "presence";
+  }
 ]
