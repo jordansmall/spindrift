@@ -9,6 +9,10 @@
 }:
 let
   inherit (fixtures) consumerFormatter;
+  nixSrc = pkgs.lib.fileset.toSource {
+    root = ../..;
+    fileset = pkgs.lib.fileset.fileFilter (f: f.hasExt "nix") ../..;
+  };
 in
 {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
@@ -24,18 +28,36 @@ in
   # The file set is derived from the tree, so a new .nix file can't escape the
   # gate. The quickstart golden flake.nix fixtures are included on purpose:
   # they are rendered from templates/default/flake.nix, which is checked too.
-  nix-fmt =
+  nix-fmt = pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
+    cd ${nixSrc}
+    find . -type f -print0 | sort -z | xargs -0 nixfmt --check
+    touch $out
+  '';
+
+  # nix-fmt must see every tracked .nix file (issue #3850). The reference side
+  # uses a different primitive (listFilesRecursive + suffix test) than nixSrc
+  # (fileFilter + hasExt), so one predicate edit cannot narrow both (each side
+  # still names its own ../.. root literal); a git flake's source copy holds
+  # only tracked files. Asserting on nixSrc, the realized input, catches a
+  # narrowed root as well as a narrowed fileset.
+  nix-fmt-covers-tracked =
     let
-      nixSrc = pkgs.lib.fileset.toSource {
-        root = ../..;
-        fileset = pkgs.lib.fileset.fileFilter (f: f.hasExt "nix") ../..;
-      };
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        filter
+        hasSuffix
+        removePrefix
+        subtractLists
+        ;
+      inherit (pkgs.lib.filesystem) listFilesRecursive;
+      relativeTo = base: map (p: removePrefix (toString base + "/") (toString p));
+      tracked = relativeTo ../.. (filter (p: hasSuffix ".nix" (toString p)) (listFilesRecursive ../..));
+      missing = subtractLists (relativeTo nixSrc (listFilesRecursive nixSrc)) tracked;
     in
-    pkgs.runCommand "nix-fmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-      cd ${nixSrc}
-      find . -type f -print0 | sort -z | xargs -0 nixfmt --check
-      touch $out
-    '';
+    assert assertMsg (missing == [ ])
+      "nix-fmt's source no longer covers every tracked .nix file; missing: ${concatStringsSep ", " missing}";
+    pkgs.runCommand "nix-fmt-covers-tracked" { } "touch $out";
 
   # go-check-env.nix's GOMAXPROCS bound (issue #3915), and its unset/0 fallback
   # against lib/image.nix's baked nix.conf `cores` (issue #3965).
