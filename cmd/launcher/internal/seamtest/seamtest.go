@@ -11,9 +11,9 @@
 // # Launcher smoke set as the deletion gate
 //
 // TestSeamLauncherSmokeMatrix in cmd/launcher/launcher_seam_integration_test.go
-// is the gate for deleting the launcher-side bats files (tests/run-*.bats,
-// tests/build.bats): it must be green, with a case for every dispatch kind
-// (work, research, butler) and runtime (podman, docker, bwrap) the rendered
+// is the gate for deleting the launcher-side bats files (tests/run-*.bats):
+// it must be green, with a case for every dispatch kind (work, research,
+// butler) and runtime (podman, docker, bwrap) the rendered
 // input document distinguishes, before any of them goes. A new kind or
 // runtime distinction in the document earns a new case there, and
 // TestSeamSmokeCatchesDroppedKnob keeps the matrix honest by asserting a

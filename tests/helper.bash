@@ -1,8 +1,7 @@
 # Shared bats helpers. Sourced by every *.bats file.
 #
 # The nix `checks.<system>.bats` derivation exports the paths these helpers
-# depend on: FAKES_DIR, RUN_CMD / BUILD_CMD, ENTRYPOINT, PROMPTS_DIR, and
-# IMAGE_PATH.
+# depend on: FAKES_DIR, RUN_CMD, ENTRYPOINT, and PROMPTS_DIR.
 
 # A missing or unreadable file counts as 0 rather than an empty string, so a
 # caller's integer comparison never throws.
@@ -210,26 +209,6 @@ setup_entrypoint_env() {
   mkdir -p "$HARNESS_SKILLS_DIR" "$OPERATOR_SKILLS_DIR"
 }
 
-# Stands in for `launcher build`'s VACUUMed host nix store DB snapshot
-# (ADR 0042): bwrapAdapter.IsReady only checks the file exists and is not a
-# directory, so a bare stub passes readiness without a real build (issue #2664).
-# Must run after cd'ing into the test's own $BATS_TEST_TMPDIR, since the launcher
-# resolves the snapshot dir relative to its working directory.
-stub_nix_var_snapshot() {
-  # The snapshot dir is generation-scoped under the agent-closure store path it
-  # was built against (issue #2680), and $BWRAP_RUN_CMD and $SKILLS_BWRAP_RUN_CMD
-  # come from separate mkHarness invocations, so each needs its own generation
-  # subdir. The *_IMAGE_TAG vars carry those closure paths, letting this mirror
-  # closureGeneration's filepath.Base(imageTag) in bash.
-  local tag generation
-  for tag in "$BWRAP_IMAGE_TAG" "$SKILLS_BWRAP_IMAGE_TAG"; do
-    [ -n "$tag" ] || continue
-    generation=$(basename "$tag")
-    mkdir -p ".spindrift/nix-var-snapshot/$generation/nix/db"
-    : >".spindrift/nix-var-snapshot/$generation/nix/db/db.sqlite"
-  done
-}
-
 # Overwrites $FAKE_BIN/driver-exec with a wrapper that fails only the
 # bind-registry verb and delegates the rest, for the two
 # tests/entrypoint-toolchain-nudge.bats cases on that failure path. Must run
@@ -253,7 +232,6 @@ setup_run_env() {
   setup_fakes
   set_run_env
   cd "$BATS_TEST_TMPDIR" || exit
-  stub_nix_var_snapshot
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
   # Bound the merge gate's poll loop (issue #2424): a test that reaches it
   # without its own values would inherit the production defaults (3600s

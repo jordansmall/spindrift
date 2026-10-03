@@ -7,12 +7,7 @@
 let
   inherit (fixtures)
     batsHarness
-    noRuntimeHarness
-    dockerHarness
-    bwrapHarness
     promptHarness
-    skillsHarness
-    skillsBwrapHarness
     opencodeHarness
     ;
 
@@ -73,8 +68,8 @@ let
 
   # Issue #2751. The env vars below stay hand-listed instead of building on
   # `batsEnv // { ... }`: merging batsEnv wholesale would pull unrelated
-  # harnesses (skillsHarness, opencodeHarness, promptHarness and the rest)
-  # into this derivation's closure for vars its suites never read.
+  # harnesses (opencodeHarness and promptHarness) into this derivation's
+  # closure for vars its suites never read.
   outcomeBatsChecks = pkgs.lib.mapAttrs' (
     name: entry:
     pkgs.lib.nameValuePair "bats-outcome-${name}" (
@@ -195,20 +190,6 @@ let
     # reads the same directory). batsBuilderSetup stages only tests/, so a
     # BATS_TEST_DIRNAME-relative path cannot reach them.
     SKILLS_TEMPLATE_DIR = ../../templates/default/skills;
-    SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
-    SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
-    # Not read by bats, but forces Nix to realize
-    # skillsBwrapHarness.internals.agentFiles so its store path exists when
-    # the bwrap adapter stats the baked-skills subdirectory. The run command
-    # embeds that path via unsafeDiscardStringContext, which drops the Nix
-    # dependency, so without this attr the path is absent.
-    SKILLS_AGENT_FILES = skillsBwrapHarness.internals.agentFiles;
-    # Each mkHarness invocation bakes a distinct agent-closure store path, so
-    # skills.bats's stub_nix_var_snapshot (tests/helper.bash) needs THIS
-    # harness's generation (bwrap.go closureGeneration, issue #2680), not
-    # bwrapHarness's below, to satisfy bwrapAdapter.IsReady's
-    # generation-scoped snapshot check.
-    SKILLS_BWRAP_IMAGE_TAG = skillsBwrapHarness.internals.agentClosurePath;
     # The opencode Driver's rendered preamble (issue #2262), so the
     # cross-half integration test derives DRIVER_AGENT_FILES_DIR from the same
     # bytes an opencode image bakes rather than retyping the relative path.
@@ -235,23 +216,10 @@ let
     # carries the sandbox-isolation reason.
     WAIT_FOR_LOG_LINES_TIMEOUT = "10";
     # The launcher commands under test overlay `gh` with the fake
-    # (batsHarness/dockerHarness), since the real `gh`
-    # is pinned into their runtimeInputs PATH and would otherwise
-    # shadow a PATH-injected fake.
+    # (batsHarness), since the real `gh` is pinned into its runtimeInputs
+    # PATH and would otherwise shadow a PATH-injected fake.
     RUN_CMD = "${batsHarness.internals.run}/bin/run";
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
-    BUILD_CMD = "${batsHarness.internals.build}/bin/build";
-    BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.internals.build}/bin/build";
-    DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
-    BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
-    # bwrapHarness's agent-closure store path, the generation name
-    # bwrapAdapter.IsReady derives via closureGeneration(IMAGE_TAG)
-    # (issue #2680). helper.bash's stub_nix_var_snapshot reads it to stub
-    # the snapshot under the same generation the launcher computes, not the
-    # flat pre-#2680 path.
-    BWRAP_IMAGE_TAG = bwrapHarness.internals.agentClosurePath;
-    BWRAP_BUILD_CMD = "${bwrapHarness.internals.build}/bin/build";
-    IMAGE_PATH = batsHarness.internals.imagePath;
   };
 
   # Shared by the bats-shard-N derivations, bats-outcome-<name>, and
