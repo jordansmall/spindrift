@@ -6308,12 +6308,12 @@ operator who wants that single slot work-first instead sets
 final value out of scope, and it expects a real unattended run to argue
 with it.
 
-**Idle tier.** The butler sits outside the reserved/normal split above: every
-slot tries it last, regardless of `RESEARCH_RESERVATION` — a slot below the
-reservation still tries research then work then the butler, and the rest
-still try work then research then the butler (`slotOrder`,
-`dispatchkind.PriorityIdle`, ADR 0056, issue #3878) — so it fills a slot only
-once both dispatch and research have just reported no work. A butler child
+**Idle tier.** The butler sits outside the research/work preference above:
+while fewer than `RESEARCH_RESERVATION` research children are running, a
+starting slot tries research then work, otherwise work then research, and
+the butler last either way (`slotOrder`, `dispatchkind.PriorityIdle`, ADR
+0056, issue #3878) — so it fills a slot only once both dispatch and research
+have just reported no work. A butler child
 already running is never preempted when dispatch or research work shows up:
 the Awake window rule only ever gates *starting* a child, never stopping one,
 so a Chore in progress runs to completion even if the queue fills mid-run.
