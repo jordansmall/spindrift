@@ -310,6 +310,50 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 	}
 }
 
+// TestRecoverByNumber_OwnerSettling_Skips pins issue #4364: a real Dispatch
+// keeps its claim after Run returns, until Close, so recover skips an issue
+// whose owner is still settling rather than adopting its PR alongside it.
+func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		line := "SPINDRIFT_OUTCOME issue=42 landing=" + testReconcilePR + " status=ready note=ok nonce=" + box.Env["RUN_NONCE"] + "\n"
+		box.Output.Write([]byte(line)) //nolint:errcheck
+		return nil
+	}
+	owner := testFactory(t, dir, fr).New("42", "t")
+	defer owner.Close()
+	if res := owner.Run(); !res.Success {
+		t.Fatalf("owner.Run: want success, got %+v", res)
+	}
+
+	s := settle.NewFake()
+	var recErr error
+	out := captureStdout(t, func() {
+		recErr = recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42")
+	})
+
+	if recErr != nil {
+		t.Fatalf("recoverByNumber: got %v, want nil (skip, not an error)", recErr)
+	}
+	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "run settling") {
+		t.Errorf("stdout = %q, want a skip line while the owner's Dispatch is unclosed", out)
+	}
+	if len(s.SettleAdoptedCalls) != 0 {
+		t.Errorf("SettleAdoptedCalls = %d, want 0 (owner is still settling)", len(s.SettleAdoptedCalls))
+	}
+	if len(s.SettleRelayedBranchCalls) != 0 {
+		t.Errorf("SettleRelayedBranchCalls = %d, want 0", len(s.SettleRelayedBranchCalls))
+	}
+}
+
 // TestRecoverByNumber_IssueClaimedElsewhere_Skips pins the acceptance
 // criterion for issue #3885: an issue whose flock claim.go's claim file
 // (2baa3b3d) another process still holds -- a live Run() -- must be skipped
@@ -346,7 +390,7 @@ func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	if recErr != nil {
 		t.Fatalf("recoverByNumber: got %v, want nil (skip, not an error)", recErr)
 	}
-	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "still live in another launcher process") {
+	if !strings.Contains(out, "status=skipped") || !strings.Contains(out, "another launcher process still owns this issue") {
 		t.Errorf("stdout = %q, want a skip line naming the live claim", out)
 	}
 	if len(s.SettleAdoptedCalls) != 0 {
