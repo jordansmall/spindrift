@@ -312,3 +312,21 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 	candidate = candidate.AddDate(0, 0, 1)
 	return &candidate
 }
+
+// ResultText returns the final-message text of every stream-json result event
+// in the log at logPath, one value per line: the Go twin of the in-box
+// `jq -r 'select(.type == "result") | .result // empty'`. Unlike
+// resultEventText it keeps an is_error result. Non-string results are
+// dropped; they can never carry an outcome line.
+func ResultText(logPath string) (string, error) {
+	return driverkit.ResultText(logPath, func(line string) (string, bool) {
+		var ev struct {
+			Type   string `json:"type"`
+			Result string `json:"result"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "result" {
+			return "", false
+		}
+		return ev.Result, true
+	})
+}

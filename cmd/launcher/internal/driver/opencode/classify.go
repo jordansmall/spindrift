@@ -57,3 +57,22 @@ func Classify(logPath string) (driverkit.Classification, error) {
 	}
 	return cl, nil
 }
+
+// ResultText returns the text of every NDJSON text event in the log at
+// logPath, one value per line: the Go twin of the in-box
+// `jq -r 'select(.type == "text") | .part.text // empty'`. Non-string text is
+// dropped; it can never carry an outcome line.
+func ResultText(logPath string) (string, error) {
+	return driverkit.ResultText(logPath, func(line string) (string, bool) {
+		var ev struct {
+			Type string `json:"type"`
+			Part struct {
+				Text string `json:"text"`
+			} `json:"part"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "text" {
+			return "", false
+		}
+		return ev.Part.Text, true
+	})
+}

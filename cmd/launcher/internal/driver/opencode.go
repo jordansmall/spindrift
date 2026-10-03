@@ -42,6 +42,10 @@ func (opencodeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 	return opencode.SynthesizeExit(logPath)
 }
 
+func (opencodeDriver) ResultText(logPath string) (string, error) {
+	return opencode.ResultText(logPath)
+}
+
 func init() {
 	register(opencodeDriver{})
 }

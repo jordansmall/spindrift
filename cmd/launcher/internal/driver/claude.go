@@ -37,6 +37,10 @@ func (claudeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 	return exitCode, nil
 }
 
+func (claudeDriver) ResultText(logPath string) (string, error) {
+	return claude.ResultText(logPath)
+}
+
 func init() {
 	register(claudeDriver{})
 }
