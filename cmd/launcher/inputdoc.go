@@ -77,8 +77,10 @@ var gitConfigLookup = func(key string) string {
 // document's settings or artifacts, then the schema default, because the
 // wrapper no longer pre-populates env with baked defaults (ADR 0020).
 // Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
+// A set-but-empty bool knob is an explicit off and wins over the document and
+// the schema default, like getenvSchema.
 func resolveBoxEnvVar(name string) string {
-	if v := os.Getenv(name); v != "" {
+	if v, ok := ambientSetting(name); ok {
 		return v
 	}
 	if loadedDoc != nil {
@@ -98,8 +100,8 @@ func resolveBoxEnvVar(name string) string {
 // or a flag-set value looks like an ambient one.
 func warnAmbientKnobEnv(w io.Writer) {
 	for _, e := range schemaFlags {
-		v := os.Getenv(e.env)
-		if v == "" {
+		v, ok := ambientSetting(e.env)
+		if !ok {
 			continue
 		}
 		// A launcherIgnores knob's flag is inert (see flagEntry), so its
@@ -112,6 +114,9 @@ func warnAmbientKnobEnv(w io.Writer) {
 			if e.settingsPath != "" {
 				equiv += " or " + e.settingsPath
 			}
+		}
+		if v == "" {
+			v = `""`
 		}
 		fmt.Fprintf(w, "%s=%s set in environment — knob env overrides are deprecated; use %s\n", e.env, v, equiv)
 	}

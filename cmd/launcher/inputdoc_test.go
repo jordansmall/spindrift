@@ -101,6 +101,43 @@ func TestWarnAmbientKnobEnv_UnsetKnob_NoWarning(t *testing.T) {
 	}
 }
 
+// A bool knob's explicit off is set-but-empty (ambientSetting), and it
+// overrides the document's value, so it owes the same ADR 0020 warning.
+func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{
+		{env: "ORCHESTRATOR_ENABLED", flag: "orchestrator-enabled", kind: "bool", settingsPath: "orchestrator.enable"},
+	}
+	t.Setenv("ORCHESTRATOR_ENABLED", "")
+
+	var buf bytes.Buffer
+	warnAmbientKnobEnv(&buf)
+
+	out := buf.String()
+	for _, want := range []string{`ORCHESTRATOR_ENABLED=""`, "orchestrator.enable"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("warning = %q, want it to mention %q", out, want)
+		}
+	}
+}
+
+func TestWarnAmbientKnobEnv_SetButEmptyNonBoolKnob_NoWarning(t *testing.T) {
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{
+		{env: "MAX_PARALLEL", flag: "max-parallel", settingsPath: "dispatch.maxParallel"},
+	}
+	t.Setenv("MAX_PARALLEL", "")
+
+	var buf bytes.Buffer
+	warnAmbientKnobEnv(&buf)
+
+	if buf.String() != "" {
+		t.Errorf("warning = %q, want empty for a set-but-empty non-bool knob", buf.String())
+	}
+}
+
 // The wrapper no longer pre-populates env (ADR 0020), so a boxEnv knob like
 // MODEL reaches the Box with its baked value only through these fallbacks: the
 // document's settings or artifacts first, then the schema default table.

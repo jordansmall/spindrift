@@ -35,7 +35,7 @@ set_box_env() {
   export MAX_REBASE_ATTEMPTS=3
   export MODEL="claude-sonnet-5"
   export OPENCODE_AUTH_CONTENT=""
-  export ORCHESTRATOR_ENABLED=""
+  export ORCHESTRATOR_ENABLED="1"
   export REPO_SLUG="owner/repo"
   export RESEARCH_VERDICTS=""
   export REVIEW_EFFORT=""
