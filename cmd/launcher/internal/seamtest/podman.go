@@ -1,0 +1,94 @@
+package seamtest
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"strings"
+)
+
+// PodmanConfig is the podman fake's JSON config.
+type PodmanConfig struct {
+	// Record is the file every invocation's argv is appended to.
+	Record string `json:"record"`
+	// ImagePresent answers `image exists` / `image inspect`.
+	ImagePresent bool `json:"image_present"`
+	// Runs scripts the `run` invocations in order; runs past the end behave
+	// as the zero PodmanRun (exit 0, no output).
+	Runs []PodmanRun `json:"runs"`
+}
+
+// PodmanRun is one scripted `podman run`.
+type PodmanRun struct {
+	Exit int `json:"exit"`
+	// Outcome is written to stdout, e.g.
+	// "SPINDRIFT_OUTCOME issue=7 status=done\n". Like a well-behaved Box it
+	// gains the run's own " nonce=<RUN_NONCE>" (from the run argv's
+	// -e RUN_NONCE=...) unless it already carries one; the launcher rejects
+	// a line without it as spoofed.
+	Outcome string `json:"outcome"`
+}
+
+func podmanMain(args []string) int {
+	return podmanFake(args, os.Stdout, os.Stderr)
+}
+
+// podmanFake mirrors tests/fakes/runtime's podman branch: every subcommand
+// succeeds silently except the probes whose failure the launcher branches on.
+func podmanFake(args []string, stdout, stderr io.Writer) int {
+	var cfg PodmanConfig
+	if err := loadConfig("podman", &cfg); err != nil {
+		fmt.Fprintf(stderr, "podman fake: %v\n", err)
+		return fakeConfigExit
+	}
+	prior, err := appendRecord(cfg.Record, args)
+	if err != nil {
+		fmt.Fprintf(stderr, "podman fake: record: %v\n", err)
+		return fakeConfigExit
+	}
+	sub := func(i int) string {
+		if i < len(args) {
+			return args[i]
+		}
+		return ""
+	}
+	switch sub(0) {
+	case "image":
+		if sub(1) == "inspect" || sub(1) == "exists" {
+			if cfg.ImagePresent {
+				return 0
+			}
+			return 1
+		}
+	case "inspect":
+		// Container liveness probe: no container exists.
+		return 1
+	case "run":
+		n := 0
+		for _, p := range prior {
+			if len(p) > 0 && p[0] == "run" {
+				n++
+			}
+		}
+		var run PodmanRun
+		if n < len(cfg.Runs) {
+			run = cfg.Runs[n]
+		}
+		io.WriteString(stdout, withNonce(run.Outcome, args))
+		return run.Exit
+	}
+	return 0
+}
+
+func withNonce(outcome string, args []string) string {
+	if outcome == "" || strings.Contains(outcome, " nonce=") {
+		return outcome
+	}
+	for i, a := range args {
+		if nonce, ok := strings.CutPrefix(a, "RUN_NONCE="); ok && i > 0 && args[i-1] == "-e" {
+			line := strings.TrimSuffix(outcome, "\n")
+			return line + " nonce=" + nonce + outcome[len(line):]
+		}
+	}
+	return outcome
+}
