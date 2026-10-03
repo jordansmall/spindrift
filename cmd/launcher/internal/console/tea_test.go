@@ -5759,3 +5759,36 @@ func heartbeatFor(t *testing.T, m Model, number string) string {
 	t.Fatalf("no pick %q in Picks %+v", number, m.Picks)
 	return ""
 }
+
+// TestIsRunningNumber_AnyRunningRowWins pins that a running row keeps the
+// sidebar's feed refreshing even when a newer queued row of another kind
+// shares its number, while a settled-then-re-picked number still reads by its
+// live row.
+func TestIsRunningNumber_AnyRunningRowWins(t *testing.T) {
+	cases := []struct {
+		name  string
+		picks []Pick
+		want  bool
+	}{
+		{"running research under newer queued work", []Pick{
+			{Number: "42", Kind: KindResearch, State: PickRunning},
+			{Number: "42", State: PickQueued},
+		}, true},
+		{"terminated older row, running re-pick", []Pick{
+			{Number: "42", State: PickTerminated},
+			{Number: "42", State: PickRunning},
+		}, true},
+		{"running row of another number only", []Pick{
+			{Number: "7", State: PickRunning},
+			{Number: "42", State: PickTerminated},
+		}, false},
+		{"no rows", nil, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := isRunningNumber(c.picks, "42"); got != c.want {
+				t.Errorf("isRunningNumber = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
