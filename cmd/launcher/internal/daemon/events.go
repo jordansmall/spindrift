@@ -4,22 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 )
-
-// emitErrW is where Emit reports a failed Encode, and where pool.publish
-// (pool.go) reports a failed status file write (issue #3545) — both are
-// advisory-write failures that must never fail the daemon, just get
-// surfaced somewhere. A package-level var rather than an Emitter field so
-// NewEmitter keeps its two-argument shape and its call sites stay put;
-// tests swap it to assert on the diagnostic. Carrying mainRun's own stderr
-// here instead — so this diagnostic lands where every other one does —
-// needs the field and the signature change, and is left to a follow-up.
-var emitErrW io.Writer = os.Stderr
 
 // Event is one JSON-lines record in the daemon's event stream: the durable,
 // machine-readable record of every child started and finished, and every
@@ -110,18 +99,33 @@ const ShutdownDrain = "signalled stop: forwarding a drain request to every runni
 // ShutdownDrain.
 const ShutdownEscalate = "second signal: forwarding the escalation so every child reaps and releases"
 
-// Emitter writes Events as JSON-lines to an injected io.Writer.
+// Emitter writes Events as JSON-lines to an injected io.Writer and reports
+// advisory write failures to a second, injected error writer.
 type Emitter struct {
-	mu  sync.Mutex
-	w   io.Writer
-	now func() time.Time
+	mu   sync.Mutex
+	w    io.Writer
+	errW io.Writer
+	now  func() time.Time
 }
 
 // NewEmitter builds an Emitter writing to w, stamping each Event with now().
 // now is injected so tests get a deterministic timestamp and a later slice
-// can hand the emitter a real clock.
-func NewEmitter(w io.Writer, now func() time.Time) *Emitter {
-	return &Emitter{w: w, now: now}
+// can hand the emitter a real clock. errW is where advisory write failures —
+// a failed event or status-file write — are reported; nil means io.Discard.
+func NewEmitter(w, errW io.Writer, now func() time.Time) *Emitter {
+	if errW == nil {
+		errW = io.Discard
+	}
+	return &Emitter{w: w, errW: errW, now: now}
+}
+
+// warnf reports an advisory failure to errW under mu, so a diagnostic cannot
+// interleave with an event write when w and errW share a buffer. Emit holds
+// mu already and writes to errW itself rather than calling this.
+func (e *Emitter) warnf(format string, args ...any) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	fmt.Fprintf(e.errW, format, args...)
 }
 
 // Emit writes ev as one JSON line. It is safe to call concurrently — a later
@@ -138,6 +142,6 @@ func (e *Emitter) Emit(ev Event) {
 	// silently dropping the record would make the durable stream lie about
 	// what happened, so report it instead of swallowing it.
 	if err := enc.Encode(ev); err != nil {
-		fmt.Fprintf(emitErrW, "daemon: event stream write failed: %v\n", err)
+		fmt.Fprintf(e.errW, "daemon: event stream write failed: %v\n", err)
 	}
 }

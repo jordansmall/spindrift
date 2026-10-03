@@ -1188,13 +1188,14 @@ func (p *pool) snapshotLocked() Status {
 // located a git dir to publish into, or an operator who chose not to
 // publish — not a swallowed error, so publish is silently a no-op rather
 // than reporting anything. A write failure is advisory-only and must never
-// fail the daemon: it is reported to emitErrW and otherwise ignored.
+// fail the daemon: it is reported to the emitter's error writer and
+// otherwise ignored.
 func (p *pool) publish(seq uint64, s Status) {
 	if p.cfg.Status == nil {
 		return
 	}
 	if err := p.cfg.Status.Publish(seq, s); err != nil {
-		fmt.Fprintf(emitErrW, "daemon: status file write failed: %v\n", err)
+		p.em.warnf("daemon: status file write failed: %v\n", err)
 	}
 }
 

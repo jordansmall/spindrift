@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -29,8 +30,12 @@ type runCall struct {
 	Slot     int
 }
 
-func newTestEmitter(buf *bytes.Buffer) *Emitter {
-	return NewEmitter(buf, func() time.Time { return time.Unix(0, 0).UTC() })
+func newTestEmitter(w io.Writer) *Emitter {
+	return newTestEmitterErr(w, io.Discard)
+}
+
+func newTestEmitterErr(w, errW io.Writer) *Emitter {
+	return NewEmitter(w, errW, func() time.Time { return time.Unix(0, 0).UTC() })
 }
 
 func decodeEvents(t *testing.T, buf *bytes.Buffer) []Event {
@@ -2169,6 +2174,25 @@ func TestLoopInvalidConfigPublishesHaltedStatus(t *testing.T) {
 	}
 	if report.Status.Reason != reason {
 		t.Errorf("status reason = %q, want %q", report.Status.Reason, reason)
+	}
+}
+
+// TestLoopInvalidConfigReportsStatusWriteFailure pins invalidConfig's own
+// status-write diagnostic, a site distinct from pool.publish: a failed Write
+// must reach the emitter's errW and still return the config-invalid halt.
+func TestLoopInvalidConfigReportsStatusWriteFailure(t *testing.T) {
+	clk := &testClock{}
+	var buf, errBuf bytes.Buffer
+	em := newTestEmitterErr(&buf, &errBuf)
+
+	cfg := testConfig(0)
+	cfg.Status = NewStatusWriter(filepath.Join(t.TempDir(), "no-such-dir"), clk.Now)
+
+	if h := Loop(context.Background(), cfg, &scriptedRunner{}, em, clk); h.Class != HaltInvalidConfig {
+		t.Fatalf("halt class = %v, want HaltInvalidConfig", h.Class)
+	}
+	if got := errBuf.String(); !strings.Contains(got, "daemon: status file write failed") {
+		t.Fatalf("errW = %q, want it to contain %q", got, "daemon: status file write failed")
 	}
 }
 

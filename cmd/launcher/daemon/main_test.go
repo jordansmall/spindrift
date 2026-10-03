@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -30,6 +31,12 @@ var shippedKnobDefaults = map[string]string{
 	"DAEMON_FAILURE_BACKOFF":   "1m",
 	"DAEMON_BREAKER_THRESHOLD": "5",
 	"DAEMON_BREAKER_WINDOW":    "15m",
+}
+
+// newTestEmitter returns an Emitter on w with a fixed clock and discarded
+// diagnostics.
+func newTestEmitter(w io.Writer) *daemon.Emitter {
+	return daemon.NewEmitter(w, io.Discard, func() time.Time { return time.Unix(0, 0).UTC() })
 }
 
 // validKnobDocument builds the minimal input document mainRun needs to get
@@ -831,7 +838,7 @@ func TestAnnounceStop(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, time.Now)
+	em := daemon.NewEmitter(&buf, io.Discard, time.Now)
 
 	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
 
@@ -908,7 +915,7 @@ func TestAnnounceStop_QuitBeforeFirstLatch(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, time.Now)
+	em := daemon.NewEmitter(&buf, io.Discard, time.Now)
 
 	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
 
@@ -944,7 +951,7 @@ func TestAnnounceStop_QuitAfterFirstLatch(t *testing.T) {
 	defer cancel()
 
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, time.Now)
+	em := daemon.NewEmitter(&buf, io.Discard, time.Now)
 
 	poolStop, poolAbort := announceStop(stop, abort, quit, cancel, em)
 
@@ -1734,7 +1741,7 @@ func decodePreflightEvents(t *testing.T, buf *bytes.Buffer) []daemon.Event {
 // and stamps exactly one "preflight" event, no "halt" (issue #3544).
 func TestStartupPreflight_Healthy(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 0}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1769,7 +1776,7 @@ func TestStartupPreflight_Healthy(t *testing.T) {
 // (missing required triage labels).
 func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 4}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1800,7 +1807,7 @@ func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 // undersized podman machine now arrives as (slice 2) — refusing to start.
 func TestStartupPreflight_ConfigInvalid(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 2}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1812,7 +1819,7 @@ func TestStartupPreflight_ConfigInvalid(t *testing.T) {
 // TestStartupPreflight_Connectivity covers doctor exit 3 refusing to start.
 func TestStartupPreflight_Connectivity(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 3}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1828,7 +1835,7 @@ func TestStartupPreflight_Connectivity(t *testing.T) {
 // daemon.Loop, outside any loop), not by this test alone.
 func TestStartupPreflight_RunsExactlyOnce(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 0}
 
 	startupPreflight(context.Background(), r, em)
@@ -1841,7 +1848,7 @@ func TestStartupPreflight_RunsExactlyOnce(t *testing.T) {
 // is not a preflight that passed.
 func TestStartupPreflight_FetchRevisionFailure(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{fetchErr: errors.New("git fetch boom")}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1872,7 +1879,7 @@ func TestStartupPreflight_FetchRevisionFailure(t *testing.T) {
 // own label distinct from an ordinary seam error.
 func TestStartupPreflight_FeatureBranchGone(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{fetchErr: &daemon.FeatureBranchGoneError{Remote: "origin", Branch: "feature-x"}}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1923,7 +1930,7 @@ func TestStartupPreflight_NeverEvaluatesSelfPath(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	h := startupPreflight(context.Background(), r, em)
 	if h.Class != daemon.HaltNone {
 		t.Fatalf("startupPreflight() = %+v, want the zero Halt (self-eval failure must never reach the preflight)", h)
@@ -1937,7 +1944,7 @@ func TestStartupPreflight_NeverEvaluatesSelfPath(t *testing.T) {
 // error (distinct from a classified exit code) refusing to start likewise.
 func TestStartupPreflight_RunDoctorSeamFailure(t *testing.T) {
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorErr: errors.New("exec boom")}
 
 	h := startupPreflight(context.Background(), r, em)
@@ -1961,7 +1968,7 @@ func TestStartupPreflight_RunDoctorSeamErrorCarriesNoDaemonPrefix(t *testing.T) 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	got := startupPreflight(context.Background(), r, em).String()
 	if !strings.HasPrefix(got, "preflight: run-doctor: ") {
 		t.Errorf("startupPreflight().String() = %q, want prefix %q", got, "preflight: run-doctor: ")
@@ -1993,7 +2000,7 @@ func TestStartupPreflight_ContextCancelled(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+			em := newTestEmitter(&buf)
 			h := startupPreflight(ctx, tt.r, em)
 			if h.Class != daemon.HaltOperatorStop {
 				t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltOperatorStop)
@@ -2036,7 +2043,7 @@ func TestStartupPreflight_SignalKilledDoctorOnCancelledContext(t *testing.T) {
 	cancel()
 
 	var buf bytes.Buffer
-	em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(&buf)
 	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: -1}
 
 	h := startupPreflight(ctx, r, em)
@@ -2087,7 +2094,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 	t.Run("preflight refusal", func(t *testing.T) {
 		var buf, stderr bytes.Buffer
-		em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+		em := newTestEmitter(&buf)
 		r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 4}
 		h := startupPreflight(context.Background(), r, em)
 
@@ -2111,7 +2118,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 	t.Run("operator cancel during preflight", func(t *testing.T) {
 		var buf, stderr bytes.Buffer
-		em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+		em := newTestEmitter(&buf)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		h := startupPreflight(ctx, &fakePreflightRunner{}, em)
@@ -2128,7 +2135,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 
 	t.Run("instance lock refusal", func(t *testing.T) {
 		var buf, stderr bytes.Buffer
-		em := daemon.NewEmitter(&buf, func() time.Time { return time.Unix(0, 0).UTC() })
+		em := newTestEmitter(&buf)
 		h := daemon.Halt{Class: daemon.HaltInstanceLock, Detail: "held by pid 123"}
 
 		dir := t.TempDir()
@@ -3002,7 +3009,7 @@ func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var merged lockedBuffer
 			clock := func() time.Time { return time.Unix(0, 0).UTC() }
-			em := daemon.NewEmitter(&merged, clock)
+			em := daemon.NewEmitter(&merged, io.Discard, clock)
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			h := startupPreflight(ctx, &fakePreflightRunner{}, em)

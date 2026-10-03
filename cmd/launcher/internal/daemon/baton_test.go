@@ -137,7 +137,7 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	r.holdSlots(slots)
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	done := make(chan Halt, 1)
 	go func() {
@@ -269,7 +269,7 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 	}
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := testConfig(slots)
@@ -351,7 +351,7 @@ func TestPoolBatonPassesOnQueueEmptyChildEnd(t *testing.T) {
 	clk := &testClock{}
 	clk.park()
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	done := make(chan Halt, 1)
 	go func() {
@@ -398,7 +398,7 @@ func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 	clk := &testClock{}
 	clk.park()
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	done := make(chan Halt, 1)
 	go func() {
@@ -443,7 +443,7 @@ func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 	// next.
 	pinTheFailingHolder(clk)
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	done := make(chan Halt, 1)
 	go func() {
@@ -484,7 +484,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		runErrAt:  1,
@@ -556,7 +556,7 @@ func TestPoolBatonPassesWhenWindowClosesBeforeChildStart(t *testing.T) {
 		},
 	}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	cfg := testConfig(slots)
 	cfg.Awake = win
@@ -648,7 +648,7 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	cfg := testConfig(slots)
 	cfg.Awake = win
@@ -730,7 +730,7 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 	const slots = 2
 	wantErr := errors.New("boom")
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	holderEntered := make(chan struct{})
 	proceed := make(chan struct{})
 	r := &scriptedRunner{
@@ -888,7 +888,7 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 	}
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	cfg := testConfig(slots)
 	p, pctx := newPool(ctx, cfg, r, em, clk)
@@ -940,7 +940,7 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 	r.holdSlots(slots)
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	done := make(chan Halt, 1)
 	go func() {
@@ -1092,7 +1092,7 @@ func TestPoolBatonEventStreamOrderingAndReasons(t *testing.T) {
 	r.holdSlots(slots)
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	done := make(chan Halt, 1)
 	go func() {

@@ -238,7 +238,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	// race ahead of the halt and try a third RunChild call this test never
 	// scripts a release for.
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	cfg := testConfig(slots)
 	cfg.FailureBackoff = time.Millisecond
@@ -469,7 +469,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	r.announceEachSlot()
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	cfg := testConfig(slots)
 
 	done := make(chan Halt, 1)
@@ -543,7 +543,7 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clk := &testClock{}
 			nw := newNotifyWriter()
-			em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+			em := newTestEmitter(nw)
 			cfg := testConfig(2)
 			cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}
 			p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
@@ -585,7 +585,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	clk := &testClock{sleepSignal: make(chan struct{}, slots)}
 	clk.park()
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	cfg := testConfig(slots)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -679,7 +679,7 @@ func TestPoolExit3WithSiblingResolvingReportsJam(t *testing.T) {
 	clk := &testClock{}
 	clk.park()
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	cfg := testConfig(slots)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -809,7 +809,7 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 	clk := &testClock{sleepSignal: make(chan struct{}, slots+1)}
 	clk.park()
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	cfg := testConfig(slots)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -931,7 +931,7 @@ func setupAwakeWindowRace(t *testing.T, slots int, hook func(p *pool, pw *probeW
 	// artifact.
 	clk := &testClock{now: time.Date(2026, 1, 1, 8, 0, 0, 0, time.UTC), sleepSignal: make(chan struct{}, slots)}
 	clk.park()
-	em := NewEmitter(pw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(pw)
 
 	cfg := testConfig(slots)
 	cfg.Awake = win
@@ -993,7 +993,7 @@ func TestPoolAwakeWindowClosingWalkExhaustedCarriesReason(t *testing.T) {
 	w, now := exhaustingWindow(t)
 	clk := &testClock{now: now, sleepSignal: make(chan struct{}, 1)}
 	clk.park()
-	em := NewEmitter(pw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(pw)
 
 	cfg := testConfig(1)
 	cfg.Awake = w
@@ -1172,7 +1172,7 @@ func TestBatonParkPublishesIdle(t *testing.T) {
 	const slots = 2
 	clk := &testClock{}
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 
 	cfg := testConfig(slots)
 	p, pctx := newPool(context.Background(), cfg, &scriptedRunner{revisions: []string{"rev1"}}, em, clk)
@@ -2369,7 +2369,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	clk := &testClock{sleepSignal: make(chan struct{}, slots)}
 	clk.park()
 	nw := newNotifyWriter()
-	em := NewEmitter(nw, func() time.Time { return time.Unix(0, 0).UTC() })
+	em := newTestEmitter(nw)
 	cfg := testConfig(slots)
 	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)}
 	p, pctx := newPool(context.Background(), cfg, r, em, clk)
@@ -2472,32 +2472,27 @@ func TestPoolSnapshotChecksCarryPerKindJammed(t *testing.T) {
 
 // TestPoolPublishReportsWriteFailureDiagnostic pins the review finding on
 // pool.publish: a status write that fails must report the
-// "daemon: status file write failed" diagnostic to emitErrW rather than
-// silently vanishing, and must never panic or halt the daemon — mirrors
-// TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic's precedent for
-// the sibling failure path. Driven through Loop's own up-front publish
+// "daemon: status file write failed" diagnostic to the emitter's errW
+// rather than silently vanishing, and must never panic or halt the daemon —
+// mirrors TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic's precedent
+// for the sibling failure path. Driven through Loop's own up-front publish
 // (loop.go, before any child runs) rather than a hand-called p.publish(),
 // per issue #3620 slice 7a. The write is made to fail by pointing
 // NewStatusWriter at a directory that does not exist, so os.CreateTemp
 // fails; chmod 0500 is avoided because the Nix check sandbox may run as
 // root, where mode bits do not deny writes.
 func TestPoolPublishReportsWriteFailureDiagnostic(t *testing.T) {
-	var errBuf bytes.Buffer
-	orig := emitErrW
-	emitErrW = &errBuf
-	t.Cleanup(func() { emitErrW = orig })
-
 	clk := &testClock{}
 	cfg := testConfig(1)
 	cfg.Status = NewStatusWriter(filepath.Join(t.TempDir(), "no-such-dir"), time.Now)
 	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}} // host-tainted: halts promptly
-	var buf bytes.Buffer
-	em := newTestEmitter(&buf)
+	var buf, errBuf bytes.Buffer
+	em := newTestEmitterErr(&buf, &errBuf)
 
 	Loop(context.Background(), cfg, r, em, clk) // must not panic despite the write failure
 
 	if got := errBuf.String(); !strings.Contains(got, "daemon: status file write failed") {
-		t.Fatalf("emitErrW = %q, want it to contain %q", got, "daemon: status file write failed")
+		t.Fatalf("errW = %q, want it to contain %q", got, "daemon: status file write failed")
 	}
 }
 
