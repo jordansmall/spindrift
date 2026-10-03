@@ -129,146 +129,35 @@ func TestGatesSkillsBaking(t *testing.T) {
 	}
 }
 
-// Since issue #2533, ORCHESTRATOR, the REVIEW_LOOP_INLINE/ORCHESTRATOR
-// exactly-one-on pair, FILER_ENABLED and WORKER_PROVISIONED (entrypoint.sh:
-// 761-799) are passthroughs of nix-precomputed Env fields rather than derived
-// in-box, so each case sets those fields explicitly instead of relying on
-// Gates to re-derive them.
-func TestGatesOrchestratorReviewLoop(t *testing.T) {
+// FILER_ENABLED and WORKER_PROVISIONED (entrypoint.sh: 761-799) are
+// passthroughs of nix-precomputed Env fields rather than derived in-box
+// (issue #2533), so each case sets those fields explicitly instead of relying
+// on Gates to re-derive them.
+func TestGatesRosterPassthrough(t *testing.T) {
 	cases := []struct {
 		name string
 		env  Env
 		want map[string]bool
 	}{
 		{
-			name: "orchestrator off, no roster",
-			env: Env{
-				ReviewLoopInline: true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             false,
-				"REVIEW_LOOP_INLINE":       true,
-				"REVIEW_LOOP_ORCHESTRATOR": false,
-				"FILER_ENABLED":            false,
-				"WORKER_PROVISIONED":       false,
-			},
+			name: "no roster",
+			env:  Env{},
+			want: map[string]bool{"FILER_ENABLED": false, "WORKER_PROVISIONED": false},
 		},
 		{
-			name: "orchestrator on, no roster",
-			env: Env{
-				OrchestratorEnabled:    true,
-				ReviewLoopOrchestrator: true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             true,
-				"REVIEW_LOOP_INLINE":       false,
-				"REVIEW_LOOP_ORCHESTRATOR": true,
-				"FILER_ENABLED":            false,
-				"WORKER_PROVISIONED":       false,
-			},
+			name: "filer and worker both provisioned",
+			env:  Env{FilerEnabled: true, WorkerProvisioned: true},
+			want: map[string]bool{"FILER_ENABLED": true, "WORKER_PROVISIONED": true},
 		},
 		{
-			name: "orchestrator off, filer and worker both provisioned",
-			env: Env{
-				ReviewLoopInline:  true,
-				FilerEnabled:      true,
-				WorkerProvisioned: true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             false,
-				"REVIEW_LOOP_INLINE":       true,
-				"REVIEW_LOOP_ORCHESTRATOR": false,
-				"FILER_ENABLED":            true,
-				"WORKER_PROVISIONED":       true,
-			},
-		},
-		{
-			name: "orchestrator on, only filer provisioned",
-			env: Env{
-				OrchestratorEnabled:    true,
-				ReviewLoopOrchestrator: true,
-				FilerEnabled:           true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             true,
-				"REVIEW_LOOP_INLINE":       false,
-				"REVIEW_LOOP_ORCHESTRATOR": true,
-				"FILER_ENABLED":            true,
-				"WORKER_PROVISIONED":       false,
-			},
+			name: "only filer provisioned",
+			env:  Env{FilerEnabled: true},
+			want: map[string]bool{"FILER_ENABLED": true, "WORKER_PROVISIONED": false},
 		},
 		{
 			name: "roster present but neither filer nor worker provisioned",
-			env: Env{
-				AgentsJSONTemplate: `{"reviewer":{"model":"m"}}`,
-				ReviewLoopInline:   true,
-			},
-			want: map[string]bool{
-				"FILER_ENABLED":            false,
-				"WORKER_PROVISIONED":       false,
-				"REVIEW_LOOP_INLINE":       true,
-				"REVIEW_LOOP_ORCHESTRATOR": false,
-			},
-		},
-		{
-			// The zero value here is what a version-skew dispatch leaves
-			// behind, not a stray `Env{}`: a host launcher predating issue
-			// #2533 never sets BOX_REVIEW_LOOP_INLINE/ORCHESTRATOR, which
-			// have no baked default. Gates reproduces entrypoint.sh's old
-			// bash negation so exactly one of the pair stays on (env.go: 78-91).
-			name: "both review-loop fields empty, orchestrator off: falls open to inline",
-			env: Env{
-				OrchestratorEnabled: false,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             false,
-				"REVIEW_LOOP_INLINE":       true,
-				"REVIEW_LOOP_ORCHESTRATOR": false,
-			},
-		},
-		{
-			// Same version-skew scenario as above, but with
-			// ORCHESTRATOR_ENABLED itself on: the fallback must track the
-			// live ORCHESTRATOR gate, not hardcode inline regardless of it.
-			name: "both review-loop fields empty, orchestrator on: falls open to orchestrator",
-			env: Env{
-				OrchestratorEnabled: true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             true,
-				"REVIEW_LOOP_INLINE":       false,
-				"REVIEW_LOOP_ORCHESTRATOR": true,
-			},
-		},
-		{
-			// The two fields cross a process boundary independently, so a
-			// stuck or duplicated forward can leave both true, not only both
-			// false (issue #2533 review). The both-false repair must apply
-			// here too, or Gates renders both review-loop sections at once.
-			name: "both review-loop fields true, orchestrator off: repairs to inline",
-			env: Env{
-				OrchestratorEnabled:    false,
-				ReviewLoopInline:       true,
-				ReviewLoopOrchestrator: true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             false,
-				"REVIEW_LOOP_INLINE":       true,
-				"REVIEW_LOOP_ORCHESTRATOR": false,
-			},
-		},
-		{
-			name: "both review-loop fields true, orchestrator on: repairs to orchestrator",
-			env: Env{
-				OrchestratorEnabled:    true,
-				ReviewLoopInline:       true,
-				ReviewLoopOrchestrator: true,
-			},
-			want: map[string]bool{
-				"ORCHESTRATOR":             true,
-				"REVIEW_LOOP_INLINE":       false,
-				"REVIEW_LOOP_ORCHESTRATOR": true,
-			},
+			env:  Env{AgentsJSONTemplate: `{"reviewer":{"model":"m"}}`},
+			want: map[string]bool{"FILER_ENABLED": false, "WORKER_PROVISIONED": false},
 		},
 	}
 	for _, tc := range cases {
@@ -281,6 +170,17 @@ func TestGatesOrchestratorReviewLoop(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The orchestrator is the only Box path, so no gate may exist to ask whether
+// it is on: the review-loop fragments are ungated registry rows instead.
+func TestGatesHaveNoOrchestratorSwitch(t *testing.T) {
+	got := Gates(Env{})
+	for _, k := range []string{"ORCHESTRATOR", "REVIEW_LOOP_INLINE", "REVIEW_LOOP_ORCHESTRATOR"} {
+		if _, ok := got[k]; ok {
+			t.Errorf("Gates has a %q key, want none", k)
+		}
 	}
 }
 

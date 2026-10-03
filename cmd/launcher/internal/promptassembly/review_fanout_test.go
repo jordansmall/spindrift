@@ -108,8 +108,6 @@ func TestReviewFanoutAgentBakedAnchorHasNoHardcodedName(t *testing.T) {
 // renders review-prompt.md into Result.ReviewPromptText.
 func orchestratorReviewEnv() Env {
 	env := coveredEnv()
-	env.OrchestratorEnabled = true
-	env.ReviewLoopInline = false
 	return env
 }
 

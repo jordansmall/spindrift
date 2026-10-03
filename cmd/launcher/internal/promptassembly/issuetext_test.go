@@ -62,9 +62,6 @@ func TestAssembleAppendsIssueTextSection(t *testing.T) {
 
 	t.Run("review prompt", func(t *testing.T) {
 		reviewEnv := baseEnv
-		reviewEnv.OrchestratorEnabled = true
-		reviewEnv.ReviewLoopInline = false
-		reviewEnv.ReviewLoopOrchestrator = true
 
 		withoutText := reviewEnv
 		withoutText.IssueText = ""
@@ -106,6 +103,13 @@ func TestAssembleIssueTextVarSubstitution(t *testing.T) {
 	if err := os.WriteFile(
 		filepath.Join(promptsFixtureDir, "issue-prompt.md"),
 		[]byte("# TASK\n\ninline: ${ISSUE_TEXT}\n"),
+		0o644,
+	); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(promptsFixtureDir, "review-prompt.md"),
+		[]byte("# REVIEW\n"),
 		0o644,
 	); err != nil {
 		t.Fatalf("WriteFile: %v", err)

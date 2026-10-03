@@ -29,7 +29,7 @@ type Result struct {
 	AgentsJSON string
 	// ReviewPromptText is the rendered review-prompt.md body, populated
 	// under the same condition Handoff.ReviewPromptFile describes
-	// (orchestrator on, default fresh-work dispatch, FixPass == 0). It lives
+	// (default fresh-work dispatch, FixPass == 0). It lives
 	// on Result, not Handoff, because it is rendered text rather than the
 	// path Handoff serializes to disk (issue #2975).
 	ReviewPromptText string
@@ -75,7 +75,7 @@ type Caps struct {
 type Handoff struct {
 	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
 	SessionMode string
-	// Invoker is "orchestrator" or "driver-exec" (entrypoint.sh: 1282-1286).
+	// Invoker is always "orchestrator"; the field goes when the entrypoint stops reading it.
 	Invoker string
 	// PromptFile is the path the CLI wrapper writes Result.Prompt to. Assemble
 	// never sets it: it renders the text, the wrapper picks the path.
@@ -87,9 +87,8 @@ type Handoff struct {
 	// every cell; the wrapper sets it only when ReviewPromptText is non-empty.
 	ReviewPromptFile string
 	// ReviewModel is extracted from AgentsJSONTemplate's "reviewer" key
-	// whenever Invoker is "orchestrator", regardless of dispatch kind or
-	// FixPass. It stays empty under "driver-exec" or when the template has no
-	// reviewer model, mirroring jq's `.reviewer.model // empty`. An explicit
+	// regardless of dispatch kind or FixPass. It stays empty when the template
+	// has no reviewer model, mirroring jq's `.reviewer.model // empty`. An explicit
 	// dispatch-time REVIEW_MODEL (issue #3171) binds over it last.
 	ReviewModel string
 	// ReviewEffort mirrors ReviewModel, from the same reviewer key's "effort"
@@ -97,7 +96,7 @@ type Handoff struct {
 	// explicit dispatch-time REVIEW_EFFORT (issue #3171).
 	ReviewEffort string
 	// AdvisoryReviewer is true when the kind supplies its own reviewer prompt
-	// (butler, ADR 0056) under ORCHESTRATOR: its inline reviewer only
+	// (butler, ADR 0056): its inline reviewer only
 	// advises, so its verdict must not steer the pass loop (issue #3925).
 	AdvisoryReviewer bool
 	// Model, Effort, Driver, DriverBin, and DriverFlags are the Driver
@@ -324,7 +323,9 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// because command substitution strips trailing newlines.
 	for _, row := range reg.Rows {
 		fragSource := Source{Kind: SourceFragment, Name: row.Fragment}
-		if gates[row.Gate] {
+		// An ungated row (empty Gate) renders unconditionally, so the
+		// orchestrator fragments need no switch gate.
+		if row.Gate == "" || gates[row.Gate] {
 			path := filepath.Join(e.PromptsDir, "fragments", row.Fragment)
 			rendered, err := renderFileSegments(path, fragSource, vars)
 			if err != nil {
@@ -428,12 +429,12 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 		base = append(base, segment{src: Source{Kind: SourceVar, Name: "ISSUE_TEXT"}, text: "\n\n" + issueSection})
 	}
 
-	// The review prompt is populated only on the fresh-work path with the
-	// orchestrator on: an advise-only dispatch never reviews (ADR 0022), and a
-	// warm FixPass box has its own review-less flow.
+	// The review prompt is populated only on the fresh-work path: an
+	// advise-only dispatch never reviews (ADR 0022), and a warm FixPass box
+	// has its own review-less flow.
 	var review body
 	var reviewName string
-	if gates["ORCHESTRATOR"] && !d.AdviseOnly && e.FixPass == 0 {
+	if !d.AdviseOnly && e.FixPass == 0 {
 		reviewName = "review-prompt.md"
 		reviewPromptPath := filepath.Join(e.PromptsDir, reviewName)
 		reviewSource := Source{Kind: SourceTemplate, Name: reviewName}
@@ -475,12 +476,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		return Result{}, err
 	}
 
-	gates := bodies.gates
-
-	invoker := "driver-exec"
-	if gates["ORCHESTRATOR"] {
-		invoker = "orchestrator"
-	}
+	invoker := "orchestrator"
 
 	frags := map[string]struct{}{}
 	addFragmentNames(frags, bodies.base)
@@ -491,7 +487,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		Handoff: Handoff{
 			SessionMode:      bodies.sessionMode,
 			Invoker:          invoker,
-			AdvisoryReviewer: gates["ORCHESTRATOR"] && bodies.kind.Prompts.Reviewer != "",
+			AdvisoryReviewer: bodies.kind.Prompts.Reviewer != "",
 		},
 	}
 
@@ -503,41 +499,39 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	if e.AgentsJSONTemplate != "" {
 		agentsTemplate := e.AgentsJSONTemplate
 
-		if gates["ORCHESTRATOR"] {
-			// Issue #2277: extract the reviewer's configured model before
-			// dropping the reviewer key entirely. The code-owned review pass
-			// replaces the inline reviewer subagent, so that subagent is
-			// never provisioned into --agents at all, not merely muted.
-			var agentsKeys map[string]json.RawMessage
-			if err := json.Unmarshal([]byte(agentsTemplate), &agentsKeys); err != nil {
-				return Result{}, fmt.Errorf("parse agents json template: %w", err)
-			}
-			if reviewerRaw, ok := agentsKeys["reviewer"]; ok {
-				var reviewer struct {
-					Model  string `json:"model"`
-					Effort string `json:"effort"`
-				}
-				// A malformed reviewer entry mirrors jq's `// empty`: an
-				// Unmarshal error and a zero-value field both leave
-				// ReviewModel/ReviewEffort empty rather than failing.
-				_ = json.Unmarshal(reviewerRaw, &reviewer)
-				result.Handoff.ReviewModel = reviewer.Model
-				result.Handoff.ReviewEffort = reviewer.Effort
-			}
-			// A kind with its own reviewer prompt (butler's
-			// butler-review-prompt.md, ADR 0056) never gets the code-owned
-			// review pass above (it's AdviseOnly), so its inline reviewer
-			// subagent is the only review it gets — keep the key instead of
-			// dropping it.
-			if bodies.kind.Prompts.Reviewer == "" {
-				delete(agentsKeys, "reviewer")
-			}
-			strippedJSON, err := json.Marshal(agentsKeys)
-			if err != nil {
-				return Result{}, fmt.Errorf("marshal reviewer-stripped agents json: %w", err)
-			}
-			agentsTemplate = string(strippedJSON)
+		// Issue #2277: extract the reviewer's configured model before
+		// dropping the reviewer key entirely. The code-owned review pass
+		// replaces the inline reviewer subagent, so that subagent is
+		// never provisioned into --agents at all, not merely muted.
+		var agentsKeys map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(agentsTemplate), &agentsKeys); err != nil {
+			return Result{}, fmt.Errorf("parse agents json template: %w", err)
 		}
+		if reviewerRaw, ok := agentsKeys["reviewer"]; ok {
+			var reviewer struct {
+				Model  string `json:"model"`
+				Effort string `json:"effort"`
+			}
+			// A malformed reviewer entry mirrors jq's `// empty`: an
+			// Unmarshal error and a zero-value field both leave
+			// ReviewModel/ReviewEffort empty rather than failing.
+			_ = json.Unmarshal(reviewerRaw, &reviewer)
+			result.Handoff.ReviewModel = reviewer.Model
+			result.Handoff.ReviewEffort = reviewer.Effort
+		}
+		// A kind with its own reviewer prompt (butler's
+		// butler-review-prompt.md, ADR 0056) never gets the code-owned
+		// review pass above (it's AdviseOnly), so its inline reviewer
+		// subagent is the only review it gets — keep the key instead of
+		// dropping it.
+		if bodies.kind.Prompts.Reviewer == "" {
+			delete(agentsKeys, "reviewer")
+		}
+		strippedJSON, err := json.Marshal(agentsKeys)
+		if err != nil {
+			return Result{}, fmt.Errorf("marshal reviewer-stripped agents json: %w", err)
+		}
+		agentsTemplate = string(strippedJSON)
 
 		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, bodies.vars, frags, bodies.kind.Prompts.Reviewer)
 		if err != nil {
@@ -552,7 +546,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// model overwrites whatever the JSON path set in ReviewModel, and a
 	// missing reviewer.md leaves the JSON-path value unchanged.
 	if e.DriverAgentFilesDir != "" {
-		if err := rewriteAgentFiles(e, bodies.vars, gates["ORCHESTRATOR"], &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
+		if err := rewriteAgentFiles(e, bodies.vars, &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
 		}
 	}
@@ -562,14 +556,12 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// Dispatch-time overrides (issue #3171) bind last, over both extraction
 	// paths above: dispatch env beats a baked roster entry beats the
 	// coordinator-model fallback. They apply even when the roster opted the
-	// reviewer out, because the review pass always runs under ORCHESTRATOR.
-	if gates["ORCHESTRATOR"] {
-		if e.ReviewModelOverride != "" {
-			result.Handoff.ReviewModel = e.ReviewModelOverride
-		}
-		if e.ReviewEffortOverride != "" {
-			result.Handoff.ReviewEffort = e.ReviewEffortOverride
-		}
+	// reviewer out, because the review pass always runs.
+	if e.ReviewModelOverride != "" {
+		result.Handoff.ReviewModel = e.ReviewModelOverride
+	}
+	if e.ReviewEffortOverride != "" {
+		result.Handoff.ReviewEffort = e.ReviewEffortOverride
 	}
 
 	return result, nil
@@ -642,8 +634,8 @@ func addFragmentNames(set map[string]struct{}, b body) {
 // renderAgentsJSON sets .{name}.prompt for every key in agentsTemplate whose
 // AgentsPromptFiles entry names a file that exists under PromptsDir.
 // agentsTemplate is a parameter rather than read from e.AgentsJSONTemplate so
-// the caller can pass the reviewer-stripped template the orchestrator-on
-// branch produces (issue #2353). reviewerPrompt is the dispatch kind's own
+// the caller can pass the reviewer-stripped template (issue #2353).
+// reviewerPrompt is the dispatch kind's own
 // reviewer prompt filename, or "" when it has none. Every fragment that
 // reaches a rendered agent prompt is added to frags.
 func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string]struct{}, reviewerPrompt string) (string, error) {
@@ -737,15 +729,15 @@ func reviewerModelFrontmatter(frontmatter string) string {
 
 // rewriteAgentFiles is renderAgentsJSON's twin for a Driver (opencode) whose
 // subagents use on-disk agent files. Call it only when DriverAgentFilesDir is
-// set. Under orchestratorOn, reviewer.md's `model:` scalar overwrites
+// set. reviewer.md's `model:` scalar overwrites
 // *reviewModel and the file is removed; a missing one leaves it untouched. A
 // kind with its own reviewer prompt (reviewerPrompt != "") keeps reviewer.md
 // instead, since it never gets the code-owned review pass this removal makes
 // room for — the rewrite loop below then rewrites it from that kind's prompt
 // like any other agent file. Names are rewritten in sorted order, so Go map
 // order cannot vary results.
-func rewriteAgentFiles(e Env, vars map[string]body, orchestratorOn bool, reviewModel *string, reviewerPrompt string) error {
-	if orchestratorOn && reviewerPrompt == "" {
+func rewriteAgentFiles(e Env, vars map[string]body, reviewModel *string, reviewerPrompt string) error {
+	if reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
 		if data, err := os.ReadFile(reviewerPath); err == nil {
 			*reviewModel = reviewerModelFrontmatter(frontmatterOf(data))

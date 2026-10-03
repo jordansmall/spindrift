@@ -13,7 +13,8 @@ import (
 // the two sides checkable for drift.
 type FragmentRow struct {
 	// Gate is the bash gate variable tested for non-emptiness, the same key
-	// Gates (gates.go) returns in its map.
+	// Gates (gates.go) returns in its map. Empty means ungated: the row's
+	// fragment renders unconditionally.
 	Gate string `json:"gate"`
 	// Fragment is the basename under prompts/fragments/ rendered when Gate is on.
 	Fragment string `json:"fragment"`

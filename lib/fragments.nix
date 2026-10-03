@@ -6,7 +6,8 @@
 
 # A row's `gate` is a bash variable the loop tests for non-emptiness, not a
 # Nix boolean, and `fragment` is a basename under prompts/fragments/, from
-# templates/default or a SPINDRIFT_PROMPT_DIR override.
+# templates/default or a SPINDRIFT_PROMPT_DIR override. A row that omits `gate`
+# is ungated and renders unconditionally; the export normalizes it to "".
 
 # `extraSubstVars` (default []) lists allowlist entries a fragment's own body
 # interpolates; every other fragment is static prose once its gate is on.
@@ -158,37 +159,28 @@ let
       fragment = "principle-redesign-from-first-principles-default.md";
       var = "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP";
     }
-    # The REVIEW section (issue #2037, ADR 0035): off, the implementor spawns
-    # a fresh `reviewer` subagent inline and loops until no blocking findings
-    # remain. On, the orchestrator drives that review as its own pass, so this
-    # pass's prompt stops after COMMIT unless a prior review pass's APPROVE is
-    # already visible in the seeded run-state handoff.
+    # The REVIEW section (issue #2037, ADR 0035): the orchestrator drives the
+    # review as its own pass, so each pass's prompt stops after COMMIT unless a
+    # prior review pass's APPROVE is already visible in the seeded run-state
+    # handoff. These three rows are ungated: the orchestrator is the only Box
+    # path, so no switch is left to condition them on.
     {
-      gate = "REVIEW_LOOP_INLINE";
-      fragment = "review-loop-inline.md";
-      var = "REVIEW_LOOP_INLINE_STEP";
-    }
-    {
-      gate = "REVIEW_LOOP_ORCHESTRATOR";
       fragment = "review-loop-orchestrator.md";
       var = "REVIEW_LOOP_ORCHESTRATOR_STEP";
     }
-    # The land pass's rebase-then-fix-then-gate work order (issue #3214):
-    # reuses the REVIEW_LOOP_ORCHESTRATOR gate, since one prompt serves every
-    # pass and a gate cannot key on "is this the land pass?". The fragment
-    # scopes itself in its own prose, keyed on the seeded handoff's
-    # `Last reviewer verdict: APPROVE`.
+    # The land pass's rebase-then-fix-then-gate work order (issue #3214). One
+    # prompt serves every pass, so a gate cannot key on "is this the land
+    # pass?"; the fragment scopes itself in its own prose, keyed on the seeded
+    # handoff's `Last reviewer verdict: APPROVE`.
     {
-      gate = "REVIEW_LOOP_ORCHESTRATOR";
       fragment = "land-pass-order-orchestrator.md";
       var = "LAND_PASS_ORDER_ORCHESTRATOR_STEP";
     }
-    # The COMMIT-section fold-fix instruction (issue #2698): reuses the
-    # REVIEW_LOOP_ORCHESTRATOR gate but must render earlier, in COMMIT, ahead
-    # of where the pass commits. The review-loop fragment itself never acts on
-    # findings in the same turn, so the instruction cannot live there.
+    # The COMMIT-section fold-fix instruction (issue #2698): must render
+    # earlier, in COMMIT, ahead of where the pass commits. The review-loop
+    # fragment itself never acts on findings in the same turn, so the
+    # instruction cannot live there.
     {
-      gate = "REVIEW_LOOP_ORCHESTRATOR";
       fragment = "commit-rework-orchestrator.md";
       var = "COMMIT_REWORK_ORCHESTRATOR_STEP";
     }
@@ -731,6 +723,7 @@ let
       var = "IF_BLOCKED_OUTCOME_LANDING_READ_ONLY_STEP";
     }
   ];
+  normalized = map (r: { gate = ""; } // r) rows;
 in
-assert (import ./fragment-pairs.nix).validate rows;
-rows
+assert (import ./fragment-pairs.nix).validate normalized;
+normalized

@@ -11,15 +11,12 @@ import (
 // must never be escalated again in a later round. Once the Filer runs, its
 // intents are only filed host-side after the run ends, so a later round's
 // `gh issue list` dedup search can never see an earlier round's own
-// in-flight intents — re-escalating files the same finding twice under
-// different keys. The guard sentence must live in item 3 (Escalate) of both
-// review-loop fragments, verbatim-identical between them (the shared
+// different keys. The guard sentence must live in item 3 (Escalate) of the
+// review-loop fragment.
 // item-list parity the non-blocking-triage test already enforces).
 func TestNonBlockingTriageItem3NeverReescalates(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	inline := readPromptFile(t, repoRoot, "fragments/review-loop-inline.md")
 	orchestrator := readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator.md")
-	inlineParagraph := nonBlockingTriageParagraph(t, inline)
 	orchestratorParagraph := nonBlockingTriageParagraph(t, orchestrator)
 
 	item3Marker := "3. Escalate"
@@ -28,7 +25,6 @@ func TestNonBlockingTriageItem3NeverReescalates(t *testing.T) {
 		name      string
 		paragraph string
 	}{
-		{"inline", inlineParagraph},
 		{"orchestrator", orchestratorParagraph},
 	} {
 		item3Idx := strings.Index(tc.paragraph, item3Marker)

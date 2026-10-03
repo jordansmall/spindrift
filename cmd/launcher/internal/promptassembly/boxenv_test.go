@@ -15,13 +15,10 @@ type boxEnvRow struct {
 }
 
 var boxEnvRows = []boxEnvRow{
-	{"OrchestratorEnabled", "ORCHESTRATOR_ENABLED", "presence"},
 	{"AgentsJSONTemplate", "AGENTS_JSON_TEMPLATE", "string"},
 	{"FilerEnabled", "BOX_FILER_ENABLED", "presence"},
 	{"WorkerProvisioned", "BOX_WORKER_PROVISIONED", "presence"},
 	{"ScoutProvisioned", "BOX_SCOUT_PROVISIONED", "presence"},
-	{"ReviewLoopInline", "BOX_REVIEW_LOOP_INLINE", "presence"},
-	{"ReviewLoopOrchestrator", "BOX_REVIEW_LOOP_ORCHESTRATOR", "presence"},
 	{"IssueTracker", "ISSUE_TRACKER", "string"},
 	{"TrackerAxisRead", "BOX_TRACKER_AXIS_READ", "string"},
 	{"TrackerAxisWrite", "BOX_TRACKER_AXIS_WRITE", "string"},

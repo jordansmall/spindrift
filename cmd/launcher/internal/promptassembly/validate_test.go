@@ -9,7 +9,7 @@ import (
 // Every gate the validateMarkers rows key off of is off here, so Validate must
 // neither reject nor warn whatever the Prompt and AgentsJSON contain.
 func TestValidateNoGatesActive(t *testing.T) {
-	e := Env{DispatchKind: "work", BoxWriteEnabled: true, OrchestratorEnabled: false}
+	e := Env{DispatchKind: "work", BoxWriteEnabled: true}
 	result := Result{Prompt: "no markers anywhere", AgentsJSON: ""}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -78,10 +78,10 @@ func TestValidateReadWriteResearchFilerRelayPass(t *testing.T) {
 	}
 }
 
-// Pins the reviewer-verdict row: the orchestrator on with a rendered review
+// Pins the reviewer-verdict row: a rendered review
 // prompt missing VERDICT: must reject.
-func TestValidateOrchestratorEnabledReject(t *testing.T) {
-	e := Env{OrchestratorEnabled: true}
+func TestValidateReviewPromptReject(t *testing.T) {
+	e := Env{}
 	result := Result{
 		ReviewPromptText: "reviewer stub, no verdict line here",
 	}
@@ -99,8 +99,8 @@ func TestValidateOrchestratorEnabledReject(t *testing.T) {
 // Acceptance criterion 3 of issue #2249, no false positives: an empty
 // Result.ReviewPromptText (a research or fix-pass dispatch) leaves the
 // reviewer-verdict gate inactive whatever the content.
-func TestValidateOrchestratorEnabledNoFalsePositive(t *testing.T) {
-	e := Env{OrchestratorEnabled: true, BoxWriteEnabled: true}
+func TestValidateReviewPromptNoFalsePositive(t *testing.T) {
+	e := Env{BoxWriteEnabled: true}
 	result := Result{ReviewPromptText: ""}
 
 	warnings, err := Validate(e, result, testValidateMarkerRows())
@@ -132,11 +132,10 @@ func TestValidateBoxAccessReadOnlyWarn(t *testing.T) {
 // AgentsJSON rather than result.Prompt, and warns rather than rejects.
 func TestValidateFilerFileRelayWarn(t *testing.T) {
 	e := Env{
-		DispatchKind:        "work",
-		BoxWriteEnabled:     false,
-		OrchestratorEnabled: true,
-		AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
-		FilerEnabled:        true,
+		DispatchKind:       "work",
+		BoxWriteEnabled:    false,
+		AgentsJSONTemplate: `{"filer":{"model":"m"}}`,
+		FilerEnabled:       true,
 	}
 	result := Result{
 		Prompt:     "issue stub",
@@ -312,8 +311,8 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 		}
 	})
 
-	t.Run("orchestratorEnabled reject", func(t *testing.T) {
-		e := Env{OrchestratorEnabled: true}
+	t.Run("reviewPrompt reject", func(t *testing.T) {
+		e := Env{}
 		result := Result{
 			ReviewPromptText: "reviewer stub, no verdict line here",
 		}
@@ -347,11 +346,10 @@ func TestValidateMarkerMessageVerbatim(t *testing.T) {
 
 	t.Run("filerFileRelay warn", func(t *testing.T) {
 		e := Env{
-			DispatchKind:        "work",
-			BoxWriteEnabled:     false,
-			OrchestratorEnabled: true,
-			AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
-			FilerEnabled:        true,
+			DispatchKind:       "work",
+			BoxWriteEnabled:    false,
+			AgentsJSONTemplate: `{"filer":{"model":"m"}}`,
+			FilerEnabled:       true,
 		}
 		result := Result{
 			// Carries SPINDRIFT_PR_INTENT so the boxAccessReadOnly row, whose
@@ -477,11 +475,10 @@ func TestValidateIssueIntentSignalCarrier(t *testing.T) {
 	rows := testValidateMarkerRows()
 	const promptKeepsPrIntentQuiet = "issue stub already ran driver-exec signal pr-intent and logged SPINDRIFT_PR_INTENT"
 	baseEnv := Env{
-		DispatchKind:        "work",
-		BoxWriteEnabled:     false,
-		OrchestratorEnabled: true,
-		AgentsJSONTemplate:  `{"filer":{"model":"m"}}`,
-		FilerEnabled:        true,
+		DispatchKind:       "work",
+		BoxWriteEnabled:    false,
+		AgentsJSONTemplate: `{"filer":{"model":"m"}}`,
+		FilerEnabled:       true,
 	}
 
 	t.Run("socket mode warns on the marker alone", func(t *testing.T) {
@@ -611,7 +608,7 @@ func TestValidateReviewerVerdictCarrierBlind(t *testing.T) {
 	rows := testValidateMarkerRows()
 
 	for _, carrier := range []string{"", "socket"} {
-		e := Env{OrchestratorEnabled: true, SignalCarrier: carrier}
+		e := Env{SignalCarrier: carrier}
 		result := Result{ReviewPromptText: "reviewer stub, no verdict line here"}
 
 		_, err := Validate(e, result, rows)
@@ -642,7 +639,7 @@ func testValidateMarkerRows() []ValidateMarkerRow {
 			Marker:   "VERDICT:",
 			Carrier:  "subagent-first-line",
 			Severity: "reject",
-			When:     "orchestratorEnabled",
+			When:     "reviewPrompt",
 			Message:  "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.",
 		},
 		{

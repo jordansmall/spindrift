@@ -112,7 +112,7 @@ rec {
       marker = "VERDICT:";
       carrier = "subagent-first-line";
       severity = "reject";
-      when = "orchestratorEnabled";
+      when = "reviewPrompt";
       message = "_validate_prompt_contract: the orchestrator's rendered review prompt is missing the required 'VERDICT:' marker -- this belongs in review-prompt.md's (or a SPINDRIFT_PROMPT_DIR override's) verdict line; without it the code-owned review loop has nothing to gate on. Refusing to invoke the Driver.";
     }
     {
@@ -760,19 +760,14 @@ rec {
       ) obligation.branches
     ) obligations;
 
-  # Obligations both branches of a paired prompt fork must satisfy, so a fork
-  # cannot silently drop a shared instruction the way commit-folding almost
-  # did across REVIEW's inline/orchestrator split (issue #2698, issue #2699).
-  # Each branch may word its own copy differently; only the literal
-  # requiredSubstrings are compared. `source` is the raw, unexpanded file.
+  # Obligations a prompt fragment must keep satisfying, so a rewrite cannot
+  # silently drop a shared instruction the way commit-folding almost did
+  # (issue #2698, issue #2699). Only the literal requiredSubstrings are
+  # compared. `source` is the raw, unexpanded file.
   sharedObligations = [
     {
       id = "commit-folding";
       branches = [
-        {
-          id = "review-loop-inline";
-          source = "fragments/review-loop-inline.md";
-        }
         {
           id = "commit-rework-orchestrator";
           source = "fragments/commit-rework-orchestrator.md";
@@ -786,15 +781,10 @@ rec {
       ];
     }
     {
-      # Pins the third triage outcome -- drop -- across both review loops, so
-      # neither fork can regress to the old binary fix/escalate choice
-      # (issue #3610).
+      # Pins the third triage outcome -- drop -- in the review loop, so it
+      # cannot regress to the old binary fix/escalate choice (issue #3610).
       id = "triage-drop-arm";
       branches = [
-        {
-          id = "review-loop-inline";
-          source = "fragments/review-loop-inline.md";
-        }
         {
           id = "review-loop-orchestrator";
           source = "fragments/review-loop-orchestrator.md";
@@ -808,15 +798,11 @@ rec {
       ];
     }
     {
-      # Pins the round-2 flip's narrowing to diff growth across both review
-      # loops, so neither fork can regress to the old unconditional round-2
-      # escalation (issue #3611).
+      # Pins the round-2 flip's narrowing to diff growth in the review loop,
+      # so it cannot regress to the old unconditional round-2 escalation
+      # (issue #3611).
       id = "triage-round-2-calibration";
       branches = [
-        {
-          id = "review-loop-inline";
-          source = "fragments/review-loop-inline.md";
-        }
         {
           id = "review-loop-orchestrator";
           source = "fragments/review-loop-orchestrator.md";
@@ -830,16 +816,12 @@ rec {
       ];
     }
     {
-      # Pins the escape hatch's scope resolution across both review loops:
+      # Pins the escape hatch's scope resolution in the review loop:
       # item 2's uncertain findings that escalate to item 3 stay out of
       # scope there too, so item 3's fix-vs-file tiebreak never runs on a
       # surface item 1 forbids touching (issue #3816).
       id = "triage-escape-hatch-scope";
       branches = [
-        {
-          id = "review-loop-inline";
-          source = "fragments/review-loop-inline.md";
-        }
         {
           id = "review-loop-orchestrator";
           source = "fragments/review-loop-orchestrator.md";

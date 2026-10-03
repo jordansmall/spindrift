@@ -103,7 +103,7 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 		template string
 	}
 
-	// A review body exists only when the orchestrator is on for fresh,
+	// A review body exists only for fresh,
 	// non-research work, where the cell renders all five orchestrator pass
 	// kinds rather than a single legacy or research pass.
 	orchestratorOnFreshWork := bodies.review != nil

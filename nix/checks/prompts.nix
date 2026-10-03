@@ -1716,9 +1716,9 @@ in
 
   # Build-time reject arm (issue #2250, parent #2244): mkHarness.nix turns the
   # `reviewer-verdict` validateMarkers row into a build-time failure when the
-  # orchestrator is statically enabled and reviewPrompt lacks the required
-  # `VERDICT:` marker. The broken fixture is built inline, never exported
-  # from nix/fixtures.nix, where every other consumer would force it.
+  # reviewPrompt lacks the required `VERDICT:` marker. The broken fixture is
+  # built inline, never exported from nix/fixtures.nix, where every other
+  # consumer would force it.
   build-time-reject-orchestrator-verdict-missing =
     let
       inherit (pkgs.lib) assertMsg;
@@ -1726,38 +1726,13 @@ in
         (import ../../lib/mkHarness.nix {
           inherit nixpkgs system;
           packages = p: [ p.hello ];
-          defaults = {
-            orchestratorEnabled = true;
-          };
           reviewPrompt = "a reviewer prompt preamble with no verdict marker at all";
         }).spindrift
       );
     in
     assert assertMsg (!broken.success)
-      "mkHarness.nix must throw when orchestratorEnabled is statically true and reviewPrompt is missing the required VERDICT: marker";
+      "mkHarness.nix must throw when reviewPrompt is missing the required VERDICT: marker";
     pkgs.runCommand "build-time-reject-orchestrator-verdict-missing" { } "touch $out";
-
-  # The gate-not-triggered counterpart (AC3): the same missing-marker
-  # reviewPrompt, but orchestratorEnabled explicitly set off. The omission is
-  # real but its gating condition is not statically known true, so
-  # buildTimeRejectVerdicts resolves "advise" and the build succeeds.
-  build-time-reject-orchestrator-verdict-not-triggered =
-    let
-      inherit (pkgs.lib) assertMsg;
-      ok = builtins.tryEval (
-        (import ../../lib/mkHarness.nix {
-          inherit nixpkgs system;
-          packages = p: [ p.hello ];
-          defaults = {
-            orchestratorEnabled = false;
-          };
-          reviewPrompt = "a reviewer prompt preamble with no verdict marker at all";
-        }).spindrift
-      );
-    in
-    assert assertMsg ok.success
-      "mkHarness.nix must not throw when orchestratorEnabled is not statically true, even with a missing VERDICT: marker";
-    pkgs.runCommand "build-time-reject-orchestrator-verdict-not-triggered" { } "touch $out";
 
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
   # brokenResearchVerdictFragmentsDir swaps in a

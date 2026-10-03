@@ -38,32 +38,28 @@ let
   ];
   # Shared helper for the prompt-contract-shared-obligations-detects-drift-*
   # checks below (issues #2699, #3610): each proves a real sharedObligations
-  # registry row can go red by swapping the inline branch's content for one
-  # carrying none of the declared substrings, while the named orchestrator-side
-  # branch keeps its real on-disk content. Filtering to the given obligationId
-  # keeps a later, unrelated obligation from failing the check on an extra.
+  # registry row can go red by swapping the fragment's content for one
+  # carrying none of the declared substrings. Filtering to the given
+  # obligationId keeps a later, unrelated obligation from failing the check on
+  # an extra.
   sharedObligationDriftCheck =
     {
       obligationId,
-      orchestratorFragmentFile,
-      brokenInlineContent,
+      fragmentFile,
+      brokenContent,
     }:
     let
-      checkName = "prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-${obligationId}";
-      orchestratorSource = "fragments/${orchestratorFragmentFile}";
-      realOrchestratorContent = builtins.readFile (
-        ../../templates/default/prompts/fragments/${orchestratorFragmentFile}
-      );
+      checkName = "prompt-contract-shared-obligations-detects-drift-if-fragment-drops-${obligationId}";
+      branchId = removeSuffix ".md" fragmentFile;
       out = promptContract.sharedObligationViolationsFor promptContract.sharedObligations {
-        "fragments/review-loop-inline.md" = brokenInlineContent;
-        "${orchestratorSource}" = realOrchestratorContent;
+        "fragments/${fragmentFile}" = brokenContent;
       };
       violations = builtins.filter (v: v.obligationId == obligationId) out;
     in
     assert assertMsg (builtins.length violations == 1)
-      "sharedObligationViolationsFor must report exactly one ${obligationId} violation when the real sharedObligations registry's inline branch content is swapped for content missing the declared obligation, got ${toString (builtins.length violations)}";
-    assert assertMsg ((builtins.head violations).branchId == "review-loop-inline")
-      "sharedObligationViolationsFor must name the offending branch's id ('review-loop-inline'), got '${(builtins.head violations).branchId}'";
+      "sharedObligationViolationsFor must report exactly one ${obligationId} violation when the real sharedObligations registry's fragment content is swapped for content missing the declared obligation, got ${toString (builtins.length violations)}";
+    assert assertMsg ((builtins.head violations).branchId == branchId)
+      "sharedObligationViolationsFor must name the offending branch's id ('${branchId}'), got '${(builtins.head violations).branchId}'";
     pkgs.runCommand checkName { } "touch $out";
 in
 {
@@ -334,7 +330,7 @@ in
     let
       out = promptContract.buildTimeRejectVerdicts {
         staticGates = {
-          orchestratorEnabled = true;
+          reviewPrompt = true;
         };
         contentByRowId = {
           reviewer-verdict = "no marker here";
@@ -343,7 +339,7 @@ in
       row = builtins.head (builtins.filter (r: r.id == "reviewer-verdict") out);
     in
     assert assertMsg (row.verdict == "reject")
-      "buildTimeRejectVerdicts: reviewer-verdict must be 'reject' when orchestratorEnabled=true and its content lacks the marker, got: ${row.verdict}";
+      "buildTimeRejectVerdicts: reviewer-verdict must be 'reject' when reviewPrompt=true and its content lacks the marker, got: ${row.verdict}";
     pkgs.runCommand
       "prompt-contract-build-time-reject-verdicts-reject-when-gate-true-and-marker-missing"
       { }
@@ -353,7 +349,7 @@ in
     let
       out = promptContract.buildTimeRejectVerdicts {
         staticGates = {
-          orchestratorEnabled = false;
+          reviewPrompt = false;
         };
         contentByRowId = {
           reviewer-verdict = "no marker here";
@@ -362,7 +358,7 @@ in
       row = builtins.head (builtins.filter (r: r.id == "reviewer-verdict") out);
     in
     assert assertMsg (row.verdict == "advise")
-      "buildTimeRejectVerdicts: reviewer-verdict must be 'advise' when orchestratorEnabled=false and its content lacks the marker, got: ${row.verdict}";
+      "buildTimeRejectVerdicts: reviewer-verdict must be 'advise' when reviewPrompt=false and its content lacks the marker, got: ${row.verdict}";
     pkgs.runCommand
       "prompt-contract-build-time-reject-verdicts-advise-when-gate-false-and-marker-missing"
       { }
@@ -372,7 +368,7 @@ in
     let
       out = promptContract.buildTimeRejectVerdicts {
         staticGates = {
-          orchestratorEnabled = true;
+          reviewPrompt = true;
         };
         contentByRowId = {
           reviewer-verdict = "the VERDICT: line is here";
@@ -1083,45 +1079,45 @@ in
   # Proves the real sharedObligations registry's "commit-folding" row can go
   # red (issue #2699). See sharedObligationDriftCheck above for what this
   # actually swaps and asserts.
-  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-commit-folding =
+  prompt-contract-shared-obligations-detects-drift-if-fragment-drops-commit-folding =
     sharedObligationDriftCheck
       {
         obligationId = "commit-folding";
-        orchestratorFragmentFile = "commit-rework-orchestrator.md";
-        brokenInlineContent = "no folding instruction of any kind in this fragment";
+        fragmentFile = "commit-rework-orchestrator.md";
+        brokenContent = "no folding instruction of any kind in this fragment";
       };
 
   # Proves the real sharedObligations registry's "triage-drop-arm" row can go
   # red (issue #3610). See sharedObligationDriftCheck above for what this
   # actually swaps and asserts.
-  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-drop-arm =
+  prompt-contract-shared-obligations-detects-drift-if-fragment-drops-triage-drop-arm =
     sharedObligationDriftCheck
       {
         obligationId = "triage-drop-arm";
-        orchestratorFragmentFile = "review-loop-orchestrator.md";
-        brokenInlineContent = "no drop outcome of any kind in this fragment";
+        fragmentFile = "review-loop-orchestrator.md";
+        brokenContent = "no drop outcome of any kind in this fragment";
       };
 
   # Proves the real sharedObligations registry's "triage-round-2-calibration"
   # row can go red (issue #3611). See sharedObligationDriftCheck above for
   # what this actually swaps and asserts.
-  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-round-2-calibration =
+  prompt-contract-shared-obligations-detects-drift-if-fragment-drops-triage-round-2-calibration =
     sharedObligationDriftCheck
       {
         obligationId = "triage-round-2-calibration";
-        orchestratorFragmentFile = "review-loop-orchestrator.md";
-        brokenInlineContent = "no round-2 calibration of any kind in this fragment";
+        fragmentFile = "review-loop-orchestrator.md";
+        brokenContent = "no round-2 calibration of any kind in this fragment";
       };
 
   # Proves the real sharedObligations registry's "triage-escape-hatch-scope"
   # row can go red (issue #3816). See sharedObligationDriftCheck above for
   # what this actually swaps and asserts.
-  prompt-contract-shared-obligations-detects-drift-if-inline-branch-drops-triage-escape-hatch-scope =
+  prompt-contract-shared-obligations-detects-drift-if-fragment-drops-triage-escape-hatch-scope =
     sharedObligationDriftCheck
       {
         obligationId = "triage-escape-hatch-scope";
-        orchestratorFragmentFile = "review-loop-orchestrator.md";
-        brokenInlineContent = "no escape-hatch scope gate of any kind in this fragment";
+        fragmentFile = "review-loop-orchestrator.md";
+        brokenContent = "no escape-hatch scope gate of any kind in this fragment";
       };
 
   # Enforcing check (issue #2699): the real registry's rows must hold against

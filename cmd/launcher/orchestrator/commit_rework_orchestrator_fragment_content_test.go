@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Guards issue #2698: on an ORCHESTRATOR_ENABLED rework pass the COMMIT section must
+// Guards issue #2698: on a rework pass the COMMIT section must
 // tell the agent to fold each fix into the commit it belongs to, while a first-slice
 // pass keeps "several small focused commits". No env knob marks that difference, so
 // the fragment reads the handoff's `Last reviewer verdict:` line; bare handoff

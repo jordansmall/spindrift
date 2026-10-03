@@ -134,7 +134,7 @@ func TestLandPassOrderOrchestratorFragmentProseFoldsRewriteInPlace(t *testing.T)
 }
 
 // Guards against issue #3214 introducing a code-out action into a fragment
-// gated on REVIEW_LOOP_ORCHESTRATOR. lib/prompt-contract.nix forbids a bare
+// ungated. lib/prompt-contract.nix forbids a bare
 // substring match of any of these literals in a read-only-reachable fragment,
 // so even a negation ("never run git push") trips it. Say "finish the pass"
 // or "hand the branch off" instead. Reads raw content, not normalized: the

@@ -14,11 +14,11 @@ import (
 // constants turns a typo into a compile error instead of a runtime trip through
 // Validate's default arm.
 const (
-	whenReadOnlyResearch    = "readOnlyResearch"
-	whenOrchestratorEnabled = "orchestratorEnabled"
-	whenBoxAccessReadOnly   = "boxAccessReadOnly"
-	whenFilerFileRelay      = "filerFileRelay"
-	whenResearchFileRelay   = "researchFileRelay"
+	whenReadOnlyResearch  = "readOnlyResearch"
+	whenReviewPrompt      = "reviewPrompt"
+	whenBoxAccessReadOnly = "boxAccessReadOnly"
+	whenFilerFileRelay    = "filerFileRelay"
+	whenResearchFileRelay = "researchFileRelay"
 )
 
 const (
@@ -102,10 +102,10 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 			// comment on any issue at all.
 			gateActive = d.Contract == dispatchkind.ContractVerdict && (gates["BOX_ACCESS_READ_ONLY"] || gates["FILER_FILE_RELAY"])
 			haystack = result.Prompt
-		case whenOrchestratorEnabled:
+		case whenReviewPrompt:
 			// ReviewPromptText, not Handoff.ReviewPromptFile: the latter became
 			// a real on-disk path and no longer holds rendered text (#2975).
-			gateActive = gates["ORCHESTRATOR"] && result.ReviewPromptText != ""
+			gateActive = result.ReviewPromptText != ""
 			haystack = result.ReviewPromptText
 		case whenBoxAccessReadOnly:
 			gateActive = gates["BOX_ACCESS_READ_ONLY"] && !d.AdviseOnly

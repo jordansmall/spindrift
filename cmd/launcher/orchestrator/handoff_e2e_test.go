@@ -97,13 +97,10 @@ func TestHandoffEndToEnd(t *testing.T) {
 	for _, name := range promptassembly.BoxEnvVarNames {
 		t.Setenv(name, "")
 	}
-	// ORCHESTRATOR_ENABLED and BOX_REVIEW_LOOP_ORCHESTRATOR, with
-	// BOX_REVIEW_LOOP_INLINE left blank by the loop above, put the render on
-	// the one cell that emits a review prompt, and --review-prompt-output
-	// below makes Handoff.ReviewPromptFile non-empty, which dispatches the
-	// orchestrator into its implement, review and land loop.
-	t.Setenv("ORCHESTRATOR_ENABLED", "1")
-	t.Setenv("BOX_REVIEW_LOOP_ORCHESTRATOR", "1")
+	// The default-work, FixPass==0 cell below is the one that emits a review
+	// prompt, and --review-prompt-output makes Handoff.ReviewPromptFile
+	// non-empty, which dispatches the orchestrator into its implement, review
+	// and land loop.
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("BOX_WRITE_ENABLED", "1")
 	t.Setenv("CODE_FORGE", "github")

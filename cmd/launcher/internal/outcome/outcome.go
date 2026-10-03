@@ -18,7 +18,7 @@ import (
 // lib/prompt-contract.nix's markerChannels registry (issue #2974). ADR 0035:
 // issue-prompt.md's OUTCOME contract must keep emitting it verbatim, because
 // rewording either side without the other silently collapses the multi-pass
-// loop to single-pass on ORCHESTRATOR_ENABLED runs.
+// loop to single-pass.
 const Token = markerChannelOutcomeToken
 
 // PRIntentToken is the exact SPINDRIFT_PR_INTENT marker literal (issue #2045,
