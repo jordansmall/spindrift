@@ -1289,6 +1289,20 @@ func TestEscapeMarkdownLinkText(t *testing.T) {
 	}
 }
 
+func TestMarkdownInlineText(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"line break and brackets", "[a]\\b\nrest", `\[a\]\\b`},
+		{"bracket past the line break", "a\n[b]", "a"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := markdownInlineText(tc.in); got != tc.want {
+				t.Errorf("markdownInlineText(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // Every render site that escapes agent text must neutralise a backslash-led
 // bracket link, not just a bare bracket (issue #4219).
 func TestMarkdownBullets_BackslashBracketLinkEscaped(t *testing.T) {

@@ -251,8 +251,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		// PostIssue error must not suppress a retry of the same intent within
 		// this run.
 		//
-		// buildSkippedIssuesSection's firstLine is the primary guard against
-		// a line break in this reference; %q also keeps it newline-free.
+		// markdownInlineText, which buildSkippedIssuesSection applies to the
+		// dedup ref, is the primary guard against a line break in this
+		// reference; %q also keeps it newline-free.
 		ref := fmt.Sprintf("this run's %q", in.Title)
 		for k := range keys {
 			dedupIndex[k] = ref
