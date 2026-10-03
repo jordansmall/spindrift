@@ -57,6 +57,30 @@ changed `*.nix` files and `shellcheck path/to/file.sh` for changed shell
 files. Both tools are baked into the Box and complement, but do not replace,
 a `checks-inbox` (or full `nix flake check`) run before opening a PR.
 
+### Seam tests
+
+Seam tests are Go tests behind the `integration` build tag that read the
+artifacts Nix renders (the launcher input documents, the contracts, the
+preambles) instead of hand-written copies. They find those artifacts in the
+directory named by `SPINDRIFT_SEAM_FIXTURES_DIR`. Run them locally from the
+dev shell:
+
+```sh
+cd cmd/launcher
+go test -tags integration ./...   # builds .#seam-fixtures itself via nix
+
+SPINDRIFT_SEAM_FIXTURES_DIR=$(nix build --no-link --print-out-paths ../..#seam-fixtures) \
+  go test -tags integration ./... # reuse one build across runs
+```
+
+With the variable unset, the `seamtest` package falls back to `nix build
+.#seam-fixtures`, and skips where `nix` is absent. In the check gate, both
+`checks-inbox` and `nix flake check` run them as `launcher-go-seam-test`, with
+the variable set to the built store path. The bats checks export the same
+variable, and `tests/helper.bash` reads the contracts, preambles and fragment
+registry from that directory, so bats and Go test one set of bytes. See [Seam
+tests](docs/reference.md#seam-tests) for the fixture list and its drift guard.
+
 The dogfood Box also bakes the upstream [`caveman`
 skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
 in-box as `/caveman`. It compresses agent narration ~65% in output tokens
