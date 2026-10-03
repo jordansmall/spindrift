@@ -1043,7 +1043,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
 # issue #2056/#2054: a provisioned `worker` turns IMPLEMENT into a coordinator
 # that delegates each slice; with no worker the section is byte-identical to
 # the single-implementor prompt. Worker presence alone gates it.
-WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
+WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"Implement a scoped slice of work delegated to it, with full implement-capable tools","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
 
 @test "IMPLEMENT section: a provisioned worker turns the section into a coordinator that delegates slices" {
   export AGENTS_JSON_TEMPLATE="$WORKER_AGENTS_JSON_TEMPLATE"
