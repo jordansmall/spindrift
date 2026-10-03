@@ -859,6 +859,29 @@ func TestLoadConfig_NixStoreWritable_DefaultsFalse(t *testing.T) {
 	}
 }
 
+// NIX_VOLUME names the container-build fallback's /nix volume: unset it
+// defaults to "spindrift-nix", an override wins, and either reaches
+// runner.Config.
+func TestLoadConfig_NixVolume_DefaultAndOverride(t *testing.T) {
+	t.Setenv("NIX_VOLUME", "")
+	c := loadConfig()
+	if c.nixVolume != "spindrift-nix" {
+		t.Errorf("loadConfig().nixVolume = %q, want %q when NIX_VOLUME is unset", c.nixVolume, "spindrift-nix")
+	}
+	if got := runnerConfig(c).NixVolume; got != "spindrift-nix" {
+		t.Errorf("runnerConfig().NixVolume = %q, want %q", got, "spindrift-nix")
+	}
+
+	t.Setenv("NIX_VOLUME", "custom-nix-vol")
+	c = loadConfig()
+	if c.nixVolume != "custom-nix-vol" {
+		t.Errorf("loadConfig().nixVolume = %q, want %q from NIX_VOLUME", c.nixVolume, "custom-nix-vol")
+	}
+	if got := runnerConfig(c).NixVolume; got != "custom-nix-vol" {
+		t.Errorf("runnerConfig().NixVolume = %q, want %q", got, "custom-nix-vol")
+	}
+}
+
 // NIX_STORE_WRITABLE reaches runner.Config so the bwrap adapter can decide
 // whether to overlay /nix/store as a writable tmpfs layer (issue #2665,
 // ADR 0042).
