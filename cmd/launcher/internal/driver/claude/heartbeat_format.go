@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/landdelta"
 )
 
-// sanitizeRole strips control characters, ANSI escape sequences, and
-// newlines from s. The role is agent-controlled (it comes from the Task
-// tool's subagent_type input) and every heartbeat line must stay single-line.
-func sanitizeRole(s string) string {
+// sanitizeLine strips control characters, ANSI escape sequences, and newlines
+// from s. It cleans any agent-controlled heartbeat field (role, verdict,
+// reason, narration, ...) so every heartbeat line stays single-line.
+func sanitizeLine(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
@@ -61,7 +62,7 @@ func sanitizeRole(s string) string {
 func FormatRoleHeader(issue, role, model string) string {
 	const targetWidth = 36
 	const minTrail = 4
-	label := sanitizeRole(role)
+	label := sanitizeLine(role)
 	if model != "" {
 		label = label + " \xc2\xb7 " + model
 	}
@@ -80,7 +81,7 @@ func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) stri
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
-		fmt.Fprintf(&sb, " %s", sanitizeRole(role))
+		fmt.Fprintf(&sb, " %s", sanitizeLine(role))
 	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
@@ -105,7 +106,7 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
-		fmt.Fprintf(&sb, " %s", sanitizeRole(role))
+		fmt.Fprintf(&sb, " %s", sanitizeLine(role))
 	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
@@ -123,27 +124,27 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 	switch op.Op {
 	case "pass_start":
 		if op.Role != "" {
-			fmt.Fprintf(&sb, "pass %d (%s) started", op.Pass, sanitizeRole(op.Role))
+			fmt.Fprintf(&sb, "pass %d (%s) started", op.Pass, sanitizeLine(op.Role))
 		} else {
 			fmt.Fprintf(&sb, "pass %d started", op.Pass)
 		}
 	case "verdict":
-		fmt.Fprintf(&sb, "verdict: %s", sanitizeRole(op.Verdict))
+		fmt.Fprintf(&sb, "verdict: %s", sanitizeLine(op.Verdict))
 	case "pass_no_outcome":
 		if op.Verdict != "" {
-			fmt.Fprintf(&sb, "pass %d ended with no outcome (last verdict %s, %s)", op.Pass, sanitizeRole(op.Verdict), sanitizeRole(op.Reason))
+			fmt.Fprintf(&sb, "pass %d ended with no outcome (last verdict %s, %s)", op.Pass, sanitizeLine(op.Verdict), sanitizeLine(op.Reason))
 		} else {
-			fmt.Fprintf(&sb, "pass %d ended with no outcome (%s)", op.Pass, sanitizeRole(op.Reason))
+			fmt.Fprintf(&sb, "pass %d ended with no outcome (%s)", op.Pass, sanitizeLine(op.Reason))
 		}
 	case "decision":
 		if op.Reason != "" {
-			fmt.Fprintf(&sb, "%s: %s", sanitizeRole(op.Decision), sanitizeRole(op.Reason))
+			fmt.Fprintf(&sb, "%s: %s", sanitizeLine(op.Decision), sanitizeLine(op.Reason))
 		} else {
-			sb.WriteString(sanitizeRole(op.Decision))
+			sb.WriteString(sanitizeLine(op.Decision))
 		}
 	case "pass_usage":
 		if op.Role != "" {
-			fmt.Fprintf(&sb, "pass %d (%s) usage: ", op.Pass, sanitizeRole(op.Role))
+			fmt.Fprintf(&sb, "pass %d (%s) usage: ", op.Pass, sanitizeLine(op.Role))
 		} else {
 			fmt.Fprintf(&sb, "pass %d usage: ", op.Pass)
 		}
@@ -167,7 +168,7 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			// costliest subagent per breakdownByAgentFile); do not re-sort.
 			parts := make([]string, len(u.Agents))
 			for i, a := range u.Agents {
-				parts[i] = fmt.Sprintf("%s %d", sanitizeRole(a.Agent), a.TotalTokens())
+				parts[i] = fmt.Sprintf("%s %d", sanitizeLine(a.Agent), a.TotalTokens())
 			}
 			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
 		}
@@ -184,28 +185,28 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		if !d.Known && d.Reason == "" {
 			d.Reason = "no delta reported"
 		}
-		sb.WriteString(sanitizeRole(d.Summary()))
+		sb.WriteString(sanitizeLine(d.Summary()))
 	case "signal":
 		// A reject's Reason is the whole point of the line, so it stands in
 		// for the size/hash detail an accept carries (issue #3724).
 		switch op.Decision {
 		case "reject":
-			fmt.Fprintf(&sb, "signal %s rejected: %s", sanitizeRole(op.Kind), sanitizeRole(op.Reason))
+			fmt.Fprintf(&sb, "signal %s rejected: %s", sanitizeLine(op.Kind), sanitizeLine(op.Reason))
 		case "read":
-			fmt.Fprintf(&sb, "signal %s read", sanitizeRole(op.Kind))
+			fmt.Fprintf(&sb, "signal %s read", sanitizeLine(op.Kind))
 		case "usage":
-			fmt.Fprintf(&sb, "signal %s rejected (usage): %s", sanitizeRole(op.Kind), sanitizeRole(op.Reason))
+			fmt.Fprintf(&sb, "signal %s rejected (usage): %s", sanitizeLine(op.Kind), sanitizeLine(op.Reason))
 		default:
-			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", sanitizeRole(op.Kind), op.Size, sanitizeRole(op.Hash))
+			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", sanitizeLine(op.Kind), op.Size, sanitizeLine(op.Hash))
 		}
 	case "delta_review_trigger":
 		// The Reason is the whole point of this op (issue #3246) and must show
 		// even on the common "skip" path, so this mirrors the "decision" case
 		// rather than the default arm's bare op name.
 		if op.Reason != "" {
-			fmt.Fprintf(&sb, "delta review %s: %s", sanitizeRole(op.Decision), sanitizeRole(op.Reason))
+			fmt.Fprintf(&sb, "delta review %s: %s", sanitizeLine(op.Decision), sanitizeLine(op.Reason))
 		} else {
-			fmt.Fprintf(&sb, "delta review %s", sanitizeRole(op.Decision))
+			fmt.Fprintf(&sb, "delta review %s", sanitizeLine(op.Decision))
 		}
 	case "run_state_error":
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
@@ -213,14 +214,14 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		// so each gets its own wording.
 		switch op.Phase {
 		case "dispositions_budget":
-			fmt.Fprintf(&sb, "dispositions budget: %s", sanitizeRole(op.Error))
+			fmt.Fprintf(&sb, "dispositions budget: %s", sanitizeLine(op.Error))
 		case "decisions_budget":
-			fmt.Fprintf(&sb, "decisions budget: %s", sanitizeRole(op.Error))
+			fmt.Fprintf(&sb, "decisions budget: %s", sanitizeLine(op.Error))
 		default:
-			fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeRole(op.Phase), sanitizeRole(op.Error))
+			fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeLine(op.Phase), sanitizeLine(op.Error))
 		}
 	default:
-		sb.WriteString(sanitizeRole(op.Op))
+		sb.WriteString(sanitizeLine(op.Op))
 	}
 	return sb.String()
 }
@@ -295,24 +296,31 @@ func pluralKind(kind string, n int) string {
 	}
 }
 
-// trimNarration returns the first sentence of text, capped at 120 characters.
-// It only trims; the caller decides whether to emit subagent text
+// narrationMaxRunes caps the narration text, ellipsis included.
+const narrationMaxRunes = 120
+
+// trimNarration returns the first sentence of the first line of text with
+// visible content, capped at narrationMaxRunes, with control and escape
+// sequences stripped (the text is agent-controlled). It sanitizes before
+// cutting the sentence so a "." inside a CSI or OSC sequence cannot end it. It
+// does not filter by source; the caller decides whether to emit subagent text
 // (parent_tool_use_id != "").
 func trimNarration(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return ""
-	}
-	if i := strings.IndexAny(text, ".!?\n"); i >= 0 {
-		text = strings.TrimSpace(text[:i+1])
-		if len(text) > 0 && text[len(text)-1] == '\n' {
-			text = strings.TrimSpace(text[:len(text)-1])
+	for _, line := range strings.FieldsFunc(text, func(r rune) bool { return r == '\r' || r == '\n' }) {
+		line = sanitizeLine(line)
+		if i := strings.IndexAny(line, ".!?"); i >= 0 {
+			line = line[:i+1]
 		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if r := []rune(line); len(r) > narrationMaxRunes {
+			line = strings.TrimRightFunc(string(r[:narrationMaxRunes-3]), unicode.IsSpace) + "..."
+		}
+		return line
 	}
-	if len(text) > 120 {
-		text = text[:117] + "..."
-	}
-	return text
+	return ""
 }
 
 // toolToPhase maps a tool name and its input to the current work phase. It is
