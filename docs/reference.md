@@ -5251,7 +5251,7 @@ answers with neither). It's a setup-time, operator-run tool, never invoked
 from inside the Box — a Box-influenced route would let an Agent steer a
 real credential at a host of its choosing. Once a route is configured,
 how a proxied dispatch actually reaches the Box over it — socket or
-loopback TCP — is a separate, cached decision; see [Registry transport
+every-interface TCP — is a separate, cached decision; see [Registry transport
 probe cache](#registry-transport-probe-cache).
 
 The routes file it writes is references-only, matching every other
@@ -5316,8 +5316,8 @@ with `spindrift registry discover --force`, which discards hand edits.
 ## Registry transport probe cache
 
 Deciding how a proxied dispatch reaches a Box's registry proxy — over a unix
-socket, or falling back to loopback TCP — takes a live probe against the
-configured container runtime (ADR 0045, issue #3111): a throwaway container
+socket, or falling back to TCP on every interface — takes a live probe against
+the configured container runtime (ADR 0045, issue #3111): a throwaway container
 mounts the socket and reports whether it can see it, and on a
 socket-incapable host (the macOS case, where the runtime runs inside a VM)
 a second live sub-probe confirms the TCP fallback's own `--add-host`

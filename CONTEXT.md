@@ -288,7 +288,7 @@ Transport is probed per Dispatch, not assumed (ADR 0044, #3111 amendment):
 where the configured runtime carries a unix socket across, the Forwarder is
 `socat` over the mounted socket and no host TCP port opens; where it cannot
 (macOS VM sharing layers, remote-context daemons), the launcher serves
-secret-gated loopback TCP instead and the Forwarder is the
+secret-gated TCP on every interface instead and the Forwarder is the
 `forward-registry-tcp` verb (`bindregistry.SpawnHTTPForwarder`,
 `cmd/launcher/internal/bindregistry/tcpforwarder.go`) attaching the per-run
 secret — mutually exclusive with `networkMode=no-host-loopback`, which fails
