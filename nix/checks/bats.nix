@@ -8,7 +8,6 @@ let
   inherit (fixtures)
     batsHarness
     noRuntimeHarness
-    customHarness
     dockerHarness
     bwrapHarness
     promptHarness
@@ -236,14 +235,13 @@ let
     # carries the sandbox-isolation reason.
     WAIT_FOR_LOG_LINES_TIMEOUT = "10";
     # The launcher commands under test overlay `gh` with the fake
-    # (batsHarness/customHarness/dockerHarness), since the real `gh`
+    # (batsHarness/dockerHarness), since the real `gh`
     # is pinned into their runtimeInputs PATH and would otherwise
     # shadow a PATH-injected fake.
     RUN_CMD = "${batsHarness.internals.run}/bin/run";
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
     BUILD_CMD = "${batsHarness.internals.build}/bin/build";
     BUILD_NO_RUNTIME_CMD = "${noRuntimeHarness.internals.build}/bin/build";
-    CUSTOM_RUN_CMD = "${customHarness.internals.run}/bin/run";
     DOCKER_RUN_CMD = "${dockerHarness.internals.run}/bin/run";
     BWRAP_RUN_CMD = "${bwrapHarness.internals.run}/bin/run";
     # bwrapHarness's agent-closure store path, the generation name

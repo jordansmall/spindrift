@@ -32,7 +32,7 @@ wait_for_log_lines() {
   fi
   local interval="0.05"
   local confirm_tries=3
-  local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); also mirrored in tests/run-batch-limits.bats' "widen past the 2s default" test
+  local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); also mirrored in tests/wait-for-log-lines.bats' "widen past the 2s default" test
   local actual i confirm
 
   for ((i = 0; i <= tries; i++)); do
@@ -74,7 +74,7 @@ assert_timeout_rejected() {
   shift 2
   run wait_for_log_lines "$log" '^run ' 1 "$timeout_value"
   # Each assertion returns 1 explicitly instead of leaning on `set -e`: the
-  # caller (tests/run-batch-limits.bats' malformed-timeout loop) suspends
+  # caller (tests/wait-for-log-lines.bats' malformed-timeout loop) suspends
   # errexit, so a bare failing statement would fall through.
   if [ "$status" -ne 1 ]; then
     echo "assert_timeout_rejected: expected status 1, got $status" >&2

@@ -3,8 +3,8 @@
 # several Boxes at once (MAX_JOBS=0) runs concurrent `podman run` fakes that
 # all append to one $PODMAN_LOG, and a real `run` argv is well past bash's
 # stdio buffer: the printf builtin flushes such a line as several write()s, so
-# concurrent appenders interleave mid-line and the line-count assertions in
-# tests/run-batch-limits.bats lose a record. Each invocation here carries a
+# concurrent appenders interleave mid-line and the line-count assertions on that
+# log (tests/run-image-build.bats) lose a record. Each invocation here carries a
 # line far over that buffer and the test asserts none are torn.
 # Invoked directly rather than through tests/helper.bash: the contract under
 # test is the fake's own log-write behaviour.
