@@ -20,7 +20,10 @@ let
   # coverage check compares against.
   allFiles = builtins.sort (a: b: a < b) (builtins.attrNames batsFiles);
 
-  shardCount = 10;
+  # The fewest shards whose LPT makespan is still the heaviest single file
+  # (entrypoint-prompt-fragments.bats, issue #4288): more shards add
+  # derivations without shortening the slowest one.
+  shardCount = 7;
   shardIndices = lib.range 0 (shardCount - 1);
   shardNames = map (i: "bats-shard-${toString i}") shardIndices;
 
