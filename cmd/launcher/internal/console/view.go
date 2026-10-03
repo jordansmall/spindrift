@@ -897,10 +897,11 @@ func windowSidebarLines(s SidebarState, budget int) []string {
 const headerFooterLines = 2
 
 // trailingNewlineRow is the extra row renderRebuildOutputPane,
-// renderSidebarFullscreen, and their model.go cursor-follow mirrors reserve
-// for View's trailing "\n" (issues #1827, #1841). Without it, output that
-// exactly fills the budget renders m.Height lines and runs one over once that
-// newline counts as a row. Named and shared so the budgets cannot drift.
+// renderSidebarFullscreen, renderDetailModal, and their mirrors (model.go,
+// layout.go's detailModalScrollBudget) reserve for View's trailing "\n" (issues
+// #1827, #1841, #4249). Without it, output that exactly fills the budget
+// renders m.Height lines and runs one over once that newline counts as a row.
+// Named and shared so the budgets cannot drift.
 const trailingNewlineRow = 1
 
 // sidebarDockedFooterLines is the docked sidebar's chrome budget, the footer
@@ -1229,13 +1230,11 @@ func detailModalLabelLinesCappedWith(labels []string, width, maxLines int, style
 	return []string{fmt.Sprintf("+%d more labels", len(labels))}
 }
 
-// renderDetailModalContent renders the floating detail modal box's interior as
-// exactly innerHeight lines: the labels line, the loading, error, or body
-// window, and the footer hint. It wraps and scrolls against the box interior,
-// never Model.Width or Model.Height (issue #1758).
-func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) []string {
-	contentBudget := innerHeight - detailModalFooterLines
-	lines := detailModalLabelLinesCapped(s.Labels, innerWidth, contentBudget)
+// detailModalContentLines is the labels line(s) and the loading, error, or
+// body window, capped to contentBudget rows; the floating box and the
+// fullscreen fallback both build their interior from it.
+func detailModalContentLines(s DetailModalState, width, contentBudget int) []string {
+	lines := detailModalLabelLinesCapped(s.Labels, width, contentBudget)
 	bodyBudget := contentBudget - len(lines)
 	switch {
 	case s.Loading:
@@ -1245,7 +1244,7 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 	default:
 		lines = append(lines, windowDetailModalLines(s, bodyBudget)...)
 	}
-	// Capped against contentBudget, not innerHeight, before the footer is
+	// Capped against contentBudget, not the full height, before the footer is
 	// appended, so a too-long labels or status block never pushes the footer
 	// off the end (issue #1778). Where labels alone consume contentBudget,
 	// this drops the loading or error line: the visible "+N more labels"
@@ -1253,6 +1252,16 @@ func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) [
 	if len(lines) > contentBudget {
 		lines = lines[:contentBudget]
 	}
+	return lines
+}
+
+// renderDetailModalContent renders the floating detail modal box's interior as
+// exactly innerHeight lines: the labels line, the loading, error, or body
+// window, and the footer hint. It wraps and scrolls against the box interior,
+// never Model.Width or Model.Height (issue #1758).
+func renderDetailModalContent(s DetailModalState, innerWidth, innerHeight int) []string {
+	contentBudget := innerHeight - detailModalFooterLines
+	lines := detailModalContentLines(s, innerWidth, contentBudget)
 	lines = append(lines, renderFooterHints(ModeDetailModal, []string{"esc", "p", "r", "u"}, innerWidth, false))
 	for len(lines) < innerHeight {
 		lines = append(lines, "")
@@ -1296,27 +1305,22 @@ func renderDetailModal(s DetailModalState, width, height int) string {
 	if height <= 0 {
 		return ""
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "#%s %s\n", s.Number, SanitizeControlSequences(s.Title))
-	contentBudget := height - detailModalTitleLines - detailModalFooterLines
-	if contentBudget < 0 {
-		contentBudget = 0
-	}
-	labelLines := detailModalLabelLinesCapped(s.Labels, width, contentBudget)
-	b.WriteString(strings.Join(labelLines, "\n"))
-	b.WriteString("\n")
-	bodyBudget := contentBudget - len(labelLines)
-	switch {
-	case s.Loading:
-		b.WriteString("loading...\n")
-	case s.Err != nil:
-		fmt.Fprintf(&b, "failed to load: %s\n", SanitizeControlSequences(s.Err.Error()))
-	default:
-		visible := strings.Join(windowDetailModalLines(s, bodyBudget), "\n")
-		b.WriteString(visible)
-		if visible != "" && !strings.HasSuffix(visible, "\n") {
-			b.WriteString("\n")
+	title := fmt.Sprintf("#%s %s", SanitizeControlSequences(s.Number), SanitizeControlSequences(s.Title))
+	if height < detailModalFullscreenChromeLines {
+		// No room for the footer: title alone, and at one row not even the
+		// trailing newline, which would count as a second row.
+		if height < detailModalTitleLines+trailingNewlineRow {
+			return title
 		}
+		return title + "\n"
+	}
+	lines := detailModalContentLines(s, width, detailModalFullscreenContentBudget(height))
+	var b strings.Builder
+	b.WriteString(title)
+	b.WriteString("\n")
+	for _, l := range lines {
+		b.WriteString(l)
+		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "%s\n", renderFooterHints(ModeDetailModal, []string{"esc", "p", "r", "u"}, width, false))
 	return b.String()

@@ -1171,6 +1171,94 @@ func TestView_DetailModal_TinyTerminal_FallsBackToFullscreen(t *testing.T) {
 	}
 }
 
+// lastNonEmptyRow returns the last non-empty row, skipping the blank row View's
+// trailing newline leaves after the footer.
+func lastNonEmptyRow(rows []string) string {
+	for i := len(rows) - 1; i >= 0; i-- {
+		if rows[i] != "" {
+			return rows[i]
+		}
+	}
+	return ""
+}
+
+// Issue #4249: View's trailing "\n" counts as a row, so the fullscreen fallback
+// must leave it out of its content budget or the title scrolls off the top.
+func TestView_DetailModal_FullscreenFallback_FitsHeight(t *testing.T) {
+	lines := make([]string, 50)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("body%d", i)
+	}
+	manyLabels := make([]string, 40)
+	for i := range manyLabels {
+		manyLabels[i] = fmt.Sprintf("label%d", i)
+	}
+	cases := []struct {
+		name  string
+		state DetailModalState
+		// hidden is status text the "+N more labels" indicator must displace.
+		hidden string
+	}{
+		{"long body", DetailModalState{Labels: []string{"bug"}, Lines: lines}, ""},
+		{"many labels loading", DetailModalState{Labels: manyLabels, Loading: true}, "loading..."},
+		{"many labels error", DetailModalState{Labels: manyLabels, Err: errors.New("boom")}, "failed to load"},
+		{"many labels body", DetailModalState{Labels: manyLabels, Lines: lines}, "body0"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.state.Number, c.state.Title = "7", "t"
+			m := Model{Width: 30, Height: 8, DetailModal: &c.state}
+			if detailModalFits(m) {
+				t.Fatalf("detailModalFits(%dx%d) = true, want the fullscreen fallback", m.Width, m.Height)
+			}
+			out := View(m)
+			rows := strings.Split(out, "\n")
+			if len(rows) > m.Height {
+				t.Errorf("View() is %d rows, want at most Height %d: %q", len(rows), m.Height, out)
+			}
+			if rows[0] != "#7 t" {
+				t.Errorf("first row = %q, want the title row", rows[0])
+			}
+			if footer := lastNonEmptyRow(rows); !strings.Contains(footer, "esc") {
+				t.Errorf("last non-empty row = %q, want the footer hint", footer)
+			}
+			if c.hidden != "" {
+				if !strings.Contains(out, "more labels") {
+					t.Errorf("View() = %q, want the \"+N more labels\" indicator", out)
+				}
+				if strings.Contains(out, c.hidden) {
+					t.Errorf("View() = %q, want %q displaced by the labels indicator", out, c.hidden)
+				}
+			}
+		})
+	}
+}
+
+// Issue #4249: the scroll clamp and the render must agree on the fullscreen
+// budget, so jumping to the end shows the last body line within Height.
+func TestView_DetailModal_FullscreenFallback_ScrolledToEnd_ShowsLastLineWithinHeight(t *testing.T) {
+	lines := make([]string, 50)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("body%d", i)
+	}
+	m := Update(NewModel(), SizeChangedMsg{Width: 30, Height: 8})
+	m = Update(m, DetailModalOpenMsg{Number: "7", Title: "t", Labels: []string{"bug"}})
+	m = Update(m, DetailModalLoadedMsg{Number: "7", Body: strings.Join(lines, "\n")})
+	m = Update(m, DetailModalScrollMsg{Delta: 1000})
+
+	out := View(m)
+	rows := strings.Split(out, "\n")
+	if len(rows) > m.Height {
+		t.Errorf("View() is %d rows, want at most Height %d: %q", len(rows), m.Height, out)
+	}
+	if rows[0] != "#7 t" {
+		t.Errorf("first row = %q, want the title row", rows[0])
+	}
+	if !strings.Contains(out, "body49") {
+		t.Errorf("View() = %q, want the last body line visible after scrolling to the end", out)
+	}
+}
+
 // Issue #1791: the tiny-terminal fallback's footer renders dim (RoleDim) like the
 // fullscreen and docked sidebar footers.
 func TestView_DetailModal_FullscreenFallback_FooterStyledDim(t *testing.T) {
@@ -4227,5 +4315,64 @@ func TestHeaderGeometry_MirrorsRenderBoxedHeader(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Issue #4249: empty body lines, a trailing one included, each take a row and
+// leave the footer last.
+func TestView_DetailModal_FullscreenFallback_EmptyBodyLinesKeepRows(t *testing.T) {
+	body := []string{"a", "", "b", ""}
+	m := Model{Width: 30, Height: 8, DetailModal: &DetailModalState{Number: "7", Title: "t", Labels: []string{"bug"}, Lines: body}}
+	rows := strings.Split(View(m), "\n")
+	if len(rows) != m.Height {
+		t.Fatalf("View() is %d rows, want Height %d: %q", len(rows), m.Height, rows)
+	}
+	// Row 0 is the title and row 1 the lone label row, so the body fills rows
+	// 2-5 and the footer follows.
+	const bodyStart = 2
+	for i, want := range body {
+		if rows[bodyStart+i] != want {
+			t.Errorf("row %d = %q, want %q", bodyStart+i, rows[bodyStart+i], want)
+		}
+	}
+	footerRow := bodyStart + len(body)
+	if !strings.Contains(rows[footerRow], "esc") {
+		t.Errorf("row %d = %q, want the footer after the body window", footerRow, rows[footerRow])
+	}
+}
+
+// Issue #4249: at Height 3 the content budget is 0, so only the title and
+// footer render; labels and body are dropped.
+func TestView_DetailModal_FullscreenFallback_NoContentRoom_TitleAndFooterOnly(t *testing.T) {
+	m := Model{Width: 30, Height: 3, DetailModal: &DetailModalState{
+		Number: "7", Title: "t", Labels: []string{"bug"}, Lines: []string{"body"},
+	}}
+	out := View(m)
+	rows := strings.Split(out, "\n")
+	if len(rows) > m.Height {
+		t.Errorf("View() is %d rows, want at most Height %d: %q", len(rows), m.Height, out)
+	}
+	if rows[0] != "#7 t" || !strings.Contains(rows[1], "esc") {
+		t.Errorf("View() = %q, want the title then the footer", out)
+	}
+	if strings.Contains(out, "bug") || strings.Contains(out, "body") {
+		t.Errorf("View() = %q, want no label or body line", out)
+	}
+}
+
+// Issue #4249: below title+footer+newline the fullscreen fallback drops the
+// footer rather than run past Height.
+func TestView_DetailModal_FullscreenFallback_TinyHeight_FitsHeight(t *testing.T) {
+	for _, h := range []int{1, 2} {
+		m := Model{Width: 30, Height: h, DetailModal: &DetailModalState{
+			Number: "7", Title: "t", Labels: []string{"bug"}, Lines: []string{"body"},
+		}}
+		out := View(m)
+		if rows := strings.Split(out, "\n"); len(rows) > h {
+			t.Errorf("Height %d: View() is %d rows, want at most %d: %q", h, len(rows), h, out)
+		}
+		if !strings.HasPrefix(out, "#7 t") {
+			t.Errorf("Height %d: View() = %q, want the title", h, out)
+		}
 	}
 }

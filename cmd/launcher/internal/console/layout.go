@@ -246,19 +246,31 @@ func detailModalWrapWidth(m Model) int {
 	return innerWidth
 }
 
+// detailModalFullscreenChromeLines is the rows the fullscreen detail modal
+// spends outside its content: title, footer, and View's trailing newline
+// (issue #4249).
+const detailModalFullscreenChromeLines = detailModalTitleLines + detailModalFooterLines + trailingNewlineRow
+
+// detailModalFullscreenContentBudget is the rows between the fullscreen detail
+// modal's title and footer, shared by renderDetailModal and
+// detailModalScrollBudget so they cannot drift (issue #4249).
+func detailModalFullscreenContentBudget(height int) int {
+	return max(height-detailModalFullscreenChromeLines, 0)
+}
+
 // detailModalScrollBudget returns the row budget the detail modal's scroll clamp
 // windows against (issue #1759). Both branches subtract wrapped label lines
 // rather than a fixed row, since labels wrap in the fullscreen renderer too
 // (issues #1772, #1832), and both cap them so the clamp matches the "+N more
-// labels" the render shows (issue #1778).
+// labels" the render shows (issue #1778). The fullscreen branch also reserves
+// View's trailing-newline row (issue #4249).
 func detailModalScrollBudget(m Model) int {
 	if !detailModalFits(m) {
-		contentBudget := m.Height - detailModalTitleLines - detailModalFooterLines
-		if contentBudget < 0 {
-			contentBudget = 0
-		}
+		contentBudget := detailModalFullscreenContentBudget(m.Height)
 		labelLines := detailModalLabelLinesCappedWith(m.DetailModal.Labels, m.Width, contentBudget, plainText)
-		return contentBudget - len(labelLines)
+		// A zero budget still yields one label line, so clamp rather than hand
+		// the scroll clamp a negative height.
+		return max(contentBudget-len(labelLines), 0)
 	}
 	innerWidth, innerHeight := detailModalInnerSize(m.Width, m.Height)
 	contentBudget := innerHeight - detailModalFooterLines
