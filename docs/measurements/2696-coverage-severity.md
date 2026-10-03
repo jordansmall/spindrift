@@ -47,7 +47,60 @@ longer gating the merge. Nothing else changes — an uncovered refactor still
 blocks exactly as before, and every other blocking category and the
 adversarial default-BLOCK stance are unchanged.
 
-## After — method only, no data yet
+## After — not measured
+
+The after arm is abandoned, not pending: issue #3840 closed the open
+loop by recording why it is not worth running, rather than running it.
+Both of "Before"'s forward references, the "after-measurement below"
+and the AC5 "same after-window measurement below", point to this
+section; the method it would have used is kept below as planned.
+
+### Why
+
+- **No window isolates this change.** The method assumes a comparable
+  window in which this change's exemption is the only rubric variable.
+  Every window since it merged on 2026-08-17 also carries these changes
+  to the same review surface:
+  - `b27ed6eb` (2026-08-24): the review prompt defaults to caveman
+    (terse, compressed output).
+  - `b83edc12` (2026-08-28): comment-to-code disproportion becomes
+    blockable. A new blocking category inflates blocking findings per
+    round and dilutes the test-coverage share.
+  - `0846145f`, `3498bb43`, `4a329f78`, `f63b52e0` (2026-09-04): the
+    review hunt is reshaped depth-first, with every dimension always
+    rendered.
+  - `87716fc1` (2026-09-12): the review fan-out moves onto the
+    `review-axis` agent. [Issue #3611's
+    record](3611-round-2-escalation-flip.md) has filed review findings
+    per merged agent PR rising from 0.54 to 1.51 across it.
+  - `dbca42a0` and `1a8c26a0` (2026-09-23): the round-2 escalation
+    flip narrows to diff growth, and `drop` becomes a third triage
+    outcome.
+  - `0d29c6f1` (2026-09-28) and `b6e64772` (2026-09-30): review-loop
+    fixes for an advisory reviewer steering the loop and for
+    re-escalating an already-filed finding.
+- **The baseline was never isolated either.** As "Before" says, it
+  predates #2550/#2551, and no window separated their effect from this
+  change's, so the issue's AC5 "close unbuilt" question stays
+  unanswered too.
+- **The per-round findings are not kept in queryable form.** Blocking
+  findings per round, their test-coverage share, and which defect
+  categories they caught all come from finding text. The orchestrator's
+  per-run findings log (`orchestrator-findings-log-*.md`,
+  `cmd/launcher/orchestrator/run.go`) collects it, but that log is a temp
+  file inside the Box, gone when the Box exits. The text does survive in
+  the Driver's raw stream, which a CI run uploads as the
+  `agent-logs-<issue>` artifact (daemon and local runs leave it in the
+  host's `.spindrift/logs`), so recovering it means fetching each run's
+  log while it is retained and re-parsing its stream the way
+  `scanReviewLog` does.
+
+The one metric only this change targets is the test-coverage share of
+blocking findings, 17% at baseline.
+
+### Method as planned (never run)
+
+Kept verbatim as written before this change merged on 2026-08-17.
 
 This diff cannot produce the after side of the measurement: it requires
 observing real review rounds over a comparable run set after this change is
