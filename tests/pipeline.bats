@@ -9,6 +9,7 @@ setup() {
   setup_fakes
   setup_bare_repo
   set_box_env
+  export BOX_SIGNAL_CARRIER=log # pipeline asserts the log-carrier path (issue #4376)
   export FAKE_DRIVER_COMMIT=1
   # The stub agent pushes and opens the PR itself, so this fixture is a
   # read-write Box and needs the signal a real one gets (issue #1951). Without

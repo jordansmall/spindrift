@@ -165,6 +165,9 @@ setup_entrypoint_env() {
   setup_fakes
   setup_bare_repo
   set_box_env
+  # Pinned rather than inherited from set_box_env: these suites were written
+  # against the log carrier, so pin it and let the socket tests override.
+  export BOX_SIGNAL_CARRIER=log
   # Not a schema knob (issue #1951): dispatch.buildBoxEnv computes it host-side
   # from BOX_FORGE_AND_ISSUE_ACCESS and forwards it only when writes are
   # enabled, so box_env_gen.bash never exports it. Read-only tests unset it
@@ -403,6 +406,10 @@ set_run_env() {
   export CLAUDE_CODE_OAUTH_TOKEN="fake-oauth"
   export GIT_USER_NAME="Test Bot"
   export GIT_USER_EMAIL="bot@example.com"
+  # The fake runtime cannot answer the socket carrier's transport probe, so
+  # launcher-level suites pin the log carrier rather than take the schema
+  # default.
+  export BOX_SIGNAL_CARRIER=log
 }
 
 # set_box_env: every lib/env-schema.nix knob with boxEnv = true, at its schema
