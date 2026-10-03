@@ -4748,11 +4748,13 @@ currently-unmitigated cost, not one that's impossible to avoid.
 
 ## Review-prompt tuning measurements
 
-[`docs/measurements/`](measurements/) holds before/after writeups for
-changes that calibrate the reviewer's own rubric, e.g. [issue #2696's
+[`docs/measurements/`](measurements/) holds writeups for changes that
+calibrate the reviewer's own rubric. [Issue #3611's round-2 escalation
+flip recalibration](measurements/3611-round-2-escalation-flip.md)
+records both a before and an after arm; [issue #2696's
 coverage-severity calibration](measurements/2696-coverage-severity.md)
-and [issue #3611's round-2 escalation flip
-recalibration](measurements/3611-round-2-escalation-flip.md).
+records only its baseline, its after arm abandoned because later
+rubric changes leave no window that isolates it.
 
 ---
 
