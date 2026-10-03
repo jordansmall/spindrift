@@ -149,7 +149,7 @@ record and queue machinery, distinguished only by the kind field.
 ## Live parallelism cap
 
 `+`/`-` raise or lower the session's parallelism cap by one, and the current
-`cap: <live>/<cap>` is always visible above the queue. Raising takes effect
+`running <live>/<cap>` is always visible above the queue. Raising takes effect
 immediately — a held or queued pick launches into the freed slot right away,
 without waiting for a running Dispatch to settle or for the background poll.
 Lowering never terminates anything: it only gates new launches until the live
@@ -208,28 +208,28 @@ reclaim loop, not a collision.
 
 When the freshness probe finds the loaded image would be rebuilt against the
 current base branch tip, the Console prints
-`!! image stale: <reason> — new launches held; press [b] to rebuild` and
+`⚠ image stale: <reason> — new launches held; press [b] to rebuild` and
 holds every new launch — a queued pick stays at `queued` instead of claiming.
 A Box already running rides out the stale window on its original image
 untouched; staleness only gates a slot *refill*, never an in-flight Dispatch.
 
 `b` fires the rebuild without leaving the session or needing a confirm: it
 checks out the base branch, pulls it, and re-realizes the image in the
-background while the session stays responsive, with `==> rebuilding
-image...` shown until it finishes. That checkout runs on the operator's own
-working directory — it refuses to run when the directory is on some other
-branch with a dirty working tree (uncommitted changes or untracked files),
-since a plain `git checkout` only blocks on a *conflicting* file and would
-otherwise carry a non-conflicting uncommitted change or untracked file onto
-the base branch in silence. Outside that case (already on the base branch,
-or any branch with a clean tree) the checkout is a safe no-op or a plain
-branch switch, so it proceeds. A successful rebuild clears the banner and
-resumes every held pick exactly where it queued — no re-pick needed. A
-failed rebuild — including a refused checkout — prints `!! rebuild failed:
-<reason>` and leaves launches held, so the operator can retry `b` once the
-underlying problem (a dirty working tree on the wrong branch, a merge
-conflict on pull, a broken derivation) is fixed. `o` opens a pane showing the
-rebuild's own output once one has run.
+background while the session stays responsive, with
+`↻ rebuilding image...` shown until it finishes. That checkout runs on the
+operator's own working directory — it refuses to run when the directory is on
+some other branch with a dirty working tree (uncommitted changes or untracked
+files), since a plain `git checkout` only blocks on a *conflicting* file and
+would otherwise carry a non-conflicting uncommitted change or untracked file
+onto the base branch in silence. Outside that case (already on the base
+branch, or any branch with a clean tree) the checkout is a safe no-op or a
+plain branch switch, so it proceeds. A successful rebuild clears the banner
+and resumes every held pick exactly where it queued — no re-pick needed. A
+failed rebuild — including a refused checkout — prints
+`⚠ rebuild failed: <reason>` and leaves launches held, so the operator can
+retry `b` once the underlying problem (a dirty working tree on the wrong
+branch, a merge conflict on pull, a broken derivation) is fixed. `o` opens
+a pane showing the rebuild's own output once one has run.
 
 ## Quit
 
