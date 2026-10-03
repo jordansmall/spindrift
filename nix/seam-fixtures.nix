@@ -12,6 +12,7 @@
   batsHarness,
   dockerHarness,
   bwrapHarness,
+  butlerHarness,
 }:
 let
   inherit (batsHarness) internals;
@@ -26,6 +27,7 @@ let
     "launcher-run-input.json" = internals.runInputDocumentFile;
     "launcher-run-input-docker.json" = dockerHarness.internals.runInputDocumentFile;
     "launcher-run-input-bwrap.json" = bwrapHarness.internals.runInputDocumentFile;
+    "launcher-run-input-butler.json" = butlerHarness.internals.runInputDocumentFile;
     "prompts" = internals.promptDir;
     "nix-checks-skill.md" = ../skills/nix-checks/SKILL.md;
   };
