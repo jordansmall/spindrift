@@ -836,9 +836,10 @@ func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 
 	gated := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// subtle.ConstantTimeCompare, not ==: this header is the sole gate on
-		// a port any local process can reach, so a short-circuiting == would
-		// leak secret a byte at a time. The early return on differing lengths
-		// leaks only len(secret), which is not a comparable oracle.
+		// a port anything that can route to the host can reach, so a
+		// short-circuiting == would leak secret a byte at a time. The early
+		// return on differing lengths leaks only len(secret), which is not a
+		// comparable oracle.
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(registrymanifest.TCPSecretHeader)), []byte(secret)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return

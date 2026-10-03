@@ -15,7 +15,7 @@ import (
 
 // NewTCPForwarder relays every request to http://upstreamHost:upstreamPort,
 // attaching secret via registrymanifest.TCPSecretHeader (issue #3111). That
-// header authenticates the hop: a loopback port has none of the filesystem
+// header authenticates the hop: a TCP port has none of the filesystem
 // permissions guarding the unix-socket transport, and socat cannot inject it.
 // GET/HEAD enforcement and the upstream credential attach stay launcher-side.
 func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http.Handler, error) {

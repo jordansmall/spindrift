@@ -19,8 +19,8 @@ import (
 const EnvVar = "REGISTRY_PROXY_MANIFEST"
 
 // TCPSecretHeader carries the per-run TCP secret on every Box request when
-// the proxy is served over loopback TCP (issue #3111). A unix socket needs
-// none: its file permissions already gate access.
+// the proxy is served over its every-interface TCP fallback (issue #3111). A
+// unix socket needs none: its file permissions already gate access.
 const TCPSecretHeader = "X-Spindrift-Registry-Proxy-Secret"
 
 // endpointScheme is one of the two ADR-0045 forms, "unix://<path>" or

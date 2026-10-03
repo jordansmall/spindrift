@@ -377,8 +377,8 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// The runner probes the transport live at most once per Dispatch (issue
 	// #3111; one-probe rule for the Signal socket too, ADR 0052): a unix
 	// socket that cannot cross into the guest (a remote-context
-	// docker/podman, a VM-backed runtime) needs the loopback-TCP fallback, so
-	// the transport can never be inferred from GOOS. The registry proxy and
+	// docker/podman, a VM-backed runtime) needs the TCP fallback, so the
+	// transport can never be inferred from GOOS. The registry proxy and
 	// the Signal socket share this one verdict rather than probing twice.
 	// Neither feature configured takes no probe at all, exactly as before
 	// this knob existed.

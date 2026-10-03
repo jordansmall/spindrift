@@ -21,8 +21,8 @@ const (
 	// request. A hostile Box gets to tie up a slot on its own launcher and
 	// only briefly, rather than parking a half-sent body forever. It is
 	// generous next to the milliseconds a signalwire.MaxRequestBytes body
-	// needs over loopback or a unix socket, so no legitimate signal can trip
-	// it.
+	// needs over the bridge IP or a unix socket, so no legitimate signal can
+	// trip it.
 	readTimeout = 30 * time.Second
 
 	// readHeaderTimeout bounds the header phase alone: a slowloris drip
@@ -99,9 +99,9 @@ func (l *Listener) ListenAndServe(socketPath string) error {
 // because a Box on a docker bridge reaches the host at the bridge IP, not at
 // loopback. A TCP port has no filesystem permissions of its own,
 // so Handler must already be gated (built with NewGatedHandler) -- serving an
-// ungated Handler here would let any local process reach the four routes with
-// no secret at all, so this fails closed instead. Call Addr to learn an
-// ephemeral port's bound address.
+// ungated Handler here would let anything that can route to the host reach the
+// four routes with no secret at all, so this fails closed instead. Call Addr to
+// learn an ephemeral port's bound address.
 func (l *Listener) ListenAndServeTCP(addr string) error {
 	if l.Handler == nil || !l.Handler.gated {
 		return errors.New("signalsocket: refusing to listen on TCP with an ungated handler")
