@@ -1056,7 +1056,12 @@ in
   # prompt's verdict contract: the VERDICT bullets, the enumeration, and the
   # status alternation all render from the configured set, and no default
   # verdict token survives in the contract. Proves the set reaches the prompt,
-  # not only the launcher.
+  # not only the launcher. The pins stay raw grep -qF, not normalized_grep:
+  # every pinned span is machine-rendered, not hand-wrapped prose.
+  # renderPrompt (lib/research-verdicts.nix) renders each verdict bullet as one
+  # line, joined only by "\n", so the raw grep also pins each bullet to a
+  # single line, which whitespace normalization would erase; the alternation
+  # and enumeration are each one marker substitution, so no reflow splits them.
   mkharness-prompt-research-verdicts-custom-rendered =
     pkgs.runCommand "mkharness-prompt-research-verdicts-custom-rendered" { }
       ''
