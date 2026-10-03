@@ -567,12 +567,12 @@ func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daem
 }
 
 // finish is mainRun's one path from a pre-loop Halt to a return value: emit
-// the halt event, print "daemon: <msg>" to stderr, publish the halted status,
-// and derive the exit code. That order is load-bearing: a merged
+// the halt event, print "daemon: " + h.Diagnostic() to stderr, publish the
+// halted status, and derive the exit code. That order is load-bearing: a merged
 // stdout+stderr stream must read halt event, diagnostic, then any
 // publishHaltedStatus write-failure warning, byte-identical to the output
-// before 580296cf. msg is a parameter because the instance-lock refusal
-// prints the bare error, not h.String()'s prefixed form. sw == nil is
+// before 580296cf. The per-class text lives in Halt.Diagnostic, so no
+// caller can print text that disagrees with h. sw == nil is
 // deliberate, not a missing argument: it is the instance-lock refusal,
 // where the status file belongs to the daemon that actually holds the
 // checkout, and a refused second instance must never stomp the live
@@ -584,9 +584,9 @@ func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daem
 // published the status by the time Loop returns its Halt, so mainRun ends
 // on h.ExitCode() alone for that path — that asymmetry is intentional, not
 // a gap to "fix" by double-emitting.
-func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds []daemon.Kind, h daemon.Halt, msg string) int {
+func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds []daemon.Kind, h daemon.Halt) int {
 	em.Emit(h.Event())
-	fmt.Fprintf(stderr, "daemon: %s\n", msg)
+	fmt.Fprintf(stderr, "daemon: %s\n", h.Diagnostic())
 	if sw != nil {
 		publishHaltedStatus(stderr, sw, kinds, h.String())
 	}
@@ -785,8 +785,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kinds)
 	if err != nil {
 		// finish keeps the pre-580296cf halt-event-then-diagnostic order. sw
-		// nil: no status file of ours exists yet. msg is the bare err.
-		return finish(stderr, em, nil, args.Kinds, daemon.Halt{Class: daemon.HaltInstanceLock, Detail: err.Error()}, err.Error())
+		// nil: no status file of ours exists yet.
+		return finish(stderr, em, nil, args.Kinds, daemon.Halt{Class: daemon.HaltInstanceLock, Detail: err.Error()})
 	}
 	// No cleanup on the crash path: the kernel drops the flock when the
 	// holder dies (including SIGKILL), so a deferred Release here only
@@ -850,7 +850,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// path rather than after a full doctor run.
 	if h := startupPreflight(preflightCtx, r, em); h.Class != daemon.HaltNone {
 		// finish keeps the pre-580296cf halt-event-then-diagnostic order.
-		return finish(stderr, em, statusWriter, args.Kinds, h, h.String())
+		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
 
 	cfg := daemon.Config{
