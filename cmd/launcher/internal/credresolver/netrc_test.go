@@ -272,3 +272,97 @@ func TestNetrcCredential_TrailingCommentLineDoesNotShadowLaterPassword(t *testin
 		t.Errorf("got %q, want %q", got, "ghp_REAL")
 	}
 }
+
+// Tokens split the way curl's do: quoted tokens are unwrapped with its
+// escapes, so a quoted password resolves exactly rather than to a partial or
+// quote-wrapped value, and unquoted tokens stay verbatim.
+func TestNetrcCredential_Tokens(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"quoted password", `machine h login bot password "abc"`, "abc"},
+		{"quoted password with spaces", `machine h login bot password "s3cr et"`, "s3cr et"},
+		{"escaped quote", `machine h password "a\"b"`, `a"b`},
+		{"escaped backslash", `machine h password "a\\b"`, `a\b`},
+		{"escaped whitespace", `machine h password "a\tb\nc\rd"`, "a\tb\nc\rd"},
+		{"unknown escape maps to itself", `machine h password "a\qb"`, "aqb"},
+		{"quoted password starting with hash", `machine h password "#abc"`, "#abc"},
+		{"quoted hash with trailing comment", `machine h password "#abc" # password nope`, "#abc"},
+		{"unquoted escapes stay verbatim", `machine h password a\"b`, `a\"b`},
+		{"quoted login containing password word", `machine h login "a password b" password real`, "real"},
+		{"quoted machine", `machine "h" password real`, "real"},
+		{"token ends at closing quote", `machine h password "ab"cd`, "ab"},
+		{"unquoted comment after closing quote", `machine h password "ab"#x`, "ab"},
+		{"non-breaking space stays in token", "machine h password a\u00a0b", "a\u00a0b"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := netrcCredential([]byte(tt.content+"\n"), "/some/netrc", "h")
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// curl treats an unterminated quote as a file syntax error. Returning the
+// partial value would be fail-open, and the error must not echo the secret.
+func TestNetrcCredential_UnterminatedQuoteIsError(t *testing.T) {
+	const secret = "s3kr3t-do-not-echo"
+	const path = "/some/netrc"
+	const host = "reg.example.com"
+	content := []byte("machine " + host + " login bot password \"" + secret + "\n")
+
+	got, err := netrcCredential(content, path, host)
+	if err == nil {
+		t.Fatalf("expected error for unterminated quote, got %q", got)
+	}
+	if got != "" {
+		t.Errorf("must not return a partial value, got %q", got)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Errorf("expected error to mention the path %q, got: %v", path, err)
+	}
+	if !strings.Contains(err.Error(), host) {
+		t.Errorf("expected error to mention the host %q, got: %v", host, err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("error must never echo a password value, got: %v", err)
+	}
+}
+
+// A macdef header line is tokenized like any other, so an unterminated quote
+// there is a syntax error (curl parity) rather than silently skipped.
+func TestNetrcCredential_MacdefHeaderUnterminatedQuoteIsError(t *testing.T) {
+	content := []byte("macdef init \"unclosed\nbody\n\nmachine h password real\n")
+
+	got, err := netrcCredential(content, "/some/netrc", "h")
+	if err == nil {
+		t.Fatalf("expected error for unterminated quote, got %q", got)
+	}
+	if !strings.Contains(err.Error(), "unterminated quote") {
+		t.Errorf("expected an unterminated-quote error, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "unclosed") {
+		t.Errorf("error must never echo a token, got: %v", err)
+	}
+}
+
+// Macro body lines are arbitrary text, never tokenized, so quotes in them
+// cannot trip the unterminated-quote check.
+func TestNetrcCredential_MacdefBodyQuotesAreSkipped(t *testing.T) {
+	content := []byte("macdef init\necho \"unclosed\n\nmachine h password real\n")
+
+	got, err := netrcCredential(content, "/some/netrc", "h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got != "real" {
+		t.Errorf("got %q, want %q", got, "real")
+	}
+}
