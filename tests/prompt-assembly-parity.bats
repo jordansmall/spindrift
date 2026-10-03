@@ -167,6 +167,17 @@ setup_butler_env() {
   export CHORE_MAX_FINDINGS="5"
 }
 
+setup_forgejo_forge_env() {
+  export CODE_FORGE="forgejo"
+  export BOX_FORGE_BACKEND=FORGEJO
+  export FORGEJO_BASE_URL="https://forge.test"
+  export FORGEJO_TOKEN="fjtok"
+  # clone_repo builds the clone URL as https://<token>@<host>/<slug>.git.
+  # Redirect that exact URL to the bare repo setup_bare_repo already seeded,
+  # so the clone stays offline.
+  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
+}
+
 @test "assert_golden_text_or_update diffs and fails when golden and produced differ, UPDATE_GOLDENS unset" {
   local golden="$BATS_TEST_TMPDIR/golden.txt" produced="$BATS_TEST_TMPDIR/produced.txt"
   echo "golden content" >"$golden"
@@ -426,28 +437,14 @@ assert_research_verdicts_parity() {
 
 @test "production path matches the golden fixture for the forgejo read-write cell" {
   # BOX_WRITE_ENABLED stays at setup_entrypoint_env's read-write default.
-  export CODE_FORGE="forgejo"
-  export BOX_FORGE_BACKEND=FORGEJO
-  export FORGEJO_BASE_URL="https://forge.test"
-  export FORGEJO_TOKEN="fjtok"
-  # clone_repo builds the clone URL as https://<token>@<host>/<slug>.git.
-  # Redirect that exact URL to the bare repo setup_bare_repo already seeded,
-  # so the clone stays offline.
-  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
+  setup_forgejo_forge_env
 
   assert_cell_golden "forgejo-read-write" initial
 }
 
 @test "production path matches the golden fixture for the forgejo read-only cell" {
-  export CODE_FORGE="forgejo"
-  export BOX_FORGE_BACKEND=FORGEJO
-  export FORGEJO_BASE_URL="https://forge.test"
-  export FORGEJO_TOKEN="fjtok"
+  setup_forgejo_forge_env
   unset BOX_WRITE_ENABLED
-  # clone_repo builds the clone URL as https://<token>@<host>/<slug>.git.
-  # Redirect that exact URL to the bare repo setup_bare_repo already seeded,
-  # so the clone stays offline.
-  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://fjtok@forge.test/"
 
   assert_cell_golden "forgejo-read-only" initial
 }
@@ -806,4 +803,75 @@ SKILL
   export BOX_FILER_ENABLED=1
 
   assert_cell_golden "butler-docs-drift-patch" initial
+}
+
+# issue #3838: cells added so every lib/fragments.nix fragment without a
+# content-asserting unit test renders into some golden.
+
+@test "production path matches the golden fixture for the forgejo orchestrator-on filer-on cell" {
+  # Nearest sibling: "orchestrator-filer-on", crossed with the forgejo forge
+  # and tracker axes. The filer and scout prompts in .agents.json carry the
+  # forgejo-only filer-label-direct-forgejo.md, filer-file-direct-forgejo.md
+  # and scout-issue-read-forgejo.md.
+  setup_forgejo_forge_env
+  export ISSUE_TRACKER="forgejo"
+  export BOX_TRACKER_AXIS_READ=FORGEJO
+  export BOX_TRACKER_AXIS_WRITE=FORGEJO
+  export BOX_TRACKER_AXIS_FILER=FORGEJO
+  export ORCHESTRATOR_ENABLED=1
+  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
+  unset BOX_REVIEW_LOOP_INLINE
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+
+  assert_cell_golden "forgejo-orchestrator-filer-on" initial
+
+  assert_review_handoff_golden "forgejo-orchestrator-filer-on"
+}
+
+@test "production path matches the golden fixture for the forgejo fix-pass cell" {
+  # Nearest sibling: "fix-pass", crossed with CODE_FORGE=forgejo so
+  # FIX_CI_READ_FORGEJO replaces the `gh run list` step with fix-ci-read-forgejo.md.
+  export FIX_PASS="1"
+  setup_forgejo_forge_env
+
+  assert_cell_golden "forgejo-fix-pass" resume
+}
+
+@test "production path matches the golden fixture for the principle-skills-baked cell" {
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
+  export BOX_WORKER_PROVISIONED=1
+  export BOX_SCOUT_PROVISIONED=1
+
+  # Dogfood-only skills, like nix-checks above: no stock Consumer image bakes
+  # them, so without this cell their three anchors render in no golden.
+  local skill
+  for skill in principle-fix-root-causes principle-laziness-protocol principle-redesign-from-first-principles; do
+    mkdir -p "$HOME/.claude/skills/$skill"
+    cat >"$HOME/.claude/skills/$skill/SKILL.md" <<SKILL
+---
+name: $skill
+description: Dogfood principle skill $skill.
+---
+Body of $skill.
+SKILL
+  done
+
+  assert_cell_golden "principle-skills-baked" initial
+}
+
+@test "production path matches the golden fixture for the butler docs-drift chore cell, filer on, socket carrier" {
+  # Nearest sibling: "butler-docs-drift-patch" minus the patch rung, plus
+  # BOX_SIGNAL_CARRIER=socket: an advise-only dispatch with a filer forces
+  # FILER_FILE_RELAY, and the socket carrier selects
+  # butler-file-issues-relay-socket.md.
+  setup_butler_env "docs-drift"
+  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
+  export BOX_FILER_ENABLED=1
+  unset BOX_OUTBOX_RELAY_CAPABLE
+  export BOX_SIGNAL_CARRIER="socket"
+
+  assert_cell_golden "butler-docs-drift-filer-on-signal-socket" initial
 }

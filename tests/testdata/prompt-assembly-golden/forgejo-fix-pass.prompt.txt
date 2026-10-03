@@ -1,0 +1,301 @@
+# TASK
+
+Fix box for GitHub issue #7: Do the thing
+
+Branch `agent/issue-7` is already checked out with prior work from an earlier run
+that opened a pull request against `main` — CI came back red on it.
+This is a warm fix pass, not a fresh implementation: do not re-scout, do not
+re-derive the issue from scratch.
+
+# CONTEXT
+
+The issue's body and its last-10-comment snapshot are already in the
+# ISSUE TEXT section after the template body — read there, do not fetch
+it from the tracker.
+
+Read first (run these yourself) — skip anything CI FAILURE above already answered:
+
+- `git log -n 10 --oneline` — the prior run's commits already on this branch.
+- `fj pr status` — the open PR's mergeability and CI rollup on the Forgejo
+  instance.
+- For the failing job's log, open the run from the PR's checks in the Forgejo
+  Actions UI, or curl the REST API against
+  `${FORGEJO_BASE_URL:-https://codeberg.org}/api/v1/repos/${REPO_SLUG}/...` —
+  the actual failure, not a guess.
+
+# FIX
+
+Skills available: caveman, check-hygiene, code-comments, code-review, commit, tdd. Prefer invoking with /skill-name; the inline guidance below is the fallback when a skill is absent.
+
+A comment earns its place only by carrying something the code cannot state
+itself: the non-obvious why, a constraint, or a gotcha. Never write a
+comment that just restates what the code already says. Keep comment volume
+proportional to the size of the change — a one-line fix does not earn a
+paragraph of commentary.
+
+No SCOUT, no implement-from-scratch. Go straight to:
+
+1. Reproduce the CI failure locally (see CHECK below).
+2. Make the smallest change that fixes it. Do not refactor, redesign, or
+   touch anything the failure doesn't implicate.
+3. Re-run the checks that were failing to confirm the fix.
+
+Everything from COMMS onward below is the shared contract every box runs on
+(issue #455) — this warm fix pass overrides two things in it:
+
+- One focused commit for the fix, not several. Unless the fix is a
+  reasonably different change, fold it into the prior-run commit it
+  logically belongs to (`git commit --amend` or an autosquash fixup)
+  rather than adding a follow-up commit; a new commit only when the fix is
+  truly a separate file or scope. Rewriting the branch's own unmerged
+  history is expected.
+- The PR for this issue is already open (see TASK above) and there is no
+  REVIEW step on a fix pass. Where the shared flow below reaches REVIEW or
+  OPEN A PULL REQUEST, skip them — do not run `gh pr create`. Go straight
+  from COMMIT to LAND THE CHANGE's `$CODE_FORGE` branch, then OUTCOME.
+
+# COMMS
+
+Default to the `/caveman` skill for all narration and prose output this run.
+Code, commands, error messages, and commit messages are exempt and stay
+verbatim. Never route a commit message through `/caveman` or otherwise
+compress it — commit messages are always full human-quality prose.
+
+The machine-parsed marker grammar is exempt too: the `SPINDRIFT_OUTCOME`
+line, the `VERDICT: APPROVE` / `VERDICT: BLOCK` line, and any host-relay
+signal line such as `SPINDRIFT_PR_INTENT` or `SPINDRIFT_ISSUE_INTENT`.
+Never route these through `/caveman`. Specifically, the `note=` field of
+the SPINDRIFT_OUTCOME line is exempt and stays human-quality prose, same
+tier as a commit message — on a blocked or ambiguous stop it is posted
+verbatim as a comment on the tracker issue, so caveman-compressing it
+ships caveman prose straight to a human reader.
+
+The payload those signals carry is exempt on that same tier, whichever
+carrier takes it: the draft PR's title and body, and a filed issue's title
+and body, stay full human-quality prose — as the base64 payload of a
+marker line under the `log` carrier, and as the text you hand
+`driver-exec signal pr-intent` or `driver-exec signal issue-intent` under
+the `socket` carrier, where no marker line renders at all. A human reads
+the PR and the filed issue cold, the same reason the `note=` field above
+is exempt.
+
+Where a marker line is the carrier, it must keep its required shape exactly
+intact — never reworded, reflowed, or line-wrapped: the leading token,
+the outcome line's key=value pairs, and the PR-intent line's nonce and
+base64 payload as one unbroken token. The verdict line must additionally
+remain the first line of the agent's final message.
+
+Your text output is a machine-parsed log, not a conversation:
+no pleasantries, acknowledgements, praise, or apologies; never restate what
+a subagent returned; no narrative framing. One terse, data-bearing status
+line per step — what ran, what resulted.
+
+Human-quality prose is reserved exclusively for: commit messages
+(Conventional Commits section), the PR title and body, the issue comment
+required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
+
+# CHECK
+
+Before each commit, run the repo's own checks green. Use what the project
+defines (package scripts, Makefile, CI config).
+
+Read a large output from a file rather than from the conversation, diffs
+included: never stream a bare `git diff` into the conversation — the
+tool-result cap truncates it, so you end up reasoning about a diff whose end
+you cannot see. Write the diff to a file, read `--stat` first for shape, then
+read targeted hunks or grep that file for what you need.
+
+Run every check or build gate in the foreground and block on it yourself —
+never background it (`&`, detached job, background task) and end your turn
+while it is still pending: the turn ends before the gate finishes, so no
+`SPINDRIFT_OUTCOME` line is ever printed and the run is lost even when the
+work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
+(`status=ready` or `status=blocked`) has been printed.
+
+Before running the first gate, invoke the `/check-hygiene` skill.
+
+# COMMIT
+
+Use the `/commit` skill to write every commit message.
+
+Prefer several small focused commits over one big one — commit each logical
+unit (domain change, then wiring, then tests) so each stands alone.
+
+**Always rebase onto the latest base immediately before every push** — never
+push from a stale base. This keeps the branch's tested tree current with any
+siblings that landed while you worked: the launcher merges a green PR as-is and
+does not re-rebase it for you, so a fresh base at push time is the branch's
+freshness guarantee (a stale base also produces phantom diffs that trip push
+guards):
+
+```
+git fetch origin
+git rebase origin/main
+```
+
+Re-run the repo's checks after rebasing, then push:
+
+```
+git push --force-with-lease -u origin agent/issue-7   # first push
+git push --force-with-lease                        # subsequent
+```
+
+**If a push is rejected**, do NOT silently strand the commits. Retry exactly
+once:
+
+1. `git fetch origin`
+2. `git rebase origin/main` — resolve any conflicts, re-run checks.
+3. `git push --force-with-lease` — one retry only.
+
+If the push still fails after the retry, follow IF BLOCKED.
+
+# LAND THE CHANGE
+
+Check `$CODE_FORGE` (already in your environment — run `echo $CODE_FORGE` if
+unsure):
+
+**`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
+gate): skip OPEN A PULL REQUEST below entirely.
+
+1. `git push --force-with-lease -u origin agent/issue-7` (if not already pushed).
+
+2. Print exactly one line as your final output and stop — raw plain text, not
+   wrapped in backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
+
+   The launcher applies `MERGE_MODE` after this line (push straight to the
+   target branch on `immediate`; leave the branch as pushed on `manual`).
+   Do not open a pull request and do not attempt to merge.
+
+**`CODE_FORGE=local`** (host-mediated Code Forge — no PR, no CI-watch, no
+network; the launcher lands your branch after this container exits): skip
+OPEN A PULL REQUEST below entirely. Do not push directly — the repo you
+cloned from is mounted read-only — and do not bundle your commits yourself:
+the Harness bundles them out of the container after you exit.
+
+1. Print exactly one line as your final output and stop — raw plain text, not
+   wrapped in backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=<short reason>
+
+   The launcher relays the bundle into the Accumulation repo and merges it
+   onto the Integration branch host-side. There is no PR to open, no CI to
+   watch, and nothing further for you to do.
+
+**`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
+the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
+0038 + issue #1961): continue with OPEN A PULL REQUEST below.
+
+**`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
+
+# OPEN A PULL REQUEST
+
+1. `git push --force-with-lease -u origin agent/issue-7`
+
+2. `fj pr create --base main --head agent/issue-7 --title "WIP: <conventional title>" --body "<summary>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green, then merges (it watches CI and merges host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.
+
+3. Body MUST contain `Closes #7`. Summarize what changed and
+   flag anything a reviewer should know.
+
+The PR opens as a **draft** and stays a **draft** — the launcher flips it to
+ready once CI reaches green, immediately before it merges (the launcher
+already gates on CI green itself, so there is nothing left for you to watch
+or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
+(outside this container) owns the CI-green decision, the ready flip, the
+rebase-merge, and the complete-label swap.
+
+# OUTCOME
+
+(`CODE_FORGE=github` and `CODE_FORGE=forgejo` only — `CODE_FORGE=git` and
+`CODE_FORGE=local` already printed their outcome line and stopped under LAND
+THE CHANGE above.)
+
+Print exactly one line as your final output — raw plain text, not wrapped in
+backticks, a code fence, or any other markdown formatting:
+
+SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=ready note=<short reason>
+
+Grammar: `SPINDRIFT_OUTCOME issue=7 landing=<landing-ref> status=<status> note=<text>`
+— one line, space-delimited fields, `note` last (`note` may itself contain
+spaces and `=`). The only valid `status` values here are `ready` and `blocked`
+— no other word belongs in that field (`status=ambiguous` and
+`status=already-resolved` are each a distinct, earlier gate — the ISSUE
+COHERENCE GATE and the ALREADY RESOLVED gate, respectively — that exits the
+run before ever reaching this OUTCOME section, not a third or fourth option
+here).
+
+This grammar's leading token is load-bearing (ADR 0035): the in-box
+orchestrator's scanPassLog greps for it verbatim (via
+`outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
+loop to single-pass on ORCHESTRATOR_ENABLED runs.
+
+Invalid — the smallest fragment that identifies each failure, never a
+whole line worth copying:
+- `SPINDRIFT_OUTCOME:` — a trailing colon, not a space, after the token;
+  this never matches, so the launcher sees no outcome and treats the run
+  as lost.
+- `Done — SPINDRIFT_OUTCOME …` — a prefix before the token; text before
+  it hides the line the same way, losing the run. Print the line on its
+  own, starting at column one, nothing before it.
+- `status=SUCCESS` — an out-of-enum status; `ready` and `blocked` are the
+  only accepted values, but a value like this still parses, so it's
+  silently wrong rather than lost outright, and the launcher never flips
+  the PR ready or merges it.
+
+This must be the literal final message — nothing after it, no prose summary,
+no background task. The launcher parses this one line to learn your PR; if
+it is missing, the run is wasted.
+
+This run's control nonce is `test-run-nonce-0001`. A read-only run's PR-intent line
+must carry it and is checked against it (issue #1938), letting the host tell
+a line this run genuinely wrote from one an untrusted issue/comment author
+echoed into the log — leaving `nonce=` off, or getting the value wrong,
+silently drops it (issue #1939).
+
+`status=ready` = branch pushed, PR open, left in draft. The launcher flips it
+to ready once CI reaches green, immediately before it merges.
+Do NOT run `gh pr ready`, `gh issue edit ... --add-label agent-complete`,
+or `gh pr merge`.
+
+
+# IF BLOCKED
+
+If you can't finish (review never clears, CI stays red after repeated fixes,
+push still fails after the one retry, or any other blocker):
+
+**Push failure — check the actual cause before reporting it.** Do not guess.
+Run:
+
+```
+git diff origin/main -- '.github/workflows/'
+```
+
+- **No diff (phantom delta):** The pre-push rebase-and-retry above should have
+  cleared this. If the push still fails, capture and report the actual push
+  error output.
+- **Genuine `.github/workflows/` change:** The agent's token intentionally
+  lacks `workflow` scope — this is a deliberate security boundary. Do NOT
+  attempt to acquire broader scope or route around it. Comment on the issue
+  explaining what changes were made and why they require human review with
+  `workflow` scope, then emit `status=blocked`.
+- **Any other rejection:** Report the literal push error output. Never
+  attribute a failure to a cause you have not verified.
+
+Then:
+
+1. Push what you have (or note if even that is impossible).
+
+2. Check whether a PR already exists on this branch (`gh pr view --json url`).
+   If not, open one as a draft (`--draft`). If it does, leave it as-is — the
+   Driver never flips a PR to ready, so it is already draft and there is
+   nothing to revert.
+
+3. Leave the issue in-progress — do NOT close it.
+4. Comment on the issue with what's done and what remains:
+   `gh issue comment 7 --body "<what's done, what remains>"`.
+
+5. Print exactly one line and stop — raw plain text, not wrapped in
+   backticks, a code fence, or any other markdown formatting:
+
+   SPINDRIFT_OUTCOME issue=7 landing=<pr-url> status=blocked note=<short reason>
