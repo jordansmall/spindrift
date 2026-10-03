@@ -102,7 +102,7 @@ func settlesAfter(launch *Launcher, num string, delay time.Duration) {
 	launch.queue.Add(Pick{Number: num, Title: "fix the thing", State: PickRunning})
 	go func() {
 		time.Sleep(delay)
-		launch.queue.setState(num, PickSettled, "")
+		launch.queue.setState(num, KindWork, PickSettled, "")
 	}()
 }
 
@@ -3889,7 +3889,7 @@ func TestTea_DetailModalKey_UnpickLauncherClaimedBehindStalePicks_ModalStaysOpen
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", State: forge.IssueOpen})
 	launch := &Launcher{CodeForge: f, queue: NewQueue()}
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
-	if !launch.queue.tryMarkClaiming("42") {
+	if !launch.queue.tryMarkClaiming("42", KindWork) {
 		t.Fatal("tryMarkClaiming = false, want the queued row claimed")
 	}
 

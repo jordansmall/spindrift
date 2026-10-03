@@ -576,3 +576,111 @@ func (r raceOnNum) TransitionState(num string, from, to forge.DispatchState) err
 	}
 	return nil
 }
+
+// One issue number can carry a work row and a research row at once (disjoint
+// label families, Queue.Add never dedups; issue #4230). A research Discover
+// must act on its own kind's row even when a newer work row shares the number.
+func TestQueue_Discover_SameNumberTwoKinds_ClaimTargetsOwnKindRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "research it", State: PickQueued, Kind: KindResearch})
+	q.Add(Pick{Number: "42", Title: "fix it", State: PickQueued, Kind: KindWork})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	batch, err := q.Discover(f, f, "", KindResearch)
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(batch.Issues) != 1 || batch.Issues[0].Number != "42" {
+		t.Fatalf("issues = %+v, want #42", batch.Issues)
+	}
+	snap := q.Snapshot()
+	if snap[0].State != PickRunning {
+		t.Errorf("research row = %+v, want PickRunning", snap[0])
+	}
+	if snap[1].State != PickQueued {
+		t.Errorf("work row = %+v, want it left at PickQueued", snap[1])
+	}
+}
+
+func TestQueue_Discover_SameNumberTwoKinds_WorkClaimTargetsOwnKindRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix it", State: PickQueued, Kind: KindWork})
+	q.Add(Pick{Number: "42", Title: "research it", State: PickQueued, Kind: KindResearch})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	if _, err := q.Discover(f, f, "", KindWork); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	snap := q.Snapshot()
+	if snap[0].State != PickRunning {
+		t.Errorf("work row = %+v, want PickRunning", snap[0])
+	}
+	if snap[1].State != PickQueued {
+		t.Errorf("research row = %+v, want it left at PickQueued", snap[1])
+	}
+}
+
+func TestQueue_Discover_SameNumberTwoKinds_DepsOfFailureHoldTargetsOwnKindRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "research it", State: PickQueued, Kind: KindResearch})
+	q.Add(Pick{Number: "42", Title: "fix it", State: PickQueued, Kind: KindWork})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	if _, err := q.Discover(failDepsOf{Fake: f, num: "42"}, f, "", KindResearch); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	snap := q.Snapshot()
+	if snap[0].State != PickHeld {
+		t.Errorf("research row = %+v, want PickHeld", snap[0])
+	}
+	if snap[1].State != PickQueued || snap[1].Reason != "" {
+		t.Errorf("work row = %+v, want it untouched at PickQueued", snap[1])
+	}
+}
+
+func TestQueue_Discover_SameNumberTwoKinds_HoldTargetsOwnKindRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "research it", State: PickQueued, Kind: KindResearch})
+	q.Add(Pick{Number: "42", Title: "fix it", State: PickQueued, Kind: KindWork})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}, Body: "Blocked by #41"})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen})
+
+	if _, err := q.Discover(f, f, "", KindResearch); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	snap := q.Snapshot()
+	if snap[0].State != PickHeld || snap[0].BlockedBy != "#41 (body)" {
+		t.Errorf("research row = %+v, want PickHeld blocked by #41 (body)", snap[0])
+	}
+	if snap[1].State != PickQueued || snap[1].BlockedBy != "" {
+		t.Errorf("work row = %+v, want it untouched at PickQueued", snap[1])
+	}
+}
+
+func TestQueue_Discover_SameNumberTwoKinds_DissolveTargetsOwnKindRow(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "research it", State: PickQueued, Kind: KindResearch})
+	q.Add(Pick{Number: "42", Title: "fix it", State: PickQueued, Kind: KindWork})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+
+	if _, err := q.Discover(raceOnNum{Fake: f, racedNum: "42"}, f, "", KindResearch); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	snap := q.Snapshot()
+	if snap[0].State != PickDissolved || snap[0].Reason != errBoom.Error() {
+		t.Errorf("research row = %+v, want dissolved with reason %q", snap[0], errBoom.Error())
+	}
+	if snap[1].State != PickQueued || snap[1].Reason != "" {
+		t.Errorf("work row = %+v, want it untouched at PickQueued", snap[1])
+	}
+}

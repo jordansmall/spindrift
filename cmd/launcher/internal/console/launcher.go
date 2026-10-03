@@ -281,12 +281,13 @@ func (l *Launcher) registry() *terminate.Registry {
 // Terminate ends num's live Dispatch by hand (ADR 0024, issue #649), delegating
 // the reap/transition/comment sequence to terminate.Reclaim before marking the
 // pick PickTerminated. The reap error is the only one returned. The pick's kind
-// selects the tracker and Factory (issue #4148); tracker is the work stack's. A
-// kind whose stack is unwired falls back to trackerFor, the route Pick claimed
-// through, and the work Factory.
+// selects the tracker and Factory (issue #4148); tracker is the work stack's.
+// The kind comes from Queue.liveRow, so a running row wins over a newer queued
+// row of the other kind (issue #4230). A kind whose stack is unwired falls back
+// to trackerFor, the route Pick claimed through, and the work Factory.
 func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	kind := KindWork
-	if p, ok := l.queueRef().newest(num); ok {
+	if p, ok := l.queueRef().liveRow(num); ok {
 		kind = p.effectiveKind()
 	}
 	reclaimTracker, factory := l.trackerFor(kind, tracker), l.Factory
@@ -309,7 +310,7 @@ func (l *Launcher) Terminate(tracker forge.IssueTracker, num string) error {
 	}
 	killErr := terminate.Reclaim(reclaimTracker, cf, reaper, l.registry(), num, terminate.Gesture)
 
-	l.queueRef().setState(num, PickTerminated, "terminated by operator")
+	l.queueRef().setState(num, kind, PickTerminated, "terminated by operator")
 	l.signalRefresh()
 	return killErr
 }
@@ -538,7 +539,7 @@ func (l *Launcher) runStack(st launchStack, pwd string) bool {
 	// on another in-progress issue's touched files. Queue.Discover already claimed
 	// the issue from Dispatchable to InProgress, so runContinuousQueue's no-op
 	// Claim avoids a redundant second one (issue #2938).
-	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, st.factory, queueSettler{st.settle, l.queueRef(), l.signalRefresh, l.registry()}, runContinuousQueue{
+	err := waves.RunContinuous(waves.Config{}, &waves.Session{Limiter: l.limiter(), Terminated: l.registry()}, st.tracker, l.CodeForge, st.factory, queueSettler{Settler: st.settle, q: l.queueRef(), notify: l.signalRefresh, terminated: l.registry(), kind: st.kind}, runContinuousQueue{
 		discover: discover,
 		pending:  func() int { return l.queueRef().PendingCount(st.kind) },
 		report:   l.recordStaleDrainReport,
