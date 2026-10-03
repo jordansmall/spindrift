@@ -224,10 +224,12 @@ type Config struct {
 // always waits for it to return and always emits that child's child_finish
 // before halting, even if ctx was cancelled mid-run or a sibling slot
 // halted the pool in the meantime. "Stop starting new work" is enforced by
-// one admission check, at the top of a slot's loop, before it starts a new
-// iteration: cfg.Stop and Abort ride every ChildRequest (see ChildRequest's
-// own doc), so a child started after Stop closes is signalled by the Runner
-// at once, and nothing between the top of the loop and RunChild needs to
+// the admission check at the top of a slot's loop, plus one re-check right
+// after awaitBaton: a slot can park there arbitrarily long, and the holder
+// hands the baton off only after deciding whether the pool halts, so the
+// slot it wakes must re-ask. cfg.Stop and Abort ride every ChildRequest (see
+// ChildRequest's own doc), so a child started after Stop closes is signalled
+// by the Runner at once, and nothing after those two checks needs to
 // re-assert the same fact.
 //
 // cfg.Slots must be positive: a zero or negative pool size would silently
@@ -369,10 +371,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// re-resolve survives, not the resolution itself.
 	var wantResolve bool
 	for {
-		// The pool's one admission check (issue #3626): with cfg.Stop
-		// riding every ChildRequest, a child started after Stop closes is
-		// signalled by the Runner at once, so nothing between here and
-		// RunChild needs to re-assert "stop starting new work".
+		// The pool's admission check (issue #3626), re-asked once after
+		// awaitBaton below: with cfg.Stop riding every ChildRequest, a child
+		// started after Stop closes is signalled by the Runner at once, so
+		// nothing else needs to re-assert "stop starting new work".
 		if p.haltIfStopping(ctx, "") {
 			return
 		}
@@ -448,7 +450,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 				// keeps them under separate halt classes; backoffOrHalt's
 				// own breaker-vs-retry logic doesn't care which.
 				revision, reason := resolveFailure(t, err)
-				if p.backoffOrHalt(ctx, slot, kind, revision, reason) {
+				if p.backoffOrHalt(ctx, slot, kind, revision, reason, batonPassFailed) {
 					return
 				}
 				continue
@@ -481,15 +483,17 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// ResolveTip exists to coalesce (issue #3625). Apart from the
 		// pre-assigned initial holder's very first round, a slot never
 		// holds the baton across a resolve; every path that loops back to
-		// the top passes it first (see the release sites below). Nothing
-		// re-checks ctx once awaitBaton returns, cancelled or not (issue
-		// #3626's one admission check): a ctx cancelled mid-wait here is
-		// caught by the *other* slot's own path instead — the holder that
-		// was actually in flight when cancellation landed reports it
-		// through backoffOrHalt's haltIfStopping, and this slot's own
-		// stray child, if it starts one, is harmless and cleaned up the
-		// same as any other child once the pool halts.
+		// the top passes it first (see the release sites below).
+		//
+		// The re-check matters because awaitBaton also returns on ctx.Done
+		// without the baton, and because the holder passes only after its
+		// round's halt decision (issue #4365): a halt that decision reaches
+		// has already landed by the time this slot wakes, so it must see it
+		// rather than start a child on a pool that has stopped.
 		p.awaitBaton(ctx, slot)
+		if p.haltIfStopping(ctx, kind) {
+			return
+		}
 
 		if !cfg.Awake.Open(p.clk.Now()) {
 			// ResolveTip (a git fetch) can outlast the window's own
@@ -533,11 +537,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// the child claimed is still available at all.
 		key := p.flightClaim(slot)
 		p.finishChild(slot)
-		// One site covers every post-child exit without a claim at once:
-		// queue empty, none dispatchable, an unrecognised exit, or a
-		// RunChild seam error. A no-op when a box record already passed the
-		// baton above.
-		p.passBaton(slot, batonPassChildEnded)
+		// Every post-child exit without a claim passes the baton, but only
+		// after the round's halt decision: Continue/Wait pass ChildEnded
+		// explicitly, failure paths pass in backoffOrHalt past the breaker
+		// check, HaltPool relies on the deferred batonPassStopped after
+		// p.halt. A pass is a no-op once a box record released the baton.
+		// A pass before a HaltPool or breaker halt lands would let a parked
+		// sibling start a child on a pool about to stop (issue #4365).
+		// child_finish still precedes the halt.
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
 			// started), so there is no exit code to report — but a
@@ -547,7 +554,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// reported before this failure already reached the stream live
 			// through OnRecord, so there is nothing left to replay here.
 			p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err)) {
+			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err), batonPassChildEnded) {
 				return
 			}
 			continue
@@ -562,6 +569,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 
 		switch action {
 		case Continue:
+			p.passBaton(slot, batonPassChildEnded)
 			// Exit 0 (dispatched) or exit 4 (image-stale): the check
 			// answered something other than "nothing to do", so whatever
 			// streak of no-work checks this kind's backoff was tracking is
@@ -569,6 +577,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			p.resetKind(kind)
 			continue
 		case Wait:
+			p.passBaton(slot, batonPassChildEnded)
 			if !cfg.Awake.Open(p.clk.Now()) {
 				// The window closed while the child ran, so this wait is
 				// the window's, not the idle backoff's: recording a no-work
@@ -590,7 +599,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// genuinely idling.
 			continue
 		case Backoff:
-			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit)) {
+			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit), batonPassChildEnded) {
 				return
 			}
 			continue
@@ -598,6 +607,8 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// haltClass is never HaltNone here: Interpret's one table ties
 			// action == HaltPool to a real class, pinned by
 			// TestInterpret_HaltPoolIffHaltClassSet.
+			// No baton pass before the halt: the deferred batonPassStopped
+			// runs after it.
 			p.halt(Halt{Class: haltClass, Kind: kind, Revision: revision})
 			return
 		}
