@@ -152,11 +152,11 @@ type bwrapAdapter struct {
 	running map[string]*os.Process
 
 	// provisioning refcounts box names between Run's beginProvisioning call and
-	// the matching release (issue #2960): the window where a per-Box cgroup dir
-	// exists but its cgroup.procs is still empty, so provisionCgroup's leftover
-	// reclaim of the same name would delete a sibling Run's mid-launch dir (issue
-	// #4164). Guarded by mu; refcounted, not a set, so two concurrent Runs for one
-	// name cannot release each other's guard.
+	// the matching handOff or release (issue #2960): the window where a per-Box
+	// cgroup dir exists but its cgroup.procs is still empty, so provisionCgroup's
+	// leftover reclaim of the same name would delete a sibling Run's mid-launch
+	// dir (issue #4164). Guarded by mu; refcounted, not a set, so two concurrent
+	// Runs for one name cannot release each other's guard.
 	provisioning map[string]int
 }
 
@@ -942,9 +942,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 	}
 
 	// Marked before provisionCgroup's mkdir, not after (see the provisioning
-	// field). The deferred release covers every early return; the explicit one
-	// after trackRunning narrows the guarded window in the common case.
-	releaseProvisioning := a.beginProvisioning(box.Name)
+	// field). The deferred release covers every early return; handOff below
+	// covers the launched case.
+	handOff, releaseProvisioning := a.beginProvisioning(box.Name)
 	defer releaseProvisioning()
 
 	// Provisioned before Start so the dir and its limits exist by the time bwrap
@@ -1035,12 +1035,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
 		}
 	}
-	// Tracked before the provisioning guard drops so reclaimLeftoverCgroupDir
-	// never sees this name unowned, even when the cgroup.procs write above
-	// failed and the dir still reads empty.
-	a.trackRunning(box.Name, cmd.Process)
+	// Atomic even when the cgroup.procs write above failed; see beginProvisioning.
+	handOff(cmd.Process)
 	defer a.untrackRunning(box.Name)
-	releaseProvisioning()
 	// Deferred so the shared lock spans cmd.Wait()'s whole duration: releasing
 	// earlier would let reclaimStaleSnapshots believe this generation is free
 	// while the sandboxed process is still reading it. Flock releases on process
@@ -1058,17 +1055,6 @@ func (a *bwrapAdapter) Run(box Box) error {
 	return asRunError(cmd.Wait())
 }
 
-// trackRunning records proc as the live process for name, so a concurrent Kill
-// can find it.
-func (a *bwrapAdapter) trackRunning(name string, proc *os.Process) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.running == nil {
-		a.running = map[string]*os.Process{}
-	}
-	a.running[name] = proc
-}
-
 // untrackRunning drops name's tracked process once Run's Wait returns.
 func (a *bwrapAdapter) untrackRunning(name string) {
 	a.mu.Lock()
@@ -1077,11 +1063,13 @@ func (a *bwrapAdapter) untrackRunning(name string) {
 }
 
 // beginProvisioning marks name as mid-launch so provisionCgroup's leftover
-// reclaim skips it; see the provisioning field. The returned release is wrapped
-// in sync.Once because Run calls it explicitly after trackRunning and
-// again via defer, and the two must not double-decrement the refcount out from
-// under a second concurrent Run for the same name.
-func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
+// reclaim skips it; see the provisioning field. handOff records proc as the
+// live process for name (so a concurrent Kill can find it) and drops the
+// provisioning guard under one a.mu hold, so no observer sees the name in
+// neither map. release is the early-return path. Both share one sync.Once so
+// whichever runs second cannot double-decrement the refcount out from under a
+// second concurrent Run for the same name.
+func (a *bwrapAdapter) beginProvisioning(name string) (handOff func(proc *os.Process), release func()) {
 	a.mu.Lock()
 	if a.provisioning == nil {
 		a.provisioning = map[string]int{}
@@ -1090,16 +1078,32 @@ func (a *bwrapAdapter) beginProvisioning(name string) (release func()) {
 	a.mu.Unlock()
 
 	var once sync.Once
-	return func() {
+	// Caller holds a.mu.
+	dropGuard := func() {
+		a.provisioning[name]--
+		if a.provisioning[name] <= 0 {
+			delete(a.provisioning, name)
+		}
+	}
+	handOff = func(proc *os.Process) {
 		once.Do(func() {
 			a.mu.Lock()
-			a.provisioning[name]--
-			if a.provisioning[name] <= 0 {
-				delete(a.provisioning, name)
+			defer a.mu.Unlock()
+			if a.running == nil {
+				a.running = map[string]*os.Process{}
 			}
-			a.mu.Unlock()
+			a.running[name] = proc
+			dropGuard()
 		})
 	}
+	release = func() {
+		once.Do(func() {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			dropGuard()
+		})
+	}
+	return handOff, release
 }
 
 // Kill sends SIGKILL to name's tracked live process, if Run has one under that
