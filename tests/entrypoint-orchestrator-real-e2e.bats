@@ -28,9 +28,6 @@ teardown() {
 }
 
 @test "real entrypoint drives the real orchestrator and real driver-exec through an implement+review pass to an outcome" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   # tests/fakes/claude emits a status=ready SPINDRIFT_OUTCOME on every call. If
   # the implement pass carried one, implementFixTransition would stop the run
   # right there (issue #2036's HasOutcome-wins rule) and never reach review, so

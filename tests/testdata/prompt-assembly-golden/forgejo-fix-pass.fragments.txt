@@ -2,6 +2,7 @@ caveman-default.md
 check-hygiene-default.md
 commit-baked.md
 commit-push-git.md
+commit-rework-orchestrator.md
 fix-ci-read-forgejo.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-git.md

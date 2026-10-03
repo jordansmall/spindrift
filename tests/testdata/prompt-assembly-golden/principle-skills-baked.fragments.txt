@@ -5,6 +5,7 @@ check-hygiene-default.md
 code-review-baked.md
 commit-baked.md
 commit-push-git.md
+commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
 if-blocked-outcome-landing-git.md
@@ -15,6 +16,7 @@ issue-blocked-comment-github.md
 issue-read-github.md
 land-git-push-git.md
 land-git-stop-read-write.md
+land-pass-order-orchestrator.md
 open-pr-create-git.md
 open-pr-push-git.md
 outcome-landing-git.md
@@ -23,7 +25,7 @@ pr-body-closes.md
 principle-fix-root-causes-default.md
 principle-laziness-protocol-default.md
 principle-redesign-from-first-principles-default.md
-review-loop-inline.md
+review-loop-orchestrator.md
 scout-delegate.md
 scout-issue-read-github.md
 skill-preamble.md

@@ -15,8 +15,8 @@ setup() {
 
 # Assemble hard-fails on this path if either review-prompt.md or
 # worker-prompt.md is missing (issues #2059, #2058). The review-prompt.md
-# stub carries a VERDICT: line so a test that enables the orchestrator for an
-# unrelated reason does not also trip the reviewer-verdict reject; only the
+# stub carries a VERDICT: line so a test that does not target the
+# reviewer-verdict row does not trip its reject; only the
 # cases exercising that row override this file to omit the marker.
 _stub_prompt_dir() {
   local dir="$BATS_TEST_TMPDIR/prompts"
@@ -28,7 +28,7 @@ _stub_prompt_dir() {
   printf '%s' "$dir"
 }
 
-@test "pass: read-write, non-research, no filer, orchestrator off -- no reject/warn, driver invoked" {
+@test "pass: read-write, non-research, no filer -- no reject/warn, driver invoked" {
   export PROMPTS_DIR="$(_stub_prompt_dir)"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -66,35 +66,19 @@ _stub_prompt_dir() {
   grep -q 'SPINDRIFT_COMMENT' "$DRIVER_PROMPT_FILE"
 }
 
-# Row "reviewer-verdict": with the orchestrator on, the review pass gates its
+# Row "reviewer-verdict": the orchestrator's review pass gates its
 # multi-pass loop on review-prompt.md's VERDICT: line, so a missing line
 # leaves that loop nothing to gate on.
-@test "reject: ORCHESTRATOR_ENABLED set, review prompt missing VERDICT: -> non-zero exit, Driver never invoked" {
+@test "reject: review prompt missing VERDICT: -> non-zero exit, Driver never invoked" {
   local prompt_dir
   prompt_dir="$(_stub_prompt_dir)"
   printf 'reviewer stub, no verdict line here\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -ne 0 ]
   grep -q 'VERDICT:' <<<"$output"
   [ ! -s "$DRIVER_LOG" ]
   [ ! -s "$DRIVER_PROMPT_FILE" ]
-}
-
-# Issue #2249 acceptance criterion #3: with the orchestrator off (inline
-# mode) phase_prompt_assembly never populates review_prompt_rendered, so the
-# reviewer-verdict condition is false whatever review-prompt.md contains.
-@test "no false positive: ORCHESTRATOR_ENABLED unset, review prompt missing VERDICT: -> exit 0, Driver invoked" {
-  local prompt_dir
-  prompt_dir="$(_stub_prompt_dir)"
-  printf 'reviewer stub, no verdict line here\n' >"$prompt_dir/review-prompt.md"
-  export PROMPTS_DIR="$prompt_dir"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  [ -s "$DRIVER_LOG" ]
 }
 
 # Row "pr-intent": under read-only, non-research the SPINDRIFT_PR_INTENT
@@ -113,20 +97,17 @@ _stub_prompt_dir() {
   grep -q 'SPINDRIFT_PR_INTENT' <<<"$output"
 }
 
-# Row "issue-intent": a filer-relay dispatch (filer configured, orchestrator
-# on, read-only) relays filed issues via SPINDRIFT_ISSUE_INTENT, checked
+# Row "issue-intent": a filer-relay dispatch (filer configured,
+# read-only) relays filed issues via SPINDRIFT_ISSUE_INTENT, checked
 # against agents_json's .filer.prompt rather than $prompt. The filer's
 # best-effort PR-body fallback backs it up, so a missing marker is advisory.
-@test "warn: filer configured, ORCHESTRATOR_ENABLED set, read-only, filer prompt missing SPINDRIFT_ISSUE_INTENT -> exit 0, Driver invoked, stderr advisory" {
+@test "warn: filer configured, read-only, filer prompt missing SPINDRIFT_ISSUE_INTENT -> exit 0, Driver invoked, stderr advisory" {
   local prompt_dir
   prompt_dir="$(_stub_prompt_dir)"
   printf 'filer stub, no issue-intent marker here\n' >"$prompt_dir/filer-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   export BOX_FILER_ENABLED=1
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   unset BOX_WRITE_ENABLED
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

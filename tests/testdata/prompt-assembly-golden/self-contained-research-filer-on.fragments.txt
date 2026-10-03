@@ -1,8 +1,6 @@
 caveman-default-research.md
-caveman-default-review.md
 caveman-default-worker.md
 caveman-default.md
-code-review-baked.md
 filer-file-relay.md
 filer-label-relay-research.md
 research-file-issues-relay.md

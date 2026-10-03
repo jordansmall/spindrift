@@ -1,7 +1,10 @@
+caveman-default-review.md
 caveman-default.md
 check-hygiene-default.md
+code-review-baked.md
 commit-baked.md
 commit-push-outbox.md
+commit-rework-orchestrator.md
 if-blocked-outcome-landing-outbox.md
 if-blocked-pr-outbox-socket.md
 if-blocked-push-outbox.md
@@ -9,12 +12,13 @@ if-blocked-triage-outbox.md
 issue-blocked-comment-github-readonly.md
 issue-read-github.md
 land-git-stop-read-only.md
+land-pass-order-orchestrator.md
 open-pr-create-outbox-socket.md
 open-pr-push-outbox.md
 outcome-landing-outbox.md
 outcome-ready-means-outbox.md
 pr-body-closes.md
-review-loop-inline.md
+review-loop-orchestrator.md
 scout-absent.md
 skill-preamble.md
 tdd-baked.md

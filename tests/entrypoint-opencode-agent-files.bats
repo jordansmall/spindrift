@@ -200,15 +200,12 @@ assemble_go_agent_files() {
   [ "$body" = "issue 7 body" ]
 }
 
-@test "entrypoint drops the reviewer's baked opencode agent file when the orchestrator is on" {
+@test "entrypoint drops the reviewer's baked opencode agent file" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
   write_agent_file "$dir/scout.md" "scout"
   write_agent_file "$dir/reviewer.md" "reviewer"
   export DRIVER_AGENT_FILES_DIR="$dir"
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-orch-on"
 
   run bash "$ENTRYPOINT"
@@ -226,7 +223,7 @@ assemble_go_agent_files() {
 # descriptor it hands the orchestrator via --handoff-file (issue #2975), whose
 # path this recovers from the argv $ORCHESTRATOR_LOG recorded; Go writes its
 # own handoff JSON.
-@test "bash and Go drop reviewer.md and recover the same --review-model when the orchestrator is on" {
+@test "bash and Go drop reviewer.md and recover the same --review-model" {
   local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
   local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
   mkdir -p "$dir_bash" "$dir_go"
@@ -236,9 +233,6 @@ assemble_go_agent_files() {
   write_agent_file "$dir_go/reviewer.md" "reviewer"
 
   export DRIVER_AGENT_FILES_DIR="$dir_bash"
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-orch-on-parity"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -258,14 +252,11 @@ assemble_go_agent_files() {
 # (issue #2277). The configured model rides reviewer.md's `model:` frontmatter
 # scalar instead of AGENTS_JSON_TEMPLATE's .reviewer.model, and must be
 # extracted before the reviewer.md removal above drops it.
-@test "entrypoint forwards --review-model from the reviewer's baked opencode agent file when the orchestrator is on" {
+@test "entrypoint forwards --review-model from the reviewer's baked opencode agent file" {
   local dir="$BATS_TEST_TMPDIR/agent-files"
   mkdir -p "$dir"
   write_agent_file "$dir/reviewer.md" "reviewer"
   export DRIVER_AGENT_FILES_DIR="$dir"
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-review-model"
 
   run bash "$ENTRYPOINT"
@@ -282,51 +273,12 @@ assemble_go_agent_files() {
   mkdir -p "$dir"
   write_agent_file "$dir/scout.md" "scout"
   export DRIVER_AGENT_FILES_DIR="$dir"
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agent-files-no-review-model"
 
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
 
   [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "" ]
-}
-
-@test "entrypoint rewrites the reviewer's baked opencode agent file when the orchestrator is off" {
-  local dir="$BATS_TEST_TMPDIR/agent-files"
-  mkdir -p "$dir"
-  write_agent_file "$dir/reviewer.md" "reviewer"
-  export DRIVER_AGENT_FILES_DIR="$dir"
-
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-
-  [ -f "$dir/reviewer.md" ]
-  local reviewer_body
-  reviewer_body="$(agent_file_body "$dir/reviewer.md")"
-  [ -n "$reviewer_body" ]
-  [ "$reviewer_body" != "placeholder body for reviewer" ]
-}
-
-# Byte-parity twin of the test above (issue #2353).
-@test "bash and Go rewrite the reviewer's baked opencode agent file byte-identically when the orchestrator is off" {
-  local dir_bash="$BATS_TEST_TMPDIR/agent-files-bash"
-  local dir_go="$BATS_TEST_TMPDIR/agent-files-go"
-  mkdir -p "$dir_bash" "$dir_go"
-  write_agent_file "$dir_bash/reviewer.md" "reviewer"
-  write_agent_file "$dir_go/reviewer.md" "reviewer"
-
-  export DRIVER_AGENT_FILES_DIR="$dir_bash"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-
-  assemble_go_agent_files "$dir_go"
-  [ "$status" -eq 0 ]
-
-  [ -f "$dir_bash/reviewer.md" ]
-  [ -f "$dir_go/reviewer.md" ]
-  diff "$dir_bash/reviewer.md" "$dir_go/reviewer.md"
 }
 
 @test "entrypoint skips a roster agent with no baked opencode agent file without error" {
@@ -421,12 +373,10 @@ assemble_go_agent_files() {
 
   # The entrypoint rewrites only the body; the baked description must not
   # leak into it. Read it from each file so the check tracks the live roster.
-  local scout_description reviewer_description worker_description
+  local scout_description worker_description
   scout_description="$(agent_file_description "$scout")"
-  reviewer_description="$(agent_file_description "$dir/reviewer.md")"
   worker_description="$(agent_file_description "$dir/worker.md")"
   [ -n "$scout_description" ]
-  [ -n "$reviewer_description" ]
   [ -n "$worker_description" ]
 
   export DRIVER_AGENT_FILES_DIR="$dir"
@@ -441,12 +391,8 @@ assemble_go_agent_files() {
   [ "$body" != "$scout_description" ]
   [[ "$body" == *"Return only the brief's path"* ]]
 
-  local reviewer="$dir/reviewer.md"
-  local reviewer_body
-  reviewer_body="$(agent_file_body "$reviewer")"
-  [ -n "$reviewer_body" ]
-  [ "$reviewer_body" != "$reviewer_description" ]
-  [[ "$reviewer_body" == *"adversarially review a branch diff"* ]]
+  # The orchestrator owns the review pass, so the reviewer file is dropped.
+  [ ! -f "$dir/reviewer.md" ]
 
   local worker="$dir/worker.md"
   local worker_body

@@ -36,6 +36,7 @@ _parity_stub_prompt_dir() {
   printf 'scout stub\n' >"$dir/scout-prompt.md"
   printf 'reviewer stub\n\nVERDICT: APPROVE or BLOCK\n' >"$dir/review-prompt.md"
   printf 'worker stub\n' >"$dir/worker-prompt.md"
+  printf 'fix stub\n' >"$dir/fix-prompt.md"
 }
 
 @test "build-time/runtime parity: every fixture's exit code matches parityFold(verdict)" {
@@ -58,6 +59,9 @@ _parity_stub_prompt_dir() {
     else
       expect_block=0
     fi
+
+    # A fixture that needs a fix pass sets this itself; never inherit it.
+    unset FIX_PASS
 
     prompt_dir="$BATS_TEST_TMPDIR/prompts-$i"
     _parity_stub_prompt_dir "$prompt_dir"
@@ -87,14 +91,12 @@ _parity_stub_prompt_dir() {
         else
           printf 'reviewer stub, no verdict line here\n' >"$prompt_dir/review-prompt.md"
         fi
+        # The row gates on a rendered review prompt, which Assemble emits only
+        # for a fresh-work dispatch; a fix pass closes the gate.
         if [ "$gate" = true ]; then
-          export ORCHESTRATOR_ENABLED=1
-          export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-          unset BOX_REVIEW_LOOP_INLINE
+          unset FIX_PASS
         else
-          unset ORCHESTRATOR_ENABLED
-          unset BOX_REVIEW_LOOP_ORCHESTRATOR
-          export BOX_REVIEW_LOOP_INLINE=1
+          export FIX_PASS=1
         fi
         ;;
       pr-intent)
@@ -118,20 +120,14 @@ _parity_stub_prompt_dir() {
         if [ "$gate" = true ]; then
           export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
           export BOX_FILER_ENABLED=1
-          export ORCHESTRATOR_ENABLED=1
-          export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-          unset BOX_REVIEW_LOOP_INLINE
           unset BOX_WRITE_ENABLED
         else
           # FILER_FILE_RELAY requires BOX_FILER_ENABLED (issue #2533),
-          # !BOX_WRITE_ENABLED and BOX_REVIEW_LOOP_ORCHESTRATOR at once, so
+          # !BOX_WRITE_ENABLED at once, so
           # turning on BOX_WRITE_ENABLED alone closes the gate while
           # .filer.prompt stays populated and markerPresent still matters.
           export AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
           export BOX_FILER_ENABLED=1
-          export ORCHESTRATOR_ENABLED=1
-          export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-          unset BOX_REVIEW_LOOP_INLINE
           export BOX_WRITE_ENABLED=1
         fi
         ;;
