@@ -133,6 +133,11 @@ func TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic(t *testing.T) {
 	}
 }
 
+func TestNewEmitterNilErrWDoesNotPanicOnWriteFailure(t *testing.T) {
+	e := NewEmitter(failWriter{}, nil, time.Now)
+	e.Emit(Event{Event: "child_start"}) // must not panic: nil errW defaults to io.Discard
+}
+
 // eventDiff renders wantEvents' mismatch report and is exported (in test
 // scope) as its own function so a self-test can inspect the rendering
 // without going through a testing.T that would fail the suite on mismatch.
