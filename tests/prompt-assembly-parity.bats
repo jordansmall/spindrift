@@ -125,11 +125,10 @@ assert_cell_golden() {
   [ "$(jq -r .SessionMode "$DRIVER_HANDOFF_FILE")" = "$expected_session_mode" ]
 }
 
-# Pins the Handoff facts only the orchestrator-on cells populate (issues #2353
+# Pins the Handoff facts only the review-prompt cells populate (issues #2353
 # and #2512), which assert_cell_golden does not cover. The separate
-# $ORCHESTRATOR_LOG check catches a run that skipped the orchestrator entirely,
-# say a caller that forgot ORCHESTRATOR_ENABLED, with a clearer failure than the
-# JSON diff gives.
+# $ORCHESTRATOR_LOG check catches a run that skipped the orchestrator entirely
+# with a clearer failure than the JSON diff gives.
 assert_review_handoff_golden() {
   local golden_name="$1"
 
@@ -139,7 +138,7 @@ assert_review_handoff_golden() {
   # golden can pin byte-exact, so diff only the orchestrator-only facts and
   # assert ReviewPromptFile merely names a file that actually got written.
   assert_golden_json_or_update "$GOLDEN_DIR/${golden_name}.handoff.json" "$DRIVER_HANDOFF_FILE" \
-    '{Invoker, ReviewModel, ReviewEffort}'
+    '{ReviewModel, ReviewEffort}'
 
   local review_prompt_file
   review_prompt_file="$(jq -r '.ReviewPromptFile' "$DRIVER_HANDOFF_FILE")"
@@ -229,18 +228,18 @@ setup_forgejo_forge_env() {
 
 @test "assert_golden_json_or_update overwrites golden with canonicalized, projected JSON when UPDATE_GOLDENS is set" {
   local golden="$BATS_TEST_TMPDIR/golden.json" produced="$BATS_TEST_TMPDIR/produced.json"
-  echo '{"Invoker": "stale", "ReviewModel": "stale-model", "ReviewEffort": "low", "PromptFile": "/tmp/stale"}' >"$golden"
-  echo '{"Invoker": "orchestrator", "ReviewModel": "opus", "ReviewEffort": "high", "PromptFile": "/tmp/fresh"}' >"$produced"
+  echo '{"ReviewModel": "stale-model", "ReviewEffort": "low", "PromptFile": "/tmp/stale"}' >"$golden"
+  echo '{"ReviewModel": "opus", "ReviewEffort": "high", "PromptFile": "/tmp/fresh"}' >"$produced"
   export UPDATE_GOLDENS=1
 
-  run assert_golden_json_or_update "$golden" "$produced" '{Invoker, ReviewModel, ReviewEffort}'
+  run assert_golden_json_or_update "$golden" "$produced" '{ReviewModel, ReviewEffort}'
 
   [ "$status" -eq 0 ]
-  [ "$(jq -S . "$golden")" = "$(jq -S . <<<'{"Invoker": "orchestrator", "ReviewModel": "opus", "ReviewEffort": "high"}')" ]
+  [ "$(jq -S . "$golden")" = "$(jq -S . <<<'{"ReviewModel": "opus", "ReviewEffort": "high"}')" ]
 }
 
-# issue #2349: a realistic multi-agent roster. The reviewer entry stays even
-# though the covered cell leaves the orchestrator off. Descriptions are
+# issue #2349: a realistic multi-agent roster. The reviewer entry stays in the
+# template (the entrypoint drops it from --agents). Descriptions are
 # synthetic on purpose: see roster-fixtures-carry-no-live-descriptions in
 # nix/checks/roster.nix.
 AGENTS_ROSTER='{"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"fixture worker description","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
@@ -262,20 +261,6 @@ AGENTS_ROSTER_WITH_FILER='{"scout":{"description":"fixture scout description","m
 # file, so a dropped or truncated field fails the diff instead of matching some
 # other cell's default. No "filer" key, keeping this cell off the filer axis.
 AGENTS_ROSTER_WITH_REVIEW_EFFORT='{"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]},"reviewer":{"description":"fixture reviewer description","model":"haiku","effort":"xhigh","prompt":"","tools":["Read","Bash","WebFetch"]},"worker":{"description":"fixture worker description","model":"sonnet","prompt":"","tools":["Read","Bash","Edit","Write","Glob","Grep"]}}'
-
-@test "production path matches the golden fixture for the covered cell, with a populated roster" {
-  export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
-  # AGENTS_ROSTER has no "filer" key, so BOX_FILER_ENABLED stays off
-  # (issue #2533).
-  export BOX_WORKER_PROVISIONED=1
-  export BOX_SCOUT_PROVISIONED=1
-
-  assert_cell_golden "covered-cell-populated-roster" initial
-
-  # The covered cell leaves the orchestrator gate off, so the invoker is always
-  # "driver-exec" and the orchestrator never runs at all.
-  [ ! -s "$ORCHESTRATOR_LOG" ]
-}
 
 # issue #3445: one line carries a literal triple-backtick run, the untrusted
 # shape promptfence.Block's dynamic fence widening exists for (CLAUDE.md's
@@ -394,7 +379,7 @@ assert_research_verdicts_parity() {
   # A filer in the roster with BOX_FILER_ENABLED=1 pins gates_tracker.go's
   # researchForceRelay, which forces the verdict comment onto the
   # SPINDRIFT_COMMENT relay arm even though this suite's box is read-write
-  # (issue #2786). No handoff fixture: research never turns the orchestrator on.
+  # (issue #2786). No handoff fixture: research renders no review prompt.
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1
@@ -517,14 +502,10 @@ Guard the batch counter with a mutex before the retry path lands.
 }
 
 # issue #2353: the orchestrator-on cells run dispatch kind "work" with FIX_PASS
-# unset, the only orchestrator-on path checkCoveredCell covers. Each must export
-# ORCHESTRATOR_ENABLED so the bash side takes run_driver_in_env's orchestrator
-# invocation path.
+# unset, the only cells that render a review prompt, so each asserts its
+# Handoff facts through assert_review_handoff_golden.
 
 @test "production path matches the golden fixture for the orchestrator-on filer-on cell" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1
@@ -536,9 +517,6 @@ Guard the batch counter with a mutex before the retry path lands.
 }
 
 @test "production path matches the golden fixture for the orchestrator-on filer-off cell" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   # AGENTS_ROSTER, not the _WITH_FILER variant: the FILER_ENABLED-off half of
   # the roster axis. The reviewer is present either way, so both cells assert
   # ReviewModel the same way through assert_review_handoff_golden.
@@ -552,9 +530,6 @@ Guard the batch counter with a mutex before the retry path lands.
 }
 
 @test "production path matches the golden fixture for the orchestrator-on skills-absent cell" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER"
   export BOX_WORKER_PROVISIONED=1
   export BOX_SCOUT_PROVISIONED=1
@@ -570,9 +545,6 @@ Guard the batch counter with a mutex before the retry path lands.
 }
 
 @test "production path matches the golden fixture for the orchestrator-on review-effort-set cell" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   # The reviewer's "effort":"xhigh" is the point of this cell: issue #2512's AC2
   # non-empty-overrides case, against the filer-on and filer-off cells above
   # whose reviewer has no "effort" key at all (the empty-follows-roster case).
@@ -716,9 +688,6 @@ SKILL
   # and, through the filer's own prompt in .agents.json,
   # filer-file-relay.md. The drop recap is already pinned by the direct and
   # socket siblings; this cell pins the log/socket carrier fork.
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1
@@ -745,9 +714,6 @@ SKILL
   # filer + orchestrator + read-only together, and the socket carrier gates
   # file-issues-relay-socket.md and, through the filer's own prompt in
   # .agents.json, filer-file-relay-socket.md.
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1
@@ -820,9 +786,6 @@ SKILL
   export BOX_TRACKER_AXIS_READ=FORGEJO
   export BOX_TRACKER_AXIS_WRITE=FORGEJO
   export BOX_TRACKER_AXIS_FILER=FORGEJO
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export AGENTS_JSON_TEMPLATE="$AGENTS_ROSTER_WITH_FILER"
   export BOX_FILER_ENABLED=1
   export BOX_WORKER_PROVISIONED=1

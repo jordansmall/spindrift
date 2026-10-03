@@ -159,8 +159,7 @@ VERDICT: APPROVE | BLOCK
 
 The first line must be exactly `VERDICT: APPROVE` or `VERDICT: BLOCK` — the
 in-box orchestrator's scanPassLog greps this literal verbatim (ADR 0035);
-reword it and the multi-pass loop silently collapses to single-pass on
-ORCHESTRATOR_ENABLED runs.
+reword it and the multi-pass loop silently collapses to single-pass.
 
 On APPROVE, add the Probed section above and name the hunt dimensions and
 any trace obligations you ran that came back clean — this is the receipt

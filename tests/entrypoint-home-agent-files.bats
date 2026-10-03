@@ -132,5 +132,5 @@ _assert_session_cache_untouched() {
   [ "$status" -eq 0 ]
 
   [ -w "$HOME/.config/opencode/agents" ]
-  rm "$HOME/.config/opencode/agents/reviewer.md"
+  [ ! -e "$HOME/.config/opencode/agents/reviewer.md" ]
 }

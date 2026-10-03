@@ -638,7 +638,7 @@ setup() {
   mkdir -p "$prompt_dir"
   printf 'issue stub\n' >"$prompt_dir/issue-prompt.md"
   printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
-  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  printf 'reviewer stub\n\nVERDICT: APPROVE or BLOCK\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
   run bash "$ENTRYPOINT"
@@ -782,8 +782,8 @@ SKILL
 }
 
 # issue #788: CODE_REVIEW_BAKED_STEP renders into review-prompt.md, which
-# reaches the reviewer through the --agents JSON rather than
-# $DRIVER_PROMPT_FILE, so this reads $DRIVER_AGENTS_FILE's .reviewer.prompt.
+# reaches the review pass through Handoff.ReviewPromptFile rather than
+# $DRIVER_PROMPT_FILE, so this reads that file.
 # Issue #3226 moved the hunt dimensions to always-rendered inline text, so the
 # gate pair now only picks execution mode.
 @test "CODE_REVIEW_BAKED_STEP renders when the code-review skill is baked" {
@@ -799,7 +799,7 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local rendered
-  rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
+  rendered="$(cat "$(jq -r .ReviewPromptFile "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")")"
   grep -qF 'Run the `/code-review` skill and fold its two-axis' <<<"$rendered"
   # issue #3226: the hunt dimensions are unconditional inline text in
   # review-prompt.md now, so they render on baked runs too.
@@ -814,19 +814,19 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local rendered
-  rendered="$(jq -r '.reviewer.prompt' "$DRIVER_AGENTS_FILE")"
+  rendered="$(cat "$(jq -r .ReviewPromptFile "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")")"
   grep -qF 'Hunt every dimension' <<<"$rendered"
   ! grep -qF 'Run the `/code-review` skill and fold its two-axis' <<<"$rendered"
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
 
-# issue #626/#1996/#2983: entrypoint.sh invokes exactly one driver binary
-# once, but $_driver_invoker picks driver-exec or the orchestrator at runtime
+# issue #626/#1996/#2983: entrypoint.sh invokes the orchestrator exactly
+# once,
 # and the argv is a conditionally-built `_driver_argv` array (so
 # `--manifest-path` can be appended for the orchestrator), so the pattern
-# matches the single-line array expansion, not a literal driver-exec name.
+# matches the single-line array expansion.
 @test "the driver invocation is called exactly once in entrypoint.sh source" {
-  count=$(grep -c '^  "\$_driver_invoker" "\${_driver_argv\[@\]}"$' "$ENTRYPOINT")
+  count=$(grep -c '^  orchestrator "\${_driver_argv\[@\]}"$' "$ENTRYPOINT")
   [ "$count" -eq 1 ]
 }
 
@@ -864,11 +864,8 @@ SKILL
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.tools | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.tools | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
   jq -e '.scout.tools | contains(["Edit"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
   jq -e '.scout.tools | contains(["Write"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.tools | contains(["Edit"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.tools | contains(["Write"]) | not' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
 @test "IN_PROGRESS_LABEL and COMPLETE_LABEL are substituted in the prompt" {
@@ -878,7 +875,7 @@ SKILL
 label: ${IN_PROGRESS_LABEL} complete: ${COMPLETE_LABEL}
 EOF
   printf 'scout stub\n' >"$prompt_dir/scout-prompt.md"
-  printf 'reviewer stub\n' >"$prompt_dir/review-prompt.md"
+  printf 'reviewer stub\n\nVERDICT: APPROVE or BLOCK\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export IN_PROGRESS_LABEL="wip"
   export COMPLETE_LABEL="done"
@@ -893,31 +890,19 @@ EOF
   mkdir -p "$prompt_dir"
   printf 'issue stub\n' >"$prompt_dir/issue-prompt.md"
   printf 'scout for issue ${ISSUE_NUMBER}\n' >"$prompt_dir/scout-prompt.md"
-  printf 'review base ${BASE_BRANCH}\n' >"$prompt_dir/review-prompt.md"
+  printf 'review base ${BASE_BRANCH}\n\nVERDICT: APPROVE or BLOCK\n' >"$prompt_dir/review-prompt.md"
   export PROMPTS_DIR="$prompt_dir"
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"r","model":"opus","prompt":"","tools":["Read"]},"scout":{"description":"s","model":"haiku","prompt":"","tools":["Read"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.prompt | contains("scout for issue 7")' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.prompt | contains("review base main")' "$DRIVER_AGENTS_FILE" >/dev/null
+  grep -qF "review base main" "$(jq -r .ReviewPromptFile "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")"
 }
 
 @test "default prompt delegates exploration to the scout subagent" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qi 'scout' "$DRIVER_PROMPT_FILE"
-}
-
-@test "default prompt spawns a reviewer subagent" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qi 'reviewer' "$DRIVER_PROMPT_FILE"
-}
-
-@test "default prompt specifies a review loop keyed on VERDICT: BLOCK" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -q 'VERDICT.*BLOCK\|BLOCK.*VERDICT' "$DRIVER_PROMPT_FILE"
 }
 
 @test "default prompt emits exactly one SPINDRIFT_OUTCOME line" {
@@ -945,19 +930,16 @@ EOF
 # and registry-drift checks.
 
 # issue #2019: the filer's FILER_FILE_DIRECT/FILER_FILE_RELAY gates pick the
-# SPINDRIFT_ISSUE_INTENT relay only when read-only (BOX_WRITE_ENABLED absent)
-# and ORCHESTRATOR_ENABLED coincide; every other combination keeps the direct
+# SPINDRIFT_ISSUE_INTENT relay only when read-only (BOX_WRITE_ENABLED absent);
+# a writable Box keeps the direct
 # `gh issue create`/`gh label create` path. The filer's own prompt text lands
 # in DRIVER_AGENTS_FILE, not DRIVER_PROMPT_FILE.
 FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
 
-@test "filer write step: read-write keeps gh issue create unchanged regardless of ORCHESTRATOR_ENABLED" {
+@test "filer write step: read-write keeps gh issue create unchanged" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
   export BOX_FILER_ENABLED=1
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-on"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
@@ -966,41 +948,12 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
 }
 
-# issue #2019: read-write with no ORCHESTRATOR_ENABLED at all must emit no
-# SPINDRIFT_ISSUE_INTENT either, distinct from the orchestrator-on case above,
-# which proves ORCHESTRATOR_ENABLED alone cannot flip the gate.
-@test "filer write step: read-write with orchestrator off emits no SPINDRIFT_ISSUE_INTENT" {
-  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
-  export BOX_FILER_ENABLED=1
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readwrite-orch-off"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
-  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$DRIVER_AGENTS_FILE"
-  grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
-}
-
-@test "filer write step: read-only with orchestrator off keeps today's degraded direct-file path unchanged" {
+@test "filer write step: read-only emits SPINDRIFT_ISSUE_INTENT, never gh issue create" {
   export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
   export BOX_FILER_ENABLED=1
   unset BOX_WRITE_ENABLED
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-off"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qF 'gh issue create' "$DRIVER_AGENTS_FILE"
-  ! grep -qF 'SPINDRIFT_ISSUE_INTENT' "$DRIVER_AGENTS_FILE"
-  grep -qF "the filer's returned issue URLs" "$DRIVER_PROMPT_FILE"
-}
-
-@test "filer write step: read-only with orchestrator on emits SPINDRIFT_ISSUE_INTENT, never gh issue create" {
-  export AGENTS_JSON_TEMPLATE="$FILER_AGENTS_JSON_TEMPLATE"
-  export BOX_FILER_ENABLED=1
-  unset BOX_WRITE_ENABLED
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export RUN_NONCE="deadbeefcafe1234"
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly-orch-on"
+  export WORK_DIR="$BATS_TEST_TMPDIR/work-filer-readonly"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   grep -qF 'SPINDRIFT_ISSUE_INTENT deadbeefcafe1234' "$DRIVER_AGENTS_FILE"
@@ -1038,8 +991,7 @@ FILER_AGENTS_JSON_TEMPLATE='{"filer":{"description":"filer","model":"haiku","pro
   ! grep -qF 'fj issue create' "$DRIVER_AGENTS_FILE"
 }
 
-# issue #2037/ADR 0035: the REVIEW section renders either the inline reviewer
-# loop or the orchestrator deferral, never both and never neither.
+# issue #2037/ADR 0035: the REVIEW section defers to the orchestrator.
 # issue #2056/#2054: a provisioned `worker` turns IMPLEMENT into a coordinator
 # that delegates each slice; with no worker the section is byte-identical to
 # the single-implementor prompt. Worker presence alone gates it.
@@ -1090,18 +1042,7 @@ WORKER_AGENTS_JSON_TEMPLATE='{"worker":{"description":"fixture worker descriptio
   [ "$coord_line" -lt "$rule_line" ]
 }
 
-@test "REVIEW section: orchestrator off keeps the inline reviewer-subagent loop" {
-  export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-off"
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  grep -qF 'spawn a fresh `reviewer` subagent' "$DRIVER_PROMPT_FILE"
-  ! grep -qF 'Review is handled by the orchestrator as a separate' "$DRIVER_PROMPT_FILE"
-}
-
-@test "REVIEW section: orchestrator on defers to the code-owned review pass" {
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
+@test "REVIEW section: defers to the code-owned review pass" {
   export WORK_DIR="$BATS_TEST_TMPDIR/work-review-loop-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]

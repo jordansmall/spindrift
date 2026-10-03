@@ -153,26 +153,24 @@ setup() {
   ! grep -qF 'fj pr status' <<<"$context_section"
 }
 
-# Assemble renders a review prompt only with the orchestrator on, a fresh-work
-# dispatch and FixPass == 0; every other cell, this suite's default included,
+# Assemble renders a review prompt only for a fresh-work dispatch with
+# FixPass == 0; every other cell (a fix pass here)
 # must not leak phase_prompt_assembly's mktemp'd file for the life of the Box
 # (review finding on issue #2975). DRIVER_REVIEW_PROMPT_TMP_FILE is the
 # test-only hook entrypoint.sh writes that mktemp path to.
 @test "the review-prompt temp file is removed on a cell that renders no review prompt" {
+  export FIX_PASS="1"
   export DRIVER_REVIEW_PROMPT_TMP_FILE="$BATS_TEST_TMPDIR/review-prompt-tmp-path"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -e "$(cat "$DRIVER_REVIEW_PROMPT_TMP_FILE")" ]
 }
 
-# The orchestrator-on cell does render a review prompt, so the same temp file
+# The default cell does render a review prompt, so the same temp file
 # must survive, non-empty, at the path Handoff.ReviewPromptFile names: the
 # orchestrator's later review pass reads it.
 @test "the review-prompt temp file survives, non-empty, on a cell that renders one" {
   export DRIVER_REVIEW_PROMPT_TMP_FILE="$BATS_TEST_TMPDIR/review-prompt-tmp-path"
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   local review_prompt_tmp_path

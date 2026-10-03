@@ -26,31 +26,11 @@ setup() {
   jq -e '.scout.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint passes --agents with only reviewer when the template carries reviewer alone" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  [ -s "$DRIVER_AGENTS_FILE" ]
-  jq -e 'has("reviewer") and (has("scout") | not)' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
-}
-
-@test "entrypoint passes --agents as a JSON object with scout and reviewer when template is set" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  [ -s "$DRIVER_AGENTS_FILE" ]
-  jq -e 'has("scout") and has("reviewer")' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.scout.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
-}
-
 @test "entrypoint forwards model fields from the nix-baked agents JSON template" {
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"reviewer","model":"claude-opus-4-5","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"scout","model":"claude-haiku-3-5","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   jq -e '.scout.model == "claude-haiku-3-5"' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.model == "claude-opus-4-5"' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
 # The filer (issue #393) is opt-in and composed independently of scout and
@@ -65,15 +45,12 @@ setup() {
   jq -e '.filer.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint drops reviewer from --agents when the orchestrator is on, even if the template carries it" {
-  # The code-owned review pass (issue #2037) replaces the implementor's inline
-  # reviewer subagent on this path. The template still carries reviewer, since
-  # nix bakes it independently of ORCHESTRATOR_ENABLED, but the --agents JSON
+@test "entrypoint drops reviewer from --agents even if the template carries it" {
+  # The code-owned review pass (issue #2037) replaces an implementor-side
+  # reviewer subagent. The template still carries reviewer, since
+  # nix bakes it from the roster, but the --agents JSON
   # forwarded to the Driver must not.
   export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]},"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
-  export ORCHESTRATOR_ENABLED=1
-  export BOX_REVIEW_LOOP_ORCHESTRATOR=1
-  unset BOX_REVIEW_LOOP_INLINE
   export WORK_DIR="$BATS_TEST_TMPDIR/work-agents-reviewer-orch-on"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -82,14 +59,13 @@ setup() {
   jq -e '.scout.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 
-@test "entrypoint passes --agents with scout, reviewer, and filer all present" {
+@test "entrypoint passes --agents with scout and filer, dropping the reviewer" {
   export AGENTS_JSON_TEMPLATE='{"scout":{"description":"scout","model":"opus","prompt":"","tools":["Read"]},"reviewer":{"description":"reviewer","model":"opus","prompt":"","tools":["Read"]},"filer":{"description":"filer","model":"haiku","prompt":"","tools":["Read"]}}'
   export BOX_FILER_ENABLED=1
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
-  jq -e 'has("scout") and has("reviewer") and has("filer")' "$DRIVER_AGENTS_FILE" >/dev/null
+  jq -e 'has("scout") and has("filer") and (has("reviewer") | not)' "$DRIVER_AGENTS_FILE" >/dev/null
   jq -e '.scout.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
-  jq -e '.reviewer.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
   jq -e '.filer.prompt | length > 0' "$DRIVER_AGENTS_FILE" >/dev/null
 }
 

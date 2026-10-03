@@ -183,10 +183,6 @@ setup_entrypoint_env() {
   setup_fakes
   setup_bare_repo
   set_box_env
-  # Pinned off rather than inherited from set_box_env: these suites' default
-  # cell is the inline review loop (BOX_REVIEW_LOOP_INLINE below), so tests of
-  # the orchestrator path export ORCHESTRATOR_ENABLED=1 themselves.
-  export ORCHESTRATOR_ENABLED=""
   # Pinned rather than inherited from set_box_env: these suites were written
   # against the log carrier, so pin it and let the socket tests override.
   export BOX_SIGNAL_CARRIER=log
@@ -201,14 +197,13 @@ setup_entrypoint_env() {
   # which the backstop's switch checks first.
   export BOX_OUTBOX_RELAY_CAPABLE=1
   # Also host-derived rather than schema knobs: nix derives them from
-  # ISSUE_TRACKER/CODE_FORGE/ORCHESTRATOR_ENABLED and passes them as launcher
+  # ISSUE_TRACKER/CODE_FORGE and passes them as launcher
   # flags. These mirror the suite's default cell (issue #2533), so a test that
   # moves one of those raw vars must move the matching BOX_* var with it.
   export BOX_TRACKER_AXIS_READ=GITHUB
   export BOX_TRACKER_AXIS_WRITE=GITHUB
   export BOX_TRACKER_AXIS_FILER=GH
   export BOX_FORGE_BACKEND=GH
-  export BOX_REVIEW_LOOP_INLINE=1
   # Pinned away from the schema default (issue #2055) so the MODEL-flag
   # assertions stay stable when that default moves.
   export MODEL="claude-test-model"

@@ -1,7 +1,10 @@
+caveman-default-review.md
 caveman-default.md
 check-hygiene-default.md
+code-review-baked.md
 commit-baked.md
 commit-push-git.md
+commit-rework-orchestrator.md
 if-blocked-outcome-landing-git.md
 if-blocked-pr-git.md
 if-blocked-push-git.md
@@ -10,12 +13,13 @@ issue-blocked-comment-forgejo.md
 issue-read-forgejo.md
 land-git-push-git.md
 land-git-stop-read-write.md
+land-pass-order-orchestrator.md
 open-pr-create-git.md
 open-pr-push-git.md
 outcome-landing-git.md
 outcome-ready-means-git.md
 pr-body-closes.md
-review-loop-inline.md
+review-loop-orchestrator.md
 scout-absent.md
 skill-preamble.md
 tdd-baked.md
