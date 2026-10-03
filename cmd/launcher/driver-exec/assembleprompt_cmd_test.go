@@ -85,15 +85,14 @@ func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 	}
 	var handoff struct {
 		SessionMode      string
-		Invoker          string
 		ReviewPromptFile string
 		ReviewModel      string
 	}
 	if err := json.Unmarshal(handoffBytes, &handoff); err != nil {
 		t.Fatalf("unmarshal handoff output: %v\n%s", err, handoffBytes)
 	}
-	if handoff.Invoker != "orchestrator" {
-		t.Errorf("handoff.Invoker = %q, want orchestrator", handoff.Invoker)
+	if handoff.SessionMode == "" {
+		t.Errorf("handoff.SessionMode is empty, want a session mode")
 	}
 }
 

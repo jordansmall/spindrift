@@ -69,14 +69,12 @@ type Caps struct {
 // Handoff is the static per-run configuration assemble-prompt hands to a
 // driver-exec/orchestrator invocation, written to disk as JSON so a process
 // starting after assemble-prompt exits re-derives nothing. Assemble sets only
-// SessionMode, Invoker, ReviewModel, ReviewEffort, and AdvisoryReviewer; the
+// SessionMode, ReviewModel, ReviewEffort, and AdvisoryReviewer; the
 // CLI wrapper populates every other field from flags and static config
 // (issue #2975).
 type Handoff struct {
 	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
 	SessionMode string
-	// Invoker is always "orchestrator"; the field goes when the entrypoint stops reading it.
-	Invoker string
 	// PromptFile is the path the CLI wrapper writes Result.Prompt to. Assemble
 	// never sets it: it renders the text, the wrapper picks the path.
 	PromptFile string
@@ -476,8 +474,6 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		return Result{}, err
 	}
 
-	invoker := "orchestrator"
-
 	frags := map[string]struct{}{}
 	addFragmentNames(frags, bodies.base)
 	addFragmentNames(frags, bodies.review)
@@ -486,7 +482,6 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		Prompt: bodies.base.text(),
 		Handoff: Handoff{
 			SessionMode:      bodies.sessionMode,
-			Invoker:          invoker,
 			AdvisoryReviewer: bodies.kind.Prompts.Reviewer != "",
 		},
 	}

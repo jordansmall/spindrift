@@ -13,7 +13,6 @@ import (
 func TestLoadHandoffFileRoundTrip(t *testing.T) {
 	want := Handoff{
 		SessionMode:      "resume",
-		Invoker:          "orchestrator",
 		PromptFile:       "/tmp/prompt.txt",
 		AgentsFile:       "/tmp/agents.json",
 		ReviewPromptFile: "/tmp/review-prompt.txt",

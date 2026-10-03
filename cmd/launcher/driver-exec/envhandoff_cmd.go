@@ -88,8 +88,8 @@ func runEnvHandoff(args []string, stdout io.Writer) int {
 			Order:          strings.Fields(*argvOrder),
 		},
 		// No flag overrides the slice and review-round bounds, so they take
-		// assemble-prompt's defaults: a conflict-resolve pass under
-		// $ORCHESTRATOR needs a working loop bound rather than 0.
+		// assemble-prompt's defaults: a conflict-resolve pass through the
+		// orchestrator needs a working loop bound rather than 0.
 		Caps: promptassembly.Caps{
 			MaxSlices:       promptassembly.DefaultMaxSlices,
 			MaxReviewRounds: promptassembly.DefaultMaxReviewRounds,
