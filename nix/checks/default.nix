@@ -118,7 +118,12 @@ let
   # also drops linuxOnlyCheckNames. Otherwise checks-inbox forces
   # mkharness-agent-closure-package's build on darwin, where
   # bwrapHarness.packages lacks agent-closure and its own assert throws.
-  checksInboxSet = removeAttrs portableSourceChecks imageOnlyCheckNames;
+  #
+  # The bats shards are source checks, not image ones, but they push a cold
+  # checks-inbox past the in-Box Driver's 10-minute Bash cap, so every run's
+  # first gate timed out. CI's `nix flake check` still runs them; fold them
+  # back in once the Box Go port (issue #4275) has shrunk the suite.
+  checksInboxSet = removeAttrs portableSourceChecks (imageOnlyCheckNames ++ batsShardNames);
 
   # A narrower axis than imageOnlyCheckNames: source checks that depend on the
   # bats harness internals, e.g. the Linux-twin driverExecBin build
