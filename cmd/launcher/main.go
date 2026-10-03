@@ -1374,12 +1374,13 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
 	}
 	iss := newIssue(fi)
-	// A live Run() for this issue, in any process sharing pwd, holds this
-	// claim; its owner settles the run, so recover must not (issue #3885).
+	// A live Dispatch for this issue, in any process sharing pwd, holds this
+	// claim from Run through Close, i.e. through its owner's settle, so
+	// recover must not settle it too (issues #3885, #4364).
 	release, claimErr := dispatch.ClaimIssue(pwd, iss.number)
 	if claimErr != nil {
 		if errors.Is(claimErr, dispatch.ErrIssueClaimed) {
-			fmt.Printf("    #%s  status=skipped  note=a Box for this issue is still live in another launcher process\n", issueNum)
+			fmt.Printf("    #%s  status=skipped  note=another launcher process still owns this issue (Box live or run settling)\n", issueNum)
 			return nil
 		}
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: claim: %w", issueNum, claimErr))
