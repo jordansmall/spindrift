@@ -268,7 +268,9 @@ in
   # composes subagents from on-disk agents/*.md files under $HOME. Rendering
   # scout must produce frontmatter carrying `mode: "subagent"`, the model
   # JSON-encoded (issue #2152 slice C), and the same description claude.nix
-  # uses, so both Drivers frame subagents identically.
+  # uses, so both Drivers frame subagents identically. Fixture descriptions
+  # here are synthetic on purpose: see roster-fixtures-carry-no-live-descriptions
+  # in nix/checks/roster.nix.
   drivers-opencode-agent-files-scout-frontmatter =
     let
       opencodeEntry = driverRegistry.entries.opencode;
@@ -278,7 +280,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; write a structured brief";
+            description = "fixture scout description";
             tools = [
               "Read"
               "Bash"
@@ -294,7 +296,7 @@ in
             name = "reviewer";
             model = "";
             mode = "subagent";
-            description = "Review the branch diff for spec compliance and coding standards";
+            description = "fixture reviewer description";
             tools = [
               "Read"
               "Bash"
@@ -312,8 +314,7 @@ in
       "opencode agentFilesTemplate's scout.md must set mode: \"subagent\" (JSON-encoded, issue #2152 slice C), got: ${scoutFile}";
     assert assertMsg (hasInfix ''model: "solo-scout-model"'' scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout model JSON-encoded (issue #2152 slice C), got: ${scoutFile}";
-    assert assertMsg
-      (hasInfix "Map relevant files, seams, and tests; write a structured brief" scoutFile)
+    assert assertMsg (hasInfix "fixture scout description" scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
     pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
 
@@ -335,7 +336,7 @@ in
             model = "solo-scout-model";
             effort = "high";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; write a structured brief";
+            description = "fixture scout description";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -360,7 +361,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; write a structured brief";
+            description = "fixture scout description";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -428,7 +429,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; write a structured brief";
+            description = "fixture scout description";
             tools = [
               "Read"
               "Bash"
@@ -482,7 +483,7 @@ in
             model = "solo-scout-model";
             effort = "high";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; write a structured brief";
+            description = "fixture scout description";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -511,7 +512,7 @@ in
             name = "scout";
             model = "solo-scout-model";
             mode = "subagent";
-            description = "Map relevant files, seams, and tests; write a structured brief";
+            description = "fixture scout description";
             tools = [ "Read" ];
             promptFile = "scout-prompt.md";
             prompt = null;
@@ -837,7 +838,7 @@ in
           name = "scout";
           model = "solo-scout-model";
           mode = "subagent";
-          description = "Map relevant files, seams, and tests; write a structured brief";
+          description = "fixture scout description";
           tools = [ "Read" ];
           promptFile = "scout-prompt.md";
           prompt = null;
