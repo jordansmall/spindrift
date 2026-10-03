@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"spindrift.dev/launcher/internal/seamtest"
 	"strings"
 	"testing"
 
@@ -35,7 +36,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(GH_HOST): %v\n", err)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	seamtest.Main(m)
 }
 
 // c.runtime names a binary that does not exist rather than
