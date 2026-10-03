@@ -452,3 +452,73 @@ func TestDispatchWave_GitForge_MergedStatusDoesNotDemoteToFailed(t *testing.T) {
 		t.Errorf("issue 1 must NOT have %q; got labels=%v", c.FailedLabel, iss.Labels)
 	}
 }
+
+// TestDispatchWave_MalformedOutcomeOnOneIssueDoesNotMaskAnothersVerification
+// pins that each issue in a wave settles and reports on its own: a malformed
+// outcome line on one never masks another's verified merge.
+func TestDispatchWave_MalformedOutcomeOnOneIssueDoesNotMaskAnothersVerification(t *testing.T) {
+	const prURL = "https://github.com/owner/repo/pull/2"
+
+	c := baseConfig()
+	c.MaxParallel = 2
+	label := "agent-trigger"
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+	fc.SetPR(fc.AgentBranch("2"), forge.PR{URL: prURL})
+	fc.SetPRState(prURL, forge.PRMerged)
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Output == nil {
+			return nil
+		}
+		switch box.Env["ISSUE_NUMBER"] {
+		case "1":
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=1 note=missing-required-tokens nonce=%s\n", box.Env["RUN_NONCE"])
+		case "2":
+			// Claiming strips pre-set labels, so the merge's complete label lands
+			// while the box runs.
+			if err := fc.AddLabels("2", []string{c.CompleteLabel}); err != nil {
+				return err
+			}
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=2 landing=%s status=merged note=ok nonce=%s\n", prURL, box.Env["RUN_NONCE"])
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	out := testutil.CaptureStdout(t, func() {
+		dispatchWave(c, fc, fc, f, s, []Issue{
+			{Number: "1", Title: "first"},
+			{Number: "2", Title: "second"},
+		}, OriginDiscovered, claimer, nil)
+	})
+
+	// Per line, because goroutine order is non-deterministic.
+	var missing1, verified2 bool
+	for _, line := range strings.Split(out, "\n") {
+		missing1 = missing1 || (strings.Contains(line, "#1 ") && strings.Contains(line, "status=missing"))
+		verified2 = verified2 || (strings.Contains(line, "#2 ") && strings.Contains(line, "status=verified-merged"))
+	}
+	if !missing1 {
+		t.Errorf("report must list #1 with status=missing; got:\n%s", out)
+	}
+	if !verified2 {
+		t.Errorf("report must list #2 with status=verified-merged; got:\n%s", out)
+	}
+
+	for num, wantFailed := range map[string]bool{"1": true, "2": false} {
+		iss, err := fc.Issue(num)
+		if err != nil {
+			t.Fatalf("Issue(%q): %v", num, err)
+		}
+		if got := containsLabel(iss.Labels, c.FailedLabel); got != wantFailed {
+			t.Errorf("issue %s carries %q = %v, want %v; labels=%v", num, c.FailedLabel, got, wantFailed, iss.Labels)
+		}
+	}
+}
