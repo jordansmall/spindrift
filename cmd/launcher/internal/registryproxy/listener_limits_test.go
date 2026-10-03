@@ -2,6 +2,7 @@ package registryproxy
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -177,4 +178,50 @@ func TestClose_DropsInFlightConn(t *testing.T) {
 	if _, err := io.ReadAll(c); err != nil {
 		t.Fatalf("in-flight conn not closed after Close: %v", err)
 	}
+}
+
+// TestClose_ReleasesSocketImmediately pins that Close frees the raw listener
+// even when it wins the race against the serve goroutine: there
+// http.Server.Close has not yet tracked the listener and would leave it
+// accepting. The unix subtest is the deterministic guard; tcp only catches a
+// regression when Close happens to win that race, so it is best-effort.
+// Sibling of signalsocket's TestListener_CloseReleasesSocketImmediately.
+func TestClose_ReleasesSocketImmediately(t *testing.T) {
+	t.Run("unix", func(t *testing.T) {
+		// Not t.TempDir(): its path can overflow AF_UNIX sun_path on macOS.
+		dir, err := os.MkdirTemp("", "rp")
+		if err != nil {
+			t.Fatalf("MkdirTemp: %v", err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(dir) })
+		socketPath := filepath.Join(dir, "p.sock")
+		p := &Proxy{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+		if err := p.ListenAndServe(socketPath); err != nil {
+			t.Fatalf("ListenAndServe: %v", err)
+		}
+		if err := p.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if _, err := os.Stat(socketPath); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("socket file after Close: stat err = %v, want not-exist", err)
+		}
+		if conn, err := net.Dial("unix", socketPath); err == nil {
+			conn.Close()
+			t.Fatal("dial succeeded after Close, want refusal")
+		}
+	})
+	t.Run("tcp", func(t *testing.T) {
+		p := &Proxy{Handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}
+		if err := p.ListenAndServeTCP("127.0.0.1:0", limitsTestSecret); err != nil {
+			t.Fatalf("ListenAndServeTCP: %v", err)
+		}
+		addr := p.Addr().String()
+		if err := p.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if conn, err := net.Dial("tcp", addr); err == nil {
+			conn.Close()
+			t.Fatal("dial succeeded after Close, want refusal")
+		}
+	})
 }
