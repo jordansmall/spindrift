@@ -4,12 +4,14 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 const testReconcilePR = "https://github.com/owner/repo/pull/77"
@@ -339,4 +341,35 @@ func TestRecoverByNumber_RedFollowsSelfHeal(t *testing.T) {
 	if last := fc.TransitionStateCalls[len(fc.TransitionStateCalls)-1]; last.To != forge.Failed {
 		t.Errorf("last transition To=%v, want Failed", last.To)
 	}
+}
+
+// Pins the report line recover prints for an adopted PR and for no PR.
+func TestRecoverByNumber_ReportLines(t *testing.T) {
+	run := func(t *testing.T, withPR bool) string {
+		c := reconcileConfig()
+		fc := forge.NewFake(dispatchLabels(c))
+		fc.BranchPrefix = c.branchPrefix
+		fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+		if withPR {
+			fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+			fc.SetCheckStates(testReconcilePR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+		}
+		dir := tempLogDir(t)
+		return testutil.CaptureStdout(t, func() {
+			_ = recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42")
+		})
+	}
+	t.Run("green adopted PR", func(t *testing.T) {
+		out := run(t, true)
+		for _, want := range []string{"status=adopted", "status=verified-merged"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("stdout missing %q:\n%s", want, out)
+			}
+		}
+	})
+	t.Run("no open PR", func(t *testing.T) {
+		if out := run(t, false); !strings.Contains(out, "status=skipped") {
+			t.Errorf("stdout missing status=skipped:\n%s", out)
+		}
+	})
 }
