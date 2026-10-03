@@ -97,12 +97,9 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		}
 
 		l := &signalsocket.Listener{Handler: handler}
-		// The listener binds every interface, not loopback, mirroring the
-		// registry proxy's own TCP bind (box.go, issue #3111 review
-		// finding): the Box reaches it only via --add-host
-		// <host>:host-gateway, which on a plain Linux docker bridge
-		// resolves to the bridge IP, so a loopback-only bind would leave
-		// nothing on the address the Box dials.
+		// The listener binds every interface, not loopback, for the same
+		// reason as the registry proxy's own TCP bind (box.go, issue #3111
+		// review finding).
 		if err := l.ListenAndServeTCP("0.0.0.0:0"); err != nil {
 			return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: %w", err)
 		}

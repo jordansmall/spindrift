@@ -433,10 +433,12 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			tcpHost := transport.Host()
 			secret := newRegistryProxyTCPSecret()
 			// The listener binds every interface, not loopback (issue #3111
-			// review finding): the Box reaches it only via --add-host
-			// <host>:host-gateway, which on a plain Linux docker bridge
-			// resolves to the bridge IP (e.g. 172.17.0.1), so a loopback-only
-			// bind leaves nothing on the address the Box dials.
+			// review finding): the Box dials the host by name, resolved
+			// either by the runtime itself or by --add-host
+			// <host>:host-gateway (probeRegistryTCPReachable decides which),
+			// and on a plain Linux docker bridge that name resolves to the
+			// bridge IP (e.g. 172.17.0.1), so a loopback-only bind would
+			// leave nothing on the address the Box dials.
 			if err := proxy.ListenAndServeTCP("0.0.0.0:0", secret); err != nil {
 				return fmt.Errorf("registry proxy: %w", err)
 			}
