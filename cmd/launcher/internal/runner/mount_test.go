@@ -41,6 +41,65 @@ func TestBuildMountSpecs_PromptDirMounted(t *testing.T) {
 	}
 }
 
+func promptsSpecs(specs []MountSpec) []MountSpec {
+	var out []MountSpec
+	for _, s := range specs {
+		if s.Target == agentpaths.PromptsDir {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// The prompt is baked into the image, so an unset PromptDir mounts nothing
+// and says nothing about SPINDRIFT_PROMPT_DIR.
+func TestBuildMountSpecs_PromptDirUnset_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{}, Box{})
+
+	if got := promptsSpecs(specs); len(got) != 0 {
+		t.Errorf("unexpected prompts spec: %+v", got)
+	}
+	for _, s := range specs {
+		if strings.Contains(s.Message, "SPINDRIFT_PROMPT_DIR") {
+			t.Errorf("unexpected SPINDRIFT_PROMPT_DIR message: %+v", s)
+		}
+	}
+}
+
+func TestBuildMountSpecs_PromptDirMissing_NoMount(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	specs := buildMountSpecs(MountParams{PromptDir: missing}, Box{})
+
+	if got := promptsSpecs(specs); len(got) != 0 {
+		t.Errorf("unexpected prompts spec for missing dir: %+v", got)
+	}
+	for _, s := range specs {
+		if s.Source == missing || strings.Contains(s.Message, "SPINDRIFT_PROMPT_DIR") {
+			t.Errorf("unexpected spec for missing dir: %+v", s)
+		}
+	}
+}
+
+// The override binds the directory, not individual files, so every prompt in
+// it reaches the Box through a single mount.
+func TestBuildMountSpecs_PromptDirBindsWholeDirectory(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"issue-prompt.md", "scout-prompt.md", "review-prompt.md"} {
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	specs := buildMountSpecs(MountParams{PromptDir: dir}, Box{})
+
+	got := promptsSpecs(specs)
+	if len(got) != 1 {
+		t.Fatalf("want exactly one prompts spec, got %+v", got)
+	}
+	if got[0].Source != dir {
+		t.Errorf("Source = %q, want the directory %q", got[0].Source, dir)
+	}
+}
+
 func TestBuildMountSpecs_DriverCacheDirMountedWritable(t *testing.T) {
 	dir := t.TempDir()
 	specs := buildMountSpecs(MountParams{DriverSessionCacheDir: "/home/agent/.claude/projects"}, Box{DriverCacheDir: dir})
