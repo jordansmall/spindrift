@@ -62,6 +62,11 @@ agent_file_frontmatter() {
   awk '{ print } /^---$/ { if (++c == 2) exit }' "$1"
 }
 
+# Frontmatter descriptions are JSON-encoded strings (agentFilesTemplate).
+agent_file_description() {
+  agent_file_frontmatter "$1" | sed -n 's/^description: //p' | jq -r .
+}
+
 # Callers assert the rewrite kept the two-fence shape rather than leaving a
 # stray third fence behind.
 agent_file_fence_count() {
@@ -363,7 +368,7 @@ assemble_go_agent_files() {
 # trailing newline the file body carries and the JSON string does not, because
 # command substitution trims it.
 @test "the same roster yields the same effective scout prompt under claude and opencode" {
-  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"Map relevant files, seams, and tests; write a structured brief","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
+  export AGENTS_JSON_TEMPLATE='{"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read","Bash","WebFetch","WebSearch","Glob","Grep"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ -s "$DRIVER_AGENTS_FILE" ]
@@ -414,6 +419,16 @@ assemble_go_agent_files() {
   frontmatter_before="$(agent_file_frontmatter "$scout")"
   [ "$(agent_file_fence_count "$scout")" -eq 2 ]
 
+  # The entrypoint rewrites only the body; the baked description must not
+  # leak into it. Read it from each file so the check tracks the live roster.
+  local scout_description reviewer_description worker_description
+  scout_description="$(agent_file_description "$scout")"
+  reviewer_description="$(agent_file_description "$dir/reviewer.md")"
+  worker_description="$(agent_file_description "$dir/worker.md")"
+  [ -n "$scout_description" ]
+  [ -n "$reviewer_description" ]
+  [ -n "$worker_description" ]
+
   export DRIVER_AGENT_FILES_DIR="$dir"
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
@@ -423,20 +438,20 @@ assemble_go_agent_files() {
   local body
   body="$(agent_file_body "$scout")"
   [ -n "$body" ]
-  [ "$body" != "Map relevant files, seams, and tests; write a structured brief" ]
+  [ "$body" != "$scout_description" ]
   [[ "$body" == *"Return only the brief's path"* ]]
 
   local reviewer="$dir/reviewer.md"
   local reviewer_body
   reviewer_body="$(agent_file_body "$reviewer")"
   [ -n "$reviewer_body" ]
-  [ "$reviewer_body" != "Review the branch diff for spec compliance and coding standards" ]
+  [ "$reviewer_body" != "$reviewer_description" ]
   [[ "$reviewer_body" == *"adversarially review a branch diff"* ]]
 
   local worker="$dir/worker.md"
   local worker_body
   worker_body="$(agent_file_body "$worker")"
   [ -n "$worker_body" ]
-  [ "$worker_body" != "Implement a scoped slice of work delegated to it, with full implement-capable tools" ]
+  [ "$worker_body" != "$worker_description" ]
   [[ "$worker_body" == *"Stay inside the slice you were handed"* ]]
 }

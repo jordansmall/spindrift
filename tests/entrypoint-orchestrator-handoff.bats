@@ -114,7 +114,7 @@ setup() {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(jq -r .ReviewModel "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "haiku" ]
@@ -139,7 +139,7 @@ setup() {
   export ORCHESTRATOR_ENABLED=1
   export BOX_REVIEW_LOOP_ORCHESTRATOR=1
   unset BOX_REVIEW_LOOP_INLINE
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(jq -r .ReviewEffort "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "high" ]
@@ -162,7 +162,7 @@ setup() {
 # the handoff this run produced, which since issue #2975 is what driver-exec
 # consumes.
 @test "direct driver-exec path leaves ReviewEffort empty even with a reviewer effort configured" {
-  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"Review the branch diff for spec compliance and coding standards","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
+  export AGENTS_JSON_TEMPLATE='{"reviewer":{"description":"fixture reviewer description","model":"haiku","effort":"high","prompt":"","tools":["Read","Bash","WebFetch"]}}'
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ ! -s "$ORCHESTRATOR_LOG" ]
