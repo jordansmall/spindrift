@@ -2971,11 +2971,12 @@ canonical lifecycle at each step. A deliberate API-shape regression in the
 adapter (a renamed JSON tag, a changed REST path) fails the harness where the
 contract suite stays green.
 
-It is **opt-in and excluded from the default check gate**: it lives behind the
-`integration` build tag, so `nix build .#checks-inbox`, `nix flake check`, and a
-plain `go test ./...` never compile it, and it self-skips wherever no container
+It is **opt-in**: it lives behind the `integration` build tag, so a plain
+`go test ./...` never compiles it, and it self-skips wherever no container
 daemon is reachable (including this repo's own dogfood Box, which has none).
-Run it explicitly, **pre-release or on demand**, on a host with `podman` or
+`nix build .#checks-inbox` does compile the tag, but only through
+`launcher-go-seam-test` (below), where this test skips like any other. Run it
+explicitly, **pre-release or on demand**, on a host with `podman` or
 `docker` and network egress to pull the image:
 
 ```sh
@@ -2987,6 +2988,21 @@ One command boots, seeds, runs the loop, asserts, and tears the container down
 test itself creates inside the disposable, localhost-only instance. The image
 defaults to `codeberg.org/forgejo/forgejo:11`; set `SPINDRIFT_FORGEJO_IMAGE` to
 pin a different tag or a local mirror.
+
+##### Seam tests
+
+Seam tests (issue #4280) are `integration`-tagged Go tests that read the
+artifacts Nix renders (`nix/seam-fixtures.nix`: the run-input document, the
+contracts, the preambles) instead of hand-written copies. The `seamtest`
+package resolves them from `SPINDRIFT_SEAM_FIXTURES_DIR`, else by running
+`nix build .#seam-fixtures`, so `go test -tags integration ./...` in the
+devshell builds them automatically and skips where `nix` is absent. `nix flake
+check` and the in-box `nix build .#checks-inbox` both run them through
+`launcher-go-seam-test`, which sets the variable to the built store path;
+`seam-fixtures-names-match-resolver` pins the Nix names against
+`cmd/launcher/internal/seamtest/fixtures.json`. There is no `code-comments`
+contract fixture: that policy was inlined into the prompts (#3505), so no
+rendered file exists to read.
 
 #### Merge guard
 
