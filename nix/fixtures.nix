@@ -323,8 +323,8 @@ let
   # The daemonless bubblewrap runner fixture (issue #54). nixInBox = false
   # because `bwrap build`'s EnsureReady (ADR 0042) reads the live
   # /nix/var/nix/db/db.sqlite, which a sandboxed `nix flake check` build cannot
-  # reach, breaking every BWRAP_BUILD_CMD bats test (issue #2664). Named as a
-  # set so equivalence.nix can build a twin that overrides only `prefetch`.
+  # reach (issue #2664). Named as a set so equivalence.nix can build a twin
+  # that overrides only `prefetch`.
   bwrapHarnessArgs = {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
@@ -333,16 +333,6 @@ let
     packages = p: [ p.hello ];
   };
   bwrapHarness = import ../lib/mkHarness.nix bwrapHarnessArgs;
-
-  # The baked runtime is never on PATH, so `build`'s container fallback is
-  # unavailable. Exercises the both-paths-impossible error, with the host build
-  # faked to fail too.
-  noRuntimeHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    overlays = [ ghFakeOverlay ];
-    runtime = "no-such-runtime";
-    packages = p: [ p.hello ];
-  };
 
   # Proves the `prompt` argument is what gets rendered to the store path and
   # reaches the agent (#4). The per-issue placeholders are escaped so they
@@ -432,15 +422,6 @@ let
     packages = p: [ p.hello ];
   };
 
-  # The bwrap variant of skillsHarness, so bats can verify the bind-mount path.
-  skillsBwrapHarness = import ../lib/mkHarness.nix {
-    inherit nixpkgs system;
-    overlays = [ ghFakeOverlay ];
-    runtime = "bwrap";
-    skills = [ bakedSkillFixture ];
-    packages = p: [ p.hello ];
-  };
-
   # A minimal flake-parts consumer (#5), evaluated in-repo through a nested
   # `mkFlake` so it needs no separate lock and no network. The checks compare
   # its outputs to the equivalent direct `mkHarness` call.
@@ -509,14 +490,12 @@ in
     rancherHarness
     bwrapHarnessArgs
     bwrapHarness
-    noRuntimeHarness
     promptHarness
     fixPromptHarness
     researchPromptHarness
     researchVerdictsHarness
     skillsHarness
     noSkillsHarness
-    skillsBwrapHarness
     minimalDirect
     consumerPkgs
     consumerFormatter
