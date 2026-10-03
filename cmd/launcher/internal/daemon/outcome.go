@@ -31,9 +31,9 @@ const outcomeNoneDispatchable = "none-dispatchable"
 // would risk, say, exit 6 changing its outcome string here without its
 // HaltClass following along. Every other exit returns HaltNone:
 // Continue/Wait/Backoff never halt, so there is nothing to classify.
-// It mirrors cmd/launcher/main.go's exitCodeFor taxonomy (main.go:1774-1798,
-// exitConfigInvalid/exitSignalledStop at main.go:1183-1192) — the exit codes
-// are that loop's contract, not this package's to redefine.
+// It mirrors cmd/launcher/main.go's exitCodeFor taxonomy and that file's
+// exitConfigInvalid/exitSignalledStop consts — the exit codes are that
+// loop's contract, not this package's to redefine.
 //
 // stopClosed is whether cfg.Stop was already closed when the child exited:
 // it only changes exit 7's answer (every other exit ignores it), because
