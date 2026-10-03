@@ -228,10 +228,10 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num. A claim (to == InProgress) also strips any stale terminal label
-// (Complete, Failed) left by a prior run, matching the dispatch workflow's
-// claim-remove-labels set (#1985), so a re-triggered or recovered issue cannot
-// run while still labeled agent-failed or agent-complete.
+// num. A claim (to == InProgress) also strips the stale terminal labels
+// DispatchLabels.ClaimRemoveLabels names, matching the dispatch workflow's
+// claim-remove-labels set (#1985), so a re-triggered or recovered issue
+// cannot run while still wearing a prior run's terminal label.
 //
 // A claim first reads num's labels and errors on forge.ErrAlreadyClaimed
 // without editing anything when InProgress is already present (#3887). The
