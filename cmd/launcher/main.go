@@ -274,12 +274,20 @@ func schemaDefault(key string) string {
 			return v
 		}
 	}
-	for _, e := range schemaFlags {
-		if e.env == key {
-			return e.dflt
-		}
+	if e, ok := schemaFlag(key); ok {
+		return e.dflt
 	}
 	return ""
+}
+
+// schemaFlag returns the schema entry whose env key is key.
+func schemaFlag(key string) (flagEntry, bool) {
+	for _, e := range schemaFlags {
+		if e.env == key {
+			return e, true
+		}
+	}
+	return flagEntry{}, false
 }
 
 // intSchemaDefault parses key's schema default as an int; a non-numeric or
@@ -289,16 +297,36 @@ func intSchemaDefault(key string) int {
 	return n
 }
 
-// getenvSchema reads key from the environment, falling back to its schema
-// default instead of a hand-written literal.
-func getenvSchema(key string) string {
-	return getenv(key, schemaDefault(key))
+// isBoolKnob reports whether key is a bool-kind schema knob. parseFlags encodes
+// such a knob's explicit off as set-but-empty, so for these an empty env value
+// is a real setting, not "unset".
+func isBoolKnob(key string) bool {
+	e, ok := schemaFlag(key)
+	return ok && e.kind == "bool"
 }
 
-// getenvSchemaPreserveEmpty is like getenvSchema but distinguishes "set to
-// empty" from "unset": use it for knobs whose schema doc gives the empty
+// ambientSetting reports key's ambient env value and whether it counts as
+// set: non-empty, or set-but-empty for a bool knob (an explicit off).
+func ambientSetting(key string) (string, bool) {
+	v, ok := os.LookupEnv(key)
+	return v, ok && (v != "" || isBoolKnob(key))
+}
+
+// getenvSchema reads key from the environment, falling back to its schema
+// default instead of a hand-written literal. A bool knob set to empty keeps
+// that explicit off rather than collapsing into a default-on schema default.
+func getenvSchema(key string) string {
+	if v, ok := ambientSetting(key); ok {
+		return v
+	}
+	return schemaDefault(key)
+}
+
+// getenvSchemaPreserveEmpty is the per-knob opt-in to keep "set to empty"
+// distinct from "unset" for non-bool knobs whose schema doc gives the empty
 // string its own meaning (e.g. "disables the limit"), where an operator's
-// explicit KEY= override must not collapse into the schema default.
+// explicit KEY= override must not collapse into the schema default. Bool
+// knobs get this automatically through getenvSchema.
 func getenvSchemaPreserveEmpty(key string) string {
 	if v, ok := os.LookupEnv(key); ok {
 		return v

@@ -94,6 +94,61 @@ in
       "renderDefaultsPreamble export=true must prefix each line with `export `";
     pkgs.runCommand "preambles-defaults-shape" { } "touch $out";
 
+  # Bool knobs reach the Box set-but-empty for explicit off, so the baked
+  # default must use the colon-less `${VAR-<baked>}`; `:-` re-defaults the
+  # empty to on (issue #4290). A non-bool knob keeps `:-`, so its empty
+  # value re-defaults. mergedDefaults carries a real bool, as in
+  # lib/mkHarness.nix.
+  preambles-defaults-bool-empty-is-off =
+    let
+      out = preambles.renderDefaultsPreamble {
+        flakeOptionEntries = {
+          orchestratorEnabled = {
+            env = "ORCHESTRATOR_ENABLED";
+            kind = "bool";
+          };
+          maxParallel = {
+            env = "MAX_PARALLEL";
+          };
+        };
+        mergedDefaults = {
+          orchestratorEnabled = true;
+          maxParallel = 5;
+        };
+      };
+    in
+    pkgs.runCommand "preambles-defaults-bool-empty-is-off"
+      {
+        preamble = out;
+        nativeBuildInputs = [ pkgs.shellcheck ];
+      }
+      ''
+        cat >script.sh <<'SCRIPT_HEADER'
+        #!/usr/bin/env bash
+        set -euo pipefail
+        SCRIPT_HEADER
+        printf '%s\n' "$preamble" >>script.sh
+        cat >>script.sh <<'SCRIPT_TAIL'
+        printf '%s' "$ORCHESTRATOR_ENABLED,$MAX_PARALLEL"
+        SCRIPT_TAIL
+
+        shellcheck script.sh
+
+        got=$(unset ORCHESTRATOR_ENABLED; source script.sh)
+        [ "$got" = 1,5 ] || { echo "unset: got [$got] want [1,5]" >&2; exit 1; }
+
+        got=$(ORCHESTRATOR_ENABLED="" source script.sh)
+        [ "$got" = ,5 ] || { echo "set-but-empty: got [$got] want [,5]" >&2; exit 1; }
+
+        got=$(ORCHESTRATOR_ENABLED=1 source script.sh)
+        [ "$got" = 1,5 ] || { echo "set: got [$got] want [1,5]" >&2; exit 1; }
+
+        got=$(MAX_PARALLEL="" source script.sh)
+        [ "$got" = 1,5 ] || { echo "non-bool set-but-empty: got [$got] want [1,5]" >&2; exit 1; }
+
+        touch $out
+      '';
+
   # Issue #2234: renderDefaultsPreamble used to splice a baked default raw
   # inside a double-quoted `VAR="${VAR:-<baked>}"` assignment, so a default
   # containing double quotes broke out of that quoting and tripped SC2140.

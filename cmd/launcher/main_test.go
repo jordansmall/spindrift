@@ -2014,8 +2014,8 @@ func TestResolveTrackerAndForgeSignals_PartialArtifactKeysFallsBack(t *testing.T
 // With no loaded document, resolveAgentPresenceSignals returns
 // schema-default-derived values rather than unconditional false:
 // WORKER_MODEL's default is non-empty, so workerProvisioned defaults true,
-// and ORCHESTRATOR_ENABLED's is false, so the review-loop pair defaults
-// (true, false), exactly one true and never both (issue #2533 review).
+// and ORCHESTRATOR_ENABLED's is true, so the review-loop pair defaults
+// (false, true), exactly one true and never both (issue #2533 review).
 func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
@@ -2024,7 +2024,7 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 	// fallback is deterministic regardless of host.
 	t.Setenv("FILER_MODEL", "")
 	t.Setenv("WORKER_MODEL", "")
-	t.Setenv("ORCHESTRATOR_ENABLED", "")
+	unsetEnv(t, "ORCHESTRATOR_ENABLED")
 
 	presence := resolveAgentPresenceSignals("")
 	if presence.filerEnabled {
@@ -2033,11 +2033,11 @@ func TestResolveAgentPresenceSignals_NoDocumentFallsBackToSchemaDefaults(t *test
 	if !presence.workerProvisioned {
 		t.Errorf("workerProvisioned = false, want true (WORKER_MODEL schema default is non-empty)")
 	}
-	if !presence.reviewLoopInline {
-		t.Errorf("reviewLoopInline = false, want true (ORCHESTRATOR_ENABLED schema default is false)")
+	if presence.reviewLoopInline {
+		t.Errorf("reviewLoopInline = true, want false (ORCHESTRATOR_ENABLED schema default is true)")
 	}
-	if presence.reviewLoopOrchestrator {
-		t.Errorf("reviewLoopOrchestrator = true, want false (ORCHESTRATOR_ENABLED schema default is false)")
+	if !presence.reviewLoopOrchestrator {
+		t.Errorf("reviewLoopOrchestrator = false, want true (ORCHESTRATOR_ENABLED schema default is true)")
 	}
 }
 
@@ -3385,7 +3385,7 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	// fallback is deterministic regardless of host.
 	t.Setenv("FILER_MODEL", "")
 	t.Setenv("WORKER_MODEL", "")
-	t.Setenv("ORCHESTRATOR_ENABLED", "")
+	unsetEnv(t, "ORCHESTRATOR_ENABLED")
 
 	cf := forge.NewFake()
 	it := forge.NewFake()
@@ -3394,8 +3394,8 @@ func TestDispatchConfig_NoDocument_UsesGuardedResolvers(t *testing.T) {
 	if !cfg.WorkerProvisioned {
 		t.Error("WorkerProvisioned = false, want true (WORKER_MODEL schema default is non-empty)")
 	}
-	if !cfg.ReviewLoopInline || cfg.ReviewLoopOrchestrator {
-		t.Errorf("ReviewLoopInline=%v ReviewLoopOrchestrator=%v, want (true, false) (ORCHESTRATOR_ENABLED schema default is false)", cfg.ReviewLoopInline, cfg.ReviewLoopOrchestrator)
+	if cfg.ReviewLoopInline || !cfg.ReviewLoopOrchestrator {
+		t.Errorf("ReviewLoopInline=%v ReviewLoopOrchestrator=%v, want (false, true) (ORCHESTRATOR_ENABLED schema default is true)", cfg.ReviewLoopInline, cfg.ReviewLoopOrchestrator)
 	}
 	if cfg.TrackerAxisRead != "GITHUB" || cfg.TrackerAxisWrite != "GITHUB" || cfg.TrackerAxisFiler != "GH" {
 		t.Errorf("TrackerAxis = (%q,%q,%q), want (GITHUB,GITHUB,GH) for github/github", cfg.TrackerAxisRead, cfg.TrackerAxisWrite, cfg.TrackerAxisFiler)
@@ -6690,5 +6690,64 @@ func TestLoadConfig_SignalCarrierExplicitLogKept(t *testing.T) {
 	t.Setenv("BOX_SIGNAL_CARRIER", "log")
 	if got := loadConfig().signalCarrier; got != "log" {
 		t.Errorf("loadConfig().signalCarrier with BOX_SIGNAL_CARRIER=log = %q, want %q", got, "log")
+	}
+}
+
+// ORCHESTRATOR_ENABLED defaults on, so a dispatch-time off (parseFlags encodes
+// it as set-but-empty) must survive the schema-default and document fallbacks.
+func TestOrchestratorEnabled_ExplicitOffBeatsDefaultAndDocument(t *testing.T) {
+	docOn := &inputdoc.Document{Settings: map[string]string{"ORCHESTRATOR_ENABLED": "1"}}
+	cases := []struct {
+		name string
+		args []string
+		doc  *inputdoc.Document
+	}{
+		{"no document, --orchestrator=false", []string{"--orchestrator=false"}, nil},
+		{"no document, deprecated --orchestrator-enabled=", []string{"--orchestrator-enabled="}, nil},
+		{"document on, --orchestrator=false", []string{"--orchestrator=false"}, docOn},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(func() { loadedDoc = nil })
+			loadedDoc = tc.doc
+			unsetEnv(t, "ORCHESTRATOR_ENABLED")
+			if _, err := parseFlags(tc.args); err != nil {
+				t.Fatalf("parseFlags: %v", err)
+			}
+			p := resolveAgentPresenceSignals("")
+			if !p.reviewLoopInline || p.reviewLoopOrchestrator {
+				t.Errorf("reviewLoopInline=%v reviewLoopOrchestrator=%v, want (true, false)", p.reviewLoopInline, p.reviewLoopOrchestrator)
+			}
+			if got := resolveBoxEnvVar("ORCHESTRATOR_ENABLED"); got != "" {
+				t.Errorf("resolveBoxEnvVar = %q, want empty (explicit off forwarded)", got)
+			}
+		})
+	}
+}
+
+func TestOrchestratorEnabled_UnsetNoDocumentDefaultsOn(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	unsetEnv(t, "ORCHESTRATOR_ENABLED")
+	p := resolveAgentPresenceSignals("")
+	if p.reviewLoopInline || !p.reviewLoopOrchestrator {
+		t.Errorf("reviewLoopInline=%v reviewLoopOrchestrator=%v, want (false, true)", p.reviewLoopInline, p.reviewLoopOrchestrator)
+	}
+	if got := resolveBoxEnvVar("ORCHESTRATOR_ENABLED"); got != "1" {
+		t.Errorf("resolveBoxEnvVar = %q, want 1", got)
+	}
+}
+
+// Only bool knobs treat set-but-empty as an explicit value; a string knob's
+// empty env still falls back to its default.
+func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	t.Setenv("LABEL", "")
+	if got := getenvSchema("LABEL"); got != "ready-for-agent" {
+		t.Errorf("getenvSchema(LABEL) = %q, want ready-for-agent", got)
+	}
+	if got := resolveBoxEnvVar("LABEL"); got != "ready-for-agent" {
+		t.Errorf("resolveBoxEnvVar(LABEL) = %q, want ready-for-agent", got)
 	}
 }

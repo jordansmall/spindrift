@@ -1738,10 +1738,9 @@ in
     pkgs.runCommand "build-time-reject-orchestrator-verdict-missing" { } "touch $out";
 
   # The gate-not-triggered counterpart (AC3): the same missing-marker
-  # reviewPrompt, but orchestratorEnabled left at its schema default (false).
-  # The omission is real but its gating condition is not statically known
-  # true, so buildTimeRejectVerdicts resolves "advise" and the build
-  # succeeds.
+  # reviewPrompt, but orchestratorEnabled explicitly set off. The omission is
+  # real but its gating condition is not statically known true, so
+  # buildTimeRejectVerdicts resolves "advise" and the build succeeds.
   build-time-reject-orchestrator-verdict-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
