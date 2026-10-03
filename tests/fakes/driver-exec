@@ -36,10 +36,18 @@
 # ArgvShape/Caps grammar it emits, not a bash re-derivation of that shape. The
 # `advise-only` verb (issue #3901) is a ninth, delegated the same way --
 # dispatchkind is the source of truth for the posture.
+#
+# assemble-prompt additionally honours a test-only DRIVER_FRAGMENTS_FILE hook
+# (issue #3838): when set and non-empty it appends --fragments-output so the
+# parity suite can pin which registry fragments each cell renders. The
+# production entrypoint never passes that flag.
 set -euo pipefail
 
 if [ "${1:-}" = "assemble-prompt" ]; then
   shift
+  if [ -n "${DRIVER_FRAGMENTS_FILE:-}" ]; then
+    set -- "$@" --fragments-output "$DRIVER_FRAGMENTS_FILE"
+  fi
   exec "$DRIVER_EXEC_BIN" assemble-prompt "$@"
 fi
 
