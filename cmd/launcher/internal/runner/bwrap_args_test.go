@@ -118,6 +118,25 @@ func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	}
 }
 
+func TestBwrapArgs_SkillsDirPrintsMountMessage(t *testing.T) {
+	dir := t.TempDir()
+	a := &bwrapAdapter{
+		agentFiles:    "/fake/agent",
+		agentEnv:      "/fake/env",
+		bakedPrefetch: "echo ok",
+		mountParams:   MountParams{SkillsDir: dir},
+	}
+
+	out := captureStdoutDuring(t, func() {
+		a.buildArgs("/tmp/fake-etc", Box{Env: map[string]string{}})
+	})
+
+	want := "==> SPINDRIFT_SKILLS_DIR set; mounting " + dir + " over /operator-skills\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("stdout = %q, want it to contain %q", out, want)
+	}
+}
+
 // A Box.Sockets entry's unix path becomes a --bind onto its fixed target
 // (ADR 0044, issue #2849; issue #3723).
 func TestBwrapArgs_RegistryProxySocketMounted(t *testing.T) {
@@ -523,6 +542,22 @@ func TestExecTarget_NetworkModeUnsetWrapsWithPasta(t *testing.T) {
 		bakedPrefetch: "echo ok",
 	}
 	assertPastaExecTarget(t, a, "/tmp/fake-etc", Box{Env: map[string]string{}})
+}
+
+// assertPastaExecTarget derives its expectation from the constants, so this
+// pins the literal ADR 0042 flags a renamed or loosened constant would
+// otherwise carry along silently.
+func TestExecTarget_DefaultPastaArgvLiteral(t *testing.T) {
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo ok"}
+	_, args, _ := a.execTarget("/tmp/fake-etc", Box{Env: map[string]string{}})
+
+	want := []string{
+		"-t", "none", "-T", "none", "-u", "none", "-U", "none", "--no-map-gw",
+		"--dns-forward", "169.254.2.2", "-f", "--", "bwrap",
+	}
+	if len(args) < len(want) || strings.Join(args[:len(want)], " ") != strings.Join(want, " ") {
+		t.Errorf("pasta argv prefix = %v, want %v", args, want)
+	}
 }
 
 // This is the execTarget half of

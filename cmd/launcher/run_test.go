@@ -57,6 +57,29 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 	}
 }
 
+// The operator-facing line for an empty queue is part of the exit-2 contract:
+// without it a bare exit 2 reads as a failure.
+func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+	fc := forge.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	out := testutil.CaptureStdout(t, func() { runExitCode(lc) })
+
+	if want := "no open 'ready-for-agent' issues — nothing to do."; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}
+
 // Regression test for #522/#477: with MAX_JOBS unset (0, the uncapped drain
 // default) the queue path no longer loops dispatchWaves waiting for a blocker.
 // A batch with nothing currently dispatchable exits straight to code 3.

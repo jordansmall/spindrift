@@ -788,6 +788,31 @@ func TestRunnerConfig_DriverMountTargets(t *testing.T) {
 	}
 }
 
+// PIDS_LIMIT, MEMORY_LIMIT, PODMAN_NETWORK and SPINDRIFT_SKILLS_DIR overrides
+// reach runner.Config, so the adapters render the operator's values rather
+// than the schema defaults.
+func TestRunnerConfig_LimitsNetworkSkillsOverrides(t *testing.T) {
+	t.Setenv("PIDS_LIMIT", "256")
+	t.Setenv("MEMORY_LIMIT", "2g")
+	t.Setenv("PODMAN_NETWORK", "pasta")
+	t.Setenv("SPINDRIFT_SKILLS_DIR", "/host/skills")
+
+	rc := runnerConfig(loadConfig())
+
+	if rc.PidsLimit != "256" {
+		t.Errorf("PidsLimit = %q, want 256", rc.PidsLimit)
+	}
+	if rc.MemoryLimit != "2g" {
+		t.Errorf("MemoryLimit = %q, want 2g", rc.MemoryLimit)
+	}
+	if rc.PodmanNetwork != "pasta" {
+		t.Errorf("PodmanNetwork = %q, want pasta", rc.PodmanNetwork)
+	}
+	if rc.MountParams.SkillsDir != "/host/skills" {
+		t.Errorf("MountParams.SkillsDir = %q, want /host/skills", rc.MountParams.SkillsDir)
+	}
+}
+
 // PASSWD_FILE/GROUP_FILE and their .drv companions (nix-sourced account
 // files, issue #2663) reach runner.Config, so the bwrap adapter binds them
 // instead of runner-written copies.

@@ -379,6 +379,29 @@ func TestContainerBuildCmd_SafeDirectoryPreludePrecedesNixBuild(t *testing.T) {
 	}
 }
 
+// An operator override renders its own value, and only that value.
+func TestBuildRunArgs_CustomLimitsRendered(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", pidsLimit: "256", memoryLimit: "2g"}
+	args := a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
+
+	for _, flag := range []string{"--pids-limit=256", "--memory=2g"} {
+		if !containsArg(args, flag) {
+			t.Errorf("missing flag %q in args: %v", flag, args)
+		}
+	}
+	for _, prefix := range []string{"--pids-limit=", "--memory="} {
+		n := 0
+		for _, arg := range args {
+			if strings.HasPrefix(arg, prefix) {
+				n++
+			}
+		}
+		if n != 1 {
+			t.Errorf("%s rendered %d times, want exactly once: %v", prefix, n, args)
+		}
+	}
+}
+
 func TestBuildRunArgsIncludesHardeningFlags(t *testing.T) {
 	a := &ociAdapter{
 		cli:         "podman",
@@ -478,6 +501,21 @@ func TestBuildRunArgs_NetworkModeRendersNetworkFlag(t *testing.T) {
 	}
 }
 
+// A raw podmanNetwork renders verbatim as the --network value.
+func TestBuildRunArgs_RawPodmanNetworkRendersNetworkFlag(t *testing.T) {
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", podmanNetwork: "pasta"}
+	args := a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
+	for i, arg := range args {
+		if arg == "--network" {
+			if i+1 >= len(args) || args[i+1] != "pasta" {
+				t.Errorf("--network value after %d = %v, want pasta", i, args)
+			}
+			return
+		}
+	}
+	t.Errorf("--network missing from args: %v", args)
+}
+
 // The default or unset mode renders no --network flag at all when no raw knob
 // is set either.
 func TestBuildRunArgs_NetworkModeOpenOmitsFlag(t *testing.T) {
@@ -536,6 +574,22 @@ func TestBuildRunArgs_SkillsDirMounted(t *testing.T) {
 	want := dir + ":/operator-skills:ro"
 	if !containsArg(args, want) {
 		t.Errorf("skills mount %q not found in args: %v", want, args)
+	}
+}
+
+// The adapter, not just buildMountSpecs, surfaces the operator-facing mount
+// message on stdout.
+func TestBuildRunArgs_SkillsDirPrintsMountMessage(t *testing.T) {
+	dir := t.TempDir()
+	a := &ociAdapter{cli: "podman", image: "spindrift:test", mountParams: MountParams{SkillsDir: dir}}
+
+	out := captureStdoutDuring(t, func() {
+		a.buildRunArgs(Box{Name: "agent-issue-1", Env: map[string]string{}})
+	})
+
+	want := "==> SPINDRIFT_SKILLS_DIR set; mounting " + dir + " over /operator-skills\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("stdout = %q, want it to contain %q", out, want)
 	}
 }
 

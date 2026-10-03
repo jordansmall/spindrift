@@ -173,6 +173,18 @@ func TestBuildMountSpecs_SkillsDirUnset_NoMount(t *testing.T) {
 	}
 }
 
+// candidateMount requires an existing directory, so a SkillsDir naming a
+// missing path yields no /operator-skills mount.
+func TestBuildMountSpecs_SkillsDirMissing_NoMount(t *testing.T) {
+	specs := buildMountSpecs(MountParams{SkillsDir: filepath.Join(t.TempDir(), "absent")}, Box{})
+
+	for _, s := range specs {
+		if s.Target == "/operator-skills" {
+			t.Errorf("unexpected skills-dir spec for a nonexistent SkillsDir: %+v", specs)
+		}
+	}
+}
+
 // ADR 0033: the code-in mount is read-only so the operator's Accumulation repo
 // stays single-writer.
 func TestBuildMountSpecs_LocalCodeForge_AccumulationRepoMountedReadOnly(t *testing.T) {
