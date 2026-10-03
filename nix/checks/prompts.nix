@@ -856,19 +856,6 @@ in
         touch $out
       '';
 
-  # Nix flakes only evaluate git-tracked files (issue #714): an agent that
-  # creates a file and runs `nix build` before staging it hits a spurious
-  # "not tracked by Git" failure and burns a checks cycle. Issue #3223 moved
-  # this guidance into the dogfood-only nix-checks skill, so it is pinned
-  # there; the fix-prompt side rides the no-drift diff (issue #1009).
-  mkharness-prompt-check-git-add-before-nix-build =
-    pkgs.runCommand "mkharness-prompt-check-git-add-before-nix-build" { }
-      ''
-        grep -qi 'git add' ${nixChecksSkill}
-        grep -qi 'tracked by' ${nixChecksSkill}
-        touch $out
-      '';
-
   # Issue #1990: the agent must not regrow the manual output-routing advice
   # the bash-output interceptor (#1988) now handles, and must keep the
   # explicit no-cat-a-whole-log rule. Issue #3220 moved that rule into the
