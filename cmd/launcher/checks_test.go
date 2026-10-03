@@ -24,11 +24,11 @@ func checkByName(t *testing.T, checks []doctor.Check, name string) doctor.Check 
 	return doctor.Check{}
 }
 
-// The order pins the six rows that ran before validate()'s validateChoice
-// calls on origin/main.
-func TestLauncherRequiredKnobChecks_ReturnsSixRows(t *testing.T) {
+// The order pins the rows that run before validate()'s validateChoice
+// calls.
+func TestLauncherRequiredKnobChecks_ReturnsSevenRows(t *testing.T) {
 	checks := launcherRequiredKnobChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime"}
+	want := []string{"removed-knobs", "repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherRequiredKnobChecks returned %d rows, want %d", len(checks), len(want))
 	}
@@ -73,7 +73,7 @@ func TestLauncherChecks_AllRequiredTier(t *testing.T) {
 // to its validateChoice calls (checks.go's doc comment).
 func TestLauncherChecks_GroupOrder(t *testing.T) {
 	checks := launcherChecks(minimalValidConfig())
-	want := []string{"repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
+	want := []string{"removed-knobs", "repo-slug", "git-user-name", "git-user-email", "gh-token", "driver-credentials", "runtime", "issue-tracker-config", "code-forge-config", "registry-proxy-routes"}
 	if len(checks) != len(want) {
 		t.Fatalf("launcherChecks returned %d rows, want %d", len(checks), len(want))
 	}

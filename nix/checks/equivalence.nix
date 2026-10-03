@@ -517,6 +517,125 @@ in
         touch $out
       '';
 
+  # Issue #4291: ORCHESTRATOR_ENABLED was removed, and a Consumer that still
+  # sets it must fail eval rather than be silently ignored. Each arm has a
+  # control (the same expression with the knob unset) so a rejection cannot be
+  # an unrelated eval failure, and lib/removed-knobs.nix is the one source.
+  removed-knob-rejected =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep;
+      removedKnobs = import ../../lib/removed-knobs.nix;
+      goTable = builtins.readFile ../../cmd/launcher/removedknobs.go;
+      consumerWith =
+        spindrift:
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = spindrift // {
+              infra.image.packages = p: [ p.hello ];
+            };
+          };
+      evaluates = consumer: (builtins.tryEval (consumer.packages.${system} ? spindrift)).success;
+      mkHarnessWith =
+        defaults:
+        import ../../lib/mkHarness.nix {
+          inherit nixpkgs system defaults;
+          packages = p: [ p.hello ];
+        };
+      mkHarnessEvaluates = defaults: (builtins.tryEval ((mkHarnessWith defaults) ? spindrift)).success;
+      pathOf = row: concatStringsSep "." row.flakePath;
+      # The module's declared options, not an eval of a Consumer: tryEval cannot
+      # tell the hidden removed-knob option from the module system's generic
+      # "option does not exist", so deleting the declaration would stay green.
+      spindriftOptions =
+        (flake-parts.lib.evalFlakeModule
+          {
+            inputs = {
+              inherit nixpkgs;
+              self.outPath = ../../.;
+            };
+          }
+          {
+            systems = [ system ];
+            imports = [ ../../lib/flakeModule.nix ];
+          }
+        ).options.perSystem.type.getSubOptions
+          [ "perSystem" ];
+      # Walks submodule option sets segment by segment; a nested option is not
+      # reachable as a plain attr path on the parent set.
+      declares =
+        path:
+        let
+          step =
+            acc: seg:
+            if acc == null || !(acc ? ${seg}) then
+              null
+            # Only an option has a type to descend through; a plain nested set is walked as-is.
+            else if pkgs.lib.isOption acc.${seg} then
+              acc.${seg}.type.getSubOptions acc.${seg}.loc
+            else
+              acc.${seg};
+          parent = builtins.foldl' step spindriftOptions.spindrift (pkgs.lib.init path);
+        in
+        parent != null && parent ? ${pkgs.lib.last path};
+      perKnob =
+        key: row:
+        let
+          nested = pkgs.lib.setAttrByPath row.flakePath true;
+          legacy = {
+            settings.${row.legacySection}.${key} = true;
+          };
+          reason = builtins.match "${row.env} was removed: (.*); delete the setting" row.message;
+        in
+        assert assertMsg (
+          builtins.match ".*was removed.*" row.message != null
+          && builtins.match ".*${row.env}.*" row.message != null
+        ) "lib/removed-knobs.nix: ${key}'s message must name ${row.env} and say it was removed";
+        assert assertMsg (pkgs.lib.hasInfix "\"${row.env}\"" goTable)
+          "cmd/launcher/removedknobs.go has no row for ${row.env}; keep it in step with lib/removed-knobs.nix";
+        assert assertMsg
+          (reason != null && pkgs.lib.hasInfix (builtins.toJSON (builtins.head reason)) goTable)
+          "cmd/launcher/removedknobs.go's reason for ${row.env} differs from the one in lib/removed-knobs.nix's message";
+        assert assertMsg (declares row.flakePath)
+          "lib/flakeModule.nix must declare the hidden removed-knob option perSystem.spindrift.${pathOf row}, or setting it fails with a generic \"option does not exist\"";
+        assert assertMsg
+          (declares [
+            "settings"
+            row.legacySection
+            key
+          ])
+          "lib/flakeModule.nix must declare the hidden removed-knob option perSystem.spindrift.settings.${row.legacySection}.${key}, or setting it fails with a generic \"option does not exist\"";
+        assert assertMsg (
+          !(schema ? ${key})
+        ) "${key} is in lib/env-schema.nix, so it is not removed: drop its lib/removed-knobs.nix row";
+        assert assertMsg (evaluates (
+          consumerWith { }
+        )) "control: a consumer with ${key} unset must evaluate";
+        assert assertMsg (
+          !(evaluates (consumerWith nested))
+        ) "setting perSystem.spindrift.${pathOf row} must fail eval (${key} was removed)";
+        assert assertMsg (!(evaluates (consumerWith legacy)))
+          "setting perSystem.spindrift.settings.${row.legacySection}.${key} must fail eval (${key} was removed)";
+        assert assertMsg (mkHarnessEvaluates { }) "control: mkHarness with no defaults must evaluate";
+        assert assertMsg (
+          !(mkHarnessEvaluates { ${key} = true; })
+        ) "mkHarness defaults.${key} must fail eval (${key} was removed)";
+        true;
+      schema = import ../../lib/env-schema.nix;
+    in
+    assert assertMsg (removedKnobs != { }) "lib/removed-knobs.nix must not be empty";
+    assert builtins.all (k: perKnob k removedKnobs.${k}) (builtins.attrNames removedKnobs);
+    pkgs.runCommand "removed-knob-rejected" { } "touch $out";
+
   # ADR 0037 (issue #2522): the 13 flat legacy shim options (oldFlatShims) must
   # be generated from the same structuralOptions declaration as the domain-tree
   # entries, not hand-copied, and each description is a one-line rename pointer.

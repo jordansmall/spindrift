@@ -12,6 +12,7 @@ let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
   schema = import ./env-schema.nix;
+  removedKnobs = import ./removed-knobs.nix;
   resolveNixPath = import ./nixpath.nix;
   runtimeValues = import ./runtime-values.nix;
   # Doc prose for the structural knobs, kept as plain data (issue #2572) so
@@ -68,11 +69,24 @@ let
       description = entry.doc;
     };
 
+  # A removed knob (lib/removed-knobs.nix) keeps a hidden, never-set option so a
+  # Consumer that still sets it reaches config.perSystem's "was removed" throw
+  # instead of the module system's generic "option does not exist".
+  removedKnobOption = mkOption {
+    type = types.nullOr types.raw;
+    default = null;
+    visible = false;
+  };
+
   mkSectionOption =
-    _sectionAttr: knobs:
+    sectionAttr: knobs:
     mkOption {
       type = types.submodule {
-        options = lib.mapAttrs mkKnobOption knobs;
+        options =
+          lib.mapAttrs mkKnobOption knobs
+          // lib.mapAttrs (_: _: removedKnobOption) (
+            lib.filterAttrs (_: row: row.legacySection == sectionAttr) removedKnobs
+          );
       };
       default = { };
     };
@@ -118,6 +132,11 @@ let
     path = lib.splitString "." (resolveNixPath key entry);
     opt = mkKnobOption key entry;
   }) flakeOptionEntries;
+
+  removedKnobTreeEntries = lib.mapAttrsToList (_: row: {
+    path = row.flakePath;
+    opt = removedKnobOption;
+  }) removedKnobs;
 
   # The one hand-written mkOption per structural knob (issue #2522), keyed by
   # its flat legacy name, which is also the mkHarness arg name and the key set
@@ -329,7 +348,9 @@ in
       in
       oldFlatShims
       // settingsOption
-      // (buildTree (flakeOptionTreeEntries ++ structuralTreeEntries ++ byNameTreeEntries));
+      // (buildTree (
+        flakeOptionTreeEntries ++ structuralTreeEntries ++ byNameTreeEntries ++ removedKnobTreeEntries
+      ));
   };
 
   config.perSystem =
@@ -410,7 +431,27 @@ in
       // structuralArgs
       // lib.optionalAttrs (byNameModels != null) { byName = byNameModels; }
       // lib.optionalAttrs (runDefaults != { }) { defaults = runDefaults; };
-      harness = mkHarness args;
+      # A set removed knob (lib/removed-knobs.nix), by its flake path or its
+      # legacy settings alias, is a hard error naming the knob; `!= null`
+      # catches an explicit `false` too.
+      removedKnobHits = lib.concatLists (
+        lib.mapAttrsToList (
+          key: row:
+          lib.optional (lib.attrByPath row.flakePath null cfg != null) {
+            at = "perSystem.spindrift.${lib.concatStringsSep "." row.flakePath}";
+            inherit (row) message;
+          }
+          ++ lib.optional ((cfg.settings.${row.legacySection}.${key} or null) != null) {
+            at = "perSystem.spindrift.settings.${row.legacySection}.${key}";
+            inherit (row) message;
+          }
+        ) removedKnobs
+      );
+      harness =
+        if removedKnobHits != [ ] then
+          throw "${(lib.head removedKnobHits).at}: ${(lib.head removedKnobHits).message}"
+        else
+          mkHarness args;
       # nixfmt from the consumer's locked nixpkgs input, the same pin the
       # nix-fmt gate uses, so `nix fmt` fixes what the check catches.
       nixfmt = (import resolvedNixpkgs { inherit system; }).nixfmt;
