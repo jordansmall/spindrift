@@ -153,6 +153,9 @@
               # skipping the OCI-image realization the full `checks` set above
               # still covers for CI.
               checks-inbox = checksResult.checks-inbox;
+              # The fixtures directory the Go seam tests build on demand
+              # (issue #4280).
+              seam-fixtures = fixtures.seamFixtures;
             }
             # lib/preambles.nix bakes FLAKE_IMAGE_ATTR as the fixed path
             # `.#packages.<system>.agent-closure` (issue #2672), so the launcher's

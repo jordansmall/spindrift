@@ -93,6 +93,7 @@ let
     // (import ./baked-skills.nix common)
     // (import ./seccomp.nix common)
     // (import ./adr-numbers.nix common)
+    // (import ./seam-fixtures.nix common)
     // (import ./event-stream-parity.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
