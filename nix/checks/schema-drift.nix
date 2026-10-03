@@ -784,7 +784,8 @@ checkedMerge {
   # env var read anywhere in non-test cmd/launcher source must be a schema
   # knob, a document artifact, a Box env name (promptassembly-boxenv.nix), or
   # in nonKnobEnvNames, so a new os.Getenv in an internal package cannot go
-  # unregistered (issue #3751).
+  # unregistered (issue #3751). The reverse scan also resolves names held in a
+  # const/var (see boundNames).
   launcher-env-coverage =
     let
       schema = import ../../lib/env-schema.nix;
@@ -846,6 +847,9 @@ checkedMerge {
         "SPINDRIFT_REPORT_FD" # report FD handed to a child
         "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path
         "REGISTRY_PROXY_TCP_SECRET" # launcher-minted, read by driver-exec registry helpers
+        "SIGNAL_SOCKET_ENDPOINT" # launcher-minted, read by driver-exec signal helper
+        "SIGNAL_SOCKET_SECRET" # launcher-minted, read by driver-exec signal helper
+        "REGISTRY_PROXY_MANIFEST" # launcher-minted, read by driver-exec bindregistry
         # Naming-convention fallback for --secret-cmd, not a registered knob.
         "SECRET_CMD"
       ];
@@ -859,8 +863,39 @@ checkedMerge {
           )
         )
       );
-      parts = builtins.split ''(os\.Getenv|getenv|getenvArtifact|docArtifact)\("([A-Z_][A-Z0-9_]*)"[,)]'' treeGoSrc;
-      goEnvNames = map (m: builtins.elemAt m 1) (filter builtins.isList parts);
+      # Fragments shared across the passes below so they cannot drift apart.
+      readerPattern = "os\\.Getenv|os\\.LookupEnv|getenv|getenvArtifact|docArtifact";
+      identRe = "[A-Za-z_][A-Za-z0-9_]*";
+      envNameRe = "[A-Z_][A-Z0-9_]*";
+      matches = re: filter builtins.isList (builtins.split re treeGoSrc);
+      # Groups: 1 reader, 2 env name.
+      literalNames = map (m: builtins.elemAt m 1) (matches ''(${readerPattern})\("(${envNameRe})"[,)]'');
+      # An env name held in a const/var or short var decl (`:=`), typed or not,
+      # and read as os.Getenv(ident) or os.Getenv(pkg.Ident). Matching is by
+      # identifier name, not scope: an unrelated `ident = "ALL_CAPS"` anywhere in
+      # the tree whose ident is also read as an env name would surface here,
+      # which fails loudly (safe direction). Not resolved: struct-field or
+      # parameter indirection (os.Getenv(f.envName)) and os.Getenv passed as a
+      # function value, which need a Go parser; nor raw-string (`FOO`),
+      # multi-name (a, b = "A", "B"), or concatenated bindings.
+      # Groups: 1 reader, 2 optional `pkg.` prefix, 3 identifier.
+      readIdents = map (m: builtins.elemAt m 2) (
+        matches ''(${readerPattern})\((${identRe}\.)?(${identRe})[,)]''
+      );
+      # Groups: 1 first token before `=`, 2 optional second token, 3 env name.
+      # For `const fooEnv string = ...` the bound ident is token 1 and token 2
+      # is the type. An untyped binding's match starts one word early (`const`
+      # at top level; inside a `const (...)` block the previous line's last
+      # word, often a comment word, as [[:space:]] crosses newlines), so the
+      # ident lands in token 2 (a type may be `pkg.Name`, hence the dot). Keep
+      # the binding if either token is read; a stray token 1 that is itself a
+      # read ident can only add a false positive.
+      boundNames = map (m: builtins.elemAt m 2) (
+        filter (
+          m: builtins.elem (builtins.elemAt m 0) readIdents || builtins.elem (builtins.elemAt m 1) readIdents
+        ) (matches ''(${identRe})[[:space:]]*([A-Za-z0-9_.]+)?[[:space:]]*:?=[[:space:]]*"(${envNameRe})"'')
+      );
+      goEnvNames = literalNames ++ boundNames;
       extraInGo = subtractLists (
         schemaEnvNames ++ documentArtifacts ++ boxEnvNames ++ nonKnobEnvNames
       ) goEnvNames;
