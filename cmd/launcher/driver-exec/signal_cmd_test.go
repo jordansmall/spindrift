@@ -17,6 +17,7 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/signalclient"
 	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/signalwire"
 )
@@ -716,9 +717,9 @@ func TestRunSignal_NoRouteAcceptsADestination(t *testing.T) {
 			}
 		}
 
-		client, base, err := signalClient(os.Getenv("SIGNAL_SOCKET_ENDPOINT"))
+		client, base, err := signalclient.New(os.Getenv("SIGNAL_SOCKET_ENDPOINT"))
 		if err != nil {
-			t.Fatalf("signalClient: %v", err)
+			t.Fatalf("signalclient.New: %v", err)
 		}
 		req, err := http.NewRequest(http.MethodPost, base+"/comment", strings.NewReader(`{"body":"x","issue":7,"labels":["bug"],"branch":"main"}`))
 		if err != nil {

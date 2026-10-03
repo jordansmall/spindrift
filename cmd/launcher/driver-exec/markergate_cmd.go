@@ -7,6 +7,7 @@ import (
 	"io"
 
 	"spindrift.dev/launcher/internal/markergate"
+	"spindrift.dev/launcher/internal/signalclient"
 )
 
 // isMarkerGateInvocation reports whether args (os.Args[1:]) selects the
@@ -108,7 +109,7 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 			OriginalOutcomeLine: *flags.originalOutcomeLine,
 			LogPath:             *flags.logPath,
 			SignalCarrier:       *flags.signalCarrier,
-			SignalStatus:        signalStatusFunc,
+			SignalStatus:        signalclient.Status,
 		}
 		prompt, promptErr := markergate.RenderNudgePrompt(cfg)
 		printScanErr(fs, promptErr)
@@ -137,7 +138,7 @@ func runMarkerGate(args []string, stdout io.Writer) int {
 		OutcomeViaBackstop:       *flags.outcomeViaBackstop,
 		ResumeExitCode:           *flags.resumeExitCode,
 		SignalCarrier:            *flags.signalCarrier,
-		SignalStatus:             signalStatusFunc,
+		SignalStatus:             signalclient.Status,
 	})
 	printScanErr(fs, resolveErr)
 	return emitJSON(fs, stdout, resolution)
