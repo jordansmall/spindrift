@@ -663,6 +663,19 @@ func compactBacklogRow(width int, marker, number, title string, labels []string)
 	return header + compactQueueTitleLine(width, title)
 }
 
+// pinNarrowAmbiguousWidth makes go-runewidth agree with lipgloss/ansi, which lay
+// out the frame and never apply the East Asian ambiguous-width rule. Left to its
+// own init (RUNEWIDTH_EASTASIAN, CJK LANG/LC_*), runewidth measures "…" and the
+// box-drawing runes as 2 columns, so truncateWithEllipsis panics on a negative
+// Repeat count and renderTitledTopBorder drifts (issue #4248). It mutates
+// runewidth's process-wide default, so every go-runewidth user in the binary
+// inherits it once this package is imported.
+func pinNarrowAmbiguousWidth() {
+	runewidth.DefaultCondition.EastAsianWidth = false
+}
+
+func init() { pinNarrowAmbiguousWidth() }
+
 // truncateWithEllipsis fits s into exactly width display columns, marking the
 // cut with a trailing "…" (issue #1779). runewidth.Truncate can stop a column
 // short when a wide rune straddles the boundary, so the result is re-measured

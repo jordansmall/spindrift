@@ -3,6 +3,8 @@ package console
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -3835,6 +3837,55 @@ func TestPadDisplay_TruncatesWithEllipsis(t *testing.T) {
 	}
 	if w := runewidth.StringWidth(got); w != 10 {
 		t.Errorf("padDisplay(...) = %q with display width %d, want exactly 10", got, w)
+	}
+}
+
+// Issue #4248: under an East Asian locale go-runewidth counts "…" and the
+// box-drawing runes as 2 columns; the pin keeps truncation and borders on width.
+func TestPinNarrowAmbiguousWidth_EastAsianLocale_TruncationLandsOnWidth(t *testing.T) {
+	old := runewidth.DefaultCondition.EastAsianWidth
+	t.Cleanup(func() { runewidth.DefaultCondition.EastAsianWidth = old })
+	runewidth.DefaultCondition.EastAsianWidth = true
+
+	pinNarrowAmbiguousWidth()
+
+	cases := []struct {
+		name string
+		got  string
+		want int
+	}{
+		{"clip", clip("a long issue title here", 10, true), 10},
+		{"padDisplay", padDisplay("supercalifragilisticexpialidocious", 10), 10},
+		{"border", ansi.Strip(renderTitledTopBorder(20, "a long panel title here", RoleDim, lipgloss.RoundedBorder())), 20},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// ansi.StringWidth is the measurer lipgloss lays out with; runewidth
+			// would agree with itself and pass for the wrong reason.
+			if w := ansi.StringWidth(c.got); w != c.want {
+				t.Errorf("width = %d, want %d: %q", w, c.want, c.got)
+			}
+		})
+	}
+}
+
+const pinInitChildEnv = "SPINDRIFT_PIN_INIT_CHILD"
+
+// Issue #4248: the test above calls pinNarrowAmbiguousWidth() directly, so it
+// stays green if the package init stops wiring it. go-runewidth reads
+// RUNEWIDTH_EASTASIAN in its own init, so only a fresh process shows whether
+// this package's init overrides it.
+func TestPinNarrowAmbiguousWidth_PackageInitOverridesEnv(t *testing.T) {
+	if os.Getenv(pinInitChildEnv) != "" {
+		if runewidth.DefaultCondition.EastAsianWidth {
+			t.Fatal("EastAsianWidth = true at start-up, want package init to pin it narrow")
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestPinNarrowAmbiguousWidth_PackageInitOverridesEnv$")
+	cmd.Env = append(os.Environ(), "RUNEWIDTH_EASTASIAN=1", pinInitChildEnv+"=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child failed: %v\n%s", err, out)
 	}
 }
 
