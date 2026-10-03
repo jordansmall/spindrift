@@ -846,6 +846,7 @@ checkedMerge {
         # Launcher-internal plumbing, never set by an operator.
         "SPINDRIFT_REPORT_FD" # report FD handed to a child
         "SPINDRIFT_DAEMON_PROGRAM" # daemon wrapper's own program path
+        "SPINDRIFT_SEAM_FIXTURES_DIR" # test-only override read by internal/seamtest (issue #4280)
         "REGISTRY_PROXY_TCP_SECRET" # launcher-minted, read by driver-exec registry helpers
         "SIGNAL_SOCKET_ENDPOINT" # launcher-minted, read by driver-exec signal helper
         "SIGNAL_SOCKET_SECRET" # launcher-minted, read by driver-exec signal helper
