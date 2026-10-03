@@ -46,7 +46,14 @@ let
   };
 
   # Rendered artifacts for the Go seam tests (issue #4280).
-  seamFixtures = import ./seam-fixtures.nix { inherit pkgs batsHarness; };
+  seamFixtures = import ./seam-fixtures.nix {
+    inherit
+      pkgs
+      batsHarness
+      dockerHarness
+      bwrapHarness
+      ;
+  };
 
   # Bound once and shared verbatim by every dogfood mkHarness call below, so a
   # future nix/dogfood-defaults.nix key threaded into only one call site can't

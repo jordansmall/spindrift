@@ -7,7 +7,12 @@
 # There is deliberately no "code-comments" contract fixture: that policy was
 # inlined into the prompts (#3505, file removed in 78f2611f), so no rendered
 # artifact exists to copy.
-{ pkgs, batsHarness }:
+{
+  pkgs,
+  batsHarness,
+  dockerHarness,
+  bwrapHarness,
+}:
 let
   inherit (batsHarness) internals;
   files = {
@@ -19,6 +24,8 @@ let
     "agent-paths-preamble.sh" = internals.agentPathsPreambleFile;
     "fragment-registry.sh" = internals.fragmentRegistryFile;
     "launcher-run-input.json" = internals.runInputDocumentFile;
+    "launcher-run-input-docker.json" = dockerHarness.internals.runInputDocumentFile;
+    "launcher-run-input-bwrap.json" = bwrapHarness.internals.runInputDocumentFile;
     "prompts" = internals.promptDir;
     "nix-checks-skill.md" = ../skills/nix-checks/SKILL.md;
   };
