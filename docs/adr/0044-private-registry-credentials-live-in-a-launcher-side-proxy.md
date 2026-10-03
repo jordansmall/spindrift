@@ -730,6 +730,14 @@ passes to the Box, and requires on every forwarded request. That is an
 expansion of this ADR's threat model rather than a transport detail, which is
 why it is recorded here and not left to an implementation ticket.
 
+> **Update.** The amendment below (issue #3111) found this paragraph sized the
+> exposure too small. The TCP fallback binds every interface, not loopback
+> (`dispatch/box.go`), because on a plain Linux docker bridge the Box dials the
+> host at the bridge IP. So the gate has to cover anything that can route to
+> the host, not only a local process on the operator's machine. The per-run
+> secret argued for here is that gate (`registrymanifest.TCPSecretHeader`);
+> narrowing the bind itself is issue #3772.
+
 The read-only invariant is unaffected: the `GET`/`HEAD` gate runs before the
 `Rewrite` hook regardless of how a request arrived, so a write is still refused
 without ever reaching the credential.
