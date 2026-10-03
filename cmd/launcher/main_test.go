@@ -1596,6 +1596,28 @@ func TestLoadConfig_EnvBeatsDocument(t *testing.T) {
 	}
 }
 
+// Folded from tests/run-label-lifecycle.bats (issue #4284): IN_PROGRESS_LABEL
+// and FAILED_LABEL env vars reach the dispatch label mapping, beating the
+// document's settings.
+func TestLoadConfig_LabelEnvOverridesDocumentAndDefaults(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+
+	loadedDoc = &inputdoc.Document{Settings: map[string]string{
+		"IN_PROGRESS_LABEL": "doc-wip",
+		"FAILED_LABEL":      "doc-broken",
+	}}
+	t.Setenv("IN_PROGRESS_LABEL", "wip")
+	t.Setenv("FAILED_LABEL", "broken")
+
+	l := dispatchLabels(loadConfig())
+	if l.InProgress != "wip" {
+		t.Errorf("InProgress = %q, want wip", l.InProgress)
+	}
+	if l.Failed != "broken" {
+		t.Errorf("Failed = %q, want broken", l.Failed)
+	}
+}
+
 // The prompt-dir specialization of
 // TestLoadConfig_DocumentSettingBeatsSchemaDefault: the document's settings
 // value backs spindriftPromptDir ahead of the schemaFlags table (issue #2200).
@@ -3426,6 +3448,39 @@ func TestDispatchConfig_ForwardsSignalCarrierAndNetworkMode(t *testing.T) {
 	}
 	if cfg.NetworkMode != "no-host-loopback" {
 		t.Errorf("dispatchConfig() NetworkMode = %q, want %q", cfg.NetworkMode, "no-host-loopback")
+	}
+}
+
+// Folded from tests/run-research-lifecycle.bats (issue #4284): the Dispatch
+// kind name and --self-contained must reach dispatch.Config, since the Box
+// reads DISPATCH_KIND and SELF_CONTAINED off it.
+func TestDispatchConfig_ForwardsKindAndSelfContained(t *testing.T) {
+	cases := []struct {
+		name          string
+		kind          *dispatchkind.Descriptor
+		selfContained bool
+		wantKind      string
+	}{
+		{"work", dispatchkind.Work, false, "work"},
+		{"research", dispatchkind.Research, false, "research"},
+		{"research self-contained", dispatchkind.Research, true, "research"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cf := forge.NewFake()
+			it := forge.NewFake()
+			c := applyDispatchKind(minimalValidConfig(), tc.kind)
+			c.selfContained = tc.selfContained
+
+			cfg := dispatchConfig(c, it, testWired(it), cf, forge.Capabilities{})
+
+			if cfg.Kind != tc.wantKind {
+				t.Errorf("dispatchConfig() Kind = %q, want %q", cfg.Kind, tc.wantKind)
+			}
+			if cfg.SelfContained != tc.selfContained {
+				t.Errorf("dispatchConfig() SelfContained = %v, want %v", cfg.SelfContained, tc.selfContained)
+			}
+		})
 	}
 }
 

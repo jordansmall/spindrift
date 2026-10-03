@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/exec"
@@ -887,6 +888,40 @@ body
 	}
 	if lc != nil {
 		t.Fatalf("bootstrap() on readiness error = %+v, want nil launch context", lc)
+	}
+}
+
+// Folded from tests/run-dispatch-no-build.bats (issue #4284): `dispatch
+// --no-build` with the image absent exits non-zero naming `spindrift build`,
+// never building.
+// RUNNER_KIND=oci with a stub bwrap runtime makes the OCI adapter's
+// readiness check hit "image absent" with no real podman or network.
+func TestMainRun_DispatchNoBuild_ImageAbsentFailsFastNamingBuild(t *testing.T) {
+	stubExecutableOnPath(t, "bwrap")
+	checkout := mustSeedableCheckout(t)
+
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("GH_TOKEN", "test-token")
+	t.Setenv("GIT_USER_NAME", "Test")
+	t.Setenv("GIT_USER_EMAIL", "test@example.com")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
+	t.Setenv("CODE_FORGE", "local")
+	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
+	t.Setenv("BASE_BRANCH", "main")
+	t.Setenv("MERGE_MODE", "immediate")
+	t.Setenv("RUNTIME", "bwrap")
+	t.Setenv("RUNNER_KIND", "oci")
+	t.Setenv("ISSUE_TRACKER", "local")
+	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
+	t.Chdir(checkout)
+
+	var stderr bytes.Buffer
+	code := runVerb([]string{"dispatch", "--no-build"}, &stderr)
+	if code == 0 {
+		t.Errorf("exit code = 0, want non-zero")
+	}
+	if !strings.Contains(stderr.String(), "spindrift build") {
+		t.Errorf("stderr = %q, want it to name `spindrift build`", stderr.String())
 	}
 }
 
