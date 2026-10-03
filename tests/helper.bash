@@ -183,6 +183,10 @@ setup_entrypoint_env() {
   setup_fakes
   setup_bare_repo
   set_box_env
+  # Pinned off rather than inherited from set_box_env: these suites' default
+  # cell is the inline review loop (BOX_REVIEW_LOOP_INLINE below), so tests of
+  # the orchestrator path export ORCHESTRATOR_ENABLED=1 themselves.
+  export ORCHESTRATOR_ENABLED=""
   # Pinned rather than inherited from set_box_env: these suites were written
   # against the log carrier, so pin it and let the socket tests override.
   export BOX_SIGNAL_CARRIER=log
