@@ -3001,7 +3001,9 @@ package resolves them from `SPINDRIFT_SEAM_FIXTURES_DIR`, else by running
 `nix build .#seam-fixtures`, so `go test -tags integration ./...` in the
 devshell builds them automatically and skips where `nix` is absent. `nix flake
 check` and the in-box `nix build .#checks-inbox` both run them through
-`launcher-go-seam-test`, which sets the variable to the built store path;
+`launcher-go-seam-test`, which sets the variable to the built store path. The
+bats checks export the same variable and `tests/helper.bash` reads the
+contracts and preambles from it, so both suites test one set of bytes.
 `seam-fixtures-names-match-resolver` pins the Nix names against
 `cmd/launcher/internal/seamtest/fixtures.json`. There is no `code-comments`
 contract fixture: that policy was inlined into the prompts (#3505), so no
