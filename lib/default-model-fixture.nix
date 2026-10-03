@@ -2,7 +2,7 @@
 # checks import it rather than re-type the literals, and it is deliberately not
 # derived from lib/env-schema.nix, so a schema-default bump fails those checks
 # instead of validating against itself; nix/checks/schema-drift.nix proves it
-# has not drifted. `nix run .#regen` renders the bats, Go, and docs copies.
+# has not drifted. `nix run .#regen` renders the Go and docs copies.
 {
   # Keys match lib/env-schema.nix's attrset keys 1:1, so a check can zip the
   # two key-for-key.
