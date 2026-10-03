@@ -2,10 +2,13 @@ package waves
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // Regression test for #524: OriginSelective shares drainMaxJobs with the queue
@@ -198,5 +201,87 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("second Run: got %d run calls, want 1", len(fr.RunCalls))
+	}
+}
+
+// ADR 0019, folded from tests/run-dependency-waves.bats: one invocation
+// dispatches only the blocker and carries it through merge during settle; the
+// dependent waits for a fresh invocation, which then sees the blocker's merged
+// PR and dispatches it.
+func TestRun_Discovered_DependencyEdge_DispatchesDependentOnNextInvocation(t *testing.T) {
+	const prURL = "https://github.com/owner/repo/pull/1"
+
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Body: "depends on #1", Labels: []string{label}})
+	fc.SetPR("agent/issue-1", forge.PR{URL: prURL})
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		if box.Output != nil && box.Issue == "1" {
+			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=1 landing=%s status=ready note=ok nonce=%s\n",
+				prURL, box.Env["RUN_NONCE"])
+		}
+		return nil
+	}
+
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := newSettle(fc, fc)
+	claimer := NewLabelClaimer(fc, label, testInProgressLabel)
+	edges := map[string][]string{"2": {"1"}}
+
+	plan, err := NewPlan(c, Input{
+		Origin: OriginDiscovered,
+		Batch:  Batch{Issues: []Issue{{Number: "1", Title: "blocker"}, {Number: "2", Title: "dependent"}}, Edges: edges},
+	})
+	if err != nil {
+		t.Fatalf("NewPlan: %v", err)
+	}
+	out := testutil.CaptureStdout(t, func() {
+		if err := run(c, nil, fc, fc, dir, f, s, plan, claimer); err != nil {
+			t.Fatalf("first Run: %v", err)
+		}
+	})
+
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
+		t.Fatalf("first Run: RunCalls = %v, want exactly issue 1", fr.RunCalls)
+	}
+	if !strings.Contains(out, "1 issue(s) remain for a later invocation") {
+		t.Errorf("first Run must report the held dependent; got:\n%s", out)
+	}
+	iss1, err := fc.Issue("1")
+	if err != nil {
+		t.Fatalf("Issue(1): %v", err)
+	}
+	if !containsLabel(iss1.Labels, c.CompleteLabel) {
+		t.Errorf("blocker must reach %q through settle; labels=%v", c.CompleteLabel, iss1.Labels)
+	}
+	iss2, err := fc.Issue("2")
+	if err != nil {
+		t.Fatalf("Issue(2): %v", err)
+	}
+	if !containsLabel(iss2.Labels, label) || containsLabel(iss2.Labels, testInProgressLabel) {
+		t.Errorf("dependent must stay unclaimed on %q after the first Run; labels=%v", label, iss2.Labels)
+	}
+
+	plan, err = NewPlan(c, Input{
+		Origin: OriginDiscovered,
+		Batch:  Batch{Issues: []Issue{{Number: "2", Title: "dependent"}}, Edges: edges},
+	})
+	if err != nil {
+		t.Fatalf("NewPlan (second): %v", err)
+	}
+	if err := run(c, nil, fc, fc, dir, f, s, plan, claimer); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if len(fr.RunCalls) != 2 || fr.RunCalls[1].Issue != "2" {
+		t.Fatalf("second Run: RunCalls = %v, want issue 2 dispatched second", fr.RunCalls)
 	}
 }

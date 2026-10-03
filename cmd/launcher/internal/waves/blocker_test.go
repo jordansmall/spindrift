@@ -14,6 +14,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // concurrencyTrackingFake wraps forge.Fake's DepsOf with an in-flight counter
@@ -366,8 +367,15 @@ func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "99", State: "CLOSED"})
 	// No PR registered: this is human-handled work absorbed outside spindrift.
 
-	if !(Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
+	var ready bool
+	out := testutil.CaptureStdout(t, func() {
+		ready = (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{})
+	})
+	if !ready {
 		t.Error("Readiness.Ready: want true for closed issue with no PR, got false")
+	}
+	if !strings.Contains(out, "blocker #99 is closed (no discoverable PR); treating as satisfied") {
+		t.Errorf("output must explain the closed-blocker fallback; got:\n%s", out)
 	}
 }
 
