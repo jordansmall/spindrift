@@ -94,3 +94,25 @@ func TestInstallFakes(t *testing.T) {
 		t.Fatalf("symlink = %q, %v; want %q", got, err, exe)
 	}
 }
+
+func TestLoadConfigFallsBackToWorkingDirFile(t *testing.T) {
+	type cfg struct{ N int }
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv(configEnv("bwrap"), "")
+	var got cfg
+	if err := loadConfig("bwrap", &got); err == nil {
+		t.Fatal("no env and no file: want error")
+	}
+	WriteFakeConfigFile(t, dir, "bwrap", cfg{N: 5})
+	if err := loadConfig("bwrap", &got); err != nil || got.N != 5 {
+		t.Fatalf("fallback file: got %+v, err %v; want N=5", got, err)
+	}
+	// An explicit env var wins over the file.
+	for k, v := range WriteFakeConfig(t, "bwrap", cfg{N: 9}) {
+		t.Setenv(k, v)
+	}
+	if err := loadConfig("bwrap", &got); err != nil || got.N != 9 {
+		t.Fatalf("env: got %+v, err %v; want N=9", got, err)
+	}
+}
