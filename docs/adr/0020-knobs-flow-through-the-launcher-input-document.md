@@ -114,3 +114,11 @@ on the same schedule — they are operator-facing knobs like any other.
   flags keep their meanings. A knob's runtime default still comes from the
   schema (via the generated defaults map) when neither document nor flag
   supplies it.
+
+## Amendment (issue #4290): a set-but-empty bool knob is an explicit off
+
+The precedence chain above treats an empty env value as unset. For a bool-kind
+schema knob that rule is relaxed: set-but-empty (what `--orchestrator=false`
+or `AUTO_FORMAT=` produces) is an explicit off and beats a document value of
+on and the schema default, in the launcher and in the Box defaults preamble.
+Every other knob still treats an empty env value as unset.
