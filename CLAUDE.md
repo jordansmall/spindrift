@@ -220,9 +220,9 @@ grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 Without it a failure prints only the failing derivation's store path
 and a `[build failed]` line, so the compile or test error costs a second
 turn running `nix log`. Pass no `-j`, `--max-jobs`, or `--cores` flags
-alongside it: the Box's baked `nix.conf` pins `cores = 4` (lib/image.nix's
-`nixConfigFile`), and Nix's own default already builds one derivation at
-a time, so hand-tuning either on top is guesswork. The one exception, an
+alongside it: the Box's baked `nix.conf` pins `cores = 4` and
+`max-jobs = 2` (lib/image.nix's `nixConfigFile`), so hand-tuning either
+on top is guesswork. The one exception, an
 `EXIT:137` kill, is below.
 
 A check failure is deterministic: the same derivation hash fails the same
@@ -236,10 +236,10 @@ check result at all, so a re-run is legitimate there, unlike a real
 failure. Under the full `nix flake check`, re-run the scoped
 `checks-inbox` target instead — a smaller target, not a smaller
 `--cores`. Under `checks-inbox` itself there is no smaller target left,
-so `--cores 1` is the one sanctioned exception to the no-resource-flags
-rule above: `max-jobs` is already 1, which leaves the concurrent compiles
-or test binaries inside a single derivation as the thing actually holding
-memory. Reach for it once, only after an `EXIT:137`, and never for a
+so `--max-jobs 1 --cores 1` is the one sanctioned exception to the
+no-resource-flags rule above: it drops the two concurrent derivations to
+one and the concurrent compiles or test binaries inside it to one as
+well. Reach for it once, only after an `EXIT:137`, and never for a
 check that genuinely failed.
 
 Nix flakes only evaluate git-tracked files: `git add` any new file (e.g.

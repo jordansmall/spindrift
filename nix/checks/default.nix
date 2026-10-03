@@ -37,7 +37,8 @@ let
 
   goCheckEnv = import ./go-check-env.nix;
 
-  imageNixCores = import ./image-nix-cores.nix;
+  imageNixCores = import ./image-nix-setting.nix "cores";
+  imageNixMaxJobs = import ./image-nix-setting.nix "max-jobs";
 
   common = {
     inherit
@@ -52,6 +53,7 @@ let
       mkFragmentParity
       goCheckEnv
       imageNixCores
+      imageNixMaxJobs
       ;
   };
   sourceChecks =

@@ -738,6 +738,10 @@ in
       echo "nix.conf is missing cores = 4" >&2
       exit 1
     }
+    grep -q 'max-jobs = 2' nix.conf || {
+      echo "nix.conf is missing max-jobs = 2" >&2
+      exit 1
+    }
     touch $out
   '';
 

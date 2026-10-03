@@ -28,9 +28,8 @@ running `nix log`:
   grep -nE 'error|FAIL' "$TMPDIR/checks.log" || tail -n 40 "$TMPDIR/checks.log"
 
 That invocation is complete as written — pass no `-j`, `--max-jobs` or
-`--cores` flags. The Box's baked `nix.conf` pins `cores = 4`, and Nix's
-own default already builds one derivation at a time, so hand-tuning
-either is guesswork. The one exception, an `EXIT:137` kill, is below.
+`--cores` flags. The Box's baked `nix.conf` pins `cores = 4` and
+`max-jobs = 2`, so hand-tuning either is guesswork. The one exception, an `EXIT:137` kill, is below.
 
 A check failure is deterministic: the same derivation hash fails the same way
 however it is scheduled. Never re-run a failed check unchanged — not under
@@ -42,9 +41,9 @@ memory) is the exception: that is not a check result at all, so a re-run is
 legitimate there, unlike a real failure. Under the full `nix flake check`,
 re-run the scoped `checks-inbox` target instead — a smaller target, not a
 smaller `--cores`. Under `checks-inbox` itself there is no smaller target left,
-so `--cores 1` is the one sanctioned exception to the no-resource-flags rule
-above: `max-jobs` is already 1, which leaves the concurrent compiles or test
-binaries inside a single derivation as the thing actually holding memory. Reach
+so `--max-jobs 1 --cores 1` is the one sanctioned exception to the
+no-resource-flags rule above: it drops the two concurrent derivations to one
+and the concurrent compiles or test binaries inside it to one as well. Reach
 for it once, only after an `EXIT:137`, and never for a check that genuinely
 failed.
 

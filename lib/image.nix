@@ -348,6 +348,9 @@ let
     # pure/hermetic, can't shell out to nproc here without IFD) -- so a
     # single Box's nix build never claims every core on hosts with many.
     cores = 4
+    # Two derivations at once lets independent checks overlap; more risks
+    # the Box's MEMORY_LIMIT and PIDS_LIMIT (each job gets `cores` threads).
+    max-jobs = 2
   '';
 
   # bwrap-only hardening (issue #2670), unrelated to nix-in-box. Always
