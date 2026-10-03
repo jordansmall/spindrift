@@ -155,10 +155,8 @@ let
     # real body rather than a hand-copied stand-in.
     GH_TOKEN_REFRESHER_ACTION_YML = ../../.github/actions/gh-token-refresher/action.yml;
     PROMPTS_DIR = ../../templates/default/prompts;
-    # The baked default prompt dir the `run` command mounts, plus a
-    # Consumer-configured one whose rendered content reaches the stubbed
-    # agent (#4).
-    PROMPT_PATH = batsHarness.internals.promptDir;
+    # A Consumer-configured prompt dir whose rendered content reaches the
+    # stubbed agent (#4).
     PROMPT_HARNESS_DIR = promptHarness.internals.promptDir;
     # The bats build host has no /agent/outcome-contract.md, so the
     # entrypoint-*.bats suites read the same canonical text an image would
@@ -198,11 +196,6 @@ let
     # reads the same directory). batsBuilderSetup stages only tests/, so a
     # BATS_TEST_DIRNAME-relative path cannot reach them.
     SKILLS_TEMPLATE_DIR = ../../templates/default/skills;
-    # The dogfood-only nix-checks skill body (issue #3223) the CHECK
-    # section's Nix lore moved into. Separate from SKILLS_TEMPLATE_DIR
-    # above because it is not harness-owned: it lives at the repo root and
-    # is baked only via nix/dogfood-skills.nix.
-    NIX_CHECKS_SKILL = ../../skills/nix-checks/SKILL.md;
     SKILLS_RUN_CMD = "${skillsHarness.internals.run}/bin/run";
     SKILLS_BWRAP_RUN_CMD = "${skillsBwrapHarness.internals.run}/bin/run";
     # Not read by bats, but forces Nix to realize

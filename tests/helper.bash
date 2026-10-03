@@ -4,13 +4,6 @@
 # depend on: FAKES_DIR, RUN_CMD / BUILD_CMD, ENTRYPOINT, PROMPTS_DIR, and
 # IMAGE_PATH.
 
-# Prints issue-prompt.md's OUTCOME section (issue #1901). Several prompt.bats
-# tests assert on this slice, so the sed anchor lives in one place.
-issue_prompt_outcome_section() {
-  local prompts="${PROMPTS_DIR:-$BATS_TEST_DIRNAME/../templates/default/prompts}"
-  sed -n '/^# OUTCOME$/,/^# IF BLOCKED$/p' "$prompts/issue-prompt.md"
-}
-
 # A missing or unreadable file counts as 0 rather than an empty string, so a
 # caller's integer comparison never throws.
 _count_matches() {
