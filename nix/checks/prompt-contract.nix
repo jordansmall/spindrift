@@ -15,6 +15,9 @@ let
     ;
   issuePromptSource = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
   researchPromptSource = builtins.readFile ../../templates/default/prompts/research-prompt.md;
+  reviewPromptSource = builtins.readFile ../../templates/default/prompts/review-prompt.md;
+  markerChannelById =
+    id: builtins.head (builtins.filter (r: r.id == id) promptContract.markerChannels);
   # Shared fixture for the prompt-contract-shared-obligation-violations-for-*
   # tests below (issue #2699): only `contentBySource` differs per test.
   fixtureObligations = [
@@ -973,7 +976,7 @@ in
   # placeholders on purpose.
   prompt-contract-issue-prompt-grammar-matches-outcome-field-shape =
     let
-      outcomeRow = builtins.head (builtins.filter (r: r.id == "outcome") promptContract.markerChannels);
+      outcomeRow = markerChannelById "outcome";
       expected =
         "Grammar: `${outcomeRow.token} "
         + (pkgs.lib.replaceStrings [ "issue=<num>" ] [ "issue=\${ISSUE_NUMBER}" ] outcomeRow.fieldShape)
@@ -982,6 +985,27 @@ in
     assert assertMsg (pkgs.lib.hasInfix expected issuePromptSource)
       "templates/default/prompts/issue-prompt.md's Grammar line must match the outcome markerChannels row's fieldShape verbatim, expected to find: ${expected}";
     pkgs.runCommand "prompt-contract-issue-prompt-grammar-matches-outcome-field-shape" { } "touch $out";
+
+  # No Go parser reads MarkerChannelFieldShapes' `VERDICT:` entry, so this
+  # check is that fieldShape's only pin (issue #4261).
+  prompt-contract-review-prompt-verdict-matches-review-verdict-field-shape =
+    let
+      verdictRow = markerChannelById "review-verdict";
+      expected = "${verdictRow.token} ${verdictRow.fieldShape}";
+      instruction =
+        "The first line must be exactly "
+        + concatStringsSep " or " (
+          map (v: "`${verdictRow.token} ${v}`") (pkgs.lib.splitString " | " verdictRow.fieldShape)
+        )
+        + " —";
+    in
+    assert assertMsg (builtins.elem expected (
+      pkgs.lib.splitString "\n" reviewPromptSource
+    )) "templates/default/prompts/review-prompt.md must have a line reading exactly: ${expected}";
+    assert assertMsg (pkgs.lib.hasInfix instruction reviewPromptSource)
+      "templates/default/prompts/review-prompt.md's first-line instruction must restate exactly the review-verdict fieldShape values, expected to find: ${instruction}";
+    pkgs.runCommand "prompt-contract-review-prompt-verdict-matches-review-verdict-field-shape" { }
+      "touch $out";
 
   # Cross-registry drift guard, so one marker spelling cannot diverge from the
   # other: markerChannels' `token` and validateMarkers' `marker` name the same
