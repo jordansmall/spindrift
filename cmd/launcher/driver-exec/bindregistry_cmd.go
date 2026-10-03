@@ -96,7 +96,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	}
 
 	if *lockfileScanWorkDir != "" {
-		runBindRegistryLockfileScan(stdout, *lockfileScanWorkDir)
+		bindregistry.WarnStaleLockfiles(stdout, *lockfileScanWorkDir)
 	}
 
 	// Resolved only when a mode that needs a live Forwarder will run, so a
@@ -149,31 +149,6 @@ func runBindRegistryClassification(stdout io.Writer, workDir, ecosystemEnvOutput
 	}
 
 	return 0
-}
-
-// runBindRegistryLockfileScan is lockfile-scan mode (issue #3199): at settle it warns
-// about any git-tracked lockfile still naming the run's Forwarder URL, a stale pin
-// that would otherwise ship silently in the PR. It parses REGISTRY_PROXY_MANIFEST
-// directly and never calls resolveRegistryProxyGate, which probes and can spawn the
-// Forwarder; a settle-time scan must never do that. Every failure path only warns.
-func runBindRegistryLockfileScan(stdout io.Writer, workDir string) {
-	if _, err := registrymanifest.Parse(os.Getenv(registrymanifest.EnvVar)); err != nil {
-		if errors.Is(err, registrymanifest.ErrAbsent) {
-			return
-		}
-		fmt.Fprintln(stdout, "==> WARNING: REGISTRY_PROXY_MANIFEST is malformed, skipping the lockfile Forwarder-URL scan: "+err.Error())
-		return
-	}
-
-	hits, err := bindregistry.ScanLockfilesForForwarder(workDir, bindregistry.ForwarderPort)
-	if err != nil {
-		fmt.Fprintln(stdout, "==> WARNING: lockfile Forwarder-URL scan failed, skipping: "+err.Error())
-		return
-	}
-
-	for _, hit := range hits {
-		fmt.Fprintln(stdout, "==> WARNING: "+hit.Ecosystem+" lockfile "+hit.Path+" still names the registry proxy Forwarder URL "+hit.MatchedURL+" — this will ship in the PR (issue #3199)")
-	}
 }
 
 // isMountedSocket confirms a manifest's unix endpoint is actually reachable in
