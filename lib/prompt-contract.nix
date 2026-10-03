@@ -723,6 +723,8 @@ rec {
     {
       id = "review-verdict";
       token = "VERDICT:";
+      # No Go code reads this fieldShape; pinned by
+      # prompt-contract-review-prompt-verdict-matches-review-verdict-field-shape.
       fieldShape = "APPROVE | BLOCK";
       defense = "structural";
       carrier = "subagent-first-line";
