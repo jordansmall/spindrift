@@ -36,6 +36,7 @@ let
   inherit (pkgs.lib)
     assertMsg
     concatStringsSep
+    escapeRegex
     hasInfix
     toLower
     ;
@@ -72,6 +73,22 @@ let
   skillText = normalize (skillRowByName skillName).src;
   normalizedFallbackText = normalize fallbackText;
 
+  # `hasInfix` would let "72" match inside "720" or "172", so a digit-appending
+  # edit would stay green. The boundary applies only at a digit edge of the needle:
+  # word needles keep matching inside punctuation.
+  isDigit = s: builtins.match "[0-9]" s != null;
+  containsClause =
+    needle: text:
+    let
+      first = builtins.substring 0 1 needle;
+      last = builtins.substring (builtins.stringLength needle - 1) 1 needle;
+      lead = if isDigit first then "(.*[^0-9])?" else ".*";
+      trail = if isDigit last then "([^0-9].*)?" else ".*";
+    in
+    # An empty needle would hand `substring` a start of -1 and throw opaquely.
+    assert assertMsg (needle != "") "${skillName} fragment parity: a clause normalizes to empty";
+    builtins.match "${lead}${escapeRegex needle}${trail}" text != null;
+
   remedy = "either re-sync the fallback with the skill, or -- if the skill's discipline genuinely changed -- update this check's clause list to match.";
 
   # `skillClause`/`fallbackClause` default to `clause`. Per-side wording exists
@@ -88,9 +105,9 @@ let
         asFallback = pkgs.lib.optionalString differs " (as \"${fallbackClause}\")";
         asSkill = pkgs.lib.optionalString differs " (as \"${skillClause}\")";
       in
-      assert assertMsg (hasInfix (normalize skillClause) skillText)
+      assert assertMsg (containsClause (normalize skillClause) skillText)
         "${skillName} fallback drift: ${skillDesc} no longer states \"${skillClause}\", which ${fallbackDesc} restates${asFallback} -- ${remedy}";
-      assert assertMsg (hasInfix (normalize fallbackClause) normalizedFallbackText)
+      assert assertMsg (containsClause (normalize fallbackClause) normalizedFallbackText)
         "${skillName} fallback drift: ${fallbackDesc} no longer states \"${fallbackClause}\", which ${skillDesc} teaches${asSkill} -- ${remedy}";
       pkgs.runCommand "${skillName}-fragment-parity-clause-${c.name}" { } "touch $out";
   };
