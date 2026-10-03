@@ -1331,7 +1331,6 @@ Full alias-to-domain mapping:
 | `perSystem.spindrift.settings.models.workerModel` | `perSystem.spindrift.agents.models.worker` |
 | `perSystem.spindrift.settings.promptSkillIteration.autoFormat` | `perSystem.spindrift.agents.format.enable` |
 | `perSystem.spindrift.settings.promptSkillIteration.autoLint` | `perSystem.spindrift.agents.lint.enable` |
-| `perSystem.spindrift.settings.promptSkillIteration.orchestratorEnabled` | `perSystem.spindrift.dispatch.orchestrator.enable` |
 | `perSystem.spindrift.settings.repository.boxForgeAndIssueAccess` | `perSystem.spindrift.forge.boxAccess` |
 | `perSystem.spindrift.settings.repository.codeForge` | `perSystem.spindrift.forge.backend` |
 | `perSystem.spindrift.settings.repository.codeForgeAccumulationRepoDir` | `perSystem.spindrift.forge.accumulationRepoDir` |

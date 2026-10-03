@@ -960,18 +960,6 @@ in
     boxEnv = true;
     boxEnvOnly = true;
   };
-  orchestratorEnabled = {
-    env = "ORCHESTRATOR_ENABLED";
-    group = "dispatch";
-    flag = "orchestrator";
-    default = true;
-    kind = "bool";
-    doc = "master feature-flag switch (issue #1996; canonicalized #2047): when enabled, forks entrypoint.sh's rendered prompt/--agents JSON onto the orchestrator-on path -- the implementor pass hands off to the in-box Go orchestrator instead of calling driver-exec directly, and every other orchestrator-conditioned fork (e.g. the filer's write-mechanism gate) reads this same switch; on by default; setting it off (false) keeps the direct driver-exec path, which is legacy and removed by ADR 0058's port (#4275)";
-    flakeOption = true;
-    nixSubPath = "orchestrator.enable";
-    boxEnv = true;
-    boxEnvOnly = true;
-  };
   issueNumber = {
     env = "ISSUE_NUMBER";
     group = "issues";

@@ -1,23 +1,19 @@
 #!/usr/bin/env bats
-# The harness varies --worker-model between arms and holds
-# --orchestrator-enabled fixed for both (issue #2057 slice 1).
+# The harness varies --worker-model between arms (issue #2057 slice 1).
 
-@test "dry-run: off arm omits worker model, on arm sets it, both share orchestrator value" {
+@test "dry-run: off arm omits worker model, on arm sets it, the rest of the command is shared" {
   run env -i \
     PATH="$PATH" \
     AB_DRY_RUN=1 AB_CONFIRM=1 \
     AB_REMOTE="git@github.com:acme/mirror.git" \
     AB_REPO_SLUG="acme/mirror" \
     AB_MODEL="claude-sonnet-5" \
-    AB_ORCH="" \
     AB_OUTDIR="$BATS_TEST_TMPDIR/ab-out" \
     bash "${AB_ORCHESTRATOR_SH:-$BATS_TEST_DIRNAME/../ab-orchestrator.sh}" 123
   [ "$status" -eq 0 ]
   echo "$output" | grep -- "--worker-model ''"
   # The on arm uses AB_WORKER_ON, which defaults to AB_MODEL.
   echo "$output" | grep -- "--worker-model claude-sonnet-5"
-  # Both arms must carry the same orchestrator value, here the empty one.
-  ! echo "$output" | grep -- "--orchestrator-enabled 1"
 }
 
 @test "--breakdown attributes tokens per role+model with injected pricing" {

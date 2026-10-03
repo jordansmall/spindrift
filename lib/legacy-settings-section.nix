@@ -46,7 +46,6 @@
   mergePollInterval = "branches";
   mergePollTimeout = "branches";
   model = "models";
-  orchestratorEnabled = "promptSkillIteration";
   overlapGate = "concurrency";
   pidsLimit = "sandbox";
   podmanNetwork = "sandbox";

@@ -326,21 +326,19 @@ func TestBuildBoxEnvForwardsTrackerAxisAndForgeBackend(t *testing.T) {
 
 // Issue #2533: each var is present only as "1" when true and absent rather
 // than "0" when false, matching BOX_FULLY_LOCAL's forwarding shape.
-func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisionedReviewLoop(t *testing.T) {
+func TestBuildBoxEnvForwardsFilerEnabledWorkerProvisioned(t *testing.T) {
 	env := mustBuildBoxEnv(t, Config{
-		FilerEnabled:           true,
-		WorkerProvisioned:      true,
-		ReviewLoopInline:       true,
-		ReviewLoopOrchestrator: true,
+		FilerEnabled:      true,
+		WorkerProvisioned: true,
 	}, "3", "T", 0, "", "")
-	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED", "BOX_REVIEW_LOOP_INLINE", "BOX_REVIEW_LOOP_ORCHESTRATOR"} {
+	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED"} {
 		if got := env[name]; got != "1" {
 			t.Errorf("%s: got %q, want %q", name, got, "1")
 		}
 	}
 
 	env = mustBuildBoxEnv(t, Config{}, "3", "T", 0, "", "")
-	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED", "BOX_REVIEW_LOOP_INLINE", "BOX_REVIEW_LOOP_ORCHESTRATOR"} {
+	for _, name := range []string{"BOX_FILER_ENABLED", "BOX_WORKER_PROVISIONED"} {
 		if _, ok := env[name]; ok {
 			t.Errorf("%s should be absent when the Config field is false", name)
 		}

@@ -428,10 +428,9 @@ let
   agentsJsonTemplate = driverEntry.agentsJsonTemplate { roster = finalRoster; };
 
   # Threaded into the Launcher input document's `run` artifacts as
-  # FILER_ENABLED / WORKER_PROVISIONED / SCOUT_PROVISIONED /
-  # REVIEW_LOOP_INLINE / REVIEW_LOOP_ORCHESTRATOR (issues #2533, #3157), so
-  # the Go side reads them from the document instead of re-deriving roster
-  # membership and orchestration mode itself.
+  # FILER_ENABLED / WORKER_PROVISIONED / SCOUT_PROVISIONED (issues #2533,
+  # #3157), so the Go side reads them from the document instead of
+  # re-deriving roster membership itself.
   agentsJsonAttrs = if agentsJsonTemplate == "" then { } else builtins.fromJSON agentsJsonTemplate;
 
   # These two key off agentsJsonTemplate's rendered output, not finalRoster:
@@ -447,8 +446,6 @@ let
   # agentFilesTemplate), so agentsJsonAttrs would wrongly read false for an
   # opencode box that does carry scout.
   scoutProvisioned = lib.any (e: e.name == "scout") finalRoster;
-  reviewLoopInline = !mergedDefaults.orchestratorEnabled;
-  reviewLoopOrchestrator = mergedDefaults.orchestratorEnabled;
 
   # On-disk subagent files, rendered by the selected Driver. A Driver with no
   # on-disk agent-config mechanism (claude.nix) returns { } here; its
@@ -757,8 +754,8 @@ let
   };
 
   # In-box orchestrator (issue #1996, ADR 0007): the Go binary entrypoint.sh
-  # hands the implementor pass off to when ORCHESTRATOR_ENABLED is set,
-  # instead of calling driver-exec directly. Its fileset carries the same
+  # hands the implementor pass off to instead of calling driver-exec
+  # directly. Its fileset carries the same
   # import closure driverExecBin needs, plus the packages its own multi-pass
   # loop reaches for (issue #1998).
   orchestratorBin = pkgs.buildGoModule {
@@ -1126,8 +1123,6 @@ let
       filerEnabled
       workerProvisioned
       scoutProvisioned
-      reviewLoopInline
-      reviewLoopOrchestrator
       choreCatalog
       # Always renders the Consumer's raw knob value (issue #2665), unlike
       # nixConfigPath below. The AND-gate with NixConfigFile lives in
