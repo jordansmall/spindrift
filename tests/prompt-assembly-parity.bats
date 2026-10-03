@@ -3,11 +3,19 @@
 # #2351, #2352, #2353, #2354, #2395): each cell runs $ENTRYPOINT, whose fake
 # driver chain execs the real Go `assemble-prompt` (ADR 0036), and diffs the
 # captured prompt, agents and handoff artifacts against the checked-in goldens.
+#
+# Each cell also pins <cell>.fragments.txt (the registry fragments it renders,
+# from the assembler's own attribution) and orchestrator cells pin
+# <cell>.review-prompt.txt. The nix check prompt-assembly-golden-coverage (to
+# be added) requires every lib/fragments.nix fragment to appear in some sidecar
+# or on its commented allowlist, so a new fragment needs a golden cell or an
+# allowlist entry.
 
 load helper
 
 setup() {
   setup_entrypoint_env
+  export DRIVER_FRAGMENTS_FILE="$BATS_TEST_TMPDIR/fragments.txt"
 
   # The covered cell requires every per-skill gate on and a non-empty
   # SKILLS_FOUND (assemble.go's checkCoveredCell), so bake all six.
@@ -104,6 +112,7 @@ assert_cell_golden() {
   [ "$status" -eq 0 ]
 
   assert_golden_text_or_update "$GOLDEN_DIR/${golden_name}.prompt.txt" "$DRIVER_PROMPT_FILE"
+  assert_golden_text_or_update "$GOLDEN_DIR/${golden_name}.fragments.txt" "$DRIVER_FRAGMENTS_FILE"
 
   if [ -s "$DRIVER_AGENTS_FILE" ]; then
     assert_golden_json_or_update "$GOLDEN_DIR/${golden_name}.agents.json" "$DRIVER_AGENTS_FILE"
@@ -136,6 +145,9 @@ assert_review_handoff_golden() {
   review_prompt_file="$(jq -r '.ReviewPromptFile' "$DRIVER_HANDOFF_FILE")"
   [ -n "$review_prompt_file" ]
   [ -s "$review_prompt_file" ]
+  # Result.Fragments counts fragments reaching the review prompt, so its text
+  # must be pinned or the fragments sidecar would claim coverage no golden backs.
+  assert_golden_text_or_update "$GOLDEN_DIR/${golden_name}.review-prompt.txt" "$review_prompt_file"
 }
 
 # Shared env for the butler cells below (ADR 0056): the butler is keyed by
