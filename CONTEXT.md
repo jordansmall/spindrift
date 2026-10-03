@@ -1105,10 +1105,11 @@ _Avoid_: verdict marker (too easily read as the Surface [[Verdict]]).
 **Signal carrier**:
 Which path a mid-run signal channel (`SPINDRIFT_COMMENT` /
 `SPINDRIFT_PR_INTENT` / `SPINDRIFT_ISSUE_INTENT`) takes across the Box seam,
-chosen per Dispatch by `BOX_SIGNAL_CARRIER`: `log`, the nonce-guarded marker
-line the Launcher scrapes from the driver log after Box exit, or `socket`,
-the [[Signal socket]]. One knob moves all three channels together; the
-[[Outcome line]] stays on the log either way (ADR 0052).
+chosen per Dispatch by `BOX_SIGNAL_CARRIER`: `socket`, the default, the
+[[Signal socket]], or `log`, the opt-out, the nonce-guarded marker line the
+Launcher scrapes from the driver log after Box exit. One knob moves all
+three channels together; the [[Outcome line]] stays on the log either way
+(ADR 0052).
 _Avoid_: transport (the unix-versus-TCP layer beneath a carrier), mode.
 
 **Signal socket**:

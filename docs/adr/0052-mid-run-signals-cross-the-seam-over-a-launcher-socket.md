@@ -41,6 +41,7 @@ is therefore already accepted, and for a heavier payload than a comment.
 **Decision: the three mid-run signal channels cross the Box seam over a
 second Launcher-owned listener, the signal socket, selected per Dispatch by
 a new knob `BOX_SIGNAL_CARRIER` whose default keeps today's log carrier.**
+(Amended by issue #4376: the default is now `socket`; see Amendment below.)
 The outcome line stays on the log: it is a few dozen bytes, it is the last
 thing a Box says, the entrypoint already re-emits it as a bare leading line
 outside the driver stream, and [ADR 0055](0055-structural-scoping-is-the-outcome-freshness-boundary-nonce-is-only-for-mid-run-signals.md)
@@ -141,7 +142,8 @@ the load-bearing properties, not the nonce.
 
 ## One knob, one verb, no fallback
 
-`BOX_SIGNAL_CARRIER` is one enum with two values, `log` (default) and
+`BOX_SIGNAL_CARRIER` is one enum with two values, `log` (default; amended by
+issue #4376: now `socket`, see Amendment below) and
 `socket`, moving all three channels together. Per-channel knobs were
 rejected: no Consumer wants a mixed state, and three carriers in every
 combination triples the fragment variants and the test surface for a
@@ -254,3 +256,39 @@ socket leaves the usage error and its exit code as they were. An explicit
 rejected line and no report; with no kind at all (no args, or an
 unrecognised kind word) the line is the kindless `signal rejected (usage):
 <reason>`, reported on the kindless `/usage` route.
+
+## Amendment (issue #4376): socket becomes the default
+
+The Rollout section set the bar for flipping the default: the daemon runs
+both Dispatch kinds through the socket for a stated span with no
+socket-attributed `agent-failed` or `agent-research-failed`. The dogfood
+daemon has run `BOX_SIGNAL_CARRIER=socket` since 2026-09-22 across work and
+research Dispatches. A log sweep of the 65 socket-era runs found 132 of 137
+`driver-exec signal` sends accepted on the first try, all 5 failures
+recovered on one retry, and no signal missing at settle; the largest body
+was 7.8 KB against the 64 KiB cap. The prompt friction the sweep surfaced
+was fixed by #3866, and no `agent-failed` or `agent-research-failed` is
+attributed to the socket. The bar is met.
+
+The flip is one line, the default in the env schema (`signalCarrier` in
+`lib/env-schema.nix`), and ships in 0.22.0. An unset `BOX_SIGNAL_CARRIER`
+now carries the signals over the socket for every Dispatch kind, including
+the butler, under `spindrift dispatch`, `spindrift research` and the daemon.
+`log` stays selectable through the whole 0.22 minor, restoring marker-line
+behaviour exactly, and the three log-carrier scanners stay in the code.
+Removing `log` remains the separate later decision the Rollout section
+describes, on its own boundary.
+
+Unset is treated as an explicit `socket` request, so "One knob, one verb, no
+fallback" holds unchanged: where the transport cannot work — `NETWORK_MODE=none`,
+or `no-host-loopback` where the transport needs TCP — an unset knob fails at
+startup with the existing signal-carrier gate error, which names
+`BOX_SIGNAL_CARRIER=log` as the remedy. There is no mode-dependent default
+and no silent fallback; a Consumer in one of those modes sets `log`
+explicitly. `spindrift doctor` shows the `signal-socket-transport` row for
+an unset knob as it does for `socket`, and omits it under explicit `log`.
+
+The Box-side "empty means log" fallbacks (`agent/entrypoint.sh`, and the
+in-Box prompt assembly's gates) are kept on purpose. They cover an older host
+launcher that forwards nothing; the current launcher always forwards the
+resolved value, so they never fire against it.

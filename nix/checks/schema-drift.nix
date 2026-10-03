@@ -1183,10 +1183,10 @@ checkedMerge {
   # signalCarrier must stay out of the settings map: ChildCommand
   # (cmd/launcher/internal/daemon/command.go) withoutKeys-strips every
   # settings key from a child's environment, so a flakeOption promotion would
-  # silently break the documented `BOX_SIGNAL_CARRIER=socket nix run .#daemon`
-  # gesture. The second assert is the issue #2519-style guard that the first
-  # one is not vacuous — and, with the `?` test, that a rename cannot make it
-  # pass by absence.
+  # silently break the documented `BOX_SIGNAL_CARRIER=log nix run .#daemon`
+  # opt-out gesture. The second assert is the issue #2519-style guard that
+  # the first one is not vacuous — and, with the `?` test, that a rename
+  # cannot make it pass by absence.
   signal-carrier-env-only =
     let
       inherit (pkgs.lib) assertMsg;

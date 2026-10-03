@@ -97,8 +97,9 @@ Doctor renders the ordered launch-gate registry (issue #2942) as five
 `ok: <name>` / `MISSING: <name>: <error>` pass/fail rows —
 `read-only-capability`, `network-mode-runtime`,
 `signal-carrier-network-mode` (the gate that refuses
-`BOX_SIGNAL_CARRIER=socket` under `NETWORK_MODE=none`, the one pairing
-the socket carrier can never work under — see [Signal
+`BOX_SIGNAL_CARRIER=socket` — or the knob left unset, which now means
+`socket` — under `NETWORK_MODE=none`, the one pairing the socket carrier
+can never work under; see [Signal
 socket](#signal-socket-box_signal_carriersocket)),
 `read-only-token-github`, `read-only-token-forgejo` — the same gates
 `dispatch`'s bootstrap and `preview` enforce before launching a Box.
@@ -128,9 +129,10 @@ socket](#signal-socket-box_signal_carriersocket)),
 
 **Signal socket transport**
 
-Last of all the rows, when `BOX_SIGNAL_CARRIER=socket` (never under `log`,
-where the row does not print at all), a `signal-socket-transport` row naming
-the same transport verdict (`unix socket` or `tcp`) probed through the
+Last of all the rows, when `BOX_SIGNAL_CARRIER` resolves to `socket` —
+set to it or left unset, since `socket` is the default; never under an
+explicit `log`, where the row does not print at all — a
+`signal-socket-transport` row naming the same transport verdict (`unix socket` or `tcp`) probed through the
 identical seam a dispatch uses for its Signal socket, always Advisory so it
 never affects the exit code, degrading under `NETWORK_MODE=none` regardless
 of transport (no probe run at all), under `NETWORK_MODE=no-host-loopback`
@@ -1387,7 +1389,7 @@ exceptions.
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` all satisfy the check today; a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
-| `BOX_SIGNAL_CARRIER`     | `log` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `log` (unchanged — nonce-guarded marker lines in the Box log) or `socket` (routed over a launcher-owned Signal socket instead, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) |
+| `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at startup under `NETWORK_MODE=none` and where the transport needs TCP under `no-host-loopback`; set `log` there |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -1775,13 +1777,14 @@ characters long and ends mid-token, with no spill-file path and no
 truncation notice of any kind. Whether the interactive client behaves as
 documented above is untested here; what a dispatch run gets is the cut.
 That matters beyond cost, because some Bash results are load-bearing rather
-than merely informative: under the `log` Signal carrier, every host-relay
-control signal — `SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`,
-`SPINDRIFT_COMMENT` — rides back to the launcher as a base64 line the host
-parses out of the echoed output, so the cap is each one's size limit too.
-`BOX_SIGNAL_CARRIER=socket` moves all three channels off the log entirely
-(see [Signal socket](#signal-socket-box_signal_carriersocket) below), so
-the cap is not their size limit there at all. On the `log` carrier, the
+than merely informative: under the `log` Signal carrier (the opt-out;
+`socket` is the default), every host-relay control signal —
+`SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`, `SPINDRIFT_COMMENT` —
+rides back to the launcher as a base64 line the host parses out of the
+echoed output, so the cap is each one's size limit too. The `socket`
+carrier, the default, moves all three channels off the log entirely (see
+[Signal socket](#signal-socket-box_signal_carriersocket) below), so the
+cap is not their size limit there at all. On the `log` carrier, the
 intent lines stay well under it in practice; the research verdict is the
 one that does not, since a read-only research Box hands a whole comment
 body back on a single `SPINDRIFT_COMMENT` line, so it is the case this
@@ -4111,6 +4114,12 @@ the Launcher to apply with its own, separately-scoped write token:
 | post a comment     | `gh issue comment`       | a single nonce-guarded `SPINDRIFT_COMMENT` line; the Launcher verifies the nonce, decodes it, and posts it host-side (ADR 0032's mechanism, reused) |
 | file an issue (Filer, opt-in) | `gh label create` / `gh issue create` | one nonce-guarded, base64-encoded `SPINDRIFT_ISSUE_INTENT` stdout line per issue; the Launcher files each one host-side (issue #2018) — see [Filer](#filer) |
 
+The three `SPINDRIFT_*` stdout lines in the table are the `log` carrier's
+form. By default (`BOX_SIGNAL_CARRIER` unset, i.e. `socket`) the same
+signals cross the seam over the [Signal
+socket](#signal-socket-box_signal_carriersocket) instead, and the Launcher
+still performs the write host-side at settle.
+
 A stray `git push` in the "land the branch" row above — the agent guessing at
 the read-write workflow — fails locally instead of reaching the forge and
 403ing there (issue #2463): the Box repoints `origin`'s push URL at a
@@ -4193,13 +4202,17 @@ removes the capability two-actor separation was closing off with a ruleset.
 
 ### Signal socket (`BOX_SIGNAL_CARRIER=socket`)
 
-The default `log` carrier sends the three mid-run signal channels
-(`SPINDRIFT_COMMENT`, `SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`) as
-nonce-guarded marker lines in the Box's stdout log — unchanged for every
-existing Consumer. `BOX_SIGNAL_CARRIER=socket` moves those same three
-channels off the log and onto a per-Dispatch Signal socket instead ([ADR
-0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md)),
-closing the defect the log carrier can't: the `BASH_MAX_OUTPUT_LENGTH`
+Since 0.22 (issue #4376) the three mid-run signal channels
+(`SPINDRIFT_COMMENT`, `SPINDRIFT_PR_INTENT`, `SPINDRIFT_ISSUE_INTENT`) cross
+the Box seam over a per-Dispatch Signal socket by default, for every
+Dispatch kind (work, research, butler), under `spindrift dispatch`,
+`spindrift research` and the daemon alike ([ADR
+0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md)).
+`BOX_SIGNAL_CARRIER=log` is the opt-out: it restores the older carrier,
+nonce-guarded marker lines in the Box's stdout log, exactly as it behaved
+before, and stays selectable for the whole 0.22 minor (removing it is a
+separate, later decision). The socket closes the defect the log carrier
+can't: the `BASH_MAX_OUTPUT_LENGTH`
 Bash output cap (see [Claude Code output caps](#claude-code-output-caps))
 truncates a large payload before the marker line ever reaches the log,
 silently losing the signal.
@@ -4218,10 +4231,10 @@ The transport is decided by the same per-Dispatch
 (`cmd/launcher/internal/dispatch/box.go`) — one probe serves
 both seams — and returns one of three verdicts: a unix socket,
 its TCP fallback, or an indeterminate/unavailable answer.
-`spindrift doctor` surfaces this ahead of time: under
-`BOX_SIGNAL_CARRIER=socket` it adds an Advisory `signal-socket-transport`
-row (the row renders only under `socket`; nothing prints under `log`)
-reporting `unix socket` or `tcp`. Three cases degrade that row, each
+`spindrift doctor` surfaces this ahead of time: when the carrier resolves to
+`socket` (set to it, or unset) it adds an Advisory
+`signal-socket-transport` row (the row renders only for `socket`;
+nothing prints under an explicit `log`) reporting `unix socket` or `tcp`. Three cases degrade that row, each
 with a message naming the mode: `NETWORK_MODE=none`, which
 degrades regardless of the transport and without running the probe at
 all (loopback is torn down outright, so there is nothing to check);
@@ -4235,12 +4248,18 @@ itself, it just tells the operator before dispatch what the
 Dispatch-level gate below would otherwise only surface mid-run.
 
 Requesting `socket` where the transport can't work is a startup error,
-never a silent fallback to `log`: `NETWORK_MODE=none` fails at launcher
+never a silent fallback to `log`, and an unset knob is such a request: it
+is treated exactly like an explicit `socket`, with no mode-dependent
+default. So `NETWORK_MODE=none` fails at launcher
 startup (the socket transport needs the loopback this mode tears down), and
 `NETWORK_MODE=no-host-loopback` fails when the Dispatch starts, before the
 Box container, because the per-Dispatch transport probe refuses the TCP
 fallback under that mode (the Signal-socket gate on a TCP verdict is a
-backstop for a cached verdict). Both errors name the mode.
+backstop for a cached verdict). Both errors name the mode, and the
+signal-carrier gate's message names the remedy, `BOX_SIGNAL_CARRIER=log`.
+A Consumer that runs under one of these modes and has not set the knob
+therefore sees the error after upgrading to 0.22 and must set `log`
+explicitly.
 
 The three log scanners still run under `socket` mode, but only to warn if a
 marker line is still present in the log; such a line contributes no data —
@@ -4250,18 +4269,21 @@ and a `socket` request the transport cannot serve is always a startup or
 Dispatch error, never a quiet fall back to `log`.
 
 `BOX_SIGNAL_CARRIER` takes exactly two values, `log` or `socket`; the
-default is `log`, unchanged for every existing Consumer — see the knob's
+default, when unset, is `socket` — see the knob's
 own row in [Runtime configuration](#runtime-configuration). This is a
 runtime-only knob — no `spindrift.*` setting and no flake option — so the
 daemon passes it through its child environment like any other env-only
-knob. There is no live toggle: `BOX_SIGNAL_CARRIER=socket nix run
-.#daemon` flips the carrier for every child the daemon starts from that
-point forward, and a restart is the only way to flip it back — see
-[Daemon](#daemon). The in-Box front for `socket` mode is the `driver-exec
+knob. There is no live toggle: `BOX_SIGNAL_CARRIER=log nix run
+.#daemon` opts every child the daemon starts from that point forward back
+onto the log carrier, and a restart is the only way to change it again —
+see [Daemon](#daemon). The in-Box front for `socket` mode is the `driver-exec
 signal comment|pr-intent|issue-intent|status` verb (issue #3724), which
 reads `SIGNAL_SOCKET_ENDPOINT` and errors when it is unset — so it serves
 the socket carrier only; under `log` the front stays what it has always
-been, a nonce-guarded marker line the Box prints.
+been, a nonce-guarded marker line the Box prints. The Box's own entrypoint
+and in-Box prompt assembly still read an empty carrier as `log`; that
+covers an older host launcher that forwards nothing, and the current
+launcher always forwards the resolved value.
 
 Each subcommand takes its body from stdin or `-body-file`, never argv —
 argv is world-readable through `/proc`, and a signal body can run to tens
@@ -6016,12 +6038,13 @@ values that passes through this way, and it has to: the knob is deliberately
 not a `flakeOption`, so it never enters the input document's `settings` map
 (`signalCarrier`, `lib/env-schema.nix`, whose own doc string spells out the
 same rationale) and the daemon's environment is its only route to a child.
-`BOX_SIGNAL_CARRIER=socket nix run .#daemon` therefore flips the carrier for
-every child the daemon starts — set on the daemon, the knob is present in
-each child; unset, it is absent and the child takes the schema default `log`
-— as it does for an empty export, which rides through as a present-but-empty
-entry the child's own `getenvSchema` read (`cmd/launcher/main.go`) collapses.
-There is no live toggle: a restart is the flip. A value outside the schema's
+`BOX_SIGNAL_CARRIER=log nix run .#daemon` therefore opts every child the
+daemon starts back onto the log carrier — set on the daemon, the knob is
+present in each child; unset, it is absent and the child takes the schema
+default `socket` — as it does for an empty export, which rides through as
+a present-but-empty entry the child's own `getenvSchema` read
+(`cmd/launcher/main.go`) collapses.
+There is no live toggle: a restart is the change. A value outside the schema's
 choices refuses the daemon's start — exit 1, with a stderr line naming the
 knob (`validateSignalCarrier`, `cmd/launcher/daemon/main.go`) — before any
 child is spawned. Earlier still, right after the input document loads and

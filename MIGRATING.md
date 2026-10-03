@@ -1,5 +1,21 @@
 # Migration Guide
 
+## `BOX_SIGNAL_CARRIER` defaults to `socket` (issue #4376)
+
+Since v0.22.0, an unset `BOX_SIGNAL_CARRIER` means the Signal socket: the
+three mid-run signal channels (comment, PR intent, issue intent) cross the
+Box seam over a Launcher-owned socket instead of marker lines in the Box
+log. Unset is treated exactly like an explicit `socket`, so Consumers on
+`NETWORK_MODE=none`, or on `no-host-loopback` with a runtime that can only
+reach the socket over its TCP fallback, now hit a startup error (the
+Signal-socket launch gate) until they set `BOX_SIGNAL_CARRIER=log`. There is
+no silent fallback, and `log` stays selectable through the whole 0.22 minor.
+
+Custom or forked prompts that rely on the marker lines should know that the
+socket-variant prompt fragments now render by default; set
+`BOX_SIGNAL_CARRIER=log` to keep the log-variant fragments. See [Signal
+socket](docs/reference.md#signal-socket-box_signal_carriersocket).
+
 ## CI research runs fire from `agent-research-trigger`, not `agent-research` (issue #3603)
 
 Since v0.19.0, `agent-research.yml` fires on the `agent-research-trigger`
