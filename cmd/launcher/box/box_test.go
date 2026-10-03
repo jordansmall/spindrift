@@ -1,0 +1,1145 @@
+package main
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"spindrift.dev/launcher/internal/bundleout"
+	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/outcomebackstop"
+	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/retry"
+	"spindrift.dev/launcher/internal/signalwire"
+)
+
+const (
+	readyLine     = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=done"
+	blockedLine   = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=blocked note=stuck"
+	resolvedLine  = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=already-resolved note=dup"
+	syntheticLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=synthetic"
+	nearMissLine  = "SPINDRIFT_OUTCOME I finished the work"
+	prIntentLine  = "SPINDRIFT_PR_INTENT n0nce dGl0bGUKCmJvZHk="
+	completeLine  = "==> entrypoint complete for 42"
+)
+
+type resumeScript struct {
+	result   string
+	rawLines []string
+	rc       int
+}
+
+type orchCall struct {
+	argv    map[string]string
+	prompt  string
+	handoff map[string]json.RawMessage
+}
+
+type fixture struct {
+	t    *testing.T
+	dir  string
+	in   inputs
+	env  promptassembly.Env
+	d    deps
+	out  bytes.Buffer
+	errb bytes.Buffer
+
+	resumes []resumeScript
+	calls   []orchCall
+
+	backstopOut  string
+	backstopErr  error
+	backstopCfgs []outcomebackstop.Config
+	demoteOut    string
+	demoteErr    error
+	demoteCfgs   []outcomebackstop.Config
+	demotePriors []string
+	bundleCfgs   []bundleout.Config
+	bundleErr    error
+	scanDirs     []string
+	scanOut      string
+	knobs        map[string]string
+}
+
+func resultEvent(text string) string {
+	b, _ := json.Marshal(struct {
+		Type   string `json:"type"`
+		Result string `json:"result"`
+	}{"result", text})
+	return string(b) + "\n"
+}
+
+func newFixture(t *testing.T) *fixture {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("TMPDIR", dir)
+	f := &fixture{t: t, dir: dir, backstopOut: syntheticLine + "\n"}
+	f.knobs = map[string]string{"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1"}
+	f.in = inputs{
+		HandoffFile:       filepath.Join(dir, "handoff.json"),
+		ResumeSessionFile: filepath.Join(dir, "resume-session"),
+		WorkDir:           filepath.Join(dir, "work"),
+		OutboxDir:         filepath.Join(dir, "outbox"),
+		StreamLog:         filepath.Join(dir, "stream-0.log"),
+		DriverTextLog:     filepath.Join(dir, "text-0.log"),
+	}
+	f.write(f.in.HandoffFile, `{"Driver":"claude","SessionMode":"initial","ReviewPromptFile":"/tmp/review.md","Model":"opus","Caps":{"MaxReviewRounds":3}}`)
+	f.write(f.in.ResumeSessionFile, "--resume SESSION")
+	f.env = promptassembly.Env{
+		DispatchKey:     "42",
+		IssueNumber:     "42",
+		Branch:          "agent/issue-42",
+		BaseBranch:      "main",
+		RunNonce:        "n0nce",
+		BoxWriteEnabled: true,
+	}
+	f.firstRun(readyLine+"\n", 0)
+	f.d = deps{
+		Orchestrate: f.orchestrate,
+		Backstop: func(cfg outcomebackstop.Config, w io.Writer) error {
+			f.backstopCfgs = append(f.backstopCfgs, cfg)
+			_, _ = io.WriteString(w, f.backstopOut)
+			return f.backstopErr
+		},
+		Demote: func(cfg outcomebackstop.Config, prior string, w io.Writer) error {
+			f.demoteCfgs = append(f.demoteCfgs, cfg)
+			f.demotePriors = append(f.demotePriors, prior)
+			_, _ = io.WriteString(w, f.demoteOut)
+			return f.demoteErr
+		},
+		BundleOut: func(cfg bundleout.Config, _ io.Writer) error {
+			f.bundleCfgs = append(f.bundleCfgs, cfg)
+			return f.bundleErr
+		},
+		WarnLockfiles: func(w io.Writer, dir string) {
+			f.scanDirs = append(f.scanDirs, dir)
+			_, _ = io.WriteString(w, f.scanOut)
+		},
+		Getenv: func(k string) string { return f.knobs[k] },
+		Stdout: &f.out,
+		Stderr: &f.errb,
+	}
+	return f
+}
+
+func (f *fixture) write(path, content string) {
+	f.t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// firstRun stands in for the Driver run bash did before exec'ing box: the same
+// log, text log and outcome line bash's run_driver_in_env would have left.
+func (f *fixture) firstRun(text string, rc int, rawLines ...string) {
+	f.t.Helper()
+	f.write(f.in.StreamLog, resultEvent(text)+strings.Join(rawLines, "\n")+"\n")
+	stripped := outcome.StripResultText(text)
+	f.write(f.in.DriverTextLog, stripped+"\n")
+	f.in.OutcomeLine = outcome.ExtractOutcomeLine(stripped)
+	f.in.DriverExitCode = rc
+}
+
+func (f *fixture) readOnlyRelay() {
+	f.env.BoxWriteEnabled = false
+	f.env.OutboxRelayCapable = true
+}
+
+func (f *fixture) orchestrate(argv []string) int {
+	f.t.Helper()
+	call := orchCall{argv: map[string]string{}}
+	for i := 0; i+1 < len(argv); i += 2 {
+		call.argv[argv[i]] = argv[i+1]
+	}
+	prompt, err := os.ReadFile(call.argv["--prompt-file"])
+	if err != nil {
+		f.t.Fatalf("prompt file unreadable during the orchestrator call: %v", err)
+	}
+	call.prompt = string(prompt)
+	raw, err := os.ReadFile(call.argv["--handoff-file"])
+	if err != nil {
+		f.t.Fatalf("handoff file unreadable during the orchestrator call: %v", err)
+	}
+	if err := json.Unmarshal(raw, &call.handoff); err != nil {
+		f.t.Fatalf("handoff not JSON: %v", err)
+	}
+	f.calls = append(f.calls, call)
+	if len(f.resumes) == 0 {
+		f.t.Errorf("unscripted orchestrator call #%d", len(f.calls))
+		return 99
+	}
+	s := f.resumes[0]
+	f.resumes = f.resumes[1:]
+	f.write(call.argv["--log-path"], resultEvent(s.result)+strings.Join(s.rawLines, "\n")+"\n")
+	return s.rc
+}
+
+func (f *fixture) run() int {
+	f.t.Helper()
+	rc, err := run(f.in, f.env, f.d)
+	if err != nil {
+		f.t.Fatalf("run() error = %v", err)
+	}
+	return rc
+}
+
+func (f *fixture) stdout() string { return f.out.String() }
+
+func (f *fixture) lines() []string {
+	return strings.Split(strings.TrimSuffix(f.out.String(), "\n"), "\n")
+}
+
+func countLine(lines []string, want string) int {
+	n := 0
+	for _, l := range lines {
+		if l == want {
+			n++
+		}
+	}
+	return n
+}
+
+func prIntentGateMissing(f *fixture) {
+	f.readOnlyRelay()
+	f.firstRun(readyLine+"\n", 0)
+}
+
+// --- outcome nudge gate: bats entrypoint-outcome-recovery.bats ---
+
+func TestOutcomeNudge_ResumeSuppliesOutcome_NoBackstop(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("all done, no marker\n", 0)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d, want 0", rc)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("orchestrator calls = %d, want 1", len(f.calls))
+	}
+	if len(f.backstopCfgs) != 0 {
+		t.Fatalf("backstop ran %d times, want 0", len(f.backstopCfgs))
+	}
+	want := []string{
+		"==> required marker missing — resuming the session once with a nudge",
+		readyLine,
+		completeLine,
+	}
+	if got := f.lines(); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+func TestOutcomeNudge_ResumeAlsoMissing_BackstopNotesRecovery(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("all done, no marker\n", 0)
+	f.resumes = []resumeScript{{result: "still nothing\n"}}
+
+	f.run()
+
+	if len(f.calls) != 1 {
+		t.Fatalf("orchestrator calls = %d, want 1 (the nudge is capped)", len(f.calls))
+	}
+	if len(f.backstopCfgs) != 1 {
+		t.Fatalf("backstop ran %d times, want exactly 1", len(f.backstopCfgs))
+	}
+	if !f.backstopCfgs[0].RecoveryAttempted {
+		t.Error("backstop RecoveryAttempted = false, want true after a resume")
+	}
+	if !strings.Contains(f.stdout(), "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop\n"+syntheticLine+"\n") {
+		t.Errorf("stdout lacks the backstop banner + line:\n%s", f.stdout())
+	}
+}
+
+func TestOutcomeNudge_ResumeTargetsPinnedSessionWithStrippedHandoff(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	f.run()
+
+	call := f.calls[0]
+	if got := call.argv["--session-file"]; got != f.in.ResumeSessionFile {
+		t.Errorf("--session-file = %q, want the pre-rendered resume session file %q", got, f.in.ResumeSessionFile)
+	}
+	if got := call.argv["--handoff-file"]; got == f.in.HandoffFile {
+		t.Error("resume reused the shared handoff file, want its own stripped copy")
+	}
+	if got := string(call.handoff["ReviewPromptFile"]); got != `""` {
+		t.Errorf("ReviewPromptFile = %s, want cleared", got)
+	}
+	for _, k := range []string{"Driver", "SessionMode", "Model", "Caps"} {
+		if _, ok := call.handoff[k]; !ok {
+			t.Errorf("stripped handoff dropped field %s", k)
+		}
+	}
+	shared, _ := os.ReadFile(f.in.HandoffFile)
+	if !strings.Contains(string(shared), "/tmp/review.md") {
+		t.Error("the shared handoff file was modified")
+	}
+	if !strings.Contains(call.prompt, "SPINDRIFT_OUTCOME") {
+		t.Errorf("nudge prompt does not restate the marker:\n%s", call.prompt)
+	}
+	if strings.HasSuffix(call.prompt, "\n") {
+		t.Error("nudge prompt kept a trailing newline bash's $(...) would have trimmed")
+	}
+}
+
+func TestOutcomeNudge_NonZeroExitNeverResumesNorBackstops(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("crashed\n", 3)
+
+	if rc := f.run(); rc != 3 {
+		t.Fatalf("rc = %d, want the driver's 3", rc)
+	}
+	if len(f.calls) != 0 || len(f.backstopCfgs) != 0 {
+		t.Fatalf("calls=%d backstops=%d, want neither on a non-zero exit", len(f.calls), len(f.backstopCfgs))
+	}
+	if strings.Contains(f.stdout(), "SPINDRIFT_OUTCOME") {
+		t.Errorf("synthetic line emitted on a crash:\n%s", f.stdout())
+	}
+}
+
+func TestOutcomeNudge_NearMissPromptQuotesOffendingLine(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(nearMissLine+"\n", 0)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	f.run()
+
+	if len(f.calls) != 1 || !strings.Contains(f.calls[0].prompt, nearMissLine) {
+		t.Fatalf("nudge prompt does not quote the near-miss line: %+v", f.calls)
+	}
+}
+
+func TestOutcomeNudge_NearMissOnEveryCall_OneResumeThenBackstop(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(nearMissLine+"\n", 0)
+	f.resumes = []resumeScript{{result: nearMissLine + "\n"}}
+
+	f.run()
+
+	if len(f.calls) != 1 {
+		t.Fatalf("orchestrator calls = %d, want 1", len(f.calls))
+	}
+	if len(f.backstopCfgs) != 1 || !f.backstopCfgs[0].RecoveryAttempted {
+		t.Fatalf("backstop cfgs = %+v, want one with RecoveryAttempted", f.backstopCfgs)
+	}
+}
+
+func TestOutcomeNudge_ResumeExitCodeReplacesOnlyWhenNonZero(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.resumes = []resumeScript{{result: readyLine + "\n", rc: 7}}
+	if rc := f.run(); rc != 7 {
+		t.Fatalf("rc = %d, want the resume's 7", rc)
+	}
+	if len(f.backstopCfgs) != 0 {
+		t.Error("backstop ran for a resume that produced an outcome")
+	}
+}
+
+func TestOutcomeNudge_SkippedForAdviseOnlyKind(t *testing.T) {
+	f := newFixture(t)
+	f.env.DispatchKind = "research"
+	f.firstRun("verdict, no marker\n", 0)
+
+	f.run()
+
+	if len(f.calls) != 0 {
+		t.Fatalf("advise-only kind resumed %d times, want 0", len(f.calls))
+	}
+}
+
+// --- outcome backstop: bats entrypoint-outcome-backstop.bats ---
+
+func TestBackstop_NoOutcomeLine_EmitsSyntheticLineOnce(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("done\n", 0)
+	f.resumes = []resumeScript{{result: "done\n"}}
+
+	f.run()
+
+	if got := countLine(f.lines(), syntheticLine); got != 1 {
+		t.Fatalf("synthetic outcome line printed %d times, want 1:\n%s", got, f.stdout())
+	}
+}
+
+func TestBackstop_TrimsTrailingNewlinesAndReprintsWithOne(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("done\n", 0)
+	f.resumes = []resumeScript{{result: "done\n"}}
+	f.backstopOut = syntheticLine + "\n\n\n"
+
+	f.run()
+
+	if !strings.Contains(f.stdout(), syntheticLine+"\n"+"==> entrypoint complete") {
+		t.Errorf("backstop output not trimmed to one newline:\n%q", f.stdout())
+	}
+}
+
+func TestBackstop_OwnOutcomePassesThroughWithoutSyntheticLine(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(blockedLine+"\n", 0)
+
+	f.run()
+
+	if len(f.backstopCfgs) != 0 {
+		t.Fatalf("backstop ran for a driver that reported its own outcome")
+	}
+}
+
+func TestBackstop_ConfigMapping(t *testing.T) {
+	f := newFixture(t)
+	f.env.DispatchKind = ""
+	f.env.HostMediatedRemote = true
+	f.env.OutboxRelayCapable = true
+	f.env.BoxWriteEnabled = true
+	f.firstRun("done\n", 0)
+	f.in.OutcomeLine = ""
+	f.resumes = []resumeScript{{result: "done\n"}}
+
+	f.run()
+
+	got := f.backstopCfgs[0]
+	if got.Clock.Sleep == nil {
+		t.Error("backstop Clock unset, want retry.RealClock()")
+	}
+	got.Clock = retry.Clock{}
+	want := outcomebackstop.Config{
+		Repo:               f.in.WorkDir,
+		Issue:              "42",
+		Branch:             "agent/issue-42",
+		Base:               "origin/main",
+		Kind:               "work",
+		HostMediatedRemote: true,
+		OutboxRelayCapable: true,
+		WriteEnabled:       true,
+		RecoveryAttempted:  true,
+		MaxAttempts:        3,
+		Backoff:            2e9,
+		Jitter:             1e9,
+		RunStateFilePath:   "/tmp/run-state.json",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("backstop config = %+v, want %+v", got, want)
+	}
+}
+
+func TestBackstop_NegativeBackoffAndJitterPassThrough(t *testing.T) {
+	f := newFixture(t)
+	f.knobs["TRANSIENT_BACKOFF_SECS"] = "-5"
+	f.knobs["HOLD_JITTER_SECS"] = "-1"
+	f.firstRun("done\n", 0)
+	f.resumes = []resumeScript{{result: "done\n"}}
+
+	f.run()
+
+	if len(f.backstopCfgs) != 1 || f.backstopCfgs[0].Backoff >= 0 || f.backstopCfgs[0].Jitter >= 0 {
+		t.Fatalf("cfgs = %+v, want negatives handed to the backstop, which clamps them (see outcomebackstop tests)", f.backstopCfgs)
+	}
+}
+
+func TestBackstop_MalformedKnobIsFatalOnlyWhenTheVerbRuns(t *testing.T) {
+	for _, knob := range []string{"MAX_REBASE_ATTEMPTS", "TRANSIENT_BACKOFF_SECS", "HOLD_JITTER_SECS"} {
+		for _, bad := range []string{"", "abc"} {
+			f := newFixture(t)
+			f.knobs[knob] = bad
+			f.firstRun("done\n", 0)
+			f.resumes = []resumeScript{{result: "done\n"}}
+			_, err := run(f.in, f.env, f.d)
+			if err == nil || !strings.Contains(err.Error(), knob) {
+				t.Errorf("%s=%q: error = %v, want one naming the knob", knob, bad, err)
+			}
+		}
+	}
+
+	// Advise-only: neither backstop nor demotion reads the knobs.
+	f := newFixture(t)
+	f.knobs = map[string]string{}
+	f.env.DispatchKind = "research"
+	f.firstRun(blockedLine+"\n", 0)
+	if _, err := run(f.in, f.env, f.d); err != nil {
+		t.Fatalf("advise-only run read an operator knob: %v", err)
+	}
+}
+
+func TestBackstop_ErrorIsFatalAndNamesPhase(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("done\n", 0)
+	f.resumes = []resumeScript{{result: "done\n"}}
+	f.backstopErr = errors.New("push exploded")
+
+	_, err := run(f.in, f.env, f.d)
+
+	if err == nil || err.Error() != "outcome-backstop: push exploded" {
+		t.Fatalf("error = %v, want %q", err, "outcome-backstop: push exploded")
+	}
+	if strings.Contains(f.stdout(), completeLine) {
+		t.Error("run continued past a fatal backstop error")
+	}
+}
+
+func TestBackstop_AdviseOnlyKindReachesTheBackstopWithItsKind(t *testing.T) {
+	f := newFixture(t)
+	f.env.DispatchKind = "research"
+	f.firstRun("verdict\n", 0)
+	f.in.OutcomeLine = ""
+
+	f.run()
+
+	if len(f.backstopCfgs) != 1 || f.backstopCfgs[0].Kind != "research" {
+		t.Fatalf("backstop cfgs = %+v, want one for kind research", f.backstopCfgs)
+	}
+	if len(f.calls) != 0 {
+		t.Error("an advise-only kind was resumed")
+	}
+}
+
+// --- already-resolved demotion: bats outcome-backstop #4016 cases ---
+
+func TestDemotion_ReplacesOutcomeLineWithVerbOutput(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(resolvedLine+"\n", 0)
+	f.demoteOut = blockedLine + "\n"
+
+	f.run()
+
+	if len(f.demotePriors) != 1 || f.demotePriors[0] != resolvedLine {
+		t.Fatalf("demote priors = %q, want [%q]", f.demotePriors, resolvedLine)
+	}
+	if f.demoteCfgs[0].RecoveryAttempted {
+		t.Error("demotion config carried RecoveryAttempted")
+	}
+	if !strings.Contains(f.stdout(), blockedLine+"\n"+completeLine) {
+		t.Errorf("demoted line not printed before completion:\n%s", f.stdout())
+	}
+}
+
+func TestDemotion_EmptyOutputLeavesClaimUntouched(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(resolvedLine+"\n", 0)
+
+	f.run()
+
+	if strings.Contains(f.stdout(), "status=blocked") {
+		t.Errorf("claim was altered:\n%s", f.stdout())
+	}
+	if got := f.stdout(); got != completeLine+"\n" {
+		t.Errorf("stdout = %q, want nothing but completion", got)
+	}
+}
+
+func TestDemotion_OutputFeedsBundleOutPriorLine(t *testing.T) {
+	f := newFixture(t)
+	f.readOnlyRelay()
+	f.firstRun(resolvedLine+"\n", 0)
+	f.demoteOut = blockedLine + "\n"
+
+	f.run()
+
+	if len(f.bundleCfgs) != 1 || f.bundleCfgs[0].PriorOutcomeLine != blockedLine {
+		t.Fatalf("bundle cfgs = %+v, want PriorOutcomeLine %q", f.bundleCfgs, blockedLine)
+	}
+}
+
+func TestDemotion_SkippedForAdviseOnlyAndForNoOutcome(t *testing.T) {
+	f := newFixture(t)
+	f.env.DispatchKind = "research"
+	f.firstRun(resolvedLine+"\n", 0)
+	f.run()
+	if len(f.demoteCfgs) != 0 {
+		t.Error("advise-only kind ran the demotion")
+	}
+}
+
+func TestDemotion_RunsEvenAfterANonZeroDriverExit(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(resolvedLine+"\n", 5)
+	if rc := f.run(); rc != 5 {
+		t.Fatalf("rc = %d, want 5", rc)
+	}
+	if len(f.demoteCfgs) != 1 {
+		t.Fatalf("demotion ran %d times, want 1 (unguarded by the exit code)", len(f.demoteCfgs))
+	}
+}
+
+func TestDemotion_ErrorIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(resolvedLine+"\n", 0)
+	f.demoteErr = errors.New("boom")
+	_, err := run(f.in, f.env, f.d)
+	if err == nil || err.Error() != "outcome-demotion: boom" {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+// --- PR-intent nudge gate: bats entrypoint-pr-intent-nudge.bats ---
+
+func TestPRIntent_GenuineMarkerPresent_NoResume(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.firstRun(readyLine+"\n", 0, prIntentLine)
+
+	f.run()
+
+	if len(f.calls) != 0 {
+		t.Fatalf("resumed %d times with the PR-intent marker present", len(f.calls))
+	}
+}
+
+func TestPRIntent_Missing_ResumeSuppliesIt(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.resumes = []resumeScript{{result: readyLine + "\n", rawLines: []string{prIntentLine}}}
+
+	f.run()
+
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %d, want 1", len(f.calls))
+	}
+	out := f.stdout()
+	if !strings.Contains(out, "==> PR-intent marker missing — resuming the session once with a nudge\n") {
+		t.Errorf("banner missing:\n%s", out)
+	}
+	if strings.Contains(out, "spindrift_op") {
+		t.Errorf("give-up op emitted although the resume supplied the marker:\n%s", out)
+	}
+	if call := f.calls[0]; call.argv["--session-file"] != f.in.ResumeSessionFile || string(call.handoff["ReviewPromptFile"]) != `""` {
+		t.Errorf("resume not narrowed: %+v", call)
+	}
+	if !strings.Contains(f.calls[0].prompt, readyLine) {
+		t.Errorf("nudge prompt does not carry the original ready line:\n%s", f.calls[0].prompt)
+	}
+}
+
+func TestPRIntent_SecondMiss_FallsThroughNoLoop(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}, {result: readyLine + "\n"}}
+
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %d, want the nudge capped at %d", len(f.calls), prIntentNudgeCap)
+	}
+	if !strings.HasSuffix(f.stdout(), completeLine+"\n") {
+		t.Errorf("run did not complete:\n%s", f.stdout())
+	}
+}
+
+func TestPRIntent_ExhaustedNudgeEmitsGiveUpOp(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	f.run()
+
+	want := `"reason":"read-only PR-intent nudge exhausted after 1 attempt; no marker line, handing off blocked"`
+	if !strings.Contains(f.stdout(), want) {
+		t.Errorf("give-up op missing:\n%s", f.stdout())
+	}
+	if strings.Contains(f.stdout(), "\n\n") {
+		t.Errorf("op line printed with a doubled newline:\n%q", f.stdout())
+	}
+}
+
+func TestPRIntent_FiresOnReadyReachedOnlyViaBackstop(t *testing.T) {
+	f := newFixture(t)
+	f.readOnlyRelay()
+	f.firstRun("done\n", 0)
+	f.resumes = []resumeScript{{result: "done\n"}, {result: syntheticLine + "\n", rawLines: []string{prIntentLine}}}
+
+	f.run()
+
+	if len(f.calls) != 2 {
+		t.Fatalf("calls = %d, want the outcome nudge then the PR-intent nudge", len(f.calls))
+	}
+	if !strings.Contains(f.calls[1].prompt, syntheticLine) {
+		t.Errorf("PR-intent nudge did not carry the backstop line:\n%s", f.calls[1].prompt)
+	}
+	if strings.Contains(f.stdout(), "spindrift_op") {
+		t.Errorf("give-up op emitted although the resumed pass supplied PR-intent:\n%s", f.stdout())
+	}
+}
+
+func TestPRIntent_CrashedResumeAfterBackstopReadyStaysTerminal(t *testing.T) {
+	f := newFixture(t)
+	f.readOnlyRelay()
+	f.firstRun("done\n", 0)
+	f.resumes = []resumeScript{{result: "done\n"}, {result: "", rc: 9}}
+
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d, want 0 (backstop-declared ready stays terminal)", rc)
+	}
+	want := "==> PR-intent nudge resume failed (rc=9) after a backstop-declared ready outcome — staying terminal (issue #593, #2448)\n"
+	if !strings.Contains(f.stdout(), want) {
+		t.Errorf("force-exit-zero banner missing:\n%s", f.stdout())
+	}
+}
+
+func TestPRIntent_CrashedResumeOnGenuineReadyKeepsItsExitCode(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.resumes = []resumeScript{{result: "", rc: 9}}
+
+	if rc := f.run(); rc != 9 {
+		t.Fatalf("rc = %d, want the resume's 9", rc)
+	}
+}
+
+func TestPRIntent_ResumedBlockedVerdictNeverClobberedToReady(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.readOnlyRelay()
+	f.resumes = []resumeScript{{result: blockedLine + "\n"}}
+
+	f.run()
+
+	if strings.Contains(f.stdout(), "restoring it") {
+		t.Errorf("restore fired over a genuine resumed verdict:\n%s", f.stdout())
+	}
+	if countLine(f.lines(), readyLine) != 0 {
+		t.Errorf("ready line reprinted:\n%s", f.stdout())
+	}
+}
+
+func TestPRIntent_ShadowedByNearMiss_RestoresOriginalLine(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.resumes = []resumeScript{{result: nearMissLine + "\n"}}
+
+	f.run()
+
+	out := f.stdout()
+	want := "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it\n" + readyLine + "\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("restore missing:\n%s", out)
+	}
+	if got := countLine(f.lines(), readyLine); got != 1 {
+		t.Errorf("ready line printed %d times, want only the restore (the first run's print is bash's)", got)
+	}
+}
+
+func TestPRIntent_NeverFires(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(f *fixture)
+	}{
+		{"read-write run", func(f *fixture) { f.env.BoxWriteEnabled = true; f.env.OutboxRelayCapable = true }},
+		{"CODE_FORGE=git (not relay capable)", func(f *fixture) { f.env.BoxWriteEnabled = false; f.env.OutboxRelayCapable = false }},
+		{"CODE_FORGE=local (host mediated, not relay capable)", func(f *fixture) {
+			f.env.BoxWriteEnabled = false
+			f.env.OutboxRelayCapable = false
+			f.env.HostMediatedRemote = true
+		}},
+		{"advise-only research", func(f *fixture) { f.readOnlyRelay(); f.env.DispatchKind = "research" }},
+	}
+	for _, c := range cases {
+		for _, viaBackstop := range []bool{false, true} {
+			name := c.name
+			if viaBackstop {
+				name += "/via-backstop"
+			}
+			t.Run(name, func(t *testing.T) {
+				f := newFixture(t)
+				c.setup(f)
+				if viaBackstop {
+					f.firstRun("done\n", 0)
+					f.in.OutcomeLine = ""
+					if f.env.DispatchKind != "research" {
+						f.resumes = []resumeScript{{result: "done\n"}}
+					}
+				} else {
+					f.firstRun(readyLine+"\n", 0)
+				}
+				f.run()
+				for _, call := range f.calls {
+					if strings.Contains(call.prompt, "SPINDRIFT_PR_INTENT") {
+						t.Fatalf("PR-intent nudge fired:\n%s", call.prompt)
+					}
+				}
+				if strings.Contains(f.stdout(), "PR-intent marker missing") {
+					t.Fatalf("PR-intent banner printed:\n%s", f.stdout())
+				}
+			})
+		}
+	}
+}
+
+func TestPRIntent_NeverFiresOnBlockedRun(t *testing.T) {
+	for _, viaBackstop := range []bool{false, true} {
+		f := newFixture(t)
+		f.readOnlyRelay()
+		if viaBackstop {
+			f.backstopOut = blockedLine + "\n"
+			f.firstRun("done\n", 0)
+			f.in.OutcomeLine = ""
+			f.resumes = []resumeScript{{result: "done\n"}}
+		} else {
+			f.firstRun(blockedLine+"\n", 0)
+		}
+		f.run()
+		if strings.Contains(f.stdout(), "PR-intent marker missing") {
+			t.Fatalf("viaBackstop=%v: PR-intent banner on a blocked run:\n%s", viaBackstop, f.stdout())
+		}
+	}
+}
+
+func TestPRIntent_NonZeroExitSkipsTheGate(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.in.DriverExitCode = 4
+	if rc := f.run(); rc != 4 || len(f.calls) != 0 {
+		t.Fatalf("rc=%d calls=%d, want 4 and no resume", rc, len(f.calls))
+	}
+}
+
+func TestPRIntent_SocketCarrierQueriesSignalStatus(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.env.SignalCarrier = "socket"
+	queried := 0
+	f.d.SignalStatus = func() (signalwire.Status, error) {
+		queried++
+		return signalwire.Status{PRIntent: &signalwire.Receipt{}}, nil
+	}
+	// The log carries no marker, yet the socket does: no nudge.
+	f.run()
+	if queried == 0 {
+		t.Fatal("signal status never queried under the socket carrier")
+	}
+	if len(f.calls) != 0 {
+		t.Fatalf("resumed %d times although the socket reported a PR intent", len(f.calls))
+	}
+}
+
+func TestPRIntent_SocketGiveUpNamesTheCarrier(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.env.SignalCarrier = "socket"
+	f.d.SignalStatus = func() (signalwire.Status, error) { return signalwire.Status{}, nil }
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	f.run()
+
+	if !strings.Contains(f.stdout(), "no PR intent on the signal socket status route") {
+		t.Errorf("socket give-up reason missing:\n%s", f.stdout())
+	}
+}
+
+func TestPRIntent_SignalStatusErrorWarnsAndStillNudges(t *testing.T) {
+	f := newFixture(t)
+	prIntentGateMissing(f)
+	f.env.SignalCarrier = "socket"
+	f.d.SignalStatus = func() (signalwire.Status, error) { return signalwire.Status{}, errors.New("socket down") }
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	f.run()
+
+	if len(f.calls) != 1 {
+		t.Fatalf("calls = %d, want the fail-safe nudge", len(f.calls))
+	}
+	if !strings.Contains(f.errb.String(), "socket down") {
+		t.Errorf("scan error not surfaced on stderr: %q", f.errb.String())
+	}
+}
+
+// --- settle phases and sequencing ---
+
+func TestSettle_LockfileScanRunsUnlessSelfContained(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(blockedLine+"\n", 6)
+	f.run()
+	if len(f.scanDirs) != 1 || f.scanDirs[0] != f.in.WorkDir {
+		t.Fatalf("scan dirs = %v, want one scan of the work dir even after a crash", f.scanDirs)
+	}
+
+	g := newFixture(t)
+	g.env.SelfContained = true
+	g.run()
+	if len(g.scanDirs) != 0 {
+		t.Fatalf("self-contained dispatch scanned %v", g.scanDirs)
+	}
+}
+
+func TestSettle_BundleOutPredicate(t *testing.T) {
+	cases := []struct {
+		name  string
+		setup func(f *fixture)
+		want  int
+	}{
+		{"read-write github", func(f *fixture) {}, 0},
+		{"host mediated (local)", func(f *fixture) { f.env.HostMediatedRemote = true }, 1},
+		{"read-only relay-capable", func(f *fixture) { f.readOnlyRelay() }, 1},
+		{"read-only not relay-capable", func(f *fixture) { f.env.BoxWriteEnabled = false }, 0},
+		{"advise-only skips even when needed", func(f *fixture) { f.readOnlyRelay(); f.env.DispatchKind = "research" }, 0},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			c.setup(f)
+			f.firstRun(blockedLine+"\n", 0)
+			f.run()
+			if len(f.bundleCfgs) != c.want {
+				t.Fatalf("bundle-out ran %d times, want %d", len(f.bundleCfgs), c.want)
+			}
+		})
+	}
+}
+
+func TestSettle_BundleOutConfigMapping(t *testing.T) {
+	f := newFixture(t)
+	f.readOnlyRelay()
+	f.firstRun(blockedLine+"\n", 0)
+
+	f.run()
+
+	want := bundleout.Config{
+		Repo:             f.in.WorkDir,
+		Base:             "origin/main",
+		Branch:           "agent/issue-42",
+		OutboxDir:        f.in.OutboxDir,
+		Issue:            "42",
+		PriorOutcomeLine: blockedLine,
+	}
+	if len(f.bundleCfgs) != 1 || f.bundleCfgs[0] != want {
+		t.Fatalf("bundle cfgs = %+v, want [%+v]", f.bundleCfgs, want)
+	}
+}
+
+func TestSettle_BundleOutRelaysTheBackstopLine(t *testing.T) {
+	f := newFixture(t)
+	f.env.BoxWriteEnabled = false
+	f.env.OutboxRelayCapable = true
+	f.firstRun("done\n", 0)
+	f.in.OutcomeLine = ""
+	f.backstopOut = blockedLine + "\n"
+	f.resumes = []resumeScript{{result: "done\n"}}
+
+	f.run()
+
+	if len(f.bundleCfgs) != 1 || f.bundleCfgs[0].PriorOutcomeLine != blockedLine {
+		t.Fatalf("bundle cfgs = %+v, want the backstop line as the prior outcome", f.bundleCfgs)
+	}
+}
+
+func TestSettle_BundleOutFailureIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.env.HostMediatedRemote = true
+	f.bundleErr = errors.New("no bundle")
+
+	_, err := run(f.in, f.env, f.d)
+
+	if err == nil || err.Error() != "bundle-out: no bundle" {
+		t.Fatalf("error = %v", err)
+	}
+	if strings.Contains(f.stdout(), completeLine) {
+		t.Error("completion line printed after a fatal bundle-out")
+	}
+}
+
+func TestSettle_WarnLockfilesOutputReachesStdoutBeforeCompletion(t *testing.T) {
+	f := newFixture(t)
+	f.scanOut = "==> WARNING: lockfile\n"
+	f.run()
+	got := f.lines()
+	if got[len(got)-2] != "==> WARNING: lockfile" || got[len(got)-1] != completeLine {
+		t.Fatalf("stdout tail = %q", got)
+	}
+}
+
+func TestOrchestratorArgv_ManifestPathOnlyWhenOutboxMounted(t *testing.T) {
+	for _, needs := range []bool{false, true} {
+		f := newFixture(t)
+		f.env.HostMediatedRemote = needs
+		f.firstRun("no marker\n", 0)
+		f.resumes = []resumeScript{{result: readyLine + "\n"}}
+		f.run()
+		got, ok := f.calls[0].argv["--manifest-path"]
+		if ok != needs {
+			t.Fatalf("needsOutbox=%v: --manifest-path present = %v", needs, ok)
+		}
+		if needs && got != f.in.OutboxDir+"/manifest.json" {
+			t.Errorf("--manifest-path = %q", got)
+		}
+	}
+}
+
+func TestResume_RefreshesOutcomeLineAndLogsEvenToEmpty(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(nearMissLine+"\n", 0)
+	f.resumes = []resumeScript{{result: "nothing useful\n"}}
+	f.backstopOut = ""
+
+	f.run()
+
+	// The backstop ran (resume's outcome line was empty, not the stale first
+	// one), and the PR-intent/demotion logic saw the refreshed state.
+	if len(f.backstopCfgs) != 1 {
+		t.Fatalf("backstop ran %d times, want 1", len(f.backstopCfgs))
+	}
+}
+
+func TestResume_PrintsResumedOutcomeLineWhenNonEmpty(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.resumes = []resumeScript{{result: "**" + readyLine + "**\n"}}
+
+	f.run()
+
+	if countLine(f.lines(), readyLine) != 1 {
+		t.Errorf("resumed line (markdown-unwrapped) not printed once:\n%s", f.stdout())
+	}
+}
+
+func TestResume_TempFilesAreCleanedExceptLogsAndHandoffCopy(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+	f.run()
+	if _, err := os.Stat(f.calls[0].argv["--prompt-file"]); !os.IsNotExist(err) {
+		t.Errorf("prompt temp file survived the resume: %v", err)
+	}
+	if _, err := os.Stat(f.calls[0].argv["--log-path"]); err != nil {
+		t.Errorf("stream log must survive for later scans: %v", err)
+	}
+	if _, err := os.Stat(f.calls[0].argv["--handoff-file"]); err != nil {
+		t.Errorf("stripped handoff must be left on disk: %v", err)
+	}
+}
+
+func TestResume_UnreadableHandoffIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.in.HandoffFile = filepath.Join(f.dir, "missing.json")
+	_, err := run(f.in, f.env, f.d)
+	if err == nil || !strings.HasPrefix(err.Error(), "resume handoff: ") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestResume_UnknownDriverIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.write(f.in.HandoffFile, `{"Driver":"nope"}`)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+	_, err := run(f.in, f.env, f.d)
+	if err == nil || !strings.HasPrefix(err.Error(), "resume: ") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRun_UnrecognizedDispatchKindIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.env.DispatchKind = "bogus"
+	_, err := run(f.in, f.env, f.d)
+	if err == nil || !strings.Contains(err.Error(), `unrecognized DISPATCH_KIND=bogus`) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRun_StdoutOrderForACleanRun(t *testing.T) {
+	f := newFixture(t)
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	want := []string{completeLine}
+	if got := f.lines(); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("stdout = %q, want %q (the first run's outcome line is bash's to print)", got, want)
+	}
+}
+
+func TestPhaseError_Format(t *testing.T) {
+	err := &phaseError{phase: "bundle-out", err: errors.New("x")}
+	if err.Error() != "bundle-out: x" || !errors.Is(err, err.err) {
+		t.Fatalf("phaseError = %q", err.Error())
+	}
+}
+
+// --- real orchestrator runner ---
+
+func TestExecOrchestrator_NotOnPathIsRC127(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	var stderr bytes.Buffer
+	if rc := execOrchestrator(nil, io.Discard, &stderr, nil); rc != 127 {
+		t.Fatalf("rc = %d, want 127", rc)
+	}
+	if !strings.Contains(stderr.String(), "orchestrator") {
+		t.Errorf("stderr = %q, want a diagnosis", stderr.String())
+	}
+}
+
+func TestExecOrchestrator_PropagatesExitCodeAndOutput(t *testing.T) {
+	bin := t.TempDir()
+	script := "#!/bin/sh\necho \"args:$*\"\nexit 5\n"
+	if err := os.WriteFile(filepath.Join(bin, "orchestrator"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	var stdout bytes.Buffer
+	rc := execOrchestrator([]string{"--a", "b"}, &stdout, io.Discard, nil)
+	if rc != 5 || stdout.String() != "args:--a b\n" {
+		t.Fatalf("rc=%d stdout=%q", rc, stdout.String())
+	}
+}
+
+// --- flags ---
+
+func allFlags() []string {
+	return []string{
+		"--driver-exit-code", "2", "--outcome-line", "L", "--stream-log", "/s", "--driver-text-log", "/t",
+		"--handoff-file", "/h", "--resume-session-file", "/r", "--work-dir", "/w", "--outbox-dir", "/o",
+	}
+}
+
+func TestParseFlags_AllSupplied(t *testing.T) {
+	in, err := parseFlags(allFlags(), io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := inputs{DriverExitCode: 2, OutcomeLine: "L", StreamLog: "/s", DriverTextLog: "/t", HandoffFile: "/h", ResumeSessionFile: "/r", WorkDir: "/w", OutboxDir: "/o"}
+	if in != want {
+		t.Fatalf("inputs = %+v, want %+v", in, want)
+	}
+}
+
+func TestParseFlags_EmptyOutcomeLineAllowedButEveryFlagRequired(t *testing.T) {
+	args := allFlags()
+	args[3] = ""
+	if _, err := parseFlags(args, io.Discard); err != nil {
+		t.Fatalf("empty --outcome-line rejected: %v", err)
+	}
+	all := allFlags()
+	for i := 0; i < len(all); i += 2 {
+		missing := append(append([]string{}, all[:i]...), all[i+2:]...)
+		if _, err := parseFlags(missing, io.Discard); err == nil || !strings.Contains(err.Error(), all[i]) {
+			t.Errorf("without %s: error = %v, want it named", all[i], err)
+		}
+	}
+}
+
+func TestParseFlags_UnknownFlagAndStrayArgRejected(t *testing.T) {
+	if _, err := parseFlags(append(allFlags(), "--bogus"), io.Discard); err == nil {
+		t.Error("unknown flag accepted")
+	}
+	if _, err := parseFlags(append(allFlags(), "stray"), io.Discard); err == nil {
+		t.Error("stray positional accepted")
+	}
+}
+
+func TestMainRun_ErrorPrintsBoxPhaseAndExitsOne(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	d := deps{Stdout: &stdout, Stderr: &stderr}
+	rc := mainRun(allFlags(), promptassembly.Env{DispatchKind: "bogus"}, d)
+	if rc != 1 || !strings.HasPrefix(stderr.String(), "box: ") {
+		t.Fatalf("rc=%d stderr=%q", rc, stderr.String())
+	}
+}
