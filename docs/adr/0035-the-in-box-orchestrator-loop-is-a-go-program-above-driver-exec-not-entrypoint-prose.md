@@ -201,3 +201,30 @@ legacy and stays only until that port removes it, with its registry rows and
 gate. Because the default now builds orchestrator-on, a custom `reviewPrompt`
 missing the `VERDICT:` marker fails at build time unless the Consumer sets
 the switch off.
+
+## Amendment (issue #4291): the switch and the direct `driver-exec` path are removed
+
+`ORCHESTRATOR_ENABLED`, its `--orchestrator` flag, the
+`dispatch.orchestrator.enable` flake option, and the direct `driver-exec`
+path they selected are gone. The Migration stance and Demolition trigger
+above are discharged: the orchestrator is the only Box path, and the
+"Default is off" and "one branch point" consequences no longer describe the
+tree. The loop's own `driver-exec` passes are unchanged; what went is the
+entrypoint's choice to skip the loop.
+
+The reasons are the ones the #4290 amendment gave, plus cost. [ADR
+0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md)'s port of
+the Box main to Go would otherwise carry two implementor paths. Dogfood had
+run the orchestrator for weeks and #4290 made it the shipped default. And a
+switch that stays keeps every fork it created in the tree: the fragment gates
+(`REVIEW_LOOP_INLINE`/`REVIEW_LOOP_ORCHESTRATOR`, now ungated registry rows;
+the inline review-loop fragment is deleted), the Filer's write mechanism
+under `read-only` (now always the relay), the prompt-assembly env field, the
+`Handoff.Invoker` field, and the launcher flag.
+
+A stale setting fails preflight instead of being ignored: the
+`removed-knobs` doctor check, and mkHarness and the flake module at eval
+time, name `ORCHESTRATOR_ENABLED` as removed, whether it arrives as env, an
+input-document key, a flake option, a legacy settings alias, or a `defaults`
+key. A Consumer that silently kept the old value would believe it still had
+the direct path.

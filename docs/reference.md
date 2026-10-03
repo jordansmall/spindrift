@@ -242,7 +242,7 @@ wins over the flake setting this release — deprecated, and the launcher warns
 with the flag/settings equivalent when it finds one — but env's role shrinks
 to secrets and internal launcher→Box plumbing from here on; see
 [`MIGRATING.md`](../MIGRATING.md).
-A set-but-empty bool knob (e.g. `--orchestrator=false`, or `AUTO_FORMAT=` in the
+A set-but-empty bool knob (e.g. `--auto-format=false`, or `AUTO_FORMAT=` in the
 env) is an explicit off that beats a document value of on; for every other knob
 an empty env value still means unset (issue #4290).
 `spindrift --help` stays scannable; the full generated table lives in
@@ -434,8 +434,7 @@ the filer is not provisioned at all until a model is set; see
 [Filer](#filer). `agents.models.scout`/`agents.models.filer`/
 `agents.models.worker` are all **deprecated** in favor of the structural
 [`roster`](#subagent-roster) option. `agents.models.review` is
-**deprecated for non-orchestrator use** only — superseded by `roster`
-there, but under `ORCHESTRATOR` the roster reviewer entry is itself
+not deprecated: on the fresh-work path the roster reviewer entry is
 superseded by the code-owned review pass, which binds its model from
 `agents.models.review` instead (falling back to the coordinator model when
 unset).
@@ -1021,7 +1020,8 @@ prompt-directed workflow) could park its turn awaiting a notification a
 one-shot `claude -p` session never receives, exactly like the `#1542`
 `ScheduleWakeup` shape. Investigation ruled out the issue's other working
 hypothesis — that `reject-background-bash.sh` was somehow inert specifically
-under `ORCHESTRATOR_ENABLED` (`cmd/launcher/orchestrator`): the orchestrator
+under the orchestrator (`cmd/launcher/orchestrator`, then switchable with
+the since-removed `ORCHESTRATOR_ENABLED`): the orchestrator
 loops `driver-exec` for additional passes, but every pass — direct or
 orchestrator-invoked — spawns the same `claude` binary with the same
 `$HOME`, the same `--driver-flags` (`DRIVER_FLAGS_COMMON`, byte-identical
@@ -1937,13 +1937,12 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
              ├─ run PREFETCH (optional cache warm-up)
              └─ run_driver_in_env  (assembles the prompt/--agents JSON, mounts
                 the session cache, then hands off to one of:)
-                ├─ driver-exec                 (ORCHESTRATOR_ENABLED off: one Driver pass)
-                │  └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-                └─ orchestrator                (ORCHESTRATOR_ENABLED on, the default: N passes)
+                └─ orchestrator                (N passes)
                    └─ driver-exec × N, one fresh Driver session per pass,
-                      seeded from a run-state handoff file — see [In-box
-                      orchestrator](#in-box-orchestrator)
-                (either path, inside the Driver pass itself:)
+                      │  seeded from a run-state handoff file — see [In-box
+                      │  orchestrator](#in-box-orchestrator)
+                      └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
+                (inside a Driver pass itself:)
                 implement → check → commit → push → self-review (reviewer subagent)
                    → open PR as a draft
                    → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
@@ -2040,21 +2039,18 @@ surfaces as a `merge-blocked` comment on the issue, not a crash.
 
 ### In-box orchestrator
 
-`ORCHESTRATOR_ENABLED` (default on since issue #4290, `boxEnv`-only — see
-`lib/env-schema.nix`) swaps which binary `run_driver_in_env` hands the
-assembled prompt/`--agents`/session flags to. Off (`orchestrator.enable =
-false`), `entrypoint.sh` calls `driver-exec` directly and the box makes
-exactly one Driver pass — the legacy path, kept selectable until [ADR
-0058](adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md)'s
-Box-main port removes it. On, the identical flag set goes to
-`orchestrator` (`cmd/launcher/orchestrator`) instead — a second
-in-box Go binary, built the same hermetic way as the launcher itself
-([ADR 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)) — which loops
+`run_driver_in_env` hands the assembled prompt/`--agents`/session flags to
+`orchestrator` (`cmd/launcher/orchestrator`) — a second in-box Go binary,
+built the same hermetic way as the launcher itself ([ADR
+0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)) — which loops
 `driver-exec` for as many passes as the implementor's own review verdicts and
 two numeric caps call for
 ([ADR 0035](adr/0035-the-in-box-orchestrator-loop-is-a-go-program-above-driver-exec-not-entrypoint-prose.md)).
-`entrypoint.sh`'s own job — prompt/`--agents` assembly, session-cache
-mounting — is unchanged either way.
+It is the only path: the `ORCHESTRATOR_ENABLED` switch and the direct
+single-pass `driver-exec` path were removed in issue #4291, and a leftover
+setting fails preflight (`spindrift doctor`'s `removed-knobs` check, flake
+eval) naming it as removed. `entrypoint.sh`'s own job — prompt/`--agents`
+assembly, session-cache mounting — is unchanged.
 
 Each pass after the first runs the Driver **sessionless** (no `--resume`,
 ever) — only the very first pass carries the box's initial session pin
@@ -2166,7 +2162,7 @@ artifact, not a growing transcript:
   when `ReviewPromptFile` is empty), each pass folds its own review in
   inline instead of splitting implement/review into separate invocations,
   so the minimum is one less than half: `N + 2`. When the handoff's
-  `AdvisoryReviewer` field is set (the butler under `ORCHESTRATOR`, whose
+  `AdvisoryReviewer` field is set (the butler, whose
   inline reviewer only advises), the legacy loop reads no verdict at all: a
   pass without an outcome stops with "no verdict", `--max-review-rounds`
   never fires, and the cap-pair warning is skipped (issue #3925). The
@@ -2225,13 +2221,12 @@ flag, to the path it wrote the rendered `review-prompt.md` text to, and only
 when that pass's `Assemble` call actually rendered one. `entrypoint.sh`
 passes `--review-prompt-output` unconditionally — `phase_prompt_assembly`,
 the one call site that builds the `assemble-prompt` invocation, runs
-unconditionally from `main()` regardless of ORCHESTRATOR/research/`FIX_PASS`.
+unconditionally from `main()` regardless of research/`FIX_PASS`.
 The real gate lives inside `Assemble` itself: `Result.ReviewPromptText` is
-populated only when the orchestrator is on, this is the default fresh-work
-dispatch, and `FixPass == 0`, so the flag is always passed but the file it
-names is only ever non-empty under those conditions — this is a consumer of
-ADR 0035's master switch, not a separate sub-knob: turning the orchestrator
-on always drives the review pass. The orchestrator itself takes no
+populated only when this is a fresh-work (not advise-only) dispatch and
+`FixPass == 0`, so the flag is always passed but the file it names is only
+ever non-empty under those conditions — there is no sub-knob: every such
+dispatch drives the review pass. The orchestrator itself takes no
 review-prompt flag of its own; it reads `ReviewPromptFile` straight off the
 loaded handoff, the same way `driver-exec` does for the pass whose
 `--top-level-role` is `reviewer`.
@@ -2398,7 +2393,7 @@ produces no verdict at all fails open and settles too, so a malfunctioning
 gate can never strand a branch the review pass already approved.
 
 Every implement/fix/land pass's own COMMIT section also carries one more
-fragment on the same `REVIEW_LOOP_ORCHESTRATOR` gate
+fragment, unconditional like the review loop's own
 (`commit-rework-orchestrator.md`, issue #2698) — the review pass itself
 has no COMMIT section to carry it. It renders on every implement/fix/land
 pass alike, including the first, but branches in prose on the seeded
@@ -2409,7 +2404,7 @@ instead; the implement pass authoring the first slice, seeded with no
 verdict yet, keeps the unmodified preference.
 
 The land pass — reached via an `APPROVE` verdict — carries its own fixed work
-order on the same `REVIEW_LOOP_ORCHESTRATOR` gate
+order, also unconditional
 (`land-pass-order-orchestrator.md`, issue #3214), scoped in prose to a seeded
 `Last reviewer verdict: APPROVE` since one prompt serves every pass: rebase
 onto the base first, then fold the kept non-blocking fixes, then run the
@@ -2574,8 +2569,8 @@ this safe.)
 ### Prompt contract build-time/runtime parity
 
 The Box's own contract with the launcher/host — e.g. a read-only research
-run's verdict must reach the launcher via a `SPINDRIFT_COMMENT` marker, an
-orchestrator-on run's review pass must emit a `VERDICT:` line — is declared
+run's verdict must reach the launcher via a `SPINDRIFT_COMMENT` marker, a
+fresh-work run's review pass must emit a `VERDICT:` line — is declared
 once, as data, in `lib/prompt-contract.nix`'s `validateMarkers` registry
 (id/marker/carrier/severity/`when`-gate/`message` per row). `severity` is
 "reject" for a row whose omission is unrecoverable (both current reject rows
@@ -2618,10 +2613,10 @@ two pass kinds share — without dispatching a Box, the same standalone seam
 `promptassembly.Compose`, sharing `assemblePromptBodies` with `Assemble`
 itself so the report can never drift from what the Driver actually receives.
 
-A cell reports one `PassComposition` per pass kind it renders: an
-orchestrator-on cell reports five — `implement`/`fix`/`land` sharing the
+A cell reports one `PassComposition` per pass kind it renders: a
+fresh-work cell reports five — `implement`/`fix`/`land` sharing the
 base-prompt body, `review`/`delta-review` sharing the review-prompt body —
-while a non-orchestrator or warm-fix (`FIX_PASS` > 0) cell reports a single
+while a warm-fix (`FIX_PASS` > 0) cell reports a single
 `legacy` pass, and a research dispatch reports a single `research` pass.
 Passes the orchestrator drives without a template of their own — a `settle`
 pass, say — have no pass kind here and so never appear. The issue body,
@@ -3399,7 +3394,7 @@ PR or changes the outcome line — the main agent falls back to pasting the
 escalated findings into the PR body, exactly as when the filer is off.
 
 Under [`BOX_FORGE_AND_ISSUE_ACCESS=read-only`](#read-only-box-box_forge_and_issue_accessread-only)
-with `ORCHESTRATOR_ENABLED` set (issue #2019), the filer's write mechanism
+(issue #2019; unconditional since #4291 removed the orchestrator switch), the filer's write mechanism
 swaps: instead of `gh label create`/`gh issue create` (both writes a
 read-only token can't make), it prints one nonce-guarded, base64-encoded
 `SPINDRIFT_ISSUE_INTENT` stdout line per issue to file, and reports `QUEUED`
@@ -3416,9 +3411,8 @@ added host-side backstop described below (`dedupTerms`, issue #3609): before
 filing, the Launcher re-checks each intent against the backlog itself — open
 and closed alike (issue #3873, since a closed finding was already filed once
 and must never be refiled just because it was since closed) — and skips a
-repeat that survived the Filer's own search. Every other
-combination (`read-write` regardless of `ORCHESTRATOR_ENABLED`, or
-`read-only` with the orchestrator off) keeps the direct `gh issue create`
+repeat that survived the Filer's own search. A
+`read-write` Box keeps the direct `gh issue create`
 path above, unchanged.
 
 The relayed payload's JSON may also carry an optional `type` key, one of the
@@ -3556,11 +3550,11 @@ than a breaking format change, and lets the next added count do the same.
 
 The Filer also backs the research Dispatch kind (see [Research
 dispatch](#research-dispatch)): whenever a research run — ordinary or
-`--self-contained`, read-only or read-write, orchestrator on or off — has
+`--self-contained`, read-only or read-write — has
 the Filer provisioned (same `models.filer` roster switch as above, no
 separate research knob), both research prompts render a filing step letting
 the researcher hand any finding worth tracking, beyond the issue's own
-verdict, to the filer subagent. Unlike the work path's read-only/orchestrator
+verdict, to the filer subagent. Unlike the work path's read-only
 fork above, research filing is relay-only **unconditionally** — there is no
 direct-file mode for research at all. The filer emits one
 `SPINDRIFT_ISSUE_INTENT` line per finding; the Launcher files each host-side
@@ -4170,12 +4164,10 @@ run view`, `gh run list`, a plain `gh api` `GET`, and so on) pass through to
 the real `gh` untouched. Like the push guard above, this is a cheap interim
 guard, not adversary-proof.
 
-The issue-filing row is additionally gated on `ORCHESTRATOR_ENABLED` (issue
-#2019), unlike the three rows above it: `read-only` with the orchestrator off
-keeps the Filer's pre-existing degraded behavior (it still attempts `gh issue
-create`, fails, and the main agent falls back to pasting the findings into
-the PR body) rather than switching to the relay — the relay only activates
-once `read-only` and `ORCHESTRATOR_ENABLED` are both true.
+The issue-filing row has the same local guard, and the Filer always uses the
+relay under `read-only` (issue #2019; it was once gated on the since-removed
+`ORCHESTRATOR_ENABLED`, whose off state kept a degraded `gh issue create`
+attempt that failed and fell back to pasting the findings into the PR body).
 
 This is checked by capability, not by `CODE_FORGE`/`ISSUE_TRACKER` value
 alone: the selected forge must implement bundle-relay and host-side
@@ -5119,7 +5111,7 @@ only for allow-listed candidates, a quality filter rather than a trust
 boundary — agreed (`butler-prompt.md`'s PROMOTION CANDIDATES step relays
 its concurrence as plain text), running under `butler-review-prompt.md`,
 which judges the finding handed to it rather than a branch diff, and
-which the butler keeps in `--agents` even under `ORCHESTRATOR`, since an
+which the butler keeps in `--agents`, since an
 advise-only run never gets the code-owned review pass that otherwise
 replaces it; and today's `BUTLER_MAX_PROMOTIONS_PER_DAY` (schema key
 `butlerMaxPromotionsPerDay`, default `0`) budget has room, part of the

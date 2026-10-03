@@ -1,20 +1,35 @@
 # Migration Guide
 
+## `ORCHESTRATOR_ENABLED` is removed (issue #4291)
+
+The in-box orchestrator is now the only Box path; the direct single-pass
+`driver-exec` path and the switch that selected it are gone. Delete
+`orchestrator.enable` (flake option `dispatch.orchestrator.enable`, legacy
+`settings.promptSkillIteration.orchestratorEnabled`), `ORCHESTRATOR_ENABLED`
+(env, settings document, `mkHarness` `defaults`), and `--orchestrator` from
+your config. A leftover setting is not ignored: it fails preflight (the
+`removed-knobs` check of `spindrift doctor`, and eval of the flake surfaces)
+naming the knob as removed.
+
+A custom prompt override that references `review-loop-inline.md` or
+`${REVIEW_LOOP_INLINE_STEP}` must drop the reference: that fragment and its
+var no longer exist. The orchestrator review-loop fragments
+(`review-loop-orchestrator.md`, `land-pass-order-orchestrator.md`,
+`commit-rework-orchestrator.md`) now render unconditionally. A custom
+`reviewPrompt` must carry the `VERDICT:` marker, as it already had to under the
+default. A `read-only` Box always uses the Filer's issue-intent relay. See
+[In-box orchestrator](docs/reference.md#in-box-orchestrator).
+
 ## `ORCHESTRATOR_ENABLED` defaults to on (issue #4290)
 
 Since v0.22.0, an unset `ORCHESTRATOR_ENABLED` runs the in-box orchestrator
 (a multi-pass implement, code-owned review, fix loop) instead of the direct
-single-pass `driver-exec` path. Set `orchestrator.enable = false` (settings
-`ORCHESTRATOR_ENABLED`) to keep the direct path. That path is legacy: it goes
-away with the Box-main port of [ADR
-0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md)
-(spec #4275).
+single-pass `driver-exec` path. Setting it off kept the direct path as a
+legacy escape hatch; issue #4291 then removed both (see above).
 
-A Consumer whose custom `reviewPrompt` lacks the `VERDICT:` marker now fails
-at build time by default, because the orchestrator-on build-time reject
-applies to the new default. Add the marker to the prompt, or set
-`orchestrator.enable = false`. See [In-box
-orchestrator](docs/reference.md#in-box-orchestrator).
+A Consumer whose custom `reviewPrompt` lacks the `VERDICT:` marker fails at
+build time, because the orchestrator-on build-time reject applies to every
+build. See [In-box orchestrator](docs/reference.md#in-box-orchestrator).
 
 ## `BOX_SIGNAL_CARRIER` defaults to `socket` (issue #4376)
 
