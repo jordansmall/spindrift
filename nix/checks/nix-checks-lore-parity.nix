@@ -3,7 +3,12 @@
 # the shared two-surface rationale. There is no verbatim comparison: CLAUDE.md's
 # section is longer, cites things the skill never mentions, and wraps narrower,
 # so this asserts only the vocabulary any faithful rewording would keep.
-{ pkgs, imageNixCores, ... }:
+{
+  pkgs,
+  imageNixCores,
+  imageNixMaxJobs,
+  ...
+}:
 let
   inherit (pkgs.lib)
     assertMsg
@@ -158,9 +163,10 @@ let
       pkgs.runCommand "nix-checks-lore-parity-clause-${c.name}" { } "touch $out";
   };
 
-  # Lore texts quote the baked cores bound in prose, so a bump can leave one
-  # stale.
+  # Lore texts quote the baked cores and max-jobs bounds in prose, so a bump
+  # can leave one stale.
   coresNeedle = "cores = ${imageNixCores}";
+  maxJobsNeedle = "max-jobs = ${imageNixMaxJobs}";
 
   # Raw markdown, run through normalize first so these cover the same path the
   # live surfaces take.
@@ -215,6 +221,13 @@ builtins.listToAttrs (map clauseCheck sharedClauses)
     assert assertMsg (hasDigitSafeInfix coresNeedle nixEditsText)
       "nix-checks lore drift: ${claudeDesc} does not quote \"cores = ${imageNixCores}\", the value lib/image.nix's nixConfigFile actually bakes -- update CLAUDE.md's prose to match the baked bound.";
     pkgs.runCommand "nix-checks-lore-cores-matches-nix-conf" { } "touch $out";
+
+  nix-checks-lore-max-jobs-matches-nix-conf =
+    assert assertMsg (hasDigitSafeInfix maxJobsNeedle skillText)
+      "nix-checks lore drift: ${skillDesc} does not quote \"max-jobs = ${imageNixMaxJobs}\", the value lib/image.nix's nixConfigFile actually bakes -- update the skill's prose to match the baked bound.";
+    assert assertMsg (hasDigitSafeInfix maxJobsNeedle nixEditsText)
+      "nix-checks lore drift: ${claudeDesc} does not quote \"max-jobs = ${imageNixMaxJobs}\", the value lib/image.nix's nixConfigFile actually bakes -- update CLAUDE.md's prose to match the baked bound.";
+    pkgs.runCommand "nix-checks-lore-max-jobs-matches-nix-conf" { } "touch $out";
 
   # The live texts never exercise the multi-digit case, so pin it here for
   # both call-site shapes, a clause row and coresNeedle. The name stays
