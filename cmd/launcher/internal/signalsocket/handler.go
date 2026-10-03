@@ -132,9 +132,10 @@ func NewGatedHandler(b *Buffer, logw io.Writer, secret string) (*Handler, error)
 func gate(secret string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// subtle.ConstantTimeCompare, not ==: this header is the sole gate on
-		// a port any local process can reach, so a short-circuiting == would
-		// leak secret a byte at a time. The early return on differing lengths
-		// leaks only len(secret), which is not a comparable oracle.
+		// a port anything that can route to the host can reach, so a
+		// short-circuiting == would leak secret a byte at a time. The early
+		// return on differing lengths leaks only len(secret), which is not a
+		// comparable oracle.
 		if subtle.ConstantTimeCompare([]byte(r.Header.Get(signalwire.SecretHeader)), []byte(secret)) != 1 {
 			// The body is never read here, on purpose: an unauthenticated
 			// caller must not get to push bytes through the socket at all,
