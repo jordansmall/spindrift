@@ -6,9 +6,9 @@
 #
 # Each cell also pins <cell>.fragments.txt (the registry fragments it renders,
 # from the assembler's own attribution) and orchestrator cells pin
-# <cell>.review-prompt.txt. The nix check prompt-assembly-golden-coverage (to
-# be added) requires every lib/fragments.nix fragment to appear in some sidecar
-# or on its commented allowlist, so a new fragment needs a golden cell or an
+# <cell>.review-prompt.txt. The nix check prompt-assembly-golden-coverage
+# requires every lib/fragments.nix fragment to appear in some sidecar
+# or on its allowlist, so a new fragment needs a golden cell or an
 # allowlist entry.
 
 load helper

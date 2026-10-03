@@ -2680,6 +2680,12 @@ the prompt, review prompt, or `--agents` JSON — one per line (an empty file
 when none did). Production never passes it; `tests/prompt-assembly-parity.bats`
 pins it per golden cell as `<cell>.fragments.txt` (issue #3838).
 
+Fragment authors: every `lib/fragments.nix` fragment must appear in some
+golden cell's `<cell>.fragments.txt` or sit on the allowlist in
+`nix/checks/prompt-assembly-golden-coverage.nix`, each entry's value naming
+the test that covers it. A new fragment with neither, or an allowlist entry that is
+now covered or names no registry fragment, fails `prompt-assembly-golden-coverage`.
+
 ### Hermetic git config
 
 The entrypoint sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
