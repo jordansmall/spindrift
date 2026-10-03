@@ -2807,3 +2807,223 @@ func TestEnsureReady_HostNixBuildInvokedViaSeam(t *testing.T) {
 		t.Errorf("callCount = %d, want 1 (no container-build fallback for a genuine error)", got)
 	}
 }
+
+// stubHostNix routes the host `nix build` through the execCommand seam to a
+// fake that replays the given call.
+func stubHostNix(t *testing.T, call fakeCall) {
+	t.Helper()
+	nixScript, _ := newFakeCLI(t, call)
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(nixScript, args...)
+	}
+}
+
+// IsReady probes the configured content-hash tag, never the mutable
+// spindrift:latest the archive carries.
+func TestIsReady_InspectsConfiguredImageTag(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	a := &ociAdapter{cli: script, image: "spindrift:abc123"}
+
+	if err := a.IsReady(); err != nil {
+		t.Fatalf("IsReady: %v", err)
+	}
+	got := strings.Join(readCall(t, dir, 0), " ")
+	if want := "image inspect spindrift:abc123"; got != want {
+		t.Errorf("inspect argv = %q, want %q", got, want)
+	}
+}
+
+// Host realize succeeds: EnsureReady announces the build and loads the
+// configured archive into the runtime.
+func TestEnsureReady_HostBuild_AnnouncesAndLoadsArchive(t *testing.T) {
+	redirectImageLockDir(t)
+	cliScript, cliDir := newFakeCLI(t,
+		fakeCall{exit: 1}, // image inspect: absent
+		fakeCall{exit: 1}, // image inspect: absent under the lock
+		fakeCall{},        // load
+		fakeCall{},        // tag
+	)
+	stubHostNix(t, fakeCall{exit: 0})
+
+	a := &ociAdapter{
+		cli:          cliScript,
+		image:        "spindrift:abc123",
+		imageDrv:     "/nix/store/fake.drv",
+		imageArchive: "/tmp/spindrift-image.tar",
+		imageTag:     "spindrift:abc123",
+	}
+
+	var ensureErr error
+	stdout := captureStdoutDuring(t, func() { ensureErr = a.EnsureReady() })
+	if ensureErr != nil {
+		t.Fatalf("EnsureReady: %v", ensureErr)
+	}
+
+	if !strings.Contains(stdout, "image 'spindrift:abc123' not found — building first") {
+		t.Errorf("stdout missing the building-first line; got: %q", stdout)
+	}
+	if got := strings.Join(readCall(t, cliDir, 0), " "); got != "image inspect spindrift:abc123" {
+		t.Errorf("inspect argv = %q", got)
+	}
+	if got, want := strings.Join(readCall(t, cliDir, 2), " "), "load -i /tmp/spindrift-image.tar"; got != want {
+		t.Errorf("load argv = %q, want %q", got, want)
+	}
+}
+
+// A missing builder falls back to a container build: the volume, builder image
+// and a throwaway staging dir reach the runtime, and the staged archive is
+// what gets loaded. A digest-pinned builder passes through verbatim, without
+// the supply-chain warning.
+func TestEnsureReady_ContainerFallback_RunArgvAndStagingDir(t *testing.T) {
+	redirectImageLockDir(t)
+	cliScript, cliDir := newFakeCLI(t,
+		fakeCall{exit: 1}, // image inspect: absent
+		fakeCall{exit: 1}, // image inspect: absent under the lock
+		fakeCall{},        // run (container build)
+		fakeCall{},        // load
+		fakeCall{},        // tag
+	)
+	stubHostNix(t, fakeCall{exit: 1, stderr: "error: a Linux system is required to build a Linux derivation"})
+
+	pwd := t.TempDir()
+	pinned := "docker.io/nixos/nix@sha256:0123456789abcdef"
+	a := &ociAdapter{
+		cli:             cliScript,
+		image:           "spindrift:abc123",
+		imageDrv:        "/nix/store/fake.drv",
+		imageTag:        "spindrift:abc123",
+		nixBuilderImage: pinned,
+		nixVolume:       "custom-nix-vol",
+		pwd:             pwd,
+		flakeImageAttr:  ".#packages.aarch64-linux.agent-image",
+	}
+
+	var ensureErr error
+	stderr := captureStderrDuring(t, func() { ensureErr = a.EnsureReady() })
+	if ensureErr != nil {
+		t.Fatalf("EnsureReady: %v", ensureErr)
+	}
+	if strings.Contains(stderr, "not digest-pinned") {
+		t.Errorf("digest-pinned builder must not warn; stderr: %q", stderr)
+	}
+
+	run := readCall(t, cliDir, 2)
+	if len(run) == 0 || run[0] != "run" {
+		t.Fatalf("run argv = %v, want a `run` call", run)
+	}
+	var mounts []string
+	for i := 0; i < len(run)-1; i++ {
+		if run[i] == "-v" {
+			mounts = append(mounts, run[i+1])
+		}
+	}
+	if !containsArg(mounts, "custom-nix-vol:/nix") {
+		t.Errorf("run argv missing the nix volume mount: %v", run)
+	}
+	if !containsArg(run, pinned) {
+		t.Errorf("run argv missing builder image %q verbatim: %v", pinned, run)
+	}
+	var tmpDir string
+	for _, m := range mounts {
+		if strings.HasSuffix(m, ":/build-output") {
+			tmpDir = strings.TrimSuffix(m, ":/build-output")
+		}
+	}
+	if tmpDir == "" {
+		t.Fatalf("run argv missing the /build-output mount: %v", run)
+	}
+	if tmpDir == pwd || strings.HasPrefix(tmpDir, pwd+string(filepath.Separator)) {
+		t.Errorf("staging dir %q must sit outside the working dir %q", tmpDir, pwd)
+	}
+	if _, err := os.Stat(tmpDir); !os.IsNotExist(err) {
+		t.Errorf("staging dir %q should be removed after the build; stat err = %v", tmpDir, err)
+	}
+	if got, want := strings.Join(readCall(t, cliDir, 3), " "), "load -i "+filepath.Join(tmpDir, "image.tar"); got != want {
+		t.Errorf("load argv = %q, want %q", got, want)
+	}
+}
+
+// A failing container build reports itself and never reaches load.
+func TestEnsureReady_ContainerBuildFails_NoLoad(t *testing.T) {
+	redirectImageLockDir(t)
+	cliScript, cliDir := newFakeCLI(t,
+		fakeCall{exit: 1}, // image inspect: absent
+		fakeCall{exit: 1}, // image inspect: absent under the lock
+		fakeCall{exit: 1}, // run (container build) fails
+	)
+	stubHostNix(t, fakeCall{exit: 1, stderr: "error: a Linux system is required to build a Linux derivation"})
+
+	a := &ociAdapter{
+		cli:             cliScript,
+		image:           "spindrift:abc123",
+		imageDrv:        "/nix/store/fake.drv",
+		imageTag:        "spindrift:abc123",
+		nixBuilderImage: "docker.io/nixos/nix@sha256:0123456789abcdef",
+		nixVolume:       "spindrift-nix",
+		pwd:             t.TempDir(),
+	}
+
+	err := a.EnsureReady()
+	if err == nil || !strings.Contains(err.Error(), "container build failed") {
+		t.Fatalf("EnsureReady error = %v, want one mentioning %q", err, "container build failed")
+	}
+	if got := callCount(t, cliDir); got != 3 {
+		t.Errorf("CLI callCount = %d, want 3 (two inspects and the failed run; no load)", got)
+	}
+}
+
+// With neither a Linux builder nor a runtime on PATH, `build` explains both
+// missing pieces instead of a bare exec failure.
+func TestEnsureReady_NoBuilderNoRuntime_ExplainsBoth(t *testing.T) {
+	redirectImageLockDir(t)
+	stubHostNix(t, fakeCall{exit: 1, stderr: "error: a Linux system is required to build a Linux derivation"})
+
+	a := &ociAdapter{
+		cli:      "spindrift-no-such-runtime",
+		image:    "spindrift:abc123",
+		imageDrv: "/nix/store/fake.drv",
+	}
+
+	var err error
+	stderr := captureStderrDuring(t, func() { err = a.EnsureReady() })
+	if err == nil {
+		t.Fatal("EnsureReady: want error with no builder and no runtime, got nil")
+	}
+	for _, want := range []string{"Linux builder", "container runtime"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
+	}
+	if !strings.Contains(stderr, "spindrift-no-such-runtime") {
+		t.Errorf("stderr should name the missing runtime; got: %q", stderr)
+	}
+}
+
+// A genuine nix error (issue #98) surfaces nix's own stderr and never starts
+// the doomed container fallback.
+func TestEnsureReady_RealNixError_SurfacesStderrWithoutContainerRun(t *testing.T) {
+	redirectImageLockDir(t)
+	cliScript, cliDir := newFakeCLI(t, fakeCall{exit: 1}) // every call fails, so a fallback `run` would still "pass" on error alone
+	stubHostNix(t, fakeCall{exit: 1, stderr: "error: undefined variable 'frobnicate'"})
+
+	a := &ociAdapter{
+		cli:             cliScript,
+		image:           "spindrift:abc123",
+		imageDrv:        "/nix/store/fake.drv",
+		nixBuilderImage: "docker.io/nixos/nix@sha256:0123456789abcdef",
+	}
+
+	var err error
+	stderr := captureStderrDuring(t, func() { err = a.EnsureReady() })
+	if err == nil {
+		t.Fatal("EnsureReady: want error for a real nix failure, got nil")
+	}
+	if !strings.Contains(stderr, "undefined variable 'frobnicate'") {
+		t.Errorf("nix stderr not surfaced; got: %q", stderr)
+	}
+	if got := callCount(t, cliDir); got != 2 {
+		t.Errorf("CLI callCount = %d, want 2 (two inspects; no container run)", got)
+	}
+}

@@ -930,6 +930,36 @@ func TestMainRun_DispatchNoBuild_ImageAbsentFailsFastNamingBuild(t *testing.T) {
 	}
 }
 
+// An EnsureReady failure aborts bootstrap before any launch context (and so
+// any Box) exists. The stub podman fails every call, so the image is absent;
+// the stub nix fails with a genuine derivation error, so no container
+// fallback masks it.
+func TestBootstrap_EnsureReadyError_AbortsBeforeLaunch(t *testing.T) {
+	stubExecutableOnPath(t, "podman")
+	nixBin := t.TempDir()
+	nixStub := "#!/bin/sh\necho \"error: undefined variable 'frobnicate'\" >&2\nexit 1\n"
+	if err := os.WriteFile(filepath.Join(nixBin, "nix"), []byte(nixStub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", nixBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("TMPDIR", t.TempDir()) // the image realize lock lives under os.TempDir
+	checkout := mustSeedableCheckout(t)
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	setMinimalLocalBootstrapEnv(t, repoPath)
+	t.Setenv("RUNTIME", "podman")
+	t.Setenv("RUNNER_KIND", "oci")
+	t.Chdir(checkout)
+
+	lc, err := bootstrap(true, dispatchkind.Work, false)
+	if err == nil || !strings.Contains(err.Error(), "nix build failed") {
+		t.Fatalf("bootstrap(ensureReady) = %v, want the EnsureReady \"nix build failed\" error", err)
+	}
+	if lc != nil {
+		t.Fatalf("bootstrap() on EnsureReady error = %+v, want nil launch context", lc)
+	}
+}
+
 // researchLaunchStack is cmdConsole's research-kind mirror of bootstrap's
 // work-kind wiring (issue #1708): the same newIssueTracker/newDispatchFactory/
 // newSettle helpers with dispatchkind.Research applied, so it must return the
