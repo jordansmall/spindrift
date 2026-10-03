@@ -9,6 +9,46 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.21.3 — 2026-10-03
+
+Fixes for the Console, the daemon's research floor, and the Filer, plus
+tighter credential and probe-cache handling.
+
+No breaking changes.
+
+- **The Console holds up better.** A work row and a research row for the
+  same issue number no longer get mixed up, so a research drain can't
+  claim a work row and Terminate stops the run you picked. A CJK locale
+  no longer crashes the TUI or draws short borders, the fullscreen detail
+  view fits the window, and a background panic now hands your terminal
+  back before the process exits.
+- **The daemon fills its research floor.** `RESEARCH_RESERVATION` used to
+  be a per-slot preference, so if research was blocked when a slot
+  picked, that slot ran a work child and the floor stayed short for the
+  whole run. The daemon now picks the kind from how many research
+  children are actually running.
+- **A retried ambiguous issue starts clean.** Once you fix an
+  ambiguous-spec issue and re-trigger it, the claim drops
+  `agent-ambiguous-spec` on every path (launcher, GitHub and Forgejo
+  workflows), so it no longer sits next to `agent-in-progress` or
+  `agent-complete`. The `agent-failed` label description now also says
+  what it really covers: blocked runs, red CI after fix passes, and
+  merge-gate failures, not only crashes.
+- **Filer findings are easier to act on.** Every criterion on a filed
+  finding now has to be something an agent can actually do inside a Box.
+  Findings without a named symbol are keyed on the nearest enclosing
+  symbol, so unrelated edits shifting line numbers no longer file the
+  same defect twice. Read-only runs also stop offering a PR link that doesn't exist.
+- **Credentials and probes are stricter.** Quoted passwords in `.netrc`
+  are read the way curl reads them; before, `password "s3cr et"` quietly
+  came back wrong and doctor still called the route resolved. A
+  hand-edited registry probe cache can no longer replay a TCP verdict
+  that `NETWORK_MODE=no-host-loopback` or `none` should forbid. Settle
+  comments also escape a couple more edge cases in agent-written titles.
+- **Shell completions know short flags.** `-h` and doctor's `-v` now show
+  up in bash, fish and zsh completions and the man page, and so does
+  `--all`.
+
 ## 0.21.2 — 2026-10-02
 
 A broad bug-fix sweep across the Console, the daemon, settle, and registry
