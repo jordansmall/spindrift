@@ -56,6 +56,8 @@ var boxEnvRows = []boxEnvRow{
 	{"ChoreClasses", "CHORE_CLASSES", "string"},
 	{"ChorePatchClasses", "CHORE_PATCH_CLASSES", "string"},
 	{"ChoreMaxFindings", "CHORE_MAX_FINDINGS", "string"},
+	{"HostMediatedRemote", "BOX_HOST_MEDIATED_REMOTE", "presence"},
+	{"OutboxRelayCapable", "BOX_OUTBOX_RELAY_CAPABLE", "presence"},
 }
 
 // boxEnvKindSpec is the one definition per kind that setValueAndExpect and

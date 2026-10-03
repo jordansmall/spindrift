@@ -68,6 +68,12 @@ type Env struct {
 	// BOX_FORGE_AND_ISSUE_ACCESS, forwarded only when writes are permitted.
 	BoxWriteEnabled bool // entrypoint.sh: $BOX_WRITE_ENABLED presence
 
+	// HostMediatedRemote and OutboxRelayCapable are per-dispatch presence facts
+	// the launcher forwards: the CODE_FORGE has no writable remote at all, and
+	// its backend gets outbox-relay treatment under a read-only Box.
+	HostMediatedRemote bool // entrypoint.sh: $BOX_HOST_MEDIATED_REMOTE presence
+	OutboxRelayCapable bool // entrypoint.sh: $BOX_OUTBOX_RELAY_CAPABLE presence
+
 	// LocalIssueReference is local tracker's PR-body opt-in: the body carries a
 	// non-auto-closing `Local-issue: <slug>` breadcrumb instead of no reference.
 	LocalIssueReference bool // entrypoint.sh: $LOCAL_ISSUE_REFERENCE presence
