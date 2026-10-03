@@ -5,6 +5,8 @@
   "driver-preamble.sh",
   "fragment-registry.sh",
   "launcher-run-input.json",
+  "nix-checks-skill.md",
   "outcome-contract.md",
+  "prompts",
   "research-outcome-contract.md"
 ]
