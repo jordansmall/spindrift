@@ -187,7 +187,7 @@ login someone
 password also-wrong
 `
 
-// The least env a registry-proxy-routes test needs to reach the registry-proxy
+// The least env a bootstrap test needs to reach the registry-proxy
 // resolution step: local tracker and forge, bwrap runtime, so no test makes a
 // real network call. The two retirement-gate tests above each pin a distinct
 // env shape and so spell theirs out in full instead.
@@ -891,28 +891,24 @@ body
 	}
 }
 
-// Folded from tests/run-dispatch-no-build.bats (issue #4284): `dispatch
-// --no-build` with the image absent exits non-zero naming `spindrift build`,
-// never building.
+// `dispatch --no-build` with the image absent exits non-zero naming
+// `spindrift build`, never building and never starting a Box (issue #4284).
 // RUNNER_KIND=oci with a stub bwrap runtime makes the OCI adapter's
-// readiness check hit "image absent" with no real podman or network.
+// readiness check hit "image absent" with no real podman or network; the
+// stubs record their argv so a build or a `run` would show up.
 func TestMainRun_DispatchNoBuild_ImageAbsentFailsFastNamingBuild(t *testing.T) {
-	stubExecutableOnPath(t, "bwrap")
+	bin, logs := t.TempDir(), t.TempDir()
+	for _, name := range []string{"bwrap", "nix"} {
+		script := "#!/bin/sh\necho \"$*\" >>" + filepath.Join(logs, name) + "\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(bin, name), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	checkout := mustSeedableCheckout(t)
 
-	t.Setenv("REPO_SLUG", "owner/repo")
-	t.Setenv("GH_TOKEN", "test-token")
-	t.Setenv("GIT_USER_NAME", "Test")
-	t.Setenv("GIT_USER_EMAIL", "test@example.com")
-	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "test-oauth-token")
-	t.Setenv("CODE_FORGE", "local")
-	t.Setenv("CODE_FORGE_ACCUMULATION_REPO_DIR", filepath.Join(t.TempDir(), "accum.git"))
-	t.Setenv("BASE_BRANCH", "main")
-	t.Setenv("MERGE_MODE", "immediate")
-	t.Setenv("RUNTIME", "bwrap")
+	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 	t.Setenv("RUNNER_KIND", "oci")
-	t.Setenv("ISSUE_TRACKER", "local")
-	t.Setenv("LOCAL_ISSUES_DIR", t.TempDir())
 	t.Chdir(checkout)
 
 	var stderr bytes.Buffer
@@ -922,6 +918,15 @@ func TestMainRun_DispatchNoBuild_ImageAbsentFailsFastNamingBuild(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "spindrift build") {
 		t.Errorf("stderr = %q, want it to name `spindrift build`", stderr.String())
+	}
+	if nixLog, err := os.ReadFile(filepath.Join(logs, "nix")); err == nil {
+		t.Errorf("nix invoked under --no-build: %q", nixLog)
+	}
+	runtimeLog, _ := os.ReadFile(filepath.Join(logs, "bwrap"))
+	for _, line := range strings.Split(string(runtimeLog), "\n") {
+		if strings.HasPrefix(line, "run ") {
+			t.Errorf("runtime started a Box under --no-build: %q", line)
+		}
 	}
 }
 

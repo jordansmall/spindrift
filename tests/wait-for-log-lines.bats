@@ -2,13 +2,9 @@
 
 load helper
 
-setup() {
-  setup_run_env
-}
-
 # The cases below run against a plain temp file, with no launcher or podman
 # fakes, so they pin the helper's own polling and timeout contract in isolation
-# from the assertions further down that use it (issue #2450).
+# from the bats suites that call it (issue #2450).
 
 @test "wait_for_log_lines fails when the count overshoots expected after passing through it" {
   local log="$BATS_TEST_TMPDIR/probe.log"

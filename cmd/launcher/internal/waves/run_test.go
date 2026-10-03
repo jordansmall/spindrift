@@ -204,10 +204,9 @@ func TestRun_Discovered_NoEdges_TouchOverlapDispatchesOnNextInvocation(t *testin
 	}
 }
 
-// ADR 0019, folded from tests/run-dependency-waves.bats: one invocation
-// dispatches only the blocker and carries it through merge during settle; the
-// dependent waits for a fresh invocation, which then sees the blocker's merged
-// PR and dispatches it.
+// ADR 0019 (issue #4284): one invocation dispatches only the blocker and
+// carries it through merge during settle; the dependent waits for a fresh
+// invocation, which then sees the blocker's merged PR and dispatches it.
 func TestRun_Discovered_DependencyEdge_DispatchesDependentOnNextInvocation(t *testing.T) {
 	const prURL = "https://github.com/owner/repo/pull/1"
 
