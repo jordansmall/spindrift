@@ -126,9 +126,9 @@ func buildFiledIssuesSection(filed []filedIntent) string {
 		if f.Skipped {
 			continue
 		}
-		title := escapeMarkdownLinkText(firstLine(f.Title))
+		title := markdownInlineText(f.Title)
 		if f.Failed {
-			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, escapeMarkdownLinkText(firstLine(f.Body))))
+			lines = append(lines, fmt.Sprintf("- **%s** (filing failed) — %s", title, markdownInlineText(f.Body)))
 			continue
 		}
 		if strings.HasPrefix(f.URL, "http://") || strings.HasPrefix(f.URL, "https://") {
@@ -156,8 +156,8 @@ func buildSkippedIssuesSection(filed []filedIntent) string {
 		if !f.Skipped {
 			continue
 		}
-		title := escapeMarkdownLinkText(firstLine(f.Title))
-		ref := escapeMarkdownLinkText(firstLine(f.DupRef))
+		title := markdownInlineText(f.Title)
+		ref := markdownInlineText(f.DupRef)
 		lines = append(lines, fmt.Sprintf("- **%s** — already tracked: %s", title, ref))
 	}
 	if len(lines) == 0 {
@@ -199,14 +199,20 @@ func firstLine(s string) string {
 // so the backslashes it adds before brackets are not re-escaped.
 var markdownLinkTextEscaper = strings.NewReplacer("\\", "\\\\", "[", "\\[", "]", "\\]")
 
-// escapeMarkdownLinkText escapes s for rendering inside a Markdown bullet --
-// as link text, as bold text, as a bare dedup reference, or as a failed
-// intent's body line: each of those is agent-chosen, and an unescaped bracket
-// breaks the surrounding syntax. A backslash is escaped too: left raw, one
-// before a bracket would escape the escaping backslash and re-open the
-// bracket as a live link (issue #4219).
+// escapeMarkdownLinkText escapes the backslashes and brackets in s: an
+// unescaped bracket breaks the surrounding Markdown syntax. A backslash is
+// escaped too: left raw, one before a bracket would escape the escaping
+// backslash and re-open the bracket as a live link (issue #4219).
 func escapeMarkdownLinkText(s string) string {
 	return markdownLinkTextEscaper.Replace(s)
+}
+
+// markdownInlineText renders an agent-authored value inside a Markdown bullet
+// -- as link text, as bold text, as a bare dedup reference, or as a failed
+// intent's body line: it cuts s at its first LF or CR (firstLine), then
+// escapes its backslashes and brackets (escapeMarkdownLinkText).
+func markdownInlineText(s string) string {
+	return escapeMarkdownLinkText(firstLine(s))
 }
 
 // commentFailureNote distinguishes "the Box never emitted a comment line" from
