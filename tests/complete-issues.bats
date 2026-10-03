@@ -21,7 +21,7 @@ setup() {
 @test "__complete-issues excludes an issue not carrying the dispatch label" {
   export FAKE_GH_ISSUES=$'1\tReady one\n2\tAlready claimed'
   # Pre-seed GH_STATE so issue 2 carries agent-in-progress instead of
-  # ready-for-agent, the same technique run-reconcile-recover.bats uses.
+  # ready-for-agent.
   printf '2\tagent-in-progress\n' >>"$GH_LOG.state"
   run "$SPINDRIFT_CMD" __complete-issues
   [ "$status" -eq 0 ]
