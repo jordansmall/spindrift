@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -3972,5 +3973,53 @@ func TestAssembleResearchInvalidVerdictsFailsAssembly(t *testing.T) {
 	env.ResearchVerdicts = "not json"
 	if _, err := Assemble(env, reg); err == nil || !strings.Contains(err.Error(), "RESEARCH_VERDICTS") {
 		t.Fatalf("Assemble error = %v, want a RESEARCH_VERDICTS parse error", err)
+	}
+}
+
+// Issue #3838: Result.Fragments records every lib/fragments.nix fragment whose
+// bytes reach Prompt, ReviewPromptText, or an agent prompt in AgentsJSON.
+func TestAssembleFragmentsCoverageRecord(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "fragments"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	files := map[string]string{
+		"issue-prompt.md":       "base ${VAR_Z}\n",
+		"agent.md":              "agent ${VAR_A} ${VAR_Z} ${VAR_A}\n",
+		"fragments/z-frag.md":   "zed\n",
+		"fragments/a-frag.md":   "ay\n",
+		"fragments/m-frag.md":   "unreferenced\n",
+		"fragments/off-frag.md": "gated off\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile %s: %v", name, err)
+		}
+	}
+	// Registry order is z before a, so a sorted result proves Assemble sorts
+	// rather than echoing registry or reach order.
+	reg := Registry{Rows: []FragmentRow{
+		{Gate: "CAVEMAN_BAKED", Fragment: "z-frag.md", Var: "VAR_Z"},
+		{Gate: "CAVEMAN_BAKED", Fragment: "a-frag.md", Var: "VAR_A"},
+		{Gate: "CAVEMAN_BAKED", Fragment: "m-frag.md", Var: "VAR_M"},
+		{Gate: "ORCHESTRATOR", Fragment: "off-frag.md", Var: "VAR_OFF"},
+	}}
+
+	env := coveredEnv()
+	env.PromptsDir = dir
+	env.AgentsJSONTemplate = `{"worker":{}}`
+	env.AgentsPromptFiles = `{"worker":"agent.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	// a-frag.md reaches only the agent prompt; z-frag.md reaches both it and
+	// the main prompt (de-duplicated); m-frag.md's gate is on but no template
+	// references VAR_M; off-frag.md's gate is off.
+	want := []string{"a-frag.md", "z-frag.md"}
+	if !slices.Equal(result.Fragments, want) {
+		t.Fatalf("Fragments = %v, want %v", result.Fragments, want)
 	}
 }

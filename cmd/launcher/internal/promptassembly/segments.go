@@ -9,7 +9,7 @@ const (
 	SourceTemplate SourceKind = "template"
 	SourceFragment SourceKind = "fragment"
 	SourceContract SourceKind = "contract"
-	SourceVar      SourceKind = "var"     // ${NAME} substitution value from the allowlist
+	SourceVar      SourceKind = "var"     // ${NAME} substitution value from vars
 	SourceCarried  SourceKind = "carried" // a --composition-carried block, i.e. text Assemble never sees
 )
 
@@ -27,7 +27,7 @@ type segment struct {
 
 // body is the attributed form of a rendered string. Its concatenated text()
 // must always equal what the equivalent non-attributed substitute() or
-// renderFile() call would have produced.
+// RenderText() call would have produced.
 type body []segment
 
 func (b body) text() string {
@@ -38,7 +38,7 @@ func (b body) text() string {
 	return sb.String()
 }
 
-// trimTrailingNewlines mirrors renderFile's strings.TrimRight(..., "\n").
+// trimTrailingNewlines mirrors RenderText's strings.TrimRight(..., "\n").
 // A tail segment trimmed to empty is dropped, so the result never carries an
 // attributed-but-empty segment a caller would have to special-case.
 func (b body) trimTrailingNewlines() body {
