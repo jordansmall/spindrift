@@ -177,13 +177,14 @@ terminal output already uses, replayed against the pick's on-disk log. It
 updates on every render, since it is a local log read with no Issue Tracker
 call behind it.
 
-A queue row's field order is conditional, not fixed: title sits right after
-the state tag — the operator's primary identifier for the row — whenever
-that natural order fits the terminal's available width. Only when the
-natural-order row would actually be clipped does it fall back to
-blocker/reason/heartbeat before title, so the operator-critical blocker
-signal survives truncation instead of the title eating the row's budget
-first (issue #1256, following up on issue #858).
+A work Section's columns (issue, title, state, age) never reorder: after the
+age comes a trailing annotation — a non-work kind's `[<kind>]` marker, the
+blocker, the reason, the heartbeat, and the pass state. The title column is width-capped, keeping a
+fixed reserve for that annotation (issue #1500), so a long title is clipped
+in place rather than pushing the operator-critical blocker signal (issue
+#858) off the row. When the docked sidebar narrows the queue, a work-Section
+row switches to a compact form: a `#num · state · age` header line carrying
+the annotation, with the title on its own line below (issue #1752).
 
 ## Terminate
 
