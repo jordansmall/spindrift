@@ -19,7 +19,8 @@ func launcherChecks(c config) []doctor.Check {
 // launcherRequiredKnobChecks builds the Required-tier rows that run before
 // validate()'s validateChoice calls.
 func launcherRequiredKnobChecks(c config) []doctor.Check {
-	return launcherchecks.RequiredKnobChecks(launcherCheckConfig(c), launcherCheckDeps(c))
+	return append([]doctor.Check{removedKnobsCheck()},
+		launcherchecks.RequiredKnobChecks(launcherCheckConfig(c), launcherCheckDeps(c))...)
 }
 
 // launcherCrossKnobChecks builds the Required-tier rows that run after

@@ -384,6 +384,10 @@ let
   # Unknown defaults keys are caught at eval time. A typo like `basebranch`
   # would otherwise be silently ignored and never baked.
   unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
+  # A removed knob (lib/removed-knobs.nix) gets its own message rather than the
+  # generic unknown-key one, which would not say it once existed.
+  removedKnobs = import ./removed-knobs.nix;
+  removedDefaultKeys = lib.filter (k: removedKnobs ? ${k}) unknownDefaultKeys;
 
   # An explicit `roster` always wins; otherwise it resolves from the four
   # deprecated per-agent model knobs (issue #264, lib/roster.nix).
@@ -1579,7 +1583,11 @@ let
     else
       throw "mkHarness: BUTLER_CHORES enables chore(s) with no prompt file in choresDir: ${lib.concatStringsSep ", " butlerChoresMissingPrompt}; each needs <name>.md in the chores directory";
 in
-if unknownDefaultKeys != [ ] then
+if removedDefaultKeys != [ ] then
+  throw "mkHarness: defaults.${lib.head removedDefaultKeys}: ${
+    removedKnobs.${lib.head removedDefaultKeys}.message
+  }"
+else if unknownDefaultKeys != [ ] then
   throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
 else
   assert buildTimeRejectOk;

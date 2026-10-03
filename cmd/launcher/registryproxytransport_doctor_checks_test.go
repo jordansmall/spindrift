@@ -36,6 +36,14 @@ func TestMain(m *testing.M) {
 		fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(GH_HOST): %v\n", err)
 		os.Exit(1)
 	}
+	// A pre-#4291 host launcher still exports its removed knobs into the Box,
+	// and removedKnobsCheck would trip on them in every validate().
+	for _, k := range removedKnobs {
+		if err := os.Unsetenv(k.env); err != nil {
+			fmt.Fprintf(os.Stderr, "TestMain: os.Unsetenv(%s): %v\n", k.env, err)
+			os.Exit(1)
+		}
+	}
 	seamtest.Main(m)
 }
 
