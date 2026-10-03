@@ -66,8 +66,16 @@ ${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STE
    - Body: the finding verbatim with file:line references, the reviewer's
      reasoning for why it matters, and an acceptance-criteria checklist. Add
      a README/docs-update criterion whenever the finding touches a
-     user-facing surface (a flag, an env var, a documented behaviour). For a
-     work-path delegation, also add a provenance line. The branch form,
+     user-facing surface (a flag, an env var, a documented behaviour).
+     Every criterion must be achievable inside a Box. On the Claude
+     driver, the env-credential scrub hook unsets the model credentials
+     before every Bash call, so a criterion that needs an authenticated
+     `claude` or Claude API run, or anything else needing credentials the
+     Box scrubs, can never be met there: make it a human-supplied input
+     ("a human supplies <X>; apply it if provided") or leave it out and say
+     why in the body. Carry through any "outside this Box" qualifier the
+     finding already carries. For a work-path
+     delegation, also add a provenance line. The branch form,
      `Found by review during #<issue> (branch <name>)`, is the primary
      case — you're delegated before the PR opens, and `CODE_FORGE=git` /
      `CODE_FORGE=local` runs never open one at all. Use the PR form,

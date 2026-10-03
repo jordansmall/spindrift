@@ -64,3 +64,36 @@ func TestFilerPromptSiteKeyRuleContract(t *testing.T) {
 		},
 	})
 }
+
+// TestFilerPromptBoxAchievableCriteriaContract pins filer-prompt.md's step 4
+// rule that every acceptance criterion be achievable inside a Box (issue
+// #4161): #3232's criterion demanded an authenticated `claude` run, which the
+// Claude driver's credential scrub hook makes impossible in its Box.
+func TestFilerPromptBoxAchievableCriteriaContract(t *testing.T) {
+	assertPromptClauses(t, "filer-prompt.md", []promptClause{
+		{
+			name:   "every acceptance criterion must be achievable inside a Box",
+			clause: "Every criterion must be achievable inside a Box",
+		},
+		{
+			name:   "the scrub hook is the reason a credentialed criterion cannot be met in a Box",
+			clause: "the env-credential scrub hook unsets the model credentials before every Bash call",
+		},
+		{
+			name:   "the rule covers anything needing scrubbed credentials, not just a capture",
+			clause: "or anything else needing credentials the Box scrubs, can never be met there",
+		},
+		{
+			name:   "a criterion needing scrubbed credentials becomes a human-supplied input",
+			clause: "make it a human-supplied input (\"a human supplies <X>; apply it if provided\")",
+		},
+		{
+			name:   "otherwise the criterion is left out and the body says why",
+			clause: "or leave it out and say why in the body",
+		},
+		{
+			name:   "an outside-this-Box qualifier on the finding is carried through",
+			clause: "Carry through any \"outside this Box\" qualifier the finding already carries",
+		},
+	})
+}
