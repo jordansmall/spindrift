@@ -591,28 +591,6 @@ line's `issue=` field. `internal/dispatchkey` holds it; the report record,
 [[Daemon]] event, slot flight, and Box env builder all carry it.
 _Avoid_: issue number (for a butler run), Dispatch ID, subject.
 
-**Driving loop**:
-Whatever keeps invoking Dispatches against the queue unattended, across many
-invocations — the [[Daemon]] today, `dogfood.sh` before it. The thing that
-outlives a single Launcher invocation.
-_Avoid_: scheduler, cron, orchestrator (the in-box review role).
-
-**Daemon**:
-The shipped [[Driving loop]] (`apps.daemon`): a long-lived host process holding
-a pool of slots, each filled with one single-Box Dispatch invocation pinned to
-a fetched revision, drawing from every configured [[Dispatch kind]] (`work`,
-`research`, and `butler` once `BUTLER_CHORES` enables a [[Chore]]); a kind
-selector (`dispatch`, `research`, `butler`) narrows it to that one. It
-supervises and re-invokes; it never runs a Box itself.
-_Avoid_: continuous dispatch (the deprecated in-process pool), dogfood loop,
-service, supervisor.
-
-**Awake window**:
-The daily local-time span, in an explicit zone, during which the Daemon may
-start a new Box. A Box already running when the window closes finishes; the
-window gates starting, never stopping.
-_Avoid_: schedule, quiet hours, cron window.
-
 **Stop signal**:
 The first operator signal to a Launcher or a Daemon: launch nothing further,
 let in-flight work drain to its own conclusion.
@@ -848,37 +826,43 @@ _Avoid_: blocker check, gate (that is the engine's internal act), preflight
 **Driving loop**:
 The outer loop that re-invokes the launcher, owning what a single invocation
 structurally cannot: advancing the checkout, rebuilding the image, and
-deciding whether to run again. ADR 0019 makes the invocation the
-image-freshness boundary, so every driving loop exists to supply the other
-half of that boundary. Instances differ by who decides to re-run — an
-operator (Console), the [[Daemon]], a workflow (CI) — not by what the
+deciding whether to run again — the thing that outlives a single launcher
+invocation. ADR 0019 makes the invocation the image-freshness boundary, so
+every driving loop exists to supply the other half of that boundary.
+Instances differ by who decides to re-run — an operator (Console), the
+[[Daemon]] (`dogfood.sh` before it), a workflow (CI) — not by what the
 role is.
-_Avoid_: supervisor, runner (that is the Box sandbox seam), harness. Note
-"daemon" names one instance ([[Daemon]]), never the role itself, and never
-the container-runtime daemon the bwrap runtime is "daemonless" of.
+_Avoid_: scheduler, cron, supervisor, runner (that is the Box sandbox seam),
+harness, orchestrator (the in-box review role). Note "daemon" names one
+instance ([[Daemon]]), never the role itself, and never the container-runtime
+daemon the bwrap runtime is "daemonless" of.
 
 **Daemon**:
 The shipped unattended [[Driving loop]]: `apps.daemon`, generated per-Consumer
 by `mkHarness` beside `apps.default`. It holds `MAX_PARALLEL` slots and fills
 each with one single-Box launcher invocation pinned to a fetched revision,
 drawing from every configured [[Dispatch kind]] — `work`, `research`, and
-`butler` once `BUTLER_CHORES` enables a [[Chore]] — against that one pool. This
-makes it the owner of dispatch concurrency, superseding continuous dispatch —
-deprecated in its favour, but kept for operators who want no daemon and
-retained as the Console's engine. Distinct from the *container-runtime* daemon
-(podman/docker) that the bwrap runtime is "daemonless" of: spindrift's Daemon is
+`butler` once `BUTLER_CHORES` enables a [[Chore]] — against that one pool; a
+kind selector (`dispatch`, `research`, `butler`) narrows it to that one kind.
+This makes it the owner of dispatch concurrency, superseding continuous
+dispatch — deprecated in its favour, but kept for operators who want no daemon
+and retained as the Console's engine. It supervises and re-invokes; it never
+runs a Box itself. Distinct from the *container-runtime* daemon (podman/docker)
+that the bwrap runtime is "daemonless" of: spindrift's Daemon is
 runtime-agnostic and drives a bwrap harness as readily as an OCI one.
-_Avoid_: service, scheduler, supervisor, dogfood loop.
+_Avoid_: continuous dispatch (the deprecated in-process pool), service,
+scheduler, supervisor, dogfood loop.
 
 **Awake window**:
-The wall-clock span during which the [[Daemon]] may *start* a launcher
-invocation, expressed as one `start-end` string in a configured timezone.
-A window whose end precedes its start wraps past midnight — the overnight
-case is first-class, not an error. It gates starting work only: a Box in
-flight when the window closes runs to completion, and so does the settle that
-follows it, because killing work already paid for saves nothing.
-_Avoid_: schedule, uptime, business hours, quiet hours (it names when the
-Daemon is permitted to act, not when the repository is quiet).
+The daily wall-clock span during which the [[Daemon]] may *start* a launcher
+invocation, expressed as one `start-end` string in an explicit timezone, never
+inherited from the host. A window whose end precedes its start wraps past
+midnight — the overnight case is first-class, not an error. It gates starting
+work only, never stopping: a Box in flight when the window closes runs to
+completion, and so does the settle that follows it, because killing work
+already paid for saves nothing.
+_Avoid_: schedule, cron window, uptime, business hours, quiet hours (it names
+when the Daemon is permitted to act, not when the repository is quiet).
 
 **Console**:
 The interactive driving loop: a launcher session in which an operator composes
