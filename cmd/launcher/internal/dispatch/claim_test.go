@@ -134,10 +134,25 @@ func nonceLineFromEnv(box runner.Box, line string) []byte {
 	return []byte(line + " nonce=" + box.Env["RUN_NONCE"] + "\n")
 }
 
-// TestClaimIssue_ReleasedAfterRun verifies that Run()'s claim is released once
-// Run returns, on both the success and the terminal-failure path, so a
-// subsequent ClaimIssue for the same issue succeeds.
-func TestClaimIssue_ReleasedAfterRun(t *testing.T) {
+// TestClaimIssue_HeldUntilClose pins issue #4364: Run()'s claim outlives Run
+// so the caller's settle (CI poll, Fix, ResolveConflict, merge) stays
+// exclusive, and only Close releases it, on both the success and the
+// terminal-failure path.
+func TestClaimIssue_HeldUntilClose(t *testing.T) {
+	check := func(t *testing.T, dir string, d *Dispatch) {
+		t.Helper()
+		if _, err := ClaimIssue(dir, "1"); !errors.Is(err, ErrIssueClaimed) {
+			t.Fatalf("ClaimIssue after Run, before Close: want ErrIssueClaimed, got %v", err)
+		}
+		d.Close()
+		release, err := ClaimIssue(dir, "1")
+		if err != nil {
+			t.Fatalf("ClaimIssue after Close: want it to succeed, got %v", err)
+		}
+		release()
+		d.Close() // idempotent; must neither panic nor drop someone else's claim
+	}
+
 	t.Run("success", func(t *testing.T) {
 		dir := tempLogDir(t)
 		fr := runner.NewFake()
@@ -152,16 +167,10 @@ func TestClaimIssue_ReleasedAfterRun(t *testing.T) {
 		defer f.Cleanup()
 		d := f.New("1", "t")
 
-		result := d.Run()
-		if !result.Success {
+		if result := d.Run(); !result.Success {
 			t.Fatalf("Run: want Success=true, got %+v", result)
 		}
-
-		release, err := ClaimIssue(dir, "1")
-		if err != nil {
-			t.Fatalf("ClaimIssue after successful Run: want it to succeed, got %v", err)
-		}
-		release()
+		check(t, dir, d)
 	})
 
 	t.Run("failure", func(t *testing.T) {
@@ -175,17 +184,69 @@ func TestClaimIssue_ReleasedAfterRun(t *testing.T) {
 		defer f.Cleanup()
 		d := f.New("1", "t")
 
-		result := d.Run()
-		if result.Success {
+		if result := d.Run(); result.Success {
 			t.Fatalf("Run: want Success=false for a terminal failure, got %+v", result)
 		}
-
-		release, err := ClaimIssue(dir, "1")
-		if err != nil {
-			t.Fatalf("ClaimIssue after failed Run: want it to succeed, got %v", err)
-		}
-		release()
+		check(t, dir, d)
 	})
+}
+
+// TestRun_SecondRunLosesWhileFirstUnclosed pins the settle-window race of
+// issue #4364: once Dispatch A's Run returned (but A is not closed, so its
+// caller is still settling), a second Run for the issue must report
+// AlreadyInFlight without launching a Box or touching the log dir.
+func TestRun_SecondRunLosesWhileFirstUnclosed(t *testing.T) {
+	dir := tempLogDir(t)
+	fr1 := runner.NewFake()
+	fr1.RunFunc = func(box runner.Box) error {
+		box.Output.Write(nonceLineFromEnv(box, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok")) //nolint:errcheck
+		return nil
+	}
+	f1, err := NewFactory(retryConfig(3, 0, 0), dir, fr1, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory 1: %v", err)
+	}
+	defer f1.Cleanup()
+	d1 := f1.New("1", "t")
+	if result := d1.Run(); !result.Success {
+		t.Fatalf("d1.Run(): want Success=true, got %+v", result)
+	}
+
+	entriesBefore, err := os.ReadDir(HostLogDirFor(dir))
+	if err != nil {
+		t.Fatalf("read log dir before d2: %v", err)
+	}
+	namesBefore := dirEntryNames(entriesBefore)
+
+	fr2 := runner.NewFake()
+	f2, err := NewFactory(retryConfig(3, 0, 0), dir, fr2, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory 2: %v", err)
+	}
+	defer f2.Cleanup()
+	d2 := f2.New("1", "t")
+	defer d2.Close()
+
+	if result := d2.Run(); !result.AlreadyInFlight {
+		t.Fatalf("d2.Run() while d1 unclosed: want AlreadyInFlight=true, got %+v", result)
+	}
+	if len(fr2.RunCalls) != 0 {
+		t.Errorf("fr2.RunCalls: want 0, got %d", len(fr2.RunCalls))
+	}
+	entriesAfter, err := os.ReadDir(HostLogDirFor(dir))
+	if err != nil {
+		t.Fatalf("read log dir after d2: %v", err)
+	}
+	if after := dirEntryNames(entriesAfter); strings.Join(after, ",") != strings.Join(namesBefore, ",") {
+		t.Errorf("log dir changed by the loser: before=%v after=%v", namesBefore, after)
+	}
+
+	d1.Close()
+	release, err := ClaimIssue(dir, "1")
+	if err != nil {
+		t.Fatalf("ClaimIssue after d1.Close: %v", err)
+	}
+	release()
 }
 
 // spindriftClaimHelperEnv gates TestHelperClaimAndBlock: unset, it is a no-op

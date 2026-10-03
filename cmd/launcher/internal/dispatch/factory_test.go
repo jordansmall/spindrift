@@ -284,11 +284,15 @@ func TestFactory_New_ResolvesIssueTextFreshPerDispatch(t *testing.T) {
 	text := "first body"
 	f := issueTextFactory(t, fr, func(string) (string, error) { return text, nil })
 
-	if r := f.New("7", "t").Run(); !r.Success {
+	d1 := f.New("7", "t")
+	if r := d1.Run(); !r.Success {
 		t.Fatalf("first Run: %+v", r)
 	}
+	d1.Close()
 	text = "edited body"
-	if r := f.New("7", "t").Run(); !r.Success {
+	d2 := f.New("7", "t")
+	defer d2.Close()
+	if r := d2.Run(); !r.Success {
 		t.Fatalf("second Run: %+v", r)
 	}
 
