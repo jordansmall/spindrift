@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -116,7 +117,7 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 	t.Helper()
 	return []string{
 		"--work-dir=" + workDir, "--outbox-dir=" + outboxDir,
-		"--forbidden-markers-registry=" + seamForbiddenMarkers(t),
+		"--forbidden-markers-registry=" + seamtest.Path(t, "forbidden-markers-registry.json"),
 		"--registry=" + seamtest.Path(t, "fragments-registry.json"),
 		"--validate-markers-registry=" + seamtest.Path(t, "prompt-contract-registry.json"),
 		"--driver-skills-dir=" + skillsDir,
@@ -200,6 +201,8 @@ type seamCase struct {
 	// nix, when set, puts the nix fake on PATH with this config (Record is
 	// filled in); the probe argv it saw lands in seamRun.nixRec.
 	nix *seamtest.NixConfig
+	// fakes are extra tool fakes put on PATH, each configured through env.
+	fakes []string
 }
 
 type seamRun struct {
@@ -275,7 +278,7 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
-	fakeNames := []string{"claude", "orchestrator"}
+	fakeNames := append([]string{"claude", "orchestrator"}, c.fakes...)
 	nixRec := filepath.Join(tmp, "nix.rec")
 	if c.nix != nil {
 		nixCfg := *c.nix
@@ -604,6 +607,11 @@ func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[st
 			continue
 		}
 		if pre, set := baseEnv[name]; !set || pre != v {
+			// A PATH box only prepended to renders as the prepended dirs over
+			// $PATH, so the golden does not embed the host's PATH.
+			if name == "PATH" && strings.HasSuffix(v, string(os.PathListSeparator)+pre) {
+				v = strings.TrimSuffix(v, pre) + "$PATH"
+			}
 			lines = append(lines, name+"="+strings.ReplaceAll(goldenValue(v, outbox, tmpRoot), "\n", `\n`))
 		}
 	}
@@ -619,6 +627,17 @@ func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[st
 	return b.String()
 }
 
+// readonlyWorkEnv is the env of a read-only work Box: extra overlays the
+// backend- and capability-specific knobs.
+func readonlyWorkEnv(extra map[string]string) map[string]string {
+	env := map[string]string{
+		"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
+		"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "BOX_WRITE_ENABLED": "",
+	}
+	mergeEnv(env, extra)
+	return env
+}
+
 // TestBoxSeamDriverInvocationGolden pins the first Driver invocation box makes
 // to the goldens captured from the bash path in 6ad56073 ("test: pin the bash
 // Driver invocation in a golden") before it was deleted; box must keep
@@ -631,24 +650,42 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		// registry arms a Registry route; the goldens without it are the
 		// Registry-absent half of the pair.
 		registry bool
+		// readonly arms a read-only Box with the outbox relay, so box installs
+		// the guards and prepends their shim dir to PATH.
+		readonly bool
+		// fj puts an fj fake on PATH, so a read-only Box shims it as well.
+		fj bool
 	}{
 		{"work", "agent/issue-7", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}, false},
+		}, false, false, false},
 		{"work-registry", "agent/issue-7", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}, true},
+		}, true, false, false},
+		{"work-readonly", "agent/issue-7", map[string]string{
+			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
+			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
+			"BOX_WRITE_ENABLED": "", "BOX_OUTBOX_RELAY_CAPABLE": "1",
+		}, false, true, false},
+		{"work-readonly-forgejo", "agent/issue-7", readonlyWorkEnv(map[string]string{
+			"BOX_OUTBOX_RELAY_CAPABLE": "1", "CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
+			"FORGEJO_TOKEN": "s3cr3t-forgejo-token", "FORGEJO_BASE_URL": "https://forge.example/",
+		}), false, true, true},
+		{"work-readonly-local", "agent/issue-7", readonlyWorkEnv(map[string]string{
+			"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
+		}), false, true, false},
+		{"work-readonly-git", "agent/issue-7", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true, false},
 		{"research", "agent/issue-7", map[string]string{
 			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}, false},
+		}, false, false, false},
 		{"butler", "agent/issue-butler-bugs", map[string]string{
 			"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs", "ISSUE_TITLE": "", "CHORE_HEAD": "deadbeef",
 			"CHORE_DIFF_RANGE": "cafef00d..deadbeef", "CHORE_SLICE": "cmd/launcher/main.go", "CHORE_MAX_FINDINGS": "5",
-		}, false},
+		}, false, false, false},
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
@@ -667,8 +704,21 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				registryEnv = seamRegistryRoute(t, workDir)
 			}
 
-			fakes := seamtest.InstallFakes(t, "claude", "orchestrator")
+			fakeNames := []string{"claude", "orchestrator"}
+			ghEnv := map[string]string{}
+			if c.readonly {
+				// A gh on PATH is what gets a shim installed; the fake keeps
+				// the run off the host's own gh.
+				fakeNames = append(fakeNames, "gh")
+				ghEnv = seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(root, "gh.rec")})
+			}
+			if c.fj {
+				fakeNames = append(fakeNames, "fj")
+				mergeEnv(ghEnv, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: filepath.Join(root, "fj.rec")}))
+			}
+			fakes := seamtest.InstallFakes(t, fakeNames...)
 			base := seamBaseEnv(t)
+			mergeEnv(base, ghEnv)
 			mergeEnv(base, c.env, map[string]string{
 				"REPO_SLUG": "owner/repo",
 				"HOME":      home,
@@ -699,6 +749,9 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			}
 			if got != string(golden) {
 				t.Errorf("first Driver invocation differs from %s.golden\n--- golden ---\n%s--- actual ---\n%s--- end ---", c.kind, golden, got)
+			}
+			if c.readonly {
+				assertExecutable(t, filepath.Join(readonlyShimDir(home), "gh"))
 			}
 			if c.registry {
 				assertRegistryBound(t, workDir, home, res.Stdout)
@@ -1498,14 +1551,154 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 	}
 }
 
-// seamForbiddenMarkers writes an empty forbiddenMarkers registry: the relay
-// cases install guards, and with no rows they install nothing to disturb the
-// Driver's PATH. The rendered registry is a seam fixture of its own.
-func seamForbiddenMarkers(t *testing.T) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "forbidden-markers-registry.json")
-	if err := os.WriteFile(path, []byte("[]"), 0o600); err != nil {
-		t.Fatal(err)
+// TestBoxSeamReadonlyGuardsAndForgejoCLI runs box over each access mode and
+// backend, asserting on the files its guard and Forgejo CLI steps leave behind
+// and on the PATH the Driver is handed.
+func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
+	const token = "s3cr3t-forgejo-token"
+	cases := []struct {
+		name  string
+		relay bool // read-only with the outbox relay (BOX_WRITE_ENABLED off, relay capable)
+		env   map[string]string
+		fj    bool // an fj fake is on PATH
+		// shims are the shims the run must have installed; none means the shim
+		// dir must not exist.
+		shims []string
+		hook  bool
+		// fjArgv is the one add-key call fj must have recorded; nil means none.
+		fjArgv []string
+	}{
+		{name: "read-write github", env: map[string]string{}},
+		{name: "read-only github with outbox relay", relay: true, shims: []string{"gh"}, hook: true},
+		{
+			name: "read-only forgejo", relay: true, fj: true,
+			env: map[string]string{
+				"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
+				"FORGEJO_TOKEN": token, "FORGEJO_BASE_URL": "https://forge.example/",
+			},
+			shims: []string{"fj", "gh"}, hook: true,
+			fjArgv: []string{"-H", "https://forge.example", "auth", "add-key", "spindrift-agent"},
+		},
+		{
+			name: "read-write forgejo", fj: true,
+			env: map[string]string{
+				"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
+				"FORGEJO_TOKEN": token, "GIT_USER_NAME": "bot",
+			},
+			fjArgv: []string{"-H", "https://codeberg.org", "auth", "add-key", "bot"},
+		},
+		{
+			// Fully local is still read-only: it gets the guards.
+			name: "read-only local",
+			env: map[string]string{
+				"BOX_WRITE_ENABLED": "", "CODE_FORGE": "local",
+				"BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
+			},
+			shims: []string{"gh"}, hook: true,
+		},
+		{
+			name:  "read-only git backend",
+			env:   map[string]string{"BOX_WRITE_ENABLED": "", "CODE_FORGE": "git"},
+			shims: []string{"gh"},
+		},
+		{name: "read-only self-contained", relay: true, env: map[string]string{"SELF_CONTAINED": "1"}},
+		{
+			name: "read-only self-contained forgejo", relay: true, fj: true,
+			env: map[string]string{
+				"SELF_CONTAINED": "1", "CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
+				"FORGEJO_TOKEN": token,
+			},
+			fjArgv: []string{"-H", "https://codeberg.org", "auth", "add-key", "spindrift-agent"},
+		},
 	}
-	return path
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			work := seamRepo(t, 0)
+			dir := t.TempDir()
+			fjArgvRec, fjStdinRec := filepath.Join(dir, "fj.argv"), filepath.Join(dir, "fj.stdin")
+			env := map[string]string{}
+			// Ambient values must not stand in for the defaults the cases pin.
+			mergeEnv(env, map[string]string{"GIT_USER_NAME": "", "FORGEJO_TOKEN": "", "FORGEJO_BASE_URL": ""}, c.env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(dir, "gh.rec")}))
+			fakes := []string{"gh"}
+			if c.fj {
+				fakes = append(fakes, "fj")
+				mergeEnv(env, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: fjArgvRec, StdinRecord: fjStdinRec}))
+			}
+			r := runBoxSeam(t, seamCase{
+				repo: work, relay: c.relay, env: env, fakes: fakes, snapshot: true,
+				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "guards"))}},
+			})
+			r.res.WantExit(t, 0)
+
+			shimDir := readonlyShimDir(r.home)
+			if len(c.shims) == 0 {
+				if _, err := os.Stat(shimDir); !os.IsNotExist(err) {
+					t.Errorf("shim dir %s exists (%v); want none", shimDir, err)
+				}
+			}
+			for _, name := range c.shims {
+				assertExecutable(t, filepath.Join(shimDir, name))
+			}
+
+			hooks := filepath.Join(work, ".git", "hooks", "pre-push")
+			pushurl, _ := exec.Command("git", "-C", work, "config", "--get", "remote.origin.pushurl").Output()
+			if !c.hook {
+				if _, err := os.Stat(hooks); !os.IsNotExist(err) {
+					t.Errorf("%s exists (%v); want no push hook", hooks, err)
+				}
+				if len(pushurl) != 0 {
+					t.Errorf("remote.origin.pushurl = %q; want unset", pushurl)
+				}
+			} else {
+				assertExecutable(t, hooks)
+				assertExecutable(t, filepath.Join(work, ".git", "hooks", "pre-receive"))
+				decoy := strings.TrimSpace(string(pushurl))
+				if filepath.Base(decoy) != "readonly-push-guard.git" {
+					t.Fatalf("remote.origin.pushurl = %q; want the bare decoy", decoy)
+				}
+				assertExecutable(t, filepath.Join(decoy, "hooks", "pre-receive"))
+				assertExecutable(t, filepath.Join(decoy, "hooks", "pre-push"))
+			}
+
+			gotFj := seamtest.ReadRecord(t, fjArgvRec)
+			if c.fjArgv == nil {
+				if len(gotFj) != 0 {
+					t.Errorf("fj ran: %v; want no call", gotFj)
+				}
+			} else {
+				if want := [][]string{c.fjArgv}; !reflect.DeepEqual(gotFj, want) {
+					t.Errorf("fj argv = %v; want %v", gotFj, want)
+				}
+				if got, _ := os.ReadFile(fjStdinRec); string(got) != token {
+					t.Errorf("fj stdin = %q; want the token", got)
+				}
+				if strings.Contains(r.res.Stdout+r.res.Stderr, token) {
+					t.Error("the token leaked into box's output")
+				}
+			}
+
+			path := envMap(seamtest.ReadSnapshot(t, r.snapshots, 1).Env)["PATH"]
+			if len(c.shims) > 0 {
+				if !strings.HasPrefix(path, shimDir+string(os.PathListSeparator)) {
+					t.Errorf("Driver PATH = %q; want it to start with %s", path, shimDir)
+				}
+			} else if strings.Contains(path, shimDir) {
+				t.Errorf("Driver PATH = %q names the shim dir; want it untouched", path)
+			}
+
+			// Each shim rejects a forbidden command locally; the fake behind it
+			// must never see the call.
+			for _, tool := range c.shims {
+				var stderr bytes.Buffer
+				cmd := exec.Command(filepath.Join(shimDir, tool), "pr", "create")
+				cmd.Stderr = &stderr
+				if err := cmd.Run(); err == nil {
+					t.Errorf("`%s pr create` through the shim succeeded; want it rejected", tool)
+				}
+				if !strings.Contains(stderr.String(), "PR-intent relay") {
+					t.Errorf("%s shim rejection = %q; want the PR-intent relay message", tool, stderr.String())
+				}
+			}
+		})
+	}
 }

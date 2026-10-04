@@ -5,6 +5,7 @@
   "check-contract.md",
   "comms-contract.md",
   "driver-preamble.sh",
+  "forbidden-markers-registry.json",
   "fragments-registry.json",
   "launcher-run-input-butler.json",
   "launcher-run-input-bwrap.json",
