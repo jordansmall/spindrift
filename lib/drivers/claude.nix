@@ -77,27 +77,6 @@ in
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
   '';
 
-  # Issue #427/ADR 0009. The session id is derived so that REPO_SLUG and
-  # ISSUE_NUMBER alone recompute it, with no stored state. `resume` prints
-  # nothing when that session's transcript is missing under the mounted
-  # projects directory (an evicted cache, or the first fix pass after a
-  # crash), and the caller then falls back to the cold-context fix flow.
-  sessionFlagsFnBody = ''
-    local h id
-    h="$(printf '%s' "spindrift-session:''${REPO_SLUG:-}:''${ISSUE_NUMBER:-}" | sha256sum | cut -c1-32)"
-    id="''${h:0:8}-''${h:8:4}-''${h:12:4}-''${h:16:4}-''${h:20:12}"
-    case "$1" in
-      initial)
-        printf -- '--session-id %s' "$id"
-        ;;
-      resume)
-        if compgen -G "''${HOME:-}/.claude/projects/*/''${id}.jsonl" >/dev/null 2>&1; then
-          printf -- '--resume %s' "$id"
-        fi
-        ;;
-    esac
-  '';
-
   # Rendered at eval time by builtins.toJSON (ADR 0007 tier-1) so model names
   # never reach bash as interpolated strings. Takes the whole roster (issue
   # #264); lib/mkHarness.nix already dropped empty-model entries through

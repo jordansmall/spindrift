@@ -106,10 +106,11 @@ configure_env() {
   # by the agent-paths preamble too. See lib/agent-paths.nix for what each path
   # is and which driver-exec verb reads it (issue #2531).
 
-  # _driver_extract_outcome and _driver_session_flags are defined by the Driver
-  # registry (lib/drivers/<name>.nix); a nix-built image prepends them via
+  # The Driver registry (lib/drivers/<name>.nix) renders the DRIVER_* variables
+  # and the _driver_extract_* helpers; a nix-built image prepends them via
   # driverPreamble (lib/mkHarness.nix), and the bats harness sources the same
-  # registry-rendered bodies via DRIVER_PREAMBLE_FILE (issue #433).
+  # bytes via DRIVER_PREAMBLE_FILE (issue #433). Session flags are rendered in
+  # Go by the Driver strategy's SessionFlags.
 }
 
 # configure_forgejo_cli wires FORGEJO_TOKEN into fj so the agent's `fj issue`
