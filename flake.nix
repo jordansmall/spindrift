@@ -142,6 +142,7 @@
               agents.models.roster = dogfoodDefaults.roster;
               agents.models.default = dogfoodDefaults.defaults.model;
               agents.models.effort = dogfoodDefaults.defaults.effort;
+              agents.bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
               dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;
             };

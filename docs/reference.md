@@ -5642,6 +5642,13 @@ efforts, and its orchestrator review effort, are all set via `roster` in
 `nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
 mechanism and dogfood's specific values.
 
+**Bash timeout.** The dogfood config sets `agents.bashTimeoutMs` to
+`1800000` (30 minutes) from `nix/dogfood-defaults.nix`'s
+`driverBashTimeoutMs`, because a cold `checks-inbox` gate outruns Claude
+Code's stock 10-minute Bash cap (issue #4409). Other Consumers leave it
+unset and keep Claude Code's own limit — see the `DRIVER_BASH_TIMEOUT_MS`
+row in the env-var table.
+
 For one-shot bwrap runs, `nix develop .#bwrap` (Linux-only, same guard as
 `apps.dogfood-bwrap`) puts the bwrap-baked `spindrift` CLI on PATH together
 with the host binaries the launcher execs from ambient PATH — `bwrap` and
