@@ -34,6 +34,7 @@ in
     # tests/helper.bash derives the per-file contract and preamble vars from it.
     SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
+    BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
     # nix/checks/promptassembly.nix's promptassembly-registry-drift check
     # reuses this same `registry` via `inherit (parity) registry`, so
     # lib/fragments.nix renders only once.

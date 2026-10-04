@@ -181,6 +181,11 @@ wait_for_socket() {
 # setup() hook per file, so the shared body lives here.
 setup_entrypoint_env() {
   setup_fakes
+  # entrypoint.sh execs `box` after the first Driver run (ADR 0058, issue
+  # #4292); it runs the real settle sequence in-process, so there is no bash
+  # fake of it.
+  : "${BOX_BIN:?BOX_BIN must be set (the real box Go binary, nix/checks/bats.nix)}"
+  cp -f "$BOX_BIN" "$FAKE_BIN/box"
   setup_bare_repo
   set_box_env
   # Pinned rather than inherited from set_box_env: these suites were written

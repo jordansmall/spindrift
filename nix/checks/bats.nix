@@ -89,6 +89,7 @@ let
           # is, so every suite that drives $ENTRYPOINT needs these vars.
           DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
           ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
+          BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
           PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
           PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
           FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
@@ -184,6 +185,7 @@ let
     # promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
     ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
+    BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
     RESEARCH_VERDICTS_PARITY_FILE = researchVerdictsParityFile;
@@ -325,6 +327,7 @@ in
         # unconditionally calls `driver-exec assemble-prompt` (issue #2354).
         DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
         ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
+        BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
         PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
         FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;

@@ -69,7 +69,7 @@ configure_env() {
   # clones from instead of a network remote (ADR 0033, issue #1697); unused
   # otherwise.
   REPO_MOUNT_DIR="${REPO_MOUNT_DIR:-/repo}"
-  # OUTBOX_DIR is the writable mount driver-exec's bundle-out verb writes
+  # OUTBOX_DIR is the writable mount box's bundle-out step writes
   # CODE_FORGE=local's seam bundle into (ADR 0033, issue #1808); unused
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
@@ -410,20 +410,6 @@ intree_binding_revert() {
     || _intree_revert_rc=$?
   if [ "$_intree_revert_rc" -ne 0 ]; then
     echo "==> WARNING: driver-exec bind-registry (in-tree revert) failed (exit ${_intree_revert_rc})"
-  fi
-}
-
-# lockfile_forwarder_scan wraps `driver-exec bind-registry`'s lockfile-scan mode
-# (issue #3199), called from main()'s settle region right before bundle-out. The
-# verb always exits 0 and stays silent on a clean run. Wrapped defensively anyway,
-# so a future change that makes it fail warns rather than letting set -e take the
-# whole run down over an advisory-only scan.
-lockfile_forwarder_scan() {
-  local _lockfile_scan_rc=0
-  driver-exec bind-registry --lockfile-scan-work-dir "$WORK_DIR" \
-    || _lockfile_scan_rc=$?
-  if [ "$_lockfile_scan_rc" -ne 0 ]; then
-    echo "==> WARNING: driver-exec bind-registry (lockfile Forwarder-URL scan) failed (exit ${_lockfile_scan_rc})"
   fi
 }
 
@@ -816,8 +802,8 @@ phase_prompt_assembly() {
   # a bash string: it survives on disk because it IS the file Handoff.AgentsFile
   # points to, read by driver-exec directly off --handoff-file.
   prompt="$(cat "$_prompt_out")"
-  # Plain (non-local) assignment so _handoff escapes to run_driver_in_env and the
-  # required-marker gates, which run outside this function's call frame (issue
+  # Plain (non-local) assignment so _handoff escapes to run_driver_in_env and
+  # main()'s box exec, which run outside this function's call frame (issue
   # #515, #2355).
   _handoff="$(cat "$_handoff_out")"
   # The handoff file, and the agents/review-prompt files it names by path, must
@@ -907,15 +893,15 @@ run_driver_in_env() {
 
   # stream_log is driver-exec's teed copy of the Driver's raw stdout; the
   # launcher's own byte-exact capture is separate and untouched. It survives this
-  # call because main()'s SPINDRIFT_PR_INTENT gate scans it later (see
+  # call because box's SPINDRIFT_PR_INTENT gate scans it later (see
   # _last_stream_log below).
   stream_log="$(mktemp)"
 
   # $_handoff_file is phase_prompt_assembly's cross-phase sentinel, read via
-  # dynamic scoping. $handoff_file_override wins for this call only: the
-  # required-marker gates' resumes use it to hand the invoker their own
-  # ReviewPromptFile-stripped copy, keeping the nudge a narrow single pass
-  # instead of re-entering the full review loop (issues #2065, #2975).
+  # dynamic scoping. $handoff_file_override wins for this call only (no caller
+  # passes one now that box owns the nudge resumes, which strip the
+  # ReviewPromptFile themselves to stay a narrow single pass; issues #2065,
+  # #2975).
   local _run_handoff_file="${handoff_file_override:-${_handoff_file:-}}" _synthesized_handoff=""
   if [ -z "$_run_handoff_file" ]; then
     _run_handoff_file="$(mktemp)"
@@ -949,17 +935,17 @@ run_driver_in_env() {
   # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but claude
   # buries it in a stream-json result event; _driver_extract_outcome re-prints it
   # as a bare line so that contract is unchanged. Captured rather than printed
-  # directly so main's backstop (issue #593) can tell whether one was emitted.
+  # directly so the box backstop (issue #593) can tell whether one was emitted.
   _last_outcome_line="$(_driver_extract_outcome "$stream_log")"
-  # main()'s SPINDRIFT_PR_INTENT gate reads this path well after this call
-  # returns and hands it to driver-exec marker-gate as --log-path, so the verb
+  # box's SPINDRIFT_PR_INTENT gate reads this path well after this call
+  # returns (passed as --stream-log), so the marker-gate package
   # owns that grammar instead of bash. This Box exits after one run, so an
   # undeleted per-pass stream log is not a real leak.
   _last_stream_log="$stream_log"
   # The unwrapped Driver result text, remembered the same dynamically-scoped way
-  # as _last_stream_log above (issue #2978): main()'s SPINDRIFT_OUTCOME gate
-  # hands this path to marker-gate so the verb scans for the marker itself,
-  # rather than main() pre-extracting a near-miss line in bash.
+  # as _last_stream_log above (issue #2978): box's SPINDRIFT_OUTCOME gate
+  # scans this path for the marker itself,
+  # rather than bash pre-extracting a near-miss line.
   _last_driver_text_log="$(mktemp)"
   _driver_extract_result_text "$stream_log" > "$_last_driver_text_log"
   if [ -n "$_last_outcome_line" ]; then
@@ -967,48 +953,6 @@ run_driver_in_env() {
   fi
 
   return "$claude_rc"
-}
-
-# _stripped_review_handoff writes a throwaway copy of $_handoff_file with
-# ReviewPromptFile cleared and prints its path (issue #2975), so each
-# required-marker gate's corrective resume stays a narrow single pass instead of
-# re-entering the full implement/review/fix loop (issue #2065). Left on disk:
-# this Box exits after one run, and test tooling can inspect it afterwards.
-_stripped_review_handoff() {
-  local _stripped
-  _stripped="$(mktemp)"
-  jq '.ReviewPromptFile = ""' "$_handoff_file" > "$_stripped"
-  printf '%s' "$_stripped"
-}
-
-# emit_outcome_backstop hands off to the driver-exec outcome-backstop verb, which
-# preserves any committed work on BRANCH and prints one synthetic status=blocked
-# SPINDRIFT_OUTCOME line. Called only when the Driver produced no parseable
-# outcome, so the launcher always gets a terminal signal (issue #593). The whole
-# decision lives in the verb (issue #2157, ADR 0036); this is exec glue. Extra
-# args pass through to the verb, e.g. main()'s --prior-outcome-line (#4016).
-emit_outcome_backstop() {
-  local _recovery="${1:-}"
-  shift || true
-  # --run-state-file is a fixed path, not a launcher-set env var: it mirrors the
-  # orchestrator's own --state-file default (issue #1997). A missing file, from a
-  # non-orchestrator run or one that never reached a review pass, is handled by
-  # the backstop's own graceful degrade (issue #2459).
-  driver-exec outcome-backstop \
-    --repo "$WORK_DIR" \
-    --issue "$DISPATCH_KEY" \
-    --branch "$BRANCH" \
-    --base "origin/${BASE_BRANCH:-}" \
-    --dispatch-kind "${DISPATCH_KIND:-work}" \
-    --host-mediated-remote "${BOX_HOST_MEDIATED_REMOTE:-}" \
-    --outbox-relay-capable "${BOX_OUTBOX_RELAY_CAPABLE:-}" \
-    --box-write-enabled "${BOX_WRITE_ENABLED:-}" \
-    --recovery-attempted "$_recovery" \
-    --max-attempts "$MAX_REBASE_ATTEMPTS" \
-    --backoff-secs "$TRANSIENT_BACKOFF_SECS" \
-    --jitter-secs "$HOLD_JITTER_SECS" \
-    --run-state-file "/tmp/run-state.json" \
-    "$@"
 }
 
 main() {
@@ -1019,10 +963,6 @@ main() {
   local _use_dev_shell _harness_path
   local prompt _handoff
   local _last_outcome_line _last_stream_log _last_driver_text_log
-  # Initialized rather than left bare, unlike the siblings above: this one is
-  # assigned only inside the backstop `if` below, and `set -u` treats a bare
-  # `local x` as unbound, not empty (issue #2448).
-  local _outcome_via_backstop=""
   local _advise_only
   local _announce_subject _announce_suffix
 
@@ -1098,168 +1038,23 @@ main() {
   local claude_rc=0
   run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" || claude_rc=$?
 
-  # SPINDRIFT_OUTCOME required-marker gate (issues #1607, #2044, #2511, #2978): a
-  # Driver pass that exits cleanly but leaves the marker missing most often just
-  # ended its turn early (issue #1542), so resume the pinned session once with a
-  # nudge the marker-gate verb renders, near-miss-quoting variant included (issue
-  # #1900). Research pins no session and a non-zero exit is the launcher's path.
-  local _outcome_gate_resumed=""
-  if [ "$claude_rc" -eq 0 ] && ! _is_advise_only; then
-    local _outcome_gate_json
-    _outcome_gate_json="$(driver-exec marker-gate --phase nudge --marker outcome \
-      --log-path "$_last_driver_text_log" \
-      --issue "${ISSUE_NUMBER:-}" --landing "$BRANCH")"
-    if [ "$(printf '%s' "$_outcome_gate_json" | jq -r '.should_nudge // false')" = "true" ]; then
-      echo "==> required marker missing — resuming the session once with a nudge"
-      _outcome_gate_resumed=1
-      local _outcome_nudge_prompt
-      _outcome_nudge_prompt="$(printf '%s' "$_outcome_gate_json" | jq -r '.prompt')"
-      # This resume gets its own ReviewPromptFile-stripped handoff, not the
-      # shared one, or it would re-enter the full implement/review/fix loop a
-      # second time under the orchestrator (issues #2065, #2975).
-      local _outcome_nudge_handoff_file
-      _outcome_nudge_handoff_file="$(_stripped_review_handoff)"
-      run_driver_in_env "$_outcome_nudge_prompt" "$_outcome_nudge_handoff_file" "resume" || claude_rc=$?
-    fi
-  fi
-
-  # Only a driver that exited cleanly yet reported nothing gets the synthetic
-  # backstop. A non-zero exit propagates untouched: the launcher's
-  # ClassifyTransient/retry path owns that case, and forcing exit 0 here would
-  # turn a retryable transient failure into a terminal blocked run (issue #593).
-  if [ "$claude_rc" -eq 0 ] && [ -z "$_last_outcome_line" ]; then
-    echo "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop"
-    # Captured (issue #2448): the PR-intent nudge gate below reads it, and a bare
-    # `emit_outcome_backstop` left it empty, silently skipping the nudge on every
-    # backstopped run.
-    _last_outcome_line="$(emit_outcome_backstop "$_outcome_gate_resumed")"
-    printf '%s\n' "$_last_outcome_line"
-    # This run's ready status was manufactured by the backstop, not reported by
-    # the driver, so a later crash in the nudge's best-effort resume must not
-    # undo the terminal verdict already committed to here (issue #2448).
-    _outcome_via_backstop=1
-    # A read-only Box holds no push token, so emit_outcome_backstop could not
-    # push $BRANCH itself; it falls through to the bundle-out step below, which
-    # relays the branch through the outbox (issue #2094). No longer a per-forge
-    # branch (ADR 0039, issue #2252): every mode reaches the single exit at the
-    # bottom of main(), and bundleout.Run is a no-op with nothing to relay.
-  fi
-
-  # SPINDRIFT_PR_INTENT required-marker gate (issues #2045, #2036, #2511, #2978):
-  # a read-only github Box that reaches status=ready but never printed the marker
-  # leaves the launcher's hostMediateDraftPR with nothing to relay. Scoped to a
-  # genuine status=ready (issue #2448). The scan lives in the marker-gate verb,
-  # $RUN_NONCE anchoring against a mid-sentence mention included (issue #1937).
-  # Guarded on !_is_advise_only too (issue #3906): an advise-only kind (butler,
-  # research) never opens a PR, so a missing marker there is not a gap to nudge.
-  if [ "$claude_rc" -eq 0 ] && ! _is_advise_only && _is_readonly_outbox_relay; then
-    local _pr_intent_gate_json
-    _pr_intent_gate_json="$(driver-exec marker-gate --phase nudge --marker pr-intent \
-      --nonce "${RUN_NONCE:-}" --original-outcome-line "$_last_outcome_line" \
-      --log-path "$_last_stream_log" --signal-carrier "${BOX_SIGNAL_CARRIER:-log}")"
-    if [ "$(printf '%s' "$_pr_intent_gate_json" | jq -r '.should_nudge // false')" = "true" ]; then
-      local _original_ready_outcome_line="$_last_outcome_line"
-      local _pr_intent_nudge_prompt
-      _pr_intent_nudge_prompt="$(printf '%s' "$_pr_intent_gate_json" | jq -r '.prompt')"
-      echo "==> PR-intent marker missing — resuming the session once with a nudge"
-      # Same ReviewPromptFile-stripped handoff override as the SPINDRIFT_OUTCOME
-      # gate's resume above: this corrective resume must stay a narrow single
-      # pass too (issues #2065, #2975).
-      local _pr_intent_nudge_handoff_file
-      _pr_intent_nudge_handoff_file="$(_stripped_review_handoff)"
-      run_driver_in_env "$_pr_intent_nudge_prompt" "$_pr_intent_nudge_handoff_file" "resume" || claude_rc=$?
-
-      # Both logs were reassigned by the resume call above, so --log-path scans
-      # the resumed pass's own raw log for a genuine PR-intent marker and
-      # --resumed-driver-text-log hands the verb its unwrapped text log to scan
-      # for a near-miss line itself, rather than main() pre-extracting one.
-      local -a _resolve_args=(
-        --phase resolve --marker pr-intent
-        --attempts 1
-        --nonce "${RUN_NONCE:-}"
-        --log-path "$_last_stream_log"
-        --signal-carrier "${BOX_SIGNAL_CARRIER:-log}"
-        --resumed-outcome-line "$_last_outcome_line"
-        --resumed-driver-text-log "$_last_driver_text_log"
-        --original-outcome-line "$_original_ready_outcome_line"
-        --resume-exit-code "$claude_rc"
-      )
-      [ -n "$_outcome_via_backstop" ] && _resolve_args+=(--outcome-via-backstop)
-      local _resolve_json
-      _resolve_json="$(driver-exec marker-gate "${_resolve_args[@]}")"
-
-      # A crash in this best-effort nudge must never undo an already-terminal
-      # backstop-declared ready run (issue #593's exit-0 guarantee, issue #2448).
-      # ForceExitZero fires only when this run's ready status came from the
-      # synthetic backstop and this resume itself exited non-zero.
-      if [ "$(printf '%s' "$_resolve_json" | jq -r '.force_exit_zero // false')" = "true" ]; then
-        echo "==> PR-intent nudge resume failed (rc=$claude_rc) after a backstop-declared ready outcome — staying terminal (issue #593, #2448)"
-        claude_rc=0
-      fi
-
-      local _pr_intent_giveup_op
-      _pr_intent_giveup_op="$(printf '%s' "$_resolve_json" | jq -r '.op_line // empty')"
-      if [ -n "$_pr_intent_giveup_op" ]; then
-        printf '%s\n' "$_pr_intent_giveup_op"
-      fi
-
-      # Restore bookkeeping (issue #2448): the resume left no valid outcome, so
-      # the earlier line is still this run's final word. Reprinted only when the
-      # resume shadowed it with a near-miss line, since the line must stay
-      # emitted exactly once. A non-empty $_last_outcome_line here is the resumed
-      # pass's own genuine verdict and must be left alone.
-      if [ -z "$_last_outcome_line" ]; then
-        _last_outcome_line="$_original_ready_outcome_line"
-        local _pr_intent_restore_line
-        _pr_intent_restore_line="$(printf '%s' "$_resolve_json" | jq -r '.outcome_line // empty')"
-        if [ -n "$_pr_intent_restore_line" ]; then
-          echo "==> resumed pass did not repeat the original SPINDRIFT_OUTCOME line — restoring it"
-          printf '%s\n' "$_pr_intent_restore_line"
-        fi
-      fi
-    fi
-  fi
-
-  # A commit-carrying branch behind a status=already-resolved claim would skip
-  # review, CI and the merge gate yet still close the issue (issue #4016), so
-  # the verb demotes it to blocked and preserves the work; it prints nothing
-  # otherwise. Unguarded by $claude_rc: a crashed run's claim would close too.
-  if ! _is_advise_only && [ -n "$_last_outcome_line" ]; then
-    local _demoted_outcome_line
-    _demoted_outcome_line="$(emit_outcome_backstop "" --prior-outcome-line "$_last_outcome_line")"
-    if [ -n "$_demoted_outcome_line" ]; then
-      printf '%s\n' "$_demoted_outcome_line"
-      _last_outcome_line="$_demoted_outcome_line"
-    fi
-  fi
-
-  # Settle-time lockfile scan (issue #3199), best-effort ahead of bundle-out: it
-  # warns when a git-tracked lockfile still names the run's Forwarder URL, so a
-  # stale pin does not ship silently. Unguarded by $claude_rc, since a crashed
-  # run can still have committed one. Guarded on !_is_self_contained rather than
-  # !_is_advise_only: only a self-contained dispatch has no clone to scan.
-  if ! _is_self_contained; then
-    lockfile_forwarder_scan
-  fi
-
-  # Harness-owned code-out (ADR 0033, issues #1808, #2082): the Harness, not the
-  # Agent, bundles the seam after the Driver exits, for CODE_FORGE=local and for
-  # a read-only Box that never pushed anything itself. Skipped for an
-  # advise-only kind, which never cuts $BRANCH, so bundle-out could not resolve
-  # it. Left unguarded under set -e on purpose: a bundle-out failure is a real
-  # container failure.
-  if ! _is_advise_only && _needs_outbox; then
-    driver-exec bundle-out \
-      --repo "$WORK_DIR" \
-      --base "origin/${BASE_BRANCH:-}" \
-      --branch "$BRANCH" \
-      --outbox "$OUTBOX_DIR" \
-      --issue "$ISSUE_NUMBER" \
-      --prior-outcome-line "$_last_outcome_line"
-  fi
-
-  echo "==> entrypoint complete for $DISPATCH_KEY"
-  exit "$claude_rc"
+  # box owns everything after the first Driver run: the required-marker nudges,
+  # the synthetic outcome backstop, the already-resolved demotion, the lockfile
+  # scan and bundle-out, and it exits with the run's exit code (ADR 0058, issue
+  # #4292). The resume flags are rendered once here: the first run already
+  # created the session transcript, so this equals rendering at resume time.
+  local _resume_session_file
+  _resume_session_file="$(mktemp)"
+  _driver_session_flags resume > "$_resume_session_file"
+  exec box \
+    --driver-exit-code "$claude_rc" \
+    --outcome-line "$_last_outcome_line" \
+    --stream-log "$_last_stream_log" \
+    --driver-text-log "$_last_driver_text_log" \
+    --handoff-file "$_handoff_file" \
+    --resume-session-file "$_resume_session_file" \
+    --work-dir "$WORK_DIR" \
+    --outbox-dir "$OUTBOX_DIR"
 }
 
 main "$@"
