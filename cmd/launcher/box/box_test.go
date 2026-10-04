@@ -149,6 +149,7 @@ func newFixture(t *testing.T) *fixture {
 			f.prefetched = append(f.prefetched, cmd)
 			return f.prefetchErr
 		},
+		LookPath:    func(string) (string, error) { return "", exec.ErrNotFound },
 		Orchestrate: f.orchestrate,
 		Backstop: func(cfg outcomebackstop.Config, w io.Writer) error {
 			f.backstopCfgs = append(f.backstopCfgs, cfg)

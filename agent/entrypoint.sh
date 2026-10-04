@@ -114,23 +114,6 @@ configure_env() {
   # Go by the Driver strategy's SessionFlags.
 }
 
-# configure_forgejo_cli wires FORGEJO_TOKEN into fj so the agent's `fj issue`
-# and `fj pr` commands (issue #1963) run non-interactively. A no-op when fj
-# isn't baked or no token is set, as on a read-only Box, whose prompt offers no
-# fj write command anyway.
-configure_forgejo_cli() {
-  command -v fj >/dev/null 2>&1 || return 0
-  [ -n "${FORGEJO_TOKEN:-}" ] || return 0
-  local _fj_base="${FORGEJO_BASE_URL:-https://codeberg.org}"
-  _fj_base="${_fj_base%/}"
-  # The trailing slash is stripped so the host fj keys the token under is the
-  # host clone_repo derives its remote from. The token is fed on stdin, never
-  # argv. `auth add-key` (NAME positional) is the forgejo-cli 0.5.0
-  # spelling baked into the image; a nixpkgs bump that renames it must update
-  # this call in lockstep, or fj would store GIT_USER_NAME as the token.
-  printf '%s' "$FORGEJO_TOKEN" | fj -H "$_fj_base" auth add-key "${GIT_USER_NAME:-spindrift-agent}" >/dev/null
-}
-
 # clone_repo authenticates, clones the target repo into WORK_DIR, sets the
 # repo-local git identity, and fetches the latest refs.
 clone_repo() {
@@ -188,9 +171,6 @@ clone_repo() {
   # Fetch the latest refs so the pre-work rebase positions the branch on current
   # origin/BASE_BRANCH, not the state captured at clone time.
   git fetch origin
-  # Configured after the repo-local identity above so GIT_USER_NAME is available
-  # for fj's key label.
-  configure_forgejo_cli
   install_readonly_guards
 }
 
@@ -379,11 +359,10 @@ main() {
 
   if _is_self_contained; then
     # No repo to clone or explore (issue #2202): stand up an empty working
-    # directory for the Driver, wire fj for a forgejo verdict post, and skip
-    # every clone/branch phase; box skips its toolchain decision too.
+    # directory for the Driver and skip every clone/branch phase; box skips its
+    # toolchain decision too.
     mkdir -p "$WORK_DIR"
     cd "$WORK_DIR"
-    configure_forgejo_cli
   else
     clone_repo
     # An advise-only dispatch (research today, ADR 0022, issue #640) explores
@@ -393,9 +372,10 @@ main() {
       phase_prework_rebase
     fi
   fi
-  # box first binds the registry proxy (the Forwarder, the home configs and the
-  # in-tree rewrite, reverted on exit; issue #4298), decides the toolchain (the
-  # devShell probe, the toolchain hint and the prefetch hook; issue #4297), lays
+  # box first sets up the Forgejo CLI credential (issue #4299), binds the
+  # registry proxy (the Forwarder, the home configs and the in-tree rewrite,
+  # reverted on exit; issue #4298), decides the toolchain (the devShell probe,
+  # the toolchain hint and the prefetch hook; issue #4297), lays
   # out the Driver skills dir and the home agent files (issue #4296), then runs
   # the conflict-resolve pass when phase_prework_rebase left a conflict, then
   # assembles the prompt, runs the first Driver run and everything after it: the
