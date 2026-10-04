@@ -18,7 +18,7 @@ import (
 // Prior art: ../kindaxes_guard_test.go.
 
 // shellKindBranch mirrors the grep -E patterns of the retired
-// tests/entrypoint-kind-axes.bats. `--dispatch-kind "${DISPATCH_KIND:-work}"`
+// entrypoint kind-axes bats guard. `--dispatch-kind "${DISPATCH_KIND:-work}"`
 // (handing the name to driver-exec for its own descriptor lookup) and the
 // "DISPATCH_KIND=${DISPATCH_KIND:-work}" display string are deliberately not
 // comparisons: both lack an operator directly after the expansion.

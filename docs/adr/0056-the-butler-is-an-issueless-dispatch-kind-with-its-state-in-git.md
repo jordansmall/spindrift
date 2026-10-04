@@ -178,7 +178,7 @@ kind test. The Box gets the same treatment: `buildBoxEnv` exports
 `DISPATCH_KEYING` (`issue`|`chore`), and `DISPATCH_ANNOUNCE_VERB` as the
 facts a Box needs; `DISPATCH_KIND` crosses the seam display-only, read only
 by driver-exec for descriptor lookups such as advise-only posture, and never
-branched on in `agent/entrypoint.sh` — `tests/entrypoint-kind-axes.bats`
+branched on in `agent/entrypoint.sh` — `cmd/launcher/box/kindaxes_test.go`
 fails the day it is. A fourth kind, when one is proposed, is one descriptor
 row, not a new string switch through eight files. **The Ledger is state
 only.** It holds claim and done state — `state.json`'s `lastSwept`, cursor,

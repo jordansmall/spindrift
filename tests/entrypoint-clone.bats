@@ -150,3 +150,63 @@ setup() {
   [ "$output" != "$other_remote" ]
 }
 
+
+# Self-contained research (ADR 0022, issue #2202): SELF_CONTAINED=1 selects the
+# no-repo research sub-mode, which clones nothing.
+@test "SELF_CONTAINED=1 clones no repo" {
+  set_dispatch_kind research
+  export SELF_CONTAINED="1"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -d "$WORK_DIR/.git" ]
+  run git -C "$WORK_DIR" rev-parse --show-toplevel
+  [ "$status" -ne 0 ]
+}
+
+@test "SELF_CONTAINED=1 with a local issue tracker clones nothing, with no REPO_SLUG/GH_TOKEN" {
+  set_dispatch_kind research
+  export SELF_CONTAINED="1"
+  export ISSUE_TRACKER="local"
+  export BOX_TRACKER_AXIS_READ=LOCAL
+  unset BOX_TRACKER_AXIS_WRITE
+  # box's env guards read this launcher-forwarded signal, not ISSUE_TRACKER,
+  # to exempt a self-contained local-tracker run from REPO_SLUG/GH_TOKEN
+  # (issue #2527).
+  export BOX_IN_BOX_UNREACHABLE_TRACKER=1
+  unset REPO_SLUG
+  unset GH_TOKEN
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ ! -d "$WORK_DIR/.git" ]
+}
+
+# Hermetic global git config (issue #404): CI's `nix flake check` sandbox has
+# no global git config, so the clone provisions the Agent identity repo-locally
+# on the workspace clone, keeping the Box's global config empty and
+# CI-equivalent.
+@test "clone sets agent identity repo-locally, not globally" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  run git -C "$WORK_DIR" config --local user.name
+  [ "$status" -eq 0 ]
+  [ "$output" = "$GIT_USER_NAME" ]
+  run git -C "$WORK_DIR" config --local user.email
+  [ "$status" -eq 0 ]
+  [ "$output" = "$GIT_USER_EMAIL" ]
+  # setup_bare_repo seeds the isolated $HOME with a "Seed" global identity. It
+  # must survive the entrypoint, which proves the Agent identity landed
+  # repo-locally.
+  run git config --global user.name
+  [ "$status" -eq 0 ]
+  [ "$output" = "Seed" ]
+}
+
+@test "clone leaves the global git config byte-identical" {
+  # setup_bare_repo writes $HOME/.gitconfig itself. Any global write by the
+  # entrypoint would leak a setting CI's hermetic check environment lacks.
+  local before
+  before="$(cat "$HOME/.gitconfig")"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/.gitconfig")" = "$before" ]
+}

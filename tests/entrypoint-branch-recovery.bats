@@ -212,3 +212,41 @@ setup() {
   after_sha="$(git --git-dir="$other_remote" rev-parse refs/heads/agent/issue-7)"
   [ "$before_sha" = "$after_sha" ]
 }
+
+# An advise-only dispatch (research, ADR 0022; butler, ADR 0056) clones fresh
+# but never cuts, checks out, or pushes an agent branch: there is no code to
+# land, so no branch to recover or rebase.
+
+# Switches from the ISSUE_NUMBER/ISSUE_TITLE cell setup_entrypoint_env sets by
+# default to the butler's own CHORE_* cell. "bugs" is a real chore under
+# templates/default/prompts/chores/ (choreSection reads it by name), not a
+# fixture stand-in.
+set_butler_env() {
+  unset ISSUE_NUMBER ISSUE_TITLE
+  export CHORE_NAME="bugs"
+  set_dispatch_kind butler
+  export CHORE_HEAD="deadbeef"
+  export CHORE_DIFF_RANGE=""
+  export CHORE_SLICE="agent/entrypoint.sh"
+}
+
+@test "research kind clones but never checks out or pushes an agent branch" {
+  set_dispatch_kind research
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -d "$WORK_DIR/.git" ]
+  run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
+  [ "$output" = "main" ]
+  run git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "agent/issue-7"
+  [ -z "$output" ]
+}
+
+@test "butler kind never checks out or pushes an agent branch" {
+  set_butler_env
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  run git -C "$WORK_DIR" rev-parse --abbrev-ref HEAD
+  [ "$output" = "main" ]
+  run git -C "$BATS_TEST_TMPDIR" ls-remote "https://github.com/owner/repo.git" "butler-bugs"
+  [ -z "$output" ]
+}
