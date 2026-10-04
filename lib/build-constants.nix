@@ -1,5 +1,5 @@
 # Single root for values duplicated across nix build sites with no drift guard.
-# The four vendorHash values differ because each site's fileset vendors a
+# The five vendorHash values differ because each site's fileset vendors a
 # different tree off identical go.mod/go.sum (issue #784). nixBuilderImage is
 # pinned by digest for supply-chain safety; docs/reference.md cannot import
 # nix, so update this file first, then its "Bumping the pin" section.
@@ -10,6 +10,9 @@
   # the way driver-exec's did once the ecosystem rows took over the
   # committed-config parsers.
   orchestratorVendorHash = "sha256-Bh3JiWUuQEfWvapyawzC13d/wwgvxdUl11j/Zia1P10=";
+  # Equal to driverExecVendorHash today (same vendored tree) but its own field:
+  # the two filesets drift independently.
+  boxVendorHash = "sha256-Iyy3pXHAYwXgDA85SS5ouPLmRjHWhMBOhdVMWhfWQNk=";
   # launcher-currency's fileset excludes driver-exec, orchestrator, quickstart
   # and daemon (each an independent `package main` the launcher never
   # imports), internal/daemon (no non-test package outside daemon imports
