@@ -1407,8 +1407,7 @@ func allFlags() []string {
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5",
 		"--prework-rebase-conflict=1", "--publish-rebase=0",
-		"--harness-skills-dir=/harness-skills", "--operator-skills-dir=/operator-skills",
-		"--harness-home-agent-dir=/home-agent", "--driver-session-cache-dir=/session-cache",
+		"--driver-session-cache-dir=/session-cache",
 	}
 }
 
@@ -1422,9 +1421,6 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		PreworkRebaseConflict: true,
 		OutboxDir:             "/o",
 		ForbiddenMarkersFile:  "/forbidden.json",
-		HarnessSkillsDir:      "/harness-skills",
-		OperatorSkillsDir:     "/operator-skills",
-		HarnessHomeAgentDir:   "/home-agent",
 		DriverSessionCacheDir: "/session-cache",
 		Assembly: assemblyInputs{
 			RegistryFile:                "/reg.json",

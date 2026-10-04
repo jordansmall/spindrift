@@ -128,17 +128,16 @@ type boxRun struct {
 	carrier     string
 }
 
-// run checks the required env, sets up the Forgejo CLI credential, installs the
-// read-only guards, binds the registry proxy, decides the toolchain, assembles
-// the prompt, then sequences the first Driver run and everything
-// entrypoint.sh's main() did after it, and returns the exit code the
+// run sequences the phases the package doc lists and returns the exit code the
 // entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
-	// First, as the shell preamble was: nothing else may run on a Box missing
-	// what the dispatch needs.
+	// The guards run first in box, but bash's clone, branch-recovery and
+	// prework-rebase phases still run ahead of `exec box` until #4301/#4302 move
+	// them in, so until then a missing variable is caught only after those.
 	if err := checkEnvGuards(d.Getenv); err != nil {
 		return 0, phaseErr("env-guards", err)
 	}
+	warnWritableStore(d.Getenv, d.Stdout)
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
 	if r.kind == "" {

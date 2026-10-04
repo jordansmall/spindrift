@@ -1,22 +1,25 @@
 // Command box is the Box's in-box driver: it first checks the required env
 // (the dispatch key, keying and git identity, plus the forge token and repo
-// unless fully local or self-contained with no reachable tracker), wires
-// FORGEJO_TOKEN into fj and installs the read-only guards (issue #4299), binds the registry proxy
+// unless fully local or self-contained with no reachable tracker), prints the
+// writable-store notice when NIX_STORE_WRITABLE=true, wires FORGEJO_TOKEN into
+// fj and installs the read-only guards (issue #4299), binds the registry proxy
 // (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
 // issue #4298), decides the toolchain (devShell probe, prefetch hook and
 // toolchain hint; issue #4297), lays out the Driver skills dir and the home
-// agent files (issue #4296), then runs the pre-work conflict-resolve pass when
-// the rebase stopped on conflicts, assembles the prompt, runs the first Driver
-// run through the orchestrator, then the settle sequence that follows it:
-// required-marker nudges, the synthetic outcome backstop, the already-resolved
-// demotion, the lockfile scan, and bundle-out. entrypoint.sh execs it with the
-// shell-local values assembly needs and it exits with the run's exit code (ADR
-// 0058). It replaces the assemble-prompt call, the toolchain-nudge,
-// devShell-probe, prefetch and bind-registry phases, and the conflict-resolve
-// phase, marker-gate, outcome-backstop, bundle-out and advise-only driver-exec
-// verbs bash chained. Under podman box runs as PID 1 and splits itself into an
-// init parent that only reaps orphans and forwards signals and a worker child
-// that does the work (see init.go).
+// agent files from HARNESS_SKILLS_DIR, OPERATOR_SKILLS_DIR and
+// HARNESS_HOME_AGENT_DIR, which it defaults itself (issue #4296), then runs
+// the pre-work conflict-resolve pass when the rebase stopped on conflicts,
+// assembles the prompt, runs the first Driver run through the orchestrator,
+// then the settle sequence that follows it: required-marker nudges, the
+// synthetic outcome backstop, the already-resolved demotion, the lockfile
+// scan, and bundle-out. entrypoint.sh execs it with the shell-local values
+// assembly needs and it exits with the run's exit code (ADR 0058). It replaces
+// the assemble-prompt call, the toolchain-nudge, devShell-probe, prefetch and
+// bind-registry phases, and the conflict-resolve phase, marker-gate,
+// outcome-backstop, bundle-out and advise-only driver-exec verbs bash
+// chained. Under podman box runs as PID 1 and splits itself into an init
+// parent that only reaps orphans and forwards signals and a worker child that
+// does the work (see init.go).
 package main
 
 import (
@@ -54,9 +57,6 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.StringVar(&a.RegistryFile, "registry", "", "path to the fragment registry JSON file")
 	fs.StringVar(&a.ValidateMarkersFile, "validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file")
 	fs.StringVar(&a.SkillsDir, "driver-skills-dir", "", "DRIVER_SKILLS_DIR, probed for baked skills")
-	fs.StringVar(&in.HarnessSkillsDir, "harness-skills-dir", "", "HARNESS_SKILLS_DIR, the baked skills copied into DRIVER_SKILLS_DIR")
-	fs.StringVar(&in.OperatorSkillsDir, "operator-skills-dir", "", "OPERATOR_SKILLS_DIR, copied over the harness skills")
-	fs.StringVar(&in.HarnessHomeAgentDir, "harness-home-agent-dir", "", "HARNESS_HOME_AGENT_DIR, the staged home agent files copied into HOME")
 	fs.StringVar(&in.DriverSessionCacheDir, "driver-session-cache-dir", "", "DRIVER_SESSION_CACHE_DIR, empty when the Driver has none")
 	fs.StringVar(&a.PromptsDir, "prompts-dir", "", "PROMPTS_DIR")
 	fs.StringVar(&a.AgentsPromptFiles, "agents-prompt-files", "", "nix-baked agent-name -> promptFile JSON map")
@@ -118,6 +118,7 @@ func mainRun(args []string, env promptassembly.Env, d deps) int {
 		}
 		return 2
 	}
+	in = withDirDefaults(in, d.Getenv)
 	rc, err := run(in, env, d)
 	if err != nil {
 		// A marker rejection is operator-facing prose: it prints bare, on the
