@@ -4,12 +4,15 @@
   "comms-contract.md",
   "driver-preamble.sh",
   "fragment-registry.sh",
+  "fragments-registry.json",
   "launcher-run-input-butler.json",
   "launcher-run-input-bwrap.json",
   "launcher-run-input-docker.json",
   "launcher-run-input.json",
   "nix-checks-skill.md",
   "outcome-contract.md",
+  "prompt-contract-registry.json",
   "prompts",
-  "research-outcome-contract.md"
+  "research-outcome-contract.md",
+  "research-verdicts-parity.json"
 ]

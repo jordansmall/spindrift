@@ -140,7 +140,7 @@ in
     pkgs.runCommand "prompt-assembly-golden-coverage" { } ''
       fail=0
       ${section "fragments with no golden cell and no allowlist entry:"
-        "add a golden cell to tests/prompt-assembly-parity.bats and run nix run .#regen-goldens, or add an allowlist entry whose value names the covering test in nix/checks/prompt-assembly-golden-coverage.nix"
+        "add a golden cell to cmd/launcher/internal/promptassembly/golden_integration_test.go and run nix run .#regen-goldens, or add an allowlist entry whose value names the covering test in nix/checks/prompt-assembly-golden-coverage.nix"
         real.uncovered
       }
       ${section "allowlisted fragments that a golden cell now covers:"
