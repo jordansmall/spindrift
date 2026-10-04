@@ -1,7 +1,9 @@
 // Command box is the Box's in-box driver: it first checks the required env
 // (the dispatch key, keying and git identity, plus the forge token and repo
 // unless fully local or self-contained with no reachable tracker), prints the
-// writable-store notice when NIX_STORE_WRITABLE=true, wires FORGEJO_TOKEN into
+// writable-store notice when NIX_STORE_WRITABLE=true, recovers the agent
+// branch and runs the pre-work rebase (issue #4301) right after the kind read,
+// ahead of the Forgejo CLI and the guards, wires FORGEJO_TOKEN into
 // fj and installs the read-only guards (issue #4299), binds the registry proxy
 // (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
 // issue #4298), decides the toolchain (devShell probe, prefetch hook and
@@ -14,7 +16,8 @@
 // synthetic outcome backstop, the already-resolved demotion, the lockfile
 // scan, and bundle-out. entrypoint.sh execs it with the shell-local values
 // assembly needs and it exits with the run's exit code (ADR 0058). It replaces
-// the assemble-prompt call, the toolchain-nudge, devShell-probe, prefetch and
+// the assemble-prompt call, the branch-recovery and prework-rebase phases, the
+// toolchain-nudge, devShell-probe, prefetch and
 // bind-registry phases, and the conflict-resolve phase, marker-gate,
 // outcome-backstop, bundle-out and advise-only driver-exec verbs bash
 // chained. Under podman box runs as PID 1 and splits itself into an init
@@ -33,6 +36,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/bindregistry"
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -82,8 +86,6 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	// of failing the run (issues #2975, #2694).
 	fs.StringVar(&tokensRaw, "max-budget-tokens", "", "Handoff.Caps.MaxBudgetTokens")
 	fs.StringVar(&usdRaw, "max-budget-usd", "", "Handoff.Caps.MaxBudgetUSD")
-	fs.BoolVar(&in.PreworkRebaseConflict, "prework-rebase-conflict", false, "the pre-work rebase stopped on conflicts")
-	fs.BoolVar(&in.PublishRebase, "publish-rebase", false, "publish the rebased branch once the conflict is resolved")
 	if err := fs.Parse(args); err != nil {
 		return inputs{}, err
 	}
@@ -171,6 +173,8 @@ func main() {
 		Backstop:      outcomebackstop.Run,
 		Demote:        outcomebackstop.DemoteAlreadyResolved,
 		BundleOut:     bundleout.Run,
+		Recover:       branchrecovery.Recover,
+		PublishBranch: branchrecovery.Publish,
 		WarnLockfiles: bindregistry.WarnStaleLockfiles,
 		Nix:           toolchain.RunNix(os.Stdout),
 		RunCmd:        func(cmd *exec.Cmd) error { return cmd.Run() },

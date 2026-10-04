@@ -46,7 +46,7 @@ setup() {
   # Same stale-branch-no-open-PR setup, but read-only (issue #1979): the box
   # holds no push-capable token, so even this housekeeping reset must never
   # force-push the remote. The reset branch matches base exactly, so the
-  # empty-bundle no-op in publish_rebased_branch leaves nothing to relay.
+  # empty-bundle no-op in branchrecovery.Publish leaves nothing to relay.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
   git -C "$prior" checkout -b "agent/issue-7" "origin/main"

@@ -392,7 +392,7 @@ setup_bare_repo() {
 }
 
 # Pushes main to a same-named remote branch so a non-default BASE_BRANCH
-# resolves to a real origin ref. phase_branch_recovery checks that ref out
+# resolves to a real origin ref. box's branch recovery checks that ref out
 # before the prompt is assembled and setup_bare_repo seeds only main, so any
 # test setting BASE_BRANCH away from "main" needs this first.
 # Usage: seed_release_branch "release-42" "seed-name"

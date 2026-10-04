@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 
 	"spindrift.dev/launcher/internal/bindregistry"
-	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/conflictresolve"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -20,8 +19,8 @@ import (
 // box carries on into assembly and, if not, the exit code.
 func (r *boxRun) conflictResolve() (conflictresolve.Outcome, error) {
 	cfg := conflictresolve.Config{
-		Conflict:    r.in.PreworkRebaseConflict,
-		Publish:     r.in.PublishRebase,
+		Conflict:    r.recovery.Conflict,
+		Publish:     r.recovery.Adopted,
 		ResolveOnly: r.d.Getenv("CONFLICT_RESOLVE_PR_URL") != "",
 		BaseBranch:  r.env.BaseBranch,
 		Branch:      r.env.Branch,
@@ -119,20 +118,10 @@ func (r *boxRun) rebaseInProgress() bool {
 	return false
 }
 
-// publishRebased lands the rebased branch. A read-only Box holds no push-capable
-// token (issue #1979: a force-push would 403), so it relays through the outbox
-// bundle instead, behind the same BOX_WRITE_ENABLED gate the PR contract uses
-// (issues #1918, #1808).
+// publishRebased lands the rebased branch through the one publish decision
+// branch recovery owns.
 func (r *boxRun) publishRebased() error {
-	if r.env.BoxWriteEnabled {
-		return r.d.Git(r.in.WorkDir, "push", "--force-with-lease", "origin", r.env.Branch)
-	}
-	return r.d.BundleOut(bundleout.Config{
-		Repo:      r.in.WorkDir,
-		Base:      "origin/" + r.env.BaseBranch,
-		Branch:    r.env.Branch,
-		OutboxDir: r.in.OutboxDir,
-	}, r.d.Stdout)
+	return r.d.PublishBranch(r.recoveryConfig(), r.d.Stdout)
 }
 
 // abortRebase is best-effort. It reverts the in-tree bindings first (ADR 0044,
