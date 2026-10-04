@@ -2082,6 +2082,141 @@ func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	}
 }
 
+// overridePromptsDir stages a Consumer prompt-dir override (a
+// SPINDRIFT_PROMPT_DIR mount): the given template files plus the real
+// fragments dir, which the fragment loop reads whichever base is selected.
+func overridePromptsDir(t *testing.T, templates map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	fragmentsDir, err := filepath.Abs(filepath.Join(promptsDir, "fragments"))
+	if err != nil {
+		t.Fatalf("Abs: %v", err)
+	}
+	if err := os.Symlink(fragmentsDir, filepath.Join(dir, "fragments")); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	for name, content := range templates {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s): %v", name, err)
+		}
+	}
+	return dir
+}
+
+// Issue #420 / #455, the ported entrypoint-outcome-contract.bats cases: a
+// runtime prompt-dir override lacking a shared block gets the canonical one
+// appended exactly once, and an override already carrying it is left alone.
+// Without the appended outcome contract the agent never emits the outcome
+// line and the launcher never learns the PR.
+func TestAssembleOverrideSharedBlocks(t *testing.T) {
+	reg := loadTestRegistry(t)
+	const reviewStub = "reviewer stub\n\nVERDICT: APPROVE or BLOCK\n"
+	const ownBlocks = "stub\n\n# COMMS\n\nown comms\n\n# CHECK\n\nown check\n\n# LAND THE CHANGE\n\nown outcome\n"
+
+	cases := []struct {
+		name     string
+		fixPass  int
+		template string
+		content  string
+		appended bool
+		want     []string
+	}{
+		{
+			name:     "issue override lacking outcome contract gets it appended",
+			template: "issue-prompt.md",
+			content:  "issue stub, no contract here\n",
+			appended: true,
+			want:     []string{"canonical comms", "canonical check", "canonical outcome"},
+		},
+		{
+			name:     "issue override already containing outcome contract is unchanged",
+			template: "issue-prompt.md",
+			content:  ownBlocks,
+			want:     []string{"own comms", "own check", "own outcome"},
+		},
+		{
+			name:     "fix override gets COMMS/CHECK/outcome appended",
+			fixPass:  2,
+			template: "fix-prompt.md",
+			content:  "fix stub, no shared blocks here\n",
+			appended: true,
+			want:     []string{"canonical comms", "canonical check", "canonical outcome"},
+		},
+		{
+			name:     "fix override already containing shared blocks is unchanged",
+			fixPass:  2,
+			template: "fix-prompt.md",
+			content:  ownBlocks,
+			want:     []string{"own comms", "own check", "own outcome"},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			templates := map[string]string{
+				"issue-prompt.md":  "issue stub\n",
+				"review-prompt.md": reviewStub,
+			}
+			templates[tc.template] = tc.content
+			contracts := t.TempDir()
+			env := coveredEnv()
+			env.FixPass = tc.fixPass
+			env.PromptsDir = overridePromptsDir(t, templates)
+			env.CommsContractFile = writeContractFile(t, contracts, "comms-contract.md", "# COMMS\n\ncanonical comms\n")
+			env.CheckContractFile = writeContractFile(t, contracts, "check-contract.md", "# CHECK\n\ncanonical check\n")
+			env.OutcomeContractFile = writeContractFile(t, contracts, "outcome-contract.md", "# LAND THE CHANGE\n\ncanonical outcome\n")
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+
+			for _, marker := range []string{"# COMMS", "# CHECK", "# LAND THE CHANGE"} {
+				if n := strings.Count(result.Prompt, marker); n != 1 {
+					t.Errorf("%q occurs %d times, want 1:\n%s", marker, n, result.Prompt)
+				}
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(result.Prompt, want) {
+					t.Errorf("Prompt missing %q:\n%s", want, result.Prompt)
+				}
+			}
+			if !tc.appended && strings.Contains(result.Prompt, "canonical") {
+				t.Errorf("Prompt carries a canonical block despite the override already containing it:\n%s", result.Prompt)
+			}
+			if tc.appended {
+				comms := strings.Index(result.Prompt, "# COMMS")
+				check := strings.Index(result.Prompt, "# CHECK")
+				outcome := strings.Index(result.Prompt, "# LAND THE CHANGE")
+				if !(comms < check && check < outcome) {
+					t.Errorf("blocks out of order: comms=%d check=%d outcome=%d", comms, check, outcome)
+				}
+			}
+		})
+	}
+}
+
+// A missing or unreadable OUTCOME_CONTRACT_FILE must fail Assemble loudly
+// rather than proceed without the contract, the failure mode #420 exists to
+// prevent (ported from entrypoint-outcome-contract.bats).
+func TestAssembleMissingOutcomeContractFileFails(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.PromptsDir = overridePromptsDir(t, map[string]string{
+		"issue-prompt.md":  "issue stub, no contract here\n",
+		"review-prompt.md": "reviewer stub\n\nVERDICT: APPROVE or BLOCK\n",
+	})
+	env.OutcomeContractFile = filepath.Join(t.TempDir(), "does-not-exist.md")
+
+	_, err := Assemble(env, reg)
+	if err == nil {
+		t.Fatal("Assemble succeeded, want an error for the missing outcome contract file")
+	}
+	if !strings.Contains(err.Error(), "does-not-exist.md") {
+		t.Errorf("error %q does not name the missing contract file", err)
+	}
+}
+
 // The research branch of the injection step (entrypoint.sh: 1064-1074) only
 // ever attempts research-verdict injection, never comms/check/outcome, even
 // with every contract-file field populated. The fixture omits the
