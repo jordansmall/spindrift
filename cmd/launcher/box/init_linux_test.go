@@ -122,6 +122,9 @@ func TestInitWorker(t *testing.T) {
 			os.Exit(23)
 		}
 	}
+	// superviseChild stops reaping once this worker exits, so an orphan still
+	// alive then would die into an unreaped zombie and fail the count.
+	time.Sleep(500 * time.Millisecond)
 	os.Exit(7)
 }
 
