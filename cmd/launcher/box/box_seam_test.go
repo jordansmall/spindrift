@@ -183,6 +183,9 @@ type seamCase struct {
 	// the box flags, where a repeated flag overrides the default.
 	promptsDir string
 	extraArgs  []string
+	// homeArgs are flags computed from the run's HOME, appended after
+	// extraArgs, for cases that point the layout at paths under HOME.
+	homeArgs func(home string) []string
 	// driverRuns script the Driver: the first is the first Driver run box
 	// performs, the rest are its corrective resumes.
 	driverRuns []seamtest.DriverRun
@@ -198,6 +201,7 @@ type seamRun struct {
 	outboxDir string
 	handoff   string
 	sessionID string
+	home      string
 	snapshots string // set when the case asked for snapshots
 }
 
@@ -263,9 +267,13 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
 
+	args := c.boxArgs(t, outbox)
+	if c.homeArgs != nil {
+		args = append(args, c.homeArgs(home)...)
+	}
 	res := seamtest.Run(t, seamtest.Cmd{
 		Bin:      box,
-		Args:     c.boxArgs(t, outbox),
+		Args:     args,
 		Env:      env,
 		PathDirs: []string{seamtest.InstallFakes(t, "claude", "orchestrator")},
 	})
@@ -275,6 +283,7 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		orchRec:   seamtest.ReadRecord(t, orchRec),
 		outboxDir: outbox,
 		sessionID: id,
+		home:      home,
 		snapshots: snapshots,
 	}
 	if len(run.orchRec) > 0 {
@@ -1037,4 +1046,226 @@ func TestBoxSeamConflictResolveOnlyStopsBeforeTheMainRun(t *testing.T) {
 		t.Fatalf("orchestrator calls %v, Driver calls %v; want only the conflict pass", r.orchRec, r.driverRec)
 	}
 	r.wantConflictPass(t)
+}
+
+// homeAgentFixture is a Driver's baked agent-files tree under the seam
+// fixtures dir, the same shape the image stages at /agent and /home/agent.
+type homeAgentFixture struct{ skills, homeAgent string }
+
+func seamAgentFiles(t *testing.T, driver string) homeAgentFixture {
+	t.Helper()
+	root := seamtest.Path(t, "agent-files-"+driver)
+	return homeAgentFixture{
+		skills:    filepath.Join(root, "agent", "skills"),
+		homeAgent: filepath.Join(root, "home", "agent"),
+	}
+}
+
+// layoutArgs hands box the fixture as its harness sources and HOME as the
+// destinations. The fixture is a read-only store path, the staging shape bwrap
+// gives box. operatorDir may name a directory that does not exist.
+func (f homeAgentFixture) layoutArgs(operatorDir, sessionCacheRel, agentFilesRel string, extra ...string) func(string) []string {
+	return func(home string) []string {
+		cache, agentFiles := "", ""
+		if sessionCacheRel != "" {
+			cache = filepath.Join(home, sessionCacheRel)
+		}
+		if agentFilesRel != "" {
+			agentFiles = filepath.Join(home, agentFilesRel)
+		}
+		return append([]string{
+			"--driver-agent-files-dir=" + agentFiles,
+			"--harness-skills-dir=" + f.skills,
+			"--operator-skills-dir=" + operatorDir,
+			"--harness-home-agent-dir=" + f.homeAgent,
+			"--driver-session-cache-dir=" + cache,
+			"--driver-skills-dir=" + filepath.Join(home, ".claude", "skills"),
+		}, extra...)
+	}
+}
+
+// assertHomeMatchesFixture walks the fixture's home/agent tree and requires
+// every entry in home with the same type and owner-writable, and regular
+// files' bytes equal unless rewritten names the file (relative path), whose
+// bytes are the caller's to check. skip names relative paths left alone.
+func assertHomeMatchesFixture(t *testing.T, fixtureHome, home string, rewritten, skip map[string]bool) {
+	t.Helper()
+	err := filepath.WalkDir(fixtureHome, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(fixtureHome, p)
+		if rel == "." || skip[rel] {
+			return nil
+		}
+		want, err := d.Info()
+		if err != nil {
+			return err
+		}
+		got, err := os.Lstat(filepath.Join(home, rel))
+		if err != nil {
+			t.Errorf("%s: missing from HOME: %v", rel, err)
+			return nil
+		}
+		if got.Mode().Type() != want.Mode().Type() {
+			t.Errorf("%s: HOME type %v; want the fixture's %v", rel, got.Mode().Type(), want.Mode().Type())
+			return nil
+		}
+		if got.Mode().Perm()&0o200 == 0 {
+			t.Errorf("%s: mode %v is not owner-writable", rel, got.Mode().Perm())
+		}
+		if want.Mode().IsRegular() && !rewritten[rel] {
+			if got.Mode().Perm()&0o100 != want.Mode().Perm()&0o100 {
+				t.Errorf("%s: mode %v; want the fixture's executable bit (%v)", rel, got.Mode().Perm(), want.Mode().Perm())
+			}
+			if g, w := readSeamFile(t, filepath.Join(home, rel)), readSeamFile(t, p); string(g) != string(w) {
+				t.Errorf("%s: content differs from the fixture", rel)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertSkillsLaidOut requires every fixture skill under the Driver skills
+// dir with the fixture's SKILL.md bytes, except those named in overridden.
+func assertSkillsLaidOut(t *testing.T, fixtureSkills, skillsDir string, overridden map[string]bool) {
+	t.Helper()
+	entries, err := os.ReadDir(fixtureSkills)
+	if err != nil || len(entries) == 0 {
+		t.Fatalf("fixture skills %s: %d entries, %v", fixtureSkills, len(entries), err)
+	}
+	for _, e := range entries {
+		if overridden[e.Name()] {
+			continue
+		}
+		want := readSeamFile(t, filepath.Join(fixtureSkills, e.Name(), "SKILL.md"))
+		if got := readSeamFile(t, filepath.Join(skillsDir, e.Name(), "SKILL.md")); string(got) != string(want) {
+			t.Errorf("skill %s: SKILL.md differs from the fixture", e.Name())
+		}
+	}
+}
+
+// fenceCount counts the lines that are exactly the YAML fence.
+func fenceCount(b []byte) int {
+	n := 0
+	for _, l := range strings.Split(string(b), "\n") {
+		if l == "---" {
+			n++
+		}
+	}
+	return n
+}
+
+// frontmatterBytes is b up to and including its second `---` line.
+func frontmatterBytes(b []byte) string {
+	lines := strings.SplitAfter(string(b), "\n")
+	fences := 0
+	for i, l := range lines {
+		if strings.TrimRight(l, "\n") == "---" {
+			if fences++; fences == 2 {
+				return strings.Join(lines[:i+1], "")
+			}
+		}
+	}
+	return ""
+}
+
+func seamHomeCase(t *testing.T, f homeAgentFixture, operatorDir, sessionCacheRel, agentFilesRel string, extraArgs ...string) seamCase {
+	t.Helper()
+	return seamCase{
+		repo:       seamRepo(t, 0),
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "home"))}},
+		homeArgs:   f.layoutArgs(operatorDir, sessionCacheRel, agentFilesRel, extraArgs...),
+	}
+}
+
+// assertSkillsPreamble requires the assembled prompt to carry the given
+// skills-found line. Callers pass a literal so the expectation does not
+// re-derive itself from the scan it checks.
+func assertSkillsPreamble(t *testing.T, r seamRun, want string) {
+	t.Helper()
+	if !strings.Contains(r.assembledPrompt(t), want) {
+		t.Errorf("assembled prompt lacks %q", want)
+	}
+}
+
+func TestBoxSeamLaysOutClaudeHome(t *testing.T) {
+	f := seamAgentFiles(t, "claude")
+	r := runBoxSeam(t, seamHomeCase(t, f, filepath.Join(t.TempDir(), "no-operator"), filepath.Join(".claude", "projects"), ""))
+	r.res.WantExit(t, 0)
+
+	// The session cache is the pre-existing live directory; the layout leaves it be.
+	assertHomeMatchesFixture(t, f.homeAgent, r.home, nil, map[string]bool{filepath.Join(".claude", "projects"): true})
+	if _, err := os.Stat(filepath.Join(r.home, ".claude", "projects", "x", r.sessionID+".jsonl")); err != nil {
+		t.Errorf("session cache lost its transcript: %v", err)
+	}
+	skillsDir := filepath.Join(r.home, ".claude", "skills")
+	assertSkillsLaidOut(t, f.skills, skillsDir, nil)
+	assertSkillsPreamble(t, r, "Skills available: auto-format, auto-lint, check-hygiene, code-comments.")
+}
+
+func TestBoxSeamOperatorSkillOverridesHarnessSkill(t *testing.T) {
+	f := seamAgentFiles(t, "claude")
+	operator := t.TempDir()
+	for name, body := range map[string]string{"auto-format": "operator's own\n", "operator-only": "mine\n"} {
+		if err := os.MkdirAll(filepath.Join(operator, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(operator, name, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := runBoxSeam(t, seamHomeCase(t, f, operator, filepath.Join(".claude", "projects"), ""))
+	r.res.WantExit(t, 0)
+
+	skillsDir := filepath.Join(r.home, ".claude", "skills")
+	if got := readSeamFile(t, filepath.Join(skillsDir, "auto-format", "SKILL.md")); string(got) != "operator's own\n" {
+		t.Errorf("auto-format SKILL.md = %q; want the operator's override", got)
+	}
+	if got := readSeamFile(t, filepath.Join(skillsDir, "operator-only", "SKILL.md")); string(got) != "mine\n" {
+		t.Errorf("operator-only SKILL.md = %q", got)
+	}
+	assertSkillsLaidOut(t, f.skills, skillsDir, map[string]bool{"auto-format": true})
+	assertSkillsPreamble(t, r, "Skills available: auto-format, auto-lint, check-hygiene, code-comments, operator-only.")
+}
+
+func TestBoxSeamLaysOutOpencodeHome(t *testing.T) {
+	f := seamAgentFiles(t, "opencode")
+	agentsRel := filepath.Join(".config", "opencode", "agents")
+	r := runBoxSeam(t, seamHomeCase(t, f, filepath.Join(t.TempDir(), "no-operator"), "", agentsRel,
+		"--driver=opencode",
+		"--agents-prompt-files="+`{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}`))
+	r.res.WantExit(t, 0)
+
+	agents := filepath.Join(r.home, agentsRel)
+	fixtureAgents := filepath.Join(f.homeAgent, agentsRel)
+	// box rewrites the bodies of the agent files the prompt map names and
+	// drops reviewer.md; review-axis.md is outside the map and stays as baked.
+	rewritten := map[string]bool{}
+	for _, name := range []string{"scout", "worker"} {
+		rewritten[filepath.Join(agentsRel, name+".md")] = true
+	}
+	skip := map[string]bool{filepath.Join(agentsRel, "reviewer.md"): true}
+	assertHomeMatchesFixture(t, f.homeAgent, r.home, rewritten, skip)
+
+	if _, err := os.Stat(filepath.Join(agents, "reviewer.md")); !os.IsNotExist(err) {
+		t.Errorf("reviewer.md still in HOME (stat err %v); box drops it", err)
+	}
+	for _, name := range []string{"scout", "worker"} {
+		want := readSeamFile(t, filepath.Join(fixtureAgents, name+".md"))
+		got := readSeamFile(t, filepath.Join(agents, name+".md"))
+		if gf, wf := frontmatterBytes(got), frontmatterBytes(want); wf == "" || gf != wf {
+			t.Errorf("%s.md frontmatter = %q; want the fixture's %q", name, gf, wf)
+		}
+		if n := fenceCount(got); n != 2 {
+			t.Errorf("%s.md has %d `---` fence lines; want 2", name, n)
+		}
+		if string(got) == string(want) {
+			t.Errorf("%s.md body was not rewritten", name)
+		}
+	}
+	assertSkillsLaidOut(t, f.skills, filepath.Join(r.home, ".claude", "skills"), nil)
 }

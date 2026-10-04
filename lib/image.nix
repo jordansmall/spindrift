@@ -236,18 +236,10 @@ let
     src = builtins.readFile (../templates/default/skills + "/${s.name}/SKILL.md");
   }) (builtins.filter (s: s.harnessOwned or false) bakedSkills);
 
-  agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
-    # PROMPTS_DIR is currently /agent/prompts, so this is also the only
-    # line that creates $out/agent itself -- every OUTCOME_CONTRACT_FILE/
-    # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE/RESEARCH_OUTCOME_CONTRACT_FILE/
-    # PROMPTASSEMBLY_REGISTRY_FILE/
-    # PROMPT_CONTRACT_REGISTRY_FILE/FORBIDDEN_MARKERS_REGISTRY_FILE `cp`
-    # destination below is a sibling of PROMPTS_DIR under that same $out/agent
-    # dir (issue #420) and relies on this mkdir having created it. A future
-    # lib/agent-paths.nix rename that moves PROMPTS_DIR out from under /agent
-    # would silently break those `cp` calls unless this mkdir (or an explicit
-    # one) moves with it.
-    mkdir -p $out${contracts.agentPaths.PROMPTS_DIR}
+  # The /agent/skills and /home/agent slice of agentFiles, written with the
+  # given pkgs: agentFiles passes the Linux pkgs, and homeLayoutFor realizes the
+  # same tree on the host for the Go seam test's fixture (issue #4296).
+  homeLayoutScript = p: ''
     ${lib.optionalString (driver.driverEntry ? sessionCacheDirRelative) ''
       # Pre-create the driver-cache mountpoint so podman reuses the agent-owned
       # directory instead of fabricating root-owned parents (issue #447).
@@ -264,7 +256,50 @@ let
     chmod +x $out/home/agent/.claude/hooks/bash-output-tee.sh
     cp ${../agent/bash-output-summary.sh} $out/home/agent/.claude/hooks/bash-output-summary.sh
     chmod +x $out/home/agent/.claude/hooks/bash-output-summary.sh
-    cp ${pkgs.writeText "settings.json" boxSettings} $out/home/agent/.claude/settings.json
+    cp ${p.writeText "settings.json" boxSettings} $out/home/agent/.claude/settings.json
+    ${lib.optionalString ((harnessSkills ++ agents.skills) != [ ]) ''
+      mkdir -p $out/agent/skills
+      ${lib.concatMapStrings (
+        f:
+        # Claude Code discovers a skill only as a directory holding SKILL.md, so
+        # each entry is baked under its own <name>/ directory below the fixed
+        # /agent/skills, which box copies into the Driver's runtime skills dir at
+        # startup. A { name; src; } entry is re-realized with the given pkgs, so
+        # no consumer host's system reaches the derivation graph (#597).
+        if builtins.isAttrs f && !(lib.isDerivation f) then
+          ''
+            mkdir -p $out/agent/skills/${f.name}
+            cp ${p.writeText "SKILL.md" f.src} $out/agent/skills/${f.name}/SKILL.md
+          ''
+        else
+          ''
+            cp -r ${f} $out/agent/skills/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
+          ''
+      ) (harnessSkills ++ agents.skills)}
+    ''}
+    ${lib.concatStrings (
+      lib.mapAttrsToList (relPath: content: ''
+        mkdir -p "$(dirname $out/home/agent/${relPath})"
+        cp ${p.writeText (baseNameOf relPath) content} $out/home/agent/${relPath}
+      '') driver.driverAgentFiles
+    )}
+  '';
+
+  homeLayoutFor = p: p.runCommand "spindrift-home-layout" { } (homeLayoutScript p);
+
+  agentFiles = pkgs.runCommand "spindrift-agent-files" { } ''
+    # PROMPTS_DIR is currently /agent/prompts, so this is also the only
+    # line that creates $out/agent itself -- every OUTCOME_CONTRACT_FILE/
+    # COMMS_CONTRACT_FILE/CHECK_CONTRACT_FILE/RESEARCH_OUTCOME_CONTRACT_FILE/
+    # PROMPTASSEMBLY_REGISTRY_FILE/
+    # PROMPT_CONTRACT_REGISTRY_FILE/FORBIDDEN_MARKERS_REGISTRY_FILE `cp`
+    # destination below is a sibling of PROMPTS_DIR under that same $out/agent
+    # dir (issue #420) and relies on this mkdir having created it. A future
+    # lib/agent-paths.nix rename that moves PROMPTS_DIR out from under /agent
+    # would silently break those `cp` calls unless this mkdir (or an explicit
+    # one) moves with it.
+    mkdir -p $out${contracts.agentPaths.PROMPTS_DIR}
+    ${homeLayoutScript pkgs}
     cp ${entrypoint}/bin/entrypoint $out/agent/entrypoint.sh
     chmod +x $out/agent/entrypoint.sh
     # A sibling of prompts/, not inside it, so a SPINDRIFT_PROMPT_DIR mount
@@ -298,32 +333,6 @@ let
     cp ${pkgs.writeText "butler-review-prompt.md" prompts.butlerReviewPrompt} $out${contracts.agentPaths.PROMPTS_DIR}/butler-review-prompt.md
     cp -r ${prompts.fragmentsSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/fragments
     cp -r ${prompts.choresSourceDir} $out${contracts.agentPaths.PROMPTS_DIR}/chores
-    ${lib.optionalString ((harnessSkills ++ agents.skills) != [ ]) ''
-      mkdir -p $out/agent/skills
-      ${lib.concatMapStrings (
-        f:
-        # Claude Code discovers a skill only as a directory holding SKILL.md, so
-        # each entry is baked under its own <name>/ directory below the fixed
-        # /agent/skills, which box copies into the Driver's runtime
-        # skills dir at startup. A { name; src; } entry is re-realized with THIS
-        # pkgs, so no consumer host's system reaches the derivation graph (#597).
-        if builtins.isAttrs f && !(lib.isDerivation f) then
-          ''
-            mkdir -p $out/agent/skills/${f.name}
-            cp ${pkgs.writeText "SKILL.md" f.src} $out/agent/skills/${f.name}/SKILL.md
-          ''
-        else
-          ''
-            cp -r ${f} $out/agent/skills/${if lib.isDerivation f then f.name else builtins.baseNameOf f}
-          ''
-      ) (harnessSkills ++ agents.skills)}
-    ''}
-    ${lib.concatStrings (
-      lib.mapAttrsToList (relPath: content: ''
-        mkdir -p "$(dirname $out/home/agent/${relPath})"
-        cp ${pkgs.writeText (baseNameOf relPath) content} $out/home/agent/${relPath}
-      '') driver.driverAgentFiles
-    )}
   '';
 
   # A non-root `agent` user (uid/gid 1000). Claude Code refuses
@@ -455,6 +464,7 @@ in
     image
     agentEnv
     agentFiles
+    homeLayoutFor
     passwdFile
     groupFile
     nixConfigFile

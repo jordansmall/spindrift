@@ -1,6 +1,7 @@
 # The rendered artifacts the Go seam tests (issue #4280) read as fixtures:
 # a pure copy of what the bats harness already renders (plus the repo's
-# nix-checks skill, which the Go check sandbox cannot reach by relative path),
+# nix-checks skill, which the Go check sandbox cannot reach by relative path,
+# and each Driver's baked agent-files tree),
 # no test logic here.
 # The names are pinned against cmd/launcher/internal/seamtest/fixtures.json by
 # nix/checks/seam-fixtures.nix.
@@ -13,6 +14,7 @@
   dockerHarness,
   bwrapHarness,
   butlerHarness,
+  opencodeHarness,
 }:
 let
   inherit (batsHarness) internals;
@@ -44,6 +46,8 @@ let
     "launcher-run-input-bwrap.json" = bwrapHarness.internals.runInputDocumentFile;
     "launcher-run-input-butler.json" = butlerHarness.internals.runInputDocumentFile;
     "prompts" = internals.promptDir;
+    "agent-files-claude" = internals.homeLayoutDir;
+    "agent-files-opencode" = opencodeHarness.internals.homeLayoutDir;
     "nix-checks-skill.md" = ../skills/nix-checks/SKILL.md;
   };
 in

@@ -53,6 +53,7 @@ let
       dockerHarness
       bwrapHarness
       butlerHarness
+      opencodeHarness
       ;
   };
 
