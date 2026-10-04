@@ -171,3 +171,91 @@ check_golden() {
   set_butler_env
   check_golden butler
 }
+
+# The steps below run in entrypoint.sh before it execs box, so no Go test
+# reaches them.
+
+# mkHarness bakes NIX_STORE_WRITABLE into the image Env from its
+# nixStoreWritable knob (ADR 0018, issue #469). Self-test mode trades
+# hermeticity for in-box `nix flake check` feedback, so the warning must be
+# loud when enabled and absent by default.
+@test "entrypoint prints a WARNING when NIX_STORE_WRITABLE=true" {
+  export NIX_STORE_WRITABLE=true
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"==> WARNING"*"/nix/store is writable"* ]]
+}
+
+@test "entrypoint prints no store-writable warning by default" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"/nix/store is writable"* ]]
+}
+
+# Issue #4409: DRIVER_BASH_TIMEOUT_MS is a Consumer knob; entrypoint.sh exports
+# it under each name the Driver's registry entry lists in DRIVER_BASH_TIMEOUT_ENV
+# (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS).
+@test "DRIVER_BASH_TIMEOUT_MS set exports both Claude Code timeout vars to the Driver" {
+  export DRIVER_BASH_TIMEOUT_MS=1800000
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=1800000' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=1800000' "$DRIVER_LOG"
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS unset leaves both Claude Code timeout vars unset" {
+  unset DRIVER_BASH_TIMEOUT_MS BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS empty leaves both Claude Code timeout vars unset" {
+  export DRIVER_BASH_TIMEOUT_MS=""
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
+# A value that is not a positive integer is warned about and skipped, since
+# Claude Code may silently fall back to its own cap instead of rejecting it.
+assert_bad_bash_timeout_skipped() {
+  export DRIVER_BASH_TIMEOUT_MS="$1"
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING: DRIVER_BASH_TIMEOUT_MS='$1' is not a positive integer"* ]]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS=0 warns and exports neither timeout var" {
+  assert_bad_bash_timeout_skipped 0
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS=-5 warns and exports neither timeout var" {
+  assert_bad_bash_timeout_skipped -5
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS=30m warns and exports neither timeout var" {
+  assert_bad_bash_timeout_skipped 30m
+}
+
+# opencode's registry entry declares no bashTimeoutEnv, so its preamble carries
+# no DRIVER_BASH_TIMEOUT_ENV line. Stripping the claude one from the wrapped
+# entrypoint reproduces that preamble shape.
+@test "a Driver preamble without DRIVER_BASH_TIMEOUT_ENV ignores DRIVER_BASH_TIMEOUT_MS" {
+  ! grep -q '^DRIVER_BASH_TIMEOUT_ENV=' "$OPENCODE_DRIVER_PREAMBLE_FILE"
+  grep -q '^DRIVER_BASH_TIMEOUT_ENV=' "$ENTRYPOINT"
+  sed -i '/^DRIVER_BASH_TIMEOUT_ENV=/d' "$ENTRYPOINT"
+  export DRIVER_BASH_TIMEOUT_MS=1800000
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}

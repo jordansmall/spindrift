@@ -129,7 +129,7 @@ func TestHandoffEndToEnd(t *testing.T) {
 		"--driver-bin", fakeClaude,
 		"--driver-flags", "",
 		// claude's real argv shape (lib/drivers/claude.nix), the same values
-		// entrypoint-orchestrator-handoff.bats pins.
+		// claudeArgvShape in driver-exec's main_test.go pins.
 		"--argv-prompt-style", "flag",
 		"--argv-prompt-flag", "-p",
 		"--argv-model-flag", "--model",
@@ -175,6 +175,19 @@ func TestHandoffEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(out, `"role":"review"`) {
 		t.Errorf("stdout missing the review pass_start op, want a review pass to have run (stdout=%q)", out)
+	}
+	if !strings.Contains(out, `"role":"land"`) {
+		t.Errorf("stdout missing the land pass_start op, want a land pass to have run (stdout=%q)", out)
+	}
+	// One cycle of implement, review and land. The fake Driver never emits a
+	// VERDICT BLOCK, so exactly one land pass follows review rather than a
+	// fix loop.
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(calls), "call\n"); n != 3 {
+		t.Errorf("Driver invoked %d times, want 3 (implement, review, land)", n)
 	}
 	wantOutcome := "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"
 	if !strings.Contains(out, wantOutcome) {

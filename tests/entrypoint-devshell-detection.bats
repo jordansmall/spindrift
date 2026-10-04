@@ -96,3 +96,19 @@ FAKE
   [ ! -f "$PREFETCH_LOG" ]
 }
 
+
+@test "entrypoint runs the configured prefetch hook inside the work tree" {
+  export PREFETCH_LOG="$BATS_TEST_TMPDIR/prefetch.log"
+  {
+    printf '#!%s\n' "$(command -v bash)"
+    cat <<'FAKE'
+echo "warmed $PWD for #${ISSUE_NUMBER:-?}" >>"$PREFETCH_LOG"
+FAKE
+  } >"$FAKE_BIN/warm-cache"
+  chmod +x "$FAKE_BIN/warm-cache"
+  export PREFETCH="warm-cache"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q "warmed" "$PREFETCH_LOG"
+  grep -q "$WORK_DIR" "$PREFETCH_LOG"
+}

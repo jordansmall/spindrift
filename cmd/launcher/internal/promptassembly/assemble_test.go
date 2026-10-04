@@ -418,6 +418,13 @@ func TestAssembleHandoff(t *testing.T) {
 			if result.Handoff.SessionMode != tc.wantMode {
 				t.Errorf("Handoff.SessionMode = %q, want %q", result.Handoff.SessionMode, tc.wantMode)
 			}
+			// Resuming after a hold changes only the session mode, never the prompt.
+			if !strings.Contains(result.Prompt, "Fresh clone, new branch") {
+				t.Errorf("Prompt missing issue-prompt.md's distinguishing text:\n%s", result.Prompt)
+			}
+			if strings.Contains(result.Prompt, "This is a warm fix pass") {
+				t.Errorf("Prompt rendered fix-prompt.md:\n%s", result.Prompt)
+			}
 			if result.Handoff.ReviewPromptFile != "" {
 				t.Errorf("Handoff.ReviewPromptFile = %q, want empty", result.Handoff.ReviewPromptFile)
 			}

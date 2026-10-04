@@ -1150,17 +1150,29 @@ func TestFirstRun_SessionFlagsFollowTheHandoffSessionMode(t *testing.T) {
 }
 
 func TestFirstRun_ManifestPathOnlyWhenOutboxMounted(t *testing.T) {
-	for _, needs := range []bool{false, true} {
-		f := newFixture(t)
-		f.env.HostMediatedRemote = needs
-		f.run()
-		got, ok := f.firstCall.argv["--manifest-path"]
-		if ok != needs {
-			t.Fatalf("needsOutbox=%v: --manifest-path present = %v", needs, ok)
-		}
-		if needs && got != f.in.OutboxDir+"/manifest.json" {
-			t.Errorf("--manifest-path = %q", got)
-		}
+	for _, c := range []struct {
+		name  string
+		setup func(*fixture)
+		want  bool
+	}{
+		{"read-write box with no host-mediated remote", func(*fixture) {}, false},
+		{"host-mediated remote", func(f *fixture) { f.env.HostMediatedRemote = true }, true},
+		{"read-only outbox-relay-capable box", func(f *fixture) { f.readOnlyRelay() }, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			c.setup(f)
+			// A read-only box also runs the PR-intent gate, which wants its marker.
+			f.firstRun(readyLine+"\n", 0, prIntentLine)
+			f.run()
+			got, ok := f.firstCall.argv["--manifest-path"]
+			if ok != c.want {
+				t.Fatalf("--manifest-path present = %v, want %v", ok, c.want)
+			}
+			if c.want && got != f.in.OutboxDir+"/manifest.json" {
+				t.Errorf("--manifest-path = %q", got)
+			}
+		})
 	}
 }
 
@@ -1169,6 +1181,40 @@ func TestFirstRun_PrintsItsOutcomeLineExactlyOnce(t *testing.T) {
 	f.run()
 	if n := countLine(f.lines(), readyLine); n != 1 {
 		t.Errorf("outcome line printed %d times:\n%s", n, f.stdout())
+	}
+}
+
+// Regression (#1611): claude sometimes wraps the outcome line in markdown, which
+// the extractor's leading-token anchor would otherwise miss.
+func TestFirstRun_ReemitsAMarkdownWrappedOutcomeLineBare(t *testing.T) {
+	for name, wrapped := range map[string]string{
+		"backticks":  "`" + readyLine + "`",
+		"bold":       "**" + readyLine + "**",
+		"whitespace": "  \t" + readyLine + " \t",
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.firstRun(wrapped+"\n", 0)
+			f.run()
+			if n := countLine(f.lines(), readyLine); n != 1 {
+				t.Errorf("bare outcome line printed %d times:\n%s", n, f.stdout())
+			}
+			if len(f.calls) != 0 || len(f.backstopCfgs) != 0 {
+				t.Errorf("calls=%d backstops=%d, a wrapped line must count as present", len(f.calls), len(f.backstopCfgs))
+			}
+		})
+	}
+}
+
+func TestFirstRun_KeepsTheLastOutcomeLineAcrossResultEvents(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun(blockedLine+"\n", 0, strings.TrimSuffix(resultEvent(readyLine+"\n"), "\n"))
+	f.run()
+	if n := countLine(f.lines(), readyLine); n != 1 {
+		t.Errorf("last outcome line printed %d times:\n%s", n, f.stdout())
+	}
+	if n := countLine(f.lines(), blockedLine); n != 0 {
+		t.Errorf("stale outcome line printed %d times:\n%s", n, f.stdout())
 	}
 }
 
