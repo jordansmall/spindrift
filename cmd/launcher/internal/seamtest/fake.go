@@ -23,6 +23,7 @@ var fakes = map[string]func(args []string) int{
 	"podman": podmanMain,
 	"docker": podmanMain,
 	"bwrap":  bwrapMain,
+	"nix":    nixMain,
 	// claude and orchestrator stand in for the Driver CLI and the in-box
 	// orchestrator when a seam test runs the box binary.
 	"claude":       driverMain,

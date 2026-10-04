@@ -154,6 +154,10 @@ func seamBaseEnv(t *testing.T) map[string]string {
 		"HOLD_JITTER_SECS":       "0",
 	}
 	mergeEnv(env, seamCellEnv())
+	// box's own toolchain knobs: an ambient PREFETCH would run its hook.
+	for _, name := range []string{"PREFETCH", "DEV_SHELL_NAME", "DEV_SHELL_PROBE_TIMEOUT"} {
+		env[name] = ""
+	}
 	for _, name := range promptassembly.BoxEnvVarNames {
 		if _, set := env[name]; !set {
 			env[name] = ""
@@ -191,12 +195,16 @@ type seamCase struct {
 	// snapshot has the orchestrator fake keep each pass's prompt and session
 	// file contents, which box deletes once the pass returns.
 	snapshot bool
+	// nix, when set, puts the nix fake on PATH with this config (Record is
+	// filled in); the probe argv it saw lands in seamRun.nixRec.
+	nix *seamtest.NixConfig
 }
 
 type seamRun struct {
 	res       seamtest.Result
 	driverRec [][]string
 	orchRec   [][]string
+	nixRec    [][]string
 	outboxDir string
 	handoff   string
 	sessionID string
@@ -265,6 +273,14 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
+	fakeNames := []string{"claude", "orchestrator"}
+	nixRec := filepath.Join(tmp, "nix.rec")
+	if c.nix != nil {
+		nixCfg := *c.nix
+		nixCfg.Record = nixRec
+		mergeEnv(env, seamtest.WriteFakeConfig(t, "nix", nixCfg))
+		fakeNames = append(fakeNames, "nix")
+	}
 
 	args := c.boxArgs(t, outbox)
 	if c.homeArgs != nil {
@@ -274,12 +290,13 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		Bin:      box,
 		Args:     args,
 		Env:      env,
-		PathDirs: []string{seamtest.InstallFakes(t, "claude", "orchestrator")},
+		PathDirs: []string{seamtest.InstallFakes(t, fakeNames...)},
 	})
 	run := seamRun{
 		res:       res,
 		driverRec: seamtest.ReadRecord(t, driverRec),
 		orchRec:   seamtest.ReadRecord(t, orchRec),
+		nixRec:    seamtest.ReadRecord(t, nixRec),
 		outboxDir: outbox,
 		sessionID: id,
 		home:      home,
@@ -557,7 +574,11 @@ func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[st
 	if err != nil {
 		t.Fatalf("handoff %q unreadable: %v", handoff, err)
 	}
-	var h struct{ PromptFile string }
+	var h struct {
+		PromptFile   string
+		Devshell     bool
+		DevshellName string
+	}
 	if err := json.Unmarshal(raw, &h); err != nil || h.PromptFile == "" {
 		t.Fatalf("handoff %s has no PromptFile (%v)", handoff, err)
 	}
@@ -565,6 +586,7 @@ func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[st
 	if err != nil {
 		t.Fatal(err)
 	}
+	fmt.Fprintf(&b, "devshell\n%t %s\n", h.Devshell, h.DevshellName)
 	b.WriteString("prompt\n")
 	if strings.TrimRight(s.Prompt, "\n") == strings.TrimRight(string(want), "\n") {
 		b.WriteString("<handoff-prompt>\n")
@@ -1267,4 +1289,47 @@ func TestBoxSeamLaysOutOpencodeHome(t *testing.T) {
 		}
 	}
 	assertSkillsLaidOut(t, f.skills, filepath.Join(r.home, ".claude", "skills"), nil)
+}
+
+// TestBoxSeamDevshellPair runs box over a work Target with a flake.nix and the
+// nix fake, and pins the devshell pair the golden renders for the Driver
+// invocation: the probe's outcome decides it, never the flake alone.
+func TestBoxSeamDevshellPair(t *testing.T) {
+	probe := []string{"develop", ".#ci", "--command", "true"}
+	for _, c := range []struct {
+		name      string
+		devShells []string
+		wantPair  string
+		wantLine  string
+	}{
+		{"present", []string{"ci"}, "true ci", "==> devShell found — lifecycle will run inside nix develop"},
+		{"absent", nil, "false default", "==> no devShell in flake (or nix develop failed) — using baked toolchain"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			repo := seamRepo(t, 0)
+			if err := os.WriteFile(filepath.Join(repo, "flake.nix"), []byte("{}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			r := runBoxSeam(t, seamCase{
+				repo:       repo,
+				snapshot:   true,
+				nix:        &seamtest.NixConfig{DevShells: c.devShells},
+				env:        map[string]string{"DEV_SHELL_NAME": "ci", "DEV_SHELL_PROBE_TIMEOUT": "60"},
+				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "devshell"))}},
+			})
+			r.res.WantExit(t, 0)
+			if want := [][]string{probe}; !reflect.DeepEqual(r.nixRec, want) {
+				t.Errorf("nix calls = %q; want %q", r.nixRec, want)
+			}
+			for _, line := range []string{"==> flake.nix found in cloned repo; probing for devShell", c.wantLine} {
+				if !strings.Contains(r.res.Stdout, line) {
+					t.Errorf("stdout lacks %q:\n%s", line, r.res.Stdout)
+				}
+			}
+			got := normaliseDriverInvocation(t, seamtest.ReadSnapshot(t, r.snapshots, 1), nil, r.outboxDir, filepath.Dir(r.outboxDir))
+			if want := "\ndevshell\n" + c.wantPair + "\nprompt\n"; !strings.Contains(got, want) {
+				t.Errorf("golden lacks the devshell pair %q:\n%s", c.wantPair, got)
+			}
+		})
+	}
 }
