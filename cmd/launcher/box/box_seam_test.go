@@ -130,6 +130,7 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
 		"--devshell=0", "--devshell-name=default",
+		"--prework-rebase-conflict=0", "--publish-rebase=0",
 	}
 }
 

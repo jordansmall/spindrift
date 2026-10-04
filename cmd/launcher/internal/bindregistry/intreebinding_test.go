@@ -1631,3 +1631,41 @@ func TestASCIILowerLowercasesASCIIOnly(t *testing.T) {
 		}
 	}
 }
+
+func TestRevertInTreeBindingsNarratesAndContinuesPastFailure(t *testing.T) {
+	dir := newTestRepo(t)
+	original := "registry = \"https://upstream.example/index/\"\n"
+	writeConfig(t, dir, cargoBinding.InTreeConfigPath, original, true)
+	if _, err := ApplyInTreeBinding(dir, cargoBinding, []HostRewrite{{UpstreamHost: "upstream.example", LocalURL: "http://127.0.0.1:27182"}}); err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	// A NUL in the path makes os.Stat fail with something other than not-exist.
+	broken := cargoBinding
+	broken.InTreeConfigPath = "bad\x00path"
+
+	var out strings.Builder
+	failed := RevertInTreeBindings(dir, []ecosystem.Row{broken, cargoBinding}, "who", &out)
+	if !failed {
+		t.Error("failed = false, want true after a row error")
+	}
+	for _, want := range []string{
+		"who: revert in-tree bad\x00path:",
+		"==> in-tree " + cargoBinding.Name + " config " + cargoBinding.InTreeConfigPath + " restored and un-hidden from git\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output %q lacks %q", out.String(), want)
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dir, cargoBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("row after the failure was not reverted: %q", got)
+	}
+
+	out.Reset()
+	if RevertInTreeBindings(dir, []ecosystem.Row{cargoBinding}, "who", &out) || out.Len() != 0 {
+		t.Errorf("second revert: failed or wrote %q, want a silent no-op", out.String())
+	}
+}

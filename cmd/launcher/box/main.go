@@ -1,13 +1,14 @@
-// Command box is the Box's in-box driver: it assembles the prompt, runs the
+// Command box is the Box's in-box driver: it runs the pre-work conflict-resolve
+// pass when the rebase stopped on conflicts, assembles the prompt, runs the
 // first Driver run through the orchestrator, then the settle sequence that
 // follows it: required-marker nudges, the synthetic outcome backstop, the
 // already-resolved demotion, the lockfile scan, and bundle-out. entrypoint.sh
 // execs it with the shell-local values assembly needs and it exits with the
 // run's exit code (ADR 0058). It replaces the assemble-prompt call and the
-// marker-gate, outcome-backstop, bundle-out and advise-only driver-exec verbs
-// bash chained. Under podman box runs as PID 1 and splits itself into an init
-// parent that only reaps orphans and forwards signals and a worker child that
-// does the work (see init.go).
+// conflict-resolve phase, marker-gate, outcome-backstop, bundle-out and
+// advise-only driver-exec verbs bash chained. Under podman box runs as PID 1
+// and splits itself into an init parent that only reaps orphans and forwards
+// signals and a worker child that does the work (see init.go).
 package main
 
 import (
@@ -69,6 +70,8 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.StringVar(&usdRaw, "max-budget-usd", "", "Handoff.Caps.MaxBudgetUSD")
 	fs.BoolVar(&p.Devshell, "devshell", false, "Handoff.Devshell")
 	fs.StringVar(&p.DevshellName, "devshell-name", "", "Handoff.DevshellName")
+	fs.BoolVar(&in.PreworkRebaseConflict, "prework-rebase-conflict", false, "the pre-work rebase stopped on conflicts")
+	fs.BoolVar(&in.PublishRebase, "publish-rebase", false, "publish the rebased branch once the conflict is resolved")
 	if err := fs.Parse(args); err != nil {
 		return inputs{}, err
 	}
@@ -156,6 +159,8 @@ func main() {
 		Demote:        outcomebackstop.DemoteAlreadyResolved,
 		BundleOut:     bundleout.Run,
 		WarnLockfiles: bindregistry.WarnStaleLockfiles,
+		Git:           gitRun,
+		AbortRebase:   abortRebase,
 		Getenv:        os.Getenv,
 		Stdout:        os.Stdout,
 		Stderr:        os.Stderr,

@@ -1352,6 +1352,7 @@ func allFlags() []string {
 		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5", "--devshell=1", "--devshell-name=dev",
+		"--prework-rebase-conflict=1", "--publish-rebase=0",
 	}
 }
 
@@ -1361,8 +1362,9 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := inputs{
-		WorkDir:   "/w",
-		OutboxDir: "/o",
+		WorkDir:               "/w",
+		PreworkRebaseConflict: true,
+		OutboxDir:             "/o",
 		Assembly: assemblyInputs{
 			RegistryFile:                "/reg.json",
 			ValidateMarkersFile:         "/markers.json",
