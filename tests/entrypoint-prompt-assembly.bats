@@ -179,3 +179,129 @@ setup() {
   [ "$(jq -r .ReviewPromptFile "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "$review_prompt_tmp_path" ]
 }
 
+
+# The Handoff descriptor phase_prompt_assembly writes carries the Driver
+# invocation's settings from the environment and the nix-rendered preamble to
+# box and the orchestrator, which forward it to driver-exec (issue #2975). The
+# Go tests cover each side of that hand-off; these pin the shell's flag wiring
+# between them.
+
+# The driver bin rides the Handoff's DriverBin (issue #2975), not a
+# --driver-bin argv flag.
+@test "the handoff carries the Driver bin and box hands it to the orchestrator" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ -s "$ORCHESTRATOR_LOG" ]
+  grep -q -- '--handoff-file' "$ORCHESTRATOR_LOG"
+  [ "$(jq -r .DriverBin "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "claude" ]
+  grep -q "driver invoked for issue #7" "$DRIVER_LOG"
+}
+
+@test "the Driver is invoked headlessly with skip-permissions" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--dangerously-skip-permissions" "$DRIVER_LOG"
+}
+
+@test "MODEL reaches the Driver as --model" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--model claude-test-model" "$DRIVER_LOG"
+}
+
+@test "MODEL env overrides the baked default model at runtime" {
+  export MODEL="claude-sonnet-4-6"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--model claude-sonnet-4-6" "$DRIVER_LOG"
+  ! grep -q -- "--model claude-test-model" "$DRIVER_LOG"
+}
+
+# Issue #113: text --print emits nothing until the end, so the box looks dead
+# under `podman logs -f`. stream-json is the only --print mode that emits
+# events in realtime.
+@test "the Driver runs in stream-json mode so activity streams live" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--output-format stream-json" "$DRIVER_LOG"
+  grep -q -- "--verbose" "$DRIVER_LOG"
+}
+
+# Issue #1609: the claude Driver's flagsCommon strips the harness's
+# re-invocation-promising tools. The flags come from DRIVER_PREAMBLE_FILE, the
+# same registry-rendered bytes the image bakes (issue #433).
+@test "the Driver is invoked with --disallowedTools blocking loop/background affordances" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -q -- "--disallowedTools" "$DRIVER_LOG"
+  grep -q -- "ScheduleWakeup" "$DRIVER_LOG"
+  grep -q -- "CronCreate" "$DRIVER_LOG"
+  grep -q -- "CronDelete" "$DRIVER_LOG"
+  grep -q -- "CronList" "$DRIVER_LOG"
+  grep -q -- "RemoteTrigger" "$DRIVER_LOG"
+  grep -q -- "Monitor" "$DRIVER_LOG"
+}
+
+# Issue #2241: EFFORT reaches the invoker on the Handoff's Effort field since
+# issue #2975, not a per-call --effort argv flag.
+@test "EFFORT reaches the handoff's Effort field" {
+  export EFFORT="high"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .Effort "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "high" ]
+}
+
+# Issue #2694 / #2975: MAX_BUDGET_TOKENS/MAX_BUDGET_USD reach the orchestrator
+# through the Handoff's Caps fields, not per-call --max-budget-* flags. Both
+# come off the environment (boxEnv, lib/env-schema.nix). MaxBudgetUSD is a JSON
+# number, so 4.44 decodes back as 4.44.
+@test "MAX_BUDGET_TOKENS/MAX_BUDGET_USD reach the handoff's Caps" {
+  export MAX_BUDGET_TOKENS="500000"
+  export MAX_BUDGET_USD="4.44"
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local handoff
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  [ "$(jq -r .Caps.MaxBudgetTokens "$handoff")" = "500000" ]
+  [ "$(jq -r .Caps.MaxBudgetUSD "$handoff")" = "4.44" ]
+}
+
+# MAX_BUDGET_* are boxEnv (lib/env-schema.nix), so set_box_env always exports
+# them at their schema default ("0"/"0.000000") even when the operator never
+# overrides them. assemble-prompt parses MAX_BUDGET_USD as a float64 and
+# json.Marshal encodes 0 as bare `0`, so .Caps.MaxBudgetUSD reads back "0".
+@test "the handoff carries schema-default budget Caps when not overridden" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local handoff
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  [ "$(jq -r .Caps.MaxBudgetTokens "$handoff")" = "0" ]
+  [ "$(jq -r .Caps.MaxBudgetUSD "$handoff")" = "0" ]
+}
+
+# The argv shape from the nix-rendered DRIVER_ARGV_* preamble vars (issue #2534)
+# rides the Handoff's ArgvShape sub-object since issue #2975, not seven per-call
+# --argv-* flags. This suite's DRIVER is claude, whose registry entry
+# (lib/drivers/claude.nix) bakes the values asserted below into
+# DRIVER_PREAMBLE_FILE.
+@test "the handoff carries claude's argv shape in ArgvShape" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  local handoff
+  handoff="$(handoff_path_from_log "$ORCHESTRATOR_LOG")"
+  [ "$(jq -r .ArgvShape.PromptStyle "$handoff")" = "flag" ]
+  [ "$(jq -r .ArgvShape.PromptFlag "$handoff")" = "-p" ]
+  [ "$(jq -r .ArgvShape.ModelFlag "$handoff")" = "--model" ]
+  [ "$(jq -r .ArgvShape.AgentsFlag "$handoff")" = "--agents" ]
+  [ "$(jq -r .ArgvShape.EffortFlag "$handoff")" = "--effort" ]
+  [ "$(jq -r '.ArgvShape.Order | join(" ")' "$handoff")" = "prompt model agents session driverFlags effort" ]
+}
+
+# DRIVER_ARGV_MODEL_OMIT_EMPTY is a bare-boolean gate set only when the
+# Driver's argvShape sets modelOmitEmpty true. claude sets it false
+# (lib/drivers/claude.nix), so this pins the gate's unset side.
+@test "the handoff carries ArgvShape.ModelOmitEmpty false for claude" {
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .ArgvShape.ModelOmitEmpty "$(handoff_path_from_log "$ORCHESTRATOR_LOG")")" = "false" ]
+}

@@ -11,7 +11,7 @@ set -euo pipefail
 : "${DRIVER_LOG:?DRIVER_LOG must point at a log file}"
 # Snapshot the call index (0 for this process's first invocation) before this
 # invocation appends its own "driver invoked for issue" line below, so
-# FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY can tell first call from resume.
+# the *_FIRST_CALL_ONLY and *_FROM_CALL hooks can tell first call from resume.
 call_index="$(grep -c '^driver invoked for issue' "$DRIVER_LOG" 2>/dev/null || true)"
 printf '%s\n' "$*" >>"$DRIVER_LOG"
 
@@ -56,11 +56,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/_driver-common.bash"
 # #593's entrypoint backstop): the result event's text carries no
 # SPINDRIFT_OUTCOME line at all.
 #
-# FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY=1 simulates the same forgetful driver
-# only on this fake's first invocation within a test, then emits a real
-# outcome on every call after — for exercising the resume-once recovery pass
-# (issue #1607), which must see the second (resumed) call succeed.
-#
 # FAKE_DRIVER_NEAR_MISS=1 simulates a driver that emits a "near-miss" outcome
 # line -- the SPINDRIFT_OUTCOME token present as a leading line but missing
 # both landing= and status= (issue #1900): parses nowhere, so the entrypoint's
@@ -69,27 +64,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/_driver-common.bash"
 # FAKE_DRIVER_NEAR_MISS_FIRST_CALL_ONLY=1 simulates the same only on this
 # fake's first invocation within a test, then emits a real outcome on every
 # call after — for exercising the resume-once recovery pass's near-miss-aware
-# prompt (issue #1900), mirroring FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY above.
+# prompt (issue #1900).
 #
 # FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL=<n> simulates the same forgetful driver
 # on every call while call_index < n, then falls through to normal scripted
 # output (including the default PR-intent + outcome line below) from call_index
-# n onward. Unlike FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY, which only ever
-# covers call_index 0, this lets a test force two consecutive no-outcome calls
+# n onward. This lets a test force two consecutive no-outcome calls
 # -- e.g. the initial pass and the SPINDRIFT_OUTCOME required-marker gate's
 # own resume -- so the synthetic backstop fires, and then have a *later*
 # resume call (the PR-intent nudge gate's own resume, issue #2448 AC2) succeed
 # with a genuine PR-intent line instead of also going no-outcome.
-#
-# FAKE_DRIVER_WRAP_OUTCOME selects a markdown-wrapped outcome line (issue
-# #1611's #1582 repro): claude's own stream-json result text sometimes wraps
-# the line in inline backticks, bold markers, or pads it with whitespace, so
-# the entrypoint's extractor must tolerate it.
-#
-# FAKE_DRIVER_MULTI_RESULT=1 emits a stale result event with its own outcome
-# line before the real one, simulating a multi-turn transcript with more than
-# one result event -- the extractor's tail -1 semantics must keep picking the
-# last outcome line, not the first.
 #
 # A well-behaved agent prints SPINDRIFT_PR_INTENT immediately before its
 # final SPINDRIFT_OUTCOME line (issue #1919), so the default result text
@@ -103,8 +87,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/_driver-common.bash"
 #
 # FAKE_DRIVER_NO_PR_INTENT_FIRST_CALL_ONLY=1 simulates the same only on this
 # fake's first invocation within a test, then emits a real one on every call
-# after -- for exercising the gate's resume-once recovery pass, mirroring
-# FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY above.
+# after -- for exercising the gate's resume-once recovery pass.
 pr_intent_line=""
 if [ "${FAKE_DRIVER_NO_PR_INTENT:-0}" != "1" ] && \
    { [ "${FAKE_DRIVER_NO_PR_INTENT_FIRST_CALL_ONLY:-0}" != "1" ] || [ "${call_index:-0}" != "0" ]; }; then
@@ -117,82 +100,34 @@ if [ "${FAKE_DRIVER_NO_PR_INTENT:-0}" != "1" ] && \
 fi
 printf '{"type":"system","subtype":"init","session_id":"fake"}\n'
 printf '{"type":"assistant","message":{"content":[{"type":"text","text":"implementing #%s"}]}}\n' "${ISSUE_NUMBER:-0}"
-if [ "${FAKE_DRIVER_MULTI_RESULT:-0}" = "1" ]; then
-  printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/0 status=blocked note=stale"}\n' \
-    "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
-fi
 if [ "${FAKE_DRIVER_NEAR_MISS:-0}" = "1" ] || { [ "${FAKE_DRIVER_NEAR_MISS_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; }; then
   # A line that leads with the SPINDRIFT_OUTCOME token but carries no
   # landing=/status= fields (issue #1900): parses nowhere, so it is a
   # near-miss the recovery nudge must quote back, not a valid outcome.
   printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: SUCCESS"}\n'
 elif [ "${FAKE_DRIVER_NO_OUTCOME:-0}" = "1" ] \
-  || { [ "${FAKE_DRIVER_NO_OUTCOME_FIRST_CALL_ONLY:-0}" = "1" ] && [ "${call_index:-0}" = "0" ]; } \
   || { [ -n "${FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL:-}" ] && [ "${call_index:-0}" -lt "$FAKE_DRIVER_NO_OUTCOME_BEFORE_CALL" ]; }; then
   printf '{"type":"result","subtype":"success","is_error":false,"result":"done, but forgot to report back"}\n'
 else
-  case "${FAKE_DRIVER_WRAP_OUTCOME:-}" in
-    backticks)
-      # The backticks are literal chars in the printf format string,
-      # simulating markdown wrapping, not unexpanded command substitution.
-      # shellcheck disable=SC2016
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"CI registered.\\n\\n`SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake`"}\n' \
-        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
-      ;;
-    bold)
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"**SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake**"}\n' \
-        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
-      ;;
-    whitespace)
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"   SPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake   "}\n' \
-        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
-      ;;
-    colon)
-      # A well-formed key=value line, but with the delimiter after the token
-      # mis-typed as a colon instead of the required space (issue #2012) --
-      # still machine-recoverable, unlike the "prose" case below.
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: issue=%s landing=https://github.com/%s/pull/1 status=ready note=fake"}\n' \
-        "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}"
-      ;;
-    prose)
-      # A colon-prefixed sign-off with no issue=/landing=/status= fields at
-      # all (the #1998 dogfood shape, issue #2012) -- genuinely not
-      # machine-recoverable, so the extractor must leave it unmatched rather
-      # than guess a status from the prose.
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: Complete \xe2\x80\x94 implemented issue #%s"}\n' \
-        "${ISSUE_NUMBER:-0}"
-      ;;
-    stray-field)
-      # A colon-prefixed prose sign-off that happens to contain one stray
-      # field marker mid-sentence, with no landing= alongside it (issue
-      # #2012) -- still not a genuine key=value line, so the extractor's
-      # field check must require landing= and status= together, not just any
-      # one of the three markers appearing anywhere.
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"SPINDRIFT_OUTCOME: I think status=done for issue #%s"}\n' \
-        "${ISSUE_NUMBER:-0}"
-      ;;
-    *)
-      # FAKE_DRIVER_OUTCOME_STATUS overrides the status field (default
-      # "ready") -- e.g. exercising the PR-intent required-marker gate row
-      # (issue #2045), which must fire only on status=ready and never on a
-      # blocked run.
-      #
-      # FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME overrides the status field only
-      # on a resume call (call_index >= 1), leaving call_index 0 at
-      # FAKE_DRIVER_OUTCOME_STATUS/"ready" -- for exercising a resumed pass
-      # that emits its own genuine, differently-shaped verdict (e.g. the
-      # PR-intent nudge gate's own resume deciding mid-nudge that the run is
-      # actually status=blocked, issue #2448), unlike
-      # FAKE_DRIVER_OUTCOME_STATUS, which would also change the first call
-      # and prevent a status=ready-only gate from ever firing.
-      fake_status="${FAKE_DRIVER_OUTCOME_STATUS:-ready}"
-      if [ -n "${FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME:-}" ] && [ "${call_index:-0}" != "0" ]; then
-        fake_status="$FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME"
-      fi
-      printf '{"type":"result","subtype":"success","is_error":false,"result":"%sSPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=%s note=fake"}\n' \
-        "$pr_intent_line" "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}" "$fake_status"
-      ;;
-  esac
+  # FAKE_DRIVER_OUTCOME_STATUS overrides the status field (default
+  # "ready") -- e.g. exercising the PR-intent required-marker gate row
+  # (issue #2045), which must fire only on status=ready and never on a
+  # blocked run.
+  #
+  # FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME overrides the status field only
+  # on a resume call (call_index >= 1), leaving call_index 0 at
+  # FAKE_DRIVER_OUTCOME_STATUS/"ready" -- for exercising a resumed pass
+  # that emits its own genuine, differently-shaped verdict (e.g. the
+  # PR-intent nudge gate's own resume deciding mid-nudge that the run is
+  # actually status=blocked, issue #2448), unlike
+  # FAKE_DRIVER_OUTCOME_STATUS, which would also change the first call
+  # and prevent a status=ready-only gate from ever firing.
+  fake_status="${FAKE_DRIVER_OUTCOME_STATUS:-ready}"
+  if [ -n "${FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME:-}" ] && [ "${call_index:-0}" != "0" ]; then
+    fake_status="$FAKE_DRIVER_OUTCOME_STATUS_ON_RESUME"
+  fi
+  printf '{"type":"result","subtype":"success","is_error":false,"result":"%sSPINDRIFT_OUTCOME issue=%s landing=https://github.com/%s/pull/1 status=%s note=fake"}\n' \
+    "$pr_intent_line" "${ISSUE_NUMBER:-0}" "${REPO_SLUG:-owner/repo}" "$fake_status"
 fi
 
 # FAKE_DRIVER_CRASH_EXIT simulates a driver killed by a transient

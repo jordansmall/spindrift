@@ -137,7 +137,6 @@ let
     # tests/prompt-assembly-parity.bats's required env (see comment above
     # promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
-    ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
     BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
@@ -280,7 +279,6 @@ in
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
         # $ENTRYPOINT unconditionally calls `driver-exec assemble-prompt` (issue #2354).
         DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
-        ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
         BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
         PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;

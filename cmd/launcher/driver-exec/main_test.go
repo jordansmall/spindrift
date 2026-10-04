@@ -277,3 +277,36 @@ func TestResolveExitOnErrorKeepsOriginalRC(t *testing.T) {
 		t.Errorf("resolveExit = %d, want a non-zero synthesized exit for a missing/invalid log", got)
 	}
 }
+
+// A handoff without a HeartbeatLog still gets the coarse heartbeat at
+// /tmp/heartbeat.log, the path a human tails inside the Box (issue #183).
+func TestMainRunHeartbeatLogDefaultsToTmp(t *testing.T) {
+	const defaultLog = "/tmp/heartbeat.log"
+	os.Remove(defaultLog)
+	t.Cleanup(func() { os.Remove(defaultLog) })
+
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	driverBin := writeFakeDriver(t, dir, "fake-driver", `printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}\n{"type":"result","num_turns":1}\n'`)
+	handoffPath := writeHandoffFile(t, promptassembly.Handoff{
+		PromptFile: promptFile,
+		DriverBin:  driverBin,
+		Issue:      "7",
+		ArgvShape:  claudeArgvShape,
+	})
+
+	var stdout, stderr bytes.Buffer
+	if rc := mainRun([]string{"-handoff-file", handoffPath, "-log-path", filepath.Join(dir, "stream.log")}, &stdout, &stderr); rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+	got, err := os.ReadFile(defaultLog)
+	if err != nil {
+		t.Fatalf("read %s: %v", defaultLog, err)
+	}
+	if !bytes.Contains(got, []byte("#7")) {
+		t.Errorf("heartbeat missing issue prefix: %q", got)
+	}
+}
