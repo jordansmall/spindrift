@@ -40,6 +40,74 @@ setup() {
   grep -q '^env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1$' "$DRIVER_LOG"
 }
 
+# Issue #4409: DRIVER_BASH_TIMEOUT_MS is a Consumer knob; entrypoint.sh exports
+# it under each name the Driver's registry entry lists in DRIVER_BASH_TIMEOUT_ENV
+# (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS).
+@test "DRIVER_BASH_TIMEOUT_MS set exports both Claude Code timeout vars to the Driver" {
+  export DRIVER_BASH_TIMEOUT_MS=1800000
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=1800000' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=1800000' "$DRIVER_LOG"
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS unset leaves both Claude Code timeout vars unset" {
+  unset DRIVER_BASH_TIMEOUT_MS BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS empty leaves both Claude Code timeout vars unset" {
+  export DRIVER_BASH_TIMEOUT_MS=""
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
+# A value that is not a positive integer is warned about and skipped, since
+# Claude Code may silently fall back to its own cap instead of rejecting it.
+assert_bad_bash_timeout_skipped() {
+  export DRIVER_BASH_TIMEOUT_MS="$1"
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"WARNING: DRIVER_BASH_TIMEOUT_MS='$1' is not a positive integer"* ]]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS=0 warns and exports neither timeout var" {
+  assert_bad_bash_timeout_skipped 0
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS=-5 warns and exports neither timeout var" {
+  assert_bad_bash_timeout_skipped -5
+}
+
+@test "DRIVER_BASH_TIMEOUT_MS=30m warns and exports neither timeout var" {
+  assert_bad_bash_timeout_skipped 30m
+}
+
+# opencode's registry entry declares no bashTimeoutEnv, so its preamble carries
+# no DRIVER_BASH_TIMEOUT_ENV line. Stripping the claude one from the wrapped
+# entrypoint reproduces that preamble shape.
+@test "a Driver preamble without DRIVER_BASH_TIMEOUT_ENV ignores DRIVER_BASH_TIMEOUT_MS" {
+  ! grep -q '^DRIVER_BASH_TIMEOUT_ENV=' "$OPENCODE_DRIVER_PREAMBLE_FILE"
+  grep -q '^DRIVER_BASH_TIMEOUT_ENV=' "$ENTRYPOINT"
+  sed -i '/^DRIVER_BASH_TIMEOUT_ENV=/d' "$ENTRYPOINT"
+  export DRIVER_BASH_TIMEOUT_MS=1800000
+  unset BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS
+  run bash "$ENTRYPOINT"
+  [ "$status" -eq 0 ]
+  grep -qx 'env: BASH_DEFAULT_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+  grep -qx 'env: BASH_MAX_TIMEOUT_MS=<unset>' "$DRIVER_LOG"
+}
+
 # Issue #2037: entrypoint.sh renders review-prompt.md to a real file and records
 # its path in the Handoff descriptor's ReviewPromptFile field (issue #2975),
 # only on this fresh-issue work-dispatch path.

@@ -955,6 +955,27 @@ run_driver_in_env() {
   return "$claude_rc"
 }
 
+# export_driver_bash_timeout (issue #4409) exports the Consumer's Bash-timeout
+# knob under each env var name the Driver's registry entry lists in
+# DRIVER_BASH_TIMEOUT_ENV. Exported (not just set) so the orchestrator and,
+# via the final exec, box's resume runs inherit it. Unset knob or a Driver
+# listing no names exports nothing, leaving the Driver's own limits. A value
+# that is not a positive integer is skipped with a warning rather than passed
+# on: Claude Code may silently fall back to its 10-minute cap on a bad value.
+export_driver_bash_timeout() {
+  [ -n "${DRIVER_BASH_TIMEOUT_MS:-}" ] || return 0
+  case "$DRIVER_BASH_TIMEOUT_MS" in
+    0* | *[!0-9]*)
+      echo "==> WARNING: DRIVER_BASH_TIMEOUT_MS='${DRIVER_BASH_TIMEOUT_MS}' is not a positive integer (milliseconds) — leaving the Driver's own Bash timeout"
+      return 0
+      ;;
+  esac
+  local _name
+  for _name in ${DRIVER_BASH_TIMEOUT_ENV:-}; do
+    export "$_name=$DRIVER_BASH_TIMEOUT_MS"
+  done
+}
+
 main() {
   # Cross-phase sentinels: declared local here so bash's dynamic scoping lets
   # each phase function assign them by plain (non-local) assignment while
@@ -967,6 +988,7 @@ main() {
   local _announce_subject _announce_suffix
 
   configure_env
+  export_driver_bash_timeout
 
   # The Box's one input for its advise-only posture (issue #3901), resolved
   # before clone_repo so an unrecognized kind fails closed instead of

@@ -31,6 +31,14 @@ in
     CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
   };
 
+  # Issue #4409: Claude Code caps a Bash call at 10 minutes by default; these
+  # are the two env vars that raise the default and the max. A Consumer's
+  # Bash-timeout knob is exported under each name.
+  bashTimeoutEnv = [
+    "BASH_DEFAULT_TIMEOUT_MS"
+    "BASH_MAX_TIMEOUT_MS"
+  ];
+
   skillsDirRelative = ".claude/skills";
 
   # Issue #427/#447/#448, ADR 0009: the launcher mounts a writable per-issue

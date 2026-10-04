@@ -12,6 +12,11 @@
   # whichever in-box binary spawned this process.
   printf 'env: CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=%s\n' "${CLAUDE_CODE_DISABLE_BACKGROUND_TASKS:-}"
 
+  # Issue #4409: the Bash-timeout knob's two Claude Code env vars. `-` (not
+  # `:-`) so a test can tell an unset var from one exported empty.
+  printf 'env: BASH_DEFAULT_TIMEOUT_MS=%s\n' "${BASH_DEFAULT_TIMEOUT_MS-<unset>}"
+  printf 'env: BASH_MAX_TIMEOUT_MS=%s\n' "${BASH_MAX_TIMEOUT_MS-<unset>}"
+
   # Same proof for the registry-proxy Binding's npm_config_registry override
   # (issue #2854): it reaches this Driver process, not just the entrypoint
   # shell that exported it.

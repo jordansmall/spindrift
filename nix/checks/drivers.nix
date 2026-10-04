@@ -161,6 +161,67 @@ in
     ) "renderPreamble must reject an envCommon key that isn't a valid shell identifier";
     pkgs.runCommand "drivers-render-preamble-env-common-rejects-bad-key" { } "touch $out";
 
+  # Issue #4409: bashTimeoutEnv renders as a plain DRIVER_ var, never `export`.
+  drivers-render-preamble-bash-timeout-env =
+    let
+      out = driverRegistry.renderPreamble (
+        stubDriverBase
+        // {
+          bashTimeoutEnv = [
+            "STUB_DEFAULT_MS"
+            "STUB_MAX_MS"
+          ];
+        }
+      );
+    in
+    assert assertMsg (hasInfix "DRIVER_BASH_TIMEOUT_ENV='STUB_DEFAULT_MS STUB_MAX_MS'\n" out)
+      "renderPreamble must bake DRIVER_BASH_TIMEOUT_ENV as a space-separated list from bashTimeoutEnv, got: ${out}";
+    assert assertMsg (
+      !(hasInfix "export DRIVER_BASH_TIMEOUT_ENV" out)
+    ) "renderPreamble must not export DRIVER_BASH_TIMEOUT_ENV, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-bash-timeout-env" { } "touch $out";
+
+  drivers-render-preamble-omits-bash-timeout-env-when-absent =
+    let
+      out = driverRegistry.renderPreamble stubDriverBase;
+    in
+    assert assertMsg (!(hasInfix "DRIVER_BASH_TIMEOUT_ENV" out))
+      "renderPreamble must omit DRIVER_BASH_TIMEOUT_ENV entirely for a Driver entry with no bashTimeoutEnv, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-omits-bash-timeout-env-when-absent" { } "touch $out";
+
+  # Names end up as env var names in entrypoint.sh, so a
+  # non-identifier must fail at eval like an envCommon key does.
+  drivers-render-preamble-bash-timeout-env-rejects-bad-name =
+    let
+      result = builtins.tryEval (
+        driverRegistry.renderPreamble (stubDriverBase // { bashTimeoutEnv = [ "not an identifier" ]; })
+      );
+    in
+    assert assertMsg (
+      !result.success
+    ) "renderPreamble must reject a bashTimeoutEnv name that isn't a valid shell identifier";
+    pkgs.runCommand "drivers-render-preamble-bash-timeout-env-rejects-bad-name" { } "touch $out";
+
+  drivers-claude-declares-bash-timeout-env =
+    let
+      claudeEntry = driverRegistry.entries.claude;
+      opencodeEntry = driverRegistry.entries.opencode;
+    in
+    assert assertMsg
+      (
+        (claudeEntry.bashTimeoutEnv or null) == [
+          "BASH_DEFAULT_TIMEOUT_MS"
+          "BASH_MAX_TIMEOUT_MS"
+        ]
+      )
+      "claude Driver's bashTimeoutEnv must name BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, got: ${
+        builtins.toJSON (claudeEntry.bashTimeoutEnv or null)
+      }";
+    assert assertMsg (
+      !(opencodeEntry ? bashTimeoutEnv)
+    ) "opencode Driver entry must declare no bashTimeoutEnv (it has no Bash-timeout env vars)";
+    pkgs.runCommand "drivers-claude-declares-bash-timeout-env" { } "touch $out";
+
   drivers-assert-shape-succeeds =
     let
       complete = stubDriverComplete;
