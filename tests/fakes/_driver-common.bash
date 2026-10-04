@@ -78,14 +78,6 @@ if [ "${FAKE_DRIVER_COMMIT:-0}" = "1" ]; then
   printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
   git add -A
 fi
-# This block simulates a driver that staged real work but never committed
-# (issue #2012's #1998 dogfood shape). The missing `git commit` is deliberate,
-# unlike FAKE_DRIVER_COMMIT above, so the outcome backstop's own commit/push
-# salvage is what's under test.
-if [ "${FAKE_DRIVER_STAGE_ONLY:-0}" = "1" ]; then
-  printf 'stub agent change for issue #%s (staged only)\n' "${ISSUE_NUMBER:-0}" >agent-change.txt
-  git add -A
-fi
 # A resume call (issue #1607's recovery pass) re-invokes this fake against a
 # tree the first call already committed, so the identical fixture content
 # leaves an empty index and `git commit` would error.

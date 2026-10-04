@@ -60,7 +60,7 @@ setup() {
   grep -q "==> claude implementing issue #7 on agent/issue-7" <<<"$output"
 }
 
-# Mirrors tests/entrypoint-outcome-contract.bats for the research kind's own
+# Mirrors the work-kind override cases (promptassembly TestAssembleOverrideSharedBlocks) for the research kind's own
 # outcome contract instead of the work "# LAND THE CHANGE" one (issue #640).
 
 @test "runtime prompt-dir override of research-prompt.md lacking the outcome contract gets it appended" {

@@ -543,8 +543,8 @@ in
   # A Consumer fixPrompt carrying only a fix-specific preamble, with no
   # shared-block markers at all, must still gain all three in COMMS, CHECK,
   # outcome-contract order: the same #420 runtime-override parity the issue
-  # prompt has. agent/entrypoint.sh's own runtime injection is covered by
-  # tests/entrypoint-outcome-contract.bats.
+  # prompt has. Runtime injection of overrides is covered by promptassembly
+  # TestAssembleOverrideSharedBlocks.
   mkharness-prompt-fix-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-fix-consumer-override-injected" { }
       ''

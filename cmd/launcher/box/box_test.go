@@ -210,7 +210,7 @@ func prIntentGateMissing(f *fixture) {
 	f.firstRun(readyLine+"\n", 0)
 }
 
-// --- outcome nudge gate: bats entrypoint-outcome-recovery.bats ---
+// --- outcome nudge gate (ported from the deleted entrypoint-outcome-recovery.bats, #4292) ---
 
 func TestOutcomeNudge_ResumeSuppliesOutcome_NoBackstop(t *testing.T) {
 	f := newFixture(t)
@@ -357,7 +357,7 @@ func TestOutcomeNudge_SkippedForAdviseOnlyKind(t *testing.T) {
 	}
 }
 
-// --- outcome backstop: bats entrypoint-outcome-backstop.bats ---
+// --- outcome backstop (ported from the deleted entrypoint-outcome-backstop.bats, #4292) ---
 
 func TestBackstop_NoOutcomeLine_EmitsSyntheticLineOnce(t *testing.T) {
 	f := newFixture(t)
@@ -580,7 +580,7 @@ func TestDemotion_ErrorIsFatal(t *testing.T) {
 	}
 }
 
-// --- PR-intent nudge gate: bats entrypoint-pr-intent-nudge.bats ---
+// --- PR-intent nudge gate (ported from the deleted entrypoint-pr-intent-nudge.bats, #4292) ---
 
 func TestPRIntent_GenuineMarkerPresent_NoResume(t *testing.T) {
 	f := newFixture(t)
