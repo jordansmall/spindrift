@@ -181,6 +181,9 @@ type seamCase struct {
 	// driverRuns script the Driver: the first is the first Driver run box
 	// performs, the rest are its corrective resumes.
 	driverRuns []seamtest.DriverRun
+	// snapshot has the orchestrator fake keep each pass's prompt and session
+	// file contents, which box deletes once the pass returns.
+	snapshot bool
 }
 
 type seamRun struct {
@@ -190,6 +193,7 @@ type seamRun struct {
 	outboxDir string
 	handoff   string
 	sessionID string
+	snapshots string // set when the case asked for snapshots
 }
 
 // firstRun and resumes split a record at the first Driver run.
@@ -244,9 +248,15 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		env["BOX_WRITE_ENABLED"] = ""
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
+	orchCfg := seamtest.OrchestratorConfig{Record: orchRec}
+	snapshots := ""
+	if c.snapshot {
+		snapshots = filepath.Join(tmp, "snapshots")
+		orchCfg.Snapshot = snapshots
+	}
 	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
-		seamtest.WriteFakeConfig(t, "orchestrator", seamtest.OrchestratorConfig{Record: orchRec}))
+		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
 
 	res := seamtest.Run(t, seamtest.Cmd{
 		Bin:      box,
@@ -260,6 +270,7 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		orchRec:   seamtest.ReadRecord(t, orchRec),
 		outboxDir: outbox,
 		sessionID: id,
+		snapshots: snapshots,
 	}
 	if len(run.orchRec) > 0 {
 		run.handoff = handoffArg(run.orchRec[0])
@@ -835,4 +846,190 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 			t.Errorf("ArgvShape = %+v; want %+v", h.ArgvShape, want)
 		}
 	})
+}
+
+// seamConflictRepo is a work tree whose agent branch and origin/main both add
+// the same file differently, with the pre-work `git rebase origin/main` already
+// stopped on the conflict, the state --prework-rebase-conflict=1 reports.
+func seamConflictRepo(t *testing.T) string {
+	t.Helper()
+	dir := seamRepo(t, 0)
+	write := func(content string) {
+		if err := os.WriteFile(filepath.Join(dir, "c"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		seamGit(t, dir, "add", "c")
+	}
+	write("agent\n")
+	seamGit(t, dir, "commit", "-q", "-m", "agent change")
+	seamGit(t, dir, "checkout", "-q", "main")
+	write("main\n")
+	seamGit(t, dir, "commit", "-q", "-m", "main change")
+	seamGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
+	seamGit(t, dir, "checkout", "-q", seamBranch)
+	cmd := exec.Command("git", "-C", dir, "rebase", "origin/main")
+	cmd.Env = append(os.Environ(), "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if err := cmd.Run(); err == nil {
+		t.Fatal("the rebase did not conflict")
+	}
+	if !seamRebaseInProgress(dir) {
+		t.Fatal("the conflicting rebase left no rebase in progress")
+	}
+	return dir
+}
+
+func seamRebaseInProgress(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git", "rebase-merge"))
+	return err == nil
+}
+
+func seamRevParse(t *testing.T, dir, rev string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", rev).Output()
+	if err != nil {
+		t.Fatalf("git rev-parse %s: %v", rev, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// seamResolveRebase is the Driver side effect that finishes the conflicted
+// rebase the way a resolving agent would.
+func seamResolveRebase(dir string) string {
+	return "cd '" + dir + "' && echo resolved >c && git add c && " +
+		"GIT_EDITOR=true GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t git rebase --continue"
+}
+
+// wantConflictPass checks the first orchestrator invocation was the sessionless
+// conflict-resolve pass and returns its snapshot: the handoff, prompt, session
+// and log files named, an empty session, the rendered conflict prompt, and a
+// Driver run that was handed no session flag.
+func (r seamRun) wantConflictPass(t *testing.T) seamtest.Snapshot {
+	t.Helper()
+	if len(r.orchRec) == 0 || len(r.driverRec) == 0 {
+		t.Fatalf("orchestrator calls %v, Driver calls %v; want the conflict pass to have run", r.orchRec, r.driverRec)
+	}
+	flags := map[string]bool{}
+	for i := 0; i < len(r.orchRec[0]); i += 2 {
+		flags[r.orchRec[0][i]] = true
+	}
+	for _, f := range []string{"--handoff-file", "--prompt-file", "--session-file", "--log-path"} {
+		if !flags[f] {
+			t.Errorf("conflict pass argv %q lacks %s", r.orchRec[0], f)
+		}
+	}
+	snap := seamtest.ReadSnapshot(t, r.snapshots, 1)
+	if snap.Session != "" {
+		t.Errorf("conflict pass session file = %q; want it empty (sessionless)", snap.Session)
+	}
+	// Substituted by hand rather than rendered through
+	// conflictresolve.RenderPrompt, so a rendering regression cannot cancel
+	// itself out. The fixture bakes no skills, so the preamble/caveman slots
+	// are empty.
+	tmpl, err := os.ReadFile(filepath.Join(repopath.PromptsDir(), "conflict-resolve-prompt.md"))
+	if err != nil {
+		t.Fatalf("read conflict-resolve prompt template: %v", err)
+	}
+	head, _, found := strings.Cut(string(tmpl), "${BRANCH}")
+	if !found {
+		t.Fatalf("conflict-resolve prompt template has no ${BRANCH} token")
+	}
+	rest, _, _ := strings.Cut(string(tmpl)[len(head):], "\n")
+	wantHead := head + rest + "\n"
+	for k, v := range map[string]string{
+		"SKILL_PREAMBLE": "", "CAVEMAN_STEP": "",
+		"BASE_BRANCH": "main", "BRANCH": seamBranch,
+	} {
+		wantHead = strings.ReplaceAll(wantHead, "${"+k+"}", v)
+	}
+	if !strings.HasPrefix(snap.Prompt, wantHead) || strings.Contains(snap.Prompt, "${") || strings.HasSuffix(snap.Prompt, "\n") {
+		t.Errorf("conflict pass prompt = %q; want it to open with %q, fully substituted and newline-trimmed", snap.Prompt, wantHead)
+	}
+	if got, want := r.driverRec[0], []string{"-p", snap.Prompt}; !reflect.DeepEqual(got, want) {
+		t.Errorf("conflict pass Driver run = %q; want %q", got, want)
+	}
+	return snap
+}
+
+func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
+	repo := seamConflictRepo(t)
+	head := seamRevParse(t, repo, seamBranch)
+	r := runBoxSeam(t, seamCase{
+		repo:       repo,
+		snapshot:   true,
+		extraArgs:  []string{"--prework-rebase-conflict=1"},
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult("could not resolve")}},
+	})
+	r.res.WantExit(t, 1)
+	for _, line := range []string{
+		"==> pre-work rebase conflict detected — invoking conflict-resolve agent",
+		"==> pre-work rebase onto origin/main failed — conflict agent could not resolve",
+	} {
+		if !strings.Contains(r.res.Stdout, line) {
+			t.Errorf("stdout lacks %q\n%s", line, r.res.Stdout)
+		}
+	}
+	if len(r.orchRec) != 1 || len(r.driverRec) != 1 {
+		t.Fatalf("orchestrator calls %v, Driver calls %v; want one of each (no assembly, no main run)", r.orchRec, r.driverRec)
+	}
+	r.wantConflictPass(t)
+	if seamRebaseInProgress(repo) {
+		t.Error("the unresolved rebase was left in progress; want it aborted")
+	}
+	if got := seamRevParse(t, repo, seamBranch); got != head {
+		t.Errorf("%s = %s after the abort; want its original head %s", seamBranch, got, head)
+	}
+}
+
+func TestBoxSeamConflictResolvedContinuesIntoTheMainRun(t *testing.T) {
+	repo := seamConflictRepo(t)
+	r := runBoxSeam(t, seamCase{
+		repo:      repo,
+		snapshot:  true,
+		extraArgs: []string{"--prework-rebase-conflict=1"},
+		driverRuns: []seamtest.DriverRun{
+			{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")},
+			{Stdout: seamResult(seamOutcomeLine("done", "after the conflict pass"))},
+		},
+	})
+	r.res.WantExit(t, 0)
+	if !strings.Contains(r.res.Stdout, "==> pre-work rebase conflict resolved by agent") {
+		t.Errorf("stdout lacks the resolved line\n%s", r.res.Stdout)
+	}
+	if len(r.orchRec) != 2 || len(r.driverRec) != 2 {
+		t.Fatalf("orchestrator calls %v, Driver calls %v; want the conflict pass and the main run", r.orchRec, r.driverRec)
+	}
+	conflict := r.wantConflictPass(t)
+	main := seamtest.ReadSnapshot(t, r.snapshots, 2)
+	if main.Prompt == conflict.Prompt || main.Session == "" {
+		t.Errorf("main run was handed the conflict prompt or no session; session %q", main.Session)
+	}
+	want := []string{"--session-id", r.sessionID, "-p", strings.TrimRight(main.Prompt, "\n")}
+	if got := r.driverRec[1]; !reflect.DeepEqual(got, want) {
+		t.Errorf("main Driver run = %q; want %q", got, want)
+	}
+	if seamRebaseInProgress(repo) {
+		t.Error("a rebase is still in progress after the resolve")
+	}
+	if got, want := seamRevParse(t, repo, seamBranch+"~1"), seamRevParse(t, repo, "origin/main"); got != want {
+		t.Errorf("%s~1 = %s; want the rebased branch on origin/main %s", seamBranch, got, want)
+	}
+}
+
+func TestBoxSeamConflictResolveOnlyStopsBeforeTheMainRun(t *testing.T) {
+	repo := seamConflictRepo(t)
+	r := runBoxSeam(t, seamCase{
+		repo:       repo,
+		snapshot:   true,
+		env:        map[string]string{"CONFLICT_RESOLVE_PR_URL": "https://example.test/o/r/pull/9"},
+		extraArgs:  []string{"--prework-rebase-conflict=1"},
+		driverRuns: []seamtest.DriverRun{{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")}},
+	})
+	r.res.WantExit(t, 0)
+	if !strings.Contains(r.res.Stdout, "==> CONFLICT_RESOLVE_PR_URL: conflict resolved — exiting without main agent") {
+		t.Errorf("stdout lacks the resolve-only line\n%s", r.res.Stdout)
+	}
+	if len(r.orchRec) != 1 || len(r.driverRec) != 1 {
+		t.Fatalf("orchestrator calls %v, Driver calls %v; want only the conflict pass", r.orchRec, r.driverRec)
+	}
+	r.wantConflictPass(t)
 }
