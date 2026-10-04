@@ -76,6 +76,11 @@ func RenderNudgePrompt(cfg NudgeConfig) (string, error) {
 	}
 }
 
+// recheckRule is shared by both outcome nudge variants: a resumed session
+// that re-runs the full gate over an unchanged tree burns minutes for nothing
+// (issue #4407).
+const recheckRule = "Do not re-run checks or gates by default: re-run them only if the working tree changed since your last green check run in this session."
+
 // renderOutcomeNudge picks the near-miss wording when a token-leading line
 // was present but missing a field marker, and the generic wording otherwise.
 // A scan error reads the same as "no near-miss line", so it renders the
@@ -87,14 +92,14 @@ func renderOutcomeNudge(cfg NudgeConfig) (string, error) {
 	}
 	if !found {
 		return fmt.Sprintf(
-			"The run ended without printing a %s line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required %s line as your final message.",
+			"The run ended without printing a %s line. "+recheckRule+" Either way, print the required %s line as your final message.",
 			outcome.Token, outcome.Token,
 		), err
 	}
 	fieldShape := outcome.MarkerChannelFieldShapes[outcome.Token]
 	return fmt.Sprintf(
 		"Your last message printed a line that looks like a %s marker but does not parse, so the run has no usable outcome: %s\n"+
-			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: %s %s. For this run, that is: %s %s -- fill in only the fields still shown as placeholders. The only valid status values are %s. Run any remaining checks/gates in the foreground first, then print that line.",
+			"Print the required line exactly once as your final message, using this grammar -- one line, space-delimited fields: %s %s. For this run, that is: %s %s -- fill in only the fields still shown as placeholders. The only valid status values are %s. "+recheckRule+" Either way, print that line.",
 		outcome.Token, nearMiss, outcome.Token, fieldShape, outcome.Token, substituteFieldShape(fieldShape, cfg.Issue, cfg.Landing), statusProse(outcome.WorkStatuses),
 	), err
 }
