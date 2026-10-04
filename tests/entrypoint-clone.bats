@@ -210,3 +210,16 @@ setup() {
   [ "$status" -eq 0 ]
   [ "$(cat "$HOME/.gitconfig")" = "$before" ]
 }
+
+# Issue #3901: an unrecognized kind fails closed before clone_repo rather than
+# defaulting to work's (or any other) posture. The axes stay at the valid work
+# cell, so driver-exec advise-only is what rejects the name (issue #3996).
+@test "an unrecognized DISPATCH_KIND fails the Box before clone" {
+  export OUTBOX_DIR="$BATS_TEST_TMPDIR/outbox"
+  export DISPATCH_KIND="bogus-kind"
+  run bash "$ENTRYPOINT"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"bogus-kind"* ]]
+  [ ! -d "$WORK_DIR" ]
+  [ ! -e "$OUTBOX_DIR" ]
+}
