@@ -1,0 +1,19 @@
+argv
+--handoff-file
+<handoff>
+--prompt-file
+<prompt>
+--session-file
+<session>
+--log-path
+<stream-log>
+session
+--session-id 12e77a13-f17a-68e0-23e4-6ceb95081fce
+prompt
+<handoff-prompt>
+env
+BASH_DEFAULT_TIMEOUT_MS=1800000
+BASH_MAX_TIMEOUT_MS=1800000
+BRANCH=agent/issue-butler-bugs
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+PWD=<tmp>/work

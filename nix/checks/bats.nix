@@ -102,6 +102,9 @@ let
     # real body rather than a hand-copied stand-in.
     GH_TOKEN_REFRESHER_ACTION_YML = ../../.github/actions/gh-token-refresher/action.yml;
     PROMPTS_DIR = ../../templates/default/prompts;
+    # Issue #4293. The Driver-invocation goldens live in the Go tree (box's seam
+    # test reads the same files), which batsBuilderSetup does not stage.
+    DRIVER_INVOCATION_GOLDEN_DIR = ../../cmd/launcher/box/testdata/driver-invocation;
     # A Consumer-configured prompt dir whose rendered content reaches the
     # stubbed agent (#4).
     PROMPT_HARNESS_DIR = promptHarness.internals.promptDir;

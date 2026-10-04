@@ -809,14 +809,13 @@ phase_prompt_assembly() {
   # The handoff file, and the agents/review-prompt files it names by path, must
   # survive the rest of the run: driver-exec reads Handoff.AgentsFile at
   # invocation time and the orchestrator reads Handoff.ReviewPromptFile at review
-  # time, both after this function returns. So only _prompt_out is removed here
-  # (run_driver_in_env always writes its own per-call --prompt-file).
+  # time, both after this function returns. _prompt_out survives too: box reads
+  # it via Handoff.PromptFile.
   _handoff_file="$_handoff_out"
   # Test-only hook (issue #2395): no fake Driver ever receives SessionMode as a
   # CLI arg, so this raw JSON is the only place a test can observe it. A no-op in
   # production, where this var is never set.
   [ -n "${DRIVER_HANDOFF_FILE:-}" ] && cp "$_handoff_out" "$DRIVER_HANDOFF_FILE"
-  rm -f "$_prompt_out"
   # Test-only hook, same shape as DRIVER_HANDOFF_FILE above: once the cleanup
   # below removes $_review_prompt_out, nothing in production names that path
   # again, so a test proving the removal has no other way to learn it.
