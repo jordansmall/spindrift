@@ -69,8 +69,10 @@ type deps struct {
 	WarnLockfiles func(w io.Writer, workDir string)
 	// Nix runs the devShell probe.
 	Nix toolchain.Nix
-	// RunCmd runs the prefetch hook.
+	// RunCmd runs the prefetch hook and the Forgejo CLI credential setup.
 	RunCmd func(*exec.Cmd) error
+	// LookPath resolves a binary on PATH, for the Forgejo CLI gate.
+	LookPath func(string) (string, error)
 	// Git runs git in dir, for the conflict-resolve publish push.
 	Git func(dir string, args ...string) error
 	// AbortRebase reverts in-tree bindings and aborts the unfinished rebase,
@@ -119,9 +121,10 @@ type boxRun struct {
 	carrier     string
 }
 
-// run binds the registry proxy, decides the toolchain, assembles the prompt,
-// then sequences the first Driver run and everything entrypoint.sh's main() did
-// after it, and returns the exit code the entrypoint would have exited with.
+// run sets up the Forgejo CLI credential, binds the registry proxy, decides the
+// toolchain, assembles the prompt, then sequences the first Driver run and
+// everything entrypoint.sh's main() did after it, and returns the exit code the
+// entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
@@ -142,7 +145,12 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
 
-	// The bindings come first: the toolchain decision's prefetch hook may
+	// The Forgejo CLI credential comes first, as it did in the shell.
+	if err := r.configureForgejoCLI(); err != nil {
+		return 0, phaseErr("forgejo-cli", err)
+	}
+
+	// The bindings come next: the toolchain decision's prefetch hook may
 	// already run cargo or npm. The deferred revert covers every exit below.
 	defer r.bindRegistry()()
 

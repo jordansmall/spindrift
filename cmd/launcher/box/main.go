@@ -1,6 +1,6 @@
-// Command box is the Box's in-box driver: it first binds the registry proxy
-// (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
-// issue #4298), decides the toolchain (devShell probe, prefetch hook and
+// Command box is the Box's in-box driver: it first wires FORGEJO_TOKEN into fj
+// (issue #4299), binds the registry proxy (the Forwarder, the home configs and
+// the in-tree rewrite, reverted on exit; issue #4298), decides the toolchain (devShell probe, prefetch hook and
 // toolchain hint; issue #4297), lays out the Driver skills dir and the home
 // agent files (issue #4296), then runs the pre-work conflict-resolve pass when
 // the rebase stopped on conflicts, assembles the prompt, runs the first Driver
@@ -169,6 +169,7 @@ func main() {
 		WarnLockfiles: bindregistry.WarnStaleLockfiles,
 		Nix:           toolchain.RunNix(os.Stdout),
 		RunCmd:        func(cmd *exec.Cmd) error { return cmd.Run() },
+		LookPath:      exec.LookPath,
 		Git:           gitRun,
 		AbortRebase:   abortRebase,
 		Registry:      realRegistryDeps(),
