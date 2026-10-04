@@ -171,51 +171,6 @@ clone_repo() {
   # Fetch the latest refs so the pre-work rebase positions the branch on current
   # origin/BASE_BRANCH, not the state captured at clone time.
   git fetch origin
-  install_readonly_guards
-}
-
-# install_readonly_guards installs the read-only guards via `driver-exec
-# readonly-guards` (issues #2463, #2465, #2509): a git push hook plus command
-# shims for gh and fj. Every guard and every rejection message comes from the
-# forbiddenMarkers registry (lib/prompt-contract.nix), never hand-copied shell.
-# The verb skips an argv0 absent from PATH, so a github Box with no fj is fine.
-install_readonly_guards() {
-  if [ -n "${BOX_WRITE_ENABLED:-}" ]; then
-    return 0
-  fi
-  # A deterministic path, not mktemp: the PATH mutation below never survives
-  # back to a caller inspecting the Box, so the location must be predictable.
-  # $HOME rather than $WORK_DIR's parent, which in production is the root-owned
-  # `/` while the Box runs as uid 1000, so the verb's mkdir would fail with
-  # EACCES and `set -e` would kill the Box mid-clone.
-  local shim_dir
-  shim_dir="$HOME/.spindrift/readonly-gh-shim"
-  local -a _rg_args=(
-    readonly-guards
-    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE"
-    --shim-dir "$shim_dir"
-  )
-  # Only the git-hook guard is gated on outbox capability: a read-only Box whose
-  # hand-off IS a real `git push` must never get that push blocked locally, since
-  # it has no other way to hand off its work. No backend registered today leaves
-  # both unset (issue #2927 gave forgejo OutboxRelayCapable), but the branch
-  # stays live for a future one. The command shims install unconditionally.
-  if [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] || [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]; then
-    # A bare decoy outside $WORK_DIR, never $WORK_DIR itself: every real push
-    # targets the branch already checked out here, so a pushurl pointing at
-    # $WORK_DIR would resolve as "Everything up-to-date" and exit 0 without
-    # firing a hook. --extra-repo-dir installs the hook in $WORK_DIR/.git/hooks
-    # too, catching a push to an explicit URL that bypasses origin's pushurl.
-    local decoy
-    decoy="$(mktemp -d)/readonly-push-guard.git"
-    git init --bare -q "$decoy"
-    git -C "$WORK_DIR" config remote.origin.pushurl "$decoy"
-    _rg_args+=(--repo-dir "$decoy" --extra-repo-dir "$WORK_DIR")
-  else
-    _rg_args+=(--skip-git-hook)
-  fi
-  driver-exec "${_rg_args[@]}"
-  export PATH="$shim_dir:$PATH"
 }
 
 # phase_branch_recovery adopts prior work on an open PR or force-resets a stale
@@ -372,19 +327,20 @@ main() {
       phase_prework_rebase
     fi
   fi
-  # box first sets up the Forgejo CLI credential (issue #4299), binds the
-  # registry proxy (the Forwarder, the home configs and the in-tree rewrite,
-  # reverted on exit; issue #4298), decides the toolchain (the devShell probe,
-  # the toolchain hint and the prefetch hook; issue #4297), lays
-  # out the Driver skills dir and the home agent files (issue #4296), then runs
-  # the conflict-resolve pass when phase_prework_rebase left a conflict, then
-  # assembles the prompt, runs the first Driver run and everything after it: the
-  # required-marker nudges, the synthetic outcome backstop, the already-resolved
-  # demotion, the lockfile scan and bundle-out, and it exits with the run's exit
-  # code (ADR 0058, issues #4292, #4293, #4294, #4295). The flags carry the
-  # shell-local values assembly needs: exporting them would put them in the
-  # Driver's environment. Every value rides a flag, bools as explicit 0/1,
-  # because box rejects a missing flag instead of defaulting it.
+  # box first sets up the Forgejo CLI credential and installs the read-only
+  # guards (issue #4299), binds the registry proxy (the Forwarder, the home
+  # configs and the in-tree rewrite, reverted on exit; issue #4298), decides the
+  # toolchain (the devShell probe, the toolchain hint and the prefetch hook;
+  # issue #4297), lays out the Driver skills dir and the home agent files
+  # (issue #4296), then runs the conflict-resolve pass when
+  # phase_prework_rebase left a conflict, then assembles the prompt, runs the
+  # first Driver run and everything after it: the required-marker nudges, the
+  # synthetic outcome backstop, the already-resolved demotion, the lockfile scan
+  # and bundle-out, and it exits with the run's exit code (ADR 0058, issues
+  # #4292, #4293, #4294, #4295). The flags carry the shell-local values assembly
+  # needs: exporting them would put them in the Driver's environment. Every
+  # value rides a flag, bools as explicit 0/1, because box rejects a missing
+  # flag instead of defaulting it.
   local _model_omit_empty=0
   local _prework_rebase_conflict=0 _publish_rebase=0
   [ -z "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] || _model_omit_empty=1
@@ -396,6 +352,7 @@ main() {
   exec box \
     --work-dir "$WORK_DIR" \
     --outbox-dir "$OUTBOX_DIR" \
+    --forbidden-markers-registry "$FORBIDDEN_MARKERS_REGISTRY_FILE" \
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE" \
     --driver-skills-dir "$DRIVER_SKILLS_DIR" \

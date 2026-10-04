@@ -1,6 +1,7 @@
 // Command box is the Box's in-box driver: it first wires FORGEJO_TOKEN into fj
-// (issue #4299), binds the registry proxy (the Forwarder, the home configs and
-// the in-tree rewrite, reverted on exit; issue #4298), decides the toolchain (devShell probe, prefetch hook and
+// and installs the read-only guards (issue #4299), binds the registry proxy
+// (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
+// issue #4298), decides the toolchain (devShell probe, prefetch hook and
 // toolchain hint; issue #4297), lays out the Driver skills dir and the home
 // agent files (issue #4296), then runs the pre-work conflict-resolve pass when
 // the rebase stopped on conflicts, assembles the prompt, runs the first Driver
@@ -47,6 +48,7 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.SetOutput(stderr)
 	fs.StringVar(&in.WorkDir, "work-dir", "", "the repository working directory")
 	fs.StringVar(&in.OutboxDir, "outbox-dir", "", "the outbox directory")
+	fs.StringVar(&in.ForbiddenMarkersFile, "forbidden-markers-registry", "", "path to the prompt-contract forbiddenMarkers registry JSON file, read by the read-only guards")
 	fs.StringVar(&a.RegistryFile, "registry", "", "path to the fragment registry JSON file")
 	fs.StringVar(&a.ValidateMarkersFile, "validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file")
 	fs.StringVar(&a.SkillsDir, "driver-skills-dir", "", "DRIVER_SKILLS_DIR, probed for baked skills")
@@ -171,8 +173,10 @@ func main() {
 		RunCmd:        func(cmd *exec.Cmd) error { return cmd.Run() },
 		LookPath:      exec.LookPath,
 		Git:           gitRun,
+		GitOutput:     gitOutput,
 		AbortRebase:   abortRebase,
 		Registry:      realRegistryDeps(),
+		Guards:        realGuardsDeps(),
 		Getenv:        os.Getenv,
 		Stdout:        os.Stdout,
 		Stderr:        os.Stderr,

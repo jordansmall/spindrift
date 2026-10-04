@@ -5097,7 +5097,7 @@ glossary entries in [`CONTEXT.md`](../CONTEXT.md) for the full vocabulary.
 
 The butler Box always runs the read-only posture, whatever
 `BOX_FORGE_AND_ISSUE_ACCESS` says (issue #3906): the launcher never sets
-`BOX_WRITE_ENABLED` for it, so the entrypoint installs the read-only guards
+`BOX_WRITE_ENABLED` for it, so box installs the read-only guards
 (the `gh`/`fj` shims, plus the git push hook on an outbox-relay or
 host-mediated forge) and dispatch's outbox decision (`needsOutbox`) applies
 the same forced read-only access, so the `/outbox` mount matches. Research
