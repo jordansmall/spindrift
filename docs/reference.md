@@ -2392,13 +2392,15 @@ spends the extra pass. A gate that does fire emits its own
 `pass_start`/`pass_usage` markers under role `delta-review` and appears in
 the pass manifest with that same kind, its own verdict, and its own usage,
 counted like any other pass. An `APPROVE` verdict settles the run exactly
-as it would have without the gate; `BLOCK` prints a corrective
-`status=blocked` outcome line carrying the findings as its note, picked up
-by the launcher's own last-line-wins log scan — the same mechanism
-`bundleout`'s own corrective outcome already relies on — and posted to the
-tracker for a human to triage, never a further fix lap. A pass that
-produces no verdict at all fails open and settles too, so a malfunctioning
-gate can never strand a branch the review pass already approved.
+as it would have without the gate; `BLOCK` appends a corrective
+`status=blocked` outcome line, carrying the findings as its note, to the
+land pass's stream log, where the entrypoint's outcome scan reads it in
+place of the ready line, and the finding is posted to the tracker for a
+human to triage, never a further fix lap. The delta review writes its own
+log, so an `APPROVE` leaves the land pass's outcome in the stream log
+untouched. A pass that produces no verdict at all fails open and settles
+too, so a malfunctioning gate can never strand a branch the review pass
+already approved.
 
 Every implement/fix/land pass's own COMMIT section also carries one more
 fragment, unconditional like the review loop's own

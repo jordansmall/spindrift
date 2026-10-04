@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -450,7 +451,7 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 			// nothing for a delta to exist against, and a land pass that
 			// already blocked is not settling as ready.
 			if passKind == passmachine.KindLand && hasOutcome && passLandDelta != nil {
-				if err := runDeltaReviewGate(cfg, &state, passLandDelta, &pc, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, &rc, stdout); err != nil {
+				if err := runDeltaReviewGate(cfg, &state, passLandDelta, &pc, &cumulativeTokens, &cumulativeUSD, &manifest, &findingsLogRounds, stdout); err != nil {
 					return 0, err
 				}
 			}
@@ -560,10 +561,9 @@ func runWithReviewPass(cfg config, stdout io.Writer) (int, error) {
 // terminal delta-review pass before it settles. Called once per run from
 // runWithReviewPass; the pointer arguments are that loop's own locals, so
 // mutations here flow back into it as they did when this code was inline.
-func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, pc *passCounter, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, rc *int, stdout io.Writer) error {
-	// Re-rendered before this function's own driver-exec invocation can
-	// truncate cfg.logPath. Both values also seed the corrective blocked
-	// line below, so both are captured whether or not the gate fires.
+func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *landdelta.Delta, pc *passCounter, cumulativeTokens *int, cumulativeUSD *float64, manifest *[]passmanifest.Entry, findingsLogRounds *int, stdout io.Writer) error {
+	// Both values seed the corrective blocked line below, so both are
+	// captured whether or not the gate fires.
 	landOutcome, outcomeFound := scanPassOutcome(cfg.logPath, cfg.driver)
 	if !outcomeFound || landOutcome.Status != outcome.StatusReady {
 		return nil
@@ -608,21 +608,35 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	if seedErr != nil {
 		return seedErr
 	}
+	// Nothing references this seeded prompt once invoked: deltaReviewTransition
+	// never continues, so there is no next round to keep it alive for.
+	defer os.Remove(seededDeltaPromptFile)
 	deltaCfg.promptFile = seededDeltaPromptFile
 	deltaCfg.sessionFile = ""
 	deltaCfg.topLevelRole = driverkit.ReviewerRole
+	// driver-exec truncates its log per pass (issue #626), so sharing
+	// cfg.logPath would replace the land pass's outcome with review prose.
+	deltaLog, logErr := os.CreateTemp(filepath.Dir(cfg.logPath), "delta-review-")
+	if logErr != nil {
+		return logErr
+	}
+	deltaLog.Close()
+	defer os.Remove(deltaLog.Name())
+	deltaCfg.logPath = deltaLog.Name()
 
-	var err error
-	*rc, err = invokeDriverExec(deltaCfg, stdout)
-	// Nothing references this seeded prompt once invoked: deltaReviewTransition
-	// never continues, so there is no next round to keep it alive for.
-	os.Remove(seededDeltaPromptFile)
+	// The delta pass's exit code is dropped on purpose: the run's rc stays the
+	// land pass's, because box skips relay on a non-zero rc and a failing
+	// reviewer must not strand work the land pass already landed.
+	deltaRC, err := invokeDriverExec(deltaCfg, stdout)
 	if err != nil {
 		return err
 	}
+	if deltaRC != 0 {
+		fmt.Fprintln(os.Stderr, "orchestrator: delta-review pass exited", deltaRC, "(dropped; the run keeps the land pass's rc)")
+	}
 
-	deltaVerdict, deltaFindings := scanReviewLog(cfg.logPath, cfg.driver)
-	deltaReport := passReport(cfg.logPath, cfg.driver)
+	deltaVerdict, deltaFindings := scanReviewLog(deltaCfg.logPath, cfg.driver)
+	deltaReport := passReport(deltaCfg.logPath, cfg.driver)
 	deltaUsageTotals := deltaReport.Totals
 	*cumulativeTokens += deltaUsageTotals.TotalTokens()
 	*cumulativeUSD += deltaUsageTotals.TotalCostUSD
@@ -644,15 +658,16 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 		Caps:             caps,
 	}, cfg.manifestPath, manifest)
 
-	// A BLOCK here contradicts the land pass's claimed status=ready, so print
-	// a corrective status=blocked line in its place (issue #1808's
-	// bundleout.Run precedent), which the launcher's last-line-wins scan
-	// picks up unchanged. Issue and Landing carry over verbatim.
+	// A BLOCK here contradicts the land pass's claimed status=ready, so append
+	// a corrective status=blocked result event to the land pass's log, where
+	// the entrypoint's last-match-wins scan finds it after the ready line.
+	// Not echoed to stdout: the entrypoint prints the extracted line itself.
+	// Issue and Landing carry over verbatim.
 	if passmachine.Verdict(deltaVerdict) == passmachine.VerdictBlock {
 		blocked := landOutcome
 		blocked.Status = outcome.StatusBlocked
 		blocked.Note = deltaReviewBlockNote(deltaFindings)
-		fmt.Fprintln(stdout, blocked.Line())
+		return appendResultEvent(cfg.logPath, cfg.driver, blocked.Line())
 	}
 
 	return nil
@@ -935,7 +950,7 @@ const deltaReviewNoteMaxRunes = 1500
 // deltaReviewBlockNote turns the delta-review pass's multi-line findings into
 // the single line outcome.Outcome.Note can carry. strings.Fields collapses
 // every whitespace run so an embedded newline can never split the line the
-// launcher's last-line-wins scan depends on, and truncation counts runes,
+// entrypoint's last-match-wins scan depends on, and truncation counts runes,
 // never bytes, so it cannot split a multi-byte rune.
 func deltaReviewBlockNote(findings string) string {
 	prefix := "bounded delta review blocked the landing"
@@ -1277,4 +1292,26 @@ func buildDriverExecCmd(cfg config) (*exec.Cmd, error) {
 		args = append(args, "--top-level-role", cfg.topLevelRole)
 	}
 	return exec.Command(bin, args...), nil
+}
+
+// appendResultEvent appends text to logPath as one synthetic final-result
+// event of the named Driver, so the Driver's own ResultText reads it back.
+func appendResultEvent(logPath, driverName, text string) error {
+	d, err := driver.New(driverName)
+	if err != nil {
+		return err
+	}
+	ev, err := d.ResultEvent(text)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(ev); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }

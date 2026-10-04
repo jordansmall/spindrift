@@ -9,11 +9,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
@@ -86,6 +89,8 @@ func fmtQuote(s string) string {
 
 type deltaReviewLoopFixture struct {
 	dir              string
+	logPath          string
+	driverName       string
 	callLog          string
 	promptFile       string
 	reviewPromptFile string
@@ -99,6 +104,8 @@ func newDeltaReviewLoopFixture(t *testing.T) deltaReviewLoopFixture {
 	dir := t.TempDir()
 	f := deltaReviewLoopFixture{
 		dir:              dir,
+		logPath:          filepath.Join(dir, "stream.log"),
+		driverName:       "claude",
 		callLog:          filepath.Join(dir, "calls.log"),
 		promptFile:       filepath.Join(dir, "prompt.txt"),
 		reviewPromptFile: filepath.Join(dir, "review-prompt.txt"),
@@ -119,13 +126,32 @@ func (f deltaReviewLoopFixture) config(maxSlices int) config {
 	return config{
 		promptFile:       f.promptFile,
 		reviewPromptFile: f.reviewPromptFile,
-		logPath:          filepath.Join(f.dir, "stream.log"),
+		logPath:          f.logPath,
+		driver:           f.driverName,
 		stateFile:        f.stateFile,
 		manifestPath:     f.manifestPath,
 		maxReviewRounds:  3,
 		maxSlices:        maxSlices,
 	}
 }
+
+// finalOutcomeLine is the outcome line the entrypoint's log scan would find in
+// the config's logPath once run returns: the last one among the log's
+// final-result events.
+func (f deltaReviewLoopFixture) finalOutcomeLine(t *testing.T) string {
+	t.Helper()
+	d, err := driver.New(f.driverName)
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	text, err := d.ResultText(f.logPath)
+	if err != nil {
+		t.Fatalf("ResultText: %v", err)
+	}
+	return outcome.ExtractOutcomeLine(outcome.StripResultText(text))
+}
+
+const deltaReviewLandOutcomeLine = "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"
 
 func (f deltaReviewLoopFixture) readManifest(t *testing.T) []passmanifest.Entry {
 	t.Helper()
@@ -196,6 +222,10 @@ func TestRunDeltaReviewGateSkipsWhenDeltaConfinedToFindings(t *testing.T) {
 			t.Errorf("manifest carries a delta-review entry, want none: %+v", e)
 		}
 	}
+
+	if got := f.finalOutcomeLine(t); got != deltaReviewLandOutcomeLine {
+		t.Errorf("log's final outcome = %q, want the land pass's %q", got, deltaReviewLandOutcomeLine)
+	}
 }
 
 // TestRunDeltaReviewGateFiresAndApproves pins issue #3246 AC2: the land pass
@@ -259,6 +289,12 @@ func TestRunDeltaReviewGateFiresAndApproves(t *testing.T) {
 	if last.Verdict != "APPROVE" {
 		t.Errorf("manifest[5].Verdict = %q, want %q", last.Verdict, "APPROVE")
 	}
+
+	// The delta-review pass writes its own log, so the land pass's stream is
+	// what the entrypoint still finds in cfg.logPath.
+	if got := f.finalOutcomeLine(t); got != deltaReviewLandOutcomeLine {
+		t.Errorf("log's final outcome = %q, want the land pass's %q", got, deltaReviewLandOutcomeLine)
+	}
 }
 
 // TestRunDeltaReviewGateFiresAndBlocks pins issue #3246 AC3: the same fixture as
@@ -307,17 +343,16 @@ func TestRunDeltaReviewGateFiresAndBlocks(t *testing.T) {
 		t.Errorf("manifest[5].Verdict = %q, want %q", got, "BLOCK")
 	}
 
-	// Both outcome lines stay in stdout: the corrective line copies Issue and
-	// Landing verbatim from the land pass's line (call 5), and the launcher's
-	// last-line-wins scan needs the corrective line last, not the other erased.
-	var correctiveLine string
-	for _, line := range strings.Split(stdout.String(), "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "SPINDRIFT_OUTCOME") && strings.Contains(line, "status=blocked") {
-			correctiveLine = strings.TrimSpace(line)
-		}
+	// The corrective line is appended to the land pass's stream log, which the
+	// entrypoint reads in place of the ready line; stdout would only duplicate
+	// the line the entrypoint prints itself. It copies Issue and Landing
+	// verbatim from the land pass's line (call 5).
+	if strings.Contains(stdout.String(), "status=blocked") {
+		t.Errorf("stdout = %q, want no status=blocked line (the log carries it)", stdout.String())
 	}
-	if correctiveLine == "" {
-		t.Fatalf("stdout = %q, want a corrective SPINDRIFT_OUTCOME status=blocked line", stdout.String())
+	correctiveLine := f.finalOutcomeLine(t)
+	if correctiveLine == "" || correctiveLine == deltaReviewLandOutcomeLine {
+		t.Fatalf("log's final outcome = %q, want a corrective status=blocked line", correctiveLine)
 	}
 	parsed, err := outcome.Parse(correctiveLine)
 	if err != nil {
@@ -426,6 +461,9 @@ func TestRunDeltaReviewGateCappedBySlicesSkipsExtraPass(t *testing.T) {
 	if !sawCapSkip {
 		t.Error("stdout carries no delta_review_trigger op with decision \"skip\" naming the cap")
 	}
+	if got := f.finalOutcomeLine(t); got != deltaReviewLandOutcomeLine {
+		t.Errorf("log's final outcome = %q, want the land pass's %q", got, deltaReviewLandOutcomeLine)
+	}
 
 	manifest := f.readManifest(t)
 	if len(manifest) != 5 {
@@ -435,5 +473,50 @@ func TestRunDeltaReviewGateCappedBySlicesSkipsExtraPass(t *testing.T) {
 		if e.Kind == passmachine.KindDeltaReview.ManifestKind() {
 			t.Errorf("manifest carries a delta-review entry, want none: %+v", e)
 		}
+	}
+}
+
+// TestRunDeltaReviewGateKeepsLandExitCodeWhenReviewerFails: the delta reviewer
+// exiting non-zero with no verdict must not replace the land pass's rc, or box
+// would skip relaying work the land pass already landed.
+func TestRunDeltaReviewGateKeepsLandExitCodeWhenReviewerFails(t *testing.T) {
+	chdirToFreshGitRepo(t)
+	f := newDeltaReviewLoopFixture(t)
+	writeFakeDriverExec(t, f.dir, f.callLog, deltaReviewFakeDriverBody(f.callLog, "none", "", "", "exit 3"))
+	t.Setenv("PATH", f.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout bytes.Buffer
+	rc, err := run(f.config(10), &stdout)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := f.callCount(t); got != 6 {
+		t.Fatalf("driver-exec invocation count = %d, want 6 (the delta reviewer ran)", got)
+	}
+	if rc != 0 {
+		t.Errorf("run rc = %d, want the land pass's 0, not the delta reviewer's", rc)
+	}
+	if got := f.finalOutcomeLine(t); got != deltaReviewLandOutcomeLine {
+		t.Errorf("log's final outcome = %q, want the land pass's %q", got, deltaReviewLandOutcomeLine)
+	}
+}
+
+// TestRunDeltaReviewGateBlockFailsVisibleWhenLogUnwritable: a BLOCK whose
+// corrective event cannot be appended must surface as a run error rather than
+// leave the land pass's status=ready as the final outcome silently.
+func TestRunDeltaReviewGateBlockFailsVisibleWhenLogUnwritable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("chmod does not deny writes to root")
+	}
+	chdirToFreshGitRepo(t)
+	f := newDeltaReviewLoopFixture(t)
+	deltaBlock := teeStreamJSONStep(streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- landed-file.txt:1 -- undeclared change\\n\\n## Non-blocking\\n- none")) +
+		` && chmod 444 "` + f.logPath + `"`
+	writeFakeDriverExec(t, f.dir, f.callLog, deltaReviewFakeDriverBody(f.callLog, "none", "", "", deltaBlock))
+	t.Setenv("PATH", f.dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout bytes.Buffer
+	if _, err := run(f.config(10), &stdout); !errors.Is(err, fs.ErrPermission) {
+		t.Fatalf("run err = %v, want the corrective append's permission error surfaced", err)
 	}
 }
