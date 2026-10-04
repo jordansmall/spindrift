@@ -5,41 +5,6 @@
 # the boundary: the agent acts freely, but only on a throwaway clone, never the host.
 set -euo pipefail
 
-# Fully-local mode talks to no real forge, so REPO_SLUG and GH_TOKEN have
-# nothing to resolve against. The launcher's own validate() (cmd/launcher/
-# main.go) already made this call and forwards it as BOX_FULLY_LOCAL (issue
-# #2527); read that rather than re-deriving it from CODE_FORGE/ISSUE_TRACKER.
-fully_local=false
-if [ -n "${BOX_FULLY_LOCAL:-}" ]; then
-  fully_local=true
-fi
-# Self-contained research (issue #2202) clones no repo, so REPO_SLUG/GH_TOKEN
-# have nothing to resolve against either. SELF_CONTAINED stays a raw runtime
-# input (a per-dispatch knob, not a nix-resolved capability signal); the
-# local-tracker half arrives as the forwarded BOX_IN_BOX_UNREACHABLE_TRACKER
-# signal (issue #2527) instead of a raw ISSUE_TRACKER=local comparison.
-no_repo=false
-if [ "${SELF_CONTAINED:-}" = 1 ] && [ -n "${BOX_IN_BOX_UNREACHABLE_TRACKER:-}" ]; then
-  no_repo=true
-fi
-[ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${GH_TOKEN:?GH_TOKEN is required}"
-# The kind's axes, exported by dispatch.buildBoxEnv (ADR 0056, issue #3996).
-# This file reads them and never branches on DISPATCH_KIND, which is
-# display-only here (tests/entrypoint-kind-axes.bats pins that).
-: "${DISPATCH_KEY:?DISPATCH_KEY is required}"
-: "${DISPATCH_KEYING:?DISPATCH_KEYING is required}"
-: "${DISPATCH_ANNOUNCE_VERB:?DISPATCH_ANNOUNCE_VERB is required}"
-# A chore-keyed Dispatch (the butler) carries one Ledger Chore, never a
-# tracker issue, so it requires CHORE_NAME in ISSUE_NUMBER's place.
-if [ "$DISPATCH_KEYING" = "chore" ]; then
-  : "${CHORE_NAME:?CHORE_NAME is required}"
-else
-  : "${ISSUE_NUMBER:?ISSUE_NUMBER is required}"
-fi
-[ "$fully_local" = true ] || [ "$no_repo" = true ] || : "${REPO_SLUG:?REPO_SLUG (owner/repo) is required}"
-: "${GIT_USER_NAME:?GIT_USER_NAME is required}"
-: "${GIT_USER_EMAIL:?GIT_USER_EMAIL is required}"
-
 # configure_env is the shared setup every phase_* function depends on; it is not
 # itself a numbered phase.
 configure_env() {

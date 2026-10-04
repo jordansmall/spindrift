@@ -155,6 +155,11 @@ func seamBaseEnv(t *testing.T) map[string]string {
 		"MAX_REBASE_ATTEMPTS":    "1",
 		"TRANSIENT_BACKOFF_SECS": "0",
 		"HOLD_JITTER_SECS":       "0",
+		// What checkEnvGuards requires of every dispatch.
+		"GH_TOKEN":       "tok",
+		"REPO_SLUG":      seamSlug,
+		"GIT_USER_NAME":  "spindrift-agent",
+		"GIT_USER_EMAIL": "agent@example.com",
 	}
 	mergeEnv(env, seamCellEnv())
 	// box's own toolchain knobs: an ambient PREFETCH would run its hook.
@@ -675,6 +680,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		}), false, true, true},
 		{"work-readonly-local", "agent/issue-7", readonlyWorkEnv(map[string]string{
 			"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
+			"GH_TOKEN": "", "REPO_SLUG": "",
 		}), false, true, false},
 		{"work-readonly-git", "agent/issue-7", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true, false},
 		{"research", "agent/issue-7", map[string]string{
@@ -1617,8 +1623,8 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 			dir := t.TempDir()
 			fjArgvRec, fjStdinRec := filepath.Join(dir, "fj.argv"), filepath.Join(dir, "fj.stdin")
 			env := map[string]string{}
-			// Ambient values must not stand in for the defaults the cases pin.
-			mergeEnv(env, map[string]string{"GIT_USER_NAME": "", "FORGEJO_TOKEN": "", "FORGEJO_BASE_URL": ""}, c.env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(dir, "gh.rec")}))
+			// Ambient values must not stand in for the defaults the cases pin; the guard needs a non-empty GIT_USER_NAME, so the default is passed explicitly.
+			mergeEnv(env, map[string]string{"GIT_USER_NAME": "spindrift-agent", "FORGEJO_TOKEN": "", "FORGEJO_BASE_URL": ""}, c.env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(dir, "gh.rec")}))
 			fakes := []string{"gh"}
 			if c.fj {
 				fakes = append(fakes, "fj")
@@ -1701,4 +1707,80 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A Box missing something its dispatch needs stops in the env-guards phase,
+// naming the variable, before the Driver or orchestrator runs.
+func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
+	butler := map[string]string{
+		"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
+		"DISPATCH_KEY": "butler-bugs", "ISSUE_NUMBER": "", "CHORE_NAME": "bugs",
+	}
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"GH_TOKEN", map[string]string{"GH_TOKEN": ""}, "GH_TOKEN is required"},
+		{"REPO_SLUG", map[string]string{"REPO_SLUG": ""}, "REPO_SLUG (owner/repo) is required"},
+		{"DISPATCH_KEY", map[string]string{"DISPATCH_KEY": ""}, "DISPATCH_KEY is required"},
+		{"ISSUE_NUMBER", map[string]string{"ISSUE_NUMBER": ""}, "ISSUE_NUMBER is required"},
+		{"GIT_USER_NAME", map[string]string{"GIT_USER_NAME": ""}, "GIT_USER_NAME is required"},
+		{"GIT_USER_EMAIL", map[string]string{"GIT_USER_EMAIL": ""}, "GIT_USER_EMAIL is required"},
+		{"CHORE_NAME", mergedEnv(butler, map[string]string{"CHORE_NAME": ""}), "CHORE_NAME is required"},
+		{"self-contained research on a github tracker", mergedEnv(seamResearchEnv, map[string]string{"SELF_CONTAINED": "1", "REPO_SLUG": ""}), "REPO_SLUG (owner/repo) is required"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := runBoxSeam(t, seamCase{repo: seamRepo(t, 0), env: c.env})
+			r.res.WantExit(t, 1)
+			if want := "box: env-guards: " + c.want; !strings.Contains(r.res.Stderr, want) {
+				t.Errorf("stderr lacks %q:\n%s", want, r.res.Stderr)
+			}
+			if len(r.driverRec) != 0 || len(r.orchRec) != 0 {
+				t.Errorf("driver calls %v, orchestrator calls %v; want none past the guard", r.driverRec, r.orchRec)
+			}
+		})
+	}
+}
+
+// Fully-local and self-contained-with-no-reachable-tracker dispatches have no
+// forge to resolve GH_TOKEN or REPO_SLUG against, so the guard skips both.
+func TestBoxSeamEnvGuardExemptsForgelessDispatches(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+	}{
+		{"fully local", map[string]string{
+			"BOX_FULLY_LOCAL": "1", "CODE_FORGE": "local", "ISSUE_TRACKER": "local",
+			"BOX_HOST_MEDIATED_REMOTE": "1", "GH_TOKEN": "", "REPO_SLUG": "",
+		}},
+		{"self-contained research, unreachable tracker", mergedEnv(seamResearchEnv, map[string]string{
+			"SELF_CONTAINED": "1", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1", "ISSUE_TRACKER": "local",
+			"GH_TOKEN": "", "REPO_SLUG": "",
+		})},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := runBoxSeam(t, seamCase{
+				repo:       seamRepo(t, 0),
+				relay:      true,
+				env:        c.env,
+				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "ran"))}},
+			})
+			r.res.WantExit(t, 0)
+			if strings.Contains(r.res.Stderr, "env-guards") {
+				t.Errorf("the guard fired:\n%s", r.res.Stderr)
+			}
+			if len(r.driverRec) != 1 {
+				t.Errorf("driver calls = %v; want the first run", r.driverRec)
+			}
+		})
+	}
+}
+
+func mergedEnv(srcs ...map[string]string) map[string]string {
+	out := map[string]string{}
+	mergeEnv(out, srcs...)
+	return out
 }
