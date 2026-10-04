@@ -41,8 +41,10 @@ const runStateFile = "/tmp/run-state.json"
 
 // inputs are the facts entrypoint.sh holds when it hands over.
 type inputs struct {
-	WorkDir               string
-	OutboxDir             string
+	WorkDir   string
+	OutboxDir string
+	// ForbiddenMarkersFile is the registry the read-only guards render from.
+	ForbiddenMarkersFile  string
 	Assembly              assemblyInputs
 	HarnessSkillsDir      string
 	OperatorSkillsDir     string
@@ -73,12 +75,17 @@ type deps struct {
 	RunCmd func(*exec.Cmd) error
 	// LookPath resolves a binary on PATH, for the Forgejo CLI gate.
 	LookPath func(string) (string, error)
-	// Git runs git in dir, for the conflict-resolve publish push.
+	// Git runs git in dir, for the conflict-resolve publish push and the
+	// read-only guards' decoy repo.
 	Git func(dir string, args ...string) error
+	// GitOutput runs git in dir and returns its stdout, for the read-only
+	// guards' pushurl check.
+	GitOutput func(dir string, args ...string) (string, error)
 	// AbortRebase reverts in-tree bindings and aborts the unfinished rebase,
 	// best-effort.
 	AbortRebase func(workDir string, w io.Writer)
 	Registry    registryDeps
+	Guards      guardsDeps
 	Getenv      func(string) string
 	Stdout      io.Writer
 	Stderr      io.Writer
@@ -121,10 +128,10 @@ type boxRun struct {
 	carrier     string
 }
 
-// run sets up the Forgejo CLI credential, binds the registry proxy, decides the
-// toolchain, assembles the prompt, then sequences the first Driver run and
-// everything entrypoint.sh's main() did after it, and returns the exit code the
-// entrypoint would have exited with.
+// run sets up the Forgejo CLI credential, installs the read-only guards, binds
+// the registry proxy, decides the toolchain, assembles the prompt, then
+// sequences the first Driver run and everything entrypoint.sh's main() did
+// after it, and returns the exit code the entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
@@ -148,6 +155,13 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// The Forgejo CLI credential comes first, as it did in the shell.
 	if err := r.configureForgejoCLI(); err != nil {
 		return 0, phaseErr("forgejo-cli", err)
+	}
+
+	// The guards come before everything else box does, as they did in the
+	// shell: the PATH they prepend must reach the prefetch hook, the
+	// orchestrator and the Driver.
+	if err := r.installReadonlyGuards(); err != nil {
+		return 0, phaseErr("readonly-guards", err)
 	}
 
 	// The bindings come next: the toolchain decision's prefetch hook may

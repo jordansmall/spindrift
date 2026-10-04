@@ -116,6 +116,7 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 	t.Helper()
 	return []string{
 		"--work-dir=" + workDir, "--outbox-dir=" + outboxDir,
+		"--forbidden-markers-registry=" + seamForbiddenMarkers(t),
 		"--registry=" + seamtest.Path(t, "fragments-registry.json"),
 		"--validate-markers-registry=" + seamtest.Path(t, "prompt-contract-registry.json"),
 		"--driver-skills-dir=" + skillsDir,
@@ -1495,4 +1496,16 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 			}
 		})
 	}
+}
+
+// seamForbiddenMarkers writes an empty forbiddenMarkers registry: the relay
+// cases install guards, and with no rows they install nothing to disturb the
+// Driver's PATH. The rendered registry is a seam fixture of its own.
+func seamForbiddenMarkers(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "forbidden-markers-registry.json")
+	if err := os.WriteFile(path, []byte("[]"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

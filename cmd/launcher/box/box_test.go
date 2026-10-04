@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/readonlyguards"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -110,8 +111,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.handoffFile = filepath.Join(dir, "handoff.json")
 	f.in = inputs{
-		WorkDir:   filepath.Join(dir, "work"),
-		OutboxDir: filepath.Join(dir, "outbox"),
+		WorkDir:              filepath.Join(dir, "work"),
+		OutboxDir:            filepath.Join(dir, "outbox"),
+		ForbiddenMarkersFile: filepath.Join(dir, "forbidden-markers.json"),
 	}
 	f.in.Assembly.SkillsDir = filepath.Join(dir, "driver-skills")
 	if err := os.MkdirAll(f.knobs["HOME"], 0o755); err != nil {
@@ -120,6 +122,7 @@ func newFixture(t *testing.T) *fixture {
 	promptFile := filepath.Join(dir, "prompt.md")
 	// The shell's assemble-prompt leaves a trailing newline bash's `$(cat)` trimmed.
 	f.write(promptFile, firstPrompt+"\n\n")
+	f.write(f.in.ForbiddenMarkersFile, "[]")
 	f.write(f.handoffFile, `{"Driver":"claude","SessionMode":"initial","PromptFile":`+strconv.Quote(promptFile)+`,"ReviewPromptFile":"/tmp/review.md","Model":"opus","Caps":{"MaxReviewRounds":3}}`)
 	f.env = promptassembly.Env{
 		DispatchKey:          "42",
@@ -171,9 +174,13 @@ func newFixture(t *testing.T) *fixture {
 			_, _ = io.WriteString(w, f.scanOut)
 		},
 		Registry: newRegFake().deps(),
-		Getenv:   func(k string) string { return f.knobs[k] },
-		Stdout:   &f.out,
-		Stderr:   &f.errb,
+		// An empty registry installs nothing, so the read-only cases need no
+		// real git and leave the test process's PATH alone.
+		Guards: guardsDeps{Install: readonlyguards.Install, Setenv: func(string, string) error { return nil }},
+		Git:    func(string, ...string) error { return nil },
+		Getenv: func(k string) string { return f.knobs[k] },
+		Stdout: &f.out,
+		Stderr: &f.errb,
 	}
 	return f
 }
@@ -1368,7 +1375,7 @@ func TestExecOrchestrator_PropagatesExitCodeAndOutput(t *testing.T) {
 // value argument.
 func allFlags() []string {
 	return []string{
-		"--work-dir=/w", "--outbox-dir=/o",
+		"--work-dir=/w", "--outbox-dir=/o", "--forbidden-markers-registry=/forbidden.json",
 		"--registry=/reg.json", "--validate-markers-registry=/markers.json", "--driver-skills-dir=/skills",
 		"--prompts-dir=/prompts", "--agents-prompt-files={}", "--driver-agent-files-dir=",
 		"--comms-contract-file=/comms", "--check-contract-file=/check",
@@ -1393,6 +1400,7 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		WorkDir:               "/w",
 		PreworkRebaseConflict: true,
 		OutboxDir:             "/o",
+		ForbiddenMarkersFile:  "/forbidden.json",
 		HarnessSkillsDir:      "/harness-skills",
 		OperatorSkillsDir:     "/operator-skills",
 		HarnessHomeAgentDir:   "/home-agent",

@@ -292,6 +292,17 @@ func gitHooksDir(repoDir string) string {
 	return filepath.Join(repoDir, "hooks")
 }
 
+// HookPaths lists the files Install writes the git-hook guard to in repoDir,
+// so a caller can assert they are in place.
+func HookPaths(repoDir string) []string {
+	hooksDir := gitHooksDir(repoDir)
+	paths := make([]string, 0, len(hookNames))
+	for _, name := range hookNames {
+		paths = append(paths, filepath.Join(hooksDir, name))
+	}
+	return paths
+}
+
 // installGitHook renders one hook body and installs it under every name in
 // hookNames, in repoDir's hooks directory and in each extraRepoDirs entry's.
 // See Config.ExtraRepoDirs for why both destinations matter.

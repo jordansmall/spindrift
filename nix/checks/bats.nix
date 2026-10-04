@@ -39,9 +39,9 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
   );
 
-  # Issue #2464. entrypoint.sh's install_readonly_guards passes
-  # `--forbidden-markers-registry` to `driver-exec readonly-guards` on every
-  # non-BOX_WRITE_ENABLED run, so each suite that exports
+  # Issue #2464. entrypoint.sh hands it to box's
+  # `--forbidden-markers-registry` flag, which installs the read-only guards on
+  # every non-BOX_WRITE_ENABLED run, so each suite that exports
   # PROMPT_CONTRACT_REGISTRY_FILE needs this sibling var too.
   forbiddenMarkersRegistryJsonFile = pkgs.writeText "forbidden-markers-registry.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers

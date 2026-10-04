@@ -247,7 +247,7 @@ func TestInstall_GitHookRow(t *testing.T) {
 	}
 }
 
-// Issue #2509 Finding 1: agent/entrypoint.sh's install_readonly_guards must
+// Issue #2509 Finding 1: box's read-only guards must
 // install the guard at both the decoy repo (RepoDir, which catches a plain
 // `git push` to origin, whose pushurl is repointed there) and $WORK_DIR itself
 // (an ExtraRepoDirs entry, which catches a push to an explicit URL or a
@@ -745,5 +745,19 @@ func TestInstall_CommandShimRowMissingShimDir(t *testing.T) {
 	}
 	if len(result.Shims) != 0 {
 		t.Errorf("result.Shims = %v, want empty on error", result.Shims)
+	}
+}
+
+func TestHookPaths_BareAndWorkingRepo(t *testing.T) {
+	work := t.TempDir()
+	runGitCmd(t, work, "init", "-q")
+	bare := t.TempDir()
+	runGitCmd(t, bare, "init", "--bare", "-q")
+	for dir, hooks := range map[string]string{work: filepath.Join(work, ".git", "hooks"), bare: filepath.Join(bare, "hooks")} {
+		want := []string{filepath.Join(hooks, "pre-push"), filepath.Join(hooks, "pre-receive")}
+		got := HookPaths(dir)
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("HookPaths(%s) = %v, want %v", dir, got, want)
+		}
 	}
 }

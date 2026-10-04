@@ -493,8 +493,8 @@ let
   promptContractRegistryJson = builtins.toJSON promptContract.validateMarkers;
 
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464), for
-  # the Go `driver-exec readonly-guards` verb's `--forbidden-markers-registry`
-  # flag. assemble-prompt no longer takes this flag (issue #2513).
+  # box's `--forbidden-markers-registry` flag (the read-only guards);
+  # assemble-prompt no longer takes it (issue #2513).
   forbiddenMarkersRegistryJson = builtins.toJSON promptContract.forbiddenMarkers;
 
   # Build-time reject arm (issue #2250): resolves both validateMarkers
@@ -773,6 +773,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/bindregistry)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/readonlyguards)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/dispatchkind)
