@@ -76,6 +76,7 @@ type deps struct {
 	// AbortRebase reverts in-tree bindings and aborts the unfinished rebase,
 	// best-effort.
 	AbortRebase func(workDir string, w io.Writer)
+	Registry    registryDeps
 	Getenv      func(string) string
 	Stdout      io.Writer
 	Stderr      io.Writer
@@ -118,9 +119,9 @@ type boxRun struct {
 	carrier     string
 }
 
-// run decides the toolchain, assembles the prompt, then sequences the first
-// Driver run and everything entrypoint.sh's main() did after it, and returns the
-// exit code the entrypoint would have exited with.
+// run binds the registry proxy, decides the toolchain, assembles the prompt,
+// then sequences the first Driver run and everything entrypoint.sh's main() did
+// after it, and returns the exit code the entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
@@ -141,7 +142,11 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
 
-	// The toolchain decision comes first: the home layout and everything after
+	// The bindings come first: the toolchain decision's prefetch hook may
+	// already run cargo or npm. The deferred revert covers every exit below.
+	defer r.bindRegistry()()
+
+	// The toolchain decision comes next: the home layout and everything after
 	// it run on the devShell choice it records (issue #4297).
 	r.decideToolchain()
 

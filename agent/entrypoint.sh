@@ -74,9 +74,9 @@ configure_env() {
   # otherwise.
   OUTBOX_DIR="${OUTBOX_DIR:-/outbox}"
   # REGISTRY_PROXY_MANIFEST (ADR 0045, issue #3141) carries the registry proxy's
-  # endpoint and route table as one JSON env var. `driver-exec bind-registry`
-  # parses it straight out of its own inherited environment, so this file needs
-  # no default, no override, and no flag to pass it through.
+  # endpoint and route table as one JSON env var. box parses it straight out of
+  # its own inherited environment, so this file needs no default, no override,
+  # and no flag to pass it through.
   # REGISTRY_PROXY_TCP_SECRET is never read here and never touches argv.
 
   # HARNESS_SKILLS_DIR holds the baked harness-owned and Consumer-configured
@@ -324,99 +324,6 @@ phase_prework_rebase() {
   fi
 }
 
-# phase_registry_proxy_bindings brings up the in-Box Forwarder and wires
-# cargo/npm/pnpm/yarn/Go at it through `driver-exec bind-registry` (ADR 0044,
-# ADR 0045, issues #2849, #2931, #3141). A silent no-op when
-# REGISTRY_PROXY_MANIFEST is unset. main() calls it before clone_repo and every
-# other phase, so it precedes any place a cargo or npm build could first happen.
-phase_registry_proxy_bindings() {
-  local _bindings_env_out _bind_registry_rc=0 _source_rc=0
-  # A verb failure here must never take the whole box run down, but these
-  # bindings apply unconditionally, so their failure warnings are never
-  # suppressed.
-  if ! _bindings_env_out="$(mktemp)"; then
-    echo "==> WARNING: mktemp failed — skipping registry proxy bindings"
-    return 0
-  fi
-
-  # A RETURN trap, not a plain `rm -f` at each return site. It unsets itself as
-  # it fires: a bash RETURN trap is process-global, not function-scoped, so
-  # leaving it registered would fire again on the next unrelated function's
-  # return and dereference a `local` that no longer exists.
-  trap 'rm -f "$_bindings_env_out"; trap - RETURN' RETURN
-
-  driver-exec bind-registry \
-    --bindings-env-output "$_bindings_env_out" \
-    || _bind_registry_rc=$?
-
-  if [ "$_bind_registry_rc" -ne 0 ]; then
-    echo "==> WARNING: driver-exec bind-registry failed (exit ${_bind_registry_rc}) — skipping registry proxy bindings"
-    return 0
-  fi
-
-  # rc-captured rather than left to errexit: an unguarded `source` here would
-  # abort the whole entrypoint mid-phase.
-  # shellcheck disable=SC1090  # dynamic path (tempfile), sourced by design: the verb's own env-file output
-  source "$_bindings_env_out" || _source_rc=$?
-  if [ "$_source_rc" -ne 0 ]; then
-    echo "==> WARNING: sourcing driver-exec bind-registry's env output failed (exit ${_source_rc}) — skipping registry proxy bindings"
-    return 0
-  fi
-}
-
-# intree_binding_apply wraps `driver-exec bind-registry`'s in-tree apply mode for
-# npm, yarn and pnpm under $WORK_DIR (cargo retired, issue #3201; logic and the
-# ADR 0044 rationale in ApplyInTreeBinding). The same call renders
-# $CARGO_HOME/config.toml, whose placeholder exports ride the sourced env file.
-# On failure it reverts, leaving no partial apply on disk (issues #2932, #3027).
-intree_binding_apply() {
-  local _intree_apply_rc=0 _cargo_bindings_env_out _source_rc=0
-  # A verb failure here must never take the whole box run down; mirrors
-  # phase_registry_proxy_bindings' rc-capture above.
-  if ! _cargo_bindings_env_out="$(mktemp)"; then
-    echo "==> WARNING: mktemp failed — skipping cargo registry placeholder bindings"
-    return 0
-  fi
-
-  # A RETURN trap that unsets itself, for the reason given in
-  # phase_registry_proxy_bindings.
-  trap 'rm -f "$_cargo_bindings_env_out"; trap - RETURN' RETURN
-
-  driver-exec bind-registry \
-    --intree-action apply \
-    --intree-work-dir "$WORK_DIR" \
-    --intree-bindings-env-output "$_cargo_bindings_env_out" \
-    || _intree_apply_rc=$?
-  if [ "$_intree_apply_rc" -ne 0 ]; then
-    echo "==> WARNING: driver-exec bind-registry (in-tree apply) failed (exit ${_intree_apply_rc}) — skipping in-tree registry binding"
-    intree_binding_revert
-    return 0
-  fi
-
-  # rc-captured rather than left to errexit: an unguarded `source` here would
-  # abort the whole entrypoint mid-phase.
-  # shellcheck disable=SC1090  # dynamic path (tempfile), sourced by design: the verb's own env-file output
-  source "$_cargo_bindings_env_out" || _source_rc=$?
-  if [ "$_source_rc" -ne 0 ]; then
-    echo "==> WARNING: sourcing driver-exec bind-registry's cargo placeholder env output failed (exit ${_source_rc}) — skipping cargo registry placeholder bindings"
-    return 0
-  fi
-}
-
-# intree_binding_revert wraps `driver-exec bind-registry`'s in-tree revert mode,
-# undoing intree_binding_apply's rewrite (RevertInTreeBinding in
-# cmd/launcher/internal/bindregistry/intreebinding.go). Called from main()'s
-# re-apply dance; box reverts on its own before aborting an unresolved
-# conflict-resolve rebase.
-intree_binding_revert() {
-  local _intree_revert_rc=0
-  driver-exec bind-registry --intree-action revert --intree-work-dir "$WORK_DIR" \
-    || _intree_revert_rc=$?
-  if [ "$_intree_revert_rc" -ne 0 ]; then
-    echo "==> WARNING: driver-exec bind-registry (in-tree revert) failed (exit ${_intree_revert_rc})"
-  fi
-}
-
 # _is_advise_only reports whether this dispatch's kind never lands code (ADR
 # 0022, issue #640), per the kind's descriptor as main() resolved it into
 # _advise_only (issue #3901).
@@ -470,12 +377,6 @@ main() {
     exit 1
   }
 
-  # Must run before any phase that could first invoke a cargo/npm/pnpm/yarn/Go/
-  # Gradle build. Gradle's own binding is written by the same `driver-exec
-  # bind-registry` call this phase already makes (issue #2934), not a separate
-  # phase.
-  phase_registry_proxy_bindings
-
   if _is_self_contained; then
     # No repo to clone or explore (issue #2202): stand up an empty working
     # directory for the Driver, wire fj for a forgejo verdict post, and skip
@@ -485,32 +386,25 @@ main() {
     configure_forgejo_cli
   else
     clone_repo
-    # In-tree binding runs right after clone_repo; the Go engine's in-tree
-    # rows cover npm, yarn and pnpm, cargo as intree_binding_apply's header
-    # says (issues #2932, #2933). See the revert/re-apply dance around
-    # phase_branch_recovery/phase_prework_rebase just below.
-    intree_binding_apply
     # An advise-only dispatch (research today, ADR 0022, issue #640) explores
-    # the clone but never lands code: no branch to cut, adopt, or rebase, so
-    # no dance either.
+    # the clone but never lands code: no branch to cut, adopt, or rebase.
     if ! _is_advise_only; then
-      intree_binding_revert
       phase_branch_recovery
       phase_prework_rebase
-      intree_binding_apply
     fi
   fi
-  # box first decides the toolchain (the devShell probe, the toolchain hint and
-  # the prefetch hook; issue #4297), lays out the Driver skills dir and the home
-  # agent files (issue #4296), then runs the conflict-resolve pass when
-  # phase_prework_rebase left a conflict, then assembles the prompt, runs the
-  # first Driver run and everything after it: the required-marker nudges, the
-  # synthetic outcome backstop, the already-resolved demotion, the lockfile scan
-  # and bundle-out, and it exits with the run's exit code (ADR 0058, issues
-  # #4292, #4293, #4294, #4295). The flags carry the shell-local values assembly
-  # needs: exporting them would put them in the Driver's environment. Every
-  # value rides a flag, bools as explicit 0/1, because box rejects a missing
-  # flag instead of defaulting it.
+  # box first binds the registry proxy (the Forwarder, the home configs and the
+  # in-tree rewrite, reverted on exit; issue #4298), decides the toolchain (the
+  # devShell probe, the toolchain hint and the prefetch hook; issue #4297), lays
+  # out the Driver skills dir and the home agent files (issue #4296), then runs
+  # the conflict-resolve pass when phase_prework_rebase left a conflict, then
+  # assembles the prompt, runs the first Driver run and everything after it: the
+  # required-marker nudges, the synthetic outcome backstop, the already-resolved
+  # demotion, the lockfile scan and bundle-out, and it exits with the run's exit
+  # code (ADR 0058, issues #4292, #4293, #4294, #4295). The flags carry the
+  # shell-local values assembly needs: exporting them would put them in the
+  # Driver's environment. Every value rides a flag, bools as explicit 0/1,
+  # because box rejects a missing flag instead of defaulting it.
   local _model_omit_empty=0
   local _prework_rebase_conflict=0 _publish_rebase=0
   [ -z "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] || _model_omit_empty=1

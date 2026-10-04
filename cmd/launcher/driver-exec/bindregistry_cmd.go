@@ -14,13 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/ecosystem"
 )
 
-// The Forwarder readiness poll is 50 tries at 100ms. These are not flags,
-// because entrypoint.sh never overrode them.
-const (
-	registryProxyForwarderTimeout      = 5 * time.Second
-	registryProxyForwarderPollInterval = 100 * time.Millisecond
-)
-
 func isBindRegistryInvocation(args []string) bool {
 	return len(args) > 0 && args[0] == "bind-registry"
 }
@@ -29,7 +22,7 @@ func isBindRegistryInvocation(args []string) bool {
 // 0036 amendment #6, issues #2930/#2931): it wires the real DialProbe and
 // SpawnSocat into runBindRegistryWithDeps and returns the process exit code.
 func runBindRegistry(args []string, stdout io.Writer) int {
-	return runBindRegistryWithDeps(args, stdout, bindregistry.DialProbe, bindregistry.SpawnSocat, exec.LookPath, registryProxyForwarderTimeout, registryProxyForwarderPollInterval)
+	return runBindRegistryWithDeps(args, stdout, bindregistry.DialProbe, bindregistry.SpawnSocat, exec.LookPath, bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval)
 }
 
 // spawnHTTPForwarder is an indirection over bindregistry.SpawnHTTPForwarder (issue
@@ -43,8 +36,8 @@ var spawnHTTPForwarder = func(upstreamHost string, upstreamPort int, secret stri
 	return bindregistry.SpawnHTTPForwarder(self, upstreamHost, upstreamPort, secret, port)
 }
 
-// renderEnvExports renders exports as export NAME='VALUE' lines for later sourcing
-// by agent/entrypoint.sh. Each value is single-quoted with embedded quotes escaped,
+// renderEnvExports renders exports as export NAME='VALUE' lines for callers that
+// source the verb's env file. Each value is single-quoted with embedded quotes escaped,
 // because nothing inside single quotes is special to the shell; %q alone left a
 // command-injection path for repo-controlled values (issue #3259). Names are
 // interpolated raw, safe only because every Name is a constant from this package.
@@ -143,7 +136,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 }
 
 // writeEnvFile is the verb's PublishFunc: it renders the exports to path in the
-// sourceable format agent/entrypoint.sh reads, printing failureLabel on error.
+// sourceable format the verb's env-file callers read, printing failureLabel on error.
 func writeEnvFile(stdout io.Writer, path, failureLabel string) bindregistry.PublishFunc {
 	return func(exports []ecosystem.EnvExport) bool {
 		if err := os.WriteFile(path, []byte(renderEnvExports(exports)), 0o644); err != nil {

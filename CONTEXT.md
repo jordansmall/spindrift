@@ -253,22 +253,27 @@ the in-Box scan may *warn* that a host is uncovered, never add a route.
 _Avoid_: auto-configuration, zero-config, runtime discovery.
 
 **Binding**:
-How a Project toolchain is pointed at the Registry proxy. Owned end to end by
-`driver-exec bind-registry` (`cmd/launcher/driver-exec/bindregistry_cmd.go`),
-the sixth verb in the ADR 0036 dispatch chain — not per-ecosystem bash phases.
+How a Project toolchain is pointed at the Registry proxy. The engine lives in
+`cmd/launcher/internal/bindregistry/bind.go`; box calls it in-process
+(`cmd/launcher/box/registry.go`, issue #4298); `driver-exec bind-registry`
+(`cmd/launcher/driver-exec/bindregistry_cmd.go`) wraps the same engine but no
+production caller remains, kept for its CLI and test callers — not per-ecosystem
+bash phases.
 Independent modes, not one shared apply/revert. Lockfile classification is no
 longer a mode: `bindregistry.Classify` is called in-process by box's toolchain
 decision (`cmd/launcher/internal/toolchain`, issue #4297). Bindings mode
-(`-bindings-env-output`, `runBindRegistryBindings`) writes go/npm/pnpm/yarn
-berry env overrides to a sourced env file, plus two direct home-level writes
-with no revert of their own: a user-level `$CARGO_HOME/config.toml`
+(`bindregistry.BindHomes`) yields go/npm/pnpm/yarn berry env overrides as
+typed exports — box sets them in its own environment, the verb writes them to
+a sourceable env file (`-bindings-env-output`) — plus two direct home-level
+writes with no revert of their own: a user-level `$CARGO_HOME/config.toml`
 (`ecosystem.CargoConfigTOML`, cargo's own mechanism, issue #2849) and a
 Gradle init script under `$GRADLE_USER_HOME/init.d/`
 (`ecosystem.GradleInitScript`: `beforeSettings`/`projectsEvaluated`/
 `settingsEvaluated`, plus a plain top-level hook for buildscript classpath).
-In-tree mode (`-intree-action=apply|revert`, `runBindRegistryIntree`) is the
-only mode with a revert. Its rewrite is a textual host substitution of a
-tracked config file for cargo, npm, yarn, and pnpm, tagged `skip-worktree`
+In-tree mode (`bindregistry.ApplyInTree`, `bindregistry.RevertInTreeBindings`;
+the verb's `-intree-action=apply|revert`) is the only mode with a revert.
+Its rewrite is a textual host substitution of a tracked config file for cargo,
+npm, yarn, and pnpm, tagged `skip-worktree`
 so the Agent neither sees nor commits it, table-driven off one row per
 ecosystem in `bindregistry.InTreeBindings()`
 (`cmd/launcher/internal/bindregistry/intreebinding.go`), itself a filtered
@@ -277,17 +282,14 @@ once — but apply first probes for an already-listening
 Forwarder and spawns one if needed, gating the whole rewrite all-or-nothing
 on TCP readiness (AC5: a Forwarder that never becomes ready leaves every
 in-tree file untouched, no partial rewrite; the gate is
-`resolveRegistryProxyGate`, whose outcome `runBindRegistryIntree` consults).
+`bindregistry.ResolveGate`, resolved once and shared by both modes).
 Appliedness has no sentinel of its own — `ApplyInTreeBinding`/
 `RevertInTreeBinding` derive it purely from the `skip-worktree` bit plus
 working-tree-vs-HEAD content on each call, never from state left over from a
-prior run. `agent/entrypoint.sh` itself is down to choreography: one
-classification-mode call, one bindings-mode call, one `source` of each
-call's emitted env file, in-tree apply/revert/re-apply calls wrapped around
-clone and branch recovery. The fourth in-tree call site is not in the
-entrypoint at all: box's conflict-resolve pass (`cmd/launcher/box/conflict.go`)
-makes a defensive best-effort revert of every in-tree binding in its
-rebase-abort path.
+prior run. box binds before its toolchain decision, applies once on the tree
+the entrypoint's clone, branch recovery and rebase left, and reverts on every
+exit after the apply; its conflict-resolve pass (`cmd/launcher/box/conflict.go`)
+also makes a defensive best-effort revert in its rebase-abort path.
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
@@ -301,10 +303,10 @@ secret-gated TCP on every interface instead and the Forwarder is the
 `forward-registry-tcp` verb (`bindregistry.SpawnHTTPForwarder`,
 `cmd/launcher/internal/bindregistry/tcpforwarder.go`) attaching the per-run
 secret — mutually exclusive with `networkMode=no-host-loopback`, which fails
-the Dispatch loudly rather than composing. Spawned by the `bind-registry`
-verb itself (`bindregistry.SpawnSocat`,
+the Dispatch loudly rather than composing. Spawned by the Binding engine's
+gate (`bindregistry.SpawnSocat`,
 `cmd/launcher/internal/bindregistry/forwarder.go`), not a separate bash phase.
-Readiness is probed in-process by the same verb (`EnsureForwarderReady`):
+Readiness is probed in-process by the same gate (`EnsureForwarderReady`):
 spawn only if nothing is already listening, then poll the TCP port until
 ready or a timeout elapses — readiness is never an external convention
 crossing a process boundary.
