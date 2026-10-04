@@ -256,12 +256,9 @@ _Avoid_: auto-configuration, zero-config, runtime discovery.
 How a Project toolchain is pointed at the Registry proxy. Owned end to end by
 `driver-exec bind-registry` (`cmd/launcher/driver-exec/bindregistry_cmd.go`),
 the sixth verb in the ADR 0036 dispatch chain — not per-ecosystem bash phases.
-Three independent modes, not one shared apply/revert. Classification mode
-(`-work-dir`+`-ecosystem-env-output`, `runBindRegistryClassification`,
-unchanged from issue #2930) scans the clone for lockfiles and writes a
-sourced `NUDGE_ECOSYSTEM` env file; its one live call site is
-`phase_toolchain_nudge` in `agent/entrypoint.sh`, with its own sourced
-env file distinct from bindings mode's. Bindings mode
+Independent modes, not one shared apply/revert. Lockfile classification is no
+longer a mode: `bindregistry.Classify` is called in-process by box's toolchain
+decision (`cmd/launcher/internal/toolchain`, issue #4297). Bindings mode
 (`-bindings-env-output`, `runBindRegistryBindings`) writes go/npm/pnpm/yarn
 berry env overrides to a sourced env file, plus two direct home-level writes
 with no revert of their own: a user-level `$CARGO_HOME/config.toml`
