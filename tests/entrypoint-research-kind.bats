@@ -129,7 +129,7 @@ setup() {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 0 ]
   [ "$(grep -c '^SPINDRIFT_OUTCOME ' <<<"$output")" -eq 1 ]
-  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=.*driver exited without emitting an outcome' <<<"$output"
+  grep -q '^SPINDRIFT_OUTCOME issue=7 landing=none status=blocked synthetic=true note=.*driver exited without emitting an outcome' <<<"$output"
   # A research dispatch pins no session worth resuming (issue #1607): exactly
   # one Driver invocation, no resume pass, no recovery attempt in the note.
   [ "$(grep -c '^driver invoked for issue' "$DRIVER_LOG")" -eq 1 ]

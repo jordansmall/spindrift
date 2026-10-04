@@ -17,25 +17,18 @@
 # relaunch-on-empty-stream logic are covered by Go unit tests
 # (cmd/launcher/driver-exec), not this fake.
 #
-# The `bundle-out` verb (issue #1808) is a second, unrelated entry point --
-# real git plumbing, not a Driver invocation -- so it is dispatched off a
-# bare first arg before the flag loop below ever runs. The `outcome-backstop`
-# verb (issue #2157) is a third such entry point, dispatched the same way.
-# The `assemble-prompt` verb (issue #2354) is a fourth: unlike the other two,
-# it delegates straight to the real Go binary (DRIVER_EXEC_BIN, exported by
-# the nix bats derivation, nix/checks/bats.nix) instead of reimplementing its
-# gate logic here -- promptassembly is the source of truth and this fake has
-# no bash re-derivation to keep in lockstep with it. The `marker-gate` verb
-# (issue #2511) is a fifth, delegated the same way. The `readonly-guards`
-# verb (issue #2509) is a sixth, delegated the same way as assemble-prompt --
-# readonlyguards is the source of truth for the guards' rendered content. The
-# `bind-registry` verb (issue #2930) is a seventh, delegated the same way --
-# bindregistry is the source of truth for the ecosystem classification. The
-# `env-handoff` verb (issue #2975 slice 3) is an eighth, delegated the same
-# way -- promptassembly.Handoff is the source of truth for the Handoff/
-# ArgvShape/Caps grammar it emits, not a bash re-derivation of that shape. The
-# `advise-only` verb (issue #3901) is a ninth, delegated the same way --
-# dispatchkind is the source of truth for the posture.
+# Non-Driver verbs are dispatched off a bare first arg before the flag loop
+# below ever runs, and each delegates straight to the real Go binary
+# (DRIVER_EXEC_BIN, exported by the nix bats derivation, nix/checks/bats.nix)
+# instead of reimplementing its logic here -- the Go package is the source of
+# truth and this fake has no bash re-derivation to keep in lockstep with it:
+# `assemble-prompt` (issue #2354), `readonly-guards` (issue #2509),
+# `bind-registry` (issue #2930), `env-handoff` (issue #2975 slice 3) and
+# `advise-only` (issue #3901). `bundle-out` (issue #1808) stays a bash stand-in:
+# entrypoint.sh still calls it from publish_rebased_branch. The other settle verbs
+# (marker-gate, outcome-backstop) are not faked:
+# entrypoint.sh now execs the real `box` binary
+# (BOX_BIN), which runs them in-process (ADR 0058, issue #4292).
 #
 # assemble-prompt additionally honours a test-only DRIVER_FRAGMENTS_FILE hook
 # (issue #3838): when set and non-empty it appends --fragments-output so the
@@ -49,11 +42,6 @@ if [ "${1:-}" = "assemble-prompt" ]; then
     set -- "$@" --fragments-output "$DRIVER_FRAGMENTS_FILE"
   fi
   exec "$DRIVER_EXEC_BIN" assemble-prompt "$@"
-fi
-
-if [ "${1:-}" = "marker-gate" ]; then
-  shift
-  exec "$DRIVER_EXEC_BIN" marker-gate "$@"
 fi
 
 if [ "${1:-}" = "readonly-guards" ]; then
@@ -98,121 +86,6 @@ if [ "${1:-}" = "bundle-out" ]; then
     printf 'SPINDRIFT_OUTCOME issue=%s landing=none status=blocked note=agent reported ready but no commits exist on %s\n' \
       "$bundle_issue" "$branch"
   fi
-  exit 0
-fi
-
-if [ "${1:-}" = "outcome-backstop" ]; then
-  # This branch re-implements the decision tree that the real verb owns in
-  # cmd/launcher/internal/outcomebackstop (Config resolution, salvage,
-  # commit-count / forge / write-enabled branching, push-with-retry). It is a
-  # stand-in for the bats wiring tests only -- the Go package is the
-  # source-of-truth. Keep the two in lockstep: any change to the verb's
-  # decisions belongs here too, and vice versa.
-  shift
-  repo="" ob_issue="" branch="" base="" kind="work"
-  host_mediated_remote="" outbox_relay_capable=""
-  write="" nonce="" recovery="" attempts="1" backoff="0" jitter="0"
-  prior_outcome_line=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --repo) repo="$2"; shift 2 ;;
-      --issue) ob_issue="$2"; shift 2 ;;
-      --branch) branch="$2"; shift 2 ;;
-      --base) base="$2"; shift 2 ;;
-      --dispatch-kind) kind="$2"; shift 2 ;;
-      --host-mediated-remote) host_mediated_remote="$2"; shift 2 ;;
-      --outbox-relay-capable) outbox_relay_capable="$2"; shift 2 ;;
-      --box-write-enabled) write="$2"; shift 2 ;;
-      --nonce) nonce="$2"; shift 2 ;;
-      --recovery-attempted) recovery="$2"; shift 2 ;;
-      --max-attempts) attempts="$2"; shift 2 ;;
-      --backoff-secs) backoff="$2"; shift 2 ;;
-      --jitter-secs) jitter="$2"; shift 2 ;;
-      --prior-outcome-line) prior_outcome_line="$2"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  # Run every git call from inside the repo, not via `git -C`: the bats
-  # push shims match on `$1 = push`, so a leading `-C <repo>` would slip the
-  # force-push past them. The real Go verb uses `git -C` -- there is no shim
-  # in production. (issue #2157)
-  cd "$repo"
-
-  # A non-empty --prior-outcome-line means the driver did report an outcome, so
-  # this is the already-resolved demotion stand-in (issue #4016) for
-  # outcomebackstop.DemoteAlreadyResolved, not the no-outcome backstop below.
-  # Prints nothing unless the prior line claims status=already-resolved AND
-  # base..branch has commits.
-  if [ -n "$prior_outcome_line" ]; then
-    if [ "$kind" != "research" ] && [[ "$prior_outcome_line" == *"status=already-resolved"* ]]; then
-      demote_count="$(git rev-list --count "$base..$branch" 2>/dev/null)" || demote_count=0
-      if [ "$demote_count" -gt 0 ]; then
-        demote_note="agent reported already-resolved but ${demote_count} commits exist on ${branch}"
-        if [ -n "$host_mediated_remote" ]; then
-          demote_note="${demote_note}; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
-        elif [ -z "$write" ] && [ -n "$outbox_relay_capable" ]; then
-          demote_note="${demote_note}; branch relayed via outbox bundle (read-only Box)"
-        elif ! git push --force-with-lease origin "$branch" 2>/dev/null; then
-          demote_note="${demote_note}; push failed"
-        fi
-        printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=blocked synthetic=true note=%s\n' \
-          "$ob_issue" "$branch" "$demote_note"
-      fi
-    fi
-    exit 0
-  fi
-
-  note="driver exited without emitting an outcome"
-  [ -n "$recovery" ] && note="${note}; a resume attempt also produced no outcome"
-  if [ "$kind" = "research" ]; then
-    printf 'SPINDRIFT_OUTCOME issue=%s landing=none status=blocked note=%s nonce=%s\n' \
-      "$ob_issue" "$note" "$nonce"
-    exit 0
-  fi
-  status="blocked"
-  if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
-    if git add -A && git commit -m "chore: salvage uncommitted work before exiting without an outcome" >/dev/null 2>&1; then
-      note="${note}; salvaged uncommitted work into a commit"
-    else
-      note="${note}; failed to salvage uncommitted work"
-      printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s nonce=%s\n' \
-        "$ob_issue" "$branch" "$status" "$note" "$nonce"
-      exit 0
-    fi
-  fi
-  commit_count="$(git rev-list --count "$base..$branch" 2>/dev/null)" || commit_count=1
-  if [ "$commit_count" -eq 0 ]; then
-    note="${note}; no work to preserve"
-  elif [ -n "$host_mediated_remote" ]; then
-    note="${note}; branch relayed via outbox bundle (no writable remote under CODE_FORGE=local)"
-    status="ready"
-  elif [ -z "$write" ] && [ -n "$outbox_relay_capable" ]; then
-    note="${note}; branch relayed via outbox bundle (read-only Box)"
-    status="ready"
-  else
-    [ "$attempts" -lt 1 ] && attempts=1
-    [ "$backoff" -lt 0 ] && backoff=0
-    [ "$jitter" -lt 0 ] && jitter=0
-    push_log="$(mktemp)"
-    attempt=1
-    pushed=""
-    while true; do
-      if git push --force-with-lease origin "$branch" 2>"$push_log"; then
-        pushed=1
-        break
-      fi
-      if [ "$attempt" -ge "$attempts" ]; then
-        note="${note}; push failed after ${attempt} attempt(s): $(tail -1 "$push_log")"
-        break
-      fi
-      sleep "$(( backoff * attempt + jitter ))"
-      attempt=$(( attempt + 1 ))
-    done
-    rm -f "$push_log"
-    [ -n "$pushed" ] && status="ready"
-  fi
-  printf 'SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s nonce=%s\n' \
-    "$ob_issue" "$branch" "$status" "$note" "$nonce"
   exit 0
 fi
 
