@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
+	"spindrift.dev/launcher/internal/toolchain"
 )
 
 // Each corrective resume is a single pass: the launcher's retry path owns
@@ -64,6 +67,10 @@ type deps struct {
 	BundleOut    func(cfg bundleout.Config, w io.Writer) error
 	// WarnLockfiles is the best-effort settle-time lockfile scan.
 	WarnLockfiles func(w io.Writer, workDir string)
+	// Nix runs the devShell probe.
+	Nix toolchain.Nix
+	// RunCmd runs the prefetch hook.
+	RunCmd func(*exec.Cmd) error
 	// Git runs git in dir, for the conflict-resolve publish push.
 	Git func(dir string, args ...string) error
 	// AbortRebase reverts in-tree bindings and aborts the unfinished rebase,
@@ -111,9 +118,9 @@ type boxRun struct {
 	carrier     string
 }
 
-// run assembles the prompt, then sequences the first Driver run and everything
-// entrypoint.sh's main() did after it, and returns the exit code the entrypoint
-// would have exited with.
+// run decides the toolchain, assembles the prompt, then sequences the first
+// Driver run and everything entrypoint.sh's main() did after it, and returns the
+// exit code the entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
@@ -134,6 +141,10 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
 
+	// The toolchain decision comes first: the home layout and everything after
+	// it run on the devShell choice it records (issue #4297).
+	r.decideToolchain()
+
 	// HOME must be laid out before the conflict-resolve pass (issue #2706) and
 	// before assembly, which rewrites opencode agent files in place in HOME
 	// (issue #2843).
@@ -149,7 +160,7 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 		return cr.ExitCode, nil
 	}
 
-	handoff, err := d.Assemble(in.Assembly, env, d.Stdout)
+	handoff, err := d.Assemble(r.in.Assembly, env, d.Stdout)
 	if err != nil {
 		return 0, phaseErr("prompt-assembly", err)
 	}
@@ -175,7 +186,7 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// Only a self-contained dispatch has no clone to scan; a crashed run can
 	// still have committed a stale lockfile (issue #3199).
 	if !env.SelfContained {
-		d.WarnLockfiles(d.Stdout, in.WorkDir)
+		d.WarnLockfiles(d.Stdout, r.in.WorkDir)
 	}
 	if err := r.bundleOut(); err != nil {
 		return 0, err
@@ -575,6 +586,35 @@ func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
 		return "", err
 	}
 	return f.Name(), f.Close()
+}
+
+// decideToolchain prints the toolchain hint, probes the Target for a devShell
+// and warms dependencies with the prefetch hook, then records whether the
+// Driver runs inside nix develop on the assembly inputs. A self-contained
+// dispatch has no clone, so all three are skipped. A prefetch failure is a
+// warning: the Driver still runs on whatever the hook warmed.
+func (r *boxRun) decideToolchain() {
+	p := &r.in.Assembly.Passthrough
+	p.Devshell, p.DevshellName = false, "default"
+	if r.env.SelfContained {
+		return
+	}
+	d, workDir, prefetch := r.d, r.in.WorkDir, r.d.Getenv("PREFETCH")
+	dec := toolchain.Decide(context.Background(), d.Stdout, workDir,
+		d.Getenv("DEV_SHELL_NAME"), d.Getenv("DEV_SHELL_PROBE_TIMEOUT"), prefetch, d.Nix)
+	if line := dec.Line(); line != "" {
+		r.say("%s", line)
+	}
+	if cmd := dec.PrefetchCmd(prefetch, workDir, d.Getenv("PATH")); cmd != nil {
+		cmd.Stdout, cmd.Stderr = d.Stdout, d.Stderr
+		if err := d.RunCmd(cmd); err != nil {
+			r.say("%s", toolchain.PrefetchWarning(err))
+		}
+	}
+	// The name rides the handoff only for a devShell run.
+	if dec.Devshell() {
+		p.Devshell, p.DevshellName = true, dec.Name
+	}
 }
 
 // layOutHome populates the Driver skills dir and HOME's agent files.

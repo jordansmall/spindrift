@@ -59,7 +59,7 @@ func run(cfg execConfig, stdout io.Writer) (int, error) {
 	}
 
 	// A devShell that no longer evaluates cleanly at Driver-run time (even
-	// though phase_devshell_probe found one earlier) fails before the Driver
+	// though box's devShell probe found one earlier) fails before the Driver
 	// writes anything, so an empty stream separates that from a genuine task
 	// failure, which always produces output. Relaunch once in the baked env.
 	if cfg.devshell && rc != 0 && logFileEmpty(cfg.logPath) {

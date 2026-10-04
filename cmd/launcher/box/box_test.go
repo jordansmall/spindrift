@@ -2,10 +2,12 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -80,6 +82,12 @@ type fixture struct {
 	bundleErr    error
 	scanDirs     []string
 	scanOut      string
+	nixCalls     [][]string
+	nixErr       error
+	nixAtCall    func()
+	prefetched   []*exec.Cmd
+	prefetchErr  error
+	assembledIn  []assemblyInputs
 	knobs        map[string]string
 }
 
@@ -125,9 +133,21 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.firstRun(readyLine+"\n", 0)
 	f.d = deps{
-		Assemble: func(assemblyInputs, promptassembly.Env, io.Writer) (string, error) {
+		Assemble: func(in assemblyInputs, _ promptassembly.Env, _ io.Writer) (string, error) {
 			f.assembled++
+			f.assembledIn = append(f.assembledIn, in)
 			return f.handoffFile, f.assembleErr
+		},
+		Nix: func(_ context.Context, _ string, args ...string) error {
+			f.nixCalls = append(f.nixCalls, args)
+			if f.nixAtCall != nil {
+				f.nixAtCall()
+			}
+			return f.nixErr
+		},
+		RunCmd: func(cmd *exec.Cmd) error {
+			f.prefetched = append(f.prefetched, cmd)
+			return f.prefetchErr
 		},
 		Orchestrate: f.orchestrate,
 		Backstop: func(cfg outcomebackstop.Config, w io.Writer) error {
@@ -1355,7 +1375,7 @@ func allFlags() []string {
 		"--argv-model-omit-empty=0", "--argv-agents-flag=--agents", "--argv-effort-flag=--effort",
 		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
-		"--max-budget-tokens=1000", "--max-budget-usd=2.5", "--devshell=1", "--devshell-name=dev",
+		"--max-budget-tokens=1000", "--max-budget-usd=2.5",
 		"--prework-rebase-conflict=1", "--publish-rebase=0",
 		"--harness-skills-dir=/harness-skills", "--operator-skills-dir=/operator-skills",
 		"--harness-home-agent-dir=/home-agent", "--driver-session-cache-dir=/session-cache",
@@ -1387,7 +1407,7 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 			ResearchOutcomeContractFile: "/research",
 			Passthrough: promptassembly.Passthrough{
 				Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude",
-				DriverFlags: "--verbose", Devshell: true, DevshellName: "dev", HeartbeatLog: "/hb",
+				DriverFlags: "--verbose", HeartbeatLog: "/hb",
 				ArgvShape: promptassembly.ArgvShape{
 					PromptStyle: "flag", PromptFlag: "-p", ModelFlag: "--model", AgentsFlag: "--agents",
 					EffortFlag: "--effort", Order: []string{"prompt", "model", "agents"},
@@ -1519,7 +1539,7 @@ func TestParseFlags_EveryFlagRequired(t *testing.T) {
 }
 
 func TestParseFlags_RetiredFlagsAreGone(t *testing.T) {
-	for _, old := range []string{"--handoff-file", "--driver-exit-code", "--outcome-line", "--stream-log", "--driver-text-log", "--resume-session-file"} {
+	for _, old := range []string{"--handoff-file", "--driver-exit-code", "--outcome-line", "--stream-log", "--driver-text-log", "--resume-session-file", "--devshell", "--devshell-name"} {
 		if _, err := parseFlags(append(allFlags(), old+"=x"), io.Discard); err == nil {
 			t.Errorf("%s accepted; box now assembles and runs the first Driver run itself", old)
 		}
@@ -1781,5 +1801,197 @@ func TestRun_AssemblesThenTheFirstPassGetsTheHandoffBoxWrote(t *testing.T) {
 	}
 	if !strings.Contains(f.firstCall.prompt, cavemanSentinel) {
 		t.Error("the first pass prompt lacks the baked caveman fragment")
+	}
+}
+
+// --- the toolchain decision ---
+
+const (
+	probingLine = "==> flake.nix found in cloned repo; probing for devShell"
+	foundLine   = "==> devShell found — lifecycle will run inside nix develop"
+	absentLine  = "==> no devShell in flake (or nix develop failed) — using baked toolchain"
+	goHintLine  = "==> hint: go mod project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
+)
+
+// target gives the clone the named files.
+func (f *fixture) target(names ...string) {
+	f.t.Helper()
+	if err := os.MkdirAll(f.in.WorkDir, 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	for _, n := range names {
+		f.write(filepath.Join(f.in.WorkDir, n), "")
+	}
+}
+
+func (f *fixture) passthrough() promptassembly.Passthrough {
+	f.t.Helper()
+	if len(f.assembledIn) != 1 {
+		f.t.Fatalf("Assemble ran %d times, want 1", len(f.assembledIn))
+	}
+	return f.assembledIn[0].Passthrough
+}
+
+func TestToolchain_NoFlakeMeansNoDevshellAndNoNix(t *testing.T) {
+	f := newFixture(t)
+	f.target("README.md")
+	f.run()
+	if p := f.passthrough(); p.Devshell || p.DevshellName != "default" {
+		t.Errorf("Devshell, DevshellName = %v, %q; want false, default", p.Devshell, p.DevshellName)
+	}
+	if len(f.nixCalls) != 0 || len(f.prefetched) != 0 {
+		t.Errorf("nix calls %v, prefetches %d; want none", f.nixCalls, len(f.prefetched))
+	}
+	if got := f.lines(); got[0] != announceLine {
+		t.Errorf("stdout = %q, want no toolchain lines", got)
+	}
+}
+
+func TestToolchain_DevshellFoundCarriesTheNameIntoAssembly(t *testing.T) {
+	f := newFixture(t)
+	f.target("flake.nix")
+	f.knobs["DEV_SHELL_NAME"], f.knobs["DEV_SHELL_PROBE_TIMEOUT"] = "ci", "300"
+	f.run()
+	if p := f.passthrough(); !p.Devshell || p.DevshellName != "ci" {
+		t.Errorf("Devshell, DevshellName = %v, %q; want true, ci", p.Devshell, p.DevshellName)
+	}
+	if want := [][]string{{"develop", ".#ci", "--command", "true"}}; !reflect.DeepEqual(f.nixCalls, want) {
+		t.Errorf("nix calls = %q, want %q", f.nixCalls, want)
+	}
+	if got := f.lines(); got[0] != probingLine || got[1] != foundLine {
+		t.Errorf("stdout = %q, want the probing then the found line first", got)
+	}
+}
+
+func TestToolchain_DevshellAbsentFallsBackToDefaultName(t *testing.T) {
+	f := newFixture(t)
+	f.target("flake.nix")
+	f.knobs["DEV_SHELL_NAME"], f.knobs["DEV_SHELL_PROBE_TIMEOUT"] = "ci", "300"
+	f.nixErr = errors.New("exit status 1")
+	f.run()
+	if p := f.passthrough(); p.Devshell || p.DevshellName != "default" {
+		t.Errorf("Devshell, DevshellName = %v, %q; want false, default", p.Devshell, p.DevshellName)
+	}
+	if got := f.lines(); got[0] != probingLine || got[1] != absentLine {
+		t.Errorf("stdout = %q, want the probing then the no-devShell line first", got)
+	}
+}
+
+func TestToolchain_SelfContainedSkipsEveryPhase(t *testing.T) {
+	f := newFixture(t)
+	f.env.SelfContained = true
+	f.target("flake.nix", "go.sum")
+	f.knobs["PREFETCH"] = "go mod download"
+	f.run()
+	if p := f.passthrough(); p.Devshell || p.DevshellName != "default" {
+		t.Errorf("Devshell, DevshellName = %v, %q; want false, default", p.Devshell, p.DevshellName)
+	}
+	if len(f.nixCalls) != 0 || len(f.prefetched) != 0 {
+		t.Errorf("nix calls %v, prefetches %d; want none", f.nixCalls, len(f.prefetched))
+	}
+	if got := f.lines(); got[0] != announceLine {
+		t.Errorf("stdout = %q, want no toolchain lines", got)
+	}
+}
+
+func TestToolchain_HintPrintsWithoutPrefetchAndIsSuppressedByIt(t *testing.T) {
+	f := newFixture(t)
+	f.target("go.sum")
+	f.run()
+	if got := f.lines(); got[0] != goHintLine {
+		t.Errorf("stdout = %q, want the hint first", got)
+	}
+	if len(f.prefetched) != 0 {
+		t.Errorf("prefetched %d times with no hook", len(f.prefetched))
+	}
+
+	f = newFixture(t)
+	f.target("go.sum")
+	f.knobs["PREFETCH"] = "go mod download"
+	f.run()
+	if strings.Contains(f.out.String(), "hint:") {
+		t.Errorf("stdout = %q, want no hint with prefetch set", f.out.String())
+	}
+}
+
+func TestToolchain_PrefetchRunsTheHookInTheCloneWithBoxStdio(t *testing.T) {
+	f := newFixture(t)
+	f.target("go.sum")
+	f.knobs["PREFETCH"] = "go mod download"
+	f.knobs["PATH"] = "/harness/bin"
+	f.run()
+	if len(f.prefetched) != 1 {
+		t.Fatalf("prefetched %d times, want 1", len(f.prefetched))
+	}
+	cmd := f.prefetched[0]
+	if want := []string{"bash", "-c", "go mod download"}; !reflect.DeepEqual(cmd.Args, want) {
+		t.Errorf("args = %q, want %q", cmd.Args, want)
+	}
+	if cmd.Dir != f.in.WorkDir || cmd.Stdout != &f.out || cmd.Stderr != &f.errb {
+		t.Errorf("Dir, Stdout, Stderr = %q, %v, %v; want the clone and box's stdio", cmd.Dir, cmd.Stdout, cmd.Stderr)
+	}
+}
+
+func TestToolchain_PrefetchInsideADevshellKeepsTheHarnessPath(t *testing.T) {
+	f := newFixture(t)
+	f.target("flake.nix")
+	f.knobs["PREFETCH"], f.knobs["PATH"], f.knobs["DEV_SHELL_PROBE_TIMEOUT"] = "make deps", "/harness/bin", "300"
+	f.run()
+	if len(f.prefetched) != 1 {
+		t.Fatalf("prefetched %d times, want 1", len(f.prefetched))
+	}
+	if args := f.prefetched[0].Args; args[0] != "nix" || args[len(args)-1] != "/harness/bin" {
+		t.Errorf("args = %q, want nix develop with the harness PATH", args)
+	}
+}
+
+func TestToolchain_PrefetchFailureWarnsAndTheRunContinues(t *testing.T) {
+	f := newFixture(t)
+	f.target("go.sum")
+	f.knobs["PREFETCH"] = "false"
+	f.prefetchErr = errors.New("exit status 1")
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if want := "==> WARNING: prefetch hook failed (exit status 1) — continuing"; countLine(f.lines(), want) != 1 {
+		t.Errorf("stdout = %q, want %q", f.lines(), want)
+	}
+	if f.assembled != 1 || !f.ranFirst {
+		t.Errorf("assembled %d, ranFirst %v; want the run to carry on", f.assembled, f.ranFirst)
+	}
+}
+
+func TestToolchain_RunsBeforeTheHomeLayout(t *testing.T) {
+	f := newFixture(t)
+	f.target("flake.nix")
+	f.knobs["DEV_SHELL_PROBE_TIMEOUT"] = "300"
+	f.nixAtCall = func() {
+		if _, err := os.Stat(f.in.Assembly.SkillsDir); err == nil {
+			t.Error("the home layout ran before the toolchain probe")
+		}
+	}
+	harness := filepath.Join(f.dir, "harness")
+	if err := os.MkdirAll(filepath.Join(harness, "a"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(harness, "a", "SKILL.md"), "a")
+	f.in.HarnessSkillsDir = harness
+	f.run()
+	if len(f.nixCalls) != 1 {
+		t.Fatalf("nix ran %d times, want 1", len(f.nixCalls))
+	}
+	if _, err := os.Stat(f.in.Assembly.SkillsDir); err != nil {
+		t.Errorf("home layout never ran: %v", err)
+	}
+}
+
+func TestToolchain_HintPrecedesTheProbeAndItsOutcome(t *testing.T) {
+	f := newFixture(t)
+	f.target("go.sum", "flake.nix")
+	f.knobs["DEV_SHELL_PROBE_TIMEOUT"] = "5m"
+	f.run()
+	got := f.lines()
+	if len(got) < 3 || got[0] != goHintLine || got[1] != probingLine || got[2] != foundLine {
+		t.Errorf("stdout = %q, want the hint, the probing line, then the outcome", got)
 	}
 }
