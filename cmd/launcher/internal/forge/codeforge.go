@@ -194,3 +194,10 @@ type BundleCommitSubjects interface {
 	// outboxDir/seambundle.FileName carries for ref, relative to base, oldest first.
 	CommitSubjects(outboxDir, base, ref string) ([]string, error)
 }
+
+// AgentBranchName is the one place the agent branch name is built from its
+// prefix (issue #444): every adapter's AgentBranch returns it, and the in-Box
+// main, which holds no CodeForge, calls it directly.
+func AgentBranchName(prefix, num string) string {
+	return prefix + num
+}

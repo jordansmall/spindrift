@@ -681,9 +681,9 @@ in
     pkgs.runCommand "drivers-opencode-agent-files-description-colon-frontmatter" { } "touch $out";
 
   # Issue #2153: renderPreamble must bake DRIVER_AGENT_FILES_DIR from the real
-  # opencode entry's agentFilesDirRelative, because agent/entrypoint.sh's
+  # opencode entry's agentFilesDirRelative, because box's
   # file-rewrite loop is gated entirely on that var being non-empty. The baked
-  # value must match agentFilesTemplate's own on-disk path, or the entrypoint
+  # value must match agentFilesTemplate's own on-disk path, or box
   # rewrites files the template never bakes.
   drivers-render-preamble-opencode-agent-files-dir =
     let
@@ -697,7 +697,7 @@ in
   # A Driver entry that declares no agentFilesDirRelative (every stub fixture
   # here, and claude.nix in production) must render no DRIVER_AGENT_FILES_DIR
   # line at all, an unset var rather than an empty string assignment, so
-  # agent/entrypoint.sh's `[ -n ... ]` gate stays a true no-op.
+  # box's non-empty gate stays a true no-op.
   drivers-render-preamble-omits-agent-files-dir-when-absent =
     let
       out = driverRegistry.renderPreamble stubDriverBase;
@@ -707,7 +707,7 @@ in
     pkgs.runCommand "drivers-render-preamble-omits-agent-files-dir-when-absent" { } "touch $out";
 
   # Issue #2843: renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the
-  # real claude entry's sessionCacheDirRelative so agent/entrypoint.sh sees
+  # real claude entry's sessionCacheDirRelative so box sees
   # the session-cache path inside the box. lib/preambles.nix's
   # renderDriverMountPreamble renders the same-named var for the host-side
   # launcher, a separate consumer.

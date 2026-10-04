@@ -64,3 +64,20 @@ func TestDirDefaults(t *testing.T) {
 		t.Errorf("env values = %q %q %q", got.HarnessSkillsDir, got.OperatorSkillsDir, got.HarnessHomeAgentDir)
 	}
 }
+
+func TestDirDefaultsWorkOutboxAndRepoMount(t *testing.T) {
+	unset := func(string) string { return "" }
+	got := withDirDefaults(inputs{}, unset)
+	if got.WorkDir != "/work" || got.OutboxDir != "/outbox" || got.RepoMountDir != "/repo" {
+		t.Errorf("defaults = %q %q %q", got.WorkDir, got.OutboxDir, got.RepoMountDir)
+	}
+	got = withDirDefaults(inputs{WorkDir: "/w", OutboxDir: "/o"}, func(k string) string {
+		if k == "REPO_MOUNT_DIR" {
+			return "/r"
+		}
+		return ""
+	})
+	if got.WorkDir != "/w" || got.OutboxDir != "/o" || got.RepoMountDir != "/r" {
+		t.Errorf("explicit = %q %q %q", got.WorkDir, got.OutboxDir, got.RepoMountDir)
+	}
+}

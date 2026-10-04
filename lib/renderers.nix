@@ -1088,7 +1088,7 @@ rec {
     + "}\n";
 
   # Oxford-joined "a, b, or c" prose rendering of an outcomeStatusSets row's
-  # statuses, for agent/entrypoint.sh's nudge prompt (issue #2504).
+  # statuses, for box's nudge prompt (issue #2504).
   renderOutcomeStatusProse =
     statuses:
     let

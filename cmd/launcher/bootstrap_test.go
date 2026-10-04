@@ -488,7 +488,7 @@ func TestSeedAccumulationRepoIfHostMediated_NonLocal_NoOp(t *testing.T) {
 
 // The research dispatch kind seeds too under CODE_FORGE=local while
 // c.selfContained is false (issue #2439): research still clones and explores
-// the repo in-box via agent/entrypoint.sh's clone_repo(), so it needs /repo
+// the repo in-box via the box main's clone, so it needs /repo
 // mounted like work does. Only the selfContained sub-mode stays a no-op.
 func TestSeedAccumulationRepoIfHostMediated_ResearchKind_SeedsFromPwd(t *testing.T) {
 	checkout := mustSeedableCheckout(t)

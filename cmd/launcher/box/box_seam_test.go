@@ -15,10 +15,12 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seambundle"
@@ -56,12 +58,13 @@ func seamGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// seamRepo returns the work tree entrypoint.sh's clone_repo leaves for box: a
-// clone of a bare origin with HEAD on main, origin/main at the base commit and
-// the repo-local identity set. box cuts the agent branch itself.
+// seamRepo returns the work dir box will clone into, which does not exist yet,
+// and seeds the origin behind it: a bare repo with HEAD on main at one base
+// commit. runBoxSeam routes the clone URL to that origin; box cuts the agent
+// branch itself.
 func seamRepo(t *testing.T) string {
 	t.Helper()
-	return seamRepoAt(t, t.TempDir())
+	return seamRepoAt(t, filepath.Join(t.TempDir(), "work"))
 }
 
 func seamRepoAt(t *testing.T, dir string) string {
@@ -69,19 +72,76 @@ func seamRepoAt(t *testing.T, dir string) string {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	origin := seamOriginPath(dir)
+	seamGit(t, t.TempDir(), "init", "-q", "--bare", "-b", "main", origin)
+	scratch := t.TempDir()
+	seamGit(t, scratch, "init", "-q", "-b", "main")
+	seamGit(t, scratch, "remote", "add", "origin", origin)
+	seamGit(t, scratch, "commit", "-q", "--allow-empty", "-m", "base")
+	seamGit(t, scratch, "push", "-q", "origin", "main")
+	return dir
+}
+
+// seamOriginPath is the bare origin seamRepoAt seeded behind a work dir.
+func seamOriginPath(workDir string) string { return workDir + ".origin.git" }
+
+// seamScratch clones the origin behind workDir into a scratch work tree, for a
+// test to stage origin state in before box runs.
+func seamScratch(t *testing.T, workDir string) string {
+	t.Helper()
+	scratch := filepath.Join(t.TempDir(), "scratch")
+	seamGit(t, filepath.Dir(scratch), "clone", "-q", seamOriginPath(workDir), scratch)
+	return scratch
+}
+
+// seamOriginCommit lands one commit of files on the origin's main.
+func seamOriginCommit(t *testing.T, workDir, msg string, files map[string]string) {
+	t.Helper()
+	scratch := seamScratch(t, workDir)
+	for path, body := range files {
+		full := filepath.Join(scratch, path)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seamGit(t, scratch, "add", "-A")
+	seamGit(t, scratch, "commit", "-q", "-m", msg)
+	seamGit(t, scratch, "push", "-q", "origin", "main")
+}
+
+// seamCloneRoute points the clone box makes at the origin behind workDir:
+// CODE_FORGE=local clones from REPO_MOUNT_DIR, every other forge from a URL
+// the HOME gitconfig rewrites to the origin, which keeps the test off the
+// global gitconfig and covers the clone's later fetch and the Box's pushes.
+// It fills the env vars box reads the URL from.
+func seamCloneRoute(t *testing.T, workDir, home string, env map[string]string) {
+	t.Helper()
+	origin := seamOriginPath(workDir)
+	if env["CODE_FORGE"] == "local" {
+		env["REPO_MOUNT_DIR"] = origin
+		return
+	}
+	if env["CODE_FORGE"] == "git" && env["CODE_FORGE_REMOTE_URL"] == "" {
+		env["CODE_FORGE_REMOTE_URL"] = "https://git.example/o/r.git"
+	}
+	url, err := boxclone.CloneURL(boxclone.Config{
+		CodeForge: env["CODE_FORGE"], RepoSlug: env["REPO_SLUG"], RemoteURL: env["CODE_FORGE_REMOTE_URL"],
+		ForgejoBaseURL: env["FORGEJO_BASE_URL"], ForgejoToken: env["FORGEJO_TOKEN"],
+	})
+	if err != nil {
+		return // box rejects the config itself
+	}
+	f, err := os.OpenFile(filepath.Join(home, ".gitconfig"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
 		t.Fatal(err)
 	}
-	origin := filepath.Join(t.TempDir(), "origin.git")
-	seamGit(t, filepath.Dir(origin), "init", "-q", "--bare", "-b", "main", origin)
-	seamGit(t, dir, "init", "-q", "-b", "main")
-	seamGit(t, dir, "remote", "add", "origin", origin)
-	seamGit(t, dir, "config", "user.name", "spindrift-agent")
-	seamGit(t, dir, "config", "user.email", "agent@example.com")
-	seamGit(t, dir, "commit", "-q", "--allow-empty", "-m", "base")
-	// The push also records refs/remotes/origin/main, as the clone would.
-	seamGit(t, dir, "push", "-q", "origin", "main")
-	return dir
+	defer f.Close()
+	if _, err := fmt.Fprintf(f, "[url %q]\n\tinsteadOf = %s\n", origin, url); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // seamCommitWork is the Driver side effect that leaves one commit on the
@@ -137,7 +197,9 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--argv-order=prompt model agents session driverFlags effort",
 		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
-		"--driver-session-cache-dir=",
+		"--driver-session-cache-dir=", "--branch-prefix=agent/issue-",
+		"--driver-bash-timeout-ms=", "--driver-bash-timeout-env=",
+		"--dev-shell-name=", "--dev-shell-probe-timeout=",
 	}
 }
 
@@ -272,7 +334,6 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		"DISPATCH_ANNOUNCE_VERB": "implementing",
 		"DISPATCH_KEY":           seamIssue,
 		"ISSUE_NUMBER":           seamIssue,
-		"BRANCH":                 seamBranch,
 		"REPO_SLUG":              seamSlug,
 		"HOME":                   home,
 	})
@@ -286,10 +347,17 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		snapshots = filepath.Join(tmp, "snapshots")
 		orchCfg.Snapshot = snapshots
 	}
+	// The clone runs `gh auth setup-git`; a case's own gh config, in c.env,
+	// wins over this answer-nothing default.
+	fakeNames := append([]string{"claude", "orchestrator"}, c.fakes...)
+	if !slices.Contains(c.fakes, "gh") {
+		fakeNames = append(fakeNames, "gh")
+	}
+	mergeEnv(env, seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(tmp, "gh.rec")}))
 	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
-	fakeNames := append([]string{"claude", "orchestrator"}, c.fakes...)
+	seamCloneRoute(t, c.repo, home, env)
 	nixRec := filepath.Join(tmp, "nix.rec")
 	if c.nix != nil {
 		nixCfg := *c.nix
@@ -565,20 +633,14 @@ func TestBoxSeamPRIntentNudgeExhausted(t *testing.T) {
 	}
 }
 
-// entrypointExports is what entrypoint.sh still exports before it execs box,
-// so the golden's env delta is these and nothing box adds. Each slice that
-// moves a setup step into box drops its entries. The values are hardcoded
-// here, so the Go golden's env section only proves box adds and removes
-// nothing; the real bash exports are pinned by
+// entrypointExports is what the shim's env preamble still exports before it
+// execs box, so the golden's env delta is these plus what box itself sets
+// (BRANCH, PWD and the Bash-timeout vars) and nothing else. The values are
+// hardcoded here, so the Go golden's env section only proves box adds and
+// removes nothing; the real bash exports are pinned by
 // tests/entrypoint-driver-invocation-golden.bats, which is not a duplicate.
-func entrypointExports(workDir, branch string) map[string]string {
-	return map[string]string{
-		"BASH_DEFAULT_TIMEOUT_MS":              "1800000",
-		"BASH_MAX_TIMEOUT_MS":                  "1800000",
-		"BRANCH":                               branch,
-		"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1",
-		"PWD":                                  workDir,
-	}
+func entrypointExports() map[string]string {
+	return map[string]string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 }
 
 var (
@@ -706,9 +768,8 @@ func readonlyWorkEnv(extra map[string]string) map[string]string {
 // reproducing them byte for byte.
 func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 	cases := []struct {
-		kind   string
-		branch string
-		env    map[string]string
+		kind string
+		env  map[string]string
 		// registry arms a Registry route; the goldens without it are the
 		// Registry-absent half of the pair.
 		registry bool
@@ -718,41 +779,41 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		// fj puts an fj fake on PATH, so a read-only Box shims it as well.
 		fj bool
 	}{
-		{"work", "agent/issue-7", map[string]string{
+		{"work", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 		}, false, false, false},
-		{"work-registry", "agent/issue-7", map[string]string{
+		{"work-registry", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 		}, true, false, false},
-		{"work-readonly", "agent/issue-7", map[string]string{
+		{"work-readonly", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 			"BOX_WRITE_ENABLED": "", "BOX_OUTBOX_RELAY_CAPABLE": "1",
 		}, false, true, false},
-		{"work-readonly-forgejo", "agent/issue-7", readonlyWorkEnv(map[string]string{
+		{"work-readonly-forgejo", readonlyWorkEnv(map[string]string{
 			"BOX_OUTBOX_RELAY_CAPABLE": "1", "CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
 			"FORGEJO_TOKEN": "s3cr3t-forgejo-token", "FORGEJO_BASE_URL": "https://forge.example/",
 		}), false, true, true},
-		{"work-readonly-local", "agent/issue-7", readonlyWorkEnv(map[string]string{
+		{"work-readonly-local", readonlyWorkEnv(map[string]string{
 			"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1", "BOX_FULLY_LOCAL": "1",
 			"GH_TOKEN": "", "REPO_SLUG": "",
 		}), false, true, false},
-		{"work-readonly-git", "agent/issue-7", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true, false},
-		{"research", "agent/issue-7", map[string]string{
+		{"work-readonly-git", readonlyWorkEnv(map[string]string{"CODE_FORGE": "git"}), false, true, false},
+		{"research", map[string]string{
 			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 		}, false, false, false},
 		// A self-contained run has no clone: the work dir is empty and the
 		// token and slug are absent, so the env guards must exempt it.
-		{"research-self-contained", "agent/issue-7", map[string]string{
+		{"research-self-contained", map[string]string{
 			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "SELF_CONTAINED": "1", "ISSUE_TRACKER": "local",
 			"BOX_TRACKER_AXIS_READ": "LOCAL", "BOX_TRACKER_AXIS_WRITE": "", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1",
 			"GH_TOKEN": "", "REPO_SLUG": "",
 		}, false, false, false},
-		{"butler", "agent/issue-butler-bugs", map[string]string{
+		{"butler", map[string]string{
 			"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs", "ISSUE_TITLE": "", "CHORE_HEAD": "deadbeef",
 			"CHORE_DIFF_RANGE": "cafef00d..deadbeef", "CHORE_SLICE": "cmd/launcher/main.go", "CHORE_MAX_FINDINGS": "5",
@@ -763,11 +824,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			box := seamtest.Build(t, "./box")
 			root := t.TempDir()
 			workDir := filepath.Join(root, "work")
-			if c.env["SELF_CONTAINED"] == "1" {
-				if err := os.MkdirAll(workDir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-			} else {
+			if c.env["SELF_CONTAINED"] != "1" {
 				seamRepoAt(t, workDir)
 			}
 			outbox := filepath.Join(root, "outbox")
@@ -781,14 +838,10 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				registryEnv = seamRegistryRoute(t, workDir)
 			}
 
-			fakeNames := []string{"claude", "orchestrator"}
-			ghEnv := map[string]string{}
-			if c.readonly {
-				// A gh on PATH is what gets a shim installed; the fake keeps
-				// the run off the host's own gh.
-				fakeNames = append(fakeNames, "gh")
-				ghEnv = seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(root, "gh.rec")})
-			}
+			// The clone runs gh, and a gh on PATH is what gets a read-only shim
+			// installed; the fake keeps the run off the host's own gh.
+			fakeNames := []string{"claude", "orchestrator", "gh"}
+			ghEnv := seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: filepath.Join(root, "gh.rec")})
 			if c.fj {
 				fakeNames = append(fakeNames, "fj")
 				mergeEnv(ghEnv, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: filepath.Join(root, "fj.rec")}))
@@ -807,15 +860,22 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				Record:   filepath.Join(root, "orch.rec"),
 				Snapshot: snapshots,
 			}))
+			if c.env["SELF_CONTAINED"] != "1" {
+				seamCloneRoute(t, workDir, home, base)
+			}
 			launch := map[string]string{}
-			mergeEnv(launch, base, entrypointExports(workDir, c.branch))
+			mergeEnv(launch, base, entrypointExports())
 
+			// The Consumer's Bash-timeout knob and the claude Driver's registry
+			// entry, as the shim's preambles carry them.
 			res := seamtest.Run(t, seamtest.Cmd{
-				Bin:      box,
-				Args:     seamBoxArgs(t, workDir, outbox, t.TempDir()),
+				Bin: box,
+				Args: append(seamBoxArgs(t, workDir, outbox, t.TempDir()),
+					"--driver-bash-timeout-ms=1800000",
+					"--driver-bash-timeout-env=BASH_DEFAULT_TIMEOUT_MS BASH_MAX_TIMEOUT_MS"),
 				Env:      launch,
 				CleanEnv: true,
-				Dir:      workDir,
+				Dir:      root,
 			})
 			res.WantExit(t, 0)
 
@@ -873,20 +933,10 @@ func seamRegistryRoute(t *testing.T, workDir string) map[string]string {
 	}
 	t.Cleanup(func() { tl.Close() })
 
-	if err := os.MkdirAll(filepath.Join(workDir, ".cargo"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for path, body := range map[string]string{
+	seamOriginCommit(t, workDir, "chore: pin private registries", map[string]string{
 		".cargo/config.toml": "[registries.othercorp]\nindex = \"http://" + seamRegistryUpstream + "/other-index/\"\n",
 		".npmrc":             "registry=http://" + seamRegistryUpstream + "/\n",
-	} {
-		if err := os.WriteFile(filepath.Join(workDir, path), []byte(body), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	seamGit(t, workDir, "add", "-A")
-	seamGit(t, workDir, "commit", "-q", "-m", "chore: pin private registries")
-	seamGit(t, workDir, "push", "-q", "origin", "main")
+	})
 
 	return map[string]string{
 		"REGISTRY_PROXY_MANIFEST": `{"endpoint":"unix://` + sock + `","routes":[{"prefix":"r0","upstreamHost":"` + seamRegistryUpstream +
@@ -1132,28 +1182,28 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 	})
 }
 
-// seamConflictRepo is a work tree whose origin holds a prior run's agent branch
+// seamConflictRepo is a work dir whose origin holds a prior run's agent branch
 // and an origin/main that advanced past it, both adding the same file
 // differently. With seamConflictGh's open PR on the branch, box adopts it and
 // its pre-work `git rebase origin/main` stops on the conflict.
 func seamConflictRepo(t *testing.T) string {
 	t.Helper()
 	dir := seamRepo(t)
+	scratch := seamScratch(t, dir)
 	write := func(content string) {
-		if err := os.WriteFile(filepath.Join(dir, "c"), []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(scratch, "c"), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		seamGit(t, dir, "add", "c")
+		seamGit(t, scratch, "add", "c")
 	}
-	seamGit(t, dir, "checkout", "-q", "-b", seamBranch)
+	seamGit(t, scratch, "checkout", "-q", "-b", seamBranch)
 	write("agent\n")
-	seamGit(t, dir, "commit", "-q", "-m", "agent change")
-	seamGit(t, dir, "push", "-q", "origin", seamBranch)
-	seamGit(t, dir, "checkout", "-q", "main")
-	seamGit(t, dir, "branch", "-q", "-D", seamBranch)
+	seamGit(t, scratch, "commit", "-q", "-m", "agent change")
+	seamGit(t, scratch, "push", "-q", "origin", seamBranch)
+	seamGit(t, scratch, "checkout", "-q", "main")
 	write("main\n")
-	seamGit(t, dir, "commit", "-q", "-m", "main change")
-	seamGit(t, dir, "push", "-q", "origin", "main")
+	seamGit(t, scratch, "commit", "-q", "-m", "main change")
+	seamGit(t, scratch, "push", "-q", "origin", "main")
 	return dir
 }
 
@@ -1243,7 +1293,7 @@ func (r seamRun) wantConflictPass(t *testing.T) seamtest.Snapshot {
 
 func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
 	repo := seamConflictRepo(t)
-	head := seamRevParse(t, repo, "origin/"+seamBranch)
+	head := seamRevParse(t, seamOriginPath(repo), "refs/heads/"+seamBranch)
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
 		snapshot:   true,
@@ -1572,9 +1622,7 @@ func TestBoxSeamDevshellPair(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			repo := seamRepo(t)
-			if err := os.WriteFile(filepath.Join(repo, "flake.nix"), []byte("{}"), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			seamOriginCommit(t, repo, "chore: add flake", map[string]string{"flake.nix": "{}"})
 			r := runBoxSeam(t, seamCase{
 				repo:       repo,
 				snapshot:   true,
@@ -1621,12 +1669,7 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 			repo := seamRepo(t)
 			if c.staleLock {
 				lock := "[[package]]\nname = \"example\"\nsource = \"registry+http://127.0.0.1:" + seamForwarderPort + "/r0/index/\"\n"
-				if err := os.WriteFile(filepath.Join(repo, "Cargo.lock"), []byte(lock), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				seamGit(t, repo, "add", "Cargo.lock")
-				seamGit(t, repo, "commit", "-q", "-m", "chore: pin registry")
-				seamGit(t, repo, "push", "-q", "origin", "main")
+				seamOriginCommit(t, repo, "chore: pin registry", map[string]string{"Cargo.lock": lock})
 			}
 			r := runBoxSeam(t, seamCase{
 				repo: repo,
@@ -1711,7 +1754,9 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 			work := seamRepo(t)
 			if c.env["SELF_CONTAINED"] == "1" {
 				// Box skips branch recovery for a self-contained run, yet this work
-				// kind still bundles out at settle, so the branch must exist.
+				// kind still bundles out at settle, so the branch must exist in a
+				// work tree the test clones itself, since box clones nothing.
+				seamGit(t, filepath.Dir(work), "clone", "-q", seamOriginPath(work), work)
 				seamGit(t, work, "checkout", "-q", "-b", seamBranch)
 			}
 			dir := t.TempDir()
@@ -1892,30 +1937,29 @@ func TestBoxSeamPrintsTheWritableStoreNotice(t *testing.T) {
 	}
 }
 
-// seamPriorBranchRepo is a work tree whose origin holds a prior run's agent
-// branch (one commit adding branch.txt unless withWork is off), optionally with origin/main advanced
-// past it by a non-conflicting commit. The local branch is deleted, as in the
-// fresh clone box starts from.
+// seamPriorBranchRepo is a work dir whose origin holds a prior run's agent
+// branch (one commit adding branch.txt unless withWork is off), optionally with
+// origin/main advanced past it by a non-conflicting commit.
 func seamPriorBranchRepo(t *testing.T, advanceMain, withWork bool) string {
 	t.Helper()
 	dir := seamRepo(t)
+	scratch := seamScratch(t, dir)
 	commit := func(file, msg string) {
-		if err := os.WriteFile(filepath.Join(dir, file), []byte(file+"\n"), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(scratch, file), []byte(file+"\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		seamGit(t, dir, "add", file)
-		seamGit(t, dir, "commit", "-q", "-m", msg)
+		seamGit(t, scratch, "add", file)
+		seamGit(t, scratch, "commit", "-q", "-m", msg)
 	}
-	seamGit(t, dir, "checkout", "-q", "-b", seamBranch)
+	seamGit(t, scratch, "checkout", "-q", "-b", seamBranch)
 	if withWork {
 		commit("branch.txt", "prior run work")
 	}
-	seamGit(t, dir, "push", "-q", "origin", seamBranch)
-	seamGit(t, dir, "checkout", "-q", "main")
-	seamGit(t, dir, "branch", "-q", "-D", seamBranch)
+	seamGit(t, scratch, "push", "-q", "origin", seamBranch)
+	seamGit(t, scratch, "checkout", "-q", "main")
 	if advanceMain {
 		commit("main_advance.txt", "advance main")
-		seamGit(t, dir, "push", "-q", "origin", "main")
+		seamGit(t, scratch, "push", "-q", "origin", "main")
 	}
 	return dir
 }
@@ -1923,11 +1967,7 @@ func seamPriorBranchRepo(t *testing.T, advanceMain, withWork bool) string {
 // seamOriginRef is origin's refs/heads/<seamBranch> sha, or "" when absent.
 func seamOriginRef(t *testing.T, work string) string {
 	t.Helper()
-	url, err := exec.Command("git", "-C", work, "remote", "get-url", "origin").Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	out, err := exec.Command("git", "--git-dir", strings.TrimSpace(string(url)), "rev-parse", "--verify", "--quiet", "refs/heads/"+seamBranch).Output()
+	out, err := exec.Command("git", "--git-dir", seamOriginPath(work), "rev-parse", "--verify", "--quiet", "refs/heads/"+seamBranch).Output()
 	if err != nil {
 		return ""
 	}
@@ -2280,11 +2320,11 @@ func TestBoxSeamSettleBundleOut(t *testing.T) {
 }
 
 // An unrecognised dispatch kind fails closed rather than defaulting to a
-// posture; entrypoint.sh rejects it before the clone, and box does too when
-// run on its own.
+// posture, and before it clones or creates anything.
 func TestBoxSeamUnrecognizedDispatchKindFails(t *testing.T) {
+	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t),
+		repo:       repo,
 		env:        map[string]string{"DISPATCH_KIND": "bogus-kind"},
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "never"))}},
 	})
@@ -2297,6 +2337,77 @@ func TestBoxSeamUnrecognizedDispatchKindFails(t *testing.T) {
 	}
 	if _, err := os.Stat(r.outboxDir); err == nil {
 		t.Errorf("outbox %s exists after a rejected kind", r.outboxDir)
+	}
+	if _, err := os.Stat(repo); err == nil {
+		t.Errorf("work dir %s exists after a rejected kind", repo)
+	}
+}
+
+// seamGhRecord is a gh fake config of its own, so a test can read back what
+// the run asked gh.
+func seamGhRecord(t *testing.T) (map[string]string, string) {
+	t.Helper()
+	rec := filepath.Join(t.TempDir(), "gh.rec")
+	return seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{Record: rec}), rec
+}
+
+func TestBoxSeamClonesTheTargetOntoTheAgentBranch(t *testing.T) {
+	repo := seamRepo(t)
+	ghEnv, ghRec := seamGhRecord(t)
+	r := runBoxSeam(t, seamCase{
+		repo: repo, env: ghEnv, fakes: []string{"gh"},
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "clone"))}},
+	})
+	r.res.WantExit(t, 0)
+	if got := strings.TrimSpace(seamGitOut(t, repo, "symbolic-ref", "--short", "HEAD")); got != seamBranch {
+		t.Errorf("HEAD = %s; want the agent branch %s", got, seamBranch)
+	}
+	for key, want := range map[string]string{"user.name": "spindrift-agent", "user.email": "agent@example.com"} {
+		if got := strings.TrimSpace(seamGitOut(t, repo, "config", "--local", key)); got != want {
+			t.Errorf("repo-local %s = %q; want %q", key, got, want)
+		}
+	}
+	if got := seamtest.ReadRecord(t, ghRec); len(got) == 0 || !reflect.DeepEqual(got[0], []string{"auth", "setup-git"}) {
+		t.Errorf("gh calls = %q; want `auth setup-git` first", got)
+	}
+}
+
+func TestBoxSeamLocalForgeClonesTheMountWithoutGh(t *testing.T) {
+	repo := seamRepo(t)
+	ghEnv, ghRec := seamGhRecord(t)
+	env := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
+	mergeEnv(env, ghEnv)
+	r := runBoxSeam(t, seamCase{
+		repo: repo, env: env, fakes: []string{"gh"},
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "local"))}},
+	})
+	r.res.WantExit(t, 0)
+	if got := strings.TrimSpace(seamGitOut(t, repo, "log", "-1", "--format=%s", "origin/main")); got != "base" {
+		t.Errorf("origin/main tip = %q; want the mount's base commit", got)
+	}
+	for _, argv := range seamtest.ReadRecord(t, ghRec) {
+		if len(argv) >= 2 && argv[0] == "auth" && argv[1] == "setup-git" {
+			t.Errorf("CODE_FORGE=local ran gh auth setup-git: %q", argv)
+		}
+	}
+}
+
+func TestBoxSeamSelfContainedClonesNothing(t *testing.T) {
+	repo := seamRepo(t)
+	r := runBoxSeam(t, seamCase{
+		repo: repo, relay: true,
+		env: mergedEnv(seamResearchEnv, map[string]string{
+			"SELF_CONTAINED": "1", "ISSUE_TRACKER": "local", "BOX_TRACKER_AXIS_READ": "LOCAL",
+			"BOX_TRACKER_AXIS_WRITE": "", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1", "GH_TOKEN": "", "REPO_SLUG": "",
+		}),
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "self-contained"))}},
+	})
+	r.res.WantExit(t, 0)
+	if _, err := os.Stat(repo); err != nil {
+		t.Errorf("work dir missing after a self-contained run: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git")); err == nil {
+		t.Errorf("a self-contained run cloned a repo into %s", repo)
 	}
 }
 

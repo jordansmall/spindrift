@@ -11,7 +11,7 @@
   # The Consumer's own tools, baked into the image. A function of the (Linux)
   # pkgs so it stays correct on a darwin host.
   packages ? (_pkgs: [ ]),
-  # Shell snippet the entrypoint runs after cloning, to warm toolchain caches
+  # Shell snippet box runs after cloning, to warm toolchain caches
   # (for example, fetching pinned deps). Baked into the image.
   prefetch ? "",
   # Baked into the image at /agent/prompts (see agentFiles), so changing it
@@ -741,11 +741,11 @@ let
   };
 
   # In-box Driver run and settle sequence (issues #4292, #4293, ADR 0058):
-  # entrypoint.sh execs this after prompt assembly. Same tight-fileset
-  # invariant as driverExecBin: the fileset is exactly box's transitive
-  # internal import closure (`go list -deps ./box`), so host-side launcher
-  # churn leaves the image drvPath alone. internal/driver is walked recursively
-  # and so covers driverkit, claude and opencode.
+  # the entrypoint.sh shim execs this, so clone, prompt assembly and settle run
+  # inside it. Same tight-fileset invariant as driverExecBin: the fileset is
+  # exactly box's transitive internal import closure (`go list -deps ./box`),
+  # so host-side launcher churn leaves the image drvPath alone. internal/driver
+  # is walked recursively and so covers driverkit, claude and opencode.
   boxBin = pkgs.buildGoModule {
     pname = "box";
     version = spindriftVersion;
@@ -794,6 +794,9 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/branchrecovery)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/boxclone)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver)

@@ -229,7 +229,7 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	// bit is tagged before the rewrite, so a crash in between leaves it set over
 	// unrewritten content and every later Apply returns here without re-checking
 	// (issue #2932, issue #3024 gap 1). The caller closes that window:
-	// entrypoint.sh reverts on any nonzero exit, and each dispatch clones fresh.
+	// box reverts on any nonzero exit, and each dispatch clones fresh.
 	if skipSet {
 		return ApplySkipWorktreeSet, nil
 	}
