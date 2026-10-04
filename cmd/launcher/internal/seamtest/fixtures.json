@@ -1,4 +1,6 @@
 [
+  "agent-files-claude",
+  "agent-files-opencode",
   "agent-paths-preamble.sh",
   "check-contract.md",
   "comms-contract.md",

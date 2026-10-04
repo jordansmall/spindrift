@@ -1749,6 +1749,7 @@ in
         "imagePath"
         "promptDir"
         "skillsDir"
+        "homeLayoutDir"
         "outcomeContractFile"
         "commsContractFile"
         "checkContractFile"

@@ -1066,6 +1066,10 @@ let
     cp -r ${imagePrompts.choresSourceDir} $out/chores
   '';
 
+  # agentFiles' /agent/skills and /home/agent slice, realized with hostPkgs so
+  # the Go seam test can read it on a darwin host too (issue #4296).
+  homeLayoutDir = imageModule.homeLayoutFor hostPkgs;
+
   # The baked-skills directory as a host store path, laid out as lib/image.nix
   # bakes it: each skill is a `<name>/SKILL.md` directory, because Claude Code
   # discovers skills only as directories. A { name; src; } content entry
@@ -1700,6 +1704,7 @@ else
         imagePath
         promptDir
         skillsDir
+        homeLayoutDir
         outcomeContractFile
         commsContractFile
         checkContractFile
