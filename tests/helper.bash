@@ -115,13 +115,6 @@ assert_timeout_rejected() {
   done
 }
 
-# Kills a suite's backgrounded stand-in socat so it never survives the test.
-# Call from each suite's own teardown(); bats requires that hook per file.
-kill_stand_in_socat() {
-  [ -n "${_test_socat_pid:-}" ] && kill "$_test_socat_pid" 2>/dev/null
-  true
-}
-
 # set_dispatch_kind <work|research|butler> exports DISPATCH_KIND plus the axes
 # dispatch.buildBoxEnv derives from the kind's descriptor (issue #3996):
 # DISPATCH_KEYING, DISPATCH_ANNOUNCE_VERB and DISPATCH_KEY. The one place this
@@ -152,18 +145,6 @@ set_dispatch_kind() {
       return 1
       ;;
   esac
-}
-
-# Bounded poll for a stand-in socat's UNIX-LISTEN socket file: a freshly
-# backgrounded socat may take a moment to bind.
-wait_for_socket() {
-  local _path="$1" _tries=0
-  while [ "$_tries" -lt 50 ]; do
-    [ -S "$_path" ] && return 0
-    sleep 0.1
-    _tries=$((_tries + 1))
-  done
-  return 1
 }
 
 # Shared setup for the split entrypoint-*.bats suites (issue #518): bats needs a
