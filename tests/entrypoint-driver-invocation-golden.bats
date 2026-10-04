@@ -176,10 +176,7 @@ check_golden() {
   check_golden butler
 }
 
-# The steps below run in entrypoint.sh before it execs box, so no Go test
-# reaches them.
-
-# Issue #4409: DRIVER_BASH_TIMEOUT_MS is a Consumer knob; entrypoint.sh exports
+# Issue #4409: DRIVER_BASH_TIMEOUT_MS is a Consumer knob; box exports
 # it under each name the Driver's registry entry lists in DRIVER_BASH_TIMEOUT_ENV
 # (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS).
 @test "DRIVER_BASH_TIMEOUT_MS set exports both Claude Code timeout vars to the Driver" {

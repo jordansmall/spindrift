@@ -73,7 +73,7 @@ setup() {
 
 @test "re-dispatched box skips force-reset when an open PR exists on the stale branch" {
   # Stand in for a prior run that pushed commits and opened a PR, then died
-  # before printing SPINDRIFT_OUTCOME. The entrypoint must not destroy the
+  # before printing SPINDRIFT_OUTCOME. Box must not destroy the
   # branch, so the #122 adoption path can still recover the run.
   local prior="$BATS_TEST_TMPDIR/prior"
   git clone -q "https://github.com/owner/repo.git" "$prior"
