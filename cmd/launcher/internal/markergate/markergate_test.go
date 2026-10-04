@@ -31,15 +31,31 @@ func writeLog(t *testing.T, contents string) string {
 	return path
 }
 
+// wantRecheckRule is hand-typed rather than read from recheckRule, so a
+// wording change to the shared sentence still trips these pins.
+const wantRecheckRule = "Do not re-run checks or gates by default: re-run them only if the working tree changed since your last green check run in this session."
+
+const wantAbsentOutcomeNudge = "The run ended without printing a %s line. " + wantRecheckRule + " Either way, print the required %s line as your final message."
+
+// assertOnlyConditionalRecheck fails if got mentions checks anywhere outside
+// the conditional re-run sentence, so no reworded unconditional "run the
+// checks" instruction can creep back in (issue #4407).
+func assertOnlyConditionalRecheck(t *testing.T, got string) {
+	t.Helper()
+	if !strings.Contains(got, wantRecheckRule) {
+		t.Fatalf("expected conditional re-run sentence, got %q", got)
+	}
+	if n, want := strings.Count(strings.ToLower(got), "check"), strings.Count(wantRecheckRule, "check"); n != want {
+		t.Fatalf("nudge mentions checks %d times, want only the %d in the conditional re-run sentence: %q", n, want, got)
+	}
+}
+
 func TestRenderNudgePrompt_OutcomeAbsent(t *testing.T) {
 	got, err := RenderNudgePrompt(NudgeConfig{Marker: MarkerOutcome})
 	if err != nil {
 		t.Fatalf("RenderNudgePrompt() error = %v, want nil", err)
 	}
-	want := fmt.Sprintf(
-		"The run ended without printing a %s line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required %s line as your final message.",
-		outcome.Token, outcome.Token,
-	)
+	want := fmt.Sprintf(wantAbsentOutcomeNudge, outcome.Token, outcome.Token)
 	if got != want {
 		t.Fatalf("RenderNudgePrompt() =\n%q\nwant\n%q", got, want)
 	}
@@ -57,10 +73,7 @@ func TestRenderNudgePrompt_OutcomeScanError(t *testing.T) {
 	if !strings.Contains(err.Error(), dirPath) {
 		t.Fatalf("RenderNudgePrompt() error = %q, want it to name the scanned path %q", err, dirPath)
 	}
-	want := fmt.Sprintf(
-		"The run ended without printing a %s line. Finish the workflow: run any remaining checks/gates in the foreground, then print the required %s line as your final message.",
-		outcome.Token, outcome.Token,
-	)
+	want := fmt.Sprintf(wantAbsentOutcomeNudge, outcome.Token, outcome.Token)
 	if got != want {
 		t.Fatalf("RenderNudgePrompt() =\n%q\nwant fail-safe generic prompt\n%q", got, want)
 	}
@@ -92,6 +105,10 @@ func TestRenderNudgePrompt_OutcomeNearMiss(t *testing.T) {
 	}
 	if !strings.Contains(got, outcome.Token+" "+wantSubstitutedOutcomeShape+" -- fill in only the fields still shown as placeholders") {
 		t.Fatalf("expected substituted example line with its remaining placeholders intact, got %q", got)
+	}
+	assertOnlyConditionalRecheck(t, got)
+	if !strings.HasSuffix(got, wantRecheckRule+" Either way, print that line.") {
+		t.Fatalf("expected the print instruction to follow the re-run rule unconditionally, got %q", got)
 	}
 }
 
