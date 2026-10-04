@@ -11,8 +11,7 @@ import (
 )
 
 // writeFakeNix writes a fake `nix` on PATH that logs its own argv to logPath
-// and execs whatever follows "--command", mirroring tests/fakes/nix under
-// FAKE_NIX_DEV_SHELL_OK=1 so the wrapped command actually runs.
+// and execs whatever follows "--command" so the wrapped command actually runs.
 func writeFakeNix(t *testing.T, dir, logPath string) {
 	t.Helper()
 	body := `#!/bin/sh

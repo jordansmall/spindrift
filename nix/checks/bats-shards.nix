@@ -20,10 +20,10 @@ let
   # coverage check compares against.
   allFiles = builtins.sort (a: b: a < b) (builtins.attrNames batsFiles);
 
-  # Sized so the LPT makespan (about 258 @test cases / 4) stays under the
+  # Sized so the LPT makespan (about 230 @test cases / 3) stays under the
   # 80-case peak the suite carried before its prompt-assembly suites moved to
   # Go (issue #4294); more shards would only add derivations.
-  shardCount = 4;
+  shardCount = 3;
   shardIndices = lib.range 0 (shardCount - 1);
   shardNames = map (i: "bats-shard-${toString i}") shardIndices;
 

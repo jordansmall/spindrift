@@ -2,10 +2,10 @@
 # Shared control flow sourced by the stub-agent fakes (tests/fakes/claude,
 # tests/fakes/opencode). It never calls a real LLM. Each caller sources it
 # after its own argument parsing and before its own transcript-shape emission,
-# with `set -euo pipefail`, DRIVER_LOG, and $model/$prompt already in place.
+# with `set -euo pipefail`, DRIVER_LOG, and $prompt already in place.
 
 {
-  printf 'driver invoked for issue #%s model=%s\n' "${ISSUE_NUMBER:-?}" "${model:-}"
+  printf 'driver invoked for issue #%s\n' "${ISSUE_NUMBER:-?}"
 
   # Real claude reads this from its own process environment (issue #2011), so
   # the fake logs whatever it inherited and a test can assert the var arrives

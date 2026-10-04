@@ -199,7 +199,6 @@ in
           ${../../tests/fakes/claude} \
           ${../../tests/fakes/opencode} \
           ${../../tests/fakes/_driver-common.bash} \
-          ${../../tests/fakes/nix} \
           ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash} \
           ${../../tests/box_env_gen.bash}

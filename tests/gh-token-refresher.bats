@@ -42,8 +42,7 @@ EOF
 
 # Writes a stub script named "$1" into "$BATS_TEST_TMPDIR/bin", reading its
 # body from stdin. Shebang resolves the sandbox's real bash rather than
-# /usr/bin/env, which the nix build sandbox does not have (tests/helper.bash's
-# stub_failing_bind_registry does the same).
+# /usr/bin/env, which the nix build sandbox does not have.
 write_stub() {
   {
     printf '#!%s\n' "$(command -v bash)"
