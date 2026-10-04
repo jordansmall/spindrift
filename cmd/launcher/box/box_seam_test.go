@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -626,20 +627,27 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		kind   string
 		branch string
 		env    map[string]string
+		// registry arms a Registry route; the goldens without it are the
+		// Registry-absent half of the pair.
+		registry bool
 	}{
 		{"work", "agent/issue-7", map[string]string{
 			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}},
+		}, false},
+		{"work-registry", "agent/issue-7", map[string]string{
+			"DISPATCH_KIND": "work", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "implementing",
+			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
+		}, true},
 		{"research", "agent/issue-7", map[string]string{
 			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
-		}},
+		}, false},
 		{"butler", "agent/issue-butler-bugs", map[string]string{
 			"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs", "ISSUE_TITLE": "", "CHORE_HEAD": "deadbeef",
 			"CHORE_DIFF_RANGE": "cafef00d..deadbeef", "CHORE_SLICE": "cmd/launcher/main.go", "CHORE_MAX_FINDINGS": "5",
-		}},
+		}, false},
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
@@ -653,6 +661,10 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			if err := os.MkdirAll(home, 0o755); err != nil {
 				t.Fatal(err)
 			}
+			registryEnv := map[string]string{}
+			if c.registry {
+				registryEnv = seamRegistryRoute(t, workDir)
+			}
 
 			fakes := seamtest.InstallFakes(t, "claude", "orchestrator")
 			base := seamBaseEnv(t)
@@ -660,7 +672,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				"REPO_SLUG": "owner/repo",
 				"HOME":      home,
 				"PATH":      fakes + string(os.PathListSeparator) + os.Getenv("PATH"),
-			}, seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{
+			}, registryEnv, seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{
 				Record: filepath.Join(root, "driver.rec"),
 				Runs:   []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "golden"))}},
 			}), seamtest.WriteFakeConfig(t, "orchestrator", seamtest.OrchestratorConfig{
@@ -687,7 +699,112 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			if got != string(golden) {
 				t.Errorf("first Driver invocation differs from %s.golden\n--- golden ---\n%s--- actual ---\n%s--- end ---", c.kind, golden, got)
 			}
+			if c.registry {
+				assertRegistryBound(t, workDir, home, res.Stdout)
+			} else if strings.Contains(got, "npm_config_registry") || strings.Contains(got, "CARGO_REGISTRIES_") {
+				t.Errorf("a run without REGISTRY_PROXY_MANIFEST bound the registry proxy:\n%s", got)
+			}
 		})
+	}
+}
+
+// seamForwarderPort is bindregistry.ForwarderPort: the address the rendered
+// bindings name and the gate probes.
+const seamForwarderPort = "27182"
+
+const seamRegistryUpstream = "cargo.mycorp.example"
+
+// seamRegistryRoute arms a Registry route for a box run over workDir and
+// returns the env that carries it. The gate wants the proxy's unix socket to
+// exist and the Forwarder port to answer; a listener on that port makes the
+// probe succeed, so no socat is spawned. The repo's committed cargo and npm
+// configs name the upstream host, which is what the bindings rewrite.
+func seamRegistryRoute(t *testing.T, workDir string) map[string]string {
+	t.Helper()
+	// Not under t.TempDir: its long path overruns the 108-byte unix socket
+	// limit in the Nix build sandbox.
+	sockDir, err := os.MkdirTemp("", "rp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	sock := filepath.Join(sockDir, "proxy.sock")
+	us, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { us.Close() })
+	// The listener is what makes the gate's probe succeed; a port already held
+	// elsewhere would let the test pass on someone else's listener, so fail.
+	tl, err := net.Listen("tcp", "127.0.0.1:"+seamForwarderPort)
+	if err != nil {
+		t.Fatalf("Forwarder port %s unavailable: %v", seamForwarderPort, err)
+	}
+	t.Cleanup(func() { tl.Close() })
+
+	if err := os.MkdirAll(filepath.Join(workDir, ".cargo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for path, body := range map[string]string{
+		".cargo/config.toml": "[registries.othercorp]\nindex = \"http://" + seamRegistryUpstream + "/other-index/\"\n",
+		".npmrc":             "registry=http://" + seamRegistryUpstream + "/\n",
+	} {
+		if err := os.WriteFile(filepath.Join(workDir, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seamGit(t, workDir, "add", "-A")
+	seamGit(t, workDir, "commit", "-q", "-m", "chore: pin private registries")
+
+	return map[string]string{
+		"REGISTRY_PROXY_MANIFEST": `{"endpoint":"unix://` + sock + `","routes":[{"prefix":"r0","upstreamHost":"` + seamRegistryUpstream +
+			`","enforcedPaths":[{"ecosystem":"npm","path":"/"}]}]}`,
+	}
+}
+
+func seamHeadBlob(t *testing.T, workDir, path string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", workDir, "show", "HEAD:"+path).Output()
+	if err != nil {
+		t.Fatalf("git show HEAD:%s: %v", path, err)
+	}
+	return string(out)
+}
+
+// assertRegistryBound checks what the golden's env cannot: the cargo bindings
+// land in $HOME/.cargo/config.toml, never the tracked config, and box's exit
+// reverts the in-tree npm rewrite so the tree ends pristine.
+func assertRegistryBound(t *testing.T, workDir, home, stdout string) {
+	t.Helper()
+	if strings.Contains(stdout, "bind-registry") {
+		t.Errorf("a bind-registry step warned:\n%s", stdout)
+	}
+	cargoHome := string(readSeamFile(t, filepath.Join(home, ".cargo", "config.toml")))
+	for _, want := range []string{
+		"[source.spindrift-upstream-othercorp]",
+		`registry = "http://` + seamRegistryUpstream + `/other-index/"`,
+		`replace-with = "spindrift-registry-proxy-r0-othercorp"`,
+		"[registries.spindrift-registry-proxy-r0-othercorp]",
+		`index = "sparse+http://127.0.0.1:` + seamForwarderPort + `/r0/other-index/"`,
+	} {
+		if !strings.Contains(cargoHome, want) {
+			t.Errorf("$HOME/.cargo/config.toml lacks %q:\n%s", want, cargoHome)
+		}
+	}
+	for _, path := range []string{".cargo/config.toml", ".npmrc"} {
+		if got, want := string(readSeamFile(t, filepath.Join(workDir, path))), seamHeadBlob(t, workDir, path); got != want {
+			t.Errorf("%s after box exit = %q; want HEAD's %q", path, got, want)
+		}
+		out, err := exec.Command("git", "-C", workDir, "ls-files", "-v", path).Output()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(string(out), "S") {
+			t.Errorf("%s still carries the skip-worktree bit: %s", path, out)
+		}
+	}
+	if out, err := exec.Command("git", "-C", workDir, "status", "--short").Output(); err != nil || len(out) != 0 {
+		t.Errorf("git status --short after box exit = %q (%v); want a pristine tree", out, err)
 	}
 }
 
@@ -1329,6 +1446,52 @@ func TestBoxSeamDevshellPair(t *testing.T) {
 			got := normaliseDriverInvocation(t, seamtest.ReadSnapshot(t, r.snapshots, 1), nil, r.outboxDir, filepath.Dir(r.outboxDir))
 			if want := "\ndevshell\n" + c.wantPair + "\nprompt\n"; !strings.Contains(got, want) {
 				t.Errorf("golden lacks the devshell pair %q:\n%s", c.wantPair, got)
+			}
+		})
+	}
+}
+
+// TestBoxSeamLockfileScanWarnsAtSettle pins issue #3199's settle scan: a
+// tracked lockfile still naming the Forwarder URL warns whether the Driver
+// pass exited clean or not, and a clean repo stays quiet. The scan only needs
+// the manifest to parse, so the endpoint need not exist.
+func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
+	const warning = "==> WARNING: cargo lockfile Cargo.lock still names the registry proxy Forwarder URL 127.0.0.1:" +
+		seamForwarderPort + " — this will ship in the PR (issue #3199)"
+	cases := []struct {
+		name      string
+		staleLock bool
+		exit      int
+		want      bool
+	}{
+		{"stale lockfile, clean exit", true, 0, true},
+		{"stale lockfile, driver crash", true, 17, true},
+		{"clean repo", false, 0, false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := seamRepo(t, 0)
+			if c.staleLock {
+				lock := "[[package]]\nname = \"example\"\nsource = \"registry+http://127.0.0.1:" + seamForwarderPort + "/r0/index/\"\n"
+				if err := os.WriteFile(filepath.Join(repo, "Cargo.lock"), []byte(lock), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				seamGit(t, repo, "add", "Cargo.lock")
+				seamGit(t, repo, "commit", "-q", "-m", "chore: pin registry")
+			}
+			r := runBoxSeam(t, seamCase{
+				repo: repo,
+				env: map[string]string{
+					"REGISTRY_PROXY_MANIFEST": `{"endpoint":"unix://` + filepath.Join(t.TempDir(), "proxy.sock") + `","routes":[]}`,
+				},
+				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "scan")), Exit: c.exit}},
+			})
+			r.res.WantExit(t, c.exit)
+			if got := strings.Contains(r.res.Stdout, warning); got != c.want {
+				t.Errorf("stdout carries the lockfile warning = %v; want %v:\n%s", got, c.want, r.res.Stdout)
+			}
+			if !c.want && strings.Contains(r.res.Stdout, "still names the registry proxy Forwarder URL") {
+				t.Errorf("clean repo warned about a Forwarder URL:\n%s", r.res.Stdout)
 			}
 		})
 	}
