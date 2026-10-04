@@ -1153,7 +1153,7 @@ by roster-entry count.
 These two knobs previously gated only `selfHealGate`'s host-side decision to
 dispatch another fix-pass Box (issue #2001) — the value never left the
 launcher process. They are now `boxEnv` (`lib/env-schema.nix`), so
-`entrypoint.sh` forwards them into the Box unconditionally as the
+the generated shim forwards them into the Box unconditionally as the
 orchestrator's own `--max-budget-tokens`/`--max-budget-usd` flags, and the
 orchestrator's review-pass loop (`--review-prompt-file` set, the default
 under `ORCHESTRATOR_ENABLED`) now applies the same threshold to its own

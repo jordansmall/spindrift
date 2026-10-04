@@ -28,7 +28,7 @@ nix develop                     # host-side dev shell: git, gh, jq, and the spin
 CI (`.github/workflows/ci.yml`) runs `nix flake check --print-build-logs` and
 then realises the Linux image on every push and PR. **Before opening a PR,
 `nix flake check` must be green**, and new behavior needs a test — a bats case
-for bash/entrypoint changes, a Go test for launcher changes, or a nix fixture
+for bash changes, a Go test for launcher and `box` changes, or a nix fixture
 check for the declarative surface.
 
 spindrift's own dogfood Consumer config opts into `nixStoreWritable` and bakes
@@ -89,7 +89,7 @@ given how much of an agent's output in this Box is narration. The pin lives
 in `flake.nix`'s `caveman` input (`flake = false`; the rev is owned by
 `flake.lock`, never a floating fetch); `nix/dogfood-skills.nix` renames
 upstream's `skills/caveman/SKILL.md` to the `caveman.md` basename the
-skill-discovery loop in `agent/entrypoint.sh` keys off of. This is
+skill-discovery loop in `box` (`cmd/launcher/box`) keys off of. This is
 dogfood-only — the generic harness keeps its empty `skills` default.
 
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
@@ -124,8 +124,7 @@ in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in
 `lib/flakeModule.nix`'s `structuralOptions`. A generated span embedded
 between BEGIN/END markers — in a committed doc (like `docs/reference.md`'s
 Default models table), a template (`templates/default/flake.nix`'s settings
-example), or a baked-in bash/Go source file (`agent/entrypoint.sh`'s outcome
-status words, or the skill-baked probes/flags/Env-assignment/
+example), or a baked-in Go source file (the skill-baked probes/flags/Env-assignment/
 struct-field/gate spans in `cmd/launcher/...`) — is a documented-fact row; add
 one to `lib/documented-facts.nix` rather than hand-writing a new
 check/guard/regen call (issues #2948, #2949). A row whose span lives inside Go
@@ -144,8 +143,9 @@ bwrap harness) rather than hand-running `spindrift dispatch` — see
 
 ## Where code goes
 
-The engine is nix; the runtime logic is a nix-built Go binary; the only bash left
-is the in-box entrypoint. Respect that split — it is the point of the project.
+The engine is nix; the runtime logic is a nix-built Go binary, in the launcher
+and in the in-box `box` program; the only bash left is the generated shim that
+`exec`s `box`. Respect that split — it is the point of the project.
 
 - **`lib/`** — the nix engine. `mkHarness.nix` (the function Consumers import),
   `flakeModule.nix` (the flake-parts option surface), `env-schema.nix` (the
@@ -176,10 +176,12 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   `registry_gen.go` nor `cliflags_gen.go` (generated from `lib/cli-flags.nix`
   by `renderers.nix`'s `renderCliFlagsGo`, pinned by the `cli-flags-gen` check).
   Go tests use standard `_test` files alongside the code.
-- **`agent/`** — the in-box entrypoint (`entrypoint.sh` and friends). Bash here
-  is deliberately thin: nix computes the glue, bash only executes it
-  ([ADR 0005](docs/adr/0005-nix-computes-generated-bash-executes.md)). Keep the
-  ratio that way — reach for nix-generated config over more shell.
+- **`agent/`** — `entrypoint.sh`, the generated shim, and the Driver's hook
+  scripts. The shim has no logic: `lib/image.nix` renders the preambles ahead
+  of one `exec box` line, and `box` (`cmd/launcher/box`) does the rest
+  ([ADR 0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md),
+  building on [ADR 0005](docs/adr/0005-nix-computes-generated-bash-executes.md)).
+  Keep it that way — reach for nix-generated config or Go over more shell.
 - **`nix/`** — `checks.nix` (the flake-check suite), `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), and `regen-goldens.nix` (`nix run
@@ -197,7 +199,7 @@ A few invariants worth calling out:
   line on stdout is parsed by the launcher (`cmd/launcher/internal/outcome`).
   Keep it well-formed; that package is the authoritative grammar. The
   contract is harness-owned: `lib/mkHarness.nix` appends it to any baked
-  `prompt` that omits it, and `agent/entrypoint.sh` appends the same
+  `prompt` that omits it, and `box` appends the same
   canonical contract at run time to a rendered issue prompt that omits it —
   covering a runtime `SPINDRIFT_PROMPT_DIR` override too — so a Consumer
   can't accidentally ship an agent that never emits the line (see
