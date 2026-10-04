@@ -76,6 +76,7 @@ let
       socat # unix-socket<->TCP Forwarder for the registry proxy (ADR 0044, issue #2849)
       driver.driverExecBin # in-box Driver runner (#626)
       driver.orchestratorBin # in-box orchestrator (#1996)
+      driver.boxBin # in-box settle sequence (#4292)
     ])
     # The nix CLI so `nix flake check` / `nix develop` work inside the box.
     # Omitted only when the Consumer opts into the lean image.
@@ -112,6 +113,7 @@ let
         jq # extracts the outcome from the stream-json transcript
         driver.driverExecBin # in-box Driver runner (#626)
         driver.orchestratorBin # in-box orchestrator (#1996)
+        driver.boxBin # in-box settle sequence (#4292)
       ])
       # On PATH for the entrypoint's fj credential setup only when the
       # Consumer's backend is forgejo (issue #1963).

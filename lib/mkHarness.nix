@@ -760,6 +760,97 @@ let
     meta.license = lib.licenses.mit;
   };
 
+  # In-box settle sequence (issue #4292, ADR 0058): entrypoint.sh execs this
+  # after the first Driver run. Same tight-fileset invariant as driverExecBin:
+  # the fileset is exactly box's transitive internal import closure
+  # (`go list -deps ./box`), so host-side launcher churn leaves the image
+  # drvPath alone. internal/driver is walked recursively and so covers
+  # driverkit, claude and opencode.
+  boxBin = pkgs.buildGoModule {
+    pname = "box";
+    version = spindriftVersion;
+    src = lib.fileset.toSource {
+      root = ../cmd/launcher;
+      fileset = lib.fileset.unions [
+        ../cmd/launcher/go.mod
+        ../cmd/launcher/go.sum
+        (lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) ../cmd/launcher/box)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/registryvocab)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/registrymanifest)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/ecosystem)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/bindregistry)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/dispatchkind)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/logscan)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/outcome)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/seambundle)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/bundleout)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/driver)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/landdelta)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/usage)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/signalwire)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/markergate)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/retry)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/runstate)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/outcomebackstop)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/backend)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/passmachine)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/promptfence)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/promptassembly)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/signalclient)
+        forgeTopLevelFiles
+      ];
+    };
+    # Its own hash field: box's fileset vendors independently of the other
+    # in-box binaries off the same go.mod/go.sum (issue #784).
+    vendorHash = buildConstants.boxVendorHash;
+    subPackages = [ "box" ];
+    meta.license = lib.licenses.mit;
+  };
+
   # In-box orchestrator (issue #1996, ADR 0007): the Go binary entrypoint.sh
   # hands the implementor pass off to instead of calling driver-exec
   # directly. Its fileset carries the same
@@ -853,6 +944,7 @@ let
       driverEntry
       driverExecBin
       orchestratorBin
+      boxBin
       driverPreamble
       driverAgentFiles
       ;
@@ -1202,7 +1294,7 @@ let
 
   # vendorHash lives in lib/build-constants.nix. Recompute it with
   # pkgs.lib.fakeHash against this recipe's own `src` and commit it alongside
-  # go.sum. launcherCurrencyBin, driverExecBin and orchestratorBin each vendor
+  # go.sum. launcherCurrencyBin, driverExecBin, orchestratorBin and boxBin each vendor
   # a narrower fileset off the same go.mod/go.sum, so each needs its own
   # recompute against its own src; the hashes are not interchangeable (#784).
   launcherBin = hostPkgs.buildGoModule {
@@ -1637,6 +1729,7 @@ else
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;
+      boxBin = imageDriver.boxBin;
       driverEntry = imageDriver.driverEntry;
 
       # daemonBin is otherwise reachable only as apps.daemon.program, a

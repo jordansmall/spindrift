@@ -1758,6 +1758,7 @@ in
         "fragmentRegistryFile"
         "driverExecBin"
         "orchestratorBin"
+        "boxBin"
         "driverEntry"
         "daemonBin"
         "runInputDocumentFile"
