@@ -475,7 +475,7 @@ phase_toolchain_nudge() {
 }
 
 # phase_devshell_probe detects a Nix devShell in the cloned repo. Sets
-# _use_dev_shell (read by phase_prefetch and phase_prompt_assembly) and
+# _use_dev_shell (read by phase_prefetch and main's box exec) and
 # _harness_path (read by phase_prefetch only; driver-exec handles the Driver's
 # devShell PATH, issue #626).
 phase_devshell_probe() {
@@ -634,8 +634,8 @@ _populate_home_agent_files() {
 
 # _scan_skills_found echoes a comma-joined list of skill names under "$1". A
 # skill is a directory holding a SKILL.md, never a flat <name>.md file, matching
-# how Claude Code itself discovers one. Shared by phase_prompt_assembly and
-# phase_conflict_resolve.
+# how Claude Code itself discovers one. Used by phase_conflict_resolve; box
+# scans in Go.
 _scan_skills_found() {
   local _dir="$1" _sf _sn _found=""
   if [ -d "$_dir" ]; then
@@ -651,15 +651,15 @@ _scan_skills_found() {
 # phase_conflict_resolve spawns a conflict-resolve agent when
 # phase_prework_rebase hit a conflict, and handles the CONFLICT_RESOLVE_PR_URL
 # resolve-only dispatch mode. Reads _had_rebase_conflict and _rebase_and_publish.
-# main() calls it before phase_prompt_assembly (issue #2354) so its two
-# early-exit paths fire before the assemble-prompt verb runs for nothing.
+# main() calls it before box assembles the prompt (issue #2354) so its two
+# early-exit paths fire before assembly runs for nothing.
 phase_conflict_resolve() {
   # Escalate to exit 1 only when the agent genuinely cannot resolve.
   if [ -n "${_had_rebase_conflict:-}" ]; then
     echo "==> pre-work rebase conflict detected — invoking conflict-resolve agent"
     # Precompute the fragments conflict-resolve-prompt.md references (issue
     # #2706): this prompt renders through the bash-only `_subst` path, not the
-    # assemble-prompt verb, so nothing else populates these vars; left unset,
+    # box's prompt assembly, so nothing else populates these vars; left unset,
     # `_subst`'s `${!v:-}` would substitute them as permanently empty. Declared
     # `local` and reached by `_subst` through dynamic scoping (issue #515).
     local SKILLS_FOUND
@@ -729,123 +729,8 @@ phase_conflict_resolve() {
   fi
 }
 
-# phase_prompt_assembly delegates prompt/roster assembly to the driver-exec
-# assemble-prompt verb (ADR 0036, ADR 0007's thin-exec-glue tier, issue #2354);
-# the gate, fragment, base-prompt and roster logic lives in
-# cmd/launcher/internal/promptassembly (issues #2349-#2353). Sets _handoff_file
-# (issues #2355, #2975).
-phase_prompt_assembly() {
-  # Filesystem discovery is the one input only bash can produce; the verb takes
-  # the result as --skills-found. A skill is a directory holding a SKILL.md, so
-  # the name advertised in SKILLS_FOUND is the directory basename. main() already
-  # called _populate_driver_skills_dir (issue #2706); calling it again keeps this
-  # function self-contained when a test invokes it in isolation.
-  _populate_driver_skills_dir
-
-  local SKILLS_FOUND
-  SKILLS_FOUND="$(_scan_skills_found "$DRIVER_SKILLS_DIR")"
-
-  # What remains here is paths, the skill-baked probes, and Handoff passthrough
-  # (issue #2975): every other Box env var is read by assembleprompt_cmd.go
-  # straight off the environment (issue #2979). Boolean gates ride bare flags
-  # appended only when true, so an unset knob is indistinguishable from an
-  # explicit off.
-  local -a _ap_args=(
-    --registry "$PROMPTASSEMBLY_REGISTRY_FILE"
-    --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE"
-    --prompts-dir "$PROMPTS_DIR"
-    --agents-prompt-files "${AGENTS_PROMPT_FILES:-}"
-    --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}"
-    --comms-contract-file "$COMMS_CONTRACT_FILE"
-    --check-contract-file "$CHECK_CONTRACT_FILE"
-    --outcome-contract-file "$OUTCOME_CONTRACT_FILE"
-    --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE"
-    --skills-found "$SKILLS_FOUND"
-    # Driver-invocation passthrough (issue #2975): the per-call Driver flags
-    # ride the Handoff descriptor, which driver-exec and the orchestrator read
-    # at run time.
-    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE"
-    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}"
-    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG"
-    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}"
-    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG"
-    --argv-order "$DRIVER_ARGV_ORDER"
-    --model "${MODEL:-}"
-    --effort "${EFFORT:-}"
-    --driver "$DRIVER_NAME"
-    --driver-bin "$DRIVER_BIN"
-    --driver-flags "$DRIVER_FLAGS_COMMON"
-    --heartbeat-log "${HEARTBEAT_LOG:-}"
-    --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}"
-    --max-budget-usd "${MAX_BUDGET_USD:-0}"
-  )
-  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT
-  [ -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" ] && _ap_args+=(--caveman-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" ] && _ap_args+=(--tdd-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" ] && _ap_args+=(--commit-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" ] && _ap_args+=(--code-review-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" ] && _ap_args+=(--auto-format-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" ] && _ap_args+=(--auto-lint-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" ] && _ap_args+=(--check-hygiene-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ] && _ap_args+=(--code-comments-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" ] && _ap_args+=(--nix-checks-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md" ] && _ap_args+=(--principle-fix-root-causes-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md" ] && _ap_args+=(--principle-laziness-protocol-skill-baked)
-  [ -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" ] && _ap_args+=(--principle-redesign-from-first-principles-skill-baked)
-  # END GENERATED SKILL-BAKED PROBES
-  # DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver registry's own model-slot gate,
-  # and --devshell wraps the Driver in the devShell; both are baked into the
-  # handoff here (issue #2975). _use_dev_shell is main's cross-phase sentinel,
-  # read via dynamic scoping.
-  [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] && _ap_args+=(--argv-model-omit-empty)
-  [ "$_use_dev_shell" = "1" ] && _ap_args+=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
-
-  local _prompt_out _agents_out _handoff_out _review_prompt_out _handoff
-  _prompt_out="$(mktemp)"
-  _agents_out="$(mktemp)"
-  _handoff_out="$(mktemp)"
-  _review_prompt_out="$(mktemp)"
-
-  # Bare `driver-exec` off $PATH, the same convention the other verb call sites
-  # use: the real in-box binary in production, the bats fake under test. A
-  # nonzero exit propagates through `set -euo pipefail`, so no explicit error
-  # handling is needed here.
-  driver-exec assemble-prompt "${_ap_args[@]}" \
-    --prompt-output "$_prompt_out" \
-    --agents-json-output "$_agents_out" \
-    --handoff-output "$_handoff_out" \
-    --review-prompt-output "$_review_prompt_out"
-
-  # $_agents_out is never read back into a bash string: it survives on disk
-  # because it IS the file Handoff.AgentsFile points to, read by driver-exec
-  # directly off --handoff-file.
-  _handoff="$(cat "$_handoff_out")"
-  # The handoff file, and the agents/review-prompt files it names by path, must
-  # survive the rest of the run: driver-exec reads Handoff.AgentsFile at
-  # invocation time and the orchestrator reads Handoff.ReviewPromptFile at review
-  # time, both after this function returns. _prompt_out survives too: box reads
-  # it via Handoff.PromptFile.
-  _handoff_file="$_handoff_out"
-  # Test-only hook (issue #2395): no fake Driver ever receives SessionMode as a
-  # CLI arg, so this raw JSON is the only place a test can observe it. A no-op in
-  # production, where this var is never set.
-  [ -n "${DRIVER_HANDOFF_FILE:-}" ] && cp "$_handoff_out" "$DRIVER_HANDOFF_FILE"
-  # Test-only hook, same shape as DRIVER_HANDOFF_FILE above: once the cleanup
-  # below removes $_review_prompt_out, nothing in production names that path
-  # again, so a test proving the removal has no other way to learn it.
-  [ -n "${DRIVER_REVIEW_PROMPT_TMP_FILE:-}" ] && printf '%s' "$_review_prompt_out" > "$DRIVER_REVIEW_PROMPT_TMP_FILE"
-  # Assemble writes $_review_prompt_out only when it actually rendered a review
-  # prompt; every other cell leaves it empty, so remove it rather than leak a
-  # temp file for the life of the Box. An `if`, not a bare `[ ... ] &&`: as the
-  # last statement in the function a false left-hand side would become its
-  # return value, and `set -e` would then abort every run with no review prompt.
-  if [ -z "$(printf '%s' "$_handoff" | jq -r '.ReviewPromptFile')" ]; then
-    rm -f "$_review_prompt_out"
-  fi
-}
-
 # _write_env_handoff writes a minimal Handoff descriptor JSON to $1 for the one
-# Driver pass that runs before phase_prompt_assembly and so has no handoff file
+# Driver pass that runs before box assembles the prompt and so has no handoff file
 # yet: phase_conflict_resolve's pre-work rebase fixup. driver-exec and the
 # orchestrator both require --handoff-file. The roster, review fields, and
 # PromptFile are left off deliberately and unmarshal to their zero values.
@@ -954,28 +839,65 @@ main() {
     phase_devshell_probe
     phase_prefetch
   fi
-  # phase_conflict_resolve runs before phase_prompt_assembly (issue #2354) so its
-  # two early exits skip the assemble-prompt verb entirely.
+  # phase_conflict_resolve runs before box assembles the prompt (issue #2354)
+  # so its two early exits skip assembly entirely.
   # _populate_driver_skills_dir must run before it too (issue #2706): that
   # phase's driver invocation and both early-exit paths otherwise ran ahead of
-  # the only other call site, leaving a prompt naming a skill unable to find it.
+  # the skills copy, leaving a prompt naming a skill unable to find it. box
+  # probes the same directory for the baked skills.
   _populate_driver_skills_dir
   # _populate_home_agent_files runs at the same early position for the same
   # reason (issue #2843): under bwrap the baked hooks, settings.json, and
   # opencode agent files must already be in $HOME before phase_conflict_resolve
-  # runs and before assemble-prompt rewrites them in place. A no-op under OCI.
+  # runs and before box's prompt assembly rewrites them in place. A no-op under
+  # OCI.
   _populate_home_agent_files
   phase_conflict_resolve
-  phase_prompt_assembly
 
-  # box runs the first Driver run and everything after it: the required-marker
-  # nudges, the synthetic outcome backstop, the already-resolved demotion, the
-  # lockfile scan and bundle-out, and it exits with the run's exit code (ADR
-  # 0058, issues #4292, #4293).
+  # box assembles the prompt, then runs the first Driver run and everything
+  # after it: the required-marker nudges, the synthetic outcome backstop, the
+  # already-resolved demotion, the lockfile scan and bundle-out, and it exits
+  # with the run's exit code (ADR 0058, issues #4292, #4293, #4294). The flags
+  # carry the shell-local values assembly needs: exporting them would put them
+  # in the Driver's environment. Every value rides a flag, bools as explicit
+  # 0/1, because box rejects a missing flag instead of defaulting it.
+  local _model_omit_empty=0 _devshell=0 _devshell_name=default
+  [ -z "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] || _model_omit_empty=1
+  # The name rides the handoff only for a devShell run, as the verb defaulted it.
+  if [ "$_use_dev_shell" = "1" ]; then
+    _devshell=1
+    _devshell_name="${DEV_SHELL_NAME:-default}"
+  fi
   exec box \
-    --handoff-file "$_handoff_file" \
     --work-dir "$WORK_DIR" \
-    --outbox-dir "$OUTBOX_DIR"
+    --outbox-dir "$OUTBOX_DIR" \
+    --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
+    --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE" \
+    --driver-skills-dir "$DRIVER_SKILLS_DIR" \
+    --prompts-dir "$PROMPTS_DIR" \
+    --agents-prompt-files "${AGENTS_PROMPT_FILES:-}" \
+    --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}" \
+    --comms-contract-file "$COMMS_CONTRACT_FILE" \
+    --check-contract-file "$CHECK_CONTRACT_FILE" \
+    --outcome-contract-file "$OUTCOME_CONTRACT_FILE" \
+    --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE" \
+    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE" \
+    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}" \
+    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG" \
+    --argv-model-omit-empty="$_model_omit_empty" \
+    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}" \
+    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG" \
+    --argv-order "$DRIVER_ARGV_ORDER" \
+    --model "${MODEL:-}" \
+    --effort "${EFFORT:-}" \
+    --driver "$DRIVER_NAME" \
+    --driver-bin "$DRIVER_BIN" \
+    --driver-flags "$DRIVER_FLAGS_COMMON" \
+    --heartbeat-log "${HEARTBEAT_LOG:-}" \
+    --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}" \
+    --max-budget-usd "${MAX_BUDGET_USD:-0}" \
+    --devshell="$_devshell" \
+    --devshell-name "$_devshell_name"
 }
 
 main "$@"

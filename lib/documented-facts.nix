@@ -128,12 +128,13 @@ map assertMarkerShape [
   }
   {
     name = "baked-skills-probes-gen";
-    docPath = "agent/entrypoint.sh";
+    docPath = "cmd/launcher/internal/promptassembly/skillprobe.go";
     blockName = "SKILL-BAKED PROBES";
     sourceDesc = "lib/baked-skills.nix";
-    beginMarker = "  # BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT\n";
-    endMarker = "  # END GENERATED SKILL-BAKED PROBES";
-    generated = renderers.renderBakedSkillProbesShell bakedSkills;
+    beginMarker = "\t// BEGIN GENERATED SKILL-BAKED PROBES -- nix run .#regen -- DO NOT EDIT\n";
+    endMarker = "\t// END GENERATED SKILL-BAKED PROBES";
+    generated = renderers.renderBakedSkillProbesGo bakedSkills;
+    postSplice = "gofmt";
   }
   {
     name = "baked-skills-flags-gen";

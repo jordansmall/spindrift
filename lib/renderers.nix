@@ -653,15 +653,12 @@ rec {
       items = names;
     };
 
-  # agent/entrypoint.sh's generated skill-baked probe block (issue #2532):
-  # one `[ -f ... ] && _ap_args+=(...)` line per lib/baked-skills.nix row.
-  renderBakedSkillProbesShell =
+  # cmd/launcher/internal/promptassembly/skillprobe.go's generated skill-baked
+  # probe block (issues #2532, #4294): one Env field assignment per
+  # lib/baked-skills.nix row, 1-tab indent inside ProbeBakedSkills.
+  renderBakedSkillProbesGo =
     bakedSkills:
-    concatStrings (
-      map (
-        s: "  [ -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" ] && _ap_args+=(--${s.name}-skill-baked)\n"
-      ) bakedSkills
-    );
+    concatStrings (map (s: "\te.${s.field} = skillBaked(dir, \"${s.name}\")\n") bakedSkills);
 
   # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
   # flag declarations (issue #2532).
@@ -687,7 +684,7 @@ rec {
     bakedSkills:
     concatStrings (
       map (
-        s: "\t${s.field} bool // entrypoint.sh: -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" (${s.gate})\n"
+        s: "\t${s.field} bool // -f \"$DRIVER_SKILLS_DIR/${s.name}/SKILL.md\" (${s.gate})\n"
       ) bakedSkills
     );
 

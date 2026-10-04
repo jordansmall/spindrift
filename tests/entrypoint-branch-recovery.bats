@@ -208,7 +208,7 @@ setup_rebase_conflict() {
 
 # An unresolvable-conflict run exits before the main agent, so it is the one
 # case here where $DRIVER_PROMPT_FILE holds conflict-resolve-prompt.md: every
-# other test also reaches phase_prompt_assembly, whose driver invocation
+# other test also reaches the main agent, whose driver invocation
 # overwrites the same capture file. This prompt renders through the bash-only
 # `_subst` path, so nothing else sets CAVEMAN_STEP/SKILL_PREAMBLE (issue #2706).
 @test "pre-work rebase conflict: unresolvable conflict prompt carries caveman directive when baked" {
@@ -300,7 +300,7 @@ SKILL
 
 # The caveman-directive tests above pin what the conflict-resolve prompt says,
 # not whether the agent can resolve the skill it names. Claude Code finds a
-# skill only under DRIVER_SKILLS_DIR, which phase_prompt_assembly populates,
+# skill only under DRIVER_SKILLS_DIR, which main populates,
 # yet phase_conflict_resolve runs first and may finish the box (issue #2354).
 # The fake driver logs "skill discovered" only on a real find (issue #2706).
 @test "pre-work rebase conflict: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
@@ -323,8 +323,8 @@ SKILL
 }
 
 # Same proof for the CONFLICT_RESOLVE_PR_URL resolve-only dispatch, where
-# phase_conflict_resolve's own `exit 0` ends the box and phase_prompt_assembly
-# never runs, so DRIVER_SKILLS_DIR population cannot depend on it.
+# phase_conflict_resolve's own `exit 0` ends the box before box ever runs, so
+# DRIVER_SKILLS_DIR population cannot depend on it.
 @test "CONFLICT_RESOLVE_PR_URL: DRIVER_SKILLS_DIR is populated before the conflict-resolve agent runs" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
@@ -344,12 +344,12 @@ SKILL
   grep -q "skill discovered: caveman" "$DRIVER_LOG"
 }
 
-# phase_conflict_resolve runs before phase_prompt_assembly in main(), so the
-# CONFLICT_RESOLVE_PR_URL early exit fires before driver-exec assemble-prompt
-# is invoked at all, not merely before its output is used (issue #2354). A
-# nonexistent PROMPTASSEMBLY_REGISTRY_FILE fails any assemble-prompt call under
-# `set -euo pipefail`, so a green run here proves the verb is never called.
-@test "CONFLICT_RESOLVE_PR_URL: exits before phase_prompt_assembly ever invokes driver-exec assemble-prompt" {
+# phase_conflict_resolve runs before main() execs box, so the
+# CONFLICT_RESOLVE_PR_URL early exit fires before box assembles the prompt at
+# all, not merely before its output is used (issue #2354). A
+# nonexistent PROMPTASSEMBLY_REGISTRY_FILE fails any prompt assembly, so a green
+# run here proves box is never reached.
+@test "CONFLICT_RESOLVE_PR_URL: exits before box ever assembles the prompt" {
   setup_rebase_conflict
   export FAKE_DRIVER_RESOLVE_CONFLICT=1
   export CONFLICT_RESOLVE_PR_URL="https://github.com/owner/repo/pull/7"

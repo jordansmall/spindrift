@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 const (
@@ -47,13 +48,15 @@ type orchCall struct {
 const firstPrompt = "the assembled prompt"
 
 type fixture struct {
-	t    *testing.T
-	dir  string
-	in   inputs
-	env  promptassembly.Env
-	d    deps
-	out  bytes.Buffer
-	errb bytes.Buffer
+	t   *testing.T
+	dir string
+	in  inputs
+	// handoffFile is what the fake Assemble returns: the file the test wrote.
+	handoffFile string
+	env         promptassembly.Env
+	d           deps
+	out         bytes.Buffer
+	errb        bytes.Buffer
 
 	// first scripts the first Driver run, the orchestrator's first call; the
 	// resumes script the calls after it, and calls records only those.
@@ -62,6 +65,9 @@ type fixture struct {
 	resumes   []resumeScript
 	calls     []orchCall
 	ranFirst  bool
+
+	assembled   int
+	assembleErr error
 
 	backstopOut  string
 	backstopErr  error
@@ -94,15 +100,15 @@ func newFixture(t *testing.T) *fixture {
 		"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1",
 		"REPO_SLUG": "owner/repo", "HOME": filepath.Join(dir, "home"),
 	}
+	f.handoffFile = filepath.Join(dir, "handoff.json")
 	f.in = inputs{
-		HandoffFile: filepath.Join(dir, "handoff.json"),
-		WorkDir:     filepath.Join(dir, "work"),
-		OutboxDir:   filepath.Join(dir, "outbox"),
+		WorkDir:   filepath.Join(dir, "work"),
+		OutboxDir: filepath.Join(dir, "outbox"),
 	}
 	promptFile := filepath.Join(dir, "prompt.md")
 	// The shell's assemble-prompt leaves a trailing newline bash's `$(cat)` trimmed.
 	f.write(promptFile, firstPrompt+"\n\n")
-	f.write(f.in.HandoffFile, `{"Driver":"claude","SessionMode":"initial","PromptFile":`+strconv.Quote(promptFile)+`,"ReviewPromptFile":"/tmp/review.md","Model":"opus","Caps":{"MaxReviewRounds":3}}`)
+	f.write(f.handoffFile, `{"Driver":"claude","SessionMode":"initial","PromptFile":`+strconv.Quote(promptFile)+`,"ReviewPromptFile":"/tmp/review.md","Model":"opus","Caps":{"MaxReviewRounds":3}}`)
 	f.env = promptassembly.Env{
 		DispatchKey:          "42",
 		DispatchKeying:       "issue",
@@ -115,6 +121,10 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.firstRun(readyLine+"\n", 0)
 	f.d = deps{
+		Assemble: func(assemblyInputs, promptassembly.Env, io.Writer) (string, error) {
+			f.assembled++
+			return f.handoffFile, f.assembleErr
+		},
 		Orchestrate: f.orchestrate,
 		Backstop: func(cfg outcomebackstop.Config, w io.Writer) error {
 			f.backstopCfgs = append(f.backstopCfgs, cfg)
@@ -310,7 +320,7 @@ func TestOutcomeNudge_ResumeTargetsPinnedSessionWithStrippedHandoff(t *testing.T
 	if want := "--resume " + f.sessionID(); call.session != want {
 		t.Errorf("session file = %q, want %q", call.session, want)
 	}
-	if got := call.argv["--handoff-file"]; got == f.in.HandoffFile {
+	if got := call.argv["--handoff-file"]; got == f.handoffFile {
 		t.Error("resume reused the shared handoff file, want its own stripped copy")
 	}
 	if got := string(call.handoff["ReviewPromptFile"]); got != `""` {
@@ -321,7 +331,7 @@ func TestOutcomeNudge_ResumeTargetsPinnedSessionWithStrippedHandoff(t *testing.T
 			t.Errorf("stripped handoff dropped field %s", k)
 		}
 	}
-	shared, _ := os.ReadFile(f.in.HandoffFile)
+	shared, _ := os.ReadFile(f.handoffFile)
 	if !strings.Contains(string(shared), "/tmp/review.md") {
 		t.Error("the shared handoff file was modified")
 	}
@@ -1061,7 +1071,7 @@ func TestResume_UnreadableHandoffIsFatal(t *testing.T) {
 	// resume's own copy.
 	f.d.Orchestrate = func(argv []string) int {
 		rc := f.orchestrate(argv)
-		os.Remove(f.in.HandoffFile)
+		os.Remove(f.handoffFile)
 		return rc
 	}
 	_, err := run(f.in, f.env, f.d)
@@ -1072,7 +1082,7 @@ func TestResume_UnreadableHandoffIsFatal(t *testing.T) {
 
 func TestFirstRun_UnknownDriverIsFatal(t *testing.T) {
 	f := newFixture(t)
-	f.write(f.in.HandoffFile, `{"Driver":"nope","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
+	f.write(f.handoffFile, `{"Driver":"nope","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
 	_, err := run(f.in, f.env, f.d)
 	if err == nil || !strings.HasPrefix(err.Error(), "driver: ") {
 		t.Fatalf("error = %v", err)
@@ -1106,8 +1116,8 @@ func TestFirstRun_PassesTheSharedHandoffAndPromptFileContent(t *testing.T) {
 	f.run()
 
 	call := f.firstCall
-	if got := call.argv["--handoff-file"]; got != f.in.HandoffFile {
-		t.Errorf("--handoff-file = %q, want the shared handoff %q as-is", got, f.in.HandoffFile)
+	if got := call.argv["--handoff-file"]; got != f.handoffFile {
+		t.Errorf("--handoff-file = %q, want the shared handoff %q as-is", got, f.handoffFile)
 	}
 	if got := string(call.handoff["ReviewPromptFile"]); got != `"/tmp/review.md"` {
 		t.Errorf("ReviewPromptFile = %s, want the first run to keep the review loop", got)
@@ -1122,7 +1132,7 @@ func TestFirstRun_PassesTheSharedHandoffAndPromptFileContent(t *testing.T) {
 
 func TestFirstRun_SessionFlagsFollowTheHandoffSessionMode(t *testing.T) {
 	setMode := func(f *fixture, mode string) {
-		f.write(f.in.HandoffFile, `{"Driver":"claude","SessionMode":"`+mode+`","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
+		f.write(f.handoffFile, `{"Driver":"claude","SessionMode":"`+mode+`","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
 	}
 	cases := []struct {
 		name       string
@@ -1240,14 +1250,14 @@ func TestFirstRun_TempFilesAreCleanedExceptLogs(t *testing.T) {
 	if _, err := os.Stat(f.firstCall.argv["--log-path"]); err != nil {
 		t.Errorf("stream log must survive for later scans: %v", err)
 	}
-	if _, err := os.Stat(f.in.HandoffFile); err != nil {
+	if _, err := os.Stat(f.handoffFile); err != nil {
 		t.Errorf("the shared handoff must stay: %v", err)
 	}
 }
 
 func TestFirstRun_UnreadablePromptFileIsFatal(t *testing.T) {
 	f := newFixture(t)
-	f.write(f.in.HandoffFile, `{"Driver":"claude","PromptFile":"`+filepath.Join(f.dir, "missing.md")+`"}`)
+	f.write(f.handoffFile, `{"Driver":"claude","PromptFile":"`+filepath.Join(f.dir, "missing.md")+`"}`)
 	_, err := run(f.in, f.env, f.d)
 	if err == nil || !strings.HasPrefix(err.Error(), "first-run: ") {
 		t.Fatalf("error = %v", err)
@@ -1259,7 +1269,7 @@ func TestFirstRun_UnreadablePromptFileIsFatal(t *testing.T) {
 
 func TestFirstRun_UnreadableHandoffIsFatal(t *testing.T) {
 	f := newFixture(t)
-	f.in.HandoffFile = filepath.Join(f.dir, "missing.json")
+	f.handoffFile = filepath.Join(f.dir, "missing.json")
 	_, err := run(f.in, f.env, f.d)
 	if err == nil || !strings.HasPrefix(err.Error(), "first-run handoff: ") {
 		t.Fatalf("error = %v", err)
@@ -1328,8 +1338,21 @@ func TestExecOrchestrator_PropagatesExitCodeAndOutput(t *testing.T) {
 
 // --- flags ---
 
+// allFlags is one `--name=value` token per flag, so a bool needs no separate
+// value argument.
 func allFlags() []string {
-	return []string{"--handoff-file", "/h", "--work-dir", "/w", "--outbox-dir", "/o"}
+	return []string{
+		"--work-dir=/w", "--outbox-dir=/o",
+		"--registry=/reg.json", "--validate-markers-registry=/markers.json", "--driver-skills-dir=/skills",
+		"--prompts-dir=/prompts", "--agents-prompt-files={}", "--driver-agent-files-dir=",
+		"--comms-contract-file=/comms", "--check-contract-file=/check",
+		"--outcome-contract-file=/outcome", "--research-outcome-contract-file=/research",
+		"--argv-prompt-style=flag", "--argv-prompt-flag=-p", "--argv-model-flag=--model",
+		"--argv-model-omit-empty=0", "--argv-agents-flag=--agents", "--argv-effort-flag=--effort",
+		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
+		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
+		"--max-budget-tokens=1000", "--max-budget-usd=2.5", "--devshell=1", "--devshell-name=dev",
+	}
 }
 
 func TestParseFlags_AllSupplied(t *testing.T) {
@@ -1337,26 +1360,64 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := inputs{HandoffFile: "/h", WorkDir: "/w", OutboxDir: "/o"}
-	if in != want {
+	want := inputs{
+		WorkDir:   "/w",
+		OutboxDir: "/o",
+		Assembly: assemblyInputs{
+			RegistryFile:                "/reg.json",
+			ValidateMarkersFile:         "/markers.json",
+			SkillsDir:                   "/skills",
+			PromptsDir:                  "/prompts",
+			AgentsPromptFiles:           "{}",
+			CommsContractFile:           "/comms",
+			CheckContractFile:           "/check",
+			OutcomeContractFile:         "/outcome",
+			ResearchOutcomeContractFile: "/research",
+			Passthrough: promptassembly.Passthrough{
+				Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude",
+				DriverFlags: "--verbose", Devshell: true, DevshellName: "dev", HeartbeatLog: "/hb",
+				ArgvShape: promptassembly.ArgvShape{
+					PromptStyle: "flag", PromptFlag: "-p", ModelFlag: "--model", AgentsFlag: "--agents",
+					EffortFlag: "--effort", Order: []string{"prompt", "model", "agents"},
+				},
+				Caps: promptassembly.Caps{
+					MaxSlices: promptassembly.DefaultMaxSlices, MaxReviewRounds: promptassembly.DefaultMaxReviewRounds,
+					MaxBudgetTokens: 1000, MaxBudgetUSD: 2.5,
+				},
+			},
+		},
+	}
+	if !reflect.DeepEqual(in, want) {
 		t.Fatalf("inputs = %+v, want %+v", in, want)
+	}
+}
+
+func TestParseFlags_MalformedBudgetDegradesToZero(t *testing.T) {
+	args := append(allFlags(), "--max-budget-tokens=lots", "--max-budget-usd=-3")
+	in, err := parseFlags(args, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caps := in.Assembly.Passthrough.Caps; caps.MaxBudgetTokens != 0 || caps.MaxBudgetUSD != 0 {
+		t.Fatalf("caps = %+v, want a malformed budget to degrade to 0", caps)
 	}
 }
 
 func TestParseFlags_EveryFlagRequired(t *testing.T) {
 	all := allFlags()
-	for i := 0; i < len(all); i += 2 {
-		missing := append(append([]string{}, all[:i]...), all[i+2:]...)
-		if _, err := parseFlags(missing, io.Discard); err == nil || !strings.Contains(err.Error(), all[i]) {
-			t.Errorf("without %s: error = %v, want it named", all[i], err)
+	for i, tok := range all {
+		missing := append(append([]string{}, all[:i]...), all[i+1:]...)
+		name, _, _ := strings.Cut(tok, "=")
+		if _, err := parseFlags(missing, io.Discard); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("without %s: error = %v, want it named", name, err)
 		}
 	}
 }
 
-func TestParseFlags_FirstRunFlagsAreGone(t *testing.T) {
-	for _, old := range []string{"--driver-exit-code", "--outcome-line", "--stream-log", "--driver-text-log", "--resume-session-file"} {
-		if _, err := parseFlags(append(allFlags(), old, "x"), io.Discard); err == nil {
-			t.Errorf("%s accepted; box now runs the first Driver run itself", old)
+func TestParseFlags_RetiredFlagsAreGone(t *testing.T) {
+	for _, old := range []string{"--handoff-file", "--driver-exit-code", "--outcome-line", "--stream-log", "--driver-text-log", "--resume-session-file"} {
+		if _, err := parseFlags(append(allFlags(), old+"=x"), io.Discard); err == nil {
+			t.Errorf("%s accepted; box now assembles and runs the first Driver run itself", old)
 		}
 	}
 }
@@ -1376,5 +1437,191 @@ func TestMainRun_ErrorPrintsBoxPhaseAndExitsOne(t *testing.T) {
 	rc := mainRun(allFlags(), promptassembly.Env{DispatchKind: "bogus"}, d)
 	if rc != 1 || !strings.HasPrefix(stderr.String(), "box: ") {
 		t.Fatalf("rc=%d stderr=%q", rc, stderr.String())
+	}
+}
+
+// --- prompt assembly ---
+
+func TestAssemble_FailureIsAPhaseErrorAndNoOrchestratorRuns(t *testing.T) {
+	f := newFixture(t)
+	f.assembleErr = errors.New("registry unreadable")
+	_, err := run(f.in, f.env, f.d)
+	var pe *phaseError
+	if !errors.As(err, &pe) || pe.phase != "prompt-assembly" || !strings.Contains(err.Error(), "registry unreadable") {
+		t.Fatalf("err = %v, want a prompt-assembly phase error carrying the cause", err)
+	}
+	if f.ranFirst || len(f.calls) != 0 {
+		t.Error("the orchestrator ran after assembly failed")
+	}
+}
+
+func TestAssemble_RunsOnceBeforeTheFirstDriverRun(t *testing.T) {
+	f := newFixture(t)
+	f.run()
+	if f.assembled != 1 {
+		t.Fatalf("assemble ran %d times, want once", f.assembled)
+	}
+}
+
+// assemblyFixture points assemblePrompt at the repo's real templates and the
+// promptassembly test registries, with tiny contract files and a skills dir
+// holding only the named skills.
+func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
+	t.Helper()
+	dir := t.TempDir()
+	contract := func(name string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte("# "+name+"\n\nbody\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	skillsDir := filepath.Join(dir, "skills")
+	for _, s := range skills {
+		if err := os.MkdirAll(filepath.Join(skillsDir, s), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillsDir, s, "SKILL.md"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return assemblyInputs{
+		RegistryFile:                repopath.RegistryJSON(),
+		ValidateMarkersFile:         repopath.ValidateMarkersJSON(),
+		SkillsDir:                   skillsDir,
+		PromptsDir:                  repopath.PromptsDir(),
+		CommsContractFile:           contract("comms-contract.md"),
+		CheckContractFile:           contract("check-contract.md"),
+		OutcomeContractFile:         contract("outcome-contract.md"),
+		ResearchOutcomeContractFile: contract("research-outcome-contract.md"),
+		Passthrough: promptassembly.Passthrough{
+			Driver: "claude", Model: "opus",
+			ArgvShape: promptassembly.ArgvShape{PromptStyle: "flag", ModelFlag: "--model", Order: []string{"prompt", "model"}},
+			Caps:      promptassembly.Caps{MaxSlices: 9, MaxReviewRounds: 3},
+		},
+	}
+}
+
+// coveredWorkEnv is a work cell Assemble accepts, as the real Box env carries it.
+func coveredWorkEnv() promptassembly.Env {
+	return promptassembly.Env{
+		IssueTracker: "github", TrackerAxisRead: "GITHUB", TrackerAxisWrite: "GITHUB", TrackerAxisFiler: "GH",
+		CodeForge: "github", ForgeBackend: "GH", BoxWriteEnabled: true, DispatchKind: "work",
+		IssueNumber: "42", IssueTitle: "Do it", Branch: "agent/issue-42", BaseBranch: "main",
+		InProgressLabel: "agent-in-progress", CompleteLabel: "agent-complete", RunNonce: "n0nce",
+	}
+}
+
+const cavemanSentinel = "Default to the `/caveman` skill for all narration and prose output this run."
+
+func assembledPrompt(t *testing.T, in assemblyInputs) (handoffPath string, h promptassembly.Handoff, prompt string) {
+	t.Helper()
+	handoffPath, err := assemblePrompt(in, coveredWorkEnv(), io.Discard)
+	if err != nil {
+		t.Fatalf("assemblePrompt: %v", err)
+	}
+	h, err = promptassembly.LoadHandoffFile(handoffPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(h.PromptFile)
+	if err != nil {
+		t.Fatalf("handoff names an unreadable prompt: %v", err)
+	}
+	return handoffPath, h, string(b)
+}
+
+func TestAssemblePrompt_WritesTheFilesTheHandoffNames(t *testing.T) {
+	in := assemblyFixture(t, "caveman")
+	in.Passthrough.Devshell = true
+	_, h, prompt := assembledPrompt(t, in)
+	if h.Driver != "claude" || h.Model != "opus" || !h.Devshell || h.Issue != "42" || h.SessionMode != "initial" {
+		t.Errorf("handoff = %+v; want the passthrough, issue and session mode layered in", h)
+	}
+	if h.Caps.MaxSlices != 9 || h.Caps.MaxReviewRounds != 3 {
+		t.Errorf("caps = %+v", h.Caps)
+	}
+	if !strings.Contains(prompt, "42") {
+		t.Errorf("prompt does not mention the issue:\n%s", prompt)
+	}
+	// A work cell renders a review prompt, and the handoff must name a file
+	// that outlives the call.
+	if h.ReviewPromptFile == "" {
+		t.Fatal("handoff names no review prompt for a work cell")
+	}
+	if _, err := os.Stat(h.ReviewPromptFile); err != nil {
+		t.Errorf("review prompt file: %v", err)
+	}
+}
+
+func TestAssemblePrompt_NoReviewPromptFileWhenNoneRendered(t *testing.T) {
+	in := assemblyFixture(t)
+	env := coveredWorkEnv()
+	env.DispatchKind = "research"
+	handoff, err := assemblePrompt(in, env, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := promptassembly.LoadHandoffFile(handoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.ReviewPromptFile != "" {
+		t.Errorf("ReviewPromptFile = %q; want none", h.ReviewPromptFile)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(handoff), "review-prompt.txt")); err == nil {
+		t.Error("a review prompt file was left behind")
+	}
+}
+
+func TestAssemblePrompt_SkillProbesFollowTheSkillsDir(t *testing.T) {
+	_, _, baked := assembledPrompt(t, assemblyFixture(t, "caveman"))
+	_, _, bare := assembledPrompt(t, assemblyFixture(t))
+	if !strings.Contains(baked, cavemanSentinel) {
+		t.Error("a baked caveman skill did not reach the prompt")
+	}
+	if strings.Contains(bare, cavemanSentinel) {
+		t.Error("the caveman fragment rendered with no baked skill")
+	}
+}
+
+func TestAssemblePrompt_UnreadableRegistryFailsBeforeWritingAnything(t *testing.T) {
+	in := assemblyFixture(t)
+	in.RegistryFile = filepath.Join(t.TempDir(), "absent.json")
+	if _, err := assemblePrompt(in, coveredWorkEnv(), io.Discard); err == nil {
+		t.Fatal("assemblePrompt succeeded with an unreadable registry")
+	}
+}
+
+func TestAssemblePrompt_UnsupportedCellFails(t *testing.T) {
+	env := coveredWorkEnv()
+	env.DispatchKind = "bogus"
+	if _, err := assemblePrompt(assemblyFixture(t), env, io.Discard); err == nil {
+		t.Fatal("assemblePrompt accepted an unsupported dispatch kind")
+	}
+}
+
+func TestRun_AssemblesThenTheFirstPassGetsTheHandoffBoxWrote(t *testing.T) {
+	f := newFixture(t)
+	in := assemblyFixture(t, "caveman")
+	f.in.Assembly = in
+	f.env = coveredWorkEnv()
+	f.d.Assemble = assemblePrompt
+	f.run()
+
+	handoff := f.firstCall.argv["--handoff-file"]
+	h, err := promptassembly.LoadHandoffFile(handoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(h.PromptFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.firstCall.prompt != strings.TrimRight(string(want), "\n") {
+		t.Errorf("first pass prompt differs from the assembled prompt file %s", h.PromptFile)
+	}
+	if !strings.Contains(f.firstCall.prompt, cavemanSentinel) {
+		t.Error("the first pass prompt lacks the baked caveman fragment")
 	}
 }

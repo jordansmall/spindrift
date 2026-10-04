@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seambundle"
 	"spindrift.dev/launcher/internal/seamtest"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 func TestMain(m *testing.M) { seamtest.Main(m) }
@@ -90,7 +91,47 @@ func seamSessionID() string {
 	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
-const seamPrompt = "implement the thing"
+// seamCellEnv is the Box env a work cell assembles against, the golden suite's
+// default cell. Vars box never sees through its flags must come from the
+// environment, exactly as in the real Box.
+func seamCellEnv() map[string]string {
+	return map[string]string{
+		"ISSUE_TRACKER":          "github",
+		"CODE_FORGE":             "github",
+		"BOX_FORGE_BACKEND":      "GH",
+		"BOX_TRACKER_AXIS_READ":  "GITHUB",
+		"BOX_TRACKER_AXIS_WRITE": "GITHUB",
+		"BOX_TRACKER_AXIS_FILER": "GH",
+		"ISSUE_TITLE":            "Do the thing",
+		"IN_PROGRESS_LABEL":      "agent-in-progress",
+		"COMPLETE_LABEL":         "agent-complete",
+	}
+}
+
+// seamBoxArgs is the flag set entrypoint.sh hands box, over the rendered
+// fixtures and the repo's real prompt templates. skillsDir is a Driver skills
+// directory (empty is fine).
+func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
+	t.Helper()
+	return []string{
+		"--work-dir=" + workDir, "--outbox-dir=" + outboxDir,
+		"--registry=" + seamtest.Path(t, "fragments-registry.json"),
+		"--validate-markers-registry=" + seamtest.Path(t, "prompt-contract-registry.json"),
+		"--driver-skills-dir=" + skillsDir,
+		"--prompts-dir=" + repopath.PromptsDir(),
+		"--agents-prompt-files=", "--driver-agent-files-dir=",
+		"--comms-contract-file=" + seamtest.Path(t, "comms-contract.md"),
+		"--check-contract-file=" + seamtest.Path(t, "check-contract.md"),
+		"--outcome-contract-file=" + seamtest.Path(t, "outcome-contract.md"),
+		"--research-outcome-contract-file=" + seamtest.Path(t, "research-outcome-contract.md"),
+		"--argv-prompt-style=flag", "--argv-prompt-flag=-p", "--argv-model-flag=--model",
+		"--argv-model-omit-empty=0", "--argv-agents-flag=--agents", "--argv-effort-flag=--effort",
+		"--argv-order=prompt model agents session driverFlags effort",
+		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
+		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
+		"--devshell=0", "--devshell-name=default",
+	}
+}
 
 // seamBaseEnv is the env every seam run launches box with, minus its
 // dispatch-kind axes. An ambient Box env must not leak into the knobs the
@@ -107,6 +148,7 @@ func seamBaseEnv(t *testing.T) map[string]string {
 		"TRANSIENT_BACKOFF_SECS": "0",
 		"HOLD_JITTER_SECS":       "0",
 	}
+	mergeEnv(env, seamCellEnv())
 	for _, name := range promptassembly.BoxEnvVarNames {
 		if _, set := env[name]; !set {
 			env[name] = ""
@@ -126,6 +168,11 @@ func mergeEnv(dst map[string]string, srcs ...map[string]string) {
 type seamCase struct {
 	repo  string
 	relay bool
+	// env overlays the run env; skills are the Driver skill directories baked in;
+	// agentsPromptFiles is the nix-baked agent -> prompt file map.
+	env               map[string]string
+	skills            []string
+	agentsPromptFiles string
 	// driverRuns script the Driver: the first is the first Driver run box
 	// performs, the rest are its corrective resumes.
 	driverRuns []seamtest.DriverRun
@@ -162,15 +209,6 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 	id := seamSessionID()
 
 	tmp := t.TempDir()
-	write := func(name, content string) string {
-		p := filepath.Join(tmp, name)
-		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	prompt := write("prompt.md", seamPrompt+"\n")
-	handoff := write("handoff.json", fmt.Sprintf(`{"Driver":"claude","SessionMode":"initial","PromptFile":%q,"ReviewPromptFile":"/review.md","Other":1}`, prompt))
 	outbox := filepath.Join(tmp, "outbox")
 	driverRec := filepath.Join(tmp, "driver.rec")
 	orchRec := filepath.Join(tmp, "orch.rec")
@@ -182,7 +220,9 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	write(filepath.Join("home", ".claude", "projects", "x", id+".jsonl"), "")
+	if err := os.WriteFile(filepath.Join(proj, id+".jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	env := seamBaseEnv(t)
 	mergeEnv(env, map[string]string{
@@ -199,28 +239,59 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 		env["BOX_WRITE_ENABLED"] = ""
 		env["BOX_OUTBOX_RELAY_CAPABLE"] = "1"
 	}
-	mergeEnv(env,
+	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", seamtest.OrchestratorConfig{Record: orchRec}))
 
 	res := seamtest.Run(t, seamtest.Cmd{
-		Bin: box,
-		Args: []string{
-			"--handoff-file", handoff,
-			"--work-dir", c.repo,
-			"--outbox-dir", outbox,
-		},
+		Bin:      box,
+		Args:     c.boxArgs(t, outbox),
 		Env:      env,
 		PathDirs: []string{seamtest.InstallFakes(t, "claude", "orchestrator")},
 	})
-	return seamRun{
+	run := seamRun{
 		res:       res,
 		driverRec: seamtest.ReadRecord(t, driverRec),
 		orchRec:   seamtest.ReadRecord(t, orchRec),
 		outboxDir: outbox,
-		handoff:   handoff,
 		sessionID: id,
 	}
+	if len(run.orchRec) > 0 {
+		run.handoff = handoffArg(run.orchRec[0])
+	}
+	return run
+}
+
+func handoffArg(argv []string) string {
+	for i, a := range argv {
+		if a == "--handoff-file" {
+			return argv[i+1]
+		}
+	}
+	return ""
+}
+
+// readSeamFile reads a file box wrote.
+func readSeamFile(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// assembledPrompt is the prompt box assembled, which the first handoff names.
+func (r seamRun) assembledPrompt(t *testing.T) string {
+	t.Helper()
+	if r.handoff == "" {
+		t.Fatal("the orchestrator never ran")
+	}
+	var h struct{ PromptFile string }
+	if err := json.Unmarshal(readSeamFile(t, r.handoff), &h); err != nil || h.PromptFile == "" {
+		t.Fatalf("handoff %s names no prompt (%v)", r.handoff, err)
+	}
+	return string(readSeamFile(t, h.PromptFile))
 }
 
 // outcomeLines are the SPINDRIFT_OUTCOME lines box printed; the progress
@@ -236,42 +307,29 @@ func outcomeLines(stdout string) []string {
 }
 
 // assertResumeHandoffStripsReview reads the handoff the first resume's
-// orchestrator was given and checks the shared original still names a review
-// prompt.
+// orchestrator was given and checks the shared original, the handoff box wrote,
+// still names a review prompt.
 func (r seamRun) assertResumeHandoffStripsReview(t *testing.T) {
 	t.Helper()
 	if len(r.orchRec) != 2 {
 		t.Fatalf("orchestrator runs = %d; want the first run and one resume", len(r.orchRec))
 	}
-	handoffArg := func(argv []string) string {
-		for i, a := range argv {
-			if a == "--handoff-file" {
-				return argv[i+1]
-			}
-		}
-		return ""
-	}
-	if got := handoffArg(r.orchRec[0]); got != r.handoff {
-		t.Errorf("first run handoff = %q; want the shared %q as-is", got, r.handoff)
-	}
 	path := handoffArg(r.orchRec[1])
 	if path == "" || path == r.handoff {
 		t.Fatalf("resume handoff = %q; want a copy distinct from %q", path, r.handoff)
 	}
-	var got map[string]any
-	b, err := os.ReadFile(path)
-	if err != nil {
+	var got, orig map[string]any
+	if err := json.Unmarshal(readSeamFile(t, path), &got); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(b, &got); err != nil {
+	if err := json.Unmarshal(readSeamFile(t, r.handoff), &orig); err != nil {
 		t.Fatal(err)
 	}
-	if got["ReviewPromptFile"] != "" || got["Driver"] != "claude" || got["Other"] != float64(1) {
+	if orig["ReviewPromptFile"] == "" || orig["ReviewPromptFile"] == nil {
+		t.Errorf("shared handoff names no review prompt: %v", orig)
+	}
+	if got["ReviewPromptFile"] != "" || got["Driver"] != "claude" || got["Issue"] != seamIssue {
 		t.Errorf("resume handoff = %v; want ReviewPromptFile cleared and the rest kept", got)
-	}
-	orig, _ := os.ReadFile(r.handoff)
-	if !strings.Contains(string(orig), `"/review.md"`) {
-		t.Errorf("shared handoff was rewritten: %s", orig)
 	}
 }
 
@@ -279,7 +337,8 @@ func (r seamRun) assertResumeHandoffStripsReview(t *testing.T) {
 // the assembled prompt.
 func (r seamRun) wantFirstRun(t *testing.T) {
 	t.Helper()
-	if got, want := r.firstRun(t), []string{"--session-id", r.sessionID, "-p", seamPrompt}; !reflect.DeepEqual(got, want) {
+	want := []string{"--session-id", r.sessionID, "-p", strings.TrimRight(r.assembledPrompt(t), "\n")}
+	if got := r.firstRun(t); !reflect.DeepEqual(got, want) {
 		t.Errorf("first Driver run = %q; want %q", got, want)
 	}
 }
@@ -527,7 +586,8 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 		}},
 		{"butler", "agent/issue-butler-bugs", map[string]string{
 			"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
-			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs",
+			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs", "ISSUE_TITLE": "", "CHORE_HEAD": "deadbeef",
+			"CHORE_DIFF_RANGE": "cafef00d..deadbeef", "CHORE_SLICE": "cmd/launcher/main.go", "CHORE_MAX_FINDINGS": "5",
 		}},
 	}
 	for _, c := range cases {
@@ -542,15 +602,6 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			if err := os.MkdirAll(home, 0o755); err != nil {
 				t.Fatal(err)
 			}
-			write := func(name, content string) string {
-				p := filepath.Join(root, name)
-				if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return p
-			}
-			prompt := write("prompt.md", seamPrompt+"\n")
-			handoff := write("handoff.json", fmt.Sprintf(`{"Driver":"claude","SessionMode":"initial","PromptFile":%q}`, prompt))
 
 			fakes := seamtest.InstallFakes(t, "claude", "orchestrator")
 			base := seamBaseEnv(t)
@@ -570,7 +621,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 
 			res := seamtest.Run(t, seamtest.Cmd{
 				Bin:      box,
-				Args:     []string{"--handoff-file", handoff, "--work-dir", workDir, "--outbox-dir", outbox},
+				Args:     seamBoxArgs(t, workDir, outbox, t.TempDir()),
 				Env:      launch,
 				CleanEnv: true,
 				Dir:      workDir,
@@ -586,5 +637,51 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 				t.Errorf("first Driver invocation differs from %s.golden\n--- golden ---\n%s--- actual ---\n%s--- end ---", c.kind, golden, got)
 			}
 		})
+	}
+}
+
+// boxArgs is seamBoxArgs with the case's baked skills and agent prompt map.
+func (c seamCase) boxArgs(t *testing.T, outbox string) []string {
+	t.Helper()
+	skillsDir := t.TempDir()
+	for _, name := range c.skills {
+		if err := os.MkdirAll(filepath.Join(skillsDir, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(skillsDir, name, "SKILL.md"), []byte("---\nname: "+name+"\n---\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	args := seamBoxArgs(t, c.repo, outbox, skillsDir)
+	for i, a := range args {
+		if strings.HasPrefix(a, "--agents-prompt-files=") {
+			args[i] = "--agents-prompt-files=" + c.agentsPromptFiles
+		}
+	}
+	return args
+}
+
+// TestBoxSeamAssemblesTheGoldenPrompt runs box over the golden suite's default
+// work cell and requires the prompt it hands the orchestrator to equal the
+// pinned golden byte for byte: box, not bash, now produces it.
+func TestBoxSeamAssemblesTheGoldenPrompt(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo: seamRepo(t, 0),
+		env: map[string]string{
+			"ISSUE_TITLE":              "Do the thing",
+			"BOX_OUTBOX_RELAY_CAPABLE": "1",
+			"RUN_NONCE":                "test-run-nonce-0001",
+		},
+		skills:            []string{"caveman", "tdd", "commit", "code-review", "check-hygiene", "code-comments"},
+		agentsPromptFiles: `{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}`,
+		driverRuns:        []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "golden"))}},
+	})
+	r.res.WantExit(t, 0)
+	want, err := os.ReadFile(filepath.Join(repopath.PromptAssemblyGoldenDir(), "no-roster.prompt.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := r.assembledPrompt(t); got != string(want) {
+		t.Errorf("assembled prompt differs from no-roster.prompt.txt\n--- golden ---\n%s\n--- actual ---\n%s\n--- end ---", want, got)
 	}
 }

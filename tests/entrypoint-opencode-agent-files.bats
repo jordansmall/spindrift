@@ -177,7 +177,7 @@ assemble_go_agent_files() {
 # A custom Nth agent (issue #264, roster) must get its baked file rewritten the
 # same generic way as the built-in names, with no per-name branch in the
 # entrypoint. This copies the real PROMPTS_DIR rather than starting from an
-# empty dir so every other file phase_prompt_assembly reads still resolves. The
+# empty dir so every other file prompt assembly reads still resolves. The
 # auditor prompt names ISSUE_NUMBER, so this also proves substitution ran.
 @test "entrypoint rewrites a custom Nth agent's baked file generically via AGENTS_PROMPT_FILES" {
   local prompt_dir="$BATS_TEST_TMPDIR/custom-prompts"

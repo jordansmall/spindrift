@@ -9,7 +9,7 @@
   PROMPTS_DIR = "/agent/prompts";
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), a sibling of
   # PROMPTS_DIR so a SPINDRIFT_PROMPT_DIR mount never hides it (issue #420).
-  # The driver-exec assemble-prompt verb reads the marker off this file's own
+  # box reads the marker off this file's own
   # first line (injectSharedBlock, cmd/launcher/internal/promptassembly), so
   # it cannot drift from the block's heading (issue #2354).
   OUTCOME_CONTRACT_FILE = "/agent/outcome-contract.md";
@@ -24,11 +24,10 @@
   # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
   RESEARCH_OUTCOME_CONTRACT_FILE = "/agent/research-outcome-contract.md";
   # The Conditional fragment registry as JSON (issues #622, #2354). The
-  # `driver-exec assemble-prompt` verb reads it through its `--registry` flag.
+  # box reads it through its `--registry` flag.
   PROMPTASSEMBLY_REGISTRY_FILE = "/agent/fragments-registry.json";
   # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356). The
-  # `driver-exec assemble-prompt` verb reads it through its
-  # `--validate-markers-registry` flag.
+  # box reads it through its `--validate-markers-registry` flag.
   PROMPT_CONTRACT_REGISTRY_FILE = "/agent/prompt-contract-registry.json";
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464). The
   # `driver-exec readonly-guards` verb reads it through its
