@@ -1,6 +1,6 @@
 # The Box's main is a Go program above a generated shim; seam tests follow the code
 
-Status: proposed
+Status: accepted
 
 ## Context
 

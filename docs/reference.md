@@ -664,13 +664,13 @@ directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, `CI FAILURE`, and the
 assembly reads as JSON and renders in one pass, so a fragment row names every
 variable it reads. Adding an opt-in prompt step that renders through box's
 prompt assembly (the one `assemble-prompt` verb shares) is a
-nix-only change: one registry row plus one fragment file, no entrypoint edit.
+nix-only change: one registry row plus one fragment file, no `box` edit.
 `conflict-resolve-prompt.md` is the one exception — box's conflict-resolve pass
 (`cmd/launcher/box/conflict.go`, package `conflictresolve`) renders it
 earlier, before box assembles the prompt, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
 gates are computed by that pass itself rather than by the registry. All
 instruction prose — conditional or not — lives with the rest of the prompt
-surface rather than as heredocs in the entrypoint script.
+surface rather than as heredocs in a shell script.
 `SPINDRIFT_PROMPT_DIR` therefore overrides fragments the same way it
 overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
 (`AUTO_FORMAT`, `AUTO_LINT`, a filer model, etc.) must ship the matching
@@ -926,14 +926,14 @@ host-side strategy by it — plus `DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
 `DRIVER_SKILLS_DIR`, the last baked as an absolute path under
 `/home/agent`, the image's fixed `HOME`) and the
 `_driver_extract_outcome` and sibling function definitions
-`mkHarness` bakes into `agent/entrypoint.sh` ahead of its own body, instead
+`mkHarness` bakes into `agent/entrypoint.sh` ahead of its `exec box` line, instead
 of `mkHarness` string-building them inline. The bats harness sources the
-exact same rendered bytes (issue #433) before exec-ing the entrypoint, so a
+exact same rendered bytes (issue #433) before exec-ing the shim, so a
 test run and a built image can never drift apart — a bats fixture has no
 real `/home/agent` to write skill files into, so `tests/helper.bash`
 appends one test-only line *after* the registry-rendered preamble,
 redirecting `DRIVER_SKILLS_DIR` at the test's own `$HOME`; the baked
-preamble itself renders identically for both. `agent/entrypoint.sh` itself
+preamble itself renders identically for both. The shim itself
 carries no Driver value literals — if the nix-rendered preamble never ran (a
 malformed image build), `set -u` fails the `exec box` line on the first unset
 `DRIVER_*` value (e.g. `$DRIVER_SKILLS_DIR`), and bash's unbound-variable
@@ -947,15 +947,15 @@ root-owned parent when the launcher mounts over it), exported as an
 absolute path (`DRIVER_SESSION_CACHE_DIR`, rendered by
 `lib/preambles.nix`'s `renderDriverMountPreamble` — a separate renderer from
 the registry's own `renderPreamble` above, consumed by the launcher wrapper
-process rather than the in-box entrypoint) that the Go launcher's OCI and
+process rather than the in-box shim) that the Go launcher's OCI and
 bwrap adapters mount over directly — no Driver-specific path literal lives
 in those runner adapters for session cache. Skills no longer follow this
 pattern: `DRIVER_SKILLS_DIR` is rendered the same way but is read only by
-`agent/entrypoint.sh` itself (see the `skillsDirRelative` and `skills`
+`box` itself (see the `skillsDirRelative` and `skills`
 entries above), not by the Go launcher. The runner adapters instead mount
 `SPINDRIFT_SKILLS_DIR` onto a fixed, Driver-independent literal,
 `/operator-skills` (`operatorSkillsDir` in
-`cmd/launcher/internal/runner/mount.go`), which the entrypoint then copies
+`cmd/launcher/internal/runner/mount.go`), which `box` then copies
 into `DRIVER_SKILLS_DIR` at box startup.
 
 The SPINDRIFT_OUTCOME contract — the sections that instruct the agent to
@@ -965,7 +965,7 @@ launcher parses to learn the landing reference (a PR URL under
 not Consumer-tunable. At
 `spindrift build` time, a `prompt` that omits the contract gets it appended
 automatically (idempotent: a prompt that already has it is left untouched).
-A runtime `SPINDRIFT_PROMPT_DIR` override is covered too: the entrypoint
+A runtime `SPINDRIFT_PROMPT_DIR` override is covered too: `box`
 appends the same canonical contract to a rendered issue prompt that omits it,
 idempotently, so a runtime-mounted custom prompt can't ship an agent that
 never emits the outcome line either.
@@ -1055,8 +1055,8 @@ literal into the shared `lib/image.nix`; it renders as an `export` line in
 the same `driverPreamble` text `flagsCommon` already flows through, so it
 reaches `claude` under both the direct and orchestrator invocation paths
 identically, and reaches both the OCI and bwrap runners identically (the
-export lands in `entrypoint.sh`'s own shell process, inherited by every
-child it execs, rather than a runner-specific `Config.Env`/`--setenv` list).
+export lands in the shim's own shell process, which `exec`s `box`, so every
+child inherits it, rather than a runner-specific `Config.Env`/`--setenv` list).
 Disallowing `Agent`/`Task` outright via `--disallowedTools` was rejected —
 scout/reviewer/filer subagent delegation is core to the harness's own
 prompt-directed workflow, not a re-invocation promise like `ScheduleWakeup`.
@@ -1152,7 +1152,7 @@ environment.
 ### Cold-run toolchain nudge
 
 When a Box runs **without a configured `prefetch`** and the cloned Target
-contains a recognized dependency lockfile, the entrypoint logs a one-time
+contains a recognized dependency lockfile, `box` logs a one-time
 informational hint after the clone:
 
 ```
@@ -1295,7 +1295,7 @@ the box, `box` probes for a devShell:
    run inside `nix develop ".#<DEV_SHELL_NAME>" --command bash -c ...` so
    the agent operates in the Target's exact pinned environment — tools, env
    vars, and shellHook included. If `nix develop` fails to exec the Driver
-   (nix rc ≠ 0 and empty stream), the entrypoint relaunches once in the baked
+   (nix rc ≠ 0 and empty stream), `box` relaunches once in the baked
    env rather than dying. That relaunch logs one line to the box's own
    stderr; it's an in-box observability detail, not itemized here alongside
    the operator-facing behavior.
@@ -1932,19 +1932,19 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
   └─ gh issue list --label ready-for-agent        (find the work)
      └─ for each issue, up to MAX_PARALLEL at once:
         podman run  spindrift:latest               (disposable box)
-          └─ /agent/entrypoint.sh
-             ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
-             ├─ run PREFETCH (optional cache warm-up)
-             ├─ assemble the prompt/--agents JSON into the handoff
-             └─ exec box  (cmd/launcher/box: the first Driver run, then the
-                │  outcome and PR-intent nudges, outcome backstop,
-                │  already-resolved demotion, lockfile scan, bundle-out — then
-                │  exits with the run's code)
-                └─ orchestrator                (N passes)
-                   └─ driver-exec × N, one fresh Driver session per pass,
-                      │  seeded from a run-state handoff file — see [In-box
-                      │  orchestrator](#in-box-orchestrator)
-                      └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
+          └─ /agent/entrypoint.sh   (generated shim: nix preambles, then exec box)
+             └─ box  (cmd/launcher/box)
+                ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
+                ├─ run PREFETCH (optional cache warm-up)
+                ├─ assemble the prompt/--agents JSON into the handoff
+                ├─ orchestrator                (N passes, the first Driver run onward)
+                │  └─ driver-exec × N, one fresh Driver session per pass,
+                │     │  seeded from a run-state handoff file — see [In-box
+                │     │  orchestrator](#in-box-orchestrator)
+                │     └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
+                └─ then the outcome and PR-intent nudges, outcome backstop,
+                   already-resolved demotion, lockfile scan, bundle-out —
+                   and exit with the run's code
                 (inside a Driver pass itself:)
                 implement → check → commit → push → self-review (reviewer subagent)
                    → open PR as a draft
@@ -2052,10 +2052,12 @@ two numeric caps call for
 It is the only path: the `ORCHESTRATOR_ENABLED` switch and the direct
 single-pass `driver-exec` path were removed in issue #4291, and a leftover
 setting fails preflight (`spindrift doctor`'s `removed-knobs` check, flake
-eval) naming it as removed. Right after prompt/`--agents` assembly,
-`entrypoint.sh` `exec`s `box` (`cmd/launcher/box`), which runs the first
-Driver pass (issue #4293), then owns the outcome and PR-intent nudges, the
-outcome backstop, demotion, the lockfile scan and bundle-out (issue #4292).
+eval) naming it as removed. The generated shim `entrypoint.sh` `exec`s
+`box` (`cmd/launcher/box`) before anything else runs; `box` clones the Target
+repo (issue #4302), recovers the branch and assembles the prompt/`--agents`
+handoff, then runs the first Driver pass (issue #4293) and owns the outcome
+and PR-intent nudges, the outcome backstop, demotion, the lockfile scan and
+bundle-out (issue #4292).
 `box`'s seam test pins the orchestrator invocation it makes — argv, session
 flags and environment — to goldens captured from the bash path
 (`cmd/launcher/box/testdata/driver-invocation/`), so a later phase move cannot
@@ -2241,7 +2243,7 @@ The review pass's own model/effort travel the same way, as the handoff's
 `ReviewModel`/`ReviewEffort` fields — but unlike `ReviewPromptFile`, neither
 is a passthrough of an `assemble-prompt` flag: `Assemble` itself extracts
 them from the `reviewer` entry of the `AGENTS_JSON_TEMPLATE` environment
-variable `entrypoint.sh` exports (the nix-baked roster reflecting
+variable the shim exports (the nix-baked roster reflecting
 `REVIEW_MODEL`/`REVIEW_EFFORT` — see the table above)
 before stripping that entry from what becomes `--agents`, so the review pass
 never provisions its own `reviewer` subagent. An operator's explicit
@@ -2393,7 +2395,7 @@ the pass manifest with that same kind, its own verdict, and its own usage,
 counted like any other pass. An `APPROVE` verdict settles the run exactly
 as it would have without the gate; `BLOCK` appends a corrective
 `status=blocked` outcome line, carrying the findings as its note, to the
-land pass's stream log, where the entrypoint's outcome scan reads it in
+land pass's stream log, where box's outcome scan reads it in
 place of the ready line, and the finding is posted to the tracker for a
 human to triage, never a further fix lap. The delta review writes its own
 log, so an `APPROVE` leaves the land pass's outcome in the stream log
@@ -2595,7 +2597,7 @@ a verdict:
   knowledge is available while `mkHarness` renders the prompt — `reject`
   fails the build outright; `advise` defers to the runtime arm below when a
   gate or its content isn't yet knowable.
-- **Runtime** (bash): `agent/entrypoint.sh`'s `_validate_prompt_contract`
+- **Runtime** (Go): `box`'s prompt assembly
   re-checks the same rows against the fully-rendered prompt just before the
   Driver runs, once every gate is a resolved boolean — there's no build
   time's "unresolved" state, so it only ever blocks (`exit 1`) or doesn't.
@@ -2702,7 +2704,7 @@ now covered or names no registry fragment, fails `prompt-assembly-golden-coverag
 
 ### Hermetic git config
 
-The entrypoint sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
+`box` sets `GIT_USER_NAME`/`GIT_USER_EMAIL` as **repo-local** git
 config on the cloned workspace (`git config user.name`, no `--global`), not
 global config. CI's hermetic `nix flake check` sandbox has no global git
 config, so keeping the Box's global surface empty too means a test that
@@ -4306,8 +4308,8 @@ see [Daemon](#daemon). The in-Box front for `socket` mode is the `driver-exec
 signal comment|pr-intent|issue-intent|status` verb (issue #3724), which
 reads `SIGNAL_SOCKET_ENDPOINT` and errors when it is unset — so it serves
 the socket carrier only; under `log` the front stays what it has always
-been, a nonce-guarded marker line the Box prints. The Box's own entrypoint
-and in-Box prompt assembly still read an empty carrier as `log`; that
+been, a nonce-guarded marker line the Box prints. `box` and in-Box
+prompt assembly still read an empty carrier as `log`; that
 covers an older host launcher that forwards nothing, and the current
 launcher always forwards the resolved value.
 
@@ -4686,8 +4688,9 @@ runner, launch one box per issue* — and leans on nix for the toolchain instead
 of a Dockerfile. The trade-offs:
 
 - **Simpler & fewer deps**: nix + a container runtime + Claude Code. The
-  orchestration is a small, nix-built Go binary (`cmd/launcher`, ADR 0007); the
-  only bash left is the in-box entrypoint. No orchestration library, no Node
+  orchestration is a small, nix-built Go binary (`cmd/launcher`, ADR 0007),
+  including the in-box `box` program (ADR 0058); the only bash left is the
+  generated shim that `exec`s it. No orchestration library, no Node
   runtime to import.
 - **Cross-issue dependency ordering within a run.** For the `github` tracker,
   the launcher resolves each issue's blockers from GitHub's native
@@ -4911,10 +4914,10 @@ left on the issue carries that meaning instead.
 research kind for issues that are already self-contained — everything
 needed to judge and enrich them lives in the issue body and its comments,
 with no repository to read against. The flag clones no repo and runs none of
-the ordinary research pass's repo-exploration steps: bootstrap skips
-`clone_repo` and branch recovery, and box skips its toolchain nudge,
-devShell probe, and prefetch entirely, standing up only an empty working
-directory before prompt assembly. Because there's nothing to clone, this mode also needs
+the ordinary research pass's repo-exploration steps: box skips the clone,
+branch recovery, its toolchain nudge, devShell probe, and prefetch
+entirely, standing up only an empty working directory before prompt
+assembly. Because there's nothing to clone, this mode also needs
 neither `REPO_SLUG` nor `GH_TOKEN` — startup validation relaxes the
 otherwise-unconditional requirement for both when `--self-contained` is
 paired with the research kind, so the natural pairing is a local issue

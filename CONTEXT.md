@@ -10,7 +10,7 @@ parties around it.
 ## Language
 
 **Harness**:
-spindrift itself — the flake, the launcher, and the in-container entrypoint that
+spindrift itself — the flake, the launcher, and the in-container `box` program that
 together build the image and launch agent waves. The thing being imported.
 _Avoid_: tool, framework, runner (the runner is specifically the container).
 
@@ -74,7 +74,7 @@ asked), tees the stream to the Box log, filters heartbeats in-process
 (absorbing the former standalone heartbeat-filter binary), and returns the
 Driver's exit code. Owns process mechanics — invocation data and outcome
 extraction stay with the Driver's nix half (ADR 0009). Replaced
-entrypoint.sh's temp-file/eval marshalling across the devShell process
+the old entrypoint's temp-file/eval marshalling across the devShell process
 boundary (issue #626). Its `bundle-out` verb (issue #1808) extends it beyond
 process mechanics into CODE_FORGE=local's harness-owned code-out: after the
 Driver exits, it bundles the base..agent-branch range into the outbox itself
@@ -88,12 +88,12 @@ _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 **box (binary)**:
 The in-box Go program (`cmd/launcher/box`, [ADR
 0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md))
-`entrypoint.sh` `exec`s after the first Driver run. box starts the Box,
-orchestrator runs passes, driver-exec serves a pass: box owns the outcome and
+the generated shim `entrypoint.sh` `exec`s. box starts the Box (env guards, the
+Target-repo clone, branch recovery, prompt assembly), orchestrator runs passes, driver-exec serves a pass: box owns the outcome and
 PR-intent nudges, the synthetic outcome backstop, the already-resolved
 demotion, the lockfile scan and bundle-out, then exits with the run's code.
 Not the Box (the isolation boundary above).
-_Avoid_: entrypoint tail, post-driver shell.
+_Avoid_: entrypoint, post-driver shell.
 
 **Filer**:
 The opt-in subagent role (beside the scout and reviewer) that turns findings
@@ -131,6 +131,7 @@ construction and validation. Or a **bwrap sandbox** (`bwrap`): daemonless and
 Linux-only, built from no image at all. The flavors are not interchangeable in
 their properties — uid mapping, resource limits, and lifecycle naming each
 differ — so a statement true of one is not automatically true of the other.
+Either way the Box runs one program, `box`, behind a generated shell shim.
 _Avoid_: runner (that is the adapter that drives a Box, not the Box), worker.
 
 **Harness plumbing**:
@@ -287,7 +288,7 @@ Appliedness has no sentinel of its own — `ApplyInTreeBinding`/
 `RevertInTreeBinding` derive it purely from the `skip-worktree` bit plus
 working-tree-vs-HEAD content on each call, never from state left over from a
 prior run. box binds before its toolchain decision, applies once on the tree
-the entrypoint's clone, branch recovery and rebase left, and reverts on every
+box's clone, branch recovery and rebase left, and reverts on every
 exit after the apply; its conflict-resolve pass (`cmd/launcher/box/conflict.go`)
 also makes a defensive best-effort revert in its rebase-abort path.
 _Avoid_: adapter, registry config, ecosystem support.
@@ -1175,7 +1176,7 @@ safety prompt.
 **Conditional fragment**:
 An opt-in prompt step rendered into an Agent prompt only when its gate is on:
 one registry row — gate variable, fragment file, substitution variable — in a
-harness-owned nix registry, consumed by a single entrypoint loop that also
+harness-owned nix registry, consumed by a single prompt-assembly loop that also
 derives the substitution allowlist from the same rows. Gates are normalized
 to env-nonempty on launcher-delivered Box plumbing; computed gates (skills
 discovery, filer, caveman) are precomputed into variables before the loop.
