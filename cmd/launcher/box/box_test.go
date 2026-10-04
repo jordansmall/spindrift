@@ -1574,6 +1574,60 @@ func TestAssemblePrompt_NoReviewPromptFileWhenNoneRendered(t *testing.T) {
 	}
 }
 
+// A fix pass renders no review prompt, so assembly must leave no file behind
+// for the life of the Box and the handoff must name none (issue #2975).
+func TestAssemblePrompt_FixPassLeavesNoReviewPromptFile(t *testing.T) {
+	env := coveredWorkEnv()
+	env.FixPass = 1
+	handoff, err := assemblePrompt(assemblyFixture(t), env, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := promptassembly.LoadHandoffFile(handoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.ReviewPromptFile != "" {
+		t.Errorf("ReviewPromptFile = %q; want none on a fix pass", h.ReviewPromptFile)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(handoff), "review-prompt.txt")); err == nil {
+		t.Error("a review prompt file was left behind")
+	}
+}
+
+// The flag-supplied Driver settings ride the Handoff to the orchestrator and
+// driver-exec, which no longer read them from the environment (issue #2975).
+func TestAssemblePrompt_HandoffCarriesTheDriverSettings(t *testing.T) {
+	in := assemblyFixture(t)
+	in.Passthrough = promptassembly.Passthrough{
+		Driver: "claude", DriverBin: "claude", DriverFlags: "--verbose", Model: "claude-test-model", Effort: "high",
+		ArgvShape: promptassembly.ArgvShape{
+			PromptStyle: "flag", PromptFlag: "-p", ModelFlag: "--model", AgentsFlag: "--agents", EffortFlag: "--effort",
+			Order: []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
+		},
+		Caps: promptassembly.Caps{MaxSlices: 9, MaxReviewRounds: 3, MaxBudgetTokens: 500000, MaxBudgetUSD: 4.44},
+	}
+	_, h, _ := assembledPrompt(t, in)
+	if h.DriverBin != "claude" || h.DriverFlags != "--verbose" || h.Model != "claude-test-model" || h.Effort != "high" {
+		t.Errorf("handoff driver settings = %+v", h)
+	}
+	if h.Caps.MaxBudgetTokens != 500000 || h.Caps.MaxBudgetUSD != 4.44 {
+		t.Errorf("caps = %+v; want the budgets", h.Caps)
+	}
+	if want := in.Passthrough.ArgvShape; !reflect.DeepEqual(h.ArgvShape, want) {
+		t.Errorf("ArgvShape = %+v; want %+v (ModelOmitEmpty false)", h.ArgvShape, want)
+	}
+}
+
+// An unset budget knob is the schema default (0), which reads back as zero
+// Caps, not an absent field.
+func TestAssemblePrompt_UnsetBudgetsAreZeroCaps(t *testing.T) {
+	_, h, _ := assembledPrompt(t, assemblyFixture(t))
+	if h.Caps.MaxBudgetTokens != 0 || h.Caps.MaxBudgetUSD != 0 {
+		t.Errorf("caps = %+v; want zero budgets", h.Caps)
+	}
+}
+
 func TestAssemblePrompt_SkillProbesFollowTheSkillsDir(t *testing.T) {
 	_, _, baked := assembledPrompt(t, assemblyFixture(t, "caveman"))
 	_, _, bare := assembledPrompt(t, assemblyFixture(t))

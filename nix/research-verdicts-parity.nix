@@ -1,4 +1,4 @@
-# Fixture for the nix-to-Go parity test in tests/prompt-assembly-parity.bats
+# Fixture for TestResearchVerdictRenderingMatchesNix, the nix-to-Go parity test
 # (issues #4159, #2630): the three renderings lib/research-verdicts.nix's
 # renderPrompt performs on research-prompt.md, per RESEARCH_VERDICTS value,
 # for forge.VerdictLabels.RenderPrompt's output at prompt assembly to be

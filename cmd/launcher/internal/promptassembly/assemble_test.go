@@ -335,7 +335,7 @@ func TestAssembleSkillPreambleSelfSubstitution(t *testing.T) {
 	}
 }
 
-// The bash-parity trim (issue #2349, prompt-assembly-parity.bats). bash
+// The bash-parity trim (issue #2349). bash
 // captured the prompt through $(...), which strips every trailing newline,
 // and nothing downstream re-added one. issue-prompt.md ends with a
 // fragment-loop token whose assignment already appends "\n\n", so an

@@ -108,8 +108,8 @@ setup() {
 # The prompt's verdict markers (the status=<...> alternation, the backtick
 # enum, the bullets) are rendered in Go from RESEARCH_VERDICTS at prompt
 # assembly, falling back to the default set when it is unset (issues #2504,
-# #4159, #2630). The nix-to-Go parity for them lives in
-# tests/prompt-assembly-parity.bats.
+# #4159, #2630). The nix-to-Go parity for them lives in promptassembly's
+# TestResearchVerdictRenderingMatchesNix.
 
 @test "research kind renders the verdict markers from the default verdict set" {
   set_dispatch_kind research

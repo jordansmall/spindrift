@@ -272,8 +272,8 @@ SKILL
 # issue #3505 removed the code-comments fragment/probe this test used to
 # target; caveman-default.md is the only fragment phase_conflict_resolve
 # still reads via `_subst` under `set -e`, so a missing copy must still abort
-# the run. The copy-then-remove PROMPTS_DIR pattern mirrors
-# tests/entrypoint-prompt-fragments.bats.
+# the run. The copy-then-remove PROMPTS_DIR pattern is the one
+# promptassembly's promptsDirMissingFragment test helper uses.
 @test "pre-work rebase conflict: PROMPTS_DIR override missing fragments/caveman-default.md aborts the run when the skill is baked" {
   setup_rebase_conflict
   export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/harness-skills"

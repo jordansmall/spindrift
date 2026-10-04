@@ -486,25 +486,19 @@ let
   agentPaths = import ./agent-paths.nix;
   agentPathsPreamble = preambles.renderAgentPathsPreamble agentPaths;
 
-  # The fragment registry rendered for agent/entrypoint.sh (issue #622): a
-  # bash array of "gate|fragment|var" rows plus every var an envsubst call
-  # must know about. The loop and `_subst` are generic over this data, so a
-  # new row needs no entrypoint edit. Shared with the bats harness file
-  # (issue #433) so neither can drift from the other.
-  fragmentRegistryRows = map (row: "${row.gate}|${row.fragment}|${row.var}") fragments;
+  # The var allowlist rendered for agent/entrypoint.sh's `_subst` (issue
+  # #622): every var an envsubst call must know about, generic over the
+  # fragment registry, so a new row needs no entrypoint edit. Shared with the
+  # bats harness file (issue #433) so neither can drift from the other. Box
+  # reads the rows themselves from fragmentsRegistryJson below.
   fragmentSubstVars = lib.concatMap (row: [ row.var ] ++ (row.extraSubstVars or [ ])) fragments;
   fragmentRegistryPreamble =
-    "_FRAGMENT_ROWS=(\n"
-    + lib.concatMapStrings (row: "  " + lib.escapeShellArg row + "\n") fragmentRegistryRows
-    + ")\n"
-    + "_FRAGMENT_SUBST_VARS=(\n"
+    "_FRAGMENT_SUBST_VARS=(\n"
     + lib.concatMapStrings (v: "  " + lib.escapeShellArg v + "\n") fragmentSubstVars
     + ")\n";
 
-  # The same registry as JSON (issue #2354), for the Go `driver-exec
-  # assemble-prompt` verb's `--registry` flag. A sibling of
-  # fragmentRegistryPreamble above, not a replacement: the bash preamble
-  # still drives entrypoint.sh's own fragment loop.
+  # The same registry as JSON (issue #2354), for box's `--registry` flag. The
+  # bash preamble above carries only the substitution allowlist.
   fragmentsRegistryJson = builtins.toJSON fragments;
 
   # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356), for

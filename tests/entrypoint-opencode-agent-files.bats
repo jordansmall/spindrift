@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # On-disk opencode subagent agent-file rewrite (issue #2153): the file-rewrite
-# twin of entrypoint-agents-json.bats's --agents JSON injection loop, for a
+# twin of promptassembly's --agents JSON injection loop, for a
 # Driver whose subagents live in on-disk markdown files instead of a JSON flag.
 
 load helper

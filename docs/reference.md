@@ -2610,11 +2610,12 @@ row × gate × marker-present combination, each pre-resolved via the real
 semantic mapping between them: a Nix `reject` verdict must correspond to the
 runtime validator blocking; `ok`/`advise` must both correspond to it not
 blocking. `nix/checks/prompt-contract-parity.nix` asserts the fold holds in
-pure Nix; `tests/prompt-contract-parity.bats` (wired as the `checks-inbox`
-member `bats-prompt-contract-parity`, `nix/checks/bats.nix`) drives the same
-fixtures — rendered to JSON — through the real `agent/entrypoint.sh` and
-asserts its exit code agrees. A future row added to `validateMarkers` is
-picked up by both without further edits.
+pure Nix; `TestValidatorMatchesParityFold`
+(`cmd/launcher/internal/promptassembly/prompt_contract_parity_integration_test.go`)
+drives the same fixtures — rendered to JSON as the seam fixture
+`prompt-contract-parity-fixtures.json` — through the real validator and
+asserts it blocks exactly when the verdict is `reject`. A future row added to
+`validateMarkers` is picked up by both without further edits.
 
 ### Prompt composition report
 
@@ -2693,7 +2694,7 @@ driver-exec assemble-prompt \
 `driver-exec assemble-prompt`'s `--fragments-output <path>` writes
 `Result.Fragments` — the sorted, de-duplicated fragment names that reached
 the prompt, review prompt, or `--agents` JSON — one per line (an empty file
-when none did). Production never passes it; `tests/prompt-assembly-parity.bats`
+when none did). Production never passes it; `TestPromptAssemblyGoldens`
 pins it per golden cell as `<cell>.fragments.txt` (issue #3838).
 
 Fragment authors: every `lib/fragments.nix` fragment must appear in some

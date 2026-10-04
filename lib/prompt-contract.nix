@@ -588,7 +588,7 @@ rec {
   parityFold = verdict: verdict != "reject";
 
   # One fixture per (validateMarkers row) x gate x markerPresent, driving
-  # tests/prompt-contract-parity.bats against the real runtime validator
+  # promptassembly's TestValidatorMatchesParityFold against the real runtime validator
   # (issue #2320, widened to every row by issue #2356). A warn row's verdict
   # is "advise" by construction rather than by calling
   # buildTimeRejectVerdicts, since its runtime validator never blocks.

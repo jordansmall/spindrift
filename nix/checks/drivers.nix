@@ -267,6 +267,26 @@ in
       "claude Driver's flagsCommon --disallowedTools must deny ${concatStringsSep ", " missing}, got: ${claudeEntry.flagsCommon}";
     pkgs.runCommand "drivers-claude-blocks-loop-background-affordances" { } "touch $out";
 
+  # A Box has no operator to approve a tool call, so claude runs headless with
+  # --dangerously-skip-permissions, and under `--print` only stream-json (which
+  # needs --verbose) emits events live (issue #113); text mode prints nothing
+  # until the end and the box looks dead under `podman logs -f`. box hands
+  # flagsCommon to driver-exec verbatim, so this pins the bytes it forwards.
+  drivers-claude-runs-headless-and-streaming =
+    let
+      words = splitString " " driverRegistry.entries.claude.flagsCommon;
+      streamIdx = filter (iw: iw.w == "--output-format") (imap0 (i: w: { inherit i w; }) words);
+      format = if streamIdx == [ ] then null else builtins.elemAt words ((builtins.head streamIdx).i + 1);
+    in
+    assert assertMsg (builtins.elem "--dangerously-skip-permissions" words)
+      "claude Driver's flagsCommon must include --dangerously-skip-permissions, got: ${driverRegistry.entries.claude.flagsCommon}";
+    assert assertMsg (builtins.elem "--verbose" words)
+      "claude Driver's flagsCommon must include --verbose (stream-json needs it under --print), got: ${driverRegistry.entries.claude.flagsCommon}";
+    assert assertMsg (
+      format == "stream-json"
+    ) "claude Driver's flagsCommon must run --output-format stream-json, got: ${toString format}";
+    pkgs.runCommand "drivers-claude-runs-headless-and-streaming" { } "touch $out";
+
   # Issue #2011: --disallowedTools can't strip run_in_background, a parameter
   # of the Bash/Agent/Task/PowerShell calls rather than a tool name, and
   # agent/reject-background-bash.sh covers only Bash. claude honors

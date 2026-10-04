@@ -27,11 +27,13 @@ let
   covered = unique (builtins.concatLists (map (n: readLines (goldenDir + "/${n}")) sidecars));
 
   # A sidecar left behind by a deleted cell would keep claiming coverage, so
-  # every sidecar must name a cell the parity suite still runs.
+  # every sidecar must name a cell the Go golden test still runs.
   cells = builtins.concatLists (
     filter (m: m != null) (
-      map (builtins.match ''.*assert_cell_golden "([^"]+)".*'') (
-        splitString "\n" (builtins.readFile ../../tests/prompt-assembly-parity.bats)
+      map (builtins.match ''.*\{name: "([^"]+)".*'') (
+        splitString "\n" (
+          builtins.readFile ../../cmd/launcher/internal/promptassembly/golden_integration_test.go
+        )
       )
     )
   );
@@ -44,16 +46,16 @@ let
   # Name test functions, not line numbers, in the reasons: lines rot.
   allowlist = {
     "auto-format.md" =
-      "assemble_test.go TestAssembleAutoFormatGate; entrypoint-prompt-fragments.bats 'AUTO-FORMAT step points to the skill instead of explaining nix fmt inline'";
+      "assemble_test.go TestAssembleAutoFormatGate; fragment_rendering_test.go TestAssembleStepRendering/AUTO-FORMAT_on_points_at_the_skill,_no_inline_nix_fmt_rationale";
     "auto-lint.md" =
-      "assemble_test.go TestAssembleAutoLintGate; entrypoint-prompt-fragments.bats 'AUTO-LINT step points to the skill instead of explaining the linter procedure inline'";
+      "assemble_test.go TestAssembleAutoLintGate; fragment_rendering_test.go TestAssembleStepRendering/AUTO-LINT_on_points_at_the_skill,_no_inline_linter_procedure";
     "ci-failure.md" = "assemble_test.go TestAssembleCIFailureSummaryGate";
     "issue-blocked-comment-forgejo-readonly.md" =
-      "entrypoint-prompt-fragments.bats 'issue blocked-comment step: forgejo tracker under read-only never runs fj issue comment'";
+      "fragment_rendering_test.go TestAssembleFragmentRendering/blocked-comment_forgejo_read-only_never_runs_fj_issue_comment";
     "research-verdict-forgejo.md" =
-      "entrypoint-prompt-fragments.bats 'research verdict step: forgejo tracker under read-write keeps fj issue comment unchanged'";
+      "fragment_rendering_test.go TestAssembleFragmentRendering/research_verdict_forgejo_read-write_keeps_fj_issue_comment";
     "research-verdict-forgejo-readonly.md" =
-      "entrypoint-prompt-fragments.bats 'research verdict step: forgejo tracker under read-only relays via a nonce-guarded SPINDRIFT_COMMENT line, never fj issue comment'; orchestrator TestMarkerFragmentParity";
+      "fragment_rendering_test.go TestAssembleFragmentRendering/research_verdict_forgejo_read-only_relays,_never_fj_issue_comment; orchestrator TestMarkerFragmentParity";
     "research-verdict-local.md" =
       "assemble_test.go TestAssembleResearchPromptCavemanLocalTracker; orchestrator TestMarkerFragmentParity";
   };
@@ -135,8 +137,8 @@ in
       "prompt-assembly-golden-coverage: an allowlisted name absent from the registry must land in staleUnregistered, got: ${builtins.toJSON fixtureStaleUnregistered}";
     assert assertMsg (orphansOf [ "kept" "deleted" ] [ "kept" ] == [ "deleted" ])
       "prompt-assembly-golden-coverage: a sidecar whose cell no longer runs must land in orphanSidecars";
-    assert assertMsg (registry != [ ] && covered != [ ])
-      "prompt-assembly-golden-coverage: expected a non-empty lib/fragments.nix registry and at least one *.fragments.txt golden sidecar -- check is vacuous";
+    assert assertMsg (registry != [ ] && covered != [ ] && cells != [ ])
+      "prompt-assembly-golden-coverage: expected a non-empty lib/fragments.nix registry, at least one *.fragments.txt golden sidecar and at least one goldenCells() cell -- check is vacuous";
     pkgs.runCommand "prompt-assembly-golden-coverage" { } ''
       fail=0
       ${section "fragments with no golden cell and no allowlist entry:"
@@ -151,8 +153,7 @@ in
         "remove the allowlist entry from nix/checks/prompt-assembly-golden-coverage.nix"
         real.staleUnregistered
       }
-      ${section
-        "fragments.txt sidecars with no assert_cell_golden cell in tests/prompt-assembly-parity.bats:"
+      ${section "fragments.txt sidecars with no cell in goldenCells() (golden_integration_test.go):"
         "delete the stale sidecar, or restore its cell"
         orphanSidecars
       }

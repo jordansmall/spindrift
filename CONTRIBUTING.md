@@ -215,7 +215,7 @@ A few invariants worth calling out:
   of truth; the same bytes recur as the Go literal `tddAnchorClause`
   (`cmd/launcher/internal/promptassembly/assemble_test.go`), as `grep -qF`
   assertions in `tests/entrypoint-skills.bats` and
-  `tests/entrypoint-prompt-fragments.bats` (some negated, so a half-done
+  `cmd/launcher/internal/promptassembly/fragment_rendering_test.go` (some negated, so a half-done
   reword leaves the `!` arms passing), in the goldens under
   `tests/testdata/prompt-assembly-golden/`, and in this bullet's own quote.
   The pair's other arm, `tdd-unbaked.md`, pins its opening line separately: a

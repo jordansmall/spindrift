@@ -95,7 +95,7 @@ rec {
   # is untouched, and `builtins.replaceStrings` no-ops where its target is
   # absent. forge.VerdictLabels.RenderPrompt (Go) ports this function so a
   # SPINDRIFT_PROMPT_DIR override renders the same way at prompt assembly; it
-  # must stay byte-identical, which tests/prompt-assembly-parity.bats pins.
+  # must stay byte-identical, which promptassembly's TestResearchVerdictRenderingMatchesNix pins.
   renderPrompt =
     promptText: verdicts:
     let

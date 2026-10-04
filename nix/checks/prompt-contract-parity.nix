@@ -2,7 +2,7 @@
 # ("ok"/"reject"/"advise") to the runtime validator promptassembly.Validate,
 # which has no "advise" state: "reject" must block, "ok" and "advise" must not
 # (issues #2320, #2244, #2356). Only the pure-Nix side is checked here;
-# tests/prompt-contract-parity.bats drives the real validator.
+# promptassembly's TestValidatorMatchesParityFold drives the real validator.
 { pkgs, ... }:
 let
   promptContract = import ../../lib/prompt-contract.nix;
