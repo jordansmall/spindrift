@@ -150,9 +150,6 @@ in
         nativeBuildInputs = [
           pkgs.go
           pkgs.git
-          # The box seam test sources the rendered Driver preamble, whose
-          # _driver_session_flags needs compgen; stdenv's bash omits it.
-          pkgs.bashInteractive
         ];
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
       }

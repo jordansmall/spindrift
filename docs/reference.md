@@ -863,8 +863,9 @@ data with no validation or rendering logic of its own (issue #624). A new
 Driver entry declares:
 
 - `name`, `package`, `bin`, `flagsCommon`, `outcomeExtractFnBody`,
-  `sessionFlagsFnBody`, `agentsJsonTemplate` — the fields ADR 0009 already
-  documents.
+  `agentsJsonTemplate` — the fields ADR 0009 already documents. Session
+  flags are not a registry field: implement `SessionFlags` on the Driver's Go
+  strategy (`cmd/launcher/internal/driver`).
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row
@@ -926,7 +927,7 @@ into the `DRIVER_*` variable block (`DRIVER_NAME` — the launcher selects its
 host-side strategy by it — plus `DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
 `DRIVER_SKILLS_DIR`, the last baked as an absolute path under
 `/home/agent`, the image's fixed `HOME`) and the
-`_driver_extract_outcome`/`_driver_session_flags` function definitions
+`_driver_extract_outcome` and sibling function definitions
 `mkHarness` bakes into `agent/entrypoint.sh` ahead of its own body, instead
 of `mkHarness` string-building them inline. The bats harness sources the
 exact same rendered bytes (issue #433) before exec-ing the entrypoint, so a

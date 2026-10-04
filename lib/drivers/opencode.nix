@@ -69,12 +69,6 @@ in
       | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
   '';
 
-  sessionFlagsFnBody = ''
-    # opencode wires no session resume; this is a defined no-op so the
-    # registry's _driver_session_flags function body is always present.
-    :
-  '';
-
   # opencode composes subagents from the on-disk files agentFilesTemplate below
   # bakes, not a CLI flag, so this always returns "". It keeps claude.nix's
   # roster argument (issue #264) only to give mkHarness.nix one call site.

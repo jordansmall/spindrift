@@ -18,7 +18,6 @@ let
     "outcomeExtractFnBody"
     "outcomeExtractNearMissFnBody"
     "resultTextExtractFnBody"
-    "sessionFlagsFnBody"
     "agentsJsonTemplate"
     "agentFilesTemplate"
     "argvShape"
@@ -159,9 +158,6 @@ let
     + "}\n"
     + "_driver_extract_result_text() {\n"
     + driverEntry.resultTextExtractFnBody
-    + "}\n"
-    + "_driver_session_flags() {\n"
-    + driverEntry.sessionFlagsFnBody
     + "}\n";
 
   # Names rendered into the preamble are interpolated into shell, so each must

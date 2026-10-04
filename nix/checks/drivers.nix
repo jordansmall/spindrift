@@ -32,7 +32,6 @@ let
     outcomeExtractFnBody = "echo stub-outcome\n";
     outcomeExtractNearMissFnBody = "echo stub-near-miss\n";
     resultTextExtractFnBody = "echo stub-result-text\n";
-    sessionFlagsFnBody = "echo stub-session\n";
     # Minimal well-formed argvShape (issue #2534): agentsFlag is deliberately
     # omitted (like opencode.nix) and modelOmitEmpty is false, so
     # drivers-render-preamble-omits-argv-shape-optional-vars can assert both
@@ -82,7 +81,7 @@ in
         flagsCommon = "";
         skillsDirRelative = ".incomplete/skills";
         outcomeExtractFnBody = "";
-        # sessionFlagsFnBody and agentsJsonTemplate deliberately omitted.
+        # agentsJsonTemplate deliberately omitted.
       };
       result = builtins.tryEval (driverRegistry.assertShape "incomplete" incomplete);
     in
@@ -112,8 +111,6 @@ in
       "renderPreamble must fold in the Driver entry's outcomeExtractNearMissFnBody, got: ${out}";
     assert assertMsg (hasInfix "_driver_extract_result_text() {\necho stub-result-text" out)
       "renderPreamble must fold in the Driver entry's resultTextExtractFnBody, got: ${out}";
-    assert assertMsg (hasInfix "_driver_session_flags() {\necho stub-session" out)
-      "renderPreamble must fold in the Driver entry's sessionFlagsFnBody, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
 
   # Issue #2011: renderPreamble exports a Driver entry's envCommon into
