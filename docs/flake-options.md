@@ -16,6 +16,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
+| `perSystem.spindrift.agents.bashTimeoutMs` | `DRIVER_BASH_TIMEOUT_MS` | — | per-call Bash timeout in milliseconds (issue #4409): exported into the Box under the env var names the active Driver's registry entry declares in bashTimeoutEnv (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, the default and maximum a single Bash call may run); a Driver declaring none ignores it; unset exports nothing and the Driver keeps its own limits (claude: 10-minute maximum); a value that is not a positive integer is skipped with a warning in the Box log rather than exported |
 | `perSystem.spindrift.agents.format.enable` | `AUTO_FORMAT` | `` | when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found |
 | `perSystem.spindrift.agents.lint.enable` | `AUTO_LINT` | `` | when enabled, the implementor auto-detects and runs the project's linter on changed files before each commit, applying auto-fix then resolving remaining findings; skips silently when no linter is found |
 | `perSystem.spindrift.agents.models.default` | `MODEL` | `claude-sonnet-5` | main/coordinator Claude model for the agent (zero-rebuild runtime switch); worker-tier defaults are unaffected |

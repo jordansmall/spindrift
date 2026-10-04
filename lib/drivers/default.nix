@@ -164,6 +164,15 @@ let
     + driverEntry.sessionFlagsFnBody
     + "}\n";
 
+  # Names rendered into the preamble are interpolated into shell, so each must
+  # be a plain identifier; `what` labels the offending field in the error.
+  assertShellIdent =
+    what: name:
+    if builtins.match "[A-Za-z_][A-Za-z0-9_]*" name == null then
+      throw "Driver ${what} '${name}' is not a valid shell identifier"
+    else
+      name;
+
   # envCommon (issue #2011) renders as `export`, unlike the plain DRIVER_*
   # assignments, because the value has to reach a child process (claude, via
   # driver-exec's env inheritance) rather than entrypoint.sh's own
@@ -172,12 +181,22 @@ let
     driverEntry:
     lib.concatStrings (
       lib.mapAttrsToList (
-        name: value:
-        if builtins.match "[A-Za-z_][A-Za-z0-9_]*" name == null then
-          throw "Driver envCommon key '${name}' is not a valid shell identifier"
-        else
-          "export ${name}=" + lib.escapeShellArg value + "\n"
+        name: value: "export ${assertShellIdent "envCommon key" name}=" + lib.escapeShellArg value + "\n"
       ) (driverEntry.envCommon or { })
+    );
+
+  # bashTimeoutEnv (issue #4409) is plain data, not an export: the Consumer's
+  # timeout value is only known at run time, so entrypoint.sh exports it under
+  # each name listed here. Absent renders no line, so a Driver with no such
+  # env vars (opencode) ignores the knob without any branch on its name.
+  renderBashTimeoutEnv =
+    driverEntry:
+    lib.optionalString (driverEntry ? bashTimeoutEnv) (
+      "DRIVER_BASH_TIMEOUT_ENV="
+      + lib.escapeShellArg (
+        lib.concatStringsSep " " (map (assertShellIdent "bashTimeoutEnv name") driverEntry.bashTimeoutEnv)
+      )
+      + "\n"
     );
 
   # The argv shape comes from ADR 0009 and issue #2534.
@@ -244,6 +263,7 @@ let
       + "\n"
     )
     + renderEnvCommon driverEntry
+    + renderBashTimeoutEnv driverEntry
     + renderArgvShape driverEntry
     + renderFunctions driverEntry;
 in

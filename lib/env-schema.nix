@@ -171,6 +171,16 @@ in
     boxEnv = true;
     boxEnvOnly = true;
   };
+  driverBashTimeoutMs = {
+    env = "DRIVER_BASH_TIMEOUT_MS";
+    group = "agents";
+    doc = "per-call Bash timeout in milliseconds (issue #4409): exported into the Box under the env var names the active Driver's registry entry declares in bashTimeoutEnv (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, the default and maximum a single Bash call may run); a Driver declaring none ignores it; unset exports nothing and the Driver keeps its own limits (claude: 10-minute maximum); a value that is not a positive integer is skipped with a warning in the Box log rather than exported";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    nixSubPath = "bashTimeoutMs";
+    boxEnv = true;
+    boxEnvOnly = true;
+  };
   model = {
     env = "MODEL";
     group = "agents";
