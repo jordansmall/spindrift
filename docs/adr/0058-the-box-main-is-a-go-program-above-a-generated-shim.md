@@ -214,3 +214,28 @@ Deliberately out of scope, each with the trigger that would reopen it:
   shell surface in the repo, untouched by any ADR, exercised only at build
   time. Named here as the known remainder; a separate question.
 - **Bats files whose system under test still execs real shell.**
+
+## Amendment (issue #4416): box as PID 1 reaps orphans through an init parent and a worker child
+
+Since issue #4292 the entrypoint `exec`s `box`, so under podman `box` is PID 1.
+The image carries no init, so every orphaned grandchild reparented to `box` and
+was never waited on: 364 `git` zombies hit `pids.max` 512 and Go could not
+create a thread.
+
+- **`box` reaps for itself**, rather than an init such as tini or catatonit in
+  front of it. `box` stays the `exec` target and the image gains nothing.
+- **When `os.Getpid() == 1`, `box` re-runs its own binary as its only child**
+  and does nothing else itself: it forwards SIGTERM/SIGINT/SIGHUP/SIGQUIT and
+  loops `Wait4(-1)` to reap adopted orphans. Reaping in the process that runs
+  `os/exec` children would race their `Wait`s and steal their statuses; the
+  worker child owns every exec child `box` runs, so its waits are never raced.
+- **The exit code passes through**: the child's code, or 128+signal when it is
+  killed. If the child cannot be started, `box` falls back to running in
+  process.
+- **bwrap is unaffected**: `box` is not PID 1 there (bwrap's own init reaps),
+  so the split is a no-op.
+- **Termination signals change behaviour**: before this, PID 1 `box` had no
+  forwarding, so on SIGTERM the Go runtime's default handling exited 2 and the
+  namespace's other processes died with it. Now init forwards
+  SIGTERM/SIGINT/SIGHUP/SIGQUIT to the worker and exits with the worker's
+  status, 128+signal when the signal kills it (143 rather than 2).
