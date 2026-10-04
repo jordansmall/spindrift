@@ -1891,3 +1891,433 @@ func TestBoxSeamPrintsTheWritableStoreNotice(t *testing.T) {
 		t.Errorf("stdout does not open with the store notice\n%s", r.res.Stdout)
 	}
 }
+
+// seamPriorBranchRepo is a work tree whose origin holds a prior run's agent
+// branch (one commit adding branch.txt unless withWork is off), optionally with origin/main advanced
+// past it by a non-conflicting commit. The local branch is deleted, as in the
+// fresh clone box starts from.
+func seamPriorBranchRepo(t *testing.T, advanceMain, withWork bool) string {
+	t.Helper()
+	dir := seamRepo(t)
+	commit := func(file, msg string) {
+		if err := os.WriteFile(filepath.Join(dir, file), []byte(file+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		seamGit(t, dir, "add", file)
+		seamGit(t, dir, "commit", "-q", "-m", msg)
+	}
+	seamGit(t, dir, "checkout", "-q", "-b", seamBranch)
+	if withWork {
+		commit("branch.txt", "prior run work")
+	}
+	seamGit(t, dir, "push", "-q", "origin", seamBranch)
+	seamGit(t, dir, "checkout", "-q", "main")
+	seamGit(t, dir, "branch", "-q", "-D", seamBranch)
+	if advanceMain {
+		commit("main_advance.txt", "advance main")
+		seamGit(t, dir, "push", "-q", "origin", "main")
+	}
+	return dir
+}
+
+// seamOriginRef is origin's refs/heads/<seamBranch> sha, or "" when absent.
+func seamOriginRef(t *testing.T, work string) string {
+	t.Helper()
+	url, err := exec.Command("git", "-C", work, "remote", "get-url", "origin").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "--git-dir", strings.TrimSpace(string(url)), "rev-parse", "--verify", "--quiet", "refs/heads/"+seamBranch).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// seamBundleHeads is `git bundle list-heads` of the outbox bundle as ref -> sha,
+// or nil when no bundle was written.
+func seamBundleHeads(t *testing.T, work, outbox string) map[string]string {
+	t.Helper()
+	path := filepath.Join(outbox, seambundle.FileName)
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	out, err := exec.Command("git", "-C", work, "bundle", "list-heads", path).Output()
+	if err != nil {
+		t.Fatalf("git bundle list-heads: %v", err)
+	}
+	heads := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if sha, ref, ok := strings.Cut(line, " "); ok {
+			heads[ref] = sha
+		}
+	}
+	return heads
+}
+
+func seamGhAskedPRList(t *testing.T, rec string) bool {
+	t.Helper()
+	for _, argv := range seamtest.ReadRecord(t, rec) {
+		if len(argv) >= 2 && argv[0] == "pr" && argv[1] == "list" {
+			return true
+		}
+	}
+	return false
+}
+
+// Branch recovery through the real box binary against a real origin and the
+// gh fake: the prior branch is adopted, force-reset or ignored, and the result
+// is read off the pushed ref or the relayed bundle.
+func TestBoxSeamBranchRecovery(t *testing.T) {
+	forgejo := map[string]string{
+		"CODE_FORGE": "forgejo", "BOX_FORGE_BACKEND": "FORGEJO",
+		"FORGEJO_TOKEN": "tok", "FORGEJO_BASE_URL": "https://forge.example",
+	}
+	butler := map[string]string{
+		"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
+		"DISPATCH_KEY": "butler-bugs", "ISSUE_NUMBER": "", "ISSUE_TITLE": "", "CHORE_NAME": "bugs",
+		"CHORE_HEAD": "deadbeef", "CHORE_DIFF_RANGE": "", "CHORE_SLICE": "agent/entrypoint.sh",
+	}
+	const (
+		unchanged = "unchanged" // origin still holds the prior run's tip
+		absent    = "absent"    // origin never gets an agent branch
+		rebased   = "rebased"   // origin holds the prior tip rebased onto origin/main
+		reset     = "reset"     // origin holds origin/main itself
+	)
+	cases := []struct {
+		name    string
+		prior   bool // origin holds a prior agent branch
+		advance bool // origin/main moved past it
+		openPR  bool // the gh fake reports an open PR on the branch
+		noWork  bool // the prior branch is at origin/main with no commits of its own
+		relay   bool
+		env     map[string]string
+		fj      bool
+
+		wantBranch string // the work tree's checked-out branch afterwards
+		wantRef    string
+		wantBundle string // "" for none, else "rebased": the bundle's branch head
+		wantAsked  bool   // gh was asked `pr list`
+		wantSay    string
+	}{
+		{name: "no prior branch", wantBranch: seamBranch, wantRef: absent},
+		{
+			name: "prior branch with an open PR is rebased and force-pushed", prior: true, advance: true, openPR: true,
+			wantBranch: seamBranch, wantRef: rebased, wantAsked: true,
+			wantSay: "open PR exists on " + seamBranch + "; skipping force-reset",
+		},
+		{
+			name: "read-only prior branch with an open PR is relayed as a bundle", prior: true, advance: true, openPR: true, relay: true,
+			wantBranch: seamBranch, wantRef: unchanged, wantBundle: rebased, wantAsked: true,
+			wantSay: "open PR exists on " + seamBranch + "; skipping force-reset",
+		},
+		{
+			name: "read-only adopted branch with nothing ahead of base relays nothing", prior: true, advance: true, openPR: true, relay: true, noWork: true,
+			wantBranch: seamBranch, wantRef: unchanged, wantAsked: true,
+		},
+		{
+			name: "stale prior branch with no open PR is force-reset", prior: true, advance: true,
+			wantBranch: seamBranch, wantRef: reset, wantAsked: true,
+			wantSay: "stale remote branch " + seamBranch + " found (no open PR); force-resetting to main",
+		},
+		{
+			name: "read-only stale prior branch is left alone", prior: true, advance: true, relay: true,
+			wantBranch: seamBranch, wantRef: unchanged, wantAsked: true,
+			wantSay: "force-resetting to main",
+		},
+		{
+			name: "forgejo starts fresh and never asks gh", prior: true, env: forgejo, fj: true,
+			wantBranch: seamBranch, wantRef: unchanged,
+			wantSay: "CODE_FORGE=forgejo: starting " + seamBranch + " fresh from origin/main",
+		},
+		{
+			name: "git starts fresh and never asks gh", prior: true, env: map[string]string{"CODE_FORGE": "git"},
+			wantBranch: seamBranch, wantRef: unchanged,
+			wantSay: "CODE_FORGE=git: starting " + seamBranch + " fresh from origin/main",
+		},
+		{name: "research never cuts the branch", prior: true, env: seamResearchEnv, wantBranch: "main", wantRef: unchanged},
+		{name: "butler never cuts the branch", prior: true, relay: true, env: butler, wantBranch: "main", wantRef: unchanged},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := seamRepo(t)
+			if c.prior {
+				repo = seamPriorBranchRepo(t, c.advance, !c.noWork)
+			}
+			prior := seamOriginRef(t, repo)
+			dir := t.TempDir()
+			ghRec := filepath.Join(dir, "gh.rec")
+			ghCfg := seamtest.GhConfig{Record: ghRec}
+			if c.openPR {
+				ghCfg.PRs = []seamtest.GhPR{{Number: 9, URL: "https://example.test/o/r/pull/9", HeadRefName: seamBranch, BaseRefName: "main"}}
+			}
+			env := mergedEnv(c.env, seamtest.WriteFakeConfig(t, "gh", ghCfg))
+			fakes := []string{"gh"}
+			if c.fj {
+				fakes = append(fakes, "fj")
+				mergeEnv(env, seamtest.WriteFakeConfig(t, "fj", seamtest.FjConfig{Record: filepath.Join(dir, "fj.rec")}))
+			}
+			r := runBoxSeam(t, seamCase{
+				repo: repo, relay: c.relay, env: env, fakes: fakes,
+				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "recovered"))}},
+			})
+			r.res.WantExit(t, 0)
+
+			if got := strings.TrimSpace(seamGitOut(t, repo, "symbolic-ref", "--short", "HEAD")); got != c.wantBranch {
+				t.Errorf("HEAD = %s; want %s", got, c.wantBranch)
+			}
+			// Only an adopted branch carries the prior run's work in the tree;
+			// every other path starts from origin/main.
+			_, err := os.Stat(filepath.Join(repo, "branch.txt"))
+			if adopted := c.openPR && c.prior && !c.noWork; (err == nil) != adopted {
+				t.Errorf("branch.txt present = %v; want %v", err == nil, adopted)
+			}
+			if got := seamGhAskedPRList(t, ghRec); got != c.wantAsked {
+				t.Errorf("gh asked `pr list` = %v; want %v", got, c.wantAsked)
+			}
+			if c.wantSay != "" && !strings.Contains(r.res.Stdout, c.wantSay) {
+				t.Errorf("stdout lacks %q\n%s", c.wantSay, r.res.Stdout)
+			}
+
+			mainTip := seamRevParse(t, repo, "origin/main")
+			origin := seamOriginRef(t, repo)
+			switch c.wantRef {
+			case absent:
+				if origin != "" {
+					t.Errorf("origin %s = %s; want no agent branch", seamBranch, origin)
+				}
+			case unchanged:
+				if origin != prior {
+					t.Errorf("origin %s = %s; want the prior tip %s", seamBranch, origin, prior)
+				}
+			case reset:
+				if origin != mainTip {
+					t.Errorf("origin %s = %s; want origin/main %s", seamBranch, origin, mainTip)
+				}
+			case rebased:
+				if local := seamRevParse(t, repo, seamBranch); origin != local {
+					t.Errorf("origin %s = %s; want the rebased local branch %s", seamBranch, origin, local)
+				}
+				if parent := seamRevParse(t, repo, "origin/"+seamBranch+"~1"); parent != mainTip {
+					t.Errorf("pushed branch's parent = %s; want the advanced origin/main %s", parent, mainTip)
+				}
+				if got := seamGitOut(t, repo, "log", "-1", "--format=%s", seamBranch); strings.TrimSpace(got) != "prior run work" {
+					t.Errorf("pushed tip = %q; want the prior run's commit", got)
+				}
+			}
+
+			heads := seamBundleHeads(t, repo, r.outboxDir)
+			if c.wantBundle == "" {
+				if heads != nil {
+					t.Errorf("bundle heads = %v; want no bundle", heads)
+				}
+				return
+			}
+			if got, want := heads["refs/heads/"+seamBranch], seamRevParse(t, repo, seamBranch); got != want {
+				t.Errorf("bundle head %s = %q; want the rebased local branch %s (heads %v)", seamBranch, got, want, heads)
+			}
+			if parent := seamRevParse(t, repo, seamBranch+"~1"); parent != mainTip {
+				t.Errorf("relayed branch's parent = %s; want the advanced origin/main %s", parent, mainTip)
+			}
+		})
+	}
+}
+
+// A failed `gh pr list` is never read as "no PR": box aborts before the Driver
+// and leaves the prior branch alone rather than force-resetting a live PR.
+func TestBoxSeamBranchRecoveryGhFailureAborts(t *testing.T) {
+	repo := seamPriorBranchRepo(t, true, true)
+	prior := seamOriginRef(t, repo)
+	r := runBoxSeam(t, seamCase{
+		repo:  repo,
+		fakes: []string{"gh"},
+		env: seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
+			Record:  filepath.Join(t.TempDir(), "gh.rec"),
+			Replies: []seamtest.GhReply{{Args: []string{"pr", "list"}, Exit: 1}},
+		}),
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "never"))}},
+	})
+	r.res.WantExit(t, 1)
+	for _, want := range []string{"box: branch-recovery:", "aborting to protect any open PR"} {
+		if !strings.Contains(r.res.Stderr, want) {
+			t.Errorf("stderr lacks %q:\n%s", want, r.res.Stderr)
+		}
+	}
+	if got := seamOriginRef(t, repo); got != prior {
+		t.Errorf("origin %s = %s; want the prior tip %s", seamBranch, got, prior)
+	}
+	if len(r.driverRec) != 0 || len(r.orchRec) != 0 {
+		t.Errorf("driver calls %v, orchestrator calls %v; want none past the abort", r.driverRec, r.orchRec)
+	}
+}
+
+func seamGitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return string(out)
+}
+
+// Settle-time bundle-out through the real box binary: whether a bundle lands
+// in the outbox, and what outcome line the harness leaves behind, for each
+// posture that relays code through it.
+func TestBoxSeamSettleBundleOut(t *testing.T) {
+	local := map[string]string{"CODE_FORGE": "local", "BOX_HOST_MEDIATED_REMOTE": "1"}
+	ready := seamOutcomeLine("ready", "done")
+	resolved := seamOutcomeLine("already-resolved", "dup")
+	const falseReady = `status=blocked note=.*ready.*no commits exist on agent/issue-7`
+	// A run whose Driver commits one file on the branch box cut for it.
+	commits := func(repo, out string, exit int) []seamtest.DriverRun {
+		return []seamtest.DriverRun{{Sh: seamCommitWork(repo), Stdout: seamResult(out), Exit: exit}}
+	}
+	cases := []struct {
+		name       string
+		relay      bool
+		env        map[string]string
+		runs       func(repo string) []seamtest.DriverRun
+		wantExit   int
+		wantBundle bool
+		noOutbox   bool   // box never creates the outbox dir
+		wantLine   string // regexp one SPINDRIFT_OUTCOME line must match; the last one when lastOnly
+		lastOnly   bool
+	}{
+		{
+			name: "local with commits", env: local, wantBundle: true,
+			runs: func(repo string) []seamtest.DriverRun { return commits(repo, seamOutcomeLine("done", "x"), 0) },
+		},
+		{
+			name: "local with commits and a driver crash keeps the exit code", env: local, wantBundle: true, wantExit: 17,
+			runs: func(repo string) []seamtest.DriverRun { return commits(repo, "", 17) },
+		},
+		{
+			name: "local with no commits after a ready claim", env: local, wantLine: falseReady,
+			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult(ready)}} },
+		},
+		{
+			name: "read-write github never bundles", noOutbox: true,
+			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult(ready)}} },
+		},
+		{
+			name: "read-only github with commits", relay: true, wantBundle: true,
+			runs: func(repo string) []seamtest.DriverRun { return commits(repo, ready, 0) },
+		},
+		{
+			name: "read-only github with no commits after a ready claim", relay: true, wantLine: falseReady,
+			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult(ready)}} },
+		},
+		{
+			name: "read-only research never bundles", noOutbox: true, relay: true, env: seamResearchEnv,
+			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult("verdict")}} },
+		},
+		{
+			name: "read-only research with a driver crash never bundles", noOutbox: true, relay: true, env: seamResearchEnv, wantExit: 17,
+			runs: func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Exit: 17}} },
+		},
+		{
+			name: "a stale ADVISE_ONLY=1 does not make a work Box advise-only", relay: true,
+			env:      map[string]string{"ADVISE_ONLY": "1"},
+			wantLine: falseReady,
+			runs:     func(string) []seamtest.DriverRun { return []seamtest.DriverRun{{Stdout: seamResult(ready)}} },
+		},
+		{
+			name: "read-only already-resolved with commits is demoted and bundled", relay: true, wantBundle: true, lastOnly: true,
+			wantLine: `landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7.*relayed via outbox bundle \(read-only Box\)`,
+			runs:     func(repo string) []seamtest.DriverRun { return commits(repo, resolved, 0) },
+		},
+		{
+			name: "local already-resolved with commits is demoted and bundled", env: local, wantBundle: true, lastOnly: true,
+			wantLine: `landing=agent/issue-7 status=blocked synthetic=true note=.*already-resolved but 1 commits exist on agent/issue-7.*relayed via outbox bundle \(no writable remote under CODE_FORGE=local\)`,
+			runs:     func(repo string) []seamtest.DriverRun { return commits(repo, resolved, 0) },
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repo := seamRepo(t)
+			r := runBoxSeam(t, seamCase{
+				repo: repo, relay: c.relay, env: c.env, driverRuns: c.runs(repo),
+				fakes: []string{"gh"},
+			})
+			r.res.WantExit(t, c.wantExit)
+
+			heads := seamBundleHeads(t, repo, r.outboxDir)
+			switch {
+			case c.wantBundle:
+				if heads["refs/heads/"+seamBranch] != seamRevParse(t, repo, seamBranch) {
+					t.Errorf("bundle heads = %v; want %s at the branch tip", heads, seamBranch)
+				}
+				bundle := filepath.Join(r.outboxDir, seambundle.FileName)
+				if out, err := exec.Command("git", "-C", repo, "bundle", "verify", bundle).CombinedOutput(); err != nil {
+					t.Errorf("git bundle verify: %v\n%s", err, out)
+				}
+			case heads != nil:
+				t.Errorf("bundle heads = %v; want no bundle", heads)
+			}
+			if _, err := os.Stat(filepath.Join(r.outboxDir, seambundle.FileName)); c.wantBundle != (err == nil) {
+				t.Errorf("bundle present = %v; want %v", err == nil, c.wantBundle)
+			}
+			if _, err := os.Stat(r.outboxDir); c.noOutbox && err == nil {
+				t.Errorf("outbox %s exists; want it never created", r.outboxDir)
+			}
+
+			if c.wantLine == "" {
+				return
+			}
+			lines := outcomeLines(r.res.Stdout)
+			if c.lastOnly && len(lines) > 0 {
+				lines = lines[len(lines)-1:]
+			}
+			re := regexp.MustCompile(c.wantLine)
+			for _, l := range lines {
+				if re.MatchString(l) {
+					return
+				}
+			}
+			t.Errorf("no outcome line matches %q; lines %q", c.wantLine, lines)
+		})
+	}
+}
+
+// An unrecognised dispatch kind fails closed rather than defaulting to a
+// posture; entrypoint.sh rejects it before the clone, and box does too when
+// run on its own.
+func TestBoxSeamUnrecognizedDispatchKindFails(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo:       seamRepo(t),
+		env:        map[string]string{"DISPATCH_KIND": "bogus-kind"},
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "never"))}},
+	})
+	r.res.WantExit(t, 1)
+	if !strings.Contains(r.res.Stderr, "bogus-kind") {
+		t.Errorf("stderr does not name the kind:\n%s", r.res.Stderr)
+	}
+	if len(r.driverRec) != 0 {
+		t.Errorf("driver calls %v; want none", r.driverRec)
+	}
+	if _, err := os.Stat(r.outboxDir); err == nil {
+		t.Errorf("outbox %s exists after a rejected kind", r.outboxDir)
+	}
+}
+
+// The assembled work prompt tells the agent how to publish: rebase before the
+// push, retry a rejected push once, report a persistent failure as blocked
+// with a comment, and treat a genuine workflow-file change as a hard stop.
+func TestBoxSeamPromptCarriesPushDiscipline(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo:       seamRepo(t),
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "prompt"))}},
+	})
+	r.res.WantExit(t, 0)
+	prompt := r.assembledPrompt(t)
+	for _, want := range []string{
+		"git rebase", "git fetch", // rebase onto base before pushing
+		"rejected", "retry", // one retry on a rejected push
+		"status=blocked", "gh issue comment", // a persistent push failure
+		".github/workflows", "workflow", // workflow changes are a hard stop
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("assembled prompt lacks %q", want)
+		}
+	}
+}
