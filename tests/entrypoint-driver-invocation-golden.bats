@@ -179,23 +179,6 @@ check_golden() {
 # The steps below run in entrypoint.sh before it execs box, so no Go test
 # reaches them.
 
-# mkHarness bakes NIX_STORE_WRITABLE into the image Env from its
-# nixStoreWritable knob (ADR 0018, issue #469). Self-test mode trades
-# hermeticity for in-box `nix flake check` feedback, so the warning must be
-# loud when enabled and absent by default.
-@test "entrypoint prints a WARNING when NIX_STORE_WRITABLE=true" {
-  export NIX_STORE_WRITABLE=true
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"==> WARNING"*"/nix/store is writable"* ]]
-}
-
-@test "entrypoint prints no store-writable warning by default" {
-  run bash "$ENTRYPOINT"
-  [ "$status" -eq 0 ]
-  [[ "$output" != *"/nix/store is writable"* ]]
-}
-
 # Issue #4409: DRIVER_BASH_TIMEOUT_MS is a Consumer knob; entrypoint.sh exports
 # it under each name the Driver's registry entry lists in DRIVER_BASH_TIMEOUT_ENV
 # (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS).

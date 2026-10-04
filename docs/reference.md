@@ -935,9 +935,9 @@ appends one test-only line *after* the registry-rendered preamble,
 redirecting `DRIVER_SKILLS_DIR` at the test's own `$HOME`; the baked
 preamble itself renders identically for both. `agent/entrypoint.sh` itself
 carries no Driver value literals — if the nix-rendered preamble never ran (a
-malformed image build), the entrypoint's `configure_env` fails fast with a
-message naming the missing variable rather than silently impersonating the
-claude Driver.
+malformed image build), `set -u` fails the `exec box` line on the first unset
+`DRIVER_*` value (e.g. `$DRIVER_SKILLS_DIR`), and bash's unbound-variable
+message names it, rather than silently impersonating the claude Driver.
 
 `mkHarness` also derives from the two directory declarations above for the
 *host*-side half, though the two now diverge (issue #2489). The session

@@ -133,10 +133,6 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
 		"--prework-rebase-conflict=0", "--publish-rebase=0",
-		// Nonexistent sources: the layout skips them, leaving skillsDir as baked.
-		"--harness-skills-dir=" + filepath.Join(skillsDir, "no-harness"),
-		"--operator-skills-dir=" + filepath.Join(skillsDir, "no-operator"),
-		"--harness-home-agent-dir=" + filepath.Join(skillsDir, "no-home-agent"),
 		"--driver-session-cache-dir=",
 	}
 }
@@ -146,7 +142,13 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 // seam tests pin, so every other Box var is blanked.
 func seamBaseEnv(t *testing.T) map[string]string {
 	t.Helper()
+	// Nonexistent sources: the layout skips them, leaving the Driver skills dir
+	// as baked.
+	absent := filepath.Join(t.TempDir(), "absent")
 	env := map[string]string{
+		"HARNESS_SKILLS_DIR":     filepath.Join(absent, "harness"),
+		"OPERATOR_SKILLS_DIR":    filepath.Join(absent, "operator"),
+		"HARNESS_HOME_AGENT_DIR": filepath.Join(absent, "home-agent"),
 		"TMPDIR":                 t.TempDir(),
 		"BASE_BRANCH":            "main",
 		"RUN_NONCE":              seamNonce,
@@ -1259,10 +1261,19 @@ func seamAgentFiles(t *testing.T, driver string) homeAgentFixture {
 	}
 }
 
-// layoutArgs hands box the fixture as its harness sources and HOME as the
-// destinations. The fixture is a read-only store path, the staging shape bwrap
-// gives box. operatorDir may name a directory that does not exist.
-func (f homeAgentFixture) layoutArgs(operatorDir, sessionCacheRel, agentFilesRel string, extra ...string) func(string) []string {
+// layoutEnv hands box the fixture as its harness sources. The fixture is a
+// read-only store path, the staging shape bwrap gives box. operatorDir may name
+// a directory that does not exist.
+func (f homeAgentFixture) layoutEnv(operatorDir string) map[string]string {
+	return map[string]string{
+		"HARNESS_SKILLS_DIR":     f.skills,
+		"OPERATOR_SKILLS_DIR":    operatorDir,
+		"HARNESS_HOME_AGENT_DIR": f.homeAgent,
+	}
+}
+
+// layoutArgs points box's destinations at HOME.
+func (f homeAgentFixture) layoutArgs(sessionCacheRel, agentFilesRel string, extra ...string) func(string) []string {
 	return func(home string) []string {
 		cache, agentFiles := "", ""
 		if sessionCacheRel != "" {
@@ -1273,9 +1284,6 @@ func (f homeAgentFixture) layoutArgs(operatorDir, sessionCacheRel, agentFilesRel
 		}
 		return append([]string{
 			"--driver-agent-files-dir=" + agentFiles,
-			"--harness-skills-dir=" + f.skills,
-			"--operator-skills-dir=" + operatorDir,
-			"--harness-home-agent-dir=" + f.homeAgent,
 			"--driver-session-cache-dir=" + cache,
 			"--driver-skills-dir=" + filepath.Join(home, ".claude", "skills"),
 		}, extra...)
@@ -1376,7 +1384,8 @@ func seamHomeCase(t *testing.T, f homeAgentFixture, operatorDir, sessionCacheRel
 	return seamCase{
 		repo:       seamRepo(t, 0),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "home"))}},
-		homeArgs:   f.layoutArgs(operatorDir, sessionCacheRel, agentFilesRel, extraArgs...),
+		env:        f.layoutEnv(operatorDir),
+		homeArgs:   f.layoutArgs(sessionCacheRel, agentFilesRel, extraArgs...),
 	}
 }
 
@@ -1783,4 +1792,17 @@ func mergedEnv(srcs ...map[string]string) map[string]string {
 	out := map[string]string{}
 	mergeEnv(out, srcs...)
 	return out
+}
+
+func TestBoxSeamPrintsTheWritableStoreNotice(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo:       seamRepo(t, 0),
+		env:        map[string]string{"NIX_STORE_WRITABLE": "true"},
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "store"))}},
+	})
+	r.res.WantExit(t, 0)
+	const notice = "==> WARNING: /nix/store is writable (self-test mode) — this Box is not hermetic; do not use for untrusted issues\n"
+	if !strings.HasPrefix(r.res.Stdout, notice) {
+		t.Errorf("stdout does not open with the store notice\n%s", r.res.Stdout)
+	}
 }
