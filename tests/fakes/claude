@@ -16,8 +16,6 @@ call_index="$(grep -c '^driver invoked for issue' "$DRIVER_LOG" 2>/dev/null || t
 printf '%s\n' "$*" >>"$DRIVER_LOG"
 
 prompt=""
-# shellcheck disable=SC2034 # model is read by the sourced _driver-common.bash below
-model=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -p)
@@ -25,8 +23,6 @@ while [ $# -gt 0 ]; do
       shift 2
       ;;
     --model)
-      # shellcheck disable=SC2034 # model is read by the sourced _driver-common.bash below
-      model="${2:-}"
       shift 2
       ;;
     *) shift ;;

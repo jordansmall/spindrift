@@ -228,23 +228,6 @@ setup_entrypoint_env() {
   mkdir -p "$HARNESS_SKILLS_DIR" "$OPERATOR_SKILLS_DIR"
 }
 
-# Overwrites $FAKE_BIN/driver-exec with a wrapper that fails only the
-# bind-registry verb and delegates the rest, for the two
-# tests/entrypoint-toolchain-nudge.bats cases on that failure path. Must run
-# after setup_fakes, which creates the file this overwrites.
-stub_failing_bind_registry() {
-  {
-    printf '#!%s\n' "$(command -v bash)"
-    cat <<FAKE
-if [ "\$1" = "bind-registry" ]; then
-  exit 3
-fi
-exec "$FAKES_DIR/driver-exec" "\$@"
-FAKE
-  } >"$FAKE_BIN/driver-exec"
-  chmod +x "$FAKE_BIN/driver-exec"
-}
-
 # Shared setup for the dispatch-env bats suite (tests/harness-env.bats).
 setup_dispatch_env() {
   setup_fakes
@@ -272,7 +255,7 @@ setup_fakes() {
   # through to the fake bwrap below.
   cp "$FAKES_DIR/pasta" "$FAKE_BIN/pasta"
   : "${DRIVER:=claude}"
-  cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" "$FAKES_DIR/nix" \
+  cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" \
      "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
   # The claude and opencode fakes source _driver-common.bash relative to their
   # own directory at runtime, so it has to sit beside the copied driver fake.
@@ -289,7 +272,6 @@ setup_fakes() {
   export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
   export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
   export DRIVER_LOG="$BATS_TEST_TMPDIR/$DRIVER.log"
-  export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
   export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
   export DRIVER_PROMPT_FILE="$BATS_TEST_TMPDIR/$DRIVER-prompt.txt"
   : >"$PODMAN_LOG"
@@ -298,7 +280,6 @@ setup_fakes() {
   : >"$PASTA_LOG"
   : >"$GH_LOG"
   : >"$DRIVER_LOG"
-  : >"$NIX_LOG"
   : >"$ORCHESTRATOR_LOG"
 
   # Defaulted from SPINDRIFT_SEAM_FIXTURES_DIR at the top of this file
@@ -429,18 +410,6 @@ setup_bare_repo() {
   )
 }
 
-# Pushes a minimal flake.nix to the remote's main branch so the entrypoint
-# clones a repo that exposes a devShell. Call after setup_bare_repo.
-seed_flake_repo() {
-  local seed="$BATS_TEST_TMPDIR/seed-flake"
-  git clone -q "https://github.com/owner/repo.git" "$seed"
-  printf '{ outputs = _: { devShells.x86_64-linux.default = {}; }; }\n' \
-    >"$seed/flake.nix"
-  git -C "$seed" add flake.nix
-  git -C "$seed" commit -q -m "chore: add flake"
-  git -C "$seed" push -q origin HEAD:main
-}
-
 # Pushes main to a same-named remote branch so a non-default BASE_BRANCH
 # resolves to a real origin ref. phase_branch_recovery checks that ref out
 # before the prompt is assembled and setup_bare_repo seeds only main, so any
@@ -451,17 +420,4 @@ seed_release_branch() {
   local seed="$BATS_TEST_TMPDIR/$seed_name"
   git clone -q "https://github.com/owner/repo.git" "$seed"
   git -C "$seed" push -q origin "main:$branch"
-}
-
-# Pushes a named dependency-manifest file (a lockfile, or a Gradle
-# build/settings file) to the remote's main branch. Call after setup_bare_repo.
-# Usage: seed_dependency_manifest "go.sum"
-seed_dependency_manifest() {
-  local manifest="$1"
-  local seed="$BATS_TEST_TMPDIR/seed-dependency-manifest"
-  git clone -q "https://github.com/owner/repo.git" "$seed"
-  touch "$seed/$manifest"
-  git -C "$seed" add "$manifest"
-  git -C "$seed" commit -q -m "chore: add $manifest"
-  git -C "$seed" push -q origin HEAD:main
 }
