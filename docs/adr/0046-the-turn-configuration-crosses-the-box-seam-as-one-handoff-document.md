@@ -44,14 +44,16 @@ Concretely:
   kind + `ORCHESTRATOR` gate) or that arrives as pure passthrough from its
   own flags (`--model`, `--driver`, `--max-slices`, the `--argv-*` family,
   ...) lands in the same struct it writes to disk.
-  `driver-exec env-handoff` is the narrower second producer (issue #2975
-  slice 2): the one Driver pass that runs before `assemble-prompt` ever
-  executes — `phase_conflict_resolve`'s pre-work rebase-fixup pass — has no
-  registry to load and no gates to compute, so it builds the same `Handoff`
-  shape straight from env-derived flags with no `promptassembly.Assemble`
-  dependency at all. Both write the identical JSON shape; `orchestrator` and
-  `driver-exec` load it through the same `promptassembly.LoadHandoffFile`
-  and don't know or care which producer wrote it.
+  `box`'s conflict-resolve pass (`cmd/launcher/box/conflict.go`) is the
+  narrower second producer (issue #2975 slice 2; amended by issue #4295, which
+  moved it from the deleted `driver-exec env-handoff` verb and the
+  entrypoint's `phase_conflict_resolve` into `box`): the one Driver pass that
+  runs before prompt assembly — the pre-work rebase-fixup pass — has no gates
+  to compute, so it builds the same `Handoff` shape straight from box's
+  passthrough fields with no `promptassembly.Assemble` call at all. Both
+  write the identical JSON shape; `orchestrator` and `driver-exec` load it
+  through the same `promptassembly.LoadHandoffFile` and don't know or care
+  which producer wrote it.
 - **Per-pass flags are only what genuinely varies per pass.** `--handoff-file`
   (required on both binaries), `--prompt-file` (falls back to the handoff's
   own `PromptFile` when empty — only a seeded run-state pass overrides it),
@@ -126,10 +128,11 @@ Concretely:
   in a struct field name fails to build; a typo in a forwarded flag name
   fails silently at runtime, the exact class of gap this ADR replaces).
 - Two producers now have to agree on one JSON shape instead of one binary
-  owning its own flag grammar outright. `driver-exec env-handoff`'s narrower
-  field set (it leaves `PromptFile`, `AgentsFile`, `ReviewPromptFile`,
-  `ReviewModel`, `ReviewEffort`, and `SessionMode`/`Invoker` unset, since the
-  one pass it serves needs none of them) means a `Handoff` loaded from that
+  owning its own flag grammar outright. `box`'s conflict-resolve pass's
+  narrower field set (it leaves `PromptFile`, `AgentsFile`,
+  `ReviewPromptFile`, `ReviewModel`, `ReviewEffort`, and
+  `SessionMode`/`Invoker` unset, since the one pass it serves needs none of
+  them) means a `Handoff` loaded from that
   producer is a valid but sparser document than one `assemble-prompt`
   writes — every consumer already treats those fields as legitimately empty
   (a review pass is enabled only when `ReviewPromptFile` is non-empty, so an

@@ -78,7 +78,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// Both handoff producers reject a negative budget before writing the JSON, so
+	// Every handoff producer rejects a negative budget before writing the JSON, so
 	// this clamp only guards a hand-edited or corrupted handoff file (issue #2694
 	// / #2975). It still prints one stderr line, because the Box has no other way
 	// to tell an operator why a run landed earlier than the cap should allow.

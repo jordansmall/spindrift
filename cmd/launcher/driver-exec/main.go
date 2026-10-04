@@ -39,9 +39,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isBindRegistryInvocation(argv) {
 		return runBindRegistry(argv[1:], stdout)
 	}
-	if isEnvHandoffInvocation(argv) {
-		return runEnvHandoff(argv[1:], stdout)
-	}
 	if isProbeRegistrySocketInvocation(argv) {
 		return runProbeRegistrySocket(argv[1:], stdout)
 	}
