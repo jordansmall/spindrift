@@ -20,6 +20,7 @@ const fakeConfigExit = 97
 // invoked under one of these names.
 var fakes = map[string]func(args []string) int{
 	"gh":     ghMain,
+	"fj":     fjMain,
 	"podman": podmanMain,
 	"docker": podmanMain,
 	"bwrap":  bwrapMain,
@@ -124,31 +125,44 @@ func loadConfig(tool string, cfg any) error {
 // one flock, so concurrent fakes (MAX_PARALLEL boxes) neither interleave
 // lines nor see the same prior count.
 func appendRecord(path string, argv []string) ([][]string, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return nil, err
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	prior, err := parseRecords(b)
-	if err != nil {
-		return nil, err
-	}
 	line, err := json.Marshal(argv)
 	if err != nil {
 		return nil, err
 	}
-	if _, err := f.Write(append(line, '\n')); err != nil {
+	var prior [][]string
+	err = appendLocked(path, append(line, '\n'), func(b []byte) (err error) {
+		prior, err = parseRecords(b)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
 	return prior, nil
+}
+
+// appendLocked appends b to path under an exclusive flock, first handing what
+// the file held to seen, and writes nothing if seen fails.
+func appendLocked(path string, b []byte, seen func(prior []byte) error) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	prior, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if seen != nil {
+		if err := seen(prior); err != nil {
+			return err
+		}
+	}
+	_, err = f.Write(b)
+	return err
 }
 
 func parseRecords(b []byte) ([][]string, error) {

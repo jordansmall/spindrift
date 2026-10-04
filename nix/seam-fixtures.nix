@@ -26,6 +26,9 @@ let
   promptContractRegistryJson = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).validateMarkers
   );
+  forbiddenMarkersRegistryJson = pkgs.writeText "forbidden-markers-registry.json" (
+    builtins.toJSON (import ../lib/prompt-contract.nix).forbiddenMarkers
+  );
   researchVerdictsParity = import ./research-verdicts-parity.nix { inherit pkgs; };
   promptContractParityFixtures = pkgs.writeText "prompt-contract-parity-fixtures.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).parityFixtures
@@ -38,6 +41,7 @@ let
     "driver-preamble.sh" = internals.driverPreambleFile;
     "agent-paths-preamble.sh" = internals.agentPathsPreambleFile;
     "fragments-registry.json" = registryJson;
+    "forbidden-markers-registry.json" = forbiddenMarkersRegistryJson;
     "prompt-contract-registry.json" = promptContractRegistryJson;
     "prompt-contract-parity-fixtures.json" = promptContractParityFixtures;
     "research-verdicts-parity.json" = researchVerdictsParity;
