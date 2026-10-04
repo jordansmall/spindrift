@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -759,5 +760,115 @@ func TestHookPaths_BareAndWorkingRepo(t *testing.T) {
 		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
 			t.Errorf("HookPaths(%s) = %v, want %v", dir, got, want)
 		}
+	}
+}
+
+// recordingBinary stands in for the real gh or fj: it appends its argv, one
+// call per line, to the returned log so a passthrough test can prove the shim
+// execs through with the arguments untouched.
+func recordingBinary(t *testing.T) (bin, log string) {
+	t.Helper()
+	dir := t.TempDir()
+	log = filepath.Join(dir, "calls.log")
+	bin = filepath.Join(dir, "real")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >>%q\n", log)
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return bin, log
+}
+
+// Each rejection names the relay that replaces the blocked command, so the
+// Driver knows where to go instead; a bare "blocked" would leave it guessing.
+// The shim dir is a caller-chosen path, so installing under $HOME rather than
+// the work dir's parent is box's concern (box TestReadonlyGuards_*).
+func TestInstall_FullRegistryRejectionNamesTheRelay(t *testing.T) {
+	bin, _ := recordingBinary(t)
+	rows, err := promptassembly.LoadForbiddenMarkersFile(repopath.ForbiddenMarkersJSON())
+	if err != nil {
+		t.Fatalf("LoadForbiddenMarkersFile: %v", err)
+	}
+	shimDir := t.TempDir()
+	cfg := Config{
+		RepoDir:    t.TempDir(),
+		ShimDir:    shimDir,
+		RealBinary: func(string) (string, error) { return bin, nil },
+	}
+	cfg.SkipGitHook = true
+	if _, err := Install(rows, cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	for _, tc := range []struct {
+		argv0 string
+		args  []string
+		want  []string
+	}{
+		{"gh", []string{"pr", "create", "--title", "x", "--body", "y"}, []string{"gh pr create", "SPINDRIFT_PR_INTENT"}},
+		{"gh", []string{"pr", "ready", "1"}, []string{"gh pr ready", "launcher"}},
+		{"gh", []string{"pr", "merge", "1"}, []string{"gh pr merge", "launcher"}},
+		{"gh", []string{"issue", "comment", "1", "--body", "hi"}, []string{"gh issue comment", "note="}},
+		{"gh", []string{"issue", "create", "--title", "x", "--body", "y"}, []string{"gh issue create", "SPINDRIFT_ISSUE_INTENT"}},
+		{"gh", []string{"api", "-X", "POST", "repos/o/r/issues/1/comments"}, []string{"gh api"}},
+		{"gh", []string{"api", "-X", "post", "repos/o/r/issues/1/comments"}, []string{"gh api"}},
+		{"gh", []string{"api", "--method", "PATCH", "repos/o/r/issues/1"}, []string{"gh api"}},
+		{"fj", []string{"pr", "create", "--title", "x", "--body", "y"}, []string{"fj pr create"}},
+		{"fj", []string{"pr", "ready", "1"}, []string{"fj pr ready"}},
+		{"fj", []string{"pr", "merge", "1"}, []string{"fj pr merge"}},
+		{"fj", []string{"issue", "comment", "1", "--body", "hi"}, []string{"fj issue comment"}},
+		{"fj", []string{"issue", "create", "--title", "x", "--body", "y"}, []string{"fj issue create"}},
+	} {
+		got, code := runShim(t, shimDir, tc.argv0, tc.args...)
+		if code == 0 {
+			t.Errorf("%s %v: exit code = 0, want non-zero; output=%q", tc.argv0, tc.args, got)
+		}
+		for _, w := range tc.want {
+			if !bytes.Contains([]byte(got), []byte(w)) {
+				t.Errorf("%s %v: output = %q, want it to contain %q", tc.argv0, tc.args, got, w)
+			}
+		}
+	}
+}
+
+// A read reaches the real binary with its argv intact; the shim only ever
+// stands in front of the write subcommands.
+func TestInstall_FullRegistryReadsReachTheRealBinary(t *testing.T) {
+	bin, log := recordingBinary(t)
+	rows, err := promptassembly.LoadForbiddenMarkersFile(repopath.ForbiddenMarkersJSON())
+	if err != nil {
+		t.Fatalf("LoadForbiddenMarkersFile: %v", err)
+	}
+	shimDir := t.TempDir()
+	cfg := Config{
+		ShimDir:     shimDir,
+		SkipGitHook: true,
+		RealBinary:  func(string) (string, error) { return bin, nil },
+	}
+	if _, err := Install(rows, cfg, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	reads := []struct {
+		argv0 string
+		args  []string
+	}{
+		{"gh", []string{"api", "repos/owner/repo/issues"}},
+		{"gh", []string{"issue", "view", "1"}},
+		{"gh", []string{"pr", "view", "1"}},
+		{"gh", []string{"run", "view", "1"}},
+		{"gh", []string{"run", "list"}},
+		{"fj", []string{"pr", "list"}},
+		{"fj", []string{"issue", "view", "1"}},
+	}
+	var want string
+	for _, tc := range reads {
+		got, code := runShim(t, shimDir, tc.argv0, tc.args...)
+		if code != 0 {
+			t.Errorf("%s %v: exit code = %d, want 0 (passthrough); output=%q", tc.argv0, tc.args, code, got)
+		}
+		want += strings.Join(tc.args, " ") + "\n"
+	}
+	if got, err := os.ReadFile(log); err != nil || string(got) != want {
+		t.Errorf("real binary saw %q (err=%v), want %q", got, err, want)
 	}
 }

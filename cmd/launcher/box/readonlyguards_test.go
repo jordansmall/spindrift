@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/readonlyguards"
+	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
 const guardsRegistry = `[
@@ -49,7 +50,9 @@ func newGuardsFixture(t *testing.T) *guardsFixture {
 	g.fakeBinary("gh")
 	g.path = g.bin + string(os.PathListSeparator) + os.Getenv("PATH")
 	t.Setenv("PATH", g.path)
-	g.shimDir = filepath.Join(g.knobs["HOME"], ".spindrift", "readonly-gh-shim")
+	// box reads PATH through the injected Getenv, so the knob mirrors the process.
+	g.knobs["PATH"] = g.path
+	g.shimDir = readonlyShimDir(g.knobs["HOME"])
 
 	if err := os.MkdirAll(g.in.WorkDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -58,6 +61,11 @@ func newGuardsFixture(t *testing.T) *guardsFixture {
 	g.d.Git = func(dir string, args ...string) error {
 		g.reg.events = append(g.reg.events, "git "+args[0])
 		return exec.Command("git", append([]string{"-C", dir}, args...)...).Run()
+	}
+	g.d.LookPath = exec.LookPath
+	g.d.GitOutput = func(dir string, args ...string) (string, error) {
+		out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+		return string(out), err
 	}
 	g.d.Guards = guardsDeps{
 		Install: func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
@@ -191,7 +199,12 @@ func TestReadonlyGuards_RunsAfterForgejoCLIBeforeBindings(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.OutboxRelayCapable = true
 	g.knobs["FORGEJO_TOKEN"] = "s3cret"
-	g.d.LookPath = func(name string) (string, error) { return "/bin/" + name, nil }
+	g.d.LookPath = func(name string) (string, error) {
+		if name == "fj" {
+			return "/bin/fj", nil
+		}
+		return exec.LookPath(name)
+	}
 	g.d.RunCmd = func(cmd *exec.Cmd) error {
 		if cmd.Args[0] == "fj" {
 			g.reg.events = append(g.reg.events, "fj")
@@ -284,4 +297,104 @@ func TestReadonlyGuards_VerificationCatchesAMissingHook(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "git hook missing") {
 		t.Fatalf("run() error = %v, want the missing hook reported", err)
 	}
+}
+
+func TestReadonlyGuards_VerificationCatchesARetargetedPushurl(t *testing.T) {
+	g := newGuardsFixture(t)
+	g.env.OutboxRelayCapable = true
+	install := g.d.Guards.Install
+	g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
+		res, err := install(rows, cfg, out)
+		g.git(g.in.WorkDir, "config", "remote.origin.pushurl", "https://forge.example/owner/repo.git")
+		return res, err
+	}
+	_, err := run(g.in, g.env, g.d)
+	if err == nil || !strings.Contains(err.Error(), "not the decoy") {
+		t.Fatalf("run() error = %v, want the retargeted pushurl reported", err)
+	}
+	if len(g.calls) != 0 {
+		t.Fatal("Driver ran with the pushurl guard defeated")
+	}
+}
+
+// The guard must fail a real `git push` locally. A pre-push hook alone is not
+// enough: git lists the remote's refs over the network before it runs the
+// hook, so origin here is an unresolvable .invalid host and the guard's message
+// with no network-failure text proves the block is local (issue #2463). Pushing
+// the branch already checked out, with --no-verify, is the dispatch's real
+// shape: a pushurl pointed at the work dir would resolve that as "Everything
+// up-to-date" and exit 0 without firing a hook (issue #2509).
+func TestReadonlyGuards_RealGitPushBlockedLocally(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"new ref", []string{"push", "origin", "HEAD:some-branch"}},
+		{"new ref, --no-verify", []string{"push", "origin", "HEAD:some-branch", "--no-verify"}},
+		{"checked-out branch, --no-verify", []string{"push", "--no-verify", "-u", "origin", "agent/issue-42"}},
+		{"unresolvable origin", []string{"push", "origin", "HEAD:some-branch"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGuardsFixture(t)
+			g.env.OutboxRelayCapable = true
+			rows, err := os.ReadFile(repopath.ForbiddenMarkersJSON())
+			if err != nil {
+				t.Fatal(err)
+			}
+			g.write(g.in.ForbiddenMarkersFile, string(rows))
+
+			work := g.in.WorkDir
+			g.git(work, "checkout", "-q", "-b", "agent/issue-42")
+			g.git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work")
+			if err := os.MkdirAll(remote, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			g.git(remote, "init", "-q", "--bare")
+			origin := remote
+			if tc.name == "unresolvable origin" {
+				origin = "https://readonly-push-hook-test.invalid/owner/repo.git"
+			}
+			g.git(work, "remote", "add", "origin", origin)
+
+			g.run()
+
+			out, err := exec.Command("git", append([]string{"-C", work}, tc.args...)...).CombinedOutput()
+			if err == nil {
+				t.Fatalf("git %v succeeded; want it blocked:\n%s", tc.args, out)
+			}
+			for _, want := range []string{"push", "outbox"} {
+				if !strings.Contains(string(out), want) {
+					t.Errorf("rejection = %q, want it to mention %q", out, want)
+				}
+			}
+			for _, bad := range []string{"Everything up-to-date", "Could not resolve host", "Failed to connect", "unable to access", "Temporary failure"} {
+				if strings.Contains(string(out), bad) {
+					t.Errorf("rejection = %q, want a local block with no %q", out, bad)
+				}
+			}
+			// Nothing reached the real remote.
+			if refs := g.git(remote, "for-each-ref"); refs != "" {
+				t.Errorf("remote refs = %q, want none", refs)
+			}
+		})
+	}
+}
+
+// Without outbox capability the hand-off is a real push, so nothing blocks it.
+func TestReadonlyGuards_NeitherCapability_PushesNormally(t *testing.T) {
+	g := newGuardsFixture(t)
+	work := g.in.WorkDir
+	g.git(work, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "work")
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	if err := os.MkdirAll(remote, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	g.git(remote, "init", "-q", "--bare")
+	g.git(work, "remote", "add", "origin", remote)
+
+	g.run()
+
+	g.git(work, "push", "origin", "HEAD:some-relay-branch")
+	g.git(remote, "rev-parse", "--verify", "some-relay-branch")
 }
