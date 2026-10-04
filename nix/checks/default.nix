@@ -134,7 +134,7 @@ let
     "promptassembly-parity"
     "bats-prompt-contract-parity"
     # flake.nix only exposes apps.regen-goldens under isLinux, because it pulls
-    # in fixtures.batsHarness.internals.driverExecBin. On darwin it is absent
+    # in fixtures.seamFixtures, rendered off the Linux-only batsHarness. On darwin it is absent
     # from config.apps, so this check's own existence assert would throw.
     "regen-goldens-app-wiring"
     # lib/mkHarness.nix only exposes packages.agent-closure when isLinux, and

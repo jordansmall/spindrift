@@ -131,6 +131,8 @@ in
         cp -r ${../../.forgejo} src/.forgejo
         cp -r ${../../templates} src/templates
         cp -r ${../../agent} src/agent
+        mkdir -p src/tests/testdata
+        cp -r ${../../tests/testdata/prompt-assembly-golden} src/tests/testdata/prompt-assembly-golden
         cp ${../../README.md} src/README.md
         cp -r ${../../lib} src/lib
         chmod -R +w src
@@ -156,6 +158,11 @@ in
       ''
         mkdir -p src/cmd
         cp -r ${../../cmd/launcher} src/cmd/launcher
+        # The promptassembly golden test reads the committed goldens and the raw
+        # prompt templates at the paths repopath resolves from the module dir.
+        mkdir -p src/tests/testdata src/templates/default
+        cp -r ${../../tests/testdata/prompt-assembly-golden} src/tests/testdata/prompt-assembly-golden
+        cp -r ${../../templates/default/prompts} src/templates/default/prompts
         chmod -R +w src
         ${goTestPrologue}
         files=$(grep -rl --include='*_test.go' --exclude-dir=vendor '^//go:build integration' . || true)

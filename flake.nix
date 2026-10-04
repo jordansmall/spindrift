@@ -183,10 +183,10 @@
                 program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
               };
             }
-            # regen-goldens runs the prompt-assembly parity suite in update mode
+            # regen-goldens runs the prompt-assembly golden test in update mode
             # (issue #2951), and nix/checks/promptassembly.nix pins it to the
-            # derivation built here. Its shared nix/parity-env.nix wiring needs
-            # driverExecBin, which lib/mkHarness.nix builds only on Linux, so the
+            # derivation built here. It needs fixtures.seamFixtures, rendered
+            # off lib/mkHarness.nix's batsHarness, which builds only on Linux, so the
             # guard is `pkgs.stdenv.isLinux`, not a sibling's `? agent-closure`.
             // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
               regen-goldens = {

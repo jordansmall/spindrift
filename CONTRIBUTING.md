@@ -183,11 +183,11 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
 - **`nix/`** — `checks.nix` (the flake-check suite), `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), and `regen-goldens.nix` (`nix run
-  .#regen-goldens`, which reruns `tests/prompt-assembly-parity.bats` with
+  .#regen-goldens`, which reruns the Go golden test
+  `cmd/launcher/internal/promptassembly/golden_integration_test.go` with
   `UPDATE_GOLDENS=1` to overwrite `tests/testdata/prompt-assembly-golden/` —
-  the update-mode counterpart to the `promptassembly-parity` check;
-  `parity-env.nix` is the env wiring shared by both). Add a check when you
-  add a guarantee.
+  the update-mode counterpart to the `launcher-go-seam-test` check). Add a
+  check when you add a guarantee.
 - **`templates/default/`** — the consumer starter (`nix flake init -t`).
   spindrift dogfoods this very template, so changes here are load-bearing.
 

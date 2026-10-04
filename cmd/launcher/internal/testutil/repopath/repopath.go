@@ -68,3 +68,9 @@ func ForbiddenMarkersJSON() string { return promptassemblyTestdata("forbidden-ma
 
 // ValidateMarkersJSON is internal/promptassembly/testdata/validate-markers.json.
 func ValidateMarkersJSON() string { return promptassemblyTestdata("validate-markers.json") }
+
+// PromptAssemblyGoldenDir is the repo-root tests/testdata/prompt-assembly-golden
+// directory: the committed prompt bytes the promptassembly golden test pins.
+func PromptAssemblyGoldenDir() string {
+	return filepath.Join(moduleDir(), "..", "..", "tests", "testdata", "prompt-assembly-golden")
+}
