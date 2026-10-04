@@ -457,6 +457,55 @@ func TestBoxSeamUnrecoveredOutcomeIsBackstopped(t *testing.T) {
 	}
 }
 
+// An advise-only kind never opens a PR and has no branch to push, so box
+// neither nudges it for a missing marker nor resumes it: one Driver run, and
+// the backstop (when the Driver reports nothing) settles it without recovery.
+func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
+	butler := map[string]string{
+		"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
+		"DISPATCH_KEY": "butler-bugs", "ISSUE_NUMBER": "", "ISSUE_TITLE": "", "CHORE_NAME": "bugs",
+		"CHORE_HEAD": "deadbeef", "CHORE_DIFF_RANGE": "", "CHORE_SLICE": "agent/entrypoint.sh",
+	}
+	t.Run("research with no outcome line is backstopped blocked without a resume", func(t *testing.T) {
+		r := runBoxSeam(t, seamCase{
+			repo:       seamRepo(t, 0),
+			env:        seamResearchEnv,
+			driverRuns: []seamtest.DriverRun{{Stdout: seamResult("verdict posted")}},
+		})
+		r.res.WantExit(t, 0)
+		if len(r.driverRec) != 1 {
+			t.Errorf("driver calls = %q; want the first run only", r.driverRec)
+		}
+		want := "SPINDRIFT_OUTCOME issue=" + seamIssue + " landing=none status=blocked synthetic=true note=driver exited without emitting an outcome"
+		got := outcomeLines(r.res.Stdout)
+		if len(got) != 1 || !strings.HasPrefix(got[0], want) {
+			t.Errorf("outcome lines = %q; want one starting %q", got, want)
+		}
+		if strings.Contains(r.res.Stdout, "resume attempt") {
+			t.Errorf("the backstop note claims a resume:\n%s", r.res.Stdout)
+		}
+	})
+	t.Run("read-only butler missing PR-intent gets no nudge", func(t *testing.T) {
+		line := "SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=ready note=swept"
+		r := runBoxSeam(t, seamCase{
+			repo:       seamRepo(t, 0),
+			relay:      true,
+			env:        butler,
+			driverRuns: []seamtest.DriverRun{{Stdout: seamResult(line)}},
+		})
+		r.res.WantExit(t, 0)
+		if len(r.driverRec) != 1 {
+			t.Errorf("driver calls = %q; want the first run only", r.driverRec)
+		}
+		if strings.Contains(r.res.Stdout, "PR-intent marker missing") {
+			t.Errorf("a PR-intent banner was printed:\n%s", r.res.Stdout)
+		}
+		if got := outcomeLines(r.res.Stdout); !reflect.DeepEqual(got, []string{line}) {
+			t.Errorf("outcome lines = %q; want %q", got, line)
+		}
+	})
+}
+
 func TestBoxSeamPRIntentNudgeTaken(t *testing.T) {
 	first := seamOutcomeLine("ready", "done")
 	intent := "SPINDRIFT_PR_INTENT " + seamNonce + " " + base64.StdEncoding.EncodeToString([]byte("feat: x\n\nbody"))

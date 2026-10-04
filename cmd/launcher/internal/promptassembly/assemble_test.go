@@ -2271,6 +2271,75 @@ func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	}
 }
 
+// The research kind's own outcome contract ("# POST THE VERDICT", issue #640)
+// follows the same override rules as the work kind's (TestAssembleOverrideSharedBlocks),
+// ported from the deleted research-kind bats suite.
+func TestAssembleResearchOverrideVerdictBlock(t *testing.T) {
+	reg := loadTestRegistry(t)
+	cases := []struct {
+		name     string
+		content  string
+		contract string
+		want     string
+		absent   string
+	}{
+		{
+			name:     "override lacking the contract gets it appended once, tokens substituted",
+			content:  "research stub, no contract here\n",
+			contract: "# POST THE VERDICT\n\ncanonical research contract for issue ${ISSUE_NUMBER}\n",
+			want:     "canonical research contract for issue 2349",
+		},
+		{
+			name:     "override already containing the contract is unchanged",
+			content:  "research stub\n\n# POST THE VERDICT\n\nalready has its own contract\n",
+			contract: "# POST THE VERDICT\n\nshould not appear\n",
+			want:     "already has its own contract",
+			absent:   "should not appear",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.DispatchKind = "research"
+			env.PromptsDir = overridePromptsDir(t, map[string]string{"research-prompt.md": tc.content})
+			env.ResearchOutcomeContractFile = writeContractFile(t, t.TempDir(), "research-outcome-contract.md", tc.contract)
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if n := strings.Count(result.Prompt, "# POST THE VERDICT"); n != 1 {
+				t.Errorf("%q occurs %d times, want 1:\n%s", "# POST THE VERDICT", n, result.Prompt)
+			}
+			if !strings.Contains(result.Prompt, tc.want) {
+				t.Errorf("Prompt missing %q:\n%s", tc.want, result.Prompt)
+			}
+			if tc.absent != "" && strings.Contains(result.Prompt, tc.absent) {
+				t.Errorf("Prompt contains %q, want it absent:\n%s", tc.absent, result.Prompt)
+			}
+		})
+	}
+}
+
+// A missing research contract file fails Assemble loudly rather than letting
+// the Box run without the verdict contract (the research twin of
+// TestAssembleMissingOutcomeContractFileFails).
+func TestAssembleMissingResearchOutcomeContractFileFails(t *testing.T) {
+	reg := loadTestRegistry(t)
+	env := coveredEnv()
+	env.DispatchKind = "research"
+	env.PromptsDir = overridePromptsDir(t, map[string]string{"research-prompt.md": "research stub, no contract here\n"})
+	env.ResearchOutcomeContractFile = filepath.Join(t.TempDir(), "does-not-exist.md")
+
+	_, err := Assemble(env, reg)
+	if err == nil {
+		t.Fatal("Assemble succeeded, want an error for the missing research contract file")
+	}
+	if !strings.Contains(err.Error(), "does-not-exist.md") {
+		t.Errorf("error %q does not name the missing contract file", err)
+	}
+}
+
 // A contract file's own ${...} tokens resolve through the same allowlist as
 // every other file Assemble renders (entrypoint.sh: 638).
 func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {

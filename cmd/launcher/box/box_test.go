@@ -831,6 +831,7 @@ func TestPRIntent_NeverFires(t *testing.T) {
 			f.env.HostMediatedRemote = true
 		}},
 		{"advise-only research", func(f *fixture) { f.readOnlyRelay(); f.env.DispatchKind = "research" }},
+		{"advise-only butler", func(f *fixture) { f.readOnlyRelay(); f.env.DispatchKind = "butler" }},
 	}
 	for _, c := range cases {
 		for _, viaBackstop := range []bool{false, true} {
@@ -843,7 +844,7 @@ func TestPRIntent_NeverFires(t *testing.T) {
 				c.setup(f)
 				if viaBackstop {
 					f.firstRun("done\n", 0)
-					if f.env.DispatchKind != "research" {
+					if f.env.DispatchKind != "research" && f.env.DispatchKind != "butler" {
 						f.resumes = []resumeScript{{result: "done\n"}}
 					}
 				} else {
