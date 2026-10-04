@@ -75,6 +75,9 @@ func TestNoRunnerExecOutsidePackage(t *testing.T) {
 			// from the host-side runner.Runner this guard polices, which launches
 			// the Box itself.
 			"driver-exec",
+			// toolchain is box's in-box devShell probe and prefetch (issue
+			// #4297): its nix runs inside the Box, not as a sandbox launch.
+			"internal/toolchain",
 			// seamtest is test support (issue #4280): it shells out to the host's
 			// `nix build` for fixtures, never to a sandbox.
 			"internal/seamtest",
