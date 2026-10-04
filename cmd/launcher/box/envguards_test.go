@@ -102,6 +102,8 @@ func TestEnvGuards_ForgeVarsExemptions(t *testing.T) {
 		wantMsg string
 	}{
 		{"fully local", map[string]string{"BOX_FULLY_LOCAL": "1"}, true, ""},
+		{"local tracker without BOX_FULLY_LOCAL", map[string]string{"ISSUE_TRACKER": "local", "BOX_TRACKER_AXIS_READ": "LOCAL"}, false, "GH_TOKEN is required"},
+		{"local forge without BOX_FULLY_LOCAL", map[string]string{"CODE_FORGE": "local"}, false, "GH_TOKEN is required"},
 		{"self-contained with unreachable tracker", map[string]string{"SELF_CONTAINED": "1", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, true, ""},
 		{"self-contained on a reachable tracker", map[string]string{"SELF_CONTAINED": "1"}, false, "GH_TOKEN is required"},
 		{"unreachable tracker without self-contained", map[string]string{"BOX_IN_BOX_UNREACHABLE_TRACKER": "1"}, false, "GH_TOKEN is required"},
@@ -134,12 +136,16 @@ func TestEnvGuards_SelfContainedWithToken_StillRequiresRepoSlug(t *testing.T) {
 }
 
 func TestEnvGuards_ExemptDispatchStillRequiresTheRest(t *testing.T) {
-	env := workEnv()
-	delete(env, "GH_TOKEN")
-	delete(env, "REPO_SLUG")
-	delete(env, "GIT_USER_NAME")
-	env["BOX_FULLY_LOCAL"] = "1"
-	if err := guardErr(env); err == nil || err.Error() != "GIT_USER_NAME is required" {
-		t.Fatalf("err = %v", err)
+	for _, drop := range []string{"ISSUE_NUMBER", "GIT_USER_NAME", "GIT_USER_EMAIL"} {
+		t.Run(drop, func(t *testing.T) {
+			env := workEnv()
+			delete(env, "GH_TOKEN")
+			delete(env, "REPO_SLUG")
+			delete(env, drop)
+			env["BOX_FULLY_LOCAL"] = "1"
+			if err := guardErr(env); err == nil || err.Error() != drop+" is required" {
+				t.Fatalf("err = %v", err)
+			}
+		})
 	}
 }
