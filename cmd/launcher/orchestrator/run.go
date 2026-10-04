@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
@@ -952,11 +951,12 @@ func deltaReviewBlockNote(findings string) string {
 	return string(runes[:deltaReviewNoteMaxRunes-1]) + "…"
 }
 
-// scanPassLog scans one pass's raw Driver log for a terminal
-// SPINDRIFT_OUTCOME line and the reviewer's "VERDICT: APPROVE|BLOCK" line.
-// The raw log is stream-json, so both markers sit inside JSON string fields
-// and a bare-line scan matches neither; RenderTranscript turns it back into
-// "[role] text" lines first (ADR 0009, issue #262 slice 4).
+// scanPassLog scans one pass's raw Driver log for the reviewer's
+// "VERDICT: APPROVE|BLOCK" line and whether the pass reached a terminal
+// outcome. The raw log is stream-json, so the verdict sits inside JSON string
+// fields and a bare-line scan misses it; RenderTranscript turns it back into
+// "[role] text" lines first (ADR 0009, issue #262 slice 4). The outcome comes
+// from scanPassOutcome, not the transcript.
 func scanPassLog(logPath, driverName string, kind passmachine.PassKind) (verdict string, hasOutcome bool) {
 	d, err := driver.New(driverName)
 	if err != nil {
@@ -974,44 +974,36 @@ func scanPassLog(logPath, driverName string, kind passmachine.PassKind) (verdict
 	// is BLOCK-dominant rather than last-match-wins (#2546).
 	res := passmachine.Scan(rendered, kind)
 
-	// outcome.ParseAnywhere tolerates a markdown wrap (issue #1611).
-	sc := bufio.NewScanner(strings.NewReader(rendered))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		if _, ok := outcome.ParseAnywhere(strings.TrimSpace(sc.Text())); ok {
-			hasOutcome = true
-		}
-	}
+	_, hasOutcome = scanPassOutcome(logPath, driverName)
 	return string(res.Verdict), hasOutcome
 }
 
-// scanPassOutcome re-renders logPath the way scanPassLog does and returns
-// the last outcome.ParseAnywhere match: the delta-review gate (issue #3246)
-// needs the land pass's Issue, Landing, and Status fields verbatim for a
-// corrective blocked line. Kept separate from scanPassLog because only the
-// rare gate-fired path pays for the second render.
+// scanPassOutcome returns the pass's terminal outcome using the Box's rule
+// (box.go): only the Driver's final result text counts, and only a line that
+// leads with the outcome token. Outcome-shaped text in tool inputs, tool
+// results, subagent prompts, or mid-pass assistant turns never ends the run
+// (issue #4405). The delta-review gate (issue #3246) also reads the land
+// pass's Issue, Landing, and Status fields from it verbatim.
 func scanPassOutcome(logPath, driverName string) (outcome.Outcome, bool) {
 	d, err := driver.New(driverName)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass outcome:", err)
 		return outcome.Outcome{}, false
 	}
-	rendered, err := d.RenderTranscript(logPath, driverkit.RenderOptions{TopLevelRole: driverkit.ImplementorRole})
+	text, err := d.ResultText(logPath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: scan pass outcome:", err)
 		return outcome.Outcome{}, false
 	}
-
-	var last outcome.Outcome
-	var found bool
-	sc := bufio.NewScanner(strings.NewReader(rendered))
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		if o, ok := outcome.ParseAnywhere(strings.TrimSpace(sc.Text())); ok {
-			last, found = o, true
-		}
+	line := outcome.ExtractOutcomeLine(outcome.StripResultText(text))
+	if line == "" {
+		return outcome.Outcome{}, false
 	}
-	return last, found
+	o, err := outcome.Parse(line)
+	if err != nil {
+		return outcome.Outcome{}, false
+	}
+	return o, true
 }
 
 // scanReviewLog scans a code-owned review pass's rendered log (issue #2037)

@@ -62,7 +62,7 @@ func deltaReviewFakeDriverBody(callLog, round2NonBlocking, decisionsPath, decisi
 	}
 	blockLine := streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none")
 	approveLine := streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- " + round2NonBlocking)
-	outcomeLine := streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")
+	outcomeLine := streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")
 
 	return `: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "` + callLog + `")
