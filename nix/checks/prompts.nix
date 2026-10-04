@@ -1132,8 +1132,8 @@ in
   # A Consumer researchPrompt carrying only a research-specific preamble,
   # with no "# POST THE VERDICT" marker at all, must still gain the contract
   # and survive the round trip byte-identical to what a SPINDRIFT_PROMPT_DIR
-  # override receives (issue #640). agent/entrypoint.sh's own runtime
-  # injection is covered by tests/entrypoint-research-kind.bats.
+  # override receives (issue #640). The Box's own runtime
+  # injection is covered by promptassembly's TestAssembleResearchOverrideVerdictBlock.
   mkharness-prompt-research-consumer-override-injected =
     pkgs.runCommand "mkharness-prompt-research-consumer-override-injected" { }
       ''
