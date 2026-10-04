@@ -55,6 +55,12 @@ type Driver interface {
 	// outcome.StripResultText then outcome.ExtractOutcomeLine. A missing log
 	// is "" with no error.
 	ResultText(logPath string) (string, error)
+
+	// ResultEvent encodes text as one newline-terminated NDJSON event in this
+	// Driver's own stream grammar, such that ResultText on a log holding it
+	// returns text. The orchestrator appends it as a synthetic final result
+	// (issue #4406).
+	ResultEvent(text string) ([]byte, error)
 }
 
 // registry is populated by each driver subpackage's init().

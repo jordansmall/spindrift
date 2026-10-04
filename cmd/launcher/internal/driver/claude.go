@@ -41,6 +41,10 @@ func (claudeDriver) ResultText(logPath string) (string, error) {
 	return claude.ResultText(logPath)
 }
 
+func (claudeDriver) ResultEvent(text string) ([]byte, error) {
+	return claude.ResultEvent(text)
+}
+
 func init() {
 	register(claudeDriver{})
 }

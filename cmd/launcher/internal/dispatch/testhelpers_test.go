@@ -98,3 +98,7 @@ func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 func (d fakeDriver) ResultText(logPath string) (string, error) {
 	return driverclaude.ResultText(logPath)
 }
+
+func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
+	return driverclaude.ResultEvent(text)
+}
