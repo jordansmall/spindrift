@@ -9,6 +9,8 @@ argv
 <stream-log>
 session
 --session-id bf718c96-aa0c-c4fa-d029-3a6bbb980c63
+devshell
+false default
 prompt
 <handoff-prompt>
 env

@@ -10,6 +10,7 @@
 #   argv      the flags with path values replaced by placeholders (<handoff>,
 #             <prompt>, <session>, <stream-log>; <outbox>/manifest.json)
 #   session   the --session-file content, then a newline when non-empty
+#   devshell  the handoff's `<Devshell> <DevshellName>` pair
 #   prompt    `<handoff-prompt>` when the --prompt-file content equals the handoff's
 #             PromptFile content modulo trailing newlines, else
 #             `<differs from handoff PromptFile>`
@@ -102,6 +103,9 @@ normalise_snapshot() {
     cat "$snap/session"
     echo
   fi
+
+  echo "devshell"
+  jq -r '"\(.Devshell) \(.DevshellName)"' "$handoff"
 
   echo "prompt"
   if [ "$(cat "$snap/prompt")" = "$(cat "$handoff_prompt_file")" ]; then
