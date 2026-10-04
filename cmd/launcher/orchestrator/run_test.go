@@ -72,8 +72,18 @@ func streamJSONVerdictLine(text string) string {
 		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + text + `"}]}}` + "\n"
 }
 
+// streamJSONOutcomeLine appends a mid-pass assistant text event. Since issue
+// #4405 it never carries a terminal outcome: only streamJSONFinalResult's
+// result event does.
 func streamJSONOutcomeLine(text string) string {
 	return `{"type":"assistant","message":{"content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+}
+
+// streamJSONFinalResult appends the stream-json result event the Driver emits
+// last, whose "result" text is the only place the orchestrator reads a pass's
+// terminal outcome from (issue #4405).
+func streamJSONFinalResult(text string) string {
+	return `{"type":"result","subtype":"success","is_error":false,"result":"` + text + `"}` + "\n"
 }
 
 // streamJSONResultLine appends a stream-json "result" event, the shape
@@ -171,7 +181,7 @@ exit 0
 `, callLog,
 		streamJSONVerdictLine("VERDICT: BLOCK"),
 		streamJSONVerdictLine("VERDICT: APPROVE"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunInvokesDriverExecOnceForwardingFlags verifies the orchestrator's S1
@@ -484,7 +494,9 @@ exit 0
 			{Op: "pass_usage", Pass: 2, Role: "review", Usage: &claude.PassUsage{}},
 			{Op: "pass_usage", Pass: 3, Role: "fix", Usage: &claude.PassUsage{}},
 			{Op: "pass_usage", Pass: 4, Role: "review", Usage: &claude.PassUsage{}},
-			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &claude.PassUsage{}},
+			// The land pass's log ends in a result event, which marks its output
+			// count main-loop-only even with no usage fields.
+			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &claude.PassUsage{OutputIsMainLoopOnly: true}},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("pass_usage ops = %+v, want %+v", got, want)
@@ -1266,7 +1278,7 @@ exit 0
 `, callLog,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
 		passSummaryPath)
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
@@ -1713,7 +1725,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- "+blockFinding+"\\n\\n## Non-blocking\\n- "+round1NonBlocking),
 		call3Body,
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- "+round2NonBlocking),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // reviewPassFakeDriverBody is fakeReviewDriverBody with a blocking round-1
@@ -1742,7 +1754,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		dispositionsContent, fmt.Sprintf("%q", dispositionsPath),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // twoRoundDispositionsFakeDriverBody scripts a 7-invocation implement,
@@ -1768,7 +1780,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:2 -- another bug\\n\\n## Non-blocking\\n- none"),
 		round2Dispositions, fmt.Sprintf("%q", dispositionsPath),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunWithReviewPassSequenceOnBlockThenApprove verifies the #2037 implement,
@@ -2006,7 +2018,7 @@ exit 0
 `, callLog,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunWithReviewPassLandDeltaNonZero verifies issue #3244's land_delta op
@@ -2843,7 +2855,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		fmt.Sprintf("%q", fixPromptCopyPath),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunWithReviewPassSeedsPassThreeWithDecisionsRecord verifies
@@ -2955,7 +2967,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
 		landDecisionsContent, fmt.Sprintf("%q", decisionsPath),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunWithReviewPassPersistsDecisionsPathWhenTheFinalPassWritesIt verifies
@@ -3049,7 +3061,7 @@ exit 0
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:2 -- another bug\\n\\n## Non-blocking\\n- none"),
 		fmt.Sprintf("%q", pass5PromptCopyPath),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // TestRunWithReviewPassAccumulatesDecisionsAcrossRoundsInDecisionsLog verifies
@@ -3857,7 +3869,7 @@ esac
 exit 0
 `, callLog,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -3930,7 +3942,7 @@ exit 0
 `, callLog, passSummaryPath,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug"),
 		passSummaryPath, missingMarker,
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 	writeFakeDriverExec(t, dir, callLog, body)
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
@@ -4258,7 +4270,7 @@ exit 0
 `, callLog,
 		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- run.go:1 -- bug\\n\\n## Non-blocking\\n- none"),
 		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none"),
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"),
 		streamJSONResultLine(1_000_000, 1_000_000, 1000.0))
 }
 
@@ -4536,7 +4548,7 @@ func TestRunWithReviewPassRunsTerminalLandPassWhenMaxSlicesCapHitsImplementPass(
 	body := `: > "$DRIVER_LOG_PATH"
 n=$(wc -l < "` + callLog + `")
 if [ "$n" -eq 2 ]; then
-  printf '%s' '` + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' | tee -a "$DRIVER_LOG_PATH"
+  printf '%s' '` + streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + `' | tee -a "$DRIVER_LOG_PATH"
 fi
 exit 0
 `
@@ -6009,7 +6021,7 @@ func TestScanPassLogDetectsOutcomeThroughStreamJSONAndMarkdownWrap(t *testing.T)
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
 	content := streamJSONVerdictLine("VERDICT: BLOCK") +
-		streamJSONOutcomeLine("`SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc`")
+		streamJSONFinalResult("`SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc`")
 	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -6488,5 +6500,57 @@ func TestPassSummarySnapshotKeepsByteIdenticalRewriteWithLaterModTime(t *testing
 
 	if target != path {
 		t.Errorf("target = %q, want %q (byte-identical rewrite with later mtime must not clear PassSummaryPath)", target, path)
+	}
+}
+
+// TestRunOutcomeTextInToolResultDoesNotEndImplementPass pins issue #4405: an
+// implement pass whose log holds outcome-shaped text only inside a tool result
+// (a file the Box read, say) has no outcome, so the loop goes on to review and
+// land rather than stopping "outcome reached" after pass 1.
+func TestRunOutcomeTextInToolResultDoesNotEndImplementPass(t *testing.T) {
+	dir := t.TempDir()
+	callLog := filepath.Join(dir, "calls.log")
+	writeFakeDriverExec(t, dir, callLog, fmt.Sprintf(`n=$(wc -l < "%s")
+case "$n" in
+  1) printf '%%s%%s' '%s' '%s' > "$DRIVER_LOG_PATH" ;;
+  2) printf '%%s' '%s' > "$DRIVER_LOG_PATH" ;;
+  *) printf '%%s' '%s' > "$DRIVER_LOG_PATH" ;;
+esac
+exit 0
+`, callLog,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_9","content":"SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=quoted nonce=abc"}]}}`+"\n",
+		streamJSONFinalResult("Implemented; review next."),
+		streamJSONVerdictLine("VERDICT: APPROVE"),
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")))
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	promptFile := filepath.Join(dir, "prompt.txt")
+	reviewPromptFile := filepath.Join(dir, "review-prompt.txt")
+	for _, f := range []string{promptFile, reviewPromptFile} {
+		if err := os.WriteFile(f, []byte("prompt"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := config{
+		promptFile:       promptFile,
+		reviewPromptFile: reviewPromptFile,
+		logPath:          filepath.Join(dir, "stream.log"),
+		stateFile:        filepath.Join(dir, "run-state.json"),
+		maxReviewRounds:  3,
+		maxSlices:        10,
+	}
+
+	var stdout bytes.Buffer
+	if _, err := run(cfg, &stdout); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, `"spindrift_op":{"op":"pass_start","pass":2,"role":"review"}`) {
+		t.Errorf("stdout = %q, want pass 2 to start as a review pass", out)
+	}
+	if strings.Contains(out, `"pass":1,"role":"implement"}`) && strings.Index(out, `"outcome reached"`) >= 0 &&
+		strings.Index(out, `"outcome reached"`) < strings.Index(out, `"pass":2,`) {
+		t.Errorf("stdout = %q, want no outcome-reached stop before pass 2", out)
 	}
 }

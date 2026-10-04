@@ -59,7 +59,7 @@ func writeFakeClaudeDriver(t *testing.T, dir, callLog string) string {
 		"case \"$n\" in\n" +
 		"  1) printf '%s' '" + streamJSONOutcomeLine("Implement pass narration, no outcome yet.") + "' ;;\n" +
 		"  2) printf '%s' '" + streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- none") + "' ;;\n" +
-		"  3) printf '%s' '" + streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + "' ;;\n" +
+		"  3) printf '%s' '" + streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc") + "' ;;\n" +
 		"esac\n" +
 		"exit 0\n"
 	path := filepath.Join(dir, "fake-claude")

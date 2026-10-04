@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/deltareview"
 	"spindrift.dev/launcher/internal/landdelta"
+	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptfence"
 	"spindrift.dev/launcher/internal/runstate"
 )
@@ -71,8 +72,8 @@ func TestDeltaReviewBlockNoteShortInputUntruncated(t *testing.T) {
 func TestScanPassOutcomeReturnsLastMatch(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")
-	content := streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=first") +
-		streamJSONOutcomeLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=final")
+	content := streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=blocked note=first") +
+		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=final")
 	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -203,5 +204,54 @@ func TestSeedDeltaReviewPromptOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
 	}
 	if strings.Contains(string(got), "### Delta focus") {
 		t.Errorf("seeded delta review prompt = %q, want no delta-focus section for an empty anchor", got)
+	}
+}
+
+const decoyOutcome = "SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=decoy nonce=abc"
+
+// decoyOutcomeLog carries a well-formed outcome line in every non-final place
+// a transcript can hold text (tool input, tool result, subagent message,
+// mid-pass assistant text) and a final result text with none (issue #4405).
+func decoyOutcomeLog() string {
+	return `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"toolu_1","name":"Bash","input":{"command":"echo ` + decoyOutcome + `"}}]}}` + "\n" +
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + decoyOutcome + `"}]}}` + "\n" +
+		`{"type":"assistant","parent_tool_use_id":"toolu_2","message":{"content":[{"type":"text","text":"` + decoyOutcome + `"}]}}` + "\n" +
+		streamJSONOutcomeLine(decoyOutcome) +
+		streamJSONFinalResult("Implemented the change; handing off to review.")
+}
+
+// Only the Driver's final result text can carry the outcome: the same text in
+// a tool call, tool result, subagent message, or mid-pass turn must not stop
+// the run (issue #4405).
+func TestScanPassIgnoresOutcomeOutsideFinalResultText(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "stream.log")
+	if err := os.WriteFile(logPath, []byte(decoyOutcomeLog()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, hasOutcome := scanPassLog(logPath, "claude", passmachine.KindLegacy); hasOutcome {
+		t.Error("scanPassLog hasOutcome = true, want false for outcome text outside the final result")
+	}
+	if o, found := scanPassOutcome(logPath, "claude"); found {
+		t.Errorf("scanPassOutcome = %+v, found = true, want false", o)
+	}
+}
+
+// A markdown-wrapped outcome line in the final result text still counts
+// (issue #1611 tolerance carried over by the shared Box rule).
+func TestScanPassDetectsMarkdownWrappedFinalResultOutcome(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "stream.log")
+	content := decoyOutcomeLog() +
+		streamJSONFinalResult("Done.\\n**SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=final nonce=abc**")
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, hasOutcome := scanPassLog(logPath, "claude", passmachine.KindLegacy); !hasOutcome {
+		t.Error("scanPassLog hasOutcome = false, want true")
+	}
+	o, found := scanPassOutcome(logPath, "claude")
+	if !found || o.Note != "final" {
+		t.Errorf("scanPassOutcome = %+v, found = %v, want the wrapped final line (note=final)", o, found)
 	}
 }
