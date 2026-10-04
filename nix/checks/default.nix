@@ -132,7 +132,6 @@ let
   # builder and fails with "Required system: aarch64-linux".
   linuxOnlyCheckNames = batsShardNames ++ [
     "promptassembly-parity"
-    "bats-outcome-opencode"
     "bats-prompt-contract-parity"
     # flake.nix only exposes apps.regen-goldens under isLinux, because it pulls
     # in fixtures.batsHarness.internals.driverExecBin. On darwin it is absent

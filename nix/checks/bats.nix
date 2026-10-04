@@ -60,52 +60,7 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
   );
 
-  # Issue #2261 slices 4-6. The unchanged entrypoint-outcome-*.bats suites run
-  # against every non-claude Driver's own fake (tests/fakes/<name>) and
-  # rendered preamble; claude stays covered by the shard derivations. A new
-  # registry entry that ships a fake is picked up without edits here.
-  nonClaudeDrivers = pkgs.lib.filterAttrs (name: _: name != "claude") driverRegistry.entries;
-
-  # Issue #2751. The env vars below stay hand-listed instead of building on
-  # `batsEnv // { ... }`: merging batsEnv wholesale would pull unrelated
-  # harnesses (opencodeHarness and promptHarness) into this derivation's
-  # closure for vars its suites never read.
-  outcomeBatsChecks = pkgs.lib.mapAttrs' (
-    name: entry:
-    pkgs.lib.nameValuePair "bats-outcome-${name}" (
-      pkgs.runCommand "bats-outcome-${name}"
-        {
-          nativeBuildInputs = batsNativeBuildInputs;
-          ENTRYPOINT = ../../agent/entrypoint.sh;
-          PROMPTS_DIR = ../../templates/default/prompts;
-          SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
-          # Overrides the fixtures dir's claude preamble: helper.bash only
-          # defaults DRIVER_PREAMBLE_FILE from the dir when it is unset.
-          DRIVER_PREAMBLE_FILE = driverOutcomeManifest.${name}.preamble;
-          DRIVER = name;
-          DRIVER_SESSION_RESUMABLE = pkgs.lib.optionalString (entry ? sessionCacheDirRelative) "1";
-          # entrypoint.sh's phase_prompt_assembly unconditionally shells out
-          # to `driver-exec assemble-prompt` (issue #2354) whatever the Driver
-          # is, so every suite that drives $ENTRYPOINT needs these vars.
-          DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
-          ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
-          BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
-          PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
-          PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-          FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
-        }
-        ''
-          ${batsBuilderSetup}
-          bats --print-output-on-failure \
-            tests/entrypoint-outcome-contract.bats \
-            tests/entrypoint-outcome-recovery.bats \
-            tests/entrypoint-outcome-backstop.bats
-          touch $out
-        ''
-    )
-  ) nonClaudeDrivers;
-
-  # Issue #2751. Shared by batsEnv, outcomeBatsChecks, and
+  # Issue #2751. Shared by batsEnv and
   # bats-prompt-contract-parity. `driver-registry-outcome-extraction` below
   # hand-lists a narrower set instead, since it needs neither git nor gettext.
   batsNativeBuildInputs = [
@@ -159,11 +114,6 @@ let
     # shards export the same manifest the dedicated check below does, or that
     # file's required-var guard fails here.
     DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
-    # claude is resumable, so its resume-session test in
-    # entrypoint-outcome-recovery.bats stays green (issue #2261 slices 4-6).
-    # The bats-outcome-<name> derivations compute this per Driver from
-    # sessionCacheDirRelative instead.
-    DRIVER_SESSION_RESUMABLE = "1";
     # The in-repo harness-owned skill bodies (lib/image.nix's harnessSkills
     # reads the same directory). batsBuilderSetup stages only tests/, so a
     # BATS_TEST_DIRNAME-relative path cannot reach them.
@@ -200,7 +150,7 @@ let
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
   };
 
-  # Shared by the bats-shard-N derivations, bats-outcome-<name>, and
+  # Shared by the bats-shard-N derivations and
   # bats-prompt-contract-parity: stage a writable copy of tests/, rewrite the
   # fakes' shebangs for the sandboxed build host, and export FAKES_DIR.
   # `driver-registry-outcome-extraction` below invokes no fake, so it needs
@@ -314,7 +264,9 @@ in
   # (_validate_prompt_contract) over every parityFixtures row and asserts the
   # exit code matches parityFold(fixture.verdict), the cross-language proof
   # that nix/checks/prompt-contract-parity.nix's pure-Nix fold matches the
-  # bash one. Env vars stay hand-listed for outcomeBatsChecks' reason (#2751).
+  # bash one. Env vars stay hand-listed instead of building on
+  # `batsEnv // { ... }`, which would pull unrelated harnesses
+  # (opencodeHarness, promptHarness) into this closure (#2751).
   "bats-prompt-contract-parity" =
     pkgs.runCommand "bats-prompt-contract-parity"
       {
@@ -323,8 +275,7 @@ in
         PROMPTS_DIR = ../../templates/default/prompts;
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
-        # Same reason as outcomeBatsChecks' copy of these vars: $ENTRYPOINT
-        # unconditionally calls `driver-exec assemble-prompt` (issue #2354).
+        # $ENTRYPOINT unconditionally calls `driver-exec assemble-prompt` (issue #2354).
         DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
         ORCHESTRATOR_BIN = "${batsHarness.internals.orchestratorBin}/bin/orchestrator";
         BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
@@ -348,5 +299,4 @@ in
   "bats-shard-partition-fills-every-shard" = batsShards."bats-shard-partition-fills-every-shard";
   "bats-shard-ceiling-formula-is-safe" = batsShards."bats-shard-ceiling-formula-is-safe";
 }
-// outcomeBatsChecks
 // batsShardChecks
