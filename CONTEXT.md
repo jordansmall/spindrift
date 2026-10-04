@@ -260,7 +260,7 @@ Three independent modes, not one shared apply/revert. Classification mode
 (`-work-dir`+`-ecosystem-env-output`, `runBindRegistryClassification`,
 unchanged from issue #2930) scans the clone for lockfiles and writes a
 sourced `NUDGE_ECOSYSTEM` env file; its one live call site is
-`phase_toolchain_nudge` (`agent/entrypoint.sh:589`), with its own sourced
+`phase_toolchain_nudge` in `agent/entrypoint.sh`, with its own sourced
 env file distinct from bindings mode's. Bindings mode
 (`-bindings-env-output`, `runBindRegistryBindings`) writes go/npm/pnpm/yarn
 berry env overrides to a sourced env file, plus two direct home-level writes
@@ -279,7 +279,8 @@ view of the one shared `ecosystem.Table`, so an ecosystem's name is spelled
 once — but apply first probes for an already-listening
 Forwarder and spawns one if needed, gating the whole rewrite all-or-nothing
 on TCP readiness (AC5: a Forwarder that never becomes ready leaves every
-in-tree file untouched, no partial rewrite, `bindregistry_cmd.go:340-364`).
+in-tree file untouched, no partial rewrite; the gate is
+`resolveRegistryProxyGate`, whose outcome `runBindRegistryIntree` consults).
 Appliedness has no sentinel of its own — `ApplyInTreeBinding`/
 `RevertInTreeBinding` derive it purely from the `skip-worktree` bit plus
 working-tree-vs-HEAD content on each call, never from state left over from a
@@ -287,8 +288,8 @@ prior run. `agent/entrypoint.sh` itself is down to choreography: one
 classification-mode call, one bindings-mode call, one `source` of each
 call's emitted env file, in-tree apply/revert/re-apply calls wrapped around
 clone and branch recovery, and a fourth in-tree call site, a defensive
-best-effort revert in `phase_conflict_resolve`'s rebase-abort path
-(`agent/entrypoint.sh:941`).
+best-effort `intree_binding_revert` in `phase_conflict_resolve`'s
+rebase-abort path.
 _Avoid_: adapter, registry config, ecosystem support.
 
 **Forwarder**:
