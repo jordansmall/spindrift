@@ -37,15 +37,6 @@
   env | sed -n 's/^CARGO_REGISTRIES_/env: CARGO_REGISTRIES_/p'
 } >>"$DRIVER_LOG"
 
-# Real claude -p discovers a skill only as a directory holding a SKILL.md
-# ($HOME/.claude/skills/<name>/SKILL.md), never a flat <name>.md file, and
-# this fake mirrors that so tests assert real discovery without a live LLM.
-if [ -d "${HOME:-}/.claude/skills" ]; then
-  for _skill in "${HOME}/.claude/skills/"*/SKILL.md; do
-    [ -f "$_skill" ] && printf 'skill discovered: %s\n' "$(basename "$(dirname "$_skill")")" >>"$DRIVER_LOG"
-  done
-fi
-
 if [ "${FAKE_DRIVER_COMMIT:-0}" = "1" ]; then
   branch="$(git rev-parse --abbrev-ref HEAD)"
   printf 'stub agent change for issue #%s\n' "${ISSUE_NUMBER:-0}" >agent-change.txt

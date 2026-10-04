@@ -50,10 +50,10 @@ while [ $# -gt 0 ]; do
 done
 
 printf '%s' "$prompt" >"${DRIVER_PROMPT_FILE:-/dev/null}"
-# Shared control flow (env/skill logging, rebase conflict resolution,
+# Shared control flow (env logging, rebase conflict resolution,
 # commit/push/PR pipeline) also played out by tests/fakes/claude; kept in
 # one place since it is byte-for-byte identical across Drivers whose fake
-# argument parsing differs (opencode never parses --agents, unlike claude).
+# argument parsing differs.
 # shellcheck source=tests/fakes/_driver-common.bash disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/_driver-common.bash"
 

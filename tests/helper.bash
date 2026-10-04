@@ -115,15 +115,6 @@ assert_timeout_rejected() {
   done
 }
 
-# Extracts the --handoff-file path box passed its first Driver pass, from a
-# verbatim-argv log such as $ORCHESTRATOR_LOG. Since issue #2975
-# the driver, model, effort, argv-shape, review and caps facts live in that JSON
-# rather than on argv. head -1 picks main's implement pass, deliberately skipping
-# the stripped copy a corrective resume passes (only ReviewPromptFile differs).
-handoff_path_from_log() {
-  grep -oE -- '--handoff-file [^ ]+' "$1" | head -1 | awk '{print $2}'
-}
-
 # Kills a suite's backgrounded stand-in socat so it never survives the test.
 # Call from each suite's own teardown(); bats requires that hook per file.
 kill_stand_in_socat() {
@@ -301,7 +292,6 @@ setup_fakes() {
   export NIX_LOG="$BATS_TEST_TMPDIR/nix.log"
   export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
   export DRIVER_PROMPT_FILE="$BATS_TEST_TMPDIR/$DRIVER-prompt.txt"
-  export DRIVER_AGENTS_FILE="$BATS_TEST_TMPDIR/$DRIVER-agents.json"
   : >"$PODMAN_LOG"
   : >"$DOCKER_LOG"
   : >"$BWRAP_LOG"

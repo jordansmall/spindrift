@@ -100,19 +100,9 @@ let
     # shards export the same manifest the dedicated check below does, or that
     # file's required-var guard fails here.
     DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
-    # The in-repo harness-owned skill bodies (lib/image.nix's harnessSkills
-    # reads the same directory). batsBuilderSetup stages only tests/, so a
-    # BATS_TEST_DIRNAME-relative path cannot reach them.
-    SKILLS_TEMPLATE_DIR = ../../templates/default/skills;
-    # The opencode Driver's rendered preamble (issue #2262), so the
-    # cross-half integration test derives DRIVER_AGENT_FILES_DIR from the same
-    # bytes an opencode image bakes rather than retyping the relative path.
+    # The opencode Driver's rendered preamble (issue #2262), read by
+    # entrypoint-driver-invocation-golden.bats rather than a hand-typed copy.
     OPENCODE_DRIVER_PREAMBLE_FILE = opencodeHarness.internals.driverPreambleFile;
-    # The real baked agent-files template output (issue #2262), so that test
-    # renders through lib/drivers/opencode.nix's agentFilesTemplate instead of
-    # write_agent_file's hand-written fixture. It proves the entrypoint's
-    # rewrite loop works on the baked bytes, not on a lookalike.
-    OPENCODE_AGENT_FILES = opencodeHarness.internals.agentFiles;
     # The binaries and rendered registries entrypoint.sh hands box (see
     # comment above promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";

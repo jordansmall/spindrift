@@ -16,17 +16,12 @@ call_index="$(grep -c '^driver invoked for issue' "$DRIVER_LOG" 2>/dev/null || t
 printf '%s\n' "$*" >>"$DRIVER_LOG"
 
 prompt=""
-agents=""
 # shellcheck disable=SC2034 # model is read by the sourced _driver-common.bash below
 model=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -p)
       prompt="${2:-}"
-      shift 2
-      ;;
-    --agents)
-      agents="${2:-}"
       shift 2
       ;;
     --model)
@@ -39,12 +34,11 @@ while [ $# -gt 0 ]; do
 done
 
 printf '%s' "$prompt" >"${DRIVER_PROMPT_FILE:-/dev/null}"
-printf '%s' "$agents" >"${DRIVER_AGENTS_FILE:-/dev/null}"
 
-# Shared control flow (env/skill logging, rebase conflict resolution,
+# Shared control flow (env logging, rebase conflict resolution,
 # commit/push/PR pipeline) also played out by tests/fakes/opencode; kept in
 # one place since it is byte-for-byte identical across Drivers whose fake
-# argument parsing differs (only claude parses --agents, above).
+# argument parsing differs.
 # shellcheck source=tests/fakes/_driver-common.bash disable=SC1091
 source "$(dirname "${BASH_SOURCE[0]}")/_driver-common.bash"
 
