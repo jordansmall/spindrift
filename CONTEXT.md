@@ -85,6 +85,16 @@ corrective `status=blocked` SPINDRIFT_OUTCOME line instead of settling as a
 false ready.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
+**box (binary)**:
+The in-box Go program (`cmd/launcher/box`, [ADR
+0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md))
+`entrypoint.sh` `exec`s after the first Driver run. box starts the Box,
+orchestrator runs passes, driver-exec serves a pass: box owns the outcome and
+PR-intent nudges, the synthetic outcome backstop, the already-resolved
+demotion, the lockfile scan and bundle-out, then exits with the run's code.
+Not the Box (the isolation boundary above).
+_Avoid_: entrypoint tail, post-driver shell.
+
 **Filer**:
 The opt-in subagent role (beside the scout and reviewer) that turns findings
 into issues on the Issue Tracker. Two callers: the work loop hands it the

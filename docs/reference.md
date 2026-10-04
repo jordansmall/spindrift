@@ -1935,17 +1935,21 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
           └─ /agent/entrypoint.sh
              ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
              ├─ run PREFETCH (optional cache warm-up)
-             └─ run_driver_in_env  (assembles the prompt/--agents JSON, mounts
-                the session cache, then hands off to one of:)
-                └─ orchestrator                (N passes)
-                   └─ driver-exec × N, one fresh Driver session per pass,
-                      │  seeded from a run-state handoff file — see [In-box
-                      │  orchestrator](#in-box-orchestrator)
-                      └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-                (inside a Driver pass itself:)
-                implement → check → commit → push → self-review (reviewer subagent)
-                   → open PR as a draft
-                   → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
+             ├─ run_driver_in_env  (assembles the prompt/--agents JSON, mounts
+             │   the session cache, then hands off to one of:)
+             │   └─ orchestrator                (N passes)
+             │      └─ driver-exec × N, one fresh Driver session per pass,
+             │         │  seeded from a run-state handoff file — see [In-box
+             │         │  orchestrator](#in-box-orchestrator)
+             │         └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
+             │   (inside a Driver pass itself:)
+             │   implement → check → commit → push → self-review (reviewer subagent)
+             │      → open PR as a draft
+             │      → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
+             └─ exec box  (cmd/launcher/box: everything after the first Driver
+                run — outcome and PR-intent nudges, outcome backstop,
+                already-resolved demotion, lockfile scan, bundle-out — then
+                exits with the run's code)
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
@@ -2050,7 +2054,10 @@ It is the only path: the `ORCHESTRATOR_ENABLED` switch and the direct
 single-pass `driver-exec` path were removed in issue #4291, and a leftover
 setting fails preflight (`spindrift doctor`'s `removed-knobs` check, flake
 eval) naming it as removed. `entrypoint.sh`'s own job — prompt/`--agents`
-assembly, session-cache mounting — is unchanged.
+assembly, session-cache mounting, the first Driver run — is unchanged; once it
+returns, `entrypoint.sh` `exec`s `box` (`cmd/launcher/box`), which owns the
+outcome and PR-intent nudges, the outcome backstop, demotion, the lockfile scan
+and bundle-out (issue #4292).
 
 Each pass after the first runs the Driver **sessionless** (no `--resume`,
 ever) — only the very first pass carries the box's initial session pin
@@ -4337,7 +4344,7 @@ no base64 and no "print exactly one line" wording anywhere in its prompt.
 Both variants of every fragment bake into the image, so flipping the knob
 takes no rebuild. The read-only `gh` shim's refusal messages for `gh pr
 create`, `gh issue comment` and `gh issue create` name both routes, and the
-in-Box marker gate — the post-driver resume nudge for a `ready` outcome with
+in-Box marker gate (`box`, `cmd/launcher/box`) — the post-driver resume nudge for a `ready` outcome with
 no PR intent — asks the socket's status route under `socket` instead of
 re-scanning the Box log.
 
