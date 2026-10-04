@@ -59,7 +59,8 @@ type deps struct {
 }
 
 // phaseError names the phase whose failure aborted the entrypoint under
-// `set -e`; mainRun prints it as `box: <phase>: <err>` and exits 1.
+// `set -e`; mainRun prints it as `box: <phase>: <err>` and exits 1, except a
+// validator rejection, which prints bare on stdout.
 type phaseError struct {
 	phase string
 	err   error
