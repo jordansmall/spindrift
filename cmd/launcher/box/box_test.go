@@ -105,6 +105,10 @@ func newFixture(t *testing.T) *fixture {
 		WorkDir:   filepath.Join(dir, "work"),
 		OutboxDir: filepath.Join(dir, "outbox"),
 	}
+	f.in.Assembly.SkillsDir = filepath.Join(dir, "driver-skills")
+	if err := os.MkdirAll(f.knobs["HOME"], 0o755); err != nil {
+		t.Fatal(err)
+	}
 	promptFile := filepath.Join(dir, "prompt.md")
 	// The shell's assemble-prompt leaves a trailing newline bash's `$(cat)` trimmed.
 	f.write(promptFile, firstPrompt+"\n\n")
@@ -513,7 +517,7 @@ func TestBackstop_MalformedKnobIsFatalOnlyWhenTheVerbRuns(t *testing.T) {
 
 	// Advise-only: neither backstop nor demotion reads the knobs.
 	f := newFixture(t)
-	f.knobs = map[string]string{}
+	f.knobs = map[string]string{"HOME": f.knobs["HOME"]}
 	f.env.DispatchKind = "research"
 	f.firstRun(blockedLine+"\n", 0)
 	if _, err := run(f.in, f.env, f.d); err != nil {
@@ -1353,6 +1357,8 @@ func allFlags() []string {
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5", "--devshell=1", "--devshell-name=dev",
 		"--prework-rebase-conflict=1", "--publish-rebase=0",
+		"--harness-skills-dir=/harness-skills", "--operator-skills-dir=/operator-skills",
+		"--harness-home-agent-dir=/home-agent", "--driver-session-cache-dir=/session-cache",
 	}
 }
 
@@ -1365,6 +1371,10 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		WorkDir:               "/w",
 		PreworkRebaseConflict: true,
 		OutboxDir:             "/o",
+		HarnessSkillsDir:      "/harness-skills",
+		OperatorSkillsDir:     "/operator-skills",
+		HarnessHomeAgentDir:   "/home-agent",
+		DriverSessionCacheDir: "/session-cache",
 		Assembly: assemblyInputs{
 			RegistryFile:                "/reg.json",
 			ValidateMarkersFile:         "/markers.json",
@@ -1391,6 +1401,98 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 	}
 	if !reflect.DeepEqual(in, want) {
 		t.Fatalf("inputs = %+v, want %+v", in, want)
+	}
+}
+
+func TestHomeLayout_PopulatesBeforeAssembly(t *testing.T) {
+	f := newFixture(t)
+	harness, operator, staged := filepath.Join(f.dir, "harness"), filepath.Join(f.dir, "operator"), filepath.Join(f.dir, "staged")
+	for path, content := range map[string]string{
+		filepath.Join(harness, "a", "SKILL.md"):    "harness a",
+		filepath.Join(harness, "b", "SKILL.md"):    "harness b",
+		filepath.Join(operator, "b", "SKILL.md"):   "operator b",
+		filepath.Join(staged, ".claude", "x.md"):   "staged x",
+		filepath.Join(staged, ".config", "y.json"): "staged y",
+	} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		f.write(path, content)
+	}
+	f.in.HarnessSkillsDir, f.in.OperatorSkillsDir, f.in.HarnessHomeAgentDir = harness, operator, staged
+	checked := 0
+	f.d.Assemble = func(in assemblyInputs, _ promptassembly.Env, _ io.Writer) (string, error) {
+		home := f.knobs["HOME"]
+		for path, want := range map[string]string{
+			filepath.Join(in.SkillsDir, "a", "SKILL.md"): "harness a",
+			filepath.Join(in.SkillsDir, "b", "SKILL.md"): "operator b",
+			filepath.Join(home, ".claude", "x.md"):       "staged x",
+			filepath.Join(home, ".config", "y.json"):     "staged y",
+		} {
+			got, err := os.ReadFile(path)
+			if err != nil || string(got) != want {
+				t.Errorf("at Assemble, %s = %q, %v; want %q", path, got, err, want)
+			}
+			checked++
+		}
+		f.assembled++
+		return f.handoffFile, nil
+	}
+	f.run()
+	if checked == 0 || f.assembled != 1 {
+		t.Fatalf("Assemble ran %d times, checked %d files", f.assembled, checked)
+	}
+}
+
+func TestHomeLayout_FailureIsPhaseErrorAndStopsTheRun(t *testing.T) {
+	for _, conflict := range []bool{false, true} {
+		f := newFixture(t)
+		f.in.PreworkRebaseConflict = conflict
+		blocker := filepath.Join(f.dir, "blocker")
+		f.write(blocker, "a file, not a directory")
+		f.in.Assembly.SkillsDir = filepath.Join(blocker, "skills")
+		// AbortRebase and Git stay nil: the layout must fail before the
+		// conflict pass could reach either.
+		rc, err := run(f.in, f.env, f.d)
+		var pe *phaseError
+		if !errors.As(err, &pe) || pe.phase != "home-layout" {
+			t.Fatalf("conflict=%v: run() = %d, %v; want a home-layout phaseError", conflict, rc, err)
+		}
+		if f.assembled != 0 || f.ranFirst {
+			t.Errorf("conflict=%v: Assemble ran %d times, orchestrator ran=%v; want neither after a layout failure", conflict, f.assembled, f.ranFirst)
+		}
+	}
+}
+
+func TestHomeLayout_EmptyHomeIsPhaseErrorAndCopiesNothing(t *testing.T) {
+	f := newFixture(t)
+	staged := filepath.Join(f.dir, "staged")
+	if err := os.MkdirAll(filepath.Join(staged, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f.write(filepath.Join(staged, ".claude", "settings.json"), "{}")
+	f.in.HarnessHomeAgentDir = staged
+	f.knobs["HOME"] = ""
+	// Chdir into the work dir: an empty HOME makes the copy land relative to
+	// the working directory, the cloned repo.
+	if err := os.MkdirAll(f.in.WorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(f.in.WorkDir)
+	rc, err := run(f.in, f.env, f.d)
+	var pe *phaseError
+	if !errors.As(err, &pe) || pe.phase != "home-layout" {
+		t.Fatalf("run() = %d, %v; want a home-layout phaseError", rc, err)
+	}
+	if f.assembled != 0 || f.ranFirst {
+		t.Errorf("Assemble ran %d times, orchestrator ran=%v; want neither", f.assembled, f.ranFirst)
+	}
+	entries, err := os.ReadDir(f.in.WorkDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("work dir holds %d entries after the failed layout; want nothing copied", len(entries))
 	}
 }
 

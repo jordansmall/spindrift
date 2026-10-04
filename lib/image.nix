@@ -304,7 +304,7 @@ let
         f:
         # Claude Code discovers a skill only as a directory holding SKILL.md, so
         # each entry is baked under its own <name>/ directory below the fixed
-        # /agent/skills, which entrypoint.sh copies into the Driver's runtime
+        # /agent/skills, which box copies into the Driver's runtime
         # skills dir at startup. A { name; src; } entry is re-realized with THIS
         # pkgs, so no consumer host's system reaches the derivation graph (#597).
         if builtins.isAttrs f && !(lib.isDerivation f) then

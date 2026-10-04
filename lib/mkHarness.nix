@@ -757,6 +757,9 @@ let
         (lib.fileset.fileFilter (f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name) ../cmd/launcher/box)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+        ) ../cmd/launcher/internal/homelayout)
+        (lib.fileset.fileFilter (
+          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/registryvocab)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
