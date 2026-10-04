@@ -278,9 +278,9 @@ run before ever reaching this OUTCOME section, not a third or fourth option
 here).
 
 This grammar's leading token is load-bearing (ADR 0035): the in-box
-orchestrator's scanPassLog greps for it verbatim (via
-`outcome.ParseAnywhere`), and rewording it silently collapses the multi-pass
-loop to single-pass.
+orchestrator's scanPassLog reads it from the pass's final result text (via
+`outcome.ExtractOutcomeLine`), and rewording it silently collapses the
+multi-pass loop to single-pass.
 
 Invalid — the smallest fragment that identifies each failure, never a
 whole line worth copying:

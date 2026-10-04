@@ -14,8 +14,9 @@ import (
 // (issue #2261 slice 1).
 const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture"
 
-// An orchestrator's outcome.ParseAnywhere scan finds the outcome only if
-// RenderTranscript emits this line, so this test pins that it does.
+// Pins that RenderTranscript emits this line, so the Console transcript
+// drill-in shows it. The orchestrator no longer reads the transcript;
+// TestOutcomeFixtureResultText covers its path.
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
