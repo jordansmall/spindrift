@@ -138,3 +138,46 @@ func TestAssembleRendersIssuePlaceholdersAndRunNonce(t *testing.T) {
 		}
 	}
 }
+
+// A warm fix pass gets the baked-skill steps through the shared-block
+// injection (issue #455) rather than its own copy: CAVEMAN_STEP inside the
+// COMMS block and the /commit anchor inside the CHECK/COMMIT block (issue
+// #487) must substitute at render time, and render nothing when unbaked.
+func TestAssembleFixPassInjectedBlocksCarryBakedSkillSteps(t *testing.T) {
+	reg := loadTestRegistry(t)
+	const (
+		cavemanClause = "Default to the `/caveman` skill for all narration"
+		commitAnchor  = "Use the `/commit` skill to write every commit message."
+	)
+
+	for _, baked := range []bool{true, false} {
+		name := "unbaked"
+		if baked {
+			name = "baked"
+		}
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			env := coveredEnv()
+			env.FixPass = 2
+			env.CavemanSkillBaked = baked
+			env.CommitSkillBaked = baked
+			env.CommsContractFile = writeContractFile(t, dir, "comms-contract.md", "# COMMS\n\n${CAVEMAN_STEP}body text\n")
+			env.CheckContractFile = writeContractFile(t, dir, "check-contract.md", "# CHECK\n\n${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}Strict Conventional Commits.\n")
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			for _, s := range []string{cavemanClause, "are exempt and stay", commitAnchor} {
+				if got := strings.Contains(result.Prompt, s); got != baked {
+					t.Errorf("Prompt contains %q = %v, want %v:\n%s", s, got, baked, result.Prompt)
+				}
+			}
+			for _, s := range []string{"${CAVEMAN_STEP}", "${COMMIT_BAKED_STEP}", "${COMMIT_UNBAKED_STEP}"} {
+				if strings.Contains(result.Prompt, s) {
+					t.Errorf("Prompt still contains literal %s", s)
+				}
+			}
+		})
+	}
+}

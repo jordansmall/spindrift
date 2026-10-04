@@ -2845,8 +2845,7 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 }
 
 // A baked opencode agent file fixture: real frontmatter shape, and a body
-// distinguishable from any real rendered prompt. The Go-side twin of
-// tests/entrypoint-opencode-agent-files.bats's write_agent_file.
+// distinguishable from any real rendered prompt.
 func writeAgentFile(t *testing.T, path, desc string) {
 	t.Helper()
 	content := "---\n" +
@@ -2860,7 +2859,7 @@ func writeAgentFile(t *testing.T, path, desc string) {
 	}
 }
 
-// The Go-side twin of the bats helper of the same name.
+// agentFileFrontmatter returns the file up to and including its second fence.
 func agentFileFrontmatter(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -3966,5 +3965,138 @@ func TestAssembleUngatedRowRendersUnconditionally(t *testing.T) {
 	}
 	if strings.Contains(result.Prompt, fragmentText(t, "commit-rework-orchestrator.md")) {
 		t.Errorf("Prompt contains the fragment of a row whose gate is unknown, want absent")
+	}
+}
+
+// The rewrite is generic over the roster (issue #264): every baked file whose
+// name the prompt map carries is rewritten from its own prompt file, with no
+// per-name branch, so a custom Nth agent is rewritten like scout and worker.
+// The custom prompt names ISSUE_NUMBER, so this also proves substitution ran.
+func TestAssembleDriverAgentFilesRewritesRosterGenerically(t *testing.T) {
+	reg := loadTestRegistry(t)
+	prompts := t.TempDir()
+	if err := os.CopyFS(prompts, os.DirFS(promptsDir)); err != nil {
+		t.Fatalf("CopyFS: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(prompts, "auditor-prompt.md"), []byte("issue ${ISSUE_NUMBER} body\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"scout", "worker", "auditor"} {
+		writeAgentFile(t, filepath.Join(dir, name+".md"), name)
+	}
+
+	env := coveredEnv()
+	env.PromptsDir = prompts
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"scout":"scout-prompt.md","worker":"worker-prompt.md","auditor":"auditor-prompt.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	for name, want := range map[string]string{
+		"scout":   "Return only the brief's path",
+		"worker":  "Stay inside the slice you were handed",
+		"auditor": "issue 2349 body",
+	} {
+		body := agentFileBody(t, filepath.Join(dir, name+".md"))
+		if !strings.Contains(body, want) {
+			t.Errorf("%s.md body missing %q: %q", name, want, body)
+		}
+		if strings.Contains(body, "placeholder body") {
+			t.Errorf("%s.md body not rewritten: %q", name, body)
+		}
+	}
+	if got := agentFileBody(t, filepath.Join(dir, "auditor.md")); got != "issue 2349 body\n" {
+		t.Errorf("auditor.md body = %q, want exactly the substituted prompt", got)
+	}
+}
+
+// Roster names with no baked file are skipped and never created: opencode
+// drops a file whose model is empty. With no reviewer.md either, there is no
+// model to extract, so the handoff's ReviewModel stays empty.
+func TestAssembleDriverAgentFilesAbsentRosterFilesAreNotCreated(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+
+	env := coveredEnv()
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}`
+
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	for _, name := range []string{"reviewer", "filer", "worker"} {
+		if _, err := os.Stat(filepath.Join(dir, name+".md")); !os.IsNotExist(err) {
+			t.Errorf("%s.md exists (stat err %v), want it never created", name, err)
+		}
+	}
+	if body := agentFileBody(t, filepath.Join(dir, "scout.md")); strings.Contains(body, "placeholder body") {
+		t.Errorf("scout.md not rewritten: %q", body)
+	}
+	if result.Handoff.ReviewModel != "" {
+		t.Errorf("Handoff.ReviewModel = %q, want empty (no reviewer.md)", result.Handoff.ReviewModel)
+	}
+}
+
+// An unset DriverAgentFilesDir (a Driver with no on-disk agent files) leaves
+// every agent file alone, even with a roster prompt map present.
+func TestAssembleDriverAgentFilesUnsetDirLeavesFilesUntouched(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+	before, err := os.ReadFile(filepath.Join(dir, "scout.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	env := coveredEnv()
+	env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, "scout.md"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("scout.md changed with DriverAgentFilesDir unset:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
+// Cross-Driver parity (issue #2153, AC3): the same roster yields the same
+// subagent prompt under either Driver. Claude's --agents JSON .scout.prompt
+// and opencode's rewritten scout.md body differ only by the single trailing
+// newline the file body carries.
+func TestAssembleScoutPromptMatchesAcrossDrivers(t *testing.T) {
+	reg := loadTestRegistry(t)
+	const roster = `{"scout":"scout-prompt.md"}`
+
+	claude := coveredEnv()
+	claude.AgentsJSONTemplate = `{"scout":{"description":"fixture scout description","model":"opus","prompt":"","tools":["Read"]}}`
+	claude.AgentsPromptFiles = roster
+	jsonResult, err := Assemble(claude, reg)
+	if err != nil {
+		t.Fatalf("Assemble (claude): %v", err)
+	}
+	want := agentPromptFromJSON(t, jsonResult.AgentsJSON, "scout")
+	if want == "" {
+		t.Fatal("claude scout prompt is empty")
+	}
+
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+	opencode := coveredEnv()
+	opencode.DriverAgentFilesDir = dir
+	opencode.AgentsPromptFiles = roster
+	if _, err := Assemble(opencode, reg); err != nil {
+		t.Fatalf("Assemble (opencode): %v", err)
+	}
+	if got := strings.TrimSuffix(agentFileBody(t, filepath.Join(dir, "scout.md")), "\n"); got != want {
+		t.Errorf("opencode scout.md body differs from claude's scout prompt:\nopencode: %q\nclaude:   %q", got, want)
 	}
 }

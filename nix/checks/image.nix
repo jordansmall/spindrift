@@ -581,6 +581,7 @@ in
   check-hygiene-skill-baked-into-image = pkgs.runCommand "check-hygiene-skill-baked-into-image" { } ''
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/check-hygiene/SKILL.md
     [ -s "$skill" ]
+    grep -qF 'name: check-hygiene' "$skill"
     grep -q 'exit marker' "$skill"
     touch $out
   '';
@@ -591,6 +592,7 @@ in
   code-comments-skill-baked-into-image = pkgs.runCommand "code-comments-skill-baked-into-image" { } ''
     skill=${noSkillsHarness.internals.agentFiles}/agent/skills/code-comments/SKILL.md
     [ -s "$skill" ]
+    grep -qF 'name: code-comments' "$skill"
     grep -q 'non-obvious why' "$skill"
     touch $out
   '';

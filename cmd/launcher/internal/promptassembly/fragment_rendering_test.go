@@ -465,7 +465,7 @@ func TestAssembleStepRendering(t *testing.T) {
 		},
 		{
 			name:    "CAVEMAN_STEP stays separated from the COMMS body text",
-			want:    []string{"# COMMS", "Default to the `/caveman` skill"},
+			want:    []string{"# COMMS", "Default to the `/caveman` skill for all narration", "are exempt and stay"},
 			wantNot: []string{"message.Your text output"},
 		},
 		{
@@ -482,10 +482,13 @@ func TestAssembleStepRendering(t *testing.T) {
 		{
 			name: "commit skill baked renders the commit step",
 			want: []string{"Use the `/commit` skill to write every commit message"},
+			// commit-unbaked.md's inline format rules are subtracted, not superseded.
+			wantNot: []string{"hard-wrapped (subject"},
 		},
 		{
-			name:    "commit skill unbaked drops the commit step",
+			name:    "commit skill unbaked renders the inline format rules in place of the commit step",
 			mutate:  []func(*Env){func(e *Env) { e.CommitSkillBaked = false }},
+			want:    []string{"hard-wrapped (subject"},
 			wantNot: []string{"Use the `/commit` skill to write every commit message"},
 		},
 		{
