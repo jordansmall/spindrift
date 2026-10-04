@@ -20,10 +20,10 @@ let
   # coverage check compares against.
   allFiles = builtins.sort (a: b: a < b) (builtins.attrNames batsFiles);
 
-  # The fewest shards whose LPT makespan is still the heaviest single file
-  # (entrypoint-prompt-fragments.bats, issue #4288): more shards add
-  # derivations without shortening the slowest one.
-  shardCount = 7;
+  # Sized so the LPT makespan (about 308 @test cases / 5) stays under the
+  # 80-case peak the suite carried before its prompt-assembly suites moved to
+  # Go (issue #4294); more shards would only add derivations.
+  shardCount = 5;
   shardIndices = lib.range 0 (shardCount - 1);
   shardNames = map (i: "bats-shard-${toString i}") shardIndices;
 
@@ -40,10 +40,10 @@ let
     builtins.length (builtins.filter isTestLine lines);
 
   # Round-robin by file index balances file counts but not test counts: one
-  # file, entrypoint-prompt-fragments.bats, carries 80 @test cases against a
-  # 1-20 range for the rest, so a shard holding it plus a few mid-size files
-  # dominates build time. Bin-pack with greedy LPT instead: heaviest file
-  # first, ties broken by filename, into the shard with the smallest total.
+  # file can carry far more @test cases than the 1-20 range of most, so a
+  # shard holding it plus a few mid-size files dominates build time. Bin-pack
+  # with greedy LPT instead: heaviest file first, ties broken by filename,
+  # into the shard with the smallest total.
   fileCounts = map (file: {
     inherit file;
     count = countTests file;

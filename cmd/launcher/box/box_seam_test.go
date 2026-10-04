@@ -173,6 +173,10 @@ type seamCase struct {
 	env               map[string]string
 	skills            []string
 	agentsPromptFiles string
+	// promptsDir overrides the repo's templates; extraArgs are appended to
+	// the box flags, where a repeated flag overrides the default.
+	promptsDir string
+	extraArgs  []string
 	// driverRuns script the Driver: the first is the first Driver run box
 	// performs, the rest are its corrective resumes.
 	driverRuns []seamtest.DriverRun
@@ -658,7 +662,14 @@ func (c seamCase) boxArgs(t *testing.T, outbox string) []string {
 			args[i] = "--agents-prompt-files=" + c.agentsPromptFiles
 		}
 	}
-	return args
+	if c.promptsDir != "" {
+		for i, a := range args {
+			if strings.HasPrefix(a, "--prompts-dir=") {
+				args[i] = "--prompts-dir=" + c.promptsDir
+			}
+		}
+	}
+	return append(args, c.extraArgs...)
 }
 
 // TestBoxSeamAssemblesTheGoldenPrompt runs box over the golden suite's default
@@ -684,4 +695,140 @@ func TestBoxSeamAssemblesTheGoldenPrompt(t *testing.T) {
 	if got := r.assembledPrompt(t); got != string(want) {
 		t.Errorf("assembled prompt differs from no-roster.prompt.txt\n--- golden ---\n%s\n--- actual ---\n%s\n--- end ---", want, got)
 	}
+}
+
+// seamStubPrompts is a prompts dir holding only stub templates, so each
+// case's marker set is exactly what its files say and no real fragment
+// supplies a marker the stub omits.
+func seamStubPrompts(t *testing.T, override map[string]string) string {
+	t.Helper()
+	files := map[string]string{
+		"issue-prompt.md":  "issue stub\n",
+		"scout-prompt.md":  "scout stub\n",
+		"review-prompt.md": "reviewer stub\n\nVERDICT: APPROVE or BLOCK\n",
+		"worker-prompt.md": "worker stub\n",
+	}
+	for name, body := range override {
+		files[name] = body
+	}
+	dir := t.TempDir()
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+var seamResearchEnv = map[string]string{
+	"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
+}
+
+// The real prompt-contract registry's reject row stops the Box before any
+// Driver run: a read-only research prompt without SPINDRIFT_COMMENT would
+// lose the verdict.
+func TestBoxSeamValidatorRejectStopsBeforeTheDriver(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo:       seamRepo(t, 0),
+		relay:      true,
+		env:        seamResearchEnv,
+		promptsDir: seamStubPrompts(t, map[string]string{"research-prompt.md": "research stub, no verdict-comment marker here\n"}),
+	})
+	if r.res.ExitCode == 0 {
+		t.Fatalf("box exited 0 on a rejected prompt; stdout:\n%s", r.res.Stdout)
+	}
+	if !strings.Contains(r.res.Stdout, "SPINDRIFT_COMMENT") {
+		t.Errorf("stdout does not name the missing marker:\n%s", r.res.Stdout)
+	}
+	if strings.Contains(r.res.Stderr, "prompt-assembly") {
+		t.Errorf("a marker rejection must print bare, got stderr:\n%s", r.res.Stderr)
+	}
+	if len(r.driverRec) != 0 || len(r.orchRec) != 0 {
+		t.Errorf("driver calls %v, orchestrator calls %v; want none after a rejected prompt", r.driverRec, r.orchRec)
+	}
+}
+
+// The same row accepts a prompt that carries the marker, however the prose
+// around it is worded.
+func TestBoxSeamValidatorPassesAMarkedResearchPrompt(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo:  seamRepo(t, 0),
+		relay: true,
+		env:   seamResearchEnv,
+		promptsDir: seamStubPrompts(t, map[string]string{
+			"research-prompt.md": "# WRAP UP\n\nWhen you are all done, drop a comment carrying SPINDRIFT_COMMENT so the launcher hears your call.\n",
+		}),
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "researched"))}},
+	})
+	r.res.WantExit(t, 0)
+	if len(r.driverRec) != 1 {
+		t.Errorf("driver calls = %v; want the first run", r.driverRec)
+	}
+	if !strings.Contains(r.assembledPrompt(t), "SPINDRIFT_COMMENT") {
+		t.Error("the assembled prompt lacks the marker")
+	}
+}
+
+// A warn row is advisory: a read-only work prompt without SPINDRIFT_PR_INTENT
+// reaches the Driver, with the advisory in the Box log.
+func TestBoxSeamValidatorWarnsAndProceeds(t *testing.T) {
+	r := runBoxSeam(t, seamCase{
+		repo:       seamRepo(t, 0),
+		relay:      true,
+		promptsDir: seamStubPrompts(t, map[string]string{"issue-prompt.md": "issue stub, no PR-intent marker here\n"}),
+		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "warned"))}},
+	})
+	r.res.WantExit(t, 0)
+	if !strings.Contains(r.res.Stdout, "SPINDRIFT_PR_INTENT") {
+		t.Errorf("stdout lacks the advisory:\n%s", r.res.Stdout)
+	}
+	if len(r.driverRec) != 1 {
+		t.Errorf("driver calls = %v; want the first run", r.driverRec)
+	}
+}
+
+// box's flags are the only source of the Driver settings in the handoff the
+// orchestrator receives: the real binary carries each one through.
+func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
+	handoff := func(t *testing.T, extra ...string) promptassembly.Handoff {
+		t.Helper()
+		r := runBoxSeam(t, seamCase{
+			repo:       seamRepo(t, 0),
+			extraArgs:  extra,
+			driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "handoff"))}},
+		})
+		r.res.WantExit(t, 0)
+		h, err := promptassembly.LoadHandoffFile(r.handoff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return h
+	}
+
+	t.Run("operator knobs", func(t *testing.T) {
+		h := handoff(t, "--model=claude-test-model", "--effort=high", "--max-budget-tokens=500000", "--max-budget-usd=4.44")
+		if h.Model != "claude-test-model" || h.Effort != "high" {
+			t.Errorf("model/effort = %q/%q", h.Model, h.Effort)
+		}
+		if h.Caps.MaxBudgetTokens != 500000 || h.Caps.MaxBudgetUSD != 4.44 {
+			t.Errorf("caps = %+v", h.Caps)
+		}
+	})
+
+	t.Run("schema defaults and claude's argv shape", func(t *testing.T) {
+		h := handoff(t)
+		if h.DriverBin != "claude" || h.Driver != "claude" {
+			t.Errorf("driver = %q bin %q", h.Driver, h.DriverBin)
+		}
+		if h.Caps.MaxBudgetTokens != 0 || h.Caps.MaxBudgetUSD != 0 {
+			t.Errorf("caps = %+v; want zero budgets by default", h.Caps)
+		}
+		want := promptassembly.ArgvShape{
+			PromptStyle: "flag", PromptFlag: "-p", ModelFlag: "--model", AgentsFlag: "--agents", EffortFlag: "--effort",
+			Order: []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
+		}
+		if !reflect.DeepEqual(h.ArgvShape, want) {
+			t.Errorf("ArgvShape = %+v; want %+v", h.ArgvShape, want)
+		}
+	})
 }

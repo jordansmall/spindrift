@@ -1323,9 +1323,9 @@ in
 
   # The PR-body ticket-reference toggle (issue #1429, ADR 0029): each of the
   # three PR_BODY_* fragments is unconditional prose for one case, since
-  # agent/entrypoint.sh picks exactly one gate per run, so a static grep on
-  # the fragment source pins each case. The runtime gate selection needs a
-  # live entrypoint.sh run and lives in tests/entrypoint-prompt-fragments.bats.
+  # promptassembly picks exactly one gate per run, so a static grep on
+  # the fragment source pins each case. The runtime gate selection is
+  # pinned by promptassembly's TestGatesPRBodyReference and TestAssembleFragmentRendering.
   pr-body-reference-github-unchanged = pkgs.runCommand "pr-body-reference-github-unchanged" { } ''
     grep -qF 'Closes #''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-closes.md}
     touch $out

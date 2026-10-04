@@ -131,8 +131,6 @@ let
   # Linux twin of the host system, so a darwin eval still demands a Linux
   # builder and fails with "Required system: aarch64-linux".
   linuxOnlyCheckNames = batsShardNames ++ [
-    "promptassembly-parity"
-    "bats-prompt-contract-parity"
     # flake.nix only exposes apps.regen-goldens under isLinux, because it pulls
     # in fixtures.seamFixtures, rendered off the Linux-only batsHarness. On darwin it is absent
     # from config.apps, so this check's own existence assert would throw.

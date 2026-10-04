@@ -16,14 +16,18 @@
 }:
 let
   inherit (batsHarness) internals;
-  # The registries the bats parity suite hands assemble-prompt, rendered the
-  # same way (nix/parity-env.nix), so the Go golden test assembles from the
-  # exact bytes the goldens were produced under.
-  registryJson = pkgs.writeText "fragments-registry.json" (builtins.toJSON (import ../lib/fragments.nix));
+  # The registries box hands prompt assembly, so the Go golden test assembles
+  # from the exact bytes the goldens were produced under.
+  registryJson = pkgs.writeText "fragments-registry.json" (
+    builtins.toJSON (import ../lib/fragments.nix)
+  );
   promptContractRegistryJson = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../lib/prompt-contract.nix).validateMarkers
   );
   researchVerdictsParity = import ./research-verdicts-parity.nix { inherit pkgs; };
+  promptContractParityFixtures = pkgs.writeText "prompt-contract-parity-fixtures.json" (
+    builtins.toJSON (import ../lib/prompt-contract.nix).parityFixtures
+  );
   files = {
     "outcome-contract.md" = internals.outcomeContractFile;
     "comms-contract.md" = internals.commsContractFile;
@@ -34,6 +38,7 @@ let
     "fragment-registry.sh" = internals.fragmentRegistryFile;
     "fragments-registry.json" = registryJson;
     "prompt-contract-registry.json" = promptContractRegistryJson;
+    "prompt-contract-parity-fixtures.json" = promptContractParityFixtures;
     "research-verdicts-parity.json" = researchVerdictsParity;
     "launcher-run-input.json" = internals.runInputDocumentFile;
     "launcher-run-input-docker.json" = dockerHarness.internals.runInputDocumentFile;

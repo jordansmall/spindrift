@@ -18,8 +18,8 @@ import (
 // These tests pin every prompt-assembly golden cell in
 // tests/testdata/prompt-assembly-golden byte for byte through
 // promptassembly.WriteAssembly, the entry point box calls. Each cell mirrors the
-// env and skill bake of the bats cell that used to pin it
-// (tests/prompt-assembly-parity.bats), as deltas over the suite's default cell.
+// env and skill bake of the bats cell that used to pin it, as deltas over the
+// suite's default cell.
 // UPDATE_GOLDENS=1 (nix run .#regen-goldens) rewrites the goldens instead of
 // diffing them.
 

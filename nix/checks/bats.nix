@@ -7,7 +7,6 @@
 let
   inherit (fixtures)
     batsHarness
-    promptHarness
     opencodeHarness
     ;
 
@@ -29,24 +28,12 @@ let
     builtins.toJSON driverOutcomeManifest
   );
 
-  # Issues #2320 and #2356, parent #2244. Rendering lib/prompt-contract.nix's
-  # parityFixtures as JSON lets tests/prompt-contract-parity.bats drive the
-  # real runtime validator over every row without duplicating the fold logic
-  # in bash.
-  promptContractParityFixtureFile = pkgs.writeText "prompt-contract-parity-fixtures.json" (
-    builtins.toJSON (import ../../lib/prompt-contract.nix).parityFixtures
-  );
-
-  # tests/prompt-assembly-parity.bats (issue #2349) lands in one of the
-  # bats-shard-N derivations (issue #2648), so those shards export the same
-  # driver-exec binary and rendered lib/fragments.nix JSON that
-  # nix/checks/promptassembly.nix does, or the suite's required-var guard
-  # fails here.
+  # The bats-shard-N derivations (issue #2648) export the rendered
+  # lib/fragments.nix JSON that entrypoint.sh hands box, the same bytes
+  # nix/checks/promptassembly.nix reads.
   promptassemblyRegistryJsonFile = pkgs.writeText "fragments-registry.json" (
     builtins.toJSON (import ../../lib/fragments.nix)
   );
-
-  researchVerdictsParityFile = import ../research-verdicts-parity.nix { inherit pkgs; };
 
   promptContractRegistryJsonFile = pkgs.writeText "prompt-contract-registry.json" (
     builtins.toJSON (import ../../lib/prompt-contract.nix).validateMarkers
@@ -60,8 +47,7 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
   );
 
-  # Issue #2751. Shared by batsEnv and
-  # bats-prompt-contract-parity. `driver-registry-outcome-extraction` below
+  # Issue #2751. Shared by batsEnv; `driver-registry-outcome-extraction` below
   # hand-lists a narrower set instead, since it needs neither git nor gettext.
   batsNativeBuildInputs = [
     pkgs.bats
@@ -105,9 +91,6 @@ let
     # Issue #4293. The Driver-invocation goldens live in the Go tree (box's seam
     # test reads the same files), which batsBuilderSetup does not stage.
     DRIVER_INVOCATION_GOLDEN_DIR = ../../cmd/launcher/box/testdata/driver-invocation;
-    # A Consumer-configured prompt dir whose rendered content reaches the
-    # stubbed agent (#4).
-    PROMPT_HARNESS_DIR = promptHarness.internals.promptDir;
     # The rendered contracts, driver/agent-paths preambles and fragment
     # registry the entrypoint-*.bats suites read: the same bytes the Go seam
     # tests read. helper.bash derives the per-file vars from this dir.
@@ -130,17 +113,12 @@ let
     # write_agent_file's hand-written fixture. It proves the entrypoint's
     # rewrite loop works on the baked bytes, not on a lookalike.
     OPENCODE_AGENT_FILES = opencodeHarness.internals.agentFiles;
-    # tests/prompt-contract-parity.bats lands in one of the bats-shard-N
-    # derivations (issue #2648), so the shards export the same fixture the
-    # dedicated check below does, or its required-var guard fails here.
-    PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
-    # tests/prompt-assembly-parity.bats's required env (see comment above
-    # promptassemblyRegistryJsonFile).
+    # The binaries and rendered registries entrypoint.sh hands box (see
+    # comment above promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
     BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-    RESEARCH_VERDICTS_PARITY_FILE = researchVerdictsParityFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
     # Widens wait_for_log_lines' (tests/helper.bash) default poll patience
     # from 2s to 10s for this gate (issue #2649); that function's doc comment
@@ -152,9 +130,9 @@ let
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
   };
 
-  # Shared by the bats-shard-N derivations and
-  # bats-prompt-contract-parity: stage a writable copy of tests/, rewrite the
-  # fakes' shebangs for the sandboxed build host, and export FAKES_DIR.
+  # Shared by the bats-shard-N derivations: stage a writable copy of tests/,
+  # rewrite the fakes' shebangs for the sandboxed build host, and export
+  # FAKES_DIR.
   # `driver-registry-outcome-extraction` below invokes no fake, so it needs
   # neither the shebang rewrite nor FAKES_DIR, and copies tests/ itself.
   batsBuilderSetup = ''
@@ -259,34 +237,6 @@ in
         cp -r ${../../tests} tests
         chmod -R +w tests
         bats --print-output-on-failure tests/driver-registry-outcome-extraction.bats
-        touch $out
-      '';
-
-  # Issue #2320, parent #2244. Drives agent/entrypoint.sh's runtime validator
-  # (_validate_prompt_contract) over every parityFixtures row and asserts the
-  # exit code matches parityFold(fixture.verdict), the cross-language proof
-  # that nix/checks/prompt-contract-parity.nix's pure-Nix fold matches the
-  # bash one. Env vars stay hand-listed instead of building on
-  # `batsEnv // { ... }`, which would pull unrelated harnesses
-  # (opencodeHarness, promptHarness) into this closure (#2751).
-  "bats-prompt-contract-parity" =
-    pkgs.runCommand "bats-prompt-contract-parity"
-      {
-        nativeBuildInputs = batsNativeBuildInputs;
-        ENTRYPOINT = ../../agent/entrypoint.sh;
-        PROMPTS_DIR = ../../templates/default/prompts;
-        SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
-        PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
-        # $ENTRYPOINT calls driver-exec verbs (advise-only) before it execs box.
-        DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
-        BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
-        PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
-        PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
-        FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
-      }
-      ''
-        ${batsBuilderSetup}
-        bats --print-output-on-failure tests/prompt-contract-parity.bats
         touch $out
       '';
 
