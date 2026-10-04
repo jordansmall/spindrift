@@ -743,6 +743,9 @@ func TestBoxSeamValidatorRejectStopsBeforeTheDriver(t *testing.T) {
 	if strings.Contains(r.res.Stderr, "prompt-assembly") {
 		t.Errorf("a marker rejection must print bare, got stderr:\n%s", r.res.Stderr)
 	}
+	if strings.Contains(r.res.Stdout, "prompt-assembly:") {
+		t.Errorf("a marker rejection must print bare, got stdout:\n%s", r.res.Stdout)
+	}
 	if len(r.driverRec) != 0 || len(r.orchRec) != 0 {
 		t.Errorf("driver calls %v, orchestrator calls %v; want none after a rejected prompt", r.driverRec, r.orchRec)
 	}

@@ -109,7 +109,7 @@ func mainRun(args []string, env promptassembly.Env, d deps) int {
 		// stdout stream the assemble-prompt verb used.
 		var rejected *promptassembly.ValidateError
 		if errors.As(err, &rejected) {
-			fmt.Fprintln(d.Stdout, err)
+			fmt.Fprintln(d.Stdout, rejected)
 		} else {
 			fmt.Fprintln(d.Stderr, "box:", err)
 		}
