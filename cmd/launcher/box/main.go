@@ -3,7 +3,9 @@
 // already-resolved demotion, the lockfile scan, and bundle-out. entrypoint.sh
 // execs it after the first run and it exits with the run's exit code (ADR
 // 0058). It replaces the marker-gate, outcome-backstop, bundle-out and
-// advise-only driver-exec verbs bash chained.
+// advise-only driver-exec verbs bash chained. Under podman box runs as PID 1
+// and splits itself into an init parent that only reaps orphans and forwards
+// signals and a worker child that does the settle (see init.go).
 package main
 
 import (
@@ -99,6 +101,9 @@ func execOrchestrator(argv []string, stdout, stderr io.Writer, stdin io.Reader) 
 }
 
 func main() {
+	if rc, ok := runAsInit(os.Getpid(), os.Executable, os.Args[1:], os.Stderr); ok {
+		os.Exit(rc)
+	}
 	d := deps{
 		Orchestrate: func(argv []string) int {
 			return execOrchestrator(argv, os.Stdout, os.Stderr, os.Stdin)
