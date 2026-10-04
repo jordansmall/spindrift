@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -197,89 +198,45 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	env.ResearchOutcomeContractFile = *researchOutcomeContractFile
 	env.SkillsFound = *skillsFound
 
-	result, err := promptassembly.Assemble(env, registry)
+	_, err = promptassembly.WriteAssembly(env, registry, validateMarkerRows, promptassembly.Passthrough{
+		Model:        *model,
+		Effort:       *effort,
+		Driver:       *driverName,
+		DriverBin:    *driverBin,
+		DriverFlags:  *driverFlags,
+		Devshell:     *devshell,
+		DevshellName: *devshellName,
+		HeartbeatLog: *heartbeatLog,
+		ArgvShape: promptassembly.ArgvShape{
+			PromptStyle:    *argvPromptStyle,
+			PromptFlag:     *argvPromptFlag,
+			ModelFlag:      *argvModelFlag,
+			ModelOmitEmpty: *argvModelOmitEmpty,
+			AgentsFlag:     *argvAgentsFlag,
+			EffortFlag:     *argvEffortFlag,
+			Order:          strings.Fields(*argvOrder),
+		},
+		Caps: promptassembly.Caps{
+			MaxSlices:       *maxSlices,
+			MaxReviewRounds: *maxReviewRounds,
+			MaxBudgetTokens: maxBudgetTokens,
+			MaxBudgetUSD:    maxBudgetUSD,
+		},
+	}, promptassembly.OutputPaths{
+		Prompt:       *promptOutput,
+		AgentsJSON:   *agentsJSONOutput,
+		Handoff:      *handoffOutput,
+		ReviewPrompt: *reviewPromptOutput,
+		Fragments:    *fragmentsOutput,
+	}, fs.Output())
 	if err != nil {
-		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
-		return 1
-	}
-
-	warnings, err := promptassembly.Validate(env, result, validateMarkerRows)
-	for _, w := range warnings {
-		fmt.Fprintln(fs.Output(), w)
-	}
-	if err != nil {
-		fmt.Fprintln(fs.Output(), err)
-		return 1
-	}
-
-	if err := os.WriteFile(*promptOutput, []byte(result.Prompt), 0o644); err != nil {
-		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write prompt output:", err)
-		return 1
-	}
-	if err := os.WriteFile(*agentsJSONOutput, []byte(result.AgentsJSON), 0o644); err != nil {
-		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write agents json output:", err)
-		return 1
-	}
-
-	// Passthrough only (issue #2975): Assemble never touches these fields, so
-	// this command layers its own flags on once Assemble and Validate both
-	// succeed. Issue comes from env.IssueNumber because EnvFromEnviron reads
-	// ISSUE_NUMBER rather than a flag (issue #2979).
-	result.Handoff.PromptFile = *promptOutput
-	if result.AgentsJSON != "" {
-		result.Handoff.AgentsFile = *agentsJSONOutput
-	}
-	result.Handoff.Model = *model
-	result.Handoff.Effort = *effort
-	result.Handoff.Driver = *driverName
-	result.Handoff.DriverBin = *driverBin
-	result.Handoff.DriverFlags = *driverFlags
-	result.Handoff.Devshell = *devshell
-	result.Handoff.DevshellName = *devshellName
-	result.Handoff.Issue = env.IssueNumber
-	result.Handoff.HeartbeatLog = *heartbeatLog
-	result.Handoff.ArgvShape = promptassembly.ArgvShape{
-		PromptStyle:    *argvPromptStyle,
-		PromptFlag:     *argvPromptFlag,
-		ModelFlag:      *argvModelFlag,
-		ModelOmitEmpty: *argvModelOmitEmpty,
-		AgentsFlag:     *argvAgentsFlag,
-		EffortFlag:     *argvEffortFlag,
-		Order:          strings.Fields(*argvOrder),
-	}
-	result.Handoff.Caps = promptassembly.Caps{
-		MaxSlices:       *maxSlices,
-		MaxReviewRounds: *maxReviewRounds,
-		MaxBudgetTokens: maxBudgetTokens,
-		MaxBudgetUSD:    maxBudgetUSD,
-	}
-	if result.ReviewPromptText != "" && *reviewPromptOutput != "" {
-		if err := os.WriteFile(*reviewPromptOutput, []byte(result.ReviewPromptText), 0o644); err != nil {
-			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write review prompt output:", err)
-			return 1
+		// A marker rejection is operator-facing prose and prints bare.
+		var rejected *promptassembly.ValidateError
+		if errors.As(err, &rejected) {
+			fmt.Fprintln(fs.Output(), err)
+		} else {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
 		}
-		result.Handoff.ReviewPromptFile = *reviewPromptOutput
-	}
-
-	if *fragmentsOutput != "" {
-		var sb strings.Builder
-		for _, name := range result.Fragments {
-			sb.WriteString(name)
-			sb.WriteByte('\n')
-		}
-		if err := os.WriteFile(*fragmentsOutput, []byte(sb.String()), 0o644); err != nil {
-			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write fragments output:", err)
-			return 1
-		}
-	}
-
-	handoffJSON, err := json.Marshal(result.Handoff)
-	if err != nil {
-		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: marshal handoff:", err)
-		return 1
-	}
-	if err := os.WriteFile(*handoffOutput, handoffJSON, 0o644); err != nil {
-		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: write handoff output:", err)
 		return 1
 	}
 
