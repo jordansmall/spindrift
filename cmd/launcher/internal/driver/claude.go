@@ -45,6 +45,10 @@ func (claudeDriver) ResultEvent(text string) ([]byte, error) {
 	return claude.ResultEvent(text)
 }
 
+func (claudeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
+	return claude.SessionFlags(mode, repoSlug, issue, home)
+}
+
 func init() {
 	register(claudeDriver{})
 }

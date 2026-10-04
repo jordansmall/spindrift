@@ -166,3 +166,15 @@ func TestOpencodeDriverRenderTranscript(t *testing.T) {
 		t.Errorf("RenderTranscript = %q, want %q", got, want)
 	}
 }
+
+func TestOpencodeSessionFlagsAlwaysEmpty(t *testing.T) {
+	d, err := New("opencode")
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+	for _, mode := range []string{"initial", "resume", ""} {
+		if got := d.SessionFlags(mode, "owner/repo", "7", t.TempDir()); got != "" {
+			t.Errorf("SessionFlags(%q) = %q; want empty", mode, got)
+		}
+	}
+}

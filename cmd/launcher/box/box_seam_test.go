@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seambundle"
@@ -118,6 +119,45 @@ func seamResumeSessionFile(t *testing.T) (path, id string) {
 		t.Fatal(err)
 	}
 	return path, id
+}
+
+// TestSessionFlagsParity pins the Go Driver's SessionFlags byte for byte to
+// the nix-rendered preamble's _driver_session_flags.
+func TestSessionFlagsParity(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+	if exec.Command(bash, "-c", "type compgen").Run() != nil {
+		t.Skip("bash has no compgen builtin")
+	}
+	preamble := seamtest.Path(t, "driver-preamble.sh")
+	d, err := driver.New("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	absent := t.TempDir()
+	present := t.TempDir()
+	proj := filepath.Join(present, ".claude", "projects", "x")
+	if err := os.MkdirAll(proj, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(proj, seamSessionID()+".jsonl"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ mode, home string }{
+		{"initial", absent}, {"resume", present}, {"resume", absent}, {"", present},
+	} {
+		cmd := exec.Command(bash, "-c", `source "$1" && _driver_session_flags "$2"`, "bash", preamble, c.mode)
+		cmd.Env = append(os.Environ(), "HOME="+c.home, "REPO_SLUG="+seamSlug, "ISSUE_NUMBER="+seamIssue)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("render %q: %v", c.mode, err)
+		}
+		if got := d.SessionFlags(c.mode, seamSlug, seamIssue, c.home); got != string(out) {
+			t.Errorf("SessionFlags(%q, home=%s) = %q; preamble rendered %q", c.mode, c.home, got, out)
+		}
+	}
 }
 
 type seamCase struct {
