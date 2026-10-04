@@ -1,6 +1,6 @@
-// Package promptassembly reproduces, in Go, the gate computations
-// agent/entrypoint.sh's phase_prompt_assembly derives from launcher-forwarded
-// env vars before rendering the prompt fragment registry (lib/fragments.nix).
+// Package promptassembly reproduces, in Go, the gate computations box
+// (cmd/launcher/box) derives from launcher-forwarded env vars before
+// rendering the prompt fragment registry (lib/fragments.nix).
 // Gates performs no I/O, so filesystem-derived flags such as the skill-baked
 // checks arrive on Env pre-resolved, stat'd at the CLI boundary.
 package promptassembly
@@ -16,24 +16,24 @@ const defaultIssueTracker = "github"
 // dispatchkind.Work.Name. Only Env.kind() reads it outside tests.
 var defaultDispatchKind = dispatchkind.Work.Name
 
-// Env is the full set of raw inputs agent/entrypoint.sh's
-// phase_prompt_assembly reads. Only a subset feeds Gates's computed booleans;
-// the rest are passthrough values Assemble renders.
+// Env is the full set of raw inputs box (cmd/launcher/box) reads. Only a
+// subset feeds Gates's computed booleans; the rest are passthrough values
+// Assemble renders.
 type Env struct {
 	// Each flag is true only when DRIVER_SKILLS_DIR/<name>/SKILL.md exists.
 	// BEGIN GENERATED SKILL-BAKED FIELDS -- nix run .#regen -- DO NOT EDIT
-	CavemanSkillBaked                              bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" (CAVEMAN_BAKED)
-	TDDSkillBaked                                  bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" (TDD_BAKED)
-	CommitSkillBaked                               bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" (COMMIT_BAKED)
-	CodeReviewSkillBaked                           bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" (CODE_REVIEW_BAKED)
-	AutoFormatSkillBaked                           bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" (AUTO_FORMAT_BAKED)
-	AutoLintSkillBaked                             bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
-	CheckHygieneSkillBaked                         bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
-	CodeCommentsSkillBaked                         bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
-	NixChecksSkillBaked                            bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" (NIX_CHECKS_BAKED)
-	PrincipleFixRootCausesSkillBaked               bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md" (PRINCIPLE_FIX_ROOT_CAUSES_BAKED)
-	PrincipleLazinessProtocolSkillBaked            bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md" (PRINCIPLE_LAZINESS_PROTOCOL_BAKED)
-	PrincipleRedesignFromFirstPrinciplesSkillBaked bool // entrypoint.sh: -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" (PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED)
+	CavemanSkillBaked                              bool // -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" (CAVEMAN_BAKED)
+	TDDSkillBaked                                  bool // -f "$DRIVER_SKILLS_DIR/tdd/SKILL.md" (TDD_BAKED)
+	CommitSkillBaked                               bool // -f "$DRIVER_SKILLS_DIR/commit/SKILL.md" (COMMIT_BAKED)
+	CodeReviewSkillBaked                           bool // -f "$DRIVER_SKILLS_DIR/code-review/SKILL.md" (CODE_REVIEW_BAKED)
+	AutoFormatSkillBaked                           bool // -f "$DRIVER_SKILLS_DIR/auto-format/SKILL.md" (AUTO_FORMAT_BAKED)
+	AutoLintSkillBaked                             bool // -f "$DRIVER_SKILLS_DIR/auto-lint/SKILL.md" (AUTO_LINT_BAKED)
+	CheckHygieneSkillBaked                         bool // -f "$DRIVER_SKILLS_DIR/check-hygiene/SKILL.md" (CHECK_HYGIENE_BAKED)
+	CodeCommentsSkillBaked                         bool // -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" (CODE_COMMENTS_BAKED)
+	NixChecksSkillBaked                            bool // -f "$DRIVER_SKILLS_DIR/nix-checks/SKILL.md" (NIX_CHECKS_BAKED)
+	PrincipleFixRootCausesSkillBaked               bool // -f "$DRIVER_SKILLS_DIR/principle-fix-root-causes/SKILL.md" (PRINCIPLE_FIX_ROOT_CAUSES_BAKED)
+	PrincipleLazinessProtocolSkillBaked            bool // -f "$DRIVER_SKILLS_DIR/principle-laziness-protocol/SKILL.md" (PRINCIPLE_LAZINESS_PROTOCOL_BAKED)
+	PrincipleRedesignFromFirstPrinciplesSkillBaked bool // -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" (PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED)
 	// END GENERATED SKILL-BAKED FIELDS
 
 	// AgentsJSONTemplate is the nix-baked --agents JSON template, empty when no

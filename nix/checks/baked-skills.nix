@@ -68,7 +68,7 @@ in
       gatesEnd = gatesRow.endMarker;
 
       probesRaw = pkgs.writeText "baked-skills-add-row-guard-probes.raw" (
-        renderers.renderBakedSkillProbesShell withExtra
+        renderers.renderBakedSkillProbesGo withExtra
       );
       flagsRaw = pkgs.writeText "baked-skills-add-row-guard-flags.raw" (
         renderers.renderBakedSkillFlagsGo withExtra
@@ -190,11 +190,42 @@ in
         	}
         }
       '';
+
+      # Runs inside the reconstructed promptassembly package: the spliced
+      # ProbeBakedSkills must see the injected row's SKILL.md on disk.
+      probeTestFile = pkgs.writeText "bakedskillsprobeaddrowguard_test.go" ''
+        package promptassembly
+
+        import (
+        	"os"
+        	"path/filepath"
+        	"testing"
+        )
+
+        func TestBakedSkillsProbeAddRowGuard(t *testing.T) {
+        	dir := t.TempDir()
+        	var absent Env
+        	absent.ProbeBakedSkills(dir)
+        	if absent.TestSkillSkillBaked {
+        		t.Error("TestSkillSkillBaked = true with no test-skill/SKILL.md")
+        	}
+        	if err := os.MkdirAll(filepath.Join(dir, "test-skill"), 0o755); err != nil {
+        		t.Fatal(err)
+        	}
+        	if err := os.WriteFile(filepath.Join(dir, "test-skill", "SKILL.md"), nil, 0o644); err != nil {
+        		t.Fatal(err)
+        	}
+        	var present Env
+        	present.ProbeBakedSkills(dir)
+        	if !present.TestSkillSkillBaked {
+        		t.Error("TestSkillSkillBaked = false with test-skill/SKILL.md present")
+        	}
+        }
+      '';
     in
     pkgs.runCommand "baked-skills-add-row-guard"
       {
         nativeBuildInputs = [ pkgs.go ];
-        committedEntrypoint = ../../agent/entrypoint.sh;
         launcherSrc = ../../cmd/launcher;
         promptsDir = ../../templates/default/prompts;
         vendorModules = launcherGoModules;
@@ -205,6 +236,7 @@ in
           fieldsRaw
           gatesRaw
           testFile
+          probeTestFile
           probesBegin
           probesEnd
           flagsBegin
@@ -239,15 +271,20 @@ in
         splice src/cmd/launcher/internal/promptassembly/env.go "$fieldsBegin" "$fieldsEnd" "$fieldsRaw" env.step1.go
         mv env.step1.go src/cmd/launcher/internal/promptassembly/env.go
 
+        splice src/cmd/launcher/internal/promptassembly/skillprobe.go "$probesBegin" "$probesEnd" "$probesRaw" skillprobe.step1.go
+        mv skillprobe.step1.go src/cmd/launcher/internal/promptassembly/skillprobe.go
+
         splice src/cmd/launcher/internal/promptassembly/gates.go "$gatesBegin" "$gatesEnd" "$gatesRaw" gates.step1.go
         mv gates.step1.go src/cmd/launcher/internal/promptassembly/gates.go
 
         gofmt -w \
           src/cmd/launcher/driver-exec/assembleprompt_cmd.go \
           src/cmd/launcher/internal/promptassembly/env.go \
-          src/cmd/launcher/internal/promptassembly/gates.go
+          src/cmd/launcher/internal/promptassembly/gates.go \
+          src/cmd/launcher/internal/promptassembly/skillprobe.go
 
         cp "$testFile" src/cmd/launcher/driver-exec/bakedskillsaddrowguard_test.go
+        cp "$probeTestFile" src/cmd/launcher/internal/promptassembly/bakedskillsprobeaddrowguard_test.go
 
         ${goCheckEnv}
         cd src/cmd/launcher
@@ -259,45 +296,11 @@ in
         # promptassembly.Assemble's fragment-inclusion chain, not just that
         # they type-check.
         go test ./driver-exec/... -run TestBakedSkillsAddRowGuard -v
+
+        # The Go probes span is the runtime behavior: a spliced test-skill row
+        # must read as present/absent from a real directory (probeTestFile).
+        go test ./internal/promptassembly/... -run TestBakedSkillsProbeAddRowGuard -v
         cd - > /dev/null
-
-        # Step 4: reconstruct agent/entrypoint.sh's spliced probes block and
-        # actually execute it, once with the injected row's skill file
-        # present and once without, proving its real runtime behavior (not
-        # just its rendered text).
-        splice "$committedEntrypoint" "$probesBegin" "$probesEnd" "$probesRaw" reconstructed-entrypoint.sh
-        awk -v begin="$probesBegin" -v end="$probesEnd" '
-          $0 == begin { grab=1; next }
-          $0 == end { grab=0 }
-          grab { print }
-        ' reconstructed-entrypoint.sh > probes-snippet.sh
-
-        mkdir -p present-skills-dir/test-skill absent-skills-dir
-        touch present-skills-dir/test-skill/SKILL.md
-
-        check_probes() {
-          local skills_dir="$1" want_present="$2" out
-          out=$(bash -c '
-            _ap_args=()
-            DRIVER_SKILLS_DIR="$1"
-            # shellcheck disable=SC1090
-            source "$2"
-            printf "%s\n" "''${_ap_args[@]}"
-          ' _ "$skills_dir" "$PWD/probes-snippet.sh")
-          if [ "$want_present" = "yes" ]; then
-            if ! printf '%s\n' "$out" | grep -qx -- "--test-skill-skill-baked"; then
-              echo "reconstructed entrypoint.sh probes span did not add --test-skill-skill-baked when $skills_dir/test-skill/SKILL.md exists" >&2
-              exit 1
-            fi
-          else
-            if printf '%s\n' "$out" | grep -qx -- "--test-skill-skill-baked"; then
-              echo "reconstructed entrypoint.sh probes span added --test-skill-skill-baked when $skills_dir/test-skill/SKILL.md does not exist" >&2
-              exit 1
-            fi
-          fi
-        }
-        check_probes "$PWD/present-skills-dir" yes
-        check_probes "$PWD/absent-skills-dir" no
 
         touch $out
       '';
@@ -310,8 +313,8 @@ in
     let
       inherit (pkgs.lib) assertMsg replaceStrings;
 
-      probesSrc = builtins.readFile ../../agent/entrypoint.sh;
-      probesSynthetic = pkgs.writeText "baked-skills-marker-guard-probes.sh" (
+      probesSrc = builtins.readFile ../../cmd/launcher/internal/promptassembly/skillprobe.go;
+      probesSynthetic = pkgs.writeText "baked-skills-marker-guard-probes.go" (
         replaceStrings [ probesRow.beginMarker ] [ "" ] probesSrc
       );
       spanResult = builtins.tryEval (

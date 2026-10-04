@@ -663,12 +663,12 @@ directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, `CI FAILURE`, and the
 `prompts/fragments/`, and a substitution variable — rendered into the
 entrypoint's single fragment loop and its substitution allowlist together,
 so a fragment can never reference a variable the substitution step doesn't
-know about. Adding an opt-in prompt step that renders through the driver-exec
-`assemble-prompt` verb (every prompt phase_prompt_assembly assembles) is a
+know about. Adding an opt-in prompt step that renders through box's prompt
+assembly (the one `assemble-prompt` verb shares) is a
 nix-only change: one registry row plus one fragment file, no entrypoint edit.
 `conflict-resolve-prompt.md` is the one exception — it renders earlier, via
 `phase_conflict_resolve`'s own bash-only `_subst` call, before
-`phase_prompt_assembly` ever runs, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
+`box` assembles the prompt, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
 gates are precomputed by a small hand-written block in `entrypoint.sh` rather
 than the shared fragment loop. All instruction prose —
 conditional or not — lives with the rest of the prompt surface rather than
@@ -869,7 +869,7 @@ Driver entry declares:
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row
-  above), and `agent/entrypoint.sh`'s `phase_prompt_assembly` copies them
+  above), and `agent/entrypoint.sh` copies them
   (`HARNESS_SKILLS_DIR`, then `OPERATOR_SKILLS_DIR` on top) into
   `$DRIVER_SKILLS_DIR` — rendered from this field — at box startup
   (issue #2489).
@@ -2227,15 +2227,14 @@ artifact, not a growing transcript:
 
 **Code-owned review pass (issue #2037).** The review pass is enabled whenever
 the handoff document's `ReviewPromptFile` field is non-empty (issue #2975):
-`driver-exec assemble-prompt` sets it, via its own `--review-prompt-output`
-flag, to the path it wrote the rendered `review-prompt.md` text to, and only
-when that pass's `Assemble` call actually rendered one. `entrypoint.sh`
-passes `--review-prompt-output` unconditionally — `phase_prompt_assembly`,
-the one call site that builds the `assemble-prompt` invocation, runs
-unconditionally from `main()` regardless of research/`FIX_PASS`.
+`box` sets it (as does the `driver-exec assemble-prompt` verb, via its
+`--review-prompt-output` flag) to the path it wrote the rendered
+`review-prompt.md` text to, and only when that pass's `Assemble` call
+actually rendered one. `box` always asks for the file, in its one
+assembly call, regardless of research/`FIX_PASS`.
 The real gate lives inside `Assemble` itself: `Result.ReviewPromptText` is
 populated only when this is a fresh-work (not advise-only) dispatch and
-`FixPass == 0`, so the flag is always passed but the file it names is only
+`FixPass == 0`, so the file is always requested but the one named is only
 ever non-empty under those conditions — there is no sub-knob: every such
 dispatch drives the review pass. The orchestrator itself takes no
 review-prompt flag of its own; it reads `ReviewPromptFile` straight off the

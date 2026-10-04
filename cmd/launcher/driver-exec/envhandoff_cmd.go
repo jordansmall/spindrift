@@ -16,7 +16,7 @@ func isEnvHandoffInvocation(args []string) bool {
 }
 
 // runEnvHandoff writes a minimal handoff JSON for the one Driver pass that runs
-// before phase_prompt_assembly: phase_conflict_resolve's pre-work rebase fixup
+// before box assembles the prompt: phase_conflict_resolve's pre-work rebase fixup
 // (ADR 0007, issue #2975). It never touches the fragment registry (issue #2975
 // finding #6), so the CONFLICT_RESOLVE_PR_URL early exit stays reachable when
 // PROMPTASSEMBLY_REGISTRY_FILE points nowhere.

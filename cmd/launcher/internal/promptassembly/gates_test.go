@@ -2,7 +2,7 @@ package promptassembly
 
 import "testing"
 
-// Each *_BAKED gate (entrypoint.sh phase_prompt_assembly) fires only when the
+// Each *_BAKED gate (box prompt assembly) fires only when the
 // CLI boundary found the skill at DRIVER_SKILLS_DIR/<name>/SKILL.md, so Gates
 // only branches on the already-resolved bool. AUTO_FORMAT_BAKED,
 // AUTO_LINT_BAKED, and (since #3505 inlined the policy body) CODE_COMMENTS_BAKED

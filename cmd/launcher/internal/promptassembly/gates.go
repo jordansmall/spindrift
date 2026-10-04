@@ -1,9 +1,9 @@
 package promptassembly
 
 // Gates computes every gate the prompt fragment registry (lib/fragments.nix)
-// reads, with no I/O. Each key is the exact name of the bash local variable
-// the gate had in agent/entrypoint.sh's phase_prompt_assembly, which is also
-// the name the registry's gate column uses, so the two must stay in step.
+// reads, with no I/O. Each key is the exact name the gate had as a bash
+// local in the retired entrypoint.sh phase, which is also the name the
+// registry's gate column uses, so the two must stay in step.
 func Gates(e Env) map[string]bool {
 	g := map[string]bool{}
 

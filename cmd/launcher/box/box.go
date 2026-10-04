@@ -33,15 +33,17 @@ const (
 // #1997); a missing file degrades inside the backstop (issue #2459).
 const runStateFile = "/tmp/run-state.json"
 
-// inputs are the facts entrypoint.sh holds when it hands over after prompt
-// assembly.
+// inputs are the facts entrypoint.sh holds when it hands over.
 type inputs struct {
-	HandoffFile string
-	WorkDir     string
-	OutboxDir   string
+	WorkDir   string
+	OutboxDir string
+	Assembly  assemblyInputs
 }
 
 type deps struct {
+	// Assemble writes the prompt, agents JSON, review prompt and handoff, and
+	// returns the handoff file's path.
+	Assemble func(in assemblyInputs, env promptassembly.Env, w io.Writer) (string, error)
 	// Orchestrate runs one orchestrator pass with argv and returns its exit
 	// code.
 	Orchestrate  func(argv []string) int
@@ -80,19 +82,21 @@ type state struct {
 }
 
 type boxRun struct {
-	in         inputs
-	env        promptassembly.Env
-	d          deps
-	st         state
-	adviseOnly bool
-	needsBox   bool // the outbox is mounted host-side
-	relay      bool // read-only Box handing off through the outbox
-	kind       string
-	carrier    string
+	handoffFile string // the handoff Assemble wrote
+	in          inputs
+	env         promptassembly.Env
+	d           deps
+	st          state
+	adviseOnly  bool
+	needsBox    bool // the outbox is mounted host-side
+	relay       bool // read-only Box handing off through the outbox
+	kind        string
+	carrier     string
 }
 
-// run sequences the first Driver run and everything entrypoint.sh's main() did
-// after it, and returns the exit code the entrypoint would have exited with.
+// run assembles the prompt, then sequences the first Driver run and everything
+// entrypoint.sh's main() did after it, and returns the exit code the entrypoint
+// would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
@@ -112,6 +116,12 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// read-only Box that hands off via the outbox (issues #2094, #2267).
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
+
+	handoff, err := d.Assemble(in.Assembly, env, d.Stdout)
+	if err != nil {
+		return 0, phaseErr("prompt-assembly", err)
+	}
+	r.handoffFile = handoff
 
 	if err := r.firstRun(); err != nil {
 		return 0, err
@@ -378,19 +388,19 @@ type handoffFacts struct {
 // readHandoff reads the handoff file once, returning its raw bytes alongside
 // the facts decoded from them.
 func (r *boxRun) readHandoff() ([]byte, handoffFacts, error) {
-	raw, err := os.ReadFile(r.in.HandoffFile)
+	raw, err := os.ReadFile(r.handoffFile)
 	if err != nil {
 		return nil, handoffFacts{}, err
 	}
 	var h handoffFacts
 	if err := json.Unmarshal(raw, &h); err != nil {
-		return nil, handoffFacts{}, fmt.Errorf("parse handoff file %s: %w", r.in.HandoffFile, err)
+		return nil, handoffFacts{}, fmt.Errorf("parse handoff file %s: %w", r.handoffFile, err)
 	}
 	return raw, h, nil
 }
 
 // firstRun is the Box's first Driver run: the shared handoff as-is, the prompt
-// the shell assembled, and the session mode the handoff names. Its exit code
+// assembly wrote, and the session mode the handoff names. Its exit code
 // seeds the run's, so unlike a resume it replaces the zero value unconditionally.
 func (r *boxRun) firstRun() error {
 	_, h, err := r.readHandoff()
@@ -410,7 +420,7 @@ func (r *boxRun) firstRun() error {
 		suffix = ""
 	}
 	r.say("==> claude %s %s%s", r.env.DispatchAnnounceVerb, subject, suffix)
-	rc, err := r.pass(r.in.HandoffFile, h.Driver, string(prompt), h.SessionMode)
+	rc, err := r.pass(r.handoffFile, h.Driver, string(prompt), h.SessionMode)
 	r.st.rc = rc
 	return err
 }
@@ -519,7 +529,7 @@ func writeTemp(pattern, content string) (string, error) {
 func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return "", fmt.Errorf("parse handoff file %s: %w", r.in.HandoffFile, err)
+		return "", fmt.Errorf("parse handoff file %s: %w", r.handoffFile, err)
 	}
 	fields["ReviewPromptFile"] = json.RawMessage(`""`)
 

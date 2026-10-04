@@ -1,5 +1,5 @@
-# The baked-skill name list (issue #2532): every skill entrypoint.sh probes at
-# DRIVER_SKILLS_DIR/<name>/SKILL.md before the driver-exec assemble-prompt call.
+# The baked-skill name list (issue #2532): every skill box probes at
+# DRIVER_SKILLS_DIR/<name>/SKILL.md when it assembles the prompt.
 # The probe stays at runtime so an operator skills mount can shadow the baked
 # set. Single-sourcing the names here lets regen (nix/regen.nix) render every
 # downstream copy from the row alone.

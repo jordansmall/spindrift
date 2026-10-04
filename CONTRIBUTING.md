@@ -125,7 +125,7 @@ in `lib/structural-options-doc.nix`, paired with its `mkOption` declaration in
 between BEGIN/END markers — in a committed doc (like `docs/reference.md`'s
 Default models table), a template (`templates/default/flake.nix`'s settings
 example), or a baked-in bash/Go source file (`agent/entrypoint.sh`'s outcome
-status words and skill-baked probes, or the skill-baked flags/Env-assignment/
+status words, or the skill-baked probes/flags/Env-assignment/
 struct-field/gate spans in `cmd/launcher/...`) — is a documented-fact row; add
 one to `lib/documented-facts.nix` rather than hand-writing a new
 check/guard/regen call (issues #2948, #2949). A row whose span lives inside Go
@@ -154,7 +154,7 @@ is the in-box entrypoint. Respect that split — it is the point of the project.
   and internal non-knob env names sit on that check's own allowlist),
   `backends/default.nix` (the backend descriptor registry — one row per
   ISSUE_TRACKER/CODE_FORGE backend; `env-schema.nix`'s tracker/forge choices derive from it),
-  `baked-skills.nix` (the registry of skills `entrypoint.sh` probes at
+  `baked-skills.nix` (the registry of skills `box` probes at
   `DRIVER_SKILLS_DIR/<name>/SKILL.md` — one row per skill drives every
   hand-mirrored consumer copy), `labels.nix` (the label registry — one row
   per label family/role, rendered into

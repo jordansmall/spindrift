@@ -72,7 +72,11 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 		return nil, fmt.Errorf("open validate markers registry %s: %w", path, err)
 	}
 	defer f.Close()
-	return LoadValidateMarkers(f)
+	rows, err := LoadValidateMarkers(f)
+	if err != nil {
+		return nil, fmt.Errorf("parse validate markers registry %s: %w", path, err)
+	}
+	return rows, nil
 }
 
 // Validate runs the reject/warn marker matrix at the tail of prompt assembly,

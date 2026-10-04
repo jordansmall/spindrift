@@ -277,7 +277,7 @@ in
         PROMPTS_DIR = ../../templates/default/prompts;
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
         PROMPT_CONTRACT_PARITY_FIXTURE = promptContractParityFixtureFile;
-        # $ENTRYPOINT unconditionally calls `driver-exec assemble-prompt` (issue #2354).
+        # $ENTRYPOINT calls driver-exec verbs (advise-only) before it execs box.
         DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
         BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
         PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;

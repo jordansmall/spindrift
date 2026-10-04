@@ -60,5 +60,9 @@ func LoadRegistryFile(path string) (Registry, error) {
 		return Registry{}, fmt.Errorf("open fragment registry %s: %w", path, err)
 	}
 	defer f.Close()
-	return LoadRegistry(f)
+	reg, err := LoadRegistry(f)
+	if err != nil {
+		return Registry{}, fmt.Errorf("parse fragment registry %s: %w", path, err)
+	}
+	return reg, nil
 }

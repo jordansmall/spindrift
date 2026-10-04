@@ -508,8 +508,7 @@ let
   fragmentsRegistryJson = builtins.toJSON fragments;
 
   # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356), for
-  # the Go `driver-exec assemble-prompt` verb's `--validate-markers-registry`
-  # flag.
+  # box's `--validate-markers-registry` flag.
   promptContractRegistryJson = builtins.toJSON promptContract.validateMarkers;
 
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464), for

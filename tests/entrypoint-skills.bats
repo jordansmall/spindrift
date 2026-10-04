@@ -77,8 +77,8 @@ SKILL
   grep -q "skill discovered: my-skill" "$DRIVER_LOG"
 }
 
-# _populate_driver_skills_dir runs twice per Box (main and
-# phase_prompt_assembly). A plain `cp -r` from a read-only Nix-store-like
+# _populate_driver_skills_dir used to run twice per Box (in main and again in the
+# bash prompt assembly box now owns). A plain `cp -r` from a read-only Nix-store-like
 # source (bwrap ro-binds /agent) carries the read-only mode bits onto the
 # copy, so the second call's cp over that copy used to fail EACCES under
 # `set -e` (issue #3941).
@@ -133,13 +133,12 @@ SKILL
   grep -q "Operator content." "$HOME/.claude/skills/dup-skill/SKILL.md"
 }
 
-# Both the in-repo body and the probe flag follow from the skill's single
-# lib/baked-skills.nix row (issue #3220).
-@test "harness-owned check-hygiene skill ships a body and a baked probe (issue #3220)" {
+# The in-repo body follows from the skill's lib/baked-skills.nix row; the probe
+# is generated Go (issue #3220), pinned by the promptassembly tests.
+@test "harness-owned check-hygiene skill ships a body (issue #3220)" {
   local skill="$skills_template_dir/check-hygiene/SKILL.md"
   [ -s "$skill" ]
   grep -qF 'name: check-hygiene' "$skill"
-  grep -qF -- '--check-hygiene-skill-baked' "$ENTRYPOINT"
 }
 
 @test "check-hygiene skill carries the relocated log and killed-build guidance" {
@@ -154,12 +153,11 @@ SKILL
   grep -qi 'bound the wait' "$skill"
 }
 
-# Body and probe flag both follow from one lib/baked-skills.nix row (#3221).
-@test "harness-owned code-comments skill ships a body and a baked probe (issue #3221)" {
+# The body follows from one lib/baked-skills.nix row (#3221).
+@test "harness-owned code-comments skill ships a body (issue #3221)" {
   local skill="$skills_template_dir/code-comments/SKILL.md"
   [ -s "$skill" ]
   grep -qF 'name: code-comments' "$skill"
-  grep -qF -- '--code-comments-skill-baked' "$ENTRYPOINT"
 }
 
 # The inline guidance is the floor and a baked skill is the upgrade: when a
