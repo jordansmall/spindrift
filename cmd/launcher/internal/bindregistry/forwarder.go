@@ -17,6 +17,13 @@ import (
 // package computes against it.
 const ForwarderPort = 27182
 
+// The Forwarder readiness poll is 50 tries at 100ms. Not flags: no caller
+// overrides them.
+const (
+	ForwarderReadyTimeout = 5 * time.Second
+	ForwarderPollInterval = 100 * time.Millisecond
+)
+
 // ProbeFunc reports whether something is already listening on
 // 127.0.0.1:port. Injected so EnsureForwarderReady's tests never touch a
 // real socket.

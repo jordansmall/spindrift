@@ -169,9 +169,10 @@ func newFixture(t *testing.T) *fixture {
 			f.scanDirs = append(f.scanDirs, dir)
 			_, _ = io.WriteString(w, f.scanOut)
 		},
-		Getenv: func(k string) string { return f.knobs[k] },
-		Stdout: &f.out,
-		Stderr: &f.errb,
+		Registry: newRegFake().deps(),
+		Getenv:   func(k string) string { return f.knobs[k] },
+		Stdout:   &f.out,
+		Stderr:   &f.errb,
 	}
 	return f
 }

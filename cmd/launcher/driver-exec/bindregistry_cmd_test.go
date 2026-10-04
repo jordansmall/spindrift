@@ -156,7 +156,7 @@ func TestRunBindRegistryWithDeps_ManifestAbsentIsNoOp(t *testing.T) {
 		func(int) bool { probeCalled = true; return true },
 		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -195,7 +195,7 @@ func TestRunBindRegistryWithDeps_ManifestMalformedJSONWarnsAndSkipsBindings(t *t
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -238,7 +238,7 @@ func TestRunBindRegistryWithDeps_SocatMissingWarnsAndSkipsBindings(t *testing.T)
 		func(int) bool { probeCalled = true; return false },
 		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathMissing,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -292,7 +292,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesBindings(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -374,7 +374,7 @@ func TestRunBindRegistryWithDeps_ExportsComeFromEcosystemTableWalk(t *testing.T)
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -434,7 +434,7 @@ func TestRunBindRegistryWithDeps_HomeConfigsComeFromEcosystemTableWalk(t *testin
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -506,7 +506,7 @@ func TestRunBindRegistryWithDeps_SuccessSummaryFragmentsComeFromEcosystemTableWa
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -544,7 +544,7 @@ func TestRunBindRegistryWithDeps_UnusableGateFallbackNamesComeFromEcosystemTable
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -576,7 +576,7 @@ func TestRunBindRegistryWithDeps_NoRoutePrefixFallbackNamesComeFromEcosystemTabl
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -641,7 +641,7 @@ func TestRunBindRegistryWithDeps_ExportOrderIsGoThenNpmFamily(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -702,7 +702,7 @@ func TestRunBindRegistryWithDeps_BindsToFirstRoutePrefixNotSecond(t *testing.T) 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -766,7 +766,7 @@ func TestRunBindRegistryWithDeps_NoRoutesWarnsAndSkipsBindings(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -802,7 +802,7 @@ func TestRunBindRegistryWithDeps_EmptyRoutePrefixWarnsAndSkipsBindings(t *testin
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -851,7 +851,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningPrintsSuccessLines(t *testing.T
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -907,7 +907,7 @@ func TestRunBindRegistryWithDeps_HostRootedDeclaredGoPathPrintsFullPathGoLine(t 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -948,7 +948,7 @@ func TestRunBindRegistryWithDeps_HostRootedNoDeclaredGoPathOmitsGoLine(t *testin
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -992,7 +992,7 @@ func TestRunBindRegistryWithDeps_HostRootedSummaryOmitsUnexportedBindingVars(t *
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1045,7 +1045,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningWritesGradleInitScript(t *testi
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1096,7 +1096,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeFallsBackToHomeGradle(t *tes
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1189,7 +1189,7 @@ func TestRunBindRegistryWithDeps_EmptyGradleUserHomeAndHomeFailsLoud(t *testing.
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when GRADLE_USER_HOME and HOME are both empty (stdout=%q)", stdout.String())
@@ -1238,7 +1238,7 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when CARGO_HOME and HOME are both empty (stdout=%q)", stdout.String())
@@ -1251,7 +1251,7 @@ func TestRunBindRegistryWithDeps_EmptyCargoHomeAndHomeFailsLoud(t *testing.T) {
 // Issue #3141's timeout warning names the manifest's endpoint. The small
 // timeout/pollInterval keeps this test's wall-clock cost well under a second
 // instead of eating the real 5s; production callers still use the real
-// registryProxyForwarderTimeout/PollInterval constants unchanged.
+// bindregistry.ForwarderReadyTimeout/PollInterval constants unchanged.
 func TestRunBindRegistryWithDeps_TimeoutWarnsAndSkipsBindings(t *testing.T) {
 	socketPath := shortUnixSocketPath(t)
 	ln, err := net.Listen("unix", socketPath)
@@ -1313,7 +1313,7 @@ func TestRunBindRegistryWithDeps_ForwarderSpawnErrorWarnsNamingEndpoint(t *testi
 		func(int) bool { return false },
 		func(string, int) (int, error) { return 0, errors.New("boom") },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1361,7 +1361,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoBoundLine(t *testing.T) 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when CARGO_HOME and HOME are both empty (stdout=%q)", stdout.String())
@@ -1405,7 +1405,7 @@ func TestRunBindRegistryWithDeps_CargoHomeFailureOmitsGoWarningLine(t *testing.T
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero when CARGO_HOME and HOME are both empty (stdout=%q)", stdout.String())
@@ -1454,7 +1454,7 @@ func TestRunBindRegistryWithDeps_AlreadyListeningSkipsSocatCheck(t *testing.T) {
 			t.Fatal("lookPath should not be called when probe already reports ready")
 			return "", nil
 		},
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1520,7 +1520,7 @@ func TestRunBindRegistryWithDeps_TCPTransportWritesBindings(t *testing.T) {
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1582,7 +1582,7 @@ func TestRunBindRegistryWithDeps_TCPTransportMissingSecretWarnsAndSkipsBindings(
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1635,7 +1635,7 @@ func TestRunBindRegistryWithDeps_TCPTransportNeverChecksSocat(t *testing.T) {
 			t.Fatal("lookPath should not be called on the TCP transport branch")
 			return "", nil
 		},
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1667,7 +1667,7 @@ func TestRunBindRegistryWithDeps_TCPManifestNonNumericPortWarns(t *testing.T) {
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1840,7 +1840,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyReadyRewritesAndHidesFromGit(t *test
 		func(int) bool { return true },
 		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1893,7 +1893,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipsRouteWithEmptyUpstreamHost(t *t
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1930,7 +1930,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAllRoutesEmptyUpstreamHostWarns(t *t
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1970,7 +1970,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyDuplicateUpstreamHostWarnsAndSuppres
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -1990,7 +1990,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyDuplicateUpstreamHostWarnsAndSuppres
 	}
 }
 
-// Issue #3141: entrypoint.sh's intree_binding_apply call site passes no transport
+// Issue #3141: box's in-process apply passes no transport
 // flag at all, so an unset manifest silently no-ops apply mode, the replacement
 // for the old empty -registry-proxy-socket no-op.
 func TestRunBindRegistryWithDeps_IntreeApplyManifestAbsentIsNoOp(t *testing.T) {
@@ -2012,7 +2012,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyManifestAbsentIsNoOp(t *testing.T) {
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2048,7 +2048,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyEmptyUpstreamHostWarns(t *testing.T)
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2089,7 +2089,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySocatMissingWarnsAndSkipsRewrite(t *
 		func(int) bool { probeCalled = true; return false },
 		func(string, int) (int, error) { spawnCalled = true; return 0, nil },
 		lookPathMissing,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2156,7 +2156,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportRewritesFile(t *testing.
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2205,7 +2205,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyTCPTransportMissingSecretWarns(t *te
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2246,7 +2246,7 @@ func TestRunBindRegistryWithDeps_IntreeRevertRestoresAppliedFile(t *testing.T) {
 		func(int) bool { t.Fatal("probe should not be called on revert"); return false },
 		func(string, int) (int, error) { t.Fatal("spawn should not be called on revert"); return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2303,7 +2303,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps apply exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2333,7 +2333,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) 
 		func(int) bool { return false },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps revert exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2362,7 +2362,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyAndRevertAllThreeRows(t *testing.T) 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps re-apply exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2452,7 +2452,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPartialFailureDoesNotBlockSiblingRow
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 1 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 1 when one row genuinely fails (stdout=%q)", rc, stdout.String())
@@ -2501,7 +2501,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyMissingConfigWarns(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2532,7 +2532,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNotRegularConfigWarns(t *testing.T) 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2564,7 +2564,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyUntrackedConfigWarns(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2595,7 +2595,7 @@ func TestRunBindRegistryWithDeps_IntreeApplySkipWorktreeAlreadySetWarns(t *testi
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2625,7 +2625,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoopContentWarns(t *testing.T) {
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2664,7 +2664,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementConfig(t
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2714,7 +2714,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWritesCargoSourceReplacementEnvOutpu
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2756,7 +2756,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyNoRegistriesTableWritesEmptyEnvOutpu
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2810,7 +2810,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyTwoRouteManifestDedupesReusedProxySo
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2867,7 +2867,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyPrintsUndeclaredRegistryWarningToStd
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2923,7 +2923,7 @@ func TestRunBindRegistryWithDeps_OneRouteBindsGoAndGradleFromTheirOwnBlocks(t *t
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -2979,7 +2979,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyBindsCargoFromSameThreeBlockRoute(t 
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())
@@ -3040,7 +3040,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyUnreadableRepoConfigFails(t *testing
 		func(int) bool { return true },
 		func(string, int) (int, error) { return 0, nil },
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want non-zero when a repo config is unreadable (stdout=%q)", rc, stdout.String())
@@ -3070,7 +3070,7 @@ func TestRunBindRegistryWithDeps_IntreeBindingsEnvOutputRequiresApply(t *testing
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
@@ -3099,7 +3099,7 @@ func TestRunBindRegistryWithDeps_IntreeApplyWithBindingsEnvOutputRejected(t *tes
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc == 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero (stdout=%q)", stdout.String())
@@ -3130,7 +3130,7 @@ func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 				func(int) bool { return true },
 				func(string, int) (int, error) { return 0, nil },
 				lookPathFound,
-				registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+				bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 			)
 			if rc == 0 {
 				t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero for %v (stdout=%q)", c.args, stdout.String())
@@ -3160,7 +3160,7 @@ func TestRunBindRegistryWithDeps_LockfileScanWarnsOnHit(t *testing.T) {
 			return 0, nil
 		},
 		lookPathFound,
-		registryProxyForwarderTimeout, registryProxyForwarderPollInterval,
+		bindregistry.ForwarderReadyTimeout, bindregistry.ForwarderPollInterval,
 	)
 	if rc != 0 {
 		t.Fatalf("runBindRegistryWithDeps exit = %d, want 0 (stdout=%q)", rc, stdout.String())

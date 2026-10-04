@@ -648,7 +648,7 @@ func TestApplyInTreeBindingConvergesAfterCrashBetweenPhases(t *testing.T) {
 // once anything sets the skip-worktree bit without rewriting content, Apply's
 // bit-first check takes that as proof a prior Apply completed and never looks
 // at content again, permanently. The caller-side mitigation lives in
-// agent/entrypoint.sh's intree_binding_apply, not here.
+// box's in-process apply (box/registry.go), not here.
 func TestApplyInTreeBindingStaysNonConvergentWhenBitSetBeforeWrite(t *testing.T) {
 	dir := newTestRepo(t)
 	original := "registry = \"https://upstream.example/index/\"\n"
