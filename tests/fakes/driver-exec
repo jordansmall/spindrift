@@ -22,23 +22,12 @@
 # (DRIVER_EXEC_BIN, exported by the nix bats derivation, nix/checks/bats.nix)
 # instead of reimplementing its logic here -- the Go package is the source of
 # truth and this fake has no bash re-derivation to keep in lockstep with it:
-# `readonly-guards` (issue #2509), `bind-registry` (issue #2930) and
 # `advise-only` (issue #3901). `bundle-out` (issue #1808) stays a bash stand-in:
 # entrypoint.sh still calls it from publish_rebased_branch. The other settle verbs
 # (marker-gate, outcome-backstop) are not faked:
 # entrypoint.sh now execs the real `box` binary
 # (BOX_BIN), which runs them in-process (ADR 0058, issue #4292).
 set -euo pipefail
-
-if [ "${1:-}" = "readonly-guards" ]; then
-  shift
-  exec "$DRIVER_EXEC_BIN" readonly-guards "$@"
-fi
-
-if [ "${1:-}" = "bind-registry" ]; then
-  shift
-  exec "$DRIVER_EXEC_BIN" bind-registry "$@"
-fi
 
 if [ "${1:-}" = "advise-only" ]; then
   shift
