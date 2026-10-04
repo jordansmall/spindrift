@@ -151,8 +151,8 @@ set_dispatch_kind() {
 # setup() hook per file, so the shared body lives here.
 setup_entrypoint_env() {
   setup_fakes
-  # entrypoint.sh execs `box` after the first Driver run (ADR 0058, issue
-  # #4292); it runs the real settle sequence in-process, so there is no bash
+  # The entrypoint shim execs `box` (ADR 0058, issue #4302), which runs the
+  # whole dispatch, settle sequence included, in-process, so there is no bash
   # fake of it.
   : "${BOX_BIN:?BOX_BIN must be set (the real box Go binary, nix/checks/bats.nix)}"
   cp -f "$BOX_BIN" "$FAKE_BIN/box"
@@ -182,7 +182,7 @@ setup_entrypoint_env() {
   # Pinned away from the schema default (issue #2055) so the MODEL-flag
   # assertions stay stable when that default moves.
   export MODEL="claude-test-model"
-  # Nix bakes this from the roster (lib/mkHarness.nix), and entrypoint.sh's
+  # Nix bakes this from the roster (lib/mkHarness.nix), and box's
   # per-name injection loop (issue #264) resolves prompt files through it.
   # Deliberately narrower than the real default roster, which also carries
   # review-axis (issue #3447): a test needing that sets the var itself.
@@ -192,7 +192,7 @@ setup_entrypoint_env() {
   export ISSUE_TITLE="Do the thing"
   export WORK_DIR="$BATS_TEST_TMPDIR/work"
   # A real Box always receives a nonce, and both fakes/claude's
-  # SPINDRIFT_PR_INTENT emission and entrypoint.sh's PR-intent marker gate
+  # SPINDRIFT_PR_INTENT emission and box's PR-intent marker gate
   # (issue #2045) key off it: unset, every read-only+github+status=ready
   # fixture here would look like a #2036 repro and eat a resume pass.
   export RUN_NONCE="test-run-nonce-0001"
@@ -264,7 +264,7 @@ setup_fakes() {
   : >"$ORCHESTRATOR_LOG"
 
   # Defaulted from SPINDRIFT_SEAM_FIXTURES_DIR at the top of this file
-  # (entrypoint.sh reads it, issue #420); a bare bats run has none, so fall
+  # (box reads it, issue #420); a bare bats run has none, so fall
   # back to a fixture.
   # A test exercising the injection overrides it. Spec #2244's registry slice
   # also touches this fallback, so check for conflicts.
