@@ -33,19 +33,12 @@ const (
 // #1997); a missing file degrades inside the backstop (issue #2459).
 const runStateFile = "/tmp/run-state.json"
 
-// inputs are the facts entrypoint.sh holds when it hands over after the first
-// Driver run.
+// inputs are the facts entrypoint.sh holds when it hands over after prompt
+// assembly.
 type inputs struct {
-	DriverExitCode int
-	// OutcomeLine was already printed by the entrypoint after the first run;
-	// box never reprints it.
-	OutcomeLine       string
-	StreamLog         string
-	DriverTextLog     string
-	HandoffFile       string
-	ResumeSessionFile string
-	WorkDir           string
-	OutboxDir         string
+	HandoffFile string
+	WorkDir     string
+	OutboxDir   string
 }
 
 type deps struct {
@@ -75,8 +68,7 @@ func (e *phaseError) Unwrap() error { return e.err }
 
 func phaseErr(phase string, err error) error { return &phaseError{phase: phase, err: err} }
 
-// state is what the entrypoint's _last_* locals and claude_rc held between
-// phases.
+// state is what the last Driver pass left for the gates that follow it.
 type state struct {
 	rc          int
 	outcomeLine string
@@ -99,12 +91,10 @@ type boxRun struct {
 	carrier    string
 }
 
-// run sequences everything entrypoint.sh's main() did after its first Driver
-// run and returns the exit code the entrypoint would have exited with.
+// run sequences the first Driver run and everything entrypoint.sh's main() did
+// after it, and returns the exit code the entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r := &boxRun{in: in, env: env, d: d}
-	r.st = state{rc: in.DriverExitCode, outcomeLine: in.OutcomeLine, streamLog: in.StreamLog, textLog: in.DriverTextLog}
-
 	r.kind = env.DispatchKind
 	if r.kind == "" {
 		r.kind = dispatchkind.Work.Name
@@ -122,6 +112,10 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// read-only Box that hands off via the outbox (issues #2094, #2267).
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
+
+	if err := r.firstRun(); err != nil {
+		return 0, err
+	}
 
 	recovered, err := r.outcomeNudge()
 	if err != nil {
@@ -373,109 +367,171 @@ func (r *boxRun) capture(fn func(io.Writer) error) (string, error) {
 
 func trimNewlines(s string) string { return strings.TrimRight(s, "\n") }
 
-// resume runs one corrective orchestrator pass against the pinned session and
-// refreshes the state the way run_driver_in_env did.
+// handoffFacts are the shared handoff's fields box itself reads; every other
+// field is the orchestrator's and driver-exec's.
+type handoffFacts struct {
+	Driver      string
+	SessionMode string
+	PromptFile  string
+}
+
+// readHandoff reads the handoff file once, returning its raw bytes alongside
+// the facts decoded from them.
+func (r *boxRun) readHandoff() ([]byte, handoffFacts, error) {
+	raw, err := os.ReadFile(r.in.HandoffFile)
+	if err != nil {
+		return nil, handoffFacts{}, err
+	}
+	var h handoffFacts
+	if err := json.Unmarshal(raw, &h); err != nil {
+		return nil, handoffFacts{}, fmt.Errorf("parse handoff file %s: %w", r.in.HandoffFile, err)
+	}
+	return raw, h, nil
+}
+
+// firstRun is the Box's first Driver run: the shared handoff as-is, the prompt
+// the shell assembled, and the session mode the handoff names. Its exit code
+// seeds the run's, so unlike a resume it replaces the zero value unconditionally.
+func (r *boxRun) firstRun() error {
+	_, h, err := r.readHandoff()
+	if err != nil {
+		return phaseErr("first-run handoff", err)
+	}
+	prompt, err := os.ReadFile(h.PromptFile)
+	if err != nil {
+		return phaseErr("first-run", err)
+	}
+	subject := "issue #" + r.env.IssueNumber
+	if r.env.DispatchKeying == dispatchkind.ByChore.String() {
+		subject = "chore " + r.env.ChoreName
+	}
+	suffix := " on " + r.env.Branch
+	if r.adviseOnly {
+		suffix = ""
+	}
+	r.say("==> claude %s %s%s", r.env.DispatchAnnounceVerb, subject, suffix)
+	rc, err := r.pass(r.in.HandoffFile, h.Driver, string(prompt), h.SessionMode)
+	r.st.rc = rc
+	return err
+}
+
+// resume runs one corrective orchestrator pass against the pinned session.
 func (r *boxRun) resume(prompt string) error {
-	handoff, driverName, err := r.strippedHandoff()
+	raw, h, err := r.readHandoff()
 	if err != nil {
 		return phaseErr("resume handoff", err)
 	}
+	handoff, err := r.strippedHandoff(raw)
+	if err != nil {
+		return phaseErr("resume handoff", err)
+	}
+	// `cmd || claude_rc=$?`: a zero exit leaves the earlier code in place.
+	rc, err := r.pass(handoff, h.Driver, prompt, "resume")
+	if rc != 0 {
+		r.st.rc = rc
+	}
+	return err
+}
+
+// pass runs one orchestrator pass and refreshes the state the gates read: the
+// stream log, the unwrapped text log, and the outcome line, which it prints
+// when the pass reported one. A failed extraction after the pass still reports
+// the orchestrator's exit code.
+func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, error) {
 	d, err := driver.New(driverName)
 	if err != nil {
-		return phaseErr("resume", err)
+		return 0, phaseErr("driver", err)
 	}
 
-	promptFile, err := os.CreateTemp("", "box-prompt-")
+	// Prompt and session cross into the orchestrator as file paths. Both go
+	// once the pass is done; the logs outlive it for the gates below.
+	promptFile, err := writeTemp("box-prompt-", trimNewlines(prompt))
 	if err != nil {
-		return phaseErr("resume", err)
+		return 0, phaseErr("driver", err)
 	}
-	defer os.Remove(promptFile.Name())
-	// `$(...)` trimmed the prompt's trailing newlines before bash wrote it.
-	if _, err := promptFile.WriteString(trimNewlines(prompt)); err != nil {
-		promptFile.Close()
-		return phaseErr("resume", err)
+	defer os.Remove(promptFile)
+	// A resume renders here, not before the first run: only then does the
+	// session's transcript exist for it to resume.
+	sessionFile, err := writeTemp("box-session-", d.SessionFlags(sessionMode, r.d.Getenv("REPO_SLUG"), r.env.IssueNumber, r.d.Getenv("HOME")))
+	if err != nil {
+		return 0, phaseErr("driver", err)
 	}
-	if err := promptFile.Close(); err != nil {
-		return phaseErr("resume", err)
-	}
+	defer os.Remove(sessionFile)
 
-	// The stream log outlives the call: the PR-intent gate scans it later.
-	streamLog, err := os.CreateTemp("", "box-stream-")
+	// The PR-intent gate scans the stream log later.
+	streamLog, err := writeTemp("box-stream-", "")
 	if err != nil {
-		return phaseErr("resume", err)
+		return 0, phaseErr("driver", err)
 	}
-	streamLog.Close()
 
 	argv := []string{
 		"--handoff-file", handoff,
-		"--prompt-file", promptFile.Name(),
-		"--session-file", r.in.ResumeSessionFile,
-		"--log-path", streamLog.Name(),
+		"--prompt-file", promptFile,
+		"--session-file", sessionFile,
+		"--log-path", streamLog,
 	}
 	if r.needsBox {
 		// Must match passmanifest.FileName.
 		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/manifest.json")
 	}
-	// `cmd || claude_rc=$?`: a zero exit leaves the earlier code in place.
-	if rc := r.d.Orchestrate(argv); rc != 0 {
-		r.st.rc = rc
-	}
+	rc := r.d.Orchestrate(argv)
 
-	text, err := d.ResultText(streamLog.Name())
+	text, err := d.ResultText(streamLog)
 	if err != nil {
-		return phaseErr("resume extract", err)
+		return rc, phaseErr("driver extract", err)
 	}
 	stripped := outcome.StripResultText(text)
-	textLog, err := os.CreateTemp("", "box-text-")
+	textLog, err := writeTemp("box-text-", stripped)
 	if err != nil {
-		return phaseErr("resume extract", err)
-	}
-	if _, err := textLog.WriteString(stripped); err != nil {
-		textLog.Close()
-		return phaseErr("resume extract", err)
-	}
-	if err := textLog.Close(); err != nil {
-		return phaseErr("resume extract", err)
+		return rc, phaseErr("driver extract", err)
 	}
 
 	r.st.outcomeLine = outcome.ExtractOutcomeLine(stripped)
-	r.st.streamLog = streamLog.Name()
-	r.st.textLog = textLog.Name()
+	r.st.streamLog = streamLog
+	r.st.textLog = textLog
 	if r.st.outcomeLine != "" {
 		r.say("%s", r.st.outcomeLine)
 	}
-	return nil
+	return rc, nil
+}
+
+func writeTemp(pattern, content string) (string, error) {
+	f, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // strippedHandoff writes a throwaway copy of the shared handoff with
 // ReviewPromptFile cleared, so the resume stays a narrow single pass instead of
 // re-entering the full review loop (issues #2065, #2975). Left on disk: this
 // Box exits after one run.
-func (r *boxRun) strippedHandoff() (path, driverName string, err error) {
-	raw, err := os.ReadFile(r.in.HandoffFile)
-	if err != nil {
-		return "", "", err
-	}
+func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return "", "", fmt.Errorf("parse handoff file %s: %w", r.in.HandoffFile, err)
-	}
-	if v, ok := fields["Driver"]; ok {
-		if err := json.Unmarshal(v, &driverName); err != nil {
-			return "", "", fmt.Errorf("handoff file %s: Driver: %w", r.in.HandoffFile, err)
-		}
+		return "", fmt.Errorf("parse handoff file %s: %w", r.in.HandoffFile, err)
 	}
 	fields["ReviewPromptFile"] = json.RawMessage(`""`)
 
 	f, err := os.CreateTemp("", "box-handoff-")
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	enc := json.NewEncoder(f)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(fields); err != nil {
 		f.Close()
-		return "", "", err
+		return "", err
 	}
-	return f.Name(), driverName, f.Close()
+	return f.Name(), f.Close()
 }

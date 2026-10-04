@@ -1,11 +1,12 @@
-// Command box is the in-box settle sequence that follows the first Driver
-// run: required-marker nudges, the synthetic outcome backstop, the
-// already-resolved demotion, the lockfile scan, and bundle-out. entrypoint.sh
-// execs it after the first run and it exits with the run's exit code (ADR
-// 0058). It replaces the marker-gate, outcome-backstop, bundle-out and
-// advise-only driver-exec verbs bash chained. Under podman box runs as PID 1
-// and splits itself into an init parent that only reaps orphans and forwards
-// signals and a worker child that does the settle (see init.go).
+// Command box is the Box's in-box driver: it runs the first Driver run through
+// the orchestrator, then the settle sequence that follows it: required-marker
+// nudges, the synthetic outcome backstop, the already-resolved demotion, the
+// lockfile scan, and bundle-out. entrypoint.sh execs it after prompt assembly
+// and it exits with the run's exit code (ADR 0058). It replaces the
+// marker-gate, outcome-backstop, bundle-out and advise-only driver-exec verbs
+// bash chained. Under podman box runs as PID 1 and splits itself into an init
+// parent that only reaps orphans and forwards signals and a worker child that
+// does the work (see init.go).
 package main
 
 import (
@@ -26,18 +27,13 @@ import (
 )
 
 // parseFlags requires every flag, so a contract drift in entrypoint.sh fails
-// loudly instead of defaulting a driver exit code to 0. Emptiness is validated
-// where a value is used (--outcome-line is legitimately empty).
+// loudly instead of defaulting a flag to its zero value. Emptiness is validated
+// where a value is used.
 func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	var in inputs
 	fs := flag.NewFlagSet("box", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.IntVar(&in.DriverExitCode, "driver-exit-code", 0, "the first Driver run's exit code")
-	fs.StringVar(&in.OutcomeLine, "outcome-line", "", "the first run's SPINDRIFT_OUTCOME line, already printed by the entrypoint")
-	fs.StringVar(&in.StreamLog, "stream-log", "", "the first run's raw Driver stream log")
-	fs.StringVar(&in.DriverTextLog, "driver-text-log", "", "the first run's unwrapped Driver text log")
 	fs.StringVar(&in.HandoffFile, "handoff-file", "", "the shared assemble-prompt handoff JSON")
-	fs.StringVar(&in.ResumeSessionFile, "resume-session-file", "", "pre-rendered session-resume flags every resume passes as --session-file")
 	fs.StringVar(&in.WorkDir, "work-dir", "", "the repository working directory")
 	fs.StringVar(&in.OutboxDir, "outbox-dir", "", "the outbox directory")
 	if err := fs.Parse(args); err != nil {

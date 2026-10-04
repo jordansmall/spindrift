@@ -1,9 +1,10 @@
 #!/usr/bin/env bats
-# Golden of the first Driver invocation (issue #4293): the argv entrypoint.sh
+# Golden of the first Driver invocation (issue #4293): the argv a dispatch
 # hands the orchestrator and the environment it runs under, for each dispatch
 # kind, with run-specific paths normalised. The same goldens
-# (cmd/launcher/box/testdata/driver-invocation/) are what box's Go seam test must
-# reproduce once box owns that run, so the move changes no byte of the handoff.
+# (cmd/launcher/box/testdata/driver-invocation/) were captured from the bash path
+# before box took that run over, and box's Go seam test must keep reproducing
+# them byte for byte, so no phase move changes what the Driver sees.
 #
 # Golden shape, plain LF text:
 #   argv      the flags with path values replaced by placeholders (<handoff>,
@@ -17,7 +18,9 @@
 #             \n), NAME<unset> for vars the orchestrator no longer sees.
 #             SHLVL, _ and OLDPWD are excluded.
 # Run with UPDATE_DRIVER_INVOCATION_GOLDEN=1 against a writable golden dir to
-# regenerate.
+# regenerate. Box now produces this invocation, so regenerating only records
+# its own output: never regenerate to clear a mismatch, which is exactly the
+# drift these goldens exist to catch.
 
 load helper
 

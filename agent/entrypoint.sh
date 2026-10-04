@@ -474,9 +474,9 @@ phase_toolchain_nudge() {
 }
 
 # phase_devshell_probe detects a Nix devShell in the cloned repo. Sets
-# _use_dev_shell (read by phase_prefetch and run_driver_in_env) and _harness_path
-# (read by phase_prefetch only; run_driver_in_env delegates devShell PATH
-# handling to driver-exec, issue #626).
+# _use_dev_shell (read by phase_prefetch and phase_prompt_assembly) and
+# _harness_path (read by phase_prefetch only; driver-exec handles the Driver's
+# devShell PATH, issue #626).
 phase_devshell_probe() {
   # When one is found, the prefetch hook and Driver run inside `nix develop` so
   # the agent operates in the Target's pinned environment.
@@ -675,12 +675,30 @@ phase_conflict_resolve() {
     fi
     local _cr_prompt
     _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
-    # No session to pin or resume for this pass, and its exit status is not
-    # checked: success is read off the rebase state below. Shadows
-    # _use_dev_shell to 0 for this call only (dynamic scoping, issue #515),
-    # since only the main run enters the devShell.
+    # No session to pin or resume for this pass (empty session file), and its
+    # exit status is not checked: success is read off the rebase state below.
+    # Shadows _use_dev_shell to 0 for the synthesized handoff only (dynamic
+    # scoping, issue #515), since only the main run enters the devShell.
     local _use_dev_shell=0
-    run_driver_in_env "$_cr_prompt" "" "" || true
+    local _cr_prompt_file _cr_session_file _cr_log _cr_handoff
+    _cr_prompt_file="$(mktemp)"
+    printf '%s' "$_cr_prompt" > "$_cr_prompt_file"
+    _cr_session_file="$(mktemp)"
+    _cr_log="$(mktemp)"
+    _cr_handoff="$(mktemp)"
+    _write_env_handoff "$_cr_handoff"
+    local -a _cr_argv=(
+      --handoff-file "$_cr_handoff"
+      --prompt-file "$_cr_prompt_file"
+      --session-file "$_cr_session_file"
+      --log-path "$_cr_log"
+    )
+    # manifest.json here must match passmanifest.FileName.
+    if _needs_outbox; then
+      _cr_argv+=(--manifest-path "$OUTBOX_DIR/manifest.json")
+    fi
+    orchestrator "${_cr_argv[@]}" || true
+    rm -f "$_cr_prompt_file" "$_cr_session_file" "$_cr_log" "$_cr_handoff"
     if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
       # Best-effort revert before the abort below re-checks out HEAD (ADR 0044,
       # issue #2851). When an in-tree config file is itself one of the unmerged
@@ -713,8 +731,8 @@ phase_conflict_resolve() {
 # phase_prompt_assembly delegates prompt/roster assembly to the driver-exec
 # assemble-prompt verb (ADR 0036, ADR 0007's thin-exec-glue tier, issue #2354);
 # the gate, fragment, base-prompt and roster logic lives in
-# cmd/launcher/internal/promptassembly (issues #2349-#2353). Sets prompt,
-# _handoff (the descriptor JSON) and _handoff_file (issues #2355, #2975).
+# cmd/launcher/internal/promptassembly (issues #2349-#2353). Sets _handoff_file
+# (issues #2355, #2975).
 phase_prompt_assembly() {
   # Filesystem discovery is the one input only bash can produce; the verb takes
   # the result as --skills-found. A skill is a directory holding a SKILL.md, so
@@ -742,9 +760,9 @@ phase_prompt_assembly() {
     --outcome-contract-file "$OUTCOME_CONTRACT_FILE"
     --research-outcome-contract-file "$RESEARCH_OUTCOME_CONTRACT_FILE"
     --skills-found "$SKILLS_FOUND"
-    # Driver-invocation passthrough (issue #2975): the facts run_driver_in_env
-    # used to rebuild into ~20 per-call flags now ride the Handoff descriptor,
-    # which driver-exec and the orchestrator read at run time.
+    # Driver-invocation passthrough (issue #2975): the per-call Driver flags
+    # ride the Handoff descriptor, which driver-exec and the orchestrator read
+    # at run time.
     --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE"
     --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}"
     --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG"
@@ -775,13 +793,13 @@ phase_prompt_assembly() {
   [ -f "$DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md" ] && _ap_args+=(--principle-redesign-from-first-principles-skill-baked)
   # END GENERATED SKILL-BAKED PROBES
   # DRIVER_ARGV_MODEL_OMIT_EMPTY is the Driver registry's own model-slot gate,
-  # and --devshell mirrors the devShell wrapping run_driver_in_env used to build
-  # per call; both are baked into the handoff here (issue #2975). _use_dev_shell is
-  # main's cross-phase sentinel, read via dynamic scoping.
+  # and --devshell wraps the Driver in the devShell; both are baked into the
+  # handoff here (issue #2975). _use_dev_shell is main's cross-phase sentinel,
+  # read via dynamic scoping.
   [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] && _ap_args+=(--argv-model-omit-empty)
   [ "$_use_dev_shell" = "1" ] && _ap_args+=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
 
-  local _prompt_out _agents_out _handoff_out _review_prompt_out
+  local _prompt_out _agents_out _handoff_out _review_prompt_out _handoff
   _prompt_out="$(mktemp)"
   _agents_out="$(mktemp)"
   _handoff_out="$(mktemp)"
@@ -797,14 +815,9 @@ phase_prompt_assembly() {
     --handoff-output "$_handoff_out" \
     --review-prompt-output "$_review_prompt_out"
 
-  # $(...) strips the trailing newline exactly as the old `$(_subst ...)` chain
-  # did, so the prompt stays byte-identical. $_agents_out is never read back into
-  # a bash string: it survives on disk because it IS the file Handoff.AgentsFile
-  # points to, read by driver-exec directly off --handoff-file.
-  prompt="$(cat "$_prompt_out")"
-  # Plain (non-local) assignment so _handoff escapes to run_driver_in_env and
-  # main()'s box exec, which run outside this function's call frame (issue
-  # #515, #2355).
+  # $_agents_out is never read back into a bash string: it survives on disk
+  # because it IS the file Handoff.AgentsFile points to, read by driver-exec
+  # directly off --handoff-file.
   _handoff="$(cat "$_handoff_out")"
   # The handoff file, and the agents/review-prompt files it names by path, must
   # survive the rest of the run: driver-exec reads Handoff.AgentsFile at
@@ -865,95 +878,6 @@ _write_env_handoff() {
     --handoff-output "$1"
 }
 
-# run_driver_in_env runs the Driver against $1 (the assembled prompt), $2 (an
-# optional per-call handoff-file override; "" uses the shared $_handoff_file),
-# and $3 (session mode, forwarded verbatim to _driver_session_flags). Runs the
-# pass through the orchestrator, which forwards the handoff to driver-exec (issue
-# #626) for each of its own passes; driver-exec owns running the Driver,
-# optionally inside the devShell.
-run_driver_in_env() {
-  local prompt="$1" handoff_file_override="$2" session_mode="$3"
-
-  # An unrecognized session_mode (e.g. "" for the conflict-resolve pass, which
-  # pins no session) falls through _driver_session_flags' case with no output,
-  # leaving the session file below empty.
-  local _driver_session_flags_rendered
-  _driver_session_flags_rendered="$(_driver_session_flags "$session_mode")"
-
-  # Prompt and session data cross into driver-exec as file paths: a compiled
-  # binary, unlike the devShell wrapper, needs no quoting-hazard workaround. The
-  # roster is not written here; it rides the Handoff descriptor's AgentsFile
-  # field, read by buildDriverArgs straight off --handoff-file.
-  local _prompt_file _session_file stream_log
-  _prompt_file="$(mktemp)"
-  printf '%s' "$prompt" > "$_prompt_file"
-  _session_file="$(mktemp)"
-  printf '%s' "$_driver_session_flags_rendered" > "$_session_file"
-
-  # stream_log is driver-exec's teed copy of the Driver's raw stdout; the
-  # launcher's own byte-exact capture is separate and untouched. It survives this
-  # call because box's SPINDRIFT_PR_INTENT gate scans it later (see
-  # _last_stream_log below).
-  stream_log="$(mktemp)"
-
-  # $_handoff_file is phase_prompt_assembly's cross-phase sentinel, read via
-  # dynamic scoping. $handoff_file_override wins for this call only (no caller
-  # passes one now that box owns the nudge resumes, which strip the
-  # ReviewPromptFile themselves to stay a narrow single pass; issues #2065,
-  # #2975).
-  local _run_handoff_file="${handoff_file_override:-${_handoff_file:-}}" _synthesized_handoff=""
-  if [ -z "$_run_handoff_file" ]; then
-    _run_handoff_file="$(mktemp)"
-    _synthesized_handoff="$_run_handoff_file"
-    _write_env_handoff "$_run_handoff_file"
-  fi
-
-  # --manifest-path (issue #2983) is passed only when the outbox is mounted
-  # host-side, otherwise the orchestrator would write to a path no one
-  # can read back. Its contract treats an omitted path as "write no manifest, no
-  # error", so leaving the flag off is correct rather than a missed feature.
-  local -a _driver_argv=(
-    --handoff-file "$_run_handoff_file"
-    --prompt-file "$_prompt_file"
-    --session-file "$_session_file"
-    --log-path "$stream_log"
-  )
-  if _needs_outbox; then
-    # manifest.json here must match passmanifest.FileName.
-    _driver_argv+=(--manifest-path "$OUTBOX_DIR/manifest.json")
-  fi
-
-  local claude_rc=0
-  set +e
-  orchestrator "${_driver_argv[@]}"
-  claude_rc=$?
-  set -e
-  rm -f "$_prompt_file" "$_session_file"
-  [ -n "$_synthesized_handoff" ] && rm -f "$_synthesized_handoff"
-
-  # The launcher greps '^SPINDRIFT_OUTCOME ' from the container log, but claude
-  # buries it in a stream-json result event; _driver_extract_outcome re-prints it
-  # as a bare line so that contract is unchanged. Captured rather than printed
-  # directly so the box backstop (issue #593) can tell whether one was emitted.
-  _last_outcome_line="$(_driver_extract_outcome "$stream_log")"
-  # box's SPINDRIFT_PR_INTENT gate reads this path well after this call
-  # returns (passed as --stream-log), so the marker-gate package
-  # owns that grammar instead of bash. This Box exits after one run, so an
-  # undeleted per-pass stream log is not a real leak.
-  _last_stream_log="$stream_log"
-  # The unwrapped Driver result text, remembered the same dynamically-scoped way
-  # as _last_stream_log above (issue #2978): box's SPINDRIFT_OUTCOME gate
-  # scans this path for the marker itself,
-  # rather than bash pre-extracting a near-miss line.
-  _last_driver_text_log="$(mktemp)"
-  _driver_extract_result_text "$stream_log" > "$_last_driver_text_log"
-  if [ -n "$_last_outcome_line" ]; then
-    printf '%s\n' "$_last_outcome_line"
-  fi
-
-  return "$claude_rc"
-}
-
 # export_driver_bash_timeout (issue #4409) exports the Consumer's Bash-timeout
 # knob under each env var name the Driver's registry entry lists in
 # DRIVER_BASH_TIMEOUT_ENV. Exported (not just set) so the orchestrator and,
@@ -981,10 +905,7 @@ main() {
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
   local _use_dev_shell _harness_path
-  local prompt _handoff
-  local _last_outcome_line _last_stream_log _last_driver_text_log
   local _advise_only
-  local _announce_subject _announce_suffix
 
   configure_env
   export_driver_bash_timeout
@@ -1046,34 +967,12 @@ main() {
   phase_conflict_resolve
   phase_prompt_assembly
 
-  if [ "$DISPATCH_KEYING" = "chore" ]; then
-    _announce_subject="chore $CHORE_NAME"
-  else
-    _announce_subject="issue #$ISSUE_NUMBER"
-  fi
-  _announce_suffix=" on $BRANCH"
-  if _is_advise_only; then
-    _announce_suffix=""
-  fi
-  echo "==> claude ${DISPATCH_ANNOUNCE_VERB} ${_announce_subject}${_announce_suffix}"
-  local claude_rc=0
-  run_driver_in_env "$prompt" "" "$(printf '%s' "$_handoff" | jq -r '.SessionMode')" || claude_rc=$?
-
-  # box owns everything after the first Driver run: the required-marker nudges,
-  # the synthetic outcome backstop, the already-resolved demotion, the lockfile
-  # scan and bundle-out, and it exits with the run's exit code (ADR 0058, issue
-  # #4292). The resume flags are rendered once here: the first run already
-  # created the session transcript, so this equals rendering at resume time.
-  local _resume_session_file
-  _resume_session_file="$(mktemp)"
-  _driver_session_flags resume > "$_resume_session_file"
+  # box runs the first Driver run and everything after it: the required-marker
+  # nudges, the synthetic outcome backstop, the already-resolved demotion, the
+  # lockfile scan and bundle-out, and it exits with the run's exit code (ADR
+  # 0058, issues #4292, #4293).
   exec box \
-    --driver-exit-code "$claude_rc" \
-    --outcome-line "$_last_outcome_line" \
-    --stream-log "$_last_stream_log" \
-    --driver-text-log "$_last_driver_text_log" \
     --handoff-file "$_handoff_file" \
-    --resume-session-file "$_resume_session_file" \
     --work-dir "$WORK_DIR" \
     --outbox-dir "$OUTBOX_DIR"
 }

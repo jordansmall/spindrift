@@ -1,18 +1,25 @@
 package seamtest
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"testing"
 )
 
 // OrchestratorConfig is the orchestrator fake's JSON config.
 type OrchestratorConfig struct {
 	// Record is the file the fake's own argv is appended to.
 	Record string `json:"record"`
+	// Snapshot, when set, is a directory each invocation writes <n>.json to (n
+	// from 1): argv, environment and the prompt and session file contents,
+	// which the caller deletes once the pass returns.
+	Snapshot string `json:"snapshot,omitempty"`
 }
 
 func orchestratorMain(args []string) int {
@@ -39,7 +46,7 @@ func execClaude(argv []string, stdout, stderr io.Writer) int {
 	return fakeConfigExit
 }
 
-// orchestratorFake stands in for the in-box orchestrator on one resume pass.
+// orchestratorFake stands in for the in-box orchestrator on one pass.
 // It records its argv, reads only --prompt-file, --session-file and
 // --log-path (the rest, such as --handoff-file and --manifest-path, stay in
 // the record), and runs the Driver as `<fields of the session file> -p
@@ -52,7 +59,8 @@ func orchestratorFake(args []string, stdout, stderr io.Writer, drive driverRunne
 		fmt.Fprintf(stderr, "orchestrator fake: %v\n", err)
 		return fakeConfigExit
 	}
-	if _, err := appendRecord(cfg.Record, args); err != nil {
+	prior, err := appendRecord(cfg.Record, args)
+	if err != nil {
 		fmt.Fprintf(stderr, "orchestrator fake: record: %v\n", err)
 		return fakeConfigExit
 	}
@@ -86,6 +94,13 @@ func orchestratorFake(args []string, stdout, stderr io.Writer, drive driverRunne
 		fmt.Fprintf(stderr, "orchestrator fake: %v\n", err)
 		return 2
 	}
+	if cfg.Snapshot != "" {
+		snap := Snapshot{Argv: args, Env: os.Environ(), Prompt: string(prompt), Session: string(session)}
+		if err := writeSnapshot(cfg.Snapshot, len(prior)+1, snap); err != nil {
+			fmt.Fprintf(stderr, "orchestrator fake: snapshot: %v\n", err)
+			return fakeConfigExit
+		}
+	}
 	log, err := os.OpenFile(flags["--log-path"], os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		fmt.Fprintf(stderr, "orchestrator fake: %v\n", err)
@@ -95,4 +110,44 @@ func orchestratorFake(args []string, stdout, stderr io.Writer, drive driverRunne
 
 	argv := append(strings.Fields(string(session)), "-p", string(prompt))
 	return drive(argv, io.MultiWriter(log, stdout), stderr)
+}
+
+// Snapshot is what one orchestrator invocation was handed: the facts a Driver
+// invocation golden pins, captured before the caller removes the prompt and
+// session files.
+type Snapshot struct {
+	Argv    []string `json:"argv"`
+	Env     []string `json:"env"` // NAME=value, as os.Environ lists them
+	Prompt  string   `json:"prompt"`
+	Session string   `json:"session"`
+}
+
+func snapshotPath(dir string, n int) string {
+	return filepath.Join(dir, fmt.Sprintf("%d.json", n))
+}
+
+func writeSnapshot(dir string, n int, s Snapshot) error {
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(snapshotPath(dir, n), b, 0o644)
+}
+
+// ReadSnapshot returns invocation n's (1-based) snapshot from dir, failing tb
+// when the orchestrator fake never wrote it.
+func ReadSnapshot(tb testing.TB, dir string, n int) Snapshot {
+	tb.Helper()
+	b, err := os.ReadFile(snapshotPath(dir, n))
+	if err != nil {
+		tb.Fatalf("seamtest: orchestrator invocation %d left no snapshot: %v", n, err)
+	}
+	var s Snapshot
+	if err := json.Unmarshal(b, &s); err != nil {
+		tb.Fatalf("seamtest: %v", err)
+	}
+	return s
 }
