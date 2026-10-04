@@ -615,6 +615,7 @@ in
       ''
         grep -qi 'vanished' ${checkHygieneSkill}
         grep -qi 'exit marker' ${checkHygieneSkill}
+        grep -qi 'bound the wait' ${checkHygieneSkill}
         touch $out
       '';
 
