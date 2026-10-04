@@ -20,7 +20,7 @@ remainder to a **fresh** worker seeded from that checkpoint — never push the
 same worker past its stated budget.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
-implements each slice; the coordinator keeps the checks green, reviews, and
-commits. Each delegated slice must satisfy the one-slice, test-first
-discipline below — you enforce it; the worker performs each
-red-green-refactor cycle.
+implements each slice; the coordinator confirms each returned slice's
+narrowest checks are green, owns the full check gate, reviews, and commits.
+Each delegated slice must satisfy the one-slice, test-first discipline
+below — you enforce it; the worker performs each red-green-refactor cycle.

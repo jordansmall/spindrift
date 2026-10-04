@@ -87,8 +87,12 @@ paragraph of commentary.
 
 ${PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP}${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK
 
-Before each commit, run the repo's own checks green. Use what the project
-defines (package scripts, Makefile, CI config).
+Run checks in two tiers. While iterating, run only the narrowest check that
+covers what you changed — one package's tests, one test file, or one named
+check target (list the targets the project defines). Once per pass, run the
+repo's full check gate green just before the pass's final commit — never
+once per commit, amend, or fixup. Use what the project defines (package
+scripts, Makefile, CI config).
 
 Read a large output from a file rather than from the conversation, diffs
 included: never stream a bare `git diff` into the conversation — the

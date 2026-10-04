@@ -48,13 +48,14 @@ satisfy this — a human, and any later delta gate, needs to see
 post-review work without diffing the branch.
 
 This ordering supersedes the COMMIT section's "rebase onto the latest base
-immediately before finishing" for this pass — the rebase already happened
-at step 1, and step 3's gate already covers it.
+immediately before finishing" and the CHECK section's "just before the
+pass's final commit" for this pass — the rebase already happened at step 1,
+and step 3's gate already covers it and the folds before it.
 
 Fetching again before finishing is still worth doing, but re-run the gate
-only when the tree actually changed since it last ran: a later rebase that
-really moved the branch, or a fix applied after the gate. A rebase that
-reports the branch already up to date changed nothing and earns no second
-run. Never re-run the gate for reassurance — over an unchanged tree it is
-the single largest wall-clock item in the pass, and it tells you nothing
-the first run did not.
+only when a fix lands once the gate has run, or a later rebase owes it under
+the COMMIT section's after-rebase rule — a rebase that reports the branch
+already up to date earns no second run, and CI runs the full check gate on
+the PR anyway. Never re-run the gate for reassurance — over an unchanged
+tree it is the single largest wall-clock item in the pass, and it tells
+you nothing the first run did not.
