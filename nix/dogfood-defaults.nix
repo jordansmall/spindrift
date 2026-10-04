@@ -63,5 +63,8 @@ in
     # let a few allow-listed, reviewer-backed findings self-promote.
     butlerChores = "bugs docs-drift";
     butlerMaxPromotionsPerDay = 3;
+    # A cold checks-inbox gate outruns the 10-minute stock Bash cap; 30 minutes
+    # lets it finish in one blocking call (issue #4409).
+    driverBashTimeoutMs = "1800000";
   };
 }
