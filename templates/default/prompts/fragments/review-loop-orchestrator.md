@@ -63,10 +63,13 @@ triage below, not the blocking-verdict handling above:
    is in scope at every round. What stays out of scope is surface this
    branch never touched at all — that pin, not the round number, is what
    bounds where the in-scope surface can grow: it widens with this
-   branch's own fixes, never onto code this branch never wrote. Re-run
-   checks, then commit them the same way — amended into the commit each
-   logically belongs to unless it is a reasonably separate scope, which
-   earns its own commit. They never become issues.
+   branch's own fixes, never onto code this branch never wrote. Run the
+   narrowest check covering each fix, then commit them the same way —
+   amended into the commit each logically belongs to unless it is a
+   reasonably separate scope, which earns its own commit. These fold
+   commits ride on narrow checks and do not by themselves re-trigger the
+   full check gate; the land pass's gate and CI cover them. They never
+   become issues.
 2. Drop a finding that is correct but trivial and out of scope for
    this slice — the fix would be cheap, but the surface is one this
    slice never touched, and nobody would ever prioritise it as a tracked

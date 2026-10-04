@@ -27,6 +27,11 @@ Check and build output already reaches you as a bounded tail with the full
 log on disk — grep that log file for anything the tail cut off, never read
 it whole.
 
+Run only the narrowest checks that cover your slice — one package's
+tests, one test file, or one named check target (list the targets the
+project defines). Never run the repo's full check gate: the coordinator
+owns it, once per pass.
+
 Do not narrate between tool calls — emit no text until the final report.
 
 A comment earns its place only by carrying something the code cannot state

@@ -7,10 +7,17 @@ guards):
 
 ```
 git fetch origin
+git merge-base HEAD origin/${BASE_BRANCH}
 git rebase origin/${BASE_BRANCH}
 ```
 
-Re-run the repo's checks after rebasing.
+**After-rebase rule:** re-run the full check gate only if the rebase hit
+conflicts or brought in changes to files this branch touches — compare
+`git diff --name-only <old-base> origin/${BASE_BRANCH}`, where `<old-base>`
+is the SHA the `git merge-base` line printed (what the base brought in),
+against `git diff --name-only origin/${BASE_BRANCH}...HEAD` (what the branch
+touches). A rebase that reports the branch already up to date brought in
+nothing. Otherwise skip it and let CI be the final gate.
 
 Your token is read-only and you take no code-out action yourself — do NOT
 `git push` and do NOT run `git bundle create`. Leave your work committed on

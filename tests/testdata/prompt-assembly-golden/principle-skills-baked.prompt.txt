@@ -151,10 +151,10 @@ remainder to a **fresh** worker seeded from that checkpoint — never push the
 same worker past its stated budget.
 
 You still own CHECK, COMMIT, REVIEW, and OUTCOME yourself: the worker only
-implements each slice; the coordinator keeps the checks green, reviews, and
-commits. Each delegated slice must satisfy the one-slice, test-first
-discipline below — you enforce it; the worker performs each
-red-green-refactor cycle.
+implements each slice; the coordinator confirms each returned slice's
+narrowest checks are green, owns the full check gate, reviews, and commits.
+Each delegated slice must satisfy the one-slice, test-first discipline
+below — you enforce it; the worker performs each red-green-refactor cycle.
 
 The scout wrote its brief to `/tmp/brief.md` itself — read it back from
 disk. Use its map to break the issue into the ordered set of slices. Quote
@@ -187,8 +187,12 @@ Before writing the change, invoke the `/principle-laziness-protocol` skill.
 
 # CHECK
 
-Before each commit, run the repo's own checks green. Use what the project
-defines (package scripts, Makefile, CI config).
+Run checks in two tiers. While iterating, run only the narrowest check that
+covers what you changed — one package's tests, one test file, or one named
+check target (list the targets the project defines). Once per pass, run the
+repo's full check gate green just before the pass's final commit — never
+once per commit, amend, or fixup. Use what the project defines (package
+scripts, Makefile, CI config).
 
 Read a large output from a file rather than from the conversation, diffs
 included: never stream a bare `git diff` into the conversation — the
@@ -263,10 +267,17 @@ guards):
 
 ```
 git fetch origin
+git merge-base HEAD origin/main
 git rebase origin/main
 ```
 
-Re-run the repo's checks after rebasing, then push:
+**After-rebase rule:** re-run the full check gate only if the rebase hit
+conflicts or brought in changes to files this branch touches — compare
+`git diff --name-only <old-base> origin/main`, where `<old-base>`
+is the SHA the `git merge-base` line printed (what the base brought in),
+against `git diff --name-only origin/main...HEAD` (what the branch
+touches). A rebase that reports the branch already up to date brought in
+nothing. Otherwise skip it and let CI be the final gate. Then push:
 
 ```
 git push --force-with-lease -u origin agent/issue-7   # first push
@@ -277,8 +288,10 @@ git push --force-with-lease                        # subsequent
 once:
 
 1. `git fetch origin`
-2. `git rebase origin/main` — resolve any conflicts, re-run checks.
-3. `git push --force-with-lease` — one retry only.
+2. `git merge-base HEAD origin/main` — note the SHA it prints.
+3. `git rebase origin/main` — resolve any conflicts, then re-run
+   the full check gate only under the same after-rebase rule.
+4. `git push --force-with-lease` — one retry only.
 
 If the push still fails after the retry, follow IF BLOCKED.
 
@@ -349,10 +362,13 @@ triage below, not the blocking-verdict handling above:
    is in scope at every round. What stays out of scope is surface this
    branch never touched at all — that pin, not the round number, is what
    bounds where the in-scope surface can grow: it widens with this
-   branch's own fixes, never onto code this branch never wrote. Re-run
-   checks, then commit them the same way — amended into the commit each
-   logically belongs to unless it is a reasonably separate scope, which
-   earns its own commit. They never become issues.
+   branch's own fixes, never onto code this branch never wrote. Run the
+   narrowest check covering each fix, then commit them the same way —
+   amended into the commit each logically belongs to unless it is a
+   reasonably separate scope, which earns its own commit. These fold
+   commits ride on narrow checks and do not by themselves re-trigger the
+   full check gate; the land pass's gate and CI cover them. They never
+   become issues.
 2. Drop a finding that is correct but trivial and out of scope for
    this slice — the fix would be cheap, but the surface is one this
    slice never touched, and nobody would ever prioritise it as a tracked
@@ -478,16 +494,17 @@ satisfy this — a human, and any later delta gate, needs to see
 post-review work without diffing the branch.
 
 This ordering supersedes the COMMIT section's "rebase onto the latest base
-immediately before finishing" for this pass — the rebase already happened
-at step 1, and step 3's gate already covers it.
+immediately before finishing" and the CHECK section's "just before the
+pass's final commit" for this pass — the rebase already happened at step 1,
+and step 3's gate already covers it and the folds before it.
 
 Fetching again before finishing is still worth doing, but re-run the gate
-only when the tree actually changed since it last ran: a later rebase that
-really moved the branch, or a fix applied after the gate. A rebase that
-reports the branch already up to date changed nothing and earns no second
-run. Never re-run the gate for reassurance — over an unchanged tree it is
-the single largest wall-clock item in the pass, and it tells you nothing
-the first run did not.
+only when a fix lands once the gate has run, or a later rebase owes it under
+the COMMIT section's after-rebase rule — a rebase that reports the branch
+already up to date earns no second run, and CI runs the full check gate on
+the PR anyway. Never re-run the gate for reassurance — over an unchanged
+tree it is the single largest wall-clock item in the pass, and it tells
+you nothing the first run did not.
 
 # LAND THE CHANGE
 

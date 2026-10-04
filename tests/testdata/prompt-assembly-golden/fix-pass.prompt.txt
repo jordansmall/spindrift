@@ -95,8 +95,12 @@ required by IF BLOCKED, and the `note=` field of the SPINDRIFT_OUTCOME line.
 
 # CHECK
 
-Before each commit, run the repo's own checks green. Use what the project
-defines (package scripts, Makefile, CI config).
+Run checks in two tiers. While iterating, run only the narrowest check that
+covers what you changed — one package's tests, one test file, or one named
+check target (list the targets the project defines). Once per pass, run the
+repo's full check gate green just before the pass's final commit — never
+once per commit, amend, or fixup. Use what the project defines (package
+scripts, Makefile, CI config).
 
 Read a large output from a file rather than from the conversation, diffs
 included: never stream a bare `git diff` into the conversation — the
@@ -168,10 +172,17 @@ guards):
 
 ```
 git fetch origin
+git merge-base HEAD origin/main
 git rebase origin/main
 ```
 
-Re-run the repo's checks after rebasing, then push:
+**After-rebase rule:** re-run the full check gate only if the rebase hit
+conflicts or brought in changes to files this branch touches — compare
+`git diff --name-only <old-base> origin/main`, where `<old-base>`
+is the SHA the `git merge-base` line printed (what the base brought in),
+against `git diff --name-only origin/main...HEAD` (what the branch
+touches). A rebase that reports the branch already up to date brought in
+nothing. Otherwise skip it and let CI be the final gate. Then push:
 
 ```
 git push --force-with-lease -u origin agent/issue-7   # first push
@@ -182,8 +193,10 @@ git push --force-with-lease                        # subsequent
 once:
 
 1. `git fetch origin`
-2. `git rebase origin/main` — resolve any conflicts, re-run checks.
-3. `git push --force-with-lease` — one retry only.
+2. `git merge-base HEAD origin/main` — note the SHA it prints.
+3. `git rebase origin/main` — resolve any conflicts, then re-run
+   the full check gate only under the same after-rebase rule.
+4. `git push --force-with-lease` — one retry only.
 
 If the push still fails after the retry, follow IF BLOCKED.
 
