@@ -1937,21 +1937,20 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
           └─ /agent/entrypoint.sh
              ├─ git clone <REPO_SLUG>  +  git checkout -b agent/issue-N
              ├─ run PREFETCH (optional cache warm-up)
-             ├─ run_driver_in_env  (assembles the prompt/--agents JSON, mounts
-             │   the session cache, then hands off to one of:)
-             │   └─ orchestrator                (N passes)
-             │      └─ driver-exec × N, one fresh Driver session per pass,
-             │         │  seeded from a run-state handoff file — see [In-box
-             │         │  orchestrator](#in-box-orchestrator)
-             │         └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
-             │   (inside a Driver pass itself:)
-             │   implement → check → commit → push → self-review (reviewer subagent)
-             │      → open PR as a draft
-             │      → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
-             └─ exec box  (cmd/launcher/box: everything after the first Driver
-                run — outcome and PR-intent nudges, outcome backstop,
-                already-resolved demotion, lockfile scan, bundle-out — then
-                exits with the run's code)
+             ├─ assemble the prompt/--agents JSON into the handoff
+             └─ exec box  (cmd/launcher/box: the first Driver run, then the
+                │  outcome and PR-intent nudges, outcome backstop,
+                │  already-resolved demotion, lockfile scan, bundle-out — then
+                │  exits with the run's code)
+                └─ orchestrator                (N passes)
+                   └─ driver-exec × N, one fresh Driver session per pass,
+                      │  seeded from a run-state handoff file — see [In-box
+                      │  orchestrator](#in-box-orchestrator)
+                      └─ claude -p "<prompts/issue-prompt.md>" --dangerously-skip-permissions
+                (inside a Driver pass itself:)
+                implement → check → commit → push → self-review (reviewer subagent)
+                   → open PR as a draft
+                   → print  SPINDRIFT_OUTCOME issue=N landing=<url> status=ready
         │
         └─ back on the host, the launcher runs the MERGE GATE for that issue:
            ├─ poll CI on the PR head until green (or red, or timeout)
@@ -2045,8 +2044,8 @@ surfaces as a `merge-blocked` comment on the issue, not a crash.
 
 ### In-box orchestrator
 
-`run_driver_in_env` hands the assembled prompt/`--agents`/session flags to
-`orchestrator` (`cmd/launcher/orchestrator`) — a second in-box Go binary,
+`box` hands the assembled prompt, the handoff and the Driver's session flags
+to `orchestrator` (`cmd/launcher/orchestrator`) — a second in-box Go binary,
 built the same hermetic way as the launcher itself ([ADR
 0007](adr/0007-runtime-logic-is-a-nix-built-go-binary.md)) — which loops
 `driver-exec` for as many passes as the implementor's own review verdicts and
@@ -2055,11 +2054,14 @@ two numeric caps call for
 It is the only path: the `ORCHESTRATOR_ENABLED` switch and the direct
 single-pass `driver-exec` path were removed in issue #4291, and a leftover
 setting fails preflight (`spindrift doctor`'s `removed-knobs` check, flake
-eval) naming it as removed. `entrypoint.sh`'s own job — prompt/`--agents`
-assembly, session-cache mounting, the first Driver run — is unchanged; once it
-returns, `entrypoint.sh` `exec`s `box` (`cmd/launcher/box`), which owns the
-outcome and PR-intent nudges, the outcome backstop, demotion, the lockfile scan
-and bundle-out (issue #4292).
+eval) naming it as removed. Right after prompt/`--agents` assembly,
+`entrypoint.sh` `exec`s `box` (`cmd/launcher/box`), which runs the first
+Driver pass (issue #4293), then owns the outcome and PR-intent nudges, the
+outcome backstop, demotion, the lockfile scan and bundle-out (issue #4292).
+`box`'s seam test pins the orchestrator invocation it makes — argv, session
+flags and environment — to goldens captured from the bash path
+(`cmd/launcher/box/testdata/driver-invocation/`), so a later phase move cannot
+change what the Driver sees without a visible diff.
 
 Each pass after the first runs the Driver **sessionless** (no `--resume`,
 ever) — only the very first pass carries the box's initial session pin
