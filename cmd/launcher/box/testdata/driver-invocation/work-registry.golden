@@ -1,0 +1,24 @@
+argv
+--handoff-file
+<handoff>
+--prompt-file
+<prompt>
+--session-file
+<session>
+--log-path
+<stream-log>
+session
+--session-id bf718c96-aa0c-c4fa-d029-3a6bbb980c63
+devshell
+false default
+prompt
+<handoff-prompt>
+env
+BASH_DEFAULT_TIMEOUT_MS=1800000
+BASH_MAX_TIMEOUT_MS=1800000
+BRANCH=agent/issue-7
+CARGO_REGISTRIES_SPINDRIFT_REGISTRY_PROXY_R0_OTHERCORP_TOKEN=spindrift-registry-proxy-placeholder-not-a-secret
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+GOTOOLCHAIN=local
+PWD=<tmp>/work
+npm_config_registry=http://127.0.0.1:27182/r0/
