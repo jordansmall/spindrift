@@ -131,6 +131,11 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
 		"--devshell=0", "--devshell-name=default",
 		"--prework-rebase-conflict=0", "--publish-rebase=0",
+		// Nonexistent sources: the layout skips them, leaving skillsDir as baked.
+		"--harness-skills-dir=" + filepath.Join(skillsDir, "no-harness"),
+		"--operator-skills-dir=" + filepath.Join(skillsDir, "no-operator"),
+		"--harness-home-agent-dir=" + filepath.Join(skillsDir, "no-home-agent"),
+		"--driver-session-cache-dir=",
 	}
 }
 

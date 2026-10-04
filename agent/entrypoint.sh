@@ -83,7 +83,8 @@ configure_env() {
   # skills (lib/image.nix); OPERATOR_SKILLS_DIR is where SPINDRIFT_SKILLS_DIR's
   # runtime override mounts (issue #2489), a path distinct from
   # DRIVER_SKILLS_DIR because a mount directly onto that would replace its
-  # contents and hide the baked skills. Copying merges, so both are copied below.
+  # contents and hide the baked skills. box copies both into DRIVER_SKILLS_DIR
+  # (issue #4296).
   HARNESS_SKILLS_DIR="${HARNESS_SKILLS_DIR:-/agent/skills}"
   OPERATOR_SKILLS_DIR="${OPERATOR_SKILLS_DIR:-/operator-skills}"
 
@@ -547,50 +548,6 @@ _is_self_contained() {
   [ "${SELF_CONTAINED:-}" = "1" ]
 }
 
-# _populate_driver_skills_dir copies HARNESS_SKILLS_DIR then OPERATOR_SKILLS_DIR
-# into DRIVER_SKILLS_DIR (issue #2489), so an operator skill wins a name
-# collision but a harness skill the operator didn't override survives. The driver
-# discovers skills only at DRIVER_SKILLS_DIR, so every call site that spawns a
-# driver invocation naming a skill must run this first. Idempotent (issue #2706)
-# only because each cp is followed by chmod -R u+w: cp -r carries a read-only
-# source's mode bits (bwrap ro-binds /agent from the Nix store), so an unwritable
-# copy would break the very next cp over it (issue #3941). A blanket chmod -R is safe here, unlike in _populate_home_agent_files:
-# nothing is bind-mounted under DRIVER_SKILLS_DIR.
-_populate_driver_skills_dir() {
-  local _src
-  mkdir -p "$DRIVER_SKILLS_DIR"
-  for _src in "$HARNESS_SKILLS_DIR" "$OPERATOR_SKILLS_DIR"; do
-    [ -d "$_src" ] || continue
-    cp -r "$_src"/. "$DRIVER_SKILLS_DIR"/
-    chmod -R u+w "$DRIVER_SKILLS_DIR"
-  done
-}
-
-# _populate_home_agent_files copies HARNESS_HOME_AGENT_DIR's staged content into
-# the real $HOME (issue #2843). A no-op under OCI, which bakes /home/agent
-# directly; under bwrap the staged tree is a read-only bind. Every copied file
-# and directory is made writable because `cp -r` preserves the source's
-# read-only mode bits (commit 8961b62e), which broke opencode under bwrap.
-_populate_home_agent_files() {
-  local _src _target
-  if [ -d "$HARNESS_HOME_AGENT_DIR" ]; then
-    cp -r "$HARNESS_HOME_AGENT_DIR"/. "$HOME"/
-    while IFS= read -r _src; do
-      _target="$HOME/${_src#"$HARNESS_HOME_AGENT_DIR"/}"
-      # Skip the driver's session-cache dir: lib/image.nix pre-creates an empty
-      # placeholder there, and bwrap binds the live HOST directory at that same
-      # path, so chmod'ing it would mutate a directory outside the sandbox and,
-      # on failure, abort box startup under set -e. assertShape now rejects a
-      # malformed sessionCacheDirRelative at eval time (#3348); the trailing-
-      # slash strip here stays as defense in depth.
-      if [ -d "$_src" ] && [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ] && [ "${_target%/}" = "${DRIVER_SESSION_CACHE_DIR%/}" ]; then
-        continue
-      fi
-      chmod u+w "$_target"
-    done < <(find "$HARNESS_HOME_AGENT_DIR" -mindepth 1)
-  fi
-}
-
 # export_driver_bash_timeout (issue #4409) exports the Consumer's Bash-timeout
 # knob under each env var name the Driver's registry entry lists in
 # DRIVER_BASH_TIMEOUT_ENV. Exported (not just set) so the orchestrator and,
@@ -666,19 +623,8 @@ main() {
     phase_devshell_probe
     phase_prefetch
   fi
-  # _populate_driver_skills_dir must run before box's conflict-resolve pass
-  # (issue #2706): that pass's driver invocation and both early-exit paths
-  # otherwise ran ahead of the skills copy, leaving a prompt naming a skill
-  # unable to find it. box probes the same directory for the baked skills.
-  _populate_driver_skills_dir
-  # _populate_home_agent_files runs at the same early position for the same
-  # reason (issue #2843): under bwrap the baked hooks, settings.json, and
-  # opencode agent files must already be in $HOME before box's conflict-resolve
-  # pass runs and before its prompt assembly rewrites them in place. A no-op
-  # under OCI.
-  _populate_home_agent_files
-
-  # box runs the conflict-resolve pass when phase_prework_rebase left a
+  # box first lays out the Driver skills dir and the home agent files (issue
+  # #4296), then runs the conflict-resolve pass when phase_prework_rebase left a
   # conflict, then assembles the prompt, runs the first Driver run and
   # everything after it: the required-marker nudges, the synthetic outcome
   # backstop, the already-resolved demotion, the lockfile scan and bundle-out,
@@ -703,6 +649,10 @@ main() {
     --registry "$PROMPTASSEMBLY_REGISTRY_FILE" \
     --validate-markers-registry "$PROMPT_CONTRACT_REGISTRY_FILE" \
     --driver-skills-dir "$DRIVER_SKILLS_DIR" \
+    --harness-skills-dir "$HARNESS_SKILLS_DIR" \
+    --operator-skills-dir "$OPERATOR_SKILLS_DIR" \
+    --harness-home-agent-dir "$HARNESS_HOME_AGENT_DIR" \
+    --driver-session-cache-dir "${DRIVER_SESSION_CACHE_DIR:-}" \
     --prompts-dir "$PROMPTS_DIR" \
     --agents-prompt-files "${AGENTS_PROMPT_FILES:-}" \
     --driver-agent-files-dir "${DRIVER_AGENT_FILES_DIR:-}" \

@@ -1,14 +1,15 @@
-// Command box is the Box's in-box driver: it runs the pre-work conflict-resolve
-// pass when the rebase stopped on conflicts, assembles the prompt, runs the
-// first Driver run through the orchestrator, then the settle sequence that
-// follows it: required-marker nudges, the synthetic outcome backstop, the
-// already-resolved demotion, the lockfile scan, and bundle-out. entrypoint.sh
-// execs it with the shell-local values assembly needs and it exits with the
-// run's exit code (ADR 0058). It replaces the assemble-prompt call and the
-// conflict-resolve phase, marker-gate, outcome-backstop, bundle-out and
-// advise-only driver-exec verbs bash chained. Under podman box runs as PID 1
-// and splits itself into an init parent that only reaps orphans and forwards
-// signals and a worker child that does the work (see init.go).
+// Command box is the Box's in-box driver: it first lays out the Driver skills
+// dir and the home agent files (issue #4296), then runs the pre-work
+// conflict-resolve pass when the rebase stopped on conflicts, assembles the
+// prompt, runs the first Driver run through the orchestrator, then the settle
+// sequence that follows it: required-marker nudges, the synthetic outcome
+// backstop, the already-resolved demotion, the lockfile scan, and bundle-out.
+// entrypoint.sh execs it with the shell-local values assembly needs and it
+// exits with the run's exit code (ADR 0058). It replaces the assemble-prompt
+// call and the conflict-resolve phase, marker-gate, outcome-backstop,
+// bundle-out and advise-only driver-exec verbs bash chained. Under podman box
+// runs as PID 1 and splits itself into an init parent that only reaps orphans
+// and forwards signals and a worker child that does the work (see init.go).
 package main
 
 import (
@@ -44,6 +45,10 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.StringVar(&a.RegistryFile, "registry", "", "path to the fragment registry JSON file")
 	fs.StringVar(&a.ValidateMarkersFile, "validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file")
 	fs.StringVar(&a.SkillsDir, "driver-skills-dir", "", "DRIVER_SKILLS_DIR, probed for baked skills")
+	fs.StringVar(&in.HarnessSkillsDir, "harness-skills-dir", "", "HARNESS_SKILLS_DIR, the baked skills copied into DRIVER_SKILLS_DIR")
+	fs.StringVar(&in.OperatorSkillsDir, "operator-skills-dir", "", "OPERATOR_SKILLS_DIR, copied over the harness skills")
+	fs.StringVar(&in.HarnessHomeAgentDir, "harness-home-agent-dir", "", "HARNESS_HOME_AGENT_DIR, the staged home agent files copied into HOME")
+	fs.StringVar(&in.DriverSessionCacheDir, "driver-session-cache-dir", "", "DRIVER_SESSION_CACHE_DIR, empty when the Driver has none")
 	fs.StringVar(&a.PromptsDir, "prompts-dir", "", "PROMPTS_DIR")
 	fs.StringVar(&a.AgentsPromptFiles, "agents-prompt-files", "", "nix-baked agent-name -> promptFile JSON map")
 	fs.StringVar(&a.DriverAgentFilesDir, "driver-agent-files-dir", "", "opencode-style baked agent files dir, empty for claude")

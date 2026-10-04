@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/outcomebackstop"
@@ -36,9 +38,13 @@ const runStateFile = "/tmp/run-state.json"
 
 // inputs are the facts entrypoint.sh holds when it hands over.
 type inputs struct {
-	WorkDir   string
-	OutboxDir string
-	Assembly  assemblyInputs
+	WorkDir               string
+	OutboxDir             string
+	Assembly              assemblyInputs
+	HarnessSkillsDir      string
+	OperatorSkillsDir     string
+	HarnessHomeAgentDir   string
+	DriverSessionCacheDir string
 	// PreworkRebaseConflict: the pre-work rebase stopped on conflicts.
 	PreworkRebaseConflict bool
 	// PublishRebase: the rebased branch must be published once resolved.
@@ -127,6 +133,13 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// read-only Box that hands off via the outbox (issues #2094, #2267).
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
+
+	// HOME must be laid out before the conflict-resolve pass (issue #2706) and
+	// before assembly, which rewrites opencode agent files in place in HOME
+	// (issue #2843).
+	if err := r.layOutHome(); err != nil {
+		return 0, err
+	}
 
 	cr, err := r.conflictResolve()
 	if err != nil {
@@ -562,4 +575,22 @@ func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
 		return "", err
 	}
 	return f.Name(), f.Close()
+}
+
+// layOutHome populates the Driver skills dir and HOME's agent files.
+func (r *boxRun) layOutHome() error {
+	in := r.in
+	// An empty HOME would join the staged tree onto box's working directory,
+	// the cloned repo.
+	home := r.d.Getenv("HOME")
+	if home == "" {
+		return phaseErr("home-layout", errors.New("HOME is unset"))
+	}
+	if err := homelayout.PopulateSkills(in.Assembly.SkillsDir, in.HarnessSkillsDir, in.OperatorSkillsDir); err != nil {
+		return phaseErr("home-layout", err)
+	}
+	if err := homelayout.PopulateHome(home, in.HarnessHomeAgentDir, in.DriverSessionCacheDir); err != nil {
+		return phaseErr("home-layout", err)
+	}
+	return nil
 }
