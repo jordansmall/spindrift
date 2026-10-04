@@ -14,16 +14,14 @@ if [ -n "${SPINDRIFT_SEAM_FIXTURES_DIR:-}" ]; then
   : "${RESEARCH_OUTCOME_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/research-outcome-contract.md}"
   : "${DRIVER_PREAMBLE_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/driver-preamble.sh}"
   : "${AGENT_PATHS_PREAMBLE_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/agent-paths-preamble.sh}"
-  : "${FRAGMENT_REGISTRY_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/fragment-registry.sh}"
   export OUTCOME_CONTRACT_FILE COMMS_CONTRACT_FILE CHECK_CONTRACT_FILE \
     RESEARCH_OUTCOME_CONTRACT_FILE DRIVER_PREAMBLE_FILE \
-    AGENT_PATHS_PREAMBLE_FILE FRAGMENT_REGISTRY_FILE
+    AGENT_PATHS_PREAMBLE_FILE
   # The file names are duplicated from nix/seam-fixtures.nix; a rename there
   # must fail loudly here.
   for _f in "$OUTCOME_CONTRACT_FILE" "$COMMS_CONTRACT_FILE" \
     "$CHECK_CONTRACT_FILE" "$RESEARCH_OUTCOME_CONTRACT_FILE" \
-    "$DRIVER_PREAMBLE_FILE" "$AGENT_PATHS_PREAMBLE_FILE" \
-    "$FRAGMENT_REGISTRY_FILE"; do
+    "$DRIVER_PREAMBLE_FILE" "$AGENT_PATHS_PREAMBLE_FILE"; do
     [ -r "$_f" ] || { echo "helper.bash: seam fixture not found: $_f" >&2; exit 1; }
   done
   unset _f
@@ -357,13 +355,12 @@ setup_fakes() {
   # the real source.
   export ENTRYPOINT_SRC="$ENTRYPOINT"
 
-  # Prepend whichever of the Driver preamble (issues #624, #433), the baked
-  # /agent/* path defaults (issue #2531), and the Conditional fragment registry
-  # (issue #622) are set, each independently guarded, in lib/image.nix's own
-  # concatenation order so the suite sees the bytes the image bakes. Outside
-  # nix none are set, the entrypoint stays unwrapped, and tests fail by design.
-  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ] || [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ] \
-    || [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
+  # Prepend whichever of the Driver preamble (issues #624, #433) and the baked
+  # /agent/* path defaults (issue #2531) are set, each independently guarded,
+  # in lib/image.nix's own concatenation order so the suite sees the bytes the
+  # image bakes. Outside nix none are set, the entrypoint stays unwrapped, and
+  # tests fail by design.
+  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ] || [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
     local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
     {
       if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
@@ -383,9 +380,6 @@ setup_fakes() {
       fi
       if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
         cat "$AGENT_PATHS_PREAMBLE_FILE"
-      fi
-      if [ -n "${FRAGMENT_REGISTRY_FILE:-}" ]; then
-        cat "$FRAGMENT_REGISTRY_FILE"
       fi
       tail -n +2 "$ENTRYPOINT"
     } >"$_wrapped"

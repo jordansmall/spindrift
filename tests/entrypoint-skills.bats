@@ -238,7 +238,7 @@ SKILL
 # The default applies to both agent passes (issue #487). CAVEMAN_STEP is
 # substituted into the COMMS section, which fix-prompt.md receives through the
 # shared-block injection (issue #455) rather than its own copy, so this
-# exercises _inject_shared_block's runtime _subst call.
+# exercises box's runtime substitution of the injected block.
 @test "fix pass gets caveman-default narration via the injected COMMS block when caveman is baked" {
   export FIX_PASS="2"
   mkdir -p "$HOME/.claude/skills/caveman"

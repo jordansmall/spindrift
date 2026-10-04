@@ -73,9 +73,8 @@
   # a derivation would turn into import-from-derivation.
   choresDir ? ../templates/default/prompts/chores,
   # The conditional fragment registry (issue #622): rows of (gate, fragment,
-  # var) that the entrypoint's fragment loop and its `_subst` allowlist are
-  # both rendered from. Not Consumer-tunable; overridable here only for the
-  # bats fixture-row test proving a new row needs no entrypoint edit.
+  # var) that box renders into the prompt from fragmentsRegistryJson. Not
+  # Consumer-tunable; a new row needs no entrypoint edit.
   fragments ? import ./fragments.nix,
   # The directory the fragment registry's files live under, copied whole into
   # the image. Not Consumer-tunable; overridable here only so
@@ -486,19 +485,7 @@ let
   agentPaths = import ./agent-paths.nix;
   agentPathsPreamble = preambles.renderAgentPathsPreamble agentPaths;
 
-  # The var allowlist rendered for agent/entrypoint.sh's `_subst` (issue
-  # #622): every var an envsubst call must know about, generic over the
-  # fragment registry, so a new row needs no entrypoint edit. Shared with the
-  # bats harness file (issue #433) so neither can drift from the other. Box
-  # reads the rows themselves from fragmentsRegistryJson below.
-  fragmentSubstVars = lib.concatMap (row: [ row.var ] ++ (row.extraSubstVars or [ ])) fragments;
-  fragmentRegistryPreamble =
-    "_FRAGMENT_SUBST_VARS=(\n"
-    + lib.concatMapStrings (v: "  " + lib.escapeShellArg v + "\n") fragmentSubstVars
-    + ")\n";
-
-  # The same registry as JSON (issue #2354), for box's `--registry` flag. The
-  # bash preamble above carries only the substitution allowlist.
+  # The registry as JSON (issue #2354), for box's `--registry` flag.
   fragmentsRegistryJson = builtins.toJSON fragments;
 
   # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356), for
@@ -983,7 +970,6 @@ let
       conflictResolvePrompt
       fixPrompt
       fragmentsSourceDir
-      fragmentRegistryPreamble
       butlerPrompt
       butlerReviewPrompt
       choresSourceDir
@@ -1047,11 +1033,6 @@ let
   # file (issue #2531), prepended by the bats harness for the same reason, so
   # tests do not run an entrypoint with no default for these vars at all.
   agentPathsPreambleFile = hostPkgs.writeText "agent-paths-preamble.sh" agentPathsPreamble;
-
-  # The fragment registry as a host store-path file (issue #622), prepended by
-  # the bats harness for the same reason, so tests exercise the same loop
-  # input and substitution allowlist that mkHarness bakes into the image.
-  fragmentRegistryFile = hostPkgs.writeText "fragment-registry.sh" imagePrompts.fragmentRegistryPreamble;
 
   # The rendered prompt directory as a host store path (native-buildable on
   # darwin, so it needs no Linux builder). The prompt is normally baked into
@@ -1722,7 +1703,6 @@ else
         researchOutcomeContractFile
         driverPreambleFile
         agentPathsPreambleFile
-        fragmentRegistryFile
         runInputDocumentFile
         buildInputDocumentFile
         ;

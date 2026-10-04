@@ -1,8 +1,6 @@
 # The Conditional fragment registry (issue #622): one row per opt-in prompt
 # step. Box's prompt assembly reads the rows as JSON (lib/mkHarness.nix's
-# fragmentsRegistryJson), and agent/entrypoint.sh's `_subst` allowlist is
-# rendered from them by fragmentRegistryPreamble, so a fragment can never
-# reference a variable the substitution step does not know about.
+# fragmentsRegistryJson), so a fragment row names every variable it reads.
 
 # A row's `gate` is a bash variable the loop tests for non-emptiness, not a
 # Nix boolean, and `fragment` is a basename under prompts/fragments/, from

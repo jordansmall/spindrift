@@ -112,8 +112,8 @@ func WriteAssembly(env Env, reg Registry, markers []ValidateMarkerRow, p Passthr
 }
 
 // ScanSkillsFound lists, ", "-joined in byte-sorted order, the subdirectories
-// of dir that hold a SKILL.md regular file -- the port of entrypoint.sh's
-// _scan_skills_found. A flat <name>.md never counts; a missing dir yields "".
+// of dir that hold a SKILL.md regular file, for SKILLS_FOUND. A flat <name>.md
+// never counts; a missing dir yields "".
 func ScanSkillsFound(dir string) string {
 	entries, err := os.ReadDir(dir) // sorted by filename
 	if err != nil {

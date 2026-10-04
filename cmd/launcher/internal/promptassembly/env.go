@@ -139,7 +139,7 @@ type Env struct {
 	// and its value is ci-failure.md's ${CI_FAILURE_SUMMARY} substitution.
 	CIFailureSummary string // entrypoint.sh: $CI_FAILURE_SUMMARY
 
-	// The seven fixed _subst allowlist names every _subst call carries alongside
+	// The seven fixed substitution names every prompt render carries alongside
 	// the fragment registry's per-row vars. They are not registry-derived, so
 	// they live on Env rather than on a FragmentRow.
 	IssueNumber     string // entrypoint.sh: $ISSUE_NUMBER
@@ -152,7 +152,7 @@ type Env struct {
 
 	// IssueText is the subject issue's body plus recent comments
 	// (forge.IssueText, issue #3445). Deliberately not one of the seven fixed
-	// _subst names above: assemblePromptBodies registers a fenced, sectioned
+	// names above: assemblePromptBodies registers a fenced, sectioned
 	// ISSUE_TEXT entry separately, because scalars mirrors entrypoint.sh's
 	// fixed-name list byte for byte and substitutes each name's raw value.
 	IssueText string // entrypoint.sh: $ISSUE_TEXT
