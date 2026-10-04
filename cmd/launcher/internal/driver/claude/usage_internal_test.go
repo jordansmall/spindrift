@@ -12,8 +12,8 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// A BreakdownByModel I/O error degrades only the per-model section; the
-// aggregate totals LastInLog already parsed survive (issue #674).
+// A breakdownByModel I/O error degrades only the per-model section; the
+// aggregate totals sumInLog already parsed survive (issue #674).
 func TestExtractUsage_BreakdownByModelError(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":100,"output_tokens":50}}`
 	path := filepath.Join(t.TempDir(), "test.log")
