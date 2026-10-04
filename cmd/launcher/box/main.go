@@ -1,5 +1,7 @@
-// Command box is the Box's in-box driver: it first wires FORGEJO_TOKEN into fj
-// and installs the read-only guards (issue #4299), binds the registry proxy
+// Command box is the Box's in-box driver: it first checks the required env
+// (the dispatch key, keying and git identity, plus the forge token and repo
+// unless fully local or self-contained with no reachable tracker), wires
+// FORGEJO_TOKEN into fj and installs the read-only guards (issue #4299), binds the registry proxy
 // (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
 // issue #4298), decides the toolchain (devShell probe, prefetch hook and
 // toolchain hint; issue #4297), lays out the Driver skills dir and the home

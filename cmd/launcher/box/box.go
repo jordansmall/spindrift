@@ -128,11 +128,17 @@ type boxRun struct {
 	carrier     string
 }
 
-// run sets up the Forgejo CLI credential, installs the read-only guards, binds
-// the registry proxy, decides the toolchain, assembles the prompt, then
-// sequences the first Driver run and everything entrypoint.sh's main() did
-// after it, and returns the exit code the entrypoint would have exited with.
+// run checks the required env, sets up the Forgejo CLI credential, installs the
+// read-only guards, binds the registry proxy, decides the toolchain, assembles
+// the prompt, then sequences the first Driver run and everything
+// entrypoint.sh's main() did after it, and returns the exit code the
+// entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
+	// First, as the shell preamble was: nothing else may run on a Box missing
+	// what the dispatch needs.
+	if err := checkEnvGuards(d.Getenv); err != nil {
+		return 0, phaseErr("env-guards", err)
+	}
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
 	if r.kind == "" {

@@ -108,6 +108,10 @@ func newFixture(t *testing.T) *fixture {
 	f.knobs = map[string]string{
 		"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1",
 		"REPO_SLUG": "owner/repo", "HOME": filepath.Join(dir, "home"),
+		// What checkEnvGuards requires of a work dispatch.
+		"GH_TOKEN": "tok", "DISPATCH_KEY": "42", "DISPATCH_KEYING": "issue",
+		"DISPATCH_ANNOUNCE_VERB": "implementing", "ISSUE_NUMBER": "42",
+		"GIT_USER_NAME": defaultGitUserName, "GIT_USER_EMAIL": "agent@example.com",
 	}
 	f.handoffFile = filepath.Join(dir, "handoff.json")
 	f.in = inputs{
@@ -546,7 +550,9 @@ func TestBackstop_MalformedKnobIsFatalOnlyWhenTheVerbRuns(t *testing.T) {
 
 	// Advise-only: neither backstop nor demotion reads the knobs.
 	f := newFixture(t)
-	f.knobs = map[string]string{"HOME": f.knobs["HOME"]}
+	for _, knob := range []string{"MAX_REBASE_ATTEMPTS", "TRANSIENT_BACKOFF_SECS", "HOLD_JITTER_SECS"} {
+		delete(f.knobs, knob)
+	}
 	f.env.DispatchKind = "research"
 	f.firstRun(blockedLine+"\n", 0)
 	if _, err := run(f.in, f.env, f.d); err != nil {
@@ -1131,6 +1137,21 @@ func TestRun_UnrecognizedDispatchKindIsFatal(t *testing.T) {
 	}
 }
 
+func TestRun_MissingEnvIsTheFirstPhaseAndRunsNothing(t *testing.T) {
+	f := newFixture(t)
+	f.knobs["GIT_USER_EMAIL"] = ""
+	orchestrated := 0
+	f.d.Orchestrate = func([]string) int { orchestrated++; return 0 }
+	_, err := run(f.in, f.env, f.d)
+	var pe *phaseError
+	if !errors.As(err, &pe) || pe.phase != "env-guards" || err.Error() != "env-guards: GIT_USER_EMAIL is required" {
+		t.Fatalf("error = %v", err)
+	}
+	if f.assembled != 0 || orchestrated != 0 || f.out.Len() != 0 {
+		t.Errorf("work ran past the guard: assembled=%d orchestrate=%d stdout=%q", f.assembled, orchestrated, f.out.String())
+	}
+}
+
 func TestRun_StdoutOrderForACleanRun(t *testing.T) {
 	f := newFixture(t)
 	if rc := f.run(); rc != 0 {
@@ -1567,7 +1588,8 @@ func TestParseFlags_UnknownFlagAndStrayArgRejected(t *testing.T) {
 
 func TestMainRun_ErrorPrintsBoxPhaseAndExitsOne(t *testing.T) {
 	var stdout, stderr bytes.Buffer
-	d := deps{Stdout: &stdout, Stderr: &stderr}
+	env := workEnv()
+	d := deps{Stdout: &stdout, Stderr: &stderr, Getenv: func(k string) string { return env[k] }}
 	rc := mainRun(allFlags(), promptassembly.Env{DispatchKind: "bogus"}, d)
 	if rc != 1 || !strings.HasPrefix(stderr.String(), "box: ") {
 		t.Fatalf("rc=%d stderr=%q", rc, stderr.String())
