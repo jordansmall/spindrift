@@ -50,6 +50,10 @@ func (opencodeDriver) ResultEvent(text string) ([]byte, error) {
 	return opencode.ResultEvent(text)
 }
 
+func (opencodeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
+	return ""
+}
+
 func init() {
 	register(opencodeDriver{})
 }

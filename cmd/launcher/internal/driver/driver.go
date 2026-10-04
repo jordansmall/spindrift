@@ -61,6 +61,13 @@ type Driver interface {
 	// returns text. The orchestrator appends it as a synthetic final result
 	// (issue #4406).
 	ResultEvent(text string) ([]byte, error)
+
+	// SessionFlags renders the CLI's session flags for mode: the Go twin of
+	// the registry's former _driver_session_flags. "initial" pins the
+	// session, "resume" resumes it only when its transcript exists under
+	// home, and any other mode renders nothing. A Driver that wires no
+	// session resume (opencode) always renders "".
+	SessionFlags(mode, repoSlug, issue, home string) string
 }
 
 // registry is populated by each driver subpackage's init().
