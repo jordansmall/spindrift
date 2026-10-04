@@ -1,5 +1,5 @@
 // Package bindregistry classifies a repo's working directory into a
-// toolchain-nudge ecosystem.
+// toolchain-nudge ecosystem, for the Box's toolchain decision.
 package bindregistry
 
 import (

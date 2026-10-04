@@ -41,15 +41,13 @@ func runBindRegistry(args []string, stdout io.Writer) int {
 type lookPathFunc func(file string) (string, error)
 
 // runBindRegistryWithDeps parses the flags and runs whichever of three modes they
-// select: classification, bindings, and in-tree (issue #2932). Any mode's flags may
+// select: bindings, in-tree (issue #2932) and the lockfile scan. Any mode's flags may
 // be given alone or with another's. probe, spawn, timeout and pollInterval are
 // injected so tests can exercise the readiness paths without a real socat or
 // listener. Bindings and in-tree apply share one gate, so neither respawns (#3141).
 func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry.ProbeFunc, spawn bindregistry.SpawnFunc, lookPath lookPathFunc, timeout, pollInterval time.Duration) int {
 	fs := flag.NewFlagSet("bind-registry", flag.ContinueOnError)
 	fs.SetOutput(stdout)
-	workDir := fs.String("work-dir", "", "the cloned Target repo to scan for lockfiles (optional, pairs with -ecosystem-env-output)")
-	ecosystemEnvOutput := fs.String("ecosystem-env-output", "", "path to write the sourceable NUDGE_ECOSYSTEM env file to (optional, pairs with -work-dir)")
 	bindingsEnvOutput := fs.String("bindings-env-output", "", "path to write the sourceable registry-binding env file to (optional; triggers bindings mode alone)")
 	intreeWorkDir := fs.String("intree-work-dir", "", "the cloned Target repo root to apply/revert in-tree bindings in (optional, pairs with -intree-action)")
 	intreeAction := fs.String("intree-action", "", "in-tree binding operation: \"apply\" or \"revert\" (optional, pairs with -intree-work-dir)")
@@ -59,10 +57,6 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		return 1
 	}
 
-	if (*workDir == "") != (*ecosystemEnvOutput == "") {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: -work-dir and -ecosystem-env-output must be given together")
-		return 1
-	}
 	if (*intreeWorkDir == "") != (*intreeAction == "") {
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-work-dir and -intree-action must be given together")
 		return 1
@@ -84,15 +78,9 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		fmt.Fprintln(stdout, "driver-exec bind-registry: -intree-action=apply and -bindings-env-output cannot be combined in one invocation — bindings mode would re-render the repo-aware rows' home configs from the base template and undo the apply")
 		return 1
 	}
-	if *workDir == "" && *ecosystemEnvOutput == "" && *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" && *lockfileScanWorkDir == "" {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -work-dir/-ecosystem-env-output, -bindings-env-output, -intree-work-dir/-intree-action, or -lockfile-scan-work-dir is required")
+	if *bindingsEnvOutput == "" && *intreeWorkDir == "" && *intreeAction == "" && *lockfileScanWorkDir == "" {
+		fmt.Fprintln(stdout, "driver-exec bind-registry: at least one of -bindings-env-output, -intree-work-dir/-intree-action, or -lockfile-scan-work-dir is required")
 		return 1
-	}
-
-	if *workDir != "" {
-		if rc := runBindRegistryClassification(stdout, *workDir, *ecosystemEnvOutput); rc != 0 {
-			return rc
-		}
 	}
 
 	if *lockfileScanWorkDir != "" {
@@ -100,7 +88,7 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 	}
 
 	// Resolved only when a mode that needs a live Forwarder will run, so a
-	// classification-only or revert-only call never touches
+	// revert-only or lockfile-scan-only call never touches
 	// REGISTRY_PROXY_MANIFEST or the probe/spawn deps at all (issue #3141).
 	var gate *registryProxyGate
 	if *intreeAction == "apply" || *bindingsEnvOutput != "" {
@@ -129,23 +117,6 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 
 	if *bindingsEnvOutput != "" {
 		return runBindRegistryBindings(stdout, gate, *bindingsEnvOutput)
-	}
-
-	return 0
-}
-
-// runBindRegistryClassification is classification mode (issue #2930): it classifies
-// workDir's lockfiles and writes the sourceable NUDGE_ECOSYSTEM env file.
-func runBindRegistryClassification(stdout io.Writer, workDir, ecosystemEnvOutput string) int {
-	classification := bindregistry.Classify(workDir)
-
-	// %q emits Go quoting, not shell quoting. Safe here only because
-	// classification is always one of bindregistry's own constants, never
-	// attacker- or repo-controlled input.
-	env := fmt.Sprintf("NUDGE_ECOSYSTEM=%q\n", classification)
-	if err := os.WriteFile(ecosystemEnvOutput, []byte(env), 0o644); err != nil {
-		fmt.Fprintln(stdout, "driver-exec bind-registry: write ecosystem env output:", err)
-		return 1
 	}
 
 	return 0

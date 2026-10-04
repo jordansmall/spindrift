@@ -118,55 +118,6 @@ func TestIsBindRegistryInvocation(t *testing.T) {
 	}
 }
 
-func TestRunBindRegistry_WritesClassification(t *testing.T) {
-	workDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workDir, "Cargo.lock"), []byte(""), 0o644); err != nil {
-		t.Fatalf("write Cargo.lock: %v", err)
-	}
-	envOut := filepath.Join(t.TempDir(), "nudge.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistry([]string{
-		"-work-dir", workDir,
-		"-ecosystem-env-output", envOut,
-	}, &stdout)
-	if rc != 0 {
-		t.Fatalf("runBindRegistry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(envOut)
-	if err != nil {
-		t.Fatalf("read ecosystem env output: %v", err)
-	}
-	want := "NUDGE_ECOSYSTEM=\"cargo\"\n"
-	if string(got) != want {
-		t.Errorf("ecosystem env output = %q, want %q", got, want)
-	}
-}
-
-func TestRunBindRegistry_NoLockfileWritesEmptyClassification(t *testing.T) {
-	workDir := t.TempDir()
-	envOut := filepath.Join(t.TempDir(), "nudge.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistry([]string{
-		"-work-dir", workDir,
-		"-ecosystem-env-output", envOut,
-	}, &stdout)
-	if rc != 0 {
-		t.Fatalf("runBindRegistry exit = %d, want 0 (stdout=%q)", rc, stdout.String())
-	}
-
-	got, err := os.ReadFile(envOut)
-	if err != nil {
-		t.Fatalf("read ecosystem env output: %v", err)
-	}
-	want := "NUDGE_ECOSYSTEM=\"\"\n"
-	if string(got) != want {
-		t.Errorf("ecosystem env output = %q, want %q", got, want)
-	}
-}
-
 // At least one complete mode must be requested. -bindings-env-output alone is
 // sufficient on its own since issue #3141, so it no longer appears among the
 // error cases here.
@@ -176,8 +127,6 @@ func TestRunBindRegistry_MissingFlagsErrors(t *testing.T) {
 		args []string
 	}{
 		{"no flags at all", nil},
-		{"work-dir without ecosystem-env-output", []string{"-work-dir", t.TempDir()}},
-		{"ecosystem-env-output without work-dir", []string{"-ecosystem-env-output", filepath.Join(t.TempDir(), "nudge.env")}},
 		{"intree-work-dir without intree-action", []string{"-intree-work-dir", t.TempDir()}},
 	}
 	for _, c := range cases {
@@ -3320,26 +3269,6 @@ func TestRunBindRegistryWithDeps_IntreeFlagValidation(t *testing.T) {
 				t.Fatalf("runBindRegistryWithDeps exit = 0, want non-zero for %v (stdout=%q)", c.args, stdout.String())
 			}
 		})
-	}
-}
-
-// Pointing the output at a path whose parent directory doesn't exist forces
-// WriteFile to fail past the Classify call, which can no longer itself return an
-// error.
-func TestRunBindRegistry_WriteFailureReturnsNonZero(t *testing.T) {
-	workDir := t.TempDir()
-	envOut := filepath.Join(t.TempDir(), "nonexistent-subdir", "nudge.env")
-
-	var stdout bytes.Buffer
-	rc := runBindRegistry([]string{
-		"-work-dir", workDir,
-		"-ecosystem-env-output", envOut,
-	}, &stdout)
-	if rc == 0 {
-		t.Fatalf("runBindRegistry exit = 0, want non-zero (stdout=%q)", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "write ecosystem env output") {
-		t.Errorf("stdout = %q, want it to contain %q", stdout.String(), "write ecosystem env output")
 	}
 }
 
