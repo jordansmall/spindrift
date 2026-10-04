@@ -46,6 +46,10 @@ func (opencodeDriver) ResultText(logPath string) (string, error) {
 	return opencode.ResultText(logPath)
 }
 
+func (opencodeDriver) ResultEvent(text string) ([]byte, error) {
+	return opencode.ResultEvent(text)
+}
+
 func init() {
 	register(opencodeDriver{})
 }

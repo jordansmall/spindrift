@@ -330,3 +330,17 @@ func ResultText(logPath string) (string, error) {
 		return ev.Result, true
 	})
 }
+
+// ResultEvent encodes text as one newline-terminated stream-json result event,
+// the inverse of ResultText: a synthetic final result the orchestrator appends
+// to the stream log (issue #4406).
+func ResultEvent(text string) ([]byte, error) {
+	b, err := json.Marshal(struct {
+		Type   string `json:"type"`
+		Result string `json:"result"`
+	}{"result", text})
+	if err != nil {
+		return nil, err
+	}
+	return append(b, '\n'), nil
+}
