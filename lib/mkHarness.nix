@@ -760,12 +760,12 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # In-box settle sequence (issue #4292, ADR 0058): entrypoint.sh execs this
-  # after the first Driver run. Same tight-fileset invariant as driverExecBin:
-  # the fileset is exactly box's transitive internal import closure
-  # (`go list -deps ./box`), so host-side launcher churn leaves the image
-  # drvPath alone. internal/driver is walked recursively and so covers
-  # driverkit, claude and opencode.
+  # In-box Driver run and settle sequence (issues #4292, #4293, ADR 0058):
+  # entrypoint.sh execs this after prompt assembly. Same tight-fileset
+  # invariant as driverExecBin: the fileset is exactly box's transitive
+  # internal import closure (`go list -deps ./box`), so host-side launcher
+  # churn leaves the image drvPath alone. internal/driver is walked recursively
+  # and so covers driverkit, claude and opencode.
   boxBin = pkgs.buildGoModule {
     pname = "box";
     version = spindriftVersion;

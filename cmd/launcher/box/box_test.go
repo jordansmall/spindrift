@@ -8,11 +8,12 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/bundleout"
-	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/retry"
@@ -27,6 +28,7 @@ const (
 	nearMissLine  = "SPINDRIFT_OUTCOME I finished the work"
 	prIntentLine  = "SPINDRIFT_PR_INTENT n0nce dGl0bGUKCmJvZHk="
 	completeLine  = "==> entrypoint complete for 42"
+	announceLine  = "==> claude implementing issue #42 on agent/issue-42"
 )
 
 type resumeScript struct {
@@ -38,8 +40,11 @@ type resumeScript struct {
 type orchCall struct {
 	argv    map[string]string
 	prompt  string
+	session string
 	handoff map[string]json.RawMessage
 }
+
+const firstPrompt = "the assembled prompt"
 
 type fixture struct {
 	t    *testing.T
@@ -50,8 +55,13 @@ type fixture struct {
 	out  bytes.Buffer
 	errb bytes.Buffer
 
-	resumes []resumeScript
-	calls   []orchCall
+	// first scripts the first Driver run, the orchestrator's first call; the
+	// resumes script the calls after it, and calls records only those.
+	first     resumeScript
+	firstCall orchCall
+	resumes   []resumeScript
+	calls     []orchCall
+	ranFirst  bool
 
 	backstopOut  string
 	backstopErr  error
@@ -80,24 +90,28 @@ func newFixture(t *testing.T) *fixture {
 	dir := t.TempDir()
 	t.Setenv("TMPDIR", dir)
 	f := &fixture{t: t, dir: dir, backstopOut: syntheticLine + "\n"}
-	f.knobs = map[string]string{"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1"}
-	f.in = inputs{
-		HandoffFile:       filepath.Join(dir, "handoff.json"),
-		ResumeSessionFile: filepath.Join(dir, "resume-session"),
-		WorkDir:           filepath.Join(dir, "work"),
-		OutboxDir:         filepath.Join(dir, "outbox"),
-		StreamLog:         filepath.Join(dir, "stream-0.log"),
-		DriverTextLog:     filepath.Join(dir, "text-0.log"),
+	f.knobs = map[string]string{
+		"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1",
+		"REPO_SLUG": "owner/repo", "HOME": filepath.Join(dir, "home"),
 	}
-	f.write(f.in.HandoffFile, `{"Driver":"claude","SessionMode":"initial","ReviewPromptFile":"/tmp/review.md","Model":"opus","Caps":{"MaxReviewRounds":3}}`)
-	f.write(f.in.ResumeSessionFile, "--resume SESSION")
+	f.in = inputs{
+		HandoffFile: filepath.Join(dir, "handoff.json"),
+		WorkDir:     filepath.Join(dir, "work"),
+		OutboxDir:   filepath.Join(dir, "outbox"),
+	}
+	promptFile := filepath.Join(dir, "prompt.md")
+	// The shell's assemble-prompt leaves a trailing newline bash's `$(cat)` trimmed.
+	f.write(promptFile, firstPrompt+"\n\n")
+	f.write(f.in.HandoffFile, `{"Driver":"claude","SessionMode":"initial","PromptFile":`+strconv.Quote(promptFile)+`,"ReviewPromptFile":"/tmp/review.md","Model":"opus","Caps":{"MaxReviewRounds":3}}`)
 	f.env = promptassembly.Env{
-		DispatchKey:     "42",
-		IssueNumber:     "42",
-		Branch:          "agent/issue-42",
-		BaseBranch:      "main",
-		RunNonce:        "n0nce",
-		BoxWriteEnabled: true,
+		DispatchKey:          "42",
+		DispatchKeying:       "issue",
+		DispatchAnnounceVerb: "implementing",
+		IssueNumber:          "42",
+		Branch:               "agent/issue-42",
+		BaseBranch:           "main",
+		RunNonce:             "n0nce",
+		BoxWriteEnabled:      true,
 	}
 	f.firstRun(readyLine+"\n", 0)
 	f.d = deps{
@@ -135,15 +149,29 @@ func (f *fixture) write(path, content string) {
 	}
 }
 
-// firstRun stands in for the Driver run bash did before exec'ing box: the same
-// log, text log and outcome line bash's run_driver_in_env would have left.
+// firstRun scripts the Driver run box now performs itself: what the first
+// orchestrator call writes to its stream log and exits with.
 func (f *fixture) firstRun(text string, rc int, rawLines ...string) {
+	f.first = resumeScript{result: text, rawLines: rawLines, rc: rc}
+}
+
+// transcript makes the pinned session's transcript exist under HOME, so a
+// resume's session flags resume it.
+func (f *fixture) transcript() {
 	f.t.Helper()
-	f.write(f.in.StreamLog, resultEvent(text)+strings.Join(rawLines, "\n")+"\n")
-	stripped := outcome.StripResultText(text)
-	f.write(f.in.DriverTextLog, stripped+"\n")
-	f.in.OutcomeLine = outcome.ExtractOutcomeLine(stripped)
-	f.in.DriverExitCode = rc
+	dir := filepath.Join(f.knobs["HOME"], ".claude", "projects", "x")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		f.t.Fatal(err)
+	}
+	f.write(filepath.Join(dir, f.sessionID()+".jsonl"), "")
+}
+
+func (f *fixture) sessionID() string {
+	d, err := driver.New("claude")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return strings.TrimPrefix(d.SessionFlags("initial", f.knobs["REPO_SLUG"], f.env.IssueNumber, ""), "--session-id ")
 }
 
 func (f *fixture) readOnlyRelay() {
@@ -162,6 +190,11 @@ func (f *fixture) orchestrate(argv []string) int {
 		f.t.Fatalf("prompt file unreadable during the orchestrator call: %v", err)
 	}
 	call.prompt = string(prompt)
+	session, err := os.ReadFile(call.argv["--session-file"])
+	if err != nil {
+		f.t.Fatalf("session file unreadable during the orchestrator call: %v", err)
+	}
+	call.session = string(session)
 	raw, err := os.ReadFile(call.argv["--handoff-file"])
 	if err != nil {
 		f.t.Fatalf("handoff file unreadable during the orchestrator call: %v", err)
@@ -169,13 +202,20 @@ func (f *fixture) orchestrate(argv []string) int {
 	if err := json.Unmarshal(raw, &call.handoff); err != nil {
 		f.t.Fatalf("handoff not JSON: %v", err)
 	}
-	f.calls = append(f.calls, call)
-	if len(f.resumes) == 0 {
-		f.t.Errorf("unscripted orchestrator call #%d", len(f.calls))
-		return 99
+	var s resumeScript
+	if !f.ranFirst {
+		f.ranFirst = true
+		f.firstCall = call
+		s = f.first
+	} else {
+		f.calls = append(f.calls, call)
+		if len(f.resumes) == 0 {
+			f.t.Errorf("unscripted orchestrator call #%d", len(f.calls)+1)
+			return 99
+		}
+		s = f.resumes[0]
+		f.resumes = f.resumes[1:]
 	}
-	s := f.resumes[0]
-	f.resumes = f.resumes[1:]
 	f.write(call.argv["--log-path"], resultEvent(s.result)+strings.Join(s.rawLines, "\n")+"\n")
 	return s.rc
 }
@@ -227,6 +267,7 @@ func TestOutcomeNudge_ResumeSuppliesOutcome_NoBackstop(t *testing.T) {
 		t.Fatalf("backstop ran %d times, want 0", len(f.backstopCfgs))
 	}
 	want := []string{
+		announceLine,
 		"==> required marker missing — resuming the session once with a nudge",
 		readyLine,
 		completeLine,
@@ -259,14 +300,15 @@ func TestOutcomeNudge_ResumeAlsoMissing_BackstopNotesRecovery(t *testing.T) {
 
 func TestOutcomeNudge_ResumeTargetsPinnedSessionWithStrippedHandoff(t *testing.T) {
 	f := newFixture(t)
+	f.transcript()
 	f.firstRun("no marker\n", 0)
 	f.resumes = []resumeScript{{result: readyLine + "\n"}}
 
 	f.run()
 
 	call := f.calls[0]
-	if got := call.argv["--session-file"]; got != f.in.ResumeSessionFile {
-		t.Errorf("--session-file = %q, want the pre-rendered resume session file %q", got, f.in.ResumeSessionFile)
+	if want := "--resume " + f.sessionID(); call.session != want {
+		t.Errorf("session file = %q, want %q", call.session, want)
 	}
 	if got := call.argv["--handoff-file"]; got == f.in.HandoffFile {
 		t.Error("resume reused the shared handoff file, want its own stripped copy")
@@ -402,7 +444,6 @@ func TestBackstop_ConfigMapping(t *testing.T) {
 	f.env.OutboxRelayCapable = true
 	f.env.BoxWriteEnabled = true
 	f.firstRun("done\n", 0)
-	f.in.OutcomeLine = ""
 	f.resumes = []resumeScript{{result: "done\n"}}
 
 	f.run()
@@ -490,7 +531,6 @@ func TestBackstop_AdviseOnlyKindReachesTheBackstopWithItsKind(t *testing.T) {
 	f := newFixture(t)
 	f.env.DispatchKind = "research"
 	f.firstRun("verdict\n", 0)
-	f.in.OutcomeLine = ""
 
 	f.run()
 
@@ -531,8 +571,8 @@ func TestDemotion_EmptyOutputLeavesClaimUntouched(t *testing.T) {
 	if strings.Contains(f.stdout(), "status=blocked") {
 		t.Errorf("claim was altered:\n%s", f.stdout())
 	}
-	if got := f.stdout(); got != completeLine+"\n" {
-		t.Errorf("stdout = %q, want nothing but completion", got)
+	if got, want := f.stdout(), announceLine+"\n"+resolvedLine+"\n"+completeLine+"\n"; got != want {
+		t.Errorf("stdout = %q, want %q", got, want)
 	}
 }
 
@@ -596,6 +636,7 @@ func TestPRIntent_GenuineMarkerPresent_NoResume(t *testing.T) {
 
 func TestPRIntent_Missing_ResumeSuppliesIt(t *testing.T) {
 	f := newFixture(t)
+	f.transcript()
 	prIntentGateMissing(f)
 	f.resumes = []resumeScript{{result: readyLine + "\n", rawLines: []string{prIntentLine}}}
 
@@ -611,7 +652,7 @@ func TestPRIntent_Missing_ResumeSuppliesIt(t *testing.T) {
 	if strings.Contains(out, "spindrift_op") {
 		t.Errorf("give-up op emitted although the resume supplied the marker:\n%s", out)
 	}
-	if call := f.calls[0]; call.argv["--session-file"] != f.in.ResumeSessionFile || string(call.handoff["ReviewPromptFile"]) != `""` {
+	if call := f.calls[0]; call.session != "--resume "+f.sessionID() || string(call.handoff["ReviewPromptFile"]) != `""` {
 		t.Errorf("resume not narrowed: %+v", call)
 	}
 	if !strings.Contains(f.calls[0].prompt, readyLine) {
@@ -706,8 +747,8 @@ func TestPRIntent_ResumedBlockedVerdictNeverClobberedToReady(t *testing.T) {
 	if strings.Contains(f.stdout(), "restoring it") {
 		t.Errorf("restore fired over a genuine resumed verdict:\n%s", f.stdout())
 	}
-	if countLine(f.lines(), readyLine) != 0 {
-		t.Errorf("ready line reprinted:\n%s", f.stdout())
+	if countLine(f.lines(), readyLine) != 1 {
+		t.Errorf("ready line not printed exactly once (the first run's):\n%s", f.stdout())
 	}
 }
 
@@ -723,8 +764,8 @@ func TestPRIntent_ShadowedByNearMiss_RestoresOriginalLine(t *testing.T) {
 	if !strings.Contains(out, want) {
 		t.Errorf("restore missing:\n%s", out)
 	}
-	if got := countLine(f.lines(), readyLine); got != 1 {
-		t.Errorf("ready line printed %d times, want only the restore (the first run's print is bash's)", got)
+	if got := countLine(f.lines(), readyLine); got != 2 {
+		t.Errorf("ready line printed %d times, want the first run's print plus the restore", got)
 	}
 }
 
@@ -753,7 +794,6 @@ func TestPRIntent_NeverFires(t *testing.T) {
 				c.setup(f)
 				if viaBackstop {
 					f.firstRun("done\n", 0)
-					f.in.OutcomeLine = ""
 					if f.env.DispatchKind != "research" {
 						f.resumes = []resumeScript{{result: "done\n"}}
 					}
@@ -781,7 +821,6 @@ func TestPRIntent_NeverFiresOnBlockedRun(t *testing.T) {
 		if viaBackstop {
 			f.backstopOut = blockedLine + "\n"
 			f.firstRun("done\n", 0)
-			f.in.OutcomeLine = ""
 			f.resumes = []resumeScript{{result: "done\n"}}
 		} else {
 			f.firstRun(blockedLine+"\n", 0)
@@ -796,7 +835,7 @@ func TestPRIntent_NeverFiresOnBlockedRun(t *testing.T) {
 func TestPRIntent_NonZeroExitSkipsTheGate(t *testing.T) {
 	f := newFixture(t)
 	prIntentGateMissing(f)
-	f.in.DriverExitCode = 4
+	f.firstRun(readyLine+"\n", 4)
 	if rc := f.run(); rc != 4 || len(f.calls) != 0 {
 		t.Fatalf("rc=%d calls=%d, want 4 and no resume", rc, len(f.calls))
 	}
@@ -920,7 +959,6 @@ func TestSettle_BundleOutRelaysTheBackstopLine(t *testing.T) {
 	f.env.BoxWriteEnabled = false
 	f.env.OutboxRelayCapable = true
 	f.firstRun("done\n", 0)
-	f.in.OutcomeLine = ""
 	f.backstopOut = blockedLine + "\n"
 	f.resumes = []resumeScript{{result: "done\n"}}
 
@@ -1019,20 +1057,24 @@ func TestResume_TempFilesAreCleanedExceptLogsAndHandoffCopy(t *testing.T) {
 func TestResume_UnreadableHandoffIsFatal(t *testing.T) {
 	f := newFixture(t)
 	f.firstRun("no marker\n", 0)
-	f.in.HandoffFile = filepath.Join(f.dir, "missing.json")
+	// The first run reads the handoff in place; losing it afterwards fails the
+	// resume's own copy.
+	f.d.Orchestrate = func(argv []string) int {
+		rc := f.orchestrate(argv)
+		os.Remove(f.in.HandoffFile)
+		return rc
+	}
 	_, err := run(f.in, f.env, f.d)
 	if err == nil || !strings.HasPrefix(err.Error(), "resume handoff: ") {
 		t.Fatalf("error = %v", err)
 	}
 }
 
-func TestResume_UnknownDriverIsFatal(t *testing.T) {
+func TestFirstRun_UnknownDriverIsFatal(t *testing.T) {
 	f := newFixture(t)
-	f.firstRun("no marker\n", 0)
-	f.write(f.in.HandoffFile, `{"Driver":"nope"}`)
-	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+	f.write(f.in.HandoffFile, `{"Driver":"nope","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
 	_, err := run(f.in, f.env, f.d)
-	if err == nil || !strings.HasPrefix(err.Error(), "resume: ") {
+	if err == nil || !strings.HasPrefix(err.Error(), "driver: ") {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -1051,9 +1093,156 @@ func TestRun_StdoutOrderForACleanRun(t *testing.T) {
 	if rc := f.run(); rc != 0 {
 		t.Fatalf("rc = %d", rc)
 	}
-	want := []string{completeLine}
+	want := []string{announceLine, readyLine, completeLine}
 	if got := f.lines(); strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("stdout = %q, want %q (the first run's outcome line is bash's to print)", got, want)
+		t.Fatalf("stdout = %q, want %q", got, want)
+	}
+}
+
+// --- the first Driver run ---
+
+func TestFirstRun_PassesTheSharedHandoffAndPromptFileContent(t *testing.T) {
+	f := newFixture(t)
+	f.run()
+
+	call := f.firstCall
+	if got := call.argv["--handoff-file"]; got != f.in.HandoffFile {
+		t.Errorf("--handoff-file = %q, want the shared handoff %q as-is", got, f.in.HandoffFile)
+	}
+	if got := string(call.handoff["ReviewPromptFile"]); got != `"/tmp/review.md"` {
+		t.Errorf("ReviewPromptFile = %s, want the first run to keep the review loop", got)
+	}
+	if call.prompt != firstPrompt {
+		t.Errorf("prompt = %q, want the PromptFile content without its trailing newlines", call.prompt)
+	}
+	if len(f.calls) != 0 {
+		t.Errorf("clean first run made %d further orchestrator calls", len(f.calls))
+	}
+}
+
+func TestFirstRun_SessionFlagsFollowTheHandoffSessionMode(t *testing.T) {
+	setMode := func(f *fixture, mode string) {
+		f.write(f.in.HandoffFile, `{"Driver":"claude","SessionMode":"`+mode+`","PromptFile":"`+filepath.Join(f.dir, "prompt.md")+`"}`)
+	}
+	cases := []struct {
+		name       string
+		mode       string
+		transcript bool
+		want       func(id string) string
+	}{
+		{"initial pins the session", "initial", false, func(id string) string { return "--session-id " + id }},
+		{"resume with a transcript", "resume", true, func(id string) string { return "--resume " + id }},
+		{"resume without a transcript", "resume", false, func(string) string { return "" }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			setMode(f, c.mode)
+			if c.transcript {
+				f.transcript()
+			}
+			f.run()
+			if want := c.want(f.sessionID()); f.firstCall.session != want {
+				t.Errorf("session file = %q, want %q", f.firstCall.session, want)
+			}
+		})
+	}
+}
+
+func TestFirstRun_ManifestPathOnlyWhenOutboxMounted(t *testing.T) {
+	for _, needs := range []bool{false, true} {
+		f := newFixture(t)
+		f.env.HostMediatedRemote = needs
+		f.run()
+		got, ok := f.firstCall.argv["--manifest-path"]
+		if ok != needs {
+			t.Fatalf("needsOutbox=%v: --manifest-path present = %v", needs, ok)
+		}
+		if needs && got != f.in.OutboxDir+"/manifest.json" {
+			t.Errorf("--manifest-path = %q", got)
+		}
+	}
+}
+
+func TestFirstRun_PrintsItsOutcomeLineExactlyOnce(t *testing.T) {
+	f := newFixture(t)
+	f.run()
+	if n := countLine(f.lines(), readyLine); n != 1 {
+		t.Errorf("outcome line printed %d times:\n%s", n, f.stdout())
+	}
+}
+
+func TestFirstRun_NonZeroExitIsTheRunsAndSkipsTheNudges(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("crashed\n", 3)
+	if rc := f.run(); rc != 3 {
+		t.Fatalf("rc = %d, want the orchestrator's 3", rc)
+	}
+	if len(f.calls) != 0 || len(f.backstopCfgs) != 0 {
+		t.Fatalf("calls=%d backstops=%d, want neither on a non-zero exit", len(f.calls), len(f.backstopCfgs))
+	}
+}
+
+func TestFirstRun_TempFilesAreCleanedExceptLogs(t *testing.T) {
+	f := newFixture(t)
+	f.run()
+	for _, name := range []string{"--prompt-file", "--session-file"} {
+		if _, err := os.Stat(f.firstCall.argv[name]); !os.IsNotExist(err) {
+			t.Errorf("%s temp file survived the first run: %v", name, err)
+		}
+	}
+	if _, err := os.Stat(f.firstCall.argv["--log-path"]); err != nil {
+		t.Errorf("stream log must survive for later scans: %v", err)
+	}
+	if _, err := os.Stat(f.in.HandoffFile); err != nil {
+		t.Errorf("the shared handoff must stay: %v", err)
+	}
+}
+
+func TestFirstRun_UnreadablePromptFileIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.write(f.in.HandoffFile, `{"Driver":"claude","PromptFile":"`+filepath.Join(f.dir, "missing.md")+`"}`)
+	_, err := run(f.in, f.env, f.d)
+	if err == nil || !strings.HasPrefix(err.Error(), "first-run: ") {
+		t.Fatalf("error = %v", err)
+	}
+	if f.ranFirst {
+		t.Error("the orchestrator ran without a prompt")
+	}
+}
+
+func TestFirstRun_UnreadableHandoffIsFatal(t *testing.T) {
+	f := newFixture(t)
+	f.in.HandoffFile = filepath.Join(f.dir, "missing.json")
+	_, err := run(f.in, f.env, f.d)
+	if err == nil || !strings.HasPrefix(err.Error(), "first-run handoff: ") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestFirstRun_AnnounceLine(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		env  func(*promptassembly.Env)
+		want string
+	}{
+		{"work names the issue and the branch", func(*promptassembly.Env) {},
+			"==> claude implementing issue #42 on agent/issue-42"},
+		{"research is advise-only and names no branch", func(e *promptassembly.Env) {
+			e.DispatchKind, e.DispatchAnnounceVerb = "research", "researching"
+		}, "==> claude researching issue #42"},
+		{"butler names its chore", func(e *promptassembly.Env) {
+			e.DispatchKind, e.DispatchKeying, e.DispatchAnnounceVerb, e.ChoreName = "butler", "chore", "sweeping", "bugs"
+		}, "==> claude sweeping chore bugs"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			f := newFixture(t)
+			c.env(&f.env)
+			f.run()
+			if got := f.lines()[0]; got != c.want {
+				t.Errorf("first stdout line = %q, want %q", got, c.want)
+			}
+		})
 	}
 }
 
@@ -1094,10 +1283,7 @@ func TestExecOrchestrator_PropagatesExitCodeAndOutput(t *testing.T) {
 // --- flags ---
 
 func allFlags() []string {
-	return []string{
-		"--driver-exit-code", "2", "--outcome-line", "L", "--stream-log", "/s", "--driver-text-log", "/t",
-		"--handoff-file", "/h", "--resume-session-file", "/r", "--work-dir", "/w", "--outbox-dir", "/o",
-	}
+	return []string{"--handoff-file", "/h", "--work-dir", "/w", "--outbox-dir", "/o"}
 }
 
 func TestParseFlags_AllSupplied(t *testing.T) {
@@ -1105,23 +1291,26 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := inputs{DriverExitCode: 2, OutcomeLine: "L", StreamLog: "/s", DriverTextLog: "/t", HandoffFile: "/h", ResumeSessionFile: "/r", WorkDir: "/w", OutboxDir: "/o"}
+	want := inputs{HandoffFile: "/h", WorkDir: "/w", OutboxDir: "/o"}
 	if in != want {
 		t.Fatalf("inputs = %+v, want %+v", in, want)
 	}
 }
 
-func TestParseFlags_EmptyOutcomeLineAllowedButEveryFlagRequired(t *testing.T) {
-	args := allFlags()
-	args[3] = ""
-	if _, err := parseFlags(args, io.Discard); err != nil {
-		t.Fatalf("empty --outcome-line rejected: %v", err)
-	}
+func TestParseFlags_EveryFlagRequired(t *testing.T) {
 	all := allFlags()
 	for i := 0; i < len(all); i += 2 {
 		missing := append(append([]string{}, all[:i]...), all[i+2:]...)
 		if _, err := parseFlags(missing, io.Discard); err == nil || !strings.Contains(err.Error(), all[i]) {
 			t.Errorf("without %s: error = %v, want it named", all[i], err)
+		}
+	}
+}
+
+func TestParseFlags_FirstRunFlagsAreGone(t *testing.T) {
+	for _, old := range []string{"--driver-exit-code", "--outcome-line", "--stream-log", "--driver-text-log", "--resume-session-file"} {
+		if _, err := parseFlags(append(allFlags(), old, "x"), io.Discard); err == nil {
+			t.Errorf("%s accepted; box now runs the first Driver run itself", old)
 		}
 	}
 }

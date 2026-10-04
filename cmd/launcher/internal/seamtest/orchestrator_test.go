@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -98,5 +99,33 @@ func TestOrchestratorMissingConfigExits(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := orchestratorFake(nil, &out, &errb, nil); code != fakeConfigExit {
 		t.Errorf("exit %d; want %d", code, fakeConfigExit)
+	}
+}
+
+func TestOrchestratorSnapshotsEachInvocation(t *testing.T) {
+	snap := filepath.Join(t.TempDir(), "snap")
+	cfg := OrchestratorConfig{Record: filepath.Join(t.TempDir(), "rec"), Snapshot: snap}
+	t.Setenv("SEAMTEST_SNAPSHOT_PROBE", "probe")
+	for i, content := range []struct{ prompt, session string }{{"one", "--session-id a"}, {"two", ""}} {
+		args := []string{"--handoff-file", "/h", "--prompt-file", writeFile(t, content.prompt),
+			"--session-file", writeFile(t, content.session), "--log-path", filepath.Join(t.TempDir(), "log")}
+		runOrchestrator(t, cfg, driverCall{}, args...)
+
+		got := ReadSnapshot(t, snap, i+1)
+		if !reflect.DeepEqual(got.Argv, args) || got.Prompt != content.prompt || got.Session != content.session {
+			t.Errorf("snapshot %d = %+v; want argv %v, prompt %q, session %q", i+1, got, args, content.prompt, content.session)
+		}
+		if !slices.Contains(got.Env, "SEAMTEST_SNAPSHOT_PROBE=probe") {
+			t.Errorf("snapshot %d env lacks the process environment", i+1)
+		}
+	}
+}
+
+func TestOrchestratorWithoutSnapshotWritesNone(t *testing.T) {
+	dir := t.TempDir()
+	runOrchestrator(t, OrchestratorConfig{Record: filepath.Join(dir, "rec")}, driverCall{},
+		"--prompt-file", writeFile(t, "p"), "--session-file", writeFile(t, ""), "--log-path", filepath.Join(dir, "log"))
+	if _, err := os.Stat(filepath.Join(dir, "1.json")); err == nil {
+		t.Error("snapshot written although none was configured")
 	}
 }

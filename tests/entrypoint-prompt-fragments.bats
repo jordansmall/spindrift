@@ -820,14 +820,14 @@ SKILL
   grep -qF 'VERDICT: APPROVE | BLOCK' <<<"$rendered"
 }
 
-# issue #626/#1996/#2983: entrypoint.sh invokes the orchestrator exactly
-# once,
-# and the argv is a conditionally-built `_driver_argv` array (so
-# `--manifest-path` can be appended for the orchestrator), so the pattern
-# matches the single-line array expansion.
-@test "the driver invocation is called exactly once in entrypoint.sh source" {
-  count=$(grep -c '^  orchestrator "\${_driver_argv\[@\]}"$' "$ENTRYPOINT")
+# issue #626/#1996/#2983/#4293: box owns the main Driver run, so the only
+# orchestrator call left in entrypoint.sh is the conflict-resolve pass's, whose
+# argv is a conditionally-built `_cr_argv` array (so `--manifest-path` can be
+# appended).
+@test "the orchestrator is invoked once in entrypoint.sh source, for conflict resolve only" {
+  count=$(grep -cE '^ +orchestrator "' "$ENTRYPOINT")
   [ "$count" -eq 1 ]
+  grep -qE '^    orchestrator "\$\{_cr_argv\[@\]\}" \|\| true$' "$ENTRYPOINT"
 }
 
 # issue #463: a prompt-dir override supplies its own fragment for a knob it

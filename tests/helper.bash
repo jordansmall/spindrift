@@ -117,8 +117,8 @@ assert_timeout_rejected() {
   done
 }
 
-# Extracts the --handoff-file path agent/entrypoint.sh's run_driver_in_env
-# passed, from a verbatim-argv log such as $ORCHESTRATOR_LOG. Since issue #2975
+# Extracts the --handoff-file path box passed its first Driver pass, from a
+# verbatim-argv log such as $ORCHESTRATOR_LOG. Since issue #2975
 # the driver, model, effort, argv-shape, review and caps facts live in that JSON
 # rather than on argv. head -1 picks main's implement pass, deliberately skipping
 # the stripped copy a corrective resume passes (only ReviewPromptFile differs).
