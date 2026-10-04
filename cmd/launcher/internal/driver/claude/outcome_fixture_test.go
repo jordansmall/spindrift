@@ -16,8 +16,9 @@ import (
 const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture"
 
 // TestOutcomeFixtureRenderTranscript verifies that RenderTranscript on the
-// canonical outcome fixture surfaces the SPINDRIFT_OUTCOME line an
-// orchestrator's outcome.ParseAnywhere scan depends on finding.
+// canonical outcome fixture surfaces the SPINDRIFT_OUTCOME line, so the
+// Console transcript drill-in shows it. The orchestrator no longer reads the
+// transcript; TestOutcomeFixtureResultText covers its path.
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 

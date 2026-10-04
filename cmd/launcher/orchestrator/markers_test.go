@@ -29,7 +29,7 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 
 	issuePrompt := readPromptFile(t, repoRoot, "issue-prompt.md")
 	if !strings.Contains(issuePrompt, outcome.Token) {
-		t.Errorf("issue-prompt.md no longer emits %q, the exact literal scanPassLog's outcome.ParseAnywhere greps for", outcome.Token)
+		t.Errorf("issue-prompt.md no longer emits %q, the exact literal scanPassLog's outcome.ExtractOutcomeLine looks for", outcome.Token)
 	}
 
 	// The read-only PR-intent hand-off (issue #2045, the #2036 fix): unlike
