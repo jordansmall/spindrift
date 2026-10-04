@@ -75,9 +75,9 @@ func NewGitClient(remoteURL, baseBranch, userName, userEmail, branchPrefix strin
 	return g
 }
 
-// AgentBranch returns branchPrefix + num.
+// AgentBranch returns forge.AgentBranchName(branchPrefix, num).
 func (g *gitClient) AgentBranch(num string) string {
-	return g.branchPrefix + num
+	return forge.AgentBranchName(g.branchPrefix, num)
 }
 
 // validateGitRef rejects a ref git would parse as an option. Merge and Rebase

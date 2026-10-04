@@ -13,10 +13,12 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/homelayout"
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/outcome"
@@ -44,6 +46,18 @@ const runStateFile = "/tmp/run-state.json"
 type inputs struct {
 	WorkDir   string
 	OutboxDir string
+	// RepoMountDir is the read-only Accumulation-repo mount CODE_FORGE=local
+	// clones from (ADR 0033, issue #1697).
+	RepoMountDir string
+	// BranchPrefix, DriverBashTimeoutMS, DriverBashTimeoutEnv, DevShellName and
+	// DevShellProbeTimeout carry preamble values entrypoint.sh cannot export
+	// without changing the Driver's environment; box exports what the Driver
+	// is meant to inherit itself.
+	BranchPrefix         string
+	DriverBashTimeoutMS  string
+	DriverBashTimeoutEnv string
+	DevShellName         string
+	DevShellProbeTimeout string
 	// ForbiddenMarkersFile is the registry the read-only guards render from.
 	ForbiddenMarkersFile  string
 	Assembly              assemblyInputs
@@ -68,6 +82,11 @@ type deps struct {
 	WarnLockfiles func(w io.Writer, workDir string)
 	// Nix runs the devShell probe.
 	Nix toolchain.Nix
+	// Clone is boxclone.Clone, which runs real git.
+	Clone func(cfg boxclone.Config, stdout, stderr io.Writer) error
+	// Chdir is os.Chdir; Setenv is os.Setenv.
+	Chdir  func(dir string) error
+	Setenv func(key, value string) error
 	// Recover is branchrecovery.Recover, which runs real git in the work dir.
 	Recover func(cfg branchrecovery.Config, openPR func() (bool, error), w io.Writer) (branchrecovery.Outcome, error)
 	// PublishBranch is branchrecovery.Publish, the one decision for how a
@@ -133,13 +152,13 @@ type boxRun struct {
 // run sequences the phases the package doc lists and returns the exit code the
 // entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
-	// The guards run first in box, but bash's clone still runs ahead of
-	// `exec box` until #4302 moves it in, so until then a missing variable is
-	// caught only after it.
 	if err := checkEnvGuards(d.Getenv); err != nil {
 		return 0, phaseErr("env-guards", err)
 	}
 	warnWritableStore(d.Getenv, d.Stdout)
+	// A butler Box never checks this branch out (advise-only, ADR 0022) or
+	// pushes it, so the value only has to be legal and stable across a rerun.
+	env.Branch = forge.AgentBranchName(in.BranchPrefix, env.DispatchKey)
 	r := &boxRun{in: in, env: env, d: d}
 	r.kind = env.DispatchKind
 	if r.kind == "" {
@@ -158,6 +177,13 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// read-only Box that hands off via the outbox (issues #2094, #2267).
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
+
+	if err := r.exportStartEnv(); err != nil {
+		return 0, err
+	}
+	if err := r.cloneTarget(); err != nil {
+		return 0, err
+	}
 
 	// Branch recovery comes before everything that touches the tree: the
 	// registry's in-tree rewrite must not dirty it ahead of the rebase and the

@@ -67,8 +67,8 @@ let
       gnugrep
       gnused
       findutils
-      gettext # envsubst, used by agent/entrypoint.sh
-      jq # extracts the outcome line from the agent's stream-json transcript
+      gettext # envsubst (promptassembly, conflictresolve)
+      jq # agent/*.sh hooks (reject-background-bash.sh and others)
       git
       gh
       (driver.driverEntry.package pkgs)
@@ -98,19 +98,21 @@ let
   };
 
   # writeShellApplication so shellcheck runs at build time and the tools stay
-  # pinned. The source stays a complete, standalone script (the bats harness
-  # prepends driverPreambleFile before exec-ing it), so its shebang is stripped
-  # before it becomes this derivation's body.
+  # pinned. agent/entrypoint.sh is a pure shim (ADR 0058, issue #4302): these
+  # preambles plus one `exec box`. The source stays a complete, standalone
+  # script (the bats harness prepends driverPreambleFile before exec-ing it),
+  # so its shebang is stripped before it becomes this derivation's body.
   entrypoint = pkgs.writeShellApplication {
     name = "entrypoint";
+    # box and the orchestrator it spawns resolve their tools from this PATH.
     runtimeInputs =
       (with pkgs; [
         git
         gh
         (driver.driverEntry.package pkgs)
-        gettext # envsubst
+        gettext # envsubst (promptassembly, conflictresolve)
         coreutils
-        jq # extracts the outcome from the stream-json transcript
+        jq # agent/*.sh hooks (reject-background-bash.sh and others)
         driver.driverExecBin # in-box Driver runner (#626)
         driver.orchestratorBin # in-box orchestrator (#1996)
         driver.boxBin # in-box settle sequence (#4292)

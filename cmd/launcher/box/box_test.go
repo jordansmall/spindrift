@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/boxclone"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/driver"
@@ -90,6 +91,7 @@ type fixture struct {
 	prefetched   []*exec.Cmd
 	prefetchErr  error
 	assembledIn  []assemblyInputs
+	assembledEnv promptassembly.Env
 	knobs        map[string]string
 
 	// recovery is what the stubbed branch recovery reports; recoverCfgs and
@@ -99,6 +101,12 @@ type fixture struct {
 	recoverCfgs []branchrecovery.Config
 	publishCfgs []branchrecovery.Config
 	publishErr  error
+
+	// cloneCfgs, chdirs and cloneErr script and record the clone step; set
+	// records what box exported into its own environment.
+	cloneCfgs []boxclone.Config
+	cloneErr  error
+	chdirs    []string
 }
 
 func resultEvent(text string) string {
@@ -127,6 +135,7 @@ func newFixture(t *testing.T) *fixture {
 		WorkDir:              filepath.Join(dir, "work"),
 		OutboxDir:            filepath.Join(dir, "outbox"),
 		ForbiddenMarkersFile: filepath.Join(dir, "forbidden-markers.json"),
+		BranchPrefix:         "agent/issue-",
 	}
 	f.in.Assembly.SkillsDir = filepath.Join(dir, "driver-skills")
 	if err := os.MkdirAll(f.knobs["HOME"], 0o755); err != nil {
@@ -149,9 +158,10 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.firstRun(readyLine+"\n", 0)
 	f.d = deps{
-		Assemble: func(in assemblyInputs, _ promptassembly.Env, _ io.Writer) (string, error) {
+		Assemble: func(in assemblyInputs, env promptassembly.Env, _ io.Writer) (string, error) {
 			f.assembled++
 			f.assembledIn = append(f.assembledIn, in)
+			f.assembledEnv = env
 			return f.handoffFile, f.assembleErr
 		},
 		Nix: func(_ context.Context, _ string, args ...string) error {
@@ -160,6 +170,18 @@ func newFixture(t *testing.T) *fixture {
 				f.nixAtCall()
 			}
 			return f.nixErr
+		},
+		Clone: func(cfg boxclone.Config, _, _ io.Writer) error {
+			f.cloneCfgs = append(f.cloneCfgs, cfg)
+			return f.cloneErr
+		},
+		Chdir: func(dir string) error {
+			f.chdirs = append(f.chdirs, dir)
+			return nil
+		},
+		Setenv: func(k, v string) error {
+			f.knobs[k] = v
+			return nil
 		},
 		Recover: func(cfg branchrecovery.Config, _ func() (bool, error), _ io.Writer) (branchrecovery.Outcome, error) {
 			f.recoverCfgs = append(f.recoverCfgs, cfg)
@@ -1424,7 +1446,9 @@ func allFlags() []string {
 		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5",
-		"--driver-session-cache-dir=/session-cache",
+		"--driver-session-cache-dir=/session-cache", "--branch-prefix=agent/issue-",
+		"--driver-bash-timeout-ms=600000", "--driver-bash-timeout-env=A B",
+		"--dev-shell-name=ci", "--dev-shell-probe-timeout=300",
 	}
 }
 
@@ -1438,6 +1462,11 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		OutboxDir:             "/o",
 		ForbiddenMarkersFile:  "/forbidden.json",
 		DriverSessionCacheDir: "/session-cache",
+		BranchPrefix:          "agent/issue-",
+		DriverBashTimeoutMS:   "600000",
+		DriverBashTimeoutEnv:  "A B",
+		DevShellName:          "ci",
+		DevShellProbeTimeout:  "300",
 		Assembly: assemblyInputs{
 			RegistryFile:                "/reg.json",
 			ValidateMarkersFile:         "/markers.json",
@@ -2037,5 +2066,20 @@ func TestToolchain_HintPrecedesTheProbeAndItsOutcome(t *testing.T) {
 	got := f.lines()
 	if len(got) < 3 || got[0] != goHintLine || got[1] != probingLine || got[2] != foundLine {
 		t.Errorf("stdout = %q, want the hint, the probing line, then the outcome", got)
+	}
+}
+
+func TestParseFlagsModelOmitEmpty(t *testing.T) {
+	for raw, want := range map[string]bool{"": false, "0": false, "1": true} {
+		in, err := parseFlags(append(allFlags(), "--argv-model-omit-empty="+raw), io.Discard)
+		if err != nil {
+			t.Fatalf("%q: %v", raw, err)
+		}
+		if got := in.Assembly.Passthrough.ArgvShape.ModelOmitEmpty; got != want {
+			t.Errorf("%q: ModelOmitEmpty = %v, want %v", raw, got, want)
+		}
+	}
+	if _, err := parseFlags(append(allFlags(), "--argv-model-omit-empty=maybe"), io.Discard); err == nil {
+		t.Error("garbage accepted")
 	}
 }

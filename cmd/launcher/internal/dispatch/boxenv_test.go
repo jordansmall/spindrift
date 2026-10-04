@@ -149,7 +149,7 @@ func TestBuildBoxEnvDispatchKeyForChore(t *testing.T) {
 	}
 }
 
-// Issue #2202: the entrypoint reads SELF_CONTAINED to skip clone_repo and
+// Issue #2202: box reads SELF_CONTAINED to skip the clone and
 // select the self-contained research prompt.
 func TestBuildBoxEnv_SelfContainedSetsMarker(t *testing.T) {
 	if got := mustBuildBoxEnv(t, Config{SelfContained: true}, "3", "T", 0, "", "")["SELF_CONTAINED"]; got != "1" {

@@ -127,7 +127,7 @@ type Config struct {
 	Kind string
 
 	// SelfContained forwards the research kind's no-repo sub-mode as
-	// SELF_CONTAINED=1 (issue #2202), so the entrypoint skips clone_repo and
+	// SELF_CONTAINED=1 (issue #2202), so box skips the clone and
 	// repo exploration. Meaningful only when Kind == "research".
 	SelfContained bool
 

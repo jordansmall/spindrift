@@ -37,11 +37,11 @@ type CodeForgeFake struct {
 	RebasedURLs []string
 }
 
-// AgentBranch returns BranchPrefix + num.
+// AgentBranch returns AgentBranchName(BranchPrefix, num).
 func (cf *CodeForgeFake) AgentBranch(num string) string {
 	cf.mu.Lock()
 	defer cf.mu.Unlock()
-	return cf.BranchPrefix + num
+	return AgentBranchName(cf.BranchPrefix, num)
 }
 
 // BranchExists returns BranchExistsErr if set, else the result scripted by

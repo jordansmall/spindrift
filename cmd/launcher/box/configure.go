@@ -2,12 +2,11 @@ package main
 
 import "io"
 
-// storeNotice must be loud: it prints when box starts (after bash's clone
-// phases until #4301/#4302 move them in). NIX_STORE_WRITABLE is baked by
-// mkHarness's nixStoreWritable knob (ADR 0018, issue #469), and self-test mode
-// trades hermeticity for in-box `nix flake check` feedback. New store paths
-// land only in this container's ephemeral layer; the image and shared volumes
-// are never mutated.
+// storeNotice must be loud: it prints when box starts. NIX_STORE_WRITABLE is
+// baked by mkHarness's nixStoreWritable knob (ADR 0018, issue #469), and
+// self-test mode trades hermeticity for in-box `nix flake check` feedback. New
+// store paths land only in this container's ephemeral layer; the image and
+// shared volumes are never mutated.
 const storeNotice = "==> WARNING: /nix/store is writable (self-test mode) — this Box is not hermetic; do not use for untrusted issues"
 
 func warnWritableStore(getenv func(string) string, w io.Writer) {
@@ -16,7 +15,7 @@ func warnWritableStore(getenv func(string) string, w io.Writer) {
 	}
 }
 
-// withDirDefaults fills the skills and home directories from the environment.
+// withDirDefaults fills the work, outbox, repo-mount, skills and home directories.
 // These are true runtime mount points or image paths, so they keep literal
 // defaults here; an empty value counts as unset, like bash's `${X:-default}`.
 func withDirDefaults(in inputs, getenv func(string) string) inputs {
@@ -26,6 +25,16 @@ func withDirDefaults(in inputs, getenv func(string) string) inputs {
 		}
 		return def
 	}
+	if in.WorkDir == "" {
+		in.WorkDir = "/work"
+	}
+	// The writable mount box's bundle-out step writes CODE_FORGE=local's seam
+	// bundle into (ADR 0033, issue #1808).
+	if in.OutboxDir == "" {
+		in.OutboxDir = "/outbox"
+	}
+	// The read-only Accumulation-repo mount CODE_FORGE=local clones from.
+	in.RepoMountDir = orDefault("REPO_MOUNT_DIR", "/repo")
 	// HARNESS_SKILLS_DIR holds the baked harness-owned and Consumer-configured
 	// skills (lib/image.nix).
 	in.HarnessSkillsDir = orDefault("HARNESS_SKILLS_DIR", "/agent/skills")

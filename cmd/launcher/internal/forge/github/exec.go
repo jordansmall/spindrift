@@ -114,9 +114,9 @@ func NewExecClient(repo string, labels forge.DispatchLabels, branchPrefix string
 	return e
 }
 
-// AgentBranch returns branchPrefix + num.
+// AgentBranch returns forge.AgentBranchName(branchPrefix, num).
 func (e *execClient) AgentBranch(num string) string {
-	return e.branchPrefix + num
+	return forge.AgentBranchName(e.branchPrefix, num)
 }
 
 // IsGithubTracker implements the optional forge.GithubTracker marker (#2341),
