@@ -1,0 +1,19 @@
+argv
+--handoff-file
+<handoff>
+--prompt-file
+<prompt>
+--session-file
+<session>
+--log-path
+<stream-log>
+session
+--session-id bf718c96-aa0c-c4fa-d029-3a6bbb980c63
+prompt
+<handoff-prompt>
+env
+BASH_DEFAULT_TIMEOUT_MS=1800000
+BASH_MAX_TIMEOUT_MS=1800000
+BRANCH=agent/issue-7
+CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+PWD=<tmp>/work
