@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 )
 
 // DriverConfig is the Driver fake's (registered as "claude") JSON config.
@@ -20,6 +21,10 @@ type DriverRun struct {
 	// Stdout is written verbatim, e.g. claude stream-json result lines.
 	Stdout string `json:"stdout"`
 	Exit   int    `json:"exit"`
+	// Sh, when set, runs under `sh -c` in the fake's cwd before Stdout is
+	// written: a side effect such as resolving a rebase conflict. Its failure
+	// is a fake config error, not the scripted Exit.
+	Sh string `json:"sh,omitempty"`
 }
 
 func driverMain(args []string) int {
@@ -40,6 +45,14 @@ func driverFake(args []string, stdout, stderr io.Writer) int {
 	var run DriverRun
 	if len(prior) < len(cfg.Runs) {
 		run = cfg.Runs[len(prior)]
+	}
+	if run.Sh != "" {
+		cmd := exec.Command("sh", "-c", run.Sh)
+		cmd.Stderr = stderr
+		if err := cmd.Run(); err != nil {
+			fmt.Fprintf(stderr, "claude fake: sh: %v\n", err)
+			return fakeConfigExit
+		}
 	}
 	io.WriteString(stdout, run.Stdout)
 	return run.Exit

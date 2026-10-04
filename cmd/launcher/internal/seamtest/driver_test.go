@@ -2,6 +2,7 @@ package seamtest
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -53,5 +54,23 @@ func TestDriverMissingConfigExits(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := driverFake([]string{"x"}, &out, &errb); code != fakeConfigExit {
 		t.Errorf("exit %d; want %d", code, fakeConfigExit)
+	}
+}
+
+func TestDriverRunsItsShellBeforeWritingStdout(t *testing.T) {
+	mark := filepath.Join(t.TempDir(), "mark")
+	cfg := DriverConfig{Record: filepath.Join(t.TempDir(), "rec"), Runs: []DriverRun{{Sh: "echo ran >" + mark, Stdout: "out\n"}}}
+	if code, out := runDriver(t, cfg, "-p", "x"); code != 0 || out != "out\n" {
+		t.Fatalf("got exit %d %q; want 0 \"out\\n\"", code, out)
+	}
+	if b, err := os.ReadFile(mark); err != nil || string(b) != "ran\n" {
+		t.Errorf("shell side effect = %q, %v; want \"ran\\n\"", b, err)
+	}
+}
+
+func TestDriverShellFailureIsAConfigError(t *testing.T) {
+	cfg := DriverConfig{Record: filepath.Join(t.TempDir(), "rec"), Runs: []DriverRun{{Sh: "exit 5", Stdout: "out\n"}}}
+	if code, out := runDriver(t, cfg, "-p", "x"); code != fakeConfigExit || out != "" {
+		t.Errorf("got exit %d %q; want %d and no stdout", code, out, fakeConfigExit)
 	}
 }
