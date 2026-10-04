@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/markergate"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/outcomebackstop"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/signalwire"
@@ -38,6 +39,10 @@ type inputs struct {
 	WorkDir   string
 	OutboxDir string
 	Assembly  assemblyInputs
+	// PreworkRebaseConflict: the pre-work rebase stopped on conflicts.
+	PreworkRebaseConflict bool
+	// PublishRebase: the rebased branch must be published once resolved.
+	PublishRebase bool
 }
 
 type deps struct {
@@ -53,9 +58,14 @@ type deps struct {
 	BundleOut    func(cfg bundleout.Config, w io.Writer) error
 	// WarnLockfiles is the best-effort settle-time lockfile scan.
 	WarnLockfiles func(w io.Writer, workDir string)
-	Getenv        func(string) string
-	Stdout        io.Writer
-	Stderr        io.Writer
+	// Git runs git in dir, for the conflict-resolve publish push.
+	Git func(dir string, args ...string) error
+	// AbortRebase reverts in-tree bindings and aborts the unfinished rebase,
+	// best-effort.
+	AbortRebase func(workDir string, w io.Writer)
+	Getenv      func(string) string
+	Stdout      io.Writer
+	Stderr      io.Writer
 }
 
 // phaseError names the phase whose failure aborted the entrypoint under
@@ -117,6 +127,14 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	// read-only Box that hands off via the outbox (issues #2094, #2267).
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
+
+	cr, err := r.conflictResolve()
+	if err != nil {
+		return 0, err
+	}
+	if !cr.Continue {
+		return cr.ExitCode, nil
+	}
 
 	handoff, err := d.Assemble(in.Assembly, env, d.Stdout)
 	if err != nil {
@@ -482,8 +500,7 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 		"--log-path", streamLog,
 	}
 	if r.needsBox {
-		// Must match passmanifest.FileName.
-		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/manifest.json")
+		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/"+passmanifest.FileName)
 	}
 	rc := r.d.Orchestrate(argv)
 

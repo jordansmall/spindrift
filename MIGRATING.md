@@ -204,8 +204,9 @@ for and passes everything else through untouched, so the literal text
 `${CODE_COMMENTS_STEP}` renders straight into the prompt the agent reads —
 confirmed against `substitute` in
 `cmd/launcher/internal/promptassembly/assemble.go` (the `phase_prompt_assembly`
-path) and the `_subst`/`envsubst` allowlist in `agent/entrypoint.sh` (the
-`phase_conflict_resolve` path); both leave an unlisted `${NAME}` token as-is.
+path) and `RenderPrompt` in `cmd/launcher/internal/conflictresolve` (the
+conflict-resolve path, which substitutes `$NAME` and `${NAME}` envsubst-style
+for allowlisted names only); both leave an unlisted `${NAME}` token as-is.
 
 ## The read-only `/issues` mount is retired; local issue text is injected (issue #3471)
 
@@ -764,16 +765,14 @@ top of this file for the current instructions.
 `fragments/code-comments.md` is now `fragments/code-comments-default.md`,
 matching the `<name>-default.md` naming `check-hygiene-default.md` and
 `caveman-default.md` already use. If your `SPINDRIFT_PROMPT_DIR` override
-ships this fragment, rename it too. The read is now guarded on the skill
-being baked (`agent/entrypoint.sh`'s `phase_conflict_resolve` checks
+ships this fragment, rename it too. The read was then guarded on the skill
+being baked (the entrypoint's former `phase_conflict_resolve` checked
 `[ -f "$DRIVER_SKILLS_DIR/code-comments/SKILL.md" ]` before reading the
-fragment, the same pattern its `CAVEMAN_STEP` neighbor already used), so an
-override directory that ships neither the fragment nor the skill no longer
-aborts `phase_conflict_resolve` under `set -euo pipefail` the way the old
-unguarded read did — the old behavior required every override to ship the
-fragment unconditionally or risk a mid-run abort on the first rebase
-conflict; the new behavior only requires the fragment when the skill is
-also present.
+fragment, the same pattern its `CAVEMAN_STEP` neighbor used), so an override
+directory that shipped neither the fragment nor the skill no longer aborted
+that pass under `set -euo pipefail` the way the old unguarded read did.
+That pass now runs in `box` (issue #4295); the conflict-resolve prompt
+already did not render this fragment before that move.
 
 ## The COMMIT and CODE-REVIEW sections are baked/unbaked fragment pairs; `${COMMIT_STEP}` and `${CODE_REVIEW_STEP}` are gone (issue #3222)
 

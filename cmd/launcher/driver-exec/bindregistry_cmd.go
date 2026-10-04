@@ -487,18 +487,7 @@ func dropCollidedRoutes(routes []registrymanifest.Route, collisions []hostRewrit
 // nor a live Forwarder.
 func runBindRegistryIntree(stdout io.Writer, action, workDir string, gate *registryProxyGate) int {
 	if action == "revert" {
-		failed := applyEachRow(bindregistry.InTreeBindings(), func(row ecosystem.Row) error {
-			reverted, err := bindregistry.RevertInTreeBinding(workDir, row)
-			if err != nil {
-				fmt.Fprintln(stdout, "driver-exec bind-registry: revert in-tree "+row.InTreeConfigPath+":", err)
-				return err
-			}
-			if reverted {
-				fmt.Fprintln(stdout, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" restored and un-hidden from git")
-			}
-			return nil
-		})
-		if failed {
+		if bindregistry.RevertInTreeBindings(workDir, bindregistry.InTreeBindings(), "driver-exec bind-registry", stdout) {
 			return 1
 		}
 		return 0

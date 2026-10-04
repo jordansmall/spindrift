@@ -239,7 +239,7 @@ install_readonly_guards() {
 
 # phase_branch_recovery adopts prior work on an open PR or force-resets a stale
 # branch with no open PR. Sets _rebase_and_publish, read by phase_prework_rebase
-# and phase_conflict_resolve.
+# and handed to box, which publishes after its conflict-resolve pass.
 phase_branch_recovery() {
   # A prior run may have pushed agent/issue-N before dying. Force-resetting when
   # no open PR exists keeps this Box's first incremental push a fast-forward.
@@ -302,8 +302,8 @@ publish_rebased_branch() {
 }
 
 # phase_prework_rebase rebases the branch onto the latest base before the
-# agent starts. Sets _had_rebase_conflict, read by phase_conflict_resolve;
-# reads _rebase_and_publish from phase_branch_recovery.
+# agent starts. Sets _had_rebase_conflict, which main() hands to box for its
+# conflict-resolve pass; reads _rebase_and_publish from phase_branch_recovery.
 phase_prework_rebase() {
   # A conflict here means the prior branch diverged in a way that cannot be
   # resolved mechanically; fail fast with a distinct signal rather than proceed
@@ -403,8 +403,8 @@ intree_binding_apply() {
 # intree_binding_revert wraps `driver-exec bind-registry`'s in-tree revert mode,
 # undoing intree_binding_apply's rewrite (RevertInTreeBinding in
 # cmd/launcher/internal/bindregistry/intreebinding.go). Called from main()'s
-# re-apply dance and from phase_conflict_resolve's rebase-abort path, which has
-# one case where the revert legitimately fails and this only warns.
+# re-apply dance; box reverts on its own before aborting an unresolved
+# conflict-resolve rebase.
 intree_binding_revert() {
   local _intree_revert_rc=0
   driver-exec bind-registry --intree-action revert --intree-work-dir "$WORK_DIR" \
@@ -534,32 +534,6 @@ phase_prefetch() {
   fi
 }
 
-# Substitute only known placeholders so a literal `$` in the prompt body
-# survives. The Conditional fragment registry (lib/fragments.nix, issue #622)
-# contributes the rest through the nix-rendered _FRAGMENT_SUBST_VARS array, so a
-# forgotten allowlist entry is impossible: adding a row needs no edit here.
-# Defined ahead of the fragment loop (issue #463), which renders through it.
-_subst() {
-  local f="$1" v
-  local -a _names=(
-    ISSUE_NUMBER
-    ISSUE_TITLE
-    BRANCH
-    BASE_BRANCH
-    IN_PROGRESS_LABEL
-    COMPLETE_LABEL
-    RUN_NONCE
-    "${_FRAGMENT_SUBST_VARS[@]}"
-  )
-  local -a _assign=()
-  local _vars=""
-  for v in "${_names[@]}"; do
-    _assign+=("$v=${!v:-}")
-    _vars+="\$$v "
-  done
-  env "${_assign[@]}" envsubst "$_vars" <"$f"
-}
-
 # _is_advise_only reports whether this dispatch's kind never lands code (ADR
 # 0022, issue #640), per the kind's descriptor as main() resolved it into
 # _advise_only (issue #3901).
@@ -571,21 +545,6 @@ _is_advise_only() {
 # (issue #2202): the Box clones no repo and explores none. Unset defaults to off.
 _is_self_contained() {
   [ "${SELF_CONTAINED:-}" = "1" ]
-}
-
-# _is_readonly_outbox_relay reports whether this Box is read-only (no
-# push-capable token was ever issued, so a force-push can only 403) and its
-# backend is outbox-relay-capable per lib/backends/default.nix, forwarded as
-# BOX_OUTBOX_RELAY_CAPABLE (issues #2267, #2527, #2927) rather than compared
-# against the raw CODE_FORGE name. Such a Box hands off via the outbox (#2094).
-_is_readonly_outbox_relay() {
-  [ -z "${BOX_WRITE_ENABLED:-}" ] && [ -n "${BOX_OUTBOX_RELAY_CAPABLE:-}" ]
-}
-
-# _needs_outbox reports whether the outbox is expected to be mounted host-side
-# for this run (mirrors needsOutbox in cmd/launcher/internal/dispatch/box.go).
-_needs_outbox() {
-  [ -n "${BOX_HOST_MEDIATED_REMOTE:-}" ] || _is_readonly_outbox_relay
 }
 
 # _populate_driver_skills_dir copies HARNESS_SKILLS_DIR then OPERATOR_SKILLS_DIR
@@ -630,138 +589,6 @@ _populate_home_agent_files() {
       chmod u+w "$_target"
     done < <(find "$HARNESS_HOME_AGENT_DIR" -mindepth 1)
   fi
-}
-
-# _scan_skills_found echoes a comma-joined list of skill names under "$1". A
-# skill is a directory holding a SKILL.md, never a flat <name>.md file, matching
-# how Claude Code itself discovers one. Used by phase_conflict_resolve; box
-# scans in Go.
-_scan_skills_found() {
-  local _dir="$1" _sf _sn _found=""
-  if [ -d "$_dir" ]; then
-    for _sf in "${_dir}/"*/SKILL.md; do
-      [ -f "$_sf" ] || continue
-      _sn="$(basename "$(dirname "$_sf")")"
-      _found="${_found:+${_found}, }${_sn}"
-    done
-  fi
-  printf '%s' "$_found"
-}
-
-# phase_conflict_resolve spawns a conflict-resolve agent when
-# phase_prework_rebase hit a conflict, and handles the CONFLICT_RESOLVE_PR_URL
-# resolve-only dispatch mode. Reads _had_rebase_conflict and _rebase_and_publish.
-# main() calls it before box assembles the prompt (issue #2354) so its two
-# early-exit paths fire before assembly runs for nothing.
-phase_conflict_resolve() {
-  # Escalate to exit 1 only when the agent genuinely cannot resolve.
-  if [ -n "${_had_rebase_conflict:-}" ]; then
-    echo "==> pre-work rebase conflict detected — invoking conflict-resolve agent"
-    # Precompute the fragments conflict-resolve-prompt.md references (issue
-    # #2706): this prompt renders through the bash-only `_subst` path, not the
-    # box's prompt assembly, so nothing else populates these vars; left unset,
-    # `_subst`'s `${!v:-}` would substitute them as permanently empty. Declared
-    # `local` and reached by `_subst` through dynamic scoping (issue #515).
-    local SKILLS_FOUND
-    SKILLS_FOUND="$(_scan_skills_found "$DRIVER_SKILLS_DIR")"
-    local CAVEMAN_STEP=""
-    if [ -f "$DRIVER_SKILLS_DIR/caveman/SKILL.md" ]; then
-      # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
-      CAVEMAN_STEP="$(_subst "${PROMPTS_DIR}/fragments/caveman-default.md")"$'\n\n'
-    fi
-    local SKILL_PREAMBLE=""
-    if [ -n "$SKILLS_FOUND" ]; then
-      # shellcheck disable=SC2034 # consumed by _subst's envsubst allowlist via ${!v:-} indirection
-      SKILL_PREAMBLE="$(_subst "${PROMPTS_DIR}/fragments/skill-preamble.md")"$'\n\n'
-    fi
-    local _cr_prompt
-    _cr_prompt="$(_subst "${PROMPTS_DIR}/conflict-resolve-prompt.md")"
-    # No session to pin or resume for this pass (empty session file), and its
-    # exit status is not checked: success is read off the rebase state below.
-    # Shadows _use_dev_shell to 0 for the synthesized handoff only (dynamic
-    # scoping, issue #515), since only the main run enters the devShell.
-    local _use_dev_shell=0
-    local _cr_prompt_file _cr_session_file _cr_log _cr_handoff
-    _cr_prompt_file="$(mktemp)"
-    printf '%s' "$_cr_prompt" > "$_cr_prompt_file"
-    _cr_session_file="$(mktemp)"
-    _cr_log="$(mktemp)"
-    _cr_handoff="$(mktemp)"
-    _write_env_handoff "$_cr_handoff"
-    local -a _cr_argv=(
-      --handoff-file "$_cr_handoff"
-      --prompt-file "$_cr_prompt_file"
-      --session-file "$_cr_session_file"
-      --log-path "$_cr_log"
-    )
-    # manifest.json here must match passmanifest.FileName.
-    if _needs_outbox; then
-      _cr_argv+=(--manifest-path "$OUTBOX_DIR/manifest.json")
-    fi
-    orchestrator "${_cr_argv[@]}" || true
-    rm -f "$_cr_prompt_file" "$_cr_session_file" "$_cr_log" "$_cr_handoff"
-    if [ -d ".git/rebase-merge" ] || [ -d ".git/rebase-apply" ]; then
-      # Best-effort revert before the abort below re-checks out HEAD (ADR 0044,
-      # issue #2851). When an in-tree config file is itself one of the unmerged
-      # conflicting paths, git refuses to check it out and
-      # intree_binding_revert warns; the `git rebase --abort` below cleans up
-      # regardless, so that warning is expected rather than a real problem.
-      intree_binding_revert
-      git rebase --abort 2>/dev/null || true
-      echo "==> pre-work rebase onto origin/${BASE_BRANCH:-} failed — conflict agent could not resolve"
-      exit 1
-    fi
-    echo "==> pre-work rebase conflict resolved by agent"
-    if [ -n "${_rebase_and_publish:-}" ]; then
-      echo "==> publishing rebased $BRANCH (post-conflict-resolve)"
-      publish_rebased_branch "$BRANCH" || {
-        echo "==> publishing rebased branch failed after conflict resolution on $BRANCH"
-        exit 1
-      }
-    fi
-  fi
-
-  # CONFLICT_RESOLVE_PR_URL mode: this box was dispatched only to re-map the PR
-  # branch onto current main, so exit after resolution without the main agent.
-  if [ -n "${CONFLICT_RESOLVE_PR_URL:-}" ]; then
-    echo "==> CONFLICT_RESOLVE_PR_URL: conflict resolved — exiting without main agent"
-    exit 0
-  fi
-}
-
-# _write_env_handoff writes a minimal Handoff descriptor JSON to $1 for the one
-# Driver pass that runs before box assembles the prompt and so has no handoff file
-# yet: phase_conflict_resolve's pre-work rebase fixup. driver-exec and the
-# orchestrator both require --handoff-file. The roster, review fields, and
-# PromptFile are left off deliberately and unmarshal to their zero values.
-_write_env_handoff() {
-  local _devshell_args=()
-  [ "${_use_dev_shell:-0}" = "1" ] && _devshell_args=(--devshell --devshell-name "${DEV_SHELL_NAME:-default}")
-  local _model_omit_empty_args=()
-  [ -n "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] && _model_omit_empty_args=(--argv-model-omit-empty)
-  # The verb rather than a `jq -n` blob (issue #2975): promptassembly.Handoff is
-  # the one source of truth for the shape, and the Go flags parse MAX_BUDGET_*
-  # leniently, where a malformed value used to fail jq and, under
-  # `set -euo pipefail`, kill the whole box run before this pass finished.
-  driver-exec env-handoff \
-    --driver "$DRIVER_NAME" \
-    --driver-bin "$DRIVER_BIN" \
-    --driver-flags "$DRIVER_FLAGS_COMMON" \
-    --model "${MODEL:-}" \
-    --effort "${EFFORT:-}" \
-    "${_devshell_args[@]}" \
-    --issue "${ISSUE_NUMBER:-}" \
-    --heartbeat-log "${HEARTBEAT_LOG:-}" \
-    --argv-prompt-style "$DRIVER_ARGV_PROMPT_STYLE" \
-    --argv-prompt-flag "${DRIVER_ARGV_PROMPT_FLAG:-}" \
-    --argv-model-flag "$DRIVER_ARGV_MODEL_FLAG" \
-    "${_model_omit_empty_args[@]}" \
-    --argv-agents-flag "${DRIVER_ARGV_AGENTS_FLAG:-}" \
-    --argv-effort-flag "$DRIVER_ARGV_EFFORT_FLAG" \
-    --argv-order "$DRIVER_ARGV_ORDER" \
-    --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}" \
-    --max-budget-usd "${MAX_BUDGET_USD:-0}" \
-    --handoff-output "$1"
 }
 
 # export_driver_bash_timeout (issue #4409) exports the Consumer's Bash-timeout
@@ -839,30 +666,32 @@ main() {
     phase_devshell_probe
     phase_prefetch
   fi
-  # phase_conflict_resolve runs before box assembles the prompt (issue #2354)
-  # so its two early exits skip assembly entirely.
-  # _populate_driver_skills_dir must run before it too (issue #2706): that
-  # phase's driver invocation and both early-exit paths otherwise ran ahead of
-  # the skills copy, leaving a prompt naming a skill unable to find it. box
-  # probes the same directory for the baked skills.
+  # _populate_driver_skills_dir must run before box's conflict-resolve pass
+  # (issue #2706): that pass's driver invocation and both early-exit paths
+  # otherwise ran ahead of the skills copy, leaving a prompt naming a skill
+  # unable to find it. box probes the same directory for the baked skills.
   _populate_driver_skills_dir
   # _populate_home_agent_files runs at the same early position for the same
   # reason (issue #2843): under bwrap the baked hooks, settings.json, and
-  # opencode agent files must already be in $HOME before phase_conflict_resolve
-  # runs and before box's prompt assembly rewrites them in place. A no-op under
-  # OCI.
+  # opencode agent files must already be in $HOME before box's conflict-resolve
+  # pass runs and before its prompt assembly rewrites them in place. A no-op
+  # under OCI.
   _populate_home_agent_files
-  phase_conflict_resolve
 
-  # box assembles the prompt, then runs the first Driver run and everything
-  # after it: the required-marker nudges, the synthetic outcome backstop, the
-  # already-resolved demotion, the lockfile scan and bundle-out, and it exits
-  # with the run's exit code (ADR 0058, issues #4292, #4293, #4294). The flags
-  # carry the shell-local values assembly needs: exporting them would put them
-  # in the Driver's environment. Every value rides a flag, bools as explicit
-  # 0/1, because box rejects a missing flag instead of defaulting it.
+  # box runs the conflict-resolve pass when phase_prework_rebase left a
+  # conflict, then assembles the prompt, runs the first Driver run and
+  # everything after it: the required-marker nudges, the synthetic outcome
+  # backstop, the already-resolved demotion, the lockfile scan and bundle-out,
+  # and it exits with the run's exit code (ADR 0058, issues #4292, #4293, #4294,
+  # #4295). The flags carry the shell-local values assembly needs: exporting
+  # them would put them in the Driver's environment. Every value rides a flag,
+  # bools as explicit 0/1, because box rejects a missing flag instead of
+  # defaulting it.
   local _model_omit_empty=0 _devshell=0 _devshell_name=default
+  local _prework_rebase_conflict=0 _publish_rebase=0
   [ -z "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] || _model_omit_empty=1
+  [ -z "${_had_rebase_conflict:-}" ] || _prework_rebase_conflict=1
+  [ -z "${_rebase_and_publish:-}" ] || _publish_rebase=1
   # The name rides the handoff only for a devShell run, as the verb defaulted it.
   if [ "$_use_dev_shell" = "1" ]; then
     _devshell=1
@@ -897,7 +726,9 @@ main() {
     --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}" \
     --max-budget-usd "${MAX_BUDGET_USD:-0}" \
     --devshell="$_devshell" \
-    --devshell-name "$_devshell_name"
+    --devshell-name "$_devshell_name" \
+    --prework-rebase-conflict="$_prework_rebase_conflict" \
+    --publish-rebase="$_publish_rebase"
 }
 
 main "$@"

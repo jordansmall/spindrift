@@ -2,6 +2,7 @@ package bindregistry
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -440,4 +441,22 @@ func RevertInTreeBinding(repoDir string, row ecosystem.Row) (reverted bool, err 
 		return false, err
 	}
 	return true, nil
+}
+
+// RevertInTreeBindings reverts every row in rows, continuing past a per-row
+// error so one row's failure cannot strand the rest, and reports whether any
+// failed. Each outcome is narrated to w; who prefixes a failure line.
+func RevertInTreeBindings(workDir string, rows []ecosystem.Row, who string, w io.Writer) (failed bool) {
+	for _, row := range rows {
+		reverted, err := RevertInTreeBinding(workDir, row)
+		if err != nil {
+			fmt.Fprintln(w, who+": revert in-tree "+row.InTreeConfigPath+":", err)
+			failed = true
+			continue
+		}
+		if reverted {
+			fmt.Fprintln(w, "==> in-tree "+row.Name+" config "+row.InTreeConfigPath+" restored and un-hidden from git")
+		}
+	}
+	return failed
 }
