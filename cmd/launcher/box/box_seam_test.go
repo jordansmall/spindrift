@@ -689,6 +689,14 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
 			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7",
 		}, false, false, false},
+		// A self-contained run has no clone: the work dir is empty and the
+		// token and slug are absent, so the env guards must exempt it.
+		{"research-self-contained", "agent/issue-7", map[string]string{
+			"DISPATCH_KIND": "research", "DISPATCH_KEYING": "issue", "DISPATCH_ANNOUNCE_VERB": "researching",
+			"DISPATCH_KEY": "7", "ISSUE_NUMBER": "7", "SELF_CONTAINED": "1", "ISSUE_TRACKER": "local",
+			"BOX_TRACKER_AXIS_READ": "LOCAL", "BOX_TRACKER_AXIS_WRITE": "", "BOX_IN_BOX_UNREACHABLE_TRACKER": "1",
+			"GH_TOKEN": "", "REPO_SLUG": "",
+		}, false, false, false},
 		{"butler", "agent/issue-butler-bugs", map[string]string{
 			"DISPATCH_KIND": "butler", "DISPATCH_KEYING": "chore", "DISPATCH_ANNOUNCE_VERB": "sweeping",
 			"DISPATCH_KEY": "butler-bugs", "CHORE_NAME": "bugs", "ISSUE_TITLE": "", "CHORE_HEAD": "deadbeef",
@@ -700,7 +708,13 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			box := seamtest.Build(t, "./box")
 			root := t.TempDir()
 			workDir := filepath.Join(root, "work")
-			seamRepoAt(t, workDir, c.branch, 0)
+			if c.env["SELF_CONTAINED"] == "1" {
+				if err := os.MkdirAll(workDir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				seamRepoAt(t, workDir, c.branch, 0)
+			}
 			outbox := filepath.Join(root, "outbox")
 			snapshots := filepath.Join(root, "snapshots")
 			home := filepath.Join(root, "home")
@@ -727,11 +741,11 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			fakes := seamtest.InstallFakes(t, fakeNames...)
 			base := seamBaseEnv(t)
 			mergeEnv(base, ghEnv)
-			mergeEnv(base, c.env, map[string]string{
+			mergeEnv(base, map[string]string{
 				"REPO_SLUG": "owner/repo",
 				"HOME":      home,
 				"PATH":      fakes + string(os.PathListSeparator) + os.Getenv("PATH"),
-			}, registryEnv, seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{
+			}, c.env, registryEnv, seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{
 				Record: filepath.Join(root, "driver.rec"),
 				Runs:   []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "golden"))}},
 			}), seamtest.WriteFakeConfig(t, "orchestrator", seamtest.OrchestratorConfig{
