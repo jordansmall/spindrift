@@ -9,9 +9,9 @@
   PROMPTS_DIR = "/agent/prompts";
   # The canonical SPINDRIFT_OUTCOME contract (issue #419), a sibling of
   # PROMPTS_DIR so a SPINDRIFT_PROMPT_DIR mount never hides it (issue #420).
-  # box reads the marker off this file's own
-  # first line (injectSharedBlock, cmd/launcher/internal/promptassembly), so
-  # it cannot drift from the block's heading (issue #2354).
+  # box reads the marker off this file's own first line (injectSharedBlock,
+  # cmd/launcher/internal/promptassembly), so it cannot drift from the block's
+  # heading (issue #2354).
   OUTCOME_CONTRACT_FILE = "/agent/outcome-contract.md";
   # The COMMS and CHECK/COMMIT blocks fix-prompt.md shares with
   # issue-prompt.md (issue #455). The image bakes and injects them like the
@@ -23,11 +23,11 @@
   # The image bakes and injects it like the work contract above, so a
   # SPINDRIFT_PROMPT_DIR override of research-prompt.md gets it too.
   RESEARCH_OUTCOME_CONTRACT_FILE = "/agent/research-outcome-contract.md";
-  # The Conditional fragment registry as JSON (issues #622, #2354). The
-  # box reads it through its `--registry` flag.
+  # The Conditional fragment registry as JSON (issues #622, #2354). box
+  # reads it through its `--registry` flag.
   PROMPTASSEMBLY_REGISTRY_FILE = "/agent/fragments-registry.json";
-  # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356). The
-  # box reads it through its `--validate-markers-registry` flag.
+  # lib/prompt-contract.nix's validateMarkers list as JSON (issue #2356). box
+  # reads it through its `--validate-markers-registry` flag.
   PROMPT_CONTRACT_REGISTRY_FILE = "/agent/prompt-contract-registry.json";
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464). The
   # `driver-exec readonly-guards` verb reads it through its
