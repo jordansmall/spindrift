@@ -230,7 +230,7 @@ func TestRunDevshellWrapsCommand(t *testing.T) {
 // writeFakeNixLaunchFail writes a fake `nix` that fails before exec-ing the
 // wrapped command, leaving an empty output stream. That mirrors a devShell
 // which no longer evaluates cleanly at Driver-run time even though
-// entrypoint.sh's earlier phase_devshell_probe found one.
+// box's earlier devShell probe found one.
 func writeFakeNixLaunchFail(t *testing.T, dir string) {
 	t.Helper()
 	body := "#!/bin/sh\nexit 1\n"

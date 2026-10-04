@@ -52,7 +52,7 @@ configure_env() {
   fi
 
   # BASE_BRANCH, BRANCH_PREFIX, MODEL, SCOUT_MODEL, REVIEW_MODEL,
-  # IN_PROGRESS_LABEL, COMPLETE_LABEL, DEV_SHELL_NAME and DEV_SHELL_PROBE_TIMEOUT
+  # IN_PROGRESS_LABEL and COMPLETE_LABEL
   # come from the nix-rendered defaults preamble (env-schema.nix) prepended at
   # image-build time; AGENTS_JSON_TEMPLATE rides that preamble as a derived
   # value, not a schema knob. The :- expansions keep set -u and the linter happy.
@@ -331,16 +331,18 @@ phase_prework_rebase() {
 # other phase, so it precedes any place a cargo or npm build could first happen.
 phase_registry_proxy_bindings() {
   local _bindings_env_out _bind_registry_rc=0 _source_rc=0
-  # A verb failure here must never take the whole box run down. Unlike
-  # phase_toolchain_nudge's cosmetic hint, these bindings apply unconditionally,
-  # so their failure warnings are never suppressed.
+  # A verb failure here must never take the whole box run down, but these
+  # bindings apply unconditionally, so their failure warnings are never
+  # suppressed.
   if ! _bindings_env_out="$(mktemp)"; then
     echo "==> WARNING: mktemp failed — skipping registry proxy bindings"
     return 0
   fi
 
-  # See phase_toolchain_nudge's matching trap for why this is a RETURN trap that
-  # unsets itself, not a plain `rm -f` at each return site.
+  # A RETURN trap, not a plain `rm -f` at each return site. It unsets itself as
+  # it fires: a bash RETURN trap is process-global, not function-scoped, so
+  # leaving it registered would fire again on the next unrelated function's
+  # return and dereference a `local` that no longer exists.
   trap 'rm -f "$_bindings_env_out"; trap - RETURN' RETURN
 
   driver-exec bind-registry \
@@ -376,8 +378,8 @@ intree_binding_apply() {
     return 0
   fi
 
-  # See phase_toolchain_nudge's matching trap for why this is a RETURN trap that
-  # unsets itself, not a plain `rm -f` at each return site.
+  # A RETURN trap that unsets itself, for the reason given in
+  # phase_registry_proxy_bindings.
   trap 'rm -f "$_cargo_bindings_env_out"; trap - RETURN' RETURN
 
   driver-exec bind-registry \
@@ -412,126 +414,6 @@ intree_binding_revert() {
     || _intree_revert_rc=$?
   if [ "$_intree_revert_rc" -ne 0 ]; then
     echo "==> WARNING: driver-exec bind-registry (in-tree revert) failed (exit ${_intree_revert_rc})"
-  fi
-}
-
-# phase_toolchain_nudge emits a one-time hint for a cold run with a
-# recognized dependency-manifest file and no prefetch configured.
-phase_toolchain_nudge() {
-  # Classification is delegated to `driver-exec bind-registry` (issue #2930),
-  # which reads the shared ecosystem table instead of this function re-deriving
-  # its own lockfile chain. The verb runs unconditionally so the env file is
-  # always available; only the hint's emission is gated on PREFETCH.
-  local _nudge_env_out _bind_registry_rc=0 _source_rc=0 _nudge_ecosystem=""
-  # This phase is cosmetic-hint-only, so a verb or mktemp failure must not take
-  # the whole box run down under set -euo pipefail. Bail before sourcing a
-  # possibly-missing or garbage env file rather than letting it propagate.
-  if ! _nudge_env_out="$(mktemp)"; then
-    if [ -z "${PREFETCH:-}" ]; then
-      echo "==> WARNING: mktemp failed — skipping toolchain nudge"
-    fi
-    return 0
-  fi
-
-  # Registered once mktemp has produced a path, so every exit from here on
-  # removes the tempfile without repeating `rm -f` at each return site. The
-  # handler unsets itself as it fires: a bash RETURN trap is process-global, not
-  # function-scoped, so leaving it registered would fire again on the next
-  # unrelated function's return and dereference a `local` that no longer exists.
-  trap 'rm -f "$_nudge_env_out"; trap - RETURN' RETURN
-
-  driver-exec bind-registry \
-    --work-dir "$WORK_DIR" \
-    --ecosystem-env-output "$_nudge_env_out" \
-    || _bind_registry_rc=$?
-
-  if [ "$_bind_registry_rc" -ne 0 ]; then
-    if [ -z "${PREFETCH:-}" ]; then
-      echo "==> WARNING: driver-exec bind-registry failed (exit ${_bind_registry_rc}) — skipping toolchain nudge"
-    fi
-    return 0
-  fi
-
-  # rc-captured rather than left to errexit: an unguarded `source` failure would
-  # abort the whole script mid-phase, which the RETURN trap above can never clean
-  # up after, since errexit unwinds without returning from any function.
-  # shellcheck disable=SC1090  # dynamic path (tempfile), sourced by design: the verb's own env-file output
-  source "$_nudge_env_out" || _source_rc=$?
-  if [ "$_source_rc" -ne 0 ]; then
-    if [ -z "${PREFETCH:-}" ]; then
-      echo "==> WARNING: sourcing driver-exec bind-registry's env output failed (exit ${_source_rc}) — skipping toolchain nudge"
-    fi
-    return 0
-  fi
-  # NUDGE_ECOSYSTEM is the env file's own on-disk variable name
-  # (cmd/launcher/driver-exec/bindregistry_cmd.go), not this shell's convention,
-  # so it is captured into a phase-local and unset rather than left to outlive
-  # the phase.
-  _nudge_ecosystem="${NUDGE_ECOSYSTEM:-}"
-  unset NUDGE_ECOSYSTEM
-
-  if [ -z "${PREFETCH:-}" ] && [ -n "$_nudge_ecosystem" ]; then
-    echo "==> hint: ${_nudge_ecosystem} project detected; set 'prefetch' to warm dependency caches per run, or 'packages' to bake a toolchain into the image"
-  fi
-}
-
-# phase_devshell_probe detects a Nix devShell in the cloned repo. Sets
-# _use_dev_shell (read by phase_prefetch and main's box exec) and
-# _harness_path (read by phase_prefetch only; driver-exec handles the Driver's
-# devShell PATH, issue #626).
-phase_devshell_probe() {
-  # When one is found, the prefetch hook and Driver run inside `nix develop` so
-  # the agent operates in the Target's pinned environment.
-  # DEV_SHELL_PROBE_TIMEOUT is nix-baked (env-schema.nix, 300 s) so a heavy
-  # consumer devShell eval cannot stall the box.
-  _use_dev_shell=0
-  _harness_path="$PATH"
-  if [ -f "flake.nix" ]; then
-    echo "==> flake.nix found in cloned repo; probing for devShell"
-    local _probe_rc=0
-    if command -v nix >/dev/null 2>&1; then
-      timeout "${DEV_SHELL_PROBE_TIMEOUT}" \
-        nix develop ".#${DEV_SHELL_NAME:-default}" --command true 2>/dev/null \
-        || _probe_rc=$?
-    else
-      _probe_rc=1
-    fi
-    if [ "$_probe_rc" -eq 0 ]; then
-      echo "==> devShell found — lifecycle will run inside nix develop"
-      _use_dev_shell=1
-    elif [ "$_probe_rc" -eq 124 ]; then
-      echo "==> devShell probe timed out (${DEV_SHELL_PROBE_TIMEOUT}s) — using baked toolchain"
-    else
-      echo "==> no devShell in flake (or nix develop failed) — using baked toolchain"
-    fi
-  fi
-}
-
-# phase_prefetch runs the optional mkHarness `prefetch` cache warm-up hook,
-# inside the devShell when phase_devshell_probe found one.
-phase_prefetch() {
-  # Optional cache warm-up (mkHarness `prefetch`); no-op when unset. Run inside
-  # the devShell when one exists, so the hook sees the Target's toolchain.
-  if [ -n "${PREFETCH:-}" ]; then
-    if [ "$_use_dev_shell" = "1" ]; then
-      local _pf_wrapper
-      _pf_wrapper="$(mktemp --suffix=.sh)"
-      # The wrapper evals $PREFETCH so shell constructs in the hook are
-      # interpreted; like the non-devShell path, it runs in a child bash and
-      # failures are non-fatal. $PATH and $PREFETCH stay literal in the
-      # generated script.
-      # shellcheck disable=SC2016
-      printf '#!/bin/bash\nexport PATH="%s:$PATH"\neval "$PREFETCH"\n' \
-        "$_harness_path" > "$_pf_wrapper"
-      chmod +x "$_pf_wrapper"
-      # Prefetch failures are non-fatal, so the nix exit status is ignored.
-      WORK_DIR="$WORK_DIR" nix develop ".#${DEV_SHELL_NAME:-default}" --command bash "$_pf_wrapper" || true
-      rm -f "$_pf_wrapper"
-    else
-      # A child bash, not eval (a failure/cd/set/exit would hit this shell) nor
-      # a ( subshell ) (inherits -u/pipefail) -- issue #3943.
-      WORK_DIR="$WORK_DIR" bash -c "$PREFETCH" || true
-    fi
   fi
 }
 
@@ -574,7 +456,6 @@ main() {
   # each phase function assign them by plain (non-local) assignment while
   # keeping them out of true global scope (issue #515).
   local _rebase_and_publish _had_rebase_conflict
-  local _use_dev_shell _harness_path
   local _advise_only
 
   configure_env
@@ -598,11 +479,10 @@ main() {
   if _is_self_contained; then
     # No repo to clone or explore (issue #2202): stand up an empty working
     # directory for the Driver, wire fj for a forgejo verdict post, and skip
-    # every clone/branch/toolchain/devShell/prefetch phase.
+    # every clone/branch phase; box skips its toolchain decision too.
     mkdir -p "$WORK_DIR"
     cd "$WORK_DIR"
     configure_forgejo_cli
-    _use_dev_shell=0
   else
     clone_repo
     # In-tree binding runs right after clone_repo; the Go engine's in-tree
@@ -619,30 +499,26 @@ main() {
       phase_prework_rebase
       intree_binding_apply
     fi
-    phase_toolchain_nudge
-    phase_devshell_probe
-    phase_prefetch
   fi
-  # box first lays out the Driver skills dir and the home agent files (issue
-  # #4296), then runs the conflict-resolve pass when phase_prework_rebase left a
-  # conflict, then assembles the prompt, runs the first Driver run and
-  # everything after it: the required-marker nudges, the synthetic outcome
-  # backstop, the already-resolved demotion, the lockfile scan and bundle-out,
-  # and it exits with the run's exit code (ADR 0058, issues #4292, #4293, #4294,
-  # #4295). The flags carry the shell-local values assembly needs: exporting
-  # them would put them in the Driver's environment. Every value rides a flag,
-  # bools as explicit 0/1, because box rejects a missing flag instead of
-  # defaulting it.
-  local _model_omit_empty=0 _devshell=0 _devshell_name=default
+  # box first decides the toolchain (the devShell probe, the toolchain hint and
+  # the prefetch hook; issue #4297), lays out the Driver skills dir and the home
+  # agent files (issue #4296), then runs the conflict-resolve pass when
+  # phase_prework_rebase left a conflict, then assembles the prompt, runs the
+  # first Driver run and everything after it: the required-marker nudges, the
+  # synthetic outcome backstop, the already-resolved demotion, the lockfile scan
+  # and bundle-out, and it exits with the run's exit code (ADR 0058, issues
+  # #4292, #4293, #4294, #4295). The flags carry the shell-local values assembly
+  # needs: exporting them would put them in the Driver's environment. Every
+  # value rides a flag, bools as explicit 0/1, because box rejects a missing
+  # flag instead of defaulting it.
+  local _model_omit_empty=0
   local _prework_rebase_conflict=0 _publish_rebase=0
   [ -z "${DRIVER_ARGV_MODEL_OMIT_EMPTY:-}" ] || _model_omit_empty=1
   [ -z "${_had_rebase_conflict:-}" ] || _prework_rebase_conflict=1
   [ -z "${_rebase_and_publish:-}" ] || _publish_rebase=1
-  # The name rides the handoff only for a devShell run, as the verb defaulted it.
-  if [ "$_use_dev_shell" = "1" ]; then
-    _devshell=1
-    _devshell_name="${DEV_SHELL_NAME:-default}"
-  fi
+  # box reads the devShell probe's knobs from its environment; the defaults
+  # preamble sets them without export.
+  export DEV_SHELL_NAME DEV_SHELL_PROBE_TIMEOUT
   exec box \
     --work-dir "$WORK_DIR" \
     --outbox-dir "$OUTBOX_DIR" \
@@ -675,8 +551,6 @@ main() {
     --heartbeat-log "${HEARTBEAT_LOG:-}" \
     --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}" \
     --max-budget-usd "${MAX_BUDGET_USD:-0}" \
-    --devshell="$_devshell" \
-    --devshell-name "$_devshell_name" \
     --prework-rebase-conflict="$_prework_rebase_conflict" \
     --publish-rebase="$_publish_rebase"
 }

@@ -129,7 +129,6 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--argv-order=prompt model agents session driverFlags effort",
 		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
-		"--devshell=0", "--devshell-name=default",
 		"--prework-rebase-conflict=0", "--publish-rebase=0",
 		// Nonexistent sources: the layout skips them, leaving skillsDir as baked.
 		"--harness-skills-dir=" + filepath.Join(skillsDir, "no-harness"),

@@ -1284,15 +1284,15 @@ Target repos.
 **How this works.** The Consumer image is built once from the Consumer's locked
 nixpkgs and is Target-agnostic: the Target repo's `flake.nix` is never evaluated
 at image-build time (ADR 0001, ADR 0002). After the Target repo is cloned inside
-the box, the entrypoint probes for a devShell:
+the box, `box` probes for a devShell:
 
 1. If `flake.nix` is present in the cloned repo and `nix` is on PATH (it is,
-   because `infra.nix.inBox = true` is the default per ADR 0008), the
-   entrypoint runs `nix develop ".#<DEV_SHELL_NAME>" --command true` under a
+   because `infra.nix.inBox = true` is the default per ADR 0008),
+   `box` runs `nix develop ".#<DEV_SHELL_NAME>" --command true` under a
    `DEV_SHELL_PROBE_TIMEOUT`-second timeout (default 300 s, baked from
    `lib/env-schema.nix`).
 2. If the probe succeeds, the prefetch hook and the Driver (claude invocation)
-   run inside `nix develop ".#<DEV_SHELL_NAME>" --command bash <wrapper>` so
+   run inside `nix develop ".#<DEV_SHELL_NAME>" --command bash -c ...` so
    the agent operates in the Target's exact pinned environment — tools, env
    vars, and shellHook included. If `nix develop` fails to exec the Driver
    (nix rc ≠ 0 and empty stream), the entrypoint relaunches once in the baked
@@ -4912,9 +4912,9 @@ research kind for issues that are already self-contained — everything
 needed to judge and enrich them lives in the issue body and its comments,
 with no repository to read against. The flag clones no repo and runs none of
 the ordinary research pass's repo-exploration steps: bootstrap skips
-`clone_repo`, branch recovery, the toolchain nudge, the devShell probe, and
-prefetch entirely, standing up only an empty working directory before
-prompt assembly. Because there's nothing to clone, this mode also needs
+`clone_repo` and branch recovery, and box skips its toolchain nudge,
+devShell probe, and prefetch entirely, standing up only an empty working
+directory before prompt assembly. Because there's nothing to clone, this mode also needs
 neither `REPO_SLUG` nor `GH_TOKEN` — startup validation relaxes the
 otherwise-unconditional requirement for both when `--self-contained` is
 paired with the research kind, so the natural pairing is a local issue
