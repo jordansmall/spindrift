@@ -227,6 +227,17 @@ alongside it: the Box's baked `nix.conf` pins `cores = 4` and
 on top is guesswork. The one exception, an
 `EXIT:137` kill, is below.
 
+Checks run in two tiers. While iterating, run the narrowest check that
+covers the change — `go test` on one package, one bats shard, or a single
+check attr with `nix build .#checks.<system>.<name> -L` (`<system>` is
+e.g. `x86_64-linux`). List the attrs with `nix eval .#checks.<system>
+--apply builtins.attrNames`. Run the full `checks-inbox` gate once per
+pass, just before the pass's final commit. After a rebase, re-run it only
+if the rebase hit conflicts or brought in changes to files the branch
+touches; otherwise CI's full `nix flake check` is the final gate. A Box's
+worker subagents run targeted checks only — its coordinator agent owns the
+full gate.
+
 A check failure is deterministic: the same derivation hash fails the same
 way however it is scheduled. Never re-run a failed check unchanged — not
 under reduced parallelism (the `EXIT:137` carve-out below is outside

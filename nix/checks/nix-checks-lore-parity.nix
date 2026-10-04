@@ -92,8 +92,9 @@ let
 
   # Each row is one phrase both texts must contain. A clause earns its place
   # only if losing it from either side would mean the skill and CLAUDE.md teach
-  # different disciplines, not just the same one in different words. The last
-  # two predate issue #3448, so this check guards the whole mirror.
+  # different disciplines, not just the same one in different words. The
+  # "not-tracked-by-git" and "overrides-acceptance-criteria" rows predate issue
+  # #3448, so this check guards the whole mirror.
   sharedClauses = [
     {
       name = "print-build-logs-flag";
@@ -147,6 +148,29 @@ let
     {
       name = "overrides-acceptance-criteria";
       clause = "overrides any acceptance criteria";
+    }
+    {
+      name = "list-check-attrs";
+      # How an agent finds the single check attr the narrow tier builds
+      # (issue #4408).
+      clause = "--apply builtins.attrNames";
+    }
+    {
+      name = "full-gate-once-per-pass";
+      # Caps the full gate at one run per pass, so iteration stays on the
+      # narrow tier.
+      clause = "once per pass, just before the pass's final commit";
+    }
+    {
+      name = "rebase-rerun-condition";
+      # Without the condition an agent re-runs the full gate after every
+      # rebase, or never.
+      clause = "only if the rebase hit conflicts or brought in changes to files the branch touches";
+    }
+    {
+      name = "workers-targeted-checks-only";
+      # Keeps workers off the full gate, which the coordinator owns (issue #4408).
+      clause = "worker subagents run targeted checks only — its coordinator agent owns the full gate";
     }
   ];
 
