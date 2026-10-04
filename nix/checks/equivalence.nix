@@ -1755,7 +1755,6 @@ in
         "researchOutcomeContractFile"
         "driverPreambleFile"
         "agentPathsPreambleFile"
-        "fragmentRegistryFile"
         "driverExecBin"
         "orchestratorBin"
         "boxBin"

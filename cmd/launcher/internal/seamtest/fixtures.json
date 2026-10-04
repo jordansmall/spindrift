@@ -3,7 +3,6 @@
   "check-contract.md",
   "comms-contract.md",
   "driver-preamble.sh",
-  "fragment-registry.sh",
   "fragments-registry.json",
   "launcher-run-input-butler.json",
   "launcher-run-input-bwrap.json",

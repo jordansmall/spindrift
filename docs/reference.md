@@ -660,25 +660,23 @@ directive, `FILE ISSUES`, `AUTO-FORMAT`, `AUTO-LINT`, `CI FAILURE`, and the
 `OPEN A PULL REQUEST` ticket-reference line) are each one row in a nix-owned
 **Conditional fragment registry**
 (`lib/fragments.nix`) — a gate variable, a fragment file under
-`prompts/fragments/`, and a substitution variable — rendered into the
-entrypoint's single fragment loop and its substitution allowlist together,
-so a fragment can never reference a variable the substitution step doesn't
-know about. Adding an opt-in prompt step that renders through box's prompt
-assembly (the one `assemble-prompt` verb shares) is a
+`prompts/fragments/`, and a substitution variable — which box's prompt
+assembly reads as JSON and renders in one pass, so a fragment row names every
+variable it reads. Adding an opt-in prompt step that renders through box's
+prompt assembly (the one `assemble-prompt` verb shares) is a
 nix-only change: one registry row plus one fragment file, no entrypoint edit.
-`conflict-resolve-prompt.md` is the one exception — it renders earlier, via
-`phase_conflict_resolve`'s own bash-only `_subst` call, before
-`box` assembles the prompt, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
-gates are precomputed by a small hand-written block in `entrypoint.sh` rather
-than the shared fragment loop. All instruction prose —
-conditional or not — lives with the rest of the prompt surface rather than
-as heredocs in the entrypoint script. `SPINDRIFT_PROMPT_DIR` therefore
-overrides fragments the same way it overrides `prompts/issue-prompt.md`
-itself: a directory that enables a knob (`AUTO_FORMAT`, `AUTO_LINT`, a filer
-model, etc.) must ship the matching `fragments/*.md` file, exactly as it
-already must ship `filer-prompt.md` when the filer is configured — the
-entrypoint reads the fragment unconditionally once its gate is on, with no
-baked-in fallback.
+`conflict-resolve-prompt.md` is the one exception — box's conflict-resolve pass
+(`cmd/launcher/box/conflict.go`, package `conflictresolve`) renders it
+earlier, before box assembles the prompt, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
+gates are computed by that pass itself rather than by the registry. All
+instruction prose — conditional or not — lives with the rest of the prompt
+surface rather than as heredocs in the entrypoint script.
+`SPINDRIFT_PROMPT_DIR` therefore overrides fragments the same way it
+overrides `prompts/issue-prompt.md` itself: a directory that enables a knob
+(`AUTO_FORMAT`, `AUTO_LINT`, a filer model, etc.) must ship the matching
+`fragments/*.md` file, exactly as it already must ship `filer-prompt.md` when
+the filer is configured — box reads the fragment unconditionally once its gate
+is on, with no baked-in fallback.
 
 The comment-discipline rule is no longer a fragment anchor: `worker-prompt.md`
 (issue #3419), and now `issue-prompt.md`, `fix-prompt.md`, and
@@ -2203,15 +2201,14 @@ artifact, not a growing transcript:
   total. Either dimension alone can trip it; a negative or malformed value
   degrades to `0` (disabled) rather than erroring, mirroring the host
   launcher's own tolerance for the identical `MAX_BUDGET_TOKENS`/
-  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`). The two CLI
-  wrappers that parse the raw string — `driver-exec assemble-prompt`'s and
-  `driver-exec env-handoff`'s own `--max-budget-tokens`/`--max-budget-usd`
-  flags — degrade a malformed value silently, the same as the host launcher:
-  neither has an operator-facing diagnostics channel to log to. Only
-  `orchestrator`'s own defense-in-depth clamp against an already-loaded
-  handoff's typed (`int`/`float64`) `Caps.MaxBudgetTokens`/`Caps.MaxBudgetUSD`
+  `MAX_BUDGET_USD` env vars (`atoiNonneg`/`floatNonneg`). The CLI wrappers
+  that parse the raw strings — `box`'s and `driver-exec assemble-prompt`'s own
+  `--max-budget-tokens`/`--max-budget-usd` flags — degrade a malformed value
+  silently, the same as the host launcher: neither has an operator-facing
+  diagnostics channel to log to. Only `orchestrator`'s own defense-in-depth
+  clamp against an already-loaded handoff's typed (`int`/`float64`) `Caps.MaxBudgetTokens`/`Caps.MaxBudgetUSD`
   fields — reachable only via a hand-edited or otherwise corrupted handoff
-  file, since both producers already reject a negative value before writing
+  file, since every producer already rejects a negative value before writing
   one — logs one stderr line naming the degraded value, since the Box has no
   other channel back to an operator. Unlike
   `--max-review-rounds`/`--max-slices` — both consulted by the

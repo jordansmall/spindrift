@@ -35,7 +35,6 @@ let
     "research-outcome-contract.md" = internals.researchOutcomeContractFile;
     "driver-preamble.sh" = internals.driverPreambleFile;
     "agent-paths-preamble.sh" = internals.agentPathsPreambleFile;
-    "fragment-registry.sh" = internals.fragmentRegistryFile;
     "fragments-registry.json" = registryJson;
     "prompt-contract-registry.json" = promptContractRegistryJson;
     "prompt-contract-parity-fixtures.json" = promptContractParityFixtures;

@@ -129,7 +129,6 @@ let
       + "\n"
       + driver.driverPreamble
       + contracts.agentPathsPreamble
-      + prompts.fragmentRegistryPreamble
       + knobs.entrypointDefaultsPreamble
       + stripShebang (builtins.readFile ../agent/entrypoint.sh);
   };

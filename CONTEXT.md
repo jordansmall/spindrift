@@ -287,8 +287,9 @@ working-tree-vs-HEAD content on each call, never from state left over from a
 prior run. `agent/entrypoint.sh` itself is down to choreography: one
 classification-mode call, one bindings-mode call, one `source` of each
 call's emitted env file, in-tree apply/revert/re-apply calls wrapped around
-clone and branch recovery, and a fourth in-tree call site, a defensive
-best-effort `intree_binding_revert` in `phase_conflict_resolve`'s
+clone and branch recovery. The fourth in-tree call site is not in the
+entrypoint at all: box's conflict-resolve pass (`cmd/launcher/box/conflict.go`)
+makes a defensive best-effort revert of every in-tree binding in its
 rebase-abort path.
 _Avoid_: adapter, registry config, ecosystem support.
 
