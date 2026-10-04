@@ -22,8 +22,7 @@
 # (DRIVER_EXEC_BIN, exported by the nix bats derivation, nix/checks/bats.nix)
 # instead of reimplementing its logic here -- the Go package is the source of
 # truth and this fake has no bash re-derivation to keep in lockstep with it:
-# `advise-only` (issue #3901). `bundle-out` (issue #1808) stays a bash stand-in:
-# entrypoint.sh still calls it from publish_rebased_branch. The other settle verbs
+# `advise-only` (issue #3901). The other settle verbs
 # (marker-gate, outcome-backstop) are not faked:
 # entrypoint.sh now execs the real `box` binary
 # (BOX_BIN), which runs them in-process (ADR 0058, issue #4292).
@@ -32,31 +31,6 @@ set -euo pipefail
 if [ "${1:-}" = "advise-only" ]; then
   shift
   exec "$DRIVER_EXEC_BIN" advise-only "$@"
-fi
-
-if [ "${1:-}" = "bundle-out" ]; then
-  shift
-  repo="" base="" branch="" outbox="" bundle_issue="" prior=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --repo) repo="$2"; shift 2 ;;
-      --base) base="$2"; shift 2 ;;
-      --branch) branch="$2"; shift 2 ;;
-      --outbox) outbox="$2"; shift 2 ;;
-      --issue) bundle_issue="$2"; shift 2 ;;
-      --prior-outcome-line) prior="$2"; shift 2 ;;
-      *) shift ;;
-    esac
-  done
-  count="$(git -C "$repo" rev-list --count "$base..$branch")"
-  if [ "$count" -gt 0 ]; then
-    mkdir -p "$outbox"
-    git -C "$repo" bundle create "$outbox/seam.bundle" "$base..$branch" >/dev/null
-  elif [[ "$prior" == *"status=ready"* ]]; then
-    printf 'SPINDRIFT_OUTCOME issue=%s landing=none status=blocked note=agent reported ready but no commits exist on %s\n' \
-      "$bundle_issue" "$branch"
-  fi
-  exit 0
 fi
 
 # The default (Driver-invocation) verb now takes a single --handoff-file

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/bundleout"
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/conflictresolve"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -19,19 +19,17 @@ import (
 // recorders for the conflict pass and its side effects.
 type crFixture struct {
 	*fixture
-	events   []string
-	pass     *orchCall
-	passRC   int
-	passFn   func() // runs inside the pass, e.g. to finish the rebase
-	gitCalls [][]string
-	gitErr   error
-	aborts   []string
+	events []string
+	pass   *orchCall
+	passRC int
+	passFn func() // runs inside the pass, e.g. to finish the rebase
+	aborts []string
 }
 
 func newCRFixture(t *testing.T) *crFixture {
 	t.Helper()
 	f := &crFixture{fixture: newFixture(t)}
-	f.in.PreworkRebaseConflict = true
+	f.recovery.Conflict = true
 	f.in.Assembly = assemblyInputs{
 		RegistryFile: repopath.RegistryJSON(),
 		PromptsDir:   repopath.PromptsDir(),
@@ -57,7 +55,7 @@ func newCRFixture(t *testing.T) *crFixture {
 	}
 	driverRun := f.d.Orchestrate
 	f.d.Orchestrate = func(argv []string) int {
-		if f.pass != nil || !f.in.PreworkRebaseConflict {
+		if f.pass != nil || !f.recovery.Conflict {
 			f.events = append(f.events, "main-run")
 			return driverRun(argv)
 		}
@@ -68,10 +66,10 @@ func newCRFixture(t *testing.T) *crFixture {
 		}
 		return f.passRC
 	}
-	f.d.Git = func(dir string, args ...string) error {
-		f.events = append(f.events, "git")
-		f.gitCalls = append(f.gitCalls, append([]string{dir}, args...))
-		return f.gitErr
+	f.d.PublishBranch = func(cfg branchrecovery.Config, _ io.Writer) error {
+		f.events = append(f.events, "publish")
+		f.publishCfgs = append(f.publishCfgs, cfg)
+		return f.publishErr
 	}
 	f.d.AbortRebase = func(workDir string, _ io.Writer) {
 		f.events = append(f.events, "abort")
@@ -125,7 +123,7 @@ func (f *crFixture) wantPrompt() string {
 
 func TestConflictResolve_NoConflictRunsNoPass(t *testing.T) {
 	f := newCRFixture(t)
-	f.in.PreworkRebaseConflict = false
+	f.recovery.Conflict = false
 	if rc := f.run(); rc != 0 {
 		t.Fatalf("rc = %d", rc)
 	}
@@ -254,65 +252,52 @@ func TestConflictResolve_ResolveOnlyExitsZeroBeforeAssembly(t *testing.T) {
 
 func TestConflictResolve_ResolveOnlyWithCleanRebaseSkipsThePass(t *testing.T) {
 	f := newCRFixture(t)
-	f.in.PreworkRebaseConflict = false
+	f.recovery.Conflict = false
 	f.knobs["CONFLICT_RESOLVE_PR_URL"] = "https://example/pr/1"
 	if rc := f.run(); rc != 0 || len(f.events) != 0 {
 		t.Fatalf("rc = %d events = %v", rc, f.events)
 	}
 }
 
-func TestConflictResolve_PublishWithWriteAccessForcePushes(t *testing.T) {
-	f := newCRFixture(t)
-	f.finishRebase()
-	f.in.PublishRebase = true
-	f.run()
-	want := [][]string{{f.in.WorkDir, "push", "--force-with-lease", "origin", "agent/issue-42"}}
-	if !reflect.DeepEqual(f.gitCalls, want) {
-		t.Fatalf("git calls = %v, want %v", f.gitCalls, want)
-	}
-	if got, want := f.events, []string{"pass", "git", "assemble", "main-run"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("events = %v, want %v", got, want)
-	}
-	if len(f.bundleCfgs) != 0 {
-		t.Errorf("bundled out with write access: %v", f.bundleCfgs)
-	}
-}
-
-func TestConflictResolve_PublishReadOnlyBundlesOut(t *testing.T) {
-	f := newCRFixture(t)
-	f.finishRebase()
-	f.in.PublishRebase = true
-	f.env.BoxWriteEnabled = false
-	f.run()
-	if len(f.gitCalls) != 0 {
-		t.Errorf("pushed without write access: %v", f.gitCalls)
-	}
-	// The settle-time bundle-out comes after the publish one.
-	want := bundleout.Config{Repo: f.in.WorkDir, Base: "origin/main", Branch: "agent/issue-42", OutboxDir: f.in.OutboxDir}
-	if len(f.bundleCfgs) == 0 || !reflect.DeepEqual(f.bundleCfgs[0], want) {
-		t.Fatalf("bundle configs = %+v, want first %+v", f.bundleCfgs, want)
+func TestConflictResolve_PublishGoesThroughBranchRecovery(t *testing.T) {
+	for _, write := range []bool{true, false} {
+		f := newCRFixture(t)
+		f.finishRebase()
+		f.recovery.Adopted = true
+		f.env.BoxWriteEnabled = write
+		f.run()
+		want := []branchrecovery.Config{{
+			WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
+			CodeForge: "github", Push: write, OutboxDir: f.in.OutboxDir,
+		}}
+		if !reflect.DeepEqual(f.publishCfgs, want) {
+			t.Fatalf("write=%v: publish configs = %+v, want %+v", write, f.publishCfgs, want)
+		}
+		if got, want := f.events, []string{"pass", "publish", "assemble", "main-run"}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("write=%v: events = %v, want %v", write, got, want)
+		}
 	}
 }
 
 func TestConflictResolve_PublishFailureExitsOneBeforeAssembly(t *testing.T) {
 	f := newCRFixture(t)
 	f.finishRebase()
-	f.in.PublishRebase = true
-	f.gitErr = io.ErrClosedPipe
+	f.recovery.Adopted = true
+	f.publishErr = io.ErrClosedPipe
 	if rc := f.run(); rc != 1 {
 		t.Fatalf("rc = %d, want 1", rc)
 	}
-	if got, want := f.events, []string{"pass", "git"}; !reflect.DeepEqual(got, want) {
+	if got, want := f.events, []string{"pass", "publish"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %v, want %v", got, want)
 	}
 }
 
-func TestConflictResolve_NoPublishWithoutTheFlag(t *testing.T) {
+func TestConflictResolve_NoPublishWithoutAdoption(t *testing.T) {
 	f := newCRFixture(t)
 	f.finishRebase()
 	f.run()
-	if len(f.gitCalls) != 0 {
-		t.Errorf("git calls = %v", f.gitCalls)
+	if len(f.publishCfgs) != 0 {
+		t.Errorf("publish configs = %+v", f.publishCfgs)
 	}
 }
 

@@ -56,14 +56,15 @@ func seamGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// seamRepo returns a clean work tree on the agent branch whose origin/main
-// ref sits at the base commit, with extraCommits commits on top of it.
-func seamRepo(t *testing.T, extraCommits int) string {
+// seamRepo returns the work tree entrypoint.sh's clone_repo leaves for box: a
+// clone of a bare origin with HEAD on main, origin/main at the base commit and
+// the repo-local identity set. box cuts the agent branch itself.
+func seamRepo(t *testing.T) string {
 	t.Helper()
-	return seamRepoAt(t, t.TempDir(), seamBranch, extraCommits)
+	return seamRepoAt(t, t.TempDir())
 }
 
-func seamRepoAt(t *testing.T, dir, branch string, extraCommits int) string {
+func seamRepoAt(t *testing.T, dir string) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
@@ -71,18 +72,22 @@ func seamRepoAt(t *testing.T, dir, branch string, extraCommits int) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	seamGit(t, filepath.Dir(origin), "init", "-q", "--bare", "-b", "main", origin)
 	seamGit(t, dir, "init", "-q", "-b", "main")
+	seamGit(t, dir, "remote", "add", "origin", origin)
+	seamGit(t, dir, "config", "user.name", "spindrift-agent")
+	seamGit(t, dir, "config", "user.email", "agent@example.com")
 	seamGit(t, dir, "commit", "-q", "--allow-empty", "-m", "base")
-	seamGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
-	seamGit(t, dir, "checkout", "-q", "-b", branch)
-	for i := 0; i < extraCommits; i++ {
-		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%d", i)), []byte("x"), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		seamGit(t, dir, "add", "-A")
-		seamGit(t, dir, "commit", "-q", "-m", fmt.Sprintf("work %d", i))
-	}
+	// The push also records refs/remotes/origin/main, as the clone would.
+	seamGit(t, dir, "push", "-q", "origin", "main")
 	return dir
+}
+
+// seamCommitWork is the Driver side effect that leaves one commit on the
+// agent branch, so a relay Box has something to bundle out at settle.
+func seamCommitWork(dir string) string {
+	return "cd '" + dir + "' && echo x >f0 && git add f0 && git commit -q -m 'work 0'"
 }
 
 // seamSessionID mirrors the claude Driver preamble's derivation, which the
@@ -132,7 +137,6 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--argv-order=prompt model agents session driverFlags effort",
 		"--model=", "--effort=", "--driver=claude", "--driver-bin=claude", "--driver-flags=",
 		"--heartbeat-log=", "--max-budget-tokens=0", "--max-budget-usd=0",
-		"--prework-rebase-conflict=0", "--publish-rebase=0",
 		"--driver-session-cache-dir=",
 	}
 }
@@ -404,7 +408,7 @@ func (r seamRun) wantFirstRun(t *testing.T) {
 func TestBoxSeamOutcomePresentRunsNoResume(t *testing.T) {
 	line := seamOutcomeLine("done", "first")
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(line)}},
 	})
 	r.res.WantExit(t, 0)
@@ -420,7 +424,7 @@ func TestBoxSeamOutcomePresentRunsNoResume(t *testing.T) {
 func TestBoxSeamMissingOutcomeIsNudgedOnce(t *testing.T) {
 	resumed := seamOutcomeLine("done", "after nudge")
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult("all finished")}, {Stdout: seamResult(resumed)}},
 	})
 	r.res.WantExit(t, 0)
@@ -442,7 +446,7 @@ func TestBoxSeamMissingOutcomeIsNudgedOnce(t *testing.T) {
 
 func TestBoxSeamUnrecoveredOutcomeIsBackstopped(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult("all finished")}, {Stdout: seamResult("still no marker")}},
 	})
 	r.res.WantExit(t, 0)
@@ -468,7 +472,7 @@ func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
 	}
 	t.Run("research with no outcome line is backstopped blocked without a resume", func(t *testing.T) {
 		r := runBoxSeam(t, seamCase{
-			repo:       seamRepo(t, 0),
+			repo:       seamRepo(t),
 			env:        seamResearchEnv,
 			driverRuns: []seamtest.DriverRun{{Stdout: seamResult("verdict posted")}},
 		})
@@ -488,7 +492,7 @@ func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
 	t.Run("read-only butler missing PR-intent gets no nudge", func(t *testing.T) {
 		line := "SPINDRIFT_OUTCOME issue=butler-bugs landing=none status=ready note=swept"
 		r := runBoxSeam(t, seamCase{
-			repo:       seamRepo(t, 0),
+			repo:       seamRepo(t),
 			relay:      true,
 			env:        butler,
 			driverRuns: []seamtest.DriverRun{{Stdout: seamResult(line)}},
@@ -509,10 +513,11 @@ func TestBoxSeamAdviseOnlyKindsNeverResume(t *testing.T) {
 func TestBoxSeamPRIntentNudgeTaken(t *testing.T) {
 	first := seamOutcomeLine("ready", "done")
 	intent := "SPINDRIFT_PR_INTENT " + seamNonce + " " + base64.StdEncoding.EncodeToString([]byte("feat: x\n\nbody"))
+	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 1),
+		repo:       repo,
 		relay:      true,
-		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(first)}, {Stdout: seamResult(intent)}},
+		driverRuns: []seamtest.DriverRun{{Sh: seamCommitWork(repo), Stdout: seamResult(first)}, {Stdout: seamResult(intent)}},
 	})
 	r.res.WantExit(t, 0)
 	r.wantFirstRun(t)
@@ -545,10 +550,11 @@ func TestBoxSeamPRIntentNudgeTaken(t *testing.T) {
 
 func TestBoxSeamPRIntentNudgeExhausted(t *testing.T) {
 	first := seamOutcomeLine("ready", "done")
+	repo := seamRepo(t)
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 1),
+		repo:       repo,
 		relay:      true,
-		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(first)}, {Stdout: seamResult("no marker either")}},
+		driverRuns: []seamtest.DriverRun{{Sh: seamCommitWork(repo), Stdout: seamResult(first)}, {Stdout: seamResult("no marker either")}},
 	})
 	r.res.WantExit(t, 0)
 	if len(r.resumes()) != 1 {
@@ -762,7 +768,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				seamRepoAt(t, workDir, c.branch, 0)
+				seamRepoAt(t, workDir)
 			}
 			outbox := filepath.Join(root, "outbox")
 			snapshots := filepath.Join(root, "snapshots")
@@ -880,6 +886,7 @@ func seamRegistryRoute(t *testing.T, workDir string) map[string]string {
 	}
 	seamGit(t, workDir, "add", "-A")
 	seamGit(t, workDir, "commit", "-q", "-m", "chore: pin private registries")
+	seamGit(t, workDir, "push", "-q", "origin", "main")
 
 	return map[string]string{
 		"REGISTRY_PROXY_MANIFEST": `{"endpoint":"unix://` + sock + `","routes":[{"prefix":"r0","upstreamHost":"` + seamRegistryUpstream +
@@ -966,7 +973,7 @@ func (c seamCase) boxArgs(t *testing.T, outbox string) []string {
 // pinned golden byte for byte: box, not bash, now produces it.
 func TestBoxSeamAssemblesTheGoldenPrompt(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
-		repo: seamRepo(t, 0),
+		repo: seamRepo(t),
 		env: map[string]string{
 			"ISSUE_TITLE":              "Do the thing",
 			"BOX_OUTBOX_RELAY_CAPABLE": "1",
@@ -1018,7 +1025,7 @@ var seamResearchEnv = map[string]string{
 // lose the verdict.
 func TestBoxSeamValidatorRejectStopsBeforeTheDriver(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		relay:      true,
 		env:        seamResearchEnv,
 		promptsDir: seamStubPrompts(t, map[string]string{"research-prompt.md": "research stub, no verdict-comment marker here\n"}),
@@ -1044,7 +1051,7 @@ func TestBoxSeamValidatorRejectStopsBeforeTheDriver(t *testing.T) {
 // around it is worded.
 func TestBoxSeamValidatorPassesAMarkedResearchPrompt(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
-		repo:  seamRepo(t, 0),
+		repo:  seamRepo(t),
 		relay: true,
 		env:   seamResearchEnv,
 		promptsDir: seamStubPrompts(t, map[string]string{
@@ -1065,7 +1072,7 @@ func TestBoxSeamValidatorPassesAMarkedResearchPrompt(t *testing.T) {
 // reaches the Driver, with the advisory in the Box log.
 func TestBoxSeamValidatorWarnsAndProceeds(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		relay:      true,
 		promptsDir: seamStubPrompts(t, map[string]string{"issue-prompt.md": "issue stub, no PR-intent marker here\n"}),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "warned"))}},
@@ -1085,7 +1092,7 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 	handoff := func(t *testing.T, extra ...string) promptassembly.Handoff {
 		t.Helper()
 		r := runBoxSeam(t, seamCase{
-			repo:       seamRepo(t, 0),
+			repo:       seamRepo(t),
 			extraArgs:  extra,
 			driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "handoff"))}},
 		})
@@ -1125,34 +1132,41 @@ func TestBoxSeamHandoffCarriesTheFlagSettings(t *testing.T) {
 	})
 }
 
-// seamConflictRepo is a work tree whose agent branch and origin/main both add
-// the same file differently, with the pre-work `git rebase origin/main` already
-// stopped on the conflict, the state --prework-rebase-conflict=1 reports.
+// seamConflictRepo is a work tree whose origin holds a prior run's agent branch
+// and an origin/main that advanced past it, both adding the same file
+// differently. With seamConflictGh's open PR on the branch, box adopts it and
+// its pre-work `git rebase origin/main` stops on the conflict.
 func seamConflictRepo(t *testing.T) string {
 	t.Helper()
-	dir := seamRepo(t, 0)
+	dir := seamRepo(t)
 	write := func(content string) {
 		if err := os.WriteFile(filepath.Join(dir, "c"), []byte(content), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		seamGit(t, dir, "add", "c")
 	}
+	seamGit(t, dir, "checkout", "-q", "-b", seamBranch)
 	write("agent\n")
 	seamGit(t, dir, "commit", "-q", "-m", "agent change")
+	seamGit(t, dir, "push", "-q", "origin", seamBranch)
 	seamGit(t, dir, "checkout", "-q", "main")
+	seamGit(t, dir, "branch", "-q", "-D", seamBranch)
 	write("main\n")
 	seamGit(t, dir, "commit", "-q", "-m", "main change")
-	seamGit(t, dir, "update-ref", "refs/remotes/origin/main", "HEAD")
-	seamGit(t, dir, "checkout", "-q", seamBranch)
-	cmd := exec.Command("git", "-C", dir, "rebase", "origin/main")
-	cmd.Env = append(os.Environ(), "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
-	if err := cmd.Run(); err == nil {
-		t.Fatal("the rebase did not conflict")
-	}
-	if !seamRebaseInProgress(dir) {
-		t.Fatal("the conflicting rebase left no rebase in progress")
-	}
+	seamGit(t, dir, "push", "-q", "origin", "main")
 	return dir
+}
+
+// seamConflictGh is the env for a gh fake reporting an open PR on seamBranch,
+// which is what makes box adopt the prior branch instead of force-resetting it.
+func seamConflictGh(t *testing.T) map[string]string {
+	t.Helper()
+	return seamtest.WriteFakeConfig(t, "gh", seamtest.GhConfig{
+		Record: filepath.Join(t.TempDir(), "gh.rec"),
+		PRs: []seamtest.GhPR{{
+			Number: 9, URL: "https://example.test/o/r/pull/9", HeadRefName: seamBranch, BaseRefName: "main",
+		}},
+	})
 }
 
 func seamRebaseInProgress(dir string) bool {
@@ -1229,11 +1243,12 @@ func (r seamRun) wantConflictPass(t *testing.T) seamtest.Snapshot {
 
 func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
 	repo := seamConflictRepo(t)
-	head := seamRevParse(t, repo, seamBranch)
+	head := seamRevParse(t, repo, "origin/"+seamBranch)
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
 		snapshot:   true,
-		extraArgs:  []string{"--prework-rebase-conflict=1"},
+		fakes:      []string{"gh"},
+		env:        seamConflictGh(t),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult("could not resolve")}},
 	})
 	r.res.WantExit(t, 1)
@@ -1260,9 +1275,10 @@ func TestBoxSeamConflictUnresolvedAborts(t *testing.T) {
 func TestBoxSeamConflictResolvedContinuesIntoTheMainRun(t *testing.T) {
 	repo := seamConflictRepo(t)
 	r := runBoxSeam(t, seamCase{
-		repo:      repo,
-		snapshot:  true,
-		extraArgs: []string{"--prework-rebase-conflict=1"},
+		repo:     repo,
+		snapshot: true,
+		fakes:    []string{"gh"},
+		env:      seamConflictGh(t),
 		driverRuns: []seamtest.DriverRun{
 			{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")},
 			{Stdout: seamResult(seamOutcomeLine("done", "after the conflict pass"))},
@@ -1297,8 +1313,8 @@ func TestBoxSeamConflictResolveOnlyStopsBeforeTheMainRun(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
 		repo:       repo,
 		snapshot:   true,
-		env:        map[string]string{"CONFLICT_RESOLVE_PR_URL": "https://example.test/o/r/pull/9"},
-		extraArgs:  []string{"--prework-rebase-conflict=1"},
+		fakes:      []string{"gh"},
+		env:        mergedEnv(seamConflictGh(t), map[string]string{"CONFLICT_RESOLVE_PR_URL": "https://example.test/o/r/pull/9"}),
 		driverRuns: []seamtest.DriverRun{{Sh: seamResolveRebase(repo), Stdout: seamResult("resolved")}},
 	})
 	r.res.WantExit(t, 0)
@@ -1445,7 +1461,7 @@ func frontmatterBytes(b []byte) string {
 func seamHomeCase(t *testing.T, f homeAgentFixture, operatorDir, sessionCacheRel, agentFilesRel string, extraArgs ...string) seamCase {
 	t.Helper()
 	return seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "home"))}},
 		env:        f.layoutEnv(operatorDir),
 		homeArgs:   f.layoutArgs(sessionCacheRel, agentFilesRel, extraArgs...),
@@ -1555,7 +1571,7 @@ func TestBoxSeamDevshellPair(t *testing.T) {
 		{"absent", nil, "false default", "==> no devShell in flake (or nix develop failed) — using baked toolchain"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			repo := seamRepo(t, 0)
+			repo := seamRepo(t)
 			if err := os.WriteFile(filepath.Join(repo, "flake.nix"), []byte("{}"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -1602,7 +1618,7 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			repo := seamRepo(t, 0)
+			repo := seamRepo(t)
 			if c.staleLock {
 				lock := "[[package]]\nname = \"example\"\nsource = \"registry+http://127.0.0.1:" + seamForwarderPort + "/r0/index/\"\n"
 				if err := os.WriteFile(filepath.Join(repo, "Cargo.lock"), []byte(lock), 0o644); err != nil {
@@ -1610,6 +1626,7 @@ func TestBoxSeamLockfileScanWarnsAtSettle(t *testing.T) {
 				}
 				seamGit(t, repo, "add", "Cargo.lock")
 				seamGit(t, repo, "commit", "-q", "-m", "chore: pin registry")
+				seamGit(t, repo, "push", "-q", "origin", "main")
 			}
 			r := runBoxSeam(t, seamCase{
 				repo: repo,
@@ -1691,7 +1708,12 @@ func TestBoxSeamReadonlyGuardsAndForgejoCLI(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			work := seamRepo(t, 0)
+			work := seamRepo(t)
+			if c.env["SELF_CONTAINED"] == "1" {
+				// Box skips branch recovery for a self-contained run, yet this work
+				// kind still bundles out at settle, so the branch must exist.
+				seamGit(t, work, "checkout", "-q", "-b", seamBranch)
+			}
 			dir := t.TempDir()
 			fjArgvRec, fjStdinRec := filepath.Join(dir, "fj.argv"), filepath.Join(dir, "fj.stdin")
 			env := map[string]string{}
@@ -1804,7 +1826,7 @@ func TestBoxSeamEnvGuardNamesTheMissingVariable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			r := runBoxSeam(t, seamCase{repo: seamRepo(t, 0), env: c.env})
+			r := runBoxSeam(t, seamCase{repo: seamRepo(t), env: c.env})
 			r.res.WantExit(t, 1)
 			if want := "box: env-guards: " + c.want; !strings.Contains(r.res.Stderr, want) {
 				t.Errorf("stderr lacks %q:\n%s", want, r.res.Stderr)
@@ -1835,7 +1857,7 @@ func TestBoxSeamEnvGuardExemptsForgelessDispatches(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			r := runBoxSeam(t, seamCase{
-				repo:       seamRepo(t, 0),
+				repo:       seamRepo(t),
 				relay:      true,
 				env:        c.env,
 				driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "ran"))}},
@@ -1859,7 +1881,7 @@ func mergedEnv(srcs ...map[string]string) map[string]string {
 
 func TestBoxSeamPrintsTheWritableStoreNotice(t *testing.T) {
 	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t, 0),
+		repo:       seamRepo(t),
 		env:        map[string]string{"NIX_STORE_WRITABLE": "true"},
 		driverRuns: []seamtest.DriverRun{{Stdout: seamResult(seamOutcomeLine("done", "store"))}},
 	})

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver"
@@ -50,10 +51,6 @@ type inputs struct {
 	OperatorSkillsDir     string
 	HarnessHomeAgentDir   string
 	DriverSessionCacheDir string
-	// PreworkRebaseConflict: the pre-work rebase stopped on conflicts.
-	PreworkRebaseConflict bool
-	// PublishRebase: the rebased branch must be published once resolved.
-	PublishRebase bool
 }
 
 type deps struct {
@@ -71,12 +68,16 @@ type deps struct {
 	WarnLockfiles func(w io.Writer, workDir string)
 	// Nix runs the devShell probe.
 	Nix toolchain.Nix
+	// Recover is branchrecovery.Recover, which runs real git in the work dir.
+	Recover func(cfg branchrecovery.Config, openPR func() (bool, error), w io.Writer) (branchrecovery.Outcome, error)
+	// PublishBranch is branchrecovery.Publish, the one decision for how a
+	// rebased branch lands.
+	PublishBranch func(cfg branchrecovery.Config, w io.Writer) error
 	// RunCmd runs the prefetch hook and the Forgejo CLI credential setup.
 	RunCmd func(*exec.Cmd) error
 	// LookPath resolves a binary on PATH, for the Forgejo CLI gate.
 	LookPath func(string) (string, error)
-	// Git runs git in dir, for the conflict-resolve publish push and the
-	// read-only guards' decoy repo.
+	// Git runs git in dir, for the read-only guards' decoy repo.
 	Git func(dir string, args ...string) error
 	// GitOutput runs git in dir and returns its stdout, for the read-only
 	// guards' pushurl check.
@@ -126,14 +127,15 @@ type boxRun struct {
 	relay       bool // read-only Box handing off through the outbox
 	kind        string
 	carrier     string
+	recovery    branchrecovery.Outcome // what the pre-work branch recovery left for conflictResolve
 }
 
 // run sequences the phases the package doc lists and returns the exit code the
 // entrypoint would have exited with.
 func run(in inputs, env promptassembly.Env, d deps) (int, error) {
-	// The guards run first in box, but bash's clone, branch-recovery and
-	// prework-rebase phases still run ahead of `exec box` until #4301/#4302 move
-	// them in, so until then a missing variable is caught only after those.
+	// The guards run first in box, but bash's clone still runs ahead of
+	// `exec box` until #4302 moves it in, so until then a missing variable is
+	// caught only after it.
 	if err := checkEnvGuards(d.Getenv); err != nil {
 		return 0, phaseErr("env-guards", err)
 	}
@@ -157,12 +159,20 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	r.relay = !env.BoxWriteEnabled && env.OutboxRelayCapable
 	r.needsBox = env.HostMediatedRemote || r.relay
 
-	// The Forgejo CLI credential comes first, as it did in the shell.
+	// Branch recovery comes before everything that touches the tree: the
+	// registry's in-tree rewrite must not dirty it ahead of the rebase and the
+	// devShell probe must see the rebased tree.
+	if err := r.recoverBranch(); err != nil {
+		return 0, phaseErr("branch-recovery", err)
+	}
+
+	// The Forgejo CLI credential comes first after recovery, as it did in the
+	// shell.
 	if err := r.configureForgejoCLI(); err != nil {
 		return 0, phaseErr("forgejo-cli", err)
 	}
 
-	// The guards come before everything else box does, as they did in the
+	// The guards come before the rest of what box does, as they did in the
 	// shell: the PATH they prepend must reach the prefetch hook, the
 	// orchestrator and the Driver.
 	if err := r.installReadonlyGuards(); err != nil {

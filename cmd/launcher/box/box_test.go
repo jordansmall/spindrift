@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/outcomebackstop"
@@ -90,6 +91,14 @@ type fixture struct {
 	prefetchErr  error
 	assembledIn  []assemblyInputs
 	knobs        map[string]string
+
+	// recovery is what the stubbed branch recovery reports; recoverCfgs and
+	// publishCfgs record its calls.
+	recovery    branchrecovery.Outcome
+	recoverErr  error
+	recoverCfgs []branchrecovery.Config
+	publishCfgs []branchrecovery.Config
+	publishErr  error
 }
 
 func resultEvent(text string) string {
@@ -151,6 +160,14 @@ func newFixture(t *testing.T) *fixture {
 				f.nixAtCall()
 			}
 			return f.nixErr
+		},
+		Recover: func(cfg branchrecovery.Config, _ func() (bool, error), _ io.Writer) (branchrecovery.Outcome, error) {
+			f.recoverCfgs = append(f.recoverCfgs, cfg)
+			return f.recovery, f.recoverErr
+		},
+		PublishBranch: func(cfg branchrecovery.Config, _ io.Writer) error {
+			f.publishCfgs = append(f.publishCfgs, cfg)
+			return f.publishErr
 		},
 		RunCmd: func(cmd *exec.Cmd) error {
 			f.prefetched = append(f.prefetched, cmd)
@@ -1407,7 +1424,6 @@ func allFlags() []string {
 		"--argv-order=prompt model agents", "--model=opus", "--effort=high",
 		"--driver=claude", "--driver-bin=claude", "--driver-flags=--verbose", "--heartbeat-log=/hb",
 		"--max-budget-tokens=1000", "--max-budget-usd=2.5",
-		"--prework-rebase-conflict=1", "--publish-rebase=0",
 		"--driver-session-cache-dir=/session-cache",
 	}
 }
@@ -1419,7 +1435,6 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 	}
 	want := inputs{
 		WorkDir:               "/w",
-		PreworkRebaseConflict: true,
 		OutboxDir:             "/o",
 		ForbiddenMarkersFile:  "/forbidden.json",
 		DriverSessionCacheDir: "/session-cache",
@@ -1495,7 +1510,7 @@ func TestHomeLayout_PopulatesBeforeAssembly(t *testing.T) {
 func TestHomeLayout_FailureIsPhaseErrorAndStopsTheRun(t *testing.T) {
 	for _, conflict := range []bool{false, true} {
 		f := newFixture(t)
-		f.in.PreworkRebaseConflict = conflict
+		f.recovery.Conflict = conflict
 		blocker := filepath.Join(f.dir, "blocker")
 		f.write(blocker, "a file, not a directory")
 		f.in.Assembly.SkillsDir = filepath.Join(blocker, "skills")
