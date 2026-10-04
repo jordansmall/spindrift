@@ -50,22 +50,18 @@ func NewTCPForwarder(upstreamHost string, upstreamPort int, secret string) (http
 
 // SpawnHTTPForwarder starts a detached Forwarder on 127.0.0.1:port relaying
 // to upstreamHost:upstreamPort with secret attached via NewTCPForwarder. It
-// re-execs this binary in its "forward-registry-tcp" subcommand mode because
-// the image carries no free-standing HTTP proxy binary the way it carries
-// socat.
-func SpawnHTTPForwarder(upstreamHost string, upstreamPort int, secret string, port int) (int, error) {
-	self, err := os.Executable()
-	if err != nil {
-		return 0, err
-	}
-
+// execs binary in its "forward-registry-tcp" subcommand mode because the image
+// carries no free-standing HTTP proxy binary the way it carries socat. binary
+// is a parameter because not every caller implements that subcommand itself:
+// only driver-exec does.
+func SpawnHTTPForwarder(binary, upstreamHost string, upstreamPort int, secret string, port int) (int, error) {
 	devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 	if err != nil {
 		return 0, err
 	}
 	defer devNull.Close()
 
-	cmd := exec.Command(self,
+	cmd := exec.Command(binary,
 		"forward-registry-tcp",
 		"-listen-port", fmt.Sprintf("%d", port),
 		"-upstream-host", upstreamHost,

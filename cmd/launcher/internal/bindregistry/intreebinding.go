@@ -192,7 +192,7 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	// Callers must not run ApplyInTreeBinding and RevertInTreeBinding
 	// concurrently for rows in the same repo: npm, yarn, and pnpm share the
 	// repo-root configDir, so one row's sweep would delete another row's
-	// in-flight temp file. runBindRegistryIntree loops its rows sequentially.
+	// in-flight temp file. applyInTree loops its rows sequentially.
 	sweepOrphanedTempFiles(filepath.Dir(configPath))
 
 	// configPath may be a symlink, which git tracks as blob mode 120000. os.Stat

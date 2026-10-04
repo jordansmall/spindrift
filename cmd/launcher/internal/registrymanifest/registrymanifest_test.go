@@ -266,7 +266,7 @@ func TestParse_RejectsInvalidPrefixCharset(t *testing.T) {
 }
 
 // The charset guard must not regress the no-prefix handling other callers
-// depend on, such as runBindRegistryBindings' empty-prefix warn-and-skip.
+// depend on, such as bindregistry.BindHomes' empty-prefix warn-and-skip.
 func TestParse_AllowsEmptyPrefix(t *testing.T) {
 	const doc = `{"endpoint":"unix:///registry-proxy.sock","routes":[{"prefix":"","upstreamHost":"upstream.example"}]}`
 	m, err := Parse(doc)
