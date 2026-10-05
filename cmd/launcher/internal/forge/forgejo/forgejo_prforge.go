@@ -371,6 +371,8 @@ func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
 // stripped. A PR that is already not a draft is a no-op issuing no request. The
 // gate is isDraftPull, not isDraftTitle, so MarkReady can act on every draft
 // OpenPRForBranch adopts, including one signaled by the draft field alone.
+// A title that strips to empty is an error: Forgejo silently ignores an
+// empty-title PATCH, which would leave the PR a draft.
 func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	p, err := f.getPull(prURL)
 	if err != nil {
@@ -383,7 +385,11 @@ func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	if err != nil {
 		return err
 	}
-	body := map[string]any{"title": stripWIPPrefix(p.Title)}
+	title := stripWIPPrefix(p.Title)
+	if title == "" {
+		return fmt.Errorf("forgejo: PR %s title %q is empty once WIP markers are stripped; refusing to PATCH an empty title", prURL, p.Title)
+	}
+	body := map[string]any{"title": title}
 	return f.rest.Do(http.MethodPatch, f.repoPath()+"/pulls/"+index, body, nil)
 }
 
