@@ -267,6 +267,63 @@ func TestRenderPrompt(t *testing.T) {
 		}
 	})
 
+	t.Run("removed fragment var in the template is rejected", func(t *testing.T) {
+		prompts := t.TempDir()
+		if err := os.WriteFile(filepath.Join(prompts, "conflict-resolve-prompt.md"),
+			[]byte("step ${CODE_COMMENTS_STEP} end"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := RenderPrompt(prompts, t.TempDir(), testNames, lookup(env))
+		if err == nil {
+			t.Fatal("want an error for a removed var")
+		}
+		for _, want := range []string{"CODE_COMMENTS_STEP", "#3505", "MIGRATING.md"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("err %q missing %q", err, want)
+			}
+		}
+	})
+
+	for _, tc := range []struct{ fragment, skill string }{
+		{"caveman-default.md", "caveman"},
+		{"skill-preamble.md", "tdd"},
+	} {
+		t.Run("removed fragment var in "+tc.fragment+" is rejected", func(t *testing.T) {
+			prompts := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(prompts, "fragments"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(prompts, "fragments", tc.fragment),
+				[]byte("${TDD_STEP}"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := RenderPrompt(prompts, skillsDirWith(t, tc.skill), testNames, lookup(env))
+			if err == nil {
+				t.Fatal("want an error for a removed var")
+			}
+			for _, want := range []string{"TDD_STEP", "#3219", "MIGRATING.md"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err %q missing %q", err, want)
+				}
+			}
+		})
+	}
+
+	t.Run("a removed token in a substituted value is not rejected", func(t *testing.T) {
+		prompts := t.TempDir()
+		if err := os.WriteFile(filepath.Join(prompts, "conflict-resolve-prompt.md"),
+			[]byte("title: ${ISSUE_TITLE}"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		got, err := RenderPrompt(prompts, t.TempDir(), testNames, lookup(map[string]string{"ISSUE_TITLE": "${CODE_COMMENTS_STEP}"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "title: ${CODE_COMMENTS_STEP}"; got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
+	})
+
 	t.Run("locally computed vars override the environment", func(t *testing.T) {
 		prompts := t.TempDir()
 		if err := os.WriteFile(filepath.Join(prompts, "conflict-resolve-prompt.md"),

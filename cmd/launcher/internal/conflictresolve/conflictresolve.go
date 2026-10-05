@@ -128,5 +128,9 @@ func render(path string, vars map[string]string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}
+	// Raw bytes only: a substituted value is untrusted.
+	if err := promptassembly.CheckRemovedVars(path, string(b)); err != nil {
+		return "", err
+	}
 	return promptassembly.RenderText(string(b), vars, true /* bare $NAME too */), nil
 }
