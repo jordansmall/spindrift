@@ -101,7 +101,7 @@ func (w *Writer) parseLine(line string) {
 			if ev.ParentToolUseID == "" {
 				for _, block := range ev.Message.Content {
 					if block.Type == "text" {
-						if narration := trimNarration(block.Text); narration != "" {
+						if narration := driverkit.TrimNarration(block.Text); narration != "" {
 							phase := w.rolePhase[w.currentRole]
 							var narLine string
 							if phase != "" {

@@ -5,68 +5,17 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/landdelta"
 )
-
-// sanitizeLine drops control characters, ANSI escape sequences, newlines,
-// Unicode format (Cf) runes such as bidi controls and zero-width chars, and
-// line/paragraph separators (Zl/Zp) from s. It cleans any agent-controlled
-// heartbeat field (role, verdict, reason, narration, ...) so every heartbeat
-// line stays single-line and cannot be reordered or visually broken. ZWJ is
-// dropped too, splitting joined emoji; harmless for a status line.
-func sanitizeLine(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		r, size := utf8.DecodeRuneInString(s[i:])
-		switch {
-		case r == 0x1b:
-			i += size
-			if i >= len(s) {
-				continue
-			}
-			switch s[i] {
-			case '[':
-				i++
-				for i < len(s) && !(s[i] >= 0x40 && s[i] <= 0x7e) {
-					i++
-				}
-				if i < len(s) {
-					i++
-				}
-			case ']':
-				i++
-				for i < len(s) && s[i] != 0x07 {
-					if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
-						i += 2
-						break
-					}
-					i++
-				}
-				if i < len(s) && s[i] == 0x07 {
-					i++
-				}
-			}
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) ||
-			unicode.Is(unicode.Cf, r) || unicode.In(r, unicode.Zl, unicode.Zp):
-			i += size
-		default:
-			b.WriteRune(r)
-			i += size
-		}
-	}
-	return b.String()
-}
 
 // FormatRoleHeader returns a switch-header line for the acting role, e.g.
 // "#284 ── implementor · opus ──────────". A non-empty model follows the role.
 func FormatRoleHeader(issue, role, model string) string {
 	const targetWidth = 36
 	const minTrail = 4
-	label := sanitizeLine(role)
+	label := driverkit.SanitizeLine(role)
 	if model != "" {
 		label = label + " \xc2\xb7 " + model
 	}
@@ -85,7 +34,7 @@ func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) stri
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
-		fmt.Fprintf(&sb, " %s", sanitizeLine(role))
+		fmt.Fprintf(&sb, " %s", driverkit.SanitizeLine(role))
 	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
@@ -110,7 +59,7 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
-		fmt.Fprintf(&sb, " %s", sanitizeLine(role))
+		fmt.Fprintf(&sb, " %s", driverkit.SanitizeLine(role))
 	}
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
@@ -128,27 +77,27 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 	switch op.Op {
 	case "pass_start":
 		if op.Role != "" {
-			fmt.Fprintf(&sb, "pass %d (%s) started", op.Pass, sanitizeLine(op.Role))
+			fmt.Fprintf(&sb, "pass %d (%s) started", op.Pass, driverkit.SanitizeLine(op.Role))
 		} else {
 			fmt.Fprintf(&sb, "pass %d started", op.Pass)
 		}
 	case "verdict":
-		fmt.Fprintf(&sb, "verdict: %s", sanitizeLine(op.Verdict))
+		fmt.Fprintf(&sb, "verdict: %s", driverkit.SanitizeLine(op.Verdict))
 	case "pass_no_outcome":
 		if op.Verdict != "" {
-			fmt.Fprintf(&sb, "pass %d ended with no outcome (last verdict %s, %s)", op.Pass, sanitizeLine(op.Verdict), sanitizeLine(op.Reason))
+			fmt.Fprintf(&sb, "pass %d ended with no outcome (last verdict %s, %s)", op.Pass, driverkit.SanitizeLine(op.Verdict), driverkit.SanitizeLine(op.Reason))
 		} else {
-			fmt.Fprintf(&sb, "pass %d ended with no outcome (%s)", op.Pass, sanitizeLine(op.Reason))
+			fmt.Fprintf(&sb, "pass %d ended with no outcome (%s)", op.Pass, driverkit.SanitizeLine(op.Reason))
 		}
 	case "decision":
 		if op.Reason != "" {
-			fmt.Fprintf(&sb, "%s: %s", sanitizeLine(op.Decision), sanitizeLine(op.Reason))
+			fmt.Fprintf(&sb, "%s: %s", driverkit.SanitizeLine(op.Decision), driverkit.SanitizeLine(op.Reason))
 		} else {
-			sb.WriteString(sanitizeLine(op.Decision))
+			sb.WriteString(driverkit.SanitizeLine(op.Decision))
 		}
 	case "pass_usage":
 		if op.Role != "" {
-			fmt.Fprintf(&sb, "pass %d (%s) usage: ", op.Pass, sanitizeLine(op.Role))
+			fmt.Fprintf(&sb, "pass %d (%s) usage: ", op.Pass, driverkit.SanitizeLine(op.Role))
 		} else {
 			fmt.Fprintf(&sb, "pass %d usage: ", op.Pass)
 		}
@@ -172,7 +121,7 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 			// costliest subagent per breakdownByAgentFile); do not re-sort.
 			parts := make([]string, len(u.Agents))
 			for i, a := range u.Agents {
-				parts[i] = fmt.Sprintf("%s %d", sanitizeLine(a.Agent), a.TotalTokens())
+				parts[i] = fmt.Sprintf("%s %d", driverkit.SanitizeLine(a.Agent), a.TotalTokens())
 			}
 			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
 		}
@@ -189,28 +138,28 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		if !d.Known && d.Reason == "" {
 			d.Reason = "no delta reported"
 		}
-		sb.WriteString(sanitizeLine(d.Summary()))
+		sb.WriteString(driverkit.SanitizeLine(d.Summary()))
 	case "signal":
 		// A reject's Reason is the whole point of the line, so it stands in
 		// for the size/hash detail an accept carries (issue #3724).
 		switch op.Decision {
 		case "reject":
-			fmt.Fprintf(&sb, "signal %s rejected: %s", sanitizeLine(op.Kind), sanitizeLine(op.Reason))
+			fmt.Fprintf(&sb, "signal %s rejected: %s", driverkit.SanitizeLine(op.Kind), driverkit.SanitizeLine(op.Reason))
 		case "read":
-			fmt.Fprintf(&sb, "signal %s read", sanitizeLine(op.Kind))
+			fmt.Fprintf(&sb, "signal %s read", driverkit.SanitizeLine(op.Kind))
 		case "usage":
-			fmt.Fprintf(&sb, "signal %s rejected (usage): %s", sanitizeLine(op.Kind), sanitizeLine(op.Reason))
+			fmt.Fprintf(&sb, "signal %s rejected (usage): %s", driverkit.SanitizeLine(op.Kind), driverkit.SanitizeLine(op.Reason))
 		default:
-			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", sanitizeLine(op.Kind), op.Size, sanitizeLine(op.Hash))
+			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", driverkit.SanitizeLine(op.Kind), op.Size, driverkit.SanitizeLine(op.Hash))
 		}
 	case "delta_review_trigger":
 		// The Reason is the whole point of this op (issue #3246) and must show
 		// even on the common "skip" path, so this mirrors the "decision" case
 		// rather than the default arm's bare op name.
 		if op.Reason != "" {
-			fmt.Fprintf(&sb, "delta review %s: %s", sanitizeLine(op.Decision), sanitizeLine(op.Reason))
+			fmt.Fprintf(&sb, "delta review %s: %s", driverkit.SanitizeLine(op.Decision), driverkit.SanitizeLine(op.Reason))
 		} else {
-			fmt.Fprintf(&sb, "delta review %s", sanitizeLine(op.Decision))
+			fmt.Fprintf(&sb, "delta review %s", driverkit.SanitizeLine(op.Decision))
 		}
 	case "run_state_error":
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
@@ -218,14 +167,14 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		// so each gets its own wording.
 		switch op.Phase {
 		case "dispositions_budget":
-			fmt.Fprintf(&sb, "dispositions budget: %s", sanitizeLine(op.Error))
+			fmt.Fprintf(&sb, "dispositions budget: %s", driverkit.SanitizeLine(op.Error))
 		case "decisions_budget":
-			fmt.Fprintf(&sb, "decisions budget: %s", sanitizeLine(op.Error))
+			fmt.Fprintf(&sb, "decisions budget: %s", driverkit.SanitizeLine(op.Error))
 		default:
-			fmt.Fprintf(&sb, "run-state %s failed: %s", sanitizeLine(op.Phase), sanitizeLine(op.Error))
+			fmt.Fprintf(&sb, "run-state %s failed: %s", driverkit.SanitizeLine(op.Phase), driverkit.SanitizeLine(op.Error))
 		}
 	default:
-		sb.WriteString(sanitizeLine(op.Op))
+		sb.WriteString(driverkit.SanitizeLine(op.Op))
 	}
 	return sb.String()
 }
@@ -298,33 +247,6 @@ func pluralKind(kind string, n int) string {
 	default:
 		return kind + "s"
 	}
-}
-
-// narrationMaxRunes caps the narration text, ellipsis included.
-const narrationMaxRunes = 120
-
-// trimNarration returns the first sentence of the first line of text with
-// visible content, capped at narrationMaxRunes, with control and escape
-// sequences stripped (the text is agent-controlled). It sanitizes before
-// cutting the sentence so a "." inside a CSI or OSC sequence cannot end it. It
-// does not filter by source; the caller decides whether to emit subagent text
-// (parent_tool_use_id != "").
-func trimNarration(text string) string {
-	for _, line := range strings.FieldsFunc(text, func(r rune) bool { return r == '\r' || r == '\n' }) {
-		line = sanitizeLine(line)
-		if i := strings.IndexAny(line, ".!?"); i >= 0 {
-			line = line[:i+1]
-		}
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		if r := []rune(line); len(r) > narrationMaxRunes {
-			line = strings.TrimRightFunc(string(r[:narrationMaxRunes-3]), unicode.IsSpace) + "..."
-		}
-		return line
-	}
-	return ""
 }
 
 // toolToPhase maps a tool name and its input to the current work phase. It is
