@@ -629,3 +629,29 @@ func TestBuildBoxEnvForwardsResearchVerdictsJSONVerbatim(t *testing.T) {
 		t.Errorf("RESEARCH_VERDICTS: got %q, want %q", env["RESEARCH_VERDICTS"], verdicts)
 	}
 }
+
+// A pure-forgejo pairing frees the Box from GH_TOKEN (issue #3325); the var is
+// a positive opt-out so an absent value stays fail-closed.
+func TestBuildBoxEnvForwardsGHTokenOptional(t *testing.T) {
+	cases := []struct {
+		name           string
+		forge, tracker backend.Descriptor
+		want           bool
+	}{
+		{"forgejo/forgejo", backend.Forgejo, backend.Forgejo, true},
+		{"github/github", backend.GitHub, backend.GitHub, false},
+		{"forgejo tracker, github forge", backend.GitHub, backend.Forgejo, false},
+		{"github tracker, forgejo forge", backend.Forgejo, backend.GitHub, false},
+		{"zero descriptors", backend.Descriptor{}, backend.Descriptor{}, false},
+	}
+	for _, c := range cases {
+		env := mustBuildBoxEnv(t, Config{ForgeDescriptor: c.forge, TrackerDescriptor: c.tracker}, "3", "T", 0, "", "")
+		got, ok := env["BOX_GH_TOKEN_OPTIONAL"]
+		if c.want && got != "1" {
+			t.Errorf("%s: BOX_GH_TOKEN_OPTIONAL = %q, want %q", c.name, got, "1")
+		}
+		if !c.want && ok {
+			t.Errorf("%s: BOX_GH_TOKEN_OPTIONAL should be absent, got %q", c.name, got)
+		}
+	}
+}

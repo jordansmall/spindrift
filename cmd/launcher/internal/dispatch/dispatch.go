@@ -332,6 +332,10 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if forgeHostMediatedRemote && trackerInBoxUnreachable {
 		env["BOX_FULLY_LOCAL"] = "1"
 	}
+	// Fail-closed opt-out: absent means the Box requires GH_TOKEN (issue #3325).
+	if !backend.NeedsGHToken(cfg.ForgeDescriptor.TokenEnvVar, cfg.TrackerDescriptor.TokenEnvVar) {
+		env["BOX_GH_TOKEN_OPTIONAL"] = "1"
+	}
 	if trackerInBoxUnreachable {
 		env["BOX_IN_BOX_UNREACHABLE_TRACKER"] = "1"
 	}
