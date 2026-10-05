@@ -10,6 +10,11 @@ import (
 // output reaches the rendered transcript pane verbatim (#721) and Bubble Tea
 // does not filter control sequences, so crafted escapes could move the cursor
 // or rewrite the terminal title. The raw path stays unsanitized (#721 AC2).
+//
+// It also strips the bidi embedding/override/isolate controls, the implicit
+// marks (LRM, RLM, ALM), and U+2028/U+2029, which can visually reorder or
+// re-flow a rendered line (#4403). The list is explicit rather than the Cf
+// category because ZWJ and ZWNJ are legitimate text.
 func SanitizeControlSequences(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -57,10 +62,23 @@ func SanitizeControlSequences(s string) string {
 			// reads U+FFFD as a CSI or C1 introducer, so that is not a strip
 			// bug (#1019).
 			i += size
+		case isBidiOrLineSeparator(r):
+			i += size
 		default:
 			b.WriteRune(r)
 			i += size
 		}
 	}
 	return b.String()
+}
+
+// isBidiOrLineSeparator reports the bidi controls, implicit marks, and
+// line/paragraph separators SanitizeControlSequences strips. The heartbeat's
+// near-copy sanitizeLine in driver/claude has the same gap (#4396); fixing it
+// should move this set into a package both can import, not hand-copy it.
+func isBidiOrLineSeparator(r rune) bool {
+	return (r >= 0x202a && r <= 0x202e) || // LRE..RLO
+		(r >= 0x2066 && r <= 0x2069) || // LRI..PDI
+		r == 0x200e || r == 0x200f || r == 0x061c || // LRM, RLM, ALM
+		r == 0x2028 || r == 0x2029 // LS, PS
 }
