@@ -39,6 +39,12 @@ type Result struct {
 	// prompt in AgentsJSON. It is the per-cell coverage record the
 	// prompt-assembly golden suite pins (issue #3838).
 	Fragments []string
+
+	// removedVarErr is the first removed fragment variable Assemble found in
+	// an operator-authored segment of a rendered prompt; Validate reports it.
+	// Deferred rather than returned so it surfaces as a *ValidateError via
+	// WriteAssembly (printed bare as operator prose); skipping Validate drops it.
+	removedVarErr error
 }
 
 // ArgvShape describes how the CLI wrapper assembles the Driver's argv: which
@@ -281,7 +287,7 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	if err != nil {
 		return promptBodies{}, err
 	}
-	vars["CHORE_PROMPT"] = varBody("CHORE_PROMPT", chorePrompt)
+	vars[chorePromptVar] = varBody(chorePromptVar, chorePrompt)
 
 	scalars["CHORE_NAME"] = e.ChoreName
 	scalars["CHORE_HEAD"] = e.ChoreHead
@@ -478,6 +484,10 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	addFragmentNames(frags, bodies.base)
 	addFragmentNames(frags, bodies.review)
 
+	var removed removedVarScan
+	removed.check("prompt", bodies.base)
+	removed.check("review prompt", bodies.review)
+
 	result := Result{
 		Prompt: bodies.base.text(),
 		Handoff: Handoff{
@@ -528,7 +538,7 @@ func Assemble(e Env, reg Registry) (Result, error) {
 		}
 		agentsTemplate = string(strippedJSON)
 
-		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, bodies.vars, frags, bodies.kind.Prompts.Reviewer)
+		agentsJSON, err := renderAgentsJSON(e, agentsTemplate, bodies.vars, frags, &removed, bodies.kind.Prompts.Reviewer)
 		if err != nil {
 			return Result{}, err
 		}
@@ -541,12 +551,13 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// model overwrites whatever the JSON path set in ReviewModel, and a
 	// missing reviewer.md leaves the JSON-path value unchanged.
 	if e.DriverAgentFilesDir != "" {
-		if err := rewriteAgentFiles(e, bodies.vars, &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
+		if err := rewriteAgentFiles(e, bodies.vars, &removed, &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
 		}
 	}
 
 	result.Fragments = slices.Sorted(maps.Keys(frags))
+	result.removedVarErr = removed.err
 
 	// Dispatch-time overrides (issue #3171) bind last, over both extraction
 	// paths above: dispatch env beats a baked roster entry beats the
@@ -633,7 +644,8 @@ func addFragmentNames(set map[string]struct{}, b body) {
 // reviewerPrompt is the dispatch kind's own
 // reviewer prompt filename, or "" when it has none. Every fragment that
 // reaches a rendered agent prompt is added to frags.
-func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string]struct{}, reviewerPrompt string) (string, error) {
+func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags map[string]struct{},
+	removed *removedVarScan, reviewerPrompt string) (string, error) {
 	var template map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(agentsTemplate), &template); err != nil {
 		return "", fmt.Errorf("parse agents json template: %w", err)
@@ -647,7 +659,8 @@ func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags 
 	}
 	promptFiles = reviewerPromptOverride(reviewerPrompt, promptFiles)
 
-	for name := range template {
+	// Sorted so the first removed-var hit is deterministic.
+	for _, name := range slices.Sorted(maps.Keys(template)) {
 		promptFile := promptFiles[name]
 		if promptFile == "" {
 			continue
@@ -661,6 +674,7 @@ func renderAgentsJSON(e Env, agentsTemplate string, vars map[string]body, frags 
 			return "", fmt.Errorf("read agent prompt file %s: %w", promptFile, err)
 		}
 		addFragmentNames(frags, renderedBody)
+		removed.check(fmt.Sprintf("agent %q prompt", name), renderedBody)
 		rendered := renderedBody.text()
 
 		var entry map[string]json.RawMessage
@@ -731,7 +745,7 @@ func reviewerModelFrontmatter(frontmatter string) string {
 // room for — the rewrite loop below then rewrites it from that kind's prompt
 // like any other agent file. Names are rewritten in sorted order, so Go map
 // order cannot vary results.
-func rewriteAgentFiles(e Env, vars map[string]body, reviewModel *string, reviewerPrompt string) error {
+func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, reviewModel *string, reviewerPrompt string) error {
 	if reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
 		if data, err := os.ReadFile(reviewerPath); err == nil {
@@ -776,6 +790,7 @@ func rewriteAgentFiles(e Env, vars map[string]body, reviewModel *string, reviewe
 			}
 			return fmt.Errorf("read agent prompt file %s: %w", promptFiles[name], err)
 		}
+		removed.check(fmt.Sprintf("agent %q prompt", name), renderedBody)
 		// Unlike renderAgentsJSON, no addFragmentNames: no golden pins opencode
 		// agent files, so recording these would claim coverage no golden backs.
 		rendered := renderedBody.text()

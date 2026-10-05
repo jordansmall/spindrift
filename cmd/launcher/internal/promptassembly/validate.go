@@ -84,7 +84,14 @@ func LoadValidateMarkersFile(path string) ([]ValidateMarkerRow, error) {
 // succeeds agent/entrypoint.sh's _validate_prompt_contract; issues #2249 and
 // #2356). It reads gates from one Gates(e) call so it cannot drift from the
 // gating Assemble used, and dispatches on row data rather than id (#2318).
+// It first reports a removed fragment variable's literal ${NAME} that Assemble
+// found in operator-authored prompt text (see removedFragmentVars). Assemble
+// defers that error to here so it is a *ValidateError; a caller that skips
+// Validate never sees it.
 func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string, err error) {
+	if result.removedVarErr != nil {
+		return nil, result.removedVarErr
+	}
 	gates := Gates(e)
 	d := e.descriptor()
 	// SIGNAL_CARRIER_SOCKET picks the verb (SocketMarker) over the marker for
