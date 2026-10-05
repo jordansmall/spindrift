@@ -368,18 +368,17 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
 // never be read from two different instants the way a separate
 // siblingsEngaged call followed by a separate markNoWork call used to
 // allow. "none-dispatchable" carries a second axis exit 2 doesn't: whether
-// a sibling could release a claim. With a sibling genuinely running (or
-// sleeping out a failure backoff), the issues this slot found "none
-// dispatchable" were claimed or overlap-deferred against that very
-// sibling — routine, reported like any other idle wait. With every sibling
-// idle, resolving (no claim held yet), parked on the shut Awake window, or
-// running only a butler child (see siblingsEngaged), nothing that could
+// a sibling could release a claim. With a sibling genuinely running, the
+// issues this slot found "none dispatchable" were claimed or
+// overlap-deferred against that very sibling — routine, reported like any
+// other idle wait. With every sibling idle, resolving (no claim held yet),
+// backing off (its child already exited), parked on the shut Awake window,
+// or running only a butler child (see siblingsEngaged), nothing that could
 // unblock it is running or can start: a jam an operator may need to
 // clear. The jam alarm's predicate below is deliberately not the same as
 // jammed itself: jammed records the queue condition this check saw (see
 // kindBackoff.markNoWork), while the alarm only fires when no sibling is
-// doing anything a child or a backoff sleep counts as (issue #3571,
-// #3735).
+// running a child that counts (issue #3571, #3735, #4205).
 func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
@@ -512,13 +511,17 @@ func (s *state) working() bool {
 
 // siblingsEngaged reports whether any slot other than slot could release a
 // claim the none-dispatchable read found blocked (#3922's can-it-explain-
-// the-read test): a sibling PhaseRunning a non-butler child, or one in
-// PhaseBackingOff. Every other phase, resolving included, holds no claim
-// (the claim is taken inside the child), and a new phase defaults to not
-// engaged. PhaseBackingOff is carried over from #3571 rather than derived
-// from #3922's test: a failed child's claim can outlive the backoff into
-// the slot's next resolve, which does not count, so whether backing off
-// should count at all is still open.
+// the-read test): a sibling PhaseRunning a non-butler child. Every other
+// phase, resolving included, holds nothing it could release (the claim is
+// taken inside the child), and a new phase defaults to not engaged.
+//
+// PhaseBackingOff is one of those (#4205): every backoffOrHalt entry leaves
+// nothing releasable. A ResolveTip failure never took a claim, and a
+// RunChild seam failure or Backoff outcome follows a child that already
+// exited, so any claim it took was either cleared (agent-failed, shutdown
+// abort) or orphaned as agent-in-progress until `spindrift recover`. The
+// overlap gate reads tracker labels, not slot phase, so the sleep releases
+// nothing.
 //
 // The butler skip ignores the reporting kind, which is safe only while the
 // butler never exits 3 (exitCodeFor maps 3 solely from
@@ -528,10 +531,7 @@ func (s *state) siblingsEngaged(slot int) bool {
 		if sl == slot {
 			continue
 		}
-		switch {
-		case ss.phase == PhaseBackingOff:
-			return true
-		case ss.phase == PhaseRunning && !ss.flight.kind.choreKeyed():
+		if ss.phase == PhaseRunning && !ss.flight.kind.choreKeyed() {
 			return true
 		}
 	}

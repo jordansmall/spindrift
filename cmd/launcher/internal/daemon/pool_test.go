@@ -520,12 +520,14 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	}
 }
 
-// TestPoolExit3RunningButlerSiblingIsNotEngaged pins which sibling phases
+// TestPoolExit3SiblingPhasesNotEngaged pins which sibling phases
 // do not suppress a jam: a sibling PhaseRunning a butler child never counts
 // as engaged, for any reporting kind, and a resolving sibling holds no claim
-// yet (issue #3735), so it reads like an idle one. A sibling backing off or
-// running a dispatch/research child still counts.
-func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
+// yet (issue #3735), so it reads like an idle one, and a backing-off sibling
+// holds no claim it could release either (issue #4205). Only a sibling
+// running a dispatch/research child counts. The kind's jammed flag is set
+// on every row: it records the queue condition, whatever the sibling does.
+func TestPoolExit3SiblingPhasesNotEngaged(t *testing.T) {
 	tests := []struct {
 		name          string
 		siblingPhase  Phase
@@ -537,7 +539,7 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 		{"running butler sibling, research reports", PhaseRunning, KindOf(dispatchkind.Butler), KindOf(dispatchkind.Research), true},
 		{"running research sibling, dispatch reports", PhaseRunning, KindOf(dispatchkind.Research), KindOf(dispatchkind.Work), false},
 		{"resolving sibling (no kind), dispatch reports", PhaseResolving, "", KindOf(dispatchkind.Work), true},
-		{"backing-off sibling (no kind), dispatch reports", PhaseBackingOff, "", KindOf(dispatchkind.Work), false},
+		{"backing-off sibling (no kind), dispatch reports", PhaseBackingOff, "", KindOf(dispatchkind.Work), true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -560,6 +562,9 @@ func TestPoolExit3RunningButlerSiblingIsNotEngaged(t *testing.T) {
 			gotJam := countEvents(eventNames(events), "jam") == 1
 			if gotJam != tt.wantJam {
 				t.Fatalf("events = %v, want jam=%v", eventNames(events), tt.wantJam)
+			}
+			if !p.st.kinds[tt.reportingKind].jammedNow() {
+				t.Fatalf("kind %v jammed = false, want true on every exit 3 regardless of sibling phase", tt.reportingKind)
 			}
 		})
 	}
@@ -768,10 +773,10 @@ func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 	}
 }
 
-// TestPoolExit3WithSiblingBackingOffReportsIdleNotJam pins that a sibling
-// asleep out a failure backoff still counts as engaged and suppresses the
-// jam alarm: the failed child's claim may still stand. Slot 0's first child
-// fails the RunChild seam itself (runErrAt/runErr), landing it in
+// TestPoolExit3WithSiblingBackingOffReportsJam pins that a sibling asleep
+// out a failure backoff does not suppress the jam alarm: every backoffOrHalt
+// entry leaves no claim the sibling could release (issue #4205). Slot 0's
+// first child fails the RunChild seam itself (runErrAt/runErr), landing it in
 // backoffOrHalt's parked Sleep; slot 1's own fetch is held at the onResolve
 // hook until that Sleep is confirmed entered (the sleepSignal below), so
 // slot 1's later exit-3 is guaranteed to land while slot 0 is genuinely
@@ -783,7 +788,7 @@ func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 // race for call 1/2, and runErrAt=1 (a global RunChild-call index, the same
 // convention as call) needs slot 0's own RunChild to land on index 1
 // deterministically too.
-func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
+func TestPoolExit3WithSiblingBackingOffReportsJam(t *testing.T) {
 	const slots = 2
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -837,7 +842,7 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 	<-clk.sleepSignal
 	close(backingOff)
 
-	nw.waitForLine(t, "\"event\":\"idle\"")
+	nw.waitForLine(t, "\"event\":\"jam\"")
 
 	cancel()
 	wg.Wait()
@@ -848,8 +853,11 @@ func TestPoolExit3WithSiblingBackingOffReportsIdleNotJam(t *testing.T) {
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	for _, ev := range events {
-		if ev.Event == "jam" {
-			t.Fatalf("events = %v, want no jam event: slot 0 was backing off when slot 1 exited none-dispatchable", eventNames(events))
+		if ev.Event != "jam" {
+			continue
+		}
+		if ev.Slot == nil || *ev.Slot != siblingSlot || ev.Kind != KindOf(dispatchkind.Work) {
+			t.Fatalf("jam event = %+v, want slot %d kind %q: slot %d was only backing off when slot %d exited none-dispatchable", ev, siblingSlot, KindOf(dispatchkind.Work), leadSlot, siblingSlot)
 		}
 	}
 }
