@@ -6,6 +6,7 @@
 package opencode
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 
@@ -14,26 +15,52 @@ import (
 )
 
 // transientExtras is opencode's complete ordered marker list, checked before
-// the shared driverkit.BaseTransientPatterns network suffix. opencode supplies
-// its own rather than passing none, to keep the bare "429"/"529" markers and
-// their precedence over "overloaded_error"/"Overloaded".
+// the shared driverkit.BaseTransientPatterns network suffix. The numeric status
+// markers are phrase-anchored so a digit run such as a token count or timestamp
+// does not match (issue #4423). opencode supplies its own list to keep 429
+// precedence over "overloaded_error"/"Overloaded".
 var transientExtras = []driverkit.Pattern{
 	{Substr: "rate_limit_error", Reason: driverkit.RateLimit},
-	{Substr: "429", Reason: driverkit.RateLimit},
+	{Substr: "status 429", Reason: driverkit.RateLimit},
+	{Substr: "status code 429", Reason: driverkit.RateLimit},
+	{Substr: "429 Too Many Requests", Reason: driverkit.RateLimit},
+	{Substr: `"statusCode":429`, Reason: driverkit.RateLimit},
 	{Substr: "overloaded_error", Reason: driverkit.Overloaded},
-	{Substr: "529", Reason: driverkit.Overloaded},
+	{Substr: "status 529", Reason: driverkit.Overloaded},
+	{Substr: "status code 529", Reason: driverkit.Overloaded},
+	{Substr: `"statusCode":529`, Reason: driverkit.Overloaded},
 	{Substr: "Overloaded", Reason: driverkit.Overloaded},
 }
 
+// event's Error is either a plain string (the form this package's fixtures
+// use) or a NamedError-style object such as
+// {"name":"APIError","data":{"statusCode":429,...}}.
 type event struct {
-	Type string `json:"type"`
+	Type  string          `json:"type"`
+	Error json.RawMessage `json:"error"`
+}
+
+// errorText returns the string payload unquoted, or any other payload in
+// compact JSON so a marker like `"statusCode":429` has no stray whitespace. A
+// missing or invalid payload yields "", which matches no marker.
+func errorText(raw json.RawMessage) string {
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		return str
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, raw) != nil {
+		return ""
+	}
+	return buf.String()
 }
 
 // Classify scans the box log at logPath and reports whether the failure is
-// transient (retryable) or terminal. Only type:"error" lines are scanned, so a
-// marker quoted in the agent's own type:"text" prose is not attributed as the
-// cause. A log with no error event, or whose error text carries no known
-// marker, classifies as Terminal/TaskFailed, as does a missing log file.
+// transient (retryable) or terminal. Only the error payload of type:"error"
+// lines is scanned, so a marker quoted in the agent's own type:"text" prose is
+// not attributed as the cause. A log with no error event, or whose error text
+// carries no known marker, classifies as Terminal/TaskFailed, as does a missing
+// log file.
 func Classify(logPath string) (driverkit.Classification, error) {
 	cl, found, err := driverkit.ClassifyScan(logPath, logscan.SkipOversized, func(chunk string) driverkit.ScanDecision {
 		s := strings.TrimSpace(chunk)
@@ -47,7 +74,7 @@ func Classify(logPath string) (driverkit.Classification, error) {
 		if ev.Type != "error" {
 			return driverkit.ScanDecision{Skip: true}
 		}
-		return driverkit.ScanDecision{Text: s, Overwrite: true}
+		return driverkit.ScanDecision{Text: errorText(ev.Error), Overwrite: true}
 	}, transientExtras, nil)
 	if err != nil {
 		return driverkit.Classification{}, err
