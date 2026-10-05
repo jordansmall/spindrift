@@ -1,9 +1,13 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // Slice 1 of issue #2267 is purely additive: nothing calls backendRows yet, so
@@ -200,6 +204,42 @@ func TestBackendRowsCoverRegistry(t *testing.T) {
 	for _, row := range backendRows {
 		if _, ok := backend.ByName(row.Name); !ok {
 			t.Errorf("backend.ByName(%q) ok=false, want true (backendRows row missing from backend.Registry)", row.Name)
+		}
+	}
+}
+
+// JIRA_INCLUDE_COMMENTS is a deprecated no-op: the thread reaches the prompt
+// once, via CommentLister, whether or not it is set (issue #3747).
+func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/api/2/issue/PROJ-7":
+			w.Write([]byte(`{"key": "PROJ-7", "fields": {"summary": "s", "description": "desc", "status": {"name": "To Do"}, "labels": []}}`))
+		case "/rest/api/2/issue/PROJ-7/comment":
+			w.Write([]byte(`{"comments": [{"body": "INJECTED"}]}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	row, ok := backendByName("jira")
+	if !ok {
+		t.Fatal("backendByName(\"jira\") ok=false")
+	}
+	for _, include := range []bool{false, true} {
+		c := config{schemaConfig: schemaConfig{
+			jiraBaseURL:         srv.URL,
+			jiraProjectKey:      "PROJ",
+			jiraToken:           "tok",
+			jiraIncludeComments: include,
+		}}
+		text, err := forge.IssueText(row.newIssueTracker(c), "PROJ-7")
+		if err != nil {
+			t.Fatalf("include=%v: IssueText: %v", include, err)
+		}
+		if n := strings.Count(text, "INJECTED"); n != 1 {
+			t.Errorf("include=%v: %d occurrences of the comment, want 1:\n%s", include, n, text)
 		}
 	}
 }

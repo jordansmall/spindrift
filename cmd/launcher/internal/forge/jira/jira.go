@@ -35,9 +35,6 @@ type JiraConfig struct {
 	// label-fallback path as Labels; native status mapping for research
 	// verdicts is deferred (ADR 0022).
 	VerdictLabels forge.VerdictLabels
-	// IncludeComments appends the issue's comment thread to the Body returned
-	// by Issue. Opt-in to keep the prompt-injection risk small by default.
-	IncludeComments bool
 
 	// HTTPClient overrides the client used for Jira REST calls; nil uses
 	// http.DefaultClient.
@@ -224,29 +221,18 @@ type jiraCommentsPayload struct {
 	} `json:"comments"`
 }
 
-// Issue returns the Jira issue's summary, description, status, and labels, and
-// appends the comment thread to Body when IncludeComments is set.
+// Issue returns the Jira issue's summary, description, status, and labels. The
+// comment thread is not inlined into Body: Comments delivers it via forge.IssueText.
 func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	var payload jiraIssuePayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 		return forge.Issue{}, err
 	}
 
-	body := payload.Fields.Description
-	if j.cfg.IncludeComments {
-		var comments jiraCommentsPayload
-		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &comments); err != nil {
-			return forge.Issue{}, err
-		}
-		for _, c := range comments.Comments {
-			body = forge.AppendComment(body, c.Body)
-		}
-	}
-
 	return forge.Issue{
 		Number: payload.Key,
 		Title:  payload.Fields.Summary,
-		Body:   body,
+		Body:   payload.Fields.Description,
 		State:  issueState(payload),
 		Labels: payload.Fields.Labels,
 	}, nil
@@ -254,8 +240,7 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 
 // Comments implements forge.CommentLister, returning issue num's comments
 // oldest-first. Jira's comment endpoint emits them in creation order, which is
-// what forge.IssueText assumes when it windows to the last 10. Its output
-// overlaps the IncludeComments knob by design when both are enabled.
+// what forge.IssueText assumes when it windows to the last 10.
 func (j *jiraClient) Comments(num string) ([]forge.Comment, error) {
 	var payload jiraCommentsPayload
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num+"/comment", nil, &payload); err != nil {

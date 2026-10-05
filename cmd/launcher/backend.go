@@ -158,14 +158,13 @@ var backendRows = []backendRow{
 				statusMapping = map[forge.DispatchState]string{}
 			}
 			return jira.NewJiraClient(jira.JiraConfig{
-				BaseURL:         c.jiraBaseURL,
-				ProjectKey:      c.jiraProjectKey,
-				Email:           c.jiraEmail,
-				Token:           c.jiraToken,
-				StatusMapping:   statusMapping,
-				Labels:          dispatchLabels(c),
-				VerdictLabels:   researchVerdictLabels(c),
-				IncludeComments: c.jiraIncludeComments,
+				BaseURL:       c.jiraBaseURL,
+				ProjectKey:    c.jiraProjectKey,
+				Email:         c.jiraEmail,
+				Token:         c.jiraToken,
+				StatusMapping: statusMapping,
+				Labels:        dispatchLabels(c),
+				VerdictLabels: researchVerdictLabels(c),
 			})
 		},
 	},
