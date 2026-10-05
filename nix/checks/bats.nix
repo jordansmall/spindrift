@@ -159,10 +159,6 @@ in
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
-          ${../../tests/fakes/claude} \
-          ${../../tests/fakes/opencode} \
-          ${../../tests/fakes/_driver-common.bash} \
-          ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash}
         touch $out
       '';
