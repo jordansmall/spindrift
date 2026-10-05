@@ -1,7 +1,6 @@
 // Package rest is the shared JSON-over-HTTP client for forge adapters that
-// speak plain REST (forgejo today). It turns a non-2xx status into a sentinel
-// error an adapter configures once via StatusMap, so no call site branches on
-// raw status codes.
+// speak plain REST. It turns a non-2xx status into a sentinel error an adapter
+// configures once via StatusMap, so no call site branches on raw status codes.
 package rest
 
 import (
