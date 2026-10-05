@@ -39,7 +39,10 @@
 
 # relayCapable covers every host-mediation seam a CODE_FORGE needs under
 # BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay always, plus draft-PR
-# create and commit subjects when the backend has a PR concept.
+# create and commit subjects when the backend has a PR concept. Nix cannot
+# see the adapters, so cmd/launcher's
+# TestRelayCapableMatchesReadOnlyForgeInterfaces checks each row's bit against
+# the interfaces its read-only forge implements (issue #2628).
 # outboxRelayCapable is narrower: it covers only the outbox mount and relay
 # treatment (issues #1918, #2267, #2927).
 

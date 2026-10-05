@@ -59,6 +59,9 @@ type Descriptor struct {
 	// always, plus draft-PR-create and commit-subjects when the backend has a
 	// PR concept. True for github, forgejo, local; false for git. Wider than
 	// OutboxRelayCapable (#1918/#2267/#2927), which is the outbox mount alone.
+	// cmd/launcher's TestRelayCapableMatchesReadOnlyForgeInterfaces checks the
+	// bit against the interfaces each row's read-only forge implements
+	// (issue #2628).
 	RelayCapable bool
 
 	// HostPostingCapable is true for an ISSUE_TRACKER backend whose comments

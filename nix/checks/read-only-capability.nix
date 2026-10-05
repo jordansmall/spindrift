@@ -3,6 +3,9 @@
 # ISSUE_TRACKER matrix against lib/backends/default.nix's relayCapable and
 # hostPostingCapable rows. Each case goes through the real mkHarness.nix entry
 # point, so it exercises mkHarness's own assert chain and not a bare copy.
+# These cases trust the relayCapable bit; whether the bit matches the forge
+# adapter's real capabilities is checked Go-side, by cmd/launcher's
+# TestRelayCapableMatchesReadOnlyForgeInterfaces (issue #2628).
 {
   pkgs,
   nixpkgs,
