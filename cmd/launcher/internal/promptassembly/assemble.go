@@ -143,31 +143,54 @@ func checkCoveredCell(e Env) error {
 	return nil
 }
 
+const identPattern = `[A-Za-z_][A-Za-z0-9_]*`
+
 // substTokenRe matches the braced ${NAME} form envsubst recognizes. Every
 // template and fragment under templates/default/prompts references its
 // variables this way, never bare $NAME (verified against the tree, #2349).
-var substTokenRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+var substTokenRe = regexp.MustCompile(`\$\{(` + identPattern + `)\}`)
 
-// substitute replaces every ${NAME} that is a key of vars; anything else
-// passes through untouched. The single ReplaceAllStringFunc pass, rather than
-// sequential per-name replacement, keeps a substituted value that itself
-// contains ${NAME}-shaped text from being re-expanded.
-func substitute(text string, vars map[string]string) string {
-	return substTokenRe.ReplaceAllStringFunc(text, func(tok string) string {
-		name := tok[2 : len(tok)-1]
-		if v, ok := vars[name]; ok {
+// bareTokenRe matches the braced form or a bare $NAME, which takes the whole
+// identifier: $BRANCHX is the name BRANCHX, not BRANCH followed by X.
+var bareTokenRe = regexp.MustCompile(`\$(?:\{(` + identPattern + `)\}|(` + identPattern + `))`)
+
+// substituteWith replaces every token re matches whose name is a key of vars;
+// anything else passes through untouched. The single ReplaceAllStringFunc
+// pass, rather than sequential per-name replacement, keeps a substituted value
+// that itself contains $NAME-shaped text from being re-expanded.
+func substituteWith(re *regexp.Regexp, text string, vars map[string]string) string {
+	return re.ReplaceAllStringFunc(text, func(tok string) string {
+		if v, ok := vars[tokenName(tok)]; ok {
 			return v
 		}
 		return tok
 	})
 }
 
-// RenderText substitutes every ${NAME} token in text through vars and trims
-// trailing newlines, the same treatment renderFileSegments gives an on-disk file.
-// Exported so a caller that needs only this substitution, not the rest of
-// Assemble's pipeline, does not hand-roll its own strings.ReplaceAll pass.
-func RenderText(text string, vars map[string]string) string {
-	return strings.TrimRight(substitute(text, vars), "\n")
+// tokenName returns the NAME in a $NAME or ${NAME} token.
+func tokenName(tok string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(tok[1:], "{"), "}")
+}
+
+// substitute replaces every braced ${NAME} that is a key of vars.
+func substitute(text string, vars map[string]string) string {
+	return substituteWith(substTokenRe, text, vars)
+}
+
+// RenderText substitutes the ${NAME} tokens in text through vars and trims
+// trailing newlines, the same treatment renderFileSegments gives an on-disk
+// file. With bare, a bare $NAME is substituted too (GNU envsubst parity). Bare
+// mode exists only for conflict-resolve-prompt.md Consumer PROMPTS_DIR
+// overrides, which use a bare $BASE_BRANCH; the main assembly path stays
+// braces-only because the default prompts carry literal shell text such as
+// `echo $CODE_FORGE`, which bare mode would rewrite once its name became a
+// substitution var.
+func RenderText(text string, vars map[string]string, bare bool) string {
+	re := substTokenRe
+	if bare {
+		re = bareTokenRe
+	}
+	return strings.TrimRight(substituteWith(re, text, vars), "\n")
 }
 
 // injectSharedBlockSegments appends the rendered contract file to prompt,

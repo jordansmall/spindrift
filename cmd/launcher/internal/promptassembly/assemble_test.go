@@ -354,17 +354,57 @@ func TestAssemblePromptHasNoTrailingNewline(t *testing.T) {
 	}
 }
 
-// RenderText is exported for an issue #2060 review finding: the
-// orchestrator's cherry-pick conflict-resolve guidance reuses this ${NAME}
-// substitution at runtime instead of its own strings.ReplaceAll pass.
+// Each row runs through both modes: braced-only (the main assembly path) must
+// leave every bare $NAME alone, bare mode (conflict-resolve overrides) must
+// also take the whole greedy identifier like GNU envsubst.
 func TestRenderText(t *testing.T) {
-	got := RenderText("A ${FOO} and a ${BAR}, but not ${BAZ}.\n\n", map[string]string{
-		"FOO": "one",
-		"BAR": "two",
-	})
-	want := "A one and a two, but not ${BAZ}."
-	if got != want {
-		t.Errorf("RenderText() = %q, want %q", got, want)
+	vars := map[string]string{
+		"NAME":  "v",
+		"OTHER": "o",
+		"LEAK":  "${OTHER} $OTHER",
+	}
+	cases := []struct {
+		name, in, braced, bare string
+	}{
+		{"braced token", "${NAME}", "v", "v"},
+		{"bare token", "$NAME", "$NAME", "v"},
+		{"bare takes whole identifier", "$NAMEX", "$NAMEX", "$NAMEX"},
+		{"braced delimits identifier", "${NAME}X", "vX", "vX"},
+		{"bare then punctuation", "$NAME.x", "$NAME.x", "v.x"},
+		{"unlisted braced", "${NOPE}", "${NOPE}", "${NOPE}"},
+		{"unlisted bare", "$NOPE", "$NOPE", "$NOPE"},
+		{"double dollar", "$$", "$$", "$$"},
+		{"double dollar before name", "$$NAME", "$$NAME", "$v"},
+		{"empty braces", "${}", "${}", "${}"},
+		{"default-value form", "${NAME:-x}", "${NAME:-x}", "${NAME:-x}"},
+		{"value not re-expanded braced", "${LEAK}", "${OTHER} $OTHER", "${OTHER} $OTHER"},
+		{"value not re-expanded bare", "$LEAK", "$LEAK", "${OTHER} $OTHER"},
+		{"trailing newlines trimmed", "A ${NAME} and ${NOPE}.\n\n", "A v and ${NOPE}.", "A v and ${NOPE}."},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			if got := RenderText(tc.in, vars, false); got != tc.braced {
+				t.Errorf("RenderText(%q, bare=false) = %q, want %q", tc.in, got, tc.braced)
+			}
+			if got := RenderText(tc.in, vars, true); got != tc.bare {
+				t.Errorf("RenderText(%q, bare=true) = %q, want %q", tc.in, got, tc.bare)
+			}
+		})
+	}
+}
+
+// Default prompts carry literal shell text such as `echo $CODE_FORGE` that the
+// agent must read verbatim; it has to survive assembly untouched.
+func TestAssembleKeepsBareShellVariablesLiteral(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	result, err := Assemble(coveredEnv(), reg)
+	if err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, "echo $CODE_FORGE") {
+		t.Errorf("Prompt lost the literal %q", "echo $CODE_FORGE")
 	}
 }
 
