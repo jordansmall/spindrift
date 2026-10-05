@@ -4,7 +4,9 @@
 package main
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"runtime"
 	"strings"
@@ -46,7 +48,7 @@ func TestCmdRecover_SignalledStop_NoFailedLabel(t *testing.T) {
 		cleanup:      func() { cleaned = true },
 	}
 
-	got := cmdRecover(lc, "42")
+	got := cmdRecover(lc, "42", io.Discard, io.Discard)
 
 	if got != exitSignalledStop {
 		t.Errorf("cmdRecover(lc, \"42\") = %d, want %d (exitSignalledStop)", got, exitSignalledStop)
@@ -92,7 +94,7 @@ func TestCmdRecover_SignalledAbort_NoFailedLabel(t *testing.T) {
 		cleanup:      func() { cleaned = true },
 	}
 
-	got := cmdRecover(lc, "42")
+	got := cmdRecover(lc, "42", io.Discard, io.Discard)
 
 	if got != exitSignalledStop {
 		t.Errorf("cmdRecover(lc, \"42\") = %d, want %d (exitSignalledStop)", got, exitSignalledStop)
@@ -162,7 +164,7 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 	rf := &killHook{Fake: runner.NewFake(), killed: killSignal}
 	s := &abortDuringSettle{Fake: settle.NewFake(), abortCh: abortCh, killSignal: killSignal}
 
-	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42")
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -225,7 +227,7 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 	runtime.GC()
 	baseline := runtime.NumGoroutine()
 
-	if err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), settle.NewFake(), "42"); err == nil {
+	if err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), settle.NewFake(), "42", io.Discard, io.Discard); err == nil {
 		t.Fatal("recoverByNumber: want error for a missing issue, got nil")
 	}
 
@@ -284,7 +286,7 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 	dir := tempLogDir(t)
 	s := &abortAfterSettleAdopted{Fake: settle.NewFake(), fc: fc, num: "42", abortCh: abortCh}
 
-	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42")
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
 
 	if !errors.Is(err, waves.ErrSignalledStop) {
 		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
@@ -339,10 +341,9 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 	}
 
 	s := settle.NewFake()
-	var recErr error
-	out := captureStdout(t, func() {
-		recErr = recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42")
-	})
+	var stdout bytes.Buffer
+	recErr := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42", &stdout, io.Discard)
+	out := stdout.String()
 
 	if recErr != nil {
 		t.Fatalf("recoverByNumber: got %v, want nil (skip, not an error)", recErr)
@@ -386,10 +387,9 @@ func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	defer release()
 
 	s := settle.NewFake()
-	var recErr error
-	out := captureStdout(t, func() {
-		recErr = recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42")
-	})
+	var stdout bytes.Buffer
+	recErr := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), s, "42", &stdout, io.Discard)
+	out := stdout.String()
 
 	if recErr != nil {
 		t.Fatalf("recoverByNumber: got %v, want nil (skip, not an error)", recErr)
