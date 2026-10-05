@@ -78,6 +78,14 @@ const (
 	EnabledByChores                       // drawn only while BUTLER_CHORES enables at least one Chore; the daemon resolves that, since this leaf package cannot import chore
 )
 
+// DemandSource is how the daemon learns whether a kind has work waiting.
+type DemandSource int
+
+const (
+	DemandTrackerProbe  DemandSource = iota + 1 // the host asks the kind's tracker (forge.DemandCounter), when the adapter has one
+	DemandChildReported                         // only a child run knows (butler: its work is Ledger Chores, not tracker issues)
+)
+
 // Prompts names the kind's prompt templates. A zero value means "defer to
 // work's selection" for Base, and "no self-contained sub-mode" for
 // SelfContainedBase.
@@ -102,6 +110,7 @@ type Descriptor struct {
 	AdviseOnly     bool // read-only posture: never lands code (no branch/PR/merge); ignores blockers
 	ReadOnlyBox    bool // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
+	DemandSource   DemandSource
 	FindingLabel   string         // provenance label settle applies to a filed finding
 	PatchLabel     string         // provenance label joining FindingLabel on a finding the host lands as a patch PR (ADR 0057); butler-only
 	Contract       PromptContract // which shared contract block prompt assembly injects
@@ -121,6 +130,7 @@ var (
 		Settle:         SettleMerge,
 		DaemonPriority: PriorityNormal,
 		Enablement:     EnabledAlways,
+		DemandSource:   DemandTrackerProbe,
 		FindingLabel:   "agent-review-finding",
 		Contract:       ContractLanding,
 		FilerRelayGate: "FILER_FILE_RELAY_WORK",
@@ -140,6 +150,7 @@ var (
 		AdviseOnly:     true,
 		DaemonPriority: PriorityReserved,
 		Enablement:     EnabledAlways,
+		DemandSource:   DemandTrackerProbe,
 		FindingLabel:   "agent-research-finding",
 		Contract:       ContractVerdict,
 		FilerRelayGate: "FILER_FILE_RELAY_RESEARCH",
@@ -168,6 +179,7 @@ var (
 		ReadOnlyBox:    true, // issue #3906
 		DaemonPriority: PriorityIdle,
 		Enablement:     EnabledByChores,
+		DemandSource:   DemandChildReported,
 		FindingLabel:   "agent-butler-finding",
 		PatchLabel:     "agent-butler-patch",
 		Contract:       ContractInline,
