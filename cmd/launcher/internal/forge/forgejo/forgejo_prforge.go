@@ -52,9 +52,10 @@ func parsePRIndex(prURL string) (string, error) {
 const forgejoWIPPrefix = "WIP:"
 
 // forgejoWIPPrefixes are the markers the read side accepts, matching Forgejo's
-// default setting.Repository.PullRequest.WorkInProgressPrefixes. An instance
-// may write a draft title with either convention, so both must be recognized.
-var forgejoWIPPrefixes = []string{forgejoWIPPrefix, "[WIP]:"}
+// default setting.Repository.PullRequest.WorkInProgressPrefixes ("WIP:" and
+// "[WIP]", plain case-insensitive prefix matches). An instance may write a
+// draft title with either convention, so both must be recognized.
+var forgejoWIPPrefixes = []string{forgejoWIPPrefix, "[WIP]"}
 
 // isDraftTitle reports whether title carries a WIP-prefix draft marker,
 // case-insensitively. Forgejo can encode draft state in the title alone.
@@ -68,14 +69,15 @@ func isDraftTitle(title string) bool {
 	return false
 }
 
-// stripWIPPrefix removes a leading, case-insensitive WIP marker and the spaces
-// after it, returning an unrecognized title unchanged.
+// stripWIPPrefix removes a leading, case-insensitive WIP marker and any colons
+// and spaces after it (so "[WIP]: x" and "[WIP] x" both yield "x"), returning
+// an unrecognized title unchanged.
 func stripWIPPrefix(title string) string {
 	trimmed := strings.TrimSpace(title)
 	upper := strings.ToUpper(trimmed)
 	for _, prefix := range forgejoWIPPrefixes {
 		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
-			return strings.TrimLeft(trimmed[len(prefix):], " ")
+			return strings.TrimLeft(trimmed[len(prefix):], ": ")
 		}
 	}
 	return title

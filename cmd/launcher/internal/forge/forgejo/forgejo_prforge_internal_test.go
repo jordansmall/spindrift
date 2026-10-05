@@ -24,12 +24,15 @@ func TestParsePRIndex_RejectsNonNumeric(t *testing.T) {
 	}
 }
 
-// Forgejo ships two default WIP prefixes, so both cases must stay in the table.
+// Forgejo's defaults are "WIP:" and "[WIP]" (no colon); "[WIP]:" is the bracket
+// form followed by a colon, which a title may also carry.
 func TestIsDraftTitle_RecognizesBothWIPPrefixes(t *testing.T) {
 	tests := []struct {
 		title string
 		want  bool
 	}{
+		{"[WIP] add feature", true},
+		{"[wip] add feature", true},
 		{"[WIP]: add feature", true},
 		{"[wip]: add feature", true},
 		{"WIP: add feature", true},
@@ -42,10 +45,17 @@ func TestIsDraftTitle_RecognizesBothWIPPrefixes(t *testing.T) {
 	}
 }
 
-func TestStripWIPPrefix_StripsBracketedPrefix(t *testing.T) {
-	got := stripWIPPrefix("[WIP]: add feature")
-	if got != "add feature" {
-		t.Fatalf("stripWIPPrefix(...) = %q, want %q", got, "add feature")
+func TestStripWIPPrefix_StripsEveryRecognizedPrefix(t *testing.T) {
+	for _, title := range []string{
+		"[WIP] add feature",
+		"[wip] add feature",
+		"[WIP]: add feature",
+		"WIP: add feature",
+		"[WIP] : add feature",
+	} {
+		if got := stripWIPPrefix(title); got != "add feature" {
+			t.Errorf("stripWIPPrefix(%q) = %q, want %q", title, got, "add feature")
+		}
 	}
 }
 
