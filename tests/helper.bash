@@ -1,12 +1,11 @@
 # Shared bats helpers. Sourced by every *.bats file.
 #
 # The nix bats check derivations export the paths these helpers depend on:
-# FAKES_DIR, SPINDRIFT_CMD, ENTRYPOINT, PROMPTS_DIR, and
-# SPINDRIFT_SEAM_FIXTURES_DIR (the rendered contracts and preambles).
+# FAKES_DIR and SPINDRIFT_SEAM_FIXTURES_DIR (the rendered contracts and
+# preambles).
 
 # The fixtures dir holds the same bytes the Go seam tests read. Each per-file
-# var only defaults from it, so an explicit export still wins, e.g. a
-# non-claude Driver's own DRIVER_PREAMBLE_FILE.
+# var only defaults from it, so an explicit export still wins.
 if [ -n "${SPINDRIFT_SEAM_FIXTURES_DIR:-}" ]; then
   : "${OUTCOME_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/outcome-contract.md}"
   : "${COMMS_CONTRACT_FILE:=$SPINDRIFT_SEAM_FIXTURES_DIR/comms-contract.md}"
@@ -80,84 +79,6 @@ setup_fakes() {
   : >"$GH_LOG"
   : >"$DRIVER_LOG"
   : >"$ORCHESTRATOR_LOG"
-
-  # Defaulted from SPINDRIFT_SEAM_FIXTURES_DIR at the top of this file
-  # (box reads it, issue #420); a bare bats run has none, so fall
-  # back to a fixture.
-  # A test exercising the injection overrides it. Spec #2244's registry slice
-  # also touches this fallback, so check for conflicts.
-  : "${OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/outcome-contract.md}"
-  export OUTCOME_CONTRACT_FILE
-  if [ ! -s "$OUTCOME_CONTRACT_FILE" ]; then
-    printf '# LAND THE CHANGE\n\ncanonical outcome contract fixture\n' >"$OUTCOME_CONTRACT_FILE"
-  fi
-
-  # Same fallback, for the COMMS and CHECK blocks fix-prompt.md shares with
-  # issue-prompt.md (issue #455).
-  : "${COMMS_CONTRACT_FILE:=$BATS_TEST_TMPDIR/comms-contract.md}"
-  export COMMS_CONTRACT_FILE
-  if [ ! -s "$COMMS_CONTRACT_FILE" ]; then
-    printf '# COMMS\n\ncanonical comms contract fixture\n' >"$COMMS_CONTRACT_FILE"
-  fi
-  : "${CHECK_CONTRACT_FILE:=$BATS_TEST_TMPDIR/check-contract.md}"
-  export CHECK_CONTRACT_FILE
-  if [ ! -s "$CHECK_CONTRACT_FILE" ]; then
-    printf '# CHECK\n\ncanonical check contract fixture\n' >"$CHECK_CONTRACT_FILE"
-  fi
-
-  # Same fallback, for the CODE COMMENTS block fix-prompt.md shares with
-  # issue-prompt.md (issue #2880).
-  : "${CODE_COMMENTS_CONTRACT_FILE:=$BATS_TEST_TMPDIR/code-comments-contract.md}"
-  export CODE_COMMENTS_CONTRACT_FILE
-  if [ ! -s "$CODE_COMMENTS_CONTRACT_FILE" ]; then
-    printf '# CODE COMMENTS\n\ncanonical code comments contract fixture\n' >"$CODE_COMMENTS_CONTRACT_FILE"
-  fi
-
-  # Same fallback, for the research dispatch kind's outcome contract (issue #640).
-  : "${RESEARCH_OUTCOME_CONTRACT_FILE:=$BATS_TEST_TMPDIR/research-outcome-contract.md}"
-  export RESEARCH_OUTCOME_CONTRACT_FILE
-  if [ ! -s "$RESEARCH_OUTCOME_CONTRACT_FILE" ]; then
-    printf '# POST THE VERDICT\n\ncanonical research outcome contract fixture\n' >"$RESEARCH_OUTCOME_CONTRACT_FILE"
-  fi
-
-  # The pre-wrap entrypoint path, saved before ENTRYPOINT is reassigned below,
-  # so a test needing its own wrapped variant (issue #622) can build one from
-  # the real source.
-  export ENTRYPOINT_SRC="$ENTRYPOINT"
-
-  # Prepend whichever of the Driver preamble (issues #624, #433) and the baked
-  # /agent/* path defaults (issue #2531) are set, each independently guarded,
-  # in lib/image.nix's own concatenation order so the suite sees the bytes the
-  # image bakes. Outside nix none are set, the entrypoint stays unwrapped, and
-  # tests fail by design.
-  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ] || [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
-    local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
-    {
-      if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
-        cat "$DRIVER_PREAMBLE_FILE"
-        # Re-root the baked absolute /home/agent skills dir under the shard's $HOME
-        # (batsBuilderSetup's $TMPDIR/home), which a bats sandbox can write to
-        # (issue #624). Stripping the prefix reuses the suffix the registry
-        # rendered. Written unexpanded so it resolves against $HOME at $_wrapped's
-        # runtime, not the one in effect here.
-        # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
-        echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
-        # Same re-rooting for DRIVER_SESSION_CACHE_DIR (issue #2843), guarded at
-        # $_wrapped's runtime because only some Drivers set it and an unguarded
-        # rewrite would leave it empty-but-set. This clobbers the var, so a test
-        # lands a trailing-slash variant via TEST_SESSION_CACHE_DIR_SUFFIX (#2845).
-        # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
-        echo 'if [ -n "${DRIVER_SESSION_CACHE_DIR:-}" ]; then DRIVER_SESSION_CACHE_DIR="$HOME/${DRIVER_SESSION_CACHE_DIR#/home/agent/}${TEST_SESSION_CACHE_DIR_SUFFIX:-}"; fi'
-      fi
-      if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
-        cat "$AGENT_PATHS_PREAMBLE_FILE"
-      fi
-      tail -n +2 "$ENTRYPOINT"
-    } >"$_wrapped"
-    chmod +x "$_wrapped"
-    ENTRYPOINT="$_wrapped"
-    export ENTRYPOINT
-  fi
 }
 
 # Minimal env so `dispatch`'s required-var guards pass.
