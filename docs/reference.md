@@ -1381,7 +1381,7 @@ exceptions.
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
 | `REPO_SLUG`               | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`; baked via `forge.repoSlug`) | target repo, `owner/repo` |
-| `GH_TOKEN`                | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`) | GitHub token for `gh` inside containers (secret; env only) |
+| `GH_TOKEN`                | — (required unless `CODE_FORGE` and `ISSUE_TRACKER` are both `local`, or `CODE_FORGE=forgejo` and `ISSUE_TRACKER` is not `github`) | GitHub token for `gh` inside containers (secret; env only) |
 | `GH_TOKEN_REFRESH_FILE`   | — (baked via `forge.ghTokenRefreshFile`) | path the launcher polls to keep `GH_TOKEN` current past an installation token's ~1h lifetime — see [GitHub App installation token](#github-app-installation-token-recommended) |
 | `CLAUDE_CODE_OAUTH_TOKEN` | — (one auth required)  | from `claude setup-token` (secret; env only) |
 | `ANTHROPIC_API_KEY`       | —                      | alternative to the OAuth token (secret; env only) |
@@ -2899,8 +2899,9 @@ generated `flake.nix`.
 - **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
   self-hosted Forgejo/Gitea instance just re-points it). `FORGEJO_TOKEN` is a
-  secret env var alongside `GH_TOKEN`, a Forgejo/Gitea API token used with
-  the Bearer/`token` auth scheme. Label pre-checks also resolve labels
+  secret env var, a Forgejo/Gitea API token used with the Bearer/`token`
+  auth scheme; `GH_TOKEN` is needed only when the other side of the pairing
+  is GitHub or the forge is tokenless. Label pre-checks also resolve labels
   defined on the repo's owning org, not just the repo itself, which needs
   the token's `read:organization` scope; without it, org-only labels go
   unseen and the launcher warns once per client.
