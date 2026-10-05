@@ -608,13 +608,13 @@ checkedMerge {
     pkgs.runCommand "backend-registry-explicit-empty-guard" { } "touch $out";
 
   # checkRow must reject a row that sets trackerAxisWrite or trackerAxisFiler
-  # without trackerAxisRead, since cmd/launcher's trackerAxisSignals drops both
-  # on such a row (issue #4183). The full-axes row proves the rejection keys on
-  # the missing read, so the negative cases are not vacuous. checkRow also
-  # rejects the converse, trackerAxisRead without trackerAxisWrite, since
-  # mkHarness.nix would default the omitted write to "GITHUB" while cmd/launcher
-  # reads it as-is (issue #2673); a synthetic row in local's shape, with an
-  # explicit "", is the control.
+  # without trackerAxisRead, since cmd/launcher's backend.TrackerAxisSignals
+  # drops both on such a row (issue #4183). The full-axes row proves the
+  # rejection keys on the missing read, so the negative cases are not vacuous.
+  # checkRow also rejects the converse, trackerAxisRead without
+  # trackerAxisWrite, since mkHarness.nix would default the omitted write to
+  # "GITHUB" while cmd/launcher reads it as-is (issue #2673); a synthetic row
+  # in local's shape, with an explicit "", is the control.
   backend-registry-axis-read-guard =
     let
       inherit (pkgs.lib) assertMsg;

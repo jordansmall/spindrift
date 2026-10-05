@@ -322,7 +322,8 @@ let
 
   # Threaded into the Launcher input document's `run` artifacts as
   # TRACKER_AXIS_READ / TRACKER_AXIS_WRITE / TRACKER_AXIS_FILER /
-  # FORGE_BACKEND (issue #2533). cmd/launcher/main.go reads the same
+  # FORGE_BACKEND (issue #2533). cmd/launcher/internal/backend's
+  # TrackerAxisSignals/ForgeBackendSignal read the same
   # lib/backends/default.nix row fields, so neither side switches by hand.
   trackerAxisRead = issueTrackerRow.trackerAxisRead or "GITHUB";
   trackerAxisWrite = issueTrackerRow.trackerAxisWrite or "GITHUB";
