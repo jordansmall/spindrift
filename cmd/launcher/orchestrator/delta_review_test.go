@@ -112,11 +112,7 @@ func TestSeedDeltaReviewPromptIncludesTriggerAndDelta(t *testing.T) {
 
 	state := runstate.RunState{ReviewFindings: "VERDICT: APPROVE\n\n## Non-blocking\n- run.go:1 -- nit"}
 	delta := landdelta.Delta{Known: true, Files: 2, Insertions: 3, Deletions: 1, Paths: []string{"go.mod", "run.go"}}
-	trigger := deltareview.Trigger{
-		Fire:   true,
-		Reason: "land delta touches lines beyond the reviewer's findings: run.go:42",
-		Beyond: []string{"run.go:42"},
-	}
+	trigger := deltareview.BeyondTrigger([]string{"run.go:42"})
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
 	if err != nil {
@@ -158,7 +154,7 @@ func TestSeedDeltaReviewPromptFencesFindingsAndStatesTerminal(t *testing.T) {
 
 	state := runstate.RunState{ReviewFindings: "VERDICT: APPROVE\n\n## Non-blocking\n- none"}
 	delta := landdelta.Delta{Known: false, Reason: "could not resolve anchor"}
-	trigger := deltareview.Trigger{Fire: true, Reason: "land pass decisions record declares gate-discovered work"}
+	trigger := deltareview.Trigger{Fire: true, Reason: deltareview.GateWorkReason}
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
 	if err != nil {
@@ -192,7 +188,7 @@ func TestSeedDeltaReviewPromptOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
 
 	state := runstate.RunState{}
 	delta := landdelta.Delta{Known: true}
-	trigger := deltareview.Trigger{Fire: true, Reason: "land pass decisions record declares gate-discovered work"}
+	trigger := deltareview.Trigger{Fire: true, Reason: deltareview.GateWorkReason}
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
 	if err != nil {
