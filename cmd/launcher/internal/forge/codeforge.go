@@ -72,8 +72,8 @@ type LandingContainmentQuery interface {
 }
 
 // PRForge is the optional PR, CI-rollup, and auto-merge interface. Only adapters
-// that open pull requests and watch CI implement it (github); the push-only git
-// adapter does not. Callers discover it with a type assertion.
+// that open pull requests and watch CI implement it (github, forgejo); the
+// push-only git adapter does not. Callers discover it with a type assertion.
 type PRForge interface {
 	// OpenPRForBranch returns the open PR for branch, if any, draft or not
 	// (issue #2408): a stranded draft is exactly as adoptable as a ready PR.

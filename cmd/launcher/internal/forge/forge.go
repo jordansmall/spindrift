@@ -1,5 +1,6 @@
 // Package forge is the interface through which the Harness speaks to the
-// Target repo's host. GitHub is today's only adapter.
+// Target repo's host. Adapters live in subpackages: github, forgejo, git,
+// local, and jira.
 package forge
 
 import (
