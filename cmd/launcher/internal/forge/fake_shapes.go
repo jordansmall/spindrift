@@ -1,5 +1,7 @@
 package forge
 
+import "fmt"
+
 // issueFilerTracker adds HostPostedIssueFiler to a Fake (issue #2028, issue
 // #1964). It stays gated behind AsIssueFiler so a bare *Fake used as an
 // IssueTracker elsewhere never silently satisfies HostPostedIssueFiler too.
@@ -12,6 +14,12 @@ type issueFilerTracker struct {
 func (f *Fake) AsIssueFiler() IssueTracker { return issueFilerTracker{IssueTracker: f, f: f} }
 
 func (i issueFilerTracker) PostIssue(title, body string, labels []string) (string, error) {
+	if missing := i.f.missingLabels(labels); len(missing) > 0 {
+		i.f.mu.Lock()
+		i.f.PostIssueCalls = append(i.f.PostIssueCalls, PostIssueCall{Title: title, Body: body, Labels: labels})
+		i.f.mu.Unlock()
+		return "", fmt.Errorf("could not add label: %q not found", missing)
+	}
 	return i.f.postIssue(title, body, labels)
 }
 

@@ -23,27 +23,50 @@ type issueIntent struct {
 	Labels []string `json:"labels"`
 }
 
+// ensureLabel creates name from meta unless known already lists it, and
+// reports whether the label now exists. gh label create has no --force and
+// rejects an existing name, so a failed create is re-checked against a fresh
+// ListLabels before giving up. A label found or created is recorded in known,
+// so later intents in one filing pass skip the create.
+func ensureLabel(it forge.IssueTracker, name string, meta doctor.LabelMeta, known *[]string) bool {
+	if slices.Contains(*known, name) {
+		return true
+	}
+	if err := it.CreateLabel(name, meta.Description, meta.Color); err != nil {
+		if reListed, rerr := it.ListLabels(); rerr == nil && slices.Contains(reListed, name) {
+			*known = append(*known, name)
+			return true
+		}
+		fmt.Fprintf(os.Stderr, "    ?? create label %q failed: %v\n", name, err)
+		return false
+	}
+	*known = append(*known, name)
+	return true
+}
+
 // ensureTypeLabel ensure-creates typ's mapped label and returns the label to
 // add to the filed issue, or "" when typ is empty, unrecognized, or the create
-// failed. gh label create has no --force and rejects an existing name, so a
-// failed create is re-checked against a fresh ListLabels before giving up. The
-// mapping is the closed host-side doctor.FindingTypeLabels (#2594, ADR 0041).
-func ensureTypeLabel(it forge.IssueTracker, typ string, existing []string) string {
+// failed. The mapping is the closed host-side doctor.FindingTypeLabels (#2594,
+// ADR 0041).
+func ensureTypeLabel(it forge.IssueTracker, typ string, known *[]string) string {
 	meta, ok := doctor.FindingTypeLabels[typ]
-	if !ok {
-		return ""
-	}
-	if slices.Contains(existing, typ) {
-		return typ
-	}
-	if err := it.CreateLabel(typ, meta.Description, meta.Color); err != nil {
-		if reListed, rerr := it.ListLabels(); rerr == nil && slices.Contains(reListed, typ) {
-			return typ
-		}
-		fmt.Fprintf(os.Stderr, "    ?? create label %q failed: %v\n", typ, err)
+	if !ok || !ensureLabel(it, typ, meta, known) {
 		return ""
 	}
 	return typ
+}
+
+// ensureFilingLabel ensure-creates a label a host-filed issue carries (issue
+// #4400): GitHub's `gh issue create --label` fails outright on a missing
+// label, which would drop every finding. A label with no known metadata passes
+// through untouched. It never drops the label: the provenance label must stay
+// on the issue so closed-provenance dedup suppression holds, so a failed create
+// surfaces as PostIssue's own failure.
+func ensureFilingLabel(it forge.IssueTracker, name string, known *[]string) {
+	meta, ok := doctor.LabelMetaFor(name)
+	if ok {
+		ensureLabel(it, name, meta, known)
+	}
 }
 
 // maxConcurrenceLen bounds Concurrence in grapheme clusters, the
@@ -165,8 +188,8 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		return nil
 	}
 	// Hoisted out of the loop: N findings would otherwise cost N ListLabels
-	// round trips. A listErr is non-fatal: ensureTypeLabel falls back to its
-	// own create-then-recheck path.
+	// round trips. A listErr is non-fatal: ensureLabel falls back to its own
+	// create-then-recheck path.
 	existingLabels, listErr := it.ListLabels()
 	if listErr != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: list labels failed: %v\n", num, listErr)
@@ -236,9 +259,13 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 			marker = dedupMarkerPrefix + dedupMarkerSuffix
 		}
 		body = body + "\n\n" + marker
+		ensureFilingLabel(it, provenanceLabel, &existingLabels)
 		labels := []string{provenanceLabel}
-		if l := ensureTypeLabel(it, in.Type, existingLabels); l != "" {
+		if l := ensureTypeLabel(it, in.Type, &existingLabels); l != "" {
 			labels = append(labels, l)
+		}
+		for _, l := range extraLabels {
+			ensureFilingLabel(it, l, &existingLabels)
 		}
 		labels = append(labels, extraLabels...)
 		url, err := filer.PostIssue(in.Title, body, labels)
