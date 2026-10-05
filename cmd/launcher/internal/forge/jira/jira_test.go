@@ -270,6 +270,36 @@ func TestJiraClient_Comments_MapsAuthorCreatedAtBodyOldestFirst(t *testing.T) {
 	}
 }
 
+// Jira's comment payload carries no author standing, so an unknown
+// association must fail closed.
+func TestJiraClient_Comments_UnknownAssociationUntrusted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"comments": [
+			{"author": {"displayName": "Alice"}, "created": "2024-01-01T00:00:00.000+0000", "body": "first"}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
+	cl, ok := jc.(forge.CommentLister)
+	if !ok {
+		t.Fatal("jiraClient does not satisfy forge.CommentLister")
+	}
+	comments, err := cl.Comments("PROJ-9")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	if len(comments) == 0 {
+		t.Fatal("Comments returned no comments, want at least one")
+	}
+	for i, c := range comments {
+		if c.Association != "" || forge.CommentTrusted(c) {
+			t.Fatalf("comments[%d] = %+v, want empty Association and untrusted", i, c)
+		}
+	}
+}
+
 // The fixture carries a prose "#3" in the description, an outward link and an
 // unrelated link type on purpose: DepsOf must read only the native inward
 // "is blocked by" links and ignore the rest.
