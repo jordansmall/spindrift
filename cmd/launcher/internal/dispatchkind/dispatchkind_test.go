@@ -122,6 +122,9 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		if d.Tracker == 0 {
 			t.Fatalf("%s: Tracker unset", d.Name)
 		}
+		if d.DemandSource == 0 {
+			t.Fatalf("%s: DemandSource unset", d.Name)
+		}
 		if d.AnnounceVerb == "" {
 			t.Fatalf("%s: AnnounceVerb unset", d.Name)
 		}
@@ -181,6 +184,24 @@ func TestUnclaimedGateIsButlerOnly(t *testing.T) {
 	for _, d := range []*Descriptor{Work, Research} {
 		if d.UnclaimedGate {
 			t.Errorf("%s: UnclaimedGate = true, want false (unclaimed gate is butler-only)", d.Name)
+		}
+	}
+}
+
+// TestDemandSource pins which kinds the host can probe a tracker for: only
+// the issue-keyed kinds. The butler's work lives in the Ledger, so only its
+// child can say whether any is left.
+func TestDemandSource(t *testing.T) {
+	for _, tc := range []struct {
+		d    *Descriptor
+		want DemandSource
+	}{
+		{Work, DemandTrackerProbe},
+		{Research, DemandTrackerProbe},
+		{Butler, DemandChildReported},
+	} {
+		if tc.d.DemandSource != tc.want {
+			t.Errorf("%s: DemandSource = %v, want %v", tc.d.Name, tc.d.DemandSource, tc.want)
 		}
 	}
 }
