@@ -11,9 +11,12 @@ import (
 	"spindrift.dev/launcher/internal/landdelta"
 )
 
-// sanitizeLine strips control characters, ANSI escape sequences, and newlines
-// from s. It cleans any agent-controlled heartbeat field (role, verdict,
-// reason, narration, ...) so every heartbeat line stays single-line.
+// sanitizeLine drops control characters, ANSI escape sequences, newlines,
+// Unicode format (Cf) runes such as bidi controls and zero-width chars, and
+// line/paragraph separators (Zl/Zp) from s. It cleans any agent-controlled
+// heartbeat field (role, verdict, reason, narration, ...) so every heartbeat
+// line stays single-line and cannot be reordered or visually broken. ZWJ is
+// dropped too, splitting joined emoji; harmless for a status line.
 func sanitizeLine(s string) string {
 	var b strings.Builder
 	b.Grow(len(s))
@@ -47,7 +50,8 @@ func sanitizeLine(s string) string {
 					i++
 				}
 			}
-		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f):
+		case r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) ||
+			unicode.Is(unicode.Cf, r) || unicode.In(r, unicode.Zl, unicode.Zp):
 			i += size
 		default:
 			b.WriteRune(r)

@@ -252,6 +252,7 @@ func TestWriterNarrationSanitized(t *testing.T) {
 		{"CSI with question mark", "\x1b[?25lHello there.", "Hello there."},
 		{"OSC hyperlink with dot", "\x1b]8;;https://x.com\alink text.", "link text."},
 		{"escape-only first line skipped", "\x1b[0m\nHello.", "Hello."},
+		{"line separator is dropped, not a break", "foo\u2028bar", "foobar"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1032,9 +1033,10 @@ func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
 	}
 }
 
-// A control character, newline, or CSI/OSC escape in a decision's reason or a
-// run_state_error's error text must not break the single-line row (issue #2027
-// AC: "Operation rows are sanitized to a single line").
+// A control character, newline, CSI/OSC escape, bidi control, or line separator
+// in a decision's reason or a run_state_error's error text must not break the
+// single-line row (issue #2027 AC: "Operation rows are sanitized to a single
+// line").
 func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: "bad\x1b[2J\nfake-row"})
 	if strings.Contains(got, "\n") {
@@ -1050,6 +1052,12 @@ func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 	}
 	if strings.Contains(gotNoOutcome, "\x1b") {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", gotNoOutcome)
+	}
+
+	gotBidi := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Verdict: "ok\u202eevil", Reason: "a\u2066b\u2028c"})
+	const wantBidi = "#42 ○ pass 1 ended with no outcome (last verdict okevil, abc)"
+	if gotBidi != wantBidi {
+		t.Errorf("FormatSpindriftOp = %q, want %q", gotBidi, wantBidi)
 	}
 }
 
