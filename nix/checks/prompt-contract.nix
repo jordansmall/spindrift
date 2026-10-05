@@ -1019,7 +1019,7 @@ in
     pkgs.runCommand "prompt-contract-marker-channels-token-matches-validate-markers" { } "touch $out";
 
   # sharedObligationViolationsFor (issue #2699) checks that both branches of a
-  # paired prompt fork carry every literal substring a shared obligation
+  # paired prompt fork carry every substring a shared obligation
   # declares. It takes contentBySource as an explicit argument so these tests
   # can prove the check actually fails, on fixture content independent of the
   # real registry (exercised separately below, against the on-disk fragments).
@@ -1052,6 +1052,41 @@ in
       }]";
     pkgs.runCommand "prompt-contract-shared-obligation-violations-for-empty-when-all-branches-satisfy"
       { }
+      "touch $out";
+
+  # A cosmetic rewrap (needle broken across a newline plus indentation) must
+  # not redden the check (issue #3815): where the prose wraps is not the contract.
+  prompt-contract-shared-obligation-violations-for-tolerates-rewrapped-substring =
+    let
+      contentBySource = {
+        "fixture-inline.md" = "Before you finish, fold your\n   commits into one.";
+        "fixture-orchestrator.md" = "Before you finish, fold\n  your commits\n  into one too.";
+      };
+      out = promptContract.sharedObligationViolationsFor fixtureObligations contentBySource;
+    in
+    assert assertMsg (out == [ ])
+      "sharedObligationViolationsFor must tolerate a declared substring rewrapped across newlines and indentation, got: [${
+        concatStringsSep ", " (map (v: v.branchId) out)
+      }]";
+    pkgs.runCommand "prompt-contract-shared-obligation-violations-for-tolerates-rewrapped-substring" { }
+      "touch $out";
+
+  # The needle side is normalized too: a declared substring written wrapped or
+  # double-spaced must still match single-spaced content.
+  prompt-contract-shared-obligation-violations-for-tolerates-rewrapped-needle =
+    let
+      obligations = map (o: o // { requiredSubstrings = [ "fold  your\ncommits" ]; }) fixtureObligations;
+      contentBySource = {
+        "fixture-inline.md" = "Before you finish, fold your commits into one.";
+        "fixture-orchestrator.md" = "Before you finish, fold your commits into one.";
+      };
+      out = promptContract.sharedObligationViolationsFor obligations contentBySource;
+    in
+    assert assertMsg (out == [ ])
+      "sharedObligationViolationsFor must normalize a declared substring's own whitespace before matching, got: [${
+        concatStringsSep ", " (map (v: v.branchId) out)
+      }]";
+    pkgs.runCommand "prompt-contract-shared-obligation-violations-for-tolerates-rewrapped-needle" { }
       "touch $out";
 
   # Acceptance criterion (issue #2699): a violation's pre-rendered `message`
