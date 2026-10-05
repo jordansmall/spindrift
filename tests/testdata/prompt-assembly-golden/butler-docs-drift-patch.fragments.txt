@@ -1,7 +1,6 @@
 butler-file-issues-relay.md
 butler-patch.md
 butler-review-patch.md
-caveman-default-worker.md
 caveman-default.md
 filer-file-relay.md
 filer-label-relay-butler.md

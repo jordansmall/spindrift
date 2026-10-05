@@ -1,5 +1,15 @@
 # Migration Guide
 
+## Worker prompt drops the caveman anchor (issue #4562)
+
+`worker-prompt.md` no longer opens with a `/caveman` anchor. A custom
+`worker-prompt.md` override copied from the previous default must drop
+`${CAVEMAN_STEP_WORKER}` (no replacement) and any reference to
+`fragments/caveman-default-worker.md`: that var and fragment file no longer
+exist. A leftover `${CAVEMAN_STEP_WORKER}` fails loudly: prompt assembly
+rejects it before the agent starts, and a baked `mkHarness` `workerPrompt` arg
+fails eval.
+
 ## `agents.bashTimeoutMs` takes an integer (issue #4420)
 
 `perSystem.spindrift.agents.bashTimeoutMs` is now `nullOr int`, like every

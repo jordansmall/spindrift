@@ -1,5 +1,4 @@
 caveman-default-review.md
-caveman-default-worker.md
 caveman-default.md
 check-hygiene-default.md
 code-review-unbaked.md

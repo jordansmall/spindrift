@@ -34,18 +34,8 @@ let
       fragment = "caveman-default.md";
       var = "CAVEMAN_STEP";
     }
-    # The worker-role variant (issue #2706): worker-prompt.md is quarantined
-    # from the marker grammar (lib/prompt-contract.nix's
-    # workerForbiddenMarkers), so caveman-default.md's exemption prose would
-    # leak literal forbidden markers into a worker prompt. No commit-message
-    # half: the coordinator owns COMMIT (issue #3419).
-    {
-      gate = "CAVEMAN_BAKED";
-      fragment = "caveman-default-worker.md";
-      var = "CAVEMAN_STEP_WORKER";
-    }
     # The review-role variant (issue #2707): a review pass emits a VERDICT
-    # line, so it keeps the marker-grammar exemption the worker variant drops,
+    # line, so it keeps the marker-grammar exemption of caveman-default.md,
     # and adds the `## Blocking`/`## Non-blocking` findings, which a Filer
     # turns into an issue body a human reads cold. Drift in the prose these
     # rows duplicate is caught by caveman_default_fragment_parity_test.go.
