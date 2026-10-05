@@ -4,7 +4,8 @@
 # hand off to `box`. Everything box does is covered by Go (cmd/launcher/box), so
 # the only thing left to pin here is the handoff itself: the shim execs box,
 # the exported environment reaches box, and the preamble's
-# non-exported values reach it only as flags.
+# non-exported values reach it only as flags, carrying exactly the values the
+# preamble resolved.
 
 load helper
 
@@ -65,4 +66,25 @@ FAKE
   local value
   value="$(grep -xA1 -- '--run-state-file' "$BOX_ARGV_LOG" | tail -n 1)"
   [ "$value" = "/tmp/run-state.json" ]
+}
+
+# box defaults both flags to empty, so a shim line that drops or misspells one
+# fails silently: the Driver just never gets its Bash-timeout env vars.
+@test "the shim hands box the Driver Bash-timeout flags" {
+  # The Driver preamble assigns DRIVER_BASH_TIMEOUT_ENV unconditionally, which
+  # would clobber an exported value, so assign both just ahead of the shim body,
+  # after the preamble has run.
+  local wrapped="$BATS_TEST_TMPDIR/entrypoint-timeout.sh"
+  awk -v ms='DRIVER_BASH_TIMEOUT_MS=1800000' \
+    -v env="DRIVER_BASH_TIMEOUT_ENV='SHIM_A SHIM_B'" \
+    '/^exec box/ { print ms; print env } 1' "$ENTRYPOINT" >"$wrapped"
+  # Fails here, not at the flag checks, if the shim's exec line changed shape.
+  grep -qx 'DRIVER_BASH_TIMEOUT_MS=1800000' "$wrapped"
+  run bash "$wrapped"
+  [ "$status" -eq 42 ]
+  local value
+  value="$(grep -xA1 -- '--driver-bash-timeout-ms' "$BOX_ARGV_LOG" | tail -n 1)"
+  [ "$value" = "1800000" ]
+  value="$(grep -xA1 -- '--driver-bash-timeout-env' "$BOX_ARGV_LOG" | tail -n 1)"
+  [ "$value" = "SHIM_A SHIM_B" ]
 }
