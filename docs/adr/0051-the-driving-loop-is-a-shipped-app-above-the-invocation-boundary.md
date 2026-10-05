@@ -115,7 +115,9 @@ runs through the full Box, so it costs what work costs.
 backs work off while research keeps filling slots at full speed. The daemon
 idles only when both kinds have backed off into an empty result. This is what
 makes mixed mode cheap: the daemon never probes a queue it already knows is
-empty, and no new query surface is needed to decide what to run.
+empty, and no new query surface is needed to decide what to run. (Superseded
+by [ADR 0059](0059-the-daemon-schedules-from-tracker-demand-not-child-exits.md);
+see the amendment below.)
 
 **Research capacity is a floor, not a ceiling.** `RESEARCH_SLOTS` guarantees
 research at least that many slots *while research has queued work*; work may
@@ -372,3 +374,16 @@ failures alarm through the breaker.) The trade-off: with
 auto-promotion (ADR 0056) on, a jam may fire shortly before a promoted
 finding makes work dispatchable again. The per-kind `checks[].jammed` status
 flag was never sibling-suppressed, and none of these amendments touches it.
+
+## Amendment (ADR 0059): Demand replaces exit-2 backoff
+
+[ADR 0059](0059-the-daemon-schedules-from-tracker-demand-not-child-exits.md)
+supersedes "Backoff is per kind" above and the exit-2 row of the wait policy
+table. The Daemon now asks each kind's tracker for its Demand directly — a
+cheap per-tracker probe at a flat interval (`DAEMON_PROBE_INTERVAL`) — rather
+than learning a queue is empty from a child, because "already knows is empty"
+went stale for up to `DAEMON_IDLE_CAP` while slots sat free, and a conditional
+or one-item probe costs less than the empty-check spawn it replaces. Exit 2
+after positive Demand only marks the count stale. Exit 3's jam semantics, the
+halts, the breaker, the Awake window, and the one shared pool stand;
+`DAEMON_IDLE_FLOOR`/`DAEMON_IDLE_CAP` now govern only the jam gate.
