@@ -31,7 +31,7 @@ func signalSocketTransportCheck(c config) doctor.Check {
 		Tier:   doctor.Advisory,
 		Remedy: "set BOX_SIGNAL_CARRIER=log, or use a NETWORK_MODE that permits loopback (not no-host-loopback or none); on an indeterminate probe instead, " + runtimeReachableRemedy,
 		Probe: func() (any, error) {
-			if c.networkMode == runner.NetworkModeNone {
+			if c.runnerNetworkMode() == runner.NetworkModeNone {
 				// Answered before the probe because the verdict cannot depend
 				// on the transport: this mode tears down loopback outright, so
 				// checkSignalCarrierNetworkModeGate already refuses the pairing
@@ -47,13 +47,14 @@ func signalSocketTransportCheck(c config) doctor.Check {
 			case endpoint.IsUnix():
 				return "unix socket", nil
 			case endpoint.IsTCP():
-				if c.networkMode == runner.NetworkModeNoHostLoopback {
+				if c.runnerNetworkMode().DeniesHostLoopback() {
 					// Same condition the Dispatch-level gate in
-					// internal/dispatch/signal_socket.go fails closed on for
-					// this mode: a TCP-only transport under a mode that blocks
-					// loopback leaves the socket carrier no usable path. A live
-					// probe never gets here: under this mode it errors before its
-					// TCP sub-probe, landing in the probe-error arm above, and the
+					// internal/dispatch/signal_socket.go fails closed on (only
+					// no-host-loopback reaches here; none returned above): a
+					// TCP-only transport under a mode that blocks loopback leaves
+					// the socket carrier no usable path. A live probe never gets
+					// here: under no-host-loopback it errors before its TCP
+					// sub-probe, landing in the probe-error arm above, and the
 					// probe cache refuses to replay one (#3775). Kept as a backstop.
 					return nil, fmt.Errorf("BOX_SIGNAL_CARRIER=socket has no usable transport under NETWORK_MODE=%s -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks: %w", c.networkMode, doctor.ErrDegraded)
 				}

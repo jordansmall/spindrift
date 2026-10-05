@@ -1,22 +1,24 @@
 package runner
 
-// NETWORK_MODE knob values (issue #2562), shared by the OCI and bwrap adapters
-// and the launcher's runtime gate in cmd/launcher/main.go.
+// NetworkMode is the NETWORK_MODE knob (issue #2562), shared by the OCI and
+// bwrap adapters and the launcher's runtime gate in cmd/launcher/main.go.
+type NetworkMode string
+
 const (
-	NetworkModeOpen           = "open"
-	NetworkModeNoHostLoopback = "no-host-loopback"
-	NetworkModeNone           = "none"
+	NetworkModeOpen           NetworkMode = "open"
+	NetworkModeNoHostLoopback NetworkMode = "no-host-loopback"
+	NetworkModeNone           NetworkMode = "none"
 
 	// NetworkModeHost is a bwrap-only opt-out (issue #2666) that restores
 	// sharing the host's network namespace. It has no OCI rendering:
 	// oci.go's networkArg() default case treats it like "open".
-	NetworkModeHost = "host"
+	NetworkModeHost NetworkMode = "host"
 )
 
-// DeniesHostLoopback reports whether networkMode denies a Box the host-loopback
+// DeniesHostLoopback reports whether m denies a Box the host-loopback
 // route: pasta without --map-gw blocks it, and "none" has no network at all.
-func DeniesHostLoopback(networkMode string) bool {
-	return networkMode == NetworkModeNoHostLoopback || networkMode == NetworkModeNone
+func (m NetworkMode) DeniesHostLoopback() bool {
+	return m == NetworkModeNoHostLoopback || m == NetworkModeNone
 }
 
 // Config carries the subset of launcher config the runner constructors need.
@@ -43,7 +45,7 @@ type Config struct {
 	// networkModeCoherenceOk), but the adapters still pick a deterministic
 	// winner (raw) since Go cannot observe that invariant.
 	PodmanNetwork string
-	NetworkMode   string
+	NetworkMode   NetworkMode
 	PidsLimit     string
 	MemoryLimit   string
 

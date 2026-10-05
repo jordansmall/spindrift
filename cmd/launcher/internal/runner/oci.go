@@ -38,10 +38,10 @@ type ociAdapter struct {
 	// unmodified. DriverSessionCacheDir is ADR 0009; the CODE_FORGE=local
 	// mount specs are issue #1697.
 	mountParams   MountParams
-	podmanNetwork string // optional raw --network value; empty omits the flag
-	networkMode   string // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/"")
-	pidsLimit     string // --pids-limit value; empty disables the flag
-	memoryLimit   string // --memory value; empty disables the flag
+	podmanNetwork string      // optional raw --network value; empty omits the flag
+	networkMode   NetworkMode // NETWORK_MODE knob ("open"/"no-host-loopback"/"none"/"host"/"")
+	pidsLimit     string      // --pids-limit value; empty disables the flag
+	memoryLimit   string      // --memory value; empty disables the flag
 }
 
 // NewOCI constructs an OCI adapter from cfg. pwd is the working directory the
@@ -423,7 +423,7 @@ func (a *ociAdapter) networkArg() string {
 		}
 		return "bridge"
 	case NetworkModeNone:
-		return NetworkModeNone
+		return string(NetworkModeNone)
 	default:
 		return ""
 	}
@@ -667,7 +667,7 @@ func (a *ociAdapter) probeRegistryProxyTransport() (registrymanifest.Endpoint, b
 		// once it knows the transport decision.
 		return registrymanifest.NewUnixEndpoint(""), false, nil
 	}
-	if DeniesHostLoopback(a.networkMode) {
+	if a.networkMode.DeniesHostLoopback() {
 		// Falling back silently would either leave a pasta Box unable to
 		// reach the proxy with no diagnostic, or wire a host-loopback route
 		// the operator's NETWORK_MODE explicitly denied (issue #3111

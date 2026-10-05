@@ -125,8 +125,8 @@ type bwrapAdapter struct {
 	// buildMountSpecs unmodified. DriverSessionCacheDir is ADR 0009; the
 	// CODE_FORGE=local mount specs are issue #1697.
 	mountParams MountParams
-	unshareNet  bool   // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
-	networkMode string // NETWORK_MODE knob; every value except the "host" opt-out isolates from the host netns (issue #2666)
+	unshareNet  bool        // raw BWRAP_UNSHARE_NET knob; redundant with isolate-by-default, kept for defense in depth
+	networkMode NetworkMode // NETWORK_MODE knob; every value except the "host" opt-out isolates from the host netns (issue #2666)
 	// pidsLimit is the PIDS_LIMIT knob (empty disables it). bwrap imposes no
 	// process-count cap of its own, so the per-Box cgroup v2 pids.max control
 	// file is the only containment mechanism (ADR 0042, provisionCgroup).

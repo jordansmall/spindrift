@@ -459,7 +459,7 @@ func TestNetworkArg(t *testing.T) {
 	cases := []struct {
 		name          string
 		cli           string
-		networkMode   string
+		networkMode   NetworkMode
 		podmanNetwork string
 		want          string
 	}{
@@ -1235,8 +1235,8 @@ func TestRegistryProxyTransport_TCPNeedsAddHost_ReportsAddHost(t *testing.T) {
 // cannot reach with no diagnostic (issue #3111 finding B). Scripts one call and
 // asserts callCount stays at 1: DeniesHostLoopback hard-errors before any more.
 func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *testing.T) {
-	for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone} {
-		t.Run(mode, func(t *testing.T) {
+	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
+		t.Run(string(mode), func(t *testing.T) {
 			script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
@@ -1250,7 +1250,7 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 			if !strings.Contains(err.Error(), a.cli) {
 				t.Errorf("RegistryProxyTransport: error %q should name the CLI %q", err, a.cli)
 			}
-			if !strings.Contains(err.Error(), mode) {
+			if !strings.Contains(err.Error(), string(mode)) {
 				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
 			}
 			if got := callCount(t, dir); got != 1 {
@@ -1266,8 +1266,8 @@ func TestRegistryProxyTransport_NoHostLoopback_SocketIncapable_ReturnsError(t *t
 // Scripts two calls (socket ExitIncapable, TCP sub-probe ExitCapable); with one,
 // the repeat would give the sub-probe ExitIncapable and now correctly error.
 func TestRegistryProxyTransport_OpenOrUnsetNetworkMode_UnchangedBehavior(t *testing.T) {
-	for _, mode := range []string{"open", ""} {
-		t.Run("mode="+mode, func(t *testing.T) {
+	for _, mode := range []NetworkMode{"open", ""} {
+		t.Run("mode="+string(mode), func(t *testing.T) {
 			script, _ := newFakeCLI(t, fakeCall{exit: registryprobe.ExitIncapable}, fakeCall{exit: registryprobe.ExitCapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
@@ -1680,8 +1680,8 @@ func TestRegistryProxyTransport_ControlReportsCapable_ReturnsError(t *testing.T)
 // TCP because the verdict came from the control probe. Scripts two calls and
 // asserts callCount stays at 2: the TCP sub-probe must never run after that.
 func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_ReturnsError(t *testing.T) {
-	for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone} {
-		t.Run(mode, func(t *testing.T) {
+	for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone} {
+		t.Run(string(mode), func(t *testing.T) {
 			script, dir := newFakeCLI(t, fakeCall{exit: 125}, fakeCall{exit: registryprobe.ExitIncapable})
 			a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 
@@ -1695,7 +1695,7 @@ func TestRegistryProxyTransport_NoHostLoopback_ControlConfirmedIncapable_Returns
 			if !strings.Contains(err.Error(), a.cli) {
 				t.Errorf("RegistryProxyTransport: error %q should name the CLI %q", err, a.cli)
 			}
-			if !strings.Contains(err.Error(), mode) {
+			if !strings.Contains(err.Error(), string(mode)) {
 				t.Errorf("RegistryProxyTransport: error %q should name the configured NETWORK_MODE %q", err, mode)
 			}
 			if got := callCount(t, dir); got != 2 {
@@ -1717,11 +1717,11 @@ func TestProbeRegistryProxyTransport_DeniesHostLoopbackNeverYieldsTCP(t *testing
 		"control-confirmed-incapable": {{exit: 125}, {exit: registryprobe.ExitIncapable}, {exit: registryprobe.ExitCapable}},
 	}
 	for outcome, calls := range outcomes {
-		for _, mode := range []string{NetworkModeNoHostLoopback, NetworkModeNone, "open", ""} {
-			if !DeniesHostLoopback(mode) {
+		for _, mode := range []NetworkMode{NetworkModeNoHostLoopback, NetworkModeNone, "open", ""} {
+			if !mode.DeniesHostLoopback() {
 				continue
 			}
-			t.Run(outcome+"/"+mode, func(t *testing.T) {
+			t.Run(outcome+"/"+string(mode), func(t *testing.T) {
 				script, _ := newFakeCLI(t, calls...)
 				a := &ociAdapter{cli: script, image: "spindrift:test", networkMode: mode}
 

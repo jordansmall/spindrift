@@ -188,9 +188,9 @@ func TestNewBwrapBuild_ImageTagScopesSnapshotDirToClosureGeneration(t *testing.T
 
 // The helper's exact membership: only no-host-loopback and none deny
 // host-loopback reachability; open, unset and any other value do not.
-func TestDeniesHostLoopback(t *testing.T) {
+func TestNetworkMode_DeniesHostLoopback(t *testing.T) {
 	tests := []struct {
-		networkMode string
+		networkMode NetworkMode
 		want        bool
 	}{
 		{NetworkModeNoHostLoopback, true},
@@ -199,8 +199,8 @@ func TestDeniesHostLoopback(t *testing.T) {
 		{"", false},
 	}
 	for _, tc := range tests {
-		if got := DeniesHostLoopback(tc.networkMode); got != tc.want {
-			t.Errorf("DeniesHostLoopback(%q) = %v, want %v", tc.networkMode, got, tc.want)
+		if got := tc.networkMode.DeniesHostLoopback(); got != tc.want {
+			t.Errorf("NetworkMode(%q).DeniesHostLoopback() = %v, want %v", tc.networkMode, got, tc.want)
 		}
 	}
 }

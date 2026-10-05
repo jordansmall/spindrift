@@ -936,7 +936,7 @@ than from a literal argv assignment.
   host-loopback route the operator's own network mode explicitly asked to
   deny. Composing the two knobs silently was wrong in both directions. The
   fix makes them mutually exclusive by construction instead:
-  `RegistryProxyTransport` checks `DeniesHostLoopback(networkMode)` — true
+  `RegistryProxyTransport` checks `networkMode.DeniesHostLoopback()` — true
   for `no-host-loopback` and for `none`, which denies the route by having no
   network at all — and when the probe has also found the socket incapable,
   returns an error rather than a usable TCP host. A Dispatch configured with

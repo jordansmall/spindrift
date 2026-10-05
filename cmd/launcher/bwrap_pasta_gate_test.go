@@ -64,7 +64,7 @@ func TestBwrapPastaGate_NetworkModeHostIsNoOp(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
-	c.networkMode = runner.NetworkModeHost
+	c.networkMode = string(runner.NetworkModeHost)
 
 	if err := checkBwrapPastaGate(c); err != nil {
 		t.Errorf("checkBwrapPastaGate() with networkMode=host = %v, want nil (pasta is never invoked)", err)
@@ -77,7 +77,7 @@ func TestBwrapPastaGate_NetworkModeNoneIsNoOp(t *testing.T) {
 	withFakePasta(t, false)
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
-	c.networkMode = runner.NetworkModeNone
+	c.networkMode = string(runner.NetworkModeNone)
 
 	if err := checkBwrapPastaGate(c); err != nil {
 		t.Errorf("checkBwrapPastaGate() with networkMode=none = %v, want nil (pasta is never invoked)", err)
