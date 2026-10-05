@@ -14,6 +14,7 @@ let
   schema = import ./env-schema.nix;
   removedKnobs = import ./removed-knobs.nix;
   resolveNixPath = import ./nixpath.nix;
+  inherit (import ./renderers.nix) flagKind;
   runtimeValues = import ./runtime-values.nix;
   # Doc prose for the structural knobs, kept as plain data (issue #2572) so
   # lib/renderers.nix's pure-builtins renderStructuralOptionsDoc can import it
@@ -51,15 +52,18 @@ let
 
   # Every type is nullOr so unset knobs fall through to mkHarness's schema
   # defaults. The `choices` case (issue #2519) is checked ahead of the
-  # int/bool/str inference so an out-of-enum value fails at the option itself,
-  # naming the option path and the valid choices.
+  # int/bool/str typing so an out-of-enum value fails at the option itself,
+  # naming the option path and the valid choices. Int follows flagKind, so an
+  # explicit `kind = "int"` types a knob with no default (issue #4420). Bool
+  # still infers from the default: every `kind = "bool"` entry carries a bool
+  # default, so honouring that kind here would change no option type.
   mkKnobOption =
     _key: entry:
     mkOption {
       type =
         if entry ? choices then
           types.nullOr (types.enum entry.choices)
-        else if builtins.isInt (entry.default or "") then
+        else if flagKind entry == "int" then
           types.nullOr types.int
         else if builtins.isBool (entry.default or "") then
           types.nullOr types.bool

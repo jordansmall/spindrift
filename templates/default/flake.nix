@@ -48,7 +48,7 @@
             # BEGIN GENERATED SETTINGS EXAMPLE -- nix run .#regen -- DO NOT EDIT
             # agents = {
             #   # per-call Bash timeout in milliseconds (issue #4409): exported into the Box under the env var names the active Driver's registry entry declares in bashTimeoutEnv (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, the default and maximum a single Bash call may run); a Driver declaring none ignores it; unset exports nothing and the Driver keeps its own limits (claude: 10-minute maximum); a value that is not a positive integer is skipped with a warning in the Box log rather than exported
-            #   bashTimeoutMs = "";
+            #   bashTimeoutMs = null;
             #   format = {
             #     # when enabled, the implementor auto-detects and runs the project's formatter on changed files before each commit; skips silently when no formatter is found
             #     enable = false;

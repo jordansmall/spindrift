@@ -100,11 +100,14 @@ rec {
   # completions, whose `case` patterns use the same `|`-joined syntax.
   choicesFlagPatterns = e: map (n: "--${n}") (allFlagNames e);
 
-  # The type token the flag table and man page print. A knob opts into the
-  # presence-style bool kind explicitly with `kind = "bool";` (issue #2145);
-  # bool is never inferred from a boolean `default`, because several knobs carry
-  # `default = false` only to render as a `types.bool` flake option while their
-  # CLI flag stays a value form, and inferring would silently flip all of them.
+  # The knob's type token: the flag table and man page print it, and it picks
+  # the flake option type (mkKnobOption) and int membership (`isIntTyped`). A
+  # knob opts into the presence-style bool kind explicitly with `kind = "bool";`
+  # (issue #2145), and an int knob with no `default` to infer from with
+  # `kind = "int";`; bool is never inferred from a boolean `default`, because
+  # several knobs carry `default = false` only to render as a `types.bool` flake
+  # option while their CLI flag stays a value form, and inferring would silently
+  # flip all of them.
   flagKind =
     e:
     if e ? kind then
@@ -188,6 +191,8 @@ rec {
             "\"${toString e.default}\""
         else if e.required or false then
           "\"${e.placeholder or ""}\""
+        else if flagKind e == "int" then
+          "null"
         else
           "\"\"";
       # Insert one schema entry into the nested domain tree at its derived flake

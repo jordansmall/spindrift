@@ -1,5 +1,19 @@
 # Migration Guide
 
+## `agents.bashTimeoutMs` takes an integer (issue #4420)
+
+`perSystem.spindrift.agents.bashTimeoutMs` is now `nullOr int`, like every
+peer timeout knob. A Consumer flake that quotes the value fails evaluation
+with a type error; drop the quotes:
+
+```nix
+agents.bashTimeoutMs = 1800000; # was: "1800000"
+```
+
+The `DRIVER_BASH_TIMEOUT_MS` env var and `--driver-bash-timeout-ms` flag
+still carry a string, which the Box skips with a warning unless it is a
+positive integer.
+
 ## `JIRA_INCLUDE_COMMENTS` is a deprecated no-op (issue #3747)
 
 Jira comments always reach the agent's prompt, the last 10, attributed,
