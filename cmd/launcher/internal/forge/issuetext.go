@@ -26,8 +26,9 @@ type Comment struct {
 }
 
 // CommentLister is the optional IssueTracker interface for adapters that can
-// list an issue's comments, discovered via type assertion. A local file-backed
-// issue has no comment thread, so this stays outside IssueTracker.
+// list an issue's comments, discovered via type assertion. The local adapter
+// inlines its launcher- and Box-authored thread into the body instead, so
+// this stays outside IssueTracker.
 type CommentLister interface {
 	// Comments returns issue num's comments, oldest first, the order IssueText
 	// assumes when it takes the trailing window of the slice.

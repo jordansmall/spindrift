@@ -47,9 +47,10 @@ type PriorityCapable interface {
 }
 
 // CommentCapable is implemented by harnesses whose adapter satisfies
-// forge.CommentLister. The local adapter has no comment thread, so its harness
-// does not implement this and the Comments case is skipped for it. A harness
-// and tracker that disagree on the two interfaces fail the case instead.
+// forge.CommentLister. The local adapter inlines its thread into the body rather
+// than listing it, so its harness does not implement this and the Comments case
+// is skipped for it. A harness and tracker that disagree on the two interfaces
+// fail the case instead.
 type CommentCapable interface {
 	// SeedComments scripts comments as num's thread, oldest first.
 	SeedComments(num string, comments []forge.Comment)
@@ -383,7 +384,7 @@ func testComments(t *testing.T, h Harness) {
 	lister, lists := h.Tracker().(forge.CommentLister)
 	ch, capable := h.(CommentCapable)
 	if !lists && !capable {
-		t.Skip("tracker has no comment thread (not a forge.CommentLister)")
+		t.Skip("tracker does not list its comments (not a forge.CommentLister)")
 	}
 	if !lists || !capable {
 		t.Fatalf("tracker %T is a forge.CommentLister: %v; harness %T is CommentCapable: %v; the two must agree", h.Tracker(), lists, h, capable)
