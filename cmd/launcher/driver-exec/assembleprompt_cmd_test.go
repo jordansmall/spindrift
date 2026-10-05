@@ -516,7 +516,6 @@ func TestIsAssemblePromptInvocation(t *testing.T) {
 		{"no args", nil, false},
 		{"ordinary flag invocation", []string{"--driver", "claude"}, false},
 		{"bundle-out", []string{"bundle-out"}, false},
-		{"outcome-backstop", []string{"outcome-backstop"}, false},
 	}
 	for _, c := range cases {
 		if got := isAssemblePromptInvocation(c.args); got != c.want {

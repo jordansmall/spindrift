@@ -24,17 +24,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if isBundleOutInvocation(argv) {
 		return runBundleOut(argv[1:], stdout)
 	}
-	if isOutcomeBackstopInvocation(argv) {
-		return runOutcomeBackstop(argv[1:], stdout)
-	}
-	if isMarkerGateInvocation(argv) {
-		return runMarkerGate(argv[1:], stdout)
-	}
 	if isAssemblePromptInvocation(argv) {
 		return runAssemblePrompt(argv[1:], stdout, stderr)
-	}
-	if isReadonlyGuardsInvocation(argv) {
-		return runReadonlyGuards(argv[1:], stdout)
 	}
 	if isBindRegistryInvocation(argv) {
 		return runBindRegistry(argv[1:], stdout)
@@ -47,9 +38,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	if isForwardRegistryTCPInvocation(argv) {
 		return runForwardRegistryTCP(argv[1:], stdout)
-	}
-	if isAdviseOnlyInvocation(argv) {
-		return runAdviseOnly(argv[1:], stdout)
 	}
 	if isSignalInvocation(argv) {
 		// The only verb handed stdin: a signal's body never travels on argv.
