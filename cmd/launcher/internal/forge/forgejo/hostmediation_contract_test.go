@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"slices"
-	"strconv"
 	"sync"
 	"testing"
 
@@ -17,7 +16,23 @@ import (
 )
 
 var hostMediationCommentRe = regexp.MustCompile(`^/api/v1/repos/owner/repo/issues/([0-9]+)/comments$`)
-var hostMediationLabelsRe = regexp.MustCompile(`^/api/v1/repos/owner/repo/issues/([0-9]+)/labels$`)
+
+// hostMediationLabels is the repo label registry the fake serves; PostIssue
+// resolves names to these IDs before the create. A slice so the served order
+// is deterministic.
+var hostMediationLabels = []struct {
+	ID   int64
+	Name string
+}{{7, "bug"}}
+
+func hostMediationLabelName(id int64) (string, bool) {
+	for _, l := range hostMediationLabels {
+		if l.ID == id {
+			return l.Name, true
+		}
+	}
+	return "", false
+}
 
 // hostMediationHarness is a forgetest.HostMediationHarness backed by a real
 // bare git repo (RelayBundle's genuine push target, mirroring
@@ -141,38 +156,41 @@ func (h *hostMediationHarness) handle(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 	case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/issues":
 		var body struct {
-			Title string `json:"title"`
-			Body  string `json:"body"`
+			Title  string  `json:"title"`
+			Body   string  `json:"body"`
+			Labels []int64 `json:"labels"`
 		}
 		json.NewDecoder(r.Body).Decode(&body)
 		if body.Title == "fail-issue" {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}
+		var names []string
+		for _, id := range body.Labels {
+			name, ok := hostMediationLabelName(id)
+			if !ok {
+				h.t.Errorf("issue create carried unknown label id %d", id)
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				return
+			}
+			names = append(names, name)
+		}
 		h.mu.Lock()
 		num := h.nextIssueNum
 		h.nextIssueNum++
-		h.filedIssues[num] = filedIssue{Title: body.Title, Body: body.Body}
+		h.filedIssues[num] = filedIssue{Title: body.Title, Body: body.Body, Labels: names}
 		h.mu.Unlock()
 		json.NewEncoder(w).Encode(map[string]any{
 			"number":   num,
 			"html_url": fmt.Sprintf("https://forge.test/owner/repo/issues/%d", num),
 		})
-	case r.Method == http.MethodPut && hostMediationLabelsRe.MatchString(r.URL.Path):
-		numStr := hostMediationLabelsRe.FindStringSubmatch(r.URL.Path)[1]
-		num, _ := strconv.Atoi(numStr)
-		var body struct {
-			Labels []string `json:"labels"`
+	case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/labels":
+		items := make([]map[string]any, 0, len(hostMediationLabels))
+		for _, l := range hostMediationLabels {
+			items = append(items, map[string]any{"id": l.ID, "name": l.Name})
 		}
-		json.NewDecoder(r.Body).Decode(&body)
-		h.mu.Lock()
-		iss, ok := h.filedIssues[num]
-		if ok {
-			iss.Labels = body.Labels
-			h.filedIssues[num] = iss
-		}
-		h.mu.Unlock()
-		w.WriteHeader(http.StatusOK)
+		body, _ := json.Marshal(items)
+		serveLabels(w, r, string(body))
 	default:
 		http.NotFound(w, r)
 	}
