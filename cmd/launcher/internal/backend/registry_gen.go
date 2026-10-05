@@ -62,3 +62,7 @@ var Forgejo = Descriptor{
 }
 
 var Registry = []Descriptor{GitHub, Git, Local, Jira, Forgejo}
+
+// descriptorRowFields lists the Descriptor fields the nix table renders, for
+// the struct-sync test; it is not read at runtime.
+var descriptorRowFields = []string{"Name", "ValidAsTracker", "ValidAsCodeForge", "TokenEnvVar", "DoctorTokenHint", "DoctorSlugHint", "HostMediatedRemote", "InBoxUnreachableTracker", "OutboxRelayCapable", "InBoxOpenPRQueryable", "InBoxGHCredentialHelper", "RelayCapable", "HostPostingCapable", "LabelRegistry", "TrackerAxisRead", "TrackerAxisWrite", "TrackerAxisFiler", "ForgeBackend"}

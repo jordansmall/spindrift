@@ -4,6 +4,12 @@
 # cmd/launcher/internal/backend/registry_gen.go on `nix run .#regen`, and
 # nix/checks/schema-drift.nix's backend-registry-gen check guards it.
 
+# Adding a field is one entry in renderBackendRegistryGo's rowFields table plus
+# the matching field on the hand-written Descriptor struct in
+# cmd/launcher/internal/backend/registry.go; TestDescriptorFieldsMatchNixRows
+# fails if the two disagree. Document an optional field's default in the
+# "An omitted ..." paragraph below, then run `nix run .#regen`.
+
 # A plain list with no `{ lib }:` wrapper, because lib/env-schema.nix imports
 # it with no `lib` in scope.
 
