@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
@@ -77,6 +78,37 @@ func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
 
 	if want := "no open 'ready-for-agent' issues — nothing to do."; !strings.Contains(out, want) {
 		t.Errorf("output missing %q:\n%s", want, out)
+	}
+}
+
+// An issue the other family holds is not "no open issues": the terminal line
+// must name it (#3584), while the exit code stays 2.
+func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
+	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	var err error
+	out := testutil.CaptureStdout(t, func() { err = run(lc) })
+
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("run(lc) = %v, want errQueueEmpty", err)
+	}
+	if want := "no dispatchable 'ready-for-agent' issues — #42 held by agent-research-in-progress."; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+	if bad := "no open 'ready-for-agent' issues"; strings.Contains(out, bad) {
+		t.Errorf("output must not say %q:\n%s", bad, out)
 	}
 }
 

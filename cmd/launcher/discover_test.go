@@ -22,7 +22,7 @@ func TestDiscoverIssues_ByNumber(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "152", Title: "the claimed one", Labels: []string{c.inProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "99", Title: "a stranded run", Labels: []string{c.inProgressLabel}})
 
-	issues, origin, err := discoverIssues(c, fc)
+	issues, _, origin, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestDiscoverIssues_ByLabel(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Title: "ready", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Title: "not ready", Labels: []string{"backlog"}})
 
-	issues, origin, err := discoverIssues(c, fc)
+	issues, _, origin, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.label}})
 	}
 
-	issues, _, err := discoverIssues(c, fc)
+	issues, _, _, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Title: "critical one", Labels: []string{c.label, "agent-priority-critical"}})
 
-	issues, _, err := discoverIssues(c, fc)
+	issues, _, _, err := discoverIssues(c, fc)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -112,9 +112,10 @@ func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 // stays out of the way otherwise.
 func TestQueryOpenIssues(t *testing.T) {
 	cases := []struct {
-		name  string
-		setup func() (config, *forge.Fake)
-		want  []string
+		name     string
+		setup    func() (config, *forge.Fake)
+		want     []string
+		wantHeld []heldIssue
 	}{
 		{
 			// The two families must never run on the same issue at once,
@@ -129,7 +130,8 @@ func TestQueryOpenIssues(t *testing.T) {
 				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
 				return c, fc
 			},
-			want: []string{"2"},
+			want:     []string{"2"},
+			wantHeld: []heldIssue{{"1", "agent-research-in-progress"}},
 		},
 		{
 			// Uses the configured work in-progress label rather than a
@@ -146,7 +148,8 @@ func TestQueryOpenIssues(t *testing.T) {
 				fc.SetIssue(forge.Issue{Number: "2", Title: "free", Labels: []string{c.label}})
 				return c, fc
 			},
-			want: []string{"2"},
+			want:     []string{"2"},
+			wantHeld: []heldIssue{{"1", "custom-work-in-progress"}},
 		},
 		{
 			// The other-family filter can drop every listed issue, leaving
@@ -160,7 +163,8 @@ func TestQueryOpenIssues(t *testing.T) {
 				fc.SetIssue(forge.Issue{Number: "1", Title: "worker has this one", Labels: []string{c.label, workInProgress}})
 				return c, fc
 			},
-			want: nil,
+			want:     nil,
+			wantHeld: []heldIssue{{"1", "agent-in-progress"}},
 		},
 		{
 			// Work-only operation — no research labels defined anywhere —
@@ -199,9 +203,12 @@ func TestQueryOpenIssues(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			c, fc := tc.setup()
-			issues, err := queryOpenIssues(c, fc)
+			issues, held, err := queryOpenIssues(c, fc)
 			if err != nil {
 				t.Fatalf("queryOpenIssues: %v", err)
+			}
+			if !reflect.DeepEqual(held, tc.wantHeld) {
+				t.Fatalf("held = %+v, want %+v", held, tc.wantHeld)
 			}
 			var got []string
 			for _, iss := range issues {
@@ -266,5 +273,26 @@ func TestLogDiscoveryPoll_NewIssueAppears_NamesIt(t *testing.T) {
 	}
 	if strings.Contains(out, "#1") {
 		t.Errorf("got %q, want it to not re-name already-seen issue #1", out)
+	}
+}
+
+func TestEmptyQueueLine(t *testing.T) {
+	cases := []struct {
+		name string
+		held []heldIssue
+		want string
+	}{
+		{"none held", nil, "no open 'ready-for-agent' issues — nothing to do."},
+		{"one held", []heldIssue{{"42", "agent-research-in-progress"}},
+			"no dispatchable 'ready-for-agent' issues — #42 held by agent-research-in-progress."},
+		{"several held", []heldIssue{{"42", "A"}, {"43", "B"}},
+			"no dispatchable 'ready-for-agent' issues — #42 held by A, #43 held by B."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := emptyQueueLine("ready-for-agent", tc.held, "nothing to do"); got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
