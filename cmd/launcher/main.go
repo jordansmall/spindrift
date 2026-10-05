@@ -245,13 +245,6 @@ func newIssue(fi forge.Issue) issue {
 	return issue{number: fi.Number, title: fi.Title, priority: fi.Priority}
 }
 
-func getenv(key, def string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return def
-}
-
 // atoi parses a positive integer; zero and negatives fall back to def.
 // Use this for values where zero would cause a bug (e.g. semaphore capacity).
 func atoi(s string, def int) int {
