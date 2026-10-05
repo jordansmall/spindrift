@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/signalsocket"
 )
 
@@ -155,7 +156,7 @@ type Config struct {
 
 	// NetworkMode is the NETWORK_MODE knob value, read by startSignalSocket's
 	// transport-verdict gate inside the Dispatch (issue #3725).
-	NetworkMode string
+	NetworkMode runner.NetworkMode
 
 	// These are nix-resolved static prompt-gate values (issue #2533;
 	// ScoutProvisioned added by #3157), forwarded into the Box unmodified.

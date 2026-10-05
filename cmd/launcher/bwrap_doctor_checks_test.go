@@ -84,10 +84,10 @@ func TestBwrapCapabilityChecks_NetworkIsolationTier(t *testing.T) {
 		t.Errorf("Tier = %v, want Required when networkMode=open", got.Tier)
 	}
 
-	for _, mode := range []string{runner.NetworkModeHost, runner.NetworkModeNone} {
+	for _, mode := range []runner.NetworkMode{runner.NetworkModeHost, runner.NetworkModeNone} {
 		c = minimalValidConfig()
 		c.runnerKind = freshness.KindBwrap
-		c.networkMode = mode
+		c.networkMode = string(mode)
 		got = checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
 		if got.Tier != doctor.Advisory {
 			t.Errorf("Tier = %v, want Advisory when networkMode=%s", got.Tier, mode)
@@ -164,7 +164,7 @@ func TestBwrapCapabilityChecks_NetworkIsolationRendersAdvisoryNotMissing(t *test
 
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
-	c.networkMode = runner.NetworkModeHost
+	c.networkMode = string(runner.NetworkModeHost)
 
 	results := doctor.RunChecks(bwrapCapabilityChecks(c))
 	var buf bytes.Buffer
@@ -252,7 +252,7 @@ func TestBwrapCapabilityChecks_OverlayRemedyOmitsUnsetHintWhenAdvisory(t *testin
 func TestBwrapCapabilityChecks_NetworkIsolationRemedyOmitsHostHintWhenAdvisory(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = freshness.KindBwrap
-	c.networkMode = runner.NetworkModeHost
+	c.networkMode = string(runner.NetworkModeHost)
 	advisory := checkByName(t, bwrapCapabilityChecks(c), "bwrap-network-isolation")
 	if strings.Contains(advisory.Remedy, "set NETWORK_MODE=host") {
 		t.Errorf("Advisory bwrap-network-isolation Remedy should not tell operator to set NETWORK_MODE=host, got: %s", advisory.Remedy)

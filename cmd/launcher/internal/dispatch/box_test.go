@@ -1027,8 +1027,8 @@ func TestRunOnce_RegistryProxyTransportErrors_AbortsDispatch(t *testing.T) {
 // cached verdict, #3775) must be refused rather than silently served over a
 // route the operator's mode blocks.
 func TestRunOnce_RegistryProxyTransportTCPVerdictUnderDenyingNetworkMode_Fails(t *testing.T) {
-	for _, mode := range []string{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
-		t.Run(mode, func(t *testing.T) {
+	for _, mode := range []runner.NetworkMode{runner.NetworkModeNoHostLoopback, runner.NetworkModeNone} {
+		t.Run(string(mode), func(t *testing.T) {
 			cfg := retryConfig(3, 0, 0)
 			cfg.NetworkMode = mode
 			cfg.RegistryProxyRoutes = registryproxy.AssignPrefixes([]registryproxy.Route{{Upstream: "http://127.0.0.1:1", EnforcedPaths: []string{"/"}}})
@@ -1050,13 +1050,13 @@ func TestRunOnce_RegistryProxyTransportTCPVerdictUnderDenyingNetworkMode_Fails(t
 			if !strings.Contains(err.Error(), "registry proxy") {
 				t.Errorf("runOnce error = %q, want it to name the registry proxy", err.Error())
 			}
-			if !strings.Contains(err.Error(), mode) {
+			if !strings.Contains(err.Error(), string(mode)) {
 				t.Errorf("runOnce error = %q, want it to name NETWORK_MODE=%s", err.Error(), mode)
 			}
 			if !strings.Contains(err.Error(), "REGISTRY_PROXY_ROUTES") {
 				t.Errorf("runOnce error = %q, want it to name the REGISTRY_PROXY_ROUTES knob", err.Error())
 			}
-			wantMsg := "registry proxy: unsupported under NETWORK_MODE=" + mode + " -- this runtime can only reach the registry proxy over its TCP fallback, which this mode blocks; use a different NETWORK_MODE or drop REGISTRY_PROXY_ROUTES"
+			wantMsg := "registry proxy: unsupported under NETWORK_MODE=" + string(mode) + " -- this runtime can only reach the registry proxy over its TCP fallback, which this mode blocks; use a different NETWORK_MODE or drop REGISTRY_PROXY_ROUTES"
 			if !strings.Contains(err.Error(), wantMsg) {
 				t.Errorf("runOnce error = %q, want it to contain %q", err.Error(), wantMsg)
 			}

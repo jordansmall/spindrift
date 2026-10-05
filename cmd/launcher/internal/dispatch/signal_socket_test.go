@@ -232,7 +232,7 @@ func TestRunOnce_SignalCarrierSocket_TCPVerdictUnderNoHostLoopback_Fails(t *test
 	if !strings.Contains(err.Error(), "BOX_SIGNAL_CARRIER") {
 		t.Errorf("runOnce error = %q, want it to name BOX_SIGNAL_CARRIER", err.Error())
 	}
-	if !strings.Contains(err.Error(), runner.NetworkModeNoHostLoopback) {
+	if !strings.Contains(err.Error(), string(runner.NetworkModeNoHostLoopback)) {
 		t.Errorf("runOnce error = %q, want it to name NETWORK_MODE=%s", err.Error(), runner.NetworkModeNoHostLoopback)
 	}
 	wantMsg := "signal socket: BOX_SIGNAL_CARRIER=socket is unsupported under NETWORK_MODE=no-host-loopback -- this runtime can only reach the Signal socket over its TCP fallback, which this mode blocks; use BOX_SIGNAL_CARRIER=log or a different NETWORK_MODE"

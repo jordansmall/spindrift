@@ -39,7 +39,7 @@ func TestSignalSocketTransportCheck_TCPUnderPermissiveModeReportsTCPTransport(t 
 
 	c := minimalValidConfig()
 	c.signalCarrier = "socket"
-	c.networkMode = runner.NetworkModeHost
+	c.networkMode = string(runner.NetworkModeHost)
 
 	check := signalSocketTransportCheck(c)
 	output, err := check.Probe()
@@ -62,7 +62,7 @@ func TestSignalSocketTransportCheck_TCPUnderNoHostLoopbackWrapsErrDegraded(t *te
 
 	c := minimalValidConfig()
 	c.signalCarrier = "socket"
-	c.networkMode = runner.NetworkModeNoHostLoopback
+	c.networkMode = string(runner.NetworkModeNoHostLoopback)
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -89,7 +89,7 @@ func TestSignalSocketTransportCheck_NetworkModeNoneWithUnixEndpointWrapsErrDegra
 
 	c := minimalValidConfig()
 	c.signalCarrier = "socket"
-	c.networkMode = runner.NetworkModeNone
+	c.networkMode = string(runner.NetworkModeNone)
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -113,7 +113,7 @@ func TestSignalSocketTransportCheck_NetworkModeNoneWithTCPEndpointWrapsErrDegrad
 
 	c := minimalValidConfig()
 	c.signalCarrier = "socket"
-	c.networkMode = runner.NetworkModeNone
+	c.networkMode = string(runner.NetworkModeNone)
 
 	check := signalSocketTransportCheck(c)
 	_, err := check.Probe()
@@ -223,7 +223,7 @@ func TestSignalSocketTransportCheck_RemedyNamesBothTheKnobAndTheRuntimeFix(t *te
 func TestSignalSocketTransportCheck_NetworkModeNoneRendersSharedReason(t *testing.T) {
 	c := minimalValidConfig()
 	c.signalCarrier = "socket"
-	c.networkMode = runner.NetworkModeNone
+	c.networkMode = string(runner.NetworkModeNone)
 
 	_, err := signalSocketTransportCheck(c).Probe()
 	if err == nil {

@@ -179,6 +179,12 @@ func (c config) effectiveBoxForgeAndIssueAccess() string {
 	return c.boxForgeAndIssueAccess
 }
 
+// runnerNetworkMode is c.networkMode as runner's typed NETWORK_MODE;
+// schemaconfig_gen.go keeps the generated field a plain string.
+func (c config) runnerNetworkMode() runner.NetworkMode {
+	return runner.NetworkMode(c.networkMode)
+}
+
 // applyDispatchKind sets c's dispatchKind and swaps the four lifecycle label
 // fields to kind's label family via forge.FamilyLabels. Only work's family is
 // operator-configurable; research's is fixed, since its CI workflow and prompt
@@ -752,7 +758,7 @@ func runnerConfig(c config) runner.Config {
 		NixVolume:         c.nixVolume,
 		FlakeImageAttr:    c.flakeImageAttr,
 		PodmanNetwork:     c.podmanNetwork,
-		NetworkMode:       c.networkMode,
+		NetworkMode:       c.runnerNetworkMode(),
 		PidsLimit:         c.pidsLimit,
 		MemoryLimit:       c.memoryLimit,
 		AgentFiles:        c.agentFiles,
@@ -916,7 +922,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		DriverSessionCacheDir:  c.driverSessionCacheDir,
 		RegistryProxyRoutes:    c.registryProxyRoutes,
 		SignalCarrier:          c.signalCarrier,
-		NetworkMode:            c.networkMode,
+		NetworkMode:            c.runnerNetworkMode(),
 		// forge.ResolveOpenPR (issue #565) keeps a zero-exit rate-limited retry
 		// from re-running a box whose work already landed a PR.
 		OpenPRForIssue: func(number string) (bool, error) {
@@ -1134,12 +1140,12 @@ func checkNetworkModeRuntimeGate(c config) error {
 	// Keys on runnerKind, never runtime: RUNNER_KIND=bwrap/RUNTIME=podman is a
 	// supported pairing, and keying on runtime would both reject it and let it
 	// reach bwrap.go's fail-open isolateNet=false (issue #2538).
-	if c.networkMode == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
+	if c.runnerNetworkMode() == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
 		return newLaunchGateConfigError("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
 	}
 	// Only the detectable subset: Go sees the resolved value alone, so an
 	// explicit NETWORK_MODE=open beside a raw knob is left to raw-wins.
-	if c.networkMode != runner.NetworkModeOpen && c.networkMode != "" && (c.podmanNetwork != "" || c.bwrapUnshareNet) {
+	if c.runnerNetworkMode() != runner.NetworkModeOpen && c.runnerNetworkMode() != "" && (c.podmanNetwork != "" || c.bwrapUnshareNet) {
 		var rawKnobs []string
 		if c.podmanNetwork != "" {
 			rawKnobs = append(rawKnobs, "PODMAN_NETWORK")
@@ -1160,7 +1166,7 @@ func checkBwrapPastaGate(c config) error {
 	if c.runnerKind != freshness.KindBwrap {
 		return nil
 	}
-	if c.networkMode == runner.NetworkModeHost || c.networkMode == runner.NetworkModeNone {
+	if mode := c.runnerNetworkMode(); mode == runner.NetworkModeHost || mode == runner.NetworkModeNone {
 		return nil
 	}
 	return runner.ValidatePasta()

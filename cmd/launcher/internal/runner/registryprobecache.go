@@ -25,7 +25,7 @@ type registryProbeCacheKey struct {
 	// aliases that resolve to one binary share a cache entry.
 	runtime     string
 	image       string
-	networkMode string
+	networkMode NetworkMode
 }
 
 // registryProbeCacheEntry is the on-disk payload. It carries the verdict in
@@ -34,13 +34,13 @@ type registryProbeCacheKey struct {
 // rejects the path-less, port-less values the probe returns (the caller mints
 // the real path or port afterwards).
 type registryProbeCacheEntry struct {
-	Version     int    `json:"version"`
-	Runtime     string `json:"runtime"`
-	Image       string `json:"image"`
-	NetworkMode string `json:"networkMode"`
-	Transport   string `json:"transport"`
-	TCPHost     string `json:"tcpHost,omitempty"`
-	TCPAddHost  bool   `json:"tcpAddHost"`
+	Version     int         `json:"version"`
+	Runtime     string      `json:"runtime"`
+	Image       string      `json:"image"`
+	NetworkMode NetworkMode `json:"networkMode"`
+	Transport   string      `json:"transport"`
+	TCPHost     string      `json:"tcpHost,omitempty"`
+	TCPAddHost  bool        `json:"tcpAddHost"`
 }
 
 // registryProbeCachePath returns the cache path for pwd, or "" when pwd is
@@ -85,7 +85,7 @@ func loadRegistryProbeCache(pwd string, want registryProbeCacheKey) (endpoint re
 		return registrymanifest.NewUnixEndpoint(""), entry.TCPAddHost, true
 	case "tcp":
 		// The file is hand-editable, so re-apply the live probe's loopback guard.
-		if entry.TCPHost == "" || DeniesHostLoopback(entry.NetworkMode) {
+		if entry.TCPHost == "" || entry.NetworkMode.DeniesHostLoopback() {
 			return registrymanifest.Endpoint{}, false, false
 		}
 		return registrymanifest.NewTCPEndpoint(entry.TCPHost, ""), entry.TCPAddHost, true
