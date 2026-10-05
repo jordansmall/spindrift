@@ -41,6 +41,10 @@
 # itself (in-box client plus token), which branch recovery needs before
 # force-resetting a prior agent branch; only github (issue #4449).
 
+# inBoxGHCredentialHelper marks a CODE_FORGE whose Box clone runs
+# `gh auth setup-git`; github and git (its remote URL may be github.com), not
+# forgejo (token URL, ADR 0038) or local (filesystem mount, ADR 0033; issue #4452).
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [
@@ -52,6 +56,7 @@
     tokenEnvVar = "GH_TOKEN";
     outboxRelayCapable = true;
     inBoxOpenPRQueryable = true;
+    inBoxGHCredentialHelper = true;
     relayCapable = true;
     hostPostingCapable = true;
     labelRegistry = true;
@@ -60,6 +65,7 @@
     name = "git";
     goVar = "Git";
     validAsCodeForge = true;
+    inBoxGHCredentialHelper = true;
   }
   {
     name = "local";
