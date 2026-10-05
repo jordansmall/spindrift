@@ -83,8 +83,10 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
 // (#2225); sit comes from the caller (#2501). Recover is read-write, so it
 // needs neither synthetic provenance nor a read-only Box. An open PR is
-// SettleAdopted's job, so sit.OpenPRFound returns false. Local push-only has
-// no PR to open (ADR 0039, #2254), where a bundle alone is evidence (#2378).
+// SettleAdopted's job, so sit.OpenPRFound returns false; every production
+// caller passes false today, so this guard only protects a future caller.
+// Local push-only has no PR to open (ADR 0039, #2254), where a bundle alone
+// is evidence (#2378).
 func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool {
 	defer s.flushSettled(num)
 	if sit.OpenPRFound {
