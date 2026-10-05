@@ -12,27 +12,4 @@ set -euo pipefail
 : "${ORCHESTRATOR_LOG:?ORCHESTRATOR_LOG must be set}"
 echo "$@" >>"$ORCHESTRATOR_LOG"
 
-# Optional per-invocation snapshot (issue #4293): the Driver-invocation golden
-# (tests/entrypoint-driver-invocation-golden.bats) needs the exact argv, the
-# environment and the contents of the files the argv names, and the entrypoint
-# deletes those files once the pass returns.
-if [ -n "${ORCHESTRATOR_SNAPSHOT_DIR:-}" ]; then
-  _n=1
-  while [ -e "$ORCHESTRATOR_SNAPSHOT_DIR/$_n" ]; do _n=$((_n + 1)); done
-  _snap="$ORCHESTRATOR_SNAPSHOT_DIR/$_n"
-  mkdir -p "$_snap"
-  printf '%s\n' "$@" >"$_snap/argv"
-  env -0 >"$_snap/env"
-  : >"$_snap/prompt"
-  : >"$_snap/session"
-  _prev=""
-  for _a in "$@"; do
-    case "$_prev" in
-      --prompt-file) cp "$_a" "$_snap/prompt" ;;
-      --session-file) cp "$_a" "$_snap/session" ;;
-    esac
-    _prev="$_a"
-  done
-fi
-
 exec driver-exec "$@"

@@ -1574,14 +1574,6 @@ non-delegated, non-systemd host). A writable ancestor whose
 `cgroup.subtree_control` lacks a controller a configured limit needs is
 not a valid anchor, so it does not rescue visibility on such a host.
 
-The bats test suite has its own internal `WAIT_FOR_LOG_LINES_TIMEOUT` knob
-(`tests/helper.bash`'s `wait_for_log_lines` poll helper) for widening its
-default poll patience against a loaded host — a test-only bash env var, not
-part of the Consumer settings surface above. The `bats-shard-N`
-checks (`nix/checks/bats.nix`), run by `nix flake check` but left out of
-`nix build .#checks-inbox` for gate time, bake a wider default (10s, vs. the shell-level 2s
-default).
-
 #### Network mode (`NETWORK_MODE`)
 
 `NETWORK_MODE` (`perSystem.spindrift.infra.network.mode`) is the primary

@@ -5,10 +5,7 @@
   ...
 }:
 let
-  inherit (fixtures)
-    batsHarness
-    opencodeHarness
-    ;
+  inherit (fixtures) batsHarness;
 
   # Issue #2261 slice 2. driverOutcomeManifest below pairs each registered
   # Driver's rendered preamble with its own testdata/outcome-fixture.jsonl, so
@@ -87,11 +84,8 @@ let
     # real body rather than a hand-copied stand-in.
     GH_TOKEN_REFRESHER_ACTION_YML = ../../.github/actions/gh-token-refresher/action.yml;
     PROMPTS_DIR = ../../templates/default/prompts;
-    # Issue #4293. The Driver-invocation goldens live in the Go tree (box's seam
-    # test reads the same files), which batsBuilderSetup does not stage.
-    DRIVER_INVOCATION_GOLDEN_DIR = ../../cmd/launcher/box/testdata/driver-invocation;
     # The rendered contracts, driver/agent-paths preambles and fragment
-    # registry the entrypoint-*.bats suites read: the same bytes the Go seam
+    # registry tests/entrypoint-shim.bats reads: the same bytes the Go seam
     # tests read. helper.bash derives the per-file vars from this dir.
     SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
     # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
@@ -99,9 +93,6 @@ let
     # shards export the same manifest the dedicated check below does, or that
     # file's required-var guard fails here.
     DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
-    # The opencode Driver's rendered preamble (issue #2262), read by
-    # entrypoint-driver-invocation-golden.bats rather than a hand-typed copy.
-    OPENCODE_DRIVER_PREAMBLE_FILE = opencodeHarness.internals.driverPreambleFile;
     # The binaries and rendered registries entrypoint.sh hands box (see
     # comment above promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
@@ -109,10 +100,6 @@ let
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
-    # Widens wait_for_log_lines' (tests/helper.bash) default poll patience
-    # from 2s to 10s for this gate (issue #2649); that function's doc comment
-    # carries the sandbox-isolation reason.
-    WAIT_FOR_LOG_LINES_TIMEOUT = "10";
     # The launcher commands under test overlay `gh` with the fake
     # (batsHarness), since the real `gh` is pinned into its runtimeInputs
     # PATH and would otherwise shadow a PATH-injected fake.

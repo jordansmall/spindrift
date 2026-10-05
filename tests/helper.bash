@@ -27,94 +27,6 @@ if [ -n "${SPINDRIFT_SEAM_FIXTURES_DIR:-}" ]; then
   unset _f
 fi
 
-# A missing or unreadable file counts as 0 rather than an empty string, so a
-# caller's integer comparison never throws.
-_count_matches() {
-  local file="$1" pattern="$2" count
-  if [ -r "$file" ]; then
-    count="$(grep -c "$pattern" "$file" 2>/dev/null)" || count=0
-  else
-    count=0
-  fi
-  echo "$count"
-}
-
-# Usage: wait_for_log_lines <file> <pattern> <expected_count> [timeout_seconds]
-# Polls rather than sampling the log once (issue #2450); the flaky CI failure
-# behind it was never pinned down (commit 9e724bab), so the wait is defensive.
-# Nix's build sandbox scrubs WAIT_FOR_LOG_LINES_TIMEOUT, so nix/checks/bats.nix
-# bakes a wider 10s default into the derivation instead (issue #2649).
-wait_for_log_lines() {
-  local file="$1" pattern="$2" expected="$3" timeout="${4:-${WAIT_FOR_LOG_LINES_TIMEOUT:-2}}"
-  # The timeout flows into a `timeout * 20` arithmetic context, so reject
-  # anything but a small positive integer: 0 collapses the loop to a single
-  # check, and an 18-digit value wraps the poll count negative (issue #2759).
-  if ! [[ "$timeout" =~ ^[1-9][0-9]{0,5}$ ]]; then
-    echo "wait_for_log_lines: timeout must be a positive integer of at most 6 digits, got '$timeout'" >&2
-    return 1
-  fi
-  local interval="0.05"
-  local confirm_tries=3
-  local tries=$((timeout * 20)) # 20 == 1/interval (0.05s); also mirrored in tests/wait-for-log-lines.bats' "widen past the 2s default" test
-  local actual i confirm
-
-  for ((i = 0; i <= tries; i++)); do
-    actual="$(_count_matches "$file" "$pattern")"
-    if [ "$actual" -gt "$expected" ]; then
-      echo "wait_for_log_lines: overshot -- $actual line(s) matching" \
-        "'$pattern' in $file, expected $expected" >&2
-      return 1
-    fi
-    if [ "$actual" -eq "$expected" ]; then
-      # Reaching expected is not proof the count has settled: it may be passing
-      # through on its way to a higher, wrong one (an over-dispatch regression).
-      # Confirm over a few extra polls, not the full remaining timeout.
-      for ((confirm = 0; confirm < confirm_tries; confirm++)); do
-        sleep "$interval"
-        actual="$(_count_matches "$file" "$pattern")"
-        if [ "$actual" -gt "$expected" ]; then
-          echo "wait_for_log_lines: overshot during confirmation --" \
-            "$actual line(s) matching '$pattern' in $file, expected $expected" >&2
-          return 1
-        fi
-      done
-      return 0
-    fi
-    [ "$i" -lt "$tries" ] && sleep "$interval"
-  done
-
-  echo "wait_for_log_lines: timed out after ${timeout}s waiting for" \
-    "$expected line(s) matching '$pattern' in $file (got $actual)" >&2
-  return 1
-}
-
-# Asserts wait_for_log_lines rejects an invalid timeout cleanly: status 1, the
-# shared rejection message, and no pre-fix symptom string. Variadic so one call
-# can pin more than one symptom per malformed-timeout case.
-# shellcheck disable=SC2154 # $status/$output are bats-provided by the `run` call above, not assigned directly
-assert_timeout_rejected() {
-  local log="$1" timeout_value="$2" absent_substring
-  shift 2
-  run wait_for_log_lines "$log" '^run ' 1 "$timeout_value"
-  # Each assertion returns 1 explicitly instead of leaning on `set -e`: the
-  # caller (tests/wait-for-log-lines.bats' malformed-timeout loop) suspends
-  # errexit, so a bare failing statement would fall through.
-  if [ "$status" -ne 1 ]; then
-    echo "assert_timeout_rejected: expected status 1, got $status" >&2
-    return 1
-  fi
-  if [[ "$output" != *"timeout must be a positive integer"* ]]; then
-    echo "assert_timeout_rejected: output missing expected substring [timeout must be a positive integer]: $output" >&2
-    return 1
-  fi
-  for absent_substring in "$@"; do
-    if [ -n "$absent_substring" ] && [[ "$output" == *"$absent_substring"* ]]; then
-      echo "assert_timeout_rejected: output unexpectedly contains [$absent_substring]: $output" >&2
-      return 1
-    fi
-  done
-}
-
 # set_dispatch_kind <work|research|butler> exports DISPATCH_KIND plus the axes
 # dispatch.buildBoxEnv derives from the kind's descriptor (issue #3996):
 # DISPATCH_KEYING, DISPATCH_ANNOUNCE_VERB and DISPATCH_KEY. The one place this
@@ -147,8 +59,7 @@ set_dispatch_kind() {
   esac
 }
 
-# Shared setup for the split entrypoint-*.bats suites (issue #518): bats needs a
-# setup() hook per file, so the shared body lives here.
+# setup() body for tests/entrypoint-shim.bats.
 setup_entrypoint_env() {
   setup_fakes
   # The entrypoint shim execs `box` (ADR 0058, issue #4302), which runs the
