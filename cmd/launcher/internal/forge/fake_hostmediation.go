@@ -4,7 +4,8 @@ package forge
 // HostPostedIssueFiler, LandingRef, LandingRepair, and LandingContainmentQuery
 // interfaces read or write. Its backing methods stay unexported so a bare *Fake
 // used as a CodeForge or IssueTracker cannot satisfy those gated interfaces by
-// accident; only the wrapper types in fake.go reach them, through promotion.
+// accident; only the wrappers AsLocal, AsGithubReadOnly, AsIssueFiler, and
+// AsLocalIssueFiler return reach them, through promotion.
 type HostMediationFake struct {
 	*core
 
