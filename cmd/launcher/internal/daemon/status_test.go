@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -651,5 +653,56 @@ func TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld(t *testing.T) {
 	}
 	if report.Holder == "" {
 		t.Errorf("Holder = %q, want the held lock's identity line", report.Holder)
+	}
+}
+
+// TestPoolSnapshotCarriesDemandFieldsPerKind pins which per-kind Demand
+// fields a snapshot carries: a probed kind with a count, an exit-driven kind
+// with none, and a jam-gated probed kind that also carries its jam.
+func TestPoolSnapshotCarriesDemandFieldsPerKind(t *testing.T) {
+	clk := &testClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+	work, research, butler := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)
+	cfg := testConfig(1)
+	cfg.Kinds = []Kind{work, research, butler}
+	cfg.ProbeIntervals = map[Kind]time.Duration{work: time.Minute, research: time.Minute}
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
+
+	now := clk.Now()
+	s := p.st.sched
+	s, _ = s.Observe(now, DemandProbed{Kind: work, Ready: 0})
+	s, _ = s.Observe(now, DemandProbed{Kind: research, Ready: 3})
+	s, _ = s.Observe(now, ChildDone{Kind: research, Result: ChildJammed})
+	p.st.sched = s
+
+	checks := p.snapshot().Checks
+	ts := func(d time.Duration) string { return now.Add(d).UTC().Format(time.RFC3339) }
+
+	w := checks[0]
+	if w.Ready == nil || *w.Ready != 0 || w.ProbedAt != ts(0) || w.NextProbe != ts(time.Minute) {
+		t.Errorf("probed work = %+v, want ready 0 (present), probed_at now, next_probe +1m", w)
+	}
+	if w.JamUntil != "" || w.ReadyAtJam != nil {
+		t.Errorf("work carries jam fields %+v with no jam", w)
+	}
+
+	r := checks[1]
+	if r.Ready == nil || *r.Ready != 3 || r.ReadyAtJam == nil || *r.ReadyAtJam != 3 || r.JamUntil == "" || !r.Jammed {
+		t.Errorf("jammed research = %+v, want ready 3, ready_at_jam 3, jam_until set, jammed", r)
+	}
+
+	b := checks[2]
+	if b.Ready != nil || b.ProbedAt != "" || b.NextProbe != "" || b.ReadyAtJam != nil {
+		t.Errorf("exit-driven butler = %+v, want no demand fields", b)
+	}
+
+	data, err := json.Marshal(checks[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"ready":0`, `"probed_at"`, `"next_probe"`} {
+		if !strings.Contains(string(data), key) {
+			t.Errorf("work JSON = %s, want it to contain %s", data, key)
+		}
 	}
 }

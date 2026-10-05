@@ -6452,6 +6452,14 @@ top-level status is how a reader tells the two apart, whether the pool
 is otherwise `asleep` or still `working` out a child started before the
 window shut.
 
+A probed kind (one with a Demand probe interval, ADR 0059) also carries
+`ready` (the last probe's count of startable items; `0` is present, not
+elided), `probed_at` and `next_probe` (RFC3339) once probed — absent in
+the gap after a child starts, until the re-probe lands, and always absent
+for an exit-driven kind. `jam_until` (RFC3339) appears only while a jam
+gate is live, and on a probed kind `ready_at_jam` is the `ready` count
+that jam froze.
+
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
 (`chooseKind`, `cmd/launcher/internal/daemon/pool.go`). It is a floor, not a

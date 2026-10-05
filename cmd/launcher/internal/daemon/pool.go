@@ -1088,6 +1088,21 @@ func (p *pool) snapshotLocked() Status {
 		} else {
 			allGated = false
 		}
+		if v.Probed && !v.ProbedAt.IsZero() {
+			// A Continue exit zeroes ProbedAt until the re-probe lands; there
+			// is no count to report in that gap.
+			ready := v.Ready
+			kc.Ready = &ready
+			kc.ProbedAt = v.ProbedAt.UTC().Format(time.RFC3339)
+			kc.NextProbe = v.NextProbe.UTC().Format(time.RFC3339)
+		}
+		if !v.JamUntil.IsZero() {
+			kc.JamUntil = v.JamUntil.UTC().Format(time.RFC3339)
+			if v.Probed {
+				readyAtJam := v.ReadyAtJam
+				kc.ReadyAtJam = &readyAtJam
+			}
+		}
 		if windowOpensAt.After(at) {
 			at = windowOpensAt
 		}

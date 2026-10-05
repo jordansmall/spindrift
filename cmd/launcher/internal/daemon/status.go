@@ -95,6 +95,20 @@ type KindCheck struct {
 	// result. Without this, which kind is jammed is unrecoverable once
 	// State collapses several kinds into one word (issue #3545).
 	Jammed bool `json:"jammed,omitempty"`
+
+	// The fields below describe the kind's Demand probe (issue #4573, ADR
+	// 0059) and are set only for a probed kind that has been probed and has not
+	// since had a child exit 0 or 4; an exit-driven kind never carries them.
+	// Ready is a *int so a real 0 survives omitempty.
+	Ready *int `json:"ready,omitempty"`
+	// ProbedAt and NextProbe are RFC3339 UTC.
+	ProbedAt  string `json:"probed_at,omitempty"`
+	NextProbe string `json:"next_probe,omitempty"`
+	// JamUntil is set only while a jam gate is live; ReadyAtJam is the
+	// Ready count the jam froze, so a reader sees how much work the jam is
+	// holding back.
+	JamUntil   string `json:"jam_until,omitempty"`
+	ReadyAtJam *int   `json:"ready_at_jam,omitempty"`
 }
 
 // State is the daemon's published operator-facing state; the pool computes
