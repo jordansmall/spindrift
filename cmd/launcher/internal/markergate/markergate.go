@@ -228,7 +228,7 @@ type ResolveConfig struct {
 	// ran, the restore fallback's source of truth.
 	OriginalOutcomeLine string
 	// OutcomeViaBackstop reports whether this run's ready status came from the
-	// synthetic outcome-backstop verb rather than a driver self-report.
+	// synthetic outcome backstop rather than a driver self-report.
 	OutcomeViaBackstop bool
 	// ResumeExitCode is the corrective resume's own driver exit code.
 	ResumeExitCode int

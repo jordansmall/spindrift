@@ -30,9 +30,7 @@
   # reads it through its `--validate-markers-registry` flag.
   PROMPT_CONTRACT_REGISTRY_FILE = "/agent/prompt-contract-registry.json";
   # lib/prompt-contract.nix's forbiddenMarkers list as JSON (issue #2464). The
-  # read-only guards read it through box's (and the `driver-exec
-  # readonly-guards` verb's) `--forbidden-markers-registry` flag;
-  # assemble-prompt no longer takes it
-  # (issue #2513).
+  # read-only guards read it through box's `--forbidden-markers-registry` flag;
+  # assemble-prompt no longer takes it (issue #2513).
   FORBIDDEN_MARKERS_REGISTRY_FILE = "/agent/forbidden-markers-registry.json";
 }

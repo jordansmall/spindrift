@@ -82,7 +82,9 @@ instead of trusting the Agent to run `git bundle create` — the Agent's own
 contract there shrinks to "commit on the branch," identical to every other
 Code Forge. An empty range against a claimed `ready` outcome gets a
 corrective `status=blocked` SPINDRIFT_OUTCOME line instead of settling as a
-false ready.
+false ready. The settle phases (outcome backstop, marker gate, read-only
+guards, dispatch-kind posture) run in-process in the box binary, so
+driver-exec carries no verb for them.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **box (binary)**:
