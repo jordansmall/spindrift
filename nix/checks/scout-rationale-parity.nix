@@ -13,6 +13,8 @@ let
     hasInfix
     ;
 
+  hasPointerInWindow = import ./scout-rationale-pointer-window.nix { inherit (pkgs) lib; };
+
   # Line-by-line rather than a whole-file hasInfix: lib.hasInfix's regex engine
   # (".*infix.*" via builtins.match) stack-overflows on cmd/launcher/main_test.go,
   # the one file among these sites large enough to trip it; every line on its
@@ -181,11 +183,8 @@ let
   pointerCheck = site: {
     name = "scout-rationale-parity-pointer-${site.name}";
     value =
-      let
-        blockText = concatStringsSep "\n" (commentBlock site);
-      in
-      assert assertMsg (hasInfix "lib/mkHarness.nix" blockText && hasInfix "scoutProvisioned" blockText)
-        "scout-rationale-parity: the comment above ${site.label} no longer names both lib/mkHarness.nix and scoutProvisioned -- the pointer was dropped or reworded away from the canonical site in lib/mkHarness.nix.";
+      assert assertMsg (hasPointerInWindow [ canonicalSite.file "scoutProvisioned" ] (commentBlock site))
+        "scout-rationale-parity: the comment above ${site.label} no longer names both lib/mkHarness.nix and scoutProvisioned on the same or adjacent lines -- the pointer was dropped, or reworded away from the canonical site in lib/mkHarness.nix.";
       pkgs.runCommand "scout-rationale-parity-pointer-${site.name}" { } "touch $out";
   };
 in
