@@ -9,6 +9,59 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.22.0 — 2026-10-05
+
+The orchestrator is now the only way a Box runs, the Signal socket is the
+default carrier, and the Box's main loop moved from bash into a Go program.
+
+**⚠ Breaking changes** this release: the orchestrator on/off switch is
+gone, `BOX_SIGNAL_CARRIER` now defaults to `socket`, and the inline
+review-loop prompt fragment was removed.
+
+- **⚠ Breaking: the orchestrator is always on.** `ORCHESTRATOR_ENABLED`,
+  `--orchestrator` and `dispatch.orchestrator.enable` no longer exist,
+  along with the direct path they used to select. Setting any of them
+  now fails loudly (at dispatch, in doctor, or at Nix evaluation) instead
+  of being quietly ignored, so drop the setting. A custom `reviewPrompt`
+  needs the `VERDICT:` marker or the build fails.
+- **⚠ Breaking: the Signal socket is the default carrier.** Comments, PR
+  intent and issue intent now cross into the launcher over its socket
+  unless you set `BOX_SIGNAL_CARRIER=log`. If you run with
+  `NETWORK_MODE=none` (or `no-host-loopback` without TCP) and never set
+  the knob, dispatch now stops at startup and tells you to set it to
+  `log`. The log carrier is still selectable through the 0.22 releases.
+- **⚠ Breaking: one prompt fragment is gone.**
+  `fragments/review-loop-inline.md` and its `REVIEW_LOOP_INLINE_STEP` var
+  were deleted with the direct path. Overrides that reference the other
+  review-loop, land-pass and commit-rework fragments keep working.
+- **The Box runs on a Go `box` program.** Clone, configure, toolchain
+  choice, the Driver's home, registry proxy, read-only guards, prompt
+  assembly, branch recovery, conflict resolve and the first Driver pass
+  all moved out of the bash entrypoint, which is now a thin shim. You
+  shouldn't see a difference, except that under podman `box` now reaps
+  orphaned processes, so zombies no longer pile up until a long build
+  dies from hitting the pids limit.
+- **Runs finish without a pointless extra round.** A Box no longer ends
+  after the implement pass because an outcome line showed up inside tool
+  output, no longer loses the land pass's result to the follow-up review
+  and re-runs the whole check gate, and isn't nudged to re-run checks when
+  nothing changed. Review citations like `run.go:12-15` now match edits
+  inside that range instead of triggering another review.
+- **Faster checks in the Box.** The Box builds two Nix derivations at
+  once, and agents iterate on the narrowest check before running the full
+  gate once per pass. A new `agents.bashTimeoutMs` knob
+  (`DRIVER_BASH_TIMEOUT_MS`) raises the claude Driver's 10-minute Bash cap
+  for long gates.
+- **Forgejo and daemon fixes.** The Forgejo backend now reads every page
+  of statuses, changed files and issue dependencies (so a blocker past
+  the first page holds an issue back), treats `[WIP]` titles as drafts,
+  and stops refiling findings when labelling fails. The daemon no longer
+  starts a child on a host it just declared unusable, or a redundant
+  research Box on an empty queue. Heartbeat and Console text from agents
+  is stripped of terminal escapes and bidi controls, and a stray number
+  in an opencode error no longer gets a deterministic failure retried as a
+  rate limit.
+
 ## 0.21.3 — 2026-10-03
 
 Fixes for the Console, the daemon's research floor, and the Filer, plus
