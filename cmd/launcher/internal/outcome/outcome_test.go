@@ -751,6 +751,26 @@ func TestLastNearMissOutcomeLine_PicksUpNonFieldedLine(t *testing.T) {
 	}
 }
 
+// A markdown-wrapped or colon-delimited valid line is no near miss: the first
+// fails the leading-token test, the second already carries both fields.
+func TestLastNearMissOutcomeLine_IgnoresWrappedAndColonValidLines(t *testing.T) {
+	tests := []struct{ name, line string }{
+		{"markdown-wrapped", "**" + outcome.Token + " issue=7 landing=agent/issue-7 status=ready note=done**"},
+		{"colon-delimited", outcome.Token + ": issue=7 landing=agent/issue-7 status=ready note=done"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, found, err := outcome.LastNearMissOutcomeLine(writeLog(t, tt.line))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if found {
+				t.Fatalf("found = true with line %q, want found=false", got)
+			}
+		})
+	}
+}
+
 func TestLineHasNonce_Match(t *testing.T) {
 	line := "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok nonce=abc123"
 	if !outcome.LineHasNonce(line, "abc123") {

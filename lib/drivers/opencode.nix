@@ -4,10 +4,6 @@
 # byte-identical to the baked one, before exec-ing the entrypoint, so the suite
 # exercises the same bytes (issue #433).
 { lib }:
-let
-  outcomeExtractor = import ./outcome-extractor.nix;
-  jqSelector = ''select(.type == "text") | .part.text // empty'';
-in
 {
   name = "opencode";
 
@@ -36,38 +32,6 @@ in
 
   # envCommon is deliberately omitted: opencode has no env vars to export into
   # the child process environment.
-
-  # opencode's stream has no single terminal `result` envelope, unlike claude's
-  # stream-json, so every `type:"text"` event's incremental `.part.text` is
-  # scanned for the outcome line. The rest of the pipeline is shared with every
-  # Driver's "match" body so both produce the same launcher-side line shape; see
-  # outcome-extractor.nix's mkOutcomeExtractor for the rationale (issue #2261).
-  outcomeExtractFnBody = outcomeExtractor.mkOutcomeExtractor {
-    inherit jqSelector;
-    variant = "match";
-  };
-
-  # The complement of outcomeExtractFnBody above over the same event stream
-  # (issue #1900): see outcome-extractor.nix's mkOutcomeExtractor for why this
-  # variant leaves the colon delimiter alone and does not require both landing=
-  # and status=.
-  outcomeExtractNearMissFnBody = outcomeExtractor.mkOutcomeExtractor {
-    inherit jqSelector;
-    variant = "near-miss";
-  };
-
-  # The shared prefix of the two bodies above, with no classification and no
-  # `tail -1` on top. The driver-exec marker gate (issue #2978) scans this raw
-  # text in Go (cmd/launcher/internal/outcome/outcome.go) instead of trusting a
-  # bash-side classification for the SPINDRIFT_OUTCOME nudge decision. Called as
-  # `_driver_extract_result_text "$stream_log"`.
-  resultTextExtractFnBody = ''
-    # The backtick below is a literal char in a single-quoted sed script, not
-    # an unexpanded command substitution.
-    # shellcheck disable=SC2016
-    jq -r '${jqSelector}' "$1" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
-  '';
 
   # opencode composes subagents from the on-disk files agentFilesTemplate below
   # bakes, not a CLI flag, so this always returns "". It keeps claude.nix's

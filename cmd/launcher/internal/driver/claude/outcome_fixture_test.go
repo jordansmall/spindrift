@@ -2,6 +2,7 @@ package claude
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -45,9 +46,8 @@ func TestOutcomeFixtureExtractUsage(t *testing.T) {
 	}
 }
 
-// TestOutcomeFixtureResultText pins the Go extraction against the same
-// fixture tests/driver-registry-outcome-extraction.bats runs the in-box shell
-// extractor on, so the two halves cannot drift.
+// TestOutcomeFixtureResultText pins ResultText against the Driver's canonical
+// testdata/outcome-fixture.jsonl.
 func TestOutcomeFixtureResultText(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
@@ -57,6 +57,14 @@ func TestOutcomeFixtureResultText(t *testing.T) {
 	}
 	if got := outcome.ExtractOutcomeLine(outcome.StripResultText(text)); got != spindriftOutcomeLine {
 		t.Errorf("ExtractOutcomeLine(ResultText(%s)) = %q, want %q", path, got, spindriftOutcomeLine)
+	}
+
+	textPath := filepath.Join(t.TempDir(), "result.txt")
+	if err := os.WriteFile(textPath, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if line, found, err := outcome.LastNearMissOutcomeLine(textPath); err != nil || found {
+		t.Errorf("LastNearMissOutcomeLine(ResultText(%s)) = %q, %v, %v; want no near miss", path, line, found, err)
 	}
 }
 

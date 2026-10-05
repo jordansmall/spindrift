@@ -7,23 +7,10 @@
 let
   inherit (fixtures) batsHarness;
 
-  # Issue #2261 slice 2. driverOutcomeManifest below pairs each registered
-  # Driver's rendered preamble with its own testdata/outcome-fixture.jsonl, so
-  # a new registry entry needs no edit here or in
-  # tests/driver-registry-outcome-extraction.bats.
-  driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
-
   # Issue #2648 slice 1. `batsShards` is threaded in via `common`
   # (nix/checks/default.nix) rather than imported here, so its directory scan
   # and @test count run once per eval, not once per consumer.
   inherit (batsShards) shardFiles shardNames;
-  driverOutcomeManifest = pkgs.lib.mapAttrs (name: entry: {
-    preamble = "${pkgs.writeText "driver-preamble-${name}.sh" (driverRegistry.renderPreamble entry)}";
-    fixture = "${(../../cmd/launcher/internal/driver + "/${name}/testdata/outcome-fixture.jsonl")}";
-  }) driverRegistry.entries;
-  driverOutcomeManifestFile = pkgs.writeText "driver-outcome-manifest.json" (
-    builtins.toJSON driverOutcomeManifest
-  );
 
   # The bats-shard-N derivations (issue #2648) export the rendered
   # lib/fragments.nix JSON that entrypoint.sh hands box, the same bytes
@@ -44,8 +31,7 @@ let
     builtins.toJSON (import ../../lib/prompt-contract.nix).forbiddenMarkers
   );
 
-  # Issue #2751. Shared by batsEnv; `driver-registry-outcome-extraction` below
-  # hand-lists a narrower set instead, since it needs neither git nor gettext.
+  # Tools every bats suite shells out to (issue #2751); shared by batsEnv.
   batsNativeBuildInputs = [
     pkgs.bats
     pkgs.bash
@@ -88,11 +74,6 @@ let
     # registry tests/entrypoint-shim.bats reads: the same bytes the Go seam
     # tests read. helper.bash derives the per-file vars from this dir.
     SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
-    # tests/driver-registry-outcome-extraction.bats (issue #2261 slice 2)
-    # lands in one of the bats-shard-N derivations (issue #2648), so the
-    # shards export the same manifest the dedicated check below does, or that
-    # file's required-var guard fails here.
-    DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
     # The binaries and rendered registries entrypoint.sh hands box (see
     # comment above promptassemblyRegistryJsonFile).
     DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
@@ -109,8 +90,6 @@ let
   # Shared by the bats-shard-N derivations: stage a writable copy of tests/,
   # rewrite the fakes' shebangs for the sandboxed build host, and export
   # FAKES_DIR.
-  # `driver-registry-outcome-extraction` below invokes no fake, so it needs
-  # neither the shebang rewrite nor FAKES_DIR, and copies tests/ itself.
   batsBuilderSetup = ''
     export HOME="$TMPDIR/home"
     mkdir -p "$HOME"
@@ -188,30 +167,6 @@ in
           ${../../tests/fakes/driver-exec} \
           ${../../tests/helper.bash} \
           ${../../tests/box_env_gen.bash}
-        touch $out
-      '';
-
-  # Issue #2261 slice 2. Runs every registered Driver's outcome-extraction
-  # shell bodies against its own canonical fixture. renderPreamble only reads
-  # string-valued attrs, so this needs no image realization and belongs in
-  # both `checks` and `checks-inbox` (nix/checks/default.nix).
-  "driver-registry-outcome-extraction" =
-    pkgs.runCommand "driver-registry-outcome-extraction"
-      {
-        nativeBuildInputs = [
-          pkgs.bats
-          pkgs.bash
-          pkgs.jq
-          pkgs.gnugrep
-          pkgs.gnused
-          pkgs.coreutils
-        ];
-        DRIVER_OUTCOME_MANIFEST = driverOutcomeManifestFile;
-      }
-      ''
-        cp -r ${../../tests} tests
-        chmod -R +w tests
-        bats --print-output-on-failure tests/driver-registry-outcome-extraction.bats
         touch $out
       '';
 
