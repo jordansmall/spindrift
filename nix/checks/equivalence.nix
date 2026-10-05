@@ -60,13 +60,12 @@ let
 in
 {
   # The image store path is substituted into the generated Launcher input
-  # documents and the placeholder is gone from them and from the shipped CLI
+  # document and the placeholder is gone from it and from the shipped CLI
   # wrapper. The wrapper carries no knob or artifact env of its own, only a
   # single --input flag (ADR 0020). The toy document keeps the placeholder, so
   # the negative control proves assertSubstituted can fail.
   mkharness-substitution = pkgs.runCommand "mkharness-substitution" { } ''
     cliCmd=${harness.spindrift}/bin/spindrift
-    buildDoc=${harness.internals.buildInputDocumentFile}
     runDoc=${harness.internals.runInputDocumentFile}
 
     assertSubstituted() {
@@ -77,7 +76,6 @@ in
     grep -q -- '--input' "$cliCmd"
     # A bare `! cmd` never trips set -e, hence the explicit exit.
     ! grep -q '@imagePath@' "$cliCmd" || exit 1
-    assertSubstituted "$buildDoc"
     assertSubstituted "$runDoc"
 
     printf '{"IMAGE":"${harness.internals.imagePath}","LEFT":"@imagePath@"}' >toy-unsubstituted.json
@@ -168,8 +166,8 @@ in
         touch $out
       '';
 
-  # The configured `defaults` and `runtime` are baked into the generated
-  # `run`/`build` Launcher input documents (ADR 0020), and this is the drift
+  # The configured `defaults` and `runtime` are baked into the generated run
+  # Launcher input document (ADR 0020), and this is the drift
   # gate for the hand-written Go struct inputdoc.Document in
   # cmd/launcher/internal/inputdoc/inputdoc.go. The greps hand-pick specific
   # keys, so a new flakeOption knob is not automatically asserted here.
@@ -198,18 +196,14 @@ in
 
     # RUNNER_KIND is forwarded as a document artifact (issue #2538): "oci" for
     # any OCI runtime (podman, docker, rancher here), "bwrap" for the bwrap
-    # harness below. Asserted on both the run and build documents —
-    # buildArtifacts carries its own RUNNER_KIND key, independent of
-    # runArtifacts.
+    # harness below.
     grep -q '"RUNNER_KIND":"oci"' ${harness.internals.runInputDocumentFile}
-    grep -q '"RUNNER_KIND":"oci"' ${harness.internals.buildInputDocumentFile}
     grep -q '"RUNNER_KIND":"oci"' ${dockerHarness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"oci"' ${rancherHarness.internals.runInputDocumentFile}
 
     # bwrap harness bakes bwrap runtime and agent store paths; no OCI store paths.
     grep -q '"RUNTIME":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"RUNNER_KIND":"bwrap"' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"AGENT_FILES":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_ENV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"PASSWD_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
@@ -219,11 +213,9 @@ in
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
     ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile} || exit 1
     # The build-time drv counterparts (issue #2672): `spindrift build` reads
-    # this SAME run document (no doc of its own), so runArtifacts' bwrap
-    # branch must carry its own copy of these six *_DRV keys independent of
-    # buildArtifacts' bwrap branch below -- a regression that drops them from
-    # runArtifacts alone must fail here, not only in the synthetic fixture
-    # check (nix/checks/preambles.nix).
+    # this SAME run document (no doc of its own), so the bwrap branch must
+    # carry these six *_DRV keys itself; a regression dropping them must fail
+    # here, not only in the synthetic fixture check (nix/checks/preambles.nix).
     grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"PASSWD_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
@@ -234,16 +226,6 @@ in
     # IMAGE_TAG is the agent-closure store path on the bwrap side, never a
     # name:hash tag (issue #2966).
     grep -q '"IMAGE_TAG":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
-    grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    grep -q '"PASSWD_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    grep -q '"GROUP_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    grep -q '"NIX_CONFIG_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    grep -q '"SYSCALL_FILTER_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    ! grep -q '"IMAGE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
-    # IMAGE_TAG is the agent-closure store path on the bwrap side, never a
-    # name:hash tag (issue #2966) -- see buildArtifacts' own param comment.
-    grep -q '"IMAGE_TAG":"/nix/store/' ${bwrapHarness.internals.buildInputDocumentFile}
     touch $out
   '';
 
@@ -1766,7 +1748,6 @@ in
         "driverEntry"
         "daemonBin"
         "runInputDocumentFile"
-        "buildInputDocumentFile"
         "roster"
         "launcherCurrencyFileset"
         "directFileFragmentRows"

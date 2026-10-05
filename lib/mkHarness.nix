@@ -135,8 +135,8 @@ let
   # OCI images are Linux-only, so the image always builds for the Linux twin.
   linuxSystem = nixpkgsShared.linuxTwin.${system};
 
-  # The single param preambles.runArtifacts and preambles.buildArtifacts take
-  # (issue #2770); lib/preambles.nix explains the bundling.
+  # The single param preambles.runArtifacts takes (issue #2770);
+  # lib/preambles.nix explains the bundling.
   systems = {
     host = system;
     linux = linuxSystem;
@@ -1259,42 +1259,12 @@ let
     inherit syscallFilterPath syscallFilterDrv;
   };
 
-  buildArtifacts = preambles.buildArtifacts {
-    inherit
-      runnerKind
-      agentFilesDrv
-      agentEnvDrv
-      passwdFileDrv
-      groupFileDrv
-      runtime
-      imagePath
-      imageHash
-      launcherCurrencyHash
-      imageDrv
-      nixBuilderImage
-      systems
-      agentClosurePath
-      ;
-    imageName = imageKnobs.imageName;
-    # See runArtifacts' nixConfigPath comment above.
-    nixConfigDrv = if nixInBox then nixConfigFileDrv else "";
-    # Unconditional; see runArtifacts' syscallFilterPath comment above.
-    inherit syscallFilterDrv;
-  };
-
-  # The rendered documents as host store-path JSON files. The generated
+  # The rendered document as a host store-path JSON file. The generated
   # wrapper passes exactly one nix-computed argument, `--input <path>`.
   runInputDocumentFile = hostPkgs.writeText "launcher-run-input.json" (
     preambles.renderInputDocumentJSON {
       settings = documentSettings;
       artifacts = runArtifacts;
-    }
-  );
-
-  buildInputDocumentFile = hostPkgs.writeText "launcher-build-input.json" (
-    preambles.renderInputDocumentJSON {
-      settings = documentSettings;
-      artifacts = buildArtifacts;
     }
   );
 
@@ -1741,7 +1711,6 @@ else
         driverPreambleFile
         agentPathsPreambleFile
         runInputDocumentFile
-        buildInputDocumentFile
         ;
       driverExecBin = imageDriver.driverExecBin;
       orchestratorBin = imageDriver.orchestratorBin;
