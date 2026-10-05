@@ -2660,7 +2660,7 @@ cache-prefix overlap would need a prefix-level comparison this report does
 not attempt.
 
 `--composition-carried [<pass>:]<name>=<path>` (repeatable) feeds text a
-later stage prepends to the pass prompt at pass time — the orchestrator's
+later stage appends to the pass prompt at pass time — the orchestrator's
 own run-state handoff, e.g. reviewer findings or the decisions record —
 into the report as a `carried` source, since `Assemble` itself never sees
 those bytes and so can't count them. Omitting the `<pass>:` prefix carries
@@ -2675,15 +2675,28 @@ only the file read and the `<pass>`-name check are deferred to a run that
 sets `--composition-output`.
 
 `--run-state <path>` derives those blocks from the orchestrator's run-state
-file (the Box's `--run-state-file`) instead of hand-extracted text: the
-handoff block rides on `implement`, `fix`, and `land` as `run-state-handoff`,
-the review block on `review` as `run-state-review`, each only when the
-state yields one. `delta-review` gets nothing from it — its seeder also needs
-land-delta and trigger data the file does not hold — so carry that one with
-`--composition-carried`. Derived blocks precede manual ones in `Sources`. A
-missing file reads as an empty state; a corrupt one fails the invocation
-(exit 1). Like `--composition-carried`, it is read only when
-`--composition-output` is set.
+file (the Box's `--run-state-file`, forwarded to each orchestrator pass as
+`--state-file`) instead of hand-extracted text. It counts the bytes the
+orchestrator appends, not the raw files the state points at: both build the
+block through one shared `internal/seedblock` implementation, so the
+separator, headers, fencing, and the inline `ReviewFindings` text are all
+included, and a recorded path whose file is missing drops its bullet just as
+it does at pass time. The handoff block rides as `run-state-handoff` on every
+pass the cell renders except `review` and `delta-review` (`implement`, `fix`,
+and `land`, or the single `legacy` or kind pass of a cell with no review
+prompt), the review block on `review` as
+`run-state-review` (what a round-2-or-later review pass carries; round 1
+runs unseeded), each only when the state yields one. `delta-review` gets
+nothing from it — its seeder also needs land-delta and trigger data the
+file does not hold — so carry that one with `--composition-carried`, which
+works alongside `--run-state` for anything the file doesn't cover. Derived
+blocks precede manual ones in `sources`. The report is a snapshot of the
+file as written to disk: the orchestrator persists the terminal-pass and
+cap-fired flags with the next pass's state write, so the snapshot lags its
+in-memory state by one pass. A missing file reads as an empty state, with a
+one-line notice on stderr; a corrupt one fails the invocation (exit 1).
+Like `--composition-carried`, it is read only when `--composition-output`
+is set.
 
 ```sh
 driver-exec assemble-prompt \
