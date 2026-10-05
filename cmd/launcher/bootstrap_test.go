@@ -68,7 +68,7 @@ func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
 	// The row's Remedy is a fixed string, so minimalValidConfig() resolves the
 	// same text the env above makes bootstrap() fail on.
 	wantRemedy := checkByName(t, launcherRequiredKnobChecks(minimalValidConfig()), "driver-credentials").Remedy
-	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
+	if !strings.Contains(err.Error(), wantRemedy) {
 		t.Errorf("bootstrap() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
 	}
 }

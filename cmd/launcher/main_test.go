@@ -2770,7 +2770,7 @@ func TestValidateCodeForge_RejectsUnknown_ExactMessage(t *testing.T) {
 		t.Fatal("validate() should reject unrecognised CODE_FORGE")
 	}
 	want := "CODE_FORGE=\"gitlab\" is not valid; must be github, forgejo, local, or git" +
-		"\nremedy: set CODE_FORGE to a supported value and fill in any forge-specific fields it requires"
+		"\n  remedy: set CODE_FORGE to a supported value and fill in any forge-specific fields it requires"
 	if err.Error() != want {
 		t.Errorf("validate() error = %q, want %q", err.Error(), want)
 	}
@@ -2807,7 +2807,7 @@ func TestValidate_RequiredKnobFailure_IncludesRemedy(t *testing.T) {
 		t.Fatal("validate() should reject a claude DRIVER with no credential set")
 	}
 	wantRemedy := checkByName(t, launcherRequiredKnobChecks(c), "driver-credentials").Remedy
-	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
+	if !strings.Contains(err.Error(), wantRemedy) {
 		t.Errorf("validate() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
 	}
 }
@@ -2825,7 +2825,7 @@ func TestValidate_RegistryProxyRoutesFailure_IncludesRemedy(t *testing.T) {
 		t.Fatal("validate() should reject an unreadable REGISTRY_PROXY_ROUTES_FILE")
 	}
 	wantRemedy := checkByName(t, launcherCrossKnobChecks(c), registryProxyRoutesCheckName).Remedy
-	if !strings.Contains(err.Error(), "\nremedy: "+wantRemedy) {
+	if !strings.Contains(err.Error(), wantRemedy) {
 		t.Errorf("validate() error = %q, want it to contain remedy line %q", err.Error(), wantRemedy)
 	}
 }

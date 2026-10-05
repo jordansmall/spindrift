@@ -193,7 +193,7 @@ problem (exit 2) enumerates every simultaneously-broken required knob, not
 just the first — none of those checks are network probes, so doctor runs
 every one instead of stopping at the first failure the way `dispatch`'s own
 fail-fast gate does, and each enumerated required-row failure carries its
-row's `remedy:` line too, subject to the same
+row's indented `remedy:` line too, subject to the same
 suppress-if-it-repeats-the-error rule —
 `dispatch`'s own fail-fast configuration abort carries that remedy line as
 well (issue #2886); the connectivity probes (exit 3) stay fail-fast, since

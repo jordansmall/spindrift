@@ -120,8 +120,9 @@ func FirstRequiredError(results []Result) error {
 
 // RemedyError pairs a blocking Check's Probe error with the Check, so Error()
 // can append the Remedy hint to a fail-fast caller's error text. Error() shares
-// Remedy's text and suppression rule with Reporter.Results, but prints
-// "\nremedy: ..." where Reporter.Results indents.
+// Remedy's text and suppression rule with Reporter.Results and indents the
+// remedy line the same way, so an errors.Join of several keeps each remedy
+// visibly attached to its own error.
 type RemedyError struct {
 	// Err is the failing Check's Probe error, unmodified.
 	Err error
@@ -130,12 +131,12 @@ type RemedyError struct {
 	Check Check
 }
 
-// Error returns Err's text, followed by a "\nremedy: <remedy>" line unless
-// Check.Remedy is empty or identical to that text.
+// Error returns Err's text, followed by an indented "\n  remedy: <remedy>" line
+// unless Check.Remedy is empty or identical to that text.
 func (e *RemedyError) Error() string {
 	msg := e.Err.Error()
 	if suffix := remedySuffix(e.Check.Remedy, msg); suffix != "" {
-		return msg + "\nremedy: " + suffix
+		return msg + "\n" + remedyLinePrefix + suffix
 	}
 	return msg
 }
@@ -145,6 +146,10 @@ func (e *RemedyError) Error() string {
 func (e *RemedyError) Unwrap() error {
 	return e.Err
 }
+
+// remedyLinePrefix starts both RemedyError's and Reporter.remedyLine's remedy
+// line, so the two renderers cannot drift apart.
+const remedyLinePrefix = "  remedy: "
 
 // remedySuffix returns remedy, or "" when it is empty or identical to msg so
 // the caller skips a remedy line that would just repeat the error. Every

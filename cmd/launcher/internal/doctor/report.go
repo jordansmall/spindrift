@@ -80,7 +80,7 @@ func (r *Reporter) Finding(t Tier, format string, a ...any) {
 // ignores verbose: its only caller, Results, gates it on the row's visibility.
 func (r *Reporter) remedyLine(remedy, msg string) {
 	if suffix := remedySuffix(remedy, msg); suffix != "" {
-		fmt.Fprint(r.w, "  remedy: "+suffix+"\n")
+		fmt.Fprint(r.w, remedyLinePrefix+suffix+"\n")
 	}
 }
 
