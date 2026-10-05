@@ -95,8 +95,8 @@ func TestRun_BoxClosureGenerationDefaultNil(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("99", "no generation set")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -121,8 +121,8 @@ func TestRun_BoxClosureGenerationSnapshottedAtNew(t *testing.T) {
 	f.SetAgentGeneration(&gen)
 
 	d := f.New("100", "generation set before New")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -152,8 +152,8 @@ func TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap(t *testing
 	gen := runner.NewAgentGeneration("/nix/store/swap-agent-closure")
 	f.SetAgentGeneration(&gen)
 
-	if result := d1.Run(); !result.Success {
-		t.Fatalf("d1.Run: want Success=true, got %+v", result)
+	if result := d1.Run(); !result.ok() {
+		t.Fatalf("d1.Run: want succeeded, got %+v", result)
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls after d1.Run: want 1, got %d", len(fr.RunCalls))
@@ -163,8 +163,8 @@ func TestDispatch_KeepsAgentGenerationSnapshotFromNewDespiteLaterSwap(t *testing
 	}
 
 	d2 := f.New("2", "post-swap")
-	if result := d2.Run(); !result.Success {
-		t.Fatalf("d2.Run: want Success=true, got %+v", result)
+	if result := d2.Run(); !result.ok() {
+		t.Fatalf("d2.Run: want succeeded, got %+v", result)
 	}
 	if len(fr.RunCalls) != 2 {
 		t.Fatalf("RunCalls after d2.Run: want 2, got %d", len(fr.RunCalls))
@@ -246,8 +246,8 @@ func TestFactory_NewChore_RunForwardsChoreEnv(t *testing.T) {
 		Branch: "butler/lint-sweep",
 		Scope:  chore.Scope{Head: "deadbeef"},
 	})
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -285,14 +285,14 @@ func TestFactory_New_ResolvesIssueTextFreshPerDispatch(t *testing.T) {
 	f := issueTextFactory(t, fr, func(string) (string, error) { return text, nil })
 
 	d1 := f.New("7", "t")
-	if r := d1.Run(); !r.Success {
+	if r := d1.Run(); !r.ok() {
 		t.Fatalf("first Run: %+v", r)
 	}
 	d1.Close()
 	text = "edited body"
 	d2 := f.New("7", "t")
 	defer d2.Close()
-	if r := d2.Run(); !r.Success {
+	if r := d2.Run(); !r.ok() {
 		t.Fatalf("second Run: %+v", r)
 	}
 
@@ -319,11 +319,11 @@ func TestFactory_New_IssueTextStableAcrossRunAndFix(t *testing.T) {
 	})
 
 	d := f.New("7", "t")
-	if r := d.Run(); !r.Success {
+	if r := d.Run(); !r.ok() {
 		t.Fatalf("Run: %+v", r)
 	}
 	text = "edited body"
-	if r := d.Fix(1, ""); !r.Success {
+	if r := d.Fix(1, ""); !r.ok() {
 		t.Fatalf("Fix: %+v", r)
 	}
 

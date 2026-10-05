@@ -164,15 +164,14 @@ func TestRemoteLedger_CountsOneFetchAndOnePushPerSweep(t *testing.T) {
 	defer cleanup()
 
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
 		},
 		IssueIntentsFound: true,
 		IssueIntents:      []string{`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"]}`},
-	}
+	})
 	newBox := func(dispatch.Chore) dispatch.Dispatcher { return d }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

@@ -1820,7 +1820,7 @@ func TestRunContinuous_FailedBoxCallsSettlerFail(t *testing.T) {
 // (a live run possibly orphaned by a killed launcher, not a genuine box
 // failure), RunContinuous's goroutine switch skips it without a Failed
 // transition or a Settler.Fail call, matching dispatchWave's
-// case result.AlreadyInFlight arm (issue #3633).
+// onSkip arm (issue #3633).
 func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
@@ -1856,6 +1856,15 @@ func TestRunContinuous_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T)
 	}
 	if len(fakeSettle.SettleCalls) != 0 {
 		t.Errorf("Settle must not be called when already in flight; got %+v", fakeSettle.SettleCalls)
+	}
+	if len(fc.TransitionStateCalls) != 0 {
+		t.Errorf("must not transition state when already in flight; got %+v", fc.TransitionStateCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("must not comment when already in flight; got %+v", fc.CommentCalls)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("runner.Run: want 0 calls when already running, got %d", len(fr.RunCalls))
 	}
 	if !strings.Contains(out, "#1") || !strings.Contains(out, "already in flight") {
 		t.Errorf("want a distinct 'already in flight' line naming #1; got output=%q", out)

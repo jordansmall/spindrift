@@ -15,7 +15,6 @@ const gateIssue = "1"
 
 func readyResult() dispatch.Result {
 	return dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: gateIssue, Landing: testPR, Status: "ready", Note: "ok"},

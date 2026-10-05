@@ -30,7 +30,6 @@ func TestSettle_SyntheticBlockedDemotedFromAlreadyResolved_PostsCommentFailsNotC
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           true,
 			Provenance:      outcome.ProvenanceSynthetic,
@@ -91,7 +90,6 @@ func TestSettle_GenuineAlreadyResolvedWithBundlePresent_DemotesRelaysNotCloses(t
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceGenuine,
@@ -152,7 +150,6 @@ func TestSettle_AlreadyResolvedOutboxConfiguredNoBundle_StillClosesAsComplete(t 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceGenuine,
@@ -196,7 +193,6 @@ func TestSettle_AlreadyResolvedOutcome_PostsCommentTransitionsAndCloses(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: outcome.StatusAlreadyResolved, Note: note},
@@ -254,7 +250,6 @@ func TestSettle_AlreadyResolvedOutcome_EmptyNoteStillPostsClosingComment(t *test
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: outcome.StatusAlreadyResolved, Note: ""},
@@ -283,7 +278,6 @@ func TestSettle_AlreadyResolvedOutcome_NoMergeGateMachineryRuns(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: outcome.StatusAlreadyResolved, Note: "already fixed"},
@@ -316,7 +310,6 @@ func TestSettle_AlreadyResolvedOutcome_SettledRecordStateComplete(t *testing.T) 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: outcome.StatusAlreadyResolved, Note: note},
@@ -377,7 +370,6 @@ func TestSettle_AlreadyResolvedOutcome_ForgejoShapeCloses(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
@@ -448,7 +440,6 @@ func TestSettle_AlreadyResolvedOutcome_LocalShapeCloses(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
@@ -493,7 +484,6 @@ func TestSettle_AlreadyResolvedOutcome_IssueCloserErrorStillCompletes(t *testing
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
@@ -531,7 +521,6 @@ func TestSettle_AlreadyResolvedOutcome_NeitherCloserShapeCompletesWithNoClose(t 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: note},
@@ -576,7 +565,6 @@ func TestSettle_AlreadyResolvedOutcome_BothClosersPrefersMergeCloser(t *testing.
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: outcome.StatusAlreadyResolved, Note: "Already fixed."},
@@ -617,7 +605,6 @@ func TestSettle_GithubReadOnly_AlreadyResolvedZeroCommits_ClosesAsComplete(t *te
 	// empty, unlike the status=blocked relay shape in blocked_relay_test.go,
 	// which always carries a branch name to relay.
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: outcome.StatusAlreadyResolved, Note: note},

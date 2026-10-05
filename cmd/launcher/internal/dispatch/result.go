@@ -10,18 +10,9 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// Result is what Run and Fix return: the parsed outcome on success, and a
+// Result is the payload behind a Disposition: the parsed outcome, and a
 // best-effort transient Classification when the box wrote no outcome line.
 type Result struct {
-	// Success is true when the box's final attempt exited zero.
-	Success bool
-
-	// AlreadyInFlight is true when a container or sandbox named for this issue
-	// was already running, so the dispatch was skipped. The caller must not
-	// transition the issue's dispatch state (the live run's in-progress claim
-	// stands) and must not retry (issue #562).
-	AlreadyInFlight bool
-
 	// Comment is the decoded body of the box log's last nonce-verified
 	// SPINDRIFT_COMMENT line (ADR 0032, issues #1692 and #1940), how a local
 	// Dispatch's Box hands settle its verdict or blocked-note comment. The
@@ -100,9 +91,72 @@ type Result struct {
 
 	// Err is the error once() returned on a Terminal classification whose log
 	// came back empty, meaning the box never launched (issue #3119). Nil for
-	// every other Success=false path: those settled on a genuine outcome or
+	// every other failed path: those settled on a genuine outcome or
 	// already printed their own explanation.
 	Err error
+}
+
+// Disposition is what Run and Fix return: a Result payload tagged as skipped,
+// failed or succeeded. It is opaque on purpose. Route is the only way to the
+// payload and takes an arm for every kind, so omitting the skip arm is a
+// compile error (an explicit nil is not). A bare "if !success" check cannot
+// tell a skip from a failure, and a caller that conflated them took the
+// destructive failure path against a live run (issues #562, #3633, #3655,
+// #3705).
+//
+// The skip contract: another run already holds this issue (its container or
+// sandbox is live, or its claim is). A skip is a distinct successful no-op,
+// never a failure. The caller must not transition the issue's dispatch state
+// (the live run's in-progress claim stands), must not retry, and must not
+// comment.
+//
+// Skip surfaces in three channels, and only the first is compiler-enforced:
+//  1. Route's onSkip arm for Run and Fix, produced by runner.ErrAlreadyRunning
+//     in dispatchWithRetry and by ErrIssueClaimed from ClaimIssue in Run.
+//  2. ResolveConflict's error return, which can be runner.ErrAlreadyRunning;
+//     callers must errors.Is it ahead of their generic error arm (settle's
+//     ready.go does).
+//  3. ErrIssueClaimed from a direct ClaimIssue caller, such as recoverByNumber
+//     in cmd/launcher/main.go (issue #4364).
+type Disposition struct {
+	kind   dispositionKind
+	result Result
+}
+
+type dispositionKind int
+
+// dispositionFailed is the zero value so a zero Disposition routes to the
+// failure arm, matching the pre-#3705 zero Result.
+const (
+	dispositionFailed dispositionKind = iota
+	dispositionSucceeded
+	dispositionSkipped
+)
+
+// Skipped reports that another run already holds this issue; see Disposition
+// for what the caller must not do.
+func Skipped() Disposition { return Disposition{kind: dispositionSkipped} }
+
+// Failed wraps the Result of a dispatch whose final attempt did not exit zero
+// (or never ran).
+func Failed(r Result) Disposition { return Disposition{kind: dispositionFailed, result: r} }
+
+// Succeeded wraps the Result of a dispatch whose final attempt exited zero, or
+// settled on a genuine outcome the box printed before dying (issue #2075).
+func Succeeded(r Result) Disposition { return Disposition{kind: dispositionSucceeded, result: r} }
+
+// Route calls exactly one arm for d and returns its value. It is the only
+// accessor for a Disposition's Result; see Disposition for the skip contract
+// onSkip must honor.
+func Route[T any](d Disposition, onSkip func() T, onFailure func(Result) T, onSuccess func(Result) T) T {
+	switch d.kind {
+	case dispositionSkipped:
+		return onSkip()
+	case dispositionSucceeded:
+		return onSuccess(d.result)
+	default:
+		return onFailure(d.result)
+	}
 }
 
 // ReportFailureReason prints r.Err, if set, on stderr next to the terse
@@ -128,16 +182,17 @@ func (r Result) FailureNote() string {
 // of a real Dispatch.
 type Dispatcher interface {
 	// Run dispatches the initial box, retrying transient failures per Config.
-	Run() Result
+	Run() Disposition
 
 	// Fix dispatches a fix box for the 1-based pass number, forwarding
 	// ciFailureSummary as CI_FAILURE_SUMMARY when non-empty. Subject to the
 	// same retry policy as Run.
-	Fix(pass int, ciFailureSummary string) Result
+	Fix(pass int, ciFailureSummary string) Disposition
 
 	// ResolveConflict dispatches a conflict-resolution box against pr. Not
 	// retried: a short-lived rebase-conflict box never runs the main agent
-	// prompt.
+	// prompt. Its error can be runner.ErrAlreadyRunning, a skip: see
+	// Disposition for that contract.
 	ResolveConflict(pr string) error
 
 	// UsageReport returns the Markdown usage-summary comment body for the

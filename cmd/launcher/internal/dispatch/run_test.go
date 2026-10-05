@@ -23,8 +23,8 @@ func TestRun_CallsRunnerWithCorrectBox(t *testing.T) {
 	d := f.New("42", "My issue")
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
@@ -88,8 +88,8 @@ func TestRun_TerminalFailurePropagates(t *testing.T) {
 
 	d := f.New("1", "broken")
 	result := d.Run()
-	if result.Success {
-		t.Fatal("want Success=false on terminal failure")
+	if result.ok() {
+		t.Fatal("want failed on terminal failure")
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Errorf("RunCalls: got %d, want 1 (no retry on terminal)", len(fr.RunCalls))
@@ -108,8 +108,8 @@ func TestRun_PopulatesBoxDriverCacheDir(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("55", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -136,8 +136,8 @@ func TestRun_PopulatesBoxOutboxDir(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("77", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -166,8 +166,8 @@ func TestRun_NoOutboxDirForNonLocalCodeForge(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("78", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -195,8 +195,8 @@ func TestRun_PopulatesBoxOutboxDir_GithubReadOnly(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("79", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -228,8 +228,8 @@ func TestRun_NoOutboxDirForGithubReadWrite(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("80", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -259,8 +259,8 @@ func TestRun_PopulatesBoxOutboxDir_ButlerReadWrite(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("82", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -295,8 +295,8 @@ func TestRun_PopulatesBoxOutboxDir_ForgejoReadOnly(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("81", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -331,8 +331,8 @@ func TestRun_NoOutboxDirForOutboxIncapableReadOnly(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("81", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -356,8 +356,8 @@ func TestNewFactory_NoDriverSessionCacheDir_NoCacheCreated(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("55", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 1 {
@@ -382,11 +382,11 @@ func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("55", "T")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
-	if result := d.Fix(1, ""); !result.Success {
-		t.Fatalf("Fix: want Success=true, got %+v", result)
+	if result := d.Fix(1, ""); !result.ok() {
+		t.Fatalf("Fix: want succeeded, got %+v", result)
 	}
 
 	if len(fr.RunCalls) != 2 {

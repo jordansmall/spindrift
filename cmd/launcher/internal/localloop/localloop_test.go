@@ -268,7 +268,6 @@ func TestWire_ComposedLoop_HappyPath(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
@@ -358,7 +357,6 @@ func TestWire_ComposedLoop_EmptyTitleSanitizesToSlug(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
@@ -434,7 +432,6 @@ func TestWire_ComposedLoop_GarbageParentUsesTitleNaming(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
@@ -580,7 +577,6 @@ func TestWire_ComposedLoop_MissingBundleBlocksNotFailed(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: num, Landing: branch, Status: "ready"},
@@ -774,7 +770,6 @@ func TestWire_ComposedLoop_OneOpenSiblingNotSurfaced(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: landedNum, Landing: branch, Status: "ready"},
@@ -870,7 +865,6 @@ func TestWire_ComposedLoop_BroadTicketIssueExcludedFromOwnSeams(t *testing.T) {
 			}
 			s := settle.New(cfg, it, cf)
 			result := dispatch.Result{
-				Success: true,
 				Resolved: outcome.Resolved{
 					Found:   true,
 					Outcome: outcome.Outcome{Issue: seamNum, Landing: branch, Status: "ready"},
@@ -957,7 +951,6 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 	seamBranch := seamCF.AgentBranch(seamNum)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, seamBranch, seamNum, lw.OutboxDir(seamNum))
 	settle.New(cfg, it, seamCF).Settle(dispatch.NewFake(), seamNum, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: seamNum, Landing: seamBranch, Status: "ready"},
@@ -970,7 +963,6 @@ func TestWire_ComposedLoop_StuckBroadTicketLandingSurfacesAnyway(t *testing.T) {
 	broadCF := lw.CodeForgeForIssue(parent)
 	broadBranch := broadCF.AgentBranch(parent)
 	settle.New(cfg, it, broadCF).Settle(dispatch.NewFake(), parent, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: parent, Landing: broadBranch, Status: "ready"},
@@ -1071,7 +1063,6 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 	branchA := cf.AgentBranch(numA)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branchA, numA, lw.OutboxDir(numA))
 	s.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
-		Success:  true,
 		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"}},
 	})
 	scopeFor := func(num string) forge.SeedScope {
@@ -1100,7 +1091,6 @@ func TestWire_ComposedLoop_DegenerateAllMembersCollide_KeepsBothMembers(t *testi
 	branchB := cf.AgentBranch(numB)
 	bundleFixtureCommit(t, accumDir, testBaseBranch, branchB, numB, lw.OutboxDir(numB))
 	s.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
-		Success:  true,
 		Resolved: outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"}},
 	})
 	res, err = reconcile.Run(it, cf, nil, cfg.Capabilities, scopeFor)
@@ -1168,7 +1158,6 @@ func TestWire_ComposedLoop_BroadTicketIssuePresent_OpenSeamNamesSeam(t *testing.
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: landedNum, Landing: branch, Status: "ready"},
@@ -1298,7 +1287,6 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	}
 	sA := settle.New(cfgA, it, cfA)
 	sA.Settle(dispatch.NewFake(), numA, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: numA, Landing: branchA, Status: "ready"},
@@ -1313,7 +1301,6 @@ func TestWire_ComposedLoop_MixedParentBatch_EachOwnIntegrationBranch(t *testing.
 	}
 	sB := settle.New(cfgB, it, cfB)
 	sB.Settle(dispatch.NewFake(), numB, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: numB, Landing: branchB, Status: "ready"},
@@ -1395,7 +1382,6 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}
 	s01 := settle.New(cfg01, it, cf01)
 	s01.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch01, Status: "ready"},
@@ -1489,7 +1475,6 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	}
 	s02 := settle.New(cfg02, it, cf02)
 	s02.Settle(dispatch.NewFake(), dependentNum, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: dependentNum, Landing: branch02, Status: "ready"},
@@ -1608,7 +1593,6 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	}
 	s11 := settle.New(cfg11, it, cf11)
 	s11.Settle(dispatch.NewFake(), blockerNum, 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: blockerNum, Landing: branch11, Status: "ready"},
@@ -1741,7 +1725,6 @@ func TestWire_ComposedLoop_AlreadyResolvedClosesIssue(t *testing.T) {
 	}
 	s := settle.New(cfg, it, cf)
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: num, Landing: "agent/issue-44", Status: outcome.StatusAlreadyResolved, Note: "already fixed on main"},

@@ -12,7 +12,6 @@ import (
 
 func mergedResult(issNum string) dispatch.Result {
 	return dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "ignored", Status: "merged", Note: "ok"},
@@ -80,7 +79,6 @@ func TestSettle_BlockedOutcome_ReportLinePrintsNote(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-53", Status: "blocked", Note: "stalled"},
@@ -102,7 +100,7 @@ func TestSettle_NoUsableOutcome_Report(t *testing.T) {
 		name   string
 		result dispatch.Result
 	}{
-		{"no outcome line", dispatch.Result{Success: true}},
+		{"no outcome line", dispatch.Result{}},
 		{"malformed outcome line", dispatch.Result{ParseErr: errFake}},
 	}
 	for _, tc := range cases {

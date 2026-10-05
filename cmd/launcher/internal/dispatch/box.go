@@ -171,14 +171,14 @@ func conflictLogPathFor(pwd, number string) string {
 // orphaned by a killed launcher, whose claim died with it. The claim is held
 // past Run's return, through the caller's settle, until Close (issue #4364);
 // callers that Run must Close.
-func (d *Dispatch) Run() Result {
+func (d *Dispatch) Run() Disposition {
 	release, err := ClaimIssue(d.pwd, d.number)
 	if err != nil {
 		if errors.Is(err, ErrIssueClaimed) {
-			return Result{AlreadyInFlight: true}
+			return Skipped()
 		}
 		fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, err)
-		return Result{Success: false}
+		return Failed(Result{})
 	}
 	d.releaseClaim = release
 
@@ -212,7 +212,7 @@ func (d *Dispatch) Run() Result {
 // Fix dispatches a fix box for the given 1-based pass number. resumeAfterHold
 // is ignored: FIX_PASS>0 already resumes the session, so a transient-backoff
 // re-dispatch mid-fix needs no extra signal.
-func (d *Dispatch) Fix(pass int, ciFailureSummary string) Result {
+func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		d.announce(report.PhaseFixPass(pass))

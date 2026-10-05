@@ -8,11 +8,11 @@ import "testing"
 func TestFake_DefaultsToSuccess(t *testing.T) {
 	f := NewFake()
 
-	if got := f.Run(); !got.Success {
-		t.Errorf("Run: want Success=true, got %+v", got)
+	if got := f.Run(); !got.ok() {
+		t.Errorf("Run: want succeeded, got %+v", got)
 	}
-	if got := f.Fix(1, "detail"); !got.Success {
-		t.Errorf("Fix: want Success=true, got %+v", got)
+	if got := f.Fix(1, "detail"); !got.ok() {
+		t.Errorf("Fix: want succeeded, got %+v", got)
 	}
 	if err := f.ResolveConflict("pr"); err != nil {
 		t.Errorf("ResolveConflict: want nil, got %v", err)

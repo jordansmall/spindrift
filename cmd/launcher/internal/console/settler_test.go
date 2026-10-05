@@ -16,7 +16,7 @@ func TestQueueSettler_Settle_MarksPickSettledAndDelegates(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	result := dispatch.Result{Success: true}
+	result := dispatch.Result{}
 	qs.Settle(nil, "42", 0, result)
 
 	if len(inner.SettleCalls) != 1 || inner.SettleCalls[0].Num != "42" {
@@ -40,7 +40,7 @@ func TestQueueSettler_Settle_SkipsPickUpdateWhenTerminated(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q, terminated: reg}
 
-	result := dispatch.Result{Success: true}
+	result := dispatch.Result{}
 	qs.Settle(nil, "42", gen, result)
 
 	if got := q.Snapshot()[0].State; got != PickTerminated {
@@ -64,7 +64,7 @@ func TestQueueSettler_Settle_StaleGenerationAfterRepickDoesNotCorruptNewRow(t *t
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q, terminated: reg}
 
-	result := dispatch.Result{Success: true}
+	result := dispatch.Result{}
 	qs.Settle(nil, "42", oldGen, result) // the stale, old-generation settle finally completes
 
 	picks := q.Snapshot()
@@ -85,7 +85,7 @@ func TestQueueSettler_Fail_MarksPickFailedAndDelegates(t *testing.T) {
 	inner := settle.NewFake()
 	qs := queueSettler{Settler: inner, q: q}
 
-	result := dispatch.Result{Success: false}
+	result := dispatch.Result{}
 	qs.Fail("42", 0, result)
 
 	if len(inner.FailCalls) != 1 || inner.FailCalls[0].Num != "42" {
@@ -120,7 +120,7 @@ func TestQueueSettler_SameNumberTwoKinds_OnlyOwnKindRowChanges(t *testing.T) {
 			if tc.fail {
 				qs.Fail("42", 0, dispatch.Result{})
 			} else {
-				qs.Settle(nil, "42", 0, dispatch.Result{Success: true})
+				qs.Settle(nil, "42", 0, dispatch.Result{})
 			}
 
 			snap := q.Snapshot()

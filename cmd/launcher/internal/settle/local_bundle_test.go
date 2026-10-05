@@ -21,7 +21,6 @@ func TestSettle_LocalForge_BlockedPostsNoteAsComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "agent/issue-42", Status: "blocked", Note: "push rejected; PR opened as draft"},
@@ -288,7 +287,6 @@ func TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: hostileLanding, Status: "ready", Note: "ok"},

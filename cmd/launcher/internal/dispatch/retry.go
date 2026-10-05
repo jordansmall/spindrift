@@ -17,7 +17,7 @@ import (
 // the cap only when the previous iteration also held; other transients back off
 // linearly. It covers Run and Fix alike (issue #441). A zero-exit box printing
 // no SPINDRIFT_OUTCOME line is classified like a non-zero exit (issue #565).
-func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold bool) error) Result {
+func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold bool) error) Disposition {
 	holdCount := 0
 	transientCount := 0
 	prevWasHold := false
@@ -39,26 +39,26 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		if err == nil {
 			result := d.successResult(attemptLogPath)
 			if result.Resolved.Found || result.ParseErr != nil || result.ClassifyErr != nil {
-				return result
+				return Succeeded(result)
 			}
 			if result.Classification.Class != driver.Transient {
-				return result
+				return Succeeded(result)
 			}
 			if exists, prErr := d.cfg.OpenPRForIssue(d.number); prErr == nil && exists {
 				// The box's work already landed a PR; re-dispatching would
 				// duplicate it. Let settle's own PR lookup route it (issue #565).
-				return result
+				return Succeeded(result)
 			}
 			cls = result.Classification
 		} else {
 			if errors.Is(err, runner.ErrAlreadyRunning) {
-				return Result{AlreadyInFlight: true}
+				return Skipped()
 			}
 			if errors.Is(err, errKilled) {
 				// The abort already released this issue; waves' Box goroutine
 				// routes it through its abandon branch before it ever reads
-				// Success (issue #3521).
-				return Result{Success: false}
+				// its Disposition (issue #3521).
+				return Failed(Result{})
 			}
 
 			var qErr quarantineErr
@@ -73,7 +73,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				if transientCount > d.cfg.Policy.Max {
 					fmt.Fprintf(d.humanOut(), "    !! #%s: quarantine retry cap exhausted (%d)\n",
 						d.number, d.cfg.Policy.Max)
-					return Result{Success: false}
+					return Failed(Result{})
 				}
 				backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
 				fmt.Fprintf(d.humanOut(), "    .. #%s: quarantine failed; retry %d/%d in %s\n",
@@ -87,18 +87,18 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				// printed before dying (issue #2075): reclassifying it would
 				// re-spend the tokens a post-hold resume preserved. A limit-hit
 				// box prints no outcome and falls through to classification.
-				return result
+				return Succeeded(result)
 			}
 
 			var clsErr error
 			cls, clsErr = d.driver.ClassifyTransient(attemptLogPath)
 			if clsErr != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: classify error: %v\n", d.number, clsErr)
-				return Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
+				return Failed(Result{KilledBySignal: runner.KilledBySignal(err)})
 			}
 
 			if cls.Class == driver.Terminal {
-				result := Result{Success: false, KilledBySignal: runner.KilledBySignal(err)}
+				result := Result{KilledBySignal: runner.KilledBySignal(err)}
 				if logIsEmpty(attemptLogPath) {
 					// A box that ran and failed left something in its log, so an
 					// empty log means it never launched (a pre-Box registry-proxy
@@ -106,7 +106,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 					// rather than the reason-free "FAILED" a caller would print.
 					result.Err = err
 				}
-				return result
+				return Failed(result)
 			}
 		}
 
@@ -119,7 +119,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 			if holdCount >= d.cfg.Policy.Max {
 				fmt.Fprintf(d.humanOut(), "    !! #%s: hold cap exhausted (%d consecutive no-progress hold(s))\n",
 					d.number, d.cfg.Policy.Max)
-				return Result{Success: false}
+				return Failed(Result{})
 			}
 			wait := cls.ResetAt.Sub(d.clock.Now()) + d.cfg.Policy.Jitter
 			if wait < 0 {
@@ -140,7 +140,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 		if transientCount > d.cfg.Policy.Max {
 			fmt.Fprintf(d.humanOut(), "    !! #%s: transient retry cap exhausted (%d)\n",
 				d.number, d.cfg.Policy.Max)
-			return Result{Success: false}
+			return Failed(Result{})
 		}
 		backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
 		fmt.Fprintf(d.humanOut(), "    .. #%s: transient (%s); retry %d/%d in %s\n",
@@ -167,13 +167,13 @@ func logIsEmpty(logPath string) bool {
 func (d *Dispatch) successResult(logPath string) Result {
 	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, d.cfg.Kind)
 	if err != nil {
-		return Result{Success: true, ParseErr: err}
+		return Result{ParseErr: err}
 	}
 	if resolved.Found && resolved.IsGenuineOrSynthetic() {
 		return d.outcomeResult(logPath, resolved)
 	}
 	cls, clsErr := d.driver.ClassifyTransient(logPath)
-	return Result{Success: true, Classification: cls, ClassifyErr: clsErr}
+	return Result{Classification: cls, ClassifyErr: clsErr}
 }
 
 // outcomeResult builds the fully populated Result for a parsed outcome,
@@ -225,8 +225,8 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 		fmt.Fprintf(os.Stderr, "    ?? #%s: pass-manifest scan: %v\n", d.number, passesErr)
 	}
 	return Result{
-		Success: true, Resolved: resolved,
-		Comment: comment, CommentFound: commentFound, CommentRejected: commentRejected,
+		Resolved: resolved,
+		Comment:  comment, CommentFound: commentFound, CommentRejected: commentRejected,
 		PRIntent: prIntent, PRIntentFound: prIntentFound, PRIntentRejected: prIntentRejected,
 		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0, IssueIntentsRejected: issueIntentsRejected,
 		Passes: passes,

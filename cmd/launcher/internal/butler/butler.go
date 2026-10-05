@@ -294,16 +294,17 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	}
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, PatchClasses: patchClasses, MaxFindings: room.Findings})
 	defer d.Close()
-	result := d.Run()
-	// A live run already holds this Chore's Box (#562): settling would read the
-	// empty result as a crash (#3705). Leave its claim standing and don't retry.
-	if result.AlreadyInFlight {
-		fmt.Printf("    #%s  status=already-in-flight  note=live run continues\n", dispatchkey.Chore(choreName))
-		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil
-	}
-
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
-	s := step.settle(d, result)
+	settle := func(result dispatch.Result) settled { return step.settle(d, result) }
+	s := dispatch.Route(d.Run(),
+		func() settled {
+			// A live run already holds this Chore's Box (#562): settling would
+			// read the empty result as a crash (#3705). Leave its claim
+			// standing and don't retry.
+			fmt.Printf("    #%s  status=already-in-flight  note=live run continues\n", dispatchkey.Chore(choreName))
+			return settled{}
+		},
+		settle, settle)
 	if !s.done {
 		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil
 	}

@@ -276,7 +276,7 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	}
 }
 
-// When d.Fix reports !Success, selfHeal must land failed right away instead of
+// When d.Fix returns a failed Disposition, selfHeal must land failed right away instead of
 // re-polling the unchanged head and burning the rest of the fix-pass budget
 // against the identical cached rollup (issue #1980). The rollup is scripted
 // FAILURE on every poll, standing in for a head that never advances, so a
@@ -291,7 +291,7 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	d.FixResult = dispatch.Result{Success: false}
+	d.FixResult = dispatch.Failed(dispatch.Result{})
 	var landing landingResult
 	var reason string
 	stderr := testutil.CaptureStderr(t, func() {
@@ -318,7 +318,7 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	}
 }
 
-// An AlreadyInFlight fix pass never started a Box: a sibling container for this
+// A skipped fix pass never started a Box: a sibling container for this
 // issue is live and owns its in-progress claim, so selfHeal must abandon without
 // a Failed transition, a comment, or another pass (issue #3655).
 func TestSelfHeal_FixAlreadyInFlightLeavesIssueUntouched(t *testing.T) {
@@ -331,7 +331,7 @@ func TestSelfHeal_FixAlreadyInFlightLeavesIssueUntouched(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	d.FixResult = dispatch.Result{AlreadyInFlight: true}
+	d.FixResult = dispatch.Skipped()
 	landing, reason := s.selfHeal(d, "1", 0, testPR)
 
 	if landing != landingAbandoned {
@@ -362,7 +362,7 @@ func TestSelfHeal_FixFailureWithErrSurfacesReason(t *testing.T) {
 
 	d := dispatch.NewFake()
 	boxErr := errors.New("box never launched: registry proxy dial failed")
-	d.FixResult = dispatch.Result{Success: false, Err: boxErr}
+	d.FixResult = dispatch.Failed(dispatch.Result{Err: boxErr})
 
 	var landing landingResult
 	var reason string
@@ -382,7 +382,7 @@ func TestSelfHeal_FixFailureWithErrSurfacesReason(t *testing.T) {
 	}
 }
 
-// A Fix that reports Success but leaves the PR head SHA unchanged must land
+// A Fix that returns a succeeded Disposition but leaves the PR head SHA unchanged must land
 // failed right away instead of re-polling the identical cached rollup as a
 // fresh genuine red (issue #1980). The no-op-confirm pause must also sleep
 // through the injected clock rather than a bare time.Sleep (issue #2502):

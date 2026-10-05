@@ -34,8 +34,8 @@ func TestRun_HeartbeatRawLogExact(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("55", "heartbeat test")
-	if result := d.Run(); !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	logPath := filepath.Join(HostLogDirFor(dir), "issue-55.log")
@@ -68,11 +68,11 @@ func TestRun_HeartbeatEmitsToStdout(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("99", "heartbeat stdout test")
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if !strings.Contains(out, "#99") {
 		t.Errorf("heartbeat missing issue prefix in stdout: %q", out)
@@ -95,11 +95,11 @@ func TestRun_AnnounceEmitsToStdout(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("99", "run announce test")
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if !strings.Contains(out, "-> #99: run announce test") {
 		t.Errorf("stdout missing run announce line, got %q", out)
@@ -131,11 +131,11 @@ func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 	f.SetHeartbeatOut(io.Discard)
 
 	d := f.New("99", "heartbeat discard test")
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if strings.Contains(out, "\xe2\x94\x80\xe2\x94\x80") {
 		t.Errorf("stdout should carry no heartbeat role header when discarded, got %q", out)
@@ -170,11 +170,11 @@ func TestFix_AnnounceEmitsToStdout(t *testing.T) {
 	defer f.Cleanup()
 
 	d := f.New("99", "fix announce test")
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Fix(1, "") })
 
-	if !result.Success {
-		t.Fatalf("Fix: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Fix: want succeeded, got %+v", result)
 	}
 	if !strings.Contains(out, "-> #99 (fix-pass-1): fix announce test") {
 		t.Errorf("stdout missing fix-pass announce line, got %q", out)
@@ -195,11 +195,11 @@ func TestFix_AnnounceSuppressedWhenDiscardConfigured(t *testing.T) {
 	f.SetHeartbeatOut(io.Discard)
 
 	d := f.New("99", "fix announce test")
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Fix(1, "") })
 
-	if !result.Success {
-		t.Fatalf("Fix: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Fix: want succeeded, got %+v", result)
 	}
 	if strings.Contains(out, "-> #") {
 		t.Errorf("stdout should carry no fix-pass announce line when discarded, got %q", out)

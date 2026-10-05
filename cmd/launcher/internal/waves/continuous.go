@@ -459,7 +459,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		launched = true
 		panicguard.Go(func() {
 			defer d.Close()
-			result := d.Run()
+			disp := d.Run()
 			switch {
 			case terminated.Marked(iss.Number, iss.Generation):
 				// terminate.Reclaim (a Console Terminate gesture or a
@@ -467,20 +467,28 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// the issue back to Dispatchable, and logged its own line,
 				// so neither a Failed transition nor a Settle belongs here.
 				fmt.Printf("    ~~ #%s reclaimed; abandoning\n", iss.Number)
-			case result.AlreadyInFlight:
-				// A live run, possibly orphaned by a killed launcher, still owns
-				// this issue's container, so skip without a dispatch-state
-				// transition and leave its in-progress claim untouched (#562,
-				// #3633).
-				fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
-			case !result.Success:
-				fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
-				result.ReportFailureReason(iss.Number)
-				transitionState(it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote())
-				s.Fail(iss.Number, iss.Generation, result)
 			default:
-				fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
-				s.Settle(d, iss.Number, iss.Generation, result)
+				dispatch.Route(disp,
+					func() struct{} {
+						// A live run, possibly orphaned by a killed launcher, still owns
+						// this issue's container, so skip without a dispatch-state
+						// transition and leave its in-progress claim untouched (#562,
+						// #3633).
+						fmt.Printf("    ~~ #%s already in flight; skipping (live run continues)\n", iss.Number)
+						return struct{}{}
+					},
+					func(result dispatch.Result) struct{} {
+						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
+						result.ReportFailureReason(iss.Number)
+						transitionState(it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote())
+						s.Fail(iss.Number, iss.Generation, result)
+						return struct{}{}
+					},
+					func(result dispatch.Result) struct{} {
+						fmt.Printf("    <- #%s done  (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
+						s.Settle(d, iss.Number, iss.Generation, result)
+						return struct{}{}
+					})
 			}
 			limiter.Release()
 			mu.Lock()

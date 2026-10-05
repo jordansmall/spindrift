@@ -19,18 +19,18 @@ type Fake struct {
 
 	RunCalls int
 
-	RunResult Result
+	RunResult Disposition
 
 	// RunResults[i] answers the i-th Run call, reusing the last element once
 	// the sequence is exhausted. A non-nil RunResults overrides RunResult.
-	RunResults []Result
+	RunResults []Disposition
 
 	FixCalls []FixCall
 
-	FixResult Result
+	FixResult Disposition
 
 	// FixResults is indexed like RunResults.
-	FixResults []Result
+	FixResults []Disposition
 
 	ResolveConflictCalls []string
 
@@ -45,16 +45,16 @@ type Fake struct {
 
 var _ Dispatcher = (*Fake)(nil)
 
-// NewFake returns a Fake that reports success on Run and Fix by default.
+// NewFake returns a Fake whose Run and Fix return Succeeded(Result{}) by default.
 func NewFake() *Fake {
 	return &Fake{
-		RunResult: Result{Success: true},
-		FixResult: Result{Success: true},
+		RunResult: Succeeded(Result{}),
+		FixResult: Succeeded(Result{}),
 	}
 }
 
-// Run records the call and returns the result for this call index.
-func (f *Fake) Run() Result {
+// Run records the call and returns the Disposition for this call index.
+func (f *Fake) Run() Disposition {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	i := f.RunCalls
@@ -68,8 +68,8 @@ func (f *Fake) Run() Result {
 	return f.RunResult
 }
 
-// Fix records the call and returns the result for this call index.
-func (f *Fake) Fix(pass int, ciFailureSummary string) Result {
+// Fix records the call and returns the Disposition for this call index.
+func (f *Fake) Fix(pass int, ciFailureSummary string) Disposition {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	i := len(f.FixCalls)

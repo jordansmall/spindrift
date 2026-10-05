@@ -39,9 +39,9 @@ func TestKill_BeforeFirstRun_NeverLaunches(t *testing.T) {
 		t.Fatalf("Kill: %v", err)
 	}
 
-	done := make(chan Result, 1)
+	done := make(chan Disposition, 1)
 	go func() { done <- d.Run() }()
-	var result Result
+	var result Disposition
 	select {
 	case result = <-done:
 	case <-time.After(5 * time.Second):
@@ -51,11 +51,11 @@ func TestKill_BeforeFirstRun_NeverLaunches(t *testing.T) {
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls = %d, want 0 (killed before launch)", len(fr.RunCalls))
 	}
-	if result.Success {
-		t.Error("want Success=false after a kill, got true")
+	if result.ok() {
+		t.Error("want failed after a kill, got true")
 	}
-	if result.AlreadyInFlight {
-		t.Error("want AlreadyInFlight=false after a kill, got true")
+	if result.skipped() {
+		t.Error("want not skipped after a kill, got skipped")
 	}
 }
 
@@ -78,10 +78,10 @@ func TestKill_DuringBackoff_InterruptsWaitAndStopsRedispatch(t *testing.T) {
 	f = newKillFactory(t, retryConfig(3, 5, 0), fr, drv, clock)
 	d := f.New("1", "t")
 
-	done := make(chan Result, 1)
+	done := make(chan Disposition, 1)
 	start := time.Now()
 	go func() { done <- d.Run() }()
-	var result Result
+	var result Disposition
 	select {
 	case result = <-done:
 	case <-time.After(8 * time.Second):
@@ -94,8 +94,8 @@ func TestKill_DuringBackoff_InterruptsWaitAndStopsRedispatch(t *testing.T) {
 	if len(fr.RunCalls) != 1 {
 		t.Errorf("RunCalls = %d, want 1 (no re-dispatch after the kill)", len(fr.RunCalls))
 	}
-	if result.Success {
-		t.Error("want Success=false after a kill, got true")
+	if result.ok() {
+		t.Error("want failed after a kill, got true")
 	}
 }
 
@@ -147,8 +147,8 @@ func TestKill_LeavesUnkilledClaimsRunnable(t *testing.T) {
 			if len(fr.RunCalls) != 1 {
 				t.Errorf("RunCalls = %d, want 1", len(fr.RunCalls))
 			}
-			if !result.Success {
-				t.Error("want Success=true for an unkilled claim, got false")
+			if !result.ok() {
+				t.Error("want succeeded for an unkilled claim, got false")
 			}
 		})
 	}

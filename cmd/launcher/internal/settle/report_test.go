@@ -178,7 +178,7 @@ func TestResearchSettle_Fail_CarriesNoteIntoSettledRecord(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 
 	fc := newResearchFake("42")
-	result := dispatch.Result{Success: true, Resolved: outcome.Resolved{Found: false}}
+	result := dispatch.Result{Resolved: outcome.Resolved{Found: false}}
 
 	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
 	s.Settle(dispatch.NewFake(), "42", 0, result)
@@ -200,7 +200,6 @@ func TestResearchSettle_Recommend_EmitsSettledRecordWithVerdictNote(t *testing.T
 
 	fc := newResearchFake("42")
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "42", Landing: "https://github.com/owner/repo/issues/42#issuecomment-1", Status: "recommend", Note: "grounded in code"},

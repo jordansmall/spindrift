@@ -338,7 +338,7 @@ type terminatingDispatcher struct {
 	num string
 }
 
-func (d terminatingDispatcher) Fix(pass int, ciFailureSummary string) dispatch.Result {
+func (d terminatingDispatcher) Fix(pass int, ciFailureSummary string) dispatch.Disposition {
 	res := d.Fake.Fix(pass, ciFailureSummary)
 	d.reg.Mark(d.num)
 	return res
@@ -405,7 +405,7 @@ func TestSelfHeal_TerminatedFixPassReaped_ReportsAbandonedNotFailed(t *testing.T
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
 	fk := dispatch.NewFake()
-	fk.FixResult = dispatch.Result{Success: false}
+	fk.FixResult = dispatch.Failed(dispatch.Result{})
 	s := newTestSettle(c, fc, fc)
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: fk, reg: reg, num: "1"}
@@ -486,7 +486,7 @@ func TestSelfHeal_TerminatedRedRetryFixExhausted_ReportsAbandonedNotFailed(t *te
 	// even with that guard deleted.
 }
 
-// A fix pass that returns Success: true but whose issue was marked while it
+// A fix pass that succeeds but whose issue was marked while it
 // ran must abandon before relayBoxBundle runs — relaying pushes bundle work
 // for an issue Reclaim already released (issue #3523).
 func TestSelfHeal_TerminatedFixPassSucceeded_SkipsRelay(t *testing.T) {
@@ -554,7 +554,6 @@ func TestSettle_AbandonedSkipsUsageComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	s.Settle(d, "1", 0, dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "1", Landing: testPR, Status: "ready", Note: "ok"},

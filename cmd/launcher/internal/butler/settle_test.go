@@ -40,7 +40,6 @@ func claimButlerChore(t *testing.T, backend ledger.Backend, choreName string, st
 
 func readyResult(intents ...string) dispatch.Result {
 	r := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -391,12 +390,11 @@ func TestSettleRun_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 	}{
 		{
 			name:   "no outcome line",
-			result: dispatch.Result{Success: false},
+			result: dispatch.Result{},
 		},
 		{
 			name: "blocked status",
 			result: dispatch.Result{
-				Success: true,
 				Resolved: outcome.Resolved{
 					Found:   true,
 					Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusBlocked, Note: "needs a human"},
@@ -468,7 +466,6 @@ func TestSettleRun_CrashedRun_StillWarnsAboutRejectedSignals(t *testing.T) {
 	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
 
 	result := dispatch.Result{
-		Success:              false,
 		IssueIntentsRejected: outcome.Rejections{NonceMismatch: 1},
 	}
 

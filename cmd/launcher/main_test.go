@@ -4052,7 +4052,6 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 
 	s := newSettle(c, ghLike, nil, nil, forge.Capabilities{})
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},

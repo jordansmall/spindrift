@@ -37,7 +37,6 @@ func TestSettle_LocalPushOnly_NoOutcomeBundlePresentMarksRecoverable(t *testing.
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
@@ -81,7 +80,6 @@ func TestSettle_LocalPushOnly_SyntheticBlockedBundlePresentMarksRecoverable(t *t
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -132,7 +130,6 @@ func TestSettle_LocalPushOnly_GenuineBlockedDoesNotMarkRecoverable(t *testing.T)
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceGenuine,
@@ -178,7 +175,6 @@ func TestSettle_LocalPushOnly_NoOutcomeBundleMissingFallsBackToFailed(t *testing
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
@@ -217,7 +213,6 @@ func TestSettle_LocalPushOnly_NoSelfReportFallsBackToFailed(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: false,
@@ -256,7 +251,6 @@ func TestSettle_LocalPushOnly_KilledBySignalBundlePresentMarksRecoverable(t *tes
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:        false,
 		KilledBySignal: true,
 		Resolved: outcome.Resolved{
 			Found: false,
@@ -296,7 +290,6 @@ func TestSettle_LocalPushOnly_KilledBySignalBundleMissingFallsBackToFailed(t *te
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:        false,
 		KilledBySignal: true,
 		Resolved: outcome.Resolved{
 			Found: false,
@@ -334,7 +327,6 @@ func TestSettle_LocalPushOnly_CleanFailureBundlePresentFallsBackToFailed(t *test
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success:        false,
 		KilledBySignal: false,
 		Resolved: outcome.Resolved{
 			Found: false,
@@ -374,7 +366,6 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			SelfReportFound: true,
 			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
@@ -427,7 +418,6 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			SelfReportFound: true,
 			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
@@ -465,7 +455,6 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch(t
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: false,
 		Resolved: outcome.Resolved{
 			SelfReportFound: false,
 		},
@@ -516,7 +505,6 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFals
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: false,
 		Resolved: outcome.Resolved{
 			SelfReportFound: false,
 		},
@@ -551,7 +539,6 @@ func TestSettle_LocalPushOnly_SelfReportBlockedFallsBackToFailed(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
