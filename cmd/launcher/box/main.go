@@ -2,10 +2,10 @@
 // (the dispatch key, keying and git identity, plus the forge token and repo
 // unless fully local or self-contained with no reachable tracker), prints the
 // writable-store notice when NIX_STORE_WRITABLE=true, clones the Target repo
-// (issue #4302) right after the kind read, recovers the agent
-// branch and runs the pre-work rebase (issue #4301) once it is cloned,
-// ahead of the Forgejo CLI and the guards, wires FORGEJO_TOKEN into
-// fj and installs the read-only guards (issue #4299), binds the registry proxy
+// (issue #4302) right after the kind read, wires FORGEJO_TOKEN into
+// fj and installs the read-only guards (issue #4299) once it is cloned, then
+// recovers the agent branch and runs the pre-work rebase (issue #4301) so no
+// branch publication runs unguarded (issue #4446), binds the registry proxy
 // (the Forwarder, the home configs and the in-tree rewrite, reverted on exit;
 // issue #4298), decides the toolchain (devShell probe, prefetch hook and
 // toolchain hint; issue #4297), lays out the Driver skills dir and the home

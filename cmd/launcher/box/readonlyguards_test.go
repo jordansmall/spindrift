@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/readonlyguards"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -195,7 +196,7 @@ func TestReadonlyGuards_FjOnPath_GetsItsShimInTheSameDir(t *testing.T) {
 	assertExecutable(t, filepath.Join(g.shimDir, "fj"))
 }
 
-func TestReadonlyGuards_RunsAfterForgejoCLIBeforeBindings(t *testing.T) {
+func TestReadonlyGuards_RunsAfterForgejoCLIBeforeRecoveryAndBindings(t *testing.T) {
 	g := newGuardsFixture(t)
 	g.env.OutboxRelayCapable = true
 	g.knobs["FORGEJO_TOKEN"] = "s3cret"
@@ -211,8 +212,13 @@ func TestReadonlyGuards_RunsAfterForgejoCLIBeforeBindings(t *testing.T) {
 		}
 		return nil
 	}
+	recoverBranch := g.d.Recover
+	g.d.Recover = func(cfg branchrecovery.Config, open func() (bool, error), out io.Writer) (branchrecovery.Outcome, error) {
+		g.reg.events = append(g.reg.events, "recover")
+		return recoverBranch(cfg, open, out)
+	}
 	g.run()
-	want := []string{"fj", "git init", "git config", "guards", "gate"}
+	want := []string{"fj", "git init", "git config", "guards", "recover", "gate"}
 	if got := g.reg.events[:len(want)]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("events = %v, want a prefix of %v", g.reg.events, want)
 	}
@@ -232,16 +238,27 @@ func TestReadonlyGuards_PathReachesChildren(t *testing.T) {
 	}
 }
 
-func TestReadonlyGuards_FailureAbortsBeforeBindingsAndDriver(t *testing.T) {
+func TestReadonlyGuards_FailureAbortsBeforeRecoveryBindingsAndDriver(t *testing.T) {
 	g := newGuardsFixture(t)
-	g.in.ForbiddenMarkersFile = filepath.Join(g.dir, "missing.json")
+	g.env.OutboxRelayCapable = true
+	// A partial install: the shims land on disk, then Install fails.
+	install := g.d.Guards.Install
+	g.d.Guards.Install = func(rows []promptassembly.ForbiddenMarkerRow, cfg readonlyguards.Config, out io.Writer) (readonlyguards.Result, error) {
+		res, _ := install(rows, cfg, out)
+		return res, errors.New("hook write failed")
+	}
 	rc, err := run(g.in, g.env, g.d)
 	var pe *phaseError
 	if !errors.As(err, &pe) || pe.phase != "readonly-guards" {
 		t.Fatalf("run() = (%d, %v), want a readonly-guards phase error", rc, err)
 	}
-	if len(g.reg.events) != 0 || len(g.calls) != 0 || g.assembled != 0 {
-		t.Fatalf("work ran after the guards failed: events=%v calls=%d assembled=%d", g.reg.events, len(g.calls), g.assembled)
+	// Recovery must never run ahead of the guards (issue #4446).
+	if len(g.recoverCfgs) != 0 {
+		t.Fatalf("recovery ran unguarded: recover=%d", len(g.recoverCfgs))
+	}
+	// The guards' own decoy setup shares the event log; nothing may follow it.
+	if ev := g.reg.events; ev[len(ev)-1] != "guards" || len(g.calls) != 0 || g.assembled != 0 {
+		t.Fatalf("work ran after the guards failed: events=%v calls=%d assembled=%d", ev, len(g.calls), g.assembled)
 	}
 }
 
