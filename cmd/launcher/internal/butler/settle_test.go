@@ -1871,8 +1871,11 @@ func TestSettleRun_RecordsWarnings(t *testing.T) {
 // Issue #4400: every finding failing to file (e.g. the provenance label could
 // not be created) must read as a failed sweep, not a quiet one -- no Done
 // commit, so the cursor stays put and the non-zero exit feeds the daemon
-// breaker -- while a partial success keeps the Done path.
+// breaker -- while a partial success keeps the Done path. Issue #4532: the
+// settled record is the operator's signal for the stall, so it is pinned too.
 func TestSettleRun_AllFindingsFailToFile_LeavesClaimStanding(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	claim := claimButlerChore(t, backend, "bugs", start)
@@ -1905,6 +1908,17 @@ func TestSettleRun_AllFindingsFailToFile_LeavesClaimStanding(t *testing.T) {
 	}
 	if tip.Commit != claim.Commit || tip.State.Phase != ledger.Claimed {
 		t.Errorf("tip = %s/%q, want the claim %s untouched", tip.Commit, tip.State.Phase, claim.Commit)
+	}
+
+	recs := readRecords()
+	if len(recs) != 1 {
+		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
+	}
+	if recs[0].Event != "settled" || recs[0].Key != dispatchkey.Chore("bugs") || recs[0].State != "failed" {
+		t.Errorf("record = %+v, want event=settled chore=bugs state=failed", recs[0])
+	}
+	if !strings.HasPrefix(recs[0].Note, "all 2 finding(s) failed to file") {
+		t.Errorf("record note = %q, want the all-failed sweep note", recs[0].Note)
 	}
 }
 
