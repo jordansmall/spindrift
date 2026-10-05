@@ -60,3 +60,18 @@ func jsonEscapeForTest(s string) string {
 	}
 	return string(out)
 }
+
+// failed counts only PostIssue failures, so a caller can tell an all-failed
+// sweep from a quiet one.
+func TestFileButlerFindings_ReportsFailedCount(t *testing.T) {
+	fc := forge.NewFake(testDispatchLabels)
+	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.PostIssueErrForTitle = map[string]error{"two": errFake}
+	plan := func([]Finding) func(Finding) Decoration { return func(Finding) Decoration { return Decoration{} } }
+
+	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, plan)
+
+	if len(filing.Filed) != 1 || filing.Failed != 1 {
+		t.Errorf("filed=%v failed=%d, want 1 filed and 1 failed", filing.Filed, filing.Failed)
+	}
+}

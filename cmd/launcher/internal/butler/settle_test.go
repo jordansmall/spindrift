@@ -1867,3 +1867,56 @@ func TestSettleRun_RecordsWarnings(t *testing.T) {
 		t.Errorf("RecordedWarnings = %q, want %q", d.RecordedWarnings, want)
 	}
 }
+
+// Issue #4400: every finding failing to file (e.g. the provenance label could
+// not be created) must read as a failed sweep, not a quiet one -- no Done
+// commit, so the cursor stays put and the non-zero exit feeds the daemon
+// breaker -- while a partial success keeps the Done path.
+func TestSettleRun_AllFindingsFailToFile_LeavesClaimStanding(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.RequireLabelsExist = true
+	fc.CreateLabelErr = errors.New("label create forbidden")
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
+
+	result := readyResult(
+		`{"title":"first finding","body":"repro","dedupTerms":["a.go:Foo"]}`,
+		`{"title":"second finding","body":"repro2","dedupTerms":["b.go:Bar"]}`,
+	)
+
+	var got settled
+	stdout := testutil.CaptureStdout(t, func() { got = s.settle(dispatch.NewFake(), result) })
+
+	if got.done {
+		t.Errorf("settled = %+v, want done=false", got)
+	}
+	if !strings.Contains(stdout, "status=failed  note=all 2 finding(s) failed to file") {
+		t.Errorf("stdout = %q, want a status=failed line naming the all-failed sweep", stdout)
+	}
+	tip, err := backend.Read("bugs")
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if tip.Commit != claim.Commit || tip.State.Phase != ledger.Claimed {
+		t.Errorf("tip = %s/%q, want the claim %s untouched", tip.Commit, tip.State.Phase, claim.Commit)
+	}
+}
+
+// A sweep that found nothing is a quiet success, never the all-failed path.
+func TestSettleRun_NoFindings_StillDone(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+	now := start.Add(time.Minute)
+	s := newSettleRun(forge.NewFake().AsIssueFiler(), backend, "bugs", claim, chore.Scope{Head: "h", NextCursor: "c"}, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
+
+	if got := s.settle(dispatch.NewFake(), readyResult()); !got.done {
+		t.Errorf("settled = %+v, want done=true", got)
+	}
+}
