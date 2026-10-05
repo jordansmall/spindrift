@@ -310,10 +310,11 @@ type PriorClaimStateReader interface {
 }
 
 // LabeledTracker is the optional IssueTracker capability for adapters whose
-// whole DispatchState space reduces to one DispatchLabels value (github, local,
-// the Fake; jira's StatusMapping blend does not). PickIssue's double-box guard
-// (#1742) uses it to spot a state the labels leave unmapped, like research's
-// Complete (ADR 0022), where a ListIssues filter would match every open issue.
+// whole DispatchState space reduces to one DispatchLabels value (github,
+// forgejo, local, the Fake; jira's StatusMapping blend does not). PickIssue's
+// double-box guard (#1742) uses it to spot a state the labels leave unmapped,
+// like research's Complete (ADR 0022), where a ListIssues filter would match
+// every open issue.
 type LabeledTracker interface {
 	// StateLabels returns the DispatchLabels family this tracker resolves
 	// DispatchState values through.
