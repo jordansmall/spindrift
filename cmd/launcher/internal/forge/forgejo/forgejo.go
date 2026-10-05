@@ -62,17 +62,25 @@ type forgejoClient struct {
 	rest *rest.Client
 
 	// orgLabelsAuthWarnOnce gates ListLabels' missing-scope warning to once
-	// per client: orgLabelsUnavailable stops the repeat lookup after the
-	// first call, so this Once only guards two concurrent first calls that
-	// both miss the flag.
+	// per client: orgLabelsState stops the repeat lookup after the first
+	// call, so this Once only guards two concurrent first calls that both
+	// miss the verdict.
 	orgLabelsAuthWarnOnce sync.Once
 
-	// orgLabelsUnavailable records that the org lookup 404ed or failed auth.
-	// Both are fixed for the client's lifetime (a user-owned repo, or the
-	// token's scope), so later polls skip the request (issue #4034). A
-	// success is never cached: org labels can be added mid-run.
-	orgLabelsUnavailable atomic.Bool
+	// orgLabelsState is the org lookup's verdict, fixed for the client's
+	// lifetime once not unknown (issue #4034). Success is never cached: org
+	// labels can be added mid-run.
+	orgLabelsState atomic.Int32
 }
+
+// orgLabelsState values. Only orgLabelsUnreadable means org labels may be
+// defined yet invisible, which PostIssue's by-name fallback must tell apart
+// from a definitively undefined label.
+const (
+	orgLabelsUnknown    int32 = iota
+	orgLabelsNone             // 404: a user-owned repo, so no org labels
+	orgLabelsUnreadable       // auth failure: token lacks read:organization
+)
 
 // NewForgejoClient returns an IssueTracker backed by the Forgejo REST API.
 func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
@@ -106,6 +114,7 @@ func (c *forgejoClient) orgLabelsPath() string {
 }
 
 type forgejoLabel struct {
+	ID   int64  `json:"id"`
 	Name string `json:"name"`
 }
 
@@ -487,21 +496,59 @@ func (c *forgejoClient) Comments(num string) ([]forge.Comment, error) {
 var _ forge.CommentLister = (*forgejoClient)(nil)
 
 // PostIssue implements forge.HostPostedIssueFiler (issue #1964), filing an
-// issue against this adapter's repo and returning its html_url. The
-// issue-creation endpoint wants label IDs, so labels go in a second call to
-// setLabels, which takes names.
+// issue and returning its html_url. Labels are resolved to IDs and sent on the
+// create itself: callers read ("", err) as "nothing filed" (issue #4459). With
+// a token lacking read:organization, the issue is created with the IDs that
+// resolve, then every name is applied by name; that call failing only warns.
 func (c *forgejoClient) PostIssue(title, body string, labels []string) (string, error) {
+	req := map[string]any{"title": title, "body": body}
+	var applyByName bool
+	if len(labels) > 0 {
+		ids, missing, err := c.labelIDs(labels)
+		if err != nil {
+			return "", err
+		}
+		if len(missing) > 0 {
+			if c.orgLabelsState.Load() != orgLabelsUnreadable {
+				return "", fmt.Errorf("forgejo: label(s) not defined on %s or its owner: %s", c.cfg.Repo, strings.Join(missing, ", "))
+			}
+			applyByName = true
+		}
+		req["labels"] = ids
+	}
 	var payload forgejoIssuePayload
-	if err := c.rest.Do(http.MethodPost, c.repoPath()+"/issues",
-		map[string]any{"title": title, "body": body}, &payload); err != nil {
+	if err := c.rest.Do(http.MethodPost, c.repoPath()+"/issues", req, &payload); err != nil {
 		return "", err
 	}
-	if len(labels) > 0 {
+	if applyByName {
 		if err := c.setLabels(strconv.Itoa(payload.Number), labels); err != nil {
-			return "", err
+			fmt.Fprintf(os.Stderr, "WARNING: forgejo: issue %s filed but applying labels %v failed: %v\n", payload.HTMLURL, labels, err)
 		}
 	}
 	return payload.HTMLURL, nil
+}
+
+// labelIDs resolves label names against the repo and org label sets, returning
+// the IDs of the names found, in the order given, and the names neither set
+// defines.
+func (c *forgejoClient) labelIDs(names []string) (ids []int64, missing []string, err error) {
+	defined, err := c.labelUnion()
+	if err != nil {
+		return nil, nil, err
+	}
+	byName := make(map[string]int64, len(defined))
+	for _, l := range defined {
+		byName[l.Name] = l.ID
+	}
+	ids = make([]int64, 0, len(names))
+	for _, n := range names {
+		if id, ok := byName[n]; ok {
+			ids = append(ids, id)
+		} else {
+			missing = append(missing, n)
+		}
+	}
+	return ids, missing, nil
 }
 
 var _ forge.HostPostedCommenter = (*forgejoClient)(nil)
@@ -571,58 +618,67 @@ func walkPages[T any, K comparable](rc *rest.Client, path string, q url.Values, 
 // or fail auth, later calls on this client skip that lookup entirely (issue
 // #4034).
 func (c *forgejoClient) ListLabels() ([]string, error) {
-	repoPayload, err := walkPages(c.rest, c.repoPath()+"/labels", url.Values{}, func(l forgejoLabel) string { return l.Name })
+	defined, err := c.labelUnion()
 	if err != nil {
 		return nil, err
 	}
-	names := labelNames(repoPayload)
-
-	orgNames, err := c.orgLabels()
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[string]bool, len(names))
-	for _, n := range names {
-		seen[n] = true
-	}
-	for _, n := range orgNames {
-		if !seen[n] {
-			seen[n] = true
-			names = append(names, n)
-		}
-	}
-	return names, nil
+	return labelNames(defined), nil
 }
 
-// orgLabels returns the owning org's label names. forge.ErrNotFound means a
+// labelUnion is the repo's labels followed by any org-only ones, deduped
+// by name; this adapter's own policy is that the repo label wins a clash.
+func (c *forgejoClient) labelUnion() ([]forgejoLabel, error) {
+	labels, err := walkPages(c.rest, c.repoPath()+"/labels", url.Values{}, func(l forgejoLabel) string { return l.Name })
+	if err != nil {
+		return nil, err
+	}
+	orgLabels, err := c.orgLabels()
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]bool, len(labels))
+	for _, l := range labels {
+		seen[l.Name] = true
+	}
+	for _, l := range orgLabels {
+		if !seen[l.Name] {
+			seen[l.Name] = true
+			labels = append(labels, l)
+		}
+	}
+	return labels, nil
+}
+
+// orgLabels returns the owning org's labels. forge.ErrNotFound means a
 // user-owned repo, so there are none. forge.ErrAuthFailure means a token
 // without read:organization; the repo fetch already succeeded with it, and
 // failing ListLabels would newly fail doctor (any ListLabels error is
 // ErrConnectivity there) for deployments that work today, so it degrades to
 // repo labels only with a warning. The cost: for that token an org-only
 // label still reads as undefined, so ListIssues on it returns nothing (the
-// #3997 gap, now warned once per client). Both verdicts stick for the
-// client via orgLabelsUnavailable. Any other error propagates, uncached.
-func (c *forgejoClient) orgLabels() ([]string, error) {
-	if c.orgLabelsUnavailable.Load() {
+// #3997 gap, now warned once per client) and PostIssue applies it in a
+// second, non-atomic call. Both verdicts stick for the client via
+// orgLabelsState. Any other error propagates, uncached.
+func (c *forgejoClient) orgLabels() ([]forgejoLabel, error) {
+	if c.orgLabelsState.Load() != orgLabelsUnknown {
 		return nil, nil
 	}
 	payload, err := walkPages(c.rest, c.orgLabelsPath(), url.Values{}, func(l forgejoLabel) string { return l.Name })
 	if err != nil {
 		if errors.Is(err, forge.ErrNotFound) {
-			c.orgLabelsUnavailable.Store(true)
+			c.orgLabelsState.Store(orgLabelsNone)
 			return nil, nil
 		}
 		if errors.Is(err, forge.ErrAuthFailure) {
 			c.orgLabelsAuthWarnOnce.Do(func() {
-				fmt.Fprintf(os.Stderr, "WARNING: forgejo: org label lookup failed (%v); the token likely lacks the read:organization scope, so org-only labels are not seen by label pre-checks\n", err)
+				fmt.Fprintf(os.Stderr, "WARNING: forgejo: org label lookup failed (%v); the token likely lacks the read:organization scope, so org-only labels are not seen by label pre-checks, and issue filing applies them in a separate, non-atomic call\n", err)
 			})
-			c.orgLabelsUnavailable.Store(true)
+			c.orgLabelsState.Store(orgLabelsUnreadable)
 			return nil, nil
 		}
 		return nil, err
 	}
-	return labelNames(payload), nil
+	return payload, nil
 }
 
 // CreateLabel creates a repository label. The color argument is a bare hex

@@ -215,43 +215,208 @@ func TestForgejoClient_PostIssue_CreatesAndReturnsURL(t *testing.T) {
 	}
 }
 
-// Forgejo's create endpoint wants label IDs, so PostIssue creates the issue
-// first and then applies labels by name through the replace-all-labels PUT,
-// which avoids ID bookkeeping.
-func TestForgejoClient_PostIssue_AppliesLabels(t *testing.T) {
-	var labelsPath, labelsMethod string
-	var labelsBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/labels") {
-			labelsPath = r.URL.Path
-			labelsMethod = r.Method
-			json.NewDecoder(r.Body).Decode(&labelsBody)
+// postIssueFake serves repo labels, org labels (orgBody, or 404 when empty,
+// or orgStatus when set), and POST /issues, recording the create bodies and
+// every label PUT. putStatus overrides the PUT's 200.
+type postIssueFake struct {
+	t         *testing.T
+	creates   []map[string]any
+	putPaths  []string
+	putLabels [][]any
+	orgStatus int
+	putStatus int
+}
+
+func (f *postIssueFake) handler(repoLabels, orgBody string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut:
+			f.putPaths = append(f.putPaths, r.URL.Path)
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				f.t.Errorf("decode label PUT body: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			names, _ := body["labels"].([]any)
+			f.putLabels = append(f.putLabels, names)
+			if f.putStatus != 0 {
+				w.WriteHeader(f.putStatus)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
-			return
+		case r.URL.Path == forgejoOrgLabelsPath:
+			if f.orgStatus != 0 {
+				w.WriteHeader(f.orgStatus)
+				return
+			}
+			if orgBody == "" && serveNoOrgLabels(w, r) {
+				return
+			}
+			serveLabels(w, r, orgBody)
+		case r.URL.Path == "/api/v1/repos/owner/repo/labels":
+			serveLabels(w, r, repoLabels)
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/repos/owner/repo/issues":
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			f.creates = append(f.creates, body)
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"number":100,"html_url":"https://codeberg.org/owner/repo/issues/100"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
 		}
-		w.WriteHeader(http.StatusCreated)
-		w.Write([]byte(`{"number":100,"html_url":"https://codeberg.org/owner/repo/issues/100"}`))
-	}))
+	}
+}
+
+func newPostIssueFiler(srvURL string) forge.HostPostedIssueFiler {
+	return forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srvURL, Repo: "owner/repo", Token: "tok"}).(forge.HostPostedIssueFiler)
+}
+
+// Forgejo's create endpoint wants label IDs, so PostIssue resolves names to
+// IDs and sends them on the single create; a follow-up label call could fail
+// after the issue exists (issue #4459).
+func TestForgejoClient_PostIssue_SendsLabelIDsOnCreate(t *testing.T) {
+	fake := &postIssueFake{t: t}
+	srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"agent-review-finding"},{"id":8,"name":"other"}]`, ""))
 	defer srv.Close()
 
-	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
-	filer := fc.(forge.HostPostedIssueFiler)
-	url, err := filer.PostIssue("a title", "a body", []string{"agent-review-finding"})
+	url, err := newPostIssueFiler(srv.URL).PostIssue("a title", "a body", []string{"agent-review-finding"})
 	if err != nil {
 		t.Fatalf("PostIssue: %v", err)
 	}
 	if url != "https://codeberg.org/owner/repo/issues/100" {
 		t.Errorf("url = %q", url)
 	}
-	if labelsMethod != http.MethodPut {
-		t.Errorf("labels method = %q, want PUT", labelsMethod)
+	if len(fake.creates) != 1 {
+		t.Fatalf("creates = %d, want 1", len(fake.creates))
 	}
-	if labelsPath != "/api/v1/repos/owner/repo/issues/100/labels" {
-		t.Errorf("labels path = %q", labelsPath)
+	gotLabels, _ := fake.creates[0]["labels"].([]any)
+	if len(gotLabels) != 1 || gotLabels[0] != float64(7) {
+		t.Errorf("labels body = %v, want [7]", fake.creates[0]["labels"])
 	}
-	gotLabels, _ := labelsBody["labels"].([]any)
-	if len(gotLabels) != 1 || gotLabels[0] != "agent-review-finding" {
-		t.Errorf("labels body = %v", labelsBody)
+	if len(fake.putPaths) != 0 {
+		t.Errorf("PUT calls = %d, want 0", len(fake.putPaths))
+	}
+}
+
+func TestForgejoClient_PostIssue_ResolvesOrgOnlyLabel(t *testing.T) {
+	fake := &postIssueFake{t: t}
+	srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"shared"}]`, `[{"id":70,"name":"shared"},{"id":71,"name":"org-only"}]`))
+	defer srv.Close()
+
+	if _, err := newPostIssueFiler(srv.URL).PostIssue("t", "b", []string{"shared", "org-only"}); err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if len(fake.creates) != 1 {
+		t.Fatalf("creates = %d, want 1", len(fake.creates))
+	}
+	gotLabels, _ := fake.creates[0]["labels"].([]any)
+	if len(gotLabels) != 2 || gotLabels[0] != float64(7) || gotLabels[1] != float64(71) {
+		t.Errorf("labels body = %v, want [7 71] (repo wins a clash, org-only resolves)", fake.creates[0]["labels"])
+	}
+}
+
+// An unresolvable label must fail before the create, so ("", err) keeps
+// meaning nothing was filed (issue #4459).
+func TestForgejoClient_PostIssue_UnknownLabelErrorsBeforeCreate(t *testing.T) {
+	fake := &postIssueFake{t: t}
+	srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"known"}]`, ""))
+	defer srv.Close()
+
+	url, err := newPostIssueFiler(srv.URL).PostIssue("t", "b", []string{"known", "missing-one"})
+	if err == nil {
+		t.Fatal("PostIssue succeeded, want error for an undefined label")
+	}
+	if url != "" {
+		t.Errorf("url = %q, want empty", url)
+	}
+	if !strings.Contains(err.Error(), "missing-one") {
+		t.Errorf("err = %v, want it to name missing-one", err)
+	}
+	if len(fake.creates) != 0 {
+		t.Errorf("creates = %d, want 0", len(fake.creates))
+	}
+}
+
+// A token without read:organization cannot see org labels, so an org-only
+// name has no knowable ID; PostIssue creates with the repo IDs it has, then
+// lets Forgejo resolve the full name list server-side.
+func TestForgejoClient_PostIssue_AuthDegradedOrgAppliesLabelsByName(t *testing.T) {
+	for _, status := range []int{http.StatusForbidden, http.StatusUnauthorized} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			fake := &postIssueFake{t: t, orgStatus: status}
+			srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"repo-label"}]`, ""))
+			defer srv.Close()
+
+			url, err := newPostIssueFiler(srv.URL).PostIssue("t", "b", []string{"repo-label", "org-only"})
+			if err != nil {
+				t.Fatalf("PostIssue: %v", err)
+			}
+			if url != "https://codeberg.org/owner/repo/issues/100" {
+				t.Errorf("url = %q", url)
+			}
+			if len(fake.creates) != 1 {
+				t.Fatalf("creates = %d, want 1", len(fake.creates))
+			}
+			gotIDs, _ := fake.creates[0]["labels"].([]any)
+			if len(gotIDs) != 1 || gotIDs[0] != float64(7) {
+				t.Errorf("create labels = %v, want [7]", fake.creates[0]["labels"])
+			}
+			if len(fake.putPaths) != 1 || fake.putPaths[0] != "/api/v1/repos/owner/repo/issues/100/labels" {
+				t.Fatalf("PUT paths = %v, want one to issue 100's labels", fake.putPaths)
+			}
+			if got := fake.putLabels[0]; len(got) != 2 || got[0] != "repo-label" || got[1] != "org-only" {
+				t.Errorf("PUT labels = %v, want the full name list", got)
+			}
+		})
+	}
+}
+
+// The create already landed, so a failed label call must not read as
+// "nothing filed": the URL comes back with a nil error.
+func TestForgejoClient_PostIssue_AuthDegradedLabelPutFailureStillReturnsURL(t *testing.T) {
+	fake := &postIssueFake{t: t, orgStatus: http.StatusForbidden, putStatus: http.StatusUnprocessableEntity}
+	srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"repo-label"}]`, ""))
+	defer srv.Close()
+
+	url, err := newPostIssueFiler(srv.URL).PostIssue("t", "b", []string{"repo-label", "org-only"})
+	if err != nil {
+		t.Fatalf("PostIssue: %v, want nil once the issue exists", err)
+	}
+	if url != "https://codeberg.org/owner/repo/issues/100" {
+		t.Errorf("url = %q", url)
+	}
+	if len(fake.creates) != 1 || len(fake.putPaths) != 1 {
+		t.Errorf("creates = %d, puts = %d, want 1 and 1", len(fake.creates), len(fake.putPaths))
+	}
+}
+
+// With every label resolvable the degraded token needs no label call.
+func TestForgejoClient_PostIssue_AuthDegradedResolvedLabelsNeedNoPut(t *testing.T) {
+	fake := &postIssueFake{t: t, orgStatus: http.StatusForbidden}
+	srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"repo-label"}]`, ""))
+	defer srv.Close()
+
+	if _, err := newPostIssueFiler(srv.URL).PostIssue("t", "b", []string{"repo-label"}); err != nil {
+		t.Fatalf("PostIssue: %v", err)
+	}
+	if len(fake.putPaths) != 0 {
+		t.Errorf("PUT calls = %d, want 0", len(fake.putPaths))
+	}
+}
+
+// Org labels read fine here, so a missing name is definitively undefined and
+// the degraded by-name fallback must not apply.
+func TestForgejoClient_PostIssue_UnknownLabelWithReadableOrgErrorsBeforeCreate(t *testing.T) {
+	fake := &postIssueFake{t: t}
+	srv := httptest.NewServer(fake.handler(`[{"id":7,"name":"known"}]`, `[{"id":71,"name":"org-label"}]`))
+	defer srv.Close()
+
+	if _, err := newPostIssueFiler(srv.URL).PostIssue("t", "b", []string{"known", "missing-one"}); err == nil {
+		t.Fatal("PostIssue succeeded, want error for an undefined label")
+	}
+	if len(fake.creates) != 0 || len(fake.putPaths) != 0 {
+		t.Errorf("creates = %d, puts = %d, want 0 and 0", len(fake.creates), len(fake.putPaths))
 	}
 }
 
@@ -695,7 +860,7 @@ func TestForgejoClient_ListLabels_OrgVerdictCachingPerClient(t *testing.T) {
 }
 
 // ListLabels called concurrently on one client, so that go test -race
-// actually sees shared access to orgLabelsUnavailable.
+// actually sees shared access to orgLabelsState.
 func TestForgejoClient_ListLabels_ConcurrentCallsDoNotRace(t *testing.T) {
 	var orgRequests atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
