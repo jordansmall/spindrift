@@ -27,7 +27,7 @@ type segment struct {
 
 // body is the attributed form of a rendered string. Its concatenated text()
 // must always equal what the equivalent non-attributed substitute() or
-// RenderText() call would have produced.
+// braced RenderText() call would have produced.
 type body []segment
 
 func (b body) text() string {
@@ -80,8 +80,7 @@ func renderSegments(raw string, owner Source, vars map[string]body) body {
 		start, end := m[0], m[1]
 		appendLiteral(raw[pos:start])
 		tok := raw[start:end]
-		name := tok[2 : len(tok)-1]
-		if v, ok := vars[name]; ok {
+		if v, ok := vars[tokenName(tok)]; ok {
 			out = append(out, v...)
 		} else {
 			appendLiteral(tok)

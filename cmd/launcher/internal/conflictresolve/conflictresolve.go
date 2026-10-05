@@ -10,8 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 
 	"spindrift.dev/launcher/internal/promptassembly"
 )
@@ -130,27 +128,5 @@ func render(path string, vars map[string]string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", path, err)
 	}
-	return strings.TrimRight(substituteVars(string(b), vars), "\n"), nil
-}
-
-// varTokenRe matches both forms GNU envsubst recognizes. A bare $NAME takes the
-// whole identifier, so $BRANCHX is the name BRANCHX, not BRANCH followed by X.
-// promptassembly.RenderText substitutes only the braced form, which is why the
-// override prompts' bare $BASE_BRANCH needs this local pass.
-var varTokenRe = regexp.MustCompile(`\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))`)
-
-// substituteVars is one regex pass, so a substituted value that itself holds
-// $NAME-shaped text is never re-expanded.
-func substituteVars(text string, vars map[string]string) string {
-	return varTokenRe.ReplaceAllStringFunc(text, func(tok string) string {
-		m := varTokenRe.FindStringSubmatch(tok)
-		name := m[1]
-		if name == "" {
-			name = m[2]
-		}
-		if v, ok := vars[name]; ok {
-			return v
-		}
-		return tok
-	})
+	return promptassembly.RenderText(string(b), vars, true /* bare $NAME too */), nil
 }
