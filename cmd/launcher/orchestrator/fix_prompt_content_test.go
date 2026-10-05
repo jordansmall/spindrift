@@ -47,12 +47,9 @@ func TestFixPromptWarmFixContract(t *testing.T) {
 			name:   "#3225 go straight from COMMIT to LAND THE CHANGE then OUTCOME",
 			clause: "Go straight from COMMIT to LAND THE CHANGE's `$CODE_FORGE` branch, then OUTCOME",
 		},
+		{
+			name:   "#3505 code-comments policy phrase present",
+			clause: codeCommentsPolicyPhrase,
+		},
 	})
-}
-
-// Issue #3505 inlines the code-comments skill's policy body verbatim into
-// FIX instead of routing through the ${CODE_COMMENTS_STEP} fragment anchor
-// (the same shape worker-prompt.md already uses, issue #3419).
-func TestFixPromptCodeCommentsPolicyInlined(t *testing.T) {
-	assertInlinesCodeCommentsPolicy(t, "fix-prompt.md")
 }

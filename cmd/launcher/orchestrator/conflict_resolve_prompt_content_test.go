@@ -50,12 +50,9 @@ func TestConflictResolvePromptOperativeContract(t *testing.T) {
 			name:   "#3225 unresolvable conflict: exit and explain",
 			clause: "If the conflict is genuinely unresolvable (e.g. the two changes are semantically incompatible), exit and explain in a short message",
 		},
+		{
+			name:   "#3505 code-comments policy phrase present",
+			clause: codeCommentsPolicyPhrase,
+		},
 	})
-}
-
-// Issue #3505 inlines the code-comments skill's policy body verbatim before
-// # SIGNALS instead of routing through the ${CODE_COMMENTS_STEP} fragment
-// anchor (the same shape worker-prompt.md already uses, issue #3419).
-func TestConflictResolvePromptCodeCommentsPolicyInlined(t *testing.T) {
-	assertInlinesCodeCommentsPolicy(t, "conflict-resolve-prompt.md")
 }
