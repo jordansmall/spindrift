@@ -845,7 +845,7 @@ in
     env = "DAEMON_IDLE_FLOOR";
     group = "dispatch";
     default = "5m";
-    doc = "wait before the daemon's first no-work check against a kind, and the poll slice size while riding out a jammed kind's backoff -- each further consecutive no-work check against that kind doubles the wait up to DAEMON_IDLE_CAP; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    doc = "the jam gate's first wait: when a tracker-probed kind (dispatch, research) has open issues but none dispatchable, the wait before the daemon's first re-check, which is also the poll slice size while riding out the jam; each further consecutive check doubles the wait up to DAEMON_IDLE_CAP, and a kind whose child keeps exiting 3 then waits DAEMON_IDLE_CAP between checks; a kind with no tracker Demand probe (the butler, and any tracker that does not yet report Demand) is exit-driven and uses this as its whole no-work backoff instead; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
     launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
@@ -857,7 +857,19 @@ in
     env = "DAEMON_IDLE_CAP";
     group = "dispatch";
     default = "30m";
-    doc = "ceiling the daemon's per-kind idle backoff doubles up to, starting from DAEMON_IDLE_FLOOR; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    doc = "ceiling the jam gate's doubling wait reaches, starting from DAEMON_IDLE_FLOOR, for a tracker-probed kind (dispatch, research); for an exit-driven kind (the butler, and any tracker that does not yet report Demand) it is the ceiling of the whole per-kind no-work backoff; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    flakeOption = true;
+    launcherIgnores = true;
+    # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
+    # alias to preserve, so no lib/legacy-settings-section.nix row.
+    legacySettingsExempt = true;
+    boxEnv = false;
+  };
+  daemonProbeInterval = {
+    env = "DAEMON_PROBE_INTERVAL";
+    group = "dispatch";
+    default = "";
+    doc = "overrides every tracker's default Demand probe interval, the pause between the daemon's cheap ready-issue counts that start slots from tracker demand (blank keeps the per-tracker defaults: each tracker adapter declares its own, local 20s today, and the others as their adapters gain Demand); an override must be at least 1s; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
     launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>

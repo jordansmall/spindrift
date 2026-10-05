@@ -702,6 +702,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
+	probeIntervalRaw := doc.ResolveOptional("DAEMON_PROBE_INTERVAL", stderr)
+	probeOverride, err := parseProbeInterval(probeIntervalRaw)
+	if err != nil {
+		return fail(stderr, err)
+	}
 	failureBackoffRaw, err := doc.Resolve("DAEMON_FAILURE_BACKOFF", stderr)
 	if err != nil {
 		return fail(stderr, err)
@@ -775,6 +780,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	args.Kinds = gatedKinds
+
+	// Built from the daemon's own resolved knobs, per kind row, once the
+	// butler gate has settled which kinds are in play.
+	demand := buildDemandSources(doc, args.Kinds)
 
 	// RESEARCH_RESERVATION is inert for a single-kind daemon (both the
 	// schema doc and daemon.Config say so), so it is resolved and validated
@@ -851,6 +860,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		// must still start.
 		butler:   slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Butler)),
 		research: researchPromoted(args),
+		demand:   demand,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -890,6 +900,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		ResearchReservation: reservation,
 		IdleFloor:           idleFloor,
 		IdleCap:             idleCap,
+		ProbeIntervals:      probeIntervals(demand, probeOverride),
 		Slots:               slots,
 		SelfProgram:         selfProgram,
 		FailureBackoff:      failureBackoff,
