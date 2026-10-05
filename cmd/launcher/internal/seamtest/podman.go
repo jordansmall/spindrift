@@ -41,8 +41,8 @@ func podmanMain(args []string) int {
 	return podmanFake(filepath.Base(os.Args[0]), args, os.Stdout, os.Stderr)
 }
 
-// podmanFake mirrors tests/fakes/runtime's podman branch: every subcommand
-// succeeds silently except the probes whose failure the launcher branches on.
+// podmanFake mirrors tests/fakes/runtime: every subcommand succeeds silently
+// except the probes whose failure the launcher branches on.
 func podmanFake(tool string, args []string, stdout, stderr io.Writer) int {
 	var cfg PodmanConfig
 	if err := loadConfig(tool, &cfg); err != nil {

@@ -28,7 +28,19 @@ fi
 
 # Shared setup for the dispatch-env bats suite (tests/harness-env.bats).
 setup_dispatch_env() {
-  setup_fakes
+  : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake runtime)}"
+  FAKE_BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$FAKE_BIN"
+  cp "$FAKES_DIR/runtime" "$FAKE_BIN/podman"
+  chmod +x "$FAKE_BIN/podman"
+  export PATH="$FAKE_BIN:$PATH"
+
+  export PODMAN_LOG="$BATS_TEST_TMPDIR/podman.log"
+  # No gh is staged on PATH: the launcher pins the real gh, so nix/fixtures.nix
+  # overlays the recording fake in, and that fake reads GH_LOG from here.
+  export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
+  : >"$PODMAN_LOG"
+  : >"$GH_LOG"
   set_dispatch_env
   cd "$BATS_TEST_TMPDIR" || exit
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
@@ -38,47 +50,6 @@ setup_dispatch_env() {
   # keeps iterations instant; a small nonzero timeout still lets it iterate once.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=2
-}
-
-setup_fakes() {
-  : "${FAKES_DIR:?FAKES_DIR must be set (dir holding fake runtime/gh/claude)}"
-  FAKE_BIN="$BATS_TEST_TMPDIR/bin"
-  mkdir -p "$FAKE_BIN"
-  cp "$FAKES_DIR/runtime" "$FAKE_BIN/podman"
-  cp "$FAKES_DIR/runtime" "$FAKE_BIN/docker"
-  cp "$FAKES_DIR/runtime" "$FAKE_BIN/bwrap"
-  # checkBwrapPastaGate (issue #2666) probes the launcher's PATH for pasta
-  # before bwrap runs, and bwrap.go's execTarget makes this fake the top-level
-  # exec target for any NetworkMode but "host", so tests/fakes/pasta must exec
-  # through to the fake bwrap below.
-  cp "$FAKES_DIR/pasta" "$FAKE_BIN/pasta"
-  : "${DRIVER:=claude}"
-  cp "$FAKES_DIR/gh" "$FAKES_DIR/$DRIVER" \
-     "$FAKES_DIR/driver-exec" "$FAKES_DIR/orchestrator" "$FAKE_BIN/"
-  # The claude and opencode fakes source _driver-common.bash relative to their
-  # own directory at runtime, so it has to sit beside the copied driver fake.
-  cp "$FAKES_DIR/_driver-common.bash" "$FAKE_BIN/"
-  chmod +x "$FAKE_BIN"/*
-  export PATH="$FAKE_BIN:$PATH"
-
-  export PODMAN_LOG="$BATS_TEST_TMPDIR/podman.log"
-  export DOCKER_LOG="$BATS_TEST_TMPDIR/docker.log"
-  export BWRAP_LOG="$BATS_TEST_TMPDIR/bwrap.log"
-  # tests/fakes/pasta (issue #2666) logs its own invocation here before exec'ing
-  # the fake bwrap; $BWRAP_LOG only ever sees the argv pasta passes on.
-  export PASTA_LOG="$BATS_TEST_TMPDIR/pasta.log"
-  export GH_LOG="$BATS_TEST_TMPDIR/gh.log"
-  export GIT_LOG="$BATS_TEST_TMPDIR/git.log"
-  export DRIVER_LOG="$BATS_TEST_TMPDIR/$DRIVER.log"
-  export ORCHESTRATOR_LOG="$BATS_TEST_TMPDIR/orchestrator.log"
-  export DRIVER_PROMPT_FILE="$BATS_TEST_TMPDIR/$DRIVER-prompt.txt"
-  : >"$PODMAN_LOG"
-  : >"$DOCKER_LOG"
-  : >"$BWRAP_LOG"
-  : >"$PASTA_LOG"
-  : >"$GH_LOG"
-  : >"$DRIVER_LOG"
-  : >"$ORCHESTRATOR_LOG"
 }
 
 # Minimal env so `dispatch`'s required-var guards pass.
