@@ -16,8 +16,8 @@ type Fake struct {
 
 	*PRForgeFake
 
-	// HostMediationFake's methods are reachable only through the AsLocal(),
-	// AsGithubReadOnly(), and AsIssueFiler() wrappers.
+	// HostMediationFake's backing methods are unexported; its type doc names
+	// the wrappers that reach them.
 	*HostMediationFake
 }
 
