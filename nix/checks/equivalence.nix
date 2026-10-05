@@ -681,6 +681,55 @@ in
     assert builtins.all (k: perKnob k removedKnobs.${k}) (builtins.attrNames removedKnobs);
     pkgs.runCommand "removed-knob-rejected" { } "touch $out";
 
+  # Issue #4401: the registry (lib/removed-fragment-vars.nix, which holds the
+  # rationale) and the launcher's hand-kept runtime table must name the same
+  # variables and issues. The registry must never name a live fragment var or a
+  # ${NAME} the shipped templates still use, or the eval-time scan would reject
+  # the default build.
+  removed-fragment-var-parity =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        attrNames
+        concatStringsSep
+        sort
+        ;
+      registry = import ../../lib/removed-fragment-vars.nix;
+      goSource = builtins.readFile ../../cmd/launcher/internal/promptassembly/removed_vars.go;
+      goRows = map (m: "${builtins.elemAt m 0}:${builtins.elemAt m 1}") (
+        builtins.filter builtins.isList (builtins.split "[{]\"([A-Z_]+)\", ([0-9]+)[}]" goSource)
+      );
+      registryRows = map (n: "${n}:${toString registry.${n}.issue}") (attrNames registry);
+      fragmentRows = import ../../lib/fragments.nix;
+      liveVars =
+        map (row: row.var) (builtins.filter (row: row ? var) fragmentRows)
+        ++ builtins.concatMap (row: row.extraSubstVars or [ ]) fragmentRows;
+      promptsRoot = ../../templates/default/prompts;
+      filesUnder =
+        dir:
+        let
+          entries = builtins.readDir dir;
+        in
+        builtins.concatMap (
+          n: if entries.${n} == "directory" then filesUnder (dir + "/${n}") else [ (dir + "/${n}") ]
+        ) (attrNames entries);
+      templateFiles = filesUnder promptsRoot;
+      templateText = concatStringsSep "\n" (map builtins.readFile templateFiles);
+      perVar =
+        name:
+        assert assertMsg (!(builtins.elem name liveVars))
+          "${name} is a live var in lib/fragments.nix, so it is not removed: drop its lib/removed-fragment-vars.nix row";
+        # Not lib.hasInfix: see mentions in lib/mkHarness.nix.
+        assert assertMsg (builtins.length (builtins.split "\\$[{]${name}[}]" templateText) == 1)
+          "templates/default/prompts still references \${${name}}; a removed fragment variable must not appear in shipped text";
+        true;
+    in
+    assert assertMsg (registry != { }) "lib/removed-fragment-vars.nix must not be empty";
+    assert builtins.all perVar (attrNames registry);
+    assert assertMsg (sort builtins.lessThan goRows == sort builtins.lessThan registryRows)
+      "removed_vars.go's rows (${concatStringsSep ", " goRows}) differ from lib/removed-fragment-vars.nix's (${concatStringsSep ", " registryRows})";
+    pkgs.runCommand "removed-fragment-var-parity" { } "touch $out";
+
   # ADR 0037 (issue #2522): the 13 flat legacy shim options (oldFlatShims) must
   # be generated from the same structuralOptions declaration as the domain-tree
   # entries, not hand-copied, and each description is a one-line rename pointer.
