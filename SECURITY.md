@@ -46,7 +46,11 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   maintainer has minimized on GitHub from the transcript it renders, but
   that is a mitigation for that transcript only: the Box's token can still
   read the full thread, and the agent still fetches parent and linked issues
-  itself, minimized comments included.
+  itself, minimized comments included. A vetted-transcript filter (#382, not
+  yet active) will keep only comments from a GitHub `OWNER`, `MEMBER`, or
+  `COLLABORATOR`; Forgejo and Jira cannot attest a commenter's standing, so
+  their comments will count as untrusted (fail closed). See the [Threat
+  model](docs/reference.md#threat-model).
 - **Secrets can be sourced from a vault instead of left in plaintext, and
   the Box is hardened against self-inflicted reads.** `<SECRET>_CMD` (e.g.
   `GH_TOKEN_CMD="rbw get spindrift-pat"`) is the preferred way to supply

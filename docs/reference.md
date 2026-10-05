@@ -2913,6 +2913,10 @@ generated `flake.nix`.
   as `github` and `forgejo`. `JIRA_INCLUDE_COMMENTS` is a deprecated no-op: it
   once inlined an unattributed copy of the thread into the description, which
   was removed (issue #3747), and it no longer changes what the agent sees.
+  Jira comments carry no author association, so once the vetted-transcript
+  filter (#382) applies none of them will reach the agent: answer an
+  `agent-ambiguous-spec` or `agent-research-unclear` question by editing the
+  description (see the [Threat model](#threat-model)).
 
   Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`, and
   `JIRA_STATUS_MAPPING` are non-secret, set via
@@ -2959,6 +2963,12 @@ generated `flake.nix`.
   reference](flake-options.md). `spindrift doctor`'s `Probe()` check
   validates the token and instance reachability independently of the GitHub
   Code Forge probe.
+
+  Forgejo comments carry no author association, so once the vetted-transcript
+  filter (#382) applies they count as untrusted and never reach the agent
+  (see the [Threat model](#threat-model)). From then on, answer an
+  `agent-ambiguous-spec` or `agent-research-unclear` question by editing the
+  issue body, not in a comment.
 
 #### In-Box forgejo tooling (`fj`)
 
@@ -4629,6 +4639,24 @@ deliberate, not oversights — write them down so you can honour them:
    agent still fetches parent and linked issues itself, minimized comments
    included. What bounds the blast radius is what the token allows and
    nothing more, because the Box has no host access.
+   Decided comment-trust policy, not yet enforced (the vetted-transcript filter
+   is #382; until it lands, every comment reaches the agent on every tracker):
+   the filter will keep only comments whose GitHub `author_association` is
+   `OWNER`, `MEMBER`, or `COLLABORATOR`. `CONTRIBUTOR` stays untrusted — one
+   merged PR earns it. Forgejo and Jira comment payloads carry no association,
+   so those trackers cannot attest a commenter's standing and their comments
+   count as untrusted: unknown means untrusted (fail closed). Once the filter
+   applies, a Forgejo or Jira transcript carries the issue body but no
+   comments, so answering an `agent-ambiguous-spec` or `agent-research-unclear`
+   question in a comment will not reach the agent — edit the issue body
+   instead. No per-tracker escape hatch
+   ships yet: a Forgejo collaborator probe
+   (`GET /repos/{owner}/{repo}/collaborators/{login}`) or an explicit
+   unknown-association entry in #383's trust allowlist are deferred until
+   #382/#383 give them a consumer, so until then the issue-body workaround
+   applies. The policy lives in one place, `forge.CommentTrusted`
+   (`cmd/launcher/internal/forge/issuetext.go`); SECURITY.md, CLAUDE.md, and
+   the Jira and Forgejo tracker entries summarize it — change them together.
 3. **Branch protection is a hard prerequisite, not a nicety.** The token needs
    Contents RW to push its `agent/issue-N` branch, and that same scope permits
    pushing directly to the base branch — bypassing the PR flow entirely. Without
