@@ -726,15 +726,15 @@ for the three cases.
 The caveman-default step is keyed on the baked skill itself rather than a
 separate knob: whenever `DRIVER_SKILLS_DIR/caveman/SKILL.md` is present at
 runtime, the issue pass and the fix pass (via the shared COMMS block, see
-below), the scout prompt, both conflict-resolve prompts, the orchestrator's
-review pass, and the research prompts (both the repo-backed and
-self-contained variants) direct the agent to use `/caveman` for narration
-and prose, exempting code, commands, error messages, and commit messages,
-plus the machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its
-`note=` field, the `VERDICT:` line, and host-relay signal lines like
-`SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. The worker
-prompt, a roster subagent with no Skill tool under the claude Driver, carries
-no caveman directive (issue #4562).
+below), both conflict-resolve prompts, the orchestrator's review pass, and
+the research prompts (both the repo-backed and self-contained variants)
+direct the agent to use `/caveman` for narration and prose, exempting code,
+commands, error messages, and commit messages, plus the machine-parsed
+marker grammar (the `SPINDRIFT_OUTCOME` line and its `note=` field, the
+`VERDICT:` line, and host-relay signal lines like `SPINDRIFT_PR_INTENT`) —
+see `fragments/caveman-default.md`. The worker and scout prompts, roster
+subagents with no Skill tool under the claude Driver, carry no caveman
+directive (issue #4562).
 The review prompt carries the marker-grammar paragraph minus
 `SPINDRIFT_ISSUE_INTENT`, which the reviewer agent itself never emits (issue
 #2707) — only the Filer subagent it spawns does — plus two additions of its

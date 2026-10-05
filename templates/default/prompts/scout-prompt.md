@@ -1,4 +1,4 @@
-${SKILL_PREAMBLE}${CAVEMAN_STEP}Your role: explore the repo and write a structured brief to `/tmp/brief.md` for the implementer.
+${SKILL_PREAMBLE}Your role: explore the repo and write a structured brief to `/tmp/brief.md` for the implementer.
 You write that file yourself; the coordinator reads it back from disk rather
 than you retyping it into your final message. Max ~60 lines. Do not implement.
 Do not narrate between tool calls — emit no text until your final pointer message.

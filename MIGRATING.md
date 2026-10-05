@@ -1,6 +1,6 @@
 # Migration Guide
 
-## Worker prompt drops the caveman anchor (issue #4562)
+## Worker and scout prompts drop the caveman anchor (issue #4562)
 
 `worker-prompt.md` no longer opens with a `/caveman` anchor. A custom
 `worker-prompt.md` override copied from the previous default must drop
@@ -9,6 +9,12 @@
 exist. A leftover `${CAVEMAN_STEP_WORKER}` fails loudly: prompt assembly
 rejects it before the agent starts, and a baked `mkHarness` `workerPrompt` arg
 fails eval.
+
+`scout-prompt.md` likewise no longer opens with `${CAVEMAN_STEP}`; a custom
+`scout-prompt.md` override should drop it. `${CAVEMAN_STEP}` still exists for
+other prompts, so a leftover does not fail: it keeps rendering the coordinator
+caveman fragment, whose `/caveman` skill the scout has no tool to load under
+the claude Driver.
 
 ## `agents.bashTimeoutMs` takes an integer (issue #4420)
 

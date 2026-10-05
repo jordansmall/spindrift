@@ -530,11 +530,10 @@ func TestAssembleAgentsJSON(t *testing.T) {
 	})
 }
 
-// Issue #2706: scout-prompt.md, rendered through renderAgentsJSON's
-// per-agent prompt lookup, carries the caveman narration directive and the
-// skill preamble when those skills are baked, and neither of them (nor a
-// dangling ${CAVEMAN_STEP}/${SKILL_PREAMBLE}) when skills are absent.
-func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
+// Issue #4562: scout-prompt.md carries no caveman anchor whether or not
+// CAVEMAN_BAKED is set (a roster subagent with no Skill tool under the claude
+// Driver), while SKILL_PREAMBLE still follows SKILLS_FOUND.
+func TestAssembleScoutPromptNoCavemanWithSkillPreamble(t *testing.T) {
 	reg := loadTestRegistry(t)
 
 	t.Run("skills present", func(t *testing.T) {
@@ -548,8 +547,9 @@ func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
 		}
 
 		prompt := agentPromptFromJSON(t, result.AgentsJSON, "scout")
-		if !strings.Contains(prompt, "Default to the `/caveman` skill") {
-			t.Errorf("scout.prompt missing caveman-default.md fragment text: %q", prompt)
+		// /caveman, not bare "caveman": SKILL_PREAMBLE still lists the caveman skill by name.
+		if strings.Contains(prompt, "/caveman") {
+			t.Errorf("scout.prompt mentions caveman with CAVEMAN_BAKED on, want absent (issue #4562): %q", prompt)
 		}
 		if !strings.Contains(prompt, "Skills available:") {
 			t.Errorf("scout.prompt missing skill-preamble.md fragment text: %q", prompt)
@@ -572,8 +572,8 @@ func TestAssembleScoutPromptCavemanAndSkillPreamble(t *testing.T) {
 		}
 
 		prompt := agentPromptFromJSON(t, result.AgentsJSON, "scout")
-		if strings.Contains(prompt, "/caveman") {
-			t.Errorf("scout.prompt contains /caveman text, want absent (CAVEMAN_BAKED gate off): %q", prompt)
+		if strings.Contains(prompt, "caveman") {
+			t.Errorf("scout.prompt mentions caveman, want absent (issue #4562): %q", prompt)
 		}
 		if strings.Contains(prompt, "Skills available:") {
 			t.Errorf("scout.prompt contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", prompt)
@@ -3112,6 +3112,65 @@ func TestAssembleDriverAgentFilesWorkerNoCavemanWithSkillPreamble(t *testing.T) 
 		}
 		if strings.Contains(body, "${") {
 			t.Errorf("worker.md body still contains an unsubstituted ${...} token: %q", body)
+		}
+	})
+}
+
+// The scout counterpart of
+// TestAssembleDriverAgentFilesWorkerNoCavemanWithSkillPreamble: the on-disk
+// scout.md rewrite must reach the same no-anchor result for scout-prompt.md
+// as TestAssembleScoutPromptNoCavemanWithSkillPreamble's renderAgentsJSON path.
+func TestAssembleDriverAgentFilesScoutNoCavemanWithSkillPreamble(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	t.Run("skills present", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+
+		env := coveredEnv()
+		env.DriverAgentFilesDir = dir
+		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+		if _, err := Assemble(env, reg); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		body := agentFileBody(t, filepath.Join(dir, "scout.md"))
+		// /caveman, not bare "caveman": SKILL_PREAMBLE still lists the caveman skill by name.
+		if strings.Contains(body, "/caveman") {
+			t.Errorf("scout.md body mentions caveman with CAVEMAN_BAKED on, want absent (issue #4562): %q", body)
+		}
+		if !strings.Contains(body, "Skills available:") {
+			t.Errorf("scout.md body missing skill-preamble.md fragment text: %q", body)
+		}
+	})
+
+	t.Run("skills absent", func(t *testing.T) {
+		dir := t.TempDir()
+		writeAgentFile(t, filepath.Join(dir, "scout.md"), "scout")
+
+		env := coveredEnv()
+		env.SkillsFound = ""
+		env.CavemanSkillBaked = false
+		env.TDDSkillBaked = false
+		env.CommitSkillBaked = false
+		env.CodeReviewSkillBaked = false
+		env.DriverAgentFilesDir = dir
+		env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+
+		if _, err := Assemble(env, reg); err != nil {
+			t.Fatalf("Assemble: %v", err)
+		}
+
+		body := agentFileBody(t, filepath.Join(dir, "scout.md"))
+		if strings.Contains(body, "caveman") {
+			t.Errorf("scout.md body mentions caveman, want absent (issue #4562): %q", body)
+		}
+		if strings.Contains(body, "Skills available:") {
+			t.Errorf("scout.md body contains skill-preamble.md fragment text, want absent (SKILLS_FOUND gate off): %q", body)
+		}
+		if strings.Contains(body, "${") {
+			t.Errorf("scout.md body still contains an unsubstituted ${...} token: %q", body)
 		}
 	})
 }
