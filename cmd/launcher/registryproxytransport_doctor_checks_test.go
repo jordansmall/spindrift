@@ -195,7 +195,7 @@ func TestRegistryProxyTransportCheck_ZeroEndpointWrapsErrDegraded(t *testing.T) 
 // `spindrift doctor` always shows one transport line (issue #3114). The
 // classify-side exclusion lives in
 // TestDoctorCheckSets_ClassifyExcludesBwrapAndDriftRowsButIncludesPerRouteRows
-// (bwrap_doctor_checks_test.go), so this test does not duplicate it.
+// (doctor_checks_test.go), so this test does not duplicate it.
 func TestDoctorCheckSets_WiresRegistryProxyTransportCheck(t *testing.T) {
 	fake := runner.NewFake()
 	withRegistryProxyTransportFake(t, fake)
