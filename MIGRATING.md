@@ -1,5 +1,18 @@
 # Migration Guide
 
+## `JIRA_INCLUDE_COMMENTS` is a deprecated no-op (issue #3747)
+
+Jira comments always reach the agent's prompt, the last 10, attributed,
+through the Jira adapter's comment lister, whether or not the knob is set.
+The knob used to additionally inline an unattributed copy of every comment
+into the issue description; that copy is gone, so the description no longer
+carries comment text (including any `## Touches` section a commenter wrote).
+
+Nothing breaks: `JIRA_INCLUDE_COMMENTS`, `--jira-include-comments`, and the
+`jira.includeComments` flake option / `settings.issueDiscovery.jiraIncludeComments`
+setting still evaluate. Drop them from your config at your convenience; they
+will be removed.
+
 ## `ORCHESTRATOR_ENABLED` is removed (issue #4291)
 
 The in-box orchestrator is now the only Box path; the direct single-pass

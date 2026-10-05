@@ -2897,12 +2897,14 @@ generated `flake.nix`.
   precedence above actually used for that issue, so drift between a stale
   body section and changed native links is visible instead of silent.
 
-  By default the agent's prompt input is the issue's summary and description
-  only; set `JIRA_INCLUDE_COMMENTS` (non-empty) to also append the comment
-  thread — opt-in, to keep the prompt-injection surface tight.
+  The agent's prompt input is the issue's summary, its description, and the
+  last 10 comments, attributed, through the adapter's comment lister, the same
+  as `github` and `forgejo`. `JIRA_INCLUDE_COMMENTS` is a deprecated no-op: it
+  once inlined an unattributed copy of the thread into the description, which
+  was removed (issue #3747), and it no longer changes what the agent sees.
 
   Config: `JIRA_BASE_URL` (site base URL), `JIRA_PROJECT_KEY`, and
-  `JIRA_STATUS_MAPPING` / `JIRA_INCLUDE_COMMENTS` are non-secret, set via
+  `JIRA_STATUS_MAPPING` are non-secret, set via
   `issues.jira`
   (baked) or their env vars (runtime) — see the [flake options
   reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside

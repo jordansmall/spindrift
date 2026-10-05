@@ -260,7 +260,7 @@
             #     baseURL = "";
             #     # Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs)
             #     email = "";
-            #     # when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight
+            #     # DEPRECATED no-op: Jira comments always reach the prompt (the last 10, attributed, through the adapter's comment lister) whether or not this is set. Kept so existing configs still evaluate; will be removed
             #     includeComments = false;
             #     # Jira project key issues are read from (e.g. ENG); required when ISSUE_TRACKER=jira
             #     projectKey = "";

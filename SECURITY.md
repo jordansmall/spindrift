@@ -38,7 +38,11 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   / `ready-for-agent`) is the authorization step, and GitHub gates it behind the
   triage role. The trust boundary is the label, not the issue or comment author —
   once labeled, the body and **every comment from any GitHub user** feed the agent
-  as prompt input. Treat every label-applier as a trusted operator.
+  as prompt input. Treat every label-applier as a trusted operator. Third-party
+  comments reach the agent only as listed, attributed comments (the github,
+  forgejo, and jira adapters' comment listers); no adapter folds a third-party
+  comment into the issue body (the local adapter's body-inlined thread is
+  written only by the launcher and the Box).
 - **Secrets can be sourced from a vault instead of left in plaintext, and
   the Box is hardened against self-inflicted reads.** `<SECRET>_CMD` (e.g.
   `GH_TOKEN_CMD="rbw get spindrift-pat"`) is the preferred way to supply
