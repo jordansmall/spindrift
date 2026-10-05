@@ -7,7 +7,7 @@ let
   builtinsCompat = import ./builtins-compat.nix;
   cliFlags = import ./cli-flags.nix;
   hasShort = e: (e.short or null) != null;
-  inherit (builtinsCompat) concatStrings mapAttrsToList;
+  inherit (builtinsCompat) concatStrings mapAttrsToList oneLine;
   filterAttrs =
     pred: attrs:
     builtins.listToAttrs (
@@ -51,14 +51,6 @@ let
     + "var ${varName} = []string{"
     + renderGoStringSlice items
     + "}\n";
-  # Collapse every run of whitespace, newlines included, to a single space and
-  # trim the ends. A naive "\n" to " " replaceStrings would instead leave
-  # doubled spaces at each line-wrap and trailing-newline boundary.
-  oneLine =
-    s:
-    builtins.concatStringsSep " " (
-      builtins.filter (p: p != "") (builtins.filter builtins.isString (builtins.split "[ \t\n]+" s))
-    );
   # A markdown table cell cannot carry an unescaped "|": it reads as a column
   # separator.
   escapeCell = builtins.replaceStrings [ "|" ] [ "\\|" ];

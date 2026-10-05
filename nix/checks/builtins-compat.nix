@@ -27,6 +27,31 @@ in
     ) "escapeRegex must leave a string with no regex metacharacters unchanged, got: ${out}";
     pkgs.runCommand "builtins-compat-escape-regex-leaves-plain-characters-untouched" { } "touch $out";
 
+  builtins-compat-one-line-collapses-whitespace-runs =
+    let
+      out = builtinsCompat.oneLine "a\n    b\t\tc  d\n\ne";
+    in
+    assert assertMsg (
+      out == "a b c d e"
+    ) "oneLine must collapse every whitespace run, newlines included, to one space, got: ${out}";
+    pkgs.runCommand "builtins-compat-one-line-collapses-whitespace-runs" { } "touch $out";
+
+  builtins-compat-one-line-collapses-carriage-returns =
+    let
+      out = builtinsCompat.oneLine "a\r\nb";
+    in
+    assert assertMsg (out == "a b") "oneLine must collapse a CRLF line break to one space, got: ${out}";
+    pkgs.runCommand "builtins-compat-one-line-collapses-carriage-returns" { } "touch $out";
+
+  builtins-compat-one-line-trims-ends =
+    let
+      out = builtinsCompat.oneLine "\n  hello world \n";
+    in
+    assert assertMsg (
+      out == "hello world"
+    ) "oneLine must trim leading and trailing whitespace, got: ${out}";
+    pkgs.runCommand "builtins-compat-one-line-trims-ends" { } "touch $out";
+
   builtins-compat-has-suffix-true =
     assert assertMsg (builtinsCompat.hasSuffix "lo" "hello")
       "hasSuffix must return true when content ends with suffix";
