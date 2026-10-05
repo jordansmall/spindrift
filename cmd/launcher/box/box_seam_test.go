@@ -200,6 +200,9 @@ func seamBoxArgs(t *testing.T, workDir, outboxDir, skillsDir string) []string {
 		"--driver-session-cache-dir=", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=", "--driver-bash-timeout-env=",
 		"--dev-shell-name=", "--dev-shell-probe-timeout=",
+		// A nonexistent temp path: the backstop reads no verdict, and an
+		// ambient /tmp/run-state.json cannot leak in (issue #4413).
+		"--run-state-file=" + filepath.Join(t.TempDir(), "run-state.json"),
 	}
 }
 
