@@ -98,19 +98,11 @@ func runAssemblePrompt(args []string, stdout, stderr io.Writer) int {
 	principleRedesignFromFirstPrinciplesSkillBaked := fs.Bool("principle-redesign-from-first-principles-skill-baked", false, "true when DRIVER_SKILLS_DIR/principle-redesign-from-first-principles/SKILL.md was baked")
 	// END GENERATED SKILL-BAKED FLAGS
 
-	promptsDir := fs.String("prompts-dir", "", "PROMPTS_DIR, default /agent/prompts")
-	agentsPromptFiles := fs.String("agents-prompt-files", "", "nix-baked agent-name -> promptFile JSON map")
-	driverAgentFilesDir := fs.String("driver-agent-files-dir", "", "opencode-style baked agent files dir, empty for claude")
-
-	commsContractFile := fs.String("comms-contract-file", "", "COMMS_CONTRACT_FILE")
-	checkContractFile := fs.String("check-contract-file", "", "CHECK_CONTRACT_FILE")
-	outcomeContractFile := fs.String("outcome-contract-file", "", "OUTCOME_CONTRACT_FILE")
-	researchOutcomeContractFile := fs.String("research-outcome-contract-file", "", "RESEARCH_OUTCOME_CONTRACT_FILE")
+	var af promptassembly.AssemblyFlags
+	af.BindFlags(fs)
 
 	skillsFound := fs.String("skills-found", "", "comma-separated list of skill directory basenames found under DRIVER_SKILLS_DIR")
 
-	registryPath := fs.String("registry", "", "path to the fragment registry JSON file (required)")
-	validateMarkersRegistryPath := fs.String("validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file (required)")
 	promptOutput := fs.String("prompt-output", "", "path to write the assembled prompt text to (required)")
 	agentsJSONOutput := fs.String("agents-json-output", "", "path to write the (possibly empty) --agents JSON to (required)")
 	handoffOutput := fs.String("handoff-output", "", "path to write the driver hand-off facts as JSON to (required)")
@@ -121,58 +113,28 @@ func runAssemblePrompt(args []string, stdout, stderr io.Writer) int {
 	fs.Var(&compositionCarried, "composition-carried", "[<pass>:]<name>=<path> carried-text block fed to Compose (repeatable); only meaningful with --composition-output")
 	runStatePath := fs.String("run-state", "", "orchestrator run-state file (the Box's --run-state-file) whose handoff and review blocks are carried into the composition report; only meaningful with --composition-output")
 
-	// Assemble never reads the flags below; they pass straight through into
-	// result.Handoff after it returns (issue #2975).
-	argvPromptStyle := fs.String("argv-prompt-style", "flag", "Handoff.ArgvShape.PromptStyle")
-	argvPromptFlag := fs.String("argv-prompt-flag", "", "Handoff.ArgvShape.PromptFlag")
-	argvModelFlag := fs.String("argv-model-flag", "--model", "Handoff.ArgvShape.ModelFlag")
-	argvModelOmitEmpty := fs.Bool("argv-model-omit-empty", false, "Handoff.ArgvShape.ModelOmitEmpty")
-	argvAgentsFlag := fs.String("argv-agents-flag", "", "Handoff.ArgvShape.AgentsFlag")
-	argvEffortFlag := fs.String("argv-effort-flag", "--effort", "Handoff.ArgvShape.EffortFlag")
-	argvOrder := fs.String("argv-order", "prompt model agents session driverFlags effort", "space-separated Handoff.ArgvShape.Order")
-
-	model := fs.String("model", "", "Handoff.Model")
-	effort := fs.String("effort", "", "Handoff.Effort")
-	driverName := fs.String("driver", "claude", "Handoff.Driver")
-	driverBin := fs.String("driver-bin", "", "Handoff.DriverBin")
-	driverFlags := fs.String("driver-flags", "", "Handoff.DriverFlags")
 	devshell := fs.Bool("devshell", false, "Handoff.Devshell")
 	devshellName := fs.String("devshell-name", "default", "Handoff.DevshellName")
 
 	maxReviewRounds := fs.Int("max-review-rounds", promptassembly.DefaultMaxReviewRounds, "Handoff.Caps.MaxReviewRounds")
 	maxSlices := fs.Int("max-slices", promptassembly.DefaultMaxSlices, "Handoff.Caps.MaxSlices")
-	// String, not Int/Float64: a malformed value degrades to 0 below, after
-	// fs.Parse succeeds. If fs.Parse failed instead, the non-zero exit would
-	// kill the whole box run under entrypoint.sh's set -euo pipefail, over a
-	// value that was never fatal before this cap existed (issue #2975 review
-	// finding #1, issue #2694).
-	maxBudgetTokensRaw := fs.String("max-budget-tokens", "0", "Handoff.Caps.MaxBudgetTokens")
-	maxBudgetUSDRaw := fs.String("max-budget-usd", "0", "Handoff.Caps.MaxBudgetUSD")
-
-	heartbeatLog := fs.String("heartbeat-log", "", "Handoff.HeartbeatLog")
 
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
 
-	// A malformed or negative value degrades to 0 rather than failing the run.
-	// This wrapper discards the ok result because it has no diagnostics channel
-	// to report the degradation on.
-	maxBudgetTokens, _ := promptassembly.ParseNonnegBudgetTokens(*maxBudgetTokensRaw)
-	maxBudgetUSD, _ := promptassembly.ParseNonnegBudgetUSD(*maxBudgetUSDRaw)
-
-	if *registryPath == "" || *validateMarkersRegistryPath == "" || *promptOutput == "" || *agentsJSONOutput == "" || *handoffOutput == "" {
+	if af.RegistryFile == "" || af.ValidateMarkersFile == "" || *promptOutput == "" || *agentsJSONOutput == "" || *handoffOutput == "" {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: -registry, -validate-markers-registry, -prompt-output, -agents-json-output, and -handoff-output are all required")
 		return 1
 	}
 
-	registry, err := promptassembly.LoadRegistryFile(*registryPath)
+	registry, err := promptassembly.LoadRegistryFile(af.RegistryFile)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
 		return 1
 	}
 
-	validateMarkerRows, err := promptassembly.LoadValidateMarkersFile(*validateMarkersRegistryPath)
+	validateMarkerRows, err := promptassembly.LoadValidateMarkersFile(af.ValidateMarkersFile)
 	if err != nil {
 		fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
 		return 1
@@ -193,40 +155,15 @@ func runAssemblePrompt(args []string, stdout, stderr io.Writer) int {
 	env.PrincipleLazinessProtocolSkillBaked = *principleLazinessProtocolSkillBaked
 	env.PrincipleRedesignFromFirstPrinciplesSkillBaked = *principleRedesignFromFirstPrinciplesSkillBaked
 	// END GENERATED SKILL-BAKED ENV
-	env.PromptsDir = *promptsDir
-	env.AgentsPromptFiles = *agentsPromptFiles
-	env.DriverAgentFilesDir = *driverAgentFilesDir
-	env.CommsContractFile = *commsContractFile
-	env.CheckContractFile = *checkContractFile
-	env.OutcomeContractFile = *outcomeContractFile
-	env.ResearchOutcomeContractFile = *researchOutcomeContractFile
+	af.ApplyTo(&env)
 	env.SkillsFound = *skillsFound
 
-	_, err = promptassembly.WriteAssembly(env, registry, validateMarkerRows, promptassembly.Passthrough{
-		Model:        *model,
-		Effort:       *effort,
-		Driver:       *driverName,
-		DriverBin:    *driverBin,
-		DriverFlags:  *driverFlags,
-		Devshell:     *devshell,
-		DevshellName: *devshellName,
-		HeartbeatLog: *heartbeatLog,
-		ArgvShape: promptassembly.ArgvShape{
-			PromptStyle:    *argvPromptStyle,
-			PromptFlag:     *argvPromptFlag,
-			ModelFlag:      *argvModelFlag,
-			ModelOmitEmpty: *argvModelOmitEmpty,
-			AgentsFlag:     *argvAgentsFlag,
-			EffortFlag:     *argvEffortFlag,
-			Order:          strings.Fields(*argvOrder),
-		},
-		Caps: promptassembly.Caps{
-			MaxSlices:       *maxSlices,
-			MaxReviewRounds: *maxReviewRounds,
-			MaxBudgetTokens: maxBudgetTokens,
-			MaxBudgetUSD:    maxBudgetUSD,
-		},
-	}, promptassembly.OutputPaths{
+	p := af.Passthrough
+	p.Devshell = *devshell
+	p.DevshellName = *devshellName
+	p.Caps.MaxSlices = *maxSlices
+	p.Caps.MaxReviewRounds = *maxReviewRounds
+	_, err = promptassembly.WriteAssembly(env, registry, validateMarkerRows, p, promptassembly.OutputPaths{
 		Prompt:       *promptOutput,
 		AgentsJSON:   *agentsJSONOutput,
 		Handoff:      *handoffOutput,

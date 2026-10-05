@@ -34,9 +34,10 @@ func LoadHandoffFile(path string) (Handoff, error) {
 
 // ParseNonnegBudgetTokens parses s as a non-negative budget cap; ok is false
 // when a negative or malformed value degraded to 0 (disabled) rather than
-// erroring (issue #2694). The -max-budget-tokens flag must stay a flag.String:
-// as a flag.Int, a malformed MAX_BUDGET_TOKENS failed fs.Parse and killed the
-// box run under entrypoint.sh's set -euo pipefail (issue #2975).
+// erroring (issue #2694). The -max-budget-tokens flag must never fail fs.Parse
+// on a malformed MAX_BUDGET_TOKENS, which would kill the box run under
+// entrypoint.sh's set -euo pipefail (issue #2975); BindFlags parses it through
+// this function for that reason.
 func ParseNonnegBudgetTokens(s string) (n int, ok bool) {
 	if v, err := strconv.Atoi(s); err == nil && v >= 0 {
 		return v, true
