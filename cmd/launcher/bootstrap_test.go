@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,7 +21,7 @@ import (
 func TestBootstrap_PropagatesValidateError(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 
 	if lc != nil {
 		t.Errorf("bootstrap() launch context = %+v, want nil on validate error", lc)
@@ -37,7 +38,7 @@ func TestBootstrap_PropagatesValidateError(t *testing.T) {
 func TestBootstrap_ValidateError_WrapsErrConfigInvalid(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
-	_, err := bootstrap(true, dispatchkind.Work, false)
+	_, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 
 	if !errors.Is(err, errConfigInvalid) {
 		t.Fatalf("bootstrap() error = %v, want errors.Is(err, errConfigInvalid) = true", err)
@@ -57,7 +58,7 @@ func TestBootstrap_PropagatesRemedyText_WrapsErrConfigInvalid(t *testing.T) {
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("DRIVER", "")
 
-	_, err := bootstrap(true, dispatchkind.Work, false)
+	_, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 
 	if err == nil {
 		t.Fatal("bootstrap() = nil error, want a driver-credentials validation error")
@@ -112,7 +113,7 @@ body
 	t.Setenv("REGISTRY_PROXY_CREDENTIAL_ENV", "SPINDRIFT_TEST_REGISTRY_PROXY_CRED_DOES_NOT_EXIST")
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_CREDENTIAL_ENV is retired regardless of REGISTRY_PROXY_UPSTREAM_URL")
 	}
@@ -148,7 +149,7 @@ func TestBootstrap_RegistryProxyUpstreamURLAlone_WrapsErrConfigInvalid(t *testin
 	t.Setenv("REGISTRY_PROXY_UPSTREAM_URL", "https://registry.example.com/artifactory/api/cargo/crates/index/")
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("bootstrap() = nil error, want an error: REGISTRY_PROXY_UPSTREAM_URL is retired")
 	}
@@ -226,7 +227,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_ENV_CRED" }
 `))
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() = %v, want no error: a resolvable routes-file env credential must not be rejected", err)
 	}
@@ -261,7 +262,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_BASIC_CRED" }
 `))
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() = %v, want no error: an auth-scheme + upstream-origin route must resolve", err)
 	}
@@ -300,7 +301,7 @@ credential = { netrc = "`+netrcPath+`" }
 `))
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() = %v, want no error: a resolvable netrc-sourced route credential must not be rejected", err)
 	}
@@ -339,7 +340,7 @@ credential = { cargo-credentials = "`+credentialsPath+`", registry-name = "myreg
 `))
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() = %v, want no error: a resolvable cargo-credentials-sourced route credential must not be rejected", err)
 	}
@@ -359,7 +360,7 @@ func TestBootstrap_NoRoutesFile_EmptyRoutes(t *testing.T) {
 	setMinimalLocalBootstrapEnv(t, filepath.Join(t.TempDir(), "accum.git"))
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() = %v, want no error with no routes file set", err)
 	}
@@ -386,7 +387,7 @@ credential = { env = "SPINDRIFT_TEST_ROUTES_CRED_DOES_NOT_EXIST" }
 `))
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("bootstrap() = nil error, want an error: the route's env credential is unresolvable")
 	}
@@ -632,7 +633,7 @@ func TestBootstrap_EarlyErrorAfterAccumLockAcquired_ReleasesLock(t *testing.T) {
 	t.Setenv("BOX_FORGE_AND_ISSUE_ACCESS", "read-only")
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("bootstrap() with BOX_FORGE_AND_ISSUE_ACCESS=read-only against the github tracker = nil error, want checkReadOnlyCapabilityGate to reject it")
 	}
@@ -685,7 +686,7 @@ body
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() = %v, want a successful launch context", err)
 	}
@@ -765,7 +766,7 @@ body
 	// git's directory, so pasta cannot resolve.
 	t.Setenv("PATH", pathWithoutPasta(t))
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil {
 		t.Fatal("bootstrap() with RUNNER_KIND=bwrap, default NETWORK_MODE, and pasta absent from PATH = nil error, want checkBwrapPastaGate to block the launch")
 	}
@@ -834,7 +835,7 @@ body
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(false, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, false, dispatchkind.Work, false)
 	if err != nil {
 		t.Fatalf("bootstrap() with RUNNER_KIND=bwrap and RUNTIME=podman = %v, want success (bwrap selected)", err)
 	}
@@ -882,7 +883,7 @@ body
 	t.Setenv("LOCAL_ISSUES_DIR", issuesDir)
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(false, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, false, dispatchkind.Work, false)
 	if err == nil || !strings.Contains(err.Error(), "image absent") {
 		t.Fatalf("bootstrap() with RUNNER_KIND=oci and RUNTIME=bwrap = %v, want the OCI adapter's \"image absent\" readiness error", err)
 	}
@@ -911,10 +912,13 @@ func TestMainRun_DispatchNoBuild_ImageAbsentFailsFastNamingBuild(t *testing.T) {
 	t.Setenv("RUNNER_KIND", "oci")
 	t.Chdir(checkout)
 
-	var stderr bytes.Buffer
-	code := runVerb([]string{"dispatch", "--no-build"}, &stderr)
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"dispatch", "--no-build"}, &stdout, &stderr)
 	if code == 0 {
 		t.Errorf("exit code = 0, want non-zero")
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "spindrift build") {
 		t.Errorf("stderr = %q, want it to name `spindrift build`", stderr.String())
@@ -951,7 +955,7 @@ func TestBootstrap_EnsureReadyError_AbortsBeforeLaunch(t *testing.T) {
 	t.Setenv("RUNNER_KIND", "oci")
 	t.Chdir(checkout)
 
-	lc, err := bootstrap(true, dispatchkind.Work, false)
+	lc, err := bootstrap(io.Discard, true, dispatchkind.Work, false)
 	if err == nil || !strings.Contains(err.Error(), "nix build failed") {
 		t.Fatalf("bootstrap(ensureReady) = %v, want the EnsureReady \"nix build failed\" error", err)
 	}

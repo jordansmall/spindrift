@@ -245,7 +245,7 @@ func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	stdin := strings.NewReader("q")
 	var stdout bytes.Buffer
 
-	got := cmdConsole(lc, stdin, &stdout)
+	got := cmdConsole(lc, stdin, &stdout, io.Discard)
 
 	if got != 0 {
 		t.Errorf("cmdConsole(lc, ...) = %d, want 0", got)
@@ -284,7 +284,7 @@ func TestCmdConsole_HoldsStopSignalRegistrationThroughCleanup(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	if got := cmdConsole(lc, strings.NewReader("q"), &stdout); got != 0 {
+	if got := cmdConsole(lc, strings.NewReader("q"), &stdout, io.Discard); got != 0 {
 		t.Errorf("cmdConsole = %d, want 0", got)
 	}
 	if installs != 1 {
@@ -317,7 +317,7 @@ func TestCmdConsole_SetsHeartbeatOutToDiscard(t *testing.T) {
 
 	stdin := strings.NewReader("q")
 	var stdout bytes.Buffer
-	cmdConsole(lc, stdin, &stdout)
+	cmdConsole(lc, stdin, &stdout, io.Discard)
 
 	if got := lc.factory.HeartbeatOut(); got != io.Discard {
 		t.Errorf("factory heartbeat sink = %v, want io.Discard", got)

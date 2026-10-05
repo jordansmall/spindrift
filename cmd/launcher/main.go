@@ -1883,9 +1883,9 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store
 // closures without running any agent.
-func cmdBuild() int {
+func cmdBuild(stderr io.Writer) int {
 	if err := build(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	return 0
@@ -1895,7 +1895,8 @@ func cmdBuild() int {
 // loop (#645, #646). Fresh and RebuildFn turn the freshness.Probe seam behind
 // the headless exit-4 path into an in-session banner and one-key rebuild
 // (issue #652). stdin/stdout are threaded so a test can drive the real Bubble
-// Tea program with a scripted reader instead of a live TTY.
+// Tea program with a scripted reader instead of a live TTY; stderr takes
+// console.Run's own error line.
 //
 // The launcher holds its own stop-signal registration for the whole body:
 // Bubble Tea drops its own on any quit (keypress or signal), and the window
@@ -1903,7 +1904,7 @@ func cmdBuild() int {
 // The channels are discarded because Console's Boxes have no Stop/Abort
 // wiring, so once quit it is SIGKILL-only (#3651, #3520). Taking it before
 // Bubble Tea's own also swallows a signal in the instant before Run starts.
-func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
+func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) int {
 	_, _, stopCleanup := installStopSignal()
 	defer stopCleanup()
 	defer lc.cleanup()
@@ -1933,7 +1934,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout io.Writer) int {
 		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	return 0
@@ -1983,9 +1984,9 @@ func cmdRecover(lc *launchContext, issueNum string) int {
 
 // cmdPreview is the `preview` subcommand: report what dispatch would do
 // without launching any Box.
-func cmdPreview(issueNums []string) int {
-	if err := preview(issueNums); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
+	if err := preview(stdout, issueNums); err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	return 0
@@ -2088,34 +2089,37 @@ func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
 
 // verbHandler is the uniform shape every verbHandlers entry implements. args
 // is the subcommand's args with the verb stripped: post-verb args first, then
-// any leading pass-through flags (see splitVerb).
-type verbHandler func(args []string, stderr io.Writer) int
+// any leading pass-through flags (see splitVerb). Output through stdout/stderr
+// is injectable end to end for doctor, reconcile, console, preview and
+// registry; build's own work, dispatch, research and recover still reach
+// process globals below bootstrap.
+type verbHandler func(args []string, stdout, stderr io.Writer) int
 
 // verbHandlers is the single source of truth for which subcommands exist
 // (issue #1574); a test enumerates its keys. The hidden __complete-issues
 // completion verb stays out of it and is dispatched ahead of the table lookup,
 // since it is not a documented verb.
 var verbHandlers = map[string]verbHandler{
-	"build": func(args []string, stderr io.Writer) int { return cmdBuild() },
-	"doctor": func(args []string, stderr io.Writer) int {
+	"build": func(args []string, stdout, stderr io.Writer) int { return cmdBuild(stderr) },
+	"doctor": func(args []string, stdout, stderr io.Writer) int {
 		opts, bad, ok := doctorFlagArgs(args)
 		if !ok {
 			fmt.Fprintf(stderr, "unrecognized argument: %s\n", bad)
 			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v] [--butler]")
 			return 1
 		}
-		return cmdDoctor(opts)
+		return cmdDoctor(opts, stdout, stderr)
 	},
-	"reconcile": func(args []string, stderr io.Writer) int { return cmdReconcile() },
-	"console": func(args []string, stderr io.Writer) int {
-		lc, err := bootstrap(true, dispatchkind.Work, false)
+	"reconcile": func(args []string, stdout, stderr io.Writer) int { return cmdReconcile(stdout, stderr) },
+	"console": func(args []string, stdout, stderr io.Writer) int {
+		lc, err := bootstrap(stdout, true, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		return cmdConsole(lc, os.Stdin, os.Stdout)
+		return cmdConsole(lc, os.Stdin, stdout, stderr)
 	},
-	"recover": func(args []string, stderr io.Writer) int {
+	"recover": func(args []string, stdout, stderr io.Writer) int {
 		// noBuild and yes are dispatch/research knobs recover has no use for.
 		// remaining is used unfiltered, since recover's non-numeric IDs must
 		// survive; see parseIssuePositionals in flags.go.
@@ -2128,27 +2132,27 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
 			return 1
 		}
-		lc, err := bootstrap(true, dispatchkind.Work, false)
+		lc, err := bootstrap(stdout, true, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
 		return cmdRecover(lc, parsed.remaining[0])
 	},
-	"preview": func(args []string, stderr io.Writer) int {
+	"preview": func(args []string, stdout, stderr io.Writer) int {
 		// remaining is the issue-ID list, unfiltered (issue #3054, #3055).
 		// Unlike dispatch and recover, preview ignores --self-contained rather
 		// than rejecting it, matching its earlier behavior.
 		parsed := parseIssuePositionals(args)
-		return cmdPreview(parsed.remaining)
+		return cmdPreview(stdout, stderr, parsed.remaining)
 	},
-	"dispatch": func(args []string, stderr io.Writer) int {
+	"dispatch": func(args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
 		if parsed.selfContained {
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		lc, err := bootstrap(!parsed.noBuild, dispatchkind.Work, false)
+		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2158,9 +2162,9 @@ var verbHandlers = map[string]verbHandler{
 		}
 		return cmdDispatch(lc)
 	},
-	"research": func(args []string, stderr io.Writer) int {
+	"research": func(args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
-		lc, err := bootstrap(!parsed.noBuild, dispatchkind.Research, parsed.selfContained)
+		lc, err := bootstrap(stdout, !parsed.noBuild, dispatchkind.Research, parsed.selfContained)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return bootstrapExitCode(err)
@@ -2171,14 +2175,12 @@ var verbHandlers = map[string]verbHandler{
 		return cmdDispatch(lc)
 	},
 	"butler": butlerVerbHandler,
-	"registry": func(args []string, stderr io.Writer) int {
+	"registry": func(args []string, stdout, stderr io.Writer) int {
 		if len(args) == 0 || args[0] != "discover" {
 			fmt.Fprintln(stderr, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]")
 			return 1
 		}
-		// The handed stderr covers only this handler's own usage error;
-		// cmdRegistryDiscover wires its own streams, like doctor and reconcile.
-		return cmdRegistryDiscover(args[1:], os.Stdout, os.Stderr)
+		return cmdRegistryDiscover(args[1:], stdout, stderr)
 	},
 }
 
@@ -2275,7 +2277,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return cmdCompleteIssues()
 	}
 	if handler, ok := verbHandlers[verb]; ok {
-		return handler(rest, stderr)
+		return handler(rest, stdout, stderr)
 	}
 	// Unrecognized subcommand prints help rather than dispatching (issue #555).
 	fmt.Fprintf(stderr, "unknown subcommand: %s\n\n", verb)

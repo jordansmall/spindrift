@@ -121,10 +121,10 @@ func printPlan(w io.Writer, plan waves.Plan) {
 	}
 }
 
-func preview(issueNums []string) error {
+func preview(stdout io.Writer, issueNums []string) error {
 	// Preview never dispatches, so it carries no dispatch kind at all rather
 	// than dispatchkind.Work, matching doctor and reconcile (issue #2944).
-	gc, err := newGatedContext(os.Stdout, nil, false)
+	gc, err := newGatedContext(stdout, nil, false)
 	if err != nil {
 		return err
 	}
@@ -132,5 +132,5 @@ func preview(issueNums []string) error {
 	if err != nil {
 		return err
 	}
-	return previewIssues(gc.config, gc.issueTracker, gc.codeForge, gc.capabilities, os.Stdout, issueNums, pwd, runner.NixEvaluator{})
+	return previewIssues(gc.config, gc.issueTracker, gc.codeForge, gc.capabilities, stdout, issueNums, pwd, runner.NixEvaluator{})
 }
