@@ -218,8 +218,9 @@ pre-baked. That makes real checks the primary in-box gate — prefer them over
 guessing. But run the **scoped** target, not the full flake check (issue
 #581): `checks-inbox` covers the source-level checks (go test/vet/fmt,
 shellcheck, nil-clean, marker/parity checks) except the bats suite,
-which CI runs and which would push a cold gate past the 10-minute Bash
-cap — build `.#checks.<system>.bats-shard-N` directly when you change
+which CI runs and which would push a cold gate past Claude Code's stock
+10-minute Bash cap (dogfood raises it to 30 minutes, issue #4409) —
+build `.#checks.<system>.bats-shard-N` directly when you change
 bash under test. It also skips the checks that build/inspect the OCI image
 (`dockerTools.buildLayeredImage`) or assert facts about the box's own
 baked toolchain — the box is already built from that image, so

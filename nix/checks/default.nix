@@ -121,9 +121,10 @@ let
   # bwrapHarness.packages lacks agent-closure and its own assert throws.
   #
   # The bats shards are source checks, not image ones, but they push a cold
-  # checks-inbox past the in-Box Driver's 10-minute Bash cap, so every run's
-  # first gate timed out. CI's `nix flake check` still runs them; fold them
-  # back in once the Box Go port (issue #4275) has shrunk the suite.
+  # checks-inbox past Claude Code's stock 10-minute Bash cap (dogfood raises
+  # it to 30 minutes, issue #4409, but whether the suite fits that is
+  # unmeasured). CI's `nix flake check` still runs them; fold them back in
+  # once the Box Go port (issue #4275) has shrunk the suite.
   checksInboxSet = removeAttrs portableSourceChecks (imageOnlyCheckNames ++ batsShardNames);
 
   # A narrower axis than imageOnlyCheckNames: source checks that depend on the
