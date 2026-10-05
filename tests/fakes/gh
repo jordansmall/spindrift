@@ -354,7 +354,7 @@ EOF
       clone)
         # ${3:-} = owner/repo slug, ${4:-} = target directory.
         # When FAKE_GH_REPO_CLONE_GIT=1, use real git so the insteadOf URL
-        # rewrite (set up by setup_bare_repo) redirects https://github.com/…
+        # rewrite (set up by the caller) redirects https://github.com/…
         # to a local bare repo; subsequent git operations work against that
         # local clone. Without the flag, the call is a no-op and the target
         # dir stays empty so downstream git operations fail (simulates a

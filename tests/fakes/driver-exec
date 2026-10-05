@@ -18,7 +18,7 @@
 # (cmd/launcher/driver-exec), not this fake.
 #
 # Only the default Driver-invocation verb is faked: entrypoint.sh execs the
-# real `box` binary (BOX_BIN), which runs the settle phases in-process
+# real `box` binary, which runs the settle phases in-process
 # (ADR 0058, issue #4292).
 set -euo pipefail
 

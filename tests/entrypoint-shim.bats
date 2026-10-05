@@ -10,10 +10,9 @@
 load helper
 
 setup() {
-  setup_entrypoint_env
-  # Replace the real box setup_entrypoint_env copied in with a recorder that
-  # exits with a code nothing else in the shim could produce.
-  rm -f "$FAKE_BIN/box"
+  setup_fakes
+  # Install a recorder as box that exits with a code nothing else in the shim
+  # could produce.
   {
     # No /usr/bin/env in the nix build sandbox, so name the interpreter directly.
     printf '#!%s\n' "$BASH"

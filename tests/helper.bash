@@ -27,99 +27,6 @@ if [ -n "${SPINDRIFT_SEAM_FIXTURES_DIR:-}" ]; then
   unset _f
 fi
 
-# set_dispatch_kind <work|research|butler> exports DISPATCH_KIND plus the axes
-# dispatch.buildBoxEnv derives from the kind's descriptor (issue #3996):
-# DISPATCH_KEYING, DISPATCH_ANNOUNCE_VERB and DISPATCH_KEY. The one place this
-# suite duplicates dispatchkind's Work/Research/Butler rows, so keep it in step
-# with them. Call it after ISSUE_NUMBER or CHORE_NAME is set: DISPATCH_KEY
-# reads whichever the kind is keyed by.
-set_dispatch_kind() {
-  local kind="$1"
-  export DISPATCH_KIND="$kind"
-  case "$kind" in
-    work)
-      export DISPATCH_KEYING="issue"
-      export DISPATCH_ANNOUNCE_VERB="implementing"
-      export DISPATCH_KEY="$ISSUE_NUMBER"
-      ;;
-    research)
-      export DISPATCH_KEYING="issue"
-      export DISPATCH_ANNOUNCE_VERB="researching"
-      export DISPATCH_KEY="$ISSUE_NUMBER"
-      ;;
-    butler)
-      export DISPATCH_KEYING="chore"
-      export DISPATCH_ANNOUNCE_VERB="sweeping"
-      export DISPATCH_KEY="butler-$CHORE_NAME"
-      ;;
-    *)
-      echo "set_dispatch_kind: unknown kind '$kind'" >&2
-      return 1
-      ;;
-  esac
-}
-
-# setup() body for tests/entrypoint-shim.bats.
-setup_entrypoint_env() {
-  setup_fakes
-  # The entrypoint shim execs `box` (ADR 0058, issue #4302), which runs the
-  # whole dispatch, settle sequence included, in-process, so there is no bash
-  # fake of it.
-  : "${BOX_BIN:?BOX_BIN must be set (the real box Go binary, nix/checks/bats.nix)}"
-  cp -f "$BOX_BIN" "$FAKE_BIN/box"
-  setup_bare_repo
-  set_box_env
-  # Pinned rather than inherited from set_box_env: these suites were written
-  # against the log carrier, so pin it and let the socket tests override.
-  export BOX_SIGNAL_CARRIER=log
-  # Not a schema knob (issue #1951): dispatch.buildBoxEnv computes it host-side
-  # from BOX_FORGE_AND_ISSUE_ACCESS and forwards it only when writes are
-  # enabled, so box_env_gen.bash never exports it. Read-only tests unset it
-  # instead of overriding BOX_FORGE_AND_ISSUE_ACCESS.
-  export BOX_WRITE_ENABLED=1
-  # Also host-computed rather than a schema knob: buildBoxEnv forwards it
-  # whenever the backend registry's outboxRelayCapable is true, read-only or
-  # not. The CODE_FORGE=local test overrides BOX_HOST_MEDIATED_REMOTE instead,
-  # which the backstop's switch checks first.
-  export BOX_OUTBOX_RELAY_CAPABLE=1
-  # Also host-derived rather than schema knobs: nix derives them from
-  # ISSUE_TRACKER/CODE_FORGE and passes them as launcher
-  # flags. These mirror the suite's default cell (issue #2533), so a test that
-  # moves one of those raw vars must move the matching BOX_* var with it.
-  export BOX_TRACKER_AXIS_READ=GITHUB
-  export BOX_TRACKER_AXIS_WRITE=GITHUB
-  export BOX_TRACKER_AXIS_FILER=GH
-  export BOX_FORGE_BACKEND=GH
-  # Pinned away from the schema default (issue #2055) so the MODEL-flag
-  # assertions stay stable when that default moves.
-  export MODEL="claude-test-model"
-  # Nix bakes this from the roster (lib/mkHarness.nix), and box's
-  # per-name injection loop (issue #264) resolves prompt files through it.
-  # Deliberately narrower than the real default roster, which also carries
-  # review-axis (issue #3447): a test needing that sets the var itself.
-  export AGENTS_PROMPT_FILES='{"scout":"scout-prompt.md","reviewer":"review-prompt.md","filer":"filer-prompt.md","worker":"worker-prompt.md"}'
-  export ISSUE_NUMBER="7"
-  set_dispatch_kind work
-  export ISSUE_TITLE="Do the thing"
-  export WORK_DIR="$BATS_TEST_TMPDIR/work"
-  # A real Box always receives a nonce, and both fakes/claude's
-  # SPINDRIFT_PR_INTENT emission and box's PR-intent marker gate
-  # (issue #2045) key off it: unset, every read-only+github+status=ready
-  # fixture here would look like a #2036 repro and eat a resume pass.
-  export RUN_NONCE="test-run-nonce-0001"
-  # box copies HARNESS_SKILLS_DIR and OPERATOR_SKILLS_DIR into
-  # DRIVER_SKILLS_DIR before every SKILLS_FOUND scan, so a Box that bakes its
-  # own skills at those vars' absolute defaults would leak into every fixture
-  # here: widening "not baked" assertions, mismatching golden diffs, and
-  # skewing byte-parity comparisons against a fixed --skills-found (issue
-  # #2059). Own both paths and create them empty, so the fixtures stay
-  # skill-free however box reads them; a test that wants a baked skill
-  # re-exports one itself.
-  export HARNESS_SKILLS_DIR="$BATS_TEST_TMPDIR/no-harness-skills"
-  export OPERATOR_SKILLS_DIR="$BATS_TEST_TMPDIR/no-operator-skills"
-  mkdir -p "$HARNESS_SKILLS_DIR" "$OPERATOR_SKILLS_DIR"
-}
-
 # Shared setup for the dispatch-env bats suite (tests/harness-env.bats).
 setup_dispatch_env() {
   setup_fakes
@@ -228,10 +135,11 @@ setup_fakes() {
     {
       if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
         cat "$DRIVER_PREAMBLE_FILE"
-        # Re-root the baked absolute /home/agent skills dir under this test's own
-        # $HOME, which a bats sandbox can write to (issue #624). Stripping the
-        # prefix reuses the suffix the registry rendered. Written unexpanded so it
-        # resolves against the HOME setup_bare_repo sets, not the one in effect here.
+        # Re-root the baked absolute /home/agent skills dir under the shard's $HOME
+        # (batsBuilderSetup's $TMPDIR/home), which a bats sandbox can write to
+        # (issue #624). Stripping the prefix reuses the suffix the registry
+        # rendered. Written unexpanded so it resolves against $HOME at $_wrapped's
+        # runtime, not the one in effect here.
         # shellcheck disable=SC2016 # intentionally unexpanded -- written verbatim into $_wrapped
         echo 'DRIVER_SKILLS_DIR="$HOME/${DRIVER_SKILLS_DIR#/home/agent/}"'
         # Same re-rooting for DRIVER_SESSION_CACHE_DIR (issue #2843), guarded at
@@ -266,50 +174,8 @@ set_dispatch_env() {
 }
 
 # set_box_env: every lib/env-schema.nix knob with boxEnv = true, at its schema
-# default, so the entrypoint-*.bats suites see the defaults the nix preamble
-# bakes into the image. Generated by nix/regen.nix (renderSetBoxEnvFixture);
+# default. It has no caller; issue #4489 retires it with its generator chain.
+# Generated by nix/regen.nix (renderSetBoxEnvFixture);
 # nix/checks/schema-drift.nix box-env-fixture-coverage guards against drift.
 # shellcheck source=tests/box_env_gen.bash disable=SC1091
 source "${BATS_TEST_DIRNAME}/box_env_gen.bash"
-
-# Stands up a local bare "GitHub" repo and rewrites https://github.com/ to it
-# via git's insteadOf, so the entrypoint's real `git clone`/`push` stay offline.
-setup_bare_repo() {
-  export HOME="$BATS_TEST_TMPDIR/home"
-  mkdir -p "$HOME"
-  export REMOTE_ROOT="$BATS_TEST_TMPDIR/remote"
-  mkdir -p "$REMOTE_ROOT/owner"
-
-  # Configure git before `init` so the bare repo's HEAD tracks `main`, not the
-  # built-in `master`. A plain `git clone` resolves the branch via remote HEAD,
-  # and a `master` HEAD with a `main`-only ref leaves the clone on an orphan
-  # branch, making the follow-up push non-fast-forward.
-  git config --global init.defaultBranch main
-  git config --global user.name "Seed"
-  git config --global user.email "seed@example.com"
-  git config --global "url.file://$REMOTE_ROOT/.insteadOf" "https://github.com/"
-
-  git init --bare -q "$REMOTE_ROOT/owner/repo.git"
-
-  local seed="$BATS_TEST_TMPDIR/seed"
-  git clone -q "https://github.com/owner/repo.git" "$seed"
-  (
-    cd "$seed" || exit 1
-    echo "# repo" >README.md
-    git add -A
-    git commit -q -m "chore: seed"
-    git push -q origin HEAD:main
-  )
-}
-
-# Pushes main to a same-named remote branch so a non-default BASE_BRANCH
-# resolves to a real origin ref. box's branch recovery checks that ref out
-# before the prompt is assembled and setup_bare_repo seeds only main, so any
-# test setting BASE_BRANCH away from "main" needs this first.
-# Usage: seed_release_branch "release-42" "seed-name"
-seed_release_branch() {
-  local branch="$1" seed_name="$2"
-  local seed="$BATS_TEST_TMPDIR/$seed_name"
-  git clone -q "https://github.com/owner/repo.git" "$seed"
-  git -C "$seed" push -q origin "main:$branch"
-}
