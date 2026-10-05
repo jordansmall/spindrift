@@ -882,10 +882,13 @@ per-Driver file (`claude.nix` itself, and any future sibling) stays pure
 data with no validation or rendering logic of its own (issue #624). A new
 Driver entry declares:
 
-- `name`, `package`, `bin`, `flagsCommon`, `outcomeExtractFnBody`,
-  `agentsJsonTemplate` — the fields ADR 0009 already documents. Session
-  flags are not a registry field: implement `SessionFlags` on the Driver's Go
-  strategy (`cmd/launcher/internal/driver`).
+- `name`, `package`, `bin`, `flagsCommon`, `agentsJsonTemplate` — the
+  fields ADR 0009 already documents. Session flags are not a registry
+  field: implement `SessionFlags` on the Driver's Go strategy
+  (`cmd/launcher/internal/driver`). That package
+  (`cmd/launcher/internal/driver/<name>`) also ships a canonical
+  `testdata/outcome-fixture.jsonl` pinned by an `outcome_fixture_test.go`, as
+  claude and opencode do.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row
@@ -946,10 +949,9 @@ The registry also owns rendering: `renderPreamble` turns a validated entry
 into the `DRIVER_*` variable block (`DRIVER_NAME` — the launcher selects its
 host-side strategy by it — plus `DRIVER_BIN`, `DRIVER_FLAGS_COMMON`,
 `DRIVER_SKILLS_DIR`, the last baked as an absolute path under
-`/home/agent`, the image's fixed `HOME`) and the
-`_driver_extract_outcome` and sibling function definitions
+`/home/agent`, the image's fixed `HOME`) that
 `mkHarness` bakes into `agent/entrypoint.sh` ahead of its `exec box` line, instead
-of `mkHarness` string-building them inline. The bats harness sources the
+of `mkHarness` string-building it inline. The bats harness sources the
 exact same rendered bytes (issue #433) before exec-ing the shim, so a
 test run and a built image can never drift apart — a bats fixture has no
 real `/home/agent` to write skill files into, so `tests/helper.bash`

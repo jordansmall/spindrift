@@ -5,9 +5,8 @@ import (
 	"strings"
 )
 
-// The two sed expressions the in-box _driver_extract_result_text applied per
-// line (lib/drivers/outcome-extractor.nix). POSIX leftmost-longest matches
-// sed -E, so a trailing "** " peels as sed would.
+// Per-line markdown strippers. POSIX leftmost-longest, so a trailing "** "
+// peels whole rather than leaving the "**" behind.
 var (
 	leadingMarkdown  = regexp.MustCompilePOSIX("^[[:space:]]*(\\*\\*|`)?")
 	trailingMarkdown = regexp.MustCompilePOSIX("(\\*\\*|`)?[[:space:]]*$")
@@ -29,10 +28,10 @@ func StripResultText(text string) string {
 // ExtractOutcomeLine returns the last line of strippedText (StripResultText's
 // output) that leads with the SPINDRIFT_OUTCOME token and carries both a
 // landing= and a status= field, with a colon after the token normalized to a
-// space (issue #2012), or "" when none does. It mirrors the in-box "match"
-// grep chain exactly rather than reusing hasOutcomeFields: the grep requires a
-// literal space before each key, where hasOutcomeFields splits on any
-// whitespace. A near miss is deliberately not returned here.
+// space (issue #2012), or "" when none does. It does not reuse
+// hasOutcomeFields: each key must follow a literal space, where
+// hasOutcomeFields splits on any whitespace. A near miss is deliberately not
+// returned here.
 func ExtractOutcomeLine(strippedText string) string {
 	var last string
 	for _, line := range strings.Split(strippedText, "\n") {

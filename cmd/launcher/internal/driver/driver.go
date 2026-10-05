@@ -50,10 +50,9 @@ type Driver interface {
 	ResolveExit(logPath string, exitCode int) (int, error)
 
 	// ResultText returns the Driver's final-message text from the raw stream
-	// log at logPath, one value per line, unstripped: the Go twin of the
-	// in-box _driver_extract_result_text's jq stage. Feed it to
-	// outcome.StripResultText then outcome.ExtractOutcomeLine. A missing log
-	// is "" with no error.
+	// log at logPath, one value per line, unstripped. Feed it to
+	// outcome.StripResultText then outcome.ExtractOutcomeLine. A missing log is
+	// "" with no error.
 	ResultText(logPath string) (string, error)
 
 	// ResultEvent encodes text as one newline-terminated NDJSON event in this
