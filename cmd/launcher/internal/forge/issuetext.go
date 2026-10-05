@@ -2,6 +2,7 @@ package forge
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -23,6 +24,11 @@ type Comment struct {
 	Author    string
 	CreatedAt string
 	Body      string
+	// Minimized marks a comment a maintainer hid on the forge; IssueText leaves
+	// it out of the transcript. Adapters that don't map moderation leave it
+	// zero.
+	Minimized       bool
+	MinimizedReason string
 }
 
 // CommentLister is the optional IssueTracker interface for adapters that can
@@ -40,24 +46,29 @@ type CommentLister interface {
 // "## Linked issues" when t implements LinkedIssueLister. A t.Issue error is
 // returned; a comments or LinkedIssues error is swallowed, so losing either
 // section never fails a dispatch the subject text alone would have carried.
-func IssueText(t IssueTracker, num string) (string, error) {
+// Minimized comments are excluded before the window is taken, so hidden ones
+// cannot evict live ones; each one dropped writes a line to warn.
+func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
 	iss, err := t.Issue(num)
 	if err != nil {
 		return "", err
 	}
 	text := iss.Body
 	if cl, ok := t.(CommentLister); ok {
-		if comments, cErr := cl.Comments(num); cErr == nil && len(comments) > 0 {
+		if comments, cErr := cl.Comments(num); cErr == nil {
+			comments = dropMinimized(comments, num, warn)
 			if len(comments) > issueTextCommentWindow {
 				comments = comments[len(comments)-issueTextCommentWindow:]
 			}
-			var b strings.Builder
-			b.WriteString(text)
-			b.WriteString("\n\n## Comments\n\n")
-			for _, c := range comments {
-				fmt.Fprintf(&b, "%s (%s): %s\n", c.Author, c.CreatedAt, c.Body)
+			if len(comments) > 0 {
+				var b strings.Builder
+				b.WriteString(text)
+				b.WriteString("\n\n## Comments\n\n")
+				for _, c := range comments {
+					fmt.Fprintf(&b, "%s (%s): %s\n", c.Author, c.CreatedAt, c.Body)
+				}
+				text = b.String()
 			}
-			text = b.String()
 		}
 	}
 
@@ -237,4 +248,23 @@ func truncateIssueText(s string) string {
 		s = s[:len(s)-1]
 	}
 	return s + fmt.Sprintf("\n\n[truncated: issue text exceeded %dKB]\n", maxIssueTextBytes/1024)
+}
+
+// dropMinimized returns comments without the minimized ones, in order, writing
+// one line per drop to warn. It copies rather than filtering in place, so the
+// adapter's slice is left untouched.
+func dropMinimized(comments []Comment, num string, warn io.Writer) []Comment {
+	live := make([]Comment, 0, len(comments))
+	for _, c := range comments {
+		if c.Minimized {
+			reason := c.MinimizedReason
+			if reason == "" {
+				reason = "no reason"
+			}
+			fmt.Fprintf(warn, "    ?? #%s: dropped minimized comment by %s (%s)\n", num, c.Author, reason)
+			continue
+		}
+		live = append(live, c)
+	}
+	return live
 }

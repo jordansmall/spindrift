@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -234,7 +235,7 @@ func TestJiraIncludeCommentsIsNoOp(t *testing.T) {
 			jiraToken:           "tok",
 			jiraIncludeComments: include,
 		}}
-		text, err := forge.IssueText(row.newIssueTracker(c), "PROJ-7")
+		text, err := forge.IssueText(row.newIssueTracker(c), "PROJ-7", io.Discard)
 		if err != nil {
 			t.Fatalf("include=%v: IssueText: %v", include, err)
 		}

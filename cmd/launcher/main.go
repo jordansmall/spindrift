@@ -904,7 +904,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 			return res.Found, err
 		},
 		IssueTextFor: func(number string) (string, error) {
-			return forge.IssueText(it, number)
+			return forge.IssueText(it, number, os.Stderr)
 		},
 	}
 }
