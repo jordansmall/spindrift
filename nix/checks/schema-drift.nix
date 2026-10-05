@@ -87,15 +87,17 @@ let
 
   # Marker consistency for lib/env-schema.nix's intKind/hostConfig/hostDerived
   # fields (issue #2363). Factored out so the guard can exercise this exact
-  # predicate against an injected schema. "Int member" means an int-typed
-  # default carrying neither of the schema's two non-membership signals,
-  # secret and boxEnvOnly; the real derivation lands in a later slice.
+  # predicate against an injected schema. "Int member" means an int-typed knob
+  # (flagKind) carrying neither of the schema's two non-membership signals,
+  # secret and boxEnvOnly.
   markerConsistencyIssues =
     schema:
     let
       inherit (pkgs.lib) filter attrValues elem;
       entries = attrValues schema;
-      isIntTyped = e: builtins.isInt (e.default or null);
+      # flagKind, the same answer typeClass in lib/renderers.nix reads, so a
+      # kind = "int" member needs intKind just like an int-defaulted one.
+      isIntTyped = e: renderers.flagKind e == "int";
       isFloatTyped = e: builtins.isFloat (e.default or null);
       isIntMember = e: isIntTyped e && !(e.secret or false) && !(e.boxEnvOnly or false);
     in
@@ -105,6 +107,12 @@ let
       # atoiNonnegSchema) it takes.
       missingIntKind = filter (e: isIntMember e && !(e ? intKind)) entries;
       intKindOnNonInt = filter (e: (e ? intKind) && !(isIntTyped e)) entries;
+      # An explicit kind types a knob with no default (e.g. a Box-only int knob
+      # unset by default); with a default, flagKind lets kind win over it, so an
+      # int default and kind must agree in both directions.
+      kindDefaultMismatch = filter (
+        e: (e ? kind) && (e ? default) && ((e.kind == "int") != builtins.isInt e.default)
+      ) entries;
       # A typo like "positve" would otherwise pass the presence and
       # int-typedness checks silently.
       badIntKindValue = filter (
@@ -140,7 +148,7 @@ let
     };
 
   # Throws on a bad schema, else returns it unchanged. The guard below runs
-  # this exact path, so dropping any of the five asserts makes that guard fail
+  # this exact path, so dropping any of its asserts makes that guard fail
   # rather than stay silently green.
   assertMarkerConsistencyOk =
     schema:
@@ -155,6 +163,10 @@ let
     assert assertMsg (issues.intKindOnNonInt == [ ])
       "lib/env-schema.nix: intKind must only appear on int-typed members: ${
         concatStringsSep ", " (map (e: e.env) issues.intKindOnNonInt)
+      }";
+    assert assertMsg (issues.kindDefaultMismatch == [ ])
+      "lib/env-schema.nix: an explicit kind must be \"int\" exactly when the default is an int: ${
+        concatStringsSep ", " (map (e: e.env) issues.kindDefaultMismatch)
       }";
     assert assertMsg (issues.badIntKindValue == [ ])
       "lib/env-schema.nix: intKind must be exactly \"positive\" or \"nonneg\": ${
@@ -2733,8 +2745,8 @@ checkedMerge {
     leaf = builtins.concatStringsSep "." byNamePaths.byName;
   };
 
-  # Runs assertMarkerConsistencyOk's five invariants against the real schema
-  # (issue #2363; emptyDisables added for #3048).
+  # Runs assertMarkerConsistencyOk's invariants against the real schema
+  # (issue #2363; emptyDisables added for #3048; kind = "int" for #4420).
   marker-consistency =
     let
       schema = import ../../lib/env-schema.nix;
@@ -2742,8 +2754,8 @@ checkedMerge {
     assert (assertMarkerConsistencyOk schema) == schema;
     pkgs.runCommand "marker-consistency" { } "touch $out";
 
-  # Regression guard (issue #2363): five copies of the real schema, each
-  # violating exactly one invariant, so dropping any of the five asserts from
+  # Regression guard (issue #2363): copies of the real schema, each
+  # violating exactly one invariant, so dropping any assert from
   # assertMarkerConsistencyOk fails here instead of passing vacuously.
   marker-consistency-guard =
     let
@@ -2782,6 +2794,24 @@ checkedMerge {
           emptyDisables = true;
         };
       };
+      # label is a real string-defaulted member, so an injected kind = "int"
+      # must be caught by kindDefaultMismatch. kind = "int" also makes label a
+      # host-config int member, so it carries intKind to keep missingIntKind
+      # quiet.
+      kindIntOnStringSchema = schema // {
+        label = schema.label // {
+          kind = "int";
+          intKind = "positive";
+        };
+      };
+      # maxParallel is a real int-defaulted member; kind = "string" (with
+      # intKind stripped, so intKindOnNonInt stays quiet) must be caught by
+      # kindDefaultMismatch's other direction.
+      kindStringOnIntSchema = schema // {
+        maxParallel = builtins.removeAttrs schema.maxParallel [ "intKind" ] // {
+          kind = "string";
+        };
+      };
       missingIntKindResult = builtins.tryEval (assertMarkerConsistencyOk missingIntKindSchema);
       intKindOnNonIntResult = builtins.tryEval (assertMarkerConsistencyOk intKindOnNonIntSchema);
       hostDerivedExcludedResult = builtins.tryEval (assertMarkerConsistencyOk hostDerivedExcludedSchema);
@@ -2789,6 +2819,8 @@ checkedMerge {
       emptyDisablesOnNonStringResult = builtins.tryEval (
         assertMarkerConsistencyOk emptyDisablesOnNonStringSchema
       );
+      kindIntOnStringResult = builtins.tryEval (assertMarkerConsistencyOk kindIntOnStringSchema);
+      kindStringOnIntResult = builtins.tryEval (assertMarkerConsistencyOk kindStringOnIntSchema);
     in
     assert assertMsg (!missingIntKindResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind removed, but it evaluated successfully";
@@ -2800,6 +2832,10 @@ checkedMerge {
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind mistyped as \"positve\", but it evaluated successfully";
     assert assertMsg (!emptyDisablesOnNonStringResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject localIssueReference (bool) decorated with an injected emptyDisables, but it evaluated successfully";
+    assert assertMsg (!kindIntOnStringResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject label (string default) decorated with an injected kind = \"int\", but it evaluated successfully";
+    assert assertMsg (!kindStringOnIntResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel (int default) decorated with kind = \"string\", but it evaluated successfully";
     pkgs.runCommand "marker-consistency-guard" { } "touch $out";
 
   # Runs assertLegacySettingsSectionOk's coverage invariants against the real
