@@ -14,17 +14,8 @@ import (
 // entrypoint.sh exporting them into the Driver's env too. Everything else
 // assembly needs box reads off the environment it inherits.
 type assemblyInputs struct {
-	RegistryFile                string
-	ValidateMarkersFile         string
-	SkillsDir                   string
-	PromptsDir                  string
-	AgentsPromptFiles           string
-	DriverAgentFilesDir         string
-	CommsContractFile           string
-	CheckContractFile           string
-	OutcomeContractFile         string
-	ResearchOutcomeContractFile string
-	Passthrough                 promptassembly.Passthrough
+	promptassembly.AssemblyFlags
+	SkillsDir string
 }
 
 // assemblePrompt produces the prompt, agents JSON, review prompt and handoff
@@ -43,13 +34,7 @@ func assemblePrompt(in assemblyInputs, env promptassembly.Env, w io.Writer) (str
 
 	env.ProbeBakedSkills(in.SkillsDir)
 	env.SkillsFound = promptassembly.ScanSkillsFound(in.SkillsDir)
-	env.PromptsDir = in.PromptsDir
-	env.AgentsPromptFiles = in.AgentsPromptFiles
-	env.DriverAgentFilesDir = in.DriverAgentFilesDir
-	env.CommsContractFile = in.CommsContractFile
-	env.CheckContractFile = in.CheckContractFile
-	env.OutcomeContractFile = in.OutcomeContractFile
-	env.ResearchOutcomeContractFile = in.ResearchOutcomeContractFile
+	in.ApplyTo(&env)
 
 	dir, err := os.MkdirTemp("", "box-assembly-")
 	if err != nil {

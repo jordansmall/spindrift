@@ -34,7 +34,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -54,9 +53,7 @@ import (
 // entrypoint.sh cannot export without changing the Driver's environment.
 func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	var in inputs
-	var tokensRaw, usdRaw, argvOrder, omitEmptyRaw string
 	a := &in.Assembly
-	p := &a.Passthrough
 	fs := flag.NewFlagSet("box", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.StringVar(&in.WorkDir, "work-dir", "", "the repository working directory")
@@ -68,34 +65,9 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.StringVar(&in.DevShellProbeTimeout, "dev-shell-probe-timeout", "", "DEV_SHELL_PROBE_TIMEOUT, exported for the devShell probe")
 	fs.StringVar(&in.RunStateFile, "run-state-file", "", "path to the run-state file: forwarded to every orchestrator pass as --state-file (writer) and read by the backstop for the reviewer's last verdict; empty disables both")
 	fs.StringVar(&in.ForbiddenMarkersFile, "forbidden-markers-registry", "", "path to the prompt-contract forbiddenMarkers registry JSON file, read by the read-only guards")
-	fs.StringVar(&a.RegistryFile, "registry", "", "path to the fragment registry JSON file")
-	fs.StringVar(&a.ValidateMarkersFile, "validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file")
 	fs.StringVar(&a.SkillsDir, "driver-skills-dir", "", "DRIVER_SKILLS_DIR, probed for baked skills")
 	fs.StringVar(&in.DriverSessionCacheDir, "driver-session-cache-dir", "", "DRIVER_SESSION_CACHE_DIR, empty when the Driver has none")
-	fs.StringVar(&a.PromptsDir, "prompts-dir", "", "PROMPTS_DIR")
-	fs.StringVar(&a.AgentsPromptFiles, "agents-prompt-files", "", "nix-baked agent-name -> promptFile JSON map")
-	fs.StringVar(&a.DriverAgentFilesDir, "driver-agent-files-dir", "", "opencode-style baked agent files dir, empty for claude")
-	fs.StringVar(&a.CommsContractFile, "comms-contract-file", "", "COMMS_CONTRACT_FILE")
-	fs.StringVar(&a.CheckContractFile, "check-contract-file", "", "CHECK_CONTRACT_FILE")
-	fs.StringVar(&a.OutcomeContractFile, "outcome-contract-file", "", "OUTCOME_CONTRACT_FILE")
-	fs.StringVar(&a.ResearchOutcomeContractFile, "research-outcome-contract-file", "", "RESEARCH_OUTCOME_CONTRACT_FILE")
-	fs.StringVar(&p.ArgvShape.PromptStyle, "argv-prompt-style", "", "Handoff.ArgvShape.PromptStyle")
-	fs.StringVar(&p.ArgvShape.PromptFlag, "argv-prompt-flag", "", "Handoff.ArgvShape.PromptFlag")
-	fs.StringVar(&p.ArgvShape.ModelFlag, "argv-model-flag", "", "Handoff.ArgvShape.ModelFlag")
-	fs.StringVar(&omitEmptyRaw, "argv-model-omit-empty", "", "DRIVER_ARGV_MODEL_OMIT_EMPTY as rendered: empty is false, else a Go bool (1, 0, true)")
-	fs.StringVar(&p.ArgvShape.AgentsFlag, "argv-agents-flag", "", "Handoff.ArgvShape.AgentsFlag")
-	fs.StringVar(&p.ArgvShape.EffortFlag, "argv-effort-flag", "", "Handoff.ArgvShape.EffortFlag")
-	fs.StringVar(&argvOrder, "argv-order", "", "space-separated Handoff.ArgvShape.Order")
-	fs.StringVar(&p.Model, "model", "", "Handoff.Model")
-	fs.StringVar(&p.Effort, "effort", "", "Handoff.Effort")
-	fs.StringVar(&p.Driver, "driver", "", "Handoff.Driver")
-	fs.StringVar(&p.DriverBin, "driver-bin", "", "Handoff.DriverBin")
-	fs.StringVar(&p.DriverFlags, "driver-flags", "", "Handoff.DriverFlags")
-	fs.StringVar(&p.HeartbeatLog, "heartbeat-log", "", "Handoff.HeartbeatLog")
-	// Strings, not Int/Float64: a malformed value degrades to 0 below instead
-	// of failing the run (issues #2975, #2694).
-	fs.StringVar(&tokensRaw, "max-budget-tokens", "", "Handoff.Caps.MaxBudgetTokens")
-	fs.StringVar(&usdRaw, "max-budget-usd", "", "Handoff.Caps.MaxBudgetUSD")
+	a.BindFlags(fs)
 	if err := fs.Parse(args); err != nil {
 		return inputs{}, err
 	}
@@ -113,19 +85,11 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	if len(missing) > 0 {
 		return inputs{}, fmt.Errorf("missing required flag(s): %s", strings.Join(missing, ", "))
 	}
-	if omitEmptyRaw != "" {
-		omit, err := strconv.ParseBool(omitEmptyRaw)
-		if err != nil {
-			return inputs{}, fmt.Errorf("--argv-model-omit-empty: %w", err)
-		}
-		p.ArgvShape.ModelOmitEmpty = omit
-	}
-	p.ArgvShape.Order = strings.Fields(argvOrder)
 	// The entrypoint never passed the review-round and slice caps, so the
-	// defaults are the only values they have ever had.
-	p.Caps = promptassembly.Caps{MaxSlices: promptassembly.DefaultMaxSlices, MaxReviewRounds: promptassembly.DefaultMaxReviewRounds}
-	p.Caps.MaxBudgetTokens, _ = promptassembly.ParseNonnegBudgetTokens(tokensRaw)
-	p.Caps.MaxBudgetUSD, _ = promptassembly.ParseNonnegBudgetUSD(usdRaw)
+	// defaults are the only values they have ever had. Set singly: Caps also
+	// holds the budgets BindFlags parsed.
+	a.Passthrough.Caps.MaxSlices = promptassembly.DefaultMaxSlices
+	a.Passthrough.Caps.MaxReviewRounds = promptassembly.DefaultMaxReviewRounds
 	return in, nil
 }
 

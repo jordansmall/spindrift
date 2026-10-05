@@ -1491,25 +1491,27 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		DevShellName:          "ci",
 		DevShellProbeTimeout:  "300",
 		Assembly: assemblyInputs{
-			RegistryFile:                "/reg.json",
-			ValidateMarkersFile:         "/markers.json",
-			SkillsDir:                   "/skills",
-			PromptsDir:                  "/prompts",
-			AgentsPromptFiles:           "{}",
-			CommsContractFile:           "/comms",
-			CheckContractFile:           "/check",
-			OutcomeContractFile:         "/outcome",
-			ResearchOutcomeContractFile: "/research",
-			Passthrough: promptassembly.Passthrough{
-				Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude",
-				DriverFlags: "--verbose", HeartbeatLog: "/hb",
-				ArgvShape: promptassembly.ArgvShape{
-					PromptStyle: "flag", PromptFlag: "-p", ModelFlag: "--model", AgentsFlag: "--agents",
-					EffortFlag: "--effort", Order: []string{"prompt", "model", "agents"},
-				},
-				Caps: promptassembly.Caps{
-					MaxSlices: promptassembly.DefaultMaxSlices, MaxReviewRounds: promptassembly.DefaultMaxReviewRounds,
-					MaxBudgetTokens: 1000, MaxBudgetUSD: 2.5,
+			SkillsDir: "/skills",
+			AssemblyFlags: promptassembly.AssemblyFlags{
+				RegistryFile:                "/reg.json",
+				ValidateMarkersFile:         "/markers.json",
+				PromptsDir:                  "/prompts",
+				AgentsPromptFiles:           "{}",
+				CommsContractFile:           "/comms",
+				CheckContractFile:           "/check",
+				OutcomeContractFile:         "/outcome",
+				ResearchOutcomeContractFile: "/research",
+				Passthrough: promptassembly.Passthrough{
+					Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude",
+					DriverFlags: "--verbose", HeartbeatLog: "/hb",
+					ArgvShape: promptassembly.ArgvShape{
+						PromptStyle: "flag", PromptFlag: "-p", ModelFlag: "--model", AgentsFlag: "--agents",
+						EffortFlag: "--effort", Order: []string{"prompt", "model", "agents"},
+					},
+					Caps: promptassembly.Caps{
+						MaxSlices: promptassembly.DefaultMaxSlices, MaxReviewRounds: promptassembly.DefaultMaxReviewRounds,
+						MaxBudgetTokens: 1000, MaxBudgetUSD: 2.5,
+					},
 				},
 			},
 		},
@@ -1706,18 +1708,20 @@ func assemblyFixture(t *testing.T, skills ...string) assemblyInputs {
 		}
 	}
 	return assemblyInputs{
-		RegistryFile:                repopath.RegistryJSON(),
-		ValidateMarkersFile:         repopath.ValidateMarkersJSON(),
-		SkillsDir:                   skillsDir,
-		PromptsDir:                  repopath.PromptsDir(),
-		CommsContractFile:           contract("comms-contract.md"),
-		CheckContractFile:           contract("check-contract.md"),
-		OutcomeContractFile:         contract("outcome-contract.md"),
-		ResearchOutcomeContractFile: contract("research-outcome-contract.md"),
-		Passthrough: promptassembly.Passthrough{
-			Driver: "claude", Model: "opus",
-			ArgvShape: promptassembly.ArgvShape{PromptStyle: "flag", ModelFlag: "--model", Order: []string{"prompt", "model"}},
-			Caps:      promptassembly.Caps{MaxSlices: 9, MaxReviewRounds: 3},
+		SkillsDir: skillsDir,
+		AssemblyFlags: promptassembly.AssemblyFlags{
+			RegistryFile:                repopath.RegistryJSON(),
+			ValidateMarkersFile:         repopath.ValidateMarkersJSON(),
+			PromptsDir:                  repopath.PromptsDir(),
+			CommsContractFile:           contract("comms-contract.md"),
+			CheckContractFile:           contract("check-contract.md"),
+			OutcomeContractFile:         contract("outcome-contract.md"),
+			ResearchOutcomeContractFile: contract("research-outcome-contract.md"),
+			Passthrough: promptassembly.Passthrough{
+				Driver: "claude", Model: "opus",
+				ArgvShape: promptassembly.ArgvShape{PromptStyle: "flag", ModelFlag: "--model", Order: []string{"prompt", "model"}},
+				Caps:      promptassembly.Caps{MaxSlices: 9, MaxReviewRounds: 3},
+			},
 		},
 	}
 }
