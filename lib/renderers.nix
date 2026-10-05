@@ -726,6 +726,7 @@ rec {
         "hostMediatedRemote"
         "inBoxUnreachableTracker"
         "outboxRelayCapable"
+        "inBoxOpenPRQueryable"
         "relayCapable"
         "hostPostingCapable"
         "labelRegistry"
@@ -771,6 +772,7 @@ rec {
         + fieldLine "HostMediatedRemote" (row.hostMediatedRemote or false)
         + fieldLine "InBoxUnreachableTracker" (row.inBoxUnreachableTracker or false)
         + fieldLine "OutboxRelayCapable" (row.outboxRelayCapable or false)
+        + fieldLine "InBoxOpenPRQueryable" (row.inBoxOpenPRQueryable or false)
         + fieldLine "RelayCapable" (row.relayCapable or false)
         + fieldLine "HostPostingCapable" (row.hostPostingCapable or false)
         + fieldLine "LabelRegistry" (row.labelRegistry or false)
