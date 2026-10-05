@@ -63,8 +63,9 @@ func (s DispatchState) Terminal() bool {
 	}
 }
 
-// DispatchLabels maps DispatchState values to issue-tracker labels. Only the
-// GitHub adapter reads them; Jira and local use their own native markers.
+// DispatchLabels maps DispatchState values to issue-tracker labels. The
+// label-based trackers (github, forgejo, local) drive transitions from them;
+// Jira prefers its native status mapping and falls back to them.
 type DispatchLabels struct {
 	Dispatchable string // default "ready-for-agent"
 	InProgress   string // default "agent-in-progress"
