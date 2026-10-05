@@ -2089,10 +2089,20 @@ func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
 
 // verbHandler is the uniform shape every verbHandlers entry implements. args
 // is the subcommand's args with the verb stripped: post-verb args first, then
-// any leading pass-through flags (see splitVerb). Output through stdout/stderr
-// is injectable end to end for doctor, reconcile, console, preview and
-// registry; build's own work, dispatch, research and recover still reach
-// process globals below bootstrap.
+// any leading pass-through flags (see splitVerb). Output injection is partial.
+//
+// Injected through stdout/stderr:
+//   - doctor, reconcile, preview and registry's launcher-layer output
+//   - the other verbs' own handler lines, bootstrap's gate walk, and
+//     console's Bubble Tea screen
+//
+// Still process globals:
+//   - tracker/forge warnings (internal/forge): os.Stderr
+//   - the image build (EnsureReady, run by build and by bootstrap):
+//     os.Stdout/os.Stderr
+//   - dispatch, research, recover, butler's sweep, and console's recover
+//     action (recoverByNumber)
+//   - doctor's interactive input: os.Stdin
 type verbHandler func(args []string, stdout, stderr io.Writer) int
 
 // verbHandlers is the single source of truth for which subcommands exist
