@@ -164,6 +164,31 @@ func TestPreviewIssues_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 	if strings.Contains(out, "no open") {
 		t.Errorf("output must not say \"no open\":\n%s", out)
 	}
+	banner := strings.Index(out, "repo: owner/repo")
+	line := strings.Index(out, "==> #42 held by agent-research-in-progress — skipped")
+	terminal := strings.Index(out, "no dispatchable")
+	if !(0 <= banner && banner < line && line < terminal) {
+		t.Errorf("want repo banner, then held line, then terminal line; got:\n%s", out)
+	}
+}
+
+func TestPreviewIssues_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
+	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
+	c.repoSlug = "owner/repo"
+	c.label = "ready-for-agent"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+
+	var buf bytes.Buffer
+	if err := previewIssues(c, fc, fc, capsFor(fc, fc), &buf, nil, t.TempDir(), nil); err != nil {
+		t.Fatalf("previewIssues: %v", err)
+	}
+
+	out := buf.String()
+	if want := "==> #42 held by agent-research-in-progress — skipped"; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
 }
 
 // probe.go no longer special-cases bwrap before the fetch step, so a bwrap and

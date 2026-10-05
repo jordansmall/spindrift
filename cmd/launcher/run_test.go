@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -109,6 +110,63 @@ func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 	}
 	if bad := "no open 'ready-for-agent' issues"; strings.Contains(out, bad) {
 		t.Errorf("output must not say %q:\n%s", bad, out)
+	}
+}
+
+// One-shot run with a held issue beside a blocked dispatchable one: the run
+// ends ErrOpenNoneDispatchable (exit 3), which says nothing about #42, so the
+// per-issue line must come from discovery itself (#3584).
+func TestRun_OneShot_NamesHeldIssueWhenRestBlocked(t *testing.T) {
+	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Body: "## Blocked by\n- #2", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "2", State: "OPEN"})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	var err error
+	out := testutil.CaptureStdout(t, func() { err = run(lc) })
+
+	if !errors.Is(err, waves.ErrOpenNoneDispatchable) {
+		t.Fatalf("run(lc) = %v, want ErrOpenNoneDispatchable", err)
+	}
+	if n := strings.Count(out, "==> #42 held by agent-research-in-progress — skipped"); n != 1 {
+		t.Errorf("held line appeared %d time(s), want 1:\n%s", n, out)
+	}
+}
+
+// Same, with #1 dispatchable: the held issue must not be dropped silently
+// just because the run went on to dispatch (#3584).
+func TestRun_OneShot_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
+	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
+	c.label = "ready-for-agent"
+	c.runnerKind = "bwrap"
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+	}
+
+	out := testutil.CaptureStdout(t, func() { runExitCode(lc) })
+
+	if n := strings.Count(out, "==> #42 held by agent-research-in-progress — skipped"); n != 1 {
+		t.Errorf("held line appeared %d time(s), want 1:\n%s", n, out)
 	}
 }
 
@@ -717,4 +775,102 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 	if containsLabel(iss1.Labels, c.failedLabel) {
 		t.Errorf("issue 1 must NOT be cascade-failed on a DepsOf check failure; labels=%v", iss1.Labels)
 	}
+}
+
+// An issue the other family holds is announced once per run, and a continuous
+// run whose first poll finds only held issues ends with the held-naming
+// terminal line rather than "no open" (#3584). Exit stays 2.
+func TestRunExitCode_ContinuousDispatch_AllHeld_NamesHeldIssue(t *testing.T) {
+	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runnerKind = "bwrap"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.label, "agent-research-in-progress"}})
+
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+	}
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = run(lc)
+	})
+	if !errors.Is(err, errQueueEmpty) {
+		t.Fatalf("run(lc) = %v, want errQueueEmpty", err)
+	}
+	if got := exitCodeFor(err); got != 2 {
+		t.Errorf("exitCodeFor = %d, want 2", got)
+	}
+	if want := "no dispatchable 'ready-for-agent' issues — #42 held by agent-research-in-progress."; !strings.Contains(out, want) {
+		t.Errorf("output missing %q:\n%s", want, out)
+	}
+	if strings.Contains(out, "no open") {
+		t.Errorf("output must not say \"no open\":\n%s", out)
+	}
+	if n := strings.Count(out, "#42 held by agent-research-in-progress — skipped"); n != 1 {
+		t.Errorf("held announcement appeared %d time(s), want 1:\n%s", n, out)
+	}
+}
+
+// The refill that follows #1's completion polls again; the held #2 must not be
+// announced a second time (#3584).
+func TestRunExitCode_ContinuousDispatch_RefillDoesNotRepeatHeldAnnouncement(t *testing.T) {
+	c := applyDispatchKind(baseConfig(), dispatchkind.Work)
+	c.label = "ready-for-agent"
+	c.continuousDispatch = true
+	c.maxParallel = 1
+	c.runnerKind = "bwrap"
+	dir := tempLogDir(t)
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{c.label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{c.label, "agent-research-in-progress"}})
+	tracker := &pollCountingTracker{IssueTracker: fc}
+
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: tracker,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, runner.NewFake()),
+		settle:       settle.NewFake(),
+	}
+
+	out := testutil.CaptureStdout(t, func() {
+		if got := runExitCode(lc); got != 0 {
+			t.Errorf("runExitCode(lc) = %d, want 0", got)
+		}
+	})
+
+	// Without a second poll the no-repeat assertion below would pass vacuously.
+	if n := tracker.polls.Load(); n < 2 {
+		t.Fatalf("ListIssues polled %d time(s), want >= 2 (a refill poll)", n)
+	}
+	if n := strings.Count(out, "held by"); n != 1 {
+		t.Errorf("\"held by\" appeared %d time(s), want exactly 1:\n%s", n, out)
+	}
+	if !strings.Contains(out, "==> #2 held by agent-research-in-progress — skipped") {
+		t.Errorf("output missing held announcement for #2:\n%s", out)
+	}
+}
+
+// pollCountingTracker counts ListIssues calls so a test can prove a refill
+// poll actually ran.
+type pollCountingTracker struct {
+	forge.IssueTracker
+	polls atomic.Int32
+}
+
+func (p *pollCountingTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	p.polls.Add(1)
+	return p.IssueTracker.ListIssues(state)
 }
