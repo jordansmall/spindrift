@@ -238,10 +238,10 @@ rec {
       severity = "reject";
       when = "boxAccessReadOnly";
       kind = "substring";
-      # prompt-only: driver-exec's bundle-out step runs `git bundle create`
-      # in-box as the legitimate way to relay committed work out of a
-      # read-only Box, so a hook or shim here would block that too. Only the
-      # rendered prompt ordering it is rejected.
+      # prompt-only: box's bundle-out phase (internal/bundleout) runs
+      # `git bundle create` in-box as the legitimate way to relay committed
+      # work out of a read-only Box, so a hook or shim here would block that
+      # too. Only the rendered prompt ordering it is rejected.
       enforce = "prompt-only";
       message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'git bundle create' -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation. Refusing to invoke the Driver.";
     }
