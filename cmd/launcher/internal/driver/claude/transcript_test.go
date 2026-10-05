@@ -65,6 +65,7 @@ func TestAttributionRoleForPass(t *testing.T) {
 		want     string
 	}{
 		{"review", ReviewerRole},
+		{"delta-review", ReviewerRole},
 		{"implement", ImplementorRole},
 		{"fix", ImplementorRole},
 		{"land", ImplementorRole},
