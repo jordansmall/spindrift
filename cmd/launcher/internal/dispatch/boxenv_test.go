@@ -630,8 +630,8 @@ func TestBuildBoxEnvForwardsResearchVerdictsJSONVerbatim(t *testing.T) {
 	}
 }
 
-// A pure-forgejo pairing frees the Box from GH_TOKEN (issue #3325); the var is
-// a positive opt-out so an absent value stays fail-closed.
+// A pairing that never reaches GitHub (forgejo or local forge, non-GitHub
+// tracker) frees the Box from GH_TOKEN (#3325, #4494); absent stays fail-closed.
 func TestBuildBoxEnvForwardsGHTokenOptional(t *testing.T) {
 	cases := []struct {
 		name           string
@@ -641,6 +641,9 @@ func TestBuildBoxEnvForwardsGHTokenOptional(t *testing.T) {
 		{"forgejo/forgejo", backend.Forgejo, backend.Forgejo, true},
 		{"github/github", backend.GitHub, backend.GitHub, false},
 		{"forgejo tracker, github forge", backend.GitHub, backend.Forgejo, false},
+		{"local forge, forgejo tracker", backend.Local, backend.Forgejo, true},
+		{"local forge, jira tracker", backend.Local, backend.Jira, true},
+		{"local/local", backend.Local, backend.Local, true},
 		{"github tracker, forgejo forge", backend.Forgejo, backend.GitHub, false},
 		{"zero descriptors", backend.Descriptor{}, backend.Descriptor{}, false},
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 )
 
@@ -54,7 +55,7 @@ func minimalDeps() Deps {
 			if name != "github" {
 				return Backend{}, false
 			}
-			return Backend{ValidAsTracker: true, ValidAsCodeForge: true, TokenEnvVar: "GH_TOKEN"}, true
+			return Backend{Descriptor: backend.GitHub}, true
 		},
 		TrackerNames:   func() []string { return []string{"github", "jira"} },
 		CodeForgeNames: func() []string { return []string{"github", "git"} },
@@ -173,15 +174,16 @@ func TestRequiredKnobChecks_GHToken(t *testing.T) {
 	}
 }
 
-// GH_TOKEN is required whenever the pairing reaches GitHub: a GitHub tracker,
-// or a forge with no token of its own (git still runs `gh auth setup-git`) or
-// a GitHub one. Only a pure non-GitHub pairing frees it.
+// GH_TOKEN is required whenever the pairing reaches GitHub: a GitHub tracker
+// or forge token, or a forge whose Box clone uses the gh credential helper
+// (git). Pairings that never reach GitHub free it.
 func TestRequiredKnobChecks_GHToken_ByPairing(t *testing.T) {
 	rows := map[string]Backend{
-		"github":  {ValidAsTracker: true, ValidAsCodeForge: true, TokenEnvVar: "GH_TOKEN"},
-		"forgejo": {ValidAsTracker: true, ValidAsCodeForge: true, TokenEnvVar: "FORGEJO_TOKEN"},
-		"jira":    {ValidAsTracker: true, TokenEnvVar: "JIRA_TOKEN"},
-		"git":     {ValidAsCodeForge: true},
+		"github":  {Descriptor: backend.GitHub},
+		"forgejo": {Descriptor: backend.Forgejo},
+		"jira":    {Descriptor: backend.Jira},
+		"git":     {Descriptor: backend.Git},
+		"local":   {Descriptor: backend.Local},
 	}
 	for _, tc := range []struct {
 		tracker, forge string
@@ -193,6 +195,9 @@ func TestRequiredKnobChecks_GHToken_ByPairing(t *testing.T) {
 		{"forgejo", "github", true},
 		{"jira", "github", true},
 		{"forgejo", "git", true},
+		{"forgejo", "local", false},
+		{"jira", "local", false},
+		{"github", "local", true},
 		{"github", "github", true},
 		{"forgejo", "nope", true},
 		{"", "", true},
@@ -407,7 +412,7 @@ func TestCrossKnobChecks_ValidatorErrorPropagates(t *testing.T) {
 			return Backend{}, false
 		}
 		return Backend{
-			ValidAsCodeForge:  true,
+			Descriptor:        backend.Git,
 			ValidateCodeForge: func() error { return wantErr },
 		}, true
 	}

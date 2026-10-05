@@ -1528,6 +1528,9 @@ func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
 		{"forgejo tracker, github forge", "github", "forgejo", true},
 		{"github tracker, forgejo forge", "forgejo", "github", true},
 		{"fully local", "local", "local", false},
+		{"local forge, forgejo tracker", "local", "forgejo", false},
+		{"local forge, jira tracker", "local", "jira", false},
+		{"local forge, github tracker", "local", "github", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CODE_FORGE", tc.forge)
