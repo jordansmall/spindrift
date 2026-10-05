@@ -1723,7 +1723,7 @@ func TestRunBindRegistryWithDeps_SharedGateSpawnsForwarderAtMostOnceAcrossBothMo
 
 // newIntreeTestRepo returns a fresh, empty git repo: one local dir, since
 // skip-worktree/checkout are purely local operations. Reuses the package's own
-// shared runGitCmd helper from bundleout_cmd_test.go.
+// shared runGitCmd helper from helpers_test.go.
 func newIntreeTestRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
