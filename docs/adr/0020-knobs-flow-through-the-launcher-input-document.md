@@ -37,7 +37,7 @@ knob the schema defines, and its assertion strength varies by key. `LABEL`,
 `FAILED_LABEL`, `SCOUT_MODEL`, `REVIEW_MODEL`, `COMPLETE_LABEL`, and `RUNTIME`
 get real value assertions — grepped against the specific string each test
 config sets, e.g. `grep -q '"LABEL":"custom-label"'`. `AGENT_FILES`,
-`AGENT_ENV`, and their `_DRV` build-doc variants are checked for presence
+`AGENT_ENV`, and their `_DRV` build-time variants are checked for presence
 only — e.g. `grep -q '"AGENT_FILES":'` — with no comparison to an expected
 value, since these are real store paths produced by the build rather than
 literal strings the test controls. `IMAGE_ARCHIVE`/`IMAGE_DRV` get a third
