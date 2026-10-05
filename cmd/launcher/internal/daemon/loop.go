@@ -544,7 +544,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// p.halt. A pass is a no-op once a box record released the baton.
 		// A pass before a HaltPool or breaker halt lands would let a parked
 		// sibling start a child on a pool about to stop (issue #4365).
-		// child_finish still precedes the halt.
+		// child_finish still precedes the halt. Continue/Wait pass after
+		// folding the result into the kind's backoff state too, so a woken
+		// sibling's chooseKind never sees a gate this child already earned
+		// as still open (issue #4380).
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
 			// started), so there is no exit code to report — but a
@@ -569,15 +572,14 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 
 		switch action {
 		case Continue:
-			p.passBaton(slot, batonPassChildEnded)
 			// Exit 0 (dispatched) or exit 4 (image-stale): the check
 			// answered something other than "nothing to do", so whatever
 			// streak of no-work checks this kind's backoff was tracking is
 			// over. The other kind's own timer, if any, is untouched.
 			p.resetKind(kind)
+			p.passBaton(slot, batonPassChildEnded)
 			continue
 		case Wait:
-			p.passBaton(slot, batonPassChildEnded)
 			if !cfg.Awake.Open(p.clk.Now()) {
 				// The window closed while the child ran, so this wait is
 				// the window's, not the idle backoff's: recording a no-work
@@ -586,6 +588,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 				// whole remaining span in one sleep instead, and this kind's
 				// idle streak stays untouched so it resumes where it left
 				// off.
+				p.passBaton(slot, batonPassChildEnded)
 				continue
 			}
 			// noteWaitResult records the no-work result and decides the
@@ -593,6 +596,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// doc for why the two must not be read from two different
 			// instants.
 			p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable)
+			p.passBaton(slot, batonPassChildEnded)
 			// No sleep here: this kind is now gated until its markNoWork
 			// deadline, and the top of the loop's pickKind/idleSleep decides
 			// whether that means switching to the other kind at once or
