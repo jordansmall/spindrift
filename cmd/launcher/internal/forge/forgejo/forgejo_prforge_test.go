@@ -547,6 +547,37 @@ func TestListPRFiles(t *testing.T) {
 	}
 }
 
+// ListPRFiles once read only the first page of /files, so a changed path past
+// it (here a guarded one) went unseen by the merge guard (issue #4458).
+func TestListPRFiles_WalksAllPages(t *testing.T) {
+	var want, files []string
+	for i := 0; i < forgejoServerPageCap; i++ {
+		name := "f" + strconv.Itoa(100+i) + ".go"
+		want = append(want, name)
+		files = append(files, `{"filename":"`+name+`"}`)
+	}
+	want = append(want, "zz/guarded.nix")
+	files = append(files, `{"filename":"zz/guarded.nix"}`)
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206/files" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if limit := r.URL.Query().Get("limit"); limit != strconv.Itoa(forge.ResultPageLimit) {
+			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(forge.ResultPageLimit))
+		}
+		w.Write([]byte("[" + strings.Join(windowPage(r, files), ",") + "]"))
+	})
+	got, err := pr.ListPRFiles("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("ListPRFiles(...) unexpected error: %v", err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("ListPRFiles(...) = %v, want %v", got, want)
+	}
+}
+
 func TestNeedsUpdate_True(t *testing.T) {
 	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/repos/owner/repo/compare/") {

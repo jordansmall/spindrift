@@ -263,15 +263,17 @@ type forgejoPRFile struct {
 	Filename string `json:"filename"`
 }
 
-// ListPRFiles returns every path the PR changes. A deleted file is reported
-// under its old path.
+// ListPRFiles returns every path the PR changes, walking every page of the
+// files endpoint via walkPages (issue #4458) so MERGE_GUARD_PATHS sees a
+// guarded path past the first page. A deleted file is reported under its old
+// path.
 func (f *forgejoCodeForge) ListPRFiles(prURL string) ([]string, error) {
 	index, err := parsePRIndex(prURL)
 	if err != nil {
 		return nil, err
 	}
-	var payload []forgejoPRFile
-	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/pulls/"+index+"/files", nil, &payload); err != nil {
+	payload, err := walkPages(f.rest, f.repoPath()+"/pulls/"+index+"/files", nil, func(p forgejoPRFile) string { return p.Filename })
+	if err != nil {
 		return nil, err
 	}
 	var files []string
