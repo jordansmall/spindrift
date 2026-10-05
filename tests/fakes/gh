@@ -10,6 +10,8 @@
 #   * `issue edit N --add-label A --remove-label R` records N's new label A in
 #     $GH_STATE, so a subsequent `issue list --label R` no longer matches it.
 #   * `pr create` / `auth setup-git` are recorded, no-op.
+#   * Any other subcommand (e.g. `repo clone`, which leaves its target dir empty)
+#     is only logged and exits 0.
 set -euo pipefail
 
 : "${GH_LOG:?GH_LOG must point at a log file}"
@@ -345,26 +347,6 @@ EOF
         else
           rollupvar="FAKE_GH_GRAPHQL_ROLLUP_${pr_num}"
           [ -n "${!rollupvar:-}" ] && printf '%s\n' "${!rollupvar}"
-        fi
-        ;;
-    esac
-    ;;
-  repo)
-    case "${2:-}" in
-      clone)
-        # ${3:-} = owner/repo slug, ${4:-} = target directory.
-        # When FAKE_GH_REPO_CLONE_GIT=1, use real git so the insteadOf URL
-        # rewrite (set up by the caller) redirects https://github.com/…
-        # to a local bare repo; subsequent git operations work against that
-        # local clone. Without the flag, the call is a no-op and the target
-        # dir stays empty so downstream git operations fail (simulates a
-        # network-unreachable or conflicted-and-unrebasable scenario).
-        repo_slug="${3:-}"
-        target_dir="${4:-}"
-        if [ -n "${FAKE_GH_REPO_CLONE_GIT:-}" ] && \
-           [ -n "$repo_slug" ] && [ -n "$target_dir" ]; then
-          git clone --no-single-branch \
-            "https://github.com/${repo_slug}.git" "$target_dir"
         fi
         ;;
     esac
