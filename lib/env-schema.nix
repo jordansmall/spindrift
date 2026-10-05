@@ -570,7 +570,7 @@ in
     secret = true;
     hostConfig = true;
     placeholder = "fake-token";
-    doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE and ISSUE_TRACKER are both local, or CODE_FORGE=forgejo and ISSUE_TRACKER is not github";
+    doc = "fine-grained PAT scoped to the target repo — Contents/PR/Issues/Metadata RW; required unless CODE_FORGE is local or forgejo, and ISSUE_TRACKER is not github";
     boxEnv = true;
   };
   ghTokenRefreshFile = {
