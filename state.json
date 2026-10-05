@@ -1,21 +1,23 @@
 {
-  "lastSwept": "30b1b7813c929d5982ff17a427c3395ebfe8d784",
-  "cursor": "cmd/launcher/internal/forge/capabilities.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-04T20:17:14.904047779-04:00"
-  },
+  "lastSwept": "0aa1ca0f7a6935382ad731efbf03d70692341e6e",
+  "cursor": "cmd/launcher/internal/forge/forgejo/forgejo_test.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/4458",
+    "https://github.com/jordansmall/spindrift/issues/4459",
+    "https://github.com/jordansmall/spindrift/issues/4460"
+  ],
+  "promoted": [
+    "https://github.com/jordansmall/spindrift/issues/4459"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
-  },
-  "reserved": 1
+    "input_tokens": 50,
+    "output_tokens": 13666,
+    "cache_read_input_tokens": 1525477,
+    "cache_creation_input_tokens": 83545,
+    "total_cost_usd": 1.4265695000000003,
+    "duration_ms": 213752,
+    "duration_api_ms": 212593,
+    "num_turns": 29
+  }
 }
