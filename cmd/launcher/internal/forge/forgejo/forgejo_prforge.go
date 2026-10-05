@@ -222,6 +222,7 @@ func (f *forgejoCodeForge) CheckState(prURL string) (forge.RollupState, error) {
 // forgejoStatus is one entry of /commits/{sha}/statuses, a single reported
 // status rather than the aggregate forgejoCombinedStatus holds.
 type forgejoStatus struct {
+	ID          int64  `json:"id"`
 	Context     string `json:"context"`
 	State       string `json:"state"`
 	Description string `json:"description"`
@@ -232,7 +233,8 @@ var forgejoFailingStatusStates = map[string]bool{
 	"error":   true,
 }
 
-// FailureDetail renders the head commit's failing statuses into a bounded
+// FailureDetail renders the head commit's failing statuses, read across every
+// page of the statuses endpoint via walkPages (issue #4458), into a bounded
 // excerpt, returning "" when nothing is failing. forge.RenderFailureDetail owns
 // the formatting and the forge.MaxFailureDetailBytes truncation. Callers should
 // treat a non-nil error as "detail unavailable".
@@ -241,8 +243,10 @@ func (f *forgejoCodeForge) FailureDetail(prURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var statuses []forgejoStatus
-	if err := f.rest.Do(http.MethodGet, f.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/statuses", nil, &statuses); err != nil {
+	// Keyed on ID, not Context: the endpoint lists every status ever reported
+	// for the sha, so one context repeats across pages and would end the walk.
+	statuses, err := walkPages(f.rest, f.repoPath()+"/commits/"+url.PathEscape(p.Head.Sha)+"/statuses", nil, func(s forgejoStatus) int64 { return s.ID })
+	if err != nil {
 		return "", err
 	}
 	var entries []forge.FailureDetailEntry
