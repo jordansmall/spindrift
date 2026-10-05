@@ -46,8 +46,9 @@ let
   defaultModelFixture = import ../../lib/default-model-fixture.nix;
   legacySettingsSection = import ../../lib/legacy-settings-section.nix;
 
-  # Defined once so schema-secret-choices-guard can exercise the predicate
-  # against an injected schema, not only the real one (issue #872).
+  # Defined once so schema-secret-choices-guard and schema-choices-default-guard
+  # can exercise the predicate against an injected schema, not only the real
+  # one (issue #872).
   schemaChoiceIssues =
     schema:
     let
@@ -60,11 +61,16 @@ let
       ) withChoices;
       badDefault = filter (e: (e ? default) && !(builtins.elem e.default e.choices)) withChoices;
       badSecret = filter (e: e.secret or false) withChoices;
+      # A choices knob must declare a default: mkHarness's choiceViolations
+      # resolves a missing one to "", never a choice, and throws for every
+      # Consumer (issue #2619).
+      missingDefault = filter (e: !(e ? default)) withChoices;
     };
 
-  # Throws on a bad schema, else returns it unchanged. The guard below runs
-  # this exact path, so dropping the badSecret assert here makes that guard
-  # fail rather than stay silently green.
+  # Throws on a bad schema, else returns it unchanged. The guards below run
+  # this exact path, so dropping the badSecret or missingDefault assert here
+  # turns schema-secret-choices-guard or schema-choices-default-guard red
+  # rather than leaving it silently green.
   assertSchemaChoicesOk =
     schema:
     let
@@ -78,6 +84,10 @@ let
     assert assertMsg (issues.badDefault == [ ])
       "lib/env-schema.nix: default is not a member of choices for: ${
         concatStringsSep ", " (map (e: e.env) issues.badDefault)
+      }";
+    assert assertMsg (issues.missingDefault == [ ])
+      "lib/env-schema.nix: choices requires a default (mkHarness would reject every Consumer) for: ${
+        concatStringsSep ", " (map (e: e.env) issues.missingDefault)
       }";
     assert assertMsg (issues.badSecret == [ ])
       "lib/env-schema.nix: choices is not supported on secret knobs — renderers only ever honor choices on nonSecret knobs (secrets get a --*-file flag, never a value-taking one): ${
@@ -1240,6 +1250,23 @@ checkedMerge {
     assert assertMsg (!result.success)
       "schema-secret-choices-guard: expected assertSchemaChoicesOk to reject the injected secret+choices fixture (jiraToken), but it evaluated successfully";
     pkgs.runCommand "schema-secret-choices-guard" { } "touch $out";
+
+  # Regression guard (issue #2619): a choices knob with no default makes
+  # mkHarness's choiceViolations throw for every Consumer. Stripping the
+  # default from an otherwise-valid choices knob keeps the missingDefault
+  # assert non-vacuous.
+  schema-choices-default-guard =
+    let
+      schema = import ../../lib/env-schema.nix;
+      inherit (pkgs.lib) assertMsg;
+      badSchema = schema // {
+        mergeMethod = builtins.removeAttrs schema.mergeMethod [ "default" ];
+      };
+      result = builtins.tryEval (assertSchemaChoicesOk badSchema);
+    in
+    assert assertMsg (!result.success)
+      "schema-choices-default-guard: expected assertSchemaChoicesOk to reject the injected default-less choices fixture (mergeMethod), but it evaluated successfully";
+    pkgs.runCommand "schema-choices-default-guard" { } "touch $out";
 
   # Regression guard (issue #2519 slice 2): lib/flakeModule.nix's types.enum
   # only protects Consumers going through the flake module. A Consumer calling
