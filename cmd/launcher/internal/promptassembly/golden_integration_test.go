@@ -82,10 +82,9 @@ func (c *cellInputs) dropSkill(name string) {
 	c.skills = slices.DeleteFunc(c.skills, func(s string) bool { return s == name })
 }
 
-// dispatch mirrors tests/helper.bash's set_dispatch_kind: the three axes
-// dispatch.buildBoxEnv derives from the kind's descriptor, plus the BRANCH
-// entrypoint.sh derives from the key. Call it after ISSUE_NUMBER or CHORE_NAME
-// is set: the key reads whichever the kind is keyed by.
+// dispatch exports the three axes dispatch.buildBoxEnv derives from the kind's
+// descriptor, plus the BRANCH entrypoint.sh derives from the key. Call it after
+// ISSUE_NUMBER or CHORE_NAME is set: the key reads whichever the kind is keyed by.
 func (c *cellInputs) dispatch(kind string) {
 	c.export("DISPATCH_KIND", kind)
 	switch kind {
@@ -153,9 +152,9 @@ func (c *cellInputs) butler(chore string) {
 	c.export("CHORE_MAX_FINDINGS", "5")
 }
 
-// defaultCell is the bats suite's starting point: setup_entrypoint_env plus
-// lib/env-schema.nix's boxEnv defaults, a github issue worked by a work
-// dispatch, writes enabled, no roster, and setup()'s six baked skills.
+// defaultCell is every cell's starting point: lib/env-schema.nix's boxEnv
+// defaults, a github issue worked by a work dispatch, writes enabled, no
+// roster, and six baked skills.
 func defaultCell() *cellInputs {
 	c := &cellInputs{
 		vars: map[string]string{
