@@ -59,11 +59,23 @@ func (s *removedVarScan) check(label string, b body) {
 		if !operatorAuthored(seg.src) {
 			continue
 		}
-		for _, r := range removedFragmentVars {
-			if strings.Contains(seg.text, "${"+r.name+"}") {
-				s.err = fmt.Errorf("%s still references ${%s}, a fragment variable removed in issue #%d that would render as literal text; delete the reference from the prompt override (see MIGRATING.md)", label, r.name, r.issue)
-				return
-			}
+		if err := CheckRemovedVars(label, seg.text); err != nil {
+			s.err = err
+			return
 		}
 	}
+}
+
+// CheckRemovedVars errors when operator-authored text references a removed
+// fragment variable as a braced ${NAME}, labelling the hit with label. Callers
+// must pass only template, fragment, or contract bytes, never a substituted
+// value. Bundled defaults are scanned too; the equivalence parity check keeps
+// them free of removed tokens, so a hit always means an override.
+func CheckRemovedVars(label, text string) error {
+	for _, r := range removedFragmentVars {
+		if strings.Contains(text, "${"+r.name+"}") {
+			return fmt.Errorf("%s still references ${%s}, a fragment variable removed in issue #%d that would render as literal text; delete the reference from the prompt override (see MIGRATING.md)", label, r.name, r.issue)
+		}
+	}
+	return nil
 }
