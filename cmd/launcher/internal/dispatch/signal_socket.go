@@ -99,7 +99,8 @@ func (d *Dispatch) startSignalSocket(transport registrymanifest.Endpoint, tcpAdd
 		l := &signalsocket.Listener{Handler: handler}
 		// The listener binds every interface, not loopback, for the same
 		// reason as the registry proxy's own TCP bind (box.go, issue #3111
-		// review finding).
+		// review finding), and accepts the same exposure (issue #3772):
+		// signalwire.SecretHeader is this listener's sole gate.
 		if err := l.ListenAndServeTCP("0.0.0.0:0"); err != nil {
 			return nil, runner.SignalSocketLocation{}, nil, fmt.Errorf("signal socket: %w", err)
 		}

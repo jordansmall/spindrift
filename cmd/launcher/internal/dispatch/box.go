@@ -456,6 +456,10 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 			// and on a plain Linux docker bridge that name resolves to the
 			// bridge IP (e.g. 172.17.0.1), so a loopback-only bind would
 			// leave nothing on the address the Box dials.
+			//
+			// Every-interface exposure is accepted, with
+			// registrymanifest.TCPSecretHeader as the sole access control;
+			// ADR 0044's issue #3772 amendment records why and what bounds it.
 			if err := proxy.ListenAndServeTCP("0.0.0.0:0", secret); err != nil {
 				return fmt.Errorf("registry proxy: %w", err)
 			}
