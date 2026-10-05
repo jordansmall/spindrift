@@ -10,7 +10,6 @@ import (
 
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/conflictresolve"
-	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -96,16 +95,7 @@ func (r *boxRun) conflictPass() error {
 	if err != nil {
 		return err
 	}
-	argv := []string{
-		"--handoff-file", handoffFile,
-		"--prompt-file", promptFile,
-		"--session-file", sessionFile,
-		"--log-path", logFile,
-	}
-	if r.needsBox {
-		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/"+passmanifest.FileName)
-	}
-	_ = r.d.Orchestrate(argv)
+	_ = r.d.Orchestrate(r.orchestratorArgv(handoffFile, promptFile, sessionFile, logFile))
 	return nil
 }
 

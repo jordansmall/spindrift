@@ -697,6 +697,13 @@ func envMap(env []string) map[string]string {
 	return m
 }
 
+// argvPlaceholders names the orchestrator flags whose per-run value the golden
+// replaces with a stable token.
+var argvPlaceholders = map[string]string{
+	"--handoff-file": "<handoff>", "--prompt-file": "<prompt>", "--session-file": "<session>",
+	"--log-path": "<stream-log>", "--state-file": "<run-state>",
+}
+
 // normaliseDriverInvocation renders an orchestrator snapshot in the golden
 // format captured from the bash path in 6ad56073 ("test: pin the bash Driver
 // invocation in a golden") before it was deleted. baseEnv is the env box would
@@ -712,14 +719,15 @@ func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[st
 	b.WriteString("argv\n")
 	for i := 0; i < len(s.Argv); i++ {
 		arg := s.Argv[i]
-		switch arg {
-		case "--handoff-file", "--prompt-file", "--session-file", "--log-path":
+		if ph, ok := argvPlaceholders[arg]; ok {
 			i++
-			placeholder := map[string]string{"--handoff-file": "<handoff>", "--prompt-file": "<prompt>", "--session-file": "<session>", "--log-path": "<stream-log>"}[arg]
 			if arg == "--handoff-file" {
 				handoff = s.Argv[i]
 			}
-			fmt.Fprintf(&b, "%s\n%s\n", arg, placeholder)
+			fmt.Fprintf(&b, "%s\n%s\n", arg, ph)
+			continue
+		}
+		switch arg {
 		case "--manifest-path":
 			i++
 			fmt.Fprintf(&b, "%s\n%s\n", arg, strings.Replace(s.Argv[i], outbox, "<outbox>", 1))
