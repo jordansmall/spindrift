@@ -241,35 +241,85 @@ func TestFake_OpenPRForBranch(t *testing.T) {
 	}
 }
 
-// The Fake, like the real adapters, no longer tracks draft state on the stored
-// PR, so MarkReadyCalls is the only thing this test can assert against.
-func TestFake_MarkReady(t *testing.T) {
-	f := forge.NewFake()
-	const branch = "agent/issue-7"
+func TestFake_MarkReadyMarkDraft(t *testing.T) {
 	const url = "https://github.com/o/r/pull/99"
-	f.SetPR(branch, forge.PR{URL: url})
-
-	if err := f.MarkReady(url); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// A scripted failure must surface and leave the draft state untouched.
+	cases := []struct {
+		name      string
+		seedDraft bool
+		script    func(f *forge.Fake) error
+		call      func(f *forge.Fake) error
+		calls     func(f *forge.Fake) []string
+		wantDraft bool
+		wantErr   bool
+	}{
+		{
+			name:      "MarkReady",
+			seedDraft: true,
+			call:      func(f *forge.Fake) error { return f.MarkReady(url) },
+			calls:     func(f *forge.Fake) []string { return f.MarkReadyCalls },
+			wantDraft: false,
+		},
+		{
+			name:      "MarkDraft",
+			call:      func(f *forge.Fake) error { return f.MarkDraft(url) },
+			calls:     func(f *forge.Fake) []string { return f.MarkDraftCalls },
+			wantDraft: true,
+		},
+		{
+			name:      "MarkReadyErr",
+			seedDraft: true,
+			script: func(f *forge.Fake) error {
+				f.MarkReadyErr = errors.New("gh pr ready: 502")
+				return f.MarkReadyErr
+			},
+			call:      func(f *forge.Fake) error { return f.MarkReady(url) },
+			wantDraft: true,
+			wantErr:   true,
+		},
+		{
+			name: "MarkDraftErr",
+			script: func(f *forge.Fake) error {
+				f.MarkDraftErr = errors.New("gh pr ready --undo: 502")
+				return f.MarkDraftErr
+			},
+			call:      func(f *forge.Fake) error { return f.MarkDraft(url) },
+			wantDraft: false,
+			wantErr:   true,
+		},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.SetPR("agent/issue-7", forge.PR{URL: url})
+			if tc.seedDraft {
+				f.SetDraft(url, true)
+			}
+			var scripted error
+			if tc.script != nil {
+				scripted = tc.script(f)
+			}
+			if got := f.IsDraft(url); got != tc.seedDraft {
+				t.Fatalf("IsDraft(%q) = %v before call, want %v", url, got, tc.seedDraft)
+			}
 
-	if len(f.MarkReadyCalls) != 1 || f.MarkReadyCalls[0] != url {
-		t.Fatalf("want MarkReadyCalls=[%q], got %v", url, f.MarkReadyCalls)
-	}
-}
-
-func TestFake_MarkDraft(t *testing.T) {
-	f := forge.NewFake()
-	const branch = "agent/issue-7"
-	const url = "https://github.com/o/r/pull/99"
-	f.SetPR(branch, forge.PR{URL: url})
-
-	if err := f.MarkDraft(url); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if len(f.MarkDraftCalls) != 1 || f.MarkDraftCalls[0] != url {
-		t.Fatalf("want MarkDraftCalls=[%q], got %v", url, f.MarkDraftCalls)
+			err := tc.call(f)
+			if tc.wantErr {
+				if !errors.Is(err, scripted) {
+					t.Fatalf("err = %v, want %v", err, scripted)
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if got := tc.calls(f); len(got) != 1 || got[0] != url {
+					t.Fatalf("want calls=[%q], got %v", url, got)
+				}
+			}
+			if got := f.IsDraft(url); got != tc.wantDraft {
+				t.Fatalf("IsDraft(%q) = %v after call, want %v", url, got, tc.wantDraft)
+			}
+		})
 	}
 }
 
