@@ -20,9 +20,9 @@ let
   launchgatesSrc = builtins.readFile ../../cmd/launcher/launchgates.go;
   doctorMainSrc = builtins.readFile ../../cmd/launcher/doctor.go;
 
-  # One mechanism, scan_files, shaped like nix/checks/gh-token-intervals.nix's
-  # check_symbol, drives all three rules below. Each rule names the writer
-  # identifiers permitted at its call sites (empty = none permitted);
+  # One mechanism, scan_files, drives all three rules below: a build-time grep
+  # of each .go file a rule hands it for write call sites. Each rule names the
+  # writer identifiers permitted at its call sites (empty = none permitted);
   # scan_files rejects every other writer. The identifiers are pinned
   # literally (w, checkW, stderr) rather than resolved through Go's type
   # system, so renaming one of those parameters is a loud false-fail — the
@@ -147,10 +147,11 @@ in
   # Each doctored source is built from the real source via replaceStrings
   # anchored on real text, so a rewrite of the anchored line surfaces as a
   # doctored == original no-op in checkDiffers below rather than silently
-  # testing nothing, the same shape gh-token-intervals.nix's own regression
-  # check uses. checkDiffers only proves at least one anchor match fired —
-  # replaceStrings replaces every occurrence, so a second unintended match
-  # elsewhere would not be caught by this guard.
+  # testing nothing, the same shape gh-token-intervals.nix's
+  # gh-token-intervals-pinned-in-action-regression uses. checkDiffers only
+  # proves at least one anchor match fired — replaceStrings replaces every
+  # occurrence, so a second unintended match elsewhere would not be caught
+  # by this guard.
   doctor-report-routing-regression =
     let
       leakFn = "\n\nfunc doctorReportRoutingLeak() {\n\tfmt.Fprintln(nil, \"leak\")\n}\n";
