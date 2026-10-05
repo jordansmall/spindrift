@@ -458,7 +458,9 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 // both an unregistered name and github/jira's own rows, whose resolved value
 // is "GITHUB" but whose Go zero value leaves the field unset.
 // renderBackendRegistryGo rejects a row that sets write/filer without read, so
-// the early return never drops a declared axis (issue #4183).
+// the early return never drops a declared axis (issue #4183); it also rejects
+// read without write, so a row past the early return always declares
+// TrackerAxisWrite and "" means a declared empty axis (issue #2673).
 func trackerAxisSignals(issueTracker string) (read, write, filer string) {
 	row, ok := backendByName(issueTracker)
 	if !ok || row.TrackerAxisRead == "" {
