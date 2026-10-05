@@ -1781,6 +1781,34 @@ func TestForgejoClient_Comments_UnpaginatedEndpointServesEveryCommentOnce(t *tes
 	}
 }
 
+// Forgejo's comment payload carries no author standing, so an unknown
+// association must fail closed.
+func TestForgejoClient_Comments_UnknownAssociationUntrusted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(forgejoCommentsPage(1, 2)))
+	}))
+	defer srv.Close()
+
+	fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+	cl, ok := fc.(forge.CommentLister)
+	if !ok {
+		t.Fatal("forgejoClient does not satisfy forge.CommentLister")
+	}
+	comments, err := cl.Comments("10")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	if len(comments) == 0 {
+		t.Fatal("Comments returned no comments, want at least one")
+	}
+	for i, c := range comments {
+		if c.Association != "" || forge.CommentTrusted(c) {
+			t.Fatalf("comments[%d] = %+v, want empty Association and untrusted", i, c)
+		}
+	}
+}
+
 // newForgejoLabelServer backs a single owner/repo Forgejo repository, answering
 // Probe, ListLabels, ListIssues (always empty, because doctor.Run's
 // recoverable-issue count, #2255, only needs somewhere to land) and CreateLabel
