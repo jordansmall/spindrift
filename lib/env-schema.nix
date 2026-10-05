@@ -175,6 +175,8 @@ in
     env = "DRIVER_BASH_TIMEOUT_MS";
     group = "agents";
     doc = "per-call Bash timeout in milliseconds (issue #4409): exported into the Box under the env var names the active Driver's registry entry declares in bashTimeoutEnv (claude: BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, the default and maximum a single Bash call may run); a Driver declaring none ignores it; unset exports nothing and the Driver keeps its own limits (claude: 10-minute maximum); a value that is not a positive integer is skipped with a warning in the Box log rather than exported";
+    # int-typed with no default, so the type cannot be inferred from `default`.
+    kind = "int";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "bashTimeoutMs";
@@ -746,10 +748,11 @@ in
     boxEnv = true;
   };
   maxBudgetUSD = {
-    # The default is a float, not the bare int 0: lib/flakeModule.nix infers the
-    # Consumer-facing option type from builtins.isInt, and types.int would
-    # reject the fractional caps this knob exists for. Falling through to
-    # types.str instead means a Consumer flake sets it quoted, e.g. "4.44".
+    # The default is a float, not the bare int 0: lib/flakeModule.nix takes the
+    # Consumer-facing option type from flagKind, which infers int from an int
+    # default, and types.int would reject the fractional caps this knob exists
+    # for. Falling through to types.str instead means a Consumer flake sets it
+    # quoted, e.g. "4.44".
     env = "MAX_BUDGET_USD";
     group = "dispatch";
     default = 0.0;

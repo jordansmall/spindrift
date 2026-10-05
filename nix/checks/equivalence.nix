@@ -441,6 +441,65 @@ in
         touch $out
       '';
 
+  # `agents.bashTimeoutMs` is an int knob with no schema default (issue #4420),
+  # so its option type comes from `kind = "int"`, not default inference: an
+  # unquoted int is accepted and still reaches the Box as a string, and the
+  # old quoted form is rejected by the declared option type itself.
+  flakemodule-int-kind-option =
+    let
+      evalConsumer =
+        value:
+        flake-parts.lib.mkFlake
+          {
+            inputs = {
+              inherit nixpkgs;
+              self = {
+                outPath = ../../.;
+              };
+            };
+          }
+          {
+            systems = [ system ];
+            debug = true;
+            imports = [ ../../lib/flakeModule.nix ];
+            perSystem.spindrift = {
+              infra.image.packages = p: [ p.hello ];
+              agents.bashTimeoutMs = value;
+            };
+          };
+      inherit (pkgs.lib) assertMsg;
+      accepted = evalConsumer 1800000;
+      # flake-parts `debug = true` exposes the perSystem options, so this is
+      # the real declared type, not a hand-built one.
+      spindriftOpts = accepted.allSystems.${system}.options.spindrift;
+      agentsOpts = spindriftOpts.agents;
+      optionType = (agentsOpts.type.getSubOptions [ ]).bashTimeoutMs.type;
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        defaults = {
+          driverBashTimeoutMs = 1800000;
+        };
+      };
+    in
+    assert assertMsg (optionType.check 1800000) "agents.bashTimeoutMs must accept an int";
+    assert assertMsg (
+      !optionType.check "1800000"
+    ) "agents.bashTimeoutMs = \"1800000\" (a string) must be rejected by the int option type";
+    pkgs.runCommand "flakemodule-int-kind-option"
+      {
+        moduleSpindrift = accepted.packages.${system}.spindrift;
+        directSpindrift = direct.spindrift;
+        doc = direct.internals.runInputDocumentFile;
+      }
+      ''
+        [ "$moduleSpindrift" = "$directSpindrift" ] \
+          || { echo "spindrift mismatch: $moduleSpindrift != $directSpindrift" >&2; exit 1; }
+        grep -q '"DRIVER_BASH_TIMEOUT_MS":"1800000"' "$doc" \
+          || { echo "DRIVER_BASH_TIMEOUT_MS=1800000 not baked in the input document" >&2; exit 1; }
+        touch $out
+      '';
+
   # ADR 0037 Pass 1 (issue #2179): the OLD settings.* / flat structural paths
   # must keep working through deprecation shims that forward via lib.warn. A
   # spread of knobs set via old paths must give byte-identical outputs to a

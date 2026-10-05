@@ -65,6 +65,6 @@ in
     butlerMaxPromotionsPerDay = 3;
     # A cold checks-inbox gate outruns the 10-minute stock Bash cap; 30 minutes
     # lets it finish in one blocking call (issue #4409).
-    driverBashTimeoutMs = "1800000";
+    driverBashTimeoutMs = 1800000;
   };
 }
