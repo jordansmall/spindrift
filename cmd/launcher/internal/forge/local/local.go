@@ -107,6 +107,7 @@ type LocalTracker struct {
 
 var _ forge.HostPostedIssueFiler = (*LocalTracker)(nil)
 var _ forge.HostPostedCommenter = (*LocalTracker)(nil)
+var _ forge.DemandCounter = (*LocalTracker)(nil)
 
 // NewLocalTracker returns a forge.IssueTracker backed by issue files in dir.
 // verdictLabels configures CompleteVerdict for the research dispatch kind, and
@@ -196,6 +197,21 @@ func (lt *LocalTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, er
 	want := lt.labels.Label(state)
 	return lt.listIssues(func(li localIssue) bool { return !li.frontmatter.Closed && li.frontmatter.State == want })
 }
+
+// demandProbeInterval is how often the daemon re-counts local demand: the
+// scan is an in-process directory read, so it can be far tighter than a
+// rate-limited API's.
+const demandProbeInterval = 20 * time.Second
+
+// CountReady implements forge.DemandCounter: the open Dispatchable issue
+// files, counted with the same predicate as ListIssues(Dispatchable).
+func (lt *LocalTracker) CountReady() (int, error) {
+	issues, err := lt.ListIssues(forge.Dispatchable)
+	return len(issues), err
+}
+
+// ProbeInterval implements forge.DemandCounter.
+func (lt *LocalTracker) ProbeInterval() time.Duration { return demandProbeInterval }
 
 // ListOpenIssues returns every non-closed issue file in dir whatever its state
 // marker, oldest created first.
