@@ -734,7 +734,10 @@ rec {
   # Every (obligation, branch) pair whose content is missing one of the
   # obligation's requiredSubstrings (issue #2699). Takes the content map as an
   # argument rather than reading each branch's `source`, so a test can prove
-  # the check really fails by handing it synthetic content.
+  # the check really fails by handing it synthetic content. Both sides are
+  # whitespace-collapsed before the match (issue #3815), so a rewrap cannot
+  # redden it; `missing` still carries the raw needle, which is what an
+  # author greps for.
   sharedObligationViolationsFor =
     obligations: contentBySource:
     builtins.concatMap (
@@ -742,8 +745,10 @@ rec {
       builtins.concatMap (
         branch:
         let
-          content = contentBySource.${branch.source} or "";
-          missing = builtins.filter (needle: !(hasInfix needle content)) obligation.requiredSubstrings;
+          content = builtinsCompat.oneLine (contentBySource.${branch.source} or "");
+          missing = builtins.filter (
+            needle: !(hasInfix (builtinsCompat.oneLine needle) content)
+          ) obligation.requiredSubstrings;
         in
         if missing == [ ] then
           [ ]
@@ -762,8 +767,10 @@ rec {
 
   # Obligations a prompt fragment must keep satisfying, so a rewrite cannot
   # silently drop a shared instruction the way commit-folding almost did
-  # (issue #2698, issue #2699). Only the literal requiredSubstrings are
-  # compared. `source` is the raw, unexpanded file.
+  # (issue #2698, issue #2699). Only the requiredSubstrings are compared,
+  # over a whitespace-collapsed copy of both sides; markdown emphasis and
+  # backticks are not stripped, so a needle must not straddle a `**...**` or
+  # backtick wrapper. `source` is the raw, unexpanded file.
   sharedObligations = [
     {
       id = "commit-folding";
