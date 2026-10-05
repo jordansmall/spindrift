@@ -149,3 +149,19 @@ func TestEnvGuards_ExemptDispatchStillRequiresTheRest(t *testing.T) {
 		})
 	}
 }
+
+func TestEnvGuards_GHTokenOptional(t *testing.T) {
+	env := workEnv()
+	delete(env, "GH_TOKEN")
+	if err := guardErr(env); err == nil || err.Error() != "GH_TOKEN is required" {
+		t.Errorf("no GH_TOKEN without opt-out: err = %v", err)
+	}
+	env["BOX_GH_TOKEN_OPTIONAL"] = "1"
+	if err := guardErr(env); err != nil {
+		t.Errorf("forgejo-style env without GH_TOKEN: err = %v", err)
+	}
+	delete(env, "REPO_SLUG")
+	if err := guardErr(env); err == nil || err.Error() != "REPO_SLUG (owner/repo) is required" {
+		t.Errorf("opt-out must keep REPO_SLUG required: err = %v", err)
+	}
+}
