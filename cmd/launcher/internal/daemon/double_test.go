@@ -91,6 +91,15 @@ type scriptedRunner struct {
 	onSelf    func(ctx context.Context, call int, revision string) error
 	onStart   func(ctx context.Context, req ChildRequest) error
 
+	// Demand scripting: demand/demandErr are set (and may change) during a
+	// test through setDemand/setDemandErr, so they live under mu with the
+	// call counters. onDemand fires before the scripted answer, outside mu,
+	// and may block to pin a probe's leader in place.
+	demand      map[Kind]Demand
+	demandErr   map[Kind]error
+	demandCalls map[Kind]int
+	onDemand    func(ctx context.Context, kind Kind)
+
 	mu           sync.Mutex
 	resolveCalls int
 	selfCalls    int
@@ -1098,4 +1107,89 @@ func TestTestClockOnSleepFires(t *testing.T) {
 	if fired != 2 {
 		t.Fatalf("onSleep fired %d times, want 2", fired)
 	}
+}
+
+// setDemand scripts kind's Demand answer from now on, clearing any scripted
+// error: Loop tests flip it mid-run to model a tracker gaining work.
+func (r *scriptedRunner) setDemand(kind Kind, ready int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.demand == nil {
+		r.demand = make(map[Kind]Demand)
+	}
+	r.demand[kind] = Demand{Ready: ready}
+	delete(r.demandErr, kind)
+}
+
+// setDemandErr makes kind's Demand fail with err (nil clears it).
+func (r *scriptedRunner) setDemandErr(kind Kind, err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.demandErr == nil {
+		r.demandErr = make(map[Kind]error)
+	}
+	if err == nil {
+		delete(r.demandErr, kind)
+		return
+	}
+	r.demandErr[kind] = err
+}
+
+// demandCount reports how many times Demand was called for kind.
+func (r *scriptedRunner) demandCount(kind Kind) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.demandCalls[kind]
+}
+
+// Demand answers from setDemand/setDemandErr: an unscripted kind has no
+// demand, never an error.
+func (r *scriptedRunner) Demand(ctx context.Context, kind Kind) (Demand, error) {
+	r.mu.Lock()
+	if r.demandCalls == nil {
+		r.demandCalls = make(map[Kind]int)
+	}
+	r.demandCalls[kind]++
+	hook := r.onDemand
+	r.mu.Unlock()
+	if hook != nil {
+		hook(ctx, kind)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if err := r.demandErr[kind]; err != nil {
+		return Demand{}, err
+	}
+	return r.demand[kind], nil
+}
+
+// pickKind is the test view of decide: the kind a free slot would start now.
+func (p *pool) pickKind() (Kind, bool) {
+	st, ok := p.decide(p.clk.Now()).(Start)
+	return st.Kind, ok
+}
+
+// markNoWork folds one no-work child result into the schedule and returns the
+// wait it gates for.
+func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
+	result := ChildEmpty
+	if jammed {
+		result = ChildJammed
+	}
+	var wait time.Duration
+	p.mutate(func(s *state) []Event {
+		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: result})
+		if v := s.sched.View(kind, now); v.Gated {
+			wait = v.Until.Sub(now)
+		}
+		return nil
+	})
+	return wait
+}
+
+// gateOf is the test view of a kind's gate: the instant it ends, and whether
+// it is gated at now.
+func (p *pool) gateOf(kind Kind, now time.Time) (time.Time, bool) {
+	v := p.st.sched.View(kind, now)
+	return v.Until, v.Gated
 }

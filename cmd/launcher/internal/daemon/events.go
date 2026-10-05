@@ -47,6 +47,9 @@ type Event struct {
 	// the event names the transition without cross-referencing an earlier
 	// backoff event.
 	Failures *int `json:"failures,omitempty"`
+	// Ready is demand_appeared/demand_drained's count of startable items the
+	// probe found. A pointer so a drained event's 0 survives omitempty.
+	Ready *int `json:"ready,omitempty"`
 }
 
 // eventWire is Event's JSON shape: eventFields sheds Event's methods so

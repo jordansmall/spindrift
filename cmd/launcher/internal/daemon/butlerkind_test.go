@@ -238,7 +238,7 @@ func TestPoolButlerBackoffGrowsIndependently(t *testing.T) {
 		}
 		// Dispatch resetting in between must never touch butler's own streak.
 		p.resetKind(KindOf(dispatchkind.Work))
-		if until, gated := p.st.kinds[KindOf(dispatchkind.Work)].readyAt(clk.Now()); gated || !until.IsZero() {
+		if until, gated := p.gateOf(KindOf(dispatchkind.Work), clk.Now()); gated || !until.IsZero() {
 			t.Fatalf("dispatch readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
 		}
 	}

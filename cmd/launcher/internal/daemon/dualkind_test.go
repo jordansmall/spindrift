@@ -312,7 +312,7 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 // TestPoolResearchGateLandsBeforeBatonPasses pins the ordering behind the
 // burst test above: a Wait child's kind-state fold (the "idle" event from
 // noteWaitResult) must reach the stream before the baton_pass that wakes a
-// parked sibling. Passing first lets the sibling's chooseKind see research
+// parked sibling. Passing first lets the sibling's Schedule.Decide see research
 // still ungated and below its reservation, start a second research child, and
 // flake that test (issue #4380).
 func TestPoolResearchGateLandsBeforeBatonPasses(t *testing.T) {
@@ -619,7 +619,7 @@ func TestPoolPerKindBackoffGrowsIndependently(t *testing.T) {
 		// Research dispatching (Continue -> reset) between each of dispatch's
 		// empty checks must never touch dispatch's own streak.
 		p.resetKind(KindOf(dispatchkind.Research))
-		if until, gated := p.st.kinds[KindOf(dispatchkind.Research)].readyAt(clk.Now()); gated || !until.IsZero() {
+		if until, gated := p.gateOf(KindOf(dispatchkind.Research), clk.Now()); gated || !until.IsZero() {
 			t.Fatalf("research readyAt() = (%v, %v) after reset, want (zero, false)", until, gated)
 		}
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"time"
 
@@ -64,6 +65,9 @@ type Runner interface {
 	// "absent" answer for --feature-branch — means the fetch itself
 	// failed and the returned Tip is the zero value.
 	ResolveTip(ctx context.Context) (Tip, error)
+	// Demand counts the startable items a child of kind could claim. Only
+	// asked for a kind with a Config.ProbeIntervals entry (ADR 0059).
+	Demand(ctx context.Context, kind Kind) (Demand, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
 }
 
@@ -178,6 +182,14 @@ type Config struct {
 	IdleFloor time.Duration
 	IdleCap   time.Duration
 
+	// ProbeIntervals names the kinds the pool schedules from tracker Demand
+	// rather than child exits (ADR 0059), and how often each is re-probed.
+	// A kind absent or at 0 stays exit-driven: its empty/jammed exits back it
+	// off exactly as IdleFloor/IdleCap describe. For a probed kind those
+	// bounds govern only its jam gate. Every key must be in Kinds and every
+	// interval non-negative.
+	ProbeIntervals map[Kind]time.Duration
+
 	// FailureBackoff is how long a slot sleeps before refilling itself
 	// after an unclassified failure (an unrecognised exit code, a
 	// RunChild seam error, or a ResolveTip error): the bad
@@ -203,7 +215,7 @@ type Config struct {
 }
 
 // Loop runs cfg.Slots slot goroutines, each independently driving children of
-// whichever configured Dispatch kind it currently picks (pickKind, pool.go)
+// whichever configured Dispatch kind it currently picks (Schedule.Decide, schedule.go)
 // through the same state machine, until something says halt: a
 // Halt-mapped exit code, the pool-wide breaker tripping, or a cancelled
 // ctx. Whichever slot halts first wins — Loop emits exactly one halt event
@@ -251,6 +263,19 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 			return invalidConfig(em, cfg, fmt.Sprintf("duplicate kind %q", k))
 		}
 		seenKinds[k] = true
+	}
+	probed := make([]Kind, 0, len(cfg.ProbeIntervals))
+	for k := range cfg.ProbeIntervals {
+		probed = append(probed, k)
+	}
+	sort.Slice(probed, func(i, j int) bool { return probed[i] < probed[j] })
+	for _, k := range probed {
+		if !seenKinds[k] {
+			return invalidConfig(em, cfg, fmt.Sprintf("probe interval for kind %q, which is not in kinds", k))
+		}
+		if d := cfg.ProbeIntervals[k]; d < 0 {
+			return invalidConfig(em, cfg, fmt.Sprintf("probe interval for kind %q must be non-negative, got %s", k, d))
+		}
 	}
 	if cfg.ResearchReservation < 0 || cfg.ResearchReservation > cfg.Slots {
 		return invalidConfig(em, cfg, fmt.Sprintf("research reservation must be between 0 and slots (%d), got %d", cfg.Slots, cfg.ResearchReservation))
@@ -341,11 +366,11 @@ func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 // is how the pool tells every slot to stop promptly, including one asleep
 // in clk.Sleep or blocked inside ResolveTip.
 //
-// All waiting lives at the top of the loop, via pickKind/idleSleep, rather
+// All waiting lives at the top of the loop, via Decide/idleSleep, rather
 // than inline in the Wait case below: with two kinds sharing a slot, a Wait
 // on one kind must never sleep in place, since "an empty work queue does not
 // slow research down" (issue #3541) — the Wait case only records the no-work
-// result and loops back around, and it is the next pickKind that decides
+// result and loops back around, and it is the next Decide that decides
 // whether that means switching kinds or genuinely idling.
 func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// The catch-all for every return: whatever route a round ends by (a
@@ -364,12 +389,13 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// wantResolve carries idleSleep's return across the loop: set when a
 	// jammed kind's wait outlived its first IdleFloor slice (idleSleep,
 	// pool.go), it asks the next round to make one opportunistic resolution
-	// before pickKind, rather than idleSleep polling internally — the
+	// before Decide, rather than idleSleep polling internally — the
 	// restart in between passes through awaitWindow and awaitBaton, either
 	// of which can block for hours, so a Tip resolved before that wait
 	// could be stale by the time it reopens; only the request to
 	// re-resolve survives, not the resolution itself.
 	var wantResolve bool
+slotLoop:
 	for {
 		// The pool's admission check (issue #3626), re-asked once after
 		// awaitBaton below: with cfg.Stop riding every ChildRequest, a child
@@ -382,10 +408,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		p.awaitWindow(ctx, slot)
 
 		// The opportunistic resolution idleSleep's return asked for, made
-		// before pickKind so a newly unblocked kind (noteTipMoved resets its
-		// backoff) is visible to pickKind in this same round. A failure
+		// before Decide so a newly unblocked kind (noteTipMoved resets its
+		// backoff) is visible to Decide in this same round. A failure
 		// here is swallowed inside resolveOpportunistic itself: haveTip
-		// stays false and the ordinary post-pickKind resolve below is left
+		// stays false and the ordinary post-Decide resolve below is left
 		// to report a genuinely broken fetch.
 		var tip Tip
 		var haveTip bool
@@ -396,26 +422,45 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			}
 		}
 
-		// kind is provisional until startChild re-chooses it below: the
+		// kind is provisional until startChild re-decides it below: the
 		// resolve-failure and halt paths in between label this one.
-		kind, ok := p.pickKind()
-		if !ok {
-			// Every configured kind has backed off into an empty result:
-			// this is the daemon genuinely idling, not merely a kind this
-			// slot happens not to prefer right now. A slot must never sleep
-			// out an idle wait holding the baton.
-			//
-			// The explicit setPhase matters here: idleSleep publishes no
-			// phase of its own, and a resolveOpportunistic call just above
-			// can have left this slot PhaseResolving, so a sleeping slot
-			// would otherwise read as "resolving" in the status file. The
-			// window is open by the time pickKind runs, so idle is the
-			// right phase to park in, the same one runSlot's own deferred
-			// setPhase resets to on every other exit.
-			p.setPhase(slot, PhaseIdle)
-			p.passBaton(slot, batonPassIdle)
-			wantResolve = p.idleSleep(ctx, slot)
-			continue
+		//
+		// The window is open and this slot is free, so this is the one place
+		// a probe may run: never while the window is shut (awaitWindow above;
+		// probe re-checks it before each kind) and never for a slot that is
+		// busy running a child.
+		var kind Kind
+	decide:
+		for {
+			switch d := p.decide(p.clk.Now()).(type) {
+			case Start:
+				kind = d.Kind
+				break decide
+			case Probe:
+				switch p.probe(ctx, slot, d.Kinds) {
+				case probeHalted:
+					return
+				case probeRetop:
+					continue slotLoop
+				}
+			default:
+				// Nothing is startable or due a probe: this is the daemon
+				// genuinely idling, not merely a kind this slot happens not to
+				// prefer right now. A slot must never sleep out an idle wait
+				// holding the baton.
+				//
+				// The explicit setPhase matters here: idleSleep publishes no
+				// phase of its own, and a resolveOpportunistic call just above
+				// can have left this slot PhaseResolving, so a sleeping slot
+				// would otherwise read as "resolving" in the status file. The
+				// window is open by the time Decide runs, so idle is the
+				// right phase to park in, the same one runSlot's own deferred
+				// setPhase resets to on every other exit.
+				p.setPhase(slot, PhaseIdle)
+				p.passBaton(slot, batonPassIdle)
+				wantResolve = p.idleSleep(ctx, slot)
+				continue slotLoop
+			}
 		}
 
 		if !haveTip {
@@ -477,7 +522,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		}
 
 		// Acquired here, not before the resolve: the baton is a discovery
-		// token, and neither pickKind nor ResolveTip discovers anything —
+		// token, and neither Decide nor ResolveTip discovers anything —
 		// they just pick a kind and learn the tip. Acquiring it earlier
 		// would serialize the tip resolutions the single-flight in
 		// ResolveTip exists to coalesce (issue #3625). Apart from the
@@ -507,7 +552,13 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			continue
 		}
 
-		kind = p.startChild(slot, kind, revision)
+		kind, started := p.startChild(slot, kind, revision)
+		if !started {
+			// Outpaced while parked on the baton: nothing is startable now,
+			// so decide again (probe or park) instead of spawning.
+			p.passBaton(slot, batonPassOutpaced)
+			continue
+		}
 		req := ChildRequest{
 			Slot:     slot,
 			Kind:     kind,
@@ -546,7 +597,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 		// sibling start a child on a pool about to stop (issue #4365).
 		// child_finish still precedes the halt. Continue/Wait pass after
 		// folding the result into the kind's backoff state too, so a woken
-		// sibling's chooseKind never sees a gate this child already earned
+		// sibling's Decide never sees a gate this child already earned
 		// as still open (issue #4380).
 		if err != nil {
 			// The seam failed, not the child (e.g. it could not even be
@@ -597,8 +648,8 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 			// instants.
 			p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable)
 			p.passBaton(slot, batonPassChildEnded)
-			// No sleep here: this kind is now gated until its markNoWork
-			// deadline, and the top of the loop's pickKind/idleSleep decides
+			// No sleep here: this kind is now gated until its gate
+			// deadline, and the top of the loop's Decide/idleSleep decides
 			// whether that means switching to the other kind at once or
 			// genuinely idling.
 			continue
