@@ -699,7 +699,7 @@ in
   # skill fails here rather than drifting silently.
   prompt-code-comments-inlined = pkgs.runCommand "prompt-code-comments-inlined" { } ''
     skill=${codeCommentsSkillSource}
-    policy=$(awk 'seen >= 2 { print } /^---$/ && seen < 2 { seen++ }' "$skill" \
+    policy=$(awk 'seen >= 2 { print } /^---$/ { seen++ }' "$skill" \
       | tr -s '[:space:]' ' ' | sed -e 's/^ *//' -e 's/ *$//')
     [ -n "$policy" ] || {
       echo "SKILL.md yielded an empty policy body -- missing its second '---' frontmatter delimiter?" >&2
