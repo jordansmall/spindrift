@@ -66,6 +66,7 @@ func parseFlags(args []string, stderr io.Writer) (inputs, error) {
 	fs.StringVar(&in.DriverBashTimeoutEnv, "driver-bash-timeout-env", "", "DRIVER_BASH_TIMEOUT_ENV, the env var names the timeout is exported under")
 	fs.StringVar(&in.DevShellName, "dev-shell-name", "", "DEV_SHELL_NAME, exported for the devShell probe")
 	fs.StringVar(&in.DevShellProbeTimeout, "dev-shell-probe-timeout", "", "DEV_SHELL_PROBE_TIMEOUT, exported for the devShell probe")
+	fs.StringVar(&in.RunStateFile, "run-state-file", "", "path to the run-state file the backstop reads the reviewer's last verdict from")
 	fs.StringVar(&in.ForbiddenMarkersFile, "forbidden-markers-registry", "", "path to the prompt-contract forbiddenMarkers registry JSON file, read by the read-only guards")
 	fs.StringVar(&a.RegistryFile, "registry", "", "path to the fragment registry JSON file")
 	fs.StringVar(&a.ValidateMarkersFile, "validate-markers-registry", "", "path to the prompt-contract validateMarkers registry JSON file")

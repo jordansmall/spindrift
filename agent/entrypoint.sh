@@ -5,6 +5,8 @@
 # would change the Driver's environment.
 set -euo pipefail
 
+# The --run-state-file path mirrors the orchestrator's own
+# --state-file default (issue #1997).
 exec box \
   --work-dir "${WORK_DIR:-}" \
   --outbox-dir "${OUTBOX_DIR:-}" \
@@ -39,4 +41,5 @@ exec box \
   --driver-flags "$DRIVER_FLAGS_COMMON" \
   --heartbeat-log "${HEARTBEAT_LOG:-}" \
   --max-budget-tokens "${MAX_BUDGET_TOKENS:-0}" \
-  --max-budget-usd "${MAX_BUDGET_USD:-0}"
+  --max-budget-usd "${MAX_BUDGET_USD:-0}" \
+  --run-state-file /tmp/run-state.json

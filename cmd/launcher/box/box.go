@@ -38,10 +38,6 @@ const (
 	prIntentNudgeCap = 1
 )
 
-// runStateFile mirrors the orchestrator's own --state-file default (issue
-// #1997); a missing file degrades inside the backstop (issue #2459).
-const runStateFile = "/tmp/run-state.json"
-
 // inputs are the facts entrypoint.sh holds when it hands over.
 type inputs struct {
 	WorkDir   string
@@ -65,6 +61,10 @@ type inputs struct {
 	OperatorSkillsDir     string
 	HarnessHomeAgentDir   string
 	DriverSessionCacheDir string
+	// RunStateFile is the run-state handoff artifact the backstop reads the
+	// reviewer's last verdict from; a missing file degrades inside the
+	// backstop (issue #2459).
+	RunStateFile string
 }
 
 type deps struct {
@@ -474,7 +474,7 @@ func (r *boxRun) backstopConfig(recoveryAttempted bool) (outcomebackstop.Config,
 		Backoff:            time.Duration(knobs[1]) * time.Second,
 		Jitter:             time.Duration(knobs[2]) * time.Second,
 		Clock:              retry.RealClock(),
-		RunStateFilePath:   runStateFile,
+		RunStateFilePath:   r.in.RunStateFile,
 	}, nil
 }
 

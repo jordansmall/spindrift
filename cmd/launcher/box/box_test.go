@@ -136,6 +136,7 @@ func newFixture(t *testing.T) *fixture {
 		OutboxDir:            filepath.Join(dir, "outbox"),
 		ForbiddenMarkersFile: filepath.Join(dir, "forbidden-markers.json"),
 		BranchPrefix:         "agent/issue-",
+		RunStateFile:         filepath.Join(dir, "run-state.json"),
 	}
 	f.in.Assembly.SkillsDir = filepath.Join(dir, "driver-skills")
 	if err := os.MkdirAll(f.knobs["HOME"], 0o755); err != nil {
@@ -552,7 +553,7 @@ func TestBackstop_ConfigMapping(t *testing.T) {
 		MaxAttempts:        3,
 		Backoff:            2e9,
 		Jitter:             1e9,
-		RunStateFilePath:   "/tmp/run-state.json",
+		RunStateFilePath:   f.in.RunStateFile,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("backstop config = %+v, want %+v", got, want)
@@ -1449,6 +1450,7 @@ func allFlags() []string {
 		"--driver-session-cache-dir=/session-cache", "--branch-prefix=agent/issue-",
 		"--driver-bash-timeout-ms=600000", "--driver-bash-timeout-env=A B",
 		"--dev-shell-name=ci", "--dev-shell-probe-timeout=300",
+		"--run-state-file=/run-state.json",
 	}
 }
 
@@ -1462,6 +1464,7 @@ func TestParseFlags_AllSupplied(t *testing.T) {
 		OutboxDir:             "/o",
 		ForbiddenMarkersFile:  "/forbidden.json",
 		DriverSessionCacheDir: "/session-cache",
+		RunStateFile:          "/run-state.json",
 		BranchPrefix:          "agent/issue-",
 		DriverBashTimeoutMS:   "600000",
 		DriverBashTimeoutEnv:  "A B",
