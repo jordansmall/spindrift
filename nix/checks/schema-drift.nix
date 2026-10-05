@@ -586,6 +586,7 @@ checkedMerge {
         name = "synthetic";
         goVar = "Synthetic";
         trackerAxisRead = "LOCAL";
+        trackerAxisWrite = "FORGEJO";
       };
       controlResult = builtins.tryEval (renderers.renderBackendRegistryGo [ controlRow ]);
       inherit (renderers) backendRegistryForbiddenEmptyFields;
@@ -609,7 +610,11 @@ checkedMerge {
   # checkRow must reject a row that sets trackerAxisWrite or trackerAxisFiler
   # without trackerAxisRead, since cmd/launcher's trackerAxisSignals drops both
   # on such a row (issue #4183). The full-axes row proves the rejection keys on
-  # the missing read, so the negative cases are not vacuous.
+  # the missing read, so the negative cases are not vacuous. checkRow also
+  # rejects the converse, trackerAxisRead without trackerAxisWrite, since
+  # mkHarness.nix would default the omitted write to "GITHUB" while cmd/launcher
+  # reads it as-is (issue #2673); a synthetic row in local's shape, with an
+  # explicit "", is the control.
   backend-registry-axis-read-guard =
     let
       inherit (pkgs.lib) assertMsg;
@@ -620,6 +625,14 @@ checkedMerge {
       render = row: builtins.tryEval (renderers.renderBackendRegistryGo [ row ]);
       writeOnly = render (bareRow // { trackerAxisWrite = "FORGEJO"; });
       filerOnly = render (bareRow // { trackerAxisFiler = "FORGEJO"; });
+      readOnly = render (bareRow // { trackerAxisRead = "LOCAL"; });
+      readWithEmptyWrite = render (
+        bareRow
+        // {
+          trackerAxisRead = "LOCAL";
+          trackerAxisWrite = "";
+        }
+      );
       fullAxes = render (
         bareRow
         // {
@@ -631,6 +644,10 @@ checkedMerge {
     in
     assert assertMsg (!writeOnly.success && !filerOnly.success)
       "backend-registry-axis-read-guard (issue #4183): renderBackendRegistryGo must reject a row that sets trackerAxisWrite or trackerAxisFiler without trackerAxisRead (write-only rendered: ${builtins.toJSON writeOnly.success}, filer-only rendered: ${builtins.toJSON filerOnly.success})";
+    assert assertMsg (!readOnly.success)
+      "backend-registry-axis-read-guard (issue #2673): renderBackendRegistryGo must reject a row that sets trackerAxisRead without trackerAxisWrite (read-only rendered: ${builtins.toJSON readOnly.success})";
+    assert assertMsg readWithEmptyWrite.success
+      "backend-registry-axis-read-guard (issue #2673): a row setting trackerAxisRead with an explicit trackerAxisWrite = \"\" (local's shape) must still render successfully, but it failed";
     assert assertMsg fullAxes.success
       "backend-registry-axis-read-guard (issue #4183): a row setting trackerAxisRead, trackerAxisWrite, and trackerAxisFiler must still render successfully, but it failed";
     pkgs.runCommand "backend-registry-axis-read-guard" { } "touch $out";
