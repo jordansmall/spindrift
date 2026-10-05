@@ -69,6 +69,7 @@ let
     // (import ./mk-fragment-parity-rejects.nix common)
     // (import ./nix-checks-lore-parity.nix common)
     // (import ./scout-rationale-parity.nix common)
+    // (import ./scout-rationale-parity-rejects.nix common)
     // (import ./code-review-fragment-parity.nix common)
     // (import ./prompt-contract.nix common)
     // (import ./prompt-contract-parity.nix common)
