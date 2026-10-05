@@ -243,8 +243,10 @@ with the flag/settings equivalent when it finds one — but env's role shrinks
 to secrets and internal launcher→Box plumbing from here on; see
 [`MIGRATING.md`](../MIGRATING.md).
 A set-but-empty bool knob (e.g. `--auto-format=false`, or `AUTO_FORMAT=` in the
-env) is an explicit off that beats a document value of on; for every other knob
-an empty env value still means unset (issue #4290).
+env) is an explicit off that beats a document value of on. One rule decides it:
+a knob's empty value counts as set when its kind is bool or its schema entry
+declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`); for every other knob an
+empty env value still means unset (issues #4290, #4398).
 `spindrift --help` stays scannable; the full generated table lives in
 `man spindrift` (and `spindrift --help --all` for the same thing in the
 terminal). Bare `spindrift` with no subcommand — or an unrecognized

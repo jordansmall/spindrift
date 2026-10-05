@@ -122,6 +122,27 @@ func TestWarnAmbientKnobEnv_SetButEmptyBoolKnob_Warns(t *testing.T) {
 	}
 }
 
+// An emptyDisables string knob's "" is a real setting (it disables the limit),
+// so it owes the ADR 0020 warning like a bool knob's explicit off.
+func TestWarnAmbientKnobEnv_EmptyDisablesKnobSetEmpty_Warns(t *testing.T) {
+	orig := schemaFlags
+	t.Cleanup(func() { schemaFlags = orig })
+	schemaFlags = []flagEntry{
+		{env: "MEMORY_LIMIT", flag: "memory-limit", settingsPath: "box.memoryLimit", emptyDisables: true},
+	}
+	t.Setenv("MEMORY_LIMIT", "")
+
+	var buf bytes.Buffer
+	warnAmbientKnobEnv(&buf)
+
+	out := buf.String()
+	for _, want := range []string{`MEMORY_LIMIT=""`, "box.memoryLimit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("warning = %q, want it to mention %q", out, want)
+		}
+	}
+}
+
 func TestWarnAmbientKnobEnv_SetButEmptyNonBoolKnob_NoWarning(t *testing.T) {
 	orig := schemaFlags
 	t.Cleanup(func() { schemaFlags = orig })

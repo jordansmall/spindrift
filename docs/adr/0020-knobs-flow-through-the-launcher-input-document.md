@@ -122,3 +122,10 @@ schema knob that rule is relaxed: set-but-empty (what `--orchestrator=false`
 or `AUTO_FORMAT=` produces) is an explicit off and beats a document value of
 on and the schema default, in the launcher and in the Box defaults preamble.
 Every other knob still treats an empty env value as unset.
+
+## Amendment (issue #4398): one rule for set-but-empty
+
+The #4290 relaxation is a single rule, `flagEntry.emptyIsSetting()`: a knob's
+set-but-empty env counts as set when its kind is bool or its schema entry
+declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`). Every other knob still
+treats an empty env value as unset.

@@ -120,10 +120,12 @@ let
       hostDerivedExcluded = filter (
         e: (e.hostDerived or false) && ((e.secret or false) || (e.boxEnvOnly or false))
       ) entries;
-      # emptyDisables is string-knobs-only and nothing else enforces that: the
-      # schemaConfig loaderLine cascade (lib/renderers.nix) checks
-      # bool/int/float/secret/hostDerived before consulting emptyDisables, so
-      # on those it would be silently ignored rather than rejected.
+      # emptyDisables is string-knobs-only and nothing else enforces that: on a
+      # bool knob it is redundant with the bool rule, and on an
+      # int/float/secret/hostDerived knob flagEmptyDisables still emits it, so
+      # flagEntry.emptyIsSetting would drive the deprecation warning and
+      # resolveBoxEnvVar while the schemaConfig loaderLine cascade
+      # (lib/renderers.nix) loads that knob without consulting an empty value.
       emptyDisablesOnNonString = filter (
         e:
         (e.emptyDisables or false)
