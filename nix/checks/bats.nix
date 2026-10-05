@@ -74,9 +74,8 @@ let
     # registry tests/entrypoint-shim.bats reads: the same bytes the Go seam
     # tests read. helper.bash derives the per-file vars from this dir.
     SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
-    # The binaries and rendered registries entrypoint.sh hands box (see
+    # The rendered registries entrypoint.sh hands box (see
     # comment above promptassemblyRegistryJsonFile).
-    BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;
     FORBIDDEN_MARKERS_REGISTRY_FILE = forbiddenMarkersRegistryJsonFile;
