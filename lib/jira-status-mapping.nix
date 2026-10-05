@@ -27,6 +27,8 @@ let
       throw ''JIRA_STATUS_MAPPING: unknown key "${builtins.head unknown}" (want one of ${builtins.concatStringsSep ", " validKeys})'';
 in
 {
+  inherit validKeys;
+
   # The empty string is the schema default and yields an empty mapping, as
   # ParseStatusMapping does. A malformed value fails the build loudly, the way
   # the launcher fails at startup.
