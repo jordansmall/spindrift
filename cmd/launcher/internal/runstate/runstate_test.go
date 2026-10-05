@@ -377,3 +377,30 @@ func TestRunStateIsEmpty(t *testing.T) {
 		}
 	}
 }
+
+func TestReadRunStateFoundReportsExistence(t *testing.T) {
+	dir := t.TempDir()
+	present := filepath.Join(dir, "run-state.json")
+	if err := WriteRunState(present, RunState{LastVerdict: "BLOCK"}); err != nil {
+		t.Fatalf("WriteRunState: %v", err)
+	}
+	for _, tc := range []struct {
+		name, path string
+		found      bool
+		verdict    string
+	}{
+		{"empty path", "", false, ""},
+		{"absent", filepath.Join(dir, "absent.json"), false, ""},
+		{"present", present, true, "BLOCK"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, found, err := ReadRunStateFound(tc.path)
+			if err != nil {
+				t.Fatalf("ReadRunStateFound: %v", err)
+			}
+			if found != tc.found || got.LastVerdict != tc.verdict {
+				t.Errorf("got (verdict=%q, found=%v), want (%q, %v)", got.LastVerdict, found, tc.verdict, tc.found)
+			}
+		})
+	}
+}

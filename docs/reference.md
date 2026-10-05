@@ -2674,6 +2674,17 @@ precedes the first `:` that itself precedes the first `=`.
 only the file read and the `<pass>`-name check are deferred to a run that
 sets `--composition-output`.
 
+`--run-state <path>` derives those blocks from the orchestrator's run-state
+file (the Box's `--run-state-file`) instead of hand-extracted text: the
+handoff block rides on `implement`, `fix`, and `land` as `run-state-handoff`,
+the review block on `review` as `run-state-review`, each only when the
+state yields one. `delta-review` gets nothing from it — its seeder also needs
+land-delta and trigger data the file does not hold — so carry that one with
+`--composition-carried`. Derived blocks precede manual ones in `Sources`. A
+missing file reads as an empty state; a corrupt one fails the invocation
+(exit 1). Like `--composition-carried`, it is read only when
+`--composition-output` is set.
+
 ```sh
 driver-exec assemble-prompt \
   --prompts-dir ./prompts \

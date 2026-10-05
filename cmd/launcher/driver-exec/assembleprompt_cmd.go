@@ -9,7 +9,10 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/runstate"
+	"spindrift.dev/launcher/internal/seedblock"
 )
 
 // carriedTextSpec is one parsed --composition-carried value. Set checks the
@@ -76,7 +79,7 @@ func isAssemblePromptInvocation(args []string) bool {
 // runAssemblePrompt is the `assemble-prompt` subcommand's CLI wrapper and
 // returns the process exit code. Keep it thin: the real work belongs in
 // promptassembly (ADR 0007's thin-exec-glue tier, issue #2349).
-func runAssemblePrompt(args []string, stdout io.Writer) int {
+func runAssemblePrompt(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("assemble-prompt", flag.ContinueOnError)
 	fs.SetOutput(stdout)
 
@@ -116,6 +119,7 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	compositionOutput := fs.String("composition-output", "", "path to write promptassembly.Compose's report as JSON, or '-' for stdout; empty (default) skips composition reporting entirely")
 	var compositionCarried carriedTextFlag
 	fs.Var(&compositionCarried, "composition-carried", "[<pass>:]<name>=<path> carried-text block fed to Compose (repeatable); only meaningful with --composition-output")
+	runStatePath := fs.String("run-state", "", "orchestrator run-state file (the Box's --run-state-file) whose handoff and review blocks are carried into the composition report; only meaningful with --composition-output")
 
 	// Assemble never reads the flags below; they pass straight through into
 	// result.Handoff after it returns (issue #2975).
@@ -244,7 +248,21 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	// here cannot cost the real prompt, agents, handoff, or review-prompt
 	// files (issue #3444 slice 3).
 	if *compositionOutput != "" {
-		var carried []promptassembly.CarriedText
+		state, found, err := runstate.ReadRunStateFound(*runStatePath)
+		if err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt: read --run-state file:", err)
+			return 1
+		}
+		if *runStatePath != "" && !found {
+			fmt.Fprintf(stderr, "driver-exec assemble-prompt: --run-state file %s not found; reporting no run-state sources\n", *runStatePath)
+		}
+		passes, err := promptassembly.Passes(env, registry)
+		if err != nil {
+			fmt.Fprintln(fs.Output(), "driver-exec assemble-prompt:", err)
+			return 1
+		}
+		// Derived blocks first, so Sources lists them ahead of the manual ones.
+		carried := runStateCarried(state, passes)
 		for _, spec := range compositionCarried {
 			text, err := os.ReadFile(spec.path)
 			if err != nil {
@@ -278,4 +296,35 @@ func runAssemblePrompt(args []string, stdout io.Writer) int {
 	}
 
 	return 0
+}
+
+const (
+	runStateHandoffBlock = "run-state-handoff"
+	runStateReviewBlock  = "run-state-review"
+)
+
+// runStateCarried is the carried text the orchestrator would append from
+// state, one entry per rendered pass it seeds: review gets the review block,
+// every other pass the handoff block (the legacy loop seeds each of its passes
+// that way, including the single legacy or kind pass of a cell with no review
+// prompt). delta-review is deliberately absent: its seeder also needs
+// land-delta and trigger data that RunState does not hold, so
+// --composition-carried remains the way to report it.
+func runStateCarried(state runstate.RunState, passes []string) []promptassembly.CarriedText {
+	handoff, review := seedblock.Handoff(state), seedblock.Review(state)
+	var carried []promptassembly.CarriedText
+	for _, pass := range passes {
+		switch pass {
+		case passmachine.KindDeltaReview.ManifestKind():
+		case passmachine.KindReview.ManifestKind():
+			if review != "" {
+				carried = append(carried, promptassembly.CarriedText{Pass: pass, Name: runStateReviewBlock, Text: review})
+			}
+		default:
+			if handoff != "" {
+				carried = append(carried, promptassembly.CarriedText{Pass: pass, Name: runStateHandoffBlock, Text: handoff})
+			}
+		}
+	}
+	return carried
 }

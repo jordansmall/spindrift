@@ -31,7 +31,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return runMarkerGate(argv[1:], stdout)
 	}
 	if isAssemblePromptInvocation(argv) {
-		return runAssemblePrompt(argv[1:], stdout)
+		return runAssemblePrompt(argv[1:], stdout, stderr)
 	}
 	if isReadonlyGuardsInvocation(argv) {
 		return runReadonlyGuards(argv[1:], stdout)
