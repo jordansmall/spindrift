@@ -193,7 +193,7 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 			n, _ := strconv.Atoi(id)
 			out[i] = map[string]any{"number": n}
 		}
-		json.NewEncoder(w).Encode(out)
+		json.NewEncoder(w).Encode(windowPage(r, out))
 		return
 
 	case r.Method == http.MethodGet && issueBlocksRe.MatchString(r.URL.Path):
