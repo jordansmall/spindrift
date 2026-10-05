@@ -3937,6 +3937,38 @@ func TestBuildArgs_PrefetchSetenv(t *testing.T) {
 	}
 }
 
+// An unreadable PrefetchFile logs its fallback diagnostic once per adapter, not
+// once per launch (issue #3356), while every launch still renders the baked
+// value; a different unreadable file is a different generation and logs again.
+// Not parallel: captureStderrDuring swaps the global os.Stderr.
+func TestBuildArgs_PrefetchFallbackLoggedOncePerFile(t *testing.T) {
+	const diagnostic = "unreadable, falling back"
+	a := &bwrapAdapter{agentFiles: "/fake/agent", agentEnv: "/fake/env", bakedPrefetch: "echo baked", networkMode: NetworkModeHost}
+	launch := func(prefetchFile string) string {
+		box := Box{Env: map[string]string{}, ClosureGeneration: &AgentGeneration{AgentFiles: "/swapped/agent", AgentEnv: "/swapped/env", PrefetchFile: prefetchFile, Generation: "swapped"}}
+		var got string
+		logged := captureStderrDuring(t, func() {
+			got = setenvValue(t, a.buildArgs("", box), "PREFETCH")
+		})
+		if got != "echo baked" {
+			t.Errorf("--setenv PREFETCH = %q, want baked fallback", got)
+		}
+		return logged
+	}
+	first := filepath.Join(t.TempDir(), "missing-a")
+	second := filepath.Join(t.TempDir(), "missing-b")
+
+	if n := strings.Count(launch(first), diagnostic); n != 1 {
+		t.Errorf("first launch logged %d diagnostics, want 1", n)
+	}
+	if n := strings.Count(launch(first), diagnostic); n != 0 {
+		t.Errorf("repeat launch on same file logged %d diagnostics, want 0", n)
+	}
+	if n := strings.Count(launch(second), diagnostic); n != 1 {
+		t.Errorf("launch on a different unreadable file logged %d diagnostics, want 1", n)
+	}
+}
+
 // setenvValue finds the value bound to a --setenv key in args, failing the
 // test if the key never appears.
 func setenvValue(t *testing.T, args []string, key string) string {
