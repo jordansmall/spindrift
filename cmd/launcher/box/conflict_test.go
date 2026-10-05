@@ -31,14 +31,16 @@ func newCRFixture(t *testing.T) *crFixture {
 	f := &crFixture{fixture: newFixture(t)}
 	f.recovery.Conflict = true
 	f.in.Assembly = assemblyInputs{
-		RegistryFile: repopath.RegistryJSON(),
-		PromptsDir:   repopath.PromptsDir(),
-		SkillsDir:    t.TempDir(),
-		Passthrough: promptassembly.Passthrough{
-			Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude-bin",
-			DriverFlags: "--verbose", Devshell: true, DevshellName: "dev", HeartbeatLog: "/hb",
-			ArgvShape: promptassembly.ArgvShape{PromptStyle: "flag", ModelFlag: "--model", Order: []string{"prompt"}},
-			Caps:      promptassembly.Caps{MaxSlices: 3, MaxReviewRounds: 4, MaxBudgetTokens: 7, MaxBudgetUSD: 1.5},
+		SkillsDir: t.TempDir(),
+		AssemblyFlags: promptassembly.AssemblyFlags{
+			RegistryFile: repopath.RegistryJSON(),
+			PromptsDir:   repopath.PromptsDir(),
+			Passthrough: promptassembly.Passthrough{
+				Model: "opus", Effort: "high", Driver: "claude", DriverBin: "claude-bin",
+				DriverFlags: "--verbose", Devshell: true, DevshellName: "dev", HeartbeatLog: "/hb",
+				ArgvShape: promptassembly.ArgvShape{PromptStyle: "flag", ModelFlag: "--model", Order: []string{"prompt"}},
+				Caps:      promptassembly.Caps{MaxSlices: 3, MaxReviewRounds: 4, MaxBudgetTokens: 7, MaxBudgetUSD: 1.5},
+			},
 		},
 	}
 	f.knobs["ISSUE_NUMBER"] = "42"
