@@ -32,13 +32,9 @@ func (r *boxRun) cloneTarget() error {
 }
 
 func (r *boxRun) cloneConfig() boxclone.Config {
-	codeForge := r.env.CodeForge
-	if codeForge == "" {
-		codeForge = "github"
-	}
 	g := r.d.Getenv
 	return boxclone.Config{
-		CodeForge:      codeForge,
+		CodeForge:      r.codeForge(),
 		RepoSlug:       g("REPO_SLUG"),
 		RemoteURL:      g("CODE_FORGE_REMOTE_URL"),
 		ForgejoBaseURL: g("FORGEJO_BASE_URL"),

@@ -19,12 +19,11 @@ type Config struct {
 	WorkDir    string
 	Branch     string
 	BaseBranch string
-	// CodeForge is CODE_FORGE, defaulted to github by the caller. Only github
-	// is asked about open PRs: local and git have no PR concept (ADR 0033,
-	// ADR 0013); forgejo's PRs are not on github.com and its Box carries no
-	// GH_TOKEN, so asking would abort every retry or read "no PR" and
-	// force-reset a live Forgejo PR's branch (issue #3942).
+	// CodeForge is CODE_FORGE, defaulted to github by the caller; narration only.
 	CodeForge string
+	// QueryOpenPR is set when the Box can ask CODE_FORGE about open PRs
+	// (backend.Descriptor.InBoxOpenPRQueryable, which records why the rest cannot).
+	QueryOpenPR bool
 	// Push is BOX_WRITE_ENABLED: the Box holds a push-capable token. A
 	// read-only Box relays through the outbox bundle instead (issue #1979:
 	// a force-push there 403s before the agent ever runs), behind the same
@@ -48,16 +47,16 @@ type Outcome struct {
 // origin/base and publishes at once when nothing is left to resolve. Narration
 // goes to w. An error means the Box must abort.
 //
-// openPR is consulted only on github, and only when origin/Branch exists. Its
-// error must abort: a silent empty answer (network/auth failure) is
-// indistinguishable from "no PR" and must not trigger the force-reset.
+// openPR is consulted only when cfg.QueryOpenPR, and only when origin/Branch
+// exists. Its error must abort: a silent empty answer (network/auth failure)
+// is indistinguishable from "no PR" and must not trigger the force-reset.
 func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, error) {
 	var out Outcome
 	base := "origin/" + cfg.BaseBranch
 	fresh := func() error { return cfg.git(w, "checkout", "-b", cfg.Branch, base) }
 
 	switch {
-	case cfg.CodeForge != "github":
+	case !cfg.QueryOpenPR:
 		// A stale refs/remotes/origin/<branch> is superseded by a fresh checkout.
 		fmt.Fprintf(w, "==> CODE_FORGE=%s: starting %s fresh from %s\n", cfg.CodeForge, cfg.Branch, base)
 		if err := fresh(); err != nil {

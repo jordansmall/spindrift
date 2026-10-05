@@ -16,7 +16,7 @@ func TestRecoverBranch_RunsForAWorkDispatchWithTheEnvsConfig(t *testing.T) {
 	f.run()
 	want := []branchrecovery.Config{{
 		WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
-		CodeForge: "github", Push: false, OutboxDir: f.in.OutboxDir,
+		CodeForge: "github", QueryOpenPR: true, Push: false, OutboxDir: f.in.OutboxDir,
 	}}
 	if !reflect.DeepEqual(f.recoverCfgs, want) {
 		t.Fatalf("recover configs = %+v, want %+v", f.recoverCfgs, want)
@@ -55,5 +55,24 @@ func TestRecoverBranch_FailureIsAPhaseErrorBeforeToolchainAndAssembly(t *testing
 	}
 	if f.assembled != 0 || len(f.nixCalls) != 0 || len(f.prefetched) != 0 {
 		t.Errorf("later phases ran: assembled=%d nix=%v prefetched=%d", f.assembled, f.nixCalls, len(f.prefetched))
+	}
+}
+
+func TestRecoveryConfig_QueriesOpenPROnlyWhereTheBoxCan(t *testing.T) {
+	for forge, want := range map[string]bool{
+		"": true, "github": true,
+		"forgejo": false, "git": false, "local": false, "bogus": false,
+	} {
+		t.Run("forge="+forge, func(t *testing.T) {
+			f := newFixture(t)
+			f.env.CodeForge = forge
+			f.run()
+			if len(f.recoverCfgs) != 1 {
+				t.Fatalf("recover configs = %+v, want one", f.recoverCfgs)
+			}
+			if got := f.recoverCfgs[0].QueryOpenPR; got != want {
+				t.Errorf("QueryOpenPR = %v, want %v", got, want)
+			}
+		})
 	}
 }

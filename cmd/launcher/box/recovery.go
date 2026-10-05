@@ -1,6 +1,7 @@
 package main
 
 import (
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/github"
@@ -24,17 +25,16 @@ func (r *boxRun) recoverBranch() error {
 }
 
 func (r *boxRun) recoveryConfig() branchrecovery.Config {
-	codeForge := r.env.CodeForge
-	if codeForge == "" {
-		codeForge = "github"
-	}
+	codeForge := r.codeForge()
+	desc, _ := backend.ByName(codeForge) // unregistered: zero Descriptor, no query
 	return branchrecovery.Config{
-		WorkDir:    r.in.WorkDir,
-		Branch:     r.env.Branch,
-		BaseBranch: r.env.BaseBranch,
-		CodeForge:  codeForge,
-		Push:       r.env.BoxWriteEnabled,
-		OutboxDir:  r.in.OutboxDir,
+		WorkDir:     r.in.WorkDir,
+		Branch:      r.env.Branch,
+		BaseBranch:  r.env.BaseBranch,
+		CodeForge:   codeForge,
+		QueryOpenPR: desc.InBoxOpenPRQueryable,
+		Push:        r.env.BoxWriteEnabled,
+		OutboxDir:   r.in.OutboxDir,
 	}
 }
 
@@ -44,4 +44,12 @@ func (r *boxRun) recoveryConfig() branchrecovery.Config {
 func (r *boxRun) openPR() (bool, error) {
 	_, open, err := github.NewExecClient(r.d.Getenv("REPO_SLUG"), forge.DispatchLabels{}, "").OpenPRForBranch(r.env.Branch)
 	return open, err
+}
+
+// codeForge is CODE_FORGE, defaulting an unset one to github.
+func (r *boxRun) codeForge() string {
+	if r.env.CodeForge == "" {
+		return "github"
+	}
+	return r.env.CodeForge
 }
