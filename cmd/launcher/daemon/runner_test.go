@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -1763,7 +1765,7 @@ func TestRunDoctor_ZeroExit(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	exit, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
@@ -1794,7 +1796,7 @@ func TestRunDoctor_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 		env:        []string{"MODEL=from-shell", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"},
 		knobs:      []string{"MODEL"},
 	})
-	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	exit, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
@@ -1820,7 +1822,7 @@ func TestRunDoctor_NonZeroExitIsNotAnError(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	exit, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
@@ -1840,7 +1842,7 @@ func TestRunDoctor_SeamFailure(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	_, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	_, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatal("RunDoctor() error = nil, want non-nil")
 	}
@@ -1870,7 +1872,7 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
+	if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
 
@@ -1915,7 +1917,7 @@ func TestRunDoctor_ButlerAppendsFlag(t *testing.T) {
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), butler: true})
-	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
+	if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
 
@@ -1940,7 +1942,7 @@ func TestRunDoctor_NoButlerOmitsFlag(t *testing.T) {
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	if _, err := r.RunDoctor(context.Background(), revision); err != nil {
+	if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
 
@@ -1968,7 +1970,7 @@ func TestRunDoctor_HealthyPreflightEmitsNothing(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	readStderr := captureStderr(t)
 	readStdout := captureStdout(t)
-	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	exit, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
@@ -2006,13 +2008,13 @@ func TestRunDoctor_RefusedPreflightForwardsFindings(t *testing.T) {
 			// two names.
 			name: "required labels missing",
 			script: `printf '%s\n%s\n' 'MISSING: label "ready-for-agent" missing' 'MISSING: label "agent-in-progress" missing'
-printf '%s\n' 'required triage label(s) missing or declined: ready-for-agent, agent-in-progress missing — create them in the repository' >&2
+printf '%s\n' 'required label(s) missing or declined: ready-for-agent, agent-in-progress missing — create them in the repository' >&2
 exit 4`,
 			wantExit: 4,
 			wantStderr: []string{
 				`MISSING: label "ready-for-agent" missing`,
 				`MISSING: label "agent-in-progress" missing`,
-				"required triage label(s) missing or declined: ready-for-agent, agent-in-progress missing — create them in the repository",
+				"required label(s) missing or declined: ready-for-agent, agent-in-progress missing — create them in the repository",
 			},
 		},
 		{
@@ -2045,7 +2047,7 @@ exit 1`,
 
 			r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 			readStderr := captureStderr(t)
-			exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+			exit, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 			if err != nil {
 				t.Fatalf("RunDoctor() unexpected error: %v", err)
 			}
@@ -2078,7 +2080,7 @@ func TestRunDoctor_CancelledContextTearsDownChild(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.RunDoctor(ctx, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+		_, _, err := r.RunDoctor(ctx, "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 		done <- err
 	}()
 
@@ -2104,7 +2106,7 @@ func TestRunDoctor_UnparseableSpecSkipsSeam(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	_, err := r.RunDoctor(context.Background(), "")
+	_, _, err := r.RunDoctor(context.Background(), "")
 	if err == nil {
 		t.Fatal("RunDoctor(empty revision) error = nil, want non-nil")
 	}
@@ -2125,7 +2127,7 @@ func TestRunDoctor_SignalKilledIsSeamFailure(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	exit, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	exit, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	if err == nil {
 		t.Fatalf("RunDoctor() = (%d, nil), want a non-nil error for a signal-killed child", exit)
 	}
@@ -2223,7 +2225,7 @@ func TestRunDoctor_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", nixSystem: "x86_64-linux", env: os.Environ()})
-	if _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err != nil {
+	if _, _, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
 
@@ -2592,5 +2594,50 @@ func TestFetchRevision_RealGitFetchErrorRedactsURLCredentials(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "nonexistent.invalid/o/r.git") {
 		t.Errorf("fetchRevision() error = %q, want git's diagnostic preserved", err.Error())
+	}
+}
+
+// TestRunDoctor_ResearchAppendsFlag asserts the research kind in play threads
+// "--research" into the preflight doctor argv, and its absence omits it.
+func TestRunDoctor_ResearchAppendsFlag(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+
+	var gotArgs []string
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		gotArgs = append([]string(nil), args...)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+	}
+
+	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+	for _, research := range []bool{true, false} {
+		r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), research: research})
+		if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
+			t.Fatalf("RunDoctor() unexpected error: %v", err)
+		}
+		if got := slices.Contains(gotArgs, "--research"); got != research {
+			t.Errorf("research=%v: argv %v, --research present = %v", research, gotArgs, got)
+		}
+	}
+}
+
+// TestRunDoctor_CapturesRequiredLabelsLine asserts the doctor line carrying
+// doctor.ErrRequiredLabelsMissing comes back beside exit 4, so the halt can
+// name the missing labels.
+func TestRunDoctor_CapturesRequiredLabelsLine(t *testing.T) {
+	orig := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = orig })
+	want := doctor.ErrRequiredLabelsMissing.Error() + ": agent-butler-finding missing — create them in the repository"
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "echo noise; echo '"+want+"' >&2; echo more; exit 4")
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	exit, line, err := r.RunDoctor(context.Background(), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	if err != nil {
+		t.Fatalf("RunDoctor() unexpected error: %v", err)
+	}
+	if exit != 4 || line != want {
+		t.Errorf("RunDoctor() = (%d, %q), want (4, %q)", exit, line, want)
 	}
 }

@@ -624,7 +624,7 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  preview [issue...]                                                          dry-run: show what dispatch would pick up, in order\n" +
 		"  build                                                                       realize the agent image without running any agent\n" +
 		"  recover <issue>                                                             run the merge gate for a single issue\n" +
-		"  doctor [--verbose|-v] [--butler]                                            check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
+		"  doctor [--verbose|-v] [--butler] [--research]                               check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
 		"  reconcile                                                                   local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n" +
 		"  registry discover <repo-dir> <routes-file> [--force]                        discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
 
@@ -2270,5 +2270,21 @@ func TestMainRunIntercepts_MatchCliFlags(t *testing.T) {
 				t.Errorf("intercepted row %q: -%s missing from mainRunIntercepts", f.flag, f.short)
 			}
 		}
+	}
+}
+
+// --research reaches doctorFlagArgs through the global flag pass like
+// --butler (issue #4400).
+func TestDoctorFlagArgs_Research(t *testing.T) {
+	remaining, err := parseFlags([]string{"doctor", "--research"})
+	if err != nil {
+		t.Fatalf("parseFlags: %v", err)
+	}
+	opts, bad, ok := doctorFlagArgs(remaining[1:])
+	if !ok || bad != "" || !opts.research || opts.butler {
+		t.Fatalf("doctorFlagArgs(--research) = (%+v, %q, %v), want research only", opts, bad, ok)
+	}
+	if _, err := parseFlags([]string{"dispatch", "--research"}); err == nil {
+		t.Errorf("parseFlags(dispatch --research) = nil error, want unknown flag")
 	}
 }

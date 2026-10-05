@@ -8,6 +8,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -22,14 +23,14 @@ import (
 var ErrConnectivity = errors.New("issue tracker or code forge connectivity failure")
 
 // ErrRequiredLabelsMissing classifies a Run failure as required checks failed or
-// declined (exit 4, issue #2569): work-tier triage labels are missing and were
-// not created.
-var ErrRequiredLabelsMissing = errors.New("required triage label(s) missing or declined")
+// declined (exit 4, issue #2569): required labels are missing and were not
+// created.
+var ErrRequiredLabelsMissing = errors.New("required label(s) missing or declined")
 
 // errRequiredLabelsMissing is shared by the non-interactive and interactive-decline
 // paths below so their identical message cannot drift apart.
-func errRequiredLabelsMissing(workMissing []string) error {
-	return fmt.Errorf("%w: %s missing — create them in the repository", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
+func errRequiredLabelsMissing(requiredMissing []string) error {
+	return fmt.Errorf("%w: %s missing — create them in the repository", ErrRequiredLabelsMissing, strings.Join(requiredMissing, ", "))
 }
 
 // labelMissingMsg is the message body shared by checkLabelSet's real "label
@@ -92,7 +93,8 @@ func ButlerLabelNames() []string {
 	return []string{"agent-butler-finding", "agent-butler-patch"}
 }
 
-// labelTier is one advisory label family. Only the work tier is Required, and
+// labelTier is one optional label family; each name is advisory unless
+// Config.RequiredLabels names it. The work tier is always Required, and
 // its names come from Config, so it stays outside this table.
 type labelTier struct {
 	noun  string
@@ -174,6 +176,14 @@ func RuntimeCheck(runtime string) Check {
 type Config struct {
 	IssueTracker string
 
+	// RequiredLabels are label names, beyond the four work-tier labels, whose
+	// absence fails the run like a work-tier label — whether or not they belong to
+	// an advisory tier. The daemon preflight names the labels of each kind it
+	// runs, so a kind never starts against a repo that cannot take them; a plain
+	// doctor names only what the work kind itself needs, leaving the rest
+	// advisory so CI stays green on deployments not using them.
+	RequiredLabels []string
+
 	// TokenHint and SlugHint name the env vars Run points an operator at in its
 	// auth-failure and repo-not-found remediation text. The caller resolves them
 	// because internal/doctor cannot see package main's backend registry, which
@@ -205,10 +215,10 @@ type Config struct {
 
 // Run probes the issue tracker and code forge, then checks that every configured
 // work-tier label and every advisory tier in advisoryTiers exists, offering to
-// create missing ones when interactive. Only missing work-tier labels fail the
-// run; the other tiers and extraChecks are advisory. stdin is the caller's own
-// scanner, so Quickstart can hand one over mid-flow without losing
-// already-buffered input.
+// create missing ones when interactive. Only missing work-tier labels and those
+// labels named in c.RequiredLabels fail the run; the other labels and
+// extraChecks are advisory. stdin is the caller's own scanner, so Quickstart can
+// hand one over mid-flow without losing already-buffered input.
 func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, stdin *bufio.Scanner, interactive bool, extraChecks []Check) (err error) {
 	tokenHint, slugHint := "GH_TOKEN", "--repo-slug / REPO_SLUG"
 	if c.TokenHint != "" {
@@ -351,10 +361,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		return missing
 	}
 
-	// checkLabels reports on the work tier plus every advisoryTiers entry, but
-	// only the work tier is fatal — the advisory tiers stay non-fatal so a CI
-	// doctor run stays green on a deployment that does not use them yet.
-	checkLabels := func() (workMissing []string, tierResults []tierResult, err error) {
+	// checkLabels reports on the work tier plus every advisoryTiers entry. The
+	// work tier and any label named in c.RequiredLabels are fatal; the rest stay
+	// non-fatal so a CI doctor run stays green on a deployment that does not
+	// use them yet.
+	checkLabels := func() (requiredMissing []string, tierResults []tierResult, err error) {
 		existing, lerr := it.ListLabels()
 		if lerr != nil {
 			return nil, nil, fmt.Errorf("%w: label check failed: %w", ErrConnectivity, lerr)
@@ -363,15 +374,17 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		for _, l := range existing {
 			present[l] = true
 		}
-		workMissing = checkLabelSet([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, present, Required)
+		requiredNames := []string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}
+		requiredNames = append(requiredNames, without(c.RequiredLabels, requiredNames)...)
+		requiredMissing = checkLabelSet(requiredNames, present, Required)
 		tierResults = make([]tierResult, len(advisoryTiers))
 		for i, t := range advisoryTiers {
-			tierResults[i] = tierResult{tier: t, missing: checkLabelSet(t.names(), present, Advisory)}
+			tierResults[i] = tierResult{tier: t, missing: checkLabelSet(without(t.names(), requiredNames), present, Advisory)}
 		}
-		return workMissing, tierResults, nil
+		return requiredMissing, tierResults, nil
 	}
 
-	workMissing, tierResults, err := checkLabels()
+	requiredMissing, tierResults, err := checkLabels()
 	if err != nil {
 		return err
 	}
@@ -382,22 +395,22 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		}
 		advisoryMissing = append(advisoryMissing, tr.missing...)
 	}
-	missing := append(append([]string{}, workMissing...), advisoryMissing...)
+	missing := append(append([]string{}, requiredMissing...), advisoryMissing...)
 	if len(missing) == 0 {
 		rep.Success("%s", allLabelsPresentMessage())
 		return nil
 	}
 
 	if !interactive {
-		if len(workMissing) > 0 {
-			return errRequiredLabelsMissing(workMissing)
+		if len(requiredMissing) > 0 {
+			return errRequiredLabelsMissing(requiredMissing)
 		}
 		return nil
 	}
 
 	advisoryCount := len(advisoryMissing)
-	requiredClause := fmt.Sprintf("%d required", len(workMissing))
-	if len(workMissing) > 0 {
+	requiredClause := fmt.Sprintf("%d required", len(requiredMissing))
+	if len(requiredMissing) > 0 {
 		requiredClause += " (declining leaves this check failing)"
 	}
 	advisoryClause := fmt.Sprintf("%d advisory", advisoryCount)
@@ -418,16 +431,16 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		len(missing), requiredClause, advisoryClause)
 	if !stdin.Scan() || strings.ToLower(strings.TrimSpace(stdin.Text())) != "y" {
 		rep.Passthrough("\n")
-		if len(workMissing) > 0 {
-			return errRequiredLabelsMissing(workMissing)
+		if len(requiredMissing) > 0 {
+			return errRequiredLabelsMissing(requiredMissing)
 		}
 		return nil
 	}
 
 	// metaFor resolves the four work-tier labels by role because an operator can
 	// rename them: a TriageLabelMeta[name] lookup keyed on the default name would
-	// miss a renamed label and fall back to gray (#2528 AC2). The other tiers use
-	// fixed literals, so the map lookup stays correct for them.
+	// miss a renamed label and fall back to gray (#2528 AC2). Every other label
+	// has a fixed name, so LabelMetaFor stays correct for them.
 	metaFor := func(name string) LabelMeta {
 		switch name {
 		case c.Label:
@@ -439,24 +452,24 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		case c.CompleteLabel:
 			return MetaComplete
 		}
-		if meta, ok := TriageLabelMeta[name]; ok {
+		if meta, ok := LabelMetaFor(name); ok {
 			return meta
 		}
 		return LabelMeta{Color: "ededed"}
 	}
 
-	// A CreateLabel failure on a required work-tier label is fatal. One on an
+	// A CreateLabel failure on a required label is fatal. One on an
 	// advisory label is only reported, here and again in the still-missing lines
 	// below: accepting the prompt must never leave an operator worse off than
 	// declining it, which is safe for an advisory-only run (issue #2569).
-	workSet := make(map[string]bool, len(workMissing))
-	for _, name := range workMissing {
-		workSet[name] = true
+	requiredSet := make(map[string]bool, len(requiredMissing))
+	for _, name := range requiredMissing {
+		requiredSet[name] = true
 	}
 	for _, name := range missing {
 		meta := metaFor(name)
 		if cerr := it.CreateLabel(name, meta.Description, meta.Color); cerr != nil {
-			if workSet[name] {
+			if requiredSet[name] {
 				return fmt.Errorf("%w: create label %q: %w", ErrConnectivity, name, cerr)
 			}
 			rep.Finding(Advisory, "create label %q failed: %v — does not fail this check", name, cerr)
@@ -465,14 +478,14 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		rep.Passthrough("created: label %q\n", name)
 	}
 
-	workMissing, tierResults, err = checkLabels()
+	requiredMissing, tierResults, err = checkLabels()
 	if err != nil {
 		return err
 	}
-	if len(workMissing) > 0 {
-		return fmt.Errorf("%w: %s still missing after creation", ErrRequiredLabelsMissing, strings.Join(workMissing, ", "))
+	if len(requiredMissing) > 0 {
+		return fmt.Errorf("%w: %s still missing after creation", ErrRequiredLabelsMissing, strings.Join(requiredMissing, ", "))
 	}
-	// Work labels are fatal above, so each advisory tier gets its own wrap-up
+	// Required labels are fatal above, so each advisory tier gets its own wrap-up
 	// line here, or one success line naming every tier when none is still
 	// short.
 	stillMissing := false
@@ -491,4 +504,15 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	}
 	rep.Success("%s", allLabelsPresentMessage())
 	return nil
+}
+
+// without returns the names not present in exclude, in order.
+func without(names, exclude []string) []string {
+	var out []string
+	for _, name := range names {
+		if !slices.Contains(exclude, name) {
+			out = append(out, name)
+		}
+	}
+	return out
 }

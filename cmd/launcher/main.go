@@ -2095,7 +2095,7 @@ var verbHandlers = map[string]verbHandler{
 		opts, bad, ok := doctorFlagArgs(args)
 		if !ok {
 			fmt.Fprintf(stderr, "unrecognized argument: %s\n", bad)
-			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v] [--butler]")
+			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v] [--butler] [--research]")
 			return 1
 		}
 		return cmdDoctor(opts, stdout, stderr)

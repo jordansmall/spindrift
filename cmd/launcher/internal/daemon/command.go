@@ -247,6 +247,10 @@ type DoctorSpec struct {
 	// Butler adds "--butler" so the preflight also runs the butler's own
 	// config checks, when the butler kind is in play after gating.
 	Butler bool
+
+	// Research adds "--research" so the preflight requires the research
+	// labels, when the research kind is in play.
+	Research bool
 }
 
 // DoctorCommand builds the Command for the daemon's own startup preflight:
@@ -270,6 +274,9 @@ func DoctorCommand(s DoctorSpec) (Command, error) {
 	argv := []string{"nix", "run", flakeref, "--", "doctor"}
 	if s.Butler {
 		argv = append(argv, "--butler")
+	}
+	if s.Research {
+		argv = append(argv, "--research")
 	}
 	argv = appendFeatureBranch(argv, s.FeatureBranch)
 	return Command{Argv: argv, Env: withoutKeys(withoutKeys(s.Env, s.Knobs), []string{reportFDEnv})}, nil

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 )
@@ -33,6 +35,7 @@ type hostRunner struct {
 	env           []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
 	knobs         []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
 	butler        bool     // the butler kind survived gateButlerKind; RunDoctor then adds doctor --butler (issue #3920)
+	research      bool     // the research kind is explicitly selected (not the bare every-kind default); RunDoctor then adds doctor --research
 
 	// flightMu guards flight below, plus the Moved baseline and the
 	// self-path memo fields further down: resolveTipOnce is the sole leader
@@ -87,6 +90,7 @@ type hostRunnerConfig struct {
 	env           []string
 	knobs         []string
 	butler        bool
+	research      bool
 }
 
 // newHostRunner rejects a nil cfg.env. withoutKeys
@@ -108,6 +112,7 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		env:           cfg.env,
 		knobs:         cfg.knobs,
 		butler:        cfg.butler,
+		research:      cfg.research,
 	}, nil
 }
 
@@ -513,10 +518,15 @@ var runnerDoctorCommand = exec.CommandContext
 // so a cancelled ctx (SIGINT/SIGTERM during the preflight, before any Box is
 // running) tears the child down instead of hanging until SIGKILL — same
 // reasoning as evalSelfPath/fetchRevision above.
-func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
-	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch, Butler: r.butler})
+//
+// labelsLine is the last doctor line carrying doctor.ErrRequiredLabelsMissing,
+// "" when doctor printed none: the report still streams to stderr, but
+// startupPreflight needs the line itself so its halt can name which labels
+// are missing.
+func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, labelsLine string, err error) {
+	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch, Butler: r.butler, Research: r.research})
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	cmd := runnerDoctorCommand(ctx, doctorCmd.Argv[0], doctorCmd.Argv[1:]...)
@@ -529,8 +539,12 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 	// preflight gets no report pipe and no SPINDRIFT_REPORT_FD (doctorCmd.Env
 	// above never carries it — see DoctorCommand): it dispatches nothing, so
 	// it has nothing to report.
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	//
+	// One shared writer for both streams: os/exec then copies through a
+	// single goroutine, so the line scanner needs no lock.
+	out := &markerLineWriter{w: os.Stderr, marker: doctor.ErrRequiredLabelsMissing.Error()}
+	cmd.Stdout = out
+	cmd.Stderr = out
 	// cmd.Stdin left nil (os/exec gives the child /dev/null) so doctor takes
 	// its non-interactive path rather than sitting on a create-labels prompt
 	// nobody in a daemon context can answer; no Setpgid either, unlike
@@ -538,7 +552,7 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 
 	waitErr := cmd.Run()
 	if waitErr == nil {
-		return 0, nil
+		return 0, out.line(), nil
 	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
@@ -548,11 +562,52 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (int, error
 		// Ctrl-C, or ctx tearing it down), so there is no doctor verdict to
 		// classify and handing -1 to the caller would report it as one.
 		if code := exitErr.ExitCode(); code >= 0 {
-			return code, nil
+			return code, out.line(), nil
 		}
-		return 0, fmt.Errorf("doctor ended without an exit code: %w", waitErr)
+		return 0, "", fmt.Errorf("doctor ended without an exit code: %w", waitErr)
 	}
-	return 0, waitErr
+	return 0, "", waitErr
+}
+
+// maxMarkerLine bounds the partial line markerLineWriter holds, so a doctor
+// that never prints a newline cannot grow the daemon's memory.
+const maxMarkerLine = 4096
+
+// markerLineWriter passes everything through to w while remembering the last
+// line containing marker. Only the current partial line is buffered, capped
+// at maxMarkerLine.
+type markerLineWriter struct {
+	w       io.Writer
+	marker  string
+	partial []byte
+	last    string
+}
+
+func (m *markerLineWriter) Write(p []byte) (int, error) {
+	n, err := m.w.Write(p)
+	for _, b := range p {
+		if b == '\n' {
+			m.flush()
+			continue
+		}
+		if len(m.partial) < maxMarkerLine {
+			m.partial = append(m.partial, b)
+		}
+	}
+	return n, err
+}
+
+func (m *markerLineWriter) flush() {
+	if l := string(m.partial); strings.Contains(l, m.marker) {
+		m.last = strings.TrimSpace(l)
+	}
+	m.partial = m.partial[:0]
+}
+
+// line returns the last marker line, counting an unterminated final one.
+func (m *markerLineWriter) line() string {
+	m.flush()
+	return m.last
 }
 
 // forwardSignals starts one goroutine that watches stop and abort for the

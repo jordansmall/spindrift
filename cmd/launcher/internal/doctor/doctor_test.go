@@ -1092,3 +1092,139 @@ func TestRun_NewAdvisoryTier_OneTableEntryIsEnough(t *testing.T) {
 		t.Errorf("must not print the all-present success line when the new tier's label is missing, got:\n%s", out)
 	}
 }
+
+var workLabelsOnly = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+// Required labels' absence fails a non-interactive run naming them; the same
+// labels stay advisory when no caller names them (issue #4400).
+func TestRun_RequiredLabels_MissingFailsRun(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		names []string
+	}{
+		{"butler", ButlerLabelNames()},
+		{"research", ResearchLabelNames()},
+		{"review-finding", []string{"agent-review-finding"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
+			f.Labels = workLabelsOnly
+
+			cfg := defaultDoctorConfig()
+			cfg.RequiredLabels = tc.names
+			var buf bytes.Buffer
+			err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+			if !errors.Is(err, ErrRequiredLabelsMissing) {
+				t.Fatalf("err = %v, want ErrRequiredLabelsMissing", err)
+			}
+			for _, label := range tc.names {
+				if !strings.Contains(err.Error(), label) {
+					t.Errorf("error does not name %q: %v", label, err)
+				}
+				if !strings.Contains(buf.String(), "MISSING: label \""+label+"\" missing") {
+					t.Errorf("want fatal MISSING row for %q, got:\n%s", label, buf.String())
+				}
+			}
+
+			buf.Reset()
+			if err := Run(f, f, defaultDoctorConfig(), NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil); err != nil {
+				t.Errorf("run without RequiredLabels failed: %v", err)
+			}
+		})
+	}
+}
+
+// Only the named labels are fatal: naming the butler finding label leaves its
+// tier's patch label advisory, and the tier summary counts only that one.
+func TestRun_RequiredLabels_RestOfTierStaysAdvisory(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = append(append([]string{}, workLabelsOnly...), "agent-butler-finding")
+
+	cfg := defaultDoctorConfig()
+	cfg.RequiredLabels = []string{"agent-butler-finding"}
+	var buf bytes.Buffer
+	if err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil); err != nil {
+		t.Fatalf("err = %v, want nil (patch label and research tier are advisory)", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "advisory: label \"agent-butler-patch\" missing") {
+		t.Errorf("want advisory row for the patch label, got:\n%s", out)
+	}
+	if !strings.Contains(out, "1 butler label(s) missing") {
+		t.Errorf("want butler summary counting only the patch label, got:\n%s", out)
+	}
+}
+
+// A tier whose every label is required prints no advisory summary.
+func TestRun_RequiredLabels_FullyCoveredTierHasNoAdvisorySummary(t *testing.T) {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = append(append([]string{}, workLabelsOnly...), ButlerLabelNames()...)
+
+	cfg := defaultDoctorConfig()
+	cfg.RequiredLabels = ButlerLabelNames()
+	var buf bytes.Buffer
+	if err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil); err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(buf.String(), "butler label(s) missing") {
+		t.Errorf("unexpected butler advisory summary:\n%s", buf.String())
+	}
+}
+
+// Interactive: required labels count as required in the prompt, declining
+// leaves the check failing, and accepting creates them, agent-review-finding
+// included with its own metadata rather than the gray fallback.
+func TestRun_RequiredLabels_InteractivePrompt(t *testing.T) {
+	newFake := func() *forge.Fake {
+		f := forge.NewFake()
+		f.ProbeRepo = "owner/repo"
+		f.RequireLabelsExist = true
+		f.Labels = append(append([]string{}, workLabelsOnly...),
+			append(append(ResearchLabelNames(), PriorityLabelNames()...), AmbiguousLabelNames()...)...)
+		return f
+	}
+	cfg := defaultDoctorConfig()
+	cfg.RequiredLabels = []string{"agent-butler-finding", "agent-review-finding"}
+
+	var buf bytes.Buffer
+	err := Run(newFake(), newFake(), cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("n\n")), true, nil)
+	if !errors.Is(err, ErrRequiredLabelsMissing) {
+		t.Fatalf("declined: err = %v, want ErrRequiredLabelsMissing", err)
+	}
+	if want := "2 required (declining leaves this check failing) and 1 advisory"; !strings.Contains(buf.String(), want) {
+		t.Errorf("prompt lacks %q, got:\n%s", want, buf.String())
+	}
+
+	f := newFake()
+	buf.Reset()
+	if err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("y\n")), true, nil); err != nil {
+		t.Fatalf("accepted: err = %v, want nil", err)
+	}
+	var found bool
+	for _, c := range f.CreateLabelCalls {
+		if c.Name == "agent-review-finding" {
+			found = true
+			if c.Color != "d4c5f9" || c.Description == "" {
+				t.Errorf("agent-review-finding created with %+v, want its own metadata", c)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("agent-review-finding not created: %+v", f.CreateLabelCalls)
+	}
+}
+
+func TestLabelMetaFor(t *testing.T) {
+	if m, ok := LabelMetaFor("agent-review-finding"); !ok || m.Color != "d4c5f9" {
+		t.Errorf("LabelMetaFor(agent-review-finding) = %+v, %v", m, ok)
+	}
+	if m, ok := LabelMetaFor("agent-butler-finding"); !ok || m != TriageLabelMeta["agent-butler-finding"] {
+		t.Errorf("LabelMetaFor(agent-butler-finding) = %+v, %v", m, ok)
+	}
+	if _, ok := LabelMetaFor("no-such-label"); ok {
+		t.Errorf("LabelMetaFor(no-such-label) ok, want false")
+	}
+}

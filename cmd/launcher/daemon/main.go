@@ -136,6 +136,13 @@ func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knob
 	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindOf(dispatchkind.Butler) }), nil
 }
 
+// researchPromoted reports whether doctor's preflight should require the
+// research labels: only when the operator named the research kind, since the
+// bare every-kind default includes it unconditionally.
+func researchPromoted(args parsedArgs) bool {
+	return args.ExplicitSelector && slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Research))
+}
+
 // settingsKeys returns doc's settings keys, sorted, so the warning loop and
 // the runner's stripped-key list both read from one source and come out in
 // a fixed order for an operator — a Go map's own iteration order is random,
@@ -491,7 +498,7 @@ func announceStop(stop, abort <-chan struct{}, quit <-chan struct{}, cancel cont
 // grounds to refuse startup outright (issue #3625 review finding).
 type preflightRunner interface {
 	fetchRevision(ctx context.Context) (string, error)
-	RunDoctor(ctx context.Context, revision string) (int, error)
+	RunDoctor(ctx context.Context, revision string) (exit int, labelsLine string, err error)
 }
 
 // startupPreflight runs `doctor` exactly once, before the pool exists, and
@@ -531,7 +538,7 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 		return preflightRefusal(em, revision, "doctor-seam-error", daemon.Halt{Class: daemon.HaltPreflight, Detail: "resolve-revision: " + err.Error()})
 	}
 
-	exit, err := r.RunDoctor(ctx, revision)
+	exit, labelsLine, err := r.RunDoctor(ctx, revision)
 	if ctx.Err() != nil {
 		return refuseCancelled()
 	}
@@ -540,6 +547,11 @@ func startupPreflight(ctx context.Context, r preflightRunner, em *daemon.Emitter
 	}
 
 	v := daemon.ClassifyPreflight(exit)
+	// Exit 4 can come from the triage, butler, research or Filer label sets;
+	// doctor's own line is the only place that names which.
+	if v.Outcome == daemon.OutcomeRequiredLabelsMissing && labelsLine != "" {
+		v.Detail = labelsLine
+	}
 	em.Emit(daemon.Event{Event: "preflight", Revision: revision, Exit: &exit, Outcome: v.Outcome})
 	return v.Halt()
 }
@@ -817,8 +829,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		env:   os.Environ(),
 		knobs: strippedKeys,
 		// A butler gateButlerKind dropped, or an explicit dispatch/research
-		// selector, must never refuse startup over butler config.
-		butler: slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Butler)),
+		// selector, must never refuse startup over butler config. Research is
+		// promoted only when explicitly selected: the bare selector always
+		// lists it, and a dispatch-only repo without the research labels
+		// must still start.
+		butler:   slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Butler)),
+		research: researchPromoted(args),
 	})
 	if err != nil {
 		return fail(stderr, err)

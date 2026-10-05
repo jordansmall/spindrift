@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -543,5 +544,24 @@ func TestDoctorCommandStripsAmbientReportFD(t *testing.T) {
 	want := []string{"PATH=/bin"}
 	if !reflect.DeepEqual(got.Env, want) {
 		t.Fatalf("DoctorCommand(%+v) env = %v, want %v (ambient SPINDRIFT_REPORT_FD=9 must not survive)", spec, got.Env, want)
+	}
+}
+
+func TestDoctorCommand_ResearchAppendsFlag(t *testing.T) {
+	base := "git+file:///home/op/repo?rev=abc123&allRefs=1"
+	got, err := DoctorCommand(DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: true, Research: true, FeatureBranch: "feat/thing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"nix", "run", base, "--", "doctor", "--butler", "--research", "--base-branch", "feat/thing"}
+	if !slices.Equal(got.Argv, want) {
+		t.Errorf("argv = %v, want %v", got.Argv, want)
+	}
+	got, err = DoctorCommand(DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got.Argv, "--research") {
+		t.Errorf("argv = %v carries --research with Research unset", got.Argv)
 	}
 }

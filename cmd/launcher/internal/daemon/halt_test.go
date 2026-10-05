@@ -34,7 +34,7 @@ func TestHaltString_MatchesDocumentedGrammar(t *testing.T) {
 		{"self-build", Halt{Class: HaltSelfBuild, Detail: "exec format error"}, "self-build: exec format error"},
 		{"breaker", Halt{Class: HaltBreaker, Detail: breakerDetail}, "breaker: " + breakerDetail},
 		{"invalid-config", Halt{Class: HaltInvalidConfig, Detail: "missing Kinds"}, "config-invalid: missing Kinds"},
-		{"preflight", Halt{Class: HaltPreflight, Detail: "doctor exit 4: required triage labels are missing"}, "preflight: doctor exit 4: required triage labels are missing"},
+		{"preflight", Halt{Class: HaltPreflight, Detail: "doctor exit 4: required labels are missing"}, "preflight: doctor exit 4: required labels are missing"},
 		{"instance-lock", Halt{Class: HaltInstanceLock, Detail: "held by pid 123"}, "instance-lock: held by pid 123"},
 		{"feature-branch-gone", Halt{Class: HaltFeatureBranchGone, Detail: "feature branch \"feature-x\" no longer exists on origin"}, "feature-branch-gone: feature branch \"feature-x\" no longer exists on origin"},
 	}

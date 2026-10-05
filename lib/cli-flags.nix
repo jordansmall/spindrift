@@ -55,7 +55,13 @@
   }
   {
     flag = "butler";
-    doc = "make doctor also validate the butler config (exit 2 on failure)";
+    doc = "make doctor also validate the butler config (exit 2 on failure) and require the butler labels (exit 4 if missing)";
+    verb = "doctor";
+    arg = null;
+  }
+  {
+    flag = "research";
+    doc = "make doctor also require the research labels (exit 4 if missing); the daemon preflight passes it when the research kind runs";
     verb = "doctor";
     arg = null;
   }
