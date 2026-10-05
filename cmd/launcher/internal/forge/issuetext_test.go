@@ -259,3 +259,24 @@ func TestIssueText(t *testing.T) {
 		}
 	})
 }
+
+// Unknown means untrusted: only the three GitHub associations that imply
+// write-adjacent standing pass, and an empty Association fails closed.
+func TestCommentTrusted(t *testing.T) {
+	for _, tc := range []struct {
+		assoc string
+		want  bool
+	}{
+		{"OWNER", true},
+		{"MEMBER", true},
+		{"COLLABORATOR", true},
+		{"CONTRIBUTOR", false},
+		{"FIRST_TIME_CONTRIBUTOR", false},
+		{"NONE", false},
+		{"", false},
+	} {
+		if got := forge.CommentTrusted(forge.Comment{Association: tc.assoc}); got != tc.want {
+			t.Errorf("CommentTrusted(%q) = %v, want %v", tc.assoc, got, tc.want)
+		}
+	}
+}

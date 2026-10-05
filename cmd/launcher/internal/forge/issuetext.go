@@ -29,6 +29,22 @@ type Comment struct {
 	// zero.
 	Minimized       bool
 	MinimizedReason string
+	// Association is the author's GitHub author_association as the tracker
+	// reports it (OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE, ...), empty
+	// when the tracker cannot attest the author's standing.
+	Association string
+}
+
+// CommentTrusted reports whether c's author is OWNER, MEMBER or COLLABORATOR,
+// the check #382's vetted-transcript filter will apply. An empty Association
+// (the tracker cannot attest standing) is untrusted: fail closed. Rationale:
+// docs/reference.md#threat-model.
+func CommentTrusted(c Comment) bool {
+	switch c.Association {
+	case "OWNER", "MEMBER", "COLLABORATOR":
+		return true
+	}
+	return false
 }
 
 // CommentLister is the optional IssueTracker interface for adapters that can
