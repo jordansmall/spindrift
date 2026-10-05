@@ -735,8 +735,9 @@ why it is recorded here and not left to an implementation ticket.
 > (`dispatch/box.go`), because on a plain Linux docker bridge the Box dials the
 > host at the bridge IP. So the gate has to cover anything that can route to
 > the host, not only a local process on the operator's machine. The per-run
-> secret argued for here is that gate (`registrymanifest.TCPSecretHeader`);
-> narrowing the bind itself is issue #3772.
+> secret argued for here is that gate (`registrymanifest.TCPSecretHeader`),
+> and it is the sole one: the bind stays every-interface by decision, for the
+> reasons in the #3772 amendment at the end of this ADR.
 
 The read-only invariant is unaffected: the `GET`/`HEAD` gate runs before the
 `Rewrite` hook regardless of how a request arrived, so a write is still refused
@@ -873,11 +874,12 @@ That widens what the gate has to cover, from any local process on the host to
 anything that can route to it — the same vector this ADR already treats as
 adversarial (`agent/env-credential-scrub.sh`'s framing, "an Agent Box with
 arbitrary code execution as its own uid"), reached from further away.
-Narrowing the bind to the bridge-gateway address instead of merely gating it
-is open follow-up work (issue #3772). So the TCP transport carries a per-run
-secret, minted fresh by `newRegistryProxyTCPSecret` (`dispatch/box.go`, 16
-`crypto/rand` bytes, hex-encoded) and required on every request via the
-`registryproxy.TCPSecretHeader` header. `ListenAndServeTCP` checks it with
+The bind is deliberately not narrowed to a gateway address; the #3772
+amendment at the end of this ADR records why and what bounds the exposure. So
+the TCP transport carries a per-run secret, minted fresh by
+`newRegistryProxyTCPSecret` (`dispatch/box.go`, 16 `crypto/rand` bytes,
+hex-encoded) and required on every request via the
+`registrymanifest.TCPSecretHeader` header. `ListenAndServeTCP` checks it with
 `crypto/subtle.ConstantTimeCompare`, not `!=` — a short-circuiting equality
 check leaks the secret to the same local adversary a byte at a time, through
 response-time variance, which is precisely the class of attack the socket's
@@ -1365,3 +1367,37 @@ collision drop key on the same fold, so two routes differing only in host
 case collide rather than both running a rewrite pass. That drop also guards
 the cargo home-render path, so two cargo routes differing only in host case
 are dropped as collided too, matching #3665's case-insensitive binding.
+
+## Amendment (issue #3772): the TCP binds stay every-interface, gated by the secret alone
+
+The #3111 amendment's TCP fallback binds `0.0.0.0:0`, and so do the two
+listeners that share its route: the signal socket's TCP arm
+(`dispatch/signal_socket.go`) and the throwaway listener
+`probeRegistryTCPReachable` dials back into (`listenTCPProbe`,
+`runner/oci.go`). On a host with a routable NIC that publishes each port to
+the LAN for the life of the Dispatch. Narrowing the bind to the address the
+Box dials was considered and rejected; the exposure is accepted instead.
+
+No one host address is what the Box dials across runtimes: the docker
+bridge's gateway, a VM-backed runtime's forwarder (Docker Desktop, Lima),
+rootless podman, and a user network named by `PODMAN_NETWORK` each differ, and
+the VM-backed ones have no host-visible gateway address to bind at all. A
+wrong guess fails the Dispatch. TCP is already the last transport, so a
+narrowed probe listener that misses hard-errors with nothing to fall back to,
+and a narrowed proxy behind an every-interface probe passes the probe and
+fails later, inside the Box.
+
+The per-run secret is therefore the sole access control —
+`registrymanifest.TCPSecretHeader` for the proxy, `signalwire.SecretHeader`
+for the signal socket, each compared in constant time. What bounds the
+exposure around it: each port is ephemeral and lives for one Dispatch; each
+listener times out header and request reads and caps concurrent connections,
+so an unauthenticated peer cannot hold the pre-auth surface open; and both
+refuse to bind at all under a `NETWORK_MODE` that denies host loopback. The
+probe listener needs no secret, because it accepts one connection and closes
+it, carrying no credential and no payload. It stays every-interface so it
+tests the same route the real listeners serve.
+
+Binding only the address the probe's dial-back arrived on (its accepted
+connection's local address, carried out through the transport verdict) is
+possible future hardening, not an open item.
