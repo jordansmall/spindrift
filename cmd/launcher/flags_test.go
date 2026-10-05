@@ -1515,6 +1515,30 @@ func TestApplySecretCmdFallback_SkipsGhTokenWhenDocumentIsFullyLocal(t *testing.
 	}
 }
 
+// A pure-Forgejo run never reaches GitHub, so the global template must not
+// look up GH_TOKEN there; any pairing that still reaches GitHub must (#3325).
+func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	for _, tc := range []struct {
+		name, forge, tracker string
+		want                 bool
+	}{
+		{"pure forgejo", "forgejo", "forgejo", false},
+		{"pure github", "github", "github", true},
+		{"forgejo tracker, github forge", "github", "forgejo", true},
+		{"github tracker, forgejo forge", "forgejo", "github", true},
+		{"fully local", "local", "local", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CODE_FORGE", tc.forge)
+			t.Setenv("ISSUE_TRACKER", tc.tracker)
+			if got := secretRequiredThisRun("GH_TOKEN"); got != tc.want {
+				t.Errorf("secretRequiredThisRun(GH_TOKEN) with %s/%s = %v, want %v", tc.forge, tc.tracker, got, tc.want)
+			}
+		})
+	}
+}
+
 // BOX_GH_TOKEN (ADR 0016 two-actor separation) is opt-in with no
 // requiredness signal of its own, so the template must never auto-source it.
 func TestParseFlags_GlobalSecretCmd_SkipsBoxGhToken(t *testing.T) {

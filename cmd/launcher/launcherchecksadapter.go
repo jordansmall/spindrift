@@ -53,6 +53,7 @@ func launcherCheckDeps(c config) launcherchecks.Deps {
 			b := launcherchecks.Backend{
 				ValidAsTracker:   row.ValidAsTracker,
 				ValidAsCodeForge: row.ValidAsCodeForge,
+				TokenEnvVar:      row.TokenEnvVar,
 			}
 			if row.validateTracker != nil {
 				b.ValidateTracker = func() error { return row.validateTracker(c) }

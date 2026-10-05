@@ -54,7 +54,7 @@ func minimalDeps() Deps {
 			if name != "github" {
 				return Backend{}, false
 			}
-			return Backend{ValidAsTracker: true, ValidAsCodeForge: true}, true
+			return Backend{ValidAsTracker: true, ValidAsCodeForge: true, TokenEnvVar: "GH_TOKEN"}, true
 		},
 		TrackerNames:   func() []string { return []string{"github", "jira"} },
 		CodeForgeNames: func() []string { return []string{"github", "git"} },
@@ -170,6 +170,51 @@ func TestRequiredKnobChecks_GHToken(t *testing.T) {
 	ch2 := checkByName(t, RequiredKnobChecks(c2, minimalDeps()), "gh-token")
 	if _, err := ch2.Probe(); err != nil {
 		t.Errorf("gh-token Probe() unexpected error: %v", err)
+	}
+}
+
+// GH_TOKEN is required whenever the pairing reaches GitHub: a GitHub tracker,
+// or a forge with no token of its own (git still runs `gh auth setup-git`) or
+// a GitHub one. Only a pure non-GitHub pairing frees it.
+func TestRequiredKnobChecks_GHToken_ByPairing(t *testing.T) {
+	rows := map[string]Backend{
+		"github":  {ValidAsTracker: true, ValidAsCodeForge: true, TokenEnvVar: "GH_TOKEN"},
+		"forgejo": {ValidAsTracker: true, ValidAsCodeForge: true, TokenEnvVar: "FORGEJO_TOKEN"},
+		"jira":    {ValidAsTracker: true, TokenEnvVar: "JIRA_TOKEN"},
+		"git":     {ValidAsCodeForge: true},
+	}
+	for _, tc := range []struct {
+		tracker, forge string
+		wantRequired   bool
+	}{
+		{"forgejo", "forgejo", false},
+		{"jira", "forgejo", false},
+		{"github", "forgejo", true},
+		{"forgejo", "github", true},
+		{"jira", "github", true},
+		{"forgejo", "git", true},
+		{"github", "github", true},
+		{"forgejo", "nope", true},
+		{"", "", true},
+	} {
+		t.Run(tc.tracker+"/"+tc.forge, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.GHToken = ""
+			c.IssueTracker = tc.tracker
+			c.CodeForge = tc.forge
+			d := minimalDeps()
+			d.Backend = func(name string) (Backend, bool) {
+				b, ok := rows[name]
+				return b, ok
+			}
+			_, err := checkByName(t, RequiredKnobChecks(c, d), "gh-token").Probe()
+			if tc.wantRequired && err == nil {
+				t.Error("gh-token Probe() = nil, want the set-GH_TOKEN error")
+			}
+			if !tc.wantRequired && err != nil {
+				t.Errorf("gh-token Probe() unexpected error: %v", err)
+			}
+		})
 	}
 }
 
