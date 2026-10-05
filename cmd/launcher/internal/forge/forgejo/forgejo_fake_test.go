@@ -228,7 +228,7 @@ func (f *fakeForgejo) IsDraftTitle(num string) bool {
 // config. Keep it separate from the adapter's own forgejoWIPPrefixes
 // (forgejo_prforge.go): this fake stands in for a real server, which derives
 // its draft field independently of this codebase's adapter.
-var fakeWIPPrefixes = []string{"WIP:", "[WIP]:"}
+var fakeWIPPrefixes = []string{"WIP:", "[WIP]"}
 
 // fakeIsDraftTitle mirrors how real Forgejo derives a pull's served "draft"
 // field entirely from its title (services/convert/pull.go sets Draft from

@@ -781,16 +781,34 @@ func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 	}
 }
 
-// MarkReady must gate on isDraftPull (the draft field or either WIP-title
-// convention), not isDraftTitle's narrower "WIP:"-only check. Gating on the
-// narrow check strands a "[WIP]:"-titled draft PR that OpenPRForBranch adopted.
-func TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle(t *testing.T) {
+// MarkReady must strip a bracketed "[WIP]" title whether or not the server
+// reports the draft field, or a bracket-titled draft PR that OpenPRForBranch
+// adopted stays a draft to Forgejo.
+func TestMarkReady_StripsBracketedWIPTitle(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		draft bool
+	}{
+		{"bracket colon, draft field", "[WIP]: add feature", true},
+		{"bracket no colon, draft field", "[WIP] add feature", true},
+		{"bracket no colon, title only", "[WIP] add feature", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			markReadyStripsBracketedWIPTitle(t, tt.title, tt.draft)
+		})
+	}
+}
+
+func markReadyStripsBracketedWIPTitle(t *testing.T, title string, draft bool) {
+	t.Helper()
 	var gotPath, gotMethod string
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
-			w.Write([]byte(pullJSON(206, "open", false, true, true, "[WIP]: add feature", "agent/issue-206", "abc123", "main")))
+			w.Write([]byte(pullJSON(206, "open", false, true, draft, title, "agent/issue-206", "abc123", "main")))
 		case r.Method == http.MethodPatch:
 			gotPath = r.URL.Path
 			gotMethod = r.Method
@@ -898,7 +916,7 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 	}
 }
 
-// The symmetric case to TestMarkReady_ActsOnDraftFieldWithBracketedWIPTitle.
+// The symmetric case to TestMarkReady_StripsBracketedWIPTitle.
 // MarkDraft must gate on the same isDraftPull predicate, or a pull already
 // draft by field but plainly titled gets redundantly PATCHed back to draft.
 func TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle(t *testing.T) {
