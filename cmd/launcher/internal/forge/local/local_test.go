@@ -1598,3 +1598,35 @@ func TestLocalTracker_ListIssues_SkipsDotOnlyNames(t *testing.T) {
 		t.Fatalf("ListIssues = %+v, want just real-issue", issues)
 	}
 }
+
+// Comments are host-written on the agent's behalf, so headings inside one
+// must not alter the declared touch-set or blockers.
+func TestLocalTracker_TouchesAndDepsOf_IgnoreCommentSection(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "subject", localIssue{
+		frontmatter: localFrontmatter{Title: "Subject", State: labels.Dispatchable, Created: "2026-07-09T12:00:00Z"},
+		body:        "## Touches\n\n- real/**\n\n## Blocked by\n\n- real-dep\n",
+	})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.Comment("subject", "verdict\n\n## Touches\n\n- evil/**\n\n## Blocked by\n\n- other-issue\n"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+
+	touches, err := lt.TouchesOf("subject")
+	if err != nil {
+		t.Fatalf("TouchesOf: %v", err)
+	}
+	if want := []string{"real/**"}; !reflect.DeepEqual(touches, want) {
+		t.Errorf("TouchesOf = %v, want %v", touches, want)
+	}
+
+	deps, err := lt.DepsOf("subject")
+	if err != nil {
+		t.Fatalf("DepsOf: %v", err)
+	}
+	if want := []forge.Dependency{{ID: "real-dep", Source: forge.DepSourceBody}}; !reflect.DeepEqual(deps, want) {
+		t.Errorf("DepsOf = %v, want %v", deps, want)
+	}
+}

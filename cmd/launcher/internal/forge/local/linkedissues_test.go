@@ -285,3 +285,33 @@ func TestLinkedIssues_SubjectReadFailureReturnsError(t *testing.T) {
 		t.Error("LinkedIssues(nonexistent) = nil error, want non-nil")
 	}
 }
+
+func TestLinkedIssues_IgnoresBlockersInsideCommentSection(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "subject", localIssue{
+		frontmatter: localFrontmatter{Title: "Subject", Created: "2026-01-01T00:00:00Z"},
+		body:        "## Blocked by\n\n- real-dep\n",
+	})
+	for _, slug := range []string{"real-dep", "other-issue"} {
+		writeLocalIssue(t, dir, slug, localIssue{
+			frontmatter: localFrontmatter{Title: slug, Created: "2026-01-01T00:00:00Z"},
+			body:        "no blockers",
+		})
+	}
+
+	lt := NewLocalTracker(dir, testLabels)
+	if err := lt.Comment("subject", "verdict\n\n## Blocked by\n\n- other-issue\n"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+
+	links, err := lt.LinkedIssues("subject")
+	if err != nil {
+		t.Fatalf("LinkedIssues: %v", err)
+	}
+	mustFind(t, links, "real-dep")
+	for _, l := range links {
+		if l.Ref == "other-issue" {
+			t.Errorf("followed blocker injected via comment: %+v", links)
+		}
+	}
+}
