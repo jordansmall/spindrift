@@ -47,17 +47,12 @@ type Signals struct {
 	FullyLocal              bool
 }
 
-// Backend is what a cross-knob row needs from one backend-registry row. The
-// validators arrive already bound to the caller's own config, so no config
-// type crosses this seam; a nil validator means no validation beyond axis
-// membership.
+// Backend is one backend-registry row (the embedded Descriptor) plus the
+// validators a cross-knob row needs. The validators arrive already bound to the
+// caller's own config, so no config type crosses this seam; a nil validator
+// means no validation beyond axis membership.
 type Backend struct {
-	ValidAsTracker   bool
-	ValidAsCodeForge bool
-
-	// TokenEnvVar names the backend's bearer-token env var; empty when it
-	// carries none (git, local).
-	TokenEnvVar string
+	backend.Descriptor
 
 	ValidateTracker   func() error
 	ValidateCodeForge func() error
@@ -87,13 +82,13 @@ func repoRequirementExempt(sig Signals, c Config) bool {
 	return sig.FullyLocal || noRepoResearch
 }
 
-// ghTokenRequired resolves both backends' token vars for backend.NeedsGHToken.
+// ghTokenRequired resolves both backends' descriptors for backend.NeedsGHToken.
 // Jira and forgejo trackers check their own tokens through their cross-knob
 // validators.
 func ghTokenRequired(c Config, d Deps) bool {
 	tracker, _ := d.Backend(c.IssueTracker)
 	forge, _ := d.Backend(c.CodeForge)
-	return backend.NeedsGHToken(forge.TokenEnvVar, tracker.TokenEnvVar)
+	return backend.NeedsGHToken(forge.Descriptor, tracker.Descriptor)
 }
 
 // requiredValue builds a Required-tier Check row whose Remedy and Probe error

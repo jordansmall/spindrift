@@ -22,7 +22,8 @@ func checkEnvGuards(getenv func(string) string) error {
 		return &missingEnvError{Name: name, Msg: msg}
 	}
 	// BOX_GH_TOKEN_OPTIONAL is a positive opt-out from dispatch.buildBoxEnv
-	// for a pure-forgejo pairing (issue #3325); absent keeps GH_TOKEN required.
+	// for a pairing that never reaches GitHub (forgejo or local forge with a
+	// non-GitHub tracker; #3325, #4494); absent keeps GH_TOKEN required.
 	if needsForge && !set("BOX_GH_TOKEN_OPTIONAL") {
 		if err := require("GH_TOKEN", "GH_TOKEN is required"); err != nil {
 			return err

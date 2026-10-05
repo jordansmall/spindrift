@@ -543,7 +543,7 @@ func secretRequiredThisRun(env string) bool {
 	switch env {
 	case "GH_TOKEN":
 		sig := resolveCapabilitySignals(codeForge, issueTracker)
-		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.TokenEnvVar, trackerRow.TokenEnvVar)
+		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
 	case "JIRA_TOKEN", "FORGEJO_TOKEN":
 		return forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env
 	case "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY":

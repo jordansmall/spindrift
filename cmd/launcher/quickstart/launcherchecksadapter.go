@@ -51,11 +51,7 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 			if !ok {
 				return launcherchecks.Backend{}, false
 			}
-			b := launcherchecks.Backend{
-				ValidAsTracker:   row.ValidAsTracker,
-				ValidAsCodeForge: row.ValidAsCodeForge,
-				TokenEnvVar:      row.TokenEnvVar,
-			}
+			b := launcherchecks.Backend{Descriptor: row}
 			// forgejo is the only backend the wizard can validate, because its
 			// validators read knobs (FORGEJO_BASE_URL, FORGEJO_TOKEN) the wizard
 			// prompts for. Every other backend declares no validator or reads a
