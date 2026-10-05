@@ -25,8 +25,10 @@ type ghWireComment struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	CreatedAt string `json:"createdAt"`
-	Body      string `json:"body"`
+	CreatedAt       string `json:"createdAt"`
+	Body            string `json:"body"`
+	IsMinimized     bool   `json:"isMinimized"`
+	MinimizedReason string `json:"minimizedReason"`
 }
 
 // githubHarness implements forgetest.Harness over a STATE_DIR/issues/<num>/
@@ -104,6 +106,8 @@ func (h *githubHarness) SeedComments(num string, comments []forge.Comment) {
 		w.Author.Login = c.Author
 		w.CreatedAt = c.CreatedAt
 		w.Body = c.Body
+		w.IsMinimized = c.Minimized
+		w.MinimizedReason = c.MinimizedReason
 		doc.Comments = append(doc.Comments, w)
 	}
 	b, _ := json.Marshal(doc)
@@ -116,4 +120,25 @@ func (h *githubHarness) IsPriorityCapable() {}
 
 func TestExecClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newGithubHarness(t))
+}
+
+func TestExecClient_CommentsCarryMinimized(t *testing.T) {
+	h := newGithubHarness(t)
+	h.SeedComments("7", []forge.Comment{
+		{Author: "a", CreatedAt: "2026-01-01T00:00:00Z", Body: "live"},
+		{Author: "b", CreatedAt: "2026-01-02T00:00:00Z", Body: "noise", Minimized: true, MinimizedReason: "SPAM"},
+	})
+	got, err := h.tr.(forge.CommentLister).Comments("7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d comments, want 2", len(got))
+	}
+	if got[0].Minimized || got[0].MinimizedReason != "" {
+		t.Errorf("live comment = %+v, want not minimized", got[0])
+	}
+	if !got[1].Minimized || got[1].MinimizedReason != "SPAM" {
+		t.Errorf("minimized comment = %+v, want Minimized with reason SPAM", got[1])
+	}
 }
