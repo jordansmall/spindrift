@@ -94,6 +94,7 @@ in
         import (
         	"bytes"
         	"encoding/json"
+        	"io"
         	"os"
         	"path/filepath"
         	"strings"
@@ -168,7 +169,7 @@ in
         		}
 
         		var stdout bytes.Buffer
-        		rc := runAssemblePrompt(args, &stdout)
+        		rc := runAssemblePrompt(args, &stdout, io.Discard)
         		if rc != 0 {
         			t.Fatalf("runAssemblePrompt(--test-skill-skill-baked=%v) exit = %d, want 0 (stdout=%q)", testSkillBaked, rc, stdout.String())
         		}

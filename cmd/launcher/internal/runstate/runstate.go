@@ -109,21 +109,29 @@ func (s RunState) IsEmpty() bool {
 // or a path with no file yet (the first pass of a run) returns a zero RunState
 // and no error.
 func ReadRunState(path string) (RunState, error) {
+	s, _, err := ReadRunStateFound(path)
+	return s, err
+}
+
+// ReadRunStateFound is ReadRunState that also reports whether a file was read:
+// found is false for an empty path or a path with no file yet. It owns the
+// missing-file rule, so callers wanting to tell "absent" from "empty" don't
+// re-derive it.
+func ReadRunStateFound(path string) (s RunState, found bool, err error) {
 	if path == "" {
-		return RunState{}, nil
+		return RunState{}, false, nil
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return RunState{}, nil
+		return RunState{}, false, nil
 	}
 	if err != nil {
-		return RunState{}, fmt.Errorf("read run state %s: %w", path, err)
+		return RunState{}, false, fmt.Errorf("read run state %s: %w", path, err)
 	}
-	var s RunState
 	if err := json.Unmarshal(data, &s); err != nil {
-		return RunState{}, fmt.Errorf("parse run state %s: %w", path, err)
+		return RunState{}, false, fmt.Errorf("parse run state %s: %w", path, err)
 	}
-	return s, nil
+	return s, true, nil
 }
 
 // WriteRunState writes s to path as indented JSON. A no-op when path is empty.

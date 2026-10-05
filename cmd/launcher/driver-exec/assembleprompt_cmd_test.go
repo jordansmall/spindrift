@@ -3,12 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/promptassembly"
+	"spindrift.dev/launcher/internal/runstate"
+	"spindrift.dev/launcher/internal/seedblock"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
@@ -62,7 +66,7 @@ func TestRunAssemblePrompt_CoveredCellWritesOutputs(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput), &stdout)
+	rc := runAssemblePrompt(coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput), &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -110,7 +114,7 @@ func TestRunAssemblePrompt_UnsupportedCellReturnsNonZero(t *testing.T) {
 	t.Setenv("DISPATCH_KIND", "bogus-kind")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for an unsupported cell")
 	}
@@ -128,7 +132,7 @@ func TestRunAssemblePrompt_MissingRequiredFlagReturnsNonZero(t *testing.T) {
 		"--registry", repopath.RegistryJSON(),
 		"--prompt-output", filepath.Join(dir, "prompt.txt"),
 		"--agents-json-output", filepath.Join(dir, "agents.json"),
-	}, &stdout)
+	}, &stdout, io.Discard)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a missing -handoff-output")
 	}
@@ -153,7 +157,7 @@ func TestRunAssemblePrompt_ValidateMarkersRegistryRequired(t *testing.T) {
 	}
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(filtered, &stdout)
+	rc := runAssemblePrompt(filtered, &stdout, io.Discard)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a missing -validate-markers-registry")
 	}
@@ -248,7 +252,7 @@ func TestRunAssemblePrompt_ValidatorRejectBlocksOutputs(t *testing.T) {
 			args = replaceArg(args, "--prompts-dir", researchPromptDirLackingSpindriftComment(t))
 
 			var stdout bytes.Buffer
-			rc := runAssemblePrompt(args, &stdout)
+			rc := runAssemblePrompt(args, &stdout, io.Discard)
 			if rc == 0 {
 				t.Fatalf("runAssemblePrompt exit = 0, want non-zero for a reject-gate missing marker (stdout=%q)", stdout.String())
 			}
@@ -283,7 +287,7 @@ func TestRunAssemblePrompt_ValidatorWarnStillWritesOutputs(t *testing.T) {
 			args = replaceArg(args, "--prompts-dir", issuePromptDirLackingSpindriftPRIntent(t))
 
 			var stdout bytes.Buffer
-			rc := runAssemblePrompt(args, &stdout)
+			rc := runAssemblePrompt(args, &stdout, io.Discard)
 			if rc != 0 {
 				t.Fatalf("runAssemblePrompt exit = %d, want 0 for a warn-gate missing marker (stdout=%q)", rc, stdout.String())
 			}
@@ -327,7 +331,7 @@ func TestRunAssemblePrompt_TrackerAxisEnvVarsReachGates(t *testing.T) {
 	t.Setenv("BOX_TRACKER_AXIS_FILER", "FORGEJO")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -360,7 +364,7 @@ func TestRunAssemblePrompt_ForgeBackendEnvVarReachesGates(t *testing.T) {
 	t.Setenv("BOX_FORGE_BACKEND", "FORGEJO")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -391,7 +395,7 @@ const (
 func assemblePromptForTest(t *testing.T, dir string, args []string) string {
 	t.Helper()
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -554,7 +558,7 @@ func TestRunAssemblePrompt_PopulatesPassthroughHandoffFields(t *testing.T) {
 	)
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -675,7 +679,7 @@ func TestRunAssemblePrompt_MalformedBudgetCapsDegradeToZero(t *testing.T) {
 			)
 
 			var stdout bytes.Buffer
-			rc := runAssemblePrompt(args, &stdout)
+			rc := runAssemblePrompt(args, &stdout, io.Discard)
 			if rc != 0 {
 				t.Fatalf("runAssemblePrompt exit = %d, want 0 (malformed/negative budget caps must degrade to 0, not fail the run) (stdout=%q)", rc, stdout.String())
 			}
@@ -720,7 +724,7 @@ func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 		args = append(args, "--review-prompt-output", reviewPromptOutput)
 
 		var stdout bytes.Buffer
-		rc := runAssemblePrompt(args, &stdout)
+		rc := runAssemblePrompt(args, &stdout, io.Discard)
 		if rc != 0 {
 			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 		}
@@ -755,7 +759,7 @@ func TestRunAssemblePrompt_ReviewPromptOutput(t *testing.T) {
 		args := orchestratorOnArgs(t, promptOutput, agentsJSONOutput, handoffOutput)
 
 		var stdout bytes.Buffer
-		rc := runAssemblePrompt(args, &stdout)
+		rc := runAssemblePrompt(args, &stdout, io.Discard)
 		if rc != 0 {
 			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 		}
@@ -792,7 +796,7 @@ func TestRunAssemblePrompt_CompositionOutputOmittedIsANoop(t *testing.T) {
 	handoffOutput := filepath.Join(dir, "handoff.json")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput), &stdout)
+	rc := runAssemblePrompt(coveredCellArgs(t, promptOutput, agentsJSONOutput, handoffOutput), &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -823,7 +827,7 @@ func TestRunAssemblePrompt_CompositionOutputFile(t *testing.T) {
 	args = append(args, "--composition-output", compositionOutput)
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -861,7 +865,7 @@ func TestRunAssemblePrompt_CompositionOutputStdout(t *testing.T) {
 	args = append(args, "--composition-output", "-")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -1016,7 +1020,7 @@ func TestRunAssemblePrompt_CompositionCarried(t *testing.T) {
 	)
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc != 0 {
 		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 	}
@@ -1074,7 +1078,7 @@ func TestRunAssemblePrompt_CompositionCarriedMalformedValue(t *testing.T) {
 	args = append(args, "--composition-output", compositionOutput, "--composition-carried", "no-equals-sign")
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for a malformed --composition-carried value")
 	}
@@ -1097,7 +1101,7 @@ func TestRunAssemblePrompt_CompositionCarriedUnreadableFile(t *testing.T) {
 		"--composition-carried", "missing="+filepath.Join(dir, "does-not-exist.txt"))
 
 	var stdout bytes.Buffer
-	rc := runAssemblePrompt(args, &stdout)
+	rc := runAssemblePrompt(args, &stdout, io.Discard)
 	if rc == 0 {
 		t.Fatal("runAssemblePrompt exit = 0, want non-zero for an unreadable --composition-carried file")
 	}
@@ -1116,7 +1120,7 @@ func TestRunAssemblePrompt_FragmentsOutput(t *testing.T) {
 		args = append(args, "--fragments-output", fragmentsOutput)
 
 		var stdout bytes.Buffer
-		if rc := runAssemblePrompt(args, &stdout); rc != 0 {
+		if rc := runAssemblePrompt(args, &stdout, io.Discard); rc != 0 {
 			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 		}
 
@@ -1143,7 +1147,7 @@ func TestRunAssemblePrompt_FragmentsOutput(t *testing.T) {
 		args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
 
 		var stdout bytes.Buffer
-		if rc := runAssemblePrompt(args, &stdout); rc != 0 {
+		if rc := runAssemblePrompt(args, &stdout, io.Discard); rc != 0 {
 			t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q)", rc, stdout.String())
 		}
 		entries, err := os.ReadDir(dir)
@@ -1154,4 +1158,261 @@ func TestRunAssemblePrompt_FragmentsOutput(t *testing.T) {
 			t.Errorf("dir has %d entries, want exactly prompt/agents/handoff", len(entries))
 		}
 	})
+}
+
+// runStateComposition runs assemble-prompt with --composition-output plus
+// extra args and returns the decoded report; the run must exit 0.
+func runStateComposition(t *testing.T, extra ...string) promptassembly.Composition {
+	t.Helper()
+	composition, _ := runStateCompositionEnv(t, nil, extra...)
+	return composition
+}
+
+// runStateCompositionEnv is runStateComposition with env overrides applied on
+// top of the covered cell, returning the run's stderr alongside.
+func runStateCompositionEnv(t *testing.T, env map[string]string, extra ...string) (promptassembly.Composition, string) {
+	t.Helper()
+	dir := t.TempDir()
+	compositionOutput := filepath.Join(dir, "composition.json")
+	args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
+	for k, v := range env {
+		t.Setenv(k, v)
+	}
+	args = append(args, "--composition-output", compositionOutput)
+	args = append(args, extra...)
+
+	var stdout, stderr bytes.Buffer
+	if rc := runAssemblePrompt(args, &stdout, &stderr); rc != 0 {
+		t.Fatalf("runAssemblePrompt exit = %d, want 0 (stdout=%q stderr=%q)", rc, stdout.String(), stderr.String())
+	}
+	raw, err := os.ReadFile(compositionOutput)
+	if err != nil {
+		t.Fatalf("read composition output: %v", err)
+	}
+	var composition promptassembly.Composition
+	if err := json.Unmarshal(raw, &composition); err != nil {
+		t.Fatalf("unmarshal composition output: %v\n%s", err, raw)
+	}
+	return composition, stderr.String()
+}
+
+func writeRunState(t *testing.T, state runstate.RunState) string {
+	t.Helper()
+	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal run state: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write run state: %v", err)
+	}
+	return path
+}
+
+// carriedBytes returns the Bytes of the named carried source on pass, and
+// whether the pass has one.
+func carriedBytes(composition promptassembly.Composition, pass, name string) (int, bool) {
+	for _, p := range composition.Passes {
+		if p.Pass != pass {
+			continue
+		}
+		for _, s := range p.Sources {
+			if s.Kind == promptassembly.SourceCarried && s.Name == name {
+				return s.Bytes, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// --run-state derives the handoff block for implement/fix/land, and
+// carries nothing for the review passes when the state has no review data.
+func TestRunAssemblePrompt_RunStateHandoff(t *testing.T) {
+	state := runstate.RunState{
+		LastVerdict:     "BLOCK",
+		ScoutBriefPath:  filepath.Join(t.TempDir(), "never-written-brief.md"),
+		PassSummaryPath: "/tmp/summary.md",
+	}
+	want := len(seedblock.Handoff(state))
+	if want == 0 {
+		t.Fatal("test state yields an empty handoff block")
+	}
+	composition := runStateComposition(t, "--run-state", writeRunState(t, state))
+
+	for _, pass := range []string{"implement", "fix", "land"} {
+		got, ok := carriedBytes(composition, pass, runStateHandoffBlock)
+		if !ok {
+			t.Errorf("pass %q lacks the %s source", pass, runStateHandoffBlock)
+		} else if got != want {
+			t.Errorf("pass %q %s bytes = %d, want %d", pass, runStateHandoffBlock, got, want)
+		}
+	}
+	for _, pass := range []string{"review", "delta-review"} {
+		for _, name := range []string{runStateHandoffBlock, runStateReviewBlock} {
+			if _, ok := carriedBytes(composition, pass, name); ok {
+				t.Errorf("pass %q carries %q, want none", pass, name)
+			}
+		}
+	}
+}
+
+// --run-state derives the review block for the review pass; delta-review
+// gets nothing because its seeder needs data RunState does not hold.
+func TestRunAssemblePrompt_RunStateReview(t *testing.T) {
+	state := runstate.RunState{
+		ReviewFindings:       "VERDICT: BLOCK\n- fix it",
+		ReviewedCommitAnchor: "0123456789abcdef0123456789abcdef01234567",
+	}
+	want := len(seedblock.Review(state))
+	if want == 0 {
+		t.Fatal("test state yields an empty review block")
+	}
+	composition := runStateComposition(t, "--run-state", writeRunState(t, state))
+
+	got, ok := carriedBytes(composition, "review", runStateReviewBlock)
+	if !ok {
+		t.Errorf("review pass lacks the %s source", runStateReviewBlock)
+	} else if got != want {
+		t.Errorf("review %s bytes = %d, want %d", runStateReviewBlock, got, want)
+	}
+	if _, ok := carriedBytes(composition, "delta-review", runStateReviewBlock); ok {
+		t.Errorf("delta-review carries %s, want none", runStateReviewBlock)
+	}
+}
+
+// Derived run-state blocks precede manual --composition-carried ones.
+func TestRunAssemblePrompt_RunStateBeforeManualCarried(t *testing.T) {
+	manual := filepath.Join(t.TempDir(), "manual.txt")
+	if err := os.WriteFile(manual, []byte("manual"), 0o644); err != nil {
+		t.Fatalf("write manual carried file: %v", err)
+	}
+	state := runstate.RunState{LastVerdict: "BLOCK"}
+	composition := runStateComposition(t,
+		"--run-state", writeRunState(t, state),
+		"--composition-carried", "implement:manual="+manual)
+
+	for _, p := range composition.Passes {
+		if p.Pass != "implement" {
+			continue
+		}
+		var names []string
+		for _, s := range p.Sources {
+			if s.Kind == promptassembly.SourceCarried {
+				names = append(names, s.Name)
+			}
+		}
+		if strings.Join(names, ",") != runStateHandoffBlock+",manual" {
+			t.Errorf("implement carried sources = %v, want [%s manual]", names, runStateHandoffBlock)
+		}
+	}
+}
+
+// A missing --run-state file reads as the zero state: no run-state sources.
+func TestRunAssemblePrompt_RunStateMissingFile(t *testing.T) {
+	absent := filepath.Join(t.TempDir(), "absent.json")
+	composition, stderr := runStateCompositionEnv(t, nil, "--run-state", absent)
+	if want := "--run-state file " + absent + " not found"; !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want a notice containing %q", stderr, want)
+	}
+	for _, p := range composition.Passes {
+		for _, name := range []string{runStateHandoffBlock, runStateReviewBlock} {
+			if _, ok := carriedBytes(composition, p.Pass, name); ok {
+				t.Errorf("pass %q carries %q from a missing file, want none", p.Pass, name)
+			}
+		}
+	}
+}
+
+// The notice must not corrupt a composition report streamed to stdout.
+func TestRunAssemblePrompt_RunStateMissingFileKeepsStdoutJSON(t *testing.T) {
+	dir := t.TempDir()
+	absent := filepath.Join(dir, "absent.json")
+	args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
+	args = append(args, "--composition-output", "-", "--run-state", absent)
+
+	var stdout, stderr bytes.Buffer
+	if rc := runAssemblePrompt(args, &stdout, &stderr); rc != 0 {
+		t.Fatalf("exit = %d, want 0 (stdout=%q stderr=%q)", rc, stdout.String(), stderr.String())
+	}
+	var composition promptassembly.Composition
+	if err := json.Unmarshal(stdout.Bytes(), &composition); err != nil {
+		t.Fatalf("stdout is not a clean composition: %v\n%s", err, stdout.String())
+	}
+	if want := "--run-state file " + absent + " not found"; !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want a notice containing %q", stderr.String(), want)
+	}
+}
+
+func TestRunAssemblePrompt_RunStateCorruptFile(t *testing.T) {
+	dir := t.TempDir()
+	corrupt := filepath.Join(dir, "run-state.json")
+	if err := os.WriteFile(corrupt, []byte("{not json"), 0o644); err != nil {
+		t.Fatalf("write corrupt run state: %v", err)
+	}
+	args := coveredCellArgs(t, filepath.Join(dir, "prompt.txt"), filepath.Join(dir, "agents.json"), filepath.Join(dir, "handoff.json"))
+
+	t.Run("with composition-output", func(t *testing.T) {
+		var stdout bytes.Buffer
+		a := append(append([]string{}, args...), "--composition-output", filepath.Join(dir, "c.json"), "--run-state", corrupt)
+		if rc := runAssemblePrompt(a, &stdout, io.Discard); rc != 1 {
+			t.Fatalf("exit = %d, want 1", rc)
+		}
+		if !strings.Contains(stdout.String(), "--run-state") {
+			t.Errorf("stdout = %q, want it to mention --run-state", stdout.String())
+		}
+	})
+	t.Run("without composition-output", func(t *testing.T) {
+		var stdout bytes.Buffer
+		a := append(append([]string{}, args...), "--run-state", corrupt)
+		if rc := runAssemblePrompt(a, &stdout, io.Discard); rc != 0 {
+			t.Fatalf("exit = %d, want 0 (stdout=%q)", rc, stdout.String())
+		}
+	})
+}
+
+// A warm FIX_PASS>0 cell has no review prompt, so the orchestrator's legacy
+// loop seeds its single legacy pass with the handoff block.
+func TestRunAssemblePrompt_RunStateLegacyCell(t *testing.T) {
+	state := runstate.RunState{LastVerdict: "BLOCK", PassSummaryPath: "/tmp/summary.md"}
+	want := len(seedblock.Handoff(state))
+	if want == 0 {
+		t.Fatal("test state yields an empty handoff block")
+	}
+	composition, _ := runStateCompositionEnv(t, map[string]string{"FIX_PASS": "1"}, "--run-state", writeRunState(t, state))
+
+	if len(composition.Passes) != 1 || composition.Passes[0].Pass != "legacy" {
+		t.Fatalf("passes = %+v, want the single legacy pass", composition.Passes)
+	}
+	got, ok := carriedBytes(composition, "legacy", runStateHandoffBlock)
+	if !ok {
+		t.Fatalf("legacy pass lacks the %s source", runStateHandoffBlock)
+	}
+	if got != want {
+		t.Errorf("legacy %s bytes = %d, want %d", runStateHandoffBlock, got, want)
+	}
+}
+
+// runStateCarried maps every rendered pass to the block the orchestrator seeds
+// it with: review gets the review block, delta-review nothing, all others the
+// handoff block.
+func TestRunStateCarried(t *testing.T) {
+	state := runstate.RunState{
+		LastVerdict:          "BLOCK",
+		ReviewFindings:       "VERDICT: BLOCK\n- fix it",
+		ReviewedCommitAnchor: "0123456789abcdef0123456789abcdef01234567",
+	}
+	handoff, review := seedblock.Handoff(state), seedblock.Review(state)
+	if handoff == "" || review == "" {
+		t.Fatal("test state must yield both blocks")
+	}
+	got := runStateCarried(state, []string{"implement", "review", "delta-review", "legacy", "research"})
+	want := []promptassembly.CarriedText{
+		{Pass: "implement", Name: runStateHandoffBlock, Text: handoff},
+		{Pass: "review", Name: runStateReviewBlock, Text: review},
+		{Pass: "legacy", Name: runStateHandoffBlock, Text: handoff},
+		{Pass: "research", Name: runStateHandoffBlock, Text: handoff},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("runStateCarried = %+v, want %+v", got, want)
+	}
 }

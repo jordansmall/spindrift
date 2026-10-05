@@ -83,37 +83,26 @@ func (a *sourceAggregator) sources() []SourceBytes {
 	return out
 }
 
-// Compose reports the assembled prompt's composition for every pass kind the
-// cell described by e and reg renders, without dispatching a Box. It renders
-// through assemblePromptBodies, the same helper Assemble uses, so the report
-// cannot drift from what Assemble produces.
-func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
-	if err := checkCoveredCell(e); err != nil {
-		return Composition{}, err
-	}
+type passDef struct {
+	name     string
+	body     body
+	template string
+}
 
-	bodies, err := assemblePromptBodies(e, reg)
-	if err != nil {
-		return Composition{}, err
-	}
-
-	type passDef struct {
-		name     string
-		body     body
-		template string
-	}
-
+// passDefs lists the passes the cell renders, in report order. Compose and
+// Passes both read it, so a caller choosing carried-block targets sees exactly
+// the passes Compose will accept.
+func passDefs(bodies promptBodies) []passDef {
 	// A review body exists only for fresh,
 	// non-research work, where the cell renders all five orchestrator pass
 	// kinds rather than a single legacy or research pass.
 	orchestratorOnFreshWork := bodies.review != nil
 
-	var defs []passDef
 	switch {
 	case bodies.kind.Prompts.Base != "":
-		defs = []passDef{{name: bodies.kind.Name, body: bodies.base, template: bodies.baseName}}
+		return []passDef{{name: bodies.kind.Name, body: bodies.base, template: bodies.baseName}}
 	case orchestratorOnFreshWork:
-		defs = []passDef{
+		return []passDef{
 			{name: passmachine.KindImplement.ManifestKind(), body: bodies.base, template: bodies.baseName},
 			{name: passmachine.KindFix.ManifestKind(), body: bodies.base, template: bodies.baseName},
 			{name: passmachine.KindLand.ManifestKind(), body: bodies.base, template: bodies.baseName},
@@ -121,7 +110,44 @@ func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
 			{name: passmachine.KindDeltaReview.ManifestKind(), body: bodies.review, template: bodies.reviewName},
 		}
 	default:
-		defs = []passDef{{name: passmachine.KindLegacy.ManifestKind(), body: bodies.base, template: bodies.baseName}}
+		return []passDef{{name: passmachine.KindLegacy.ManifestKind(), body: bodies.base, template: bodies.baseName}}
+	}
+}
+
+// defsFor is the shared preamble of Passes and Compose: the cell check, the
+// bodies Assemble renders, and the pass list read off them.
+func defsFor(e Env, reg Registry) ([]passDef, error) {
+	if err := checkCoveredCell(e); err != nil {
+		return nil, err
+	}
+	bodies, err := assemblePromptBodies(e, reg)
+	if err != nil {
+		return nil, err
+	}
+	return passDefs(bodies), nil
+}
+
+// Passes names the passes Compose reports for the cell, in report order.
+func Passes(e Env, reg Registry) ([]string, error) {
+	defs, err := defsFor(e, reg)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(defs))
+	for i, d := range defs {
+		names[i] = d.name
+	}
+	return names, nil
+}
+
+// Compose reports the assembled prompt's composition for every pass kind the
+// cell described by e and reg renders, without dispatching a Box. It renders
+// through assemblePromptBodies, the same helper Assemble uses, so the report
+// cannot drift from what Assemble produces.
+func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
+	defs, err := defsFor(e, reg)
+	if err != nil {
+		return Composition{}, err
 	}
 
 	// A carried block naming a pass kind this cell doesn't render would

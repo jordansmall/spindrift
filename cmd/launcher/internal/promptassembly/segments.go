@@ -10,7 +10,7 @@ const (
 	SourceFragment SourceKind = "fragment"
 	SourceContract SourceKind = "contract"
 	SourceVar      SourceKind = "var"     // ${NAME} substitution value from vars
-	SourceCarried  SourceKind = "carried" // a --composition-carried block, i.e. text Assemble never sees
+	SourceCarried  SourceKind = "carried" // a --composition-carried or --run-state block, i.e. text Assemble never sees
 )
 
 // Source names one origin of prompt bytes.

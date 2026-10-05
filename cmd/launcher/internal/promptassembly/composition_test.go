@@ -574,3 +574,32 @@ func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
 		})
 	}
 }
+
+// Passes must name exactly the passes Compose reports, in the same order.
+func TestPassesMatchesCompose(t *testing.T) {
+	reg := loadTestRegistry(t)
+	legacy := coveredEnv()
+	legacy.FixPass = 1
+	research := coveredEnv()
+	research.DispatchKind = "research"
+
+	for name, env := range map[string]Env{"orchestrator": coveredEnv(), "legacy": legacy, "research": research} {
+		t.Run(name, func(t *testing.T) {
+			comp, err := Compose(env, reg, nil)
+			if err != nil {
+				t.Fatalf("Compose: %v", err)
+			}
+			got, err := Passes(env, reg)
+			if err != nil {
+				t.Fatalf("Passes: %v", err)
+			}
+			var want []string
+			for _, p := range comp.Passes {
+				want = append(want, p.Pass)
+			}
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("Passes = %v, want %v", got, want)
+			}
+		})
+	}
+}
