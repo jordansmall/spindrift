@@ -11,7 +11,7 @@ type HostMediationFake struct {
 
 	// RelayBundleErr, if non-nil, fails every RelayBundle call, scripting
 	// CODE_FORGE=local's missing or malformed bundle failure (ADR 0033).
-	// Only AsLocal() reaches it.
+	// Only AsLocal() and AsGithubReadOnly() reach it.
 	RelayBundleErr   error
 	RelayBundleCalls []RelayBundleCall
 
@@ -36,7 +36,7 @@ type HostMediationFake struct {
 	CommitSubjectsCalls  []CommitSubjectsCall
 
 	// PostIssueURL is the URL a successful PostIssue returns (issue #2018).
-	// Only AsIssueFiler() reaches it.
+	// Only AsIssueFiler() and AsLocalIssueFiler() reach it.
 	PostIssueURL   string
 	PostIssueErr   error
 	PostIssueCalls []PostIssueCall
