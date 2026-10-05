@@ -4613,9 +4613,8 @@ transient mint failure (a network blip, a transient API error) without waiting
 out the full 45m cycle, so a single miss still leaves several more attempts
 inside that same hour. `lib/gh-token-intervals.nix` is the one root for both
 values, and `nix/checks/gh-token-intervals.nix` pins the `gh-token-refresher`
-action's `sleep_secs` literals against it — plus, once the launcher grows its
-own App-refresh constants (issue #2867), those too. A bump starts at the
-registry; the check fails until the hand-written sites follow.
+action's `sleep_secs` literals against it. A bump starts at the registry; the
+check fails until the hand-written sites follow.
 
 ### Research token (least-privilege, optional)
 
