@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/x/term"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
@@ -523,13 +524,14 @@ func applySecretCmdFallback() error {
 // secrets. Reads CODE_FORGE and ISSUE_TRACKER through getenvSchema, not
 // os.Getenv, so a value set only in the Consumer flake is seen (ADR 0020).
 func secretRequiredThisRun(env string) bool {
+	codeForge, issueTracker := getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER")
+	forgeRow, _ := backendByName(codeForge)
+	trackerRow, _ := backendByName(issueTracker)
 	switch env {
 	case "GH_TOKEN":
-		sig := resolveCapabilitySignals(getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER"))
-		return !sig.fullyLocal
+		sig := resolveCapabilitySignals(codeForge, issueTracker)
+		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.TokenEnvVar, trackerRow.TokenEnvVar)
 	case "JIRA_TOKEN", "FORGEJO_TOKEN":
-		forgeRow, _ := backendByName(getenvSchema("CODE_FORGE"))
-		trackerRow, _ := backendByName(getenvSchema("ISSUE_TRACKER"))
 		return forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env
 	case "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY":
 		// Either one satisfies validate(), so try the template only when

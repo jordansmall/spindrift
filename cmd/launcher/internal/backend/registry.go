@@ -100,3 +100,14 @@ func QuickstartEligible() []Descriptor {
 	}
 	return out
 }
+
+// NeedsGHToken reports whether a forge/tracker pairing reaches GitHub, taking
+// each side's TokenEnvVar: only a forge carrying its own non-GitHub token,
+// paired with a non-GitHub tracker, frees GH_TOKEN. A tokenless forge stays on
+// it: `git` because Box clone still runs `gh auth setup-git`, an unknown
+// name's zero row fail-closed. local/local is exempted by callers' fully-local
+// check, not here (issue #3325).
+func NeedsGHToken(forgeTokenEnvVar, trackerTokenEnvVar string) bool {
+	return trackerTokenEnvVar == GitHub.TokenEnvVar ||
+		forgeTokenEnvVar == "" || forgeTokenEnvVar == GitHub.TokenEnvVar
+}

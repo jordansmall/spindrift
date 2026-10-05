@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 )
@@ -54,6 +55,10 @@ type Backend struct {
 	ValidAsTracker   bool
 	ValidAsCodeForge bool
 
+	// TokenEnvVar names the backend's bearer-token env var; empty when it
+	// carries none (git, local).
+	TokenEnvVar string
+
 	ValidateTracker   func() error
 	ValidateCodeForge func() error
 }
@@ -80,6 +85,15 @@ type Deps struct {
 func repoRequirementExempt(sig Signals, c Config) bool {
 	noRepoResearch := c.ResearchDispatch && c.SelfContained && sig.InBoxUnreachableTracker
 	return sig.FullyLocal || noRepoResearch
+}
+
+// ghTokenRequired resolves both backends' token vars for backend.NeedsGHToken.
+// Jira and forgejo trackers check their own tokens through their cross-knob
+// validators.
+func ghTokenRequired(c Config, d Deps) bool {
+	tracker, _ := d.Backend(c.IssueTracker)
+	forge, _ := d.Backend(c.CodeForge)
+	return backend.NeedsGHToken(forge.TokenEnvVar, tracker.TokenEnvVar)
 }
 
 // requiredValue builds a Required-tier Check row whose Remedy and Probe error
@@ -116,7 +130,7 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 			return c.GitUserEmail == ""
 		}),
 		requiredValue("gh-token", "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)", func() bool {
-			return !repoRequirementExempt(sig, c) && c.GHToken == ""
+			return !repoRequirementExempt(sig, c) && ghTokenRequired(c, d) && c.GHToken == ""
 		}),
 		{
 			Name:   "driver-credentials",

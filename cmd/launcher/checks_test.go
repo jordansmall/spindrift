@@ -205,9 +205,8 @@ func TestLauncherChecks_GhToken_Fails(t *testing.T) {
 	c.ghToken = ""
 	ch := checkByName(t, launcherChecks(c), "gh-token")
 	_, err := ch.Probe()
-	want := "set GH_TOKEN (fine-grained PAT scoped to the single target repo: Issues RW, Contents RW, Pull requests RW, Metadata R)"
-	if err == nil || err.Error() != want {
-		t.Errorf("gh-token Probe() = %v, want %q", err, want)
+	if err == nil || err.Error() != ch.Remedy {
+		t.Errorf("gh-token Probe() = %v, want the row's Remedy %q", err, ch.Remedy)
 	}
 }
 
@@ -216,6 +215,43 @@ func TestLauncherChecks_GhToken_Passes(t *testing.T) {
 	ch := checkByName(t, launcherChecks(c), "gh-token")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("gh-token Probe() unexpected error: %v", err)
+	}
+}
+
+// A pure-Forgejo deployment carries FORGEJO_TOKEN, not GH_TOKEN, so the row
+// must pass; a forgejo tracker on a GitHub forge still reaches GitHub (#3325).
+func TestLauncherChecks_GhToken_ByPairing(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		issueTracker string
+		codeForge    string
+		wantRequired bool
+	}{
+		{"pure forgejo", "forgejo", "forgejo", false},
+		{"forgejo tracker, github forge", "forgejo", "github", true},
+		{"jira tracker, github forge", "jira", "github", true},
+		{"github tracker, forgejo forge", "github", "forgejo", true},
+		{"jira tracker, forgejo forge", "jira", "forgejo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.issueTracker = tc.issueTracker
+			c.codeForge = tc.codeForge
+			c.forgejoBaseURL = "https://codeberg.org"
+			c.forgejoToken = "tok"
+			c.jiraBaseURL = "https://example.atlassian.net"
+			c.jiraProjectKey = "PROJ"
+			c.jiraToken = "tok"
+			c.ghToken = ""
+			ch := checkByName(t, launcherChecks(c), "gh-token")
+			_, err := ch.Probe()
+			if tc.wantRequired && (err == nil || err.Error() != ch.Remedy) {
+				t.Errorf("gh-token Probe() = %v, want the row's Remedy %q", err, ch.Remedy)
+			}
+			if !tc.wantRequired && err != nil {
+				t.Errorf("gh-token Probe() unexpected error: %v", err)
+			}
+		})
 	}
 }
 

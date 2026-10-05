@@ -81,3 +81,25 @@ func TestRelayCapableAndHostPostingCapable(t *testing.T) {
 		})
 	}
 }
+
+func TestNeedsGHToken(t *testing.T) {
+	cases := []struct {
+		name           string
+		forge, tracker string
+		want           bool
+	}{
+		{"github/github", GitHub.TokenEnvVar, GitHub.TokenEnvVar, true},
+		{"forgejo/forgejo", Forgejo.TokenEnvVar, Forgejo.TokenEnvVar, false},
+		{"jira tracker, github forge", GitHub.TokenEnvVar, Jira.TokenEnvVar, true},
+		{"forgejo tracker, github forge", GitHub.TokenEnvVar, Forgejo.TokenEnvVar, true},
+		{"github tracker, forgejo forge", Forgejo.TokenEnvVar, GitHub.TokenEnvVar, true},
+		{"jira tracker, forgejo forge", Forgejo.TokenEnvVar, Jira.TokenEnvVar, false},
+		{"git forge", Git.TokenEnvVar, Forgejo.TokenEnvVar, true},
+		{"unknown forge", "", Forgejo.TokenEnvVar, true},
+	}
+	for _, c := range cases {
+		if got := NeedsGHToken(c.forge, c.tracker); got != c.want {
+			t.Errorf("%s: NeedsGHToken(%q, %q) = %v, want %v", c.name, c.forge, c.tracker, got, c.want)
+		}
+	}
+}

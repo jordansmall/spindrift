@@ -139,19 +139,25 @@ func TestRunQuickstart_WiresLauncherChecksIntoDoctorOutput(t *testing.T) {
 
 // The wizard's doctor step must reach the same gh-token verdict `spindrift
 // doctor` reaches against the harness.env the wizard wrote. The shared row
-// is GH_TOKEN-specific, so the token belongs in Config.GHToken only when the
+// reads GH_TOKEN, so the token belongs in Config.GHToken only when the
 // scaffold writes it under that name: a forgejo scaffold writes
-// FORGEJO_TOKEN, leaving GH_TOKEN unset for both binaries to report.
+// FORGEJO_TOKEN, leaving GH_TOKEN blank. The row passes for a pure
+// forgejo pairing (never reaches GitHub) and reports MISSING for a jira
+// tracker on a github forge (#3325).
 func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 	for _, tc := range []struct {
 		issueTracker string
 		codeForge    string
 		wantGHToken  bool
+		wantMissing  bool
 	}{
 		{issueTracker: "github", codeForge: "github", wantGHToken: true},
 		{issueTracker: "forgejo", codeForge: "forgejo", wantGHToken: false},
+		// jira writes JIRA_TOKEN, leaving GH_TOKEN blank, yet the github forge
+		// still reaches GitHub, so the row must report it missing.
+		{issueTracker: "jira", codeForge: "github", wantGHToken: false, wantMissing: true},
 	} {
-		t.Run(tc.issueTracker, func(t *testing.T) {
+		t.Run(tc.issueTracker+"/"+tc.codeForge, func(t *testing.T) {
 			a := validAnswers()
 			a.tracker.issueTracker = tc.issueTracker
 
@@ -164,12 +170,13 @@ func TestQuickstartCheckConfig_GHTokenMirrorsHarnessEnvKnob(t *testing.T) {
 				t.Errorf("quickstartCheckConfig(...).GHToken = %q, want %q", c.GHToken, want)
 			}
 
-			_, err := launcherRow(t, a, tc.codeForge, "gh-token").Probe()
-			if tc.wantGHToken && err != nil {
+			row := launcherRow(t, a, tc.codeForge, "gh-token")
+			_, err := row.Probe()
+			switch {
+			case tc.wantMissing && (err == nil || err.Error() != row.Remedy):
+				t.Errorf("gh-token Probe() = %v, want the row's Remedy %q", err, row.Remedy)
+			case !tc.wantMissing && err != nil:
 				t.Errorf("gh-token Probe() unexpected error: %v", err)
-			}
-			if !tc.wantGHToken && err == nil {
-				t.Error("gh-token Probe() = nil error, want the same MISSING verdict `spindrift doctor` reaches against this scaffold's harness.env")
 			}
 		})
 	}

@@ -19,10 +19,10 @@ func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 		RepoSlug:     a.repoSlug,
 		GitUserName:  a.gitUserName,
 		GitUserEmail: a.gitUserEmail,
-		// The shared gh-token row is GH_TOKEN-specific, so the wizard's
-		// credential belongs here only when its own harness.env writes it under
-		// that name. Otherwise `spindrift doctor` contradicts the scaffold the
-		// wizard just wrote.
+		// The shared gh-token row reads GH_TOKEN, so the wizard's credential
+		// belongs here only when its own harness.env writes it under that name.
+		// Otherwise a scaffold that still needs GH_TOKEN (e.g. a jira tracker
+		// on a github forge) would pass here and fail `spindrift doctor`.
 		GHToken: ghToken,
 
 		ClaudeOAuthToken: a.claudeOAuthToken,
@@ -54,6 +54,7 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 			b := launcherchecks.Backend{
 				ValidAsTracker:   row.ValidAsTracker,
 				ValidAsCodeForge: row.ValidAsCodeForge,
+				TokenEnvVar:      row.TokenEnvVar,
 			}
 			// forgejo is the only backend the wizard can validate, because its
 			// validators read knobs (FORGEJO_BASE_URL, FORGEJO_TOKEN) the wizard

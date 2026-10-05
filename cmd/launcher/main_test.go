@@ -2575,6 +2575,21 @@ func TestValidate_ForgejoCodeForge(t *testing.T) {
 	}
 }
 
+// A pure-Forgejo deployment authenticates with FORGEJO_TOKEN alone: validate()
+// must not demand GH_TOKEN (#3325).
+func TestValidate_PureForgejoNeedsNoGHToken(t *testing.T) {
+	c := minimalValidConfig()
+	c.issueTracker = "forgejo"
+	c.codeForge = "forgejo"
+	c.forgejoBaseURL = "https://codeberg.org"
+	c.forgejoToken = "tok"
+	c.ghToken = ""
+
+	if err := validate(c); err != nil {
+		t.Fatalf("pure-forgejo config without GH_TOKEN should validate: %v", err)
+	}
+}
+
 // validate() gates credential required-ness on the Driver: the opencode
 // Driver's github-copilot Provider is OAuth-only and needs
 // OPENCODE_AUTH_CONTENT, other opencode Providers need neither, and the
