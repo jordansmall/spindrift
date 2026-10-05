@@ -200,6 +200,35 @@ func TestRoundLogAppendFreshEmitsRunStateErrorOnAppendFailure(t *testing.T) {
 	}
 }
 
+// A symlink at *logPath must not redirect the append to its target.
+func TestRoundLogAppendFreshRefusesSymlinkLogPath(t *testing.T) {
+	rl := roundLog{phase: "dispositions", tempPattern: "orchestrator-dispositions-log-*.md"}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target.txt")
+	const original = "untouched target contents\n"
+	if err := os.WriteFile(target, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	logPath := filepath.Join(dir, "log-link.md")
+	if err := os.Symlink(target, logPath); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+
+	rl.appendFresh(&logPath, 1, "## Round 1", "run.go:1 -- fixed in commit abc123", &stdout)
+
+	if !strings.Contains(stdout.String(), `"spindrift_op":{"op":"run_state_error","phase":"dispositions_log"`) {
+		t.Errorf("stdout = %q, want a run_state_error op with phase dispositions_log", stdout.String())
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != original {
+		t.Errorf("symlink target = %q, want unchanged %q", string(got), original)
+	}
+}
+
 // An uncreatable TMPDIR is what makes os.CreateTemp("", rl.tempPattern) fail.
 func TestRoundLogAppendFreshEmitsRunStateErrorOnCreateFailure(t *testing.T) {
 	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "does-not-exist"))

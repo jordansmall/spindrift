@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"syscall"
 
 	"spindrift.dev/launcher/internal/driver/claude"
 )
@@ -137,7 +138,10 @@ func (rl roundLog) appendRound(logPath *string, header, content string) error {
 		}
 		*logPath = path
 	}
-	f, err := os.OpenFile(*logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	// *logPath round-trips through the run-state file, which any in-box pass
+	// can rewrite, so O_NOFOLLOW stops a symlink there from redirecting the
+	// append. It rejects only the final component, never a symlinked TMPDIR.
+	f, err := os.OpenFile(*logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY|syscall.O_NOFOLLOW, 0o644)
 	if err != nil {
 		return fmt.Errorf("append %s log: %w", rl.phase, err)
 	}
