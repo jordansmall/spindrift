@@ -369,7 +369,7 @@ in
     group = "issues";
     default = false;
     kind = "bool";
-    doc = "when enabled, the Jira adapter appends the issue's comment thread to the description it returns; off (default) keeps the prompt-injection surface tight";
+    doc = "DEPRECATED no-op: Jira comments always reach the prompt (the last 10, attributed, through the adapter's comment lister) whether or not this is set. Kept so existing configs still evaluate; will be removed";
     flakeOption = true;
     nixSubPath = "jira.includeComments";
     boxEnv = false;
