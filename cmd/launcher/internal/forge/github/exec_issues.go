@@ -188,10 +188,11 @@ type ghComment struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	CreatedAt       string `json:"createdAt"`
-	Body            string `json:"body"`
-	IsMinimized     bool   `json:"isMinimized"`
-	MinimizedReason string `json:"minimizedReason"`
+	CreatedAt         string `json:"createdAt"`
+	Body              string `json:"body"`
+	IsMinimized       bool   `json:"isMinimized"`
+	MinimizedReason   string `json:"minimizedReason"`
+	AuthorAssociation string `json:"authorAssociation"`
 }
 
 // Comments returns issue num's comments oldest-first, the order gh emits them
@@ -219,6 +220,7 @@ func (e *execClient) Comments(num string) ([]forge.Comment, error) {
 			Body:            c.Body,
 			Minimized:       c.IsMinimized,
 			MinimizedReason: c.MinimizedReason,
+			Association:     c.AuthorAssociation,
 		}
 	}
 	return comments, nil

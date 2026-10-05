@@ -25,10 +25,11 @@ type ghWireComment struct {
 	Author struct {
 		Login string `json:"login"`
 	} `json:"author"`
-	CreatedAt       string `json:"createdAt"`
-	Body            string `json:"body"`
-	IsMinimized     bool   `json:"isMinimized"`
-	MinimizedReason string `json:"minimizedReason"`
+	CreatedAt         string `json:"createdAt"`
+	Body              string `json:"body"`
+	IsMinimized       bool   `json:"isMinimized"`
+	MinimizedReason   string `json:"minimizedReason"`
+	AuthorAssociation string `json:"authorAssociation"`
 }
 
 // githubHarness implements forgetest.Harness over a STATE_DIR/issues/<num>/
@@ -108,6 +109,7 @@ func (h *githubHarness) SeedComments(num string, comments []forge.Comment) {
 		w.Body = c.Body
 		w.IsMinimized = c.Minimized
 		w.MinimizedReason = c.MinimizedReason
+		w.AuthorAssociation = c.Association
 		doc.Comments = append(doc.Comments, w)
 	}
 	b, _ := json.Marshal(doc)
@@ -140,5 +142,34 @@ func TestExecClient_CommentsCarryMinimized(t *testing.T) {
 	}
 	if !got[1].Minimized || got[1].MinimizedReason != "SPAM" {
 		t.Errorf("minimized comment = %+v, want Minimized with reason SPAM", got[1])
+	}
+}
+
+// Pins the fail-closed policy through the real adapter path: gh's
+// authorAssociation round-trips, and a comment gh reports no association for
+// is untrusted rather than defaulting to trusted.
+func TestComments_AssociationFeedsCommentTrusted(t *testing.T) {
+	h := newGithubHarness(t)
+	h.SeedIssue(forge.Issue{Number: "7", Title: "t", Body: "b"})
+	h.SeedComments("7", []forge.Comment{
+		{Author: "o", Body: "1", Association: "OWNER"},
+		{Author: "n", Body: "2", Association: "NONE"},
+		{Author: "u", Body: "3"},
+	})
+	got, err := h.Tracker().(forge.CommentLister).Comments("7")
+	if err != nil {
+		t.Fatalf("Comments: %v", err)
+	}
+	want := []struct {
+		assoc   string
+		trusted bool
+	}{{"OWNER", true}, {"NONE", false}, {"", false}}
+	if len(got) != len(want) {
+		t.Fatalf("got %d comments, want %d", len(got), len(want))
+	}
+	for i, w := range want {
+		if got[i].Association != w.assoc || forge.CommentTrusted(got[i]) != w.trusted {
+			t.Errorf("comments[%d] = %+v, want Association %q trusted=%v", i, got[i], w.assoc, w.trusted)
+		}
 	}
 }
