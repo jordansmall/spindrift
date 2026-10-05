@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"time"
 )
 
 // DepSource records whether a Dependency came from the tracker's native
@@ -195,6 +196,21 @@ type HostPostedCommenter interface {
 type HostPostedIssueFiler interface {
 	// PostIssue files a new issue and returns its URL.
 	PostIssue(title, body string, labels []string) (url string, err error)
+}
+
+// DemandCounter is the optional IssueTracker capability for adapters that
+// can answer "how many issues are waiting?" for the daemon's Demand probe
+// (ADR 0059). The count is advisory: it tallies labelled candidates, not
+// issues whose blockers have cleared, so a caller treats a nonzero count as
+// "worth starting a child", never as a promise of dispatchable work.
+type DemandCounter interface {
+	// CountReady returns the number of open issues in the Dispatchable
+	// state -- the set ListIssues(Dispatchable) returns.
+	CountReady() (int, error)
+	// ProbeInterval is the adapter's default cadence for re-asking
+	// CountReady; a cheap in-process scan answers faster than a
+	// rate-limited API.
+	ProbeInterval() time.Duration
 }
 
 // IssueLabeler is the optional IssueTracker capability for adapters that can

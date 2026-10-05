@@ -5,6 +5,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"time"
 )
 
 // IssueTrackerFake is the tracker-capability slice of Fake: every field
@@ -144,6 +145,28 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 	if tf.ListIssuesErr != nil {
 		return nil, tf.ListIssuesErr
 	}
+	return tf.listState(state), nil
+}
+
+// CountReady implements DemandCounter. It shares ListIssuesErr with
+// ListIssues (a failing tracker fails both) but, unlike ListIssues, is not
+// recorded in ListIssuesCalls, so a demand probe never perturbs a test that
+// asserts which states the dispatch loop listed.
+func (tf *IssueTrackerFake) CountReady() (int, error) {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if tf.ListIssuesErr != nil {
+		return 0, tf.ListIssuesErr
+	}
+	return len(tf.listState(Dispatchable)), nil
+}
+
+// ProbeInterval implements DemandCounter.
+func (tf *IssueTrackerFake) ProbeInterval() time.Duration { return time.Second }
+
+// listState returns the open issues in state, ascending by number; the
+// caller holds tf.mu.
+func (tf *IssueTrackerFake) listState(state DispatchState) []Issue {
 	label := tf.labels.Label(state)
 	var out []Issue
 	for _, iss := range tf.issues {
@@ -173,7 +196,7 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 		nj, _ := strconv.Atoi(out[j].Number)
 		return ni < nj
 	})
-	return out, nil
+	return out
 }
 
 // ListOpenIssues returns every non-closed issue, ascending by number, whatever

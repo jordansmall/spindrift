@@ -67,6 +67,7 @@ func RunTrackerContract(t *testing.T, h Harness) {
 	t.Run("DispatchOrder", func(t *testing.T) { testDispatchOrder(t, h) })
 	t.Run("LabelToPriority", func(t *testing.T) { testLabelToPriority(t, h) })
 	t.Run("Comments", func(t *testing.T) { testComments(t, h) })
+	t.Run("DemandCount", func(t *testing.T) { testDemandCount(t, h) })
 }
 
 // testDispatchLifecycle checks that ListIssues(state) reflects the current
@@ -418,5 +419,56 @@ func testComments(t *testing.T, h Harness) {
 	}
 	if len(empty) != 0 {
 		t.Errorf("Comments(702) = %+v, want no comments", empty)
+	}
+}
+
+// testDemandCount checks that an adapter implementing forge.DemandCounter
+// reports exactly the Dispatchable set ListIssues returns, however many
+// issues sit in other states. Adapters without the capability skip it.
+func testDemandCount(t *testing.T, h Harness) {
+	tr := h.Tracker()
+	dc, ok := tr.(forge.DemandCounter)
+	if !ok {
+		t.Skip("adapter does not implement forge.DemandCounter")
+	}
+	if dc.ProbeInterval() <= 0 {
+		t.Fatalf("ProbeInterval() = %v, want > 0", dc.ProbeInterval())
+	}
+
+	// Earlier scenarios share this tracker and may leave Dispatchable issues
+	// behind, so the mix is asserted as a delta from the starting count.
+	before, err := dc.CountReady()
+	if err != nil {
+		t.Fatalf("CountReady: %v", err)
+	}
+
+	for _, num := range []string{"121", "122", "123", "124"} {
+		h.SeedIssue(forge.Issue{Number: num, Title: "demand " + num})
+		if err := tr.TransitionState(num, forge.Untriaged, forge.Dispatchable); err != nil {
+			t.Fatalf("TransitionState(%s, Untriaged, Dispatchable): %v", num, err)
+		}
+	}
+	h.SeedIssue(forge.Issue{Number: "125", Title: "untriaged"})
+	for _, step := range [][3]any{
+		{"122", forge.Dispatchable, forge.InProgress},
+		{"123", forge.Dispatchable, forge.InProgress},
+		{"123", forge.InProgress, forge.Complete},
+	} {
+		num := step[0].(string)
+		if err := tr.TransitionState(num, step[1].(forge.DispatchState), step[2].(forge.DispatchState)); err != nil {
+			t.Fatalf("TransitionState(%s, %v, %v): %v", num, step[1], step[2], err)
+		}
+	}
+
+	listed, err := tr.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues(Dispatchable): %v", err)
+	}
+	got, err := dc.CountReady()
+	if err != nil {
+		t.Fatalf("CountReady: %v", err)
+	}
+	if got != len(listed) || got-before != 2 {
+		t.Fatalf("CountReady() = %d, want %d (== len(ListIssues(Dispatchable)) = %v)", got, before+2, numbers(listed))
 	}
 }
