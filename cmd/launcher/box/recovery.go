@@ -25,14 +25,12 @@ func (r *boxRun) recoverBranch() error {
 }
 
 func (r *boxRun) recoveryConfig() branchrecovery.Config {
-	codeForge := r.codeForge()
-	desc, _ := backend.ByName(codeForge) // unregistered: zero Descriptor, no query
 	return branchrecovery.Config{
 		WorkDir:     r.in.WorkDir,
 		Branch:      r.env.Branch,
 		BaseBranch:  r.env.BaseBranch,
-		CodeForge:   codeForge,
-		QueryOpenPR: desc.InBoxOpenPRQueryable,
+		CodeForge:   r.codeForge(),
+		QueryOpenPR: r.forgeDescriptor().InBoxOpenPRQueryable,
 		Push:        r.env.BoxWriteEnabled,
 		OutboxDir:   r.in.OutboxDir,
 	}
@@ -49,7 +47,14 @@ func (r *boxRun) openPR() (bool, error) {
 // codeForge is CODE_FORGE, defaulting an unset one to github.
 func (r *boxRun) codeForge() string {
 	if r.env.CodeForge == "" {
-		return "github"
+		return backend.GitHub.Name
 	}
 	return r.env.CodeForge
+}
+
+// forgeDescriptor is codeForge's registry row. An unregistered name gets a zero
+// Descriptor, so every in-box capability reads false.
+func (r *boxRun) forgeDescriptor() backend.Descriptor {
+	desc, _ := backend.ByName(r.codeForge())
+	return desc
 }

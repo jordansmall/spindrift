@@ -34,14 +34,16 @@ func (r *boxRun) cloneTarget() error {
 func (r *boxRun) cloneConfig() boxclone.Config {
 	g := r.d.Getenv
 	return boxclone.Config{
-		CodeForge:      r.codeForge(),
-		RepoSlug:       g("REPO_SLUG"),
-		RemoteURL:      g("CODE_FORGE_REMOTE_URL"),
-		ForgejoBaseURL: g("FORGEJO_BASE_URL"),
-		ForgejoToken:   g("FORGEJO_TOKEN"),
-		RepoMountDir:   r.in.RepoMountDir,
-		WorkDir:        r.in.WorkDir,
-		GitUserName:    g("GIT_USER_NAME"),
-		GitUserEmail:   g("GIT_USER_EMAIL"),
+		CodeForge:          r.codeForge(),
+		GHCredentialHelper: r.forgeDescriptor().InBoxGHCredentialHelper,
+		HostMediatedRemote: r.env.HostMediatedRemote,
+		RepoSlug:           g("REPO_SLUG"),
+		RemoteURL:          g("CODE_FORGE_REMOTE_URL"),
+		ForgejoBaseURL:     g("FORGEJO_BASE_URL"),
+		ForgejoToken:       g("FORGEJO_TOKEN"),
+		RepoMountDir:       r.in.RepoMountDir,
+		WorkDir:            r.in.WorkDir,
+		GitUserName:        g("GIT_USER_NAME"),
+		GitUserEmail:       g("GIT_USER_EMAIL"),
 	}
 }

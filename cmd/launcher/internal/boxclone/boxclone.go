@@ -17,15 +17,21 @@ import (
 type Config struct {
 	// CodeForge is CODE_FORGE, defaulted to github by the caller; "" is
 	// treated as github too.
-	CodeForge      string
-	RepoSlug       string
-	RemoteURL      string // CODE_FORGE_REMOTE_URL
-	ForgejoBaseURL string // FORGEJO_BASE_URL; default https://codeberg.org
-	ForgejoToken   string
-	RepoMountDir   string
-	WorkDir        string
-	GitUserName    string
-	GitUserEmail   string
+	CodeForge string
+	// GHCredentialHelper runs `gh auth setup-git` before cloning. See
+	// backend.Descriptor.InBoxGHCredentialHelper for which forges want it.
+	GHCredentialHelper bool
+	// HostMediatedRemote marks the remote as a host-owned filesystem mount,
+	// so the clone trusts the mount and work dir globally (#1720).
+	HostMediatedRemote bool
+	RepoSlug           string
+	RemoteURL          string // CODE_FORGE_REMOTE_URL
+	ForgejoBaseURL     string // FORGEJO_BASE_URL; default https://codeberg.org
+	ForgejoToken       string
+	RepoMountDir       string
+	WorkDir            string
+	GitUserName        string
+	GitUserEmail       string
 }
 
 // CloneURL resolves the URL to clone from. The choice is gated on the exact
@@ -66,10 +72,7 @@ func CloneURL(cfg Config) (string, error) {
 // the state captured at clone time. Narration goes to stdout; git and gh keep
 // their own stdout and stderr streams.
 func Clone(cfg Config, stdout, stderr io.Writer) error {
-	// local clones from a filesystem mount and forgejo from a FORGEJO_TOKEN
-	// URL (ADR 0038); neither is github.com, so gh's credential helper has
-	// nothing to apply and would fail a forgejo Box that has no GH_TOKEN.
-	if cfg.CodeForge != "local" && cfg.CodeForge != "forgejo" {
+	if cfg.GHCredentialHelper {
 		if err := run(stdout, stderr, "", "gh", "auth", "setup-git"); err != nil {
 			return err
 		}
@@ -78,13 +81,13 @@ func Clone(cfg Config, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if cfg.CodeForge == "local" {
+	if cfg.HostMediatedRemote {
 		// Under rootless podman the Box's mapped uid never matches the
 		// host-owned bind mount's uid, so git's dubious-ownership guard
 		// rejects RepoMountDir before the clone copies a single object
 		// (#1720). Both paths outlive the clone step, so these are standing
-		// global entries: the one local exception to the repo-local-only
-		// config rule below.
+		// global entries: the one host-mediated exception to the
+		// repo-local-only config rule below.
 		for _, dir := range []string{cfg.RepoMountDir, cfg.WorkDir} {
 			if err := run(stdout, stderr, "", "git", "config", "--global", "--add", "safe.directory", dir); err != nil {
 				return err
