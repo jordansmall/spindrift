@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // testRunClaimTimeout is the claim timeout every Sweep test below passes
@@ -264,6 +265,52 @@ func TestSweep_CrashedRunLeavesClaimStanding(t *testing.T) {
 	}
 	if tip.State.Phase != ledger.Claimed {
 		t.Errorf("Phase = %q, want %q (claim left standing)", tip.State.Phase, ledger.Claimed)
+	}
+}
+
+// (b2) A Box skipped because a live run already holds the Chore (issue #562,
+// #3705) is not a failure: Sweep reports ClaimLeft without settling, so no
+// settled record, no status=failed line, no tracker call, and no Ledger
+// commit past the claim.
+func TestSweep_AlreadyInFlightSkipsSettle(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	repo := ledgertest.NewRepo(t)
+	backend := ledger.Local{Repo: repo}
+	tree := fakeTree{head: "headsha", files: []string{"a.go"}}
+	fc := forge.NewFake()
+
+	d := dispatch.NewFake()
+	d.RunResult = dispatch.Result{AlreadyInFlight: true}
+	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
+
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	r := New(backend, tree, fc.AsIssueFiler(), newBox, testRunPolicy(noRunEvery, "bugs"), func() time.Time { return now })
+	var out Outcome
+	var err error
+	stdout := captureStdout(t, func() {
+		out, err = r.Sweep([]string{"bugs"})
+	})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != ClaimLeft || out.Chore != "bugs" {
+		t.Errorf("Outcome = %+v, want Kind=ClaimLeft Chore=bugs", out)
+	}
+	if d.RunCalls != 1 {
+		t.Errorf("dispatcher Run calls = %d, want 1 (no retry)", d.RunCalls)
+	}
+	if recs := readRecords(); len(recs) != 0 {
+		t.Errorf("report records = %+v, want none", recs)
+	}
+	if strings.Contains(stdout, "status=failed") || !strings.Contains(stdout, "status=already-in-flight") {
+		t.Errorf("stdout = %q, want an already-in-flight skip line and no status=failed", stdout)
+	}
+	if len(fc.PostIssueCalls) != 0 {
+		t.Errorf("PostIssueCalls = %v, want none", fc.PostIssueCalls)
+	}
+	subjects := gitLogSubjects(t, repo, ledger.RefPrefix+"bugs")
+	if len(subjects) != 1 || subjects[0] != "bugs: claimed" {
+		t.Errorf("git log subjects = %v, want [bugs: claimed]", subjects)
 	}
 }
 

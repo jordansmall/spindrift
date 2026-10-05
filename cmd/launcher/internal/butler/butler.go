@@ -13,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 )
@@ -101,8 +102,9 @@ const (
 	// Swept means a Box ran and the done Ledger commit landed.
 	Swept
 	// ClaimLeft means a Box ran but its settle step never wrote a done
-	// commit (a crashed run, or a Ledger write that failed): the claim
-	// stands for the next run to resume from.
+	// commit (a crashed run, or a Ledger write that failed), or the Box was
+	// skipped because a live run already holds the Chore (issue #3705): the
+	// claim stands for the next run to resume from.
 	ClaimLeft
 )
 
@@ -293,6 +295,12 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, PatchClasses: patchClasses, MaxFindings: room.Findings})
 	defer d.Close()
 	result := d.Run()
+	// A live run already holds this Chore's Box (#562): settling would read the
+	// empty result as a crash (#3705). Leave its claim standing and don't retry.
+	if result.AlreadyInFlight {
+		fmt.Printf("    #%s  status=already-in-flight  note=live run continues\n", dispatchkey.Chore(choreName))
+		return Outcome{Kind: ClaimLeft, Chore: choreName}, nil
+	}
 
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
 	s := step.settle(d, result)
