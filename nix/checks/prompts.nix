@@ -1732,6 +1732,81 @@ in
     ) "mkHarness.nix must throw when reviewPrompt is missing the required VERDICT: marker";
     pkgs.runCommand "build-time-reject-orchestrator-verdict-missing" { } "touch $out";
 
+  # Removed fragment variables (issue #4401): a prompt override still writing
+  # one would ship the literal token, so mkHarness.nix rejects it. Each fixture
+  # is the default template plus the token, so no other build-time check can be
+  # the reason for the failure; the control appends legitimate pass-through
+  # text (${HOME}, ${FORGEJO_TOKEN}) and must still evaluate.
+  build-time-reject-removed-fragment-var =
+    let
+      inherit (pkgs.lib) assertMsg;
+      defaultPrompt = builtins.readFile ../../templates/default/prompts/issue-prompt.md;
+      defaultFixPrompt = builtins.readFile ../../templates/default/prompts/fix-prompt.md;
+      defaultReviewPrompt = builtins.readFile ../../templates/default/prompts/review-prompt.md;
+      defaultFilerPrompt = builtins.readFile ../../templates/default/prompts/filer-prompt.md;
+      defaultResearchPrompt = builtins.readFile ../../templates/default/prompts/research-prompt.md;
+      # A copy of a shipped prompt directory with one file's text extended.
+      dirWithAppended =
+        src: file: text:
+        pkgs.runCommand "removed-var-${builtins.replaceStrings [ "/" ] [ "-" ] file}" { inherit text; } ''
+          mkdir -p $out
+          cp -r ${src}/. $out/
+          chmod -R u+w $out
+          printf '\n%s\n' "$text" >> $out/${file}
+        '';
+      evaluates =
+        args:
+        (builtins.tryEval (
+          (import ../../lib/mkHarness.nix (
+            {
+              inherit nixpkgs system;
+              packages = p: [ p.hello ];
+            }
+            // args
+          )).spindrift
+        )).success;
+    in
+    assert assertMsg (evaluates {
+      prompt = defaultPrompt + "\n\${HOME} \${FORGEJO_TOKEN}\n";
+      fixPrompt = defaultFixPrompt + "\n\${HOME} \${FORGEJO_TOKEN}\n";
+    }) "control: default prompts plus pass-through \${HOME}/\${FORGEJO_TOKEN} must evaluate";
+    assert assertMsg (
+      !evaluates { prompt = defaultPrompt + "\n\${REVIEW_LOOP_INLINE_STEP}\n"; }
+    ) "mkHarness.nix must throw when prompt references the removed \${REVIEW_LOOP_INLINE_STEP}";
+    assert assertMsg (
+      !evaluates { fixPrompt = defaultFixPrompt + "\n\${TDD_STEP}\n"; }
+    ) "mkHarness.nix must throw when fixPrompt references the removed \${TDD_STEP}";
+    assert assertMsg (
+      !evaluates { reviewPrompt = defaultReviewPrompt + "\n\${TDD_STEP}\n"; }
+    ) "mkHarness.nix must throw when reviewPrompt references the removed \${TDD_STEP}";
+    assert assertMsg (
+      !evaluates { filerPrompt = defaultFilerPrompt + "\n\${COMMIT_STEP}\n"; }
+    ) "mkHarness.nix must throw when filerPrompt references the removed \${COMMIT_STEP}";
+    assert assertMsg (
+      !evaluates { researchPrompt = defaultResearchPrompt + "\n\${CODE_REVIEW_STEP}\n"; }
+    ) "mkHarness.nix must throw when researchPrompt references the removed \${CODE_REVIEW_STEP}";
+    assert assertMsg (
+      !evaluates {
+        fragmentsDir =
+          dirWithAppended ../../templates/default/prompts/fragments "auto-format.md"
+            "\${COMMIT_STEP}";
+      }
+    ) "mkHarness.nix must throw when a fragment file references the removed \${COMMIT_STEP}";
+    assert assertMsg (evaluates {
+      fragmentsDir = pkgs.runCommand "fragments-without-read-only-variant" { } ''
+        mkdir -p $out
+        cp -r ${../../templates/default/prompts/fragments}/. $out/
+        chmod -R u+w $out
+        rm $out/land-git-stop-read-only.md
+      '';
+    }) "a fragmentsDir missing a row's fragment file must still evaluate (it renders empty)";
+    assert assertMsg (
+      !evaluates {
+        choresDir = dirWithAppended ../../templates/default/prompts/chores "bugs.md" "\${CODE_REVIEW_STEP}";
+      }
+    ) "mkHarness.nix must throw when a chore file references the removed \${CODE_REVIEW_STEP}";
+    pkgs.runCommand "build-time-reject-removed-fragment-var" { } "touch $out";
+
   # The `verdict-comment-relay` counterpart (issue #2250, parent #2244):
   # brokenResearchVerdictFragmentsDir swaps in a
   # research-verdict-github-readonly.md missing the required

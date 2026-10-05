@@ -386,6 +386,7 @@ let
   # A removed knob (lib/removed-knobs.nix) gets its own message rather than the
   # generic unknown-key one, which would not say it once existed.
   removedKnobs = import ./removed-knobs.nix;
+  removedFragmentVars = import ./removed-fragment-vars.nix;
   removedDefaultKeys = lib.filter (k: removedKnobs ? ${k}) unknownDefaultKeys;
 
   # An explicit `roster` always wins; otherwise it resolves from the four
@@ -578,6 +579,70 @@ let
         lib.concatMapStringsSep "\n" (
           v: "  ${v.file}: contains forbidden marker '${v.marker}' (${v.id})"
         ) forbiddenMarkerViolations
+      }";
+
+  # A removed fragment variable still written as a literal ${NAME} in a
+  # Consumer-overridable prompt arg, fragment file or chore file renders as that
+  # literal text (issue #4401). Scans the prompt args, each lib/fragments.nix
+  # row's fragment file present under fragmentsDir, and the top-level *.md
+  # files under choresDir, so it fires regardless of which gates a build turns
+  # on. Registry and rationale: lib/removed-fragment-vars.nix.
+  removedFragmentVarViolations =
+    let
+      promptArgs = {
+        inherit
+          prompt
+          scoutPrompt
+          reviewPrompt
+          reviewAxisPrompt
+          filerPrompt
+          workerPrompt
+          conflictResolvePrompt
+          fixPrompt
+          researchPrompt
+          researchSelfContainedPrompt
+          butlerPrompt
+          butlerReviewPrompt
+          ;
+      };
+      labelled = label: attrs: lib.mapAttrs' (n: v: lib.nameValuePair "${label} ${n}" v) attrs;
+      fragmentFiles = builtins.listToAttrs (
+        # A fragment missing from a Consumer fragmentsDir renders empty, so
+        # skip it rather than abort eval on a file-not-found.
+        map (row: {
+          name = row.fragment;
+          value = builtins.readFile (fragmentsDir + "/${row.fragment}");
+        }) (builtins.filter (row: builtins.pathExists (fragmentsDir + "/${row.fragment}")) fragments)
+      );
+      choreFiles = lib.mapAttrs (n: _: builtins.readFile (choresDir + "/${n}")) (
+        lib.filterAttrs (n: t: t != "directory" && lib.hasSuffix ".md" n) (builtins.readDir choresDir)
+      );
+      sources =
+        labelled "prompt arg" promptArgs
+        // labelled "fragment file" fragmentFiles
+        // labelled "chore file" choreFiles;
+      # Not lib.hasInfix: its `.*X.*` regex recurses per character under a
+      # std::regex Nix (CI's) and overflows the evaluator's stack on a whole
+      # prompt. Same split idiom as lib/prompt-contract.nix's
+      # hasDirectPlaceholder, braces in a character class.
+      mentions = name: text: builtins.length (builtins.split "\\$[{]${name}[}]" text) > 1;
+    in
+    lib.concatMap (
+      source:
+      map (name: {
+        inherit source name;
+        inherit (removedFragmentVars.${name}) issue;
+      }) (builtins.filter (name: mentions name sources.${source}) (lib.attrNames removedFragmentVars))
+    ) (lib.attrNames sources);
+
+  removedFragmentVarCheckOk =
+    if removedFragmentVarViolations == [ ] then
+      true
+    else
+      throw "mkHarness: a prompt arg, fragment file or chore file references a removed fragment variable, which would render as literal text (see MIGRATING.md):\n${
+        lib.concatMapStringsSep "\n" (
+          v: "  ${v.source}: \${${v.name}} (removed in issue #${toString v.issue})"
+        ) removedFragmentVarViolations
       }";
 
   # The FILER_FILE_DIRECT*-gated fragment rows (issue #2595, ADR 0041): the
@@ -1673,6 +1738,7 @@ else if unknownDefaultKeys != [ ] then
 else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
+  assert removedFragmentVarCheckOk;
   assert researchDirectFileCheckOk;
   assert repoSlugCoherenceOk;
   assert choicesCheckOk;
