@@ -5164,7 +5164,14 @@ non-zero, so the next invocation's staleness check is the only recovery path
 to file (typically a missing provenance label) counts as such a crash: the run
 is marked failed, writes no Done commit, leaves the cursor and claim where they
 were so the next run re-finds the findings, and exits non-zero so the daemon's
-breaker counts it.
+breaker counts it. The daemon surfaces it as a `settled` event with
+`state=failed` and a note starting `all N finding(s) failed to file` (see
+[Daemon](#daemon)); watch for that event. Because the claim stays live for
+`BUTLER_CLAIM_TIMEOUT`, the breaker sees at most one such failure per Chore
+per timeout, so with the default threshold and window one stalled Chore
+cannot trip it alone. The breaker counts failures across the whole pool,
+though, so other failures in the same window (other Chores, work, or
+research) add to that one.
 
 Four budget knobs (ADR 0056) cap a day of butler activity, summed across
 every Chore currently listed in `BUTLER_CHORES` (drop a Chore from the list
