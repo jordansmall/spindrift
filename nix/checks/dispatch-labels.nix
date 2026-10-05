@@ -6,6 +6,7 @@
 { pkgs, ... }:
 let
   inherit (pkgs.lib)
+    any
     assertMsg
     concatMap
     concatStringsSep
@@ -67,28 +68,27 @@ let
         concatStringsSep "; " (map (n: "${n}: ${concatStringsSep ", " missingBySet.${n}}") offenders)
       }";
     offenders;
-  # Only tokens shaped like our labels are worth checking; otherwise every
-  # hyphenated comment phrase becomes a false missing-label offender. Used only
-  # by triggerGuardLabel, whose guard line never carries prose: the harness-write
-  # check uses per-surface extraction instead, because this shape filter fails
-  # open on a de-prefixed rename and broadening it false-positives.
-  isLabelShaped = s: builtins.match "agent-[a-z-]+" s != null;
-  # Pins each workflow's own `if:` label guard (issue #2528 AC3). A file-wide token
-  # check cannot catch a rename of the agent-research guard: the literal
-  # legitimately reappears dozens of times in the same file, so the token
-  # survives the guard pointing elsewhere. This reads the guard's own line.
-  triggerGuardLabel =
+  # Pins each workflow's own `if:` label guard (issue #2528 AC3). Per guard line,
+  # not file-wide: the guarded literal legitimately reappears dozens of times in
+  # the same file, so a token check survives the guard pointing elsewhere. Any
+  # `if:` line mentioning `github.event.label.name` is a guard, and one whose
+  # comparison isn't `== '<literal>'` yields null, so an unparsed reference
+  # fails rather than vanishing (issue #2641). A legitimate second label means
+  # widening the expectation to a list checked by membership. Block-scalar
+  # (`if: >-`) guards put the reference on a later line and are not seen.
+  triggerGuardLabels =
     src:
-    let
-      guardLines = filter (l: hasInfix "if: github.event.label.name ==" l) (splitString "\n" src);
-    in
-    if guardLines == [ ] then
-      null
-    else
+    map (
+      l:
       let
-        toks = filter isLabelShaped (tokenize (builtins.head guardLines));
+        literals = concatMap (m: if builtins.isList m then m else [ ]) (
+          builtins.split "github\\.event\\.label\\.name == '([^']*)'" l
+        );
+        # builtins.split alternates strings and match lists: n matches give 2n+1 elements.
+        references = (builtins.length (builtins.split "github\\.event\\.label\\.name" l) - 1) / 2;
       in
-      if toks == [ ] then null else builtins.head toks;
+      literals ++ builtins.genList (_: null) (references - builtins.length literals)
+    ) (filter (l: hasInfix "if:" l && hasInfix "github.event.label.name" l) (splitString "\n" src));
   triggerGuardExpectations = {
     "github:agent-dispatch.yml" = "agent-trigger";
     "github:agent-recover.yml" = "agent-recover";
@@ -120,8 +120,16 @@ let
   assertTriggerGuardsPinned =
     triggerGuardSrcs:
     let
+      foundByName = mapAttrs (
+        name: _: triggerGuardLabels triggerGuardSrcs.${name}
+      ) triggerGuardExpectations;
       mismatches = filter (
-        name: triggerGuardLabel triggerGuardSrcs.${name} != triggerGuardExpectations.${name}
+        name:
+        let
+          found = foundByName.${name};
+        in
+        found == [ ]
+        || any (labelsOnLine: any (l: l != triggerGuardExpectations.${name}) labelsOnLine) found
       ) (builtins.attrNames triggerGuardExpectations);
     in
     assert assertMsg (mismatches == [ ])
@@ -129,13 +137,30 @@ let
         concatStringsSep "; " (
           map (
             name:
-            "${name}: guard names ${builtins.toJSON (triggerGuardLabel triggerGuardSrcs.${name})}, want ${
-              builtins.toJSON triggerGuardExpectations.${name}
-            }"
+            let
+              found = foundByName.${name};
+            in
+            "${name}: want ${builtins.toJSON triggerGuardExpectations.${name}}, but "
+            + (
+              if found == [ ] then
+                "no `if:` guard line mentioning github.event.label.name found"
+              else
+                "guard lines compare ${builtins.toJSON found} (one list per guard line; null = a label.name reference not compared to a quoted literal)"
+            )
           ) mismatches
         )
       }";
     mismatches;
+  # Builds a check requiring assertTriggerGuardsPinned to reject
+  # realTriggerGuardSrcs overlaid with `srcs`.
+  expectGuardRejection =
+    name: description: srcs:
+    let
+      result = builtins.tryEval (assertTriggerGuardsPinned (realTriggerGuardSrcs // srcs));
+    in
+    assert assertMsg (!result.success)
+      "${name}: expected assertTriggerGuardsPinned to reject ${description}, but it evaluated successfully";
+    pkgs.runCommand name { } "touch $out";
   # Every name lib/labels.nix's families carry, plus the trigger-only pair. This
   # is the set label-registry-covers-harness-writes checks membership against.
   allRegistryLabels =
@@ -319,8 +344,78 @@ let
         )
       }";
     registryOffenders;
+
+  # Issue #2641: each case doctors one guard shape the extractor could skip, so
+  # each must make assertTriggerGuardsPinned reject. Keyed by check name so the
+  # name is written once.
+  guardRegressionCases = {
+    # Reading only the first guard line would let it through.
+    dispatch-labels-pinned-in-workflows-second-guard-regression = {
+      description = "a synthetic github agent-research.yml with a second guard line naming agent-study after the intact agent-research-trigger guard";
+      srcs."github:agent-research.yml" =
+        realTriggerGuardSrcs."github:agent-research.yml"
+        + "\n      if: github.event.label.name == 'agent-study'\n";
+    };
+
+    # Reading only the first literal on a line would let it through.
+    dispatch-labels-pinned-in-workflows-same-line-guard-regression = {
+      description = "a synthetic github agent-research.yml whose guard line also names agent-study after agent-research-trigger";
+      srcs."github:agent-research.yml" =
+        replaceStrings
+          [ "if: github.event.label.name == 'agent-research-trigger'" ]
+          [
+            "if: github.event.label.name == 'agent-research-trigger' || github.event.label.name == 'agent-study'"
+          ]
+          realTriggerGuardSrcs."github:agent-research.yml";
+    };
+
+    # An `agent-*` label-shape filter would drop it and let the first guard carry the check.
+    dispatch-labels-pinned-in-workflows-non-agent-label-guard-regression = {
+      description = "a synthetic github agent-research.yml with a second guard line naming ready-for-agent after the intact agent-research-trigger guard";
+      srcs."github:agent-research.yml" =
+        realTriggerGuardSrcs."github:agent-research.yml"
+        + "\n      if: github.event.label.name == 'ready-for-agent'\n";
+    };
+
+    # Same label-shape filter, same line.
+    dispatch-labels-pinned-in-workflows-same-line-non-agent-label-guard-regression = {
+      description = "a synthetic github agent-dispatch.yml whose guard line also compares against ready-for-agent after agent-trigger";
+      srcs."github:agent-dispatch.yml" =
+        replaceStrings
+          [ "if: github.event.label.name == 'agent-trigger'" ]
+          [
+            "if: github.event.label.name == 'agent-trigger' || github.event.label.name == 'ready-for-agent'"
+          ]
+          realTriggerGuardSrcs."github:agent-dispatch.yml";
+    };
+
+    # A `!=` gate is no `== '<literal>'` comparison; a line filter keyed on the
+    # exact `==` text never sees it.
+    dispatch-labels-pinned-in-workflows-negated-guard-regression = {
+      description = "a synthetic github agent-research.yml with a second guard line using != against agent-study after the intact agent-research-trigger guard";
+      srcs."github:agent-research.yml" =
+        realTriggerGuardSrcs."github:agent-research.yml"
+        + "\n      if: github.event.label.name != 'agent-study'\n";
+    };
+
+    # The literal pattern cannot parse it, so the intact literal must not carry
+    # the line.
+    dispatch-labels-pinned-in-workflows-same-line-unparsed-guard-regression = {
+      description = "a synthetic github agent-dispatch.yml whose guard line also compares against ready-for-agent without spaces around ==";
+      srcs."github:agent-dispatch.yml" =
+        replaceStrings
+          [ "if: github.event.label.name == 'agent-trigger'" ]
+          [
+            "if: github.event.label.name == 'agent-trigger' || github.event.label.name=='ready-for-agent'"
+          ]
+          realTriggerGuardSrcs."github:agent-dispatch.yml";
+    };
+  };
 in
-{
+mapAttrs (
+  name: { description, srcs }: expectGuardRejection name description srcs
+) guardRegressionCases
+// {
   dispatch-labels-pinned-in-workflows =
     assert (assertLabelsPinned { inherit requiredLabels workflowSets; }) == [ ];
     assert (assertTriggerGuardsPinned realTriggerGuardSrcs) == [ ];
@@ -347,9 +442,9 @@ in
     pkgs.runCommand "dispatch-labels-pinned-in-workflows-regression" { } "touch $out";
 
   # Proves assertLabelsPinned itself still rejects a rename (issue #2528 AC3).
-  # The trigger-guard regression above doctors one `if:` line, which
-  # assertLabelsPinned's whole-file token scan never looks at, leaving it
-  # otherwise unexercised. This doctors workflowSets.github instead.
+  # dispatch-labels-pinned-in-workflows-regression above doctors one `if:`
+  # line, which assertLabelsPinned's whole-file token scan never looks at,
+  # leaving it otherwise unexercised. This doctors workflowSets.github instead.
   dispatch-labels-pinned-in-workflows-research-rename-regression =
     let
       driftedGithub =
