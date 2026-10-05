@@ -342,17 +342,22 @@ func (lt *LocalTracker) DepsOf(num string) ([]forge.Dependency, error) {
 	return forge.WithSource(parseLocalBlockers(li.body), forge.DepSourceBody), nil
 }
 
-// TouchesOf returns the touch-set parsed from issue num's body with the shared
-// body grammar, because the local tracker has no native touch-set concept.
+// TouchesOf returns the touch-set parsed from issue num's description (the
+// body above its "## Comments" section, as parseLocalBlockers reads it) with
+// the shared body grammar, because the local tracker has no native touch-set
+// concept.
 func (lt *LocalTracker) TouchesOf(num string) ([]string, error) {
 	li, err := lt.readIssueFile(num)
 	if err != nil {
 		return nil, err
 	}
-	return forge.ParseTouchPaths(li.body), nil
+	return forge.ParseTouchPaths(forge.Description(li.body)), nil
 }
 
+// parseLocalBlockers reads only the description: comments are host-written on
+// the agent's behalf and must not alter the declared blockers.
 func parseLocalBlockers(body string) []string {
+	body = forge.Description(body)
 	seen := map[string]bool{}
 	var refs []string
 	inSection := false
