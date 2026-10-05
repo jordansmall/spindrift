@@ -32,10 +32,11 @@ type hostRunner struct {
 	featureBranch string
 	selfAttr      string
 	nixSystem     string
-	env           []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
-	knobs         []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
-	butler        bool     // the butler kind survived gateKinds; RunDoctor then adds doctor --butler (issue #3920)
-	research      bool     // the research kind is explicitly selected (not the bare every-kind default); RunDoctor then adds doctor --research
+	env           []string      // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
+	knobs         []string      // keys of the Launcher input document's settings map, stripped from env before a child sees it
+	butler        bool          // the butler kind survived gateKinds; RunDoctor then adds doctor --butler (issue #3920)
+	research      bool          // the research kind is explicitly selected (not the bare every-kind default); RunDoctor then adds doctor --research
+	demand        demandSources // per-kind tracker Demand counters; a kind absent here is exit-driven
 
 	// flightMu guards flight below, plus the Moved baseline and the
 	// self-path memo fields further down: resolveTipOnce is the sole leader
@@ -91,6 +92,7 @@ type hostRunnerConfig struct {
 	knobs         []string
 	butler        bool
 	research      bool
+	demand        demandSources
 }
 
 // newHostRunner rejects a nil cfg.env. withoutKeys
@@ -113,6 +115,7 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		knobs:         cfg.knobs,
 		butler:        cfg.butler,
 		research:      cfg.research,
+		demand:        cfg.demand,
 	}, nil
 }
 
@@ -346,11 +349,19 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 	return daemon.Tip{Revision: revision, SelfPath: path, Moved: moved}, nil
 }
 
-// Demand has no source yet: the pool only asks for a kind with a
-// Config.ProbeIntervals entry, and the host sets none, so every kind stays
-// exit-driven until a later slice wires a tracker in.
+// Demand counts a kind's ready issues in-process from its tracker counter. A
+// kind with no source is an error: the pool only asks for kinds named in
+// Config.ProbeIntervals, which probeIntervals derives from the same map.
 func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind) (daemon.Demand, error) {
-	return daemon.Demand{}, errors.New("no demand source")
+	c, ok := r.demand[kind]
+	if !ok {
+		return daemon.Demand{}, fmt.Errorf("no demand source for kind %q", kind)
+	}
+	n, err := c.CountReady()
+	if err != nil {
+		return daemon.Demand{}, err
+	}
+	return daemon.Demand{Ready: n}, nil
 }
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {

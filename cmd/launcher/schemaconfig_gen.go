@@ -43,6 +43,7 @@ type schemaConfig struct {
 	daemonFailureBackoff         string
 	daemonIdleCap                string
 	daemonIdleFloor              string
+	daemonProbeInterval          string
 	daemonSelfApp                string
 	failedLabel                  string
 	forgejoBaseURL               string
@@ -135,6 +136,7 @@ func loadSchemaConfig() schemaConfig {
 		daemonFailureBackoff:      getenvSchema("DAEMON_FAILURE_BACKOFF"),
 		daemonIdleCap:             getenvSchema("DAEMON_IDLE_CAP"),
 		daemonIdleFloor:           getenvSchema("DAEMON_IDLE_FLOOR"),
+		daemonProbeInterval:       getenvSchema("DAEMON_PROBE_INTERVAL"),
 		daemonSelfApp:             getenvSchema("DAEMON_SELF_APP"),
 		failedLabel:               getenvSchema("FAILED_LABEL"),
 		forgejoBaseURL:            getenvSchema("FORGEJO_BASE_URL"),
