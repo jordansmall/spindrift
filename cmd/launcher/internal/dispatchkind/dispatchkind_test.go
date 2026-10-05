@@ -125,6 +125,9 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		if d.AnnounceVerb == "" {
 			t.Fatalf("%s: AnnounceVerb unset", d.Name)
 		}
+		if d.Enablement == 0 {
+			t.Fatalf("%s: Enablement unset", d.Name)
+		}
 		if findingLabels[d.FindingLabel] {
 			t.Fatalf("duplicate FindingLabel %q in All", d.FindingLabel)
 		}
@@ -133,6 +136,21 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 			t.Fatalf("duplicate FilerRelayGate %q in All", d.FilerRelayGate)
 		}
 		filerRelayGates[d.FilerRelayGate] = true
+	}
+}
+
+// TestEnablementRows pins which kinds a bare daemon always draws and which
+// wait on a Chore being enabled (issue #4574): only the butler is gated.
+func TestEnablementRows(t *testing.T) {
+	want := map[*Descriptor]Enablement{
+		Work:     EnabledAlways,
+		Research: EnabledAlways,
+		Butler:   EnabledByChores,
+	}
+	for _, d := range All {
+		if d.Enablement != want[d] {
+			t.Errorf("%s: Enablement = %v, want %v", d.Name, d.Enablement, want[d])
+		}
 	}
 }
 
