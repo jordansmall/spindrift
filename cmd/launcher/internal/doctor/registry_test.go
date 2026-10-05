@@ -524,7 +524,7 @@ func TestWithRemedy_AppendsRemedyAndUnwraps(t *testing.T) {
 
 	got := WithRemedy(Result{Check: check, Err: probeErr})
 
-	want := gitUserNameErrText + "\nremedy: " + gitUserNameRemedy
+	want := gitUserNameErrText + "\n  remedy: " + gitUserNameRemedy
 	if got.Error() != want {
 		t.Errorf("WithRemedy().Error() = %q, want %q", got.Error(), want)
 	}
@@ -534,6 +534,20 @@ func TestWithRemedy_AppendsRemedyAndUnwraps(t *testing.T) {
 	var re *RemedyError
 	if !errors.As(got, &re) || re.Check.Name != check.Name || re.Check.Remedy != check.Remedy {
 		t.Errorf("errors.As(WithRemedy(), *RemedyError) did not recover the Check, got %+v", got)
+	}
+}
+
+// Each remedy line is indented so a reader can tell it from the next
+// joined error's first line.
+func TestWithRemedy_JoinedErrorsKeepEachRemedyIndented(t *testing.T) {
+	a := WithRemedy(Result{Check: Check{Name: "a", Remedy: "fix a"}, Err: errors.New("err a")})
+	b := WithRemedy(Result{Check: Check{Name: "b", Remedy: "fix b"}, Err: errors.New("err b")})
+
+	got := errors.Join(a, b, errors.New("plain c")).Error()
+
+	want := "err a\n  remedy: fix a\nerr b\n  remedy: fix b\nplain c"
+	if got != want {
+		t.Errorf("errors.Join(...).Error() = %q, want %q", got, want)
 	}
 }
 
