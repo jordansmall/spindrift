@@ -80,10 +80,17 @@ func TestCmdRecover_RunsCleanupOnEveryExit(t *testing.T) {
 		cleanup:      func() { called = true },
 	}
 
-	got := cmdRecover(lc, "42")
+	var stdout, stderr bytes.Buffer
+	got := cmdRecover(lc, "42", &stdout, &stderr)
 
 	if got != 1 {
 		t.Errorf("cmdRecover(lc, \"42\") = %d, want 1 (no PR)", got)
+	}
+	if !strings.Contains(stdout.String(), "status=skipped  note=no open PR") {
+		t.Errorf("stdout = %q, want the skipped line", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "no open PR") {
+		t.Errorf("stderr = %q, want the failure line", stderr.String())
 	}
 	if !called {
 		t.Error("cmdRecover did not run lc.cleanup()")
@@ -109,7 +116,7 @@ func TestCmdRecover_WritesReasonToGithubOutput(t *testing.T) {
 		cleanup:      func() {},
 	}
 
-	got := cmdRecover(lc, "42")
+	got := cmdRecover(lc, "42", io.Discard, io.Discard)
 
 	if got != 1 {
 		t.Errorf("cmdRecover(lc, \"42\") = %d, want 1 (no PR)", got)
@@ -154,7 +161,7 @@ func TestCmdRecover_AdoptedPRSucceeds(t *testing.T) {
 		cleanup:      func() {},
 	}
 
-	got := cmdRecover(lc, "42")
+	got := cmdRecover(lc, "42", io.Discard, io.Discard)
 
 	if got != 0 {
 		t.Errorf("cmdRecover(lc, \"42\") = %d, want 0 (PR adopted and merged)", got)

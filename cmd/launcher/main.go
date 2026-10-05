@@ -1366,7 +1366,7 @@ func registryFor(s any) *terminate.Registry {
 // is adopted, gated on the operator's explicit agent-recover label rather than
 // any automatic sweep (#600). With no open PR it falls back to adopting a
 // relayed finished branch out of the outbox (issue #2225).
-func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string) error {
+func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string, stdout, stderr io.Writer) error {
 	// Installed once, ahead of it.Issue, exactly as run() places its own
 	// install ahead of discoverIssues (#3522): a signal that fired before this
 	// call must win over recoverFailed below, not just over an adopt already
@@ -1395,7 +1395,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 
 	fi, err := it.Issue(issueNum)
 	if err != nil {
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err))
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err), stdout, stderr)
 	}
 	iss := newIssue(fi)
 	// A live Dispatch for this issue, in any process sharing pwd, holds this
@@ -1404,10 +1404,10 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	release, claimErr := dispatch.ClaimIssue(pwd, iss.number)
 	if claimErr != nil {
 		if errors.Is(claimErr, dispatch.ErrIssueClaimed) {
-			fmt.Printf("    #%s  status=skipped  note=another launcher process still owns this issue (Box live or run settling)\n", issueNum)
+			fmt.Fprintf(stdout, "    #%s  status=skipped  note=another launcher process still owns this issue (Box live or run settling)\n", issueNum)
 			return nil
 		}
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: claim: %w", issueNum, claimErr))
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: claim: %w", issueNum, claimErr), stdout, stderr)
 	}
 	defer release()
 	branch := cf.AgentBranch(iss.number)
@@ -1416,7 +1416,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	// sits on top of it: maxAttempts = retries + 1.
 	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.transientRetryMax+1)
 	if prErr != nil {
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr))
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr), stdout, stderr)
 	}
 	if !res.Found {
 		// A resolveErr is logged, not returned: the self-report walk runs
@@ -1426,7 +1426,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		// bundle sitting in the outbox is evidence enough (issue #2378).
 		resolved, resolveErr := dispatch.ResolveFromLogs(pwd, iss.number, "")
 		if resolveErr != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: resolve pass logs: %v\n", issueNum, resolveErr)
+			fmt.Fprintf(stderr, "    ?? #%s: resolve pass logs: %v\n", issueNum, resolveErr)
 		}
 		if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 			return fmt.Errorf("mkdir logs: %w", err)
@@ -1446,7 +1446,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		// Same reason as the SettleAdopted arm below: this Dispatch never calls
 		// Run, so it needs the lineage guarantee stated explicitly (#2575).
 		if err := d.EnsureRunLineage(); err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
+			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
 		result := dispatch.Result{Resolved: resolved}
 		sit := s.SituationFor(iss.number, res.Found, result)
@@ -1467,8 +1467,8 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		if settled {
 			return nil
 		}
-		fmt.Printf("    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum))
+		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
+		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
 	}
 	if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 		return fmt.Errorf("mkdir logs: %w", err)
@@ -1483,7 +1483,7 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	// EnsureRunLineage establishes it once, before any pass log is read
 	// (issue #2575).
 	if err := d.EnsureRunLineage(); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
+		fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 	}
 	s.SettleAdopted(d, iss.number, 0, res.URL)
 	// Same reordering as the SettleRelayedBranch arm above, and for the same
@@ -1501,20 +1501,20 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 // agent-failed (issue #2477). The workflow's claim strips the prior terminal
 // label before this process starts, so the pre-claim state has to be read back
 // out of the issue timeline via the optional PriorClaimStateReader.
-func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, origErr error) error {
+func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, origErr error, stdout, stderr io.Writer) error {
 	if caps.PriorClaimStateReader == nil {
 		return origErr
 	}
 	prior, found, err := caps.PriorClaimStateReader.PriorClaimState(num)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not determine pre-claim state: %v\n", num, err)
+		fmt.Fprintf(stderr, "    ?? #%s: could not determine pre-claim state: %v\n", num, err)
 		return origErr
 	}
 	if !found || prior != forge.Complete {
 		return origErr
 	}
 	if err := it.TransitionState(num, forge.InProgress, forge.Complete); err != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not restore agent-complete: %v\n", num, err)
+		fmt.Fprintf(stderr, "    ?? #%s: could not restore agent-complete: %v\n", num, err)
 		return origErr
 	}
 	note := fmt.Sprintf("recover attempted and declined to change anything: %v. This issue was already `agent-complete` before recover claimed it — that state is restored rather than parking `agent-failed`.", origErr)
@@ -1525,9 +1525,9 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// contradicting terminal transition; this one reaches at most one.
 	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
+		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}
-	fmt.Printf("    #%s  status=recover-declined  note=%v\n", num, origErr)
+	fmt.Fprintf(stdout, "    #%s  status=recover-declined  note=%v\n", num, origErr)
 	return nil
 }
 
@@ -1910,7 +1910,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 		Fresh:           fresh,
 		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {
-			return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum)
+			return lc.recoverIssue(issueNum, stdout, stderr)
 		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
@@ -1939,6 +1939,12 @@ func writeGithubOutput(key, value string) error {
 	return err
 }
 
+// recoverIssue runs recoverByNumber against the launch context's wiring; the
+// recover verb and console's recover action share it.
+func (lc *launchContext) recoverIssue(issueNum string, stdout, stderr io.Writer) error {
+	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum, stdout, stderr)
+}
+
 // cmdRecover is the `recover` subcommand: adopt an already-discovered open PR
 // with no outcome line and drive it through the merge gate, honouring the
 // two-stage operator-shutdown latch the same as every other Box-launching
@@ -1946,9 +1952,9 @@ func writeGithubOutput(key, value string) error {
 // blanket failure return below, writing neither the recover-reason output nor
 // a stderr line, since a requested stop is not a recover failure. Tests pass
 // a spy cleanup to exercise the cleanup-on-every-exit contract.
-func cmdRecover(lc *launchContext, issueNum string) int {
+func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	err := recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum)
+	err := lc.recoverIssue(issueNum, stdout, stderr)
 	if err == nil {
 		return 0
 	}
@@ -1956,9 +1962,9 @@ func cmdRecover(lc *launchContext, issueNum string) int {
 		return exitSignalledStop
 	}
 	if writeErr := writeGithubOutput("recover-reason", err.Error()); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "warning: writing recover-reason output: %v\n", writeErr)
+		fmt.Fprintf(stderr, "warning: writing recover-reason output: %v\n", writeErr)
 	}
-	fmt.Fprintf(os.Stderr, "%s\n", err)
+	fmt.Fprintf(stderr, "%s\n", err)
 	return 1
 }
 
@@ -2127,7 +2133,7 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
 		}
-		return cmdRecover(lc, parsed.remaining[0])
+		return cmdRecover(lc, parsed.remaining[0], stdout, stderr)
 	},
 	"preview": func(args []string, stdout, stderr io.Writer) int {
 		// remaining is the issue-ID list, unfiltered (issue #3054, #3055).
