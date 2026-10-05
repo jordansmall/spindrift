@@ -82,8 +82,8 @@
   }
   {
     promptFile = "worker-prompt.md";
-    coverage = "covered";
-    cavemanVar = "CAVEMAN_STEP_WORKER";
-    reason = null;
+    coverage = "exempt";
+    cavemanVar = null;
+    reason = "a roster subagent: under the claude Driver its tool list carries no Skill tool, so it cannot load /caveman, and its only output is a final report to the coordinator, not narration (issue #4562)";
   }
 ]

@@ -69,6 +69,7 @@ func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
 		issue  string
 	}{
 		{"base template", "issue-prompt.md", false, "prompt", "${REVIEW_LOOP_INLINE_STEP}", "#4291"},
+		{"worker agent prompt", "worker-prompt.md", true, `agent "worker" prompt`, "${CAVEMAN_STEP_WORKER}", "#4562"},
 		{"review prompt", "review-prompt.md", false, "review prompt", "${TDD_STEP}", "#3219"},
 		{"fragment", fragment, false, "prompt", "${COMMIT_STEP}", "#3222"},
 		{"agent prompt", "scout-prompt.md", true, `agent "scout" prompt`, "${CODE_COMMENTS_STEP}", "#3505"},
@@ -78,8 +79,9 @@ func TestAssembleValidateRejectsRemovedFragmentVar(t *testing.T) {
 			env := coveredEnv()
 			env.PromptsDir = stagePromptsCopy(t)
 			if tc.agents {
-				env.AgentsJSONTemplate = `{"scout":{"model":"x"}}`
-				env.AgentsPromptFiles = `{"scout":"scout-prompt.md"}`
+				agent := strings.TrimSuffix(tc.file, "-prompt.md")
+				env.AgentsJSONTemplate = `{"` + agent + `":{"model":"x"}}`
+				env.AgentsPromptFiles = `{"` + agent + `":"` + tc.file + `"}`
 			}
 			appendToFile(t, filepath.Join(env.PromptsDir, tc.file), "\nstale "+tc.token+"\n")
 

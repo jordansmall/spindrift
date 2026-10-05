@@ -17,6 +17,7 @@ var removedFragmentVars = []struct {
 	name  string
 	issue int
 }{
+	{"CAVEMAN_STEP_WORKER", 4562},
 	{"REVIEW_LOOP_INLINE_STEP", 4291},
 	{"CODE_COMMENTS_STEP", 3505},
 	{"COMMIT_STEP", 3222},

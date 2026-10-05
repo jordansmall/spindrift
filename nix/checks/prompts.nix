@@ -674,22 +674,6 @@ in
         touch $out
       '';
 
-  # Issue #3419: a worker never writes a commit message, the coordinator owns
-  # COMMIT, so caveman-default-worker.md must carry only the narrowed
-  # code/commands/error-messages exemption. Pinned on the raw fragment
-  # template, since its own source text is what must never regrow the clause;
-  # presence half plus absence half.
-  caveman-default-worker-no-commit-message =
-    pkgs.runCommand "caveman-default-worker-no-commit-message" { }
-      ''
-        ${normalizedGrep}
-        p=${../../templates/default/prompts/fragments/caveman-default-worker.md}
-        grep -qF '/caveman' "$p"
-        normalized_grep "$p" 'Code, commands, and error messages are exempt and stay verbatim.'
-        ! grep -qi 'commit message' "$p"
-        touch $out
-      '';
-
   # Issue #3419 (worker-prompt.md) and #3505 (the three coordinator prompts):
   # every prompt inlines the code-comments policy verbatim rather than
   # carrying the removed ${CODE_COMMENTS_STEP} anchor / fragment, so one
@@ -2186,9 +2170,10 @@ in
     '';
 
   # Exempt-row check (issue #2709, slice 2): every "exempt" row's assembled
-  # prompt must carry no case-insensitive "caveman" at all. Currently just
-  # filer-prompt.md, which authors issue titles and bodies directly and so
-  # must stay human prose end to end. The file list derives from the
+  # prompt must carry no case-insensitive "caveman" at all: filer-prompt.md
+  # authors issue titles and bodies directly and so must stay human prose end
+  # to end, and worker-prompt.md has no Skill tool to load it with (issue
+  # #4562). The file list derives from the
   # registry's exempt rows, so a future exempt row needs no second list.
   caveman-coverage-exempt-templates-carry-no-caveman-mention =
     let

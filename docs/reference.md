@@ -733,14 +733,8 @@ and prose, exempting code, commands, error messages, and commit messages,
 plus the machine-parsed marker grammar (the `SPINDRIFT_OUTCOME` line and its
 `note=` field, the `VERDICT:` line, and host-relay signal lines like
 `SPINDRIFT_PR_INTENT`) — see `fragments/caveman-default.md`. The worker
-prompt carries only the opening `/caveman` directive plus a narrower
-code/commands/error-messages exemption, dropping both the commit-message
-exemption and the marker-grammar paragraph
-(`fragments/caveman-default-worker.md`): a worker never writes a commit
-message (the coordinator owns COMMIT, issue #3419), and the worker role is
-structurally forbidden from ever emitting the marker grammar (issue
-#2059/#2491 quarantine), so naming those markers in its own rendered prompt
-would trip that contract.
+prompt, a roster subagent with no Skill tool under the claude Driver, carries
+no caveman directive (issue #4562).
 The review prompt carries the marker-grammar paragraph minus
 `SPINDRIFT_ISSUE_INTENT`, which the reviewer agent itself never emits (issue
 #2707) — only the Filer subagent it spawns does — plus two additions of its

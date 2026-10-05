@@ -12,11 +12,6 @@
   },
   {
     "gate": "CAVEMAN_BAKED",
-    "fragment": "caveman-default-worker.md",
-    "var": "CAVEMAN_STEP_WORKER"
-  },
-  {
-    "gate": "CAVEMAN_BAKED",
     "fragment": "caveman-default-review.md",
     "var": "CAVEMAN_STEP_REVIEW"
   },

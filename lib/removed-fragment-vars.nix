@@ -9,6 +9,9 @@
 # every unknown token: legitimate pass-through text such as ${FORGEJO_TOKEN}
 # in the filer-*-forgejo.md fragments must keep rendering.
 {
+  CAVEMAN_STEP_WORKER = {
+    issue = 4562;
+  };
   REVIEW_LOOP_INLINE_STEP = {
     issue = 4291;
   };
