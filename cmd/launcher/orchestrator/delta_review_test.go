@@ -192,7 +192,7 @@ func TestSeedDeltaReviewPromptOmitsDeltaFocusForInvalidAnchor(t *testing.T) {
 
 	state := runstate.RunState{}
 	delta := landdelta.Delta{Known: true}
-	trigger := deltareview.Trigger{Fire: true, Reason: "land delta is confined to what the reviewer's findings already covered"}
+	trigger := deltareview.Trigger{Fire: true, Reason: "land pass decisions record declares gate-discovered work"}
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
 	if err != nil {
