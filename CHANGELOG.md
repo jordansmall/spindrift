@@ -1,5 +1,204 @@
 # Changelog
 
+## [0.22.0](https://github.com/jordansmall/spindrift/compare/v0.21.3...v0.22.0) (2026-10-05)
+
+
+### ⚠ BREAKING CHANGES
+
+* **entrypoint:** exec box after the first Driver run
+* ORCHESTRATOR_ENABLED, --orchestrator and dispatch.orchestrator.enable no longer exist. The direct driver-exec path they selected is gone.
+* **entrypoint:** always hand the pass to the orchestrator
+* **promptassembly:** fragments/review-loop-inline.md and its REVIEW_LOOP_INLINE_STEP var no longer exist.
+* **orchestrator:** ORCHESTRATOR_ENABLED (dispatch.orchestrator.enable) now defaults to on. A Consumer whose custom reviewPrompt lacks the VERDICT: marker now fails at build time unless it sets orchestrator.enable = false.
+
+### Features
+
+* add a Consumer knob for the claude Driver Bash timeout ([0b19f85](https://github.com/jordansmall/spindrift/commit/0b19f85c3cc6e365d023b7e8be7c5b443891ef76)), closes [#4409](https://github.com/jordansmall/spindrift/issues/4409)
+* **box:** add the typed branch recovery decision ([4c66613](https://github.com/jordansmall/spindrift/commit/4c66613454d7aefa0baaf0ba10514e45ade5281a))
+* **box:** add the typed clone package ([a7539de](https://github.com/jordansmall/spindrift/commit/a7539de3d00cda4894b2b727bf6a2c31f9a1e67b))
+* **box:** assemble the prompt in box ([814f66b](https://github.com/jordansmall/spindrift/commit/814f66b851612557abc482b0ec1cc174c6cfd5e8)), closes [#4294](https://github.com/jordansmall/spindrift/issues/4294)
+* **box:** bind the registry proxy in box ([73ec192](https://github.com/jordansmall/spindrift/commit/73ec1922b5be8eed74c10128625cd5cf2a54552d)), closes [#4298](https://github.com/jordansmall/spindrift/issues/4298)
+* **box:** check the required env in box ([d1e2d12](https://github.com/jordansmall/spindrift/commit/d1e2d12807cb2e976adb42ddec75016b3a3e65ba))
+* **box:** clone in box; entrypoint becomes the shim ([28b48e6](https://github.com/jordansmall/spindrift/commit/28b48e6b058518b235fadeb37de59a96481755f1))
+* **box:** decide the toolchain in box ([e43063b](https://github.com/jordansmall/spindrift/commit/e43063ba00974b77de236304ff1e0f79fa6aba56)), closes [#4297](https://github.com/jordansmall/spindrift/issues/4297)
+* **box:** install the read-only guards in box ([4e2c65d](https://github.com/jordansmall/spindrift/commit/4e2c65de46ee3916998ab210770773a2ff834dbf)), closes [#4299](https://github.com/jordansmall/spindrift/issues/4299)
+* **box:** lay out the Driver's home in box ([cd68317](https://github.com/jordansmall/spindrift/commit/cd68317be06e4efe4fee549f88dc67147819c642)), closes [#4296](https://github.com/jordansmall/spindrift/issues/4296)
+* **box:** own the nudge loops and outcome backstop ([829c059](https://github.com/jordansmall/spindrift/commit/829c059310dc7b0829a0337fdb82c2c836d20a79)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **box:** recover the branch and rebase in box ([b437385](https://github.com/jordansmall/spindrift/commit/b43738563625724653482ae536b9c88e36adb92f))
+* **box:** run the configure step in box ([96fe925](https://github.com/jordansmall/spindrift/commit/96fe925e09538be80d4f2c502bbff56d3c47da2d))
+* **box:** run the conflict-resolve pass in box ([693ee98](https://github.com/jordansmall/spindrift/commit/693ee986663e2eb30d998878dc2f93d3176162b8)), closes [#4295](https://github.com/jordansmall/spindrift/issues/4295)
+* **box:** run the first Driver pass in box ([3ecdcb1](https://github.com/jordansmall/spindrift/commit/3ecdcb1ddd988a5bfb0b55c8b323983649fce359)), closes [#4293](https://github.com/jordansmall/spindrift/issues/4293)
+* **box:** set up the Forgejo CLI credential in box ([990724d](https://github.com/jordansmall/spindrift/commit/990724d5df662600bb7d63ff7784598a9c6b7b84)), closes [#4299](https://github.com/jordansmall/spindrift/issues/4299)
+* **conflictresolve:** add the resolve decision ([8c29b72](https://github.com/jordansmall/spindrift/commit/8c29b725c34f8104523188d59f2dabde53c2d760)), closes [#4295](https://github.com/jordansmall/spindrift/issues/4295)
+* **dispatch:** make socket the default signal carrier ([8e0a53b](https://github.com/jordansmall/spindrift/commit/8e0a53b1459f172c70cf5a9d5fd70209941a016c)), closes [#4376](https://github.com/jordansmall/spindrift/issues/4376)
+* **dogfood:** raise the claude Driver Bash timeout to 30 minutes ([a8f0e38](https://github.com/jordansmall/spindrift/commit/a8f0e3847b20cbc9abddc4c611515c705cdb5699)), closes [#4409](https://github.com/jordansmall/spindrift/issues/4409)
+* **driver:** encode a synthetic result event ([1f3eeee](https://github.com/jordansmall/spindrift/commit/1f3eeeeb36bd6b35aa3fcb0402b686584d22b1a0))
+* **driver:** extract result text and outcome lines in Go ([e63f9df](https://github.com/jordansmall/spindrift/commit/e63f9df0fd2f4b1600c6d4f0b4927408f9374fc6)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **driver:** render session flags in Go ([86cfaa7](https://github.com/jordansmall/spindrift/commit/86cfaa751d725785b79f0ad579e01fd05d8d7c2b)), closes [#4293](https://github.com/jordansmall/spindrift/issues/4293)
+* **homelayout:** add the Driver home layout ([b8badec](https://github.com/jordansmall/spindrift/commit/b8badec37bc2d74b8640e632c031dbc591ea254a)), closes [#4296](https://github.com/jordansmall/spindrift/issues/4296)
+* **orchestrator:** default ORCHESTRATOR_ENABLED on ([6afeb03](https://github.com/jordansmall/spindrift/commit/6afeb038361265c6c77261921cc6cc39d1602dc2)), closes [#4290](https://github.com/jordansmall/spindrift/issues/4290)
+* **preflight:** reject a removed ORCHESTRATOR_ENABLED ([08a6272](https://github.com/jordansmall/spindrift/commit/08a62726c28a1bef1c13340bcd8705aaff01703a)), closes [#4291](https://github.com/jordansmall/spindrift/issues/4291)
+* **promptassembly:** read the outbox presence facts from env ([ab6b745](https://github.com/jordansmall/spindrift/commit/ab6b74589a54ba427b92eb1302ce2d457d749e68)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **toolchain:** add the Box's toolchain decision ([70fcd9e](https://github.com/jordansmall/spindrift/commit/70fcd9e907cb921ccac0c2ab1cb2197ccc003179)), closes [#4297](https://github.com/jordansmall/spindrift/issues/4297)
+
+
+### Bug Fixes
+
+* **box:** print a validator rejection bare ([b59a65e](https://github.com/jordansmall/spindrift/commit/b59a65ea1b84d2728fd81e00119c0a31671c2a9e)), closes [#4294](https://github.com/jordansmall/spindrift/issues/4294)
+* **box:** reap orphaned children when box is PID 1 ([1574530](https://github.com/jordansmall/spindrift/commit/15745306af5ab6bdac4d68775ea643f21d804499)), closes [#4416](https://github.com/jordansmall/spindrift/issues/4416)
+* **box:** take the run-state path from a flag ([6f97272](https://github.com/jordansmall/spindrift/commit/6f9727233ec0d83b7229c7225e5e9ada9123b828)), closes [#4413](https://github.com/jordansmall/spindrift/issues/4413)
+* **claude:** attribute delta-review to reviewer ([d53a54e](https://github.com/jordansmall/spindrift/commit/d53a54ec370adbe2ca2d68d2f5d02e3707ac4078)), closes [#4425](https://github.com/jordansmall/spindrift/issues/4425)
+* **daemon:** fold the wait result before passing the baton ([f87482e](https://github.com/jordansmall/spindrift/commit/f87482e26a0c1f8dd2b969946143fd39dfcf6d49)), closes [#4380](https://github.com/jordansmall/spindrift/issues/4380)
+* **daemon:** pass the baton after the halt decision ([4cbb634](https://github.com/jordansmall/spindrift/commit/4cbb634a247006c2e73d112dc4fb7ac349ca878f)), closes [#4365](https://github.com/jordansmall/spindrift/issues/4365)
+* **deltareview:** parse range cites as line spans ([a621ae9](https://github.com/jordansmall/spindrift/commit/a621ae938902a29228a4b1c09e4cbc9a0b776ae7)), closes [#4366](https://github.com/jordansmall/spindrift/issues/4366)
+* **forgejo:** dedup failure statuses by context ([d8710e5](https://github.com/jordansmall/spindrift/commit/d8710e5946e9f2d6f65add3ec0f59ba9aebdca6d)), closes [#4473](https://github.com/jordansmall/spindrift/issues/4473)
+* **forgejo:** match Forgejo's "[WIP]" WIP prefix ([d28ba26](https://github.com/jordansmall/spindrift/commit/d28ba2695e764db97a82ca3a91c2c3d88947e9fa)), closes [#4460](https://github.com/jordansmall/spindrift/issues/4460)
+* **forgejo:** send labels on the issue create request ([efd5576](https://github.com/jordansmall/spindrift/commit/efd5576557b46f128da7e265657b26db8ba03b91)), closes [#4459](https://github.com/jordansmall/spindrift/issues/4459)
+* **forgejo:** walk every page of a commit's statuses ([328b92f](https://github.com/jordansmall/spindrift/commit/328b92f6b898420ed4904db6fec5312934834da6)), closes [#4458](https://github.com/jordansmall/spindrift/issues/4458)
+* **forgejo:** walk every page of a PR's changed files ([0224078](https://github.com/jordansmall/spindrift/commit/0224078ac6c93f443e842e1f5362885fdbfd108a)), closes [#4458](https://github.com/jordansmall/spindrift/issues/4458)
+* **forgejo:** walk every page of native deps ([c21cc50](https://github.com/jordansmall/spindrift/commit/c21cc509780c76e1e0f8f70278512a0db93f1583)), closes [#4462](https://github.com/jordansmall/spindrift/issues/4462)
+* **markergate:** stop nudging a full check re-run ([8486102](https://github.com/jordansmall/spindrift/commit/848610201c3440c947a4dc60d4045bc1b08f1798)), closes [#4407](https://github.com/jordansmall/spindrift/issues/4407)
+* **opencode:** anchor 429/529 to the error payload ([b7d6d6c](https://github.com/jordansmall/spindrift/commit/b7d6d6c57b7631bebb7289194aaaf57361c96a33)), closes [#4423](https://github.com/jordansmall/spindrift/issues/4423)
+* **orchestrator:** keep land outcome past review ([560d69f](https://github.com/jordansmall/spindrift/commit/560d69f37d8bdfc6b50124947b4f71efc84c48ad)), closes [#4406](https://github.com/jordansmall/spindrift/issues/4406)
+* **orchestrator:** read outcome from final result only ([047ecfd](https://github.com/jordansmall/spindrift/commit/047ecfdc7585251c764bcdbd6c06cd098bffe0ab)), closes [#4405](https://github.com/jordansmall/spindrift/issues/4405)
+
+
+### Performance Improvements
+
+* **checks:** leave the bats shards out of checks-inbox ([78c6bc9](https://github.com/jordansmall/spindrift/commit/78c6bc9ff23b671ed6d2c5273f9c4969c9b1df4a))
+* **image:** let the Box build two derivations at once ([65d07ee](https://github.com/jordansmall/spindrift/commit/65d07eee1ef0426debcf9f1cb661300d8addb1cf))
+* **prompts:** two-tier check discipline ([655191f](https://github.com/jordansmall/spindrift/commit/655191fe58ade986a44f561704f245145a3b1010)), closes [#4408](https://github.com/jordansmall/spindrift/issues/4408)
+
+
+### Security
+
+* **console:** strip Unicode bidi controls ([abc1722](https://github.com/jordansmall/spindrift/commit/abc1722a2377e5cb26a0a00babb2c707bdab775e)), closes [#4403](https://github.com/jordansmall/spindrift/issues/4403)
+* **heartbeat:** drop bidi controls in sanitizeLine ([fa08a71](https://github.com/jordansmall/spindrift/commit/fa08a71e2cf05960926e41ddf8a4534a1dc18ae5)), closes [#4396](https://github.com/jordansmall/spindrift/issues/4396)
+* **heartbeat:** sanitize narration, cap on runes ([58462da](https://github.com/jordansmall/spindrift/commit/58462daaa4ca05eb977592a8cd2fcbece11a79e2)), closes [#4387](https://github.com/jordansmall/spindrift/issues/4387)
+* **opencode:** sanitize and cap heartbeat text ([1a0a2c4](https://github.com/jordansmall/spindrift/commit/1a0a2c47dc1a55f56e8ee75a95af09294f055fb7)), closes [#4424](https://github.com/jordansmall/spindrift/issues/4424)
+
+
+### Documentation
+
+* **adr:** make the Box main a Go program ([6f34e30](https://github.com/jordansmall/spindrift/commit/6f34e30807ea2723fe480803400451cd79a77246))
+* **adr:** record box's PID-1 reaper in ADR 0058 ([77d76f4](https://github.com/jordansmall/spindrift/commit/77d76f4be63e4667fa26c6ee56b822ff97c2d171))
+* **claude:** fix stale names in usage test comment ([3c2014e](https://github.com/jordansmall/spindrift/commit/3c2014e5b3725fcc1a55b4b4ba26cb2864c0621b)), closes [#4426](https://github.com/jordansmall/spindrift/issues/4426)
+* **context:** drop Binding entry line numbers ([9f9e840](https://github.com/jordansmall/spindrift/commit/9f9e8401d26e3f8eba7b74ba1aebd578a522cf28)), closes [#4436](https://github.com/jordansmall/spindrift/issues/4436)
+* **contributing:** document the seam tests ([82a1cd8](https://github.com/jordansmall/spindrift/commit/82a1cd84b4aa729ab34166caffe5d6b2c32ffd0c)), closes [#4288](https://github.com/jordansmall/spindrift/issues/4288)
+* describe box as the Box main above a shim ([0aa1ca0](https://github.com/jordansmall/spindrift/commit/0aa1ca0f7a6935382ad731efbf03d70692341e6e))
+* **dispatchkey:** point Key.String at DISPATCH_KEY forwarding ([9953e9a](https://github.com/jordansmall/spindrift/commit/9953e9ad86ed3611b025ff682ecf3853d8a315bf)), closes [#4388](https://github.com/jordansmall/spindrift/issues/4388)
+* **forge:** fix HostMediationFake wrapper pointer ([d5788b0](https://github.com/jordansmall/spindrift/commit/d5788b0da230dfe50e9cd686ceb8e95ecb3c0b12)), closes [#4455](https://github.com/jordansmall/spindrift/issues/4455)
+* name box as the owner of the entrypoint's tail ([5f20676](https://github.com/jordansmall/spindrift/commit/5f2067655994bd0dae406d4892cba43e3f510285)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* name ExtractOutcomeLine as the pass outcome reader ([5c0d7f9](https://github.com/jordansmall/spindrift/commit/5c0d7f95a210d1c3be5bd951543bb419507e0346))
+* **nix-checks:** teach the narrow check tier ([bb47e29](https://github.com/jordansmall/spindrift/commit/bb47e292cc8331897346588ff53dec36df62c7bc))
+* **nix:** tidy box naming in agent-paths comments ([c672e2d](https://github.com/jordansmall/spindrift/commit/c672e2d593757bb16573cedbab5081c2c64dac17)), closes [#4294](https://github.com/jordansmall/spindrift/issues/4294)
+* record socket as the default signal carrier ([5cca22c](https://github.com/jordansmall/spindrift/commit/5cca22cd31eda738d7e928343f8631ad498d6c15)), closes [#4376](https://github.com/jordansmall/spindrift/issues/4376)
+* record the orchestrator as the default path ([0083ba9](https://github.com/jordansmall/spindrift/commit/0083ba96bc65831a34d9c5373bfe83bd99b0083e)), closes [#4290](https://github.com/jordansmall/spindrift/issues/4290)
+* record the orchestrator switch's removal ([9408706](https://github.com/jordansmall/spindrift/commit/94087064fcffb524651dc5a0e97479eea6554f7b)), closes [#4291](https://github.com/jordansmall/spindrift/issues/4291)
+* **reference:** note baton_pass waits for halt ([6941f37](https://github.com/jordansmall/spindrift/commit/6941f37a41fa5641f95b626cc7b1b408e7327bee))
+* **release-notes:** add 0.22.0 highlights ([d69dccf](https://github.com/jordansmall/spindrift/commit/d69dccf901971da2949c81193fc69e0bc438bd2f))
+* **seam:** name the smoke matrix as the bats deletion gate ([10ca18e](https://github.com/jordansmall/spindrift/commit/10ca18e8317ef167a260fa335e6c3a07f732b2bd)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* show box running the first Driver pass ([30b1b78](https://github.com/jordansmall/spindrift/commit/30b1b7813c929d5982ff17a427c3395ebfe8d784)), closes [#4293](https://github.com/jordansmall/spindrift/issues/4293)
+
+
+### Code Refactoring
+
+* **bindregistry:** export the lockfile Forwarder scan ([418df11](https://github.com/jordansmall/spindrift/commit/418df11361c4e9206cf339ca7c9b82bc8fbb3fff)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **bindregistry:** move bind-registry's engine ([8e28c03](https://github.com/jordansmall/spindrift/commit/8e28c038a39a75bb48f6f7e423bdfe65c3c8f879)), closes [#4298](https://github.com/jordansmall/spindrift/issues/4298)
+* **box:** forward the run-state path to the orchestrator ([da4d022](https://github.com/jordansmall/spindrift/commit/da4d0221ba01867957aaf9ba64c61479e61a58db)), closes [#4468](https://github.com/jordansmall/spindrift/issues/4468)
+* **driver-exec:** delete the env-handoff verb ([89ff933](https://github.com/jordansmall/spindrift/commit/89ff933684afc739023e3b32e2d0a0a1592de5e9)), closes [#4295](https://github.com/jordansmall/spindrift/issues/4295)
+* **driver-exec:** drop classification mode ([66d6eb1](https://github.com/jordansmall/spindrift/commit/66d6eb144e3b7fa7caede723b3ad605cfb4bd897)), closes [#4297](https://github.com/jordansmall/spindrift/issues/4297)
+* **drivers:** drop the bash session-flags renderer ([8bd97fc](https://github.com/jordansmall/spindrift/commit/8bd97fcad194157e7d33f619157d80a549c9beac)), closes [#4293](https://github.com/jordansmall/spindrift/issues/4293)
+* **driver:** share heartbeat sanitizer in driverkit ([8d03846](https://github.com/jordansmall/spindrift/commit/8d03846f1c99501232b3978325c68f7863889560)), closes [#4424](https://github.com/jordansmall/spindrift/issues/4424)
+* drop the bash substitution allowlist ([fb21ccf](https://github.com/jordansmall/spindrift/commit/fb21ccf1d19ca56d822b38eb0f6aca79e2177c73)), closes [#4295](https://github.com/jordansmall/spindrift/issues/4295)
+* **entrypoint:** always hand the pass to the orchestrator ([46aa8cb](https://github.com/jordansmall/spindrift/commit/46aa8cb8ee9e475e713e4b50332cec3648f1de8b)), closes [#4291](https://github.com/jordansmall/spindrift/issues/4291)
+* **entrypoint:** exec box after the first Driver run ([c19c873](https://github.com/jordansmall/spindrift/commit/c19c873dbc635d7778e0a56ca77db10e4b5a5dd9)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **harness:** drop fixture run/build wrappers ([6615eb6](https://github.com/jordansmall/spindrift/commit/6615eb6984dc057e436068a3daefb5c219eefebe)), closes [#4288](https://github.com/jordansmall/spindrift/issues/4288)
+* **promptassembly:** assemble the orchestrator prompt only ([7f48e9b](https://github.com/jordansmall/spindrift/commit/7f48e9bb50ccb6556a54ab980335e42b706d87c8)), closes [#4291](https://github.com/jordansmall/spindrift/issues/4291)
+* **promptassembly:** share the assemble-prompt writer ([e6b08e2](https://github.com/jordansmall/spindrift/commit/e6b08e2632bdb8cb120ce5652b6fcfad2c5fbaaf)), closes [#4294](https://github.com/jordansmall/spindrift/issues/4294)
+* remove the ORCHESTRATOR_ENABLED knob ([73bca7d](https://github.com/jordansmall/spindrift/commit/73bca7d96fadc38a0a0a44ebee5500e83f5cfba9)), closes [#4291](https://github.com/jordansmall/spindrift/issues/4291)
+* **signal:** move the socket client into signalclient ([851668a](https://github.com/jordansmall/spindrift/commit/851668a722d1796cde74771f894b7681937131be)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+
+
+### Tests
+
+* **bats:** read fixtures from the seam dir ([8463dba](https://github.com/jordansmall/spindrift/commit/8463dba85de01a3d18c687c478f7fb8504a29514)), closes [#4288](https://github.com/jordansmall/spindrift/issues/4288)
+* **box:** cover the backstop's BLOCK verdict clause ([7869dfb](https://github.com/jordansmall/spindrift/commit/7869dfb24fedc3bdfc2f5d52ee729c92448d8f21))
+* **box:** cover the kind cases only bats pinned ([ee72f82](https://github.com/jordansmall/spindrift/commit/ee72f829bfd8e43019aed740fc48321b05a83bcd))
+* **box:** delete bats suites box's opening covers ([bbbcabc](https://github.com/jordansmall/spindrift/commit/bbbcabc7f3b57a41fcc16743e12f97f65a773ad2))
+* **box:** delete bats suites box's recovery covers ([d56f696](https://github.com/jordansmall/spindrift/commit/d56f6968e428a69a9d90fa3cad8bbd238f38fe1f))
+* **box:** guard box against kind-name branches ([c639c2c](https://github.com/jordansmall/spindrift/commit/c639c2cb2f0a85abac7ac1ba043aac6934804668))
+* **box:** let worker orphans die before the worker exits ([e907841](https://github.com/jordansmall/spindrift/commit/e907841fe9d8fbd0ecf37042e24e99781fe47c72))
+* **box:** pin branch recovery at the seam ([a4ad68b](https://github.com/jordansmall/spindrift/commit/a4ad68b7d8e1338659f6f230184d8ec58eb9e42f))
+* **box:** pin self-contained research at the seam ([49e236c](https://github.com/jordansmall/spindrift/commit/49e236c93a9c67de68eedb39fd9f4330c4955962))
+* **box:** pin the devshell pair at the seam ([48edb25](https://github.com/jordansmall/spindrift/commit/48edb2511dfa8d8a45b01158146b854e638cfba8)), closes [#4297](https://github.com/jordansmall/spindrift/issues/4297)
+* **box:** pin the home layout at the seam ([506832c](https://github.com/jordansmall/spindrift/commit/506832cc443a5e7d4519d72a148d5e95bf8a9aa2)), closes [#4296](https://github.com/jordansmall/spindrift/issues/4296)
+* **box:** pin the read-only guards at the seam ([c409e0c](https://github.com/jordansmall/spindrift/commit/c409e0c9ede7c774fe0fab39328dfa9dac0a9da5)), closes [#4299](https://github.com/jordansmall/spindrift/issues/4299)
+* **box:** pin the registry bindings at the seam ([a561dde](https://github.com/jordansmall/spindrift/commit/a561dde536da6b3bfc966c7342d0d359341b112b)), closes [#4298](https://github.com/jordansmall/spindrift/issues/4298)
+* **box:** pin the resolve pass at the seam ([f459068](https://github.com/jordansmall/spindrift/commit/f459068b625521fdab363c216f0c7783c9bf63e7)), closes [#4295](https://github.com/jordansmall/spindrift/issues/4295)
+* **box:** regenerate driver goldens from Go seam ([8ba21ee](https://github.com/jordansmall/spindrift/commit/8ba21eea9e86b829beffa08634ba8b0d056cfc79)), closes [#4467](https://github.com/jordansmall/spindrift/issues/4467)
+* **box:** replace the clone bats with box's Go tests ([dae9b26](https://github.com/jordansmall/spindrift/commit/dae9b26b1cea97aa0990d3b8c32763adc0f55a8b))
+* **box:** seam-test the built box binary ([7eff02f](https://github.com/jordansmall/spindrift/commit/7eff02f4bdfb1ad1023f3ad20a6210d4fd618684)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **checks:** shard the bats suite seven ways ([aac377a](https://github.com/jordansmall/spindrift/commit/aac377a11478148686492cf01de10aa6c414a49d)), closes [#4288](https://github.com/jordansmall/spindrift/issues/4288)
+* cover the guard cases only bats pinned ([196168d](https://github.com/jordansmall/spindrift/commit/196168de4ff42688dfefaf61b73327145cc657f6)), closes [#4299](https://github.com/jordansmall/spindrift/issues/4299)
+* **daemon:** spin the escalation child without forks ([37a85aa](https://github.com/jordansmall/spindrift/commit/37a85aaac8ebfb259b0934c8108cce7999425115))
+* delete bats suites box's guards cover ([a271bf3](https://github.com/jordansmall/spindrift/commit/a271bf3061ea95c888c879ea3efd2a86069b4130)), closes [#4299](https://github.com/jordansmall/spindrift/issues/4299)
+* delete bats suites box's registry bindings cover ([81021ce](https://github.com/jordansmall/spindrift/commit/81021cefa5229fe1549c101feade78afa3b907e3)), closes [#4298](https://github.com/jordansmall/spindrift/issues/4298)
+* delete bats suites box's toolchain covers ([524350f](https://github.com/jordansmall/spindrift/commit/524350f0340b560f22aa1af57b533380e1b237ee)), closes [#4297](https://github.com/jordansmall/spindrift/issues/4297)
+* delete the bats cases box now covers ([ddeb92a](https://github.com/jordansmall/spindrift/commit/ddeb92a675dd74ce7d57a53b432e6c7500f1ed2c)), closes [#4295](https://github.com/jordansmall/spindrift/issues/4295)
+* delete the bats suites box now covers ([611e40f](https://github.com/jordansmall/spindrift/commit/611e40f8fd5a66e4a680c2e472782b29c203ab79)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* delete the bats suites box's assembly covers ([b314730](https://github.com/jordansmall/spindrift/commit/b31473033cd105190bb54b55f5d1eb086b8e8a40)), closes [#4294](https://github.com/jordansmall/spindrift/issues/4294)
+* delete the bats suites box's first run covers ([8976188](https://github.com/jordansmall/spindrift/commit/8976188bb7153e497381c5ae64fc07d88824335e)), closes [#4293](https://github.com/jordansmall/spindrift/issues/4293)
+* delete the bats suites box's home layout covers ([a8b9cfc](https://github.com/jordansmall/spindrift/commit/a8b9cfcec4fa4f16c6cd56f371d842accee6a560)), closes [#4296](https://github.com/jordansmall/spindrift/issues/4296)
+* delete the dispatch-mechanics bats files ([c4f3a99](https://github.com/jordansmall/spindrift/commit/c4f3a995cf715fb91af9db779fd6cda724bc6ad8))
+* drop the orphaned bash default-models fixture ([7ef8252](https://github.com/jordansmall/spindrift/commit/7ef8252845ae4d811cf20b06845728f55167a0ec))
+* **forgejo:** window the contract fake's deps list ([a47e34f](https://github.com/jordansmall/spindrift/commit/a47e34f67e5159dea6be440d5570b5840b3fbea6))
+* **launcher:** delete the landing-and-outcome bats files ([ffd13df](https://github.com/jordansmall/spindrift/commit/ffd13dff7e651e0f08d1b66e744e622abad8b3d4))
+* **launcher:** drop the runtimes, build and skills bats files ([c61f239](https://github.com/jordansmall/spindrift/commit/c61f239266338c477de367b3705ac0333ccc3ead)), closes [#4286](https://github.com/jordansmall/spindrift/issues/4286)
+* **launcher:** pin dispatch wiring bats held ([d7aa4cb](https://github.com/jordansmall/spindrift/commit/d7aa4cbbd34441c1dbc0669ce20f44eb78b8b05c))
+* **launcher:** pin knob wiring, pasta flags and skills mount ([73fff17](https://github.com/jordansmall/spindrift/commit/73fff176f8de7365fb8a6345f84cefa83850ce41)), closes [#4286](https://github.com/jordansmall/spindrift/issues/4286)
+* **launcher:** pin the report lines recover prints ([2b188e7](https://github.com/jordansmall/spindrift/commit/2b188e7328d858315908ae020fe6c22979b7b2c5))
+* **orchestrator:** map every pass kind to a role ([797f0ae](https://github.com/jordansmall/spindrift/commit/797f0aecd53b5a8bac236f04ccd863d7692f432c))
+* pin the bash Driver invocation in a golden ([ad45243](https://github.com/jordansmall/spindrift/commit/ad4524368fc242a3c338252ee4e91df53c70a4bb)), closes [#4293](https://github.com/jordansmall/spindrift/issues/4293)
+* pin the bats-only skill and agent-file cases ([ed3c37b](https://github.com/jordansmall/spindrift/commit/ed3c37b216ef2cc6e5ae7e8f809c2a9bbe75ac9c)), closes [#4296](https://github.com/jordansmall/spindrift/issues/4296)
+* pin the direct review path in bats harnesses ([c9c442a](https://github.com/jordansmall/spindrift/commit/c9c442afd444232c77c3399911dc340406a67faa)), closes [#4290](https://github.com/jordansmall/spindrift/issues/4290)
+* pin the log signal carrier in bats harnesses ([e976c98](https://github.com/jordansmall/spindrift/commit/e976c98d97c5ecb5082fb066f53da79021e72145)), closes [#4376](https://github.com/jordansmall/spindrift/issues/4376)
+* **promptassembly:** pin override contract assembly ([383424f](https://github.com/jordansmall/spindrift/commit/383424fdef417d858bd9ff14423d379b5f6c1039)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **promptassembly:** pin the prompt goldens in Go ([59b9c52](https://github.com/jordansmall/spindrift/commit/59b9c52e541fd62d6d11b559a4f006c230c25be1)), closes [#4294](https://github.com/jordansmall/spindrift/issues/4294)
+* retire bats suites the box port made redundant ([bb6aaed](https://github.com/jordansmall/spindrift/commit/bb6aaedb1c7fc6ec8bf7633318a07ddb636108da)), closes [#4467](https://github.com/jordansmall/spindrift/issues/4467)
+* run the bats suites on the orchestrator cell only ([d34f150](https://github.com/jordansmall/spindrift/commit/d34f15069d013c50e49ce6400bfe3b4f398e7313)), closes [#4291](https://github.com/jordansmall/spindrift/issues/4291)
+* **runner:** pin prompt-dir mount edge cases ([680073b](https://github.com/jordansmall/spindrift/commit/680073b2b8a70c83790e30b2ec0e10f79054b594)), closes [#4282](https://github.com/jordansmall/spindrift/issues/4282)
+* **runner:** pin the OCI image build path in-process ([935beac](https://github.com/jordansmall/spindrift/commit/935beac23728c87879769540025ce917f09d0d56)), closes [#4286](https://github.com/jordansmall/spindrift/issues/4286)
+* **seam:** add go build and subprocess harness ([6957cce](https://github.com/jordansmall/spindrift/commit/6957cce156520b40b17b145c1d9338aec4d8bc8a)), closes [#4281](https://github.com/jordansmall/spindrift/issues/4281)
+* **seam:** add Go fixture resolver and first seam test ([2f1a5e6](https://github.com/jordansmall/spindrift/commit/2f1a5e62cf133c8b1fb5c2f64a44e384dbc4f3c5)), closes [#4280](https://github.com/jordansmall/spindrift/issues/4280)
+* **seam:** add re-exec fake stack with podman and gh ([35fbf8d](https://github.com/jordansmall/spindrift/commit/35fbf8da5d0acaf230193bb7f5f2f75a3973ff2c)), closes [#4281](https://github.com/jordansmall/spindrift/issues/4281)
+* **seam:** add rendered prompts to seam fixtures ([ea1a9e2](https://github.com/jordansmall/spindrift/commit/ea1a9e2e9ac1fc4613fab4fdd4f08f128d9cdc64)), closes [#4282](https://github.com/jordansmall/spindrift/issues/4282)
+* **seam:** add the butler kind to the smoke matrix ([f3bdd08](https://github.com/jordansmall/spindrift/commit/f3bdd08fe64f56358caf2fb80456171b77f1b61f)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** answer as docker and bwrap in fakes ([e794ac7](https://github.com/jordansmall/spindrift/commit/e794ac72bff331fe0bfaa230da3f00bf8cb294a9)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** give the gh fake typed issues and PRs ([840e1ab](https://github.com/jordansmall/spindrift/commit/840e1ab8d99cf839b1d4b9337c798d893d1cbd1f)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** let runtime fakes emit issue intents ([913c9a4](https://github.com/jordansmall/spindrift/commit/913c9a40a9f62a2201f5e0afb10fefe684a2bbd0)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** move prompt-byte bats cases to Go ([51d94ec](https://github.com/jordansmall/spindrift/commit/51d94ec1c72fe7320af85c0654718af2a9898c4e)), closes [#4282](https://github.com/jordansmall/spindrift/issues/4282)
+* **seam:** prove a dropped knob fails the smoke checks ([ca387d2](https://github.com/jordansmall/spindrift/commit/ca387d2f03b5e772095cb4adeaf380def6cea1b9)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** render a butler-capable input document ([643ec4b](https://github.com/jordansmall/spindrift/commit/643ec4b9cffe5506179967f9a9d55afc7b9d7c46)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** render docker and bwrap input documents ([c1b41e6](https://github.com/jordansmall/spindrift/commit/c1b41e6f2f972b9b34fb3cf6bb5d5182910ae808)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** render seam fixtures into one derivation ([4f87cda](https://github.com/jordansmall/spindrift/commit/4f87cdadf9ed354197e547aec4e84f1236387352)), closes [#4280](https://github.com/jordansmall/spindrift/issues/4280)
+* **seam:** run integration-tagged tests in checks-inbox ([e899088](https://github.com/jordansmall/spindrift/commit/e89908800bb9702a5e52b5d80c051f04f1b09d7e)), closes [#4280](https://github.com/jordansmall/spindrift/issues/4280)
+* **seam:** smoke the launcher across kinds and runtimes ([cda0383](https://github.com/jordansmall/spindrift/commit/cda03839148afeb8a9699f708bc54f3d41664365)), closes [#4283](https://github.com/jordansmall/spindrift/issues/4283)
+* **seam:** smoke-test the launcher against the input document ([e83b856](https://github.com/jordansmall/spindrift/commit/e83b85615ae89aee428f40c18d0fd0ab088f0cdd)), closes [#4281](https://github.com/jordansmall/spindrift/issues/4281)
+* **seamtest:** add Driver and orchestrator fakes ([9b572d4](https://github.com/jordansmall/spindrift/commit/9b572d4b7171602124d39c5a0d8f64e0cd8e050a)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+* **settle:** drive the merge gate from a ready outcome ([e6eba5c](https://github.com/jordansmall/spindrift/commit/e6eba5c6a6f7ea5e3182861be4702059ea3913ab))
+* **settle:** pin the report lines settle prints ([7670a85](https://github.com/jordansmall/spindrift/commit/7670a85aceeb18cd415d8a62f62a7846e3b25ced))
+* **shim:** pin an absolute run-state path, not a copied literal ([9d5bb7d](https://github.com/jordansmall/spindrift/commit/9d5bb7d1fd8410b8cc975c710793b65646a05089)), closes [#4468](https://github.com/jordansmall/spindrift/issues/4468)
+* **shim:** pin the Driver Bash-timeout flags reaching box ([4f3b1f8](https://github.com/jordansmall/spindrift/commit/4f3b1f85f8f60576f33594c575a684a28075e964)), closes [#4478](https://github.com/jordansmall/spindrift/issues/4478)
+* tighten the bats folds after review ([2750aec](https://github.com/jordansmall/spindrift/commit/2750aec69b08c675e45c7cfaec58b8eff3103497))
+* **waves:** pin dependency waves the bats held ([cebc8e1](https://github.com/jordansmall/spindrift/commit/cebc8e14a7b3b91f2199826f5209e2f292be24df))
+* **waves:** pin that each issue in a wave settles alone ([af2a70f](https://github.com/jordansmall/spindrift/commit/af2a70f70c6d67d0ba01bbda7ba2aaeb29fa6c32))
+
+
+### Build System
+
+* **box:** build box and bake it into the image ([d321bfb](https://github.com/jordansmall/spindrift/commit/d321bfb523553a4c9d52d0b07c8ed6401f54332b)), closes [#4292](https://github.com/jordansmall/spindrift/issues/4292)
+
 ## [0.21.3](https://github.com/jordansmall/spindrift/compare/v0.21.2...v0.21.3) (2026-10-03)
 
 
