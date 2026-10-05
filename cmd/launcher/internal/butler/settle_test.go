@@ -3,6 +3,7 @@ package butler
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -450,7 +451,7 @@ func TestSettleRun_CrashedRun_LeavesClaimUnadvanced(t *testing.T) {
 }
 
 // (e) A crashed run -- no ready outcome line at all -- still warns about any
-// rejected signal lines the result channel carried, since settle.LogRejectedSignals
+// rejected signal lines the result channel carried, since settle.RecordSettleWarnings
 // now runs as settle's first statement, ahead of both crash guards (issue
 // #3990). Before this fix the warning lived inside settle.FileButlerFindings,
 // reachable only once a run had already cleared the guards below, so a
@@ -1840,5 +1841,29 @@ func TestPatchCommitSubject(t *testing.T) {
 				t.Errorf("patchCommitSubject(%q) len = %d runes, want <= %d", tc.title, len(r), patchSubjectMaxLen)
 			}
 		})
+	}
+}
+
+// A butler settle records its warnings to the Dispatcher's sidecar, keyed by
+// the Chore, even on a crashed run (issue #3744).
+func TestSettleRun_RecordsWarnings(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	now := start.Add(time.Minute)
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, chore.Scope{}, func() time.Time { return now }, chore.Room{}, promotion{}, patchRung{})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Warnings:             []string{"scan warning"},
+		IssueIntentsRejected: outcome.Rejections{NonceMismatch: 1},
+	}
+	testutil.CaptureStderr(t, func() { s.settle(d, result) })
+
+	want := [][]string{{"scan warning", "1 nonce-mismatched issue-intent line(s) rejected"}}
+	if !reflect.DeepEqual(d.RecordedWarnings, want) {
+		t.Errorf("RecordedWarnings = %q, want %q", d.RecordedWarnings, want)
 	}
 }

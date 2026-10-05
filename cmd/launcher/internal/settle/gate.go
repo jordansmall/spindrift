@@ -3,6 +3,7 @@ package settle
 import (
 	"fmt"
 	"os"
+	"slices"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -19,7 +20,7 @@ import (
 // a Box exits so each issue settles independently of its wave siblings.
 func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	defer s.flushSettled(num)
-	logRejectedSignals(num, result)
+	RecordSettleWarnings(d, num, "", result)
 	if result.ParseErr != nil {
 		// A malformed outcome line gets the same PR-adoption safety net as no
 		// outcome line at all (issue #1898): the Box may still have landed a
@@ -215,23 +216,48 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 }
 
-// logRejectedSignals warns about rejected lines a result channel dropped
-// (issue #2976), naming the actual cause — nonce-mismatched, malformed, or
-// both (issue #3670) — rather than always saying nonce-mismatched. An
-// issue-intent rejection leaves no other trace, so it always warns. retry.go's
-// own scan already warns when every comment or pr-intent line was rejected, so
-// for those two this covers only the silent case: a verifying match alongside
-// one or more rejections.
-func logRejectedSignals(num string, result dispatch.Result) {
-	if result.CommentFound && result.CommentRejected.Total() > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d %s comment line(s) rejected\n", num, result.CommentRejected.Total(), result.CommentRejected.Cause())
+// RecordSettleWarnings is the one seam that prints a settle's rejection
+// warnings to stderr and records result.Warnings plus those rejections to d's
+// sidecar (issue #3744). tag prefixes every entry and stderr line ("" for the
+// initial settle, "fix pass N: " for a fix pass); an empty fix-pass batch
+// records nothing, so a clean pass cannot delete an earlier run's file.
+//
+// An issue-intent rejection leaves no other trace, so it always warns.
+// retry.go's own scan already warns when every comment or pr-intent line was
+// rejected, so for those two this covers only a verifying match alongside
+// rejections.
+func RecordSettleWarnings(d dispatch.Dispatcher, num, tag string, result dispatch.Result) {
+	var rejections []string
+	if result.CommentFound {
+		rejections = appendRejection(rejections, "comment", result.CommentRejected)
 	}
-	if result.PRIntentFound && result.PRIntentRejected.Total() > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d %s pr-intent line(s) rejected\n", num, result.PRIntentRejected.Total(), result.PRIntentRejected.Cause())
+	if result.PRIntentFound {
+		rejections = appendRejection(rejections, "pr-intent", result.PRIntentRejected)
 	}
-	if result.IssueIntentsRejected.Total() > 0 {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: %d %s issue-intent line(s) rejected\n", num, result.IssueIntentsRejected.Total(), result.IssueIntentsRejected.Cause())
+	rejections = appendRejection(rejections, "issue-intent", result.IssueIntentsRejected)
+
+	batch := slices.Concat(result.Warnings, rejections)
+	if tag != "" {
+		for i, w := range batch {
+			batch[i] = tag + w
+		}
 	}
+	for _, w := range rejections {
+		dispatch.PrintWarning(num, tag+w)
+	}
+	if tag != "" && len(batch) == 0 {
+		return
+	}
+	d.RecordWarnings(batch)
+}
+
+// appendRejection adds a warning naming the actual cause -- nonce-mismatched,
+// malformed, or both (issues #2976, #3670) -- when r holds any rejection.
+func appendRejection(warnings []string, channel string, r outcome.Rejections) []string {
+	if r.Total() == 0 {
+		return warnings
+	}
+	return append(warnings, fmt.Sprintf("%d %s %s line(s) rejected", r.Total(), r.Cause(), channel))
 }
 
 // settleUnresolved is the shared safety net for a box result carrying no usable

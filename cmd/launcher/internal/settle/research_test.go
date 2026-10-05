@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -1337,5 +1338,28 @@ func TestMarkdownBullets_BackslashBracketLinkEscaped(t *testing.T) {
 				t.Errorf("bullet = %q, want %q", bullet, tc.want)
 			}
 		})
+	}
+}
+
+// Research settle records its scan and rejection warnings to the sidecar too
+// (issue #3744): the seam is shared by every dispatch kind.
+func TestResearchSettle_RecordsWarnings(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Status: "recommend", Note: "grounded in code"},
+		},
+		Warnings:             []string{"scan warning"},
+		IssueIntentsRejected: outcome.Rejections{Malformed: 2},
+	}
+
+	d := dispatch.NewFake()
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, false)
+	captureStdout(t, func() { s.Settle(d, "42", 0, result) })
+
+	want := [][]string{{"scan warning", "2 malformed issue-intent line(s) rejected"}}
+	if !reflect.DeepEqual(d.RecordedWarnings, want) {
+		t.Errorf("RecordedWarnings = %q, want %q", d.RecordedWarnings, want)
 	}
 }

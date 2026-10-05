@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -824,7 +825,7 @@ func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 	}
 }
 
-// gate.go's logRejectedSignals warns for a rejected comment line only when a
+// gate.go's RecordSettleWarnings warns for a rejected comment line only when a
 // verifying match was also found on that channel. dispatch.outcomeResult's
 // own comment-scan warning in retry.go already covers CommentFound=false,
 // where every line on the channel was rejected, so gate.go stays silent
@@ -874,11 +875,11 @@ func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 	})
 }
 
-// logRejectedSignals must report the actual rejection cause — nonce mismatch,
+// RecordSettleWarnings must report the actual rejection cause — nonce mismatch,
 // malformed payload, or both — rather than always saying nonce-mismatched
 // (issue #3670). Table-driven so each cause's exact wording, sourced from
 // outcome.Rejections.Cause(), stays pinned.
-func TestSettle_LogRejectedSignals_CausePinned(t *testing.T) {
+func TestSettle_RecordSettleWarnings_CausePinned(t *testing.T) {
 	const issNum = "3670"
 	const prURL = "https://github.com/owner/repo/pull/3670"
 
@@ -924,3 +925,62 @@ var errFake = fakeErr("fake error")
 type fakeErr string
 
 func (e fakeErr) Error() string { return string(e) }
+
+// Every kind's settle hands the sidecar writer one batch (issue #3744): the
+// scan warnings outcomeResult collected, then the rejection warnings settle
+// itself derives -- the same text stderr gets, minus its "    ?? #<n>: "
+// prefix.
+func TestSettle_RecordsScanThenRejectionWarnings(t *testing.T) {
+	const issNum = "3744"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	scan := make([]string, 1, 4)
+	scan[0] = "comment: 2 lines carried the token but none verified"
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Status: "blocked", Note: "tests failing"},
+		},
+		Warnings:        scan,
+		CommentFound:    true,
+		CommentRejected: outcome.Rejections{NonceMismatch: 1},
+	}
+
+	d := dispatch.NewFake()
+	s := newTestSettle(baseConfig(), fc, fc)
+	stderr := testutil.CaptureStderr(t, func() { s.Settle(d, issNum, 0, result) })
+
+	rejection := "1 nonce-mismatched comment line(s) rejected"
+	want := [][]string{{scan[0], rejection}}
+	if !reflect.DeepEqual(d.RecordedWarnings, want) {
+		t.Errorf("RecordedWarnings = %q, want %q", d.RecordedWarnings, want)
+	}
+	if !strings.Contains(stderr, "    ?? #"+issNum+": "+rejection+"\n") {
+		t.Errorf("stderr = %q, want the rejection line unchanged", stderr)
+	}
+	if spare := scan[:cap(scan)][1]; spare != "" {
+		t.Errorf("result.Warnings spare capacity was written into: %q", spare)
+	}
+}
+
+// A settle with nothing to warn about still records one empty batch, so the
+// sidecar from an earlier run is cleared.
+func TestSettle_NoWarnings_RecordsEmptyBatch(t *testing.T) {
+	const issNum = "3744"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Status: "blocked", Note: "tests failing"},
+		},
+	}
+
+	d := dispatch.NewFake()
+	newTestSettle(baseConfig(), fc, fc).Settle(d, issNum, 0, result)
+
+	if len(d.RecordedWarnings) != 1 || len(d.RecordedWarnings[0]) != 0 {
+		t.Errorf("RecordedWarnings = %q, want exactly one empty batch", d.RecordedWarnings)
+	}
+}

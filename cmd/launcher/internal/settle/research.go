@@ -63,7 +63,7 @@ func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabe
 // human queues. Under the comment relay a missing SPINDRIFT_COMMENT block
 // counts as a missing outcome line.
 func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	logRejectedSignals(num, result)
+	RecordSettleWarnings(d, num, "", result)
 	if !result.Resolved.Found {
 		r.fail(num, "no verdict outcome line")
 		return
