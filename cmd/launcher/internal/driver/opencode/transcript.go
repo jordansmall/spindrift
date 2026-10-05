@@ -20,8 +20,9 @@ type textEvent struct {
 // RenderTranscript returns each type:"text" event's part.text from the box log
 // at logPath (one JSON object per line, per opencode's `--format json`), joined
 // by "\n" in log order. It keeps each event's text verbatim, because the
-// orchestrator scans this rendering for the agent's own outcome and verdict
-// lines. Returns ("", nil) when logPath does not exist, as the claude Driver does.
+// orchestrator scans this rendering for the agent's verdict line and the review
+// findings that follow it; the outcome line is read from ResultText instead.
+// Returns ("", nil) when logPath does not exist, as the claude Driver does.
 func RenderTranscript(logPath string) (string, error) {
 	var texts []string
 	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
