@@ -9,6 +9,49 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.23.0 — 2026-10-05
+
+Tighter handling of issue comments, Forgejo runs that don't need a GitHub
+token, and a daemon that checks its labels before it starts.
+
+**⚠ Breaking changes** this release: `agents.bashTimeoutMs` now takes an
+integer, not a string.
+
+- **⚠ Breaking: `agents.bashTimeoutMs` is an integer.** A Consumer flake
+  that quotes the value (`"1800000"`) now fails evaluation; drop the
+  quotes. The `DRIVER_BASH_TIMEOUT_MS` env var and its flag still take a
+  string as before. `MIGRATING.md` has the details.
+- **Less untrusted text reaches the agent.** Comments GitHub has hidden
+  (minimized) no longer land in the agent's prompt. Jira comments are no
+  longer pasted into the issue body as an unattributed copy, so
+  `JIRA_INCLUDE_COMMENTS` is now a deprecated no-op (comments still reach
+  the agent, attributed, through the normal path). The local tracker's
+  dependency and touched-files parsing ignores comments, so a comment
+  can't invent a blocker. The Box also installs its read-only guards
+  before branch recovery runs, not after.
+- **Forgejo and local forges without `GH_TOKEN`.** A pure-Forgejo setup,
+  or `CODE_FORGE=local` paired with a Forgejo or Jira tracker, no longer
+  asks for a GitHub token anywhere (validate, the secret template, or the
+  Box). Forgejo also strips stacked `[WIP]` markers from a PR title and
+  won't mark a PR ready when nothing would be left of the title.
+- **The daemon checks labels up front.** When the daemon runs the butler
+  (or you explicitly select research), `spindrift doctor` now requires
+  that kind's labels and halts startup naming any that are missing,
+  instead of burning a Box per sweep on findings that can't be filed.
+  Settle also creates provenance labels on demand, and a butler sweep
+  whose findings all fail to file now counts as failed, so the findings
+  come back next run instead of being skipped past.
+- **Mistakes in prompt overrides fail loudly.** A custom prompt that still
+  references a removed fragment variable (such as
+  `${REVIEW_LOOP_INLINE_STEP}`) is now rejected when the prompt is
+  assembled, or at Nix evaluation for a baked `mkHarness` prompt, instead
+  of rendering a blank.
+- **Clearer daemon and settle reporting.** The launcher now names issues
+  it skipped because the other label family (work vs. research) holds
+  them, once per run. Settle warnings are kept in the per-issue record,
+  and the daemon's jam alarm can fire even while another slot is backing
+  off.
+
 ## 0.22.0 — 2026-10-05
 
 The orchestrator is now the only way a Box runs, the Signal socket is the
