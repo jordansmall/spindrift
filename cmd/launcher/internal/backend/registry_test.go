@@ -125,3 +125,17 @@ func TestNeedsGHToken(t *testing.T) {
 		}
 	}
 }
+
+// TestInBoxOpenPRQueryable pins the exact set of CODE_FORGE backends whose open
+// PRs the Box can query itself (see Descriptor.InBoxOpenPRQueryable).
+func TestInBoxOpenPRQueryable(t *testing.T) {
+	var got []string
+	for _, d := range Registry {
+		if d.InBoxOpenPRQueryable {
+			got = append(got, d.Name)
+		}
+	}
+	if want := []string{"github"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("InBoxOpenPRQueryable set = %v, want %v", got, want)
+	}
+}

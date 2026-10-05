@@ -31,6 +31,15 @@ type Descriptor struct {
 	// which is what let #2927 close forgejo's asymmetry with a one-field flip.
 	OutboxRelayCapable bool
 
+	// InBoxOpenPRQueryable is true only for a CODE_FORGE whose open PRs the Box
+	// can query itself (an in-box client plus a token for it), so branch
+	// recovery asks it before force-resetting a prior agent branch. forgejo has
+	// PRs but its Box has no client wired into branch recovery and no GH_TOKEN
+	// (issue #3942); local and git have no PR concept (ADR 0033, ADR 0013).
+	// Flipping it for another forge also needs that forge's client in the Box's
+	// openPR (cmd/launcher/box/recovery.go).
+	InBoxOpenPRQueryable bool
+
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
 	// reachability at all (ADR 0032: "local"). Issue #3471 retired the /issues
 	// mount, so grep the field name for the live set of consumers that

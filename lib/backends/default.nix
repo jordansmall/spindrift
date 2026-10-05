@@ -37,6 +37,10 @@
 # outboxRelayCapable is narrower: it covers only the outbox mount and relay
 # treatment (issues #1918, #2267, #2927).
 
+# inBoxOpenPRQueryable marks a CODE_FORGE whose open PRs the Box can query
+# itself (in-box client plus token), which branch recovery needs before
+# force-resetting a prior agent branch; only github (issue #4449).
+
 # labelRegistry marks a tracker whose labels are registered objects that
 # ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [
@@ -47,6 +51,7 @@
     validAsCodeForge = true;
     tokenEnvVar = "GH_TOKEN";
     outboxRelayCapable = true;
+    inBoxOpenPRQueryable = true;
     relayCapable = true;
     hostPostingCapable = true;
     labelRegistry = true;
