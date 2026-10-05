@@ -66,7 +66,7 @@ func newFixture(t *testing.T) *fixture {
 	git(t, f.work, "config", "user.email", "t@example.com")
 	f.cfg = branchrecovery.Config{
 		WorkDir: f.work, Branch: branch, BaseBranch: "main",
-		CodeForge: "github", Push: true, OutboxDir: f.outbox,
+		CodeForge: "github", QueryOpenPR: true, Push: true, OutboxDir: f.outbox,
 	}
 	return f
 }
@@ -297,35 +297,32 @@ func TestRecoverOpenPRErrorAborts(t *testing.T) {
 	}
 }
 
-func TestRecoverForgeWithoutPRsStartsFresh(t *testing.T) {
-	for _, forge := range []string{"forgejo", "git", "local"} {
-		t.Run(forge, func(t *testing.T) {
-			f := newFixture(t)
-			f.cfg.CodeForge = forge
-			f.withPriorBranch(t, "prior.txt", "prior\n")
-			before := f.originRef(t, "refs/heads/"+branch)
+func TestRecoverWithoutOpenPRQueryStartsFresh(t *testing.T) {
+	f := newFixture(t)
+	f.cfg.CodeForge = "github"
+	f.cfg.QueryOpenPR = false
+	f.withPriorBranch(t, "prior.txt", "prior\n")
+	before := f.originRef(t, "refs/heads/"+branch)
 
-			var w bytes.Buffer
-			out, err := branchrecovery.Recover(f.cfg, never(t), &w)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if out != (branchrecovery.Outcome{}) {
-				t.Errorf("outcome = %+v", out)
-			}
-			if got, want := git(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
-				t.Errorf("HEAD = %s, want origin/main %s", got, want)
-			}
-			if got := f.originRef(t, "refs/heads/"+branch); got != before {
-				t.Errorf("origin branch moved: %s -> %s", before, got)
-			}
-			if _, err := os.Stat(f.bundlePath()); !os.IsNotExist(err) {
-				t.Errorf("bundle written: %v", err)
-			}
-			if want := "CODE_FORGE=" + forge + ": starting " + branch + " fresh from origin/main"; !strings.Contains(w.String(), want) {
-				t.Errorf("narration missing %q: %s", want, w.String())
-			}
-		})
+	var w bytes.Buffer
+	out, err := branchrecovery.Recover(f.cfg, never(t), &w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != (branchrecovery.Outcome{}) {
+		t.Errorf("outcome = %+v", out)
+	}
+	if got, want := git(t, f.work, "rev-parse", "HEAD"), f.originRef(t, "main"); got != want {
+		t.Errorf("HEAD = %s, want origin/main %s", got, want)
+	}
+	if got := f.originRef(t, "refs/heads/"+branch); got != before {
+		t.Errorf("origin branch moved: %s -> %s", before, got)
+	}
+	if _, err := os.Stat(f.bundlePath()); !os.IsNotExist(err) {
+		t.Errorf("bundle written: %v", err)
+	}
+	if want := "CODE_FORGE=github: starting " + branch + " fresh from origin/main"; !strings.Contains(w.String(), want) {
+		t.Errorf("narration missing %q: %s", want, w.String())
 	}
 }
 

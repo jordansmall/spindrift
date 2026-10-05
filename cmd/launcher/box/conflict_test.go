@@ -283,7 +283,7 @@ func TestConflictResolve_PublishGoesThroughBranchRecovery(t *testing.T) {
 		f.run()
 		want := []branchrecovery.Config{{
 			WorkDir: f.in.WorkDir, Branch: "agent/issue-42", BaseBranch: "main",
-			CodeForge: "github", Push: write, OutboxDir: f.in.OutboxDir,
+			CodeForge: "github", QueryOpenPR: true, Push: write, OutboxDir: f.in.OutboxDir,
 		}}
 		if !reflect.DeepEqual(f.publishCfgs, want) {
 			t.Fatalf("write=%v: publish configs = %+v, want %+v", write, f.publishCfgs, want)
