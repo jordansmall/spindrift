@@ -246,13 +246,15 @@ func TestDecide(t *testing.T) {
 		decisions  string
 		wantFire   bool
 		wantBeyond []string
+		wantReason string
 	}{
 		{
-			name:      "gate-work declared fires regardless of delta",
-			delta:     landdelta.Delta{Known: false, Reason: "no anchor"},
-			findings:  "",
-			decisions: "gate-discovered work: touched run.go to unbreak the gate.",
-			wantFire:  true,
+			name:       "gate-work declared fires regardless of delta",
+			delta:      landdelta.Delta{Known: false, Reason: "no anchor"},
+			findings:   "",
+			decisions:  "gate-discovered work: touched run.go to unbreak the gate.",
+			wantFire:   true,
+			wantReason: GateWorkReason,
 		},
 		{
 			name:      "unknown delta does not fire on its own",
@@ -497,6 +499,7 @@ func TestDecide(t *testing.T) {
 			findings:   "## Blocking\n- a.go:1 — bug\n- b.go:1 — bug\n",
 			wantFire:   true,
 			wantBeyond: []string{"a.go:100", "b.go:20"},
+			wantReason: beyondReasonPrefix + "a.go:100, b.go:20",
 		},
 		{
 			name: "mixed bare and line citation on one path still vouches for the whole path",
@@ -544,6 +547,9 @@ func TestDecide(t *testing.T) {
 			}
 			if !reflect.DeepEqual(got.Beyond, c.wantBeyond) {
 				t.Errorf("Decide(...).Beyond = %#v, want %#v", got.Beyond, c.wantBeyond)
+			}
+			if c.wantReason != "" && got.Reason != c.wantReason {
+				t.Errorf("Decide(...).Reason = %q, want %q", got.Reason, c.wantReason)
 			}
 		})
 	}
