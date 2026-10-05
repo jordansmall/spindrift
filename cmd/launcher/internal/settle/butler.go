@@ -46,14 +46,25 @@ type Decoration struct {
 	OnFiled     func(url string)
 }
 
+// ButlerFiling is FileButlerFindings's tally: the URLs of the findings that
+// filed in payload order, plus how many the per-sweep cap dropped and how many
+// failed to post.
+type ButlerFiling struct {
+	Filed           []string
+	Dropped, Failed int
+}
+
 // FileButlerFindings caps result's issue-intent findings at maxPerSweep (0
 // means no cap; see capIntents), hands the kept well-formed findings to plan
 // before filing anything, then files the capped result under
 // dispatchkind.Butler.FindingLabel's provenance label using the Decoration
 // the plan's returned callback produces per finding. It prints the same
 // filed/dropped lines internal/butler's settle step always has, and returns
-// only successful filings in payload order, plus the dropped count.
-func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, plan func(kept []Finding) func(Finding) Decoration) (filed []string, dropped int) {
+// only successful filings in payload order, plus the dropped count and the
+// failed count (PostIssue failures only; a dedup skip or malformed payload is
+// neither), so a caller can tell a sweep whose every filing failed from one
+// that simply found nothing.
+func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
 	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
 	capped := result
 	capped.IssueIntents = kept
@@ -77,13 +88,17 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 		fmt.Printf("    #%s  dropped %d finding(s) beyond the %d-per-sweep cap\n", num, dropped, maxPerSweep)
 	}
 
+	out := ButlerFiling{Dropped: dropped}
 	for _, f := range rawFiled {
+		if f.Failed {
+			out.Failed++
+		}
 		if f.Failed || f.Skipped {
 			continue
 		}
-		filed = append(filed, f.URL)
+		out.Filed = append(out.Filed, f.URL)
 	}
-	return filed, dropped
+	return out
 }
 
 // capIntents keeps at most n of raw's well-formed issue-intent payloads, in

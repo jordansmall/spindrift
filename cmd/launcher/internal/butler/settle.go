@@ -128,7 +128,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// gate calls after ledger.Finish below; the Ledger's Patched URLs derive
 	// from it.
 	var landings []patchLanding
-	filed, dropped := settle.FileButlerFindings(s.it, num, result, s.room.Findings, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
+	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
 		// of the day's shared promotion room. room.Promotions is Sweep's own
 		// snapshot, handed down rather than re-walked here (issue #3994): a
@@ -240,6 +240,15 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		}
 	})
 
+	// Every finding failing to file (a missing provenance label, a network or
+	// rate-limit error) leaves the claim standing like a crash: the cursor
+	// stays put so the findings are re-found next run, and the non-zero exit
+	// feeds the daemon breaker instead of spending a Box per sweep forever.
+	if len(filing.Filed) == 0 && filing.Failed > 0 {
+		s.fail(num, fmt.Sprintf("all %d finding(s) failed to file -- see the logged issue-intent filing errors; a missing provenance label is one cause (spindrift doctor --butler)", filing.Failed))
+		return settled{}
+	}
+
 	patched := make([]string, len(landings))
 	for i, l := range landings {
 		patched[i] = l.prURL
@@ -247,11 +256,11 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	state := ledger.State{
 		LastSwept: s.scope.Head,
 		Cursor:    s.scope.NextCursor,
-		Filed:     filed,
+		Filed:     filing.Filed,
 		Promoted:  promoted,
 		Patched:   patched,
 		Usage:     d.CumulativeUsage(),
-		Dropped:   dropped,
+		Dropped:   filing.Dropped,
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
@@ -264,15 +273,15 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		return settled{}
 	}
 
-	note := fmt.Sprintf("%d filed", len(filed))
+	note := fmt.Sprintf("%d filed", len(filing.Filed))
 	if len(promoted) > 0 {
-		note = fmt.Sprintf("%d filed, %d promoted", len(filed), len(promoted))
+		note = fmt.Sprintf("%d filed, %d promoted", len(filing.Filed), len(promoted))
 	}
 	if len(patched) > 0 {
 		note = fmt.Sprintf("%s, %d patched", note, len(patched))
 	}
-	if dropped > 0 {
-		note = fmt.Sprintf("%s, %d dropped", note, dropped)
+	if filing.Dropped > 0 {
+		note = fmt.Sprintf("%s, %d dropped", note, filing.Dropped)
 	}
 	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
@@ -282,7 +291,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// must never leave the Chore's claim standing (issue #4076).
 	s.adoptLandings(landings)
 
-	return settled{done: true, filed: len(filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
+	return settled{done: true, filed: len(filing.Filed), promoted: len(promoted), dropped: filing.Dropped, patched: len(patched)}
 }
 
 // adoptLandings hands each landed patch's draft PR to the work merge gate.

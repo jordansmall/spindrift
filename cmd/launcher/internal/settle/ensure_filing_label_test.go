@@ -116,10 +116,10 @@ func TestFileButlerFindings_EnsuresExtraLabels(t *testing.T) {
 	plan := func([]Finding) func(Finding) Decoration {
 		return func(Finding) Decoration { return Decoration{ExtraLabels: []string{patchLabel}} }
 	}
-	filed, _, _ := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, plan)
+	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, plan)
 
-	if len(filed) != 2 {
-		t.Fatalf("filed = %v, want 2", filed)
+	if len(filing.Filed) != 2 {
+		t.Fatalf("filed = %v, want 2", filing.Filed)
 	}
 	want := []string{dispatchkind.Butler.FindingLabel, patchLabel}
 	if got := createdNames(fc); !slices.Equal(got, want) {
