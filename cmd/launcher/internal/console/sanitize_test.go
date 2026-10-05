@@ -1,6 +1,9 @@
 package console
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // This test pins #721: a byte-range check for C1 controls misfires on
 // UTF-8 continuation bytes, so a rune next to a stripped OSC sequence
@@ -43,6 +46,36 @@ func TestSanitizeControlSequences_RawC1SurvivesAsReplacementChar(t *testing.T) {
 		want := "a�b"
 		if got := SanitizeControlSequences(in); got != want {
 			t.Errorf("SanitizeControlSequences(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Bidi overrides/isolates, implicit marks, and line/paragraph separators can
+// reorder or re-flow the rendered transcript to disguise text, so each is
+// stripped (#4403).
+func TestSanitizeControlSequences_StripsBidiAndLineSeparators(t *testing.T) {
+	for _, r := range []rune{
+		0x202a, 0x202b, 0x202c, 0x202d, 0x202e,
+		0x2066, 0x2067, 0x2068, 0x2069,
+		0x200e, 0x200f, 0x061c,
+		0x2028, 0x2029,
+	} {
+		t.Run(fmt.Sprintf("U+%04X", r), func(t *testing.T) {
+			in := "a" + string(r) + "b"
+			if got := SanitizeControlSequences(in); got != "ab" {
+				t.Errorf("SanitizeControlSequences(%q) = %q, want %q", in, got, "ab")
+			}
+		})
+	}
+}
+
+// The strip list is explicit, not the Cf category: RTL script text and the
+// ZWJ joining an emoji sequence and the ZWNJ inside Persian words are
+// legitimate and must survive.
+func TestSanitizeControlSequences_PreservesRTLTextZWJAndZWNJ(t *testing.T) {
+	for _, in := range []string{"שלום", "مرحبا", "👩‍💻", "می\u200cخواهم"} {
+		if got := SanitizeControlSequences(in); got != in {
+			t.Errorf("SanitizeControlSequences(%q) = %q, want unchanged", in, got)
 		}
 	}
 }
