@@ -747,9 +747,6 @@ let
         ) ../cmd/launcher/internal/seambundle)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/outcomebackstop)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/retry)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
@@ -766,12 +763,6 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/seedblock)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/markergate)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/readonlyguards)
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/bindregistry)
