@@ -187,24 +187,22 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 		return 0, err
 	}
 
-	// Branch recovery comes before everything that touches the tree: the
+	// The Forgejo CLI credential and the guards come right after the clone,
+	// ahead of recovery, so no recovery step (its gh pr list, its outbox
+	// bundle) runs unguarded (issue #4446). The PATH the guards prepend
+	// must reach the prefetch hook, the orchestrator and the Driver.
+	if err := r.configureForgejoCLI(); err != nil {
+		return 0, phaseErr("forgejo-cli", err)
+	}
+	if err := r.installReadonlyGuards(); err != nil {
+		return 0, phaseErr("readonly-guards", err)
+	}
+
+	// Branch recovery comes before everything else that touches the tree: the
 	// registry's in-tree rewrite must not dirty it ahead of the rebase and the
 	// devShell probe must see the rebased tree.
 	if err := r.recoverBranch(); err != nil {
 		return 0, phaseErr("branch-recovery", err)
-	}
-
-	// The Forgejo CLI credential comes first after recovery, as it did in the
-	// shell.
-	if err := r.configureForgejoCLI(); err != nil {
-		return 0, phaseErr("forgejo-cli", err)
-	}
-
-	// The guards come before the rest of what box does, as they did in the
-	// shell: the PATH they prepend must reach the prefetch hook, the
-	// orchestrator and the Driver.
-	if err := r.installReadonlyGuards(); err != nil {
-		return 0, phaseErr("readonly-guards", err)
 	}
 
 	// The bindings come next: the toolchain decision's prefetch hook may

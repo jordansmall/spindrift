@@ -150,4 +150,7 @@ func TestForgejoCLI_FailureAbortsBeforeAnythingElse(t *testing.T) {
 	if len(g.calls) != 0 || g.assembled != 0 {
 		t.Fatalf("Driver ran (%d calls) or assembled (%d) after fj failed", len(g.calls), g.assembled)
 	}
+	if len(g.recoverCfgs) != 0 {
+		t.Fatalf("recovery ran after fj failed: %+v", g.recoverCfgs)
+	}
 }

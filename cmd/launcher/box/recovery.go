@@ -7,10 +7,10 @@ import (
 )
 
 // recoverBranch positions the agent branch ahead of everything that reads the
-// tree: the guards, the registry's in-tree rewrite and the devShell probe all
-// must see the rebased tree, and the rewrite must not dirty it before the
-// rebase. Advise-only never cuts, adopts or rebases a branch (ADR 0022, issue
-// #640) and a self-contained Box has no clone.
+// tree: the registry's in-tree rewrite and the devShell probe both must see
+// the rebased tree, and the rewrite must not dirty it before the rebase.
+// Advise-only never cuts, adopts or rebases a branch (ADR 0022, issue #640)
+// and a self-contained Box has no clone.
 func (r *boxRun) recoverBranch() error {
 	if r.env.SelfContained || r.adviseOnly {
 		return nil
