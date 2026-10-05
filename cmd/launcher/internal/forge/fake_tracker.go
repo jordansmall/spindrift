@@ -64,6 +64,9 @@ type IssueTrackerFake struct {
 
 	CreateLabelCalls []CreateLabelCall
 	CreateLabelErr   error
+	// RequireLabelsExist makes the filer's PostIssue fail on any label not in
+	// Labels, as GitHub's `gh issue create --label` does (issue #4400).
+	RequireLabelsExist bool
 
 	// AddLabelsCalls records each AddLabels invocation so a test can assert
 	// call count and arguments directly (issue #4074).
@@ -400,7 +403,26 @@ func (tf *IssueTrackerFake) CreateLabel(name, description, color string) error {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.CreateLabelCalls = append(tf.CreateLabelCalls, CreateLabelCall{name, description, color})
+	if tf.CreateLabelErr == nil {
+		tf.Labels = append(tf.Labels, name)
+	}
 	return tf.CreateLabelErr
+}
+
+// missingLabels returns the labels a RequireLabelsExist PostIssue rejects.
+func (tf *IssueTrackerFake) missingLabels(labels []string) []string {
+	tf.mu.Lock()
+	defer tf.mu.Unlock()
+	if !tf.RequireLabelsExist {
+		return nil
+	}
+	var out []string
+	for _, l := range labels {
+		if !slices.Contains(tf.Labels, l) {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // AddLabels implements the optional IssueLabeler interface (issue #4074). It

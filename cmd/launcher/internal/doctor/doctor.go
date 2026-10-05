@@ -45,6 +45,17 @@ type LabelMeta struct {
 	Color       string // hex without leading #
 }
 
+// LabelMetaFor resolves a fixed-name label's metadata: TriageLabelMeta first,
+// then ReviewFindingLabelMeta, the one generated row kept out of that map. It is
+// the single lookup for the host's ensure-create and doctor's interactive create.
+func LabelMetaFor(name string) (LabelMeta, bool) {
+	if meta, ok := TriageLabelMeta[name]; ok {
+		return meta, true
+	}
+	meta, ok := ReviewFindingLabelMeta[name]
+	return meta, ok
+}
+
 // ResearchLabelNames returns the seven fixed research-tier label names (ADR 0022).
 // All but "agent-research-finding" (ADR 0041) come from forge rather than local
 // literals; that one has no forge declaration to source it from.

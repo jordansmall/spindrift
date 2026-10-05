@@ -45,3 +45,10 @@ var FindingTypeLabels = map[string]LabelMeta{
 	"enhancement": LabelMeta{Description: "Filed as an enhancement finding", Color: "a2eeef"},
 	"chore":       LabelMeta{Description: "Filed as a chore finding", Color: "fef2c0"},
 }
+
+// ReviewFindingLabelMeta is the review-finding provenance label (lib/labels.nix's
+// reviewFinding family, ADR 0041), kept out of TriageLabelMeta because its color
+// collides with agent-research-unclear's. LabelMetaFor consults both maps.
+var ReviewFindingLabelMeta = map[string]LabelMeta{
+	"agent-review-finding": LabelMeta{Description: "Filed from a non-blocking review finding", Color: "d4c5f9"},
+}

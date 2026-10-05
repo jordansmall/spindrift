@@ -655,6 +655,7 @@ func TestFileIssueIntentsDetailed_RecognizedTypeAppliesMappedLabel(t *testing.T)
 		t.Run(typ, func(t *testing.T) {
 			fc := forge.NewFake(testDispatchLabels)
 			fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+			fc.Labels = []string{"agent-review-finding"}
 
 			result := dispatch.Result{
 				IssueIntentsFound: true,
@@ -716,6 +717,7 @@ func TestFileIssueIntentsDetailed_ResearchProvenanceWithTypeLabel(t *testing.T) 
 func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.Labels = []string{"agent-review-finding"}
 
 	result := dispatch.Result{
 		IssueIntentsFound: true,
@@ -744,6 +746,7 @@ func TestFileIssueIntentsDetailed_AbsentTypeFilesUntyped(t *testing.T) {
 func TestFileIssueIntentsDetailed_UnknownTypeFilesUntyped(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
+	fc.Labels = []string{"agent-review-finding"}
 
 	result := dispatch.Result{
 		IssueIntentsFound: true,
@@ -805,7 +808,7 @@ func TestFileIssueIntentsDetailed_UnrecognizedTypeCannotSmuggleADispatchLabel(t 
 func TestFileIssueIntentsDetailed_LabelAlreadyExistsSkipsCreate(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
-	fc.Labels = []string{"bug"}
+	fc.Labels = []string{"agent-review-finding", "bug"}
 
 	result := dispatch.Result{
 		IssueIntentsFound: true,
@@ -882,8 +885,8 @@ func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t 
 	if len(detailed) != 1 || detailed[0].Failed || detailed[0].URL == "" {
 		t.Fatalf("detailed = %+v, want a single successful entry", detailed)
 	}
-	if len(fc.CreateLabelCalls) != 1 {
-		t.Fatalf("CreateLabelCalls = %+v, want 1", fc.CreateLabelCalls)
+	if len(fc.CreateLabelCalls) != 2 {
+		t.Fatalf("CreateLabelCalls = %+v, want provenance and type", fc.CreateLabelCalls)
 	}
 	if len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
@@ -906,7 +909,7 @@ func TestFileIssueIntentsDetailed_ListLabelsErrSkipsPreCheckButCreateSucceeds(t 
 func TestFileIssueIntentsDetailed_CreateLabelFailsButLabelAlreadyExists_StillApplied(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/99"
-	fc.LabelsSeq = [][]string{{}, {"bug"}}
+	fc.LabelsSeq = [][]string{{"agent-review-finding"}, {"bug"}}
 	fc.CreateLabelErr = errFake
 
 	result := dispatch.Result{

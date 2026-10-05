@@ -187,10 +187,14 @@ in
   ];
 
   # Review-finding provenance (issue #393, ADR 0041): the Filer creates this
-  # label from its prompt fragments, never through doctor.Run(), so the renderer
-  # must not emit it into TriageLabelMeta, where its d4c5f9 would collide with
-  # agent-research-unclear's and trip TestTriageLabelMeta_ColorsAreDistinct. It
-  # is here only for registry coverage (issue #2528 AC1).
+  # label from its prompt fragments, and the host ensure-creates it when filing
+  # a relayed review finding (issue #4400). Doctor also requires and creates it
+  # when a read-only work deployment relays findings host-side
+  # (Config.RequiredLabels), but the renderer must not emit it into
+  # TriageLabelMeta, where its d4c5f9 would collide with agent-research-unclear's
+  # and trip TestTriageLabelMeta_ColorsAreDistinct. It is emitted as the
+  # standalone doctor.ReviewFindingLabelMeta map instead, which
+  # doctor.LabelMetaFor consults after TriageLabelMeta.
   reviewFinding = [
     {
       role = "ReviewFinding";
