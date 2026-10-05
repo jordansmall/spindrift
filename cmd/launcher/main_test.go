@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -68,13 +67,6 @@ func TestMainRun_UnknownSubcommand_PrintsHelpToStderrAndExits1(t *testing.T) {
 	}
 }
 
-// runVerb calls mainRun for argv that reaches a verb handler. Handlers take
-// only stderr (verbHandler), so verb output never reaches mainRun's stdout and
-// there is nothing on it to assert (issue #3699).
-func runVerb(args []string, stderr io.Writer) int {
-	return mainRun(args, io.Discard, stderr)
-}
-
 // Pass-through booleans parseFlags leaves ahead of the verb must not be read
 // as the verb (issue #3784): each case reaches the verb's own handler.
 func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
@@ -91,10 +83,13 @@ func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
 		{[]string{"--no-build", "doctor", "--butler"}, "unrecognized argument: --no-build"},
 	}
 	for _, tc := range cases {
-		var stderr bytes.Buffer
-		code := runVerb(tc.args, &stderr)
+		var stdout, stderr bytes.Buffer
+		code := mainRun(tc.args, &stdout, &stderr)
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", tc.args, code)
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("mainRun(%v) stdout = %q, want empty", tc.args, stdout.String())
 		}
 		if strings.Contains(stderr.String(), "unknown subcommand") {
 			t.Errorf("mainRun(%v) stderr = %q, want the flag not read as the verb", tc.args, stderr.String())
@@ -245,10 +240,13 @@ func TestMainRun_Dispatch_MissingRepoSlugUnderLocalForge_ExitsConfigInvalid(t *t
 	t.Setenv("ISSUE_TRACKER", "github")
 	t.Setenv("REPO_SLUG", "")
 
-	var stderr bytes.Buffer
-	code := runVerb([]string{"dispatch"}, &stderr)
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"dispatch"}, &stdout, &stderr)
 	if code != exitConfigInvalid {
 		t.Errorf("mainRun(dispatch) code = %d, want %d; stderr=%s", code, exitConfigInvalid, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("mainRun(dispatch) stdout = %q, want empty", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "REPO_SLUG") {
 		t.Errorf("mainRun(dispatch) stderr = %q, want a REPO_SLUG validation error", stderr.String())
@@ -311,10 +309,13 @@ func TestRegistry_MissingOrUnknownSubcommand_UsageError(t *testing.T) {
 // unrecognised "--flag" for every subcommand, pre-ticket behavior this slice
 // leaves untouched — pinned below so a regression there is still caught.
 func TestDoctor_UnrecognizedArg_UsageError(t *testing.T) {
-	var stderr bytes.Buffer
-	code := runVerb([]string{"doctor", "extra"}, &stderr)
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"doctor", "extra"}, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("mainRun(doctor extra) code = %d, want 1", code)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("mainRun(doctor extra) stdout = %q, want empty (usage goes to stderr)", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "usage: spindrift doctor [--verbose|-v]") {
 		t.Errorf("mainRun(doctor extra) stderr = %q, want the usage message", stderr.String())
@@ -394,8 +395,6 @@ func TestMainRun_Recover_AcceptsNonNumericIssueID(t *testing.T) {
 // A smoke check that `preview` reaches the same REPO_SLUG bootstrap error
 // wherever "--no-build" sits (issue #3055); flags_test.go's
 // TestParseIssuePositionals_* tests cover the strip mechanism itself.
-// cmdPreview writes errors through os.Stderr directly, not the io.Writer
-// mainRun hands its verb handlers, so this reads a redirected temp file.
 func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
@@ -405,18 +404,33 @@ func TestMainRun_Preview_StripsFlagsBeforeIssueID(t *testing.T) {
 		{"preview", "--no-build", "42"},
 	}
 	for _, argv := range cases {
-		var code int
 		var stdout, stderr bytes.Buffer
-		out := captureStderrFile(t, func() {
-			code = mainRun(argv, &stdout, &stderr)
-		})
+		code := mainRun(argv, &stdout, &stderr)
 
 		if code != 1 {
 			t.Errorf("mainRun(%v) code = %d, want 1", argv, code)
 		}
-		if !strings.Contains(out, "REPO_SLUG") {
-			t.Errorf("mainRun(%v) real stderr = %q, want a REPO_SLUG validation error", argv, out)
+		if !strings.Contains(stderr.String(), "REPO_SLUG") {
+			t.Errorf("mainRun(%v) stderr = %q, want a REPO_SLUG validation error", argv, stderr.String())
 		}
+	}
+}
+
+// preview's report reaches the stdout mainRun is handed, with no fd redirect
+// (issue #3722).
+func TestMainRun_Preview_WritesReportToInjectedStdout(t *testing.T) {
+	setFullyLocalEnv(t)
+	t.Setenv("RUNTIME", "echo")
+	writeLocalReadyIssue(t, os.Getenv("LOCAL_ISSUES_DIR"), "42", "ready-for-agent")
+
+	var stdout, stderr bytes.Buffer
+	code := mainRun([]string{"preview", "42"}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("mainRun(preview 42) code = %d, want 0; stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "#42") {
+		t.Errorf("mainRun(preview 42) stdout = %q, want it to list issue #42", stdout.String())
 	}
 }
 
@@ -458,6 +472,9 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 		verb          string
 		setup         func(t *testing.T) (issuesDir string)
 		wantMsgSuffix string
+		// injected: the message goes to the injected stderr writer; otherwise
+		// it still goes to real os.Stderr, captured by fd redirect.
+		injected bool
 	}{
 		{
 			verb:          "dispatch",
@@ -477,6 +494,7 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 				return os.Getenv("LOCAL_ISSUES_DIR")
 			},
 			wantMsgSuffix: "proof the selective-list preview path was taken with this exact ID",
+			injected:      true,
 		},
 	}
 
@@ -501,15 +519,24 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 
 					var code int
 					var stdout, stderr bytes.Buffer
-					out := captureStderrFile(t, func() {
+					var out string
+					if v.injected {
 						code = mainRun(argv, &stdout, &stderr)
-					})
+					} else {
+						out = captureStderrFile(t, func() {
+							code = mainRun(argv, &stdout, &stderr)
+						})
+					}
 
 					if code != 1 {
 						t.Errorf("mainRun(%v) code = %d, want 1 (SPIN-99 unknown)", argv, code)
 					}
-					if !strings.Contains(out, "issue SPIN-99") {
-						t.Errorf("mainRun(%v) stderr = %q, want it to name the unresolved slug SPIN-99 (%s)", argv, out, v.wantMsgSuffix)
+					got, stream := out, "os.Stderr"
+					if v.injected {
+						got, stream = stderr.String(), "injected stderr"
+					}
+					if !strings.Contains(got, "issue SPIN-99") {
+						t.Errorf("mainRun(%v) %s = %q, want it to name the unresolved slug SPIN-99 (%s)", argv, stream, got, v.wantMsgSuffix)
 					}
 				})
 			}
@@ -6347,11 +6374,15 @@ func TestBootstrapExitCode(t *testing.T) {
 func TestMainRun_ResearchDispatchParity_SameBootstrapErrorSameExitCode(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
-	var dispatchErr bytes.Buffer
-	dispatchCode := runVerb([]string{"dispatch"}, &dispatchErr)
+	var dispatchOut, dispatchErr bytes.Buffer
+	dispatchCode := mainRun([]string{"dispatch"}, &dispatchOut, &dispatchErr)
 
-	var researchErr bytes.Buffer
-	researchCode := runVerb([]string{"research"}, &researchErr)
+	var researchOut, researchErr bytes.Buffer
+	researchCode := mainRun([]string{"research"}, &researchOut, &researchErr)
+
+	if dispatchOut.Len() != 0 || researchOut.Len() != 0 {
+		t.Errorf("stdout dispatch=%q research=%q, want both empty", dispatchOut.String(), researchOut.String())
+	}
 
 	if dispatchCode != exitConfigInvalid {
 		t.Fatalf("mainRun(dispatch) code = %d, want %d; stderr=%s", dispatchCode, exitConfigInvalid, dispatchErr.String())

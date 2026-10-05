@@ -18,11 +18,11 @@ import (
 // own via newReadContext (issue #2941) instead of bootstrap. opts.interactive
 // is ignored: it is always overwritten below from the stdin TTY probe, never
 // from the caller's flag parse.
-func cmdDoctor(opts doctorOptions) int {
+func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
 	// doctor never dispatches, so it carries no dispatch kind (issue #2944).
 	rc := newReadContext(nil, false)
 	opts.interactive = isStdinTTY()
-	return doctorReport(rc, os.Stdout, os.Stderr, os.Stdin, opts)
+	return doctorReport(rc, stdout, stderr, os.Stdin, opts)
 }
 
 // doctorOptions is doctorReport's last parameter. A struct rather than

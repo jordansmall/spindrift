@@ -79,19 +79,19 @@ func surfaceAfterDispatch(c config, lw *localloop.Wired, caps forge.Capabilities
 // sweep (ADR 0029). It needs no EnsureReady gate, dispatch factory, or settle
 // wiring, so it builds its seams through newReadContext rather than bootstrap
 // (issue #2941).
-func cmdReconcile() int {
+func cmdReconcile(stdout, stderr io.Writer) int {
 	// reconcile never dispatches, so it carries no dispatch kind (issue #2944).
 	rc := newReadContext(nil, false)
 
 	pwd, err := os.Getwd()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 
 	lp := rc.reconcileLivenessProbe(pwd)
-	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, rc.capabilities, pwd, os.Stdout); err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+	if err := runReconcile(rc.config, rc.issueTracker, rc.codeForge, lp, rc.capabilities, pwd, stdout); err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	return 0

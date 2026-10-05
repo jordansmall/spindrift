@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"time"
 
@@ -45,12 +46,13 @@ type launchContext struct {
 	cleanup      func()
 }
 
-// bootstrap wires the prologue shared by run, dispatch, research, and recover.
-// ensureReady picks EnsureReady() over IsReady() (--no-build); kind selects the
-// label family, blocker handling, and Settle via applyDispatchKind (ADR 0022);
-// selfContained is research's no-repo sub-mode (issue #2202). The accumulation
-// lock is the one thing an early error return can leak, so a defer releases it.
-func bootstrap(ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
+// bootstrap wires the prologue shared by console, recover, dispatch, research,
+// and butler. ensureReady picks EnsureReady() over IsReady() (--no-build); kind
+// selects the label family, blocker handling, and Settle via applyDispatchKind
+// (ADR 0022); stdout receives the gate walk's output; selfContained is
+// research's no-repo sub-mode (issue #2202). The accumulation lock is the one
+// thing an early error return can leak, so a defer releases it.
+func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor, selfContained bool) (lc *launchContext, err error) {
 	pwd, err := os.Getwd()
 	if err != nil {
 		return nil, err
@@ -90,7 +92,7 @@ func bootstrap(ensureReady bool, kind *dispatchkind.Descriptor, selfContained bo
 		}()
 	}
 
-	gc, err := newGatedContext(os.Stdout, kind, selfContained)
+	gc, err := newGatedContext(stdout, kind, selfContained)
 	if err != nil {
 		return nil, err
 	}

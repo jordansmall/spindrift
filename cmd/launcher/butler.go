@@ -345,13 +345,13 @@ func cmdButler(lc *launchContext, choreName string) int {
 
 // butlerVerbHandler is verbHandlers["butler"]'s body, split out so its own
 // flag-parsing errors are testable without going through bootstrap.
-func butlerVerbHandler(args []string, stderr io.Writer) int {
+func butlerVerbHandler(args []string, stdout, stderr io.Writer) int {
 	choreName, noBuild, err := parseButlerArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
-	lc, err := bootstrap(!noBuild, dispatchkind.Butler, false)
+	lc, err := bootstrap(stdout, !noBuild, dispatchkind.Butler, false)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return bootstrapExitCode(err)
