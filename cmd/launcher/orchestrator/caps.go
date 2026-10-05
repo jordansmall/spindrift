@@ -42,6 +42,12 @@ func validateCaps(maxReviewRounds, maxSlices int, reviewPassEnabled bool) error 
 // 1 and 2 and extrapolates the per-round cost linearly to stay O(1):
 // looping Transition maxReviewRounds times would let an operator-supplied
 // cap, including a mistyped MaxInt, drive this function's own runtime.
+//
+// Linearity is an assumption, not a check: it holds only while
+// passmachine.Transition reads MaxReviewRounds solely as a > 0 enable guard
+// and a >= boundary. The backstop is TestSimulateReviewRoundCapPassLinearity,
+// which covers caps up to its maxN at CI time, so a Transition change that
+// branches on the cap's value above maxN would go unseen (issue #2659).
 func simulateReviewRoundCapPass(maxReviewRounds int, reviewPassEnabled bool) (int, error) {
 	pass1, err := capFiredPass(1, reviewPassEnabled)
 	if err != nil {
