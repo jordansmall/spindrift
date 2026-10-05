@@ -36,6 +36,7 @@ let
     trim
     ;
   inherit (pkgs.lib.lists) findFirstIndex;
+  builtinsCompat = import ../../lib/builtins-compat.nix;
   setupSrc = builtins.readFile ../../.github/actions/agent-setup/action.yml;
   swapSrc = builtins.readFile ../../.github/actions/forgejo-label-swap/label-swap.sh;
   swapActionSrc = builtins.readFile ../../.github/actions/forgejo-label-swap/action.yml;
@@ -116,13 +117,6 @@ let
         "forgejo/agent-dispatch.yml"
       ];
 
-  # Forgejo folds a `comment: >-` block, so line breaks collapse to spaces;
-  # fold GitHub's copy the same way before comparing. Same normalizer as
-  # lib/renderers.nix's `oneLine`, which that file does not export.
-  collapseWs =
-    s:
-    concatStringsSep " " (filter (x: x != "") (filter builtins.isString (builtins.split "[ \t\n]+" s)));
-
   singleCapture =
     pattern: what: file: src:
     let
@@ -194,14 +188,18 @@ let
     }
   ];
 
+  # Forgejo folds a `comment: >-` block, so line breaks collapse to spaces;
+  # fold GitHub's copy the same way before comparing.
   commentPairs = map (row: {
     inherit (row) name file;
-    ghNorm = collapseWs (
+    ghNorm = builtinsCompat.oneLine (
       replaceStrings (map (s: s.from) row.subst) (map (s: s.to) row.subst) (
         unescapeShell (ghBody row.file githubWorkflows.${row.file})
       )
     );
-    fjNorm = collapseWs (fjComment "forgejo/${row.file}" forgejoWorkflows."forgejo/${row.file}");
+    fjNorm = builtinsCompat.oneLine (
+      fjComment "forgejo/${row.file}" forgejoWorkflows."forgejo/${row.file}"
+    );
   }) commentRows;
   commentMismatches = filter (p: p.ghNorm != p.fjNorm) commentPairs;
 in

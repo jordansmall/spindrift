@@ -68,5 +68,14 @@ rec {
 
   concatStrings = builtins.concatStringsSep "";
 
+  # Collapse every run of whitespace, newlines included, to a single space and
+  # trim the ends. A naive "\n" to " " replaceStrings would instead leave
+  # doubled spaces at each line-wrap and trailing-newline boundary.
+  oneLine =
+    s:
+    builtins.concatStringsSep " " (
+      builtins.filter (p: p != "") (builtins.filter builtins.isString (builtins.split "[[:space:]]+" s))
+    );
+
   mapAttrsToList = f: attrs: map (n: f n attrs.${n}) (builtins.attrNames attrs);
 }
