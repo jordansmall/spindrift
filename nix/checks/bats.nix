@@ -163,8 +163,7 @@ in
           ${../../tests/fakes/opencode} \
           ${../../tests/fakes/_driver-common.bash} \
           ${../../tests/fakes/driver-exec} \
-          ${../../tests/helper.bash} \
-          ${../../tests/box_env_gen.bash}
+          ${../../tests/helper.bash}
         touch $out
       '';
 
