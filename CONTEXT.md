@@ -871,11 +871,31 @@ kind selector (`dispatch`, `research`, `butler`) narrows it to that one kind.
 This makes it the owner of dispatch concurrency, superseding continuous
 dispatch — deprecated in its favour, but kept for operators who want no daemon
 and retained as the Console's engine. It supervises and re-invokes; it never
-runs a Box itself. Distinct from the *container-runtime* daemon (podman/docker)
-that the bwrap runtime is "daemonless" of: spindrift's Daemon is
-runtime-agnostic and drives a bwrap harness as readily as an OCI one.
+runs a Box itself. It learns whether a kind has work from that kind's
+[[Demand]], never by spawning a child to find out (ADR 0059). Distinct from the
+*container-runtime* daemon (podman/docker) that the bwrap runtime is
+"daemonless" of: spindrift's Daemon is runtime-agnostic and drives a bwrap
+harness as readily as an OCI one.
 _Avoid_: continuous dispatch (the deprecated in-process pool), service,
 scheduler, supervisor, dogfood loop.
+
+**Demand**:
+A [[Dispatch kind]]'s cheap answer to "is there work", read by the [[Daemon]]
+itself (ADR 0059): for a tracker kind, `Ready`, the count of open issues
+wearing its dispatchable label, probed per Issue Tracker at a flat interval
+(an ETag'd page on github, `x-total-count` on forgejo, a directory scan on
+local, a zero-row search on jira); for the butler, the instant its next
+[[Chore]] is due, reported by its last child. Advisory only: the child still
+discovers and claims, and `Ready` counts labelled candidates, not dispatchable
+ones — blockers and overlap still surface as a jam.
+_Avoid_: queue depth, backlog (that is the Console's pick source), pending.
+
+**Start budget**:
+The most children of one [[Dispatch kind]] the [[Daemon]] lets into discovery
+at once: `Ready` from its [[Demand]] minus the slots already starting that kind
+but not yet claimed. One queued issue starts one child, not one per free slot;
+a claim releases the budget and the kind is re-probed.
+_Avoid_: quota, reservation (that is `RESEARCH_RESERVATION`'s floor).
 
 **Awake window**:
 The daily wall-clock span during which the [[Daemon]] may *start* a launcher
