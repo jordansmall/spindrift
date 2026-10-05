@@ -43,8 +43,8 @@ func TestRunOnce_SignalCarrierLog_NoOp(t *testing.T) {
 			d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 			result := d.Run()
 
-			if !result.Success {
-				t.Fatalf("Run: want Success=true, got %+v", result)
+			if !result.ok() {
+				t.Fatalf("Run: want succeeded, got %+v", result)
 			}
 			if len(sockets) != 0 {
 				t.Errorf("box.Sockets = %+v, want empty under the log carrier", sockets)
@@ -109,8 +109,8 @@ func TestRunOnce_SignalCarrierSocket_UnixVerdict_LiveMountAndRetainedBuffer(t *t
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if len(sockets) != 1 {
 		t.Fatalf("box.Sockets = %+v, want exactly one entry", sockets)
@@ -178,8 +178,8 @@ func TestRunOnce_SignalCarrierSocket_TCPVerdict(t *testing.T) {
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if loc.Endpoint.Host() != "host.docker.internal" {
 		t.Errorf("box.SignalSocket.Endpoint.Host() = %q, want %q", loc.Endpoint.Host(), "host.docker.internal")
@@ -262,8 +262,8 @@ func TestRunOnce_SignalCarrierSocket_TransportProbeSharedWithRegistryProxy(t *te
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if fr.RegistryProxyTransportCalls != 1 {
 		t.Errorf("RegistryProxyTransportCalls = %d, want exactly 1 (ADR 0052 forbids a second probe)", fr.RegistryProxyTransportCalls)
@@ -352,11 +352,11 @@ func TestRunOnce_SignalCarrierSocket_MirrorNeverSplicesOutcomeLine(t *testing.T)
 	if postStatus != http.StatusOK {
 		t.Fatalf("POST /comment status = %d, want 200", postStatus)
 	}
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v -- the mirror line spliced the outcome line", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v -- the mirror line spliced the outcome line", result)
 	}
-	if !result.Resolved.Found {
-		t.Fatalf("result.Resolved.Found = false, want the outcome resolved: %+v", result.Resolved)
+	if !result.result.Resolved.Found {
+		t.Fatalf("result.result.Resolved.Found = false, want the outcome resolved: %+v", result.result.Resolved)
 	}
 
 	data, err := os.ReadFile(logPath)

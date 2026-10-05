@@ -585,6 +585,14 @@ resumable conversation session, which the Driver-cache entry preserves
 across a Dispatch's fix passes.
 _Avoid_: session (collides with the Driver's conversation session), run, job.
 
+**Dispatch Disposition**:
+The opaque value `dispatch.Run` and `dispatch.Fix` return: a Result payload
+tagged skipped, failed or succeeded, reachable only through `dispatch.Route`,
+which takes an arm per kind. Skipped means another run already holds the
+issue; it is a successful no-op, never a failure (#3705). Unrelated to
+`freshness.Disposition` (see [[Guard]]).
+_Avoid_: bare "Disposition" (ambiguous with the freshness one), success flag.
+
 **Dispatch kind**:
 The axis naming what a Dispatch delivers: `work` (the original kind — lands
 code through the Code Forge), `research` (lands a verdict and enrichment

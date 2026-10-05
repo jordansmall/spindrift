@@ -432,7 +432,6 @@ func TestSettle_FilesIssueIntents_OnReadyOutcome(t *testing.T) {
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/77"
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
@@ -468,7 +467,6 @@ func TestSettle_FilesIssueIntents_OnBlockedOutcome(t *testing.T) {
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/78"
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -504,7 +502,6 @@ func TestSettle_NoIssueIntentsFound_NoFilingAttempted(t *testing.T) {
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
@@ -979,7 +976,6 @@ func TestSettle_IssueIntentFilingFailure_DoesNotBlockOutcome(t *testing.T) {
 	fc.PostIssueErr = errFake
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
@@ -1015,7 +1011,6 @@ func TestSettle_ReportsFiledTally_NoIntents(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -1043,7 +1038,6 @@ func TestSettle_ReportsFiledTally_AllOK(t *testing.T) {
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/78"
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -1083,7 +1077,6 @@ func TestSettle_WorkPath_AllDedupedPostsSkippedComment(t *testing.T) {
 	})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -1125,7 +1118,6 @@ func TestSettle_WorkPath_AllFiledPostsNoSkippedComment(t *testing.T) {
 	fc.PostIssueURL = "https://github.com/owner/repo/issues/900"
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -1160,7 +1152,6 @@ func TestSettle_ReportsFiledTally_AllFailed(t *testing.T) {
 	fc.PostIssueErr = errFake
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},

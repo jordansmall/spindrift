@@ -162,25 +162,35 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			if headErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=head-sha-unavailable  !! %v\n", num, pr, headErr)
 			}
-			result := d.Fix(attempt+1, detail)
+			disp := d.Fix(attempt+1, detail)
 			// Catches d.Fix's own exit — a non-zero result can be Reclaim's
 			// SIGKILL — before the Failed commit or bundle relay below.
 			if s.terminated(num, gen) {
 				return landingAbandoned, ""
 			}
-			// No Box started: a live run owns this issue's in-progress claim,
-			// so leave its state alone and do not retry (issue #3655).
-			if result.AlreadyInFlight {
-				fmt.Printf("    #%s  landing=%s  status=already-in-flight  ~~ fix pass %d skipped; live run continues\n", num, pr, attempt+1)
-				return landingAbandoned, ""
+			type fixStop struct {
+				landing landingResult
+				note    string
+				stop    bool
 			}
-			if !result.Success {
-				fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
-				result.ReportFailureReason(num)
-				s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
-				note := fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
-				s.transitionState(num, forge.InProgress, forge.Failed, note)
-				return landingFailed, note
+			stopped := dispatch.Route(disp,
+				func() fixStop {
+					// No Box started: a live run owns this issue's in-progress claim,
+					// so leave its state alone and do not retry (issue #3655).
+					fmt.Printf("    #%s  landing=%s  status=already-in-flight  ~~ fix pass %d skipped; live run continues\n", num, pr, attempt+1)
+					return fixStop{landing: landingAbandoned, stop: true}
+				},
+				func(result dispatch.Result) fixStop {
+					fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
+					result.ReportFailureReason(num)
+					s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
+					note := fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
+					s.transitionState(num, forge.InProgress, forge.Failed, note)
+					return fixStop{landing: landingFailed, note: note, stop: true}
+				},
+				func(dispatch.Result) fixStop { return fixStop{} })
+			if stopped.stop {
+				return stopped.landing, stopped.note
 			}
 			// A read-only Box holds no push-capable token (issue #1979): its fix
 			// agent bundled its work to the outbox, so HeadCommitSHA reflects no

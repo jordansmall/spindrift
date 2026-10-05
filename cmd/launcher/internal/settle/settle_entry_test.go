@@ -35,7 +35,6 @@ func TestSettle_PostsUsageComment_Blocked(t *testing.T) {
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\ncost: 0.25"
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -65,7 +64,6 @@ func TestSettle_BlockedOutcome_DemotesToFailed(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -96,7 +94,6 @@ func TestSettle_ConsoleUsesLandingLabel(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing; expr=1 mismatch"},
@@ -129,7 +126,6 @@ func TestSettle_UsageMissing_NoCrash(t *testing.T) {
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\nModel: `unknown`\n\nUsage data unavailable (no result event in log)."
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "no result"},
@@ -160,7 +156,6 @@ func TestSettle_PostsUsageComment_Ready(t *testing.T) {
 	d := dispatch.NewFake()
 	d.UsageReportBody = "## Run usage\n\nbreakdown included"
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
@@ -192,7 +187,6 @@ func TestSettle_ImmediateMergeClosesIssue(t *testing.T) {
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
@@ -220,7 +214,6 @@ func TestSettle_LocalTrackerWithPRForgeDoesNotClose(t *testing.T) {
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
@@ -253,7 +246,6 @@ func TestSettle_ManualModeDoesNotCloseIssue(t *testing.T) {
 			c := baseConfig()
 			c.MergeMode = mode
 			result := dispatch.Result{
-				Success: true,
 				Resolved: outcome.Resolved{
 					Found:   true,
 					Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
@@ -284,7 +276,6 @@ func TestSettle_RedCIDoesNotCloseIssue(t *testing.T) {
 	c := baseConfig()
 	c.MaxFixAttempts = 0
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ready", Note: "ok"},
@@ -383,7 +374,6 @@ func TestSettle_GitForge_MergedStatusSkipsVerify(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "1", Landing: branch, Status: "merged", Note: "ok"},
@@ -412,7 +402,7 @@ func TestSettle_NoOutcome_NonDraftPRBlocked(t *testing.T) {
 
 	c := baseConfig()
 	s := newTestSettle(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "3", 0, dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "3", 0, dispatch.Result{})
 
 	if fc.Merged != "" {
 		t.Errorf("non-draft PR must not be merged off draft-ness; fc.Merged=%q", fc.Merged)
@@ -431,7 +421,7 @@ func TestSettle_NoOutcome_NoPRFound(t *testing.T) {
 
 	c := baseConfig()
 	s := newTestSettle(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "4", 0, dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "4", 0, dispatch.Result{})
 
 	iss, _ := fc.Issue("4")
 	if !containsLabel(iss.Labels, "agent-failed") {
@@ -453,7 +443,7 @@ func TestSettle_NoOutcome_PRLookupError_NoLabelChurn(t *testing.T) {
 
 	c := baseConfig()
 	s := newTestSettle(c, fc, fc)
-	s.Settle(dispatch.NewFake(), "6", 0, dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "6", 0, dispatch.Result{})
 
 	if len(fc.TransitionStateCalls) != 0 {
 		t.Errorf("PR lookup error must not trigger label churn; got %v", fc.TransitionStateCalls)
@@ -471,7 +461,6 @@ func TestSettle_NoOutcome_PRLookupError_PrintsClassification(t *testing.T) {
 	c := baseConfig()
 	s := newTestSettle(c, fc, fc)
 	result := dispatch.Result{
-		Success:        true,
 		Classification: driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed},
 	}
 	out := testutil.CaptureStdout(t, func() {
@@ -492,7 +481,7 @@ func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 
 	c := baseConfig()
 	s := newTestSettle(c, fc, fc.AsPushOnly())
-	s.Settle(dispatch.NewFake(), "8", 0, dispatch.Result{Success: true})
+	s.Settle(dispatch.NewFake(), "8", 0, dispatch.Result{})
 
 	iss, _ := fc.Issue("8")
 	if !containsLabel(iss.Labels, "agent-failed") {
@@ -511,7 +500,6 @@ func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -541,7 +529,6 @@ func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "ready", Note: "ok"},
@@ -570,7 +557,6 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -596,7 +582,6 @@ func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -631,7 +616,6 @@ func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -667,7 +651,6 @@ func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -703,7 +686,6 @@ func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
 	fc.RecordLandingPassErr = sentinel
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -741,7 +723,6 @@ func TestSettle_RecordLandingPass_NoOpWhenPassesEmpty(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -768,7 +749,6 @@ func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "blocked", Note: "tests failing"},
@@ -797,7 +777,6 @@ func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -827,7 +806,6 @@ func TestSettle_NonceRejectedIssueIntent_LogsWarning(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -857,7 +835,6 @@ func TestSettle_NonceRejectedComment_FoundSuppressesDuplicate(t *testing.T) {
 
 	baseResult := func(commentFound bool) dispatch.Result {
 		return dispatch.Result{
-			Success: true,
 			Resolved: outcome.Resolved{
 				Found:   true,
 				Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
@@ -921,7 +898,6 @@ func TestSettle_LogRejectedSignals_CausePinned(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
 			result := dispatch.Result{
-				Success: true,
 				Resolved: outcome.Resolved{
 					Found:   true,
 					Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},

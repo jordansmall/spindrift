@@ -106,3 +106,10 @@ func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
 func (d fakeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
 	return driverclaude.SessionFlags(mode, repoSlug, issue, home)
 }
+
+// ok reports whether d is a Succeeded disposition. Test-only: production code
+// reaches the payload through Route.
+func (d Disposition) ok() bool { return d.kind == dispositionSucceeded }
+
+// skipped reports whether d is the Skipped disposition. Test-only.
+func (d Disposition) skipped() bool { return d.kind == dispositionSkipped }

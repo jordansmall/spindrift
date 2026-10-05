@@ -321,7 +321,7 @@ func TestDispatch_AbortClosedWithBoxInFlight_ReclaimsNeitherFailsNorSettles(t *t
 // shape Dispatch's own doc blesses (a nil session, or a nil session.Terminated,
 // means dispatchWave's Gate builds its own registry). dispatchWave's abort
 // result switch must observe that same fresh registry's mark, not the caller's
-// nil, or a reclaimed issue falls through to the !result.Success case and gets
+// nil, or a reclaimed issue falls through to the failure arm and gets
 // a spurious Failed transition on top of Reclaim's own Dispatchable one
 // (#3522 review finding).
 func TestDispatch_AbortClosedWithBoxInFlight_NilSession_ReclaimsNeitherFailsNorSettles(t *testing.T) {

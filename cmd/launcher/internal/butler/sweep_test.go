@@ -148,7 +148,7 @@ func TestSweep_ClaimLeft(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{Success: false}
+	d.RunResult = dispatch.Failed(dispatch.Result{})
 
 	r := New(backend, tree, it, func(dispatch.Chore) dispatch.Dispatcher { return d }, testPolicy(), func() time.Time { return now })
 
@@ -179,8 +179,7 @@ func TestSweep_Swept(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/900"
 
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success:           true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		IssueIntentsFound: true,
 		IssueIntents: []string{
 			`{"title":"finding one","body":"repro","dedupTerms":["a.go:Foo"]}`,
@@ -189,7 +188,7 @@ func TestSweep_Swept(t *testing.T) {
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
 		},
-	}
+	})
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	r := New(backend, tree, fc.AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return d }, testPolicy(), func() time.Time { return now })

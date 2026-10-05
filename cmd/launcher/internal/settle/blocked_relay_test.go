@@ -50,7 +50,6 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR(t *testing.T
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -109,7 +108,6 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_ClosesAlread
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -151,7 +149,6 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleAndCreatesDraftPR_LocalTracker
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -189,7 +186,6 @@ func TestSettle_GithubReadOnly_BlockedRelaysBundleWithoutPRIntent(t *testing.T) 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "push rejected"},
@@ -231,7 +227,6 @@ func TestSettle_LocalReadOnly_BlockedRelaysBundleWithoutDraftPR(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -280,7 +275,6 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "https://github.com/owner/repo/pull/1933", Status: "blocked", Note: "push rejected"},
@@ -315,7 +309,6 @@ func TestSettle_LocalReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "blocked", Note: "push rejected"},
@@ -349,7 +342,6 @@ func TestSettle_GithubReadOnly_BlockedRelayFailureSkipsDraftPRButStaysBlocked(t 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -398,7 +390,6 @@ func TestSettle_GithubReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) 
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -452,7 +443,6 @@ func TestSettle_LocalReadOnly_BlockedRelayFailureStaysBlocked(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -487,7 +477,6 @@ func TestSettle_LocalReadOnly_BlockedRelayAbsentBundleLogsBenign(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},
@@ -535,7 +524,6 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "blocked", Note: "review never cleared"},

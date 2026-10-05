@@ -82,14 +82,14 @@ func TestDispatchWithRetry_SuccessOnFirstRun(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true, got false")
+	if !result.ok() {
+		t.Error("want succeeded, got false")
 	}
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.Resolved.Outcome.Status != "ready" {
-		t.Errorf("Outcome.Status: got %q, want %q", result.Resolved.Outcome.Status, "ready")
+	if result.result.Resolved.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.result.Resolved.Outcome.Status, "ready")
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Errorf("RunCalls: got %d, want 1", len(fr.RunCalls))
@@ -119,14 +119,14 @@ func TestDispatchWithRetry_SuccessWithCommentLinePopulatesResult(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if !result.CommentFound {
+	if !result.result.CommentFound {
 		t.Fatal("want CommentFound=true")
 	}
-	if result.Comment != "verdict body" {
-		t.Errorf("Comment: got %q, want %q", result.Comment, "verdict body")
+	if result.result.Comment != "verdict body" {
+		t.Errorf("Comment: got %q, want %q", result.result.Comment, "verdict body")
 	}
 }
 
@@ -146,14 +146,14 @@ func TestDispatchWithRetry_CommentLineWithWrongNonceNotFound(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.CommentFound {
+	if result.result.CommentFound {
 		t.Fatal("want CommentFound=false for a nonce mismatch")
 	}
-	if result.Comment != "" {
-		t.Errorf("Comment: got %q, want empty", result.Comment)
+	if result.result.Comment != "" {
+		t.Errorf("Comment: got %q, want empty", result.result.Comment)
 	}
 }
 
@@ -173,11 +173,11 @@ func TestDispatchWithRetry_CommentLineWithWrongNoncePopulatesRejectedCount(t *te
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.CommentRejected.Total() != 1 {
-		t.Errorf("CommentRejected: got %d, want 1", result.CommentRejected.Total())
+	if result.result.CommentRejected.Total() != 1 {
+		t.Errorf("CommentRejected: got %d, want 1", result.result.CommentRejected.Total())
 	}
 }
 
@@ -199,15 +199,15 @@ func TestDispatchWithRetry_SuccessWithPRIntentLinePopulatesResult(t *testing.T) 
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if !result.PRIntentFound {
+	if !result.result.PRIntentFound {
 		t.Fatal("want PRIntentFound=true")
 	}
 	want := "feat: add widget\n\nAdds a widget."
-	if result.PRIntent != want {
-		t.Errorf("PRIntent: got %q, want %q", result.PRIntent, want)
+	if result.result.PRIntent != want {
+		t.Errorf("PRIntent: got %q, want %q", result.result.PRIntent, want)
 	}
 }
 
@@ -228,22 +228,22 @@ func TestDispatchWithRetry_SelfReportSurvivesSyntheticBackstop(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if !result.Resolved.Outcome.Synthetic {
+	if !result.result.Resolved.Outcome.Synthetic {
 		t.Error("Outcome.Synthetic: got false, want true")
 	}
-	if result.Resolved.Outcome.Status != "blocked" {
-		t.Errorf("Outcome.Status: got %q, want %q", result.Resolved.Outcome.Status, "blocked")
+	if result.result.Resolved.Outcome.Status != "blocked" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.result.Resolved.Outcome.Status, "blocked")
 	}
-	if !result.Resolved.SelfReportFound {
+	if !result.result.Resolved.SelfReportFound {
 		t.Fatal("want SelfReportFound=true")
 	}
-	if result.Resolved.SelfReport.Status != "success" {
-		t.Errorf("SelfReport.Status: got %q, want %q", result.Resolved.SelfReport.Status, "success")
+	if result.result.Resolved.SelfReport.Status != "success" {
+		t.Errorf("SelfReport.Status: got %q, want %q", result.result.Resolved.SelfReport.Status, "success")
 	}
-	if result.Resolved.SelfReport.Parsed {
+	if result.result.Resolved.SelfReport.Parsed {
 		t.Error("SelfReport.Parsed: got true, want false (near-miss line does not parse the full grammar)")
 	}
 }
@@ -316,15 +316,15 @@ func TestDispatchWithRetry_SuccessWithIssueIntentLinesPopulatesResult(t *testing
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if !result.IssueIntentsFound {
+	if !result.result.IssueIntentsFound {
 		t.Fatal("want IssueIntentsFound=true")
 	}
 	want := []string{`{"title":"first"}`, `{"title":"second"}`}
-	if len(result.IssueIntents) != len(want) || result.IssueIntents[0] != want[0] || result.IssueIntents[1] != want[1] {
-		t.Errorf("IssueIntents: got %v, want %v", result.IssueIntents, want)
+	if len(result.result.IssueIntents) != len(want) || result.result.IssueIntents[0] != want[0] || result.result.IssueIntents[1] != want[1] {
+		t.Errorf("IssueIntents: got %v, want %v", result.result.IssueIntents, want)
 	}
 }
 
@@ -342,14 +342,14 @@ func TestDispatchWithRetry_NoIssueIntentLinesLeavesResultEmpty(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.IssueIntentsFound {
+	if result.result.IssueIntentsFound {
 		t.Fatal("want IssueIntentsFound=false")
 	}
-	if len(result.IssueIntents) != 0 {
-		t.Errorf("IssueIntents: got %v, want empty", result.IssueIntents)
+	if len(result.result.IssueIntents) != 0 {
+		t.Errorf("IssueIntents: got %v, want empty", result.result.IssueIntents)
 	}
 }
 
@@ -369,14 +369,14 @@ func TestDispatchWithRetry_IssueIntentLineWithWrongNoncePopulatesRejectedCount(t
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.IssueIntentsFound {
+	if result.result.IssueIntentsFound {
 		t.Fatal("want IssueIntentsFound=false for a nonce mismatch")
 	}
-	if result.IssueIntentsRejected.Total() != 1 {
-		t.Errorf("IssueIntentsRejected: got %d, want 1", result.IssueIntentsRejected.Total())
+	if result.result.IssueIntentsRejected.Total() != 1 {
+		t.Errorf("IssueIntentsRejected: got %d, want 1", result.result.IssueIntentsRejected.Total())
 	}
 }
 
@@ -393,14 +393,14 @@ func TestDispatchWithRetry_PRIntentLineWithWrongNonceNotFound(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.PRIntentFound {
+	if result.result.PRIntentFound {
 		t.Fatal("want PRIntentFound=false for a nonce mismatch")
 	}
-	if result.PRIntent != "" {
-		t.Errorf("PRIntent: got %q, want empty", result.PRIntent)
+	if result.result.PRIntent != "" {
+		t.Errorf("PRIntent: got %q, want empty", result.result.PRIntent)
 	}
 }
 
@@ -420,11 +420,11 @@ func TestDispatchWithRetry_PRIntentLineWithWrongNoncePopulatesRejectedCount(t *t
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true")
 	}
-	if result.PRIntentRejected.Total() != 1 {
-		t.Errorf("PRIntentRejected: got %d, want 1", result.PRIntentRejected.Total())
+	if result.result.PRIntentRejected.Total() != 1 {
+		t.Errorf("PRIntentRejected: got %d, want 1", result.result.PRIntentRejected.Total())
 	}
 }
 
@@ -442,14 +442,14 @@ func TestDispatchWithRetry_SuccessWithoutOutcomeClassifies(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true, got false")
+	if !result.ok() {
+		t.Error("want succeeded, got false")
 	}
-	if result.Resolved.Found {
+	if result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=false")
 	}
-	if result.Classification != wantCls {
-		t.Errorf("Classification: got %+v, want %+v", result.Classification, wantCls)
+	if result.result.Classification != wantCls {
+		t.Errorf("Classification: got %+v, want %+v", result.result.Classification, wantCls)
 	}
 }
 
@@ -466,13 +466,13 @@ func TestDispatchWithRetry_SuccessWithMalformedOutcomeSetsParseErr(t *testing.T)
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true, got false")
+	if !result.ok() {
+		t.Error("want succeeded, got false")
 	}
-	if result.ParseErr == nil {
+	if result.result.ParseErr == nil {
 		t.Fatal("want ParseErr set for an unparseable outcome line")
 	}
-	if result.Resolved.Found {
+	if result.result.Resolved.Found {
 		t.Error("want OutcomeFound=false for an unparseable outcome line")
 	}
 	if called {
@@ -491,8 +491,8 @@ func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (terminal failure), got true")
+	if result.ok() {
+		t.Error("want failed (terminal failure), got true")
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Errorf("RunCalls: got %d, want 1 (no retry on terminal)", len(fr.RunCalls))
@@ -503,8 +503,8 @@ func TestDispatchWithRetry_TerminalNeverRetried(t *testing.T) {
 	// The fake box wrote nothing to its log, so this is the "box never
 	// launched" case (issue #3119): the error once() returned must surface on
 	// Result.Err.
-	if !errors.Is(result.Err, boxErr) {
-		t.Errorf("Err: got %v, want boxErr", result.Err)
+	if !errors.Is(result.result.Err, boxErr) {
+		t.Errorf("Err: got %v, want boxErr", result.result.Err)
 	}
 }
 
@@ -523,11 +523,11 @@ func TestDispatchWithRetry_TerminalWithNonEmptyLogLeavesErrNil(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (terminal failure), got true")
+	if result.ok() {
+		t.Error("want failed (terminal failure), got true")
 	}
-	if result.Err != nil {
-		t.Errorf("Err: got %v, want nil (box ran and produced log output)", result.Err)
+	if result.result.Err != nil {
+		t.Errorf("Err: got %v, want nil (box ran and produced log output)", result.result.Err)
 	}
 }
 
@@ -542,10 +542,10 @@ func TestDispatchWithRetry_TerminalWithoutKillSignalLeavesKilledBySignalFalse(t 
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (terminal failure), got true")
+	if result.ok() {
+		t.Error("want failed (terminal failure), got true")
 	}
-	if result.KilledBySignal {
+	if result.result.KilledBySignal {
 		t.Error("want KilledBySignal=false (plain error, not a signal kill), got true")
 	}
 }
@@ -563,10 +563,10 @@ func TestDispatchWithRetry_TerminalWithKillSignalSetsKilledBySignal(t *testing.T
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (terminal failure), got true")
+	if result.ok() {
+		t.Error("want failed (terminal failure), got true")
 	}
-	if !result.KilledBySignal {
+	if !result.result.KilledBySignal {
 		t.Error("want KilledBySignal=true (RunError ExitCode=143, SIGTERM), got false")
 	}
 }
@@ -587,8 +587,8 @@ func TestDispatchWithRetry_HoldThenSuccess(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true (success after hold), got false")
+	if !result.ok() {
+		t.Error("want succeeded (success after hold), got false")
 	}
 	if len(fr.RunCalls) != 2 {
 		t.Errorf("RunCalls: got %d, want 2 (initial + hold re-dispatch)", len(fr.RunCalls))
@@ -668,7 +668,7 @@ func TestDispatchWithRetry_HoldResumeCountsBothAttemptsUsage(t *testing.T) {
 	if len(fr.RunCalls) != 2 {
 		t.Fatalf("RunCalls: got %d, want 2 (initial + hold re-dispatch)", len(fr.RunCalls))
 	}
-	if !result.Success || !result.Resolved.Found {
+	if !result.ok() || !result.result.Resolved.Found {
 		t.Fatalf("want a settled, successful outcome from the resumed attempt; got: %+v", result)
 	}
 
@@ -731,14 +731,14 @@ func TestDispatchWithRetry_NonZeroExitWithOutcomeSettles(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true (printed outcome settles despite non-zero exit)")
 	}
-	if !result.Success {
-		t.Error("want Success=true so the wave engine routes to Settle, not FAILED")
+	if !result.ok() {
+		t.Error("want succeeded so the wave engine routes to Settle, not FAILED")
 	}
-	if result.Resolved.Outcome.Status != "ready" {
-		t.Errorf("Outcome.Status: got %q, want \"ready\"", result.Resolved.Outcome.Status)
+	if result.result.Resolved.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want \"ready\"", result.result.Resolved.Outcome.Status)
 	}
 	if classified {
 		t.Error("classify was called; want the printed outcome to settle before classification")
@@ -788,8 +788,8 @@ func TestDispatchWithRetry_ConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	// With max=3 the first hold is free and the next three count, so the
 	// fourth 429 hits the cap before it sleeps: 4 runs, 3 sleeps.
@@ -816,11 +816,11 @@ func TestDispatchWithRetry_HoldCapExhaustedSuppressedWhenDiscardConfigured(t *te
 	var sleeps []time.Duration
 	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	if strings.Contains(out, "hold cap exhausted") {
 		t.Errorf("stdout should carry no hold-cap-exhausted status line when discarded, got %q", out)
@@ -842,11 +842,11 @@ func TestDispatchWithRetry_RateLimitHoldSuppressedWhenDiscardConfigured(t *testi
 	d := newTestDispatchDiscard(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if !result.Success {
-		t.Error("want Success=true (succeeded after hold), got false")
+	if !result.ok() {
+		t.Error("want succeeded (succeeded after hold), got false")
 	}
 	if strings.Contains(out, "rate limit; holding") {
 		t.Errorf("stdout should carry no rate-limit-hold status line when discarded, got %q", out)
@@ -868,11 +868,11 @@ func TestDispatchWithRetry_ConsecutiveHoldsEmitToStdoutWithoutOverride(t *testin
 	var sleeps []time.Duration
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, drv, fakeClock(fixedNow, &sleeps))
 
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	if !strings.Contains(out, "rate limit; holding until") {
 		t.Errorf("stdout missing rate-limit-hold status line, got %q", out)
@@ -894,11 +894,11 @@ func TestDispatchWithRetry_TransientRetriesEmitToStdoutWithoutOverride(t *testin
 	var sleeps []time.Duration
 	d := newTestDispatch(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	if !strings.Contains(out, "transient (network); retry") {
 		t.Errorf("stdout missing transient-backoff status line, got %q", out)
@@ -935,8 +935,8 @@ func TestDispatchWithRetry_HoldNotCountedAfterProgress(t *testing.T) {
 	// Even with max=1 the sequence succeeds: run 1 holds on a 429 for free and
 	// sets prevWasHold, run 2 is a 529 that resets prevWasHold and counts as
 	// the first transient, and run 3 succeeds.
-	if !result.Success {
-		t.Error("want Success=true (succeeded after mixed transients), got false")
+	if !result.ok() {
+		t.Error("want succeeded (succeeded after mixed transients), got false")
 	}
 	if len(fr.RunCalls) != 3 {
 		t.Errorf("RunCalls: got %d, want 3", len(fr.RunCalls))
@@ -954,8 +954,8 @@ func TestDispatchWithRetry_TransientBackoffRetryAndSucceed(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true (success after backoff retry), got false")
+	if !result.ok() {
+		t.Error("want succeeded (success after backoff retry), got false")
 	}
 	if len(fr.RunCalls) != 2 {
 		t.Errorf("RunCalls: got %d, want 2", len(fr.RunCalls))
@@ -980,11 +980,11 @@ func TestDispatchWithRetry_TransientBackoffRetrySuppressedWhenDiscardConfigured(
 	d := newTestDispatchDiscard(t, retryConfig(3, 10, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 	writeOutcomeOnFinalCall(fr, []error{boxErr, nil}, nonceLine(d, "SPINDRIFT_OUTCOME issue=1 landing=https://github.com/o/r/pull/1 status=ready note=ok"))
 
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if !result.Success {
-		t.Error("want Success=true (success after backoff retry), got false")
+	if !result.ok() {
+		t.Error("want succeeded (success after backoff retry), got false")
 	}
 	if strings.Contains(out, "transient (overloaded); retry") {
 		t.Errorf("stdout should carry no transient-backoff status line when discarded, got %q", out)
@@ -1002,8 +1002,8 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	// max=2: initial run + 2 retries = 3 total runs, 2 sleeps.
 	if len(fr.RunCalls) != 3 {
@@ -1021,8 +1021,8 @@ func TestDispatchWithRetry_TransientCapExhausted(t *testing.T) {
 	}
 	// The cap-exhaustion path prints its own "!!" status line, so Result.Err
 	// must stay nil or a caller duplicates it (issue #3119).
-	if result.Err != nil {
-		t.Errorf("Err: got %v, want nil (cap-exhaustion path prints its own message)", result.Err)
+	if result.result.Err != nil {
+		t.Errorf("Err: got %v, want nil (cap-exhaustion path prints its own message)", result.result.Err)
 	}
 }
 
@@ -1038,11 +1038,11 @@ func TestDispatchWithRetry_TransientCapExhaustedSuppressedWhenDiscardConfigured(
 	var sleeps []time.Duration
 	d := newTestDispatchDiscard(t, retryConfig(2, 5, 0), fr, drv, fakeClock(time.Time{}, &sleeps))
 
-	var result Result
+	var result Disposition
 	out := testutil.CaptureStdout(t, func() { result = d.Run() })
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	if strings.Contains(out, "transient retry cap exhausted") {
 		t.Errorf("stdout should carry no transient-cap-exhausted status line when discarded, got %q", out)
@@ -1062,8 +1062,8 @@ func TestDispatchWithRetry_RateLimitWithoutResetAtUsesBackoff(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true (success after backoff for 429 without resetsAt), got false")
+	if !result.ok() {
+		t.Error("want succeeded (success after backoff for 429 without resetsAt), got false")
 	}
 	if len(sleeps) != 1 {
 		t.Fatalf("sleep calls: got %d, want 1", len(sleeps))
@@ -1120,10 +1120,10 @@ func TestDispatchWithRetry_ZeroExitRateLimitHoldsAndRedispatches(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true, got false")
+	if !result.ok() {
+		t.Error("want succeeded, got false")
 	}
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true after hold + re-dispatch")
 	}
 	if calls != 2 {
@@ -1159,10 +1159,10 @@ func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true, got false")
+	if !result.ok() {
+		t.Error("want succeeded, got false")
 	}
-	if !result.Resolved.Found {
+	if !result.result.Resolved.Found {
 		t.Fatal("want OutcomeFound=true after backoff + re-dispatch")
 	}
 	if calls != 2 {
@@ -1177,7 +1177,7 @@ func TestDispatchWithRetry_ZeroExitTransientWithoutResetAtUsesBackoff(t *testing
 }
 
 // Consecutive zero-exit rate-limit holds that never recover count against the
-// transient retry cap and land on Success=false rather than a silent or
+// transient retry cap and land on failed rather than a silent or
 // confusing status=missing (issue #565's second acceptance criterion).
 func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.T) {
 	fixedNow := time.Unix(1_000_000, 0).UTC()
@@ -1192,8 +1192,8 @@ func TestDispatchWithRetry_ZeroExitConsecutiveHoldsConsumeCapAndFail(t *testing.
 
 	result := d.Run()
 
-	if result.Success {
-		t.Error("want Success=false (cap exhausted), got true")
+	if result.ok() {
+		t.Error("want failed (cap exhausted), got true")
 	}
 	if len(fr.RunCalls) != 4 {
 		t.Errorf("RunCalls: got %d, want 4", len(fr.RunCalls))
@@ -1223,14 +1223,14 @@ func TestDispatchWithRetry_ZeroExitTransientSkipsRetryWhenPRExists(t *testing.T)
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Error("want Success=true (zero exit passthrough), got false")
+	if !result.ok() {
+		t.Error("want succeeded (zero exit passthrough), got false")
 	}
-	if result.Resolved.Found {
+	if result.result.Resolved.Found {
 		t.Error("want OutcomeFound=false")
 	}
-	if result.Classification.Reason != driver.RateLimit {
-		t.Errorf("Classification: got %+v, want RateLimit passthrough", result.Classification)
+	if result.result.Classification.Reason != driver.RateLimit {
+		t.Errorf("Classification: got %+v, want RateLimit passthrough", result.result.Classification)
 	}
 	if len(fr.RunCalls) != 1 {
 		t.Errorf("RunCalls: got %d, want 1 (no re-dispatch when a PR already exists)", len(fr.RunCalls))
@@ -1256,8 +1256,8 @@ func TestDispatchWithRetry_AppliesToFixToo(t *testing.T) {
 
 	result := d.Fix(1, "ci failure detail")
 
-	if !result.Success {
-		t.Error("want Success=true (fix succeeded after hold), got false")
+	if !result.ok() {
+		t.Error("want succeeded (fix succeeded after hold), got false")
 	}
 	if len(fr.RunCalls) != 2 {
 		t.Errorf("RunCalls: got %d, want 2 (initial fix attempt + hold re-dispatch)", len(fr.RunCalls))
@@ -1291,11 +1291,11 @@ func TestDispatchWithRetry_ParsesPassManifestFromOutbox(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success || !result.Resolved.Found {
+	if !result.ok() || !result.result.Resolved.Found {
 		t.Fatalf("want a successful, found outcome; got: %+v", result)
 	}
-	if !reflect.DeepEqual(result.Passes, want) {
-		t.Errorf("Passes: got %+v, want %+v", result.Passes, want)
+	if !reflect.DeepEqual(result.result.Passes, want) {
+		t.Errorf("Passes: got %+v, want %+v", result.result.Passes, want)
 	}
 }
 
@@ -1312,14 +1312,14 @@ func TestDispatchWithRetry_MissingPassManifestDegradesToNil(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success || !result.Resolved.Found {
+	if !result.ok() || !result.result.Resolved.Found {
 		t.Fatalf("want a successful, found outcome; got: %+v", result)
 	}
-	if len(result.Passes) != 0 {
-		t.Errorf("Passes: got %+v, want nil/empty (no manifest ever written)", result.Passes)
+	if len(result.result.Passes) != 0 {
+		t.Errorf("Passes: got %+v, want nil/empty (no manifest ever written)", result.result.Passes)
 	}
-	if result.ParseErr != nil {
-		t.Errorf("ParseErr: got %v, want nil (a missing manifest must never surface as a parse error)", result.ParseErr)
+	if result.result.ParseErr != nil {
+		t.Errorf("ParseErr: got %v, want nil (a missing manifest must never surface as a parse error)", result.result.ParseErr)
 	}
 }
 
@@ -1362,14 +1362,14 @@ func TestDispatchWithRetry_LogRenamedMidRunRestoresCanonicalPath(t *testing.T) {
 		return os.Rename(logPath, moved)
 	}
 
-	var result Result
+	var result Disposition
 	stderr := captureStderr(t, func() { result = d.Run() })
 
-	if !result.Success || !result.Resolved.Found {
+	if !result.ok() || !result.result.Resolved.Found {
 		t.Fatalf("want a successful, found outcome; got: %+v", result)
 	}
-	if result.Resolved.Outcome.Status != "ready" {
-		t.Errorf("Outcome.Status: got %q, want %q", result.Resolved.Outcome.Status, "ready")
+	if result.result.Resolved.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.result.Resolved.Outcome.Status, "ready")
 	}
 	if !strings.Contains(stderr, logPath) || !strings.Contains(stderr, moved) {
 		t.Errorf("stderr must name both %q and %q, got: %s", logPath, moved, stderr)
@@ -1426,14 +1426,14 @@ func TestDispatchWithRetry_LogRenamedMidRunAndCanonicalReoccupiedSettlesFromMove
 		return os.WriteFile(logPath, nil, 0o644)
 	}
 
-	var result Result
+	var result Disposition
 	stderr := captureStderr(t, func() { result = d.Run() })
 
-	if !result.Success || !result.Resolved.Found {
+	if !result.ok() || !result.result.Resolved.Found {
 		t.Fatalf("want a successful, found outcome; got: %+v", result)
 	}
-	if result.Resolved.Outcome.Status != "ready" {
-		t.Errorf("Outcome.Status: got %q, want %q", result.Resolved.Outcome.Status, "ready")
+	if result.result.Resolved.Outcome.Status != "ready" {
+		t.Errorf("Outcome.Status: got %q, want %q", result.result.Resolved.Outcome.Status, "ready")
 	}
 	if !strings.Contains(stderr, logPath) || !strings.Contains(stderr, moved) {
 		t.Errorf("stderr must name both %q and %q, got: %s", logPath, moved, stderr)
@@ -1470,14 +1470,14 @@ func TestDispatchWithRetry_LogRemovedMidRunBehavesAsBefore(t *testing.T) {
 		return boxErr
 	}
 
-	var result Result
+	var result Disposition
 	stderr := captureStderr(t, func() { result = d.Run() })
 
-	if result.Success {
-		t.Errorf("want Success=false, got true: %+v", result)
+	if result.ok() {
+		t.Errorf("want failed, got true: %+v", result)
 	}
-	if result.Resolved.Found {
-		t.Errorf("want no outcome found, got: %+v", result.Resolved)
+	if result.result.Resolved.Found {
+		t.Errorf("want no outcome found, got: %+v", result.result.Resolved)
 	}
 	if !classified {
 		t.Error("want classification to run when the log truly has nothing to reclaim")

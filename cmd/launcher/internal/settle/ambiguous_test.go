@@ -32,7 +32,6 @@ func TestSettle_AmbiguousOutcome_PostsNoteAndTransitions(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "ambiguous", Note: note},
@@ -84,7 +83,6 @@ func TestSettle_AmbiguousOutcome_EmptyNoteSkipsComment(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "ambiguous", Note: ""},
@@ -122,7 +120,6 @@ func TestSettle_AmbiguousOutcome_NoMergeMachineryRuns(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: issNum, Landing: testPR, Status: "ambiguous", Note: "unrelated work"},

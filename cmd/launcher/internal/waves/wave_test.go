@@ -223,6 +223,12 @@ func TestDispatchWave_AlreadyInFlightSkipsWithoutFailedTransition(t *testing.T) 
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("runner.Run: want 0 calls when already running, got %d", len(fr.RunCalls))
 	}
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Errorf("only the initial claim may transition state; got %+v", fc.TransitionStateCalls)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("must not comment when already in flight; got %+v", fc.CommentCalls)
+	}
 	if !strings.Contains(out, "#1") || !strings.Contains(out, "already in flight") {
 		t.Errorf("want a distinct 'already in flight' line naming #1; got output=%q", out)
 	}

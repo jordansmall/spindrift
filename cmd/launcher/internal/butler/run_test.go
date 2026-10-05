@@ -92,15 +92,14 @@ func runRepoGitOutput(t *testing.T, repo string, args ...string) []byte {
 // (settle_test.go's readyResult mirrors this).
 func readyDispatcher() *dispatch.Fake {
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
 		},
 		IssueIntentsFound: true,
 		IssueIntents:      []string{`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"]}`},
-	}
+	})
 	return d
 }
 
@@ -108,7 +107,7 @@ func readyDispatcher() *dispatch.Fake {
 // line at all, the shape a killed or crashed Box leaves.
 func crashedDispatcher() *dispatch.Fake {
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{Success: false}
+	d.RunResult = dispatch.Failed(dispatch.Result{})
 	return d
 }
 
@@ -134,8 +133,7 @@ func gitLogSubjects(t *testing.T, repo, ref string) []string {
 // class (issue #3880). Mirrors readyDispatcher's outcome shape.
 func promotableDispatcher(class string) *dispatch.Fake {
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -144,7 +142,7 @@ func promotableDispatcher(class string) *dispatch.Fake {
 		IssueIntents: []string{
 			fmt.Sprintf(`{"title":"bug found","body":"repro","dedupTerms":["a.go:Foo"],"class":%q,"concurrence":"agreed"}`, class),
 		},
-	}
+	})
 	return d
 }
 
@@ -280,7 +278,7 @@ func TestSweep_AlreadyInFlightSkipsSettle(t *testing.T) {
 	fc := forge.NewFake()
 
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{AlreadyInFlight: true}
+	d.RunResult = dispatch.Skipped()
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -867,8 +865,7 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 	fc.PostIssueURL = "https://example.com/issues/9100"
 
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -878,7 +875,7 @@ func TestSweep_PerSweepCapDropsExcessFindingsInLedger(t *testing.T) {
 			`{"title":"bug one","body":"repro","dedupTerms":["a.go:One"]}`,
 			`{"title":"bug two","body":"repro","dedupTerms":["a.go:Two"]}`,
 		},
-	}
+	})
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -922,8 +919,7 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 	// Budgets are global across every enabled Chore (chore.Budgets' own
 	// doc), not per Chore, so this counts toward "bugs"'s headroom below.
 	seed := dispatch.NewFake()
-	seed.RunResult = dispatch.Result{
-		Success: true,
+	seed.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-seed", Status: outcome.StatusReady, Note: "seeded"},
@@ -935,7 +931,7 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 			`{"title":"s3","body":"repro","dedupTerms":["a.go:S3"]}`,
 			`{"title":"s4","body":"repro","dedupTerms":["a.go:S4"]}`,
 		},
-	}
+	})
 	seedPolicy := testRunPolicy(noRunEvery, "seed", "bugs")
 	seedRunner := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), func(c dispatch.Chore) dispatch.Dispatcher { return seed }, seedPolicy, func() time.Time { return now })
 	seedOut, err := seedRunner.Sweep([]string{"seed"})
@@ -947,8 +943,7 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 	}
 
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -963,7 +958,7 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 			`{"title":"bug six","body":"repro","dedupTerms":["a.go:Six"]}`,
 			`{"title":"bug seven","body":"repro","dedupTerms":["a.go:Seven"]}`,
 		},
-	}
+	})
 	policy := testRunPolicy(noRunEvery, "seed", "bugs")
 	policy.Budgets = chore.Budgets{MaxFindingsPerDay: 10, MaxFindingsPerSweep: 0}
 	r := New(backend, fakeTree{head: "headsha", files: []string{"a.go"}}, fc.AsIssueFiler(), func(c dispatch.Chore) dispatch.Dispatcher { return d }, policy, func() time.Time { return now })
@@ -1476,8 +1471,7 @@ func patchDiffFor(path string) string {
 // policy allows it.
 func patchableDispatcher(class string) *dispatch.Fake {
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -1486,7 +1480,7 @@ func patchableDispatcher(class string) *dispatch.Fake {
 		IssueIntents: []string{
 			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["docs/a.md:Foo"],"class":%q,"concurrence":"agreed","patch":%q}`, class, testPatchDiff),
 		},
-	}
+	})
 	return d
 }
 
@@ -1501,15 +1495,14 @@ func patchableDispatcherN(class string, n int) *dispatch.Fake {
 		path := fmt.Sprintf("docs/a%d.md", i)
 		intents[i] = fmt.Sprintf(`{"title":"fix typo %d","body":"repro","dedupTerms":[%q],"class":%q,"concurrence":"agreed","patch":%q}`, i, path+":Foo", class, patchDiffFor(path))
 	}
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
 		},
 		IssueIntentsFound: true,
 		IssueIntents:      intents,
-	}
+	})
 	return d
 }
 
@@ -2605,8 +2598,7 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 
 	claudeDiff := "--- a/CLAUDE.md\n+++ b/CLAUDE.md\n@@ -1 +1 @@\n-old\n+new\n"
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -2615,7 +2607,7 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 		IssueIntents: []string{
 			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":["CLAUDE.md:Foo"],"class":"docs-drift","concurrence":"agreed","patch":%q}`, claudeDiff),
 		},
-	}
+	})
 	pf := &fakePatchForge{prefix: "agent/issue-", IssueLabeler: fc}
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher { return d }
 
@@ -2657,8 +2649,7 @@ func TestSweep_PatchOutsidePatchPathsNeverReachesTree(t *testing.T) {
 // trees, so their tracked file can't live under docs/.
 func patchableTopLevelDispatcher(path, diff string) *dispatch.Fake {
 	d := dispatch.NewFake()
-	d.RunResult = dispatch.Result{
-		Success: true,
+	d.RunResult = dispatch.Succeeded(dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
 			Outcome: outcome.Outcome{Issue: "butler-bugs", Status: outcome.StatusReady, Note: "swept"},
@@ -2667,7 +2658,7 @@ func patchableTopLevelDispatcher(path, diff string) *dispatch.Fake {
 		IssueIntents: []string{
 			fmt.Sprintf(`{"title":"fix typo","body":"repro","dedupTerms":[%q],"class":"docs-drift","concurrence":"agreed","patch":%q}`, path+":Foo", diff),
 		},
-	}
+	})
 	return d
 }
 

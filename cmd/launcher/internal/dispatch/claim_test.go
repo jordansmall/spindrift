@@ -40,7 +40,7 @@ func TestRun_SkipsAlreadyClaimedIssueAcrossFactories(t *testing.T) {
 	defer f1.Cleanup()
 	d1 := f1.New("1", "t")
 
-	d1Done := make(chan Result, 1)
+	d1Done := make(chan Disposition, 1)
 	go func() { d1Done <- d1.Run() }()
 
 	select {
@@ -77,8 +77,8 @@ func TestRun_SkipsAlreadyClaimedIssueAcrossFactories(t *testing.T) {
 
 	result2 := d2.Run()
 
-	if !result2.AlreadyInFlight {
-		t.Fatalf("d2.Run(): want AlreadyInFlight=true, got %+v", result2)
+	if !result2.skipped() {
+		t.Fatalf("d2.Run(): want skipped, got %+v", result2)
 	}
 	if len(fr2.RunCalls) != 0 {
 		t.Errorf("fr2.RunCalls: want 0, got %d -- the loser must never reach runOnce", len(fr2.RunCalls))
@@ -104,8 +104,8 @@ func TestRun_SkipsAlreadyClaimedIssueAcrossFactories(t *testing.T) {
 
 	close(proceed)
 	result1 := <-d1Done
-	if !result1.Success {
-		t.Fatalf("d1.Run(): want Success=true, got %+v", result1)
+	if !result1.ok() {
+		t.Fatalf("d1.Run(): want succeeded, got %+v", result1)
 	}
 
 	cur, err := os.ReadFile(d1.logPath())
@@ -167,8 +167,8 @@ func TestClaimIssue_HeldUntilClose(t *testing.T) {
 		defer f.Cleanup()
 		d := f.New("1", "t")
 
-		if result := d.Run(); !result.Success {
-			t.Fatalf("Run: want Success=true, got %+v", result)
+		if result := d.Run(); !result.ok() {
+			t.Fatalf("Run: want succeeded, got %+v", result)
 		}
 		check(t, dir, d)
 	})
@@ -184,8 +184,8 @@ func TestClaimIssue_HeldUntilClose(t *testing.T) {
 		defer f.Cleanup()
 		d := f.New("1", "t")
 
-		if result := d.Run(); result.Success {
-			t.Fatalf("Run: want Success=false for a terminal failure, got %+v", result)
+		if result := d.Run(); result.ok() {
+			t.Fatalf("Run: want failed for a terminal failure, got %+v", result)
 		}
 		check(t, dir, d)
 	})
@@ -194,7 +194,7 @@ func TestClaimIssue_HeldUntilClose(t *testing.T) {
 // TestRun_SecondRunLosesWhileFirstUnclosed pins the settle-window race of
 // issue #4364: once Dispatch A's Run returned (but A is not closed, so its
 // caller is still settling), a second Run for the issue must report
-// AlreadyInFlight without launching a Box or touching the log dir.
+// a skip without launching a Box or touching the log dir.
 func TestRun_SecondRunLosesWhileFirstUnclosed(t *testing.T) {
 	dir := tempLogDir(t)
 	fr1 := runner.NewFake()
@@ -208,8 +208,8 @@ func TestRun_SecondRunLosesWhileFirstUnclosed(t *testing.T) {
 	}
 	defer f1.Cleanup()
 	d1 := f1.New("1", "t")
-	if result := d1.Run(); !result.Success {
-		t.Fatalf("d1.Run(): want Success=true, got %+v", result)
+	if result := d1.Run(); !result.ok() {
+		t.Fatalf("d1.Run(): want succeeded, got %+v", result)
 	}
 
 	entriesBefore, err := os.ReadDir(HostLogDirFor(dir))
@@ -227,8 +227,8 @@ func TestRun_SecondRunLosesWhileFirstUnclosed(t *testing.T) {
 	d2 := f2.New("1", "t")
 	defer d2.Close()
 
-	if result := d2.Run(); !result.AlreadyInFlight {
-		t.Fatalf("d2.Run() while d1 unclosed: want AlreadyInFlight=true, got %+v", result)
+	if result := d2.Run(); !result.skipped() {
+		t.Fatalf("d2.Run() while d1 unclosed: want skipped, got %+v", result)
 	}
 	if len(fr2.RunCalls) != 0 {
 		t.Errorf("fr2.RunCalls: want 0, got %d", len(fr2.RunCalls))

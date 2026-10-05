@@ -16,7 +16,7 @@ func TestFake_ImplementsSettler(t *testing.T) {
 func TestFake_RecordsCalls(t *testing.T) {
 	f := NewFake()
 	d := dispatch.NewFake()
-	result := dispatch.Result{Success: true}
+	result := dispatch.Result{}
 
 	f.Settle(d, "1", 7, result)
 	f.SettleAdopted(d, "2", 0, testPR)

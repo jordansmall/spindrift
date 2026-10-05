@@ -330,8 +330,12 @@ func TestRecoverByNumber_OwnerSettling_Skips(t *testing.T) {
 	}
 	owner := testFactory(t, dir, fr).New("42", "t")
 	defer owner.Close()
-	if res := owner.Run(); !res.Success {
-		t.Fatalf("owner.Run: want success, got %+v", res)
+	succeeded := dispatch.Route(owner.Run(),
+		func() bool { return false },
+		func(dispatch.Result) bool { return false },
+		func(dispatch.Result) bool { return true })
+	if !succeeded {
+		t.Fatalf("owner.Run: want succeeded")
 	}
 
 	s := settle.NewFake()

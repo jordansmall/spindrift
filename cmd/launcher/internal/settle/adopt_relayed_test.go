@@ -59,7 +59,6 @@ func newAdoptBackstopFixture(t *testing.T, issNum, prURL, prIntent string) (*for
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -123,7 +122,6 @@ func TestSettle_GithubReadOnly_AdoptsNoOutcomeSuccess(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
@@ -179,7 +177,6 @@ func TestSettle_GithubReadOnly_AdoptsWithDefaultPRBodyWhenNoIntent(t *testing.T)
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -249,7 +246,6 @@ func TestSettle_GithubReadOnly_AdoptedPRWithRedCIDoesNotMerge(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -324,7 +320,6 @@ func TestSettle_GithubReadOnly_NonSyntheticBlockedDoesNotAdopt(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceGenuine,
@@ -375,7 +370,6 @@ func TestSettle_GithubReadOnly_SyntheticBlockedNoSelfReportDoesNotAdopt(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -424,7 +418,6 @@ func TestSettle_GithubReadOnly_SyntheticBlockedSelfReportBlockedDoesNotAdopt(t *
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -480,7 +473,6 @@ func TestSettle_GithubReadOnly_AdoptionFingerprintButBundleMissingFallsBackToBlo
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -535,7 +527,6 @@ func TestSettle_GithubReadWrite_SyntheticSuccessDoesNotAdopt(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:      true,
 			Provenance: outcome.ProvenanceSynthetic,
@@ -585,7 +576,6 @@ func TestSettle_GithubReadOnly_NoOutcomeNoSelfReportDoesNotAdopt(t *testing.T) {
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: false,
@@ -629,7 +619,6 @@ func TestSettle_GithubReadOnly_NoOutcomeSelfReportBlockedDoesNotAdopt(t *testing
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,
@@ -675,7 +664,6 @@ func TestSettle_GithubReadOnly_NoOutcomeBundleMissingFallsBackToBlocked(t *testi
 
 	d := dispatch.NewFake()
 	result := dispatch.Result{
-		Success: true,
 		Resolved: outcome.Resolved{
 			Found:           false,
 			SelfReportFound: true,

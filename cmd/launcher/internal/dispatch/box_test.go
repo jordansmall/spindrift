@@ -53,10 +53,10 @@ func TestRunOnce_PreservesPriorAttemptLogOnRetry(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
-	if !result.Resolved.Found || result.Resolved.Outcome.Status != "ready" {
+	if !result.result.Resolved.Found || result.result.Resolved.Outcome.Status != "ready" {
 		t.Fatalf("Run: want ready outcome, got %+v", result)
 	}
 	if calls != 2 {
@@ -110,8 +110,8 @@ func TestRunOnce_RotatesPreExistingLogFromDuplicateLaunch(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	cur, err := os.ReadFile(d.logPath())
@@ -181,8 +181,8 @@ func TestRun_QuarantinesPriorRunLogsBeforeFirstAttempt(t *testing.T) {
 
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	got := d.CumulativeUsage()
@@ -256,11 +256,11 @@ func TestRun_QuarantineFailureDoesNotSettleOnStaleLog(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Errorf("Run: want Success=false on a quarantine failure, got %+v", result)
+	if result.ok() {
+		t.Errorf("Run: want failed on a quarantine failure, got %+v", result)
 	}
-	if result.Resolved.Found {
-		t.Errorf("Run: want Resolved.Found=false (must not settle on the stale prior run's outcome), got %+v", result.Resolved)
+	if result.result.Resolved.Found {
+		t.Errorf("Run: want Resolved.Found=false (must not settle on the stale prior run's outcome), got %+v", result.result.Resolved)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("runner.Run: want 0 calls when quarantine fails before dispatch, got %d", len(fr.RunCalls))
@@ -298,8 +298,8 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Errorf("Run: want Success=false once the retry cap is exhausted, got %+v", result)
+	if result.ok() {
+		t.Errorf("Run: want failed once the retry cap is exhausted, got %+v", result)
 	}
 	if len(sleeps) != 3 {
 		t.Errorf("Sleep calls = %d, want 3 (Policy.Max) -- a quarantine failure must retry with backoff, not give up on the first attempt", len(sleeps))
@@ -537,11 +537,11 @@ func TestRunOnce_SkipsAlreadyRunningContainerWithoutTouchingLog(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Fatalf("Run: want Success=false for an already-in-flight skip, got %+v", result)
+	if result.ok() {
+		t.Fatalf("Run: want failed for an already-in-flight skip, got %+v", result)
 	}
-	if !result.AlreadyInFlight {
-		t.Fatalf("Run: want AlreadyInFlight=true, got %+v", result)
+	if !result.skipped() {
+		t.Fatalf("Run: want skipped, got %+v", result)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("runner.Run: want 0 calls when already running, got %d", len(fr.RunCalls))
@@ -679,8 +679,8 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_MountsListeningSocket(t *testing.T)
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if socketPath == "" {
 		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty with RegistryProxyRoutes set")
@@ -736,8 +736,8 @@ func TestRunOnce_RegistryProxyUnixTransport_SocketsHasProxyEntry(t *testing.T) {
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if proxySocketPath == "" {
 		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty, want a minted host path")
@@ -780,8 +780,8 @@ func TestRunOnce_RegistryProxyTCPTransport_SocketsEmpty(t *testing.T) {
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if len(sockets) != 0 {
 		t.Errorf("box.Sockets = %+v, want empty on the TCP transport branch", sockets)
@@ -803,8 +803,8 @@ func TestRunOnce_NoRegistryProxyRoutes_SocketsEmpty(t *testing.T) {
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if len(sockets) != 0 {
 		t.Errorf("box.Sockets = %+v, want empty when RegistryProxyRoutes is unset", sockets)
@@ -877,8 +877,8 @@ func TestRunOnce_RegistryProxyUpstreamURLSet_LongTMPDIR_StillWorks(t *testing.T)
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if socketPath == "" {
 		t.Fatal("box.RegistryProxy.Endpoint.SocketPath() was empty with RegistryProxyRoutes set")
@@ -937,8 +937,8 @@ func TestRunOnce_RegistryProxyCredentialSet_AttachesAuthorizationHeader(t *testi
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if want := "Bearer " + credential; gotAuth != want {
 		t.Errorf("upstream got Authorization %q, want %q", gotAuth, want)
@@ -968,8 +968,8 @@ func TestRunOnce_RegistryProxyUpstreamURLUnset_NoSocketNoProxy(t *testing.T) {
 	d := newTestDispatch(t, retryConfig(3, 0, 0), fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if socketPath != "" {
 		t.Errorf("box.RegistryProxy.Endpoint.SocketPath() = %q, want empty when RegistryProxyRoutes is empty", socketPath)
@@ -1112,8 +1112,8 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_MountsTCPLocation(t *test
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
 
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 	if loc.Endpoint.SocketPath() != "" {
 		t.Errorf("box.RegistryProxy.Endpoint.SocketPath() = %q, want empty on the TCP transport branch", loc.Endpoint.SocketPath())
@@ -1177,8 +1177,8 @@ func TestRunOnce_RegistryProxyTransportSocketIncapable_SecretDiffersPerRun(t *te
 		}
 
 		d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
-		if result := d.Run(); !result.Success {
-			t.Fatalf("Run: want Success=true, got %+v", result)
+		if result := d.Run(); !result.ok() {
+			t.Fatalf("Run: want succeeded, got %+v", result)
 		}
 		return secret
 	}
@@ -1221,8 +1221,8 @@ func TestRunOnce_RegistryProxyManifest_UnixEndpoint(t *testing.T) {
 
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, RealClock())
 	result := d.Run()
-	if !result.Success {
-		t.Fatalf("Run: want Success=true, got %+v", result)
+	if !result.ok() {
+		t.Fatalf("Run: want succeeded, got %+v", result)
 	}
 
 	raw, ok := envSnapshot[registrymanifest.EnvVar]
@@ -1461,11 +1461,11 @@ func TestRun_IssueTextForErrorFailsDispatch(t *testing.T) {
 
 	result := d.Run()
 
-	if result.Success {
-		t.Fatalf("Run: want Success=false when IssueTextFor errors, got %+v", result)
+	if result.ok() {
+		t.Fatalf("Run: want failed when IssueTextFor errors, got %+v", result)
 	}
-	if !errors.Is(result.Err, sentinel) {
-		t.Errorf("Run result.Err = %v, want it to wrap %v", result.Err, sentinel)
+	if !errors.Is(result.result.Err, sentinel) {
+		t.Errorf("Run result.result.Err = %v, want it to wrap %v", result.result.Err, sentinel)
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("Run: want the box never launched, got %d RunCalls", len(fr.RunCalls))
