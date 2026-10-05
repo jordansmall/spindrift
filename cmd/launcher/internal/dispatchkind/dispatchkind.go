@@ -70,6 +70,14 @@ const (
 	PriorityIdle                           // tried only after every other kind on every slot (butler, ADR 0056: a slot picks it only when nothing else has work)
 )
 
+// Enablement is when the daemon draws a kind at all.
+type Enablement int
+
+const (
+	EnabledAlways   Enablement = iota + 1 // drawn whenever selected
+	EnabledByChores                       // drawn only while BUTLER_CHORES enables at least one Chore; the daemon resolves that, since this leaf package cannot import chore
+)
+
 // Prompts names the kind's prompt templates. A zero value means "defer to
 // work's selection" for Base, and "no self-contained sub-mode" for
 // SelfContainedBase.
@@ -100,6 +108,7 @@ type Descriptor struct {
 	FilerRelayGate string         // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
 	Tracker        Tracker        // which IssueTracker instance this kind's issues live on
 	AnnounceVerb   string         // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
+	Enablement     Enablement     // when the daemon draws this kind; see Enablement
 	UnclaimedGate  bool           // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
 }
 
@@ -111,6 +120,7 @@ var (
 		Labels:         LabelsConfigured,
 		Settle:         SettleMerge,
 		DaemonPriority: PriorityNormal,
+		Enablement:     EnabledAlways,
 		FindingLabel:   "agent-review-finding",
 		Contract:       ContractLanding,
 		FilerRelayGate: "FILER_FILE_RELAY_WORK",
@@ -129,6 +139,7 @@ var (
 		Settle:         SettleVerdict,
 		AdviseOnly:     true,
 		DaemonPriority: PriorityReserved,
+		Enablement:     EnabledAlways,
 		FindingLabel:   "agent-research-finding",
 		Contract:       ContractVerdict,
 		FilerRelayGate: "FILER_FILE_RELAY_RESEARCH",
@@ -156,6 +167,7 @@ var (
 		AdviseOnly:     true,
 		ReadOnlyBox:    true, // issue #3906
 		DaemonPriority: PriorityIdle,
+		Enablement:     EnabledByChores,
 		FindingLabel:   "agent-butler-finding",
 		PatchLabel:     "agent-butler-patch",
 		Contract:       ContractInline,
