@@ -1,7 +1,8 @@
 // Package driverkit holds the vocabulary shared across the Driver seam (ADR
 // 0009): transient classification, pattern matching, NDJSON line framing, the
-// log-scan degrade contract, and the role constants. Declaring them here keeps
-// every Driver strategy from hand-mirroring its own copy.
+// log-scan degrade contract, the role constants, and heartbeat-text
+// sanitizing and trimming. Declaring them here keeps every Driver strategy
+// from hand-mirroring its own copy.
 package driverkit
 
 import "time"
