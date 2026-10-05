@@ -14,6 +14,7 @@ type PRForgeFake struct {
 	branchPRs       map[string]string // keyed by branch name, valued by PR URL
 	mergeableStates map[string]MergeableState
 	needsUpdate     map[string]bool
+	drafts          map[string]bool // keyed by PR URL; internal-only, forge.PR carries no draft field (#2503)
 	checkQ          map[string][]RollupState
 	checkErrQ       map[string][]error // a nil entry falls through to checkQ
 	prFiles         map[string][]string
@@ -118,6 +119,20 @@ func (pf *PRForgeFake) NeedsUpdate(url string) (bool, error) {
 		return false, pf.NeedsUpdateErr
 	}
 	return pf.needsUpdate[url], nil
+}
+
+// SetDraft seeds url's draft state, which MarkReady and MarkDraft then flip.
+func (pf *PRForgeFake) SetDraft(url string, draft bool) {
+	pf.mu.Lock()
+	defer pf.mu.Unlock()
+	pf.drafts[url] = draft
+}
+
+// IsDraft reports url's tracked draft state, false when none was seeded or set.
+func (pf *PRForgeFake) IsDraft(url string) bool {
+	pf.mu.Lock()
+	defer pf.mu.Unlock()
+	return pf.drafts[url]
 }
 
 // SetCheckStates scripts the states successive CheckState calls return for url.
@@ -287,22 +302,30 @@ func (pf *PRForgeFake) EnqueueAutoMerge(prURL string) error {
 	return pf.EnqueueAutoMergeErr
 }
 
-// MarkReady records the call to MarkReadyCalls. Neither the Fake nor the real
-// adapters track draft state on the stored PR, so that log is what tests assert
-// on.
+// MarkReady records the call to MarkReadyCalls and, unless MarkReadyErr fails
+// it, clears the PR's draft state (see IsDraft).
 func (pf *PRForgeFake) MarkReady(prURL string) error {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.LandingCallLog = append(pf.LandingCallLog, "MarkReady:"+prURL)
 	pf.MarkReadyCalls = append(pf.MarkReadyCalls, prURL)
-	return pf.MarkReadyErr
+	if pf.MarkReadyErr != nil {
+		return pf.MarkReadyErr
+	}
+	pf.drafts[prURL] = false
+	return nil
 }
 
-// MarkDraft records the call to MarkDraftCalls, the inverse of MarkReady.
+// MarkDraft records the call to MarkDraftCalls and, unless MarkDraftErr fails
+// it, sets the PR's draft state: the inverse of MarkReady.
 func (pf *PRForgeFake) MarkDraft(prURL string) error {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.LandingCallLog = append(pf.LandingCallLog, "MarkDraft:"+prURL)
 	pf.MarkDraftCalls = append(pf.MarkDraftCalls, prURL)
-	return pf.MarkDraftErr
+	if pf.MarkDraftErr != nil {
+		return pf.MarkDraftErr
+	}
+	pf.drafts[prURL] = true
+	return nil
 }
