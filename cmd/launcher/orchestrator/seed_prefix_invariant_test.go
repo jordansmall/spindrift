@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/deltareview"
 	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/runstate"
+	"spindrift.dev/launcher/internal/seedblock"
 )
 
 // assertOriginalIsCacheablePrefix pins the layout prompt caching needs, not
@@ -24,14 +25,14 @@ func assertOriginalIsCacheablePrefix(t *testing.T, original, seeded string) {
 	}
 
 	rest := seeded[len(original):]
-	if !strings.HasPrefix(rest, seededPromptSeparator) {
-		t.Fatalf("text following the original prompt = %q, want it to open with the exact separator %q", rest, seededPromptSeparator)
+	if !strings.HasPrefix(rest, seedblock.Separator) {
+		t.Fatalf("text following the original prompt = %q, want it to open with the exact separator %q", rest, seedblock.Separator)
 	}
-	if len(rest) == len(seededPromptSeparator) {
+	if len(rest) == len(seedblock.Separator) {
 		t.Fatalf("seeded prompt has nothing after the separator, want the pass-specific block to actually follow it")
 	}
-	if n := strings.Count(seeded, seededPromptSeparator); n != 1 {
-		t.Errorf("seeded prompt contains the separator %q %d times, want exactly 1 (at the original/block join)", seededPromptSeparator, n)
+	if n := strings.Count(seeded, seedblock.Separator); n != 1 {
+		t.Errorf("seeded prompt contains the separator %q %d times, want exactly 1 (at the original/block join)", seedblock.Separator, n)
 	}
 }
 
@@ -117,4 +118,55 @@ func TestSeedDeltaReviewPromptPreservesOriginalAsCacheablePrefix(t *testing.T) {
 		t.Fatalf("read seeded delta review prompt: %v", err)
 	}
 	assertOriginalIsCacheablePrefix(t, original, string(got))
+}
+
+// TestSeededPromptEqualsOriginalPlusSeedblock pins that the file each seeder
+// writes is exactly the original plus the seedblock text, so a caller
+// reporting seedblock's output reports the bytes the orchestrator appends.
+func TestSeededPromptEqualsOriginalPlusSeedblock(t *testing.T) {
+	dir := t.TempDir()
+	original := "original prompt\n"
+	promptFile := filepath.Join(dir, "prompt.md")
+	if err := os.WriteFile(promptFile, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dispositions := filepath.Join(dir, "dispositions.md")
+	if err := os.WriteFile(dispositions, []byte("won't-fix: x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state := runstate.RunState{
+		LastVerdict:          "BLOCK",
+		ReviewFindings:       "fix the thing",
+		DispositionsLogPath:  dispositions,
+		ReviewedCommitAnchor: "0123456789abcdef0123456789abcdef01234567",
+		PassSummaryPath:      "/tmp/summary.md",
+	}
+
+	cases := []struct {
+		name  string
+		seed  func(string, runstate.RunState) (string, error)
+		block string
+	}{
+		{"handoff", seedPromptFromState, seedblock.Handoff(state)},
+		{"review", seedReviewPromptFromState, seedblock.Review(state)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.block == "" {
+				t.Fatal("seedblock returned an empty block for a populated state")
+			}
+			path, err := tc.seed(promptFile, state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.Remove(path)
+			got, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if want := original + tc.block; string(got) != want {
+				t.Errorf("seeded file = %q, want original + seedblock = %q", got, want)
+			}
+		})
+	}
 }

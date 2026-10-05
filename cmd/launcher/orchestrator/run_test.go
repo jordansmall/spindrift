@@ -2594,7 +2594,7 @@ func TestRecordReviewedCommitAnchorDegradesOnGitFailure(t *testing.T) {
 }
 
 // TestRecordReviewedCommitAnchorDegradesOnNonSHAOutput verifies
-// recordReviewedCommitAnchor's validReviewedCommitAnchor guard: `git rev-parse
+// recordReviewedCommitAnchor's seedblock.ValidReviewedCommitAnchor guard: `git rev-parse
 // HEAD` can exit 0 while printing something that is not a SHA on the combined
 // output runGitIn reads, and that must never be persisted. A fake `git` on PATH
 // always exits 0 with non-SHA output.
@@ -5143,7 +5143,7 @@ func TestSeedReviewPromptFromStateIncludesDeltaFocusForValidAnchor(t *testing.T)
 }
 
 // TestSeedReviewPromptFromStateIncludesDeltaFocusForSixtyFourCharAnchor pins
-// reviewedCommitAnchorRe's upper boundary (issue #2551 review): a 64-character
+// seedblock.ValidReviewedCommitAnchor's upper boundary (issue #2551 review): a 64-character
 // anchor, a SHA-256 repo's full `git rev-parse HEAD` output, must still be
 // accepted. TestSeedReviewPromptFromStateOmitsDeltaFocusForInvalidAnchor covers
 // 65 as a reject; nothing pinned 64 as the accepted edge.
