@@ -19,10 +19,6 @@ let
     agentEnvPath = "/nix/store/bbb-agent-env";
     passwdFilePath = "/nix/store/eee-passwd";
     groupFilePath = "/nix/store/fff-group";
-    # Deliberately the same literals preambles-build-artifacts-bwrap's fixture
-    # uses, because both renderers derive these drvs from one Consumer config
-    # (issue #2672). preambles-run-build-artifacts-bwrap-key-parity below
-    # asserts the two outputs agree on these six keys.
     agentFilesDrv = "/nix/store/aaa-agent-files.drv";
     agentEnvDrv = "/nix/store/bbb-agent-env.drv";
     passwdFileDrv = "/nix/store/eee-passwd.drv";
@@ -566,23 +562,27 @@ in
     assert assertMsg (out.WORKER_PROVISIONED == "false")
       "runArtifacts (oci) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
     assert assertMsg (
-      !(out ? AGENT_FILES)
-    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? PASSWD_FILE)
-    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? GROUP_FILE)
-    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? NIX_CONFIG_FILE)
-    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? NIX_STORE_WRITABLE)
-    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? SYSCALL_FILTER)
-    ) "runArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
+      out.NIX_VOLUME == "spindrift-nix"
+    ) "runArtifacts (oci) must name the spindrift-nix volume, got: ${builtins.toJSON out}";
+    assert
+      let
+        leaked = builtins.filter (k: out ? ${k}) [
+          "AGENT_FILES"
+          "PASSWD_FILE"
+          "GROUP_FILE"
+          "NIX_CONFIG_FILE"
+          "NIX_STORE_WRITABLE"
+          "SYSCALL_FILTER"
+          "AGENT_FILES_DRV"
+          "AGENT_ENV_DRV"
+          "PASSWD_FILE_DRV"
+          "GROUP_FILE_DRV"
+          "NIX_CONFIG_FILE_DRV"
+          "SYSCALL_FILTER_DRV"
+        ];
+      in
+      assertMsg (leaked == [ ])
+        "runArtifacts (oci) must not set bwrap-only keys ${builtins.toJSON leaked}, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci" { } "touch $out";
 
   # Issue #262 AC1: a driver-scoped image name must reach IMAGE_TAG, so an
@@ -664,180 +664,10 @@ in
       "runArtifacts (oci-driver-scoped) must render WORKER_PROVISIONED as the literal string \"false\", got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-oci-driver-scoped-image-name" { } "touch $out";
 
-  preambles-build-artifacts-bwrap =
-    let
-      out = preambles.buildArtifacts {
-        runnerKind = "bwrap";
-        agentFilesDrv = "/nix/store/aaa-agent-files.drv";
-        agentEnvDrv = "/nix/store/bbb-agent-env.drv";
-        passwdFileDrv = "/nix/store/eee-passwd.drv";
-        groupFileDrv = "/nix/store/fff-group.drv";
-        runtime = "bwrap";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift";
-        imageDrv = "/nix/store/ddd-image.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
-        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
-        agentClosurePath = "/nix/store/ggg-agent-closure";
-      };
-    in
-    assert assertMsg (
-      out.RUNTIME == "bwrap"
-    ) "buildArtifacts (bwrap) must set RUNTIME=bwrap, got: ${builtins.toJSON out}";
-    assert assertMsg (out.IMAGE_TAG == "/nix/store/ggg-agent-closure")
-      "buildArtifacts (bwrap) must set IMAGE_TAG to the agent-closure output path (issue #2966), got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.AGENT_FILES_DRV == "/nix/store/aaa-agent-files.drv"
-    ) "buildArtifacts (bwrap) must set AGENT_FILES_DRV, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.AGENT_ENV_DRV == "/nix/store/bbb-agent-env.drv"
-    ) "buildArtifacts (bwrap) must set AGENT_ENV_DRV, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.PASSWD_FILE_DRV == "/nix/store/eee-passwd.drv"
-    ) "buildArtifacts (bwrap) must set PASSWD_FILE_DRV, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.GROUP_FILE_DRV == "/nix/store/fff-group.drv"
-    ) "buildArtifacts (bwrap) must set GROUP_FILE_DRV, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? IMAGE_DRV)
-    ) "buildArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
-    ) "buildArtifacts (bwrap) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
-    ) "buildArtifacts (bwrap) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.NIX_CONFIG_FILE_DRV == "/nix/store/fake-nix-conf-path.drv"
-    ) "buildArtifacts (bwrap) must set NIX_CONFIG_FILE_DRV, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.SYSCALL_FILTER_DRV == "/nix/store/fake-syscall-filter-path/filter.bpf.drv"
-    ) "buildArtifacts (bwrap) must set SYSCALL_FILTER_DRV, got: ${builtins.toJSON out}";
-    pkgs.runCommand "preambles-build-artifacts-bwrap" { } "touch $out";
-
-  # Issue #2672: the two checks above each pin only their own output against
-  # a literal, so both would keep passing if the renderers diverged from each
-  # other. This one compares them directly. IMAGE_TAG joins the six drv keys
-  # (issue #2966) because each renderer's bwrap branch spells it out instead
-  # of sharing the bwrapDrvArtifacts helper.
-  preambles-run-build-artifacts-bwrap-key-parity =
-    let
-      runOut = preambles.runArtifacts (
-        bwrapRunArtifactsBase
-        // {
-          nixConfigPath = "/nix/store/fake-nix-conf-path/nix.conf";
-          nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
-        }
-      );
-      buildOut = preambles.buildArtifacts {
-        runnerKind = "bwrap";
-        agentFilesDrv = bwrapRunArtifactsBase.agentFilesDrv;
-        agentEnvDrv = bwrapRunArtifactsBase.agentEnvDrv;
-        passwdFileDrv = bwrapRunArtifactsBase.passwdFileDrv;
-        groupFileDrv = bwrapRunArtifactsBase.groupFileDrv;
-        runtime = "bwrap";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift";
-        imageDrv = "/nix/store/ddd-image.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        nixConfigDrv = "/nix/store/fake-nix-conf-path.drv";
-        syscallFilterDrv = bwrapRunArtifactsBase.syscallFilterDrv;
-        agentClosurePath = bwrapRunArtifactsBase.agentClosurePath;
-      };
-      mismatched = builtins.filter (key: runOut.${key} != buildOut.${key}) [
-        "AGENT_FILES_DRV"
-        "AGENT_ENV_DRV"
-        "PASSWD_FILE_DRV"
-        "GROUP_FILE_DRV"
-        "NIX_CONFIG_FILE_DRV"
-        "SYSCALL_FILTER_DRV"
-        "IMAGE_TAG"
-      ];
-    in
-    assert assertMsg (mismatched == [ ])
-      "runArtifacts and buildArtifacts (bwrap) must render identical values for the shared bwrap keys when fed the same Consumer config, mismatched keys: ${builtins.toJSON mismatched}, runArtifacts: ${builtins.toJSON runOut}, buildArtifacts: ${builtins.toJSON buildOut}";
-    pkgs.runCommand "preambles-run-build-artifacts-bwrap-key-parity" { } "touch $out";
-
-  preambles-build-artifacts-oci =
-    let
-      out = preambles.buildArtifacts {
-        runnerKind = "oci";
-        agentFilesDrv = "/nix/store/aaa-agent-files.drv";
-        agentEnvDrv = "/nix/store/bbb-agent-env.drv";
-        passwdFileDrv = "/nix/store/eee-passwd.drv";
-        groupFileDrv = "/nix/store/fff-group.drv";
-        runtime = "podman";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift";
-        imageDrv = "/nix/store/ddd-image.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        # Required (no default) even though the OCI branch never reads either
-        # (issues #2670, #2966).
-        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
-        agentClosurePath = "/nix/store/ggg-agent-closure";
-      };
-    in
-    assert assertMsg (
-      out.RUNTIME == "podman"
-    ) "buildArtifacts (oci) must set the configured RUNTIME, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.IMAGE_ARCHIVE == "/nix/store/ccc-image"
-    ) "buildArtifacts (oci) must set IMAGE_ARCHIVE, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.IMAGE_TAG == "spindrift:deadbeef"
-    ) "buildArtifacts (oci) must set IMAGE_TAG, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.IMAGE_DRV == "/nix/store/ddd-image.drv"
-    ) "buildArtifacts (oci) must set IMAGE_DRV, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-image"
-    ) "buildArtifacts (oci) must set FLAKE_IMAGE_ATTR, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
-    ) "buildArtifacts (oci) must set FLAKE_LAUNCHER_ATTR, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      out.LAUNCHER_CURRENCY_HASH == "deadbeefdeadbeefdeadbeefdeadbeef"
-    ) "buildArtifacts (oci) must set LAUNCHER_CURRENCY_HASH, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? AGENT_FILES_DRV)
-    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? PASSWD_FILE_DRV)
-    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? GROUP_FILE_DRV)
-    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? NIX_CONFIG_FILE_DRV)
-    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    assert assertMsg (
-      !(out ? SYSCALL_FILTER_DRV)
-    ) "buildArtifacts (oci) must not set bwrap-only keys, got: ${builtins.toJSON out}";
-    pkgs.runCommand "preambles-build-artifacts-oci" { } "touch $out";
-
-  # documentArtifactKeys must be derived from what runArtifacts and
-  # buildArtifacts emit across both runnerKind branches (issue #810), not a
-  # hand-maintained list that can drift. Pinning the exact union forces a
-  # conscious update here when either renderer gains or loses a key.
+  # documentArtifactKeys must be derived from what runArtifacts emits across
+  # both runnerKind branches (issue #810), not a hand-maintained list that can
+  # drift. Pinning the exact list forces a conscious update here when
+  # runArtifacts gains or loses a key.
   preambles-document-artifact-keys =
     let
       out = preambles.documentArtifactKeys;
@@ -890,7 +720,7 @@ in
       ];
     in
     assert assertMsg (out == expected)
-      "documentArtifactKeys must be the sorted union of runArtifacts/buildArtifacts output keys (both runnerKinds) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
+      "documentArtifactKeys must be the sorted union of runArtifacts output keys (both runnerKinds) plus the manual IMAGE and GITHUB_OUTPUT escape hatches, got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-document-artifact-keys" { } "touch $out";
 
   # The {settings, artifacts} nesting is what the Go inputdoc.Document

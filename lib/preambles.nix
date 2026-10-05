@@ -7,32 +7,9 @@ let
   unique = builtins.foldl' (acc: x: if builtins.elem x acc then acc else acc ++ [ x ]) [ ];
   builtinsCompat = import ./builtins-compat.nix;
   inherit (builtinsCompat) concatStrings mapAttrsToList escapeShellArg;
-  # Shared by runArtifacts and buildArtifacts so FLAKE_LAUNCHER_ATTR is
-  # defined once (issue #2677 review fix).
-  launcherCurrencyAttr = system: ".#packages.${system}.launcher-currency";
-  # Shared by runArtifacts' bwrap/OCI branches and buildArtifacts' OCI branch
-  # so the FLAKE_IMAGE_ATTR shape is assembled once (issue #2667 review fix).
+  # Shared by runArtifacts' bwrap and OCI branches so the FLAKE_IMAGE_ATTR
+  # shape is assembled once (issue #2667 review fix).
   flakeImageAttrFor = system: name: ".#packages.${system}.${name}";
-  # Shared by runArtifacts' and buildArtifacts' bwrap branches so the six
-  # build-time drv keys can never render differently between the run and
-  # build documents (issue #2672 review fix).
-  bwrapDrvArtifacts =
-    {
-      agentFilesDrv,
-      agentEnvDrv,
-      passwdFileDrv,
-      groupFileDrv,
-      nixConfigDrv ? "",
-      syscallFilterDrv,
-    }:
-    {
-      AGENT_FILES_DRV = agentFilesDrv;
-      AGENT_ENV_DRV = agentEnvDrv;
-      PASSWD_FILE_DRV = passwdFileDrv;
-      GROUP_FILE_DRV = groupFileDrv;
-      NIX_CONFIG_FILE_DRV = nixConfigDrv;
-      SYSCALL_FILTER_DRV = syscallFilterDrv;
-    };
 in
 rec {
   # Shell-escapes each baked default via escapeShellArg so a value containing
@@ -112,9 +89,8 @@ rec {
       agentEnvPath,
       passwdFilePath,
       groupFilePath,
-      # `spindrift build` has no doc of its own: it runs against this same run
-      # document, so the bwrap branch needs its build-time drv counterparts
-      # here too, not only in buildArtifacts' own bwrap branch (issue #2672).
+      # `spindrift build` runs against this run document, so the bwrap branch
+      # needs its build-time drv counterparts (issue #2672).
       agentFilesDrv,
       agentEnvDrv,
       passwdFileDrv,
@@ -196,20 +172,14 @@ rec {
           # (issue #2667).
           FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-closure";
           IMAGE_TAG = agentClosurePath;
-        }
-        # cmdBuild reads this same run document, so the bwrap branch carries
-        # its own build artifacts the way the OCI branch does (IMAGE_DRV and
-        # friends below). buildArtifacts' bwrap branch renders the separate build
-        # input document, which `build` does not read (issue #2672).
-        // bwrapDrvArtifacts {
-          inherit
-            agentFilesDrv
-            agentEnvDrv
-            passwdFileDrv
-            groupFileDrv
-            nixConfigDrv
-            syscallFilterDrv
-            ;
+          # cmdBuild reads the run document, so it needs the drv behind each
+          # bwrap artifact, as the OCI branch carries IMAGE_DRV (issue #2672).
+          AGENT_FILES_DRV = agentFilesDrv;
+          AGENT_ENV_DRV = agentEnvDrv;
+          PASSWD_FILE_DRV = passwdFileDrv;
+          GROUP_FILE_DRV = groupFileDrv;
+          NIX_CONFIG_FILE_DRV = nixConfigDrv;
+          SYSCALL_FILTER_DRV = syscallFilterDrv;
         }
       else
         {
@@ -236,7 +206,7 @@ rec {
       # Linux-bound OCI artifacts, the launcher is a per-host-system Go binary
       # that runs on every platform including bwrap/darwin, so this renders
       # against systems.host.
-      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr systems.host;
+      FLAKE_LAUNCHER_ATTR = ".#packages.${systems.host}.launcher-currency";
       LAUNCHER_CURRENCY_HASH = launcherCurrencyHash;
       HOST_MEDIATED_REMOTE = if hostMediatedRemote then "true" else "false";
       OUTBOX_RELAY_CAPABLE = if outboxRelayCapable then "true" else "false";
@@ -252,76 +222,11 @@ rec {
       CHORE_CATALOG = choreCatalog;
     };
 
-  # The Launcher input document's `artifacts` section of the build input
-  # (ADR 0020, issue #625): everything `build` needs to realize the image or
-  # closure.
-  buildArtifacts =
-    {
-      runnerKind,
-      agentFilesDrv,
-      agentEnvDrv,
-      passwdFileDrv,
-      groupFileDrv,
-      runtime,
-      imagePath,
-      imageHash,
-      launcherCurrencyHash,
-      imageName,
-      imageDrv,
-      nixBuilderImage,
-      # Bundled the same way as runArtifacts above (issue #2770 slice 2). See
-      # its comment for the FLAKE_IMAGE_ATTR/FLAKE_LAUNCHER_ATTR divergence.
-      systems,
-      # The bwrap-only nix.conf build artifact (issue #2664). See runArtifacts'
-      # nixConfigPath comment above for why it defaults to "".
-      nixConfigDrv ? "",
-      # See runArtifacts' syscallFilterPath comment above: unconditional, so
-      # no `?` default.
-      syscallFilterDrv,
-      # bwrap.go's closureGeneration() derives the store-DB snapshot dir name
-      # from IMAGE_TAG, so this must render the same value runArtifacts' bwrap
-      # branch does or NewBwrapBuild and NewBwrap disagree about where that
-      # snapshot lives (issue #2966).
-      agentClosurePath,
-    }:
-    (
-      if runnerKind == "bwrap" then
-        {
-          RUNTIME = "bwrap";
-          IMAGE_TAG = agentClosurePath;
-        }
-        // bwrapDrvArtifacts {
-          inherit
-            agentFilesDrv
-            agentEnvDrv
-            passwdFileDrv
-            groupFileDrv
-            nixConfigDrv
-            syscallFilterDrv
-            ;
-        }
-      else
-        {
-          RUNTIME = runtime;
-          IMAGE_ARCHIVE = imagePath;
-          IMAGE_TAG = "${imageName}:${imageHash}";
-          IMAGE_DRV = imageDrv;
-          NIX_BUILDER_IMAGE = nixBuilderImage;
-          NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-image";
-        }
-    )
-    // {
-      RUNNER_KIND = runnerKind;
-      FLAKE_LAUNCHER_ATTR = launcherCurrencyAttr systems.host;
-      LAUNCHER_CURRENCY_HASH = launcherCurrencyHash;
-    };
-
   # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
   # what actually renders instead of a parallel list that can silently drift
   # (issue #810). The placeholder args below are safe because only the output
   # keys matter. IMAGE and GITHUB_OUTPUT (#2324) are env-only escape hatches
-  # neither function emits, so they are added by hand.
+  # runArtifacts does not emit, so they are added by hand.
   documentArtifactKeys =
     let
       dummyDriverEntry = {
@@ -374,35 +279,8 @@ rec {
           syscallFilterPath = "dummy";
           syscallFilterDrv = "dummy";
         };
-      dummyBuildArtifacts =
-        runnerKind:
-        buildArtifacts {
-          inherit runnerKind;
-          agentFilesDrv = "dummy";
-          agentEnvDrv = "dummy";
-          passwdFileDrv = "dummy";
-          groupFileDrv = "dummy";
-          runtime = "dummy";
-          imagePath = "dummy";
-          imageHash = "dummy";
-          launcherCurrencyHash = "dummy";
-          imageName = "dummy";
-          imageDrv = "dummy";
-          nixBuilderImage = "dummy";
-          systems = {
-            host = "dummy";
-            linux = "dummy";
-          };
-          nixConfigDrv = "dummy";
-          syscallFilterDrv = "dummy";
-          agentClosurePath = "dummy";
-        };
       allKeys =
         builtins.concatMap (runnerKind: builtins.attrNames (dummyRunArtifacts runnerKind)) [
-          "bwrap"
-          "oci"
-        ]
-        ++ builtins.concatMap (runnerKind: builtins.attrNames (dummyBuildArtifacts runnerKind)) [
           "bwrap"
           "oci"
         ]
