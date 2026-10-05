@@ -515,7 +515,6 @@ func TestIsAssemblePromptInvocation(t *testing.T) {
 		{"assemble-prompt first arg", []string{"assemble-prompt", "--registry", "x"}, true},
 		{"no args", nil, false},
 		{"ordinary flag invocation", []string{"--driver", "claude"}, false},
-		{"bundle-out", []string{"bundle-out"}, false},
 	}
 	for _, c := range cases {
 		if got := isAssemblePromptInvocation(c.args); got != c.want {

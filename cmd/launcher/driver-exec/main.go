@@ -1,8 +1,6 @@
 // Command driver-exec runs one Driver invocation, direct or inside the Target's
 // devShell (ADR 0009, ADR 0014, issue #626): it spawns the Driver, tees the
 // stream to a log path, filters heartbeats, and returns the Driver's exit code.
-// Its bundle-out verb (issue #1808) bundles base..agent-branch into the outbox
-// so CODE_FORGE=local's Agent only has to commit on the branch.
 package main
 
 import (
@@ -21,9 +19,6 @@ import (
 // flag package, which panics on re-registering flags across repeated calls in
 // one test binary.
 func mainRun(argv []string, stdout, stderr io.Writer) int {
-	if isBundleOutInvocation(argv) {
-		return runBundleOut(argv[1:], stdout)
-	}
 	if isAssemblePromptInvocation(argv) {
 		return runAssemblePrompt(argv[1:], stdout, stderr)
 	}

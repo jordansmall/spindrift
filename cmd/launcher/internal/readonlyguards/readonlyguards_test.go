@@ -14,11 +14,11 @@ import (
 )
 
 // runGitCmd duplicates the helper of the same name in
-// cmd/launcher/driver-exec/bundleout_cmd_test.go, which is in a different
-// package and so cannot be imported here.
+// cmd/launcher/driver-exec/helpers_test.go (see there for why gc is off),
+// which is in a different package and so cannot be imported here.
 func runGitCmd(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command("git", append([]string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v (dir=%s): %v: %s", args, dir, err, out)
