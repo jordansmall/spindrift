@@ -100,11 +100,7 @@ func TestSeedDeltaReviewPromptPreservesOriginalAsCacheablePrefix(t *testing.T) {
 
 	state := runstate.RunState{ReviewFindings: "VERDICT: APPROVE\n\n## Non-blocking\n- run.go:1 -- nit"}
 	delta := landdelta.Delta{Known: true, Files: 2, Insertions: 3, Deletions: 1, Paths: []string{"go.mod", "run.go"}}
-	trigger := deltareview.Trigger{
-		Fire:   true,
-		Reason: "land delta touches lines beyond the reviewer's findings: run.go:42",
-		Beyond: []string{"run.go:42"},
-	}
+	trigger := deltareview.BeyondTrigger([]string{"run.go:42"})
 
 	seeded, err := seedDeltaReviewPrompt(promptFile, state, delta, trigger)
 	if err != nil {
