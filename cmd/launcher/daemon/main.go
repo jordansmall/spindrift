@@ -19,6 +19,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
@@ -43,7 +44,7 @@ const inputFlag = "--input"
 type parsedArgs struct {
 	InputPath        string
 	Kinds            []daemon.Kind
-	ExplicitSelector bool   // true when argv named a kind selector; false for the bare "every kind" default (see gateButlerKind)
+	ExplicitSelector bool   // true when argv named a kind selector; false for the bare "every kind" default (see gateKinds)
 	FeatureBranch    string // empty when --feature-branch is absent; see hostRunner.featureBranch
 }
 
@@ -56,7 +57,7 @@ type parsedArgs struct {
 // operator who has not created the research labels on their target repo
 // runs the daemon; `research` alone restricts it to advise-only research;
 // `butler` alone restricts it to the chore. The bare default's butler is
-// provisional until gateButlerKind, since parseArgs has no document to
+// provisional until gateKinds, since parseArgs has no document to
 // resolve BUTLER_CHORES against.
 func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
@@ -107,33 +108,48 @@ func parseArgs(args []string) (parsedArgs, error) {
 	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch}, nil
 }
 
-// gateButlerKind drops the butler from a bare invocation's kinds when
-// BUTLER_CHORES enables no Chore, so a bare daemon without Chores runs the
-// other kinds rather than being refused by startupPreflight's `doctor
-// --butler`. A `butler` selector named explicitly fails startup instead of
-// running nothing. A butler that survives this gate has the rest of its
-// config validated by that same `doctor --butler` (issue #3920).
-// Without the butler among kinds the three knobs are never parsed, so a
-// dispatch- or research-only daemon never fails on butler config it does not
-// use. With the butler among kinds but knobs.Chores empty, chore.Load
+// gateKinds drops from a bare invocation's kinds every kind whose descriptor
+// Enablement row is unmet, so a bare daemon without Chores runs the other
+// kinds rather than being refused by startupPreflight's `doctor --butler`. A
+// kind named explicitly fails startup instead of running nothing. A butler that survives
+// this gate has the rest of its config validated by that same `doctor
+// --butler` (issue #3920).
+// Without an EnabledByChores kind among kinds the three knobs are never
+// parsed, so a dispatch- or research-only daemon never fails on butler config
+// it does not use. With one among kinds but knobs.Chores empty, chore.Load
 // itself short-circuits before touching BUTLER_EVERY or
 // BUTLER_CHORE_CLASSES, so only a chore.Load error with at least one Chore
 // enabled fails startup.
-func gateButlerKind(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([]daemon.Kind, error) {
-	if !slices.Contains(kinds, daemon.KindOf(dispatchkind.Butler)) {
-		return kinds, nil
+func gateKinds(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([]daemon.Kind, error) {
+	loadChores := sync.OnceValues(func() ([]chore.Chore, error) { return chore.Load(knobs) })
+	kept := make([]daemon.Kind, 0, len(kinds))
+	for _, k := range kinds {
+		d, ok := dispatchkind.ByVerb(string(k))
+		if !ok {
+			return nil, fmt.Errorf("unknown kind %q", k)
+		}
+		var disabled error
+		switch d.Enablement {
+		case dispatchkind.EnabledAlways:
+		case dispatchkind.EnabledByChores:
+			resolved, err := loadChores()
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", d.Verb, err)
+			}
+			if len(resolved) == 0 {
+				disabled = chore.ErrNoChores
+			}
+		default:
+			return nil, fmt.Errorf("%s: unknown enablement %d", d.Verb, d.Enablement)
+		}
+		switch {
+		case disabled == nil:
+			kept = append(kept, k)
+		case explicitSelector:
+			return nil, fmt.Errorf("%s selected but %w", d.Verb, disabled)
+		}
 	}
-	resolved, err := chore.Load(knobs)
-	if err != nil {
-		return nil, fmt.Errorf("butler: %w", err)
-	}
-	if len(resolved) > 0 {
-		return kinds, nil
-	}
-	if explicitSelector {
-		return nil, fmt.Errorf("butler selected but %w", chore.ErrNoChores)
-	}
-	return slices.DeleteFunc(slices.Clone(kinds), func(k daemon.Kind) bool { return k == daemon.KindOf(dispatchkind.Butler) }), nil
+	return kept, nil
 }
 
 // researchPromoted reports whether doctor's preflight should require the
@@ -754,7 +770,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	butlerChores := doc.ResolveOptional("BUTLER_CHORES", stderr)
 	butlerEvery := doc.ResolveOptional("BUTLER_EVERY", stderr)
 	butlerChoreClasses := doc.ResolveOptional("BUTLER_CHORE_CLASSES", stderr)
-	gatedKinds, err := gateButlerKind(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: butlerChores, Every: butlerEvery, Classes: butlerChoreClasses})
+	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: butlerChores, Every: butlerEvery, Classes: butlerChoreClasses})
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -828,7 +844,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		// entry and this line calls os.Setenv, so it's still a startup capture.
 		env:   os.Environ(),
 		knobs: strippedKeys,
-		// A butler gateButlerKind dropped, or an explicit dispatch/research
+		// A butler gateKinds dropped, or an explicit dispatch/research
 		// selector, must never refuse startup over butler config. Research is
 		// promoted only when explicitly selected: the bare selector always
 		// lists it, and a dispatch-only repo without the research labels

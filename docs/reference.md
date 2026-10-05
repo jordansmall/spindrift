@@ -5887,9 +5887,10 @@ under **Pool** below — except the butler, which the bare default drops when
 opted into no Chore sees the same two-kind daemon as before; naming `butler`
 explicitly with an empty `BUTLER_CHORES` fails startup instead of running a
 kind that could only ever report no work (`daemon: butler selected but no
-chores enabled (BUTLER_CHORES is empty)`, `gateButlerKind`,
-`cmd/launcher/daemon/main.go`). `status` is the other positional, and it is
-dispatched ahead of that kind-selector parse rather than sharing its slot —
+chores enabled (BUTLER_CHORES is empty)`). `gateKinds`
+(`cmd/launcher/daemon/main.go`) decides this from each kind's descriptor
+`Enablement` row, never from its name. `status` is the other positional, and
+it is dispatched ahead of that kind-selector parse rather than sharing its slot —
 `nix run .#daemon -- status` prints the checkout's current daemon state and
 exits without starting anything, needing no `--input` document (reading
 status is not running a daemon; the wrapper's own leading `--input <doc>`
@@ -6225,7 +6226,7 @@ the first child will run at, so the preflight validates the build about to
 actually run rather than the operator's possibly-stale working tree. When
 `--feature-branch` is set (**Feature branch** above), doctor's own argv
 gets the same `--base-branch` flag every child does. When the butler kind
-survived `gateButlerKind` (**Daemon** above) — a bare invocation with a
+survived `gateKinds` (**Daemon** above) — a bare invocation with a
 non-empty `BUTLER_CHORES`, or an explicit `butler` selector — doctor's argv
 also gets `--butler`, so the preflight validates the butler's own config
 (a Filer, `DRIVER` not `opencode`, a `CODE_FORGE` with a Ledger,

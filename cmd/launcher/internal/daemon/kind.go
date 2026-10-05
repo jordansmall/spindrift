@@ -43,7 +43,7 @@ func ParseKind(s string) (Kind, error) {
 // butler off the same pool by default (ADR 0056, #3878), while "dispatch",
 // "research", or "butler" alone still restrict it to one kind for callers
 // that want that. The daemon binary still drops the butler from "" when
-// BUTLER_CHORES enables no Chore (cmd/launcher/daemon's gateButlerKind).
+// BUTLER_CHORES enables no Chore (cmd/launcher/daemon's gateKinds).
 func ParseKinds(s string) ([]Kind, error) {
 	if s == "" {
 		kinds := make([]Kind, 0, len(dispatchkind.All))

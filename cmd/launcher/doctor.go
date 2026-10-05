@@ -81,7 +81,7 @@ func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opt
 	configErr := v.configErr
 	if opts.butler {
 		// "" means no --chore: validate every BUTLER_CHORES entry, and an
-		// empty BUTLER_CHORES fails (ErrNoChores) -- same as gateButlerKind
+		// empty BUTLER_CHORES fails (ErrNoChores) -- same as gateKinds
 		// refusing an explicit butler selector with no chores.
 		if _, err := resolveButlerSettings(rc.config, ""); err != nil {
 			configErr = errors.Join(configErr, err)

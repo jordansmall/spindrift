@@ -34,7 +34,7 @@ type hostRunner struct {
 	nixSystem     string
 	env           []string // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
 	knobs         []string // keys of the Launcher input document's settings map, stripped from env before a child sees it
-	butler        bool     // the butler kind survived gateButlerKind; RunDoctor then adds doctor --butler (issue #3920)
+	butler        bool     // the butler kind survived gateKinds; RunDoctor then adds doctor --butler (issue #3920)
 	research      bool     // the research kind is explicitly selected (not the bare every-kind default); RunDoctor then adds doctor --research
 
 	// flightMu guards flight below, plus the Moved baseline and the
