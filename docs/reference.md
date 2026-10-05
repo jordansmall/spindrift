@@ -64,12 +64,16 @@ The checks `spindrift doctor` runs, grouped by what it probes.
 
 **Labels**
 
-- The four triage labels, required.
+- The four triage labels, required. Also required when the run needs them:
+  `agent-review-finding` on a read-only work deployment with a Filer, and the
+  butler or research labels under `--butler`/`--research`.
 - The seven `agent-research*` labels (ADR 0022, ADR 0041), advisory.
 - The three `agent-priority-*` labels (ADR 0040), advisory.
 - `agent-ambiguous-spec`, advisory.
 - The butler pair `agent-butler-finding` (ADR 0056) and `agent-butler-patch`
-  (ADR 0057), advisory.
+  (ADR 0057), advisory unless `--butler` promotes them (`agent-butler-patch`
+  only while the patch rung is on: `BUTLER_MAX_PATCHES_PER_DAY` above 0 and a
+  `github`/`forgejo` tracker naming the same backend as `CODE_FORGE`).
 - When run interactively (TTY attached) and labels are missing, doctor
   offers to create them, with the prompt itself stating the
   required/advisory tier counts and what declining each means; in CI (no
@@ -225,8 +229,8 @@ each other, so the collision is not a conflict to resolve.
 | 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec/butler labels unless promoted by `--research`/`--butler`, runtime not ready, etc.) are allowed, and their rows print only under `--verbose`/`-v` — except the advisory labels re-listed above the interactive create-label prompt and the still-missing-after-creation lines, which print either way (see [`spindrift doctor` checks](#spindrift-doctor-checks)) |
 | 1    | reserved for internal/unclassified errors |
 | 2    | configuration invalid — the same required-knob/driver/cross-knob validation `dispatch` gates on, minus runtime readiness (advisory here, per exit 0 above, even though `dispatch` itself still requires it before launching a Box); also fires when `podman-machine-memory` fails (the podman machine is undersized for `MEMORY_LIMIT` × `MAX_PARALLEL`, issue #3544), since that row is classified alongside the required-knob checks |
-| 3    | auth or connectivity — the issue tracker or code forge could not be reached, or a work-tier label create call failed (an advisory-tier label create failure does not fail the check and still exits 0; its row prints only under `--verbose`/`-v`) |
-| 4    | required checks failed or declined — one or more of the four triage labels are missing and were not created, whether declined at the interactive prompt, missing in non-interactive (CI) mode, or still missing after a create attempt |
+| 3    | auth or connectivity — the issue tracker or code forge could not be reached, or a Required label's create call failed (the work tier, or a tier promoted by `--butler`/`--research`; an advisory-tier label create failure does not fail the check and still exits 0; its row prints only under `--verbose`/`-v`) |
+| 4    | required checks failed or declined — one or more required labels are missing and were not created (the four triage labels, plus any label the run requires: the `--butler`/`--research` tiers, or `agent-review-finding` on a read-only Filer deployment), whether declined at the interactive prompt, missing in non-interactive (CI) mode, or still missing after a create attempt |
 
 The optional `--butler` flag additionally runs the butler's own config checks
 (the same ones `spindrift butler` gates a sweep on — `BUTLER_CHORES`,
@@ -234,12 +238,21 @@ The optional `--butler` flag additionally runs the butler's own config checks
 a failure there folds into exit 2 above, same as any other configuration-invalid
 case (issue #3920).
 
-Passing `--butler` also promotes the butler label tier (`agent-butler-finding`,
-`agent-butler-patch`) from advisory to Required, and `--research` does the same
-for the research tier, so missing labels of a promoted tier exit 4 like a missing
+Passing `--butler` also promotes `agent-butler-finding` from advisory to
+Required (`agent-butler-patch` too, but only while the patch rung is on, since a
+zero `BUTLER_MAX_PATCHES_PER_DAY` cap never applies it), and `--research` does
+the same for the research tier, so those missing labels exit 4 like a missing
 triage label (create prompt included). The daemon's startup preflight passes
-each flag for the kind it runs (issue #4400); a plain `spindrift doctor` keeps
-both tiers advisory.
+each flag for the kind it runs (issue #4400), except that `--research` is passed
+only when the operator explicitly selected the research kind; a plain
+`spindrift doctor` keeps both tiers advisory. A read-only work deployment with a
+provisioned Filer also requires `agent-review-finding` with no flag, since the
+host files the findings the Box relays and its label must exist. An
+`ISSUE_TRACKER` with no label registry (`local`, `jira`) adds none of these
+extra Required labels: it cannot list or create one ahead of time, so the
+label appears on first filing instead (issue #4400). `agent-butler-patch` is
+likewise Required only when the patch rung is on: the tracker and `CODE_FORGE`
+must be a matching `github`/`forgejo` pair that can actually land patches.
 
 Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 > baked default** (ADR 0020): nix renders the resolved `settings` values (plus
@@ -3416,9 +3429,11 @@ the main agent delegates only those escalated findings to the filer. The
 filer:
 
 - ensures the `agent-review-finding` label exists on the Target repo
-  (idempotent — it creates the label itself; this label is separate from the
-  four triage labels `spindrift doctor` manages and is not required for
-  dispatch to work);
+  (idempotent — it creates the label itself, and the host also ensure-creates
+  it when it files a relayed finding; this label is separate from the
+  four triage labels `spindrift doctor` manages; doctor requires it only for a
+  read-only work deployment with a provisioned Filer, where the host files the
+  relayed findings);
 - searches **all open issues, regardless of label** and skips findings that
   already match — an open issue means the problem is already tracked,
   whether human-filed, `ready-for-agent`, filed via `/to-tickets`, or from a
@@ -3481,6 +3496,12 @@ mapping and ensure-creates the mapped label best-effort before applying it
 alongside whichever provenance label the caller supplies
 (`agent-review-finding` on the work path, `agent-research-finding` on the
 research path).
+The host ensure-creates that provenance label (and `agent-butler-patch` on
+the patch rung) too, create-then-recheck like the type label, before posting
+the issue. Unlike the type label, a failure here is not best-effort: if the
+label still cannot be created (a token without label-create rights), it stays
+requested and the filing counts as failed (`failed:<N>`) rather than landing
+unlabeled.
 Omitting `type`, or naming anything outside the closed set, still files the
 issue — just untyped, never rejected — and a label ensure-creation failure
 is itself non-fatal, the same best-effort guarantee as the rest of this
@@ -3496,8 +3517,8 @@ the same site; whitespace touching a separator is absorbed into the fold
 too, so `Type. Field` also keys as `type:field`; and any leading or
 trailing separator is trimmed, so a separator-only term normalizes to
 empty, and a term with no letter or digit at all, e.g. `-` or `!!`, also
-normalizes to empty) and dropped if it's
-empty, contains `,` (the marker line's own field separator), or contains
+normalizes to empty) and dropped if it's empty, contains `,` (the marker
+line's own field separator), or contains
 `--` (which would close the `<!-- spindrift-dedup: ... -->` HTML comment
 early) — an intent carrying no usable term after that filter has an empty
 key set and never matches, and the run warns on stderr that the intent files
@@ -3675,9 +3696,10 @@ see [Configuring the research verdict vocabulary
 to change the verdicts and their labels. `spindrift doctor` checks and, in
 interactive mode, offers to create these too, but treats them as advisory:
 unlike the four triage labels above, a missing research label never fails
-the check (so CI `doctor` runs stay green for deployments that don't use
-research yet). `agent-research-trigger` is a separate case: doctor never
-checks or creates it at all — like `agent-trigger`, it is repo-local
+the check unless `--research` promotes the tier (the daemon's startup
+preflight does when the research kind is explicitly selected), so CI `doctor` runs stay green for
+deployments that don't use research yet. `agent-research-trigger` is a
+separate case: doctor never checks or creates it at all — like `agent-trigger`, it is repo-local
 Actions trigger vocabulary, not a doctor-managed label — so create it
 manually below for the CI path. To create the default set manually:
 
@@ -3740,8 +3762,9 @@ non-configurable provenance label the one-shot butler run's Filer applies to
 every Chore finding it files — the butler kind's counterpart to
 `agent-research-finding`. `spindrift doctor` checks and, in interactive mode,
 offers to create it too, but treats it as advisory: like the labels above, a
-missing `agent-butler-finding` label never fails the check. To create it
-manually:
+missing `agent-butler-finding` label never fails the check unless `--butler`
+promotes the butler tier. The host also creates it at filing time if missing.
+To create it manually:
 
 ```sh
 gh label create agent-butler-finding --repo owner/repo --color f9d0c4 --description "Filed from a butler Chore finding"
@@ -3755,7 +3778,10 @@ non-configurable provenance label the host adds alongside
 than leaving it for a worker to promote. `spindrift doctor` checks and, in
 interactive mode, offers to create it too, but treats it as advisory: like
 the labels above, a missing `agent-butler-patch` label never fails the
-check. To create it manually:
+check unless `--butler` promotes the butler tier, and even then only while
+the patch rung is on (`BUTLER_MAX_PATCHES_PER_DAY` above 0 and a matching
+`github`/`forgejo` tracker and forge). The host also creates it at
+filing time if missing. To create it manually:
 
 ```sh
 gh label create agent-butler-patch --repo owner/repo --color 5319e7 --description "Butler finding the host landed as a patch PR (ADR 0057)"
@@ -5077,7 +5103,12 @@ codes](#spindrift-doctor-exit-codes)). A
 daemon with the butler kind in play — a bare invocation with a non-empty
 `BUTLER_CHORES`, or an explicit `butler` selector — passes `--butler` to its
 own startup doctor preflight and refuses to start when the butler cannot
-run; see the [Daemon](#daemon) section's **Startup preflight** description
+run or its labels are missing — `agent-butler-finding`, plus
+`agent-butler-patch` only while the patch rung is on
+(`BUTLER_MAX_PATCHES_PER_DAY` above 0 and a matching `github`/`forgejo`
+tracker and forge); the
+host still ensure-creates them when it files a finding. See the
+[Daemon](#daemon) section's **Startup preflight** description
 (issue #3920).
 
 `BUTLER_CHORE_CLASSES` (schema key `butlerChoreClasses`) holds each Chore's
@@ -5127,7 +5158,11 @@ worker's leftover and taken over, carrying `lastSwept` and `cursor` forward
 from the last done commit so the takeover resumes the sweep rather than
 restarting it. A run that itself crashes leaves the claim standing and exits
 non-zero, so the next invocation's staleness check is the only recovery path
-— there is no separate `recover` for butler.
+— there is no separate `recover` for butler. A sweep whose findings all fail
+to file (typically a missing provenance label) counts as such a crash: the run
+is marked failed, writes no Done commit, leaves the cursor and claim where they
+were so the next run re-finds the findings, and exits non-zero so the daemon's
+breaker counts it.
 
 Four budget knobs (ADR 0056) cap a day of butler activity, summed across
 every Chore currently listed in `BUTLER_CHORES` (drop a Chore from the list
@@ -6195,10 +6230,17 @@ also gets `--butler`, so the preflight validates the butler's own config
 `BUTLER_CHORE_CLASSES`, the sweep-vs-day cap relationship, `BUTLER_EVERY`)
 up front; a butler that cannot run then refuses daemon startup as a
 preflight halt instead of halting the pool on its first butler slot (exit
-6, config-invalid) after the pool has already started. An explicit `dispatch`/`research`
-selector never adds the flag, so butler-only misconfiguration never
-refuses a daemon that was never going to run the butler. The
-daemon passes no verbosity flag, so doctor's quiet-by-default behavior
+6, config-invalid) after the pool has already started. `--butler` also makes
+the butler label tier Required, so a missing `agent-butler-finding` (or
+`agent-butler-patch`, while the patch rung is on: `BUTLER_MAX_PATCHES_PER_DAY`
+above 0 and a matching `github`/`forgejo` tracker and forge) refuses
+the start. A daemon whose operator explicitly selected the research kind
+(`nix run .#daemon -- research`) likewise passes `--research`, which makes the
+research label tier Required (issue #4400); the bare invocation keeps research
+labels advisory even though it draws from the research queue. An explicit
+`dispatch`/`research` selector never adds `--butler`, so butler-only
+misconfiguration never refuses a daemon that was never going to run the
+butler. The daemon passes no verbosity flag, so doctor's quiet-by-default behavior
 (`--verbose`/`-v` opts back into the full report) governs the preflight: a
 healthy start adds no doctor report at all to the daemon's own stderr, and a
 refused one adds only two things: the failing `MISSING:` rows (a missing
@@ -6218,8 +6260,13 @@ claim silently fails; the same pass also catches an undersized podman
 machine before the VM dies mid-run rather than after. Runtime readiness is
 deliberately not re-checked here — every Dispatch already validates it
 before any claim, so the preflight would only be re-asking a question the
-child asks itself. A missing *research* label never refuses a start,
-matching doctor's advisory treatment of that family (ADR 0022). Doctor's
+child asks itself. A missing *research* label refuses a start only when the
+research kind was explicitly selected (`--research`); otherwise it stays
+advisory, matching doctor's treatment of that family (ADR 0022). An exit-4
+refusal shows doctor's own "required label(s) missing or declined" line as
+its detail, so the halt names the labels rather than just pointing at the
+four triage ones; the generic "required labels are missing" detail appears
+only when no such line was captured. Doctor's
 own exit-code table is a separate contract from the child's: the daemon
 reads it through `ClassifyPreflight`, not the `Interpret` mapping the
 child-dispatch table above uses, which is why every `preflight` event's
@@ -6676,7 +6723,7 @@ the same log:
 |------|---------|
 | 0    | a clean stop — an operator signal, or a child that drained and reported a signalled stop |
 | 10   | the daemon's own build changed at the fetched tip and it halted at an iteration boundary |
-| 11   | the startup preflight refused the start — a Required-tier `doctor` failure (missing triage labels, invalid config) or a seam failure resolving the tip/running doctor at all |
+| 11   | the startup preflight refused the start — a Required-tier `doctor` failure (missing triage labels, missing research/butler labels for a selected kind, invalid config) or a seam failure resolving the tip/running doctor at all |
 | 12   | `--feature-branch` disappeared from origin mid-run — the pool stopped claiming and halted once in-flight children finished (**Feature branch** above); a branch already missing at startup exits 11 instead |
 | 1    | anything else: a startup failure (including a refused instance lock), or any other halt — the event stream carries the specific reason |
 
