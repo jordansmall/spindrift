@@ -75,25 +75,27 @@ asked), tees the stream to the Box log, filters heartbeats in-process
 Driver's exit code. Owns process mechanics — invocation data and outcome
 extraction stay with the Driver's nix half (ADR 0009). Replaced
 the old entrypoint's temp-file/eval marshalling across the devShell process
-boundary (issue #626). Its `bundle-out` verb (issue #1808) extends it beyond
-process mechanics into CODE_FORGE=local's harness-owned code-out: after the
-Driver exits, it bundles the base..agent-branch range into the outbox itself
-instead of trusting the Agent to run `git bundle create` — the Agent's own
-contract there shrinks to "commit on the branch," identical to every other
-Code Forge. An empty range against a claimed `ready` outcome gets a
-corrective `status=blocked` SPINDRIFT_OUTCOME line instead of settling as a
-false ready. The settle phases (outcome backstop, marker gate, read-only
-guards, dispatch-kind posture) run in-process in the box binary, so
-driver-exec carries no verb for them.
+boundary (issue #626). The settle phases (outcome backstop, marker gate,
+read-only guards, dispatch-kind posture, bundle-out) run in-process in the box
+binary, so driver-exec carries no verb for them.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **box (binary)**:
 The in-box Go program (`cmd/launcher/box`, [ADR
 0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md))
 the generated shim `entrypoint.sh` `exec`s. box starts the Box (env guards, the
-Target-repo clone, branch recovery, prompt assembly), orchestrator runs passes, driver-exec serves a pass: box owns the outcome and
-PR-intent nudges, the synthetic outcome backstop, the already-resolved
-demotion, the lockfile scan and bundle-out, then exits with the run's code.
+Target-repo clone, branch recovery, prompt assembly), orchestrator runs passes,
+driver-exec serves a pass: box owns the outcome and PR-intent nudges, the
+synthetic outcome backstop, the already-resolved demotion, the lockfile scan
+and bundle-out, then exits with the run's code. That last phase
+(`internal/bundleout`, issue #1808; advise-only kinds skip it) is the
+harness-owned code-out for a Box whose outbox is mounted host-side
+(CODE_FORGE=local, or a read-only relay):
+after the Driver exits, box bundles the base..agent-branch range into the
+outbox itself instead of trusting the Agent to run `git bundle create`, so the
+Agent's contract shrinks to "commit on the branch," identical to every other
+Code Forge. An empty range against a claimed `ready` outcome gets a corrective
+`status=blocked` SPINDRIFT_OUTCOME line instead of settling as a false ready.
 Not the Box (the isolation boundary above).
 _Avoid_: entrypoint, post-driver shell.
 
