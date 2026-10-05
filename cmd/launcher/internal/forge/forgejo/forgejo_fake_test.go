@@ -342,7 +342,7 @@ func (f *fakeForgejo) handlePatchPull(w http.ResponseWriter, r *http.Request, nu
 
 	f.mu.Lock()
 	p, ok := f.pulls[num]
-	if ok {
+	if ok && body.Title != "" { // upstream EditPullRequest ignores an empty title
 		p.Title = body.Title
 	}
 	f.mu.Unlock()

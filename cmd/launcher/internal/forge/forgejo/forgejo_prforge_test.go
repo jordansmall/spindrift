@@ -2,6 +2,7 @@ package forgejo_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -834,6 +835,68 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 	}
 	if gotBody["title"] != "add feature" {
 		t.Fatalf("body[title] = %v, want %q", gotBody["title"], "add feature")
+	}
+}
+
+func markReadyAgainst(t *testing.T, title string, draft bool) (patches []map[string]any, err error) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
+			w.Write([]byte(pullJSON(206, "open", false, true, draft, title, "agent/issue-206", "abc123", "main")))
+		case r.Method == http.MethodPatch:
+			var b map[string]any
+			json.NewDecoder(r.Body).Decode(&b)
+			patches = append(patches, b)
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+		BaseURL:      srv.URL,
+		Repo:         "owner/repo",
+		Token:        "tok",
+		BranchPrefix: "agent/issue-",
+	}, nil, "unused")
+	pr, ok := cf.(prReader)
+	if !ok {
+		t.Fatalf("forgejoCodeForge does not satisfy prReader")
+	}
+	err = pr.MarkReady("https://forge.test/owner/repo/pulls/206")
+	return patches, err
+}
+
+func TestMarkReady_MarkerOnlyTitleRefusesPatch(t *testing.T) {
+	for _, title := range []string{"[WIP]", "WIP:"} {
+		for _, draft := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s/draft=%v", title, draft), func(t *testing.T) {
+				patches, err := markReadyAgainst(t, title, draft)
+				if err == nil {
+					t.Fatalf("MarkReady(%q) error = nil, want error", title)
+				}
+				if !strings.Contains(err.Error(), "empty once WIP markers are stripped") || !strings.Contains(err.Error(), "206") {
+					t.Errorf("error = %q, want it to name the PR and say the stripped title is empty", err)
+				}
+				if len(patches) != 0 {
+					t.Errorf("sent %d PATCH request(s), want none: %v", len(patches), patches)
+				}
+			})
+		}
+	}
+}
+
+func TestMarkReady_StripsStackedMarkersInOnePatch(t *testing.T) {
+	patches, err := markReadyAgainst(t, "WIP: [WIP] add feature", true)
+	if err != nil {
+		t.Fatalf("MarkReady(...) unexpected error: %v", err)
+	}
+	if len(patches) != 1 {
+		t.Fatalf("PATCH count = %d, want 1", len(patches))
+	}
+	if patches[0]["title"] != "add feature" {
+		t.Fatalf("body[title] = %v, want %q", patches[0]["title"], "add feature")
 	}
 }
 
