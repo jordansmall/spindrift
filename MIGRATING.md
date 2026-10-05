@@ -231,11 +231,11 @@ the `${TDD_*_STEP}` pair and before
 As of issue #4401 a leftover `${CODE_COMMENTS_STEP}` in an override prompt
 is an error: prompt assembly rejects it before the agent starts, naming the
 variable, the issue that removed it, and this file, and a baked `mkHarness`
-prompt arg fails eval. The assembler still passes other unknown `${NAME}`
-tokens through untouched. An override `conflict-resolve-prompt.md` is not
-checked at runtime, and `RenderPrompt` in
-`cmd/launcher/internal/conflictresolve` leaves an unlisted `${NAME}` as-is, so
-drop the token there yourself.
+prompt arg fails eval. As of issue #4523 an override
+`conflict-resolve-prompt.md` and the fragments it reads
+(`fragments/caveman-default.md`, `fragments/skill-preamble.md`) are rejected
+the same way. Both renderers still pass other unknown `${NAME}` tokens
+through untouched.
 
 ## The read-only `/issues` mount is retired; local issue text is injected (issue #3471)
 
