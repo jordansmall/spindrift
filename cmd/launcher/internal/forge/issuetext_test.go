@@ -1,7 +1,9 @@
 package forge_test
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -23,7 +25,7 @@ func TestIssueText(t *testing.T) {
 		f.SetIssue(forge.Issue{Number: "1", Body: "the body"})
 		tracker := issueOnlyTracker{IssueTracker: f}
 
-		got, err := forge.IssueText(tracker, "1")
+		got, err := forge.IssueText(tracker, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText: %v", err)
 		}
@@ -42,7 +44,7 @@ func TestIssueText(t *testing.T) {
 			},
 		}
 
-		got, err := forge.IssueText(f, "1")
+		got, err := forge.IssueText(f, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText: %v", err)
 		}
@@ -67,7 +69,7 @@ func TestIssueText(t *testing.T) {
 		}
 		f.CommentsFor = map[string][]forge.Comment{"1": comments}
 
-		got, err := forge.IssueText(f, "1")
+		got, err := forge.IssueText(f, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText: %v", err)
 		}
@@ -90,12 +92,106 @@ func TestIssueText(t *testing.T) {
 		}
 	})
 
+	t.Run("minimized comments are dropped, live ones kept", func(t *testing.T) {
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "1", Body: "body"})
+		f.CommentsFor = map[string][]forge.Comment{
+			"1": {
+				{Author: "alice", CreatedAt: "t1", Body: "live-one"},
+				{Author: "mallory", CreatedAt: "t2", Body: "hidden-one", Minimized: true, MinimizedReason: "SPAM"},
+				{Author: "bob", CreatedAt: "t3", Body: "live-two"},
+			},
+		}
+
+		got, err := forge.IssueText(f, "1", io.Discard)
+		if err != nil {
+			t.Fatalf("IssueText: %v", err)
+		}
+		want := "body\n\n## Comments\n\n" +
+			"alice (t1): live-one\n" +
+			"bob (t3): live-two\n"
+		if got != want {
+			t.Errorf("IssueText = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("minimized comments never evict live ones from the window", func(t *testing.T) {
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "1", Body: "body"})
+		var comments []forge.Comment
+		for i := 0; i < 10; i++ {
+			comments = append(comments, forge.Comment{Author: "a", CreatedAt: "t", Body: "live-" + string(rune('a'+i))})
+		}
+		for i := 0; i < 5; i++ {
+			comments = append(comments, forge.Comment{Author: "m", CreatedAt: "t", Body: "hidden", Minimized: true})
+		}
+		f.CommentsFor = map[string][]forge.Comment{"1": comments}
+
+		got, err := forge.IssueText(f, "1", io.Discard)
+		if err != nil {
+			t.Fatalf("IssueText: %v", err)
+		}
+		for i := 0; i < 10; i++ {
+			if body := "live-" + string(rune('a'+i)); !strings.Contains(got, body) {
+				t.Errorf("IssueText missing live comment %q", body)
+			}
+		}
+		if strings.Contains(got, "hidden") {
+			t.Errorf("IssueText contains minimized comment: %q", got)
+		}
+	})
+
+	t.Run("all comments minimized renders no Comments heading", func(t *testing.T) {
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "1", Body: "body"})
+		f.CommentsFor = map[string][]forge.Comment{
+			"1": {{Author: "m", CreatedAt: "t", Body: "hidden", Minimized: true}},
+		}
+
+		got, err := forge.IssueText(f, "1", io.Discard)
+		if err != nil {
+			t.Fatalf("IssueText: %v", err)
+		}
+		if got != "body" {
+			t.Errorf("IssueText = %q, want %q", got, "body")
+		}
+	})
+
+	t.Run("each dropped comment warns with issue, author, and reason or a placeholder", func(t *testing.T) {
+		f := forge.NewFake()
+		f.SetIssue(forge.Issue{Number: "7", Body: "body"})
+		f.CommentsFor = map[string][]forge.Comment{
+			"7": {
+				{Author: "mallory", Body: "x", Minimized: true, MinimizedReason: "SPAM"},
+				{Author: "alice", Body: "kept"},
+				{Author: "eve", Body: "y", Minimized: true, MinimizedReason: "OFF_TOPIC"},
+				{Author: "bob", Body: "z", Minimized: true},
+			},
+		}
+
+		var warn bytes.Buffer
+		if _, err := forge.IssueText(f, "7", &warn); err != nil {
+			t.Fatalf("IssueText: %v", err)
+		}
+		lines := strings.Split(strings.TrimSuffix(warn.String(), "\n"), "\n")
+		if len(lines) != 3 {
+			t.Fatalf("warn = %q, want 3 lines", warn.String())
+		}
+		for i, want := range [][]string{{"#7", "mallory", "SPAM"}, {"#7", "eve", "OFF_TOPIC"}, {"#7", "bob", "(no reason)"}} {
+			for _, w := range want {
+				if !strings.Contains(lines[i], w) {
+					t.Errorf("warn line %d = %q, missing %q", i, lines[i], w)
+				}
+			}
+		}
+	})
+
 	t.Run("comments-fetch error degrades to body-only", func(t *testing.T) {
 		f := forge.NewFake()
 		f.SetIssue(forge.Issue{Number: "1", Body: "the body"})
 		f.CommentsErr = map[string]error{"1": errors.New("comments unavailable")}
 
-		got, err := forge.IssueText(f, "1")
+		got, err := forge.IssueText(f, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText: %v", err)
 		}
@@ -108,7 +204,7 @@ func TestIssueText(t *testing.T) {
 		f := forge.NewFake()
 		f.IssueErr = errors.New("issue unavailable")
 
-		_, err := forge.IssueText(f, "1")
+		_, err := forge.IssueText(f, "1", io.Discard)
 		if err == nil {
 			t.Fatal("IssueText: want error, got nil")
 		}
@@ -118,7 +214,7 @@ func TestIssueText(t *testing.T) {
 		f := forge.NewFake()
 		f.SetIssue(forge.Issue{Number: "1", Body: strings.Repeat("x", 100*1024)})
 
-		got, err := forge.IssueText(f, "1")
+		got, err := forge.IssueText(f, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText: %v", err)
 		}
@@ -143,7 +239,7 @@ func TestIssueText(t *testing.T) {
 		}
 		tracker := issueOnlyTracker{IssueTracker: f}
 
-		got, err := forge.IssueText(tracker, "1")
+		got, err := forge.IssueText(tracker, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText(issueOnlyTracker): %v", err)
 		}
@@ -154,7 +250,7 @@ func TestIssueText(t *testing.T) {
 		}
 
 		want := "the body\n\n## Comments\n\nalice (2024-01-01T00:00:00Z): first\n"
-		got, err = forge.IssueText(f, "1")
+		got, err = forge.IssueText(f, "1", io.Discard)
 		if err != nil {
 			t.Fatalf("IssueText(Fake): %v", err)
 		}

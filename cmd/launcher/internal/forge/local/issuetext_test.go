@@ -1,6 +1,7 @@
 package local_test
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,7 +43,7 @@ func TestIssueText_TransitiveBlockedByRendered(t *testing.T) {
 	writeIssue(t, dir, "c", "title: C\ncreated: 2026-01-01T00:00:00Z\n", "no blockers")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestIssueText_ParentFollowedOnExactFileMatchAndWalked(t *testing.T) {
 	writeIssue(t, dir, "gpb", "title: GPB\ncreated: 2026-01-01T00:00:00Z\n", "no blockers")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "child")
+	got, err := forge.IssueText(lt, "child", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -80,7 +81,7 @@ func TestIssueText_UnresolvedNonFileParentAndMissingBlocker(t *testing.T) {
 		"## Blocked by\n\n- missing\n")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -104,7 +105,7 @@ func TestIssueText_MalformedLinkedFileUnresolvedWithReason(t *testing.T) {
 	}
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestIssueText_StatusLine(t *testing.T) {
 	writeIssue(t, dir, "c", "title: C\ncreated: 2026-01-01T00:00:00Z\n", "body of c")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -146,7 +147,7 @@ func TestIssueText_AdmissionOrder(t *testing.T) {
 	writeIssue(t, dir, "p", "title: P\ncreated: 2026-01-01T00:00:00Z\n", "no blockers")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestIssueText_WholeEntryOmissionForSize(t *testing.T) {
 	writeIssue(t, dir, "small", "title: Small\ncreated: 2026-01-01T00:00:00Z\n", "small body")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestIssueText_SubjectOnlyTruncationUnchanged(t *testing.T) {
 	writeIssue(t, dir, "b", "title: B\ncreated: 2026-01-01T00:00:00Z\n", "body of b")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -219,7 +220,7 @@ func TestIssueText_CycleAndBackLinkRenderOnce(t *testing.T) {
 	writeIssue(t, dir, "b", "title: B\ncreated: 2026-01-01T00:00:00Z\n", "## Blocked by\n\n- a\n")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
@@ -238,7 +239,7 @@ func TestIssueText_LinkedIssueCommentsSectionCarriedThrough(t *testing.T) {
 		"body of b\n\n## Comments\n\nalice (2024-01-01): hello\n")
 
 	lt := local.NewLocalTracker(dir, issueTextLabels)
-	got, err := forge.IssueText(lt, "a")
+	got, err := forge.IssueText(lt, "a", io.Discard)
 	if err != nil {
 		t.Fatalf("IssueText: %v", err)
 	}
