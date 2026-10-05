@@ -161,7 +161,10 @@ butler) off one pool (issue #3541, #3878).
 The label gates which issues get dispatched — only triage-role holders can apply
 it. But once labeled, the issue body and **every comment from any GitHub user**
 feed the agent as prompt input. The trust boundary is the label, not the issue or
-comment author.
+comment author. The launcher drops comments a maintainer has minimized on GitHub
+from the transcript it renders, but that is a mitigation for that transcript
+only: the Box's token can still read the full thread, and the agent still fetches
+parent and linked issues itself, minimized comments included.
 
 ## Worktrees
 

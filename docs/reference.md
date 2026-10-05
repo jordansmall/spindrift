@@ -1977,9 +1977,11 @@ spindrift dispatch   (the nix-built Go launcher, host-side)
 ```
 
 Before assembling the prompt, the launcher reads the subject issue's body
-plus its last-10-comment snapshot host-side and forwards it into the Box as
-the `ISSUE_TEXT` env var (issue #3445) — the Box never fetches its own
-subject issue from the tracker any more. `promptassembly` renders it into a
+plus its last-10-comment snapshot host-side (comments a maintainer has
+minimized on GitHub are dropped first, and each drop is logged to the
+host's stderr) and forwards it into the Box as the `ISSUE_TEXT` env var
+(issue #3445) — the Box never fetches its own subject issue from the
+tracker any more. `promptassembly` renders it into a
 fenced `# ISSUE TEXT` section (a short preamble marking it authoritative and
 untrusted, then the text itself inside a CommonMark-safe fence) and appends
 that section to the assembled prompt and to the review prompt, after
@@ -4619,7 +4621,11 @@ deliberate, not oversights — write them down so you can honour them:
    bug to patch. The label gates *which* issues get dispatched — but once
    labeled, the issue body and **every comment from any GitHub user** feed the
    agent as prompt input. The trust boundary is the label, not the issue or
-   comment author. What bounds the blast radius is what the token allows and
+   comment author. The launcher drops comments a maintainer has minimized on
+   GitHub from the transcript it renders, but that is a mitigation for that
+   transcript only: the Box's token can still read the full thread, and the
+   agent still fetches parent and linked issues itself, minimized comments
+   included. What bounds the blast radius is what the token allows and
    nothing more, because the Box has no host access.
 3. **Branch protection is a hard prerequisite, not a nicety.** The token needs
    Contents RW to push its `agent/issue-N` branch, and that same scope permits
