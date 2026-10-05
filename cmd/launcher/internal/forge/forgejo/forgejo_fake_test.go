@@ -210,14 +210,12 @@ func (f *fakeForgejo) AutoMergeEnqueued(url string) bool {
 	return f.enqueued[prNumFromURL(url)]
 }
 
-// IsDraftTitle is the fake's own oracle for the "draft" field it serves,
-// since pullPayload derives that field from the title the same way. Tests
-// read it directly because the adapter's OpenPRForBranch no longer reports
-// draft status on the forge.PR it returns.
-func (f *fakeForgejo) IsDraftTitle(num string) bool {
+// IsDraft is the fake's oracle for the "draft" field it serves, derived from
+// the title exactly as fakeIsDraftTitle describes; pullPayload does the same.
+func (f *fakeForgejo) IsDraft(url string) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	p, ok := f.pulls[num]
+	p, ok := f.pulls[prNumFromURL(url)]
 	if !ok {
 		return false
 	}

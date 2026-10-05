@@ -176,53 +176,15 @@ func TestExecClient_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
 
-// draftState reads back the fake gh script's own draft flag for PR num from
-// STATE_DIR/prs/<num>/draft, the file the script's pr-ready case writes. It is
-// the oracle for MarkReady and MarkDraft now that OpenPRForBranch no longer
-// round-trips isDraft at all (#2503).
-func (h *prforgeHarness) draftState(url string) string {
+// IsDraft reads the fake gh script's own draft flag from
+// STATE_DIR/prs/<num>/draft, the file its pr-ready case writes.
+func (h *prforgeHarness) IsDraft(url string) bool {
 	h.t.Helper()
 	raw, err := os.ReadFile(filepath.Join(h.stateDir, "prs", prNum(url), "draft"))
 	if err != nil {
 		h.t.Fatalf("read draft state for %q: %v", url, err)
 	}
-	return strings.TrimSpace(string(raw))
-}
-
-// MarkReady must actually flip the fake script's draft state: the script's
-// pr-ready case once exited 0 without touching the draft file, so it was
-// unfaithful to real gh pr ready (issue #2408). The oracle reads that state
-// file directly rather than round-tripping through OpenPRForBranch, which no
-// longer populates a draft field on the PR it returns (#2503).
-func TestExecClient_MarkReadyClearsDraft(t *testing.T) {
-	h := newPRForgeHarness(t)
-	const num = "220"
-	url := h.SeedDraftPR(num)
-
-	if err := h.Forge().MarkReady(url); err != nil {
-		t.Fatalf("MarkReady(%q): %v", url, err)
-	}
-
-	if got := h.draftState(url); got != "false" {
-		t.Fatalf("draft state after MarkReady(%q) = %q, want %q", url, got, "false")
-	}
-}
-
-// Inverse of TestExecClient_MarkReadyClearsDraft: MarkDraft's gh pr ready
-// --undo call must flip an open PR back to draft, checked against the same
-// fake-script state file oracle.
-func TestExecClient_MarkDraftSetsDraft(t *testing.T) {
-	h := newPRForgeHarness(t)
-	const num = "221"
-	url := h.SeedOpenPR(num)
-
-	if err := h.Forge().MarkDraft(url); err != nil {
-		t.Fatalf("MarkDraft(%q): %v", url, err)
-	}
-
-	if got := h.draftState(url); got != "true" {
-		t.Fatalf("draft state after MarkDraft(%q) = %q, want %q", url, got, "true")
-	}
+	return strings.TrimSpace(string(raw)) == "true"
 }
 
 // HeadCommitSHA is the signal settle's selfHealGate compares before and after
