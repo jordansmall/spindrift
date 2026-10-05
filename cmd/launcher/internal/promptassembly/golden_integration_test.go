@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -121,23 +122,11 @@ func (c *cellInputs) filerOn() {
 // readOnly mirrors `unset BOX_WRITE_ENABLED`.
 func (c *cellInputs) readOnly() { c.unset("BOX_WRITE_ENABLED") }
 
-// forgejoForge mirrors setup_forgejo_forge_env's pipeline-visible half.
-func (c *cellInputs) forgejoForge() {
-	c.export("CODE_FORGE", "forgejo")
-	c.export("BOX_FORGE_BACKEND", "FORGEJO")
-}
+func (c *cellInputs) forgejoForge() { c.export("CODE_FORGE", "forgejo") }
 
-func (c *cellInputs) forgejoTracker() {
-	c.export("ISSUE_TRACKER", "forgejo")
-	c.export("BOX_TRACKER_AXIS_READ", "FORGEJO")
-	c.export("BOX_TRACKER_AXIS_WRITE", "FORGEJO")
-}
+func (c *cellInputs) forgejoTracker() { c.export("ISSUE_TRACKER", "forgejo") }
 
-func (c *cellInputs) localTracker() {
-	c.export("ISSUE_TRACKER", "local")
-	c.export("BOX_TRACKER_AXIS_READ", "LOCAL")
-	c.unset("BOX_TRACKER_AXIS_WRITE")
-}
+func (c *cellInputs) localTracker() { c.export("ISSUE_TRACKER", "local") }
 
 // butler mirrors setup_butler_env: the butler is keyed by Chore name, never a
 // tracker issue.
@@ -160,10 +149,6 @@ func defaultCell() *cellInputs {
 		vars: map[string]string{
 			"ISSUE_TRACKER":            "github",
 			"CODE_FORGE":               "github",
-			"BOX_FORGE_BACKEND":        "GH",
-			"BOX_TRACKER_AXIS_READ":    "GITHUB",
-			"BOX_TRACKER_AXIS_WRITE":   "GITHUB",
-			"BOX_TRACKER_AXIS_FILER":   "GH",
 			"BOX_WRITE_ENABLED":        "1",
 			"BOX_OUTBOX_RELAY_CAPABLE": "1",
 			"BOX_SIGNAL_CARRIER":       "log",
@@ -259,7 +244,6 @@ func goldenCells() []goldenCell {
 		}},
 		{name: "forgejo-tracker", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoTracker()
-			c.export("BOX_TRACKER_AXIS_FILER", "FORGEJO")
 		}},
 		{name: "jira-tracker", mode: modeInitial, setup: func(c *cellInputs) {
 			// jira rides the same prompt-selection arms as github.
@@ -369,7 +353,6 @@ func goldenCells() []goldenCell {
 		{name: "forgejo-orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
 			c.forgejoForge()
 			c.forgejoTracker()
-			c.export("BOX_TRACKER_AXIS_FILER", "FORGEJO")
 			c.filerOn()
 		}},
 		{name: "forgejo-fix-pass", mode: modeResume, setup: func(c *cellInputs) {
@@ -404,6 +387,23 @@ func assembleCell(t *testing.T, c *cellInputs, outDir string) (promptassembly.Re
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
+		}
+	}
+	// The BOX_* tuple is derived from the cell's ISSUE_TRACKER/CODE_FORGE via the
+	// registry functions resolveTrackerAndForgeSignals uses; a cell may not set it
+	// by hand (issue #2674). An empty value (local's write axis) stays unset.
+	read, write, filer := backend.TrackerAxisSignals(c.vars["ISSUE_TRACKER"])
+	for k, v := range map[string]string{
+		"BOX_TRACKER_AXIS_READ":  read,
+		"BOX_TRACKER_AXIS_WRITE": write,
+		"BOX_TRACKER_AXIS_FILER": filer,
+		"BOX_FORGE_BACKEND":      backend.ForgeBackendSignal(c.vars["CODE_FORGE"]),
+	} {
+		if _, ok := c.vars[k]; ok {
+			t.Fatalf("cell sets %s by hand; it is derived from ISSUE_TRACKER/CODE_FORGE", k)
+		}
+		if v != "" {
+			t.Setenv(k, v)
 		}
 	}
 	for k, v := range c.vars {
