@@ -261,7 +261,8 @@ func TestPoolReservationKeepsResearchFloorWhileBothKindsHaveWork(t *testing.T) {
 // contract: a reservation is a floor, not a ceiling. Slots: 2,
 // ResearchReservation: 1; research empties on its first check (and, with a
 // frozen fake clock, never becomes runnable again), so both slots settle
-// into running work.
+// into running work. The reservation is a live running count, so any slot
+// turning over while no research runs prefers research until that gate lands.
 func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &scriptedRunner{
@@ -297,15 +298,63 @@ func TestPoolWorkBurstsIntoWholePoolWhenResearchQueueEmpty(t *testing.T) {
 	Loop(ctx, dualKindConfig(2, 1), r, em, clk)
 	gate.requireGoalMet(t)
 
-	// Only slot 0 (the reserved one) ever prefers research, and its single
-	// empty result gates it for good (the fake clock never advances here),
-	// so research must be tried exactly once.
+	// Research's single empty result gates it for good (the fake clock never
+	// advances here) and lands before the baton passes, so no sibling
+	// re-checks the empty queue: research must be tried exactly once.
 	if got := r.kindCount(KindOf(dispatchkind.Research)); got != 1 {
 		t.Fatalf("research calls = %d, want exactly 1: its first empty result should gate it for the rest of the run", got)
 	}
 	if seen := slotsSeen(r.calls(), KindOf(dispatchkind.Work)); !seen[0] || !seen[1] {
 		t.Fatalf("dispatch slots seen = %v, want both slot 0 and slot 1 (research emptying should burst work into the whole pool)", seen)
 	}
+}
+
+// TestPoolResearchGateLandsBeforeBatonPasses pins the ordering behind the
+// burst test above: a Wait child's kind-state fold (the "idle" event from
+// noteWaitResult) must reach the stream before the baton_pass that wakes a
+// parked sibling. Passing first lets the sibling's chooseKind see research
+// still ungated and below its reservation, start a second research child, and
+// flake that test (issue #4380).
+func TestPoolResearchGateLandsBeforeBatonPasses(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		byKind: map[Kind][]ChildResult{
+			KindOf(dispatchkind.Research): {{Exit: 2}},
+			KindOf(dispatchkind.Work):     {{Exit: 0}},
+		},
+	}
+	gate := &kindGate{
+		r:        r,
+		limit:    3000,
+		cancelFn: cancel,
+		// Slot 0 is the lead baton holder and prefers research while no
+		// research child runs, so research's one child runs there; work
+		// reaching slot 0 means that child has finished.
+		cancelWhen: func(r *scriptedRunner) bool {
+			return slotsSeen(r.calls(), KindOf(dispatchkind.Work))[0]
+		},
+	}
+	r.onStart = gate.onStart
+	var buf bytes.Buffer
+	Loop(ctx, dualKindConfig(2, 1), r, newTestEmitter(&buf), &testClock{})
+	gate.requireGoalMet(t)
+
+	researchKind := KindOf(dispatchkind.Research)
+	finished := false
+	for _, ev := range decodeEvents(t, &buf) {
+		if !finished {
+			finished = ev.Event == "child_finish" && ev.Kind == researchKind
+			continue
+		}
+		switch {
+		case ev.Event == "idle" && ev.Kind == researchKind:
+			return
+		case ev.Event == "baton_pass":
+			t.Fatalf("baton_pass reached the stream before research's idle event")
+		}
+	}
+	t.Fatalf("no research idle event followed research's child_finish")
 }
 
 // TestPoolResearchBurstsIntoWholePoolWhenWorkQueueEmpty mirrors
