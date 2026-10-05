@@ -452,41 +452,6 @@ func resolveCapabilitySignals(codeForge, issueTracker string) capabilitySignals 
 	}
 }
 
-// trackerAxisSignals reads the tracker-axis facts off the matching
-// backendRows entry rather than re-deriving them with its own name switch, so
-// nix and Go can never drift (issue #2533). An empty TrackerAxisRead covers
-// both an unregistered name and github/jira's own rows, whose resolved value
-// is "GITHUB" but whose Go zero value leaves the field unset.
-// renderBackendRegistryGo rejects a row that sets write/filer without read, so
-// the early return never drops a declared axis (issue #4183); it also rejects
-// read without write, so a row past the early return always declares
-// TrackerAxisWrite and "" means a declared empty axis (issue #2673).
-func trackerAxisSignals(issueTracker string) (read, write, filer string) {
-	row, ok := backendByName(issueTracker)
-	if !ok || row.TrackerAxisRead == "" {
-		return "GITHUB", "GITHUB", "GH"
-	}
-	// TrackerAxisWrite is read as-is: unlike Read and Filer, "" is a
-	// legitimate resolved value for a found row (local has no write-step axis),
-	// not an unset-field placeholder. Filer's "GH" default mirrors
-	// lib/mkHarness.nix's `issueTrackerRow.trackerAxisFiler or "GH"`.
-	filer = row.TrackerAxisFiler
-	if filer == "" {
-		filer = "GH"
-	}
-	return row.TrackerAxisRead, row.TrackerAxisWrite, filer
-}
-
-// forgeBackendSignal mirrors lib/backends/default.nix's registry rows, the
-// same registry-driven shape as trackerAxisSignals (issue #2533).
-func forgeBackendSignal(codeForge string) string {
-	row, ok := backendByName(codeForge)
-	if !ok || row.ForgeBackend == "" {
-		return "GH"
-	}
-	return row.ForgeBackend
-}
-
 // resolveTrackerAndForgeSignals returns the tracker-axis and forge-backend
 // signals for the pairing in effect this run, with resolveCapabilitySignals's
 // trust-then-fallback shape and for the same reason: an operator can override
@@ -502,8 +467,8 @@ func resolveTrackerAndForgeSignals(codeForge, issueTracker string) (read, write,
 			return docArtifact("TRACKER_AXIS_READ"), docArtifact("TRACKER_AXIS_WRITE"), docArtifact("TRACKER_AXIS_FILER"), docArtifact("FORGE_BACKEND")
 		}
 	}
-	read, write, filer = trackerAxisSignals(issueTracker)
-	return read, write, filer, forgeBackendSignal(codeForge)
+	read, write, filer = backend.TrackerAxisSignals(issueTracker)
+	return read, write, filer, backend.ForgeBackendSignal(codeForge)
 }
 
 type agentPresence struct {

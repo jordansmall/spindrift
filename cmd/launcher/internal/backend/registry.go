@@ -81,7 +81,7 @@ type Descriptor struct {
 	// TrackerAxisRead is this tracker's read-step axis value ("GITHUB",
 	// "LOCAL", or "FORGEJO"); empty means "GITHUB", so github and jira leave it
 	// at the Go zero value. An unregistered name's zero-value Descriptor reads
-	// back the same way, which is why trackerAxisSignals (main.go) tests for ""
+	// back the same way, which is why TrackerAxisSignals tests for ""
 	// to cover both cases at once.
 	TrackerAxisRead string
 
@@ -114,6 +114,41 @@ func ByName(name string) (Descriptor, bool) {
 		}
 	}
 	return Descriptor{}, false
+}
+
+// TrackerAxisSignals reads the tracker-axis facts off the matching Registry
+// entry rather than re-deriving them with its own name switch, so nix and Go
+// can never drift (issue #2533). An empty TrackerAxisRead covers both an
+// unregistered name and github/jira's own rows, whose resolved value is
+// "GITHUB" but whose Go zero value leaves the field unset.
+// renderBackendRegistryGo rejects a row that sets write/filer without read, so
+// the early return never drops a declared axis (issue #4183); it also rejects
+// read without write, so a row past the early return always declares
+// TrackerAxisWrite and "" means a declared empty axis (issue #2673).
+func TrackerAxisSignals(issueTracker string) (read, write, filer string) {
+	row, ok := ByName(issueTracker)
+	if !ok || row.TrackerAxisRead == "" {
+		return "GITHUB", "GITHUB", "GH"
+	}
+	// TrackerAxisWrite is read as-is: unlike Read and Filer, "" is a
+	// legitimate resolved value for a found row (local has no write-step axis),
+	// not an unset-field placeholder. The "GITHUB" fallback above and Filer's
+	// "GH" default mirror lib/mkHarness.nix's `or "GITHUB"` / `or "GH"`.
+	filer = row.TrackerAxisFiler
+	if filer == "" {
+		filer = "GH"
+	}
+	return row.TrackerAxisRead, row.TrackerAxisWrite, filer
+}
+
+// ForgeBackendSignal mirrors lib/backends/default.nix's registry rows, the
+// same registry-driven shape as TrackerAxisSignals (issue #2533).
+func ForgeBackendSignal(codeForge string) string {
+	row, ok := ByName(codeForge)
+	if !ok || row.ForgeBackend == "" {
+		return "GH"
+	}
+	return row.ForgeBackend
 }
 
 // QuickstartEligible returns the descriptors Quickstart's wizard can drive

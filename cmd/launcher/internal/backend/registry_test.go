@@ -182,3 +182,31 @@ func TestDescriptorFieldsMatchNixRows(t *testing.T) {
 		}
 	}
 }
+
+func TestTrackerAxisAndForgeBackendSignals(t *testing.T) {
+	cases := []struct {
+		name               string
+		read, write, filer string
+		forge              string
+	}{
+		{"github", "GITHUB", "GITHUB", "GH", "GH"},
+		{"local", "LOCAL", "", "GH", "GH"},
+		{"forgejo", "FORGEJO", "FORGEJO", "FORGEJO", "FORGEJO"},
+		{"jira", "GITHUB", "GITHUB", "GH", "GH"},
+		// Unregistered: ByName returns a zero-value Descriptor, a branch
+		// distinct from a registered row with unset fields (issue #2533 review).
+		{"not-a-real-backend", "GITHUB", "GITHUB", "GH", "GH"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			read, write, filer := TrackerAxisSignals(tc.name)
+			if read != tc.read || write != tc.write || filer != tc.filer {
+				t.Errorf("TrackerAxisSignals(%q) = (%q,%q,%q), want (%q,%q,%q)", tc.name, read, write, filer, tc.read, tc.write, tc.filer)
+			}
+			if got := ForgeBackendSignal(tc.name); got != tc.forge {
+				t.Errorf("ForgeBackendSignal(%q) = %q, want %q", tc.name, got, tc.forge)
+			}
+		})
+	}
+}

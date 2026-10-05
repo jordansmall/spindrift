@@ -1896,22 +1896,6 @@ func TestResolveCapabilitySignals_MatchingDocumentPartialArtifactKeysFallsBack(t
 	}
 }
 
-// trackerAxisSignals/forgeBackendSignal fall back to the default arm
-// (GITHUB/GITHUB/GH, GH) for a name with no backendRows entry, exercised
-// directly rather than only through registered names: the registry-driven
-// bodies resolve it via `backendByName` returning a zero-value Descriptor, a
-// genuinely distinct branch worth its own coverage (issue #2533 review).
-func TestTrackerAxisSignalsAndForgeBackendSignal_UnregisteredNameFallsBack(t *testing.T) {
-	read, write, filer := trackerAxisSignals("not-a-real-backend")
-	if read != "GITHUB" || write != "GITHUB" || filer != "GH" {
-		t.Errorf("trackerAxisSignals(unregistered) = (%q,%q,%q), want (GITHUB,GITHUB,GH)", read, write, filer)
-	}
-
-	if got := forgeBackendSignal("not-a-real-backend"); got != "GH" {
-		t.Errorf("forgeBackendSignal(unregistered) = %q, want GH", got)
-	}
-}
-
 // With no loaded document, resolveTrackerAndForgeSignals derives the
 // tracker-axis and forge-backend strings fresh from the pure mirror of
 // lib/mkHarness.nix's computation rather than reading an unpopulated

@@ -31,9 +31,9 @@
 # cmd/launcher reads it as-is. trackerAxisRead and trackerAxisWrite must be set
 # together or neither, and a row that sets trackerAxisFiler must set
 # trackerAxisRead, else renderBackendRegistryGo throws: cmd/launcher's
-# trackerAxisSignals drops write and filer for a row that omits read (issue
-# #4183), and reads an omitted write as "" where mkHarness.nix says "GITHUB"
-# (issue #2673).
+# backend.TrackerAxisSignals drops write and filer for a row that omits read
+# (issue #4183), and reads an omitted write as "" where mkHarness.nix says
+# "GITHUB" (issue #2673).
 
 # goVar is an explicit field rather than a derived title-case transform,
 # because "github" must render as "GitHub" and no capitalize-first rule
