@@ -183,17 +183,23 @@ func (d *Dispatch) successResult(logPath string) Result {
 // "socket" mode. Shared by the zero-exit and non-zero-exit settled paths
 // (issue #2075) so both report identical signals.
 func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Result {
+	var warnings []string
+	warn := func(format string, a ...any) {
+		w := fmt.Sprintf(format, a...)
+		PrintWarning(d.number, w)
+		warnings = append(warnings, w)
+	}
 	comment, commentFound, commentRejected, commentErr := outcome.LastCommentLineInLog(logPath, d.nonce)
 	if commentErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: comment scan: %v\n", d.number, commentErr)
+		warn("comment scan: %v", commentErr)
 	}
 	prIntent, prIntentFound, prIntentRejected, prIntentErr := outcome.LastPRIntentInLog(logPath, d.nonce)
 	if prIntentErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: pr-intent scan: %v\n", d.number, prIntentErr)
+		warn("pr-intent scan: %v", prIntentErr)
 	}
 	issueIntents, issueIntentsRejected, issueIntentsErr := outcome.AllIssueIntentLinesInLog(logPath, d.nonce)
 	if issueIntentsErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: issue-intent scan: %v\n", d.number, issueIntentsErr)
+		warn("issue-intent scan: %v", issueIntentsErr)
 	}
 	// Under the socket carrier the log scan above still runs, but only to
 	// warn: a marker line surviving in the log means a Box or an untrusted
@@ -209,7 +215,7 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 			if !found && rejected.Total() == 0 {
 				return
 			}
-			fmt.Fprintf(os.Stderr, "    ?? #%s: %s marker line found in log under BOX_SIGNAL_CARRIER=socket; ignored\n", d.number, channel)
+			warn("%s marker line found in log under BOX_SIGNAL_CARRIER=socket; ignored", channel)
 		}
 		warnStaleMarker("comment", commentFound, commentRejected)
 		warnStaleMarker("pr-intent", prIntentFound, prIntentRejected)
@@ -218,18 +224,18 @@ func (d *Dispatch) outcomeResult(logPath string, resolved outcome.Resolved) Resu
 		commentRejected, prIntentRejected, issueIntentsRejected = outcome.Rejections{}, outcome.Rejections{}, outcome.Rejections{}
 	}
 	if resolved.SelfReportError != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: self-report scan: %v\n", d.number, resolved.SelfReportError)
+		warn("self-report scan: %v", resolved.SelfReportError)
 	}
 	passes, passesErr := passmanifest.Read(filepath.Join(OutboxDirFor(d.pwd, d.number), passmanifest.FileName))
 	if passesErr != nil {
-		fmt.Fprintf(os.Stderr, "    ?? #%s: pass-manifest scan: %v\n", d.number, passesErr)
+		warn("pass-manifest scan: %v", passesErr)
 	}
 	return Result{
 		Resolved: resolved,
 		Comment:  comment, CommentFound: commentFound, CommentRejected: commentRejected,
 		PRIntent: prIntent, PRIntentFound: prIntentFound, PRIntentRejected: prIntentRejected,
 		IssueIntents: issueIntents, IssueIntentsFound: len(issueIntents) > 0, IssueIntentsRejected: issueIntentsRejected,
-		Passes: passes,
+		Passes: passes, Warnings: warnings,
 	}
 }
 
