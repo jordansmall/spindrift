@@ -346,6 +346,13 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 	return daemon.Tip{Revision: revision, SelfPath: path, Moved: moved}, nil
 }
 
+// Demand has no source yet: the pool only asks for a kind with a
+// Config.ProbeIntervals entry, and the host sets none, so every kind stays
+// exit-driven until a later slice wires a tracker in.
+func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind) (daemon.Demand, error) {
+	return daemon.Demand{}, errors.New("no demand source")
+}
+
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
 	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath:      r.repoPath,

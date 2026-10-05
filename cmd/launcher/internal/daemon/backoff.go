@@ -13,7 +13,7 @@ import (
 // only the kind it was working, not its sibling's.
 //
 // A plain value, not a mutex-guarded object (issue #3623): the pool holds
-// its per-kind idleBackoffs (via kindBackoff, below) as map values under
+// its per-kind idleBackoffs (via kindBackoff, below, inside the Schedule) under
 // p.mu, so next()/reset() read the receiver and return the updated value
 // for the caller to store back, rather than mutating in place.
 type idleBackoff struct {
@@ -59,9 +59,9 @@ func (b idleBackoff) reset() idleBackoff {
 // the growing wait it earns — has to live and reset independently of the
 // other's.
 //
-// A plain value (issue #3623): the pool holds its kinds map as
-// map[Kind]kindBackoff under p.mu, so every method here reads the receiver
-// and returns the updated value for the caller to store back into the map,
+// A plain value (issue #3623): the Schedule holds one per kind under p.mu, so
+// every method here reads the receiver
+// and returns the updated value for the caller to store back,
 // rather than mutating a shared object in place.
 type kindBackoff struct {
 	b      idleBackoff

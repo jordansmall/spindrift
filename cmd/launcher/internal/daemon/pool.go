@@ -41,6 +41,15 @@ type pool struct {
 	mu  sync.Mutex
 	st  state
 	seq uint64 // publish sequence counter; see mutate
+
+	// demandFlights holds each kind's in-flight Demand probe, so slots that
+	// all find the same kind stale share one Runner.Demand call. Guarded by
+	// p.mu but kept off state: it is coordination, not published pool state.
+	demandFlights map[Kind]*demandFlight
+
+	// onDemandJoin, when set by a test, fires each time a slot joins another
+	// slot's Demand flight, so coalescing can be pinned without timing.
+	onDemandJoin func()
 }
 
 // state is all of the pool's mutable state, in one value: every field here
@@ -51,7 +60,7 @@ type state struct {
 	slots     []slotState
 	awakeShut bool // true once awake_close has fired, until the matching awake_open
 	b         breaker
-	kinds     map[Kind]kindBackoff
+	sched     Schedule
 	batonSlot int
 }
 
@@ -152,13 +161,20 @@ const (
 	// through that whole shut span would stall every sibling's own
 	// discovery for no reason.
 	batonPassWindowClosed batonReason = "the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"
-	// batonPassIdle fires when pickKind finds every configured kind backed
-	// off for the holder: the holder is about to idleSleep, and a slot
-	// must never sleep out an idle wait holding the baton. pickKind runs
+	// batonPassIdle fires when Decide finds nothing startable or probe-due for
+	// the holder: the holder is about to idleSleep, and a slot
+	// must never sleep out an idle wait holding the baton. Decide runs
 	// before the baton is acquired, so a non-holder never reaches this
 	// path holding it — only the pre-assigned initial holder (leadSlot)
 	// can, on its very first round.
 	batonPassIdle batonReason = "no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"
+	// batonPassOutpaced fires when the holder re-decides at startChild and
+	// finds a sibling's result since took away the Start it decided on
+	// before blocking on the baton (a sibling's exit 2 zeroing the count the
+	// holder was about to spend). The holder loops back to decide again, so
+	// the baton must not stay with it through that round's probe or idle
+	// wait.
+	batonPassOutpaced batonReason = "a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"
 	// batonPassStopped fires when the holder returns before any of the
 	// above resolved (a cancelled ctx, a halt, a self-build mismatch, or a
 	// HaltPool child exit or breaker trip, whose pass waits until after the
@@ -205,15 +221,11 @@ type slotFlight struct {
 // RunChild is already contractually drain-safe under a cancelled ctx (see
 // loop.go's own doc), and hostRunner.RunChild uses exec.Command rather than
 // CommandContext, so cancelling it can never kill a running child. r, clk,
-// the breaker, and the per-kind backoffs are all pool-wide policy, not
+// the breaker, and the Schedule are all pool-wide policy, not
 // slot-tracking state, but they live here so backoffOrHalt and runSlot stop
 // threading them as parameters.
 func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) (*pool, context.Context) {
 	pctx, cancel := context.WithCancel(ctx)
-	kinds := make(map[Kind]kindBackoff, len(cfg.Kinds))
-	for _, k := range cfg.Kinds {
-		kinds[k] = newKindBackoff(cfg.IdleFloor, cfg.IdleCap)
-	}
 	slots := make([]slotState, cfg.Slots)
 	for i := range slots {
 		slots[i].phase = PhaseIdle
@@ -227,9 +239,10 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		st: state{
 			slots:     slots,
 			b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
-			kinds:     kinds,
+			sched:     newSchedule(cfg.Kinds, cfg.ResearchReservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals),
 			batonSlot: leadSlot,
 		},
+		demandFlights: make(map[Kind]*demandFlight),
 	}
 	if cfg.Slots > 1 {
 		// A single slot has no sibling to race, so it must take no wait
@@ -253,7 +266,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 // normal, so a kind added later keeps its configured place within its own
 // tier instead of silently inheriting one half of a hardcoded pair. A kind
 // with no descriptor (ByVerb misses) is treated as normal priority, not
-// reserved or idle. preferReserved comes from chooseKind.
+// reserved or idle. preferReserved comes from Schedule.Decide.
 func slotOrder(kinds []Kind, preferReserved bool) []Kind {
 	if len(kinds) < 2 {
 		return kinds
@@ -283,7 +296,7 @@ func slotOrder(kinds []Kind, preferReserved bool) []Kind {
 }
 
 // kindPriority is k's daemon priority tier, PriorityNormal for a kind with no
-// descriptor — the one tier rule slotOrder's ordering and chooseKind's
+// descriptor — the one tier rule slotOrder's ordering and Schedule.Decide's
 // reserved count both read.
 func kindPriority(k Kind) dispatchkind.DaemonPriority {
 	if d, ok := dispatchkind.ByVerb(string(k)); ok {
@@ -292,75 +305,44 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 	return dispatchkind.PriorityNormal
 }
 
-// chooseKind returns the first runnable kind in slotOrder's preference, with
-// the reserved tier first while fewer than ResearchReservation reserved-kind
-// children are running — a floor on running research, not a per-slot
-// assignment, so it recovers on whichever slot turns over next. Only running
-// children count: research children that exit early (a run of Continue
-// exits, say) never lift the count, so research can keep taking every
-// turnover while work still has queued work. startChild
-// calls it in the same p.mu hold as the PhaseRunning flip, so two slots can
-// never both take the last reserved seat, and nothing is claimed before
-// startChild, so no early-exit path needs cleanup. The starting slot is not
-// itself PhaseRunning, so the count never includes it. Callers hold p.mu; now
-// is sampled before the lock (never call the Clock under it).
-func (p *pool) chooseKind(s *state, now time.Time) (Kind, bool) {
-	running := 0
+// occupancy reads what the slot phases say is running, for Schedule.Decide's
+// reservation count. Only running children count: research children that
+// exit early (a run of Continue exits, say) never lift the count, so research
+// can keep taking every turnover while work still has queued work. The
+// starting slot is not itself PhaseRunning, so the count never includes it.
+// The caller holds p.mu.
+func occupancy(s *state) Occupancy {
+	running := make(map[Kind]int)
 	for _, sl := range s.slots {
-		if sl.phase != PhaseRunning {
-			continue
-		}
-		if kindPriority(sl.flight.kind) == dispatchkind.PriorityReserved {
-			running++
+		if sl.phase == PhaseRunning {
+			running[sl.flight.kind]++
 		}
 	}
-	for _, kind := range slotOrder(p.cfg.Kinds, running < p.cfg.ResearchReservation) {
-		if s.kinds[kind].runnable(now) {
-			return kind, true
-		}
-	}
-	return "", false
+	return Occupancy{Running: running}
 }
 
-// pickKind returns the Dispatch kind the pool should fill a slot with now.
-// ok is false when every configured kind has backed off into an empty result
-// — the daemon is genuinely idle, and the caller sleeps instead of
-// dispatching. A pure read, not a mutate: nothing here changes state. The
-// kind is provisional: startChild re-chooses under its own lock hold, since a
-// sibling can start or finish a child in between.
-func (p *pool) pickKind() (Kind, bool) {
-	// Sample now before taking p.mu: no Clock implementation takes p.mu
-	// itself, but calling one under the lock anyway would hold it for
-	// however long that call takes, for no reason — the lock only needs
-	// to guard the kinds map read below.
-	now := p.clk.Now()
+// decide asks the Schedule what a free slot should do at now. A pure read,
+// not a mutate: now is sampled by the caller before the lock (never call the
+// Clock under it), and the answer is provisional — a sibling can start or
+// finish a child, or a probe can land, before the caller acts on it.
+// startChild re-decides in the same p.mu hold as the PhaseRunning flip, so two
+// slots can never both take the last reserved seat, and nothing is claimed
+// before startChild, so no early-exit path needs cleanup.
+func (p *pool) decide(now time.Time) Decision {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.chooseKind(&p.st, now)
+	return p.st.sched.Decide(now, occupancy(&p.st))
 }
 
-// resetKind clears kind's backoff gate: runSlot calls this on a Continue
-// outcome (exit 0 or 4), so a check that answered something other than
-// "nothing to do" ends whatever no-work streak this kind's backoff was
-// tracking.
+// resetKind folds a Continue outcome (exit 0 or 4) into the schedule: a check
+// that answered something other than "nothing to do" ends whatever no-work
+// streak this kind's backoff was tracking.
 func (p *pool) resetKind(kind Kind) {
+	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
-		s.kinds[kind] = s.kinds[kind].reset()
+		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: ChildContinue})
 		return nil
 	})
-}
-
-// markNoWork records one no-work result for kind and returns the wait it
-// gates for — see kindBackoff.markNoWork for what jammed means. Kept for
-// the package's own tests: noteWaitResult is the one production path to a
-// no-work fold, and no production caller reaches for this one.
-func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
-	var wait time.Duration
-	p.mutate(func(s *state) []Event {
-		s.kinds[kind], wait = s.kinds[kind].markNoWork(now, jammed)
-		return nil
-	})
-	return wait
 }
 
 // noteWaitResult is runSlot's Wait-case fold: it records kind's no-work
@@ -381,9 +363,18 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
 // running a child that counts (issue #3571, #3735, #4205).
 func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool) {
 	now := p.clk.Now()
+	result := ChildEmpty
+	if noneDispatchable {
+		result = ChildJammed
+	}
 	p.mutate(func(s *state) []Event {
+		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: result})
+		// What the kind now waits for: its backoff, or for a probed kind the
+		// interval to its next probe.
 		var wait time.Duration
-		s.kinds[kind], wait = s.kinds[kind].markNoWork(now, noneDispatchable)
+		if v := s.sched.View(kind, now); v.Gated {
+			wait = v.Until.Sub(now)
+		}
 		if noneDispatchable && !s.siblingsEngaged(slot) {
 			return []Event{{Event: "jam", Kind: kind, Revision: revision, Slot: intPtr(slot), Wait: wait.String(), Reason: "no work is dispatchable and no sibling slot is doing anything that could unblock it"}}
 		}
@@ -396,26 +387,34 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 // therefore always visible to any snapshot that publishes alongside this
 // event, which a hand-placed write after a separately-emitted child_start
 // could not otherwise guarantee. The kind is re-chosen inside that same
-// mutate (see chooseKind); provisional, runnable when pickKind returned it,
-// is the fallback if everything has since gated. child_start carries no
+// mutate (see Schedule.Decide). When that re-decide is not a Start, what
+// follows depends on provisional, the kind runSlot decided on. A probed
+// kind's count is what says there is work, so a sibling's exit 2 zeroing it
+// while this slot waited on the baton means nothing is marked and ok is
+// false: the caller decides again rather than spawn an empty child (ADR
+// 0059). An exit-driven kind has only its backoff to go on, and a child is
+// how it finds work at all, so it still starts as provisional. child_start carries no
 // dispatch key (neither issue nor chore): the daemon cannot know which key
 // a freshly started child will work until it reports a "box" record, and
 // waiting to emit child_start until then would either hide a started child
 // from the stream for its whole queue scan, or emit nothing at all for a
 // child that never claims — the "box" event is where the slot↔key binding
 // first appears (see noteBox).
-func (p *pool) startChild(slot int, provisional Kind, revision string) Kind {
+func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, ok bool) {
 	now := p.clk.Now()
-	var kind Kind
 	p.mutate(func(s *state) []Event {
-		var ok bool
-		if kind, ok = p.chooseKind(s, now); !ok {
+		if st, started := s.sched.Decide(now, occupancy(s)).(Start); started {
+			kind = st.Kind
+		} else if s.sched.View(provisional, now).Probed {
+			return nil
+		} else {
 			kind = provisional
 		}
+		ok = true
 		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision}}
 		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)}}
 	})
-	return kind
+	return kind, ok
 }
 
 // finishChild moves slot back to idle and zeroes its flight. A slot calls this
@@ -743,7 +742,7 @@ func (p *pool) haltStopRequested(kind Kind) {
 // for some other reason and cancelled me as a side effect".
 //
 // kind is the halt event's Kind, if the caller has picked one yet: the
-// top-of-loop call races cancellation against pickKind itself and so has
+// top-of-loop call races cancellation against Decide itself and so has
 // none to give (pass ""), while backoffOrHalt already knows which kind this
 // iteration is running.
 func (p *pool) haltIfStopping(ctx context.Context, kind Kind) bool {
@@ -822,7 +821,7 @@ func (p *pool) backoffOrHalt(ctx context.Context, slot int, kind Kind, revision,
 		return true
 	}
 
-	// Sample now before taking p.mu, same reasoning as pickKind.
+	// Sample now before taking p.mu: the Clock is never called under it.
 	now := p.clk.Now()
 	var count int
 	var crossed bool
@@ -892,32 +891,34 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 	return "", fmt.Sprintf("resolve-revision: %v", err)
 }
 
-// idleSleep is what a slot calls when pickKind finds every configured kind
-// backed off: a genuine drought, not just a kind this slot doesn't prefer
-// right now. With no jammed kind among those gated, it sleeps the whole wait
-// in one call, same as ever: a merge can unblock a jammed queue, but it
-// cannot create new work in a kind that is merely queue-empty, so resolving
-// early there would only spend a fetch for nothing.
+// idleSleep is what a slot calls when Schedule.Decide finds nothing to start
+// and nothing to probe: a genuine drought, not just a kind this slot doesn't
+// prefer right now. It re-decides rather than taking the caller's Park, so a
+// sibling's reset or a probe landing since is seen; anything but a Park with
+// time left returns at once for the caller to re-decide. With no jammed kind
+// gating the wait (Park.JamPoll false), it sleeps the whole wait in one call,
+// same as ever: a merge can unblock a jammed queue, but it cannot create new
+// work in a kind that is merely queue-empty, so resolving early there would
+// only spend a fetch for nothing.
 //
-// With a jammed kind gated, it instead sleeps only one IdleFloor-sized slice
-// (or the whole wait, if that is shorter) and reports back, via wantResolve,
-// whether time remained afterward — exactly the condition under which
-// runSlot (loop.go) should make one opportunistic resolution before its next
-// pickKind: that resolution, not a call made here, is what can observe
+// With a jammed kind gating it, it instead sleeps only one IdleFloor-sized
+// slice (or the whole wait, if that is shorter) and reports back, via
+// wantResolve, whether time remained afterward — exactly the condition under
+// which runSlot (loop.go) should make one opportunistic resolution before
+// its next Decide: that resolution, not a call made here, is what can observe
 // Tip.Moved and report it, so the wait's very first IdleFloor slice alone
 // (wantResolve false) resolves nothing extra and fires no tip_moved.
 func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
-	// Sample now before taking p.mu, same reasoning as pickKind. The scan
-	// itself runs under one lock hold (idleWait) so it never observes two
-	// kinds at different instants; the actual sleep happens after the lock
-	// is released — p.clk.Sleep must never run under p.mu.
+	// Sample now before taking p.mu in decide: p.clk.Sleep and Now must never
+	// run under it.
 	now := p.clk.Now()
-	wait, jammedGate, ok := p.idleWait(now)
-	if !ok {
+	park, ok := p.decide(now).(Park)
+	if !ok || !park.Until.After(now) {
 		return false
 	}
+	wait := park.Until.Sub(now)
 
-	if !jammedGate {
+	if !park.JamPoll {
 		p.clk.Sleep(ctx, wait)
 		return false
 	}
@@ -940,7 +941,7 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 	return wait > slice
 }
 
-// resolveTip is the one seam runSlot's post-pickKind fetch and
+// resolveTip is the one seam runSlot's post-Decide fetch and
 // resolveOpportunistic (the opportunistic call idleSleep's return asks for)
 // both call to reach Runner.ResolveTip: it sets PhaseResolving and, on a
 // Moved tip, reports noteTipMoved before returning. Folding the
@@ -970,13 +971,13 @@ func (p *pool) resolveTip(ctx context.Context, slot int) (Tip, error) {
 }
 
 // resolveOpportunistic makes the one opportunistic ResolveTip call idleSleep's
-// resolveTip return asks runSlot for, ahead of its next pickKind. tip, true
+// resolveTip return asks runSlot for, ahead of its next Decide. tip, true
 // on success — the underlying resolveTip already reports Tip.Moved, so the
 // caller that keeps this tip for the current iteration never has to check
 // Moved itself. A failure here is deliberately treated as no change
 // observed: it is not the per-iteration fetch's own site, so it carries no
 // haltIfStopping guard, no backoffOrHalt, and no breaker failure — only that
-// fetch, made after pickKind finds a kind runnable, reports a genuinely
+// fetch, made after Decide finds a kind startable, reports a genuinely
 // broken fetch.
 func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 	tip, err := p.resolveTip(ctx, slot)
@@ -989,75 +990,37 @@ func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 	return tip, true
 }
 
-// idleWait scans every kind's backoff under one p.mu hold and reports the
-// wait until the earliest kind's deadline and whether any gated kind is
-// currently jammed. ok is false when there is nothing to sleep for at all:
-// either a kind turned out runnable already at now (a sibling's reset()
-// raced in between pickKind's failed pass and this call, or a deadline has
-// already elapsed — the caller loops back around to pickKind at once), or
-// p.st.kinds is empty (Loop's own validation, len(cfg.Kinds) == 0, rejects
-// that before a pool is ever built, but newPool itself doesn't enforce it,
-// so this also guards a caller — a test, say — that builds a pool
-// directly). A pure read, not a mutate: nothing here changes state.
-func (p *pool) idleWait(now time.Time) (wait time.Duration, jammedGate bool, ok bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	var earliest time.Time
-	for _, k := range p.st.kinds {
-		at, gated := k.readyAt(now)
-		if !gated {
-			return 0, false, false
-		}
-		if earliest.IsZero() || at.Before(earliest) {
-			earliest = at
-		}
-		if k.jammedNow() {
-			jammedGate = true
-		}
-	}
-	if earliest.IsZero() {
-		return 0, false, false
-	}
-	return earliest.Sub(now), jammedGate, true
-}
-
 // noteTipMoved records that revision is a tip a resolution actually observed
-// as moved (Tip.Moved), and resets every currently-jammed kind's backoff —
-// the observed change ends each of their no-work streaks same as real work
+// as moved (Tip.Moved), and lifts every currently-jammed kind's gate — the
+// observed change ends each of their no-work streaks same as real work
 // would (a queue-empty kind's streak is untouched, since a moved tip is not
 // evidence an empty queue refilled). No single Kind names this: several
 // kinds can be jammed at once, and the tip that moved is evidence for all of
 // them, not whichever this slot happened to be running. Kinds names the set
-// actually reset below; iterating cfg.Kinds rather than the kinds map keeps
-// that set's order deterministic. The scan, resets, and the tip_moved event
-// itself all happen in one mutate, so the set an operator reads on the event
-// is exactly the set that was reset, not a snapshot taken a moment either
+// actually lifted, in configured order. The lift and the tip_moved event
+// itself happen in one mutate, so the set an operator reads on the event
+// is exactly the set that was lifted, not a snapshot taken a moment either
 // side of it.
 //
-// The event is emitted only when reset is non-empty: resolveTip (pool.go,
-// see its own doc) reports every per-iteration fetch's Moved tip here, not
-// just the opportunistic call a jammed kind gates. Without the guard,
-// tip_moved would fire on every ordinary advance of the base branch rather
-// than staying the jam signal it is.
+// The event is emitted only when the lifted set is non-empty: resolveTip
+// (pool.go, see its own doc) reports every per-iteration fetch's Moved tip
+// here, not just the opportunistic call a jammed kind gates. Without the
+// guard, tip_moved would fire on every ordinary advance of the base branch
+// rather than staying the jam signal it is.
 //
 // The Runner-global baseline also changes the count: the per-slot baselines
 // this replaced fired one tip_moved per idling slot that crossed a merge,
 // where two slots crossing the same merge now share one baseline and so
 // produce exactly one between them. A single event still does the whole job,
-// since the backoff reset below is pool-wide.
+// since the lift is pool-wide.
 func (p *pool) noteTipMoved(slot int, revision string) {
 	p.mutate(func(s *state) []Event {
-		var reset []Kind
-		for _, kind := range p.cfg.Kinds {
-			if k := s.kinds[kind]; k.jammedNow() {
-				s.kinds[kind] = k.reset()
-				reset = append(reset, kind)
-			}
-		}
-		if len(reset) == 0 {
+		var lifted []Kind
+		s.sched, lifted = s.sched.LiftJams()
+		if len(lifted) == 0 {
 			return nil
 		}
-		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue", Kinds: reset}}
+		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue", Kinds: lifted}}
 	})
 }
 
@@ -1112,16 +1075,17 @@ func (p *pool) snapshotLocked() Status {
 	allGated := true
 	anyJammed := false
 	for _, k := range p.cfg.Kinds {
-		kb := p.st.kinds[k]
-		at, gated := kb.readyAt(now)
+		v := p.st.sched.View(k, now)
+		at := v.Until // zero unless Gated, never a stale deadline
 		kc := KindCheck{Kind: k}
-		if gated {
-			if kb.jammedNow() {
+		if v.Gated {
+			// A probed kind's Jammed flag lingers past its gate; only a live
+			// jam gate (JamUntil) counts, not a fresh-empty Demand's wait.
+			if v.Jammed && (!v.Probed || !v.JamUntil.IsZero()) {
 				anyJammed = true
 				kc.Jammed = true
 			}
 		} else {
-			at = time.Time{} // an ungated at may be a stale deadline; see readyAt
 			allGated = false
 		}
 		if windowOpensAt.After(at) {

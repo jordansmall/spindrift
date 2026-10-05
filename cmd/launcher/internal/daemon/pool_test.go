@@ -563,7 +563,7 @@ func TestPoolExit3SiblingPhasesNotEngaged(t *testing.T) {
 			if gotJam != tt.wantJam {
 				t.Fatalf("events = %v, want jam=%v", eventNames(events), tt.wantJam)
 			}
-			if !p.st.kinds[tt.reportingKind].jammedNow() {
+			if !p.st.sched.View(tt.reportingKind, clk.Now()).Jammed {
 				t.Fatalf("kind %v jammed = false, want true on every exit 3 regardless of sibling phase", tt.reportingKind)
 			}
 		})
@@ -1342,7 +1342,7 @@ func TestNoteTipMovedStampsJammedKinds(t *testing.T) {
 				p.markNoWork(k, clk.Now(), true)
 			}
 			readyAt := func(k Kind) time.Time {
-				until, _ := p.st.kinds[k].readyAt(clk.Now())
+				until, _ := p.gateOf(k, clk.Now())
 				return until
 			}
 			gateBefore := map[Kind]time.Time{}
@@ -1481,7 +1481,7 @@ func TestResolveTipPostPickKindSiteReportsMoved(t *testing.T) {
 	if !reflect.DeepEqual(tipMoved.Kinds, []Kind{KindOf(dispatchkind.Work)}) {
 		t.Fatalf("tip_moved kinds = %v, want [dispatch]", tipMoved.Kinds)
 	}
-	if p.st.kinds[KindOf(dispatchkind.Work)].jammedNow() {
+	if p.st.sched.View(KindOf(dispatchkind.Work), clk.Now()).Jammed {
 		t.Fatalf("dispatch still jammedNow after a post-pickKind resolve observed Moved=true, want the gate cleared")
 	}
 }
@@ -1637,8 +1637,8 @@ func TestSlotOrderDerivesFromKinds(t *testing.T) {
 		},
 		{
 			// Preferring research in a research-less set must not invent
-			// a kind the pool has no backoff entry for — chooseKind's
-			// s.kinds lookup would nil-deref on it.
+			// a kind the pool has no backoff entry for — Schedule.Decide's
+			// kind lookup would nil-deref on it.
 			name:           "no research kind below reservation keeps given order",
 			kinds:          []Kind{KindOf(dispatchkind.Work), kindOther},
 			preferReserved: true,
@@ -2405,7 +2405,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// rather than a sample taken mid-iteration.
 	<-clk.sleepSignal
 
-	if !p.st.kinds[KindOf(dispatchkind.Work)].jammedNow() {
+	if !p.st.sched.View(KindOf(dispatchkind.Work), clk.Now()).Jammed {
 		t.Fatalf("dispatch jammedNow = false with a sibling occupied, want true (exit 3 alone gates this)")
 	}
 
@@ -2413,7 +2413,7 @@ func TestPoolExit3DuringSiblingOccupancyStaysJammedAfterSiblingClears(t *testing
 	// sibling has to clear before the state under test is observable.
 	p.finishChild(1)
 
-	if !p.st.kinds[KindOf(dispatchkind.Work)].jammedNow() {
+	if !p.st.sched.View(KindOf(dispatchkind.Work), clk.Now()).Jammed {
 		t.Fatalf("dispatch jammedNow = false after the sibling cleared, want still true")
 	}
 	if s := p.snapshot().State; s != StateJammed {
@@ -2660,7 +2660,7 @@ func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
 				startChildAs(p, 0, tt.sibling, "rev1")
 			}
 
-			if got := p.startChild(1, work, "rev1"); got != tt.want {
+			if got, _ := p.startChild(1, work, "rev1"); got != tt.want {
 				t.Fatalf("startChild chose %q, want %q", got, tt.want)
 			}
 			if got := p.snapshot().Slots[1].Kind; got != tt.want {
@@ -2682,7 +2682,33 @@ func TestPoolStartChildFallsBackToProvisionalKindWhenNothingRunnable(t *testing.
 	p.markNoWork(work, clk.Now(), false)
 	p.markNoWork(research, clk.Now(), false)
 
-	if got := p.startChild(0, work, "rev1"); got != work {
+	if got, _ := p.startChild(0, work, "rev1"); got != work {
 		t.Fatalf("startChild chose %q, want the provisional %q", got, work)
+	}
+}
+
+// TestPoolStartChildDeclinesProbedKindWhoseCountZeroed pins ADR 0059: unlike
+// an exit-driven kind, a probed kind whose count a sibling zeroed since
+// runSlot decided is not started as an empty child. The slot stays idle and
+// no child_start is emitted.
+func TestPoolStartChildDeclinesProbedKindWhoseCountZeroed(t *testing.T) {
+	clk := &testClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), probedConfig(2, time.Hour, workKind), &scriptedRunner{}, newTestEmitter(&buf), clk)
+	defer p.cancel()
+	p.mutate(func(s *state) []Event {
+		s.sched, _ = s.sched.Observe(clk.Now(), DemandProbed{Kind: workKind, Ready: 1})
+		s.sched, _ = s.sched.Observe(clk.Now(), ChildDone{Kind: workKind, Result: ChildEmpty})
+		return nil
+	})
+
+	if kind, ok := p.startChild(0, workKind, "rev1"); ok {
+		t.Fatalf("startChild started %q, want no start", kind)
+	}
+	if got := p.snapshot().Slots[0].Phase; got == PhaseRunning {
+		t.Fatalf("slot 0 phase = %q, want not running", got)
+	}
+	if strings.Contains(buf.String(), "child_start") {
+		t.Fatalf("child_start emitted for a declined start: %s", buf.String())
 	}
 }
