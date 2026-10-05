@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -33,11 +34,93 @@ func findModuleRoot(start string) (string, error) {
 	}
 }
 
+// buildState memoizes builds for the life of the test binary: a package links
+// once, and every later request gets the same path (or the same error).
+var buildState = struct {
+	sync.Mutex
+	dir    string // owned by Main; empty when TestMain did not call it
+	builds map[string]builtBinary
+}{builds: map[string]builtBinary{}}
+
+type builtBinary struct {
+	path string
+	err  error
+}
+
+// goBuild links pkg into out from the module at root. A var so a test can
+// count toolchain invocations.
+var goBuild = func(root, pkg, out string) ([]byte, error) {
+	cmd := exec.Command("go", "build", "-o", out, pkg)
+	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "GOPROXY=off")
+	return cmd.CombinedOutput()
+}
+
+// withBuildDir runs runTests with a fresh shared build dir and removes it
+// afterwards. Main calls os.Exit, which skips defers, so the removal has to
+// happen here, before Main exits.
+func withBuildDir(runTests func() int) int {
+	dir, err := os.MkdirTemp("", "seamtest-build-")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "seamtest: %v\n", err)
+		return 1
+	}
+	buildState.Lock()
+	buildState.dir = dir
+	buildState.Unlock()
+	defer func() {
+		buildState.Lock()
+		buildState.dir = ""
+		buildState.Unlock()
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintf(os.Stderr, "seamtest: %v\n", err)
+		}
+	}()
+	return runTests()
+}
+
+// buildBinary is the non-TB core of Build.
+func buildBinary(root, pkg string) (string, error) {
+	// One lock across the whole go build is deliberate: no seam test runs
+	// t.Parallel, so serializing distinct packages costs nothing.
+	buildState.Lock()
+	defer buildState.Unlock()
+	key := filepath.Join(root, pkg)
+	if b, ok := buildState.builds[key]; ok {
+		return b.path, b.err
+	}
+	b := linkBinary(root, pkg)
+	buildState.builds[key] = b
+	return b.path, b.err
+}
+
+// linkBinary runs under buildState's lock.
+func linkBinary(root, pkg string) builtBinary {
+	if buildState.dir == "" {
+		return builtBinary{err: errors.New("no shared build dir; TestMain must call seamtest.Main")}
+	}
+	name := path.Base(path.Clean(pkg))
+	if name == "." {
+		name = path.Base(filepath.ToSlash(root))
+	}
+	// A subdir per package keeps two packages with the same base name apart.
+	sub, err := os.MkdirTemp(buildState.dir, "bin-")
+	if err != nil {
+		return builtBinary{err: err}
+	}
+	out := filepath.Join(sub, name)
+	if b, err := goBuild(root, pkg, out); err != nil {
+		return builtBinary{err: fmt.Errorf("go build %s: %w\n%s", pkg, err, b)}
+	}
+	return builtBinary{path: out}
+}
+
 // Build compiles pkg (a path relative to the launcher module root, e.g. "."
-// or "./cmd/foo") into tb's temp dir and returns the binary's path. GOPROXY=off
-// makes a missing module fail instead of reaching the network; Go picks up
-// vendor/ on its own when the tree has one. Each call links afresh -- the Go
-// build cache makes repeats cheap, and a shared output dir would outlive tb.
+// or "./cmd/foo") and returns the binary's path. GOPROXY=off makes a missing
+// module fail instead of reaching the network; Go picks up vendor/ on its own
+// when the tree has one. Each package links once per test binary, into a dir
+// Main owns and removes on exit; a failed build is remembered too, so every
+// test that asks for that binary fails.
 func Build(tb testing.TB, pkg string) string {
 	tb.Helper()
 	wd, err := os.Getwd()
@@ -48,16 +131,9 @@ func Build(tb testing.TB, pkg string) string {
 	if err != nil {
 		tb.Fatalf("seamtest: %v", err)
 	}
-	name := path.Base(path.Clean(pkg))
-	if name == "." {
-		name = path.Base(filepath.ToSlash(root))
-	}
-	out := filepath.Join(tb.TempDir(), name)
-	cmd := exec.Command("go", "build", "-o", out, pkg)
-	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GOPROXY=off")
-	if b, err := cmd.CombinedOutput(); err != nil {
-		tb.Fatalf("seamtest: go build %s: %v\n%s", pkg, err, b)
+	out, err := buildBinary(root, pkg)
+	if err != nil {
+		tb.Fatalf("seamtest: %v", err)
 	}
 	return out
 }
