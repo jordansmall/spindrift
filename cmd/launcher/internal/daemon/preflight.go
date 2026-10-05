@@ -2,6 +2,11 @@ package daemon
 
 import "fmt"
 
+// OutcomeRequiredLabelsMissing is the outcome ClassifyPreflight gives doctor's
+// exit 4, exported so the daemon can tell that verdict apart without
+// re-deriving the exit code.
+const OutcomeRequiredLabelsMissing = "doctor-required-labels-missing"
+
 // PreflightVerdict is ClassifyPreflight's result: whether the host may run
 // at all, and — when it may not — what an operator needs to know and do
 // about it.
@@ -54,9 +59,9 @@ func ClassifyPreflight(exit int) PreflightVerdict {
 	case 4:
 		return PreflightVerdict{
 			Exit:    exit,
-			Outcome: "doctor-required-labels-missing",
-			Detail:  "required triage labels are missing",
-			Remedy:  "create the four triage labels on the target repo, or run `spindrift doctor` interactively to create them — until then every claim fails and the daemon would run doing nothing",
+			Outcome: OutcomeRequiredLabelsMissing,
+			Detail:  "required labels are missing",
+			Remedy:  "create the missing labels named in the doctor report on the target repo, or run `spindrift doctor` interactively to create every missing label — until then the kinds that need them cannot claim or file",
 		}
 	default:
 		return PreflightVerdict{

@@ -82,6 +82,28 @@ func TestRelayCapableAndHostPostingCapable(t *testing.T) {
 	}
 }
 
+// TestLabelRegistry pins which trackers manage labels as registered objects:
+// doctor's extra Required labels would deadlock a preflight on one that does
+// not (issue #4400).
+func TestLabelRegistry(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		desc Descriptor
+		want bool
+	}{
+		{"github", GitHub, true},
+		{"forgejo", Forgejo, true},
+		{"local", Local, false},
+		{"jira", Jira, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.desc.LabelRegistry; got != tc.want {
+				t.Fatalf("%s.LabelRegistry = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestNeedsGHToken(t *testing.T) {
 	cases := []struct {
 		name           string

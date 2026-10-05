@@ -10,6 +10,7 @@ var GitHub = Descriptor{
 	OutboxRelayCapable: true,
 	RelayCapable:       true,
 	HostPostingCapable: true,
+	LabelRegistry:      true,
 }
 
 // Git is the descriptor for the "git" backend.
@@ -50,6 +51,7 @@ var Forgejo = Descriptor{
 	OutboxRelayCapable: true,
 	RelayCapable:       true,
 	HostPostingCapable: true,
+	LabelRegistry:      true,
 	TrackerAxisRead:    "FORGEJO",
 	TrackerAxisWrite:   "FORGEJO",
 	TrackerAxisFiler:   "FORGEJO",

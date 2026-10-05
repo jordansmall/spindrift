@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -426,7 +428,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := forge.NewFake()
 			f.ProbeRepo = "owner/repo"
-			f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+			f.Labels = append([]string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}, doctor.ButlerLabelNames()...)
 
 			c := newHealthyConfig(t)
 			tc.mutate(t, &c)
@@ -654,5 +656,53 @@ func TestDoctorReport_ConfigErr_CarriesFailingRowRemedy(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), wantRemedy) {
 		t.Errorf("want stderr to carry the driver-credentials remedy %q, got %q", wantRemedy, stderr.String())
+	}
+}
+
+// requiredLabels names only what the selected kinds and the work kind's own
+// relay need: the butler patch label waits on a nonzero daily cap and a
+// tracker/forge pair that can land patches, and the review-finding label on a
+// read-only work Box with a provisioned Filer. A tracker with no label
+// registry (local, jira) never gets an extra Required label (issue #4400).
+func TestRequiredLabels(t *testing.T) {
+	t.Setenv("FILER_MODEL", "test-model")
+	cf := forge.NewFake()
+	githubDesc, _ := backend.ByName("github")
+	patchCaps := forge.Capabilities{
+		BranchPusher: fakeBranchPusher{}, DraftPRCreator: fakeDraftPRCreator{}, IssueLabeler: fakeIssueLabeler{},
+		PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
+		ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
+	}
+	mk := func(tracker, access, driver string, patches int, caps forge.Capabilities) readContext {
+		var c config
+		c.issueTracker = tracker
+		c.boxForgeAndIssueAccess = access
+		c.driver = driver
+		c.butlerMaxPatchesPerDay = patches
+		return readContext{config: c, codeForge: cf, capabilities: caps}
+	}
+	for _, tc := range []struct {
+		name string
+		opts doctorOptions
+		rc   readContext
+		want []string
+	}{
+		{"no flags, read-write", doctorOptions{}, mk("github", "read-write", "", 0, patchCaps), nil},
+		{"read-only with filer", doctorOptions{}, mk("github", "read-only", "claude", 0, patchCaps), []string{"agent-review-finding"}},
+		{"read-only, opencode has no filer", doctorOptions{}, mk("github", "read-only", "opencode", 0, patchCaps), nil},
+		{"butler, patches off", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
+		{"butler, patches on", doctorOptions{butler: true}, mk("github", "read-write", "", 2, patchCaps), []string{"agent-butler-finding", "agent-butler-patch"}},
+		{"butler, patches on but no patch forge", doctorOptions{butler: true}, mk("github", "read-write", "", 2, forge.Capabilities{}), []string{"agent-butler-finding"}},
+		{"research", doctorOptions{research: true}, mk("github", "read-write", "", 0, patchCaps), doctor.ResearchLabelNames()},
+		{"butler patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
+		{"forgejo keeps butler label", doctorOptions{butler: true}, mk("forgejo", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
+		{"local, butler and research and read-only", doctorOptions{butler: true, research: true}, mk("local", "read-only", "claude", 2, patchCaps), nil},
+		{"jira, butler and research and read-only", doctorOptions{butler: true, research: true}, mk("jira", "read-only", "claude", 2, patchCaps), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := requiredLabels(tc.opts, tc.rc); !slices.Equal(got, tc.want) {
+				t.Errorf("requiredLabels() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

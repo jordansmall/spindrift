@@ -728,6 +728,7 @@ rec {
         "outboxRelayCapable"
         "relayCapable"
         "hostPostingCapable"
+        "labelRegistry"
         "trackerAxisRead"
         "trackerAxisWrite"
         "trackerAxisFiler"
@@ -772,6 +773,7 @@ rec {
         + fieldLine "OutboxRelayCapable" (row.outboxRelayCapable or false)
         + fieldLine "RelayCapable" (row.relayCapable or false)
         + fieldLine "HostPostingCapable" (row.hostPostingCapable or false)
+        + fieldLine "LabelRegistry" (row.labelRegistry or false)
         + fieldLine "TrackerAxisRead" (row.trackerAxisRead or "")
         + fieldLine "TrackerAxisWrite" (row.trackerAxisWrite or "")
         + fieldLine "TrackerAxisFiler" (row.trackerAxisFiler or "")

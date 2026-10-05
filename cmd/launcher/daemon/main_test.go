@@ -20,6 +20,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
 
@@ -1666,6 +1667,7 @@ type fakePreflightRunner struct {
 	fetchErr   error
 	doctorExit int
 	doctorErr  error
+	doctorLine string // the labels line RunDoctor reports alongside doctorExit
 
 	mu          sync.Mutex
 	doctorCalls int
@@ -1678,14 +1680,14 @@ func (f *fakePreflightRunner) fetchRevision(ctx context.Context) (string, error)
 	return f.revision, nil
 }
 
-func (f *fakePreflightRunner) RunDoctor(ctx context.Context, revision string) (int, error) {
+func (f *fakePreflightRunner) RunDoctor(ctx context.Context, revision string) (int, string, error) {
 	f.mu.Lock()
 	f.doctorCalls++
 	f.mu.Unlock()
 	if f.doctorErr != nil {
-		return 0, f.doctorErr
+		return 0, "", f.doctorErr
 	}
-	return f.doctorExit, nil
+	return f.doctorExit, f.doctorLine, nil
 }
 
 func (f *fakePreflightRunner) calls() int {
@@ -1780,7 +1782,7 @@ func TestStartupPreflight_Healthy(t *testing.T) {
 
 // TestStartupPreflight_RequiredLabelsMissing pins the acceptance criterion
 // that the failure names what failed and its remedy, on doctor's own exit 4
-// (missing required triage labels).
+// (missing required labels).
 func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -1791,10 +1793,10 @@ func TestStartupPreflight_RequiredLabelsMissing(t *testing.T) {
 		t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltPreflight)
 	}
 	reason := h.String()
-	if !strings.Contains(reason, "required triage labels are missing") {
+	if !strings.Contains(reason, "required labels are missing") {
 		t.Errorf("reason = %q, want it to name what failed", reason)
 	}
-	if !strings.Contains(reason, "create the four triage labels") {
+	if !strings.Contains(reason, "create the missing labels") {
 		t.Errorf("reason = %q, want it to carry the remedy", reason)
 	}
 
@@ -2116,7 +2118,7 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 		}
 		// The tail is doctor's remedy prose, owned elsewhere: pin the prefix
 		// literally and the rest against the event's own reason.
-		if prefix := "daemon: preflight: doctor exit 4: required triage labels are missing — remedy: "; !strings.HasPrefix(stderr.String(), prefix) {
+		if prefix := "daemon: preflight: doctor exit 4: required labels are missing — remedy: "; !strings.HasPrefix(stderr.String(), prefix) {
 			t.Errorf("stderr = %q, want prefix %q", stderr.String(), prefix)
 		}
 		if want := "daemon: " + h.String() + "\n"; stderr.String() != want {
@@ -3048,6 +3050,52 @@ func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
 				}
 			} else if strings.TrimSpace(strings.Join(trailing, "")) != "" {
 				t.Errorf("trailing = %q, want none", trailing)
+			}
+		})
+	}
+}
+
+// TestStartupPreflight_ExitFourNamesMissingLabels pins that doctor's own
+// labels line, not ClassifyPreflight's generic text, becomes the halt's
+// detail: exit 4 now also covers the butler/research/Filer label sets.
+func TestStartupPreflight_ExitFourNamesMissingLabels(t *testing.T) {
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	line := doctor.ErrRequiredLabelsMissing.Error() + ": agent-butler-finding missing — create them in the repository"
+	r := &fakePreflightRunner{revision: "deadbeef", doctorExit: 4, doctorLine: line}
+
+	h := startupPreflight(context.Background(), r, em)
+	if h.Class != daemon.HaltPreflight {
+		t.Fatalf("startupPreflight().Class = %v, want %v", h.Class, daemon.HaltPreflight)
+	}
+	if !strings.Contains(h.String(), "agent-butler-finding") || !strings.Contains(h.Detail, line) {
+		t.Errorf("halt = %q (detail %q), want it to name agent-butler-finding", h.String(), h.Detail)
+	}
+	if !strings.Contains(buf.String(), `"outcome":"doctor-required-labels-missing"`) {
+		t.Errorf("events = %q, want outcome doctor-required-labels-missing unchanged", buf.String())
+	}
+}
+
+// TestResearchPromoted pins that only an explicit research selector makes
+// the preflight demand the research labels: the bare every-kind default
+// lists research too, and a dispatch-only repo must still start.
+func TestResearchPromoted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		argv []string
+		want bool
+	}{
+		{"bare", []string{"--input", "x.json"}, false},
+		{"dispatch", []string{"--input", "x.json", "dispatch"}, false},
+		{"research", []string{"--input", "x.json", "research"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			args, err := parseArgs(tc.argv)
+			if err != nil {
+				t.Fatalf("parseArgs: %v", err)
+			}
+			if got := researchPromoted(args); got != tc.want {
+				t.Errorf("researchPromoted = %v, want %v (kinds %v, explicit %v)", got, tc.want, args.Kinds, args.ExplicitSelector)
 			}
 		})
 	}

@@ -36,6 +36,9 @@
 # create and commit subjects when the backend has a PR concept.
 # outboxRelayCapable is narrower: it covers only the outbox mount and relay
 # treatment (issues #1918, #2267, #2927).
+
+# labelRegistry marks a tracker whose labels are registered objects that
+# ListLabels/CreateLabel manage; local and jira omit it (issue #4400).
 [
   {
     name = "github";
@@ -46,6 +49,7 @@
     outboxRelayCapable = true;
     relayCapable = true;
     hostPostingCapable = true;
+    labelRegistry = true;
   }
   {
     name = "git";
@@ -88,6 +92,7 @@
     outboxRelayCapable = true;
     relayCapable = true;
     hostPostingCapable = true;
+    labelRegistry = true;
     trackerAxisRead = "FORGEJO";
     trackerAxisWrite = "FORGEJO";
     trackerAxisFiler = "FORGEJO";

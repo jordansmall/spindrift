@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -31,7 +32,40 @@ func cmdDoctor(opts doctorOptions, stdout, stderr io.Writer) int {
 type doctorOptions struct {
 	interactive bool
 	verbose     bool
-	butler      bool
+	butler      bool // also validates butler config and makes its labels Required
+	research    bool // makes the research labels Required
+}
+
+// requiredLabels names the labels, beyond the four work-tier ones, that the
+// selected kinds need the repo to carry, so a daemon preflight fails before a
+// kind that cannot file its labels starts. Research and butler labels stay
+// advisory without their flag.
+func requiredLabels(opts doctorOptions, rc readContext) []string {
+	c := rc.config
+	// local and jira have no label registry to list or create from: a Required
+	// label there could never be seen present, so the preflight would exit 4
+	// forever. The label springs into existence on first filing instead.
+	if row, _ := backendByName(c.issueTracker); !row.LabelRegistry {
+		return nil
+	}
+	var labels []string
+	if opts.research {
+		labels = append(labels, doctor.ResearchLabelNames()...)
+	}
+	if opts.butler {
+		labels = append(labels, dispatchkind.Butler.FindingLabel)
+		// The patch rung never applies its label while the daily cap is 0 or
+		// while this tracker/forge pair cannot land patches at all.
+		if c.butlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.codeForge, rc.capabilities) != nil {
+			labels = append(labels, dispatchkind.Butler.PatchLabel)
+		}
+	}
+	// A read-only work Box relays review findings for the host to file, so the
+	// label is part of what the work kind needs whichever flags are set.
+	if c.boxForgeAndIssueAccess == "read-only" && resolveAgentPresenceSignals(c.driver).filerEnabled {
+		labels = append(labels, dispatchkind.Work.FindingLabel)
+	}
+	return labels
 }
 
 // doctorReport runs cmdDoctor's exit-vocabulary classification (issue #2569).
@@ -57,7 +91,7 @@ func doctorReport(rc readContext, stdout, stderr io.Writer, stdin io.Reader, opt
 		fmt.Fprintf(stderr, "%s\n", configErr)
 	}
 	rep := doctor.NewReporter(stdout, opts.verbose)
-	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, rep, rep.AdvisoryWriter(), stdin, opts.interactive, v.reportChecks)
+	runErr := runDoctor(rc.issueTracker, rc.codeForge, rc.config, rep, rep.AdvisoryWriter(), stdin, opts.interactive, v.reportChecks, requiredLabels(opts, rc)...)
 	if runErr != nil {
 		fmt.Fprintf(stderr, "%s\n", runErr)
 	}
@@ -97,10 +131,11 @@ func doctorExitCodeFor(configErr, runErr error) int {
 // be introspected) obeys the same quiet gate as an advisory: row instead of
 // bypassing the Reporter (issue #3777). The two params stay distinct since
 // only one of them is the report stream.
-func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check) error {
+func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.Reporter, checkW io.Writer, stdin io.Reader, interactive bool, extraChecks []doctor.Check, requiredLabels ...string) error {
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    c.issueTracker,
+		RequiredLabels:  requiredLabels,
 		TokenHint:       row.DoctorTokenHint,
 		SlugHint:        row.DoctorSlugHint,
 		Label:           c.label,

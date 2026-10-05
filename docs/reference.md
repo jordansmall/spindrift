@@ -222,7 +222,7 @@ each other, so the collision is not a conflict to resolve.
 
 | exit | meaning |
 |------|---------|
-| 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec/butler labels, runtime not ready, etc.) are allowed, and their rows print only under `--verbose`/`-v` — except the advisory labels re-listed above the interactive create-label prompt and the still-missing-after-creation lines, which print either way (see [`spindrift doctor` checks](#spindrift-doctor-checks)) |
+| 0    | healthy — required checks passed; advisory findings (missing research/priority/ambiguous-spec/butler labels unless promoted by `--research`/`--butler`, runtime not ready, etc.) are allowed, and their rows print only under `--verbose`/`-v` — except the advisory labels re-listed above the interactive create-label prompt and the still-missing-after-creation lines, which print either way (see [`spindrift doctor` checks](#spindrift-doctor-checks)) |
 | 1    | reserved for internal/unclassified errors |
 | 2    | configuration invalid — the same required-knob/driver/cross-knob validation `dispatch` gates on, minus runtime readiness (advisory here, per exit 0 above, even though `dispatch` itself still requires it before launching a Box); also fires when `podman-machine-memory` fails (the podman machine is undersized for `MEMORY_LIMIT` × `MAX_PARALLEL`, issue #3544), since that row is classified alongside the required-knob checks |
 | 3    | auth or connectivity — the issue tracker or code forge could not be reached, or a work-tier label create call failed (an advisory-tier label create failure does not fail the check and still exits 0; its row prints only under `--verbose`/`-v`) |
@@ -233,6 +233,13 @@ The optional `--butler` flag additionally runs the butler's own config checks
 `BUTLER_EVERY`, `BUTLER_CLAIM_TIMEOUT`, `DAEMON_AWAKE_WINDOW`, and the rest);
 a failure there folds into exit 2 above, same as any other configuration-invalid
 case (issue #3920).
+
+Passing `--butler` also promotes the butler label tier (`agent-butler-finding`,
+`agent-butler-patch`) from advisory to Required, and `--research` does the same
+for the research tier, so missing labels of a promoted tier exit 4 like a missing
+triage label (create prompt included). The daemon's startup preflight passes
+each flag for the kind it runs (issue #4400); a plain `spindrift doctor` keeps
+both tiers advisory.
 
 Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 > baked default** (ADR 0020): nix renders the resolved `settings` values (plus
