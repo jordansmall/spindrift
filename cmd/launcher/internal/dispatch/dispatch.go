@@ -122,9 +122,8 @@ type Config struct {
 	// Kind is the dispatch kind ("work", "research" or "butler"). Its
 	// descriptor's axes reach the Box as DISPATCH_KEYING and
 	// DISPATCH_ANNOUNCE_VERB (issue #3996); the name itself rides along as
-	// DISPATCH_KIND, which the entrypoint only displays or hands to driver-exec
-	// for a descriptor lookup (advise-only posture, issue #3901). Empty
-	// defaults to "work".
+	// DISPATCH_KIND, which box resolves to its descriptor in-process (issue
+	// #3901). Empty defaults to "work".
 	Kind string
 
 	// SelfContained forwards the research kind's no-repo sub-mode as
@@ -315,7 +314,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 	if cfg.boxAccessForKind() == "read-write" {
 		env["BOX_WRITE_ENABLED"] = "1"
 	}
-	// Forwarded so the in-box `driver-exec outcome-backstop` verb keys its
+	// Forwarded so box's in-process outcome backstop keys its
 	// decision off explicit signals rather than a raw CODE_FORGE name
 	// comparison (issue #2267).
 	forgeHostMediatedRemote := cfg.ForgeDescriptor.HostMediatedRemote

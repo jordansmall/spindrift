@@ -730,7 +730,7 @@ in
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "retry.maxRebase";
-    # Forwarded into the Box so the driver-exec outcome-backstop verb takes its
+    # Forwarded into the Box so box's in-process outcome backstop takes its
     # push-retry bound from launcher-delivered plumbing rather than a
     # hand-copied default (issue #2157).
     boxEnv = true;
@@ -988,8 +988,8 @@ in
     flakeOption = true;
     intKind = "nonneg";
     nixSubPath = "retry.holdJitter";
-    # Forwarded into the Box for the outcome-backstop verb's push-retry
-    # jitter (issue #2157); see maxRebaseAttempts.
+    # Forwarded into the Box for the push-retry jitter of box's
+    # in-process outcome backstop (issue #2157); see maxRebaseAttempts.
     boxEnv = true;
   };
   transientBackoffSecs = {
@@ -1000,8 +1000,8 @@ in
     flakeOption = true;
     intKind = "positive";
     nixSubPath = "retry.transientBackoff";
-    # Forwarded into the Box for the outcome-backstop verb's push-retry
-    # linear backoff unit (issue #2157); see maxRebaseAttempts.
+    # Forwarded into the Box for the push-retry linear backoff unit of
+    # box's in-process outcome backstop (issue #2157); see maxRebaseAttempts.
     boxEnv = true;
   };
   transientRetryMax = {
