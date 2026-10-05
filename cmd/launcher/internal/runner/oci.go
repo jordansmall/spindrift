@@ -715,6 +715,10 @@ var errProbeNoVerdict = errors.New("no probe verdict")
 // listenTCPProbe binds the throwaway TCP listener the probe container dials
 // back into. A var, not a direct net.Listen call, so a test can force the bind
 // to fail without starving the process of file descriptors (issue #3120).
+// It binds every interface like the real listeners (dispatch's registry proxy
+// and signal socket, issue #3772) so the probe tests the same route they
+// serve, and it carries no secret because it only accepts and closes -- no
+// credential, no payload.
 var listenTCPProbe = func() (net.Listener, error) {
 	return net.Listen("tcp", "0.0.0.0:0")
 }
