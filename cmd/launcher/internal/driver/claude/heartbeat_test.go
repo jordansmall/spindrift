@@ -1206,6 +1206,41 @@ func TestWriterPassStartSwitchesBackToImplementorOnLand(t *testing.T) {
 	}
 }
 
+// A "delta-review" pass_start after a "land" pass_start switches the active
+// role to reviewer: the run-once delta-review pass that can follow land
+// (issue #3246) is a review, not implementor work (issue #4425).
+func TestWriterPassStartSwitchesToReviewerOnDeltaReviewAfterLand(t *testing.T) {
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	var status bytes.Buffer
+	w := claude.New(&bytes.Buffer{}, "4425", &status)
+
+	landStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"land"}}` + "\n"
+	landNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Landing the change."}]}}` + "\n"
+	deltaStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":4,"role":"delta-review"}}` + "\n"
+	deltaNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the delta."}]}}` + "\n"
+	fmt.Fprint(w, landStart)
+	fmt.Fprint(w, landNar)
+	fmt.Fprint(w, deltaStart)
+	fmt.Fprint(w, deltaNar)
+
+	out := status.String()
+	if !strings.Contains(out, rule+" implementor ") {
+		t.Errorf("missing implementor header for the land pass: %q", out)
+	}
+	if !strings.Contains(out, rule+" reviewer ") {
+		t.Errorf("missing reviewer switch header after delta-review pass_start: %q", out)
+	}
+	if !strings.Contains(out, "Reviewing the delta.") {
+		t.Errorf("missing delta-review narration: %q", out)
+	}
+	land := strings.Index(out, "Landing the change.")
+	rev := strings.Index(out, rule+" reviewer ")
+	delta := strings.Index(out, "Reviewing the delta.")
+	if land >= rev || rev >= delta {
+		t.Errorf("reviewer header must sit between the land and delta-review narration: %q", out)
+	}
+}
+
 // A pass_start with no Role, the legacy single-loop dispatch shape, leaves the
 // active top-level role unchanged: a later top-level turn is still attributed
 // to implementor, exactly as if the pass_start were absent (issue #2382).

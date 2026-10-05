@@ -75,10 +75,11 @@ type SpindriftOp struct {
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
-	// "implement", "review", "fix", or "land". The land pass (issue #2457,
-	// #2654) is terminal: it runs exactly once per run and cannot re-enter
-	// the review cycle. Empty on every other op kind, and on a pass_start
-	// from the legacy single-loop path that never distinguishes roles.
+	// "implement", "review", "fix", "land", or "delta-review". The land pass
+	// (issue #2457, #2654) runs exactly once per run and cannot re-enter the
+	// review cycle, but a run-once delta-review pass (issue #3246) can follow
+	// it. Empty on every other op kind, and on a pass_start from the legacy
+	// single-loop path that never distinguishes roles.
 	Role    string `json:"role,omitempty"`
 	Verdict string `json:"verdict,omitempty"`
 	// Kind names the signal kind on a "signal" op (issue #3724): "comment",
@@ -192,13 +193,14 @@ func CollectTaskRoles(ev Event, taskRole map[string]string) {
 }
 
 // AttributionRoleForPass maps a pass_start op's Role to an attribution role:
-// "review" to ReviewerRole, "implement"/"fix"/"land" to ImplementorRole, and
-// anything else to "" so a caller can tell "no role info" from "implementor".
+// "review"/"delta-review" to ReviewerRole, "implement"/"fix"/"land" to
+// ImplementorRole, and anything else to "" so a caller can tell "no role info"
+// from "implementor".
 // The literals are not passmachine's constants because driverExecBin's fileset
 // (lib/mkHarness.nix) excludes that package, so importing it breaks the build.
 func AttributionRoleForPass(passRole string) string {
 	switch passRole {
-	case "review":
+	case "review", "delta-review":
 		return ReviewerRole
 	case "implement", "fix", "land":
 		return ImplementorRole
