@@ -4,8 +4,9 @@
 # error wording here must not diverge from it. Pure builtins only, no pkgs.lib,
 # so a bare `nix eval` tests this file without a locked nixpkgs.
 let
-  # These must match the keys of jira.go's statusMappingKeys map exactly,
-  # in lowerCamelCase.
+  # Must match jira.go's statusMappingKeys keys, in lowerCamelCase;
+  # nix/checks/jira-status-mapping.nix's jira-status-mapping-keys-match-go-source
+  # enforces it.
   validKeys = [
     "dispatchable"
     "inProgress"
