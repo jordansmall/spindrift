@@ -12,8 +12,9 @@ import (
 
 // Writer parses opencode's flat one-event-per-line NDJSON and emits a
 // per-issue heartbeat line to out on each type:"text" event with non-empty
-// prose. Every byte is forwarded to raw unchanged; the heartbeat is a side
-// effect.
+// prose, sanitized and bounded by driverkit.TrimNarration: like claude's
+// narration it shows only the first sentence, not the whole first line. Every
+// byte is forwarded to raw unchanged; the heartbeat is a side effect.
 type Writer struct {
 	raw   io.Writer
 	issue string
@@ -52,13 +53,9 @@ func (w *Writer) parseLine(line string) {
 	if ev.Type != "text" {
 		return
 	}
-	text := strings.TrimSpace(ev.Part.Text)
+	text := driverkit.TrimNarration(ev.Part.Text)
 	if text == "" {
 		return
 	}
-	firstLine := text
-	if i := strings.IndexByte(firstLine, '\n'); i >= 0 {
-		firstLine = firstLine[:i]
-	}
-	fmt.Fprintf(w.out, "#%s \xc2\xb7 %s\n", w.issue, firstLine)
+	fmt.Fprintf(w.out, "#%s \xc2\xb7 %s\n", w.issue, text)
 }

@@ -74,8 +74,8 @@ func SanitizeControlSequences(s string) string {
 
 // isBidiOrLineSeparator reports the bidi controls, implicit marks, and
 // line/paragraph separators SanitizeControlSequences strips. The heartbeat's
-// near-copy sanitizeLine in driver/claude has the same gap (#4396); fixing it
-// should move this set into a package both can import, not hand-copy it.
+// driverkit.SanitizeLine strips a superset via unicode.Cf/Zl/Zp (ZWJ and ZWNJ
+// too); the two sanitizers' escape parsing is still a hand-copied pair.
 func isBidiOrLineSeparator(r rune) bool {
 	return (r >= 0x202a && r <= 0x202e) || // LRE..RLO
 		(r >= 0x2066 && r <= 0x2069) || // LRI..PDI
