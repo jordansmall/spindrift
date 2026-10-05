@@ -190,7 +190,7 @@ func TestCmdDispatchSelective_RunsCleanupOnEveryExit(t *testing.T) {
 		cleanup:      func() { called = true },
 	}
 
-	got := cmdDispatchSelective(lc, []string{"99"}, false)
+	got := cmdDispatchSelective(lc, []string{"99"}, false, io.Discard, io.Discard)
 
 	if got != 1 {
 		t.Errorf("cmdDispatchSelective(lc, [99], false) = %d, want 1 (unknown issue)", got)
@@ -216,7 +216,7 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 		cleanup:      func() { called = true },
 	}
 
-	got := cmdDispatch(lc)
+	got := cmdDispatch(lc, io.Discard, io.Discard)
 
 	if got != 2 {
 		t.Errorf("cmdDispatch(lc) = %d, want 2 (errQueueEmpty)", got)

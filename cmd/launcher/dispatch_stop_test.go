@@ -5,6 +5,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -15,7 +16,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/settle"
-	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -40,7 +40,7 @@ func TestRunExitCode_SignalledStop_NoBoxLaunched(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, exitSignalledStop)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
@@ -67,7 +67,7 @@ func TestRunExitCode_SignalledStop_WinsOverEmptyQueue(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, exitSignalledStop)
 	}
 }
@@ -98,7 +98,7 @@ func TestRunExitCode_SignalledStop_WinsOverAllBlocked(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 3", got, exitSignalledStop)
 	}
 }
@@ -128,10 +128,9 @@ func TestRunExitCode_SignalledStop_WinsOverClaimedBlocked(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	var got int
-	out := testutil.CaptureStdout(t, func() {
-		got = runExitCode(lc)
-	})
+	var buf bytes.Buffer
+	got := runExitCode(lc, &buf, io.Discard)
+	out := buf.String()
 	if got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 0", got, exitSignalledStop)
 	}
@@ -159,7 +158,7 @@ func TestRunExitCode_SignalledAbort_ExitsSameCodeAsStop(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d", got, exitSignalledStop)
 	}
 }
@@ -182,7 +181,7 @@ func TestRunExitCode_AbortOnly_WinsOverEmptyQueue(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d -- must not flatten into exit 2", got, exitSignalledStop)
 	}
 }
@@ -210,7 +209,7 @@ func TestRunExitCode_AbortOnly_NoBoxLaunched(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop)", got, exitSignalledStop)
 	}
 	if len(fc.TransitionStateCalls) != 0 {
@@ -243,15 +242,13 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	var got int
-	stderr := captureStderrFile(t, func() {
-		got = selectiveDispatchExitCode(lc, []string{"1"}, true)
-	})
+	var stderr bytes.Buffer
+	got := selectiveDispatchExitCode(lc, []string{"1"}, true, io.Discard, &stderr)
 	if got != exitSignalledStop {
 		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, exitSignalledStop)
 	}
-	if stderr != "" {
-		t.Errorf("stderr = %q, want empty (a requested stop is not a failure)", stderr)
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty (a requested stop is not a failure)", stderr.String())
 	}
 }
 
@@ -277,7 +274,7 @@ func TestSelectiveDispatchExitCode_SignalledAbort(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := selectiveDispatchExitCode(lc, []string{"1"}, true); got != exitSignalledStop {
+	if got := selectiveDispatchExitCode(lc, []string{"1"}, true, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, exitSignalledStop)
 	}
 }
@@ -303,7 +300,7 @@ func TestCmdDispatch_SignalledStop_StillRunsCleanup(t *testing.T) {
 		cleanup:      func() { cleaned = true },
 	}
 
-	if got := cmdDispatch(lc); got != exitSignalledStop {
+	if got := cmdDispatch(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("cmdDispatch(lc) = %d, want %d", got, exitSignalledStop)
 	}
 	if !cleaned {
@@ -332,7 +329,7 @@ func TestCmdDispatchSelective_SignalledStop_StillRunsCleanup(t *testing.T) {
 		cleanup:      func() { cleaned = true },
 	}
 
-	if got := cmdDispatchSelective(lc, []string{"1"}, true); got != exitSignalledStop {
+	if got := cmdDispatchSelective(lc, []string{"1"}, true, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("cmdDispatchSelective(lc, ...) = %d, want %d", got, exitSignalledStop)
 	}
 	if !cleaned {

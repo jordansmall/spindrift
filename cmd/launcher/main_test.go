@@ -472,9 +472,6 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 		verb          string
 		setup         func(t *testing.T) (issuesDir string)
 		wantMsgSuffix string
-		// injected: the message goes to the injected stderr writer; otherwise
-		// it still goes to real os.Stderr, captured by fd redirect.
-		injected bool
 	}{
 		{
 			verb:          "dispatch",
@@ -494,7 +491,6 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 				return os.Getenv("LOCAL_ISSUES_DIR")
 			},
 			wantMsgSuffix: "proof the selective-list preview path was taken with this exact ID",
-			injected:      true,
 		},
 	}
 
@@ -517,51 +513,19 @@ func TestMainRun_NonNumericAndMixedIssueIDs_HitSelectivePath(t *testing.T) {
 					}
 					argv := append([]string{v.verb}, tc.ids...)
 
-					var code int
 					var stdout, stderr bytes.Buffer
-					var out string
-					if v.injected {
-						code = mainRun(argv, &stdout, &stderr)
-					} else {
-						out = captureStderrFile(t, func() {
-							code = mainRun(argv, &stdout, &stderr)
-						})
-					}
+					code := mainRun(argv, &stdout, &stderr)
 
 					if code != 1 {
 						t.Errorf("mainRun(%v) code = %d, want 1 (SPIN-99 unknown)", argv, code)
 					}
-					got, stream := out, "os.Stderr"
-					if v.injected {
-						got, stream = stderr.String(), "injected stderr"
-					}
-					if !strings.Contains(got, "issue SPIN-99") {
-						t.Errorf("mainRun(%v) %s = %q, want it to name the unresolved slug SPIN-99 (%s)", argv, stream, got, v.wantMsgSuffix)
+					if !strings.Contains(stderr.String(), "issue SPIN-99") {
+						t.Errorf("mainRun(%v) stderr = %q, want it to name the unresolved slug SPIN-99 (%s)", argv, stderr.String(), v.wantMsgSuffix)
 					}
 				})
 			}
 		})
 	}
-}
-
-// captureStderrFile redirects os.Stderr to a temp file for the duration of
-// fn. Needed for code paths that write to real os.Stderr, not an io.Writer.
-func captureStderrFile(t *testing.T, fn func()) string {
-	t.Helper()
-	f, err := os.CreateTemp(t.TempDir(), "stderr")
-	if err != nil {
-		t.Fatal(err)
-	}
-	orig := os.Stderr
-	os.Stderr = f
-	fn()
-	os.Stderr = orig
-	f.Close()
-	out, err := os.ReadFile(f.Name())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(out)
 }
 
 // `console` reaches the same bootstrap/validate prologue as the other

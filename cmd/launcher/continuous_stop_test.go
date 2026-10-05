@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -76,7 +77,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverEmptyQueue(t *test
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- must not flatten into exit 2", got, exitSignalledStop)
 	}
 }
@@ -109,7 +110,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledStop_WinsOverAllBlocked(t *test
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- must not flatten into exit 3", got, exitSignalledStop)
 	}
 }
@@ -138,7 +139,7 @@ func TestRunExitCode_ContinuousDispatch_SignalledAbort_ExitsSameCodeAsStop(t *te
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != exitSignalledStop {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != exitSignalledStop {
 		t.Errorf("runExitCode(lc) = %d, want %d (waves.ErrSignalledStop) -- an abort exits the same code as a graceful drain", got, exitSignalledStop)
 	}
 }

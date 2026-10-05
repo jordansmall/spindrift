@@ -1234,11 +1234,11 @@ func heldLine(h heldIssue) string {
 // re-finds the same hold stays quiet, as logDiscoveryPoll does for new issues.
 // seen is its own map, apart from logDiscoveryPoll's, since a held issue is
 // never in the dispatchable set that one tracks.
-func logHeldIssues(held []heldIssue, seen map[string]bool) {
+func logHeldIssues(held []heldIssue, seen map[string]bool, stdout io.Writer) {
 	for _, h := range held {
 		if !seen[h.number] {
 			seen[h.number] = true
-			fmt.Println(heldLine(h))
+			fmt.Fprintln(stdout, heldLine(h))
 		}
 	}
 }
@@ -1263,17 +1263,17 @@ func emptyQueueLine(label string, held []heldIssue, nothing string) string {
 // the workflow already claimed that issue, so it is targeted directly: a label
 // query could otherwise pick up a different issue stranded on the same
 // in-progress label by an earlier crash.
-func discoverIssues(c config, it forge.IssueTracker) ([]issue, []heldIssue, waves.Origin, error) {
+func discoverIssues(c config, it forge.IssueTracker, stdout io.Writer) ([]issue, []heldIssue, waves.Origin, error) {
 	origin := resolveOrigin(c)
 	if origin == waves.OriginClaimed {
-		fmt.Printf("==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
+		fmt.Fprintf(stdout, "==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
 		fi, err := it.Issue(c.issueNumber)
 		if err != nil {
 			return nil, nil, origin, err
 		}
 		return []issue{newIssue(fi)}, nil, origin, nil
 	}
-	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+	fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
 	issues, held, err := queryOpenIssues(c, it)
 	return issues, held, origin, err
 }
@@ -1325,9 +1325,9 @@ func readinessFor(it forge.IssueTracker, issues []issue) (waves.Batch, error) {
 // run always announces, whatever seen holds (the #1645 invariant). Later polls
 // stay silent unless they surface a number not in seen, and then name only
 // those.
-func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool) {
+func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool, stdout io.Writer) {
 	if first {
-		fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
+		fmt.Fprintf(stdout, "==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
 	} else {
 		var newNums []string
 		for _, iss := range issues {
@@ -1336,7 +1336,7 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 			}
 		}
 		if len(newNums) > 0 {
-			fmt.Printf("==> querying open '%s' issues in %s — new: #%s\n", c.label, c.repoSlug, strings.Join(newNums, ", #"))
+			fmt.Fprintf(stdout, "==> querying open '%s' issues in %s — new: #%s\n", c.label, c.repoSlug, strings.Join(newNums, ", #"))
 		}
 	}
 	for _, iss := range issues {
@@ -1534,12 +1534,12 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 // run is the orchestration logic for the `dispatch` subcommand: preflight,
 // stranded-issue reconciliation, discovery, dependency-graph construction, and
 // drain/wave dispatch. bootstrap wires lc in production; tests use fakes.
-func run(lc *launchContext) error {
+func run(lc *launchContext, stdout, stderr io.Writer) error {
 	c, it, cf, f, s, pwd := lc.config, lc.issueTracker, lc.codeForge, lc.factory, lc.settle, lc.pwd
 	caps := lc.capabilities
 	lp := reconcile.NewFSProbe(pwd, lc.runner)
 
-	fmt.Println(repoBanner(c))
+	fmt.Fprintln(stdout, repoBanner(c))
 
 	if err := checkAutoMergePreflight(c, caps); err != nil {
 		return err
@@ -1550,7 +1550,7 @@ func run(lc *launchContext) error {
 	// committing to right now (#600). The only adopt path is the explicit
 	// `spindrift recover <n>`.
 	if resolveOrigin(c) == waves.OriginDiscovered && c.continuousDispatch {
-		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, runner.NixRealizer{}, lp)
+		return runContinuousDispatch(c, it, cf, pwd, f, s, runner.NixEvaluator{}, runner.NixRealizer{}, lp, stdout, stderr)
 	}
 
 	// Installed once, ahead of discoverIssues, mirroring
@@ -1560,12 +1560,12 @@ func run(lc *launchContext) error {
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
 
-	issues, held, origin, err := discoverIssues(c, it)
+	issues, held, origin, err := discoverIssues(c, it, stdout)
 	if err != nil {
 		return signalledOr(stopCh, abortCh, err)
 	}
 	for _, h := range held {
-		fmt.Println(heldLine(h))
+		fmt.Fprintln(stdout, heldLine(h))
 	}
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
@@ -1575,8 +1575,8 @@ func run(lc *launchContext) error {
 		if waves.SignalledStopAlready(stopCh, abortCh) {
 			return waves.ErrSignalledStop
 		}
-		fmt.Println(emptyQueueLine(c.label, held, "nothing to do"))
-		if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
+		fmt.Fprintln(stdout, emptyQueueLine(c.label, held, "nothing to do"))
+		if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout); err != nil {
 			return err
 		}
 		return errQueueEmpty
@@ -1597,8 +1597,8 @@ func run(lc *launchContext) error {
 		return err
 	}
 
-	fmt.Print(dispatchCompletionBanner(c))
-	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout)
+	fmt.Fprint(stdout, dispatchCompletionBanner(c))
+	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout)
 }
 
 // signalledOr returns waves.ErrSignalledStop when a stop or abort has already
@@ -1644,7 +1644,7 @@ func continuousDispatchErr(err, firstQueryErr error) error {
 // closure's first call is the only query a continuous run makes before its
 // first dispatch (#1645). eval and realize are injected so tests substitute
 // fakes rather than shelling out to nix (#2679).
-func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe) error {
+func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, pwd string, f *dispatch.Factory, s settle.Settler, eval freshness.Evaluator, realize freshness.Realizer, lp reconcile.LivenessProbe, stdout, stderr io.Writer) error {
 	// Resolved fresh rather than threaded in (issue #2946): unlike run's
 	// lc.capabilities, this argument list carries no aggregate context.
 	forgeDesc, _ := backend.ByName(c.codeForge)
@@ -1680,8 +1680,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// announcement is about the poll itself, so a slow per-issue DepsOf
 		// round-trip must never delay it. An errored non-first poll passes an
 		// empty slice, so nothing is new and the poll goes unannounced.
-		logDiscoveryPoll(c, issues, wasFirst, seenIssues)
-		logHeldIssues(held, seenHeld)
+		logDiscoveryPoll(c, issues, wasFirst, seenIssues, stdout)
+		logHeldIssues(held, seenHeld, stdout)
 		if err != nil {
 			return waves.Batch{}, err
 		}
@@ -1733,11 +1733,11 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			swapClassified = true
 			swapHostTainted = disposition == freshness.HostTainted
 			if swapHostTainted {
-				fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
+				fmt.Fprintln(stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, res.Rev, c.flakeImageAttr, res.TipTag, currentImageTag))
 				return drain()
 			}
 			if err := freshness.RealizeSync(realize, pwd, res, c.flakeImageAttr); err != nil {
-				fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: realize failed, draining instead: %v\n", err)
+				fmt.Fprintf(stderr, "==> bwrap hot-swap: realize failed, draining instead: %v\n", err)
 				return drain()
 			}
 			// res.TipTag becomes both a bind-mount source and a path component
@@ -1745,7 +1745,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			// not a genuine store path rather than trust a Probe-side
 			// regression never to hand back a foreign host directory (#2682).
 			if !strings.HasPrefix(res.TipTag, "/nix/store/") {
-				fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: realized tip tag %q is not a nix store path, draining instead\n", res.TipTag)
+				fmt.Fprintf(stderr, "==> bwrap hot-swap: realized tip tag %q is not a nix store path, draining instead\n", res.TipTag)
 				return drain()
 			}
 			// nixInBox Consumers need a real nix-var store-DB snapshot
@@ -1755,14 +1755,14 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			// would otherwise surface as every later Box launch failing to stat.
 			if c.nixConfigFile != "" {
 				if err := snapshotGeneration(pwd, res.TipTag); err != nil {
-					fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: snapshot generation failed, draining instead: %v\n", err)
+					fmt.Fprintf(stderr, "==> bwrap hot-swap: snapshot generation failed, draining instead: %v\n", err)
 					return drain()
 				}
 			}
 			gen := runner.NewAgentGeneration(res.TipTag)
 			f.SetAgentGeneration(&gen)
 			currentImageTag = res.TipTag
-			fmt.Printf("==> hot-swapped bwrap agent closure to %s tip %s (%s)\n", c.baseBranch, res.Rev, res.TipTag)
+			fmt.Fprintf(stdout, "==> hot-swapped bwrap agent closure to %s tip %s (%s)\n", c.baseBranch, res.Rev, res.TipTag)
 			return res.Applicable, true, res.Message
 		}
 
@@ -1830,7 +1830,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			if !swapClassified {
 				hostTainted = guard.Classify(staleResult) == freshness.HostTainted
 				if hostTainted {
-					fmt.Fprintln(os.Stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
+					fmt.Fprintln(stdout, freshness.HostTaintDiagnostic(c.runnerKind, c.baseBranch, staleResult.Rev, c.flakeImageAttr, staleResult.TipTag, currentImageTag))
 				}
 			}
 			if hostTainted {
@@ -1848,8 +1848,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// RunContinuous returns ErrOpenNoneDispatchable solely when nothing was
 		// ever dispatched.
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
-			fmt.Println(emptyQueueLine(c.label, firstHeld, "nothing to do"))
-			if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
+			fmt.Fprintln(stdout, emptyQueueLine(c.label, firstHeld, "nothing to do"))
+			if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout); err != nil {
 				return err
 			}
 			_ = guard.Reset()
@@ -1857,8 +1857,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		return err
 	}
-	fmt.Print(dispatchCompletionBanner(c))
-	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout)
+	fmt.Fprint(stdout, dispatchCompletionBanner(c))
+	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout)
 }
 
 // cmdBuild is the `build` subcommand: realize the sandbox image or store
@@ -1985,8 +1985,8 @@ func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
 // exist but none are dispatchable (a selective wave can defer every listed
 // issue, just as a queue drain can), 1 for any other error, 0 on success.
 // Split out so it is testable without bootstrap.
-func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool) int {
-	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, os.Stdout)
+func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool, stdout, stderr io.Writer) int {
+	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, stdout)
 	if err == nil {
 		return 0
 	}
@@ -1996,15 +1996,15 @@ func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool) 
 	if errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		return 3
 	}
-	fmt.Fprintf(os.Stderr, "%s\n", err)
+	fmt.Fprintf(stderr, "%s\n", err)
 	return 1
 }
 
 // cmdDispatchSelective is the `dispatch <nums>` subcommand: an
 // operator-supplied issue list that bypasses the label and barrier gates.
-func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool) int {
+func cmdDispatchSelective(lc *launchContext, nums []string, forceYes bool, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	return selectiveDispatchExitCode(lc, nums, forceYes)
+	return selectiveDispatchExitCode(lc, nums, forceYes, stdout, stderr)
 }
 
 // exitCodeFor translates a run or runContinuousDispatch error into an exit
@@ -2052,19 +2052,19 @@ func bootstrapExitCode(err error) int {
 
 // runExitCode translates run's result via exitCodeFor. Split out from
 // cmdDispatch so it is testable without going through bootstrap.
-func runExitCode(lc *launchContext) int {
-	err := run(lc)
+func runExitCode(lc *launchContext, stdout, stderr io.Writer) int {
+	err := run(lc, stdout, stderr)
 	code := exitCodeFor(err)
 	if code == 1 && err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 	}
 	return code
 }
 
 // cmdDispatch is the `dispatch` subcommand: drain the labeled queue.
-func cmdDispatch(lc *launchContext) int {
+func cmdDispatch(lc *launchContext, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	return runExitCode(lc)
+	return runExitCode(lc, stdout, stderr)
 }
 
 // flushAmbientWarnings writes snapshotted ambient-env deprecation warnings to
@@ -2078,17 +2078,23 @@ func flushAmbientWarnings(stderr io.Writer, warnings *bytes.Buffer) {
 // any leading pass-through flags (see splitVerb). Output injection is partial.
 //
 // Injected through stdout/stderr:
-//   - doctor, reconcile, preview and registry's launcher-layer output
+//   - doctor, reconcile, preview, registry, dispatch, research and recover's
+//     launcher-layer lines (not the globals below), including console's
+//     recover action
 //   - the other verbs' own handler lines, bootstrap's gate walk, and
 //     console's Bubble Tea screen
 //
-// Still process globals:
-//   - tracker/forge warnings (internal/forge): os.Stderr
-//   - the image build (EnsureReady, run by build and by bootstrap):
-//     os.Stdout/os.Stderr
-//   - dispatch, research, recover, butler's sweep, and console's recover
-//     action (recoverByNumber)
-//   - doctor's interactive input: os.Stdin
+// Still process globals: every internal/* package that prints writes to
+// os.Stdout/os.Stderr directly, not the injected writers -- among them, not
+// exhaustively, waves, dispatch, settle, shutdown, terminate, reconcile,
+// freshness, localloop, forge (tracker/forge warnings), runner (the image
+// build, EnsureReady, run by build and by bootstrap), and butler (its sweep).
+// Launcher-owned globals in package main:
+//   - newDispatchFactory's driver-cache warning and dispatchConfig's
+//     IssueTextFor (forge.IssueText's warnings): os.Stderr
+//   - dispatchConfig.ResolveEnv's BASE_BRANCH diagnostics: os.Stdout
+//   - doctor's interactive input and selective dispatch's confirm prompt:
+//     os.Stdin
 type verbHandler func(args []string, stdout, stderr io.Writer) int
 
 // verbHandlers is the single source of truth for which subcommands exist
@@ -2154,9 +2160,9 @@ var verbHandlers = map[string]verbHandler{
 			return bootstrapExitCode(err)
 		}
 		if len(parsed.remaining) > 0 {
-			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes)
+			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes, stdout, stderr)
 		}
-		return cmdDispatch(lc)
+		return cmdDispatch(lc, stdout, stderr)
 	},
 	"research": func(args []string, stdout, stderr io.Writer) int {
 		parsed := parseIssuePositionals(args)
@@ -2166,9 +2172,9 @@ var verbHandlers = map[string]verbHandler{
 			return bootstrapExitCode(err)
 		}
 		if len(parsed.remaining) > 0 {
-			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes)
+			return cmdDispatchSelective(lc, parsed.remaining, parsed.yes, stdout, stderr)
 		}
-		return cmdDispatch(lc)
+		return cmdDispatch(lc, stdout, stderr)
 	},
 	"butler": butlerVerbHandler,
 	"registry": func(args []string, stdout, stderr io.Writer) int {

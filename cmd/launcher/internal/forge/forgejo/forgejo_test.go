@@ -626,10 +626,9 @@ func TestForgejoClient_ListLabels_UnionsRepoAndOrgLabels(t *testing.T) {
 	}
 }
 
-// captureStderr returns everything fn writes to os.Stderr, via a temp file
-// like main_test.go's captureStderrFile. Swapping the package-global
-// os.Stderr makes this unsafe under t.Parallel with any other
-// stderr-sensitive test.
+// captureStderr returns everything fn writes to os.Stderr, via a temp file.
+// Swapping the package-global os.Stderr makes this unsafe under t.Parallel
+// with any other stderr-sensitive test.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	f, err := os.CreateTemp(t.TempDir(), "stderr")

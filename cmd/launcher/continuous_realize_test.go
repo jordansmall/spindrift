@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -92,7 +93,7 @@ func TestRunContinuousDispatch_StaleRealizesTipInBackground(t *testing.T) {
 	// freshness.TestRealizeTip_ReturnsBeforeRealizeCompletes.
 	realizeFake.Block = make(chan struct{})
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the realize wiring must not change the existing exit behavior", got)
 	}
@@ -163,7 +164,7 @@ func TestRunContinuousDispatch_FailedRealizeDoesNotChangeOutcome(t *testing.T) {
 	realizeFake := freshness.NewRealizerFake()
 	realizeFake.Err = errors.New("boom: nix build failed")
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed background realize must not change the existing exit behavior", got)
 	}
@@ -225,7 +226,7 @@ func TestRunContinuousDispatch_Bwrap_StaleClosure_HotSwapsThenReachesEmptyQueue(
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 2 {
 		t.Fatalf("exitCodeFor(err) = %d, want 2 (errQueueEmpty) -- ADR 0043: an image-only-stale bwrap verdict hot-swaps instead of draining, so with no open issue at all the run falls through to the ordinary empty-queue exit", got)
 	}

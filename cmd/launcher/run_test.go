@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,7 +34,7 @@ func TestRun_EmptyQueue_ReturnsErrQueueEmpty(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	err := run(lc)
+	err := run(lc, io.Discard, io.Discard)
 
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("run(lc) = %v, want errQueueEmpty", err)
@@ -54,7 +57,7 @@ func TestRunExitCode_EmptyQueue_ReturnsExitCode2(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 2 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 2 {
 		t.Errorf("runExitCode(lc) = %d, want 2 (errQueueEmpty)", got)
 	}
 }
@@ -75,7 +78,9 @@ func TestRunExitCode_EmptyQueue_SaysNothingToDo(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() { runExitCode(lc) })
+	var buf bytes.Buffer
+	runExitCode(lc, &buf, io.Discard)
+	out := buf.String()
 
 	if want := "no open 'ready-for-agent' issues — nothing to do."; !strings.Contains(out, want) {
 		t.Errorf("output missing %q:\n%s", want, out)
@@ -100,7 +105,9 @@ func TestRun_EmptyQueue_NamesCrossFamilyHeldIssue(t *testing.T) {
 	}
 
 	var err error
-	out := testutil.CaptureStdout(t, func() { err = run(lc) })
+	var buf bytes.Buffer
+	err = run(lc, &buf, io.Discard)
+	out := buf.String()
 
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("run(lc) = %v, want errQueueEmpty", err)
@@ -134,7 +141,9 @@ func TestRun_OneShot_NamesHeldIssueWhenRestBlocked(t *testing.T) {
 	}
 
 	var err error
-	out := testutil.CaptureStdout(t, func() { err = run(lc) })
+	var buf bytes.Buffer
+	err = run(lc, &buf, io.Discard)
+	out := buf.String()
 
 	if !errors.Is(err, waves.ErrOpenNoneDispatchable) {
 		t.Fatalf("run(lc) = %v, want ErrOpenNoneDispatchable", err)
@@ -163,7 +172,9 @@ func TestRun_OneShot_NamesHeldIssueAlongsideDispatchable(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() { runExitCode(lc) })
+	var buf bytes.Buffer
+	runExitCode(lc, &buf, io.Discard)
+	out := buf.String()
 
 	if n := strings.Count(out, "==> #42 held by agent-research-in-progress — skipped"); n != 1 {
 		t.Errorf("held line appeared %d time(s), want 1:\n%s", n, out)
@@ -193,7 +204,7 @@ func TestRunExitCode_QueueMaxJobsZero_NoneDispatchable_ReturnsExitCode3(t *testi
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 3 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 3 {
 		t.Errorf("runExitCode(lc) = %d, want 3 (ErrOpenNoneDispatchable)", got)
 	}
 }
@@ -230,7 +241,7 @@ func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if got := selectiveDispatchExitCode(lc, []string{"10"}, true); got != 3 {
+	if got := selectiveDispatchExitCode(lc, []string{"10"}, true, io.Discard, io.Discard); got != 3 {
 		t.Errorf("selectiveDispatchExitCode(lc, [10], true) = %d, want 3 (ErrOpenNoneDispatchable)", got)
 	}
 }
@@ -253,7 +264,7 @@ func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 2 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 2 {
 		t.Errorf("runExitCode(lc) = %d, want 2 (errQueueEmpty)", got)
 	}
 }
@@ -280,7 +291,7 @@ func TestRun_ContinuousDispatch_StartupQueryError_Propagates(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	err := run(lc)
+	err := run(lc, io.Discard, io.Discard)
 	if !errors.Is(err, boxErr) {
 		t.Fatalf("run(lc) = %v, want the raw ListIssuesErr", err)
 	}
@@ -315,7 +326,7 @@ func TestRunExitCode_ContinuousDispatch_AllBlocked_ReturnsExitCode3(t *testing.T
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 3 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 3 {
 		t.Errorf("runExitCode(lc) = %d, want 3 (ErrOpenNoneDispatchable)", got)
 	}
 }
@@ -344,7 +355,7 @@ func TestRunExitCode_ContinuousDispatch_Fresh_DispatchesAndReturns0(t *testing.T
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 0 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 0 {
 		t.Errorf("runExitCode(lc) = %d, want 0", got)
 	}
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "1" {
@@ -377,11 +388,7 @@ func TestRunExitCode_ContinuousDispatch_QueriesTrackerOnceBeforeFirstDispatch(t 
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() {
-		if got := runExitCode(lc); got != 0 {
-			t.Errorf("runExitCode(lc) = %d, want 0", got)
-		}
-	})
+	out := captureRunStdout(t, lc, 0)
 
 	firstDispatch := strings.Index(out, "    -> #")
 	if firstDispatch == -1 {
@@ -425,11 +432,7 @@ func TestRunExitCode_ContinuousDispatch_RefillAnnouncesOnlyNewIssue(t *testing.T
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() {
-		if got := runExitCode(lc); got != 0 {
-			t.Errorf("runExitCode(lc) = %d, want 0", got)
-		}
-	})
+	out := captureRunStdout(t, lc, 0)
 
 	// The bootstrap poll's baseline line and the refill's new-issue announcement
 	// share the "==> querying open" prefix by design, so distinguish them by the
@@ -469,7 +472,7 @@ func TestRun_DoesNotAdoptLiveRunnersInProgressIssue(t *testing.T) {
 		settle:       sf,
 	}
 
-	if err := run(lc); !errors.Is(err, errQueueEmpty) {
+	if err := run(lc, io.Discard, io.Discard); !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("run(lc) = %v, want errQueueEmpty (no other issue dispatchable)", err)
 	}
 	if len(sf.SettleAdoptedCalls) != 0 {
@@ -516,7 +519,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStale_ReturnsExitCode4(t *testing.T
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 4 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 4 {
 		t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
 	}
 	if len(fr.RunCalls) != 0 {
@@ -558,11 +561,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleOnFirstRefillWithTransientDisc
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() {
-		if got := runExitCode(lc); got != 4 {
-			t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
-		}
-	})
+	out := captureRunStdout(t, lc, 4) // 4: waves.ErrImageStale
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
 	}
@@ -610,11 +609,7 @@ func TestRunExitCode_ContinuousDispatch_ImageStaleHeldBackExcludesBlockedIssue(t
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() {
-		if got := runExitCode(lc); got != 4 {
-			t.Errorf("runExitCode(lc) = %d, want 4 (waves.ErrImageStale)", got)
-		}
-	})
+	out := captureRunStdout(t, lc, 4) // 4: waves.ErrImageStale
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0 (no Box launches once the probe is stale)", len(fr.RunCalls))
 	}
@@ -718,7 +713,7 @@ func TestRun_DepsOfCheckFailure_HoldsIssueNotDispatched(t *testing.T) {
 		settle:       settle.NewFake(),
 	}
 
-	if err := run(lc); err != nil {
+	if err := run(lc, io.Discard, io.Discard); err != nil {
 		t.Fatalf("run(lc): %v", err)
 	}
 
@@ -761,7 +756,7 @@ func TestRunExitCode_ContinuousDispatch_DepsOfCheckFailure_HoldsIssueNotDispatch
 		settle:       settle.NewFake(),
 	}
 
-	if got := runExitCode(lc); got != 0 {
+	if got := runExitCode(lc, io.Discard, io.Discard); got != 0 {
 		t.Errorf("runExitCode(lc) = %d, want 0", got)
 	}
 	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "2" {
@@ -799,11 +794,9 @@ func TestRunExitCode_ContinuousDispatch_AllHeld_NamesHeldIssue(t *testing.T) {
 		factory:      testFactory(t, dir, runner.NewFake()),
 		settle:       settle.NewFake(),
 	}
-
-	var err error
-	out := testutil.CaptureStdout(t, func() {
-		err = run(lc)
-	})
+	var buf bytes.Buffer
+	err := run(lc, &buf, io.Discard)
+	out := buf.String()
 	if !errors.Is(err, errQueueEmpty) {
 		t.Fatalf("run(lc) = %v, want errQueueEmpty", err)
 	}
@@ -845,11 +838,7 @@ func TestRunExitCode_ContinuousDispatch_RefillDoesNotRepeatHeldAnnouncement(t *t
 		settle:       settle.NewFake(),
 	}
 
-	out := testutil.CaptureStdout(t, func() {
-		if got := runExitCode(lc); got != 0 {
-			t.Errorf("runExitCode(lc) = %d, want 0", got)
-		}
-	})
+	out := captureRunStdout(t, lc, 0)
 
 	// Without a second poll the no-repeat assertion below would pass vacuously.
 	if n := tracker.polls.Load(); n < 2 {
@@ -873,4 +862,16 @@ type pollCountingTracker struct {
 func (p *pollCountingTracker) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
 	p.polls.Add(1)
 	return p.IssueTracker.ListIssues(state)
+}
+
+// captureRunStdout runs lc, asserts the want exit code, and returns its stdout.
+// Wave output still goes to process stdout, so the launcher's lines share the
+// captured os.Stdout to stay in one ordered stream.
+func captureRunStdout(t *testing.T, lc *launchContext, want int) string {
+	t.Helper()
+	return testutil.CaptureStdout(t, func() {
+		if got := runExitCode(lc, os.Stdout, io.Discard); got != want {
+			t.Errorf("runExitCode(lc) = %d, want %d", got, want)
+		}
+	})
 }

@@ -37,7 +37,7 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 		return previewSelectiveList(c, it, cf, caps, w, issueNums)
 	}
 
-	issues, held, origin, err := discoverIssues(c, it)
+	issues, held, origin, err := discoverIssues(c, it, w)
 	if err != nil {
 		return err
 	}
