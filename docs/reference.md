@@ -6421,7 +6421,13 @@ already returned with each issue rather than adding a query qualifier, so
 in-progress work started by a Console session, CI, or a human is just as
 visible to it as work this daemon started itself, and an operator who has
 never created the research labels pays nothing for the check — an absent
-label is a label no issue carries, so the filter is a silent no-op.
+label is a label no issue carries, so the filter is a silent no-op. A
+skipped issue is not silent to the operator, though: every run mode
+(one-shot, continuous, and `spindrift preview`) names each one as `==> #N
+held by <label> — skipped` (a continuous run once per run, never again on
+a refill poll), and a run whose open issues are all held ends with
+`no dispatchable '<label>' issues — #N held by <label>.` rather than the
+plain empty-queue line, still exit 2.
 
 `DAEMON_APP` (default `.#`) is the flake app attribute the daemon
 re-invokes for each child — see the `DAEMON_APP` row in [Advanced
