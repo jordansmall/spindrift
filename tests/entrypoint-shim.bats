@@ -58,14 +58,12 @@ FAKE
   ! grep -q '^DRIVER_ARGV_ORDER=' "$BOX_ENV_LOG"
 }
 
-# Must match the orchestrator's --state-file default, else the backstop
-# silently loses the reviewer's BLOCK verdict.
-@test "the shim hands box the orchestrator's run-state path" {
+@test "the shim hands box an absolute run-state path" {
   run bash "$ENTRYPOINT"
   [ "$status" -eq 42 ]
   local value
   value="$(grep -xA1 -- '--run-state-file' "$BOX_ARGV_LOG" | tail -n 1)"
-  [ "$value" = "/tmp/run-state.json" ]
+  [[ "$value" == /* ]]
 }
 
 # box defaults both flags to empty, so a shim line that drops or misspells one

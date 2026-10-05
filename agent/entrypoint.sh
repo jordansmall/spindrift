@@ -5,8 +5,9 @@
 # would change the Driver's environment.
 set -euo pipefail
 
-# The --run-state-file path mirrors the orchestrator's own
-# --state-file default (issue #1997).
+# The --run-state-file value below is the one source of the run-state path for
+# a Box run: box hands it to the orchestrator (writer) and the backstop (reader)
+# alike (issue #4468).
 exec box \
   --work-dir "${WORK_DIR:-}" \
   --outbox-dir "${OUTBOX_DIR:-}" \
