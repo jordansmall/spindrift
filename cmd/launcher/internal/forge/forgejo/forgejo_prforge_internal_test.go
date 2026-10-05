@@ -59,6 +59,26 @@ func TestStripWIPPrefix_StripsEveryRecognizedPrefix(t *testing.T) {
 	}
 }
 
+func TestStripWIPPrefix_StripsStackedMarkers(t *testing.T) {
+	for _, tc := range []struct{ title, want string }{
+		{"WIP: [WIP] add feature", "add feature"},
+		{"WIP: WIP: add feature", "add feature"},
+		{"[WIP] WIP: add feature", "add feature"},
+		{"[WIP]", ""},
+		{"WIP:", ""},
+		{"wip: ", ""},
+		{"[WIP]:", ""},
+	} {
+		got := stripWIPPrefix(tc.title)
+		if got != tc.want {
+			t.Errorf("stripWIPPrefix(%q) = %q, want %q", tc.title, got, tc.want)
+		}
+		if isDraftTitle(got) {
+			t.Errorf("stripWIPPrefix(%q) = %q, still a draft title", tc.title, got)
+		}
+	}
+}
+
 // An unset or unrecognized method falls back to "rebase", matching the github
 // adapter's mergeMethodFlag default.
 func TestForgejoMergeDo(t *testing.T) {

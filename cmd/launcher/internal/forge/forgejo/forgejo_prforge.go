@@ -57,30 +57,39 @@ const forgejoWIPPrefix = "WIP:"
 // draft title with either convention, so both must be recognized.
 var forgejoWIPPrefixes = []string{forgejoWIPPrefix, "[WIP]"}
 
-// isDraftTitle reports whether title carries a WIP-prefix draft marker,
-// case-insensitively. Forgejo can encode draft state in the title alone.
-func isDraftTitle(title string) bool {
-	upper := strings.ToUpper(strings.TrimSpace(title))
-	for _, prefix := range forgejoWIPPrefixes {
-		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
-			return true
-		}
-	}
-	return false
-}
-
-// stripWIPPrefix removes a leading, case-insensitive WIP marker and any colons
-// and spaces after it (so "[WIP]: x" and "[WIP] x" both yield "x"), returning
-// an unrecognized title unchanged.
-func stripWIPPrefix(title string) string {
+// matchWIPPrefix reports whether title carries a leading, case-insensitive WIP
+// marker and, if so, returns the title after it with any colons and spaces
+// trimmed (so "[WIP]: x" and "[WIP] x" both yield "x"). isDraftTitle and
+// stripWIPPrefix share it so their notions of a marker cannot drift apart.
+func matchWIPPrefix(title string) (rest string, ok bool) {
 	trimmed := strings.TrimSpace(title)
 	upper := strings.ToUpper(trimmed)
 	for _, prefix := range forgejoWIPPrefixes {
 		if strings.HasPrefix(upper, strings.ToUpper(prefix)) {
-			return strings.TrimLeft(trimmed[len(prefix):], ": ")
+			return strings.TrimLeft(trimmed[len(prefix):], ": "), true
 		}
 	}
-	return title
+	return title, false
+}
+
+// isDraftTitle reports whether title carries a WIP-prefix draft marker,
+// case-insensitively. Forgejo can encode draft state in the title alone.
+func isDraftTitle(title string) bool {
+	_, ok := matchWIPPrefix(title)
+	return ok
+}
+
+// stripWIPPrefix removes every leading WIP marker, returning an unrecognized
+// title unchanged. Stacked markers are all stripped, so the result never
+// satisfies isDraftTitle; a marker-only title yields "".
+func stripWIPPrefix(title string) string {
+	for {
+		rest, ok := matchWIPPrefix(title)
+		if !ok {
+			return title
+		}
+		title = rest
+	}
 }
 
 // isDraftPull reports whether p is a draft, by the draft field or the WIP
