@@ -667,8 +667,9 @@ func TestBoxSeamPRIntentNudgeExhausted(t *testing.T) {
 // execs box, so the golden's env delta is these plus what box itself sets
 // (BRANCH, PWD and the Bash-timeout vars) and nothing else. The values are
 // hardcoded here, so the Go golden's env section only proves box adds and
-// removes nothing; the real bash exports are pinned by
-// tests/entrypoint-driver-invocation-golden.bats, which is not a duplicate.
+// removes nothing; the real exports are pinned by nix/checks/drivers.nix (the
+// claude Driver's envCommon) and tests/entrypoint-shim.bats (the shim's env
+// reaches box).
 func entrypointExports() map[string]string {
 	return map[string]string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 }
@@ -678,9 +679,8 @@ var (
 	goldenStore  = regexp.MustCompile(`/nix/store/[a-z0-9]{32}-`)
 )
 
-// goldenValue rewrites run-specific substrings the way
-// tests/entrypoint-driver-invocation-golden.bats's _norm_value does, in the
-// same order.
+// goldenValue rewrites run-specific substrings to placeholders. Order matters:
+// the outbox may sit under tmpRoot, so it must go before <tmp>.
 func goldenValue(v, outbox, tmpRoot string) string {
 	v = strings.ReplaceAll(v, outbox, "<outbox>")
 	v = goldenMktemp.ReplaceAllString(v, "<mktemp>")
@@ -701,6 +701,10 @@ func envMap(env []string) map[string]string {
 // format captured from the bash path in 6ad56073 ("test: pin the bash Driver
 // invocation in a golden") before it was deleted. baseEnv is the env box would
 // have been launched with had entrypoint.sh exported nothing.
+//
+// The prompt section matches the handoff's PromptFile modulo trailing
+// newlines, and the env delta skips SHLVL, _ and OLDPWD, which vary by shell
+// rather than by invocation.
 func normaliseDriverInvocation(t *testing.T, s seamtest.Snapshot, baseEnv map[string]string, outbox, tmpRoot string) string {
 	t.Helper()
 	var b strings.Builder
@@ -796,6 +800,14 @@ func readonlyWorkEnv(extra map[string]string) map[string]string {
 // to the goldens captured from the bash path in 6ad56073 ("test: pin the bash
 // Driver invocation in a golden") before it was deleted; box must keep
 // reproducing them byte for byte.
+//
+// Regenerate with, from cmd/launcher:
+//
+//	UPDATE_GOLDENS=1 go test -tags integration ./box -run TestBoxSeamDriverInvocationGolden
+//
+// Box produces this invocation now, so regenerating only records its own
+// output: never regenerate to clear a mismatch, which is exactly the drift
+// these goldens exist to catch.
 func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 	cases := []struct {
 		kind string
@@ -910,7 +922,13 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			res.WantExit(t, 0)
 
 			got := normaliseDriverInvocation(t, seamtest.ReadSnapshot(t, snapshots, 1), base, outbox, root)
-			golden, err := os.ReadFile(filepath.Join("testdata", "driver-invocation", c.kind+".golden"))
+			goldenPath := filepath.Join("testdata", "driver-invocation", c.kind+".golden")
+			if os.Getenv("UPDATE_GOLDENS") != "" {
+				if err := os.WriteFile(goldenPath, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			golden, err := os.ReadFile(goldenPath)
 			if err != nil {
 				t.Fatal(err)
 			}
