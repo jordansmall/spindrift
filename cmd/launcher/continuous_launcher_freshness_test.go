@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -59,7 +60,7 @@ func TestRunContinuousDispatch_LauncherStaleTriggersImageStale(t *testing.T) {
 
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the launcher attr/hash wiring must reach freshness.Probe so a launcher-only staleness verdict still stops the wave", got)
 	}
@@ -116,7 +117,7 @@ func TestRunContinuousDispatch_LauncherHashMatchAllowsDispatch(t *testing.T) {
 
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("runContinuousDispatch = %v, want nil -- image and launcher both fresh should let the wave dispatch and settle the one open issue", err)
 	}
@@ -168,7 +169,7 @@ func TestRunContinuousDispatch_GenuineFirstDiscoverErrorNeverReachesLaterStalene
 
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp, io.Discard, io.Discard)
 	if !errors.Is(err, boxErr) {
 		t.Fatalf("runContinuousDispatch = %v, want the raw ListIssuesErr surfaced (errors.Is boxErr), never flattened into ErrImageStale or ErrOpenNoneDispatchable", err)
 	}

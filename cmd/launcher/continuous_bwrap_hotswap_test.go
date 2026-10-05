@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"sync"
 	"testing"
 
@@ -80,7 +81,7 @@ func TestRunContinuousDispatch_BwrapImageOnlyStale_HotSwapsAndKeepsRefilling(t *
 	staleEval := &freshness.Fake{OutPath: staleOutPath}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("runContinuousDispatch = %v, want nil -- a bwrap image-only-stale verdict must hot-swap and keep refilling, never drain-exit", err)
 	}
@@ -157,7 +158,7 @@ func TestRunContinuousDispatch_BwrapBothStale_DrainsAsLauncherStale(t *testing.T
 	}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a both-stale bwrap verdict must drain like the pre-#2682 path, not swap", got)
 	}
@@ -205,7 +206,7 @@ func TestRunContinuousDispatch_OCIImageOnlyStale_StillDrains(t *testing.T) {
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-img"}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- the OCI path must keep draining, never swap", got)
 	}
@@ -257,7 +258,7 @@ func TestRunContinuousDispatch_BwrapRealizeFails_FallsBackToDrain(t *testing.T) 
 	realizeFake := freshness.NewRealizerFake()
 	realizeFake.Err = errors.New("boom: nix build failed")
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed synchronous realize must fall back to the ordinary drain, not crash or hang", got)
 	}
@@ -318,7 +319,7 @@ func TestRunContinuousDispatch_BwrapNonConvergingSwap_HaltsHostTainted(t *testin
 	}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, eval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, eval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 5 {
 		t.Fatalf("exitCodeFor(err) = %d, want 5 (errImageHostTainted) -- an in-process bwrap swap that keeps re-diverging at the same rev must halt via the shared guard.Classify mechanism", got)
 	}
@@ -379,7 +380,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotsGenerationBeforeBindin
 		return nil
 	}
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if err != nil {
 		t.Fatalf("runContinuousDispatch = %v, want nil", err)
 	}
@@ -455,7 +456,7 @@ func TestRunContinuousDispatch_BwrapNixInBoxSwap_SnapshotGenerationFails_FallsBa
 		return errors.New("boom: vacuum into failed")
 	}
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- a failed snapshotGeneration must fall back to the ordinary drain, not crash or hang", got)
 	}
@@ -505,7 +506,7 @@ func TestRunContinuousDispatch_BwrapLauncherUnconfigured_FallsBackToDrain(t *tes
 	staleEval := &freshness.Fake{OutPath: "/nix/store/" + staleHash + "-agent-closure"}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- an unconfigured launcher dimension must never hot-swap, since Probe can't tell whether the launcher itself has moved", got)
 	}
@@ -556,7 +557,7 @@ func TestRunContinuousDispatch_BwrapEmptyTipTag_FallsBackToDrain(t *testing.T) {
 	}}
 	realizeFake := freshness.NewRealizerFake()
 
-	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err); got != 4 {
 		t.Fatalf("exitCodeFor(err) = %d, want 4 (waves.ErrImageStale) -- an empty realized tip tag must fall back to the ordinary drain, not bind a generation with no store path", got)
 	}

@@ -1,13 +1,14 @@
 package main
 
 import (
+	"bytes"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/waves"
 )
 
@@ -22,7 +23,7 @@ func TestDiscoverIssues_ByNumber(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "152", Title: "the claimed one", Labels: []string{c.inProgressLabel}})
 	fc.SetIssue(forge.Issue{Number: "99", Title: "a stranded run", Labels: []string{c.inProgressLabel}})
 
-	issues, _, origin, err := discoverIssues(c, fc)
+	issues, _, origin, err := discoverIssues(c, fc, io.Discard)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestDiscoverIssues_ByLabel(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Title: "ready", Labels: []string{c.label}})
 	fc.SetIssue(forge.Issue{Number: "2", Title: "not ready", Labels: []string{"backlog"}})
 
-	issues, _, origin, err := discoverIssues(c, fc)
+	issues, _, origin, err := discoverIssues(c, fc, io.Discard)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -68,7 +69,7 @@ func TestDiscoverIssues_OldestFirst(t *testing.T) {
 		fc.SetIssue(forge.Issue{Number: n, Title: "issue " + n, Labels: []string{c.label}})
 	}
 
-	issues, _, _, err := discoverIssues(c, fc)
+	issues, _, _, err := discoverIssues(c, fc, io.Discard)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestDiscoverIssues_PriorityPropagatesToWaveIssues(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Title: "critical one", Labels: []string{c.label, "agent-priority-critical"}})
 
-	issues, _, _, err := discoverIssues(c, fc)
+	issues, _, _, err := discoverIssues(c, fc, io.Discard)
 	if err != nil {
 		t.Fatalf("discoverIssues: %v", err)
 	}
@@ -230,9 +231,9 @@ func TestLogDiscoveryPoll_First_AlwaysAnnounces(t *testing.T) {
 	c.repoSlug = "owner/repo"
 	seen := map[string]bool{}
 
-	out := testutil.CaptureStdout(t, func() {
-		logDiscoveryPoll(c, []issue{{number: "1"}}, true, seen)
-	})
+	var buf bytes.Buffer
+	logDiscoveryPoll(c, []issue{{number: "1"}}, true, seen, &buf)
+	out := buf.String()
 
 	if !strings.Contains(out, "==> querying open 'ready-for-agent' issues in owner/repo") {
 		t.Errorf("got %q, want it to contain the baseline querying-open line", out)
@@ -247,9 +248,9 @@ func TestLogDiscoveryPoll_RepeatNoNewIssues_Silent(t *testing.T) {
 	c.repoSlug = "owner/repo"
 	seen := map[string]bool{"1": true}
 
-	out := testutil.CaptureStdout(t, func() {
-		logDiscoveryPoll(c, []issue{{number: "1"}}, false, seen)
-	})
+	var buf bytes.Buffer
+	logDiscoveryPoll(c, []issue{{number: "1"}}, false, seen, &buf)
+	out := buf.String()
 
 	if out != "" {
 		t.Errorf("got %q, want no output for a poll with no new issues", out)
@@ -264,9 +265,9 @@ func TestLogDiscoveryPoll_NewIssueAppears_NamesIt(t *testing.T) {
 	c.repoSlug = "owner/repo"
 	seen := map[string]bool{"1": true}
 
-	out := testutil.CaptureStdout(t, func() {
-		logDiscoveryPoll(c, []issue{{number: "1"}, {number: "2"}}, false, seen)
-	})
+	var buf bytes.Buffer
+	logDiscoveryPoll(c, []issue{{number: "1"}, {number: "2"}}, false, seen, &buf)
+	out := buf.String()
 
 	if !strings.Contains(out, "#2") {
 		t.Errorf("got %q, want it to name newly-seen issue #2", out)
@@ -302,15 +303,21 @@ func TestLogHeldIssues_AnnouncesEachIssueOncePerRun(t *testing.T) {
 	a := heldIssue{number: "42", label: "agent-research-in-progress"}
 	b := heldIssue{number: "43", label: "agent-research-in-progress"}
 
-	first := testutil.CaptureStdout(t, func() { logHeldIssues([]heldIssue{a}, seen) })
+	var firstBuf bytes.Buffer
+	logHeldIssues([]heldIssue{a}, seen, &firstBuf)
+	first := firstBuf.String()
 	if want := "==> #42 held by agent-research-in-progress — skipped\n"; first != want {
 		t.Errorf("first call printed %q, want %q", first, want)
 	}
-	repeat := testutil.CaptureStdout(t, func() { logHeldIssues([]heldIssue{a}, seen) })
+	var repeatBuf bytes.Buffer
+	logHeldIssues([]heldIssue{a}, seen, &repeatBuf)
+	repeat := repeatBuf.String()
 	if repeat != "" {
 		t.Errorf("repeat call printed %q, want nothing", repeat)
 	}
-	next := testutil.CaptureStdout(t, func() { logHeldIssues([]heldIssue{a, b}, seen) })
+	var nextBuf bytes.Buffer
+	logHeldIssues([]heldIssue{a, b}, seen, &nextBuf)
+	next := nextBuf.String()
 	if want := "==> #43 held by agent-research-in-progress — skipped\n"; next != want {
 		t.Errorf("new-issue call printed %q, want %q", next, want)
 	}

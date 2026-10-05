@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -51,7 +52,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 
 	// Call 1: a stale probe with no prior guard is content staleness, so it
 	// arms the guard at rev R.
-	err1 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err1 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err1); got != 4 {
 		t.Fatalf("call 1: exitCodeFor(err1) = %d, want 4 (waves.ErrImageStale)", got)
 	}
@@ -64,7 +65,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	// runContinuousDispatch takes its success path. After #2128 that path no
 	// longer clears the tracker, so the guard armed by call 1 survives any
 	// clean success, not just the issue-close originally reported.
-	err2 := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp)
+	err2 := runContinuousDispatch(c, it, cf, dir, f, s, freshEval, realizeFake, lp, io.Discard, io.Discard)
 	if err2 != nil {
 		t.Fatalf("call 2: runContinuousDispatch = %v, want nil (fresh probe + one dispatchable issue settles cleanly)", err2)
 	}
@@ -80,7 +81,7 @@ func TestRunContinuousDispatch_CleanSuccessPreservesHostTaintGuard_Halts(t *test
 	// halts with exit 5 rather than reporting content staleness again.
 	// TestGuard_Classify_NonConverging_HostTaintedAndClears drives the same
 	// shape straight at Guard.Classify with no intervening success.
-	err3 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp)
+	err3 := runContinuousDispatch(c, it, cf, dir, f, s, staleEval, realizeFake, lp, io.Discard, io.Discard)
 	if got := exitCodeFor(err3); got != 5 {
 		t.Fatalf("call 3: exitCodeFor(err3) = %d, want 5 (errImageHostTainted — same-rev repeat after the guard survived call 2's clean success)", got)
 	}
