@@ -209,7 +209,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	}
 	reaper := f.AsReaper()
 
-	// mu also guards stale, dispatchedAny, claimed, and outstanding below
+	// mu also guards stale, dispatchedAny, claimed, and inflight below
 	// (#653): every refill call, whether from the bootstrap loop, a completing
 	// Box, or the grow listener, runs under this one lock, so they never
 	// interleave.
@@ -232,7 +232,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// aborting is true only for the span of that one reclaim, keeping the
 	// terminal wait below from returning while a Reclaim is still between its
 	// Kill and the InProgress->Dispatchable transition that same Kill races:
-	// the reclaimed Box's own completion goroutine drops outstanding to 0 and
+	// the reclaimed Box's own completion goroutine empties inflight and
 	// broadcasts from inside that window, which would otherwise exit the
 	// process with the aborted issue stranded on InProgress (#3521).
 	aborting := false
@@ -244,18 +244,17 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// an already-Complete issue back to Dispatchable (#3521). refill's claim
 	// and the abort watcher's snapshot both run under mu, so a Box either
 	// launches before the watcher latches aborted (and is therefore in the
-	// snapshot) or never launches at all.
+	// snapshot) or never launches at all. len(inflight) is also the in-flight
+	// Box count: a plain sync.WaitGroup cannot coordinate safely here, since the
+	// grow listener can call refill, and so wg.Add, from a goroutine with no
+	// causal link to any counted Box, risking the documented WaitGroup race.
+	// Reading and mutating inflight under mu makes "is anything still
+	// outstanding" and "am I about to add more" the same critical section.
 	inflight := make(map[string]bool)
 	// logged keys an issue number to the last skip line printed for it, so the
 	// re-walks on every completion, grow, and ~3m poll tick (#1637) do not
 	// reprint an unchanged blocked or deferred reason.
 	logged := make(map[string]string)
-	// outstanding counts in-flight Boxes. A plain sync.WaitGroup cannot
-	// coordinate safely here: the grow listener can call refill, and so wg.Add,
-	// from a goroutine with no causal link to any counted Box, risking the
-	// documented WaitGroup race. Counting under mu makes "is anything still
-	// outstanding" and "am I about to add more" the same critical section.
-	outstanding := 0
 	closed := false
 	// staleDrain consolidates the stale-drain report state (#2678, #2774).
 	var staleDrain staleDrainTracker
@@ -292,7 +291,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			if !announce {
 				return
 			}
-			if outstanding > 0 {
+			if len(inflight) > 0 {
 				fmt.Println("==> stop requested; draining outstanding work")
 			} else {
 				fmt.Println("==> stop requested; nothing in flight")
@@ -384,7 +383,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			} else {
 				staleDrain.heldBack = n
 			}
-			if outstanding == 0 {
+			if len(inflight) == 0 {
 				// Nothing in flight, so the drain is already over and the
 				// completion goroutine below never runs to report it. end is
 				// set to start itself, not a fresh time.Now(), so Duration() is
@@ -458,7 +457,6 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		d := f.New(iss.Number, iss.Title)
 		inflight[iss.Number] = true
 		launched = true
-		outstanding++
 		panicguard.Go(func() {
 			defer d.Close()
 			result := d.Run()
@@ -487,20 +485,20 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 			limiter.Release()
 			mu.Lock()
 			// Integrate the idle slot-time since the last checkpoint using the
-			// pre-decrement outstanding count, the busy-slot count over the
-			// interval that just ended. checkpoint bills that interval at
+			// pre-delete inflight count, the busy-slot count over the
+			// interval that just ended, so it must stay above the delete below
+			// or it under-bills by one Box. checkpoint bills that interval at
 			// staleDrain.cap, the cap in effect over it, not a live limiter.Cap()
 			// read (#2678 review finding); it is a no-op outside a drain.
-			staleDrain.checkpointIfNeeded(now(), limiter.Cap(), outstanding)
-			outstanding--
+			staleDrain.checkpointIfNeeded(now(), limiter.Cap(), len(inflight))
 			// Must run before the abort watcher can next take mu, or a Box that
 			// just finished on its own would still look in-flight to it (#3521).
 			delete(inflight, iss.Number)
 			drainRefill()
-			if staleDrain.inProgress() && outstanding == 0 {
+			if staleDrain.inProgress() && len(inflight) == 0 {
 				reportStaleDrainReleasingMu(&mu, queue, staleDrain.finish(staleDrain.slotAt))
 			}
-			if outstanding == 0 {
+			if len(inflight) == 0 {
 				idle.Broadcast()
 			}
 			mu.Unlock()
@@ -542,7 +540,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 				// refreshing it, so the new cap is not retroactively credited to
 				// the whole preceding interval at the next checkpoint (#2678
 				// review finding). A no-op outside a drain.
-				staleDrain.checkpointIfNeeded(now(), limiter.Cap(), outstanding)
+				staleDrain.checkpointIfNeeded(now(), limiter.Cap(), len(inflight))
 				drainRefill()
 				mu.Unlock()
 			case <-growDone:
@@ -638,7 +636,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 
 	mu.Lock()
 	drainRefill()
-	for outstanding > 0 || aborting {
+	for len(inflight) > 0 || aborting {
 		idle.Wait()
 	}
 	closed = true
@@ -664,7 +662,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// signalled/aborted without a concurrent writer, settles it (#3520,
 	// #3521). announce=false: the drain is over, so there is none to
 	// announce for Stop. observeAbort() has no such quiet mode — by this
-	// point outstanding is already 0, so if this is the call that first
+	// point inflight is already empty, so if this is the call that first
 	// notices cfg.Abort closed, reclaimInFlight has nothing left to reclaim
 	// and only prints its harmless "nothing in flight" line.
 	mu.Lock()
