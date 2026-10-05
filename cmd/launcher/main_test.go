@@ -1445,9 +1445,9 @@ func TestLoadConfig_SpindriftDirsEnvBeatsSchemaTable_Mixed(t *testing.T) {
 }
 
 // loadConfig() routes PIDS_LIMIT and MEMORY_LIMIT through the schema's
-// emptyDisables loader (getenvSchemaPreserveEmpty): an unset var still falls
+// emptyDisables rule (flagEntry.emptyIsSetting): an unset var still falls
 // back to the schema default, but an explicit KEY="" resolves to "" instead
-// of collapsing into it, the contract getenvSchema deliberately lacks (#3048).
+// of collapsing into it (#3048).
 func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1482,7 +1482,7 @@ func TestLoadConfig_EmptyDisablesLimit(t *testing.T) {
 			}
 
 			if !tc.useRealTable {
-				withSchemaFlags(t, []flagEntry{{env: tc.env, dflt: tc.dflt}})
+				withSchemaFlags(t, []flagEntry{{env: tc.env, dflt: tc.dflt, emptyDisables: true}})
 			}
 			// useRealTable cases call no withSchemaFlags: previous subtests'
 			// stubs are already restored by their own t.Cleanup.
@@ -1523,11 +1523,10 @@ func TestIntSchemaDefault(t *testing.T) {
 	}
 }
 
-// getenvSchemaPreserveEmpty directly: an unset env var falls back to the
-// schema default like getenvSchema, one set to "" returns "" verbatim (the
-// contract getenvSchema deliberately lacks), and a non-empty value passes
-// through (issue #3048).
-func TestGetenvSchemaPreserveEmpty(t *testing.T) {
+// getenvSchema on an emptyDisables knob: an unset env var falls back to the
+// schema default, one set to "" returns "" verbatim, and a non-empty value
+// passes through (issue #3048).
+func TestGetenvSchema_EmptyDisablesKnob(t *testing.T) {
 	cases := []struct {
 		name   string
 		setEnv bool // false: leave env genuinely unset
@@ -1548,10 +1547,10 @@ func TestGetenvSchemaPreserveEmpty(t *testing.T) {
 				os.Unsetenv("PIDS_LIMIT")
 			}
 
-			withSchemaFlags(t, []flagEntry{{env: "PIDS_LIMIT", dflt: "2048"}})
+			withSchemaFlags(t, []flagEntry{{env: "PIDS_LIMIT", dflt: "2048", emptyDisables: true}})
 
-			if got := getenvSchemaPreserveEmpty("PIDS_LIMIT"); got != tc.want {
-				t.Errorf("getenvSchemaPreserveEmpty(PIDS_LIMIT) = %q, want %q", got, tc.want)
+			if got := getenvSchema("PIDS_LIMIT"); got != tc.want {
+				t.Errorf("getenvSchema(PIDS_LIMIT) = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -6580,8 +6579,9 @@ func TestBoolKnob_ExplicitOffBeatsDocument(t *testing.T) {
 	}
 }
 
-// Only bool knobs treat set-but-empty as an explicit value; a string knob's
-// empty env still falls back to its default.
+// Set-but-empty is an explicit value only where flagEntry.emptyIsSetting says
+// so (bool kind or emptyDisables); any other string knob's empty env still
+// falls back to its default.
 func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil

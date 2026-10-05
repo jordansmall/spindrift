@@ -77,8 +77,8 @@ var gitConfigLookup = func(key string) string {
 // document's settings or artifacts, then the schema default, because the
 // wrapper no longer pre-populates env with baked defaults (ADR 0020).
 // Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
-// A set-but-empty bool knob is an explicit off and wins over the document and
-// the schema default, like getenvSchema.
+// An empty value wins over the document and schema default only per
+// ambientSetting, like getenvSchema.
 func resolveBoxEnvVar(name string) string {
 	if v, ok := ambientSetting(name); ok {
 		return v

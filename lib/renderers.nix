@@ -1118,6 +1118,8 @@ rec {
       # Mirrors flagEntry.launcherIgnores in cmd/launcher/flags.go, where the
       # axis is documented (issue #3698).
       flagLauncherIgnores = e: if e.launcherIgnores or false then ", launcherIgnores: true" else "";
+      # Mirrors flagEntry.emptyDisables in cmd/launcher/flags.go.
+      flagEmptyDisables = e: if e.emptyDisables or false then ", emptyDisables: true" else "";
       # Every non-secret knob must declare a group so the full reference can file
       # it under a heading. A missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
@@ -1128,7 +1130,7 @@ rec {
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagChoices e}},\n"
+              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagChoices e}},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
@@ -1220,8 +1222,6 @@ rec {
           }(\"${e.env}\"),\n"
         else if typeClass e == "float" then
           "\t\t${key}: floatNonnegSchema(\"${e.env}\"),\n"
-        else if e.emptyDisables or false then
-          "\t\t${key}: getenvSchemaPreserveEmpty(\"${e.env}\"),\n"
         else
           "\t\t${key}: getenvSchema(\"${e.env}\"),\n";
       loaderLines = concatStrings (mapAttrsToList loaderLine members);

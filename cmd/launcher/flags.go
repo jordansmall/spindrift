@@ -145,6 +145,17 @@ type flagEntry struct {
 	// flake-option/flag parity, #3567) but never itself reads; only
 	// cmd/launcher/daemon consumes it, via the input document (#3698).
 	launcherIgnores bool
+	// emptyDisables marks a string knob whose doc gives "" its own meaning
+	// (e.g. disables the limit); see emptyIsSetting.
+	emptyDisables bool
+}
+
+// emptyIsSetting is the one rule for whether an empty env value is a real
+// setting rather than "unset" (which falls back to the default): true iff the
+// knob is bool kind (parseFlags encodes a bool's explicit off as set-but-empty)
+// or emptyDisables. Read env through ambientSetting; never re-derive this.
+func (e flagEntry) emptyIsSetting() bool {
+	return e.kind == "bool" || e.emptyDisables
 }
 
 // secretKnob is a knob the schema marks secret = true, so it gets no inline
