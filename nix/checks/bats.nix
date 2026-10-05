@@ -76,7 +76,6 @@ let
     SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
     # The binaries and rendered registries entrypoint.sh hands box (see
     # comment above promptassemblyRegistryJsonFile).
-    DRIVER_EXEC_BIN = "${batsHarness.internals.driverExecBin}/bin/driver-exec";
     BOX_BIN = "${batsHarness.internals.boxBin}/bin/box";
     PROMPTASSEMBLY_REGISTRY_FILE = promptassemblyRegistryJsonFile;
     PROMPT_CONTRACT_REGISTRY_FILE = promptContractRegistryJsonFile;

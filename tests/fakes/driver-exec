@@ -17,21 +17,10 @@
 # relaunch-on-empty-stream logic are covered by Go unit tests
 # (cmd/launcher/driver-exec), not this fake.
 #
-# Non-Driver verbs are dispatched off a bare first arg before the flag loop
-# below ever runs, and each delegates straight to the real Go binary
-# (DRIVER_EXEC_BIN, exported by the nix bats derivation, nix/checks/bats.nix)
-# instead of reimplementing its logic here -- the Go package is the source of
-# truth and this fake has no bash re-derivation to keep in lockstep with it:
-# `advise-only` (issue #3901). The other settle verbs
-# (marker-gate, outcome-backstop) are not faked:
-# entrypoint.sh now execs the real `box` binary
-# (BOX_BIN), which runs them in-process (ADR 0058, issue #4292).
+# Only the default Driver-invocation verb is faked: entrypoint.sh execs the
+# real `box` binary (BOX_BIN), which runs the settle phases in-process
+# (ADR 0058, issue #4292).
 set -euo pipefail
-
-if [ "${1:-}" = "advise-only" ]; then
-  shift
-  exec "$DRIVER_EXEC_BIN" advise-only "$@"
-fi
 
 # The default (Driver-invocation) verb now takes a single --handoff-file
 # (issue #2975): every driver/model/effort/argv-shape/devshell/heartbeat/roster
