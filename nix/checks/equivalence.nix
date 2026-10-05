@@ -920,6 +920,13 @@ in
         repository.codeForge = "local";
         issueDiscovery.issueTracker = "local";
       });
+      # forgejo is the only registry row whose explicit tracker-axis/forge
+      # values differ from mkHarness's fallbacks, so a drifted fallback cannot
+      # hide behind the github/local corners.
+      forgejoRun = assertModuleMatchesDirect (mkRun {
+        repository.codeForge = "forgejo";
+        issueDiscovery.issueTracker = "forgejo";
+      });
     in
     assert assertMsg (
       !badIssueNumber.success
@@ -932,6 +939,7 @@ in
         identityDoc = identityRun.runInputDocumentFile;
         defaultDoc = defaultRun.runInputDocumentFile;
         localForgeAndTrackerDoc = localForgeAndTrackerRun.runInputDocumentFile;
+        forgejoDoc = forgejoRun.runInputDocumentFile;
       }
       ''
         grep -q '"MAX_FIX_ATTEMPTS":"5"' "$behaviorDoc" \
@@ -982,6 +990,27 @@ in
           || { echo "IN_BOX_UNREACHABLE_TRACKER must be true for ISSUE_TRACKER=local, registry derivation broken?" >&2; exit 1; }
         grep -q '"FULLY_LOCAL":"true"' "$localForgeAndTrackerDoc" \
           || { echo "FULLY_LOCAL must be true for CODE_FORGE=local/ISSUE_TRACKER=local, registry derivation broken?" >&2; exit 1; }
+
+        # Tracker-axis / forge-backend derivation (issue #2674): the Go golden
+        # test derives these via backend.TrackerAxisSignals/ForgeBackendSignal,
+        # whose own tests pin the same values, so these greps tie mkHarness's
+        # fallbacks and registry-row reads to that table.
+        expectKey() { # doc key value
+          grep -q "\"$2\":\"$3\"" "$1" \
+            || { echo "$2 must be '$3' in $1, registry derivation broken?" >&2; exit 1; }
+        }
+        expectKey "$defaultDoc" TRACKER_AXIS_READ GITHUB
+        expectKey "$defaultDoc" TRACKER_AXIS_WRITE GITHUB
+        expectKey "$defaultDoc" TRACKER_AXIS_FILER GH
+        expectKey "$defaultDoc" FORGE_BACKEND GH
+        expectKey "$localForgeAndTrackerDoc" TRACKER_AXIS_READ LOCAL
+        expectKey "$localForgeAndTrackerDoc" TRACKER_AXIS_WRITE ""
+        expectKey "$localForgeAndTrackerDoc" TRACKER_AXIS_FILER GH
+        expectKey "$localForgeAndTrackerDoc" FORGE_BACKEND GH
+        expectKey "$forgejoDoc" TRACKER_AXIS_READ FORGEJO
+        expectKey "$forgejoDoc" TRACKER_AXIS_WRITE FORGEJO
+        expectKey "$forgejoDoc" TRACKER_AXIS_FILER FORGEJO
+        expectKey "$forgejoDoc" FORGE_BACKEND FORGEJO
         touch $out
       '';
 
