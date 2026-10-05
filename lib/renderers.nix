@@ -727,6 +727,7 @@ rec {
         "inBoxUnreachableTracker"
         "outboxRelayCapable"
         "inBoxOpenPRQueryable"
+        "inBoxGHCredentialHelper"
         "relayCapable"
         "hostPostingCapable"
         "labelRegistry"
@@ -773,6 +774,7 @@ rec {
         + fieldLine "InBoxUnreachableTracker" (row.inBoxUnreachableTracker or false)
         + fieldLine "OutboxRelayCapable" (row.outboxRelayCapable or false)
         + fieldLine "InBoxOpenPRQueryable" (row.inBoxOpenPRQueryable or false)
+        + fieldLine "InBoxGHCredentialHelper" (row.inBoxGHCredentialHelper or false)
         + fieldLine "RelayCapable" (row.relayCapable or false)
         + fieldLine "HostPostingCapable" (row.hostPostingCapable or false)
         + fieldLine "LabelRegistry" (row.labelRegistry or false)

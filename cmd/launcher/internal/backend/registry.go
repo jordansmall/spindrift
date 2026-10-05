@@ -40,6 +40,14 @@ type Descriptor struct {
 	// openPR (cmd/launcher/box/recovery.go).
 	InBoxOpenPRQueryable bool
 
+	// InBoxGHCredentialHelper is true for a CODE_FORGE whose Box clone runs
+	// `gh auth setup-git`, so gh's credential helper authenticates the clone and
+	// fetch. git keeps it because CODE_FORGE_REMOTE_URL may point at github.com;
+	// forgejo clones with a FORGEJO_TOKEN URL (ADR 0038) and has no GH_TOKEN,
+	// local clones a filesystem mount (ADR 0033). Read by the Box's cloneConfig
+	// (cmd/launcher/box/clone.go).
+	InBoxGHCredentialHelper bool
+
 	// InBoxUnreachableTracker is true only for a tracker with no in-box
 	// reachability at all (ADR 0032: "local"). Issue #3471 retired the /issues
 	// mount, so grep the field name for the live set of consumers that

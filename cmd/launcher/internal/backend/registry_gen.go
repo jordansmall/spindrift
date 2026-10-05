@@ -3,21 +3,23 @@ package backend
 
 // GitHub is the descriptor for the "github" backend.
 var GitHub = Descriptor{
-	Name:                 "github",
-	ValidAsTracker:       true,
-	ValidAsCodeForge:     true,
-	TokenEnvVar:          "GH_TOKEN",
-	OutboxRelayCapable:   true,
-	InBoxOpenPRQueryable: true,
-	RelayCapable:         true,
-	HostPostingCapable:   true,
-	LabelRegistry:        true,
+	Name:                    "github",
+	ValidAsTracker:          true,
+	ValidAsCodeForge:        true,
+	TokenEnvVar:             "GH_TOKEN",
+	OutboxRelayCapable:      true,
+	InBoxOpenPRQueryable:    true,
+	InBoxGHCredentialHelper: true,
+	RelayCapable:            true,
+	HostPostingCapable:      true,
+	LabelRegistry:           true,
 }
 
 // Git is the descriptor for the "git" backend.
 var Git = Descriptor{
-	Name:             "git",
-	ValidAsCodeForge: true,
+	Name:                    "git",
+	ValidAsCodeForge:        true,
+	InBoxGHCredentialHelper: true,
 }
 
 // Local is the descriptor for the "local" backend.

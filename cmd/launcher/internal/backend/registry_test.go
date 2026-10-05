@@ -139,3 +139,17 @@ func TestInBoxOpenPRQueryable(t *testing.T) {
 		t.Fatalf("InBoxOpenPRQueryable set = %v, want %v", got, want)
 	}
 }
+
+// TestInBoxGHCredentialHelper pins the exact set of CODE_FORGE backends whose
+// Box clone runs `gh auth setup-git` (see Descriptor.InBoxGHCredentialHelper).
+func TestInBoxGHCredentialHelper(t *testing.T) {
+	var got []string
+	for _, d := range Registry {
+		if d.InBoxGHCredentialHelper {
+			got = append(got, d.Name)
+		}
+	}
+	if want := []string{"github", "git"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("InBoxGHCredentialHelper set = %v, want %v", got, want)
+	}
+}
