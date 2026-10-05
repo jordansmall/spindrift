@@ -424,6 +424,81 @@ func TestDecide(t *testing.T) {
 			wantBeyond: []string{"run.go:20", "run.go:100"},
 		},
 		{
+			name: "prepend hunk with a count renders its real pre-image span, not line 1",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 0, Count: 4}}}},
+			findings:   "## Blocking\n- run.go:100 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:1-3"},
+		},
+		{
+			name: "equal-start hunks sort by shown end, given shorter first",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 500, Count: 1}, {Start: 500, Count: 9}}}},
+			findings:   "## Blocking\n- run.go:3 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:500", "run.go:500-508"},
+		},
+		{
+			name: "equal-start hunks sort by shown end, given longer first",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 500, Count: 9}, {Start: 500, Count: 1}}}},
+			findings:   "## Blocking\n- run.go:3 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:500", "run.go:500-508"},
+		},
+		{
+			name: "equal-start hunks order by shown end, not PostCount, given growing hunk first",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 500, Count: 1, PostCount: 9}, {Start: 500, Count: 9}}}},
+			findings:   "## Blocking\n- run.go:3 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:500 (+9)", "run.go:500-508"},
+		},
+		{
+			name: "equal-start hunks order by shown end, not PostCount, given growing hunk last",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 500, Count: 9}, {Start: 500, Count: 1, PostCount: 9}}}},
+			findings:   "## Blocking\n- run.go:3 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:500 (+9)", "run.go:500-508"},
+		},
+		{
+			name: "prepend and line-1 hunks both shown at line 1 sort by shown end, given line-1 hunk first",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 1, Count: 3}, {Start: 0, Count: 0}}}},
+			findings:   "## Blocking\n- run.go:100 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:1", "run.go:1-3"},
+		},
+		{
+			name: "prepend and line-1 hunks both shown at line 1 sort by shown end, given prepend first",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 0, Count: 0}, {Start: 1, Count: 3}}}},
+			findings:   "## Blocking\n- run.go:100 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:1", "run.go:1-3"},
+		},
+		{
+			name: "prepend still fires when a finding cites line 3",
+			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
+				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 0, Count: 0}}}},
+			findings:   "## Blocking\n- run.go:3 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"run.go:1"},
+		},
+		{
+			name: "multiple paths follow delta.Paths order",
+			delta: landdelta.Delta{Known: true, Files: 2, Paths: []string{"a.go", "b.go"},
+				Ranges: map[string][]landdelta.Range{
+					"a.go": {{Start: 100, Count: 1}},
+					"b.go": {{Start: 20, Count: 1}},
+				}},
+			findings:   "## Blocking\n- a.go:1 — bug\n- b.go:1 — bug\n",
+			wantFire:   true,
+			wantBeyond: []string{"a.go:100", "b.go:20"},
+		},
+		{
 			name: "mixed bare and line citation on one path still vouches for the whole path",
 			delta: landdelta.Delta{Known: true, Files: 1, Paths: []string{"run.go"},
 				Ranges: map[string][]landdelta.Range{"run.go": {{Start: 900, Count: 1}}}},
@@ -535,7 +610,7 @@ func TestCoveredBy(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := coveredBy(window{c.start, c.end}, windows); got != c.want {
+			if got := coveredBy(window{start: c.start, end: c.end}, windows); got != c.want {
 				t.Errorf("coveredBy(%d, %d, %v) = %v, want %v", c.start, c.end, windows, got, c.want)
 			}
 		})

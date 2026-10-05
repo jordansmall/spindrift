@@ -5,8 +5,10 @@
 package deltareview
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -216,8 +218,7 @@ type window struct {
 }
 
 // locationsBeyond returns the rendered locations delta touches outside what
-// findings vouches for, one path at a time from delta.Paths (already sorted
-// per landdelta's contract).
+// findings vouches for, one path at a time from delta.Paths.
 func locationsBeyond(delta landdelta.Delta, findings []Location) []string {
 	if len(delta.Paths) == 0 {
 		return nil
@@ -227,16 +228,11 @@ func locationsBeyond(delta landdelta.Delta, findings []Location) []string {
 		byPath[loc.Path] = append(byPath[loc.Path], loc)
 	}
 
-	type beyondEntry struct {
-		path     string
-		start    int
-		rendered string
-	}
-	var beyond []beyondEntry
+	var beyond []string
 	for _, p := range delta.Paths {
 		locs, named := byPath[p]
 		if !named {
-			beyond = append(beyond, beyondEntry{path: p, rendered: p})
+			beyond = append(beyond, p)
 			continue
 		}
 		if hasBareCitation(locs) {
@@ -250,39 +246,39 @@ func locationsBeyond(delta landdelta.Delta, findings []Location) []string {
 			continue
 		}
 		windows := mergeWindows(locs)
+		var uncovered []landdelta.Range
 		for _, r := range ranges {
 			// A block inserted beside a cited line counts as the lines it
 			// adds, not the one line it anchors to (issue #3532); renderSpan
 			// keeps pre-image lines.
-			span := window{start: r.Start, end: r.ReachEnd()}
-			if !coveredBy(span, windows) {
-				beyond = append(beyond, beyondEntry{path: p, start: span.start, rendered: renderSpan(p, r)})
+			if !coveredBy(window{start: r.Start, end: r.ReachEnd()}, windows) {
+				uncovered = append(uncovered, r)
 			}
 		}
-	}
-	// landdelta.Delta.Paths is documented sorted, but the per-path []Range
-	// order is not, so sort explicitly rather than trust hunk order: a
-	// reader scans a path's hunks in file order, not the rendered string's
-	// lexicographic order (where "run.go:100" sorts before "run.go:20").
-	sort.Slice(beyond, func(i, j int) bool {
-		if beyond[i].path != beyond[j].path {
-			return beyond[i].path < beyond[j].path
+		// landdelta.Delta.Paths is documented sorted, so the output follows it,
+		// but the per-path []Range order is not: sort hunks in file order
+		// (numeric, not the rendered string's "run.go:100" < "run.go:20").
+		// SortFunc is unstable, so the key covers every field renderSpan
+		// reads; any ranges still tied render identically.
+		slices.SortFunc(uncovered, func(a, b landdelta.Range) int {
+			aStart, aEnd := shownBounds(a)
+			bStart, bEnd := shownBounds(b)
+			return cmp.Or(
+				cmp.Compare(aStart, bStart),
+				cmp.Compare(aEnd, bEnd),
+				cmp.Compare(a.PostCount, b.PostCount),
+				cmp.Compare(a.Count, b.Count),
+			)
+		})
+		for _, r := range uncovered {
+			beyond = append(beyond, renderSpan(p, r))
 		}
-		return beyond[i].start < beyond[j].start
-	})
-	if len(beyond) == 0 {
-		return nil
 	}
-	rendered := make([]string, len(beyond))
-	for i, e := range beyond {
-		rendered[i] = e.rendered
-	}
-	return rendered
+	return beyond
 }
 
-// hasBareCitation reports whether any of locs cites path alone with no line,
-// which vouches for the whole file even when the same path also carries a
-// line-cited Location.
+// hasBareCitation: a bare-path citation vouches for the whole file even when
+// the same path also carries a line-cited Location.
 func hasBareCitation(locs []Location) bool {
 	for _, loc := range locs {
 		if loc.Line == 0 {
@@ -316,16 +312,32 @@ func mergeWindows(locs []Location) []window {
 	return windows
 }
 
-// coveredBy reports whether s falls wholly inside one of windows. A span
+// coveredBy reports whether span falls wholly inside one of windows. A span
 // straddling two windows still counts as beyond: the gap between them is
 // exactly what tolerance excluded.
-func coveredBy(s window, windows []window) bool {
+func coveredBy(span window, windows []window) bool {
 	for _, w := range windows {
-		if s.start >= w.start && s.end <= w.end {
+		if span.start >= w.start && span.end <= w.end {
 			return true
 		}
 	}
 	return false
+}
+
+// shownBounds is the [start, end] pre-image span a hunk is displayed (and
+// sorted) as. Line 0 is git's "inserted before line 1" header (@@ -0,0 @@),
+// not a line any file has; locationsBeyond compared the real span, but the
+// rendered location feeds the delta-review agent's prompt (Trigger.Beyond),
+// so it must name real lines.
+func shownBounds(r landdelta.Range) (start, end int) {
+	start, end = r.Start, r.End()
+	if start == 0 {
+		start = 1
+	}
+	if end < 1 {
+		end = 1
+	}
+	return start, end
 }
 
 // renderSpan renders a touched pre-image span as the whole hunk, not the
@@ -333,13 +345,7 @@ func coveredBy(s window, windows []window) bool {
 // side is longer gets a " (+N)" suffix (under -U0 every post-side line is an
 // added one) rather than a span naming pre-image lines nothing touched.
 func renderSpan(path string, r landdelta.Range) string {
-	start, end := r.Start, r.End()
-	if start == 0 {
-		// Line 0 is git's "inserted before line 1" header (@@ -0,0 @@), not a
-		// line any file has; locationsBeyond already compared the real span,
-		// so nudging to 1 here only affects what the run log shows.
-		start, end = 1, 1
-	}
+	start, end := shownBounds(r)
 	rendered := fmt.Sprintf("%s:%d", path, start)
 	if start != end {
 		rendered = fmt.Sprintf("%s:%d-%d", path, start, end)
