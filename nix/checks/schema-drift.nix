@@ -1369,25 +1369,6 @@ checkedMerge {
     pkgs.runCommand "mkharness-jira-status-mapping-guard-non-jira-tracker-not-triggered" { }
       "touch $out";
 
-  # The set_box_env fixture must export every boxEnv = true knob, so the
-  # entrypoint-*.bats suites exercise the same defaults the nix preamble bakes
-  # into the image. Regenerate with `nix run .#regen` (issues #462, #520).
-  box-env-fixture-coverage =
-    let
-      schema = import ../../lib/env-schema.nix;
-      generated = pkgs.writeText "box_env_gen.bash.generated" (renderers.renderSetBoxEnvFixture schema);
-    in
-    pkgs.runCommand "box-env-fixture-coverage"
-      {
-        inherit generated;
-        committed = ../../tests/box_env_gen.bash;
-      }
-      ''
-        diff "$generated" "$committed" \
-          || { echo "tests/box_env_gen.bash is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
-
   # Regenerate with `nix run .#regen` when lib/env-schema.nix or
   # lib/renderers.nix's groupOrder changes.
   launcher-flag-table =

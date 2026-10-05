@@ -2,7 +2,8 @@
 # lib/flakeModule.nix derive all per-knob output from these entries, so one new
 # entry reaches the preambles, flake options, entrypoint defaults, BOX_ENV_VARS,
 # and harness.env.example with no further edit. Field semantics live with their
-# consumers: lib/renderers.nix, lib/nixpath.nix, nix/checks/schema-drift.nix.
+# consumers: lib/renderers.nix, lib/nixpath.nix, lib/preambles.nix,
+# nix/checks/schema-drift.nix.
 let
   backends = import ./backends/default.nix;
   # Shared by the three butler daily budget knobs below (ADR 0056).

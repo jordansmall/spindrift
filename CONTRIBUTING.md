@@ -94,7 +94,7 @@ dogfood-only — the generic harness keeps its empty `skills` default.
 
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
-`docs/flake-options.md`, `tests/box_env_gen.bash`,
+`docs/flake-options.md`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`, and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
 hand-editing them until the drift-guard checks (`nix/checks/schema-drift.nix`) go quiet:

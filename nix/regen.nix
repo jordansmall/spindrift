@@ -28,7 +28,6 @@ let
   flakeOptionsDoc =
     renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
       byNamePaths;
-  boxEnvFixture = renderers.renderSetBoxEnvFixture schema;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
   choreCatalog = import ../lib/chore-catalog.nix;
@@ -184,7 +183,6 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/backend/registry_gen.go"
     ${writeGenerated "cmd/launcher/internal/doctor/labelmeta_gen.go" labelRegistryFile}
     gofmt -w "$root/cmd/launcher/internal/doctor/labelmeta_gen.go"
-    ${writeGenerated "tests/box_env_gen.bash" boxEnvFixture}
     ${writeGenerated "cmd/launcher/defaultmodels_gen_test.go" defaultModelFixtureGo}
     gofmt -w "$root/cmd/launcher/defaultmodels_gen_test.go"
     ${writeGenerated "cmd/launcher/internal/daemon/shippeddefaults_gen_test.go" daemonKnobDefaultsGo}

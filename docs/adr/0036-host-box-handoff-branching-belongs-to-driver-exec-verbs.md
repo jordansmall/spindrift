@@ -116,6 +116,8 @@ too — each behind the smallest interface the entrypoint can call.
 - `MAX_REBASE_ATTEMPTS`, `TRANSIENT_BACKOFF_SECS`, and `HOLD_JITTER_SECS` now
   ride into the Box as forwarded `boxEnv` vars; a new boxEnv knob shows up in
   the `tests/box_env_gen.bash` fixture and the image's BOX_ENV_VARS list.
+  (Amended by issue #4489: that fixture is retired, so a new boxEnv knob now
+  shows up only in BOX_ENV_VARS.)
 - The bats suite drives a fake `driver-exec` (issue #626), so the fake gains an
   `outcome-backstop` verb reproducing the protocol from its flags — the same
   test-double pattern `bundle-out` already established. The production
