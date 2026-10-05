@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Fake gh for tests. Records every invocation to $GH_LOG and models just enough
-# of the issue label lifecycle (issue #15) to prove `run` idempotency:
+# of the issue label lifecycle (issue #15) for tests/harness-env.bats's
+# `dispatch` runs and the pr pair tests/fake-gh-pr-ready.bats calls directly:
 #
 #   * `issue list --label L` prints the FAKE_GH_ISSUES rows whose *current*
 #     lifecycle label is L. An issue that has never been edited is treated as
@@ -9,25 +10,47 @@
 #     has been edited it matches only its recorded label.
 #   * `issue edit N --add-label A --remove-label R` records N's new label A in
 #     $GH_STATE, so a subsequent `issue list --label R` no longer matches it.
-#   * `pr create` / `auth setup-git` are recorded, no-op.
-#   * Any other subcommand (e.g. `repo clone`, which leaves its target dir empty)
-#     is only logged and exits 0.
+#   * `issue view` answers the `--json labels` and `--json
+#     number,title,body,state,labels` shapes; the issue is always OPEN with an
+#     empty body.
+#   * `pr view --json isDraft` reads FAKE_GH_PR_DRAFT_<n>; `pr ready` flips it to
+#     false in $GH_STATE.
+#   * Every other call is recorded, no-op.
 set -euo pipefail
 
 : "${GH_LOG:?GH_LOG must point at a log file}"
 printf '%s\n' "$*" >>"$GH_LOG"
 
-# Per-test label state (issue number -> current lifecycle label), kept beside the
-# log so it is isolated per test yet persists across two `run` invocations.
+# Per-test state (issue number -> lifecycle label, pr-draft-N -> isDraft), kept
+# beside the log so it is isolated per test yet persists across gh calls.
 GH_STATE="${GH_STATE:-$GH_LOG.state}"
+
+# state_get KEY: the last value $GH_STATE recorded for KEY, or empty.
+state_get() {
+  local k v cur=""
+  if [ -f "$GH_STATE" ]; then
+    while IFS=$'\t' read -r k v; do
+      [ "$k" = "$1" ] && cur="$v"
+    done <"$GH_STATE"
+  fi
+  printf '%s' "$cur"
+}
+
+# labels_array LABEL: a gh --json labels array holding LABEL, or [] when empty.
+labels_array() {
+  if [ -n "$1" ]; then
+    jq -cn '[{"name":$a}]' --arg a "$1"
+  else
+    printf '[]\n'
+  fi
+}
 
 case "${1:-}" in
   issue)
     case "${2:-}" in
       list)
         # execClient.ListIssues()/ListOpenIssues() expect a JSON array
-        # matching --json number,title,labels — not the plain-text tsv
-        # lines this used to print.
+        # matching --json number,title,labels.
         want=""
         args=("$@")
         for ((i = 0; i < ${#args[@]}; i++)); do
@@ -36,24 +59,9 @@ case "${1:-}" in
         entries=()
         while IFS=$'\t' read -r num title; do
           [ -n "$num" ] || continue
-          cur=""
-          if [ -f "$GH_STATE" ]; then
-            while IFS=$'\t' read -r k v; do
-              [ "$k" = "$num" ] && cur="$v"
-            done < "$GH_STATE"
-          fi
+          cur=$(state_get "$num")
           if [ -z "$cur" ] || [ "$cur" = "$want" ]; then
-            label="${cur:-$want}"
-            labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
-            extra_label="${!labelsvar:-}"
-            labels_json="[]"
-            if [ -n "$label" ] && [ -n "$extra_label" ]; then
-              labels_json=$(jq -cn '[{"name":$a},{"name":$b}]' --arg a "$label" --arg b "$extra_label")
-            elif [ -n "$label" ]; then
-              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$label")
-            elif [ -n "$extra_label" ]; then
-              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$extra_label")
-            fi
+            labels_json=$(labels_array "${cur:-$want}")
             entries+=("$(jq -cn --argjson num "$num" --arg title "$title" --argjson labels "$labels_json" \
               '{"number":$num,"title":$title,"labels":$labels}')")
           fi
@@ -83,36 +91,12 @@ EOF
           [ "${args[i]}" = "--json" ] && json_field="${args[i + 1]:-}"
         done
         case "$json_field" in
-          body)
-            bodyvar="FAKE_GH_ISSUE_BODY_${num}"
-            printf '%s\n' "${!bodyvar:-}"
-            ;;
           labels)
             # execClient.issueLabels() expects a JSON object, matching the
             # "labels" field of the combined number,title,body,state,labels
-            # response below — not the plain-text lines this used to print.
-            cur=""
-            if [ -f "$GH_STATE" ]; then
-              while IFS=$'\t' read -r k v; do
-                [ "$k" = "$num" ] && cur="$v"
-              done < "$GH_STATE"
-            fi
-            labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
-            extra_label="${!labelsvar:-}"
-            labels_json="[]"
-            if [ -n "$cur" ] && [ -n "$extra_label" ]; then
-              labels_json=$(jq -cn '[{"name":$a},{"name":$b}]' --arg a "$cur" --arg b "$extra_label")
-            elif [ -n "$cur" ]; then
-              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$cur")
-            elif [ -n "$extra_label" ]; then
-              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$extra_label")
-            fi
+            # response below.
+            labels_json=$(labels_array "$(state_get "$num")")
             jq -cn --argjson labels "$labels_json" '{"labels":$labels}'
-            ;;
-          state)
-            # FAKE_GH_ISSUE_STATE_N overrides; default is OPEN.
-            statevar="FAKE_GH_ISSUE_STATE_${num}"
-            printf '%s\n' "${!statevar:-OPEN}"
             ;;
           number,title,body,state,labels)
             # Combined response for execClient.Issue(): return a JSON object.
@@ -121,35 +105,12 @@ EOF
             while IFS=$'\t' read -r n t; do
               [ "$n" = "$num" ] && title="$t" && break
             done <<< "${FAKE_GH_ISSUES:-}"
-            statevar="FAKE_GH_ISSUE_STATE_${num}"
-            state="${!statevar:-OPEN}"
-            bodyvar="FAKE_GH_ISSUE_BODY_${num}"
-            body="${!bodyvar:-}"
-            # Collect labels: lifecycle label from GH_STATE, plus any static label.
-            cur=""
-            if [ -f "$GH_STATE" ]; then
-              while IFS=$'\t' read -r k v; do
-                [ "$k" = "$num" ] && cur="$v"
-              done < "$GH_STATE"
-            fi
-            labelsvar="FAKE_GH_ISSUE_LABELS_${num}"
-            extra_label="${!labelsvar:-}"
-            # Build labels array JSON using jq for safe escaping.
-            labels_json="[]"
-            if [ -n "$cur" ] && [ -n "$extra_label" ]; then
-              labels_json=$(jq -cn '[{"name":$a},{"name":$b}]' --arg a "$cur" --arg b "$extra_label")
-            elif [ -n "$cur" ]; then
-              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$cur")
-            elif [ -n "$extra_label" ]; then
-              labels_json=$(jq -cn '[{"name":$a}]' --arg a "$extra_label")
-            fi
+            labels_json=$(labels_array "$(state_get "$num")")
             jq -cn \
               --argjson num "$num" \
               --arg title "$title" \
-              --arg body "$body" \
-              --arg state "$state" \
               --argjson labels "$labels_json" \
-              '{"number":$num,"title":$title,"body":$body,"state":$state,"labels":$labels}'
+              '{"number":$num,"title":$title,"body":"","state":"OPEN","labels":$labels}'
             ;;
         esac
         ;;
@@ -157,19 +118,6 @@ EOF
     ;;
   pr)
     case "${2:-}" in
-      list)
-        # Supports --head <branch> to look up a PR by head branch name.
-        head_branch=""
-        args=("$@")
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          [ "${args[i]}" = "--head" ] && head_branch="${args[i + 1]:-}"
-        done
-        if [ -n "$head_branch" ]; then
-          issue_num="${head_branch##*/issue-}"
-          listvar="FAKE_GH_PR_LIST_${issue_num}"
-          printf '%s\n' "${!listvar:-}"
-        fi
-        ;;
       view)
         pr_ref="${3:-}"
         json_field=""
@@ -179,29 +127,9 @@ EOF
         done
         pr_num="${pr_ref##*/}"
         case "$json_field" in
-          state)
-            # Dynamic state written by `gh pr merge` takes precedence.
-            dyn_state=""
-            if [ -f "$GH_STATE" ]; then
-              while IFS=$'\t' read -r k v; do
-                [ "$k" = "pr-state-$pr_num" ] && dyn_state="$v"
-              done <"$GH_STATE"
-            fi
-            if [ -n "$dyn_state" ]; then
-              printf '%s\n' "$dyn_state"
-            else
-              statevar="FAKE_GH_PR_STATE_${pr_num}"
-              printf '%s\n' "${!statevar:-}"
-            fi
-            ;;
           isDraft)
             # Dynamic flip written by `gh pr ready` takes precedence.
-            dyn_state=""
-            if [ -f "$GH_STATE" ]; then
-              while IFS=$'\t' read -r k v; do
-                [ "$k" = "pr-draft-$pr_num" ] && dyn_state="$v"
-              done <"$GH_STATE"
-            fi
+            dyn_state=$(state_get "pr-draft-$pr_num")
             if [ -n "$dyn_state" ]; then
               printf '%s\n' "$dyn_state"
             else
@@ -209,55 +137,6 @@ EOF
               printf '%s\n' "${!draftvar:-false}"
             fi
             ;;
-          headRefName,baseRefName)
-            headvar="FAKE_GH_PR_HEAD_${pr_num}"
-            basevar="FAKE_GH_PR_BASE_${pr_num}"
-            printf '%s\t%s\n' \
-              "${!headvar:-agent/issue-${pr_num}}" \
-              "${!basevar:-main}"
-            ;;
-          headRefOid)
-            # Advance a per-PR call counter (enables sequence tests, mirroring
-            # the graphql-count-N counter above).
-            counter_key="headsha-count-${pr_num}"
-            count=0
-            if [ -f "$GH_STATE" ]; then
-              while IFS=$'\t' read -r k v; do
-                [ "$k" = "$counter_key" ] && count="$v"
-              done < "$GH_STATE"
-            fi
-            count=$((count + 1))
-            printf '%s\t%s\n' "$counter_key" "$count" >> "$GH_STATE"
-            # FAKE_GH_PR_HEAD_SHA_SEQ_N is a comma-separated list of SHAs
-            # returned in order, sticking on the last element once exhausted —
-            # script this to model a no-op fix pass (repeat the same SHA).
-            # Unscripted, each call returns a fresh, always-distinct value —
-            # modeling the common case where a push genuinely advanced the
-            # head — mirroring forge.Fake.HeadCommitSHA's default (#1980).
-            seqvar="FAKE_GH_PR_HEAD_SHA_SEQ_${pr_num}"
-            if [ -n "${!seqvar:-}" ]; then
-              IFS=',' read -ra seq <<< "${!seqvar}"
-              idx=$((count - 1))
-              [ "$idx" -ge "${#seq[@]}" ] && idx=$(( ${#seq[@]} - 1 ))
-              printf '%s\n' "${seq[$idx]}"
-            else
-              printf 'fake-head-sha-%s\n' "$count"
-            fi
-            ;;
-        esac
-        ;;
-      checks)
-        pr_ref="${3:-}"
-        pr_num="${pr_ref##*/}"
-        checksvar="FAKE_GH_PR_CHECKS_${pr_num}"
-        # Plain output for any caller that uses gh pr checks directly.
-        case "${!checksvar:-none}" in
-          success)  printf 'CI\tpass\thttps://example.com\n' ;;
-          failure)  printf 'CI\tfail\thttps://example.com\n' ;;
-          pending)  printf 'CI\tpending\thttps://example.com\n' ;;
-          cancel)   printf 'CI\tcancel\thttps://example.com\n' ;;
-          skipping) printf 'CI\tskipping\thttps://example.com\n' ;;
-          none)     ;; # no output — "not started"
         esac
         ;;
       ready)
@@ -269,85 +148,6 @@ EOF
         pr_ref="${*: -1}"
         pr_num="${pr_ref##*/}"
         printf 'pr-draft-%s\tfalse\n' "$pr_num" >>"$GH_STATE"
-        ;;
-      merge)
-        pr_ref="${3:-}"
-        pr_num="${pr_ref##*/}"
-        # FAKE_GH_PR_MERGE_CONFLICT_N: number of merge calls that should fail
-        # with a merge-conflict error before succeeding.
-        conflict_var="FAKE_GH_PR_MERGE_CONFLICT_${pr_num}"
-        merge_count_key="merge-count-${pr_num}"
-        merge_count=0
-        if [ -f "$GH_STATE" ]; then
-          while IFS=$'\t' read -r k v; do
-            [ "$k" = "$merge_count_key" ] && merge_count="$v"
-          done <"$GH_STATE"
-        fi
-        merge_count=$((merge_count + 1))
-        printf '%s\t%s\n' "$merge_count_key" "$merge_count" >>"$GH_STATE"
-        if [ -n "${!conflict_var:-}" ] && [ "$merge_count" -le "${!conflict_var:-0}" ]; then
-          printf 'GraphQL: Pull Request is not mergeable\n' >&2
-          exit 1
-        fi
-        printf 'pr-state-%s\tMERGED\n' "$pr_num" >>"$GH_STATE"
-        ;;
-    esac
-    ;;
-  api)
-    case "${2:-}" in
-      graphql)
-        # Extract PR number from -F number=N and the query body from -f query=...
-        pr_num=""
-        query=""
-        args=("$@")
-        for ((i = 0; i < ${#args[@]}; i++)); do
-          if [ "${args[i]}" = "-F" ] && [[ "${args[i+1]:-}" = number=* ]]; then
-            pr_num="${args[i+1]#number=}"
-          fi
-          if [ "${args[i]}" = "-f" ] && [[ "${args[i+1]:-}" = query=* ]]; then
-            query="${args[i+1]#query=}"
-          fi
-        done
-        # The Mergeable() query asks for PR content-mergeability (issue #566)
-        # rather than the statusCheckRollup queried by CheckState(); it is
-        # scripted separately so a conflict-vs-checks scenario is not
-        # conflated with the rollup-state sequence below.
-        if [[ "$query" == *mergeable* ]]; then
-          mergeablevar="FAKE_GH_PR_MERGEABLE_${pr_num}"
-          if [ -n "${!mergeablevar:-}" ]; then
-            printf '%s\n' "${!mergeablevar}"
-          else
-            conflict_var="FAKE_GH_PR_MERGE_CONFLICT_${pr_num}"
-            if [ -n "${!conflict_var:-}" ]; then
-              printf 'CONFLICTING\n'
-            else
-              printf 'MERGEABLE\n'
-            fi
-          fi
-          exit 0
-        fi
-        # Advance per-PR call counter (enables sequence tests).
-        counter_key="graphql-count-${pr_num}"
-        count=0
-        if [ -f "$GH_STATE" ]; then
-          while IFS=$'\t' read -r k v; do
-            [ "$k" = "$counter_key" ] && count="$v"
-          done < "$GH_STATE"
-        fi
-        count=$((count + 1))
-        printf '%s\t%s\n' "$counter_key" "$count" >> "$GH_STATE"
-        # FAKE_GH_GRAPHQL_ROLLUP_SEQ_N is a comma-separated list of states
-        # returned in order; sticks on the last element once exhausted.
-        seqvar="FAKE_GH_GRAPHQL_ROLLUP_SEQ_${pr_num}"
-        if [ -n "${!seqvar:-}" ]; then
-          IFS=',' read -ra seq <<< "${!seqvar}"
-          idx=$((count - 1))
-          [ "$idx" -ge "${#seq[@]}" ] && idx=$(( ${#seq[@]} - 1 ))
-          printf '%s\n' "${seq[$idx]}"
-        else
-          rollupvar="FAKE_GH_GRAPHQL_ROLLUP_${pr_num}"
-          [ -n "${!rollupvar:-}" ] && printf '%s\n' "${!rollupvar}"
-        fi
         ;;
     esac
     ;;
