@@ -217,7 +217,7 @@ in
     grep -q '"NIX_CONFIG_FILE":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"NIX_STORE_WRITABLE":' ${bwrapHarness.internals.runInputDocumentFile}
     # IMAGE_ARCHIVE is not baked as a store path (empty-default guard is fine).
-    ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
+    ! grep -q '"IMAGE_ARCHIVE":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile} || exit 1
     # The build-time drv counterparts (issue #2672): `spindrift build` reads
     # this SAME run document (no doc of its own), so runArtifacts' bwrap
     # branch must carry its own copy of these six *_DRV keys independent of
@@ -230,6 +230,10 @@ in
     grep -q '"GROUP_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"NIX_CONFIG_FILE_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"SYSCALL_FILTER_DRV":' ${bwrapHarness.internals.runInputDocumentFile}
+    ! grep -q '"IMAGE_DRV":' ${bwrapHarness.internals.runInputDocumentFile} || exit 1
+    # IMAGE_TAG is the agent-closure store path on the bwrap side, never a
+    # name:hash tag (issue #2966).
+    grep -q '"IMAGE_TAG":"/nix/store/' ${bwrapHarness.internals.runInputDocumentFile}
     grep -q '"AGENT_FILES_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"AGENT_ENV_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}
     grep -q '"PASSWD_FILE_DRV":' ${bwrapHarness.internals.buildInputDocumentFile}

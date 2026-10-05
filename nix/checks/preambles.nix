@@ -404,7 +404,7 @@ in
     assert assertMsg (out.CHORE_CATALOG == "chore-a chore-b")
       "runArtifacts (bwrap) must render CHORE_CATALOG from its choreCatalog input, got: ${builtins.toJSON out}";
     assert assertMsg (
-      !(out ? IMAGE_ARCHIVE)
+      !(out ? IMAGE_ARCHIVE) && !(out ? IMAGE_DRV)
     ) "runArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
     assert assertMsg (
       out.FLAKE_LAUNCHER_ATTR == ".#packages.aarch64-darwin.launcher-currency"
