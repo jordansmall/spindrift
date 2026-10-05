@@ -41,6 +41,9 @@ type Fake struct {
 	CumulativeUsageResult usage.Usage
 
 	CloseCalls int
+
+	// RecordedWarnings holds the argument of each RecordWarnings call, in order.
+	RecordedWarnings [][]string
 }
 
 var _ Dispatcher = (*Fake)(nil)
@@ -103,6 +106,13 @@ func (f *Fake) CumulativeUsage() usage.Usage {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.CumulativeUsageResult
+}
+
+// RecordWarnings records the call.
+func (f *Fake) RecordWarnings(warnings []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.RecordedWarnings = append(f.RecordedWarnings, warnings)
 }
 
 // Close records the call.

@@ -89,6 +89,11 @@ type Result struct {
 	// to the pre-#2983 pass-blind behavior rather than an error.
 	Passes []passmanifest.Entry
 
+	// Warnings holds the settle-scan warnings outcomeResult printed, each the
+	// text PrintWarning wrote. The sidecar may prefix fix-pass entries with
+	// "fix pass N: " (issue #3744).
+	Warnings []string
+
 	// Err is the error once() returned on a Terminal classification whose log
 	// came back empty, meaning the box never launched (issue #3119). Nil for
 	// every other failed path: those settled on a genuine outcome or
@@ -204,8 +209,21 @@ type Dispatcher interface {
 	// budget gate (issue #2001) reads it before dispatching another fix pass.
 	CumulativeUsage() usage.Usage
 
+	// RecordWarnings adds a batch of scan warnings to this Dispatch's sidecar
+	// (issue #3744): the first call replaces an earlier run's file, later
+	// calls (fix passes) append; no warnings at all clears it. Best-effort:
+	// it never fails the settle.
+	RecordWarnings(warnings []string)
+
 	// Close evicts this issue's driver-cache entry and releases the claim
 	// Run took (issue #4364); the per-issue caller defers it once the
 	// Dispatch is done.
 	Close()
+}
+
+// PrintWarning writes one settle warning to stderr in the "    ?? #<n>: "
+// form, the single source of that format for every settle warning (issue
+// #3744).
+func PrintWarning(number, w string) {
+	fmt.Fprintf(os.Stderr, "    ?? #%s: %s\n", number, w)
 }

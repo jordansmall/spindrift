@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/driver"
@@ -40,6 +41,10 @@ type Dispatch struct {
 	cfg      Config
 	cacheDir string
 	cache    *cache
+
+	// warnings accumulates RecordWarnings batches across the initial run and
+	// its fix passes.
+	warnings []string
 
 	// nonce is this Dispatch's per-run nonce (issue #1937), minted by
 	// Factory.New, forwarded into every Box as RUN_NONCE, and kept here so
@@ -736,6 +741,36 @@ func markRunLineage(pwd, number string) error {
 		return err
 	}
 	return f.Close()
+}
+
+// warningsPath returns the per-issue sidecar holding the settle warnings
+// (scan and rejection) of the initial run plus each fix pass (issue #3744).
+// It is a sibling of the attempt logs, never a
+// suffix of one: appending to issue-<n>.log would feed the Box log's
+// outcome-line rescan, and AllAttemptLogPaths probes exact names.
+func warningsPath(pwd, number string) string {
+	return filepath.Join(HostLogDirFor(pwd), "issue-"+number+".warnings")
+}
+
+// RecordWarnings appends warnings to this Dispatch's accumulated set and
+// rewrites the sidecar, one per line, so a fix pass adds to the initial run's
+// batch while the first call replaces an earlier run's file. While the set is
+// empty the sidecar is removed so a stale one never lingers. Works with no
+// report pipe (non-daemon runs).
+func (d *Dispatch) RecordWarnings(warnings []string) {
+	d.warnings = append(d.warnings, warnings...)
+	path := warningsPath(d.pwd, d.number)
+	var err error
+	if len(d.warnings) == 0 {
+		if err = os.Remove(path); os.IsNotExist(err) {
+			err = nil
+		}
+	} else if err = os.MkdirAll(filepath.Dir(path), 0o755); err == nil {
+		err = os.WriteFile(path, []byte(strings.Join(d.warnings, "\n")+"\n"), 0o644)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: warnings sidecar: %v\n", d.number, err)
+	}
 }
 
 // EnsureRunLineage gives a Dispatch that reaches Fix, CumulativeUsage, or
