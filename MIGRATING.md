@@ -40,8 +40,11 @@ naming the knob as removed.
 
 A custom prompt override that references `review-loop-inline.md` or
 `${REVIEW_LOOP_INLINE_STEP}` must drop the reference: that fragment and its
-var no longer exist. The orchestrator review-loop fragments
-(`review-loop-orchestrator.md`, `land-pass-order-orchestrator.md`,
+var no longer exist. A leftover `${REVIEW_LOOP_INLINE_STEP}` (or any other
+removed fragment variable listed in `lib/removed-fragment-vars.nix`) now fails
+loudly: prompt assembly rejects it before the agent starts, and a baked
+`mkHarness` prompt arg fails eval (issue #4401). The orchestrator review-loop
+fragments (`review-loop-orchestrator.md`, `land-pass-order-orchestrator.md`,
 `commit-rework-orchestrator.md`) now render unconditionally. A custom
 `reviewPrompt` must carry the `VERDICT:` marker, as it already had to under the
 default. A `read-only` Box always uses the Filer's issue-intent relay. See
@@ -225,15 +228,14 @@ wording and placement (inside the IMPLEMENT section's variable run, after
 the `${TDD_*_STEP}` pair and before
 `${PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP}${PRINCIPLE_LAZINESS_PROTOCOL_STEP}# CHECK`).
 
-A leftover `${CODE_COMMENTS_STEP}` in an override prompt is not an error and
-not silently dropped: prompt assembly only substitutes tokens it has a value
-for and passes everything else through untouched, so the literal text
-`${CODE_COMMENTS_STEP}` renders straight into the prompt the agent reads —
-confirmed against `substitute` in
-`cmd/launcher/internal/promptassembly/assemble.go` (the `phase_prompt_assembly`
-path) and `RenderPrompt` in `cmd/launcher/internal/conflictresolve` (the
-conflict-resolve path, which substitutes `$NAME` and `${NAME}` envsubst-style
-for allowlisted names only); both leave an unlisted `${NAME}` token as-is.
+As of issue #4401 a leftover `${CODE_COMMENTS_STEP}` in an override prompt
+is an error: prompt assembly rejects it before the agent starts, naming the
+variable, the issue that removed it, and this file, and a baked `mkHarness`
+prompt arg fails eval. The assembler still passes other unknown `${NAME}`
+tokens through untouched. An override `conflict-resolve-prompt.md` is not
+checked at runtime, and `RenderPrompt` in
+`cmd/launcher/internal/conflictresolve` leaves an unlisted `${NAME}` as-is, so
+drop the token there yourself.
 
 ## The read-only `/issues` mount is retired; local issue text is injected (issue #3471)
 
@@ -839,13 +841,13 @@ Go sweep backing the guarantee that TDD_BAKED/TDD_UNBAKED gets.
 ### What breaks in an override prompt directory
 
 - **`${COMMIT_STEP}` and `${CODE_REVIEW_STEP}` no longer exist.** An
-  override prompt still writing either one renders a literal,
-  unsubstituted `${COMMIT_STEP}` / `${CODE_REVIEW_STEP}` into the assembled
-  prompt — the assembler substitutes only variables the registry declares,
-  and nothing raises. Replace each with its adjacent pair, no separator
-  between them: `${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}` in
-  `issue-prompt.md`'s COMMIT section, `${CODE_REVIEW_BAKED_STEP}${CODE_REVIEW_UNBAKED_STEP}`
-  in `review-prompt.md`.
+  override prompt still writing either one fails prompt assembly before
+  the agent starts (issue #4401), and a baked `mkHarness` prompt arg fails
+  eval. Replace each with its adjacent pair, no separator between them:
+  `${COMMIT_BAKED_STEP}${COMMIT_UNBAKED_STEP}` in
+  `issue-prompt.md`'s COMMIT section,
+  `${CODE_REVIEW_BAKED_STEP}${CODE_REVIEW_UNBAKED_STEP}` in
+  `review-prompt.md`.
 
 - **`fragments/commit-default.md` and `fragments/code-review-default.md` are
   deleted.** An override prompt directory carrying its own copy of either
@@ -981,10 +983,9 @@ fails the build if the two ever agree.
 ### What breaks in an override prompt directory
 
 - **`${TDD_STEP}` no longer exists.** An override `issue-prompt.md` still
-  writing it renders a literal, unsubstituted `${TDD_STEP}` into the
-  assembled prompt — the assembler substitutes only variables the registry
-  declares, and nothing raises. Replace it with the adjacent pair, no
-  separator between them:
+  writing it fails prompt assembly before the agent starts (issue #4401),
+  and a baked `mkHarness` prompt arg fails eval. Replace it with the
+  adjacent pair, no separator between them:
 
   ```
   ${COORDINATOR_STEP}${COORDINATOR_SCOUT_BRIEF_STEP}${SKILL_PREAMBLE}${TDD_BAKED_STEP}${TDD_UNBAKED_STEP}# CODE COMMENTS
