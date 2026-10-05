@@ -2170,11 +2170,9 @@ in
     '';
 
   # Exempt-row check (issue #2709, slice 2): every "exempt" row's assembled
-  # prompt must carry no case-insensitive "caveman" at all: filer-prompt.md
-  # authors issue titles and bodies directly and so must stay human prose end
-  # to end, and worker-prompt.md has no Skill tool to load it with (issue
-  # #4562). The file list derives from the
-  # registry's exempt rows, so a future exempt row needs no second list.
+  # prompt must carry no case-insensitive "caveman" at all. Each row's
+  # `reason` in lib/prompt-coverage.nix says why; the file list derives from
+  # the registry's exempt rows, so a future exempt row needs no second list.
   caveman-coverage-exempt-templates-carry-no-caveman-mention =
     let
       inherit (pkgs.lib) concatMapStringsSep filter;

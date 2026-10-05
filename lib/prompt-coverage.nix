@@ -9,6 +9,9 @@
 
 # cavemanVar names the envsubst variable and is set only when coverage is
 # "covered"; reason is set only when it is "exempt". The other is null.
+let
+  noSkillTool = "a roster subagent: under the claude Driver its tool list carries no Skill tool, so it cannot load /caveman";
+in
 [
   {
     promptFile = "butler-prompt.md";
@@ -76,14 +79,14 @@
   }
   {
     promptFile = "scout-prompt.md";
-    coverage = "covered";
-    cavemanVar = "CAVEMAN_STEP";
-    reason = null;
+    coverage = "exempt";
+    cavemanVar = null;
+    reason = "${noSkillTool}, and its only output is the brief the coordinator reads back from disk, not narration (issue #4562)";
   }
   {
     promptFile = "worker-prompt.md";
     coverage = "exempt";
     cavemanVar = null;
-    reason = "a roster subagent: under the claude Driver its tool list carries no Skill tool, so it cannot load /caveman, and its only output is a final report to the coordinator, not narration (issue #4562)";
+    reason = "${noSkillTool}, and its only output is a final report to the coordinator, not narration (issue #4562)";
   }
 ]
