@@ -26,6 +26,14 @@ A Driver is inherently **two coordinated pieces keyed by one name**, because it 
 
 Each Driver **normalizes its tool's misbehavior at its own boundary**, so the entrypoint tail, launcher, merge gate, and retry logic stay Driver-agnostic. opencode is badly behaved where claude is clean — it exits `0` on error, emits no `result` envelope (its final `step_finish` may not even fire before exit), and its rate-limit markers look nothing like Anthropic's. The opencode adapter therefore surfaces the sentinel as a bare stdout line — both Drivers render the same nix-generated `jq` extraction pipeline (`lib/drivers/outcome-extractor.nix`) and supply only their own `jqSelector`: opencode selects each `text` event's `.part.text` (`lib/drivers/opencode.nix:9`), claude the `result` event's `.result` (`lib/drivers/claude.nix:9`) — and **synthesizes** a trustworthy exit code from "valid outcome line present AND no `error` event" because opencode's own code is worthless. The upshot: the **`SPINDRIFT_OUTCOME` line is the true cross-Driver success contract**; the exit code is per-Driver corroboration only (already half-true when this was written, and now wholly so: the missing-line→`TaskFailed` rule is itself per-Driver, in each classifier's own scan — `cmd/launcher/internal/driver/claude/classify.go:110-111`, `opencode/classify.go:55-56`).
 
+*Amended by issue #4431:* outcome-line and result-text extraction is no longer
+part of the in-box half. The nix-generated `jq` extractor
+(`lib/drivers/outcome-extractor.nix`) and its `jqSelector`s are deleted;
+extraction lives only in the launcher's Go `Driver` strategies (`ResultText` in
+`cmd/launcher/internal/driver/{claude,opencode}`) and the `outcome` package
+(`StripResultText`, `ExtractOutcomeLine`). Each Driver's selection is unchanged:
+claude the `result` event's `.result`, opencode each `text` event's `.part.text`.
+
 **Provider** is a new axis distinct from Driver: the model backend a Driver talks to (Anthropic, GitHub Copilot, OpenAI). "Add GitHub Copilot" is *not* a new Driver — it is the opencode Driver pointed at the `github-copilot` provider, with `MODEL` provider-namespaced (`github-copilot/…`). Credentials go two ways, mirroring the baked-default/runtime-override pattern already used for prompts: the primary path is a **nix-generated `opencode.json` with `{env:VAR}` placeholders** (documented for apiKey providers; keeps the "secrets are env, never host files" model), with a **materialized/mounted `auth.json`** fallback for Copilot's OAuth device-flow, whose headless credential path is undocumented and must be resolved by an empirical spike before the auth design is finalized.
 
 ## Considered Options

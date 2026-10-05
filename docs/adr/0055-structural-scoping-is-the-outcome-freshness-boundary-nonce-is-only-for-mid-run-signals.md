@@ -50,6 +50,12 @@ does a different job in each:
   bare-leading outcome lines inside the one final message — which the
   extractor's `tail -1` already resolves.
 
+  *Amended by issue #4431:* the in-box `_driver_extract_outcome` (and its
+  `tail -1`) is deleted. The Go driver `ResultText` now does the final-message
+  scoping host-side, and `outcome.ExtractOutcomeLine`'s last match is the
+  within-final-message tiebreak, so structure still defends the outcome line
+  before any nonce.
+
 - **`SPINDRIFT_COMMENT` / `SPINDRIFT_PR_INTENT` / `SPINDRIFT_ISSUE_INTENT`**
   have no in-box extractor and no leading-line requirement. `parseSignalLine`
   finds the token *anywhere* in a line and is deliberately mid-JSON-tolerant
@@ -75,7 +81,8 @@ the structure they can't have.
    grammar and its explanatory paragraph in the prompts, the host
    `LastInLog` nonce gate and its `skipped`-without-nonce warning, and the
    synthetic backstop's `nonce=` append. The extractor keeps `tail -1` as the
-   within-final-message tiebreak (unchanged behavior).
+   within-final-message tiebreak (unchanged behavior). *Amended by issue
+   #4431:* that tiebreak is now `outcome.ExtractOutcomeLine`'s last match.
 
 2. **Keep the nonce unchanged for the three signal channels.** It is their
    sole replay defense. `RUN_NONCE` plumbing, the prompt fragments carrying
