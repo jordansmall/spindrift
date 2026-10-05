@@ -32,11 +32,24 @@ setup() {
   INSTALLATION_ID=456
   export key_file token_file APP_ID INSTALLATION_ID MINT_TOKEN_SRC
 
-  # openssl is stubbed for every case: mint_token only needs *some* bytes
-  # out of the base64/dgst subcommands it drives, never real JWT crypto.
-  write_stub openssl <<'EOF'
-cat >/dev/null
-printf 'stub'
+  # openssl is stubbed for every case since the nix build sandbox has none.
+  # `base64` mirrors real wrapping (64 columns unless -A), so a dropped -A
+  # leaks newlines into a segment. `dgst` records its argv and stdin and prints
+  # a 256-byte (RS256-sized) signature whose base64 holds `+`, `/` and `==`
+  # padding, so the b64url alphabet and padding steps are exercised.
+  sig_file="$BATS_TEST_TMPDIR/sig.bin"
+  { printf '\xfb\xef\xbe'; head -c 253 /dev/zero | tr '\0' '\377'; } > "$sig_file"
+  [ "$(stat -c %s "$sig_file")" -eq 256 ]
+  write_stub openssl <<EOF
+case "\$1" in
+  base64) if [ "\${2:-}" = -A ]; then exec base64 -w0; else exec base64 -w64; fi ;;
+  dgst)
+    printf '%s\\n' "\$@" > "$BATS_TEST_TMPDIR/openssl-dgst-argv"
+    cat > "$BATS_TEST_TMPDIR/openssl-dgst-stdin"
+    cat "$sig_file"
+    ;;
+  *) exit 1 ;;
+esac
 EOF
 }
 
@@ -62,8 +75,17 @@ stub_curl_body() {
   local body_file="$BATS_TEST_TMPDIR/curl-body"
   printf '%s' "$1" > "$body_file"
   write_stub curl <<EOF
+printf '%s\\n' "\$@" > "$BATS_TEST_TMPDIR/curl-argv"
 cat "$body_file"
 EOF
+}
+
+# Reverses b64url: restores the alphabet and padding, then decodes.
+b64url_decode() {
+  local s
+  s=$(printf '%s' "$1" | tr '_-' '/+')
+  while [ $(( ${#s} % 4 )) -ne 0 ]; do s="$s="; done
+  printf '%s' "$s" | base64 -d
 }
 
 run_mint_token() {
@@ -120,4 +142,37 @@ assert_mint_fails_preserving_token() {
 
   [ "$status" -eq 0 ]
   [ "$(cat "$token_file")" = "tok" ]
+}
+
+@test "mint_token signs an RS256 JWT and POSTs it to the installation token endpoint" {
+  write_stub date <<'EOF'
+printf '1700000000\n'
+EOF
+  stub_curl_body '{"token":"tok"}'
+  local curl_argv="$BATS_TEST_TMPDIR/curl-argv"
+
+  run_mint_token
+
+  [ "$status" -eq 0 ]
+
+  # Argv is one arg per line, so flag/value pairing is asserted by adjacency.
+  local argv jwt
+  argv=$(cat "$curl_argv")
+  [[ "$argv" == *$'-X\nPOST\n'* ]]
+  [[ "$argv" == *$'-H\nAccept: application/vnd.github+json\n'* ]]
+  [[ "$argv" == *$'\nhttps://api.github.com/app/installations/456/access_tokens' ]]
+  jwt=$(grep -m1 '^Authorization: Bearer ' "$curl_argv")
+  jwt=${jwt#Authorization: Bearer }
+  [[ "$argv" == *$'-H\nAuthorization: Bearer '"$jwt"$'\n'* ]]
+
+  [[ "$jwt" =~ ^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$ ]]
+  local header payload sig
+  IFS=. read -r header payload sig <<< "$jwt"
+  [ "$(b64url_decode "$header")" = '{"alg":"RS256","typ":"JWT"}' ]
+  [ "$(b64url_decode "$payload")" = '{"iat":1699999940,"exp":1700000540,"iss":123}' ]
+  b64url_decode "$sig" > "$BATS_TEST_TMPDIR/sig-decoded"
+  cmp "$sig_file" "$BATS_TEST_TMPDIR/sig-decoded"
+
+  [ "$(cat "$BATS_TEST_TMPDIR/openssl-dgst-argv")" = "$(printf '%s\n' dgst -sha256 -sign "$key_file")" ]
+  [ "$(cat "$BATS_TEST_TMPDIR/openssl-dgst-stdin")" = "$header.$payload" ]
 }
