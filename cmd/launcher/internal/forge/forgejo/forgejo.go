@@ -394,9 +394,11 @@ func dependencyIDs(payload []forgejoDependencyPayload) []string {
 	return ids
 }
 
-func (c *forgejoClient) nativeDepsOf(num string) ([]string, error) {
-	var payload []forgejoDependencyPayload
-	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/dependencies", nil, &payload); err != nil {
+// nativeLinks returns the issue numbers on every page of issue num's native
+// link endpoint, "dependencies" or "blocks".
+func (c *forgejoClient) nativeLinks(num, endpoint string) ([]string, error) {
+	payload, err := walkPages(c.rest, c.repoPath()+"/issues/"+num+"/"+endpoint, nil, func(p forgejoDependencyPayload) int { return p.Number })
+	if err != nil {
 		return nil, err
 	}
 	return dependencyIDs(payload), nil
@@ -406,7 +408,7 @@ func (c *forgejoClient) nativeDepsOf(num string) ([]string, error) {
 // dependencies API and falling back to body-text parsing when that lookup
 // errors or finds nothing.
 func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
-	deps, err := c.nativeDepsOf(num)
+	deps, err := c.nativeLinks(num, "dependencies")
 	if err == nil && len(deps) > 0 {
 		return forge.WithSource(deps, forge.DepSourceNative), nil
 	}
@@ -425,11 +427,11 @@ func (c *forgejoClient) DepsOf(num string) ([]forge.Dependency, error) {
 // grammar declares a forward blocks relationship, so it returns a lookup
 // failure directly.
 func (c *forgejoClient) BlocksOf(num string) ([]forge.Dependency, error) {
-	var payload []forgejoDependencyPayload
-	if err := c.rest.Do(http.MethodGet, c.repoPath()+"/issues/"+num+"/blocks", nil, &payload); err != nil {
+	blocks, err := c.nativeLinks(num, "blocks")
+	if err != nil {
 		return nil, err
 	}
-	return forge.WithSource(dependencyIDs(payload), forge.DepSourceNative), nil
+	return forge.WithSource(blocks, forge.DepSourceNative), nil
 }
 
 // TouchesOf returns the touch-set parsed from issue num's body. Forgejo has no

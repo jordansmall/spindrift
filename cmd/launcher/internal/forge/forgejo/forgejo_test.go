@@ -1008,6 +1008,45 @@ func TestForgejoClient_BlocksOf_ReturnsNativeBlocking(t *testing.T) {
 	}
 }
 
+// DepsOf and BlocksOf once read only the first page of /dependencies and
+// /blocks, so a blocker past it went unseen and the issue could dispatch while
+// it was open, and a blocked issue past it went unreported (issue #4462).
+func TestForgejoClient_NativeLinks_WalkAllPages(t *testing.T) {
+	const total = forgejoServerPageCap + 10
+	cases := []struct {
+		endpoint string
+		lookup   func(forge.IssueTracker, string) ([]forge.Dependency, error)
+	}{
+		{"dependencies", func(fc forge.IssueTracker, num string) ([]forge.Dependency, error) { return fc.DepsOf(num) }},
+		{"blocks", func(fc forge.IssueTracker, num string) ([]forge.Dependency, error) {
+			return fc.(forge.BlockersLister).BlocksOf(num)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.endpoint, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/repos/owner/repo/issues/7/"+tc.endpoint {
+					t.Errorf("unexpected path: %s", r.URL.Path)
+				}
+				serveCappedNumbered(w, r, total, forgejoIssuesPage)
+			}))
+			defer srv.Close()
+
+			fc := forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: srv.URL, Repo: "owner/repo", Token: "tok"})
+			got, err := tc.lookup(fc, "7")
+			if err != nil {
+				t.Fatalf("lookup: %v", err)
+			}
+			if len(got) != total {
+				t.Fatalf("got %d issues, want %d", len(got), total)
+			}
+			if last := got[len(got)-1]; last.ID != strconv.Itoa(total) {
+				t.Errorf("last issue = %v, want ID %d", last, total)
+			}
+		})
+	}
+}
+
 // BlocksOf has nothing to fall back to, so a native lookup failure must reach
 // the caller rather than degrade.
 func TestForgejoClient_BlocksOf_PropagatesNativeError(t *testing.T) {
