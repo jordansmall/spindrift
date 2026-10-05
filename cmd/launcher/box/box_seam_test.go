@@ -515,18 +515,45 @@ func TestBoxSeamMissingOutcomeIsNudgedOnce(t *testing.T) {
 	}
 }
 
+// unrecoveredRuns is a first pass and its resume, neither emitting an outcome.
+func unrecoveredRuns() []seamtest.DriverRun {
+	return []seamtest.DriverRun{{Stdout: seamResult("all finished")}, {Stdout: seamResult("still no marker")}}
+}
+
+// unrecoveredOutcome is the backstop's synthetic line after unrecoveredRuns,
+// with verdictClause spliced in ahead of the work-preservation clause.
+func unrecoveredOutcome(verdictClause string) string {
+	return fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s landing=%s status=blocked synthetic=true note=driver exited without emitting an outcome; a resume attempt also produced no outcome; %sno work to preserve", seamIssue, seamBranch, verdictClause)
+}
+
 func TestBoxSeamUnrecoveredOutcomeIsBackstopped(t *testing.T) {
-	r := runBoxSeam(t, seamCase{
-		repo:       seamRepo(t),
-		driverRuns: []seamtest.DriverRun{{Stdout: seamResult("all finished")}, {Stdout: seamResult("still no marker")}},
-	})
+	r := runBoxSeam(t, seamCase{repo: seamRepo(t), driverRuns: unrecoveredRuns()})
 	r.res.WantExit(t, 0)
 	r.wantFirstRun(t)
 
 	if res := r.resumes(); len(res) != 1 || len(res[0]) != 4 || !reflect.DeepEqual(res[0][:2], []string{"--resume", r.sessionID}) || res[0][2] != "-p" {
 		t.Errorf("resumes = %q; want exactly one `--resume %s -p <nudge>`", res, r.sessionID)
 	}
-	want := fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s landing=%s status=blocked synthetic=true note=driver exited without emitting an outcome; a resume attempt also produced no outcome; no work to preserve", seamIssue, seamBranch)
+	want := unrecoveredOutcome("")
+	if got := outcomeLines(r.res.Stdout); !reflect.DeepEqual(got, []string{want}) {
+		t.Errorf("outcome lines = %q; want one synthetic %q", got, want)
+	}
+}
+
+// The reviewer's last verdict reaches the backstop through --run-state-file.
+func TestBoxSeamBackstopReadsRunStateFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run-state.json")
+	if err := os.WriteFile(path, []byte(`{"last_verdict":"BLOCK"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := runBoxSeam(t, seamCase{
+		repo:       seamRepo(t),
+		driverRuns: unrecoveredRuns(),
+		// Overrides the flag seamBoxArgs passes: the flag package keeps the last value.
+		extraArgs: []string{"--run-state-file=" + path},
+	})
+	r.res.WantExit(t, 0)
+	want := unrecoveredOutcome("reviewer's blocking findings were never cleared; ")
 	if got := outcomeLines(r.res.Stdout); !reflect.DeepEqual(got, []string{want}) {
 		t.Errorf("outcome lines = %q; want one synthetic %q", got, want)
 	}
