@@ -10,7 +10,9 @@
 load helper
 
 setup() {
-  setup_fakes
+  FAKE_BIN="$BATS_TEST_TMPDIR/bin"
+  mkdir -p "$FAKE_BIN"
+  export PATH="$FAKE_BIN:$PATH"
   # Install a recorder as box that exits with a code nothing else in the shim
   # could produce.
   {
@@ -25,6 +27,27 @@ FAKE
   chmod +x "$FAKE_BIN/box"
   export BOX_ARGV_LOG="$BATS_TEST_TMPDIR/box.argv"
   export BOX_ENV_LOG="$BATS_TEST_TMPDIR/box.env"
+
+  # Prepend whichever of the Driver preamble (issues #624, #433) and the baked
+  # /agent/* path defaults (issue #2531) are set, each independently guarded,
+  # in lib/image.nix's own concatenation order so the suite sees the bytes the
+  # image bakes. Outside nix none are set, the entrypoint stays unwrapped, and
+  # tests fail by design.
+  if [ -n "${DRIVER_PREAMBLE_FILE:-}" ] || [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
+    local _wrapped="$BATS_TEST_TMPDIR/entrypoint.sh"
+    {
+      if [ -n "${DRIVER_PREAMBLE_FILE:-}" ]; then
+        cat "$DRIVER_PREAMBLE_FILE"
+      fi
+      if [ -n "${AGENT_PATHS_PREAMBLE_FILE:-}" ]; then
+        cat "$AGENT_PATHS_PREAMBLE_FILE"
+      fi
+      tail -n +2 "$ENTRYPOINT"
+    } >"$_wrapped"
+    chmod +x "$_wrapped"
+    ENTRYPOINT="$_wrapped"
+    export ENTRYPOINT
+  fi
 }
 
 @test "the shim execs box and propagates its exit status" {
