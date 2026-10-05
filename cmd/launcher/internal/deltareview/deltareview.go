@@ -22,6 +22,22 @@ import (
 // wording (issue #3245), catching a reword on either side pre-merge.
 const GateWorkPhrase = "gate-discovered"
 
+// GateWorkReason is the Reason Decide returns when the decisions record declares
+// gate-discovered work. Exported so fixtures share Decide's wording.
+const GateWorkReason = "land pass decisions record declares gate-discovered work"
+
+const beyondReasonPrefix = "land delta touches lines beyond the reviewer's findings: "
+
+// BeyondTrigger is the Trigger Decide returns for a delta reaching the beyond
+// locations. Exported so fixtures share Decide's wording.
+func BeyondTrigger(beyond []string) Trigger {
+	return Trigger{
+		Fire:   true,
+		Reason: beyondReasonPrefix + strings.Join(beyond, ", "),
+		Beyond: beyond,
+	}
+}
+
 var bulletRe = regexp.MustCompile(`^\s*[-*]\s+(.*)$`)
 
 var lineSuffixRe = regexp.MustCompile(`:(\d+)(?:-(\d+)|:\d+)?$`)
@@ -184,17 +200,13 @@ func Decide(delta landdelta.Delta, findings, decisions string) Trigger {
 	// This fires before delta is consulted, because issue #3245 requires a human
 	// look at every inline gate fix even when no comparison resolves.
 	if GateWorkDeclared(decisions) {
-		return Trigger{Fire: true, Reason: "land pass decisions record declares gate-discovered work"}
+		return Trigger{Fire: true, Reason: GateWorkReason}
 	}
 
 	if delta.Known {
 		beyond := locationsBeyond(delta, FindingLocations(findings))
 		if len(beyond) > 0 {
-			return Trigger{
-				Fire:   true,
-				Reason: "land delta touches lines beyond the reviewer's findings: " + strings.Join(beyond, ", "),
-				Beyond: beyond,
-			}
+			return BeyondTrigger(beyond)
 		}
 	}
 
