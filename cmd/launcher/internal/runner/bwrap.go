@@ -144,8 +144,8 @@ type bwrapAdapter struct {
 	// refusing to launch the Box (ADR 0042's degrade-don't-lie posture).
 	syscallFilterPath string
 
-	// mu guards running, the box-name to live-process map Kill consults (issue
-	// #649). A bwrap sandbox is an unnamed child process with no daemon to query
+	// mu guards the maps below: running, the box-name to live-process map Kill
+	// consults (issue #649), plus provisioning and prefetchFallbackLogged. A bwrap sandbox is an unnamed child process with no daemon to query
 	// by name, so Run tracks its own handle here for Terminate, the one caller
 	// that reaches a live process from outside Run's goroutine.
 	mu      sync.Mutex
@@ -158,6 +158,15 @@ type bwrapAdapter struct {
 	// dir (issue #4164). Guarded by mu; refcounted, not a set, so two concurrent
 	// Runs for one name cannot release each other's guard.
 	provisioning map[string]int
+
+	// prefetchFallbackLogged holds the PrefetchFile paths whose read-error
+	// fallback prefetchFor has already logged (issue #3356), so a generation
+	// realized before its prefetch child existed logs once per adapter, not per
+	// launch. Guarded by mu; lazily allocated; never pruned, so it grows by one
+	// entry per distinct unreadable generation. Keyed on PrefetchFile, not
+	// Generation: Generation can be "" for an unsafe closure path
+	// (safePathComponent) and would collapse distinct generations.
+	prefetchFallbackLogged map[string]struct{}
 }
 
 // nixVarSnapshotDir is the host-side directory standing in for /nix/var inside a
@@ -433,15 +442,26 @@ func (a *bwrapAdapter) nixConfigFileFor(box Box) string {
 // prefetchFor resolves the PREFETCH value box's launch should --setenv.
 // Deliberately not pick: PrefetchFile is a path, not the value, and prefetch's
 // empty string is a legitimate swapped value (lib/mkHarness.nix's prefetch ? ""),
-// not "unset". A read error falls back to a.bakedPrefetch with one diagnostic
-// line, since an unreadable swapped prefetch child must never take down a Box.
+// not "unset". A read error falls back to a.bakedPrefetch, logging only
+// the first error per PrefetchFile, since an unreadable swapped prefetch child
+// must never take down a Box.
 func (a *bwrapAdapter) prefetchFor(box Box) string {
 	if box.ClosureGeneration == nil || box.ClosureGeneration.PrefetchFile == "" {
 		return a.bakedPrefetch
 	}
 	content, err := os.ReadFile(box.ClosureGeneration.PrefetchFile)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: prefetch file %q unreadable, falling back to baked value: %v\n", box.ClosureGeneration.PrefetchFile, err)
+		file := box.ClosureGeneration.PrefetchFile
+		a.mu.Lock()
+		if a.prefetchFallbackLogged == nil {
+			a.prefetchFallbackLogged = map[string]struct{}{}
+		}
+		_, seen := a.prefetchFallbackLogged[file]
+		a.prefetchFallbackLogged[file] = struct{}{}
+		a.mu.Unlock()
+		if !seen {
+			fmt.Fprintf(os.Stderr, "==> bwrap hot-swap: prefetch file %q unreadable, falling back to baked value: %v\n", file, err)
+		}
 		return a.bakedPrefetch
 	}
 	return string(content)
