@@ -14,26 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/forgejo"
 )
 
-// prReader covers only the PR-object methods forgejoCodeForge implements so
-// far. Asserting forge.PRForge directly would fail until later slices add the
-// remaining methods.
-type prReader interface {
-	PRState(url string) (forge.PRState, error)
-	HeadCommitSHA(url string) (string, error)
-	Mergeable(url string) (forge.MergeableState, error)
-	OpenPRForBranch(branch string) (forge.PR, bool, error)
-	PRForBranch(branch string) (string, bool, error)
-	CheckState(url string) (forge.RollupState, error)
-	FailureDetail(url string) (string, error)
-	ListPRFiles(url string) ([]string, error)
-	NeedsUpdate(url string) (bool, error)
-	CanAutoMerge() (bool, error)
-	EnqueueAutoMerge(prURL string) error
-	MarkReady(prURL string) error
-	MarkDraft(prURL string) error
-}
-
-func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) prReader {
+func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) forge.PRForge {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
@@ -43,9 +24,9 @@ func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) prReader {
 		Token:        "tok",
 		BranchPrefix: "agent/issue-",
 	}, nil, "unused")
-	pr, ok := cf.(prReader)
+	pr, ok := cf.(forge.PRForge)
 	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
+		t.Fatalf("forgejoCodeForge does not satisfy forge.PRForge")
 	}
 	return pr
 }
@@ -256,7 +237,7 @@ func forgejoPullsPage(start, count int) string {
 func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 	const pageSize = forge.ResultPageLimit
 	var gotPages []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
@@ -287,19 +268,7 @@ func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 			t.Errorf("server received request for page %d, want no request beyond the empty page 3", page)
 			w.WriteHeader(http.StatusNotFound)
 		}
-	}))
-	defer srv.Close()
-
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 
 	got, ok, err := pr.OpenPRForBranch("branch-" + strconv.Itoa(pageSize+2))
 	if err != nil {
@@ -325,25 +294,13 @@ func TestOpenPRForBranch_WalksAllPages(t *testing.T) {
 func TestOpenPRForBranch_WalksPastServerCappedPageSize(t *testing.T) {
 	const total = 110
 	var gotPages []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		gotPages = append(gotPages, r.URL.Query().Get("page"))
 		serveCappedNumbered(w, r, total, forgejoPullsPage)
-	}))
-	defer srv.Close()
-
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 
 	got, ok, err := pr.OpenPRForBranch("branch-" + strconv.Itoa(total))
 	if err != nil {
@@ -766,23 +723,12 @@ func TestCanAutoMerge_False(t *testing.T) {
 func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotMethod = r.Method
 		json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.EnqueueAutoMerge("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("EnqueueAutoMerge(...) unexpected error: %v", err)
 	}
@@ -800,7 +746,7 @@ func TestEnqueueAutoMerge_PostsMergeWhenChecksSucceed(t *testing.T) {
 func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main")))
@@ -812,18 +758,7 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.MarkReady("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("MarkReady(...) unexpected error: %v", err)
 	}
@@ -840,7 +775,7 @@ func TestMarkReady_StripsWIPPrefix(t *testing.T) {
 
 func markReadyAgainst(t *testing.T, title string, draft bool) (patches []map[string]any, err error) {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, draft, title, "agent/issue-206", "abc123", "main")))
@@ -852,18 +787,7 @@ func markReadyAgainst(t *testing.T, title string, draft bool) (patches []map[str
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	t.Cleanup(srv.Close)
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader")
-	}
+	})
 	err = pr.MarkReady("https://forge.test/owner/repo/pulls/206")
 	return patches, err
 }
@@ -902,7 +826,7 @@ func TestMarkReady_StripsStackedMarkersInOnePatch(t *testing.T) {
 
 func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 	patched := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -912,18 +836,7 @@ func TestMarkReady_AlreadyReadyNoOp(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.MarkReady("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("MarkReady(...) unexpected error: %v", err)
 	}
@@ -956,7 +869,7 @@ func markReadyStripsBracketedWIPTitle(t *testing.T, title string, draft bool) {
 	t.Helper()
 	var gotPath, gotMethod string
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, draft, title, "agent/issue-206", "abc123", "main")))
@@ -968,18 +881,7 @@ func markReadyStripsBracketedWIPTitle(t *testing.T, title string, draft bool) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.MarkReady("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("MarkReady(...) unexpected error: %v", err)
 	}
@@ -997,7 +899,7 @@ func markReadyStripsBracketedWIPTitle(t *testing.T, title string, draft bool) {
 func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 	var gotPath, gotMethod string
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "abc123", "main")))
@@ -1009,18 +911,7 @@ func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.MarkDraft("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("MarkDraft(...) unexpected error: %v", err)
 	}
@@ -1037,7 +928,7 @@ func TestMarkDraft_AddsWIPPrefix(t *testing.T) {
 
 func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 	patched := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, true, "WIP: add feature", "agent/issue-206", "abc123", "main")))
@@ -1047,18 +938,7 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.MarkDraft("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("MarkDraft(...) unexpected error: %v", err)
 	}
@@ -1072,7 +952,7 @@ func TestMarkDraft_AlreadyDraftNoOp(t *testing.T) {
 // draft by field but plainly titled gets redundantly PATCHed back to draft.
 func TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle(t *testing.T) {
 	patched := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/repos/owner/repo/pulls/206":
 			w.Write([]byte(pullJSON(206, "open", false, true, true, "add feature", "agent/issue-206", "abc123", "main")))
@@ -1082,18 +962,7 @@ func TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer srv.Close()
-	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
-		BaseURL:      srv.URL,
-		Repo:         "owner/repo",
-		Token:        "tok",
-		BranchPrefix: "agent/issue-",
-	}, nil, "unused")
-	pr, ok := cf.(prReader)
-	if !ok {
-		t.Fatalf("forgejoCodeForge does not satisfy prReader (methods not yet implemented)")
-	}
+	})
 	if err := pr.MarkDraft("https://forge.test/owner/repo/pulls/206"); err != nil {
 		t.Fatalf("MarkDraft(...) unexpected error: %v", err)
 	}
