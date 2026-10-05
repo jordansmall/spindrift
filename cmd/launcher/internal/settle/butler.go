@@ -46,13 +46,6 @@ type Decoration struct {
 	OnFiled     func(url string)
 }
 
-// LogRejectedSignals warns about result's rejected signal lines (see
-// gate.go's logRejectedSignals) -- exported so a caller can log them before
-// its own crash guards decide whether to file anything at all (issue #3990).
-func LogRejectedSignals(num string, result dispatch.Result) {
-	logRejectedSignals(num, result)
-}
-
 // FileButlerFindings caps result's issue-intent findings at maxPerSweep (0
 // means no cap; see capIntents), hands the kept well-formed findings to plan
 // before filing anything, then files the capped result under

@@ -181,6 +181,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					return fixStop{landing: landingAbandoned, stop: true}
 				},
 				func(result dispatch.Result) fixStop {
+					RecordSettleWarnings(d, num, fmt.Sprintf("fix pass %d: ", attempt+1), result)
 					fmt.Printf("    #%s  landing=%s  status=fix-failed  !! fix pass %d exited non-zero — aborting self-heal\n", num, pr, attempt+1)
 					result.ReportFailureReason(num)
 					s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
@@ -188,7 +189,10 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					s.transitionState(num, forge.InProgress, forge.Failed, note)
 					return fixStop{landing: landingFailed, note: note, stop: true}
 				},
-				func(dispatch.Result) fixStop { return fixStop{} })
+				func(result dispatch.Result) fixStop {
+					RecordSettleWarnings(d, num, fmt.Sprintf("fix pass %d: ", attempt+1), result)
+					return fixStop{}
+				})
 			if stopped.stop {
 				return stopped.landing, stopped.note
 			}

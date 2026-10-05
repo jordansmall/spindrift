@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
@@ -501,5 +503,54 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	}
 	if !strings.Contains(fc.CommentCalls[0].Body, "ci-timeout:") {
 		t.Errorf("comment body = %q, want a substring containing %q", fc.CommentCalls[0].Body, "ci-timeout:")
+	}
+}
+
+// A fix pass's scan warnings and rejection warnings reach the sidecar through
+// the same seam as the initial settle's, tagged with the pass (issue #3744).
+func TestSelfHeal_FixPassWarningsAreRecorded(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
+	})
+	s := newTestSettle(c, fc, fc)
+
+	d := dispatch.NewFake()
+	d.FixResult = dispatch.Failed(dispatch.Result{
+		Warnings:             []string{"pass-manifest scan: boom"},
+		IssueIntentsRejected: outcome.Rejections{Malformed: 2},
+	})
+	stderr := testutil.CaptureStderr(t, func() { s.selfHeal(d, "1", 0, testPR) })
+
+	rejection := "fix pass 1: 2 malformed issue-intent line(s) rejected"
+	want := [][]string{{"fix pass 1: pass-manifest scan: boom", rejection}}
+	if !reflect.DeepEqual(d.RecordedWarnings, want) {
+		t.Errorf("RecordedWarnings = %q, want %q", d.RecordedWarnings, want)
+	}
+	if !strings.Contains(stderr, "    ?? #1: "+rejection+"\n") {
+		t.Errorf("stderr = %q, want the tagged rejection line", stderr)
+	}
+}
+
+// A clean fix pass records nothing: under RecordWarnings' accumulation an
+// empty batch would still delete an earlier run's sidecar when this Dispatch
+// recorded none before it (an adopted settle).
+func TestSelfHeal_CleanFixPassRecordsNothing(t *testing.T) {
+	c := fixConfig(3)
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{
+		forge.StateFailure, forge.StateFailure, forge.StateFailure, forge.StateFailure,
+	})
+	s := newTestSettle(c, fc, fc)
+
+	d := dispatch.NewFake()
+	d.FixResult = dispatch.Failed(dispatch.Result{})
+	testutil.CaptureStderr(t, func() { s.selfHeal(d, "1", 0, testPR) })
+
+	if len(d.RecordedWarnings) != 0 {
+		t.Errorf("RecordedWarnings = %q, want none", d.RecordedWarnings)
 	}
 }

@@ -106,7 +106,7 @@ func newSettleRun(it forge.IssueTracker, backend ledger.Backend, choreName strin
 // issue-intent/pr-intent lines are never silently lost (issue #3990).
 func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settled {
 	num := dispatchkey.Chore(s.chore).String()
-	settle.LogRejectedSignals(num, result)
+	settle.RecordSettleWarnings(d, num, "", result)
 
 	if !result.Resolved.Found {
 		s.fail(num, "no ready outcome line")
