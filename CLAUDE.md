@@ -37,11 +37,15 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   to retry. See [Create the ambiguous-spec
   label](docs/reference.md#create-the-ambiguous-spec-label-on-the-target-repo).
 - `agent-review-finding` — filed by the Filer from a non-blocking review
-  finding (#393). Never carries a dispatch label
+  finding (#393); the host also ensure-creates the label when it files a
+  relayed finding; doctor requires it on a read-only deployment with a Filer.
+  Never carries a dispatch label
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
 - `agent-butler-finding` — filed by the host from a butler Chore finding
-  (ADR 0056). Never carries a dispatch label
+  (ADR 0056); the host creates the label if missing, and a butler daemon
+  refuses to start without it (except on `local`/`jira`, which have no
+  label registry to check). Never carries a dispatch label
   (`agent-trigger`/`ready-for-agent`) — a human promotes it to
   `ready-for-agent` like any other issue before an agent picks it up.
   **Opt-in exception** (issue #3880): the host itself adds
@@ -55,7 +59,9 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   dispatch label, except when the host's push or PR create fails and the
   finding falls back to promotion — the issue then keeps this label with no
   patch PR behind it (a failed create first adopts any PR the forge made
-  anyway, else deletes the pushed branch; issue #4112). The patch rung is off until
+  anyway, else deletes the pushed branch; issue #4112). The host ensure-creates
+  the label, and a butler daemon refuses to start without it while the patch
+  rung is on. The patch rung is off until
   `BUTLER_MAX_PATCHES_PER_DAY` is greater than 0, and also needs an issue
   tracker that can add a label after filing (`github`/`forgejo`; never
   `ISSUE_TRACKER=local`), since a failed landing's fallback has nowhere
@@ -138,9 +144,11 @@ once:
 Research never opens a PR, watches CI, or merges — it posts one comment and
 stops. `spindrift doctor` checks and, in interactive mode, offers to create
 these labels too, but treats them as advisory: unlike the triage labels, a
-missing research label never fails the check. Doctor does not check or
-create `agent-research-trigger` — like `agent-trigger`, it is repo-local
-Actions trigger vocabulary, not a doctor-managed label — so create it
+missing research label never fails the check unless `--research` promotes the
+tier, as the daemon's startup preflight does when the research kind is
+explicitly selected. Doctor does not check or create
+`agent-research-trigger` — like `agent-trigger`, it is repo-local Actions
+trigger vocabulary, not a doctor-managed label — so create it
 manually for the CI path; see [Create the research
 labels](docs/reference.md#create-the-research-labels-on-the-target-repo).
 The workflow authenticates with an optional least-privilege research GitHub App
