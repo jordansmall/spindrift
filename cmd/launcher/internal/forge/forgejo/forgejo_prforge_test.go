@@ -529,6 +529,35 @@ func TestFailureDetail_Bounded(t *testing.T) {
 	}
 }
 
+// FailureDetail once read only the first page of /statuses, so a failure past
+// it went unreported (issue #4458). Every status shares one context, as the
+// endpoint lists every status ever reported for the sha.
+func TestFailureDetail_WalksAllPages(t *testing.T) {
+	var statuses []string
+	for i := 0; i < forgejoServerPageCap; i++ {
+		statuses = append(statuses, `{"id":`+strconv.Itoa(100+i)+`,"context":"ci/build","state":"success","description":"ok"}`)
+	}
+	statuses = append(statuses, `{"id":200,"context":"ci/build","state":"failure","description":"page two broke"}`)
+	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/commits/abc123/statuses" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		if limit := r.URL.Query().Get("limit"); limit != strconv.Itoa(forge.ResultPageLimit) {
+			t.Errorf("limit query param = %q, want %q", limit, strconv.Itoa(forge.ResultPageLimit))
+		}
+		w.Write([]byte("[" + strings.Join(windowPage(r, statuses), ",") + "]"))
+	}))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "page two broke") {
+		t.Fatalf("FailureDetail(...) = %q, want it to contain the page-2 failure", got)
+	}
+}
+
 func TestListPRFiles(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206/files" {
