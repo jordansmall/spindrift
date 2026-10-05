@@ -558,6 +558,94 @@ func TestFailureDetail_WalksAllPages(t *testing.T) {
 	}
 }
 
+// The statuses endpoint lists every status ever posted for the sha, so a
+// failure superseded by a later success on the same context is stale (issue
+// #4473).
+func TestFailureDetail_DropsSupersededFailure(t *testing.T) {
+	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[
+			{"id":2,"context":"ci/build","state":"success"},
+			{"id":1,"context":"ci/build","state":"failure","description":"stale broke"}
+		]`))
+	}))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("FailureDetail(...) = %q, want empty for a superseded failure", got)
+	}
+}
+
+// Newest is the highest ID, not the first listed: an oldest-first listing must
+// still let the later success supersede the failure.
+func TestFailureDetail_NewestIsHighestID(t *testing.T) {
+	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[
+			{"id":1,"context":"ci/build","state":"failure","description":"stale broke"},
+			{"id":2,"context":"ci/build","state":"success"}
+		]`))
+	}))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if got != "" {
+		t.Fatalf("FailureDetail(...) = %q, want empty for a superseded failure", got)
+	}
+}
+
+// With no IDs to compare, the first status listed wins, matching the
+// endpoint's newest-first default order.
+func TestFailureDetail_FirstSeenWinsWithoutIDs(t *testing.T) {
+	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[
+			{"context":"ci/build","state":"failure","description":"newest broke"},
+			{"context":"ci/build","state":"success"}
+		]`))
+	}))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !strings.Contains(got, "newest broke") {
+		t.Fatalf("FailureDetail(...) = %q, want the first-listed failure kept", got)
+	}
+}
+
+// The superseded failure sits on page 2 while its newer success is on page 1,
+// so dedup must run after the whole walk, not per page.
+func TestFailureDetail_DropsSupersededFailureAcrossPages(t *testing.T) {
+	var statuses []string
+	for i := 0; i < forgejoServerPageCap; i++ {
+		statuses = append(statuses, `{"id":`+strconv.Itoa(200+i)+`,"context":"ci/build","state":"success","description":"ok"}`)
+	}
+	statuses = append(statuses,
+		`{"id":1,"context":"ci/build","state":"failure","description":"stale broke"}`,
+		`{"id":2,"context":"ci/lint","state":"failure","description":"lint broke"}`,
+	)
+	var sawPage2 bool
+	pr := newPRForgeTestForge(t, pullHandler(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "2" {
+			sawPage2 = true
+		}
+		w.Write([]byte("[" + strings.Join(windowPage(r, statuses), ",") + "]"))
+	}))
+	got, err := pr.FailureDetail("https://forge.test/owner/repo/pulls/206")
+	if err != nil {
+		t.Fatalf("FailureDetail(...) unexpected error: %v", err)
+	}
+	if !sawPage2 {
+		t.Fatalf("walk never requested page 2; test would not cover cross-page dedup")
+	}
+	if strings.Contains(got, "stale broke") {
+		t.Fatalf("FailureDetail(...) = %q, want it to omit the superseded failure", got)
+	}
+	if !strings.Contains(got, "lint broke") {
+		t.Fatalf("FailureDetail(...) = %q, want it to keep the genuine %q failure", got, "ci/lint")
+	}
+}
+
 func TestListPRFiles(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206/files" {
