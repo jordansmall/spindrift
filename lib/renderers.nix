@@ -684,30 +684,37 @@ rec {
   renderBackendRegistryGo =
     backends:
     let
-      # Every field lib/backends/default.nix's header documents. A row attribute
-      # outside this set is a misspelling, not a new fact, and must fail the
-      # build rather than render as if the field were never set.
-      knownFields = [
-        "name"
-        "goVar"
-        "validAsTracker"
-        "validAsCodeForge"
-        "tokenEnvVar"
-        "doctorTokenHint"
-        "doctorSlugHint"
-        "hostMediatedRemote"
-        "inBoxUnreachableTracker"
-        "outboxRelayCapable"
-        "inBoxOpenPRQueryable"
-        "inBoxGHCredentialHelper"
-        "relayCapable"
-        "hostPostingCapable"
-        "labelRegistry"
-        "trackerAxisRead"
-        "trackerAxisWrite"
-        "trackerAxisFiler"
-        "forgeBackend"
+      # The one table of Descriptor fields, in render order: the row attribute,
+      # its Descriptor field, and what an omitted attribute renders as (`required`
+      # has none). knownFields and the field lines both derive from it, so a
+      # known field can never go unrendered. Go names stay explicit: pure builtins
+      # has no title-casing.
+      required = attr: go: { inherit attr go; };
+      optional = attr: go: default: { inherit attr go default; };
+      rowFields = [
+        (required "name" "Name")
+        (optional "validAsTracker" "ValidAsTracker" false)
+        (optional "validAsCodeForge" "ValidAsCodeForge" false)
+        (optional "tokenEnvVar" "TokenEnvVar" "")
+        (optional "doctorTokenHint" "DoctorTokenHint" "")
+        (optional "doctorSlugHint" "DoctorSlugHint" "")
+        (optional "hostMediatedRemote" "HostMediatedRemote" false)
+        (optional "inBoxUnreachableTracker" "InBoxUnreachableTracker" false)
+        (optional "outboxRelayCapable" "OutboxRelayCapable" false)
+        (optional "inBoxOpenPRQueryable" "InBoxOpenPRQueryable" false)
+        (optional "inBoxGHCredentialHelper" "InBoxGHCredentialHelper" false)
+        (optional "relayCapable" "RelayCapable" false)
+        (optional "hostPostingCapable" "HostPostingCapable" false)
+        (optional "labelRegistry" "LabelRegistry" false)
+        (optional "trackerAxisRead" "TrackerAxisRead" "")
+        (optional "trackerAxisWrite" "TrackerAxisWrite" "")
+        (optional "trackerAxisFiler" "TrackerAxisFiler" "")
+        (optional "forgeBackend" "ForgeBackend" "")
       ];
+      # A row attribute outside this set is a misspelling, not a new fact, and
+      # must fail the build rather than render as if the field were never set.
+      # goVar names the generated var and is not a Descriptor field.
+      knownFields = [ "goVar" ] ++ map (f: f.attr) rowFields;
       checkRow =
         row:
         let
@@ -732,28 +739,13 @@ rec {
           ""
         else
           "\t${goName}: ${builtins.toJSON value},\n";
+      rowFieldLine =
+        row: f: fieldLine f.go (if f ? default then row.${f.attr} or f.default else row.${f.attr});
       renderRow =
         row:
         "// ${row.goVar} is the descriptor for the \"${row.name}\" backend.\n"
         + "var ${row.goVar} = Descriptor{\n"
-        + fieldLine "Name" row.name
-        + fieldLine "ValidAsTracker" (row.validAsTracker or false)
-        + fieldLine "ValidAsCodeForge" (row.validAsCodeForge or false)
-        + fieldLine "TokenEnvVar" (row.tokenEnvVar or "")
-        + fieldLine "DoctorTokenHint" (row.doctorTokenHint or "")
-        + fieldLine "DoctorSlugHint" (row.doctorSlugHint or "")
-        + fieldLine "HostMediatedRemote" (row.hostMediatedRemote or false)
-        + fieldLine "InBoxUnreachableTracker" (row.inBoxUnreachableTracker or false)
-        + fieldLine "OutboxRelayCapable" (row.outboxRelayCapable or false)
-        + fieldLine "InBoxOpenPRQueryable" (row.inBoxOpenPRQueryable or false)
-        + fieldLine "InBoxGHCredentialHelper" (row.inBoxGHCredentialHelper or false)
-        + fieldLine "RelayCapable" (row.relayCapable or false)
-        + fieldLine "HostPostingCapable" (row.hostPostingCapable or false)
-        + fieldLine "LabelRegistry" (row.labelRegistry or false)
-        + fieldLine "TrackerAxisRead" (row.trackerAxisRead or "")
-        + fieldLine "TrackerAxisWrite" (row.trackerAxisWrite or "")
-        + fieldLine "TrackerAxisFiler" (row.trackerAxisFiler or "")
-        + fieldLine "ForgeBackend" (row.forgeBackend or "")
+        + concatStrings (map (rowFieldLine row) rowFields)
         + "}\n";
       checkedBackends = map checkRow backends;
       rows = concatStrings (map renderRow checkedBackends);
