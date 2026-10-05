@@ -337,6 +337,26 @@ func prIntentGateMissing(f *fixture) {
 	f.firstRun(readyLine+"\n", 0)
 }
 
+func TestOrchestratorPass_ForwardsRunStateFileAsStateFile(t *testing.T) {
+	f := newFixture(t)
+	f.firstRun("no marker\n", 0)
+	f.resumes = []resumeScript{{result: readyLine + "\n"}}
+
+	f.run()
+
+	if f.in.RunStateFile == "" {
+		t.Fatal("fixture RunStateFile is empty")
+	}
+	if len(f.calls) != 1 {
+		t.Fatalf("resume calls = %d, want 1", len(f.calls))
+	}
+	for name, call := range map[string]orchCall{"first": f.firstCall, "resume": f.calls[0]} {
+		if got := call.argv["--state-file"]; got != f.in.RunStateFile {
+			t.Errorf("%s pass --state-file = %q, want %q", name, got, f.in.RunStateFile)
+		}
+	}
+}
+
 // --- outcome nudge gate (ported from the deleted entrypoint-outcome-recovery.bats, #4292) ---
 
 func TestOutcomeNudge_ResumeSuppliesOutcome_NoBackstop(t *testing.T) {

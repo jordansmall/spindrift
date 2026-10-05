@@ -63,7 +63,9 @@ type inputs struct {
 	DriverSessionCacheDir string
 	// RunStateFile is the run-state handoff artifact the backstop reads the
 	// reviewer's last verdict from; a missing file degrades inside the
-	// backstop (issue #2459).
+	// backstop (issue #2459). Box also hands it to every orchestrator pass as
+	// --state-file, so the writer and the backstop share one path (issue #4468);
+	// empty disables both (the orchestrator skips the file, the backstop degrades).
 	RunStateFile string
 }
 
@@ -585,16 +587,7 @@ func (r *boxRun) pass(handoff, driverName, prompt, sessionMode string) (int, err
 		return 0, phaseErr("driver", err)
 	}
 
-	argv := []string{
-		"--handoff-file", handoff,
-		"--prompt-file", promptFile,
-		"--session-file", sessionFile,
-		"--log-path", streamLog,
-	}
-	if r.needsBox {
-		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/"+passmanifest.FileName)
-	}
-	rc := r.d.Orchestrate(argv)
+	rc := r.d.Orchestrate(r.orchestratorArgv(handoff, promptFile, sessionFile, streamLog))
 
 	text, err := d.ResultText(streamLog)
 	if err != nil {
@@ -701,4 +694,21 @@ func (r *boxRun) layOutHome() error {
 		return phaseErr("home-layout", err)
 	}
 	return nil
+}
+
+// orchestratorArgv is the one place an orchestrator pass's argv is built, so
+// every pass (main, nudge, conflict-resolve) forwards the same shared flags,
+// including the run-state path (issue #4468).
+func (r *boxRun) orchestratorArgv(handoff, prompt, session, streamLog string) []string {
+	argv := []string{
+		"--handoff-file", handoff,
+		"--prompt-file", prompt,
+		"--session-file", session,
+		"--log-path", streamLog,
+		"--state-file", r.in.RunStateFile,
+	}
+	if r.needsBox {
+		argv = append(argv, "--manifest-path", r.in.OutboxDir+"/"+passmanifest.FileName)
+	}
+	return argv
 }

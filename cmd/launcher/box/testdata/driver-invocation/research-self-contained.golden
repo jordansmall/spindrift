@@ -7,6 +7,8 @@ argv
 <session>
 --log-path
 <stream-log>
+--state-file
+<run-state>
 session
 --session-id 922720ce-df74-ac9f-5358-a7ac2aa4fced
 devshell

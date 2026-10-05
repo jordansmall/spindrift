@@ -197,6 +197,21 @@ func TestConflictResolve_ManifestPathWhenOutboxMounted(t *testing.T) {
 	}
 }
 
+func TestConflictResolve_ForwardsRunStateFileAsStateFile(t *testing.T) {
+	f := newCRFixture(t)
+	f.finishRebase()
+	f.run()
+	if f.in.RunStateFile == "" {
+		t.Fatal("fixture RunStateFile is empty")
+	}
+	if f.pass == nil {
+		t.Fatal("conflict pass never ran")
+	}
+	if got := f.pass.argv["--state-file"]; got != f.in.RunStateFile {
+		t.Errorf("--state-file = %q, want %q", got, f.in.RunStateFile)
+	}
+}
+
 func TestConflictResolve_OrchestratorExitCodeIsIgnored(t *testing.T) {
 	f := newCRFixture(t)
 	f.finishRebase()
