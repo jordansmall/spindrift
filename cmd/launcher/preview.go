@@ -37,12 +37,12 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 		return previewSelectiveList(c, it, cf, caps, w, issueNums)
 	}
 
-	issues, origin, err := discoverIssues(c, it)
+	issues, held, origin, err := discoverIssues(c, it)
 	if err != nil {
 		return err
 	}
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
-		fmt.Fprintf(w, "%s\nno open '%s' issues — nothing to dispatch.\n", repoBanner(c), c.label)
+		fmt.Fprintf(w, "%s\n%s\n", repoBanner(c), emptyQueueLine(c.label, held, "nothing to dispatch"))
 		return nil
 	}
 	result, err := waves.NewReadiness(it, toWaveIssues(issues))

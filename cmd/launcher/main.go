@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1225,16 +1226,6 @@ func containsLabel(labels []string, target string) bool {
 	return false
 }
 
-// containsAnyLabel reports whether labels carries any of targets.
-func containsAnyLabel(labels, targets []string) bool {
-	for _, t := range targets {
-		if containsLabel(labels, t) {
-			return true
-		}
-	}
-	return false
-}
-
 // resolveOrigin is the one place c.issueNumber is read as the claimed-single
 // versus discovered-batch sentinel; every other call site reads the derived
 // Origin instead of re-checking the sentinel.
@@ -1245,34 +1236,54 @@ func resolveOrigin(c config) waves.Origin {
 	return waves.OriginDiscovered
 }
 
+// heldIssue is a dispatchable issue skipped because the other dispatch
+// family's in-progress label is on it; label is the one that matched.
+type heldIssue struct{ number, label string }
+
+// emptyQueueLine is the terminal line for a queue with nothing to dispatch.
+// With held issues it says "dispatchable" rather than "open", because the
+// queue was not empty — another family owned what was in it.
+func emptyQueueLine(label string, held []heldIssue, nothing string) string {
+	if len(held) == 0 {
+		return fmt.Sprintf("no open '%s' issues — %s.", label, nothing)
+	}
+	parts := make([]string, len(held))
+	for i, h := range held {
+		parts[i] = fmt.Sprintf("#%s held by %s", h.number, h.label)
+	}
+	return fmt.Sprintf("no dispatchable '%s' issues — %s.", label, strings.Join(parts, ", "))
+}
+
 // discoverIssues resolves the batch of issues to dispatch and the Origin it
-// came from. When ISSUE_NUMBER is set the workflow already claimed that issue,
-// so it is targeted directly: a label query could otherwise pick up a
-// different issue stranded on the same in-progress label by an earlier crash.
-func discoverIssues(c config, it forge.IssueTracker) ([]issue, waves.Origin, error) {
+// came from, plus the issues the other family holds. When ISSUE_NUMBER is set
+// the workflow already claimed that issue, so it is targeted directly: a label
+// query could otherwise pick up a different issue stranded on the same
+// in-progress label by an earlier crash.
+func discoverIssues(c config, it forge.IssueTracker) ([]issue, []heldIssue, waves.Origin, error) {
 	origin := resolveOrigin(c)
 	if origin == waves.OriginClaimed {
 		fmt.Printf("==> targeting claimed issue #%s in %s\n", c.issueNumber, c.repoSlug)
 		fi, err := it.Issue(c.issueNumber)
 		if err != nil {
-			return nil, origin, err
+			return nil, nil, origin, err
 		}
-		return []issue{newIssue(fi)}, origin, nil
+		return []issue{newIssue(fi)}, nil, origin, nil
 	}
 	fmt.Printf("==> querying open '%s' issues in %s\n", c.label, c.repoSlug)
-	issues, err := queryOpenIssues(c, it)
-	return issues, origin, err
+	issues, held, err := queryOpenIssues(c, it)
+	return issues, held, origin, err
 }
 
-// queryOpenIssues fetches the dispatchable-labelled batch and prints nothing,
-// so a caller that polls repeatedly can decide whether a poll is worth
-// announcing; see logDiscoveryPoll.
-func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
+// queryOpenIssues fetches the dispatchable-labelled batch, plus the issues the
+// other family holds, and prints nothing, so a caller that polls repeatedly
+// can decide whether a poll is worth announcing; see logDiscoveryPoll.
+func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, []heldIssue, error) {
 	rawIssues, err := it.ListIssues(forge.Dispatchable)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var issues []issue
+	var held []heldIssue
 	for _, fi := range rawIssues {
 		// Filtering on the tracker-returned Labels, rather than adding a
 		// -label: qualifier to the ListIssues query, is what makes this
@@ -1281,15 +1292,17 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, error) {
 		// also keeps work-only operation working with no research labels
 		// defined — an absent label is a label no issue carries, so the
 		// filter is a no-op (applyDispatchKind already dropped blank labels).
-		// Silent like the Dispatchable filter above: an issue held back by
-		// another family's in-progress label is no more newsworthy than
-		// one that never had the dispatchable label to begin with.
-		if containsAnyLabel(fi.Labels, c.otherFamilyInProgressLabels) {
+		// Returned rather than dropped so the caller can name what blocked an
+		// otherwise-ready issue; this function still prints nothing itself.
+		if i := slices.IndexFunc(c.otherFamilyInProgressLabels, func(l string) bool {
+			return containsLabel(fi.Labels, l)
+		}); i >= 0 {
+			held = append(held, heldIssue{number: fi.Number, label: c.otherFamilyInProgressLabels[i]})
 			continue
 		}
 		issues = append(issues, newIssue(fi))
 	}
-	return issues, nil
+	return issues, held, nil
 }
 
 // readinessFor resolves a waves.Batch from a raw issues batch. discover must
@@ -1543,7 +1556,7 @@ func run(lc *launchContext) error {
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
 
-	issues, origin, err := discoverIssues(c, it)
+	issues, held, origin, err := discoverIssues(c, it)
 	if err != nil {
 		return signalledOr(stopCh, abortCh, err)
 	}
@@ -1555,7 +1568,7 @@ func run(lc *launchContext) error {
 		if waves.SignalledStopAlready(stopCh, abortCh) {
 			return waves.ErrSignalledStop
 		}
-		fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+		fmt.Println(emptyQueueLine(c.label, held, "nothing to do"))
 		if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
 			return err
 		}
@@ -1647,7 +1660,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// itself.
 	discover := func() (waves.Batch, error) {
 		wasFirst := firstQuery
-		issues, err := queryOpenIssues(c, it)
+		issues, _, err := queryOpenIssues(c, it)
 		if firstQuery {
 			firstQuery = false
 			firstQueryErr = err
@@ -1770,7 +1783,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// counts through waves.CountReady rather than len(issues), so a blocked,
 	// deferred, or already-claimed issue is not counted as held back.
 	pending := func(claimed map[string]bool) (int, error) {
-		issues, err := queryOpenIssues(c, it)
+		issues, _, err := queryOpenIssues(c, it)
 		if err != nil {
 			return 0, err
 		}
@@ -1819,7 +1832,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			return firstQueryErr
 		}
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
-			fmt.Printf("no open '%s' issues — nothing to do.\n", c.label)
+			fmt.Println(emptyQueueLine(c.label, nil, "nothing to do"))
 			if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
 				return err
 			}
