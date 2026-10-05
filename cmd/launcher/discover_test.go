@@ -296,3 +296,22 @@ func TestEmptyQueueLine(t *testing.T) {
 		})
 	}
 }
+
+func TestLogHeldIssues_AnnouncesEachIssueOncePerRun(t *testing.T) {
+	seen := make(map[string]bool)
+	a := heldIssue{number: "42", label: "agent-research-in-progress"}
+	b := heldIssue{number: "43", label: "agent-research-in-progress"}
+
+	first := testutil.CaptureStdout(t, func() { logHeldIssues([]heldIssue{a}, seen) })
+	if want := "==> #42 held by agent-research-in-progress — skipped\n"; first != want {
+		t.Errorf("first call printed %q, want %q", first, want)
+	}
+	repeat := testutil.CaptureStdout(t, func() { logHeldIssues([]heldIssue{a}, seen) })
+	if repeat != "" {
+		t.Errorf("repeat call printed %q, want nothing", repeat)
+	}
+	next := testutil.CaptureStdout(t, func() { logHeldIssues([]heldIssue{a, b}, seen) })
+	if want := "==> #43 held by agent-research-in-progress — skipped\n"; next != want {
+		t.Errorf("new-issue call printed %q, want %q", next, want)
+	}
+}

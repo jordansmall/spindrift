@@ -42,7 +42,11 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 		return err
 	}
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
-		fmt.Fprintf(w, "%s\n%s\n", repoBanner(c), emptyQueueLine(c.label, held, "nothing to dispatch"))
+		fmt.Fprintln(w, repoBanner(c))
+		for _, h := range held {
+			fmt.Fprintln(w, heldLine(h))
+		}
+		fmt.Fprintln(w, emptyQueueLine(c.label, held, "nothing to dispatch"))
 		return nil
 	}
 	result, err := waves.NewReadiness(it, toWaveIssues(issues))
@@ -54,6 +58,9 @@ func previewIssues(c config, it forge.IssueTracker, cf forge.CodeForge, caps for
 		return err
 	}
 	fmt.Fprintln(w, repoBanner(c))
+	for _, h := range held {
+		fmt.Fprintln(w, heldLine(h))
+	}
 	printPlan(w, plan)
 	return nil
 }

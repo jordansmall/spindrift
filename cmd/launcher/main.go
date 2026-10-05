@@ -1240,16 +1240,40 @@ func resolveOrigin(c config) waves.Origin {
 // family's in-progress label is on it; label is the one that matched.
 type heldIssue struct{ number, label string }
 
+// String is the "#N held by <label>" fragment heldLine and emptyQueueLine share.
+func (h heldIssue) String() string {
+	return fmt.Sprintf("#%s held by %s", h.number, h.label)
+}
+
+// heldLine is the one-line announcement of a skipped held issue.
+func heldLine(h heldIssue) string {
+	return "==> " + h.String() + " — skipped"
+}
+
+// logHeldIssues announces each held issue once per run: a refill poll that
+// re-finds the same hold stays quiet, as logDiscoveryPoll does for new issues.
+// seen is its own map, apart from logDiscoveryPoll's, since a held issue is
+// never in the dispatchable set that one tracks.
+func logHeldIssues(held []heldIssue, seen map[string]bool) {
+	for _, h := range held {
+		if !seen[h.number] {
+			seen[h.number] = true
+			fmt.Println(heldLine(h))
+		}
+	}
+}
+
 // emptyQueueLine is the terminal line for a queue with nothing to dispatch.
 // With held issues it says "dispatchable" rather than "open", because the
-// queue was not empty — another family owned what was in it.
+// queue was not empty — another family owned what was in it. nothing is
+// ignored when held is non-empty.
 func emptyQueueLine(label string, held []heldIssue, nothing string) string {
 	if len(held) == 0 {
 		return fmt.Sprintf("no open '%s' issues — %s.", label, nothing)
 	}
 	parts := make([]string, len(held))
 	for i, h := range held {
-		parts[i] = fmt.Sprintf("#%s held by %s", h.number, h.label)
+		parts[i] = h.String()
 	}
 	return fmt.Sprintf("no dispatchable '%s' issues — %s.", label, strings.Join(parts, ", "))
 }
@@ -1292,8 +1316,8 @@ func queryOpenIssues(c config, it forge.IssueTracker) ([]issue, []heldIssue, err
 		// also keeps work-only operation working with no research labels
 		// defined — an absent label is a label no issue carries, so the
 		// filter is a no-op (applyDispatchKind already dropped blank labels).
-		// Returned rather than dropped so the caller can name what blocked an
-		// otherwise-ready issue; this function still prints nothing itself.
+		// Held issues go back to the caller, which names them; this function
+		// still prints nothing itself.
 		if i := slices.IndexFunc(c.otherFamilyInProgressLabels, func(l string) bool {
 			return containsLabel(fi.Labels, l)
 		}); i >= 0 {
@@ -1560,6 +1584,9 @@ func run(lc *launchContext) error {
 	if err != nil {
 		return signalledOr(stopCh, abortCh, err)
 	}
+	for _, h := range held {
+		fmt.Println(heldLine(h))
+	}
 
 	if origin == waves.OriginDiscovered && len(issues) == 0 {
 		// A signal that already fired wins here too: the operator asked to
@@ -1650,20 +1677,23 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// RunContinuous, whose sentinel the console Discoverer shares (#1645).
 	firstQuery := true
 	firstQueryEmpty := false
+	var firstHeld []heldIssue
 	var firstQueryErr error
 	// seenIssues carries logDiscoveryPoll's per-run dedupe state (#1666), so a
 	// long-running refill loop stops repeating the "querying open" line once
 	// the queue has settled.
 	seenIssues := make(map[string]bool)
-	// These four need no locking: every discover call runs under
+	seenHeld := make(map[string]bool)
+	// None of these need locking: every discover call runs under
 	// RunContinuous's own mutex, so this closure never runs concurrently with
 	// itself.
 	discover := func() (waves.Batch, error) {
 		wasFirst := firstQuery
-		issues, _, err := queryOpenIssues(c, it)
+		issues, held, err := queryOpenIssues(c, it)
 		if firstQuery {
 			firstQuery = false
 			firstQueryErr = err
+			firstHeld = held
 			firstQueryEmpty = err == nil && len(issues) == 0
 		}
 		// Runs before readinessFor's DepsOf fan-out on purpose: the
@@ -1671,6 +1701,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		// round-trip must never delay it. An errored non-first poll passes an
 		// empty slice, so nothing is new and the poll goes unannounced.
 		logDiscoveryPoll(c, issues, wasFirst, seenIssues)
+		logHeldIssues(held, seenHeld)
 		if err != nil {
 			return waves.Batch{}, err
 		}
@@ -1783,6 +1814,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	// counts through waves.CountReady rather than len(issues), so a blocked,
 	// deferred, or already-claimed issue is not counted as held back.
 	pending := func(claimed map[string]bool) (int, error) {
+		// held is dropped on purpose: a hold belongs to the other family, so it
+		// is not stale-drain heldBack.
 		issues, _, err := queryOpenIssues(c, it)
 		if err != nil {
 			return 0, err
@@ -1831,8 +1864,11 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 			// ErrOpenNoneDispatchable and exit 3.
 			return firstQueryErr
 		}
+		// firstHeld is the first poll's snapshot, which is right only because
+		// RunContinuous returns ErrOpenNoneDispatchable solely when nothing was
+		// ever dispatched.
 		if errors.Is(err, waves.ErrOpenNoneDispatchable) && firstQueryEmpty {
-			fmt.Println(emptyQueueLine(c.label, nil, "nothing to do"))
+			fmt.Println(emptyQueueLine(c.label, firstHeld, "nothing to do"))
 			if err := reconcileAfterDispatch(c, it, cf, lp, caps, pwd, os.Stdout); err != nil {
 				return err
 			}
