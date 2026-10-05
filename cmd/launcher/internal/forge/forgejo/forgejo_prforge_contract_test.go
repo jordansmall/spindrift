@@ -35,35 +35,3 @@ func (h *prforgeHarness) CodeForge() forge.CodeForge { return h.cf }
 func TestForgejoCodeForge_PRForgeContract(t *testing.T) {
 	forgetest.RunPRForgeContract(t, newPRForgeHarness(t))
 }
-
-// Real Forgejo derives a pull's draft field from its title
-// (services/convert/pull.go: Draft is pr.IsWorkInProgress(ctx)), so the fake
-// must derive it too rather than carry an independent flag. The test reads
-// IsDraftTitle because OpenPRForBranch no longer reports draft status on the
-// forge.PR it returns.
-func TestFakeForgejo_SeedDraftPR_DraftDerivedFromTitle(t *testing.T) {
-	h := newPRForgeHarness(t)
-	url := h.SeedDraftPR("300")
-
-	if _, ok, err := h.Forge().OpenPRForBranch("agent/issue-300"); err != nil {
-		t.Fatalf("OpenPRForBranch: %v", err)
-	} else if !ok {
-		t.Fatalf("OpenPRForBranch(%q): not found", "agent/issue-300")
-	}
-	if !h.IsDraftTitle("300") {
-		t.Fatalf("IsDraftTitle(%q) = false, want true (fake's draft field must derive from its WIP-prefixed title)", "300")
-	}
-
-	if err := h.Forge().MarkReady(url); err != nil {
-		t.Fatalf("MarkReady(%q): %v", url, err)
-	}
-
-	if _, ok, err := h.Forge().OpenPRForBranch("agent/issue-300"); err != nil {
-		t.Fatalf("OpenPRForBranch after MarkReady: %v", err)
-	} else if !ok {
-		t.Fatalf("OpenPRForBranch(%q) after MarkReady: not found", "agent/issue-300")
-	}
-	if h.IsDraftTitle("300") {
-		t.Fatalf("IsDraftTitle(%q) = true after MarkReady, want false (fake's draft field must track the WIP-stripped title)", "300")
-	}
-}

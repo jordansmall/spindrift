@@ -18,9 +18,14 @@ type PRForgeHarness interface {
 	CodeForge() forge.CodeForge
 	// SeedOpenPR returns the PR's URL, the ref every PRForge method takes.
 	SeedOpenPR(num string) string
-	// SeedDraftPR covers issue #2408: OpenPRForBranch must adopt a stranded
-	// draft PR exactly as it adopts a non-draft one, on every adapter.
+	// SeedDraftPR seeds a PR whose backend draft state is true, so IsDraft
+	// confirms it, and returns its URL. Covers issue #2408: OpenPRForBranch must
+	// adopt a stranded draft PR exactly as it adopts a non-draft one.
 	SeedDraftPR(num string) string
+	// IsDraft is an out-of-band oracle reading the backend's own draft state for
+	// url, because forge.PR carries no draft field (#2503). url must name a PR
+	// the harness seeded; a harness may fail the test otherwise.
+	IsDraft(url string) bool
 	// SeedCheckStates scripts the RollupState values CheckState returns for
 	// url on successive calls, in order.
 	SeedCheckStates(url string, states []forge.RollupState)
@@ -114,11 +119,17 @@ func testOpenPRForBranchAdoptsDraft(t *testing.T, h PRForgeHarness) {
 	if !ok || pr.URL != wantURL {
 		t.Fatalf("OpenPRForBranch(%q) = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
 	}
+	if !h.IsDraft(wantURL) {
+		t.Fatalf("IsDraft(%q) = false after adopting a draft PR, want true", wantURL)
+	}
 }
 
 // testMarkReadyClearsAdoptedDraftThenMerges is the companion half of issue
 // #2408: MarkReady must clear whatever draft signal the adapter uses, so an
 // adopted draft becomes mergeable and Merge succeeds on it.
+//
+// CodeForgeFake.Merge (the Fake gets it by embedding) ignores draft state, so
+// on the Fake the merge half does not prove MarkReady unblocked a merge.
 func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 	const num = "214"
 	branch := h.CodeForge().AgentBranch(num)
@@ -132,8 +143,15 @@ func testMarkReadyClearsAdoptedDraftThenMerges(t *testing.T, h PRForgeHarness) {
 		t.Fatalf("OpenPRForBranch(%q) = (%+v, %v), want URL %q", branch, pr, ok, wantURL)
 	}
 
+	if !h.IsDraft(wantURL) {
+		t.Fatalf("IsDraft(%q) = false before MarkReady, want true", wantURL)
+	}
+
 	if err := h.Forge().MarkReady(wantURL); err != nil {
 		t.Fatalf("MarkReady(%q): %v", wantURL, err)
+	}
+	if h.IsDraft(wantURL) {
+		t.Fatalf("IsDraft(%q) = true after MarkReady, want false", wantURL)
 	}
 
 	pr, ok, err = h.Forge().OpenPRForBranch(branch)
@@ -229,6 +247,9 @@ func testAutoMergeEligibility(t *testing.T, h PRForgeHarness) {
 
 	const num = "206"
 	url := h.SeedOpenPR(num)
+	if h.IsDraft(url) {
+		t.Fatalf("IsDraft(%q) = true before MarkReady, want false", url)
+	}
 
 	if err := h.Forge().EnqueueAutoMerge(url); err != nil {
 		t.Fatalf("EnqueueAutoMerge(%q): %v", url, err)
@@ -243,18 +264,27 @@ func testAutoMergeEligibility(t *testing.T, h PRForgeHarness) {
 	if err := h.Forge().MarkReady(url); err != nil {
 		t.Fatalf("MarkReady(%q) second call (already ready): %v", url, err)
 	}
+	if h.IsDraft(url) {
+		t.Fatalf("IsDraft(%q) = true after MarkReady on a ready PR, want false", url)
+	}
 }
 
 // testMarkDraftIdempotent holds MarkDraft to MarkReady's idempotence rule.
 func testMarkDraftIdempotent(t *testing.T, h PRForgeHarness) {
 	const num = "209"
 	url := h.SeedOpenPR(num)
+	if h.IsDraft(url) {
+		t.Fatalf("IsDraft(%q) = true before MarkDraft, want false", url)
+	}
 
 	if err := h.Forge().MarkDraft(url); err != nil {
 		t.Fatalf("MarkDraft(%q) first call: %v", url, err)
 	}
 	if err := h.Forge().MarkDraft(url); err != nil {
 		t.Fatalf("MarkDraft(%q) second call (already draft): %v", url, err)
+	}
+	if !h.IsDraft(url) {
+		t.Fatalf("IsDraft(%q) = false after MarkDraft, want true", url)
 	}
 }
 
