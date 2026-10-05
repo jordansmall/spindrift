@@ -2,6 +2,7 @@ package boxclone_test
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,7 +67,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	f.cfg = boxclone.Config{
-		CodeForge: "github", RepoSlug: "o/r", WorkDir: f.work,
+		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "o/r", WorkDir: f.work,
 		GitUserName: "Box Agent", GitUserEmail: "box@example.com",
 	}
 	return f
@@ -150,6 +151,7 @@ func TestCloneForgejoEmbedsTokenAndSkipsGh(t *testing.T) {
 	f := newFixture(t)
 	f.redirect(t, "https://tok123@forge.example.test/o/r.git")
 	f.cfg.CodeForge = "forgejo"
+	f.cfg.GHCredentialHelper = false
 	f.cfg.ForgejoToken = "tok123"
 	f.cfg.ForgejoBaseURL = "https://forge.example.test/"
 	var out bytes.Buffer
@@ -168,6 +170,7 @@ func TestCloneForgejoDefaultsToCodeberg(t *testing.T) {
 	f := newFixture(t)
 	f.redirect(t, "https://tok123@codeberg.org/o/r.git")
 	f.cfg.CodeForge = "forgejo"
+	f.cfg.GHCredentialHelper = false
 	f.cfg.ForgejoToken = "tok123"
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -180,6 +183,7 @@ func TestCloneForgejoDefaultsToCodeberg(t *testing.T) {
 func TestCloneForgejoRequiresToken(t *testing.T) {
 	f := newFixture(t)
 	f.cfg.CodeForge = "forgejo"
+	f.cfg.GHCredentialHelper = false
 	err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "FORGEJO_TOKEN is required when CODE_FORGE=forgejo") {
 		t.Fatalf("err = %v", err)
@@ -190,6 +194,8 @@ func TestCloneLocalClonesMountSkipsGhAndTrustsBothPaths(t *testing.T) {
 	f := newFixture(t)
 	t.Setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
 	f.cfg.CodeForge = "local"
+	f.cfg.GHCredentialHelper = false
+	f.cfg.HostMediatedRemote = true
 	f.cfg.RepoMountDir = f.origin
 	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
@@ -215,8 +221,10 @@ func TestCloneSetsIdentityRepoLocallyAndLeavesGlobalConfigAlone(t *testing.T) {
 			f.cfg.CodeForge = forge
 			switch forge {
 			case "github":
+				f.cfg.GHCredentialHelper = true
 				f.redirect(t, "https://github.com/o/r.git")
 			case "git":
+				f.cfg.GHCredentialHelper = true
 				f.cfg.RemoteURL = "https://git.example.test/o/r.git"
 				f.redirect(t, f.cfg.RemoteURL)
 			case "forgejo":
@@ -251,6 +259,7 @@ func TestCloneBannerRedactsTokenBearingURL(t *testing.T) {
 	f := newFixture(t)
 	f.redirect(t, "https://sekrit@codeberg.org/o/r.git")
 	f.cfg.CodeForge = "forgejo"
+	f.cfg.GHCredentialHelper = false
 	f.cfg.ForgejoToken = "sekrit"
 	var out, errOut bytes.Buffer
 	if err := boxclone.Clone(f.cfg, &out, &errOut); err != nil {
@@ -302,5 +311,32 @@ func TestCloneURL(t *testing.T) {
 				t.Errorf("CloneURL = %q, %v; want %q", got, err, tc.want)
 			}
 		})
+	}
+}
+
+func TestCloneSkipsGhWhenCredentialHelperIsOffRegardlessOfForge(t *testing.T) {
+	f := newFixture(t)
+	f.redirect(t, "https://github.com/o/r.git")
+	f.cfg.GHCredentialHelper = false
+	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.ghCalls(t); got != "" {
+		t.Errorf("gh was invoked: %q", got)
+	}
+}
+
+func TestCloneAddsNoSafeDirectoryUnlessRemoteIsHostMediated(t *testing.T) {
+	f := newFixture(t)
+	f.redirect(t, "https://github.com/o/r.git")
+	if err := boxclone.Clone(f.cfg, &bytes.Buffer{}, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "config", "--file", f.globalCfg, "--get-all", "safe.directory")
+	// --get-all exits 1 only for an unset key; any other failure must not pass.
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Errorf("safe.directory lookup = %q, %v; want unset (exit 1)", out, err)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -19,7 +20,7 @@ func TestCloneRunsWithTheEnvsConfigAndGithubDefault(t *testing.T) {
 	f.in.RepoMountDir = "/repo"
 	f.run()
 	want := boxclone.Config{
-		CodeForge: "github", RepoSlug: "owner/repo", RemoteURL: "https://git.example/r.git",
+		CodeForge: "github", GHCredentialHelper: true, RepoSlug: "owner/repo", RemoteURL: "https://git.example/r.git",
 		ForgejoBaseURL: "https://fj.example", ForgejoToken: "fjtok", RepoMountDir: "/repo",
 		WorkDir: f.in.WorkDir, GitUserName: defaultGitUserName, GitUserEmail: "agent@example.com",
 	}
@@ -104,5 +105,44 @@ func TestCloneRunsBeforeBranchRecovery(t *testing.T) {
 	f.run()
 	if strings.Join(order, ",") != "clone,recover" {
 		t.Errorf("order = %v", order)
+	}
+}
+
+func TestCloneConfig_RunsGhCredentialHelperOnlyWhereTheForgeWantsIt(t *testing.T) {
+	for forge, want := range map[string]bool{
+		"": true, "github": true, "git": true,
+		"forgejo": false, "local": false,
+		// Unreachable: the host validates CODE_FORGE against its choices.
+		// Pinned so CloneURL's github fallback running without gh's helper
+		// stays deliberate.
+		"bogus": false,
+	} {
+		t.Run("forge="+forge, func(t *testing.T) {
+			f := newFixture(t)
+			f.env.CodeForge = forge
+			f.run()
+			if len(f.cloneCfgs) != 1 {
+				t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
+			}
+			if got := f.cloneCfgs[0].GHCredentialHelper; got != want {
+				t.Errorf("GHCredentialHelper = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestCloneConfig_HostMediatedRemoteFollowsTheEnv(t *testing.T) {
+	for _, want := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remote=%v", want), func(t *testing.T) {
+			f := newFixture(t)
+			f.env.HostMediatedRemote = want
+			f.run()
+			if len(f.cloneCfgs) != 1 {
+				t.Fatalf("clone configs = %+v, want one", f.cloneCfgs)
+			}
+			if got := f.cloneCfgs[0].HostMediatedRemote; got != want {
+				t.Errorf("HostMediatedRemote = %v, want %v", got, want)
+			}
+		})
 	}
 }
