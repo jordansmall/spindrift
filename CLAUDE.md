@@ -164,7 +164,10 @@ feed the agent as prompt input. The trust boundary is the label, not the issue o
 comment author. The launcher drops comments a maintainer has minimized on GitHub
 from the transcript it renders, but that is a mitigation for that transcript
 only: the Box's token can still read the full thread, and the agent still fetches
-parent and linked issues itself, minimized comments included.
+parent and linked issues itself, minimized comments included. A vetted-transcript
+filter (#382, not yet active) will keep only GitHub OWNER/MEMBER/COLLABORATOR
+comments and treat trackers that cannot attest standing (Forgejo, Jira) as
+untrusted — see SECURITY.md.
 
 ## Worktrees
 
