@@ -33,11 +33,14 @@ var fakes = map[string]func(args []string) int{
 
 // Main is the TestMain hook: invoked under a registered tool name the test
 // binary runs that fake and exits with its status, before any test starts;
-// otherwise it runs the tests.
+// otherwise it runs the tests with a shared build dir for Build, removed once
+// they finish.
 //
 //	func TestMain(m *testing.M) { seamtest.Main(m) }
 func Main(m *testing.M) {
-	os.Exit(dispatch(filepath.Base(os.Args[0]), os.Args[1:], m.Run))
+	os.Exit(dispatch(filepath.Base(os.Args[0]), os.Args[1:], func() int {
+		return withBuildDir(m.Run)
+	}))
 }
 
 func dispatch(name string, args []string, runTests func() int) int {
