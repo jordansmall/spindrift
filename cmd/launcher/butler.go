@@ -277,12 +277,12 @@ func butlerPatchForge(cf forge.CodeForge, caps forge.Capabilities) butler.PatchF
 // exitConfigInvalid (6) rather than 1, so the daemon's shared breaker
 // (internal/daemon/outcome.go) never treats a config problem as an
 // unclassified error (issue #3920).
-func cmdButler(lc *launchContext, choreName string) int {
+func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 	defer lc.cleanup()
 
 	settings, err := resolveButlerSettings(lc.config, choreName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(stderr, err)
 		return exitConfigInvalid
 	}
 	budgets := butlerBudgets(lc.config)
@@ -293,14 +293,14 @@ func cmdButler(lc *launchContext, choreName string) int {
 	// make that identity ambiguous.
 	host, err := os.Hostname()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "butler: hostname: %v\n", err)
+		fmt.Fprintf(stderr, "butler: hostname: %v\n", err)
 		return 1
 	}
 	// butlerPreflight already checked row.newLedger != nil for this CODE_FORGE.
 	row, _ := backendByName(lc.config.codeForge)
 	backend, tree, ledgerCleanup, err := row.newLedger(lc.config)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "butler: %v\n", err)
+		fmt.Fprintf(stderr, "butler: %v\n", err)
 		return 1
 	}
 	defer ledgerCleanup()
@@ -338,7 +338,7 @@ func cmdButler(lc *launchContext, choreName string) int {
 		err = butlerOutcomeErr(o)
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err)
+		fmt.Fprintf(stderr, "%s\n", err)
 	}
 	return exitCodeFor(err)
 }
@@ -356,5 +356,5 @@ func butlerVerbHandler(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return bootstrapExitCode(err)
 	}
-	return cmdButler(lc, choreName)
+	return cmdButler(lc, choreName, stderr)
 }

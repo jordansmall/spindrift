@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -305,7 +307,7 @@ func TestCmdButler_RejectsChoreNotEnabled(t *testing.T) {
 		config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "other-chore"}},
 		cleanup: func() {},
 	}
-	code := cmdButler(lc, "bugs")
+	code := cmdButler(lc, "bugs", io.Discard)
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -355,13 +357,13 @@ func TestCmdButler_RejectsMalformedChoreName(t *testing.T) {
 	t.Setenv("FILER_MODEL", "test-model")
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bad.name")
-	var code int
-	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+	var stderr bytes.Buffer
+	code := cmdButler(lc, "", &stderr)
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
-	if !strings.Contains(stderr, "invalid name format") {
-		t.Errorf("stderr = %q, want it to name the invalid format", stderr)
+	if !strings.Contains(stderr.String(), "invalid name format") {
+		t.Errorf("stderr = %q, want it to name the invalid format", stderr.String())
 	}
 	assertNoButlerLedgerClaims(t, repo)
 }
@@ -373,13 +375,13 @@ func TestCmdButler_RejectsChoreMissingFromCatalog(t *testing.T) {
 	withLoadedDoc(t, &inputdoc.Document{Artifacts: map[string]string{"CHORE_CATALOG": "docs-drift"}})
 	repo := ledgertest.NewRepo(t)
 	lc := testButlerLaunchContext(t, repo, "bugs")
-	var code int
-	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+	var stderr bytes.Buffer
+	code := cmdButler(lc, "", &stderr)
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
-	if !strings.Contains(stderr, "prompt file missing") {
-		t.Errorf("stderr = %q, want it to name the missing prompt", stderr)
+	if !strings.Contains(stderr.String(), "prompt file missing") {
+		t.Errorf("stderr = %q, want it to name the missing prompt", stderr.String())
 	}
 	assertNoButlerLedgerClaims(t, repo)
 }
@@ -417,13 +419,13 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 			repo := ledgertest.NewRepo(t)
 			lc := testButlerLaunchContext(t, repo, "bugs")
 			tt.set(&lc.config)
-			var code int
-			stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+			var stderr bytes.Buffer
+			code := cmdButler(lc, "", &stderr)
 			if code != exitConfigInvalid {
 				t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 			}
-			if !strings.Contains(stderr, tt.wantSubstr) {
-				t.Errorf("stderr = %q, want it to name %s", stderr, tt.wantSubstr)
+			if !strings.Contains(stderr.String(), tt.wantSubstr) {
+				t.Errorf("stderr = %q, want it to name %s", stderr.String(), tt.wantSubstr)
 			}
 			assertNoButlerLedgerClaims(t, repo)
 		})
@@ -438,13 +440,13 @@ func TestCmdButler_RejectsOverrideForChoreNotEnabled(t *testing.T) {
 		config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: "bugs", butlerEvery: "6h bgus=1h"}},
 		cleanup: func() {},
 	}
-	var code int
-	stderr := captureStderrFile(t, func() { code = cmdButler(lc, "") })
+	var stderr bytes.Buffer
+	code := cmdButler(lc, "", &stderr)
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
-	if !strings.Contains(stderr, `override for chore "bgus"`) {
-		t.Errorf("stderr = %q, want the rejected override named", stderr)
+	if !strings.Contains(stderr.String(), `override for chore "bgus"`) {
+		t.Errorf("stderr = %q, want the rejected override named", stderr.String())
 	}
 }
 
@@ -455,7 +457,7 @@ func TestCmdButler_RejectsForgeWithNoLedger(t *testing.T) {
 		config:  config{schemaConfig: schemaConfig{codeForge: "git", butlerChores: "bugs"}},
 		cleanup: func() {},
 	}
-	code := cmdButler(lc, "bugs")
+	code := cmdButler(lc, "bugs", io.Discard)
 	if code != exitConfigInvalid {
 		t.Errorf("cmdButler code = %d, want %d", code, exitConfigInvalid)
 	}
@@ -475,7 +477,7 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 				config:  config{schemaConfig: schemaConfig{codeForge: "local", butlerChores: schemaDefault("BUTLER_CHORES")}},
 				cleanup: func() {},
 			}
-			code := cmdButler(lc, choreName)
+			code := cmdButler(lc, choreName, io.Discard)
 			if code != exitConfigInvalid {
 				t.Errorf("cmdButler(%q) code = %d, want %d", choreName, code, exitConfigInvalid)
 			}
@@ -914,7 +916,7 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		cleanup: func() {},
 	}
 
-	code := cmdButler(lc, "bugs")
+	code := cmdButler(lc, "bugs", io.Discard)
 	if code != 0 {
 		t.Fatalf("cmdButler code = %d, want 0", code)
 	}
