@@ -4,10 +4,6 @@
 # mkHarness.internals.driverPreambleFile, byte-identical to the preamble the
 # image bakes in, so the suite exercises the same bytes (issue #433).
 { lib }:
-let
-  outcomeExtractor = import ./outcome-extractor.nix;
-  jqSelector = ''select(.type == "result") | .result // empty'';
-in
 {
   name = "claude";
 
@@ -46,36 +42,6 @@ in
   # A Driver that omits this attribute gets no per-issue cache and no mount,
   # so it has no resumable session state.
   sessionCacheDirRelative = ".claude/projects";
-
-  # Called as `_driver_extract_outcome "$stream_log"`. Shares its pipeline
-  # shape (markdown-strip, issue #1611; colon/space delimiter tolerance, issue
-  # #2012; required landing=/status= fields) with every other Driver's "match"
-  # body; outcome-extractor.nix's mkOutcomeExtractor doc comment explains both.
-  outcomeExtractFnBody = outcomeExtractor.mkOutcomeExtractor {
-    inherit jqSelector;
-    variant = "match";
-  };
-
-  # Called as `_driver_extract_near_miss_outcome "$stream_log"` (issue #1900).
-  # The complement of outcomeExtractFnBody above; mkOutcomeExtractor explains
-  # why this variant leaves the colon alone and requires neither field.
-  outcomeExtractNearMissFnBody = outcomeExtractor.mkOutcomeExtractor {
-    inherit jqSelector;
-    variant = "near-miss";
-  };
-
-  # Called as `_driver_extract_result_text "$stream_log"`: the shared prefix
-  # the two extractors above classify further, with no landing/status grep and
-  # no `tail -1`. The driver-exec marker gate (issue #2978) scans this raw text
-  # through cmd/launcher/internal/outcome/outcome.go rather than trusting a
-  # bash-side classification for the SPINDRIFT_OUTCOME nudge decision.
-  resultTextExtractFnBody = ''
-    # The backtick below is a literal char in a single-quoted sed script, not
-    # an unexpanded command substitution.
-    # shellcheck disable=SC2016
-    jq -r '${jqSelector}' "$1" 2>/dev/null \
-      | sed -E 's/^[[:space:]]*(\*\*|`)?//; s/(\*\*|`)?[[:space:]]*$//' || true
-  '';
 
   # Rendered at eval time by builtins.toJSON (ADR 0007 tier-1) so model names
   # never reach bash as interpolated strings. Takes the whole roster (issue

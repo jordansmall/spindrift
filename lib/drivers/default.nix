@@ -15,9 +15,6 @@ let
     "bin"
     "flagsCommon"
     "skillsDirRelative"
-    "outcomeExtractFnBody"
-    "outcomeExtractNearMissFnBody"
-    "resultTextExtractFnBody"
     "agentsJsonTemplate"
     "agentFilesTemplate"
     "argvShape"
@@ -141,25 +138,6 @@ let
     );
   };
 
-  # The image preamble and the bats harness file share these definitions
-  # verbatim (issue #433) so neither can drift from the other.
-  renderFunctions =
-    driverEntry:
-    "_driver_extract_outcome() {\n"
-    + driverEntry.outcomeExtractFnBody
-    + "}\n"
-    # Issue #2978 removed entrypoint.sh's call site, so shellcheck sees this
-    # function as unreferenced in the composed script. It stays defined because
-    # tests/driver-registry-outcome-extraction.bats calls it directly to pin
-    # the extraction grammar.
-    + "# shellcheck disable=SC2329\n"
-    + "_driver_extract_near_miss_outcome() {\n"
-    + driverEntry.outcomeExtractNearMissFnBody
-    + "}\n"
-    + "_driver_extract_result_text() {\n"
-    + driverEntry.resultTextExtractFnBody
-    + "}\n";
-
   # Names rendered into the preamble are interpolated into shell, so each must
   # be a plain identifier; `what` labels the offending field in the error.
   assertShellIdent =
@@ -260,8 +238,7 @@ let
     )
     + renderEnvCommon driverEntry
     + renderBashTimeoutEnv driverEntry
-    + renderArgvShape driverEntry
-    + renderFunctions driverEntry;
+    + renderArgvShape driverEntry;
 in
 {
   inherit

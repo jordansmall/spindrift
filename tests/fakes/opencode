@@ -10,9 +10,7 @@
 # Mirrors tests/fakes/claude line-for-line in control flow (same env-var
 # contract), but emits opencode's real NDJSON transcript shape instead of
 # claude's stream-json: every outcome-carrying line is a `{"type":"text",
-# "part":{"text":"..."}}` event (the shape lib/drivers/opencode.nix's
-# outcomeExtractFnBody parses via `jq -r 'select(.type == "text") |
-# .part.text // empty'`, and the shape asserted in
+# "part":{"text":"..."}}` event (the shape asserted in
 # cmd/launcher/internal/driver/opencode/transcript_test.go's
 # TestRenderTranscript_SurfacesTextEvents), not claude's `result` envelope.
 set -euo pipefail
