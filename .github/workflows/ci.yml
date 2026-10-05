@@ -32,12 +32,16 @@ jobs:
       # Key on nix-system, not runner.os: both matrix arches are Linux but
       # hold arch-incompatible store paths, so a shared key would let them
       # evict each other.
+      # Only main saves: PR-scoped saves are unreadable by other PRs yet push
+      # the repo past GitHub's 10 GB cap, LRU-evicting the main caches every
+      # PR restores from (one arch then builds cold).
       - name: Restore and save the nix store
         uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ matrix.nix-system }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/go.sum') }}
           restore-prefixes-first-match: nix-${{ matrix.nix-system }}-
           gc-max-store-size-linux: 5G
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       # shellcheck, the bats suite, and the eval-only equivalence checks.
       - name: nix flake check
@@ -76,13 +80,15 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v16
 
       # Separate cache from the Linux job: primary-key already keys on
-      # runner.os, so macOS and Linux never share or evict each other.
+      # runner.os, so macOS and Linux never share or evict each other. Only
+      # main saves, for the same reason as the Linux job.
       - name: Restore and save the nix store
         uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('**/*.nix', '**/flake.lock', '**/go.sum') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-macos: 5G
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       # On aarch64-darwin the OCI-image checks self-skip (the image module is
       # optionalAttrs-gated to Linux in nix/checks/default.nix), so this runs
