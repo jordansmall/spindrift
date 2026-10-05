@@ -360,7 +360,15 @@ a resolving sibling no longer counts either. It holds no claim — the
 claim is taken inside the child — so it fails the same can-it-release
 test, and ResolveTip's single flight overlaps sibling resolving windows,
 which let them mask a jam in lockstep. Only backing-off siblings and
-running non-butler siblings suppress the alarm now.) The trade-off: with
+running non-butler siblings suppress the alarm now.) (Amended by issue
+#4205: a backing-off sibling no longer counts either, by the same test. A
+backoff follows a child that already exited, or a ResolveTip failure that
+never took a claim; any claim was cleared (agent-failed, shutdown abort) or
+is orphaned as agent-in-progress until `spindrift recover`, and the overlap
+gate reads tracker labels, not slot phase. Only a running non-butler
+sibling suppresses the alarm now, so a transient failure in one slot no
+longer delays a sibling's jam by up to `DAEMON_FAILURE_BACKOFF`; repeated
+failures alarm through the breaker.) The trade-off: with
 auto-promotion (ADR 0056) on, a jam may fire shortly before a promoted
 finding makes work dispatchable again. The per-kind `checks[].jammed` status
-flag was never sibling-suppressed, and this amendment doesn't touch it.
+flag was never sibling-suppressed, and none of these amendments touches it.
