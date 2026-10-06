@@ -541,3 +541,45 @@ func TestPaginateWalksAllPages(t *testing.T) {
 		}
 	}
 }
+
+func TestDoWithHeaderReturnsResponseHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "7")
+		w.Write([]byte(`{"name":"widget"}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", nil, nil)
+
+	var out struct {
+		Name string `json:"name"`
+	}
+	h, err := c.DoWithHeader(http.MethodGet, "/widgets", nil, &out)
+	if err != nil {
+		t.Fatalf("DoWithHeader returned unexpected error: %v", err)
+	}
+	if got := h.Get("x-total-count"); got != "7" {
+		t.Fatalf("x-total-count = %q, want 7", got)
+	}
+	if out.Name != "widget" {
+		t.Fatalf("out.Name = %q, want widget", out.Name)
+	}
+}
+
+func TestDoWithHeaderErrorReturnsNoHeaders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Total-Count", "7")
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, nil, "testbackend", nil, nil)
+
+	h, err := c.DoWithHeader(http.MethodGet, "/widgets", nil, nil)
+	if err == nil {
+		t.Fatal("DoWithHeader on a 404 returned nil error")
+	}
+	if h != nil {
+		t.Fatalf("headers = %v, want nil on error", h)
+	}
+}
