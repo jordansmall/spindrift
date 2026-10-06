@@ -529,20 +529,27 @@ func hasUnmergedPaths(gitIn func(args ...string) *exec.Cmd) bool {
 	return err == nil && len(bytes.TrimSpace(out)) > 0
 }
 
-// relayClone builds the `gh repo clone` closure bundlerelay's Relay,
-// CommitSubjects, and PushBranch all take as their clone step: op names the
-// caller for the wrapped ghCommandErr's description.
+// relayClone builds the clone closure bundlerelay's Relay, CommitSubjects, and
+// PushBranch all take as their clone step: op names the caller for the wrapped
+// ghCommandErr's description. It clones GitRemote's HTTPS URL, not `gh repo
+// clone`, which follows the operator's per-host gh git_protocol and so can pick
+// a personal SSH key (issue #4647). The -c pairs after `clone` are clone's own
+// --config: they land in the new repo's config, so the plain `git push` the
+// callers run later authenticates through the same gh credential helper.
 func (e *execClient) relayClone(op string) func(dir string) error {
 	return func(dir string) error {
-		if _, err := exec.Command("gh", "repo", "clone", e.repo, dir, "--", "--no-single-branch").Output(); err != nil {
-			return ghCommandErr("github: "+op+": gh repo clone", err)
+		url, gitArgs := GitRemote(e.repo)
+		args := append([]string{"clone"}, gitArgs...)
+		args = append(args, "--no-single-branch", url, dir)
+		if _, err := exec.Command("git", args...).Output(); err != nil {
+			return ghCommandErr("github: "+op+": git clone", err)
 		}
 		return nil
 	}
 }
 
 // PushBranch creates branch on the target repo from localRef in the git repo
-// at srcDir, with the launcher's own gh-cli credential (issue #4071, ADR
+// at srcDir, over HTTPS through the gh credential helper (issue #4071, ADR
 // 0057); refuses if branch already exists, or is base (issue #4104).
 func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
 	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, e.relayClone("push branch"))

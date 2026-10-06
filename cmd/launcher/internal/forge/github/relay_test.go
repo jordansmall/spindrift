@@ -13,9 +13,18 @@ import (
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
-// The fake gh script from codeforge_contract_test.go clones $REMOTE for any
-// repo slug, which is all RelayBundle needs to reach.
+// newRelayHarness is newRelayHTTPSHarness for tests that never inspect the
+// server's requests.
 func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
+	t.Helper()
+	repo, _ := newRelayHTTPSHarness(t)
+	return repo
+}
+
+// newRelayHTTPSHarness serves the fixture's bare repo as owner/repo over HTTPS,
+// the only way the relay clone reaches it (see serveRelayOverHTTPS). The fake
+// gh script from codeforge_contract_test.go still handles every other gh call.
+func newRelayHTTPSHarness(t *testing.T) (*forgetest.GitRepoFixture, *httpsRelayServer) {
 	t.Helper()
 	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
@@ -23,13 +32,15 @@ func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
+	// The fake gh still answers the non-clone calls these tests make (pr
+	// create, ...); serveRelayOverHTTPS layers the SSH-preferring gh over it.
 	scriptDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(scriptDir, "gh"), []byte(fakeGHCodeForge), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", scriptDir+":"+os.Getenv("PATH"))
-	t.Setenv("REMOTE", repo.Bare)
 	t.Setenv("STATE_DIR", t.TempDir())
+	srv := serveRelayOverHTTPS(t, repo, "relay-token")
 
 	// The fixture's first push leaves the bare repo's HEAD symref on git-init's
 	// default ("master", which doesn't exist here), so a fresh clone gets no
@@ -38,7 +49,7 @@ func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 	if out, err := exec.Command("git", "-C", repo.Bare, "symbolic-ref", "HEAD", "refs/heads/main").CombinedOutput(); err != nil {
 		t.Fatalf("set bare repo HEAD to refs/heads/main: %v: %s", err, out)
 	}
-	return repo
+	return repo, srv
 }
 
 // A read-write Box pushes in-box, so if NewExecClient satisfied
@@ -85,53 +96,41 @@ func TestReadOnlyCodeForge_RelayBundle_PushesRefToOrigin(t *testing.T) {
 	}
 }
 
-// A `gh repo clone` failure's stderr text must reach the returned error (via
+// A git clone failure's stderr text must reach the returned error (via
 // ghCommandErr), not just err's own Go-side message.
 func TestReadOnlyCodeForge_RelayBundle_CloneFailureSurfacesStderr(t *testing.T) {
-	prependFakeGH(t, `case "$1-$2" in
-repo-clone)
-	printf 'gh: repository not found\n' >&2
-	exit 1
-	;;
-esac
-`)
+	newRelayHarness(t)
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cf := NewReadOnlyCodeForge("owner/missing", forge.DispatchLabels{}, "agent/issue-")
 	br := cf.(forge.BundleRelay)
 
 	err := br.RelayBundle(outbox, "agent/issue-1918")
 	if err == nil {
-		t.Fatal("RelayBundle with a failing gh repo clone: got nil error, want one")
+		t.Fatal("RelayBundle with a failing git clone: got nil error, want one")
 	}
-	if !strings.Contains(err.Error(), "repository not found") {
-		t.Errorf("RelayBundle error = %q, want it to contain gh's stderr %q", err.Error(), "repository not found")
+	if !strings.Contains(err.Error(), "owner/missing.git/' not found") {
+		t.Errorf("RelayBundle error = %q, want it to contain git's stderr %q", err.Error(), "owner/missing.git/' not found")
 	}
 }
 
-// CommitSubjects's own `gh repo clone` closure must give the same stderr
+// CommitSubjects's own clone closure must give the same stderr
 // guarantee.
 func TestReadOnlyCodeForge_CommitSubjects_CloneFailureSurfacesStderr(t *testing.T) {
-	prependFakeGH(t, `case "$1-$2" in
-repo-clone)
-	printf 'gh: repository not found\n' >&2
-	exit 1
-	;;
-esac
-`)
+	newRelayHarness(t)
 	outbox := t.TempDir()
 	forgetest.WriteFile(t, filepath.Join(outbox, seambundle.FileName), "not a bundle")
 
-	cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	cf := NewReadOnlyCodeForge("owner/missing", forge.DispatchLabels{}, "agent/issue-")
 	cs := cf.(forge.BundleCommitSubjects)
 
 	_, err := cs.CommitSubjects(outbox, "main", "agent/issue-1918")
 	if err == nil {
-		t.Fatal("CommitSubjects with a failing gh repo clone: got nil error, want one")
+		t.Fatal("CommitSubjects with a failing git clone: got nil error, want one")
 	}
-	if !strings.Contains(err.Error(), "repository not found") {
-		t.Errorf("CommitSubjects error = %q, want it to contain gh's stderr %q", err.Error(), "repository not found")
+	if !strings.Contains(err.Error(), "owner/missing.git/' not found") {
+		t.Errorf("CommitSubjects error = %q, want it to contain git's stderr %q", err.Error(), "owner/missing.git/' not found")
 	}
 }
 

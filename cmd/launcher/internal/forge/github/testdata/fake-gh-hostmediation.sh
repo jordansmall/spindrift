@@ -1,15 +1,10 @@
 #!/bin/sh
-# forgetest.RunHostMediationContract drives this stateful stand-in for gh. REMOTE is
-# the bare git repo RelayBundle really pushes to, and STATE_DIR is where the contract
-# reads posted comments and filed issues back. Head "agent/issue-2407-adopt" must
-# fail with gh's own "already exists" stderr, which exec_pr.go's CreateDraftPR
-# matches (#2407).
+# forgetest.RunHostMediationContract drives this stateful stand-in for gh.
+# STATE_DIR is where the contract reads posted comments and filed issues back.
+# Head "agent/issue-2407-adopt" must fail with gh's own "already exists"
+# stderr, which exec_pr.go's CreateDraftPR matches (#2407).
 
 case "$1-$2" in
-repo-clone)
-	dir="$4"
-	git clone "$REMOTE" "$dir" >&2
-	;;
 pr-create)
 	shift 2
 	head=""
