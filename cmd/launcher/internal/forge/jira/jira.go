@@ -418,6 +418,10 @@ type jiraSearchPayload struct {
 	StartAt    int                `json:"startAt"`
 	MaxResults int                `json:"maxResults"`
 	Total      int                `json:"total"`
+
+	// Cloud's search/jql pages by an opaque token instead of startAt/total.
+	NextPageToken string `json:"nextPageToken"`
+	IsLast        bool   `json:"isLast"`
 }
 
 // ListIssues returns open issues in dispatch state state, created-time
@@ -547,11 +551,44 @@ func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
 // doSearch runs a JQL search, walking every result page so a backlog larger
 // than one ResultPageLimit page is never silently truncated. JQL orders
 // results server-side, so appending pages in fetch order preserves
-// oldest-first without a client-side sort. The walk returns an error rather
-// than a short result when a page comes back empty before total or repeats
-// the previous page, so a nil error means the result is complete.
+// oldest-first without a client-side sort.
+//
+// Cloud removed v2 /search (410), so it walks /search/jql by nextPageToken. The
+// v2 variant is used because it returns description as plain text rather than
+// ADF, and its fields must be named or only the id comes back. Cloud may not
+// honour maxResults, so the walk never counts rows, and it fails on a repeated
+// token rather than spin. Server/DC walks startAt until total, returning an
+// error rather than a short result when a page comes back empty before total
+// or repeats the previous page, so a nil error means the result is complete.
 func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 	var all []jiraIssuePayload
+	if j.cloud {
+		token := ""
+		err := j.rest.Paginate(func(int) (bool, error) {
+			q := url.Values{
+				"jql":        {jql},
+				"fields":     {"summary,description,status,labels"},
+				"maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)},
+			}
+			if token != "" {
+				q.Set("nextPageToken", token)
+			}
+			var payload jiraSearchPayload
+			if err := j.rest.Do(http.MethodGet, "/rest/api/2/search/jql?"+q.Encode(), nil, &payload); err != nil {
+				return false, err
+			}
+			all = append(all, payload.Issues...)
+			if !payload.IsLast && payload.NextPageToken != "" && payload.NextPageToken == token {
+				return false, fmt.Errorf("jira search/jql returned the same nextPageToken twice; refusing to loop")
+			}
+			token = payload.NextPageToken
+			return payload.IsLast || token == "", nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return all, nil
+	}
 	var prevFirstKey string
 	err := j.rest.Paginate(func(int) (bool, error) {
 		// Advance by rows received, not a fixed stride: the server may cap the
