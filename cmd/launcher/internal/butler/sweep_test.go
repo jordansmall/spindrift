@@ -2,16 +2,20 @@ package butler
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // fakeTree is Tree's test double: a fixed Head and TrackedFiles answer, or an
@@ -229,5 +233,113 @@ func TestSweep_ReadLedgerError(t *testing.T) {
 	_, err := r.Sweep([]string{"bugs"})
 	if err == nil || err.Error() != `butler: read bugs ledger: boom` {
 		t.Errorf("err = %v, want %q", err, `butler: read bugs ledger: boom`)
+	}
+}
+
+// seedDone leaves name with a Done tip at at, last swept at lastSwept.
+func seedDone(t *testing.T, backend ledger.Backend, name, lastSwept string, at time.Time) {
+	t.Helper()
+	claim, err := ledger.Claim(backend, name, ledger.Tip{}, ledger.ClaimedBy{Host: "seed-host", Start: at})
+	if err != nil {
+		t.Fatalf("seed Claim %s: %v", name, err)
+	}
+	if _, err := ledger.Finish(backend, name, claim, ledger.State{LastSwept: lastSwept}, at); err != nil {
+		t.Fatalf("seed Finish %s: %v", name, err)
+	}
+}
+
+// TestSweep_NotDueReportsNextDuePerCandidate pins the not_due records a
+// NotDue sweep sends the daemon: one per candidate, in candidate order, an
+// instant for the interval rule and on_tip_move for nothing-to-scan.
+func TestSweep_NotDueReportsNextDuePerCandidate(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	tree := fakeTree{head: "head2", files: []string{"a.go"}}
+	seedDone(t, backend, "bugs", "head1", now.Add(-10*time.Minute))
+	seedDone(t, backend, "docs", "head2", now.Add(-48*time.Hour))
+
+	policy := testPolicy()
+	policy.Chores = []chore.Chore{{Name: "bugs", Every: time.Hour}, {Name: "docs"}}
+	r := New(backend, tree, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, policy, func() time.Time { return now })
+
+	out, err := r.Sweep([]string{"bugs", "docs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != NotDue {
+		t.Fatalf("Kind = %v, want NotDue: %+v", out.Kind, out)
+	}
+	want := []report.Record{
+		{Event: report.EventNotDue, Key: dispatchkey.Chore("bugs"), NextDue: report.NextDue{At: time.Date(2026, 1, 1, 12, 50, 0, 0, time.UTC)}},
+		{Event: report.EventNotDue, Key: dispatchkey.Chore("docs"), NextDue: report.NextDue{OnTipMove: true}},
+	}
+	got := readRecords()
+	if !slices.Equal(got, want) {
+		t.Errorf("records = %+v, want %+v", got, want)
+	}
+}
+
+// TestSweep_DueChoreEmitsNoNotDue pins that not_due records go out only on a
+// NotDue exit: a later candidate that runs leaves the daemon nothing to park.
+func TestSweep_DueChoreEmitsNoNotDue(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	tree := fakeTree{head: "head2", files: []string{"a.go"}}
+	seedDone(t, backend, "bugs", "head1", now.Add(-10*time.Minute))
+
+	policy := testPolicy()
+	policy.Chores = []chore.Chore{{Name: "bugs", Every: time.Hour}, {Name: "docs"}}
+	fc := forge.NewFake()
+	r := New(backend, tree, fc.AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }, policy, func() time.Time { return now })
+
+	out, err := r.Sweep([]string{"bugs", "docs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind == NotDue {
+		t.Fatalf("Kind = NotDue, want the due chore to run: %+v", out)
+	}
+	for _, rec := range readRecords() {
+		if rec.Event == report.EventNotDue {
+			t.Errorf("unexpected not_due record %+v from a sweep that ran a chore", rec)
+		}
+	}
+}
+
+// TestSweep_NotDueBudgetLiftsAtPolicyZoneMidnight pins that a spent daily
+// budget lifts at the next midnight of the policy zone, not of the clock's
+// own (UTC) zone: the sweep must hand chore.NextDue a clock in Policy.Zone.
+func TestSweep_NotDueBudgetLiftsAtPolicyZoneMidnight(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	zone, err := time.LoadLocation("Asia/Kolkata") // UTC+5:30, no DST
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	// 03:30 on 11 March in Kolkata, still 10 March in UTC.
+	now := time.Date(2026, 3, 10, 22, 0, 0, 0, time.UTC)
+	seedDone(t, backend, "bugs", "head1", now.Add(-10*time.Minute))
+
+	policy := testPolicy()
+	policy.Zone = zone
+	policy.Budgets = chore.Budgets{MaxSweepsPerDay: 1}
+	r := New(backend, fakeTree{head: "head2", files: []string{"a.go"}}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, policy, func() time.Time { return now })
+
+	out, err := r.Sweep([]string{"bugs"})
+	if err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+	if out.Kind != NotDue {
+		t.Fatalf("Kind = %v, want NotDue: %+v", out.Kind, out)
+	}
+	recs := readRecords()
+	if len(recs) != 1 || recs[0].Event != report.EventNotDue {
+		t.Fatalf("records = %+v, want one not_due", recs)
+	}
+	want := time.Date(2026, 3, 12, 0, 0, 0, 0, zone)
+	if got := recs[0].NextDue; !got.At.Equal(want) || got.OnTipMove {
+		t.Errorf("next_due = %+v, want At %v (midnight in %v)", got, want, zone)
 	}
 }

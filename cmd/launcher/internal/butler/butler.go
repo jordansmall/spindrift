@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // Policy is a Runner's resolved butler knobs (ADR 0056).
@@ -191,6 +192,11 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 	room := r.policy.Budgets.Room(today)
 
 	var reasons []string
+	type answer struct {
+		name string
+		next report.NextDue
+	}
+	var answers []answer
 	for _, c := range candidates {
 		tip, err := r.backend.Read(c.Name)
 		if err != nil {
@@ -200,12 +206,28 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 		if err != nil {
 			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", c.Name, err)
 		}
-		verdict := chore.Check(tip, recent, head, whenNow, room, chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout})
+		cfg := chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout}
+		verdict := chore.Check(tip, recent, head, whenNow, room, cfg)
 		if verdict != chore.Due {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", c.Name, verdict))
+			// NextDue reads the budget day from now's Location, so it gets the
+			// policy zone, as the day totals above did.
+			at, onTipMove := chore.NextDue(tip, recent, head, whenNow.In(r.policy.Zone), room, cfg)
+			// (zero, false): nothing time- or head-based lifts it, so there is
+			// nothing to tell the daemon.
+			if !at.IsZero() || onTipMove {
+				answers = append(answers, answer{name: c.Name, next: report.NextDue{At: at, OnTipMove: onTipMove}})
+			}
 			continue
 		}
 		return r.run(c, tip, head, whenNow, room)
+	}
+
+	// Reported only on this exit: the daemon reads not_due records when the
+	// child ends not-due, and a later candidate that ran leaves it nothing to
+	// park.
+	for _, a := range answers {
+		report.NotDue(dispatchkey.Chore(a.name), a.next)
 	}
 
 	return Outcome{Kind: NotDue, Reasons: reasons}, nil

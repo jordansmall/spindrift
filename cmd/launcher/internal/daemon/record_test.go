@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -190,5 +191,79 @@ func TestParseRecord_KindMismatchIsDistinct(t *testing.T) {
 		if got := errors.Is(err, ErrKindMismatch); got != tc.mismatch {
 			t.Errorf("ParseRecord(%q, %s) errors.Is(ErrKindMismatch) = %v, want %v (err: %v)", tc.line, tc.kind, got, tc.mismatch, err)
 		}
+	}
+}
+
+func TestParseRecord_NotDue(t *testing.T) {
+	butler := KindOf(dispatchkind.Butler)
+	cases := []struct {
+		name    string
+		line    string
+		kind    Kind
+		want    Record
+		wantErr bool
+
+		mismatch bool
+	}{
+		{
+			name: "instant",
+			line: `{"event":"not_due","chore":"bugs","next_due":"2026-01-01T15:00:00.000000001Z"}`,
+			kind: butler,
+			want: Record{Event: report.EventNotDue, Key: dispatchkey.Chore("bugs"), NextDue: report.NextDue{At: time.Date(2026, 1, 1, 15, 0, 0, 1, time.UTC)}},
+		},
+		{
+			name: "on tip move",
+			line: `{"event":"not_due","chore":"bugs","next_due":"on_tip_move"}`,
+			kind: butler,
+			want: Record{Event: report.EventNotDue, Key: dispatchkey.Chore("bugs"), NextDue: report.NextDue{OnTipMove: true}},
+		},
+		{
+			name:    "bad next_due",
+			line:    `{"event":"not_due","chore":"bugs","next_due":"soon"}`,
+			kind:    butler,
+			wantErr: true,
+		},
+		{
+			name:    "zero instant next_due",
+			line:    `{"event":"not_due","chore":"bugs","next_due":"0001-01-01T00:00:00Z"}`,
+			kind:    butler,
+			wantErr: true,
+		},
+		{
+			name:    "empty next_due",
+			line:    `{"event":"not_due","chore":"bugs"}`,
+			kind:    butler,
+			wantErr: true,
+		},
+		{
+			name:     "issue-keyed from butler child",
+			line:     `{"event":"not_due","issue":"42","next_due":"on_tip_move"}`,
+			kind:     butler,
+			wantErr:  true,
+			mismatch: true,
+		},
+		{
+			name:    "no key",
+			line:    `{"event":"not_due","next_due":"on_tip_move"}`,
+			kind:    butler,
+			wantErr: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok, err := ParseRecord(tc.line, tc.kind)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if tc.wantErr {
+				if errors.Is(err, ErrKindMismatch) != tc.mismatch {
+					t.Errorf("errors.Is(ErrKindMismatch) = %v, want %v (err: %v)", !tc.mismatch, tc.mismatch, err)
+				}
+				return
+			}
+			if !ok || got != tc.want {
+				t.Fatalf("ParseRecord = (%+v, %v), want (%+v, true)", got, ok, tc.want)
+			}
+		})
 	}
 }

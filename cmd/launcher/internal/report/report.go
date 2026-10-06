@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"sync"
 	"syscall"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 )
@@ -39,6 +40,32 @@ type Record struct {
 	Phase string
 	State string
 	Note  string
+	// NextDue is a not_due record's answer, parsed off the wire by
+	// UnmarshalJSON; zero on every other event.
+	NextDue NextDue
+}
+
+// NextDue is a not_due record's answer: the earliest instant a Chore lifts
+// (zero for none) and whether some Chore waits on a branch-head move instead.
+// The zero value is no answer, which is never written or accepted.
+type NextDue struct {
+	At        time.Time
+	OnTipMove bool
+}
+
+// IsZero reports that n carries no answer.
+func (n NextDue) IsZero() bool { return n.At.IsZero() && !n.OnTipMove }
+
+// wire is n's next_due string: UTC at full nanosecond precision, since a live
+// claim lifts one nanosecond past its timeout. "" for the zero value.
+func (n NextDue) wire() string {
+	switch {
+	case n.OnTipMove:
+		return NextDueOnTipMove
+	case n.At.IsZero():
+		return ""
+	}
+	return n.At.UTC().Format(time.RFC3339Nano)
 }
 
 // recordWire is Record's JSON shape. The Key splits back into the
@@ -51,11 +78,13 @@ type recordWire struct {
 	Phase string `json:"phase,omitempty"`
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
+
+	NextDue string `json:"next_due,omitempty"`
 }
 
 func (r Record) MarshalJSON() ([]byte, error) {
 	issue, chore := r.Key.Fields()
-	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note})
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, NextDue: r.NextDue.wire()})
 }
 
 // UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
@@ -73,20 +102,52 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note}
+	var nd NextDue
+	// Parsed only for a not_due: an event this reader doesn't know yet may
+	// carry a next_due of its own shape.
+	if w.Event == EventNotDue && w.NextDue != "" {
+		var err error
+		if nd, err = ParseNextDue(w.NextDue); err != nil {
+			return err
+		}
+	}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, NextDue: nd}
 	return nil
 }
 
-// EventBox and EventSettled are the two Record.Event values this package
-// ever writes. Naming them once here and using the name everywhere else
+// EventBox, EventSettled and EventNotDue are the Record.Event values this
+// package ever writes. Naming them once here and using the name everywhere else
 // (internal/daemon's parser, dispatch loop, and pool event stream) means a
 // typo in the wire value is a compile error, not a silent parse miss on the
 // reading side — issue #3627's review finding. The JSON on the wire is
-// unchanged: these are still the bare strings "box"/"settled".
+// unchanged: these are still the bare strings "box"/"settled"/"not_due".
 const (
 	EventBox     = "box"
 	EventSettled = "settled"
+	EventNotDue  = "not_due"
 )
+
+// NextDueOnTipMove is the next_due wire value for a Chore that only a
+// branch-head move lifts, so no instant names when it becomes due.
+const NextDueOnTipMove = "on_tip_move"
+
+// ParseNextDue is the one decoder for a not_due record's NextDue: the
+// NextDueOnTipMove sentinel, or an RFC3339Nano instant. Anything else,
+// including the empty string and the zero instant (which the writer's own
+// zero value would produce), is an error.
+func ParseNextDue(s string) (NextDue, error) {
+	if s == NextDueOnTipMove {
+		return NextDue{OnTipMove: true}, nil
+	}
+	at, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return NextDue{}, fmt.Errorf("report: invalid next_due %q: %w", s, err)
+	}
+	if at.IsZero() {
+		return NextDue{}, fmt.Errorf("report: invalid next_due %q: zero instant", s)
+	}
+	return NextDue{At: at}, nil
+}
 
 // PhaseInitial and PhaseConflictResolve are two of the three Box.phase
 // values this package's callers ever pass; the third, a fix pass, has no
@@ -134,6 +195,16 @@ func (r *Reporter) Box(key dispatchkey.Key, phase string) {
 // vocabulary from the existing outcome/settle machinery.
 func (r *Reporter) Settled(key dispatchkey.Key, state, note string) {
 	r.emit(Record{Event: EventSettled, Key: key, State: state, Note: note})
+}
+
+// NotDue records that key's Chore is not due, and when it will be. A zero
+// next is dropped: the reader rejects a not_due that names neither an instant
+// nor a tip move.
+func (r *Reporter) NotDue(key dispatchkey.Key, next NextDue) {
+	if next.IsZero() {
+		return
+	}
+	r.emit(Record{Event: EventNotDue, Key: key, NextDue: next})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe
