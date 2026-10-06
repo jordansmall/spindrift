@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
@@ -23,10 +22,6 @@ import (
 // a failed config validation from any other bootstrap failure via errors.Is.
 // bootstrap never rewrites validate's message, so its text reaches stderr intact.
 var errConfigInvalid = errors.New("config invalid")
-
-// ghTokenRefreshInterval is how often bootstrap polls GH_TOKEN_REFRESH_FILE for
-// a freshly minted token. An installation token lives about an hour (issue #1027).
-const ghTokenRefreshInterval = 60 * time.Second
 
 // launchContext bundles the wiring every top-level dispatch entry point shares,
 // including the independently wired IssueTracker and CodeForge (ADR 0013).
@@ -118,7 +113,7 @@ func bootstrap(stdout io.Writer, ensureReady bool, kind *dispatchkind.Descriptor
 	// the minter rewrites in place (issue #1027). No-op when unset.
 	if c.ghTokenRefreshFile != "" {
 		panicguard.Go(func() {
-			tokenrefresh.Watch(c.ghTokenRefreshFile, ghTokenRefreshInterval, nil, func(v string) error {
+			tokenrefresh.Watch(c.ghTokenRefreshFile, tokenrefresh.Interval, nil, func(v string) error {
 				return os.Setenv("GH_TOKEN", v)
 			})
 		})

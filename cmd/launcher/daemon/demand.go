@@ -8,6 +8,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
+	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
@@ -19,10 +20,11 @@ type demandSources map[daemon.Kind]forge.DemandCounter
 
 // buildDemandSources builds a demand counter for each kind in kinds whose
 // descriptor row says DemandTrackerProbe, from the same settings a child
-// resolves ISSUE_TRACKER, the tracker's own knobs and the work labels from. A
-// tracker without a forge.DemandCounter adapter (everything but local and
-// forgejo so far) or a missing knob yields no source, never an error: the
-// kind then simply stays exit-driven.
+// resolves ISSUE_TRACKER, the tracker's own knobs and the work labels from; a
+// blank ISSUE_TRACKER is github, as the launcher defaults it. A tracker
+// without a forge.DemandCounter adapter (everything but local, forgejo and
+// github so far) or a missing knob yields no source, never an error: the kind
+// then simply stays exit-driven.
 //
 // FORGEJO_TOKEN is read as a plain knob; a token supplied only through its
 // -file or -cmd form is invisible here, so that deployment stays exit-driven.
@@ -30,6 +32,10 @@ type demandSources map[daemon.Kind]forge.DemandCounter
 // A relative LOCAL_ISSUES_DIR is used as written: it resolves against the
 // daemon's cwd, which every child inherits (RunChild sets no cmd.Dir), so
 // both sides read the same directory.
+//
+// The github probe runs `gh` in the daemon's own environment, so it sees the
+// daemon's GH_TOKEN; mainRun keeps that fresh from GH_TOKEN_REFRESH_FILE the
+// way a child does.
 func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSources {
 	var probed []*dispatchkind.Descriptor
 	for _, k := range kinds {
@@ -59,6 +65,13 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		newTracker = func(l forge.DispatchLabels) forge.IssueTracker {
 			return forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: baseURL, Repo: repo, Token: token, Labels: l})
 		}
+	case "github", "":
+		slug := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
+		if slug == "" {
+			return nil
+		}
+		// The branch prefix only names agent branches, which counting never touches.
+		newTracker = func(l forge.DispatchLabels) forge.IssueTracker { return github.NewExecClient(slug, l, "") }
 	default:
 		return nil
 	}

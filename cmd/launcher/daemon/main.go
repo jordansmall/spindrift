@@ -27,6 +27,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/stopsignal"
+	"spindrift.dev/launcher/internal/tokenrefresh"
 )
 
 // installStopSignal is a package-level test seam, like the launcher's own
@@ -784,6 +785,14 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// Built from the daemon's own resolved knobs, per kind row, once the
 	// butler gate has settled which kinds are in play.
 	demand := buildDemandSources(doc, args.Kinds)
+	// The github Demand probe runs gh in this process, so keep its token fresh
+	// the way a child's bootstrap does: an expired token fails every probe,
+	// and probe failures feed the breaker.
+	if f := childKnob(doc, "GH_TOKEN_REFRESH_FILE", os.Getenv("GH_TOKEN_REFRESH_FILE")); f != "" {
+		go tokenrefresh.Watch(f, tokenrefresh.Interval, nil, func(v string) error {
+			return os.Setenv("GH_TOKEN", v)
+		})
+	}
 
 	// RESEARCH_RESERVATION is inert for a single-kind daemon (both the
 	// schema doc and daemon.Config say so), so it is resolved and validated
