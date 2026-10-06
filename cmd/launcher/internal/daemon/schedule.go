@@ -41,6 +41,10 @@ type kindSched struct {
 	// ready is also zeroed by a child's exit 2, which is no tracker
 	// observation, so zero crossings compare against this instead.
 	counted int
+
+	// claims counts the Claimed events folded into this kind, so a probe can
+	// tell whether one landed while it was in flight.
+	claims int
 }
 
 // Occupancy is what the pool's slot phases say is running, passed in on each
@@ -102,6 +106,8 @@ type ChildDone struct {
 type DemandProbed struct {
 	Kind  Kind
 	Ready int
+	// Claims is the kind's claim count when the probe began.
+	Claims int
 }
 
 // DemandFailed: a probe of Kind errored.
@@ -141,8 +147,9 @@ func (k kindSched) jamGated(now time.Time) bool {
 
 // startable reports whether a child of this kind may start at now, with
 // starting children yet to claim. A starting child's item is still counted in
-// ready, so a probed kind may have at most ready-starting children in
-// discovery; an exit-driven kind has no count to spend.
+// ready, so a probed kind's children in discovery are capped at ready in
+// total: ready-starting is how many more may start. An exit-driven kind has
+// no count to spend.
 func (k kindSched) startable(now time.Time, starting int) bool {
 	if !k.probed() {
 		return k.gate.runnable(now)
@@ -214,13 +221,24 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	case ChildDone:
 		ks = ks.childDone(now, e.Result)
 	case DemandProbed:
-		ks.ready, ks.counted, ks.probedAt = e.Ready, e.Ready, now
+		ks.ready, ks.counted = e.Ready, e.Ready
+		// A claim that landed mid-probe moved the count after it was read, so
+		// stay stale (the Claimed zeroed probedAt) and re-probe.
+		if e.Claims == ks.claims {
+			ks.probedAt = now
+		}
 	case DemandFailed:
 		// Keep the old count: only a rest from probing, so siblings don't
 		// hammer a failing tracker.
 		ks.probedAt = now
 	case Claimed:
 		if ks.probed() {
+			ks.claims++
+			// Keep a failed re-probe from resting on the pre-claim count; counted
+			// stays as read, for the demand_appeared/drained comparison.
+			if ks.ready > 0 {
+				ks.ready--
+			}
 			ks.probedAt = time.Time{} // the claim moved the count; re-probe before the next start
 		}
 	}
@@ -267,6 +285,9 @@ func (s Schedule) LiftJams() (Schedule, []Kind) {
 	}
 	return s, lifted
 }
+
+// claimsOf is the number of claims folded into kind, 0 for an unknown kind.
+func (s Schedule) claimsOf(kind Kind) int { return s.state[kind].claims }
 
 // with returns a copy of s holding ks for kind, leaving s's own map alone.
 func (s Schedule) with(kind Kind, ks kindSched) Schedule {

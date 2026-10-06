@@ -2712,3 +2712,27 @@ func TestPoolStartChildDeclinesProbedKindWhoseCountZeroed(t *testing.T) {
 		t.Fatalf("child_start emitted for a declined start: %s", buf.String())
 	}
 }
+
+// TestOccupancyCountsRunningAndStartingPerKind pins that only PhaseRunning
+// slots count, and that a running slot with no flight key (no claim reported
+// yet) is also Starting.
+func TestOccupancyCountsRunningAndStartingPerKind(t *testing.T) {
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
+	keyed := slotFlight{kind: work, key: dispatchkey.Issue("1")}
+	s := &state{slots: []slotState{
+		{phase: PhaseRunning, flight: slotFlight{kind: work}},
+		{phase: PhaseRunning, flight: slotFlight{kind: work}},
+		{phase: PhaseRunning, flight: keyed},
+		{phase: PhaseRunning, flight: slotFlight{kind: research}},
+		{phase: PhaseRunning, flight: slotFlight{kind: research, key: dispatchkey.Issue("2")}},
+		{phase: PhaseBackingOff, flight: slotFlight{kind: research}},
+		{phase: PhaseIdle},
+	}}
+	occ := occupancy(s)
+	if want := map[Kind]int{work: 3, research: 2}; !reflect.DeepEqual(occ.Running, want) {
+		t.Errorf("Running = %v, want %v", occ.Running, want)
+	}
+	if want := map[Kind]int{work: 2, research: 1}; !reflect.DeepEqual(occ.Starting, want) {
+		t.Errorf("Starting = %v, want %v", occ.Starting, want)
+	}
+}

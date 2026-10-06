@@ -306,19 +306,24 @@ func kindPriority(k Kind) dispatchkind.DaemonPriority {
 }
 
 // occupancy reads what the slot phases say is running, for Schedule.Decide's
-// reservation count. Only running children count: research children that
-// exit early (a run of Continue exits, say) never lift the count, so research
-// can keep taking every turnover while work still has queued work. The
-// starting slot is not itself PhaseRunning, so the count never includes it.
-// The caller holds p.mu.
+// reservation count and start budget. Only running children count toward the
+// reservation: research children that exit early (a run of Continue exits,
+// say) never lift the count, so research can keep taking every turnover while
+// work still has queued work. A running slot with no flight key has not yet
+// reported its claim, so it is also starting. The deciding slot is not itself
+// PhaseRunning, so neither count includes it. The caller holds p.mu.
 func occupancy(s *state) Occupancy {
 	running := make(map[Kind]int)
+	starting := make(map[Kind]int)
 	for _, sl := range s.slots {
 		if sl.phase == PhaseRunning {
 			running[sl.flight.kind]++
+			if sl.flight.key.IsZero() {
+				starting[sl.flight.kind]++
+			}
 		}
 	}
-	return Occupancy{Running: running}
+	return Occupancy{Running: running, Starting: starting}
 }
 
 // decide asks the Schedule what a free slot should do at now. A pure read,
@@ -444,13 +449,20 @@ func (p *pool) finishChild(slot int) {
 // rides alongside always agree. A no-op — no state change, no event — if
 // slot is not currently running: the child reported after the slot
 // cleared, which can only be a race (RunChild already returned), not a
-// state worth publishing.
+// state worth publishing. Any key change counts as a new claim, folded into the
+// Schedule as Claimed so the kind is re-probed before its next start; a
+// repeat of the same key moves no count. A switch back to a key the slot
+// already boxed costs only an extra re-probe.
 func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
+	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase != PhaseRunning {
 			return nil
 		}
 		flight := &s.slots[slot].flight
+		if flight.key != rec.Key {
+			s.sched, _ = s.sched.Observe(now, Claimed{Kind: kind})
+		}
 		flight.key = rec.Key
 		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
