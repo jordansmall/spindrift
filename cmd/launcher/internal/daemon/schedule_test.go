@@ -427,7 +427,7 @@ func TestScheduleTipMovedResetsOnlyJammedKinds(t *testing.T) {
 		ChildDone{Kind: schedResearch, Result: ChildEmpty},
 		ChildDone{Kind: schedButler, Result: ChildJammed})
 
-	s, lifted, _ := s.LiftJams(schedT0)
+	s, lifted, _ := s.TipMoved(schedT0)
 	if want := []Kind{schedWork, schedButler}; !reflect.DeepEqual(lifted, want) {
 		t.Fatalf("lifted = %v, want %v", lifted, want)
 	}
@@ -437,7 +437,7 @@ func TestScheduleTipMovedResetsOnlyJammedKinds(t *testing.T) {
 	if v := s.View(schedResearch, schedT0); !v.Gated {
 		t.Fatal("queue-empty research must stay gated across a moved tip")
 	}
-	if _, lifted, _ = s.LiftJams(schedT0); len(lifted) != 0 {
+	if _, lifted, _ = s.TipMoved(schedT0); len(lifted) != 0 {
 		t.Fatalf("second lift = %v, want none", lifted)
 	}
 }
@@ -462,9 +462,9 @@ func TestScheduleJamBackoffDoublesAndTipMovedLifts(t *testing.T) {
 	}
 
 	s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: 5}, ChildDone{Kind: schedWork, Result: ChildJammed})
-	s, _, _ = s.LiftJams(now)
+	s, _, _ = s.TipMoved(now)
 	if d := s.Decide(now, Occupancy{}); d != (Start{Kind: schedWork}) {
-		t.Fatalf("after LiftJams: %#v, want Start", d)
+		t.Fatalf("after TipMoved: %#v, want Start", d)
 	}
 	s = schedObserve(t, s, now, ChildDone{Kind: schedWork, Result: ChildJammed})
 	if p := s.Decide(now, Occupancy{}).(Park); p.Until.Sub(now) != schedFloor {
@@ -506,7 +506,7 @@ func TestScheduleJamLiftsOnDemandRiseOrTipMove(t *testing.T) {
 				s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: tt.probed})
 			}
 			if tt.tipMoved {
-				s, _, _ = s.LiftJams(now)
+				s, _, _ = s.TipMoved(now)
 			}
 			if got := s.View(schedWork, now).Jammed; got != tt.wantJam {
 				t.Fatalf("Jammed = %v, want %v", got, tt.wantJam)
@@ -787,7 +787,7 @@ func TestScheduleDemandFailedAfterClaimDoesNotRestartSpentKind(t *testing.T) {
 	}
 }
 
-func TestScheduleLiftJamsWokeOnlyWhenALiftedKindBecomesStartable(t *testing.T) {
+func TestScheduleTipMovedWokeOnlyWhenALiftedKindBecomesStartable(t *testing.T) {
 	work := func(r ChildOutcome) ChildDone { return ChildDone{Kind: schedWork, Result: r} }
 	probe := func(n int) DemandProbed { return DemandProbed{Kind: schedWork, Ready: n} }
 	tests := []struct {
@@ -802,7 +802,7 @@ func TestScheduleLiftJamsWokeOnlyWhenALiftedKindBecomesStartable(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			s := schedObserve(t, probedSchedule(allKinds(), 0), schedT0, tc.evs...)
-			if _, _, woke := s.LiftJams(schedT0); woke != tc.want {
+			if _, _, woke := s.TipMoved(schedT0); woke != tc.want {
 				t.Fatalf("woke = %v, want %v", woke, tc.want)
 			}
 		})
@@ -1023,14 +1023,14 @@ func TestScheduleReportedTipMoveLiftsWaitingKind(t *testing.T) {
 	s := schedObserve(t, reportedSchedule(schedWork, schedButler), schedT0,
 		ChildDone{Kind: schedWork, Result: ChildEmpty},
 		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{OnTipMove: true}})
-	s, lifted, woke := s.LiftJams(schedT0)
+	s, lifted, woke := s.TipMoved(schedT0)
 	if want := []Kind{schedButler}; !reflect.DeepEqual(lifted, want) || !woke {
 		t.Fatalf("lifted = %v woke = %v, want %v and woke", lifted, woke, want)
 	}
 	if d := s.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedButler}) {
 		t.Fatalf("after lift: %#v, want Start butler", d)
 	}
-	if _, lifted, _ = s.LiftJams(schedT0); len(lifted) != 0 {
+	if _, lifted, _ = s.TipMoved(schedT0); len(lifted) != 0 {
 		t.Fatalf("second lift = %v, want none", lifted)
 	}
 }
@@ -1038,7 +1038,7 @@ func TestScheduleReportedTipMoveLiftsWaitingKind(t *testing.T) {
 func TestScheduleReportedTipMoveDoesNotLiftTimedWait(t *testing.T) {
 	s := schedObserve(t, reportedSchedule(schedButler), schedT0,
 		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{At: schedAt(time.Hour)}})
-	if _, lifted, woke := s.LiftJams(schedT0); len(lifted) != 0 || woke {
+	if _, lifted, woke := s.TipMoved(schedT0); len(lifted) != 0 || woke {
 		t.Fatalf("lifted = %v woke = %v, want neither", lifted, woke)
 	}
 }
@@ -1067,17 +1067,17 @@ func TestNextDueMerge(t *testing.T) {
 func TestScheduleReportedView(t *testing.T) {
 	due := schedAt(time.Hour)
 	s := reportedSchedule(schedWork, schedButler)
-	if v := s.View(schedWork, schedT0); v.Reported || v.DueKnown {
-		t.Fatalf("work view = %+v, want not reported", v)
+	if v := s.View(schedWork, schedT0); !v.NextDue.IsZero() || v.Gated {
+		t.Fatalf("work view = %+v, want no due state, ungated", v)
 	}
-	if v := s.View(schedButler, schedT0); !v.Reported || v.DueKnown || v.Gated {
-		t.Fatalf("start-up butler view = %+v, want reported, unknown, ungated", v)
+	if v := s.View(schedButler, schedT0); !v.NextDue.IsZero() || v.Gated {
+		t.Fatalf("start-up butler view = %+v, want unknown, ungated", v)
 	}
 
 	timed := schedObserve(t, s, schedT0,
 		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{At: due}})
 	v := timed.View(schedButler, schedT0)
-	if !v.Reported || !v.DueKnown || v.NextDue.At != due || !v.Gated || v.Until != due {
+	if v.NextDue.At != due || !v.Gated || v.Until != due {
 		t.Fatalf("timed view = %+v, want gated until %v", v, due)
 	}
 	if v := timed.View(schedButler, due); v.Gated || !v.Until.IsZero() {
@@ -1091,7 +1091,7 @@ func TestScheduleReportedView(t *testing.T) {
 	}
 
 	backoff := schedObserve(t, s, schedT0, ChildDone{Kind: schedButler, Result: ChildEmpty})
-	if v := backoff.View(schedButler, schedT0); v.DueKnown || !v.Gated || !v.Until.Equal(schedAt(schedFloor)) {
+	if v := backoff.View(schedButler, schedT0); !v.NextDue.IsZero() || !v.Gated || !v.Until.Equal(schedAt(schedFloor)) {
 		t.Fatalf("fallback view = %+v, want the backoff gate", v)
 	}
 }
