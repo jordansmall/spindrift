@@ -182,6 +182,20 @@ func TestMergeImmediate(t *testing.T) {
 			wantMerged:       false,
 			wantRebaseCalled: 3,
 		},
+		{
+			// A permanent push failure (auth, permission, missing repo) does
+			// not wrap ErrTransientPushFailure, so the loop must not burn retries on it.
+			name:              "conflict → rebase permanent push failure → no retry, error returned",
+			maxRebaseAttempts: 3,
+			mergeErrs:         []error{forge.ErrMergeConflict},
+			rebaseErrs: []error{
+				errors.New("git push --force-with-lease: exit status 128: remote: Repository not found."),
+				nil,
+			},
+			wantErr:          true,
+			wantMerged:       false,
+			wantRebaseCalled: 1,
+		},
 	}
 
 	for _, tc := range cases {
@@ -727,6 +741,36 @@ func TestMergeImmediate_StaleBaseNonTransientRebaseFailureBlocksMerge(t *testing
 	}
 	if len(fc.RebasedURLs) != 1 {
 		t.Errorf("Rebase called %d times, want 1 (non-transient error must not enter the push-retry loop)", len(fc.RebasedURLs))
+	}
+}
+
+// A permanent push failure (auth, permission, missing repo) does not wrap
+// ErrTransientPushFailure, so the preflight's push-retry loop must not burn
+// retries on it: one Rebase call, and the merge stays blocked.
+func TestMergeImmediate_StaleBasePermanentPushFailureIsNotRetried(t *testing.T) {
+	c := baseConfig()
+	c.MaxRebaseAttempts = 3
+	c.PreflightStaleBase = true
+	fc := forge.NewFake()
+	fc.SetNeedsUpdate(testPR, true)
+	fc.RebaseErrs = []error{
+		errors.New("git push --force-with-lease: exit status 128: remote: Repository not found."),
+		nil,
+	}
+	fc.MergeErrs = []error{nil}
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
+	s := newTestSettle(c, fc, fc)
+
+	err := s.mergeImmediate("1", 0, testPR, nil)
+
+	if err == nil {
+		t.Fatal("mergeImmediate: want error for a permanent push failure, got nil")
+	}
+	if fc.Merged != "" {
+		t.Errorf("Merge must not be called after the stale-base rebase failed; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.RebasedURLs) != 1 {
+		t.Errorf("Rebase called %d times, want 1 (a permanent push failure must not be retried)", len(fc.RebasedURLs))
 	}
 }
 
