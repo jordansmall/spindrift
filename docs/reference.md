@@ -6608,7 +6608,11 @@ and vice versa, so each kind's own no-work streak — and the growing wait
 it earns — lives and resets independently of the other's). Within a kind
 the streak is still pool-wide, not per slot: any slot's no-work result
 against a kind counts against that kind's one timer, the same shape as the
-breaker below. The first no-work check against a kind waits `IdleFloor`
+breaker below. No-work results from children that all started under the
+same gate count once, not once per slot: when several slots drain a
+kind's queue together, the first result gates the kind, and the rest,
+while that gate is still live, leave its backoff and deadline as they
+are (issue #4618). The first no-work check against a kind waits `IdleFloor`
 (`DAEMON_IDLE_FLOOR`, default 5 minutes, see
 [Advanced tuning](#advanced-tuning)); each further *consecutive* no-work
 check against that same kind doubles the wait, capped at `IdleCap`
