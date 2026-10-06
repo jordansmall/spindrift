@@ -209,8 +209,8 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 }
 
 // Observe folds ev into the schedule at now and returns the updated copy.
-// woke reports that the change can start a kind that was not startable
-// before; this slice never reports it.
+// woke reports that the event made its kind startable when it was not before.
+// Only the observed kind changes, so that is the whole startable set growing.
 func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	kind := ev.kind()
 	ks, ok := s.state[kind]
@@ -242,7 +242,12 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 			ks.probedAt = time.Time{} // the claim moved the count; re-probe before the next start
 		}
 	}
-	return s.with(kind, ks), false
+	return s.with(kind, ks), opened(s.state[kind], ks, now)
+}
+
+// opened reports that a kind startable after a change was not before it.
+func opened(before, after kindSched, now time.Time) bool {
+	return after.startable(now, 0) && !before.startable(now, 0)
 }
 
 func (k kindSched) childDone(now time.Time, r ChildOutcome) kindSched {
@@ -273,17 +278,19 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome) kindSched {
 
 // LiftJams ends every jammed kind's gate — a moved tip is evidence a merge
 // unblocked them, though not that an empty queue refilled — and returns the
-// kinds lifted in configured order, for the tip_moved event.
-func (s Schedule) LiftJams() (Schedule, []Kind) {
-	var lifted []Kind
+// kinds lifted in configured order, for the tip_moved event. woke is Observe's
+// answer for the lift: some lifted kind is startable at now that was not.
+func (s Schedule) LiftJams(now time.Time) (_ Schedule, lifted []Kind, woke bool) {
 	for _, kind := range s.kinds {
 		if ks := s.state[kind]; ks.gate.jammedNow() {
+			before := ks
 			ks.gate = ks.gate.reset()
 			s = s.with(kind, ks)
 			lifted = append(lifted, kind)
+			woke = woke || opened(before, ks, now)
 		}
 	}
-	return s, lifted
+	return s, lifted, woke
 }
 
 // claimsOf is the number of claims folded into kind, 0 for an unknown kind.
