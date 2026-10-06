@@ -96,7 +96,8 @@ After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
 `docs/flake-options.md`,
 `cmd/launcher/internal/doctor/labelmeta_gen.go`,
-`cmd/launcher/internal/inputdoc/emptyissetting_gen.go`, and the generated section of
+`cmd/launcher/internal/inputdoc/emptyissetting_gen.go`,
+`cmd/launcher/internal/inputdoc/schemadefaults_gen.go`, and the generated section of
 `templates/default/flake.nix`'s commented-out `settings` example — instead of
 hand-editing them until the drift-guard checks (`nix/checks/schema-drift.nix`) go quiet:
 

@@ -672,6 +672,26 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when a non-secret knob's default in
+  # lib/env-schema.nix changes; gofmt-normalized the same way regen normalizes
+  # it (issue #4592).
+  schema-defaults-gen-go =
+    let
+      raw = pkgs.writeText "schemadefaults_gen.go.raw" (renderers.renderSchemaDefaultsGo schema);
+    in
+    pkgs.runCommand "schema-defaults-gen-go"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/inputdoc/schemadefaults_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/inputdoc/schemadefaults_gen.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regenerate with `nix run .#regen` when lib/labels.nix changes. The raw
   # renderer output is gofmt-normalized here the same way regen normalizes it
   # (issue #2528).
