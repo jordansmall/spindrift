@@ -869,6 +869,16 @@ func TestLoopRejectsBadProbeIntervals(t *testing.T) {
 	}
 }
 
+func TestLoopRejectsTrackerForUndrawnKind(t *testing.T) {
+	cfg := testConfig(1)
+	cfg.Trackers = map[Kind]string{researchKind: "github"}
+	var buf bytes.Buffer
+	h := Loop(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
+	if h.Class != HaltInvalidConfig {
+		t.Fatalf("halt = %v, want invalid config", h)
+	}
+}
+
 // parkedLoopDoubles builds the doubles a wake test needs: a clock that parks
 // every Sleep until the test releases it, and a runner holding each slot's
 // child until released. The cleanup cancels the returned ctx and drains the

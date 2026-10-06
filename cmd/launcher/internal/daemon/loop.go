@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"sync"
 	"time"
 
@@ -191,6 +192,11 @@ type Config struct {
 	// interval non-negative.
 	ProbeIntervals map[Kind]time.Duration
 
+	// Trackers names the tracker each kind's Demand counts against. Kinds
+	// sharing a name share one rate-limit pause (ADR 0059); a kind with no
+	// entry is its own tracker. Every key must be in Kinds.
+	Trackers map[Kind]string
+
 	// FailureBackoff is how long a slot sleeps before refilling itself
 	// after an unclassified failure (an unrecognised exit code, a
 	// RunChild seam error, or a ResolveTip error): the bad
@@ -265,17 +271,17 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 		}
 		seenKinds[k] = true
 	}
-	probed := make([]Kind, 0, len(cfg.ProbeIntervals))
-	for k := range cfg.ProbeIntervals {
-		probed = append(probed, k)
-	}
-	sort.Slice(probed, func(i, j int) bool { return probed[i] < probed[j] })
-	for _, k := range probed {
+	for _, k := range sortedKeys(cfg.ProbeIntervals) {
 		if !seenKinds[k] {
 			return invalidConfig(em, cfg, fmt.Sprintf("probe interval for kind %q, which is not in kinds", k))
 		}
 		if d := cfg.ProbeIntervals[k]; d < 0 {
 			return invalidConfig(em, cfg, fmt.Sprintf("probe interval for kind %q must be non-negative, got %s", k, d))
+		}
+	}
+	for _, k := range sortedKeys(cfg.Trackers) {
+		if !seenKinds[k] {
+			return invalidConfig(em, cfg, fmt.Sprintf("tracker for kind %q, which is not in kinds", k))
 		}
 	}
 	if cfg.ResearchReservation < 0 || cfg.ResearchReservation > cfg.Slots {
@@ -350,6 +356,10 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 // directly, bypassing pool.snapshot (there is no pool yet to snapshot): cfg
 // is otherwise unvalidated at this point, so cfg.Kinds is copied over as
 // given rather than assumed well-formed.
+// sortedKeys returns m's kinds in order, so config validation reports the same
+// offender every run.
+func sortedKeys[V any](m map[Kind]V) []Kind { return slices.Sorted(maps.Keys(m)) }
+
 func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 	h := Halt{Class: HaltInvalidConfig, Detail: detail}
 	em.Emit(h.Event())
