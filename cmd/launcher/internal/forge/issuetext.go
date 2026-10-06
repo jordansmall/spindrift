@@ -126,6 +126,9 @@ func relationRank(r LinkRelation) int {
 // ref, never cut mid-body. Sizing reserves the heading, the unresolved list,
 // and the worst case where every resolvable entry lands in the omitted list
 // before spending on bodies, so the section can end under budget, never over.
+// The unresolved list is sized first, then bodies, then the omitted list from
+// whatever is left; a list that does not fit is cut line by line with the rest
+// collapsed into an "and N more" line, or dropped if even that cannot fit.
 func renderLinkedIssues(links []LinkedIssue, budget int) string {
 	if budget <= len(linkedIssuesHeading) {
 		return ""
@@ -151,16 +154,14 @@ func renderLinkedIssues(links []LinkedIssue, budget int) string {
 
 	var unresolvedBlock string
 	if len(unresolved) > 0 {
-		var b strings.Builder
-		b.WriteString("### Unresolved references\n\n")
+		lines := make([]string, len(unresolved))
 		for i, l := range unresolved {
-			if i > 0 {
-				b.WriteByte('\n')
-			}
-			fmt.Fprintf(&b, "- %s (%s of %s): %s", l.Ref, l.Relation, l.LinkedFrom, l.Err)
+			lines[i] = fmt.Sprintf("- %s (%s of %s): %s", l.Ref, l.Relation, l.LinkedFrom, l.Err)
 		}
-		unresolvedBlock = b.String()
-		budget -= len(unresolvedBlock) + len(blockSep)
+		unresolvedBlock = boundedList("### Unresolved references\n\n", lines, budget-len(blockSep))
+		if unresolvedBlock != "" {
+			budget -= len(unresolvedBlock) + len(blockSep)
+		}
 	}
 
 	// Reserve as if every resolvable entry ends up omitted, the worst case
@@ -175,6 +176,9 @@ func renderLinkedIssues(links []LinkedIssue, budget int) string {
 		worstOmitted += len(omittedLines[i]) + 1 // +1 for the '\n' joining bullets
 	}
 	entryBudget := budget - worstOmitted
+	// remaining charges each admitted block in full, so what is left after
+	// admission bounds the omitted list; entryBudget only gates admission.
+	remaining := budget
 
 	var blocks []string
 	var omittedRefs []string
@@ -185,32 +189,61 @@ func renderLinkedIssues(links []LinkedIssue, budget int) string {
 		netCost := len(block) + len(blockSep) - (len(omittedLines[i]) + 1)
 		if netCost <= entryBudget {
 			entryBudget -= netCost
+			remaining -= len(block) + len(blockSep)
 			blocks = append(blocks, block)
 		} else {
 			omittedRefs = append(omittedRefs, l.Ref)
 		}
 	}
 
-	if len(unresolvedBlock) > 0 {
+	if unresolvedBlock != "" {
 		blocks = append(blocks, unresolvedBlock)
 	}
 	if len(omittedRefs) > 0 {
-		var b strings.Builder
-		b.WriteString("### Omitted for size\n\n")
+		lines := make([]string, len(omittedRefs))
 		for i, ref := range omittedRefs {
-			if i > 0 {
-				b.WriteByte('\n')
-			}
-			b.WriteString("- ")
-			b.WriteString(ref)
+			lines[i] = "- " + ref
 		}
-		blocks = append(blocks, b.String())
+		if omitted := boundedList("### Omitted for size\n\n", lines, remaining-len(blockSep)); omitted != "" {
+			blocks = append(blocks, omitted)
+		}
 	}
 
 	if len(blocks) == 0 {
 		return ""
 	}
 	return linkedIssuesHeading + strings.Join(blocks, blockSep)
+}
+
+// boundedList renders heading plus lines joined by '\n', never longer than
+// budget bytes. It keeps the longest prefix of lines that still leaves room for
+// a "- … and N more" line counting the rest, and returns "" when no such
+// prefix fits (not even a collapse line alone) or when lines is empty.
+func boundedList(heading string, lines []string, budget int) string {
+	n := len(lines)
+	if n == 0 {
+		return ""
+	}
+	render := func(k int) string {
+		out := heading + strings.Join(lines[:k], "\n")
+		if k < n {
+			if k > 0 {
+				out += "\n"
+			}
+			out += fmt.Sprintf("- … and %d more", n-k)
+		}
+		return out
+	}
+	if out := render(n); len(out) <= budget {
+		return out
+	}
+	// Below n each kept line adds more bytes than the shrinking count saves,
+	// so size grows with k and a binary search finds the longest fitting prefix.
+	k := sort.Search(n, func(k int) bool { return len(render(k)) > budget })
+	if k == 0 {
+		return ""
+	}
+	return render(k - 1)
 }
 
 // renderLinkedEntry renders one resolved LinkedIssue as a heading, a status
