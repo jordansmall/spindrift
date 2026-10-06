@@ -206,7 +206,11 @@ type HostPostedIssueFiler interface {
 type DemandCounter interface {
 	// CountReady returns the number of open issues in the Dispatchable
 	// state -- the set ListIssues(Dispatchable) returns.
-	CountReady() (int, error)
+	//
+	// fresh asks an adapter that caches change tokens (e.g. an ETag) to skip
+	// its conditional request and re-read; an adapter without a cache
+	// ignores it.
+	CountReady(fresh bool) (int, error)
 	// ProbeInterval is the adapter's default cadence for re-asking
 	// CountReady; a cheap in-process scan answers faster than a
 	// rate-limited API.

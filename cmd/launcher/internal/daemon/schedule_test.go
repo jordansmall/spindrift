@@ -691,3 +691,43 @@ func TestScheduleLiftJamsWokeOnlyWhenALiftedKindBecomesStartable(t *testing.T) {
 		})
 	}
 }
+
+// A child's exit 2 after Demand counted work makes the count suspect, so the
+// next probe must skip any adapter cache; a probe that counted none gives no
+// reason to distrust it.
+func TestScheduleEmptyChildAfterDemandForcesFreshProbe(t *testing.T) {
+	probed := DemandProbed{Kind: schedWork, Ready: 3}
+	empty := ChildDone{Kind: schedWork, Result: ChildEmpty}
+
+	s := probedSchedule([]Kind{schedWork}, 0)
+	if s.View(schedWork, schedT0).Fresh {
+		t.Fatal("a new schedule is Fresh")
+	}
+	s = schedObserve(t, s, schedT0, probed)
+	if s.View(schedWork, schedT0).Fresh {
+		t.Fatal("Fresh after a probe alone")
+	}
+	s = schedObserve(t, s, schedT0, empty)
+	if !s.View(schedWork, schedT0).Fresh {
+		t.Fatal("not Fresh after Counted>0 then exit 2")
+	}
+
+	s = schedObserve(t, s, schedAt(time.Second), DemandFailed{Kind: schedWork})
+	if !s.View(schedWork, schedAt(time.Second)).Fresh {
+		t.Fatal("a failed probe cleared Fresh")
+	}
+	s = schedObserve(t, s, schedAt(time.Second), DemandProbed{Kind: schedWork, Ready: 3})
+	if !s.View(schedWork, schedAt(time.Second)).Fresh {
+		t.Fatal("a conditional probe cleared Fresh")
+	}
+	s = schedObserve(t, s, schedAt(time.Second), DemandProbed{Kind: schedWork, Ready: 3, Fresh: true})
+	if s.View(schedWork, schedAt(time.Second)).Fresh {
+		t.Fatal("a fresh probe left Fresh set")
+	}
+
+	s = probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 0}, empty)
+	if s.View(schedWork, schedT0).Fresh {
+		t.Fatal("Fresh after exit 2 with Counted==0")
+	}
+}

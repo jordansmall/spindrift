@@ -437,7 +437,7 @@ func testDemandCount(t *testing.T, h Harness) {
 
 	// Earlier scenarios share this tracker and may leave Dispatchable issues
 	// behind, so the mix is asserted as a delta from the starting count.
-	before, err := dc.CountReady()
+	before, err := dc.CountReady(false)
 	if err != nil {
 		t.Fatalf("CountReady: %v", err)
 	}
@@ -464,7 +464,7 @@ func testDemandCount(t *testing.T, h Harness) {
 	if err != nil {
 		t.Fatalf("ListIssues(Dispatchable): %v", err)
 	}
-	got, err := dc.CountReady()
+	got, err := dc.CountReady(false)
 	if err != nil {
 		t.Fatalf("CountReady: %v", err)
 	}

@@ -205,7 +205,7 @@ const demandProbeInterval = 20 * time.Second
 
 // CountReady implements forge.DemandCounter: the open Dispatchable issue
 // files, counted with the same predicate as ListIssues(Dispatchable).
-func (lt *LocalTracker) CountReady() (int, error) {
+func (lt *LocalTracker) CountReady(_ bool) (int, error) {
 	issues, err := lt.ListIssues(forge.Dispatchable)
 	return len(issues), err
 }

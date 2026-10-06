@@ -74,7 +74,7 @@ func TestForgejoDemand_ReadsTotalCountFromOneItemPage(t *testing.T) {
 	f := &demandFake{labelsBody: `[{"id":1,"name":"ready"}]`, issuesBody: readyItem, totalHeader: "7"}
 	dc := newDemandCounter(t, f)
 
-	n, err := dc.CountReady()
+	n, err := dc.CountReady(false)
 	if err != nil {
 		t.Fatalf("CountReady: %v", err)
 	}
@@ -94,7 +94,7 @@ func TestForgejoDemand_UndefinedLabelCountsZeroWithoutIssueQuery(t *testing.T) {
 	f := &demandFake{labelsBody: `[{"id":1,"name":"other"}]`, issuesBody: readyItem, totalHeader: "7"}
 	dc := newDemandCounter(t, f)
 
-	n, err := dc.CountReady()
+	n, err := dc.CountReady(false)
 	if err != nil {
 		t.Fatalf("CountReady: %v", err)
 	}
@@ -109,12 +109,12 @@ func TestForgejoDemand_UndefinedLabelCountsZeroWithoutIssueQuery(t *testing.T) {
 func TestForgejoDemand_UndefinedLabelIsRecheckedEveryProbe(t *testing.T) {
 	f := &demandFake{labelsBody: `[]`, issuesBody: readyItem, totalHeader: "2"}
 	dc := newDemandCounter(t, f)
-	if n, _ := dc.CountReady(); n != 0 {
+	if n, _ := dc.CountReady(false); n != 0 {
 		t.Fatalf("first CountReady = %d, want 0", n)
 	}
 
 	f.labelsBody = `[{"id":1,"name":"ready"}]`
-	n, err := dc.CountReady()
+	n, err := dc.CountReady(false)
 	if err != nil || n != 2 {
 		t.Fatalf("CountReady after label created = %d, %v; want 2, nil", n, err)
 	}
@@ -125,7 +125,7 @@ func TestForgejoDemand_LabelPreCheckCachedAcrossProbes(t *testing.T) {
 	dc := newDemandCounter(t, f)
 
 	for i := 0; i < 4; i++ {
-		if _, err := dc.CountReady(); err != nil {
+		if _, err := dc.CountReady(false); err != nil {
 			t.Fatalf("CountReady #%d: %v", i, err)
 		}
 	}
@@ -141,13 +141,13 @@ func TestForgejoDemand_MissingTotalCountErrors(t *testing.T) {
 	f := &demandFake{labelsBody: `[{"id":1,"name":"ready"}]`, issuesBody: readyItem}
 	dc := newDemandCounter(t, f)
 
-	_, err := dc.CountReady()
+	_, err := dc.CountReady(false)
 	if err == nil || !strings.Contains(err.Error(), "forgejo") {
 		t.Fatalf("CountReady error = %v, want one naming forgejo", err)
 	}
 
 	f.totalHeader = "many"
-	if _, err := dc.CountReady(); err == nil {
+	if _, err := dc.CountReady(false); err == nil {
 		t.Fatal("CountReady with an unparseable X-Total-Count returned nil error")
 	}
 }
@@ -155,7 +155,7 @@ func TestForgejoDemand_MissingTotalCountErrors(t *testing.T) {
 func TestForgejoDemand_DroppedFilterCountsZeroAndRechecksLabels(t *testing.T) {
 	f := &demandFake{labelsBody: `[{"id":1,"name":"ready"}]`, issuesBody: readyItem, totalHeader: "1"}
 	dc := newDemandCounter(t, f)
-	if n, _ := dc.CountReady(); n != 1 {
+	if n, _ := dc.CountReady(false); n != 1 {
 		t.Fatalf("warm-up CountReady = %d, want 1", n)
 	}
 
@@ -163,13 +163,13 @@ func TestForgejoDemand_DroppedFilterCountsZeroAndRechecksLabels(t *testing.T) {
 	f.labelsBody = `[]`
 	f.issuesBody = `[{"number":9,"title":"x","state":"open","labels":[]}]`
 	f.totalHeader = "40"
-	n, err := dc.CountReady()
+	n, err := dc.CountReady(false)
 	if err != nil || n != 0 {
 		t.Fatalf("CountReady with dropped filter = %d, %v; want 0, nil", n, err)
 	}
 
 	before := f.labelReqs.Load()
-	if n, _ := dc.CountReady(); n != 0 {
+	if n, _ := dc.CountReady(false); n != 0 {
 		t.Fatalf("next CountReady = %d, want 0", n)
 	}
 	if f.labelReqs.Load() == before {
@@ -187,7 +187,7 @@ func TestForgejoDemand_LabelCheckFailureWarnsOncePerOutage(t *testing.T) {
 
 	warnings := func() int {
 		out := captureStderr(t, func() {
-			if _, err := dc.CountReady(); err != nil {
+			if _, err := dc.CountReady(false); err != nil {
 				t.Errorf("CountReady: %v", err)
 			}
 		})

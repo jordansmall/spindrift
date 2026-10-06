@@ -888,3 +888,26 @@ func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 	}
 	requireNoRepark(t, clk, slots)
 }
+
+// Demand said there was work and the child exited 2: the next probe skips any
+// adapter cache.
+func TestLoopEmptyChildAfterDemandForcesFreshProbe(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clk := &testClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 2}}}
+	r.setDemand(workKind, 1)
+	r.onDemand = func(_ context.Context, k Kind) {
+		if r.demandCount(k) > 2 {
+			cancel()
+		}
+	}
+	var buf bytes.Buffer
+
+	Loop(ctx, probedConfig(1, time.Second, workKind), r, newTestEmitter(&buf), clk)
+
+	got := r.demandFreshCalls(workKind)
+	if len(got) < 2 || got[0] || !got[1] {
+		t.Fatalf("fresh flags per probe = %v, want false, true", got)
+	}
+}

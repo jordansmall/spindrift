@@ -62,7 +62,7 @@ func TestBuildDemandSources_LocalTrackerPerKindLabel(t *testing.T) {
 		if !ok {
 			t.Fatalf("no demand source for %s", kind)
 		}
-		got, err := c.CountReady()
+		got, err := c.CountReady(false)
 		if err != nil || got != want {
 			t.Errorf("%s CountReady() = %d, %v; want %d, nil", kind, got, err, want)
 		}
@@ -82,7 +82,7 @@ func TestBuildDemandSources_ConfiguredWorkLabel(t *testing.T) {
 		"LOCAL_ISSUES_DIR": dir,
 		"LABEL":            "go-agent",
 	}), allDemandKinds)
-	got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady()
+	got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady(false)
 	if err != nil || got != 1 {
 		t.Errorf("CountReady() = %d, %v; want 1, nil", got, err)
 	}
@@ -103,7 +103,7 @@ func TestBuildDemandSources_RelativeDirResolvesAgainstCwd(t *testing.T) {
 			"LOCAL_ISSUES_DIR": dir,
 			"LABEL":            "ready-for-agent",
 		}), allDemandKinds)
-		got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady()
+		got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady(false)
 		if err != nil || got != 1 {
 			t.Errorf("dir %q: CountReady() = %d, %v; want 1, nil", dir, got, err)
 		}
@@ -146,7 +146,7 @@ func TestBuildDemandSources_AmbientOverrideOfDocumentKnobIgnored(t *testing.T) {
 		"LOCAL_ISSUES_DIR": docDir,
 		"LABEL":            "ready-for-agent",
 	}), allDemandKinds)
-	got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady()
+	got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady(false)
 	if err != nil || got != 1 {
 		t.Errorf("CountReady() = %d, %v; want 1 (the document's directory and label), nil", got, err)
 	}
@@ -164,7 +164,7 @@ func TestBuildDemandSources_AmbientKnobAbsentFromDocumentHonoured(t *testing.T) 
 		"ISSUE_TRACKER": "local",
 		"LABEL":         "ready-for-agent",
 	}), allDemandKinds)
-	got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady()
+	got, err := src[daemon.KindOf(dispatchkind.Work)].CountReady(false)
 	if err != nil || got != 1 {
 		t.Errorf("CountReady() = %d, %v; want 1, nil", got, err)
 	}
@@ -217,7 +217,7 @@ func TestParseProbeInterval(t *testing.T) {
 
 type fixedInterval time.Duration
 
-func (fixedInterval) CountReady() (int, error)       { return 0, nil }
+func (fixedInterval) CountReady(bool) (int, error)   { return 0, nil }
 func (f fixedInterval) ProbeInterval() time.Duration { return time.Duration(f) }
 
 func TestProbeIntervals(t *testing.T) {
@@ -246,11 +246,11 @@ func TestHostRunnerDemand(t *testing.T) {
 	}), allDemandKinds)
 	r := mustHostRunner(t, hostRunnerConfig{env: []string{}, demand: src})
 
-	d, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Work))
+	d, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Work), false)
 	if err != nil || d.Ready != 1 {
 		t.Errorf("Demand(work) = %+v, %v; want Ready 1, nil", d, err)
 	}
-	if _, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Butler)); err == nil {
+	if _, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Butler), false); err == nil {
 		t.Error("Demand(butler) = nil error, want an error: no demand source")
 	}
 }

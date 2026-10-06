@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -98,6 +99,7 @@ type scriptedRunner struct {
 	demand      map[Kind]Demand
 	demandErr   map[Kind]error
 	demandCalls map[Kind]int
+	demandFresh map[Kind][]bool // the fresh flag of each Demand call, in order
 	onDemand    func(ctx context.Context, kind Kind)
 
 	mu           sync.Mutex
@@ -1183,14 +1185,23 @@ func (r *scriptedRunner) demandCount(kind Kind) int {
 	return r.demandCalls[kind]
 }
 
+// demandFreshCalls reports the fresh flag of each Demand call for kind.
+func (r *scriptedRunner) demandFreshCalls(kind Kind) []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.demandFresh[kind])
+}
+
 // Demand answers from setDemand/setDemandErr: an unscripted kind has no
 // demand, never an error.
-func (r *scriptedRunner) Demand(ctx context.Context, kind Kind) (Demand, error) {
+func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool) (Demand, error) {
 	r.mu.Lock()
 	if r.demandCalls == nil {
 		r.demandCalls = make(map[Kind]int)
+		r.demandFresh = make(map[Kind][]bool)
 	}
 	r.demandCalls[kind]++
+	r.demandFresh[kind] = append(r.demandFresh[kind], fresh)
 	hook := r.onDemand
 	r.mu.Unlock()
 	if hook != nil {

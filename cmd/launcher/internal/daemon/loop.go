@@ -66,8 +66,9 @@ type Runner interface {
 	// failed and the returned Tip is the zero value.
 	ResolveTip(ctx context.Context) (Tip, error)
 	// Demand counts the startable items a child of kind could claim. Only
-	// asked for a kind with a Config.ProbeIntervals entry (ADR 0059).
-	Demand(ctx context.Context, kind Kind) (Demand, error)
+	// asked for a kind with a Config.ProbeIntervals entry (ADR 0059). fresh
+	// tells an adapter that caches to skip its cache and re-read.
+	Demand(ctx context.Context, kind Kind, fresh bool) (Demand, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
 }
 

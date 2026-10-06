@@ -87,6 +87,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 	f := &demandFlight{done: make(chan struct{})}
 	p.demandFlights[kind] = f
 	claims := p.st.sched.claimsOf(kind)
+	fresh := p.st.sched.View(kind, p.clk.Now()).Fresh
 	p.mu.Unlock()
 
 	// Deferred so a panic in Demand still clears the flight and releases
@@ -99,7 +100,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		close(f.done)
 	}()
 
-	d, err := p.r.Demand(ctx, kind)
+	d, err := p.r.Demand(ctx, kind, fresh)
 	now := p.clk.Now()
 	if err != nil {
 		p.mutate(func(s *state) []Event {
@@ -112,7 +113,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		// Zero when never probed, so a first probe finding work reads as
 		// appearing and one finding none as nothing at all.
 		prev := s.sched.View(kind, now).Counted
-		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims})
+		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh})
 		switch {
 		case prev == 0 && d.Ready > 0:
 			return []Event{{Event: "demand_appeared", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)}}

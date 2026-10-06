@@ -279,7 +279,7 @@ func (c *forgejoClient) ProbeInterval() time.Duration { return demandProbeInterv
 // A configured label the repo doesn't define counts zero without an issue
 // query, because Forgejo silently drops an unresolved labels= filter and would
 // count every open issue (issue #3952).
-func (c *forgejoClient) CountReady() (int, error) {
+func (c *forgejoClient) CountReady(_ bool) (int, error) {
 	label := c.cfg.Labels.Label(forge.Dispatchable)
 	if !c.labelKnownDefined(label) {
 		return 0, nil
