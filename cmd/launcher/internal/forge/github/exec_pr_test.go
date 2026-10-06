@@ -234,9 +234,40 @@ fi
 	}
 }
 
+// gh label list caps at --limit, so a repo with more labels was silently
+// truncated (issue #4607). The fake serves 150 labels only to a paginated
+// REST call, 100 otherwise, and rejects any --limit cap.
+func TestListLabels_PagesPastOneHundred(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "api" ] && [ "$2" = "repos/owner/repo/labels?per_page=100" ]; then
+  n=100
+  for a in "$@"; do
+    [ "$a" = "--paginate" ] && n=150
+    [ "$a" = "--limit" ] && { printf 'unexpected --limit\n' >&2; exit 1; }
+  done
+  i=1
+  while [ "$i" -le "$n" ]; do printf 'label-%d\n' "$i"; i=$((i+1)); done
+  exit 0
+fi
+printf 'unexpected argv: %s\n' "$*" >&2
+exit 1
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	got, err := c.ListLabels()
+	if err != nil {
+		t.Fatalf("ListLabels: %v", err)
+	}
+	if len(got) != 150 {
+		t.Fatalf("ListLabels returned %d labels, want 150", len(got))
+	}
+	if got[0] != "label-1" || got[149] != "label-150" {
+		t.Fatalf("ListLabels order/content wrong: first %q last %q", got[0], got[149])
+	}
+}
+
 // The error must carry gh's stderr text (issue #2864).
 func TestListLabels_FailureSurfacesStderr(t *testing.T) {
-	prependFakeGH(t, `if [ "$1" = "label" ] && [ "$2" = "list" ]; then
+	prependFakeGH(t, `if [ "$1" = "api" ]; then
   printf 'HTTP 502: Bad Gateway\n' >&2
   exit 1
 fi

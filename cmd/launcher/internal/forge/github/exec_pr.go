@@ -408,15 +408,15 @@ func (e *execClient) Probe() (string, error) {
 }
 
 // ListLabels returns the names of all labels defined in the repository.
+// --paginate is load-bearing: one page holds at most demandPageSize labels.
 func (e *execClient) ListLabels() ([]string, error) {
-	out, err := exec.Command("gh", "label", "list",
-		"--repo", e.repo,
-		"--json", "name",
+	out, err := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/labels?per_page=%d", e.repo, demandPageSize),
+		"--paginate",
 		"--jq", ".[].name",
-		"--limit", "100",
 	).Output()
 	if err != nil {
-		return nil, ghCommandErr("gh label list", err)
+		return nil, ghCommandErr("gh api labels", err)
 	}
 	var labels []string
 	sc := bufio.NewScanner(strings.NewReader(string(out)))
