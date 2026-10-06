@@ -7,6 +7,7 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
@@ -18,10 +19,13 @@ type demandSources map[daemon.Kind]forge.DemandCounter
 
 // buildDemandSources builds a demand counter for each kind in kinds whose
 // descriptor row says DemandTrackerProbe, from the same settings a child
-// resolves ISSUE_TRACKER, LOCAL_ISSUES_DIR and the work labels from. A
-// tracker without a forge.DemandCounter adapter (everything but local so
-// far) or a missing knob yields no source, never an error: the kind then
-// simply stays exit-driven.
+// resolves ISSUE_TRACKER, the tracker's own knobs and the work labels from. A
+// tracker without a forge.DemandCounter adapter (everything but local and
+// forgejo so far) or a missing knob yields no source, never an error: the
+// kind then simply stays exit-driven.
+//
+// FORGEJO_TOKEN is read as a plain knob; a token supplied only through its
+// -file or -cmd form is invisible here, so that deployment stays exit-driven.
 //
 // A relative LOCAL_ISSUES_DIR is used as written: it resolves against the
 // daemon's cwd, which every child inherits (RunChild sets no cmd.Dir), so
@@ -37,11 +41,25 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		return nil
 	}
 
-	if childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER")) != "local" {
-		return nil
-	}
-	dir := childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR"))
-	if dir == "" {
+	var newTracker func(forge.DispatchLabels) forge.IssueTracker
+	switch childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER")) {
+	case "local":
+		dir := childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR"))
+		if dir == "" {
+			return nil
+		}
+		newTracker = func(l forge.DispatchLabels) forge.IssueTracker { return local.NewLocalTracker(dir, l) }
+	case "forgejo":
+		baseURL := childKnob(doc, "FORGEJO_BASE_URL", os.Getenv("FORGEJO_BASE_URL"))
+		repo := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
+		token := childKnob(doc, "FORGEJO_TOKEN", os.Getenv("FORGEJO_TOKEN"))
+		if repo == "" || token == "" {
+			return nil
+		}
+		newTracker = func(l forge.DispatchLabels) forge.IssueTracker {
+			return forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: baseURL, Repo: repo, Token: token, Labels: l})
+		}
+	default:
 		return nil
 	}
 	configured := forge.DispatchLabels{
@@ -57,7 +75,7 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		if labels.Dispatchable == "" {
 			continue
 		}
-		counter, ok := forge.IssueTracker(local.NewLocalTracker(dir, labels)).(forge.DemandCounter)
+		counter, ok := newTracker(labels).(forge.DemandCounter)
 		if !ok {
 			continue
 		}
