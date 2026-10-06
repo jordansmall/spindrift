@@ -226,3 +226,77 @@ func childValue(doc *inputdoc.Document, key, ambient string) (string, bool) {
 	}
 	return ambient, ambient != ""
 }
+
+// childSharedKnobs are the raw values of the knobs the daemon resolves as a
+// child does (issue #4623): the document first, then the ambient env.
+type childSharedKnobs struct {
+	baseBranch, maxParallel, awakeWindow          string
+	butlerChores, butlerEvery, butlerChoreClasses string
+}
+
+// resolveChildSharedKnobs resolves every knob both the daemon and its
+// children read. BASE_BRANCH and MAX_PARALLEL are required; the rest fall
+// back to their schema default, so an empty BUTLER_CHORES is the default, not
+// a configuration error.
+func resolveChildSharedKnobs(doc *inputdoc.Document) (childSharedKnobs, error) {
+	var k childSharedKnobs
+	var err error
+	if k.baseBranch, err = requiredChildKnob(doc, "BASE_BRANCH", os.Getenv("BASE_BRANCH")); err != nil {
+		return k, err
+	}
+	if k.maxParallel, err = requiredChildKnob(doc, "MAX_PARALLEL", os.Getenv("MAX_PARALLEL")); err != nil {
+		return k, err
+	}
+	k.awakeWindow = childKnob(doc, "DAEMON_AWAKE_WINDOW", os.Getenv("DAEMON_AWAKE_WINDOW"))
+	k.butlerChores = childKnob(doc, "BUTLER_CHORES", os.Getenv("BUTLER_CHORES"))
+	k.butlerEvery = childKnob(doc, "BUTLER_EVERY", os.Getenv("BUTLER_EVERY"))
+	k.butlerChoreClasses = childKnob(doc, "BUTLER_CHORE_CLASSES", os.Getenv("BUTLER_CHORE_CLASSES"))
+	return k, nil
+}
+
+// daemonOnlyRaw are the raw values of the daemonOnlyKnobs. selfApp and
+// researchReservation stay empty when their gate is off.
+type daemonOnlyRaw struct {
+	app, selfApp, idleFloor, idleCap, probeInterval string
+	failureBackoff, breakerThreshold, breakerWindow string
+	researchReservation                             string
+}
+
+// resolveDaemonOnlyKnobs resolves, through Document.Lookup, the knobs no child
+// reads, so a non-empty ambient value still wins (ADR 0020).
+// DAEMON_SELF_APP is read only when the self-change check is on (withSelf),
+// RESEARCH_RESERVATION only for a multi-kind daemon (multiKind).
+func resolveDaemonOnlyKnobs(doc *inputdoc.Document, stderr io.Writer, withSelf, multiKind bool) (daemonOnlyRaw, error) {
+	var k daemonOnlyRaw
+	var err error
+	if k.app, err = doc.Resolve("DAEMON_APP", stderr); err != nil {
+		return k, err
+	}
+	if k.idleFloor, err = doc.Resolve("DAEMON_IDLE_FLOOR", stderr); err != nil {
+		return k, err
+	}
+	if k.idleCap, err = doc.Resolve("DAEMON_IDLE_CAP", stderr); err != nil {
+		return k, err
+	}
+	k.probeInterval = doc.ResolveOptional("DAEMON_PROBE_INTERVAL", stderr)
+	if k.failureBackoff, err = doc.Resolve("DAEMON_FAILURE_BACKOFF", stderr); err != nil {
+		return k, err
+	}
+	if k.breakerThreshold, err = doc.Resolve("DAEMON_BREAKER_THRESHOLD", stderr); err != nil {
+		return k, err
+	}
+	if k.breakerWindow, err = doc.Resolve("DAEMON_BREAKER_WINDOW", stderr); err != nil {
+		return k, err
+	}
+	if withSelf {
+		if k.selfApp, err = doc.Resolve("DAEMON_SELF_APP", stderr); err != nil {
+			return k, err
+		}
+	}
+	if multiKind {
+		if k.researchReservation, err = doc.Resolve("RESEARCH_RESERVATION", stderr); err != nil {
+			return k, err
+		}
+	}
+	return k, nil
+}

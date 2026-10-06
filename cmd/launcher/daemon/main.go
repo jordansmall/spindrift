@@ -700,91 +700,30 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	stripped := strippedKeys(doc)
 	warnStrippedChildEnv(stripped, stderr)
 
-	// DAEMON_APP and the daemon's own tuning knobs below are read by no child
-	// launcher, so they keep Lookup's ambient-wins override (ADR 0020).
-	appAttr, err := doc.Resolve("DAEMON_APP", stderr)
+	shared, err := resolveChildSharedKnobs(doc)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	// BASE_BRANCH and MAX_PARALLEL, like the knobs further down that a child
-	// also reads, resolve as childKnob does (document first, since the child
-	// never sees the ambient value) so the daemon and its children agree (issue #4623).
-	baseBranch, err := requiredChildKnob(doc, "BASE_BRANCH", os.Getenv("BASE_BRANCH"))
+	baseBranch := shared.baseBranch
+	slots, err := parseSlots(shared.maxParallel)
 	if err != nil {
-		return fail(stderr, err)
-	}
-	maxParallelRaw, err := requiredChildKnob(doc, "MAX_PARALLEL", os.Getenv("MAX_PARALLEL"))
-	if err != nil {
-		return fail(stderr, err)
-	}
-	slots, err := parseSlots(maxParallelRaw)
-	if err != nil {
-		return fail(stderr, err)
-	}
-
-	// The five backoff/breaker tuning knobs, resolved and validated here —
-	// before startupPreflight, before any slot fills, before any Box runs —
-	// so a bad value refuses the start cleanly rather than surfacing as a
-	// daemon.Loop halt mid-run.
-	idleFloorRaw, err := doc.Resolve("DAEMON_IDLE_FLOOR", stderr)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	idleFloor, err := parseIdleFloor(idleFloorRaw)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	idleCapRaw, err := doc.Resolve("DAEMON_IDLE_CAP", stderr)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	idleCap, err := parseIdleCap(idleCapRaw, idleFloor)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	probeIntervalRaw := doc.ResolveOptional("DAEMON_PROBE_INTERVAL", stderr)
-	probeOverride, err := parseProbeInterval(probeIntervalRaw)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	failureBackoffRaw, err := doc.Resolve("DAEMON_FAILURE_BACKOFF", stderr)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	failureBackoff, err := parseFailureBackoff(failureBackoffRaw)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	breakerThresholdRaw, err := doc.Resolve("DAEMON_BREAKER_THRESHOLD", stderr)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	breakerThreshold, err := parseBreakerThreshold(breakerThresholdRaw)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	breakerWindowRaw, err := doc.Resolve("DAEMON_BREAKER_WINDOW", stderr)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	breakerWindow, err := parseBreakerWindow(breakerWindowRaw)
-	if err != nil {
-		return fail(stderr, err)
-	}
-
-	// BOX_SIGNAL_CARRIER is env-only (absent from the --input document's
-	// settings map), so it is read with os.Getenv rather than doc.Resolve —
-	// Resolve would fail on a legitimately-unset knob.
-	if err := validateSignalCarrier(os.Getenv("BOX_SIGNAL_CARRIER")); err != nil {
 		return fail(stderr, err)
 	}
 
 	// The schema validates DAEMON_AWAKE_WINDOW at Nix eval time, but an
 	// ambient env value (used when the document does not carry the key)
 	// bypasses that entirely, so this runtime parse is the actual guarantee.
-	// Resolved as childKnob does, like the other knobs a child also reads.
-	awakeRaw := childKnob(doc, "DAEMON_AWAKE_WINDOW", os.Getenv("DAEMON_AWAKE_WINDOW"))
-	awake, err := daemon.ParseWindow(awakeRaw)
+	awake, err := daemon.ParseWindow(shared.awakeWindow)
+	if err != nil {
+		return fail(stderr, err)
+	}
+
+	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: shared.butlerChores, Every: shared.butlerEvery, Classes: shared.butlerChoreClasses})
+	if err != nil {
+		return fail(stderr, err)
+	}
+	args.Kinds = gatedKinds
+	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -797,33 +736,72 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// the self check stays off, but visibly so — a safety property silently
 	// off is worse than one an operator can see is off.
 	selfProgram := os.Getenv("SPINDRIFT_DAEMON_PROGRAM")
-	var selfAttr, nixSystem string
 	if selfProgram == "" {
 		fmt.Fprintln(stderr, "daemon: SPINDRIFT_DAEMON_PROGRAM is unset, so the self-change check is disabled (not started through the generated wrapper)")
-	} else {
-		selfAttr, err = doc.Resolve("DAEMON_SELF_APP", stderr)
-		if err != nil {
-			return fail(stderr, err)
-		}
+	}
+
+	// The daemon's own knobs, resolved and validated here — before
+	// startupPreflight, before any slot fills, before any Box runs — so a bad
+	// value refuses the start cleanly rather than surfacing as a daemon.Loop
+	// halt mid-run. RESEARCH_RESERVATION is inert for a single-kind daemon
+	// (both the schema doc and daemon.Config say so), so it is resolved and
+	// validated only when the positional verb actually put more than one kind
+	// in play: a work-only operator (no research labels created yet) must not
+	// be failed at startup by a reservation value that happens to exceed
+	// their MAX_PARALLEL.
+	withSelf, multiKind := selfProgram != "", len(args.Kinds) > 1
+	own, err := resolveDaemonOnlyKnobs(doc, stderr, withSelf, multiKind)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	appAttr := own.app
+	idleFloor, err := parseIdleFloor(own.idleFloor)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	idleCap, err := parseIdleCap(own.idleCap, idleFloor)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	probeOverride, err := parseProbeInterval(own.probeInterval)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	failureBackoff, err := parseFailureBackoff(own.failureBackoff)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	breakerThreshold, err := parseBreakerThreshold(own.breakerThreshold)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	breakerWindow, err := parseBreakerWindow(own.breakerWindow)
+	if err != nil {
+		return fail(stderr, err)
+	}
+
+	// BOX_SIGNAL_CARRIER is env-only (absent from the --input document's
+	// settings map), so it is read with os.Getenv rather than doc.Resolve —
+	// Resolve would fail on a legitimately-unset knob.
+	if err := validateSignalCarrier(os.Getenv("BOX_SIGNAL_CARRIER")); err != nil {
+		return fail(stderr, err)
+	}
+
+	var selfAttr, nixSystem string
+	if withSelf {
+		selfAttr = own.selfApp
 		nixSystem, err = nixSystemDouble(runtime.GOOS, runtime.GOARCH)
 		if err != nil {
 			return fail(stderr, err)
 		}
 	}
 
-	// childKnob, like DAEMON_AWAKE_WINDOW: an empty BUTLER_CHORES is the
-	// default, not a configuration error.
-	butlerChores := childKnob(doc, "BUTLER_CHORES", os.Getenv("BUTLER_CHORES"))
-	butlerEvery := childKnob(doc, "BUTLER_EVERY", os.Getenv("BUTLER_EVERY"))
-	butlerChoreClasses := childKnob(doc, "BUTLER_CHORE_CLASSES", os.Getenv("BUTLER_CHORE_CLASSES"))
-	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: butlerChores, Every: butlerEvery, Classes: butlerChoreClasses})
-	if err != nil {
-		return fail(stderr, err)
-	}
-	args.Kinds = gatedKinds
-	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
-	if err != nil {
-		return fail(stderr, err)
+	var reservation int
+	if multiKind {
+		reservation, err = parseResearchReservation(own.researchReservation, slots)
+		if err != nil {
+			return fail(stderr, err)
+		}
 	}
 
 	// Built from the daemon's own resolved knobs, per kind row, once the
@@ -836,24 +814,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		go tokenrefresh.Watch(f, tokenrefresh.Interval, nil, func(v string) error {
 			return os.Setenv("GH_TOKEN", v)
 		})
-	}
-
-	// RESEARCH_RESERVATION is inert for a single-kind daemon (both the
-	// schema doc and daemon.Config say so), so it is resolved and validated
-	// only when the positional verb actually put more than one kind in
-	// play. A work-only operator (no research labels created yet) must not
-	// be failed at startup by a reservation value that happens to exceed
-	// their MAX_PARALLEL — the knob simply does not apply to their run.
-	var reservation int
-	if len(args.Kinds) > 1 {
-		researchReservationRaw, err := doc.Resolve("RESEARCH_RESERVATION", stderr)
-		if err != nil {
-			return fail(stderr, err)
-		}
-		reservation, err = parseResearchReservation(researchReservationRaw, slots)
-		if err != nil {
-			return fail(stderr, err)
-		}
 	}
 
 	wd, err := os.Getwd()
