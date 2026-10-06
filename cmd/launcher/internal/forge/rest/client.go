@@ -181,17 +181,25 @@ func (c *Client) HTTPClientForTest() *http.Client {
 	return c.hc
 }
 
-// Do issues method against path relative to the base URL, marshaling body as
-// the JSON request body (nil for none) and decoding the response into out
-// (nil discards it). A non-2xx status returns an error wrapping StatusMap's
-// sentinel when the map has one, and a generic status error otherwise.
+// Do is DoWithHeader discarding the response headers.
 func (c *Client) Do(method, path string, body, out any) error {
+	_, err := c.DoWithHeader(method, path, body, out)
+	return err
+}
+
+// DoWithHeader issues method against path relative to the base URL, marshaling
+// body as the JSON request body (nil for none) and decoding the response into
+// out (nil discards it). A non-2xx status returns an error wrapping StatusMap's
+// sentinel when the map has one, and a generic status error otherwise. It
+// returns the successful response's headers, for callers reading metadata such
+// as a total count; a failed call returns nil headers.
+func (c *Client) DoWithHeader(method, path string, body, out any) (http.Header, error) {
 	var b []byte
 	if body != nil {
 		var err error
 		b, err = json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("%s: marshal request: %w", c.backend, err)
+			return nil, fmt.Errorf("%s: marshal request: %w", c.backend, err)
 		}
 	}
 
@@ -203,7 +211,7 @@ func (c *Client) Do(method, path string, body, out any) error {
 
 		req, err := http.NewRequest(method, c.baseURL+path, reqBody)
 		if err != nil {
-			return fmt.Errorf("%s: build request: %w", c.backend, err)
+			return nil, fmt.Errorf("%s: build request: %w", c.backend, err)
 		}
 		if c.auth != nil {
 			c.auth.Apply(req)
@@ -214,18 +222,18 @@ func (c *Client) Do(method, path string, body, out any) error {
 
 		resp, err := c.hc.Do(req)
 		if err != nil {
-			return fmt.Errorf("%s: %s %s: %w", c.backend, method, path, err)
+			return nil, fmt.Errorf("%s: %s %s: %w", c.backend, method, path, err)
 		}
 
 		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			if out != nil {
 				if err := json.NewDecoder(resp.Body).Decode(out); err != nil && err != io.EOF {
 					resp.Body.Close()
-					return fmt.Errorf("%s: decode response from %s %s: %w", c.backend, method, path, DecodeError{Err: err})
+					return nil, fmt.Errorf("%s: decode response from %s %s: %w", c.backend, method, path, DecodeError{Err: err})
 				}
 			}
 			resp.Body.Close()
-			return nil
+			return resp.Header, nil
 		}
 
 		if isTransientStatus(resp.StatusCode) && attempt < c.maxAttempts {
@@ -238,11 +246,11 @@ func (c *Client) Do(method, path string, body, out any) error {
 		statusErr := StatusError{Status: resp.StatusCode, Message: readErrorMessage(resp.Body)}
 		resp.Body.Close()
 		if sentinel, ok := c.statuses[resp.StatusCode]; ok {
-			return fmt.Errorf("%s: %s %s: %w: %w", c.backend, method, path, sentinel, statusErr)
+			return nil, fmt.Errorf("%s: %s %s: %w: %w", c.backend, method, path, sentinel, statusErr)
 		}
-		return fmt.Errorf("%s: %s %s: unexpected %w", c.backend, method, path, statusErr)
+		return nil, fmt.Errorf("%s: %s %s: unexpected %w", c.backend, method, path, statusErr)
 	}
-	return fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
+	return nil, fmt.Errorf("%s: %s %s: maxAttempts must be >= 1 (got %d)", c.backend, method, path, c.maxAttempts)
 }
 
 // Paginate calls fetch for page 1, 2, 3, ... until fetch reports done, so each
