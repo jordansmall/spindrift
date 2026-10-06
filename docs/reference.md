@@ -1552,7 +1552,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | the minimum number of research Dispatches the daemon keeps running out of `MAX_PARALLEL`'s pool slots — a floor, not a ceiling; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_IDLE_FLOOR`    | `5m`    | — (post-freeze; no legacy alias — set `dispatch.daemonIdleFloor`) | the jam gate's first wait: when a tracker-probed kind (dispatch, research) has open issues but none dispatchable, the wait before the daemon's first re-check, which is also the poll slice size while riding out the jam; each further consecutive check doubles the wait up to `DAEMON_IDLE_CAP`, and a kind whose child keeps exiting 3 then waits `DAEMON_IDLE_CAP` between checks; a kind with no tracker Demand probe (the butler, and any tracker that does not yet report Demand) is exit-driven and uses this as its whole no-work backoff instead; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_IDLE_CAP`      | `30m`   | — (post-freeze; no legacy alias — set `dispatch.daemonIdleCap`) | ceiling the jam gate's doubling wait reaches, starting from `DAEMON_IDLE_FLOOR`, for a tracker-probed kind (dispatch, research); for an exit-driven kind (the butler, and any tracker that does not yet report Demand) it is the ceiling of the whole per-kind no-work backoff; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start if the cap is below the floor; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
-| `DAEMON_PROBE_INTERVAL` | `` (per-tracker defaults) | — (post-freeze; no legacy alias — set `dispatch.daemonProbeInterval`) | overrides every tracker's default Demand probe interval, the pause between the daemon's cheap ready-issue counts that start slots from tracker demand (blank keeps the per-tracker defaults: each tracker adapter declares its own, local 20s and forgejo 3m today, and the others as their adapters gain Demand — today `ISSUE_TRACKER=local` and `forgejo` are probed); an override must be at least 1s; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
+| `DAEMON_PROBE_INTERVAL` | `` (per-tracker defaults) | — (post-freeze; no legacy alias — set `dispatch.daemonProbeInterval`) | overrides every tracker's default Demand probe interval, the pause between the daemon's cheap ready-issue counts that start slots from tracker demand (blank keeps the per-tracker defaults: each tracker adapter declares its own, local 20s, forgejo 3m, github 60s; other trackers are not probed yet); an override must be at least 1s; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_FAILURE_BACKOFF` | `1m`  | — (post-freeze; no legacy alias — set `dispatch.daemonFailureBackoff`) | wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_BREAKER_THRESHOLD` | `5` | — (post-freeze; no legacy alias — set `dispatch.daemonBreakerThreshold`) | pool-wide unclassified failures within `DAEMON_BREAKER_WINDOW` that trip the circuit breaker and halt the whole daemon; validated by the daemon at startup, which refuses to start on a non-positive value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_BREAKER_WINDOW` | `15m`  | — (post-freeze; no legacy alias — set `dispatch.daemonBreakerWindow`) | trailing window the circuit breaker counts `DAEMON_BREAKER_THRESHOLD` unclassified failures within; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
@@ -6555,8 +6555,8 @@ codes above, which this table's meanings link back to) — but the daemon's
 *action* on each code is its own. The wait below is no longer a fixed
 interval. Which of two policies applies is per kind: a kind whose tracker
 reports **Demand** is scheduled from that count (below); any other kind —
-the butler, and every tracker but `ISSUE_TRACKER=local` and `forgejo` for now — is
-exit-driven, and its wait is an idle backoff, one
+the butler, and every tracker but `ISSUE_TRACKER=local`, `forgejo` and
+`github` for now — is exit-driven, and its wait is an idle backoff, one
 per configured Dispatch kind (`kindBackoff`,
 `cmd/launcher/internal/daemon/backoff.go`) rather than one pool-wide timer
 (issue #3541 split it: an empty work queue must not slow research down,
@@ -6583,7 +6583,8 @@ other kind's own timer, if any, is untouched.
 kinds it covers) replaces "start a child to find out the queue is empty"
 with a cheap tracker-side count. A probed kind carries a flat probe interval
 (`ISSUE_TRACKER=local`: 20s, a scan of the queue directory;
-`ISSUE_TRACKER=forgejo`: 3m, one small request; `DAEMON_PROBE_INTERVAL`
+`ISSUE_TRACKER=forgejo`: 3m, one small request; `github`: 60s, one
+conditional request; `DAEMON_PROBE_INTERVAL`
 overrides it for every tracker when set, blank keeps the per-tracker
 defaults, and a bad value fails start-up). The Forgejo probe asks for a
 one-item issue page filtered by the dispatch label and reads the total from
@@ -6611,6 +6612,20 @@ breaker below (`reason` `demand: ...`) and rests the kind for one interval.
 `demand_appeared` and `demand_drained` (events table below) report a kind's
 Ready crossing zero; `ready`, `probed_at`, `next_probe`, `jam_until` and
 `ready_at_jam` on each status `kinds` entry show the state.
+
+The GitHub probe is one conditional request: `gh api` for the first 100
+open issues carrying the kind's dispatch label, sorted by last update, with
+`If-None-Match` set to the ETag of the previous answer. An unchanged queue
+answers 304, which does not count against the primary rate limit, and the
+cached count is reused; sorting by last update keeps a relabelled old issue
+inside that first page. The daemon runs `gh` in its own environment, so it
+needs `GH_TOKEN` (or a `gh` login) of its own; when
+`GH_TOKEN_REFRESH_FILE` is set it polls that file into its own `GH_TOKEN` as
+a child does, so an expired App token does not fail every probe into the
+breaker. A blank `REPO_SLUG` leaves every kind exit-driven, and a blank
+`LABEL` the work kind. Because a 304 can repeat a count a
+child has already consumed, a probe that counted work followed by a child
+exiting 2 makes the next probe of that kind skip the cache and read fresh.
 
 **Start budget.** A probed kind is started only while its Ready count
 exceeds the slots *starting* it — slots running a child of that
