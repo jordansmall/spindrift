@@ -909,6 +909,22 @@ already paid for saves nothing.
 _Avoid_: schedule, cron window, uptime, business hours, quiet hours (it names
 when the Daemon is permitted to act, not when the repository is quiet).
 
+**Events file**:
+The [[Daemon]]'s event stream persisted beside its status file, capped and
+rotated, so the history survives however the Daemon is supervised — under
+systemd, in a foreground terminal, or anything else. The stream on stdout is
+unchanged; the file is a second home for the same lines. The status file is
+the present; the Events file is the history.
+_Avoid_: journal (that is systemd's copy, absent outside systemd), audit log.
+
+**Child log**:
+One Daemon child's own output — the launcher's side of a Dispatch: build,
+claim, Box start, settle, CI polling, merge gate, outcome — teed to a file the
+child's start event names. The only record of a Dispatch that failed outside
+its Box. Distinct from a [[Pass log]], which is the agent's side.
+_Avoid_: runner log (the runner is the Box isolation seam), daemon log, box
+log.
+
 **Console**:
 The interactive driving loop: a launcher session in which an operator composes
 the running work by Picking issues (promoting them as needed), watches live
@@ -921,6 +937,15 @@ queue is in-memory; durable state lives on the Issue Tracker alone. A peer of
 the headless driving loops (the [[Daemon]], CI), not a replacement for them.
 _Avoid_: TUI (names the rendering, not the role), dashboard (it drives, not
 merely displays), monitor.
+
+**Dashboard**:
+A read-only view of one [[Daemon]]: its slots and their phases, the Dispatch
+each busy slot is working, the recent history from its [[Events file]], and
+each Dispatch's [[Child log]] and [[Pass log]]s. It never picks, starts,
+stops, or settles anything, and it reads only what the Daemon already
+publishes — never the Daemon's internals. The name is the role, not the
+rendering: a web page and a terminal view are both the Dashboard.
+_Avoid_: monitor, console (that drives), UI, status page.
 
 **Section**:
 A named slice of the session's issues the Console shows one at a time — Backlog,
@@ -1050,6 +1075,13 @@ never silently re-dispatched — and `spindrift recover` (the
 Console surface a count. The operator's action becomes *recover*, not
 *restart*. _Avoid_: stranded, salvageable, failed-recoverable (it is a state of
 its own, not a flavor of `Failed`).
+
+**Pass log**:
+One Box pass's log — the initial pass, each fix pass, or the conflict-resolve
+pass — written per Dispatch, with earlier attempts rotated aside rather than
+overwritten. The agent's side of a Dispatch; the [[Transcript]] and
+[[Activity feed]] are views of it.
+_Avoid_: box log, runner log, issue log (Chores have no issue).
 
 **Transcript**:
 The Driver-rendered record of a Dispatch's work across its pass logs — the full
