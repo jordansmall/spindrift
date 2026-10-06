@@ -1026,9 +1026,10 @@ func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 // produce exactly one between them. A single event still does the whole job,
 // since the lift is pool-wide.
 func (p *pool) noteTipMoved(slot int, revision string) {
+	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
 		var lifted []Kind
-		s.sched, lifted = s.sched.LiftJams()
+		s.sched, lifted, _ = s.sched.LiftJams(now)
 		if len(lifted) == 0 {
 			return nil
 		}

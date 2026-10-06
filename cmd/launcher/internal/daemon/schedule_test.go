@@ -33,11 +33,7 @@ func probedSchedule(kinds []Kind, reservation int) Schedule {
 func schedObserve(t *testing.T, s Schedule, now time.Time, evs ...SchedEvent) Schedule {
 	t.Helper()
 	for _, ev := range evs {
-		var woke bool
-		s, woke = s.Observe(now, ev)
-		if woke {
-			t.Fatalf("Observe(%v) woke; this slice never wakes", ev)
-		}
+		s, _ = s.Observe(now, ev)
 	}
 	return s
 }
@@ -411,7 +407,7 @@ func TestScheduleTipMovedResetsOnlyJammedKinds(t *testing.T) {
 		ChildDone{Kind: schedResearch, Result: ChildEmpty},
 		ChildDone{Kind: schedButler, Result: ChildJammed})
 
-	s, lifted := s.LiftJams()
+	s, lifted, _ := s.LiftJams(schedT0)
 	if want := []Kind{schedWork, schedButler}; !reflect.DeepEqual(lifted, want) {
 		t.Fatalf("lifted = %v, want %v", lifted, want)
 	}
@@ -421,7 +417,7 @@ func TestScheduleTipMovedResetsOnlyJammedKinds(t *testing.T) {
 	if v := s.View(schedResearch, schedT0); !v.Gated {
 		t.Fatal("queue-empty research must stay gated across a moved tip")
 	}
-	if _, lifted = s.LiftJams(); len(lifted) != 0 {
+	if _, lifted, _ = s.LiftJams(schedT0); len(lifted) != 0 {
 		t.Fatalf("second lift = %v, want none", lifted)
 	}
 }
@@ -446,7 +442,7 @@ func TestScheduleJamBackoffDoublesAndTipMovedLifts(t *testing.T) {
 	}
 
 	s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: 5}, ChildDone{Kind: schedWork, Result: ChildJammed})
-	s, _ = s.LiftJams()
+	s, _, _ = s.LiftJams(now)
 	if d := s.Decide(now, Occupancy{}); d != (Start{Kind: schedWork}) {
 		t.Fatalf("after LiftJams: %#v, want Start", d)
 	}
@@ -572,6 +568,46 @@ func TestScheduleDemandFailedRestsProbingKeepingCount(t *testing.T) {
 	}
 }
 
+func TestScheduleObserveWokeOnlyWhenStartableSetGrows(t *testing.T) {
+	work := func(r ChildOutcome) ChildDone { return ChildDone{Kind: schedWork, Result: r} }
+	probe := func(k Kind, n int) DemandProbed { return DemandProbed{Kind: k, Ready: n} }
+	probed := func(evs ...SchedEvent) func() Schedule {
+		return func() Schedule { return schedObserve(t, probedSchedule(allKinds(), 0), schedT0, evs...) }
+	}
+	tests := []struct {
+		name  string
+		build func() Schedule
+		at    time.Duration
+		ev    SchedEvent
+		want  bool
+	}{
+		{"never-probed kind gains ready", probed(), 0, probe(schedWork, 1), true},
+		{"empty kind gains ready", probed(probe(schedWork, 0)), 0, probe(schedWork, 3), true},
+		{"stale count refreshed", probed(probe(schedWork, 3)), schedInterval, probe(schedWork, 3), true},
+		{"failed probe revives a stale count", probed(probe(schedWork, 3)), schedInterval, DemandFailed{Kind: schedWork}, true},
+		{"already startable kind gains more", probed(probe(schedWork, 1)), 0, probe(schedWork, 5), false},
+		{"startable kind drains to zero", probed(probe(schedWork, 1)), 0, probe(schedWork, 0), false},
+		{"empty kind stays empty", probed(probe(schedWork, 0)), 0, probe(schedWork, 0), false},
+		{"failed probe with no count", probed(), 0, DemandFailed{Kind: schedWork}, false},
+		{"startable kind child empty", probed(probe(schedWork, 2)), 0, work(ChildEmpty), false},
+		{"startable kind child jammed", probed(probe(schedWork, 2)), 0, work(ChildJammed), false},
+		{"startable kind child continues", probed(probe(schedWork, 2)), 0, work(ChildContinue), false},
+		{"jam-gated kind probed while still jammed", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 9), false},
+		{"unstartable kind finishes empty", probed(), 0, work(ChildEmpty), false},
+		{"exit-driven kind's backoff reset by continue",
+			probed(ChildDone{Kind: schedButler, Result: ChildEmpty}), 0, ChildDone{Kind: schedButler, Result: ChildContinue}, true},
+		{"exit-driven kind backs off", probed(), 0, ChildDone{Kind: schedButler, Result: ChildEmpty}, false},
+		{"unconfigured kind", func() Schedule { return probedSchedule([]Kind{schedWork}, 0) }, 0, probe(schedResearch, 4), false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, woke := tc.build().Observe(schedAt(tc.at), tc.ev); woke != tc.want {
+				t.Fatalf("woke = %v, want %v", woke, tc.want)
+			}
+		})
+	}
+}
+
 func TestScheduleObserveKeepsValueSemantics(t *testing.T) {
 	old := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil)
 	_ = schedObserve(t, old, schedT0, ChildDone{Kind: schedWork, Result: ChildEmpty})
@@ -631,5 +667,27 @@ func TestScheduleDemandFailedAfterClaimDoesNotRestartSpentKind(t *testing.T) {
 	}
 	if v := s.View(schedWork, schedT0); v.Ready != 0 || v.Counted != 1 {
 		t.Fatalf("Ready/Counted = %d/%d, want 0/1", v.Ready, v.Counted)
+	}
+}
+
+func TestScheduleLiftJamsWokeOnlyWhenALiftedKindBecomesStartable(t *testing.T) {
+	work := func(r ChildOutcome) ChildDone { return ChildDone{Kind: schedWork, Result: r} }
+	probe := func(n int) DemandProbed { return DemandProbed{Kind: schedWork, Ready: n} }
+	tests := []struct {
+		name string
+		evs  []SchedEvent
+		want bool
+	}{
+		{"jammed kind with ready work", []SchedEvent{probe(3), work(ChildJammed)}, true},
+		{"jammed kind with nothing ready", []SchedEvent{probe(0), work(ChildJammed)}, false},
+		{"nothing jammed", []SchedEvent{probe(3)}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := schedObserve(t, probedSchedule(allKinds(), 0), schedT0, tc.evs...)
+			if _, _, woke := s.LiftJams(schedT0); woke != tc.want {
+				t.Fatalf("woke = %v, want %v", woke, tc.want)
+			}
+		})
 	}
 }
