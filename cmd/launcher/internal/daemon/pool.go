@@ -1284,7 +1284,7 @@ func (p *pool) snapshotLocked() Status {
 		}
 		if !v.JamUntil.IsZero() {
 			kc.JamUntil = v.JamUntil.UTC().Format(time.RFC3339)
-			if v.Probed {
+			if v.Probed && !v.JamBaselinePending {
 				readyAtJam := v.ReadyAtJam
 				kc.ReadyAtJam = &readyAtJam
 			}

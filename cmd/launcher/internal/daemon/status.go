@@ -117,7 +117,9 @@ type KindCheck struct {
 	NextProbe string `json:"next_probe,omitempty"`
 	// JamUntil is set only while a jam gate is live; ReadyAtJam is the
 	// Ready count the jam froze, so a reader sees how much work the jam is
-	// holding back.
+	// holding back. A jam recorded while a claim or an empty child's exit had
+	// moved the count unconfirmed takes the next probe's count instead, and
+	// ReadyAtJam is absent until that probe lands.
 	JamUntil   string `json:"jam_until,omitempty"`
 	ReadyAtJam *int   `json:"ready_at_jam,omitempty"`
 
