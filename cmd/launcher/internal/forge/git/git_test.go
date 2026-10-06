@@ -90,7 +90,11 @@ func TestGitClient_Merge_PushOnlyLanding(t *testing.T) {
 	}
 }
 
-func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
+// conflictRemote builds a bare remote whose "main" and "agent/issue-1" both
+// descend from a base commit holding files; each side then runs its own steps
+// in the work clone before they are committed and pushed.
+func conflictRemote(t *testing.T, files map[string]string, branchSteps, mainSteps func(work string)) string {
+	t.Helper()
 	dir := t.TempDir()
 	bare := filepath.Join(dir, "origin.git")
 	work := filepath.Join(dir, "work")
@@ -100,26 +104,69 @@ func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
 	gitRun(t, work, "checkout", "-B", "main")
 	gitRun(t, work, "config", "user.email", "test@example.com")
 	gitRun(t, work, "config", "user.name", "Test")
-	gitWriteFile(t, filepath.Join(work, "shared.txt"), "base\n")
-	gitRun(t, work, "add", "shared.txt")
+	for name, body := range files {
+		gitWriteFile(t, filepath.Join(work, name), body)
+		gitRun(t, work, "add", name)
+	}
 	gitRun(t, work, "commit", "-m", "base")
 	gitRun(t, work, "push", "-u", "origin", "main")
 
 	gitRun(t, work, "checkout", "-b", "agent/issue-1")
-	gitWriteFile(t, filepath.Join(work, "shared.txt"), "feature change\n")
-	gitRun(t, work, "add", "shared.txt")
+	branchSteps(work)
 	gitRun(t, work, "commit", "-m", "feature")
 	gitRun(t, work, "push", "-u", "origin", "agent/issue-1")
 
 	gitRun(t, work, "checkout", "main")
-	gitWriteFile(t, filepath.Join(work, "shared.txt"), "conflicting main change\n")
-	gitRun(t, work, "add", "shared.txt")
-	gitRun(t, work, "commit", "-m", "conflicting")
+	mainSteps(work)
+	gitRun(t, work, "commit", "-m", "main")
 	gitRun(t, work, "push", "origin", "main")
+	return bare
+}
+
+func TestGitClient_Merge_ConflictReturnsErrMergeConflict(t *testing.T) {
+	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
+		func(work string) {
+			gitWriteFile(t, filepath.Join(work, "shared.txt"), "feature change\n")
+			gitRun(t, work, "add", "shared.txt")
+		},
+		func(work string) {
+			gitWriteFile(t, filepath.Join(work, "shared.txt"), "conflicting main change\n")
+			gitRun(t, work, "add", "shared.txt")
+		})
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
-	err := g.Merge("agent/issue-1")
-	if err != forge.ErrMergeConflict {
+	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
+	}
+}
+
+// TestGitClient_Merge_ModifyDeleteConflictReturnsErrMergeConflict covers a
+// conflict for which git prints no "merge conflict" text, so the
+// classification must come from the unmerged index entries.
+func TestGitClient_Merge_ModifyDeleteConflictReturnsErrMergeConflict(t *testing.T) {
+	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
+		func(work string) { gitRun(t, work, "rm", "shared.txt") },
+		func(work string) {
+			gitWriteFile(t, filepath.Join(work, "shared.txt"), "main change\n")
+			gitRun(t, work, "add", "shared.txt")
+		})
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
+	}
+}
+
+// TestGitClient_Merge_RenameRenameConflictReturnsErrMergeConflict covers
+// another conflict kind that prints no "merge conflict" text.
+func TestGitClient_Merge_RenameRenameConflictReturnsErrMergeConflict(t *testing.T) {
+	body := "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\n"
+	bare := conflictRemote(t, map[string]string{"x.txt": body},
+		func(work string) { gitRun(t, work, "mv", "x.txt", "z.txt") },
+		func(work string) { gitRun(t, work, "mv", "x.txt", "y.txt") })
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	if err := g.Merge("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatalf("Merge: want forge.ErrMergeConflict, got: %v", err)
 	}
 }
