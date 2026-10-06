@@ -6692,13 +6692,18 @@ changing; `ready`, `probed_at`, `next_probe`, `jam_until` and `ready_at_jam`
 on each status `kinds` entry, and `rate_limited_until` on each `trackers`
 entry, show the state.
 
-The GitHub probe is one conditional request: `gh api` for the first 100
-open issues carrying the kind's dispatch label, sorted by last update, with
-`If-None-Match` set to the ETag of the previous answer. An unchanged queue
-answers 304, which does not count against the primary rate limit, and the
-cached count is reused; sorting by last update keeps a relabelled old issue
-inside that first page. The daemon runs `gh` in its own environment, so it
-needs `GH_TOKEN` (or a `gh` login) of its own; when
+The GitHub probe is usually one conditional request: `gh api` for the first
+100 open issues carrying the kind's dispatch label, sorted by last update,
+with `If-None-Match` set to the ETag of the previous answer. An unchanged
+queue answers 304, which does not count against the primary rate limit, and
+the cached count is reused; sorting by last update keeps a relabelled old
+issue inside that first page. The endpoint lists labelled PRs too. When they
+leave a full first page with fewer than 100 issues, the probe reads up to
+four further pages unconditionally and sums the issues, clamped to 100. Page
+1's ETag does not cover those pages, so a change there is seen once page 1
+changes (issue #4596). Past five pages the probe under-counts: a label
+with 500 or more leading PRs can read as 0. The daemon runs `gh` in its own
+environment, so it needs `GH_TOKEN` (or a `gh` login) of its own; when
 `GH_TOKEN_REFRESH_FILE` is set it polls that file into its own `GH_TOKEN` as
 a child does, so an expired App token does not fail every probe into the
 breaker. A blank `REPO_SLUG` leaves every tracker-probed kind exit-driven,

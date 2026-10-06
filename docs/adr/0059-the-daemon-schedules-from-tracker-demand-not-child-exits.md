@@ -37,7 +37,7 @@ each tracker the launcher supports:
 
 | Tracker | Cheapest probe | Change token |
 |---------|----------------|--------------|
-| github | `issues?labels=…&sort=updated&per_page=100` | ETag → 304 |
+| github | `issues?labels=…&sort=updated&per_page=100` | ETag → 304 on page 1 (Amended by issue #4596: deeper pages when PRs crowd it; see below) |
 | forgejo | `issues?labels=…&limit=1`, read `x-total-count` | none — Codeberg sends no ETag or Last-Modified on issue lists |
 | local | `LocalTracker.ListIssues` over `LOCAL_ISSUES_DIR` | none needed — a directory scan, no network |
 | jira | JQL search, `maxResults=0`, read `total` | none |
@@ -71,6 +71,13 @@ by-name check with a descriptor enablement row.
 - **github** probes `sort=updated&per_page=100` with `If-None-Match`. Sorting
   by update matters: labelling an old issue bumps its `updated_at`, while the
   default created-order first page would not change, so a 304 would hide it.
+  (Amended by issue #4596: the endpoint lists labelled PRs too, and they take
+  page slots. When they crowd a full first page, the probe reads up to four
+  further pages unconditionally. Page 1's ETag does not cover those, so a
+  change on a deeper page stays hidden until page 1 changes. That over-count
+  ends early only when the real count reaches 0, because the child then
+  exits 2 and the next probe reads fresh. Past five pages the probe
+  under-counts, possibly to 0.)
   When Demand said `Ready > 0` but the child exits 2, the next probe drops
   `If-None-Match` and reads fresh.
 - **forgejo** reads `x-total-count` from a `limit=1` page. It keeps
