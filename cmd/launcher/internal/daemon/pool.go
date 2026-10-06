@@ -594,7 +594,7 @@ func (p *pool) noteNotDue(slot int, rec Record) {
 			return nil
 		}
 		flight := &s.slots[slot].flight
-		flight.nextDue = flight.nextDue.Merge(NextDue(rec.NextDue))
+		flight.nextDue = flight.nextDue.Merge(rec.NextDue)
 		return nil
 	})
 }
