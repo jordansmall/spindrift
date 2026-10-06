@@ -1,6 +1,7 @@
 package local_test
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -190,6 +191,39 @@ func TestIssueText_WholeEntryOmissionForSize(t *testing.T) {
 	}
 	if !strings.Contains(got, "small body") {
 		t.Errorf("expected small's body present, got:\n%s", got)
+	}
+}
+
+func TestIssueText_UnresolvedListBoundedWithinCap(t *testing.T) {
+	var blockers strings.Builder
+	blockers.WriteString("## Blocked by\n\n")
+	for i := 0; i < 60; i++ {
+		fmt.Fprintf(&blockers, "- dangling-blocker-slug-number-%03d\n", i)
+	}
+	// The subject nearly fills the cap, leaving room for only a few unresolved
+	// lines, so the full unresolved list cannot fit.
+	body := blockers.String()
+	body += strings.Repeat("x", 64*1024-len(body)-400)
+
+	dir := t.TempDir()
+	writeIssue(t, dir, "a", "title: A\ncreated: 2026-01-01T00:00:00Z\n", body)
+
+	lt := local.NewLocalTracker(dir, issueTextLabels)
+	got, err := forge.IssueText(lt, "a", io.Discard)
+	if err != nil {
+		t.Fatalf("IssueText: %v", err)
+	}
+	if len(got) > 64*1024 {
+		t.Fatalf("IssueText len = %d, want <= 64KB", len(got))
+	}
+	if strings.Contains(got, "[truncated:") {
+		t.Errorf("linked section must be bounded, not cut by the backstop, got tail %q", got[len(got)-200:])
+	}
+	if !strings.Contains(got, "### Unresolved references") {
+		t.Errorf("expected a bounded unresolved section, got tail %q", got[len(got)-200:])
+	}
+	if !strings.Contains(got, "- … and ") {
+		t.Errorf("expected overflow collapsed into an 'and N more' line, got tail %q", got[len(got)-200:])
 	}
 }
 

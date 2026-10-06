@@ -102,7 +102,9 @@ func IssueText(t IssueTracker, num string, warn io.Writer) (string, error) {
 	if lErr != nil || len(links) == 0 {
 		return text, nil
 	}
-	return text + renderLinkedIssues(links, maxIssueTextBytes-len(text)), nil
+	// Backstop: renderLinkedIssues sizes itself to the budget, but a future
+	// sizing mistake should degrade to the visible marker, not an overshoot.
+	return truncateIssueText(text + renderLinkedIssues(links, maxIssueTextBytes-len(text))), nil
 }
 
 const linkedIssuesHeading = "\n\n## Linked issues\n\n"
