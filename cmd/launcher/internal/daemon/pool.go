@@ -63,6 +63,13 @@ type state struct {
 	sched     Schedule
 	batonSlot int
 
+	// tip is the last revision a resolution observed as moved, and
+	// continues counts each kind's children that ended Continue. A child's
+	// not_due report is only as fresh as these were when it started: see
+	// reportStale.
+	tip       string
+	continues map[Kind]int
+
 	// wake is the current wake generation: a parked slot sleeps on a context
 	// derived from it, and wakeParked cancels it and installs a fresh one
 	// when a change grows the set of startable kinds (observe, a jam lift).
@@ -253,6 +260,11 @@ type slotFlight struct {
 	revision string
 	issues   []string
 	key      dispatchkey.Key
+	// nextDue folds every not_due record the child reported: when a
+	// child-reported kind next has work. Not a claim, so it never moves key.
+	nextDue NextDue
+	// continues is state.continues[kind] when the child started.
+	continues int
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -411,6 +423,10 @@ func (p *pool) resetKind(kind Kind) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
 		s.observe(now, ChildDone{Kind: kind, Result: ChildContinue})
+		if s.continues == nil {
+			s.continues = map[Kind]int{}
+		}
+		s.continues[kind]++
 		return nil
 	})
 }
@@ -431,14 +447,22 @@ func (p *pool) resetKind(kind Kind) {
 // jammed itself: jammed records the queue condition this check saw (see
 // kindBackoff.markNoWork), while the alarm only fires when no sibling is
 // running a child that counts (issue #3571, #3735, #4205).
-func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool) {
+//
+// nextDue is the child's not_due report and continues is what
+// flightContinues read for it. A report that went stale while the child ran
+// (see reportStale) is replaced by "due now": one spurious child start just
+// re-reports, where parking on a stale report can idle the kind indefinitely.
+func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool, nextDue NextDue, continues int) {
 	now := p.clk.Now()
 	result := ChildEmpty
 	if noneDispatchable {
 		result = ChildJammed
 	}
 	p.mutate(func(s *state) []Event {
-		s.observe(now, ChildDone{Kind: kind, Result: result})
+		if s.reportStale(kind, revision, continues, nextDue) {
+			nextDue = NextDue{At: now}
+		}
+		s.observe(now, ChildDone{Kind: kind, Result: result, NextDue: nextDue})
 		// What the kind now waits for: its backoff, or for a probed kind the
 		// interval to its next probe.
 		var wait time.Duration
@@ -450,6 +474,20 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 		}
 		return []Event{{Event: "idle", Kind: kind, Wait: wait.String(), Slot: intPtr(slot)}}
 	})
+}
+
+// reportStale reports that a not_due report from a kind's child, run at
+// revision having seen continues Continue exits, no longer holds. A sibling
+// child's Continue clears the kind's due state and may have released the very
+// claim the report waits on. A tip that moved since revision already spent
+// the move an on_tip_move report waits for, and noteTipMoved had no parked
+// kind to lift; comparing revisions rather than lifts is what catches a move
+// landing anywhere between the child's resolve and its exit.
+func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDue) bool {
+	if nd.IsZero() {
+		return false
+	}
+	return s.continues[kind] != continues || (nd.OnTipMove && s.tip != "" && s.tip != revision)
 }
 
 // startChild marks slot running at revision and returns the kind it chose,
@@ -481,7 +519,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 			kind = provisional
 		}
 		ok = true
-		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision}}
+		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind]}}
 		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)}}
 	})
 	return kind, ok
@@ -545,6 +583,21 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 	})
 }
 
+// noteNotDue folds a not_due record into slot's flight, for runSlot to hand
+// the schedule when the child exits empty (flightReport). It touches neither
+// the claim key nor the baton — a not_due Chore was never claimed — and emits
+// nothing. Dropped like noteBox's race when slot is no longer running.
+func (p *pool) noteNotDue(slot int, rec Record) {
+	p.mutate(func(s *state) []Event {
+		if s.slots[slot].phase != PhaseRunning {
+			return nil
+		}
+		flight := &s.slots[slot].flight
+		flight.nextDue = flight.nextDue.Merge(NextDue(rec.NextDue))
+		return nil
+	})
+}
+
 // noteSettled emits the settled event through the same mutate-ordered path
 // as noteBox, so a settled record is never reordered against the status
 // snapshot or another pool event. Unlike noteBox it touches no state: a
@@ -570,6 +623,16 @@ func (p *pool) flightClaim(slot int) dispatchkey.Key {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.st.slots[slot].flight.key
+}
+
+// flightReport is flightClaim's sibling for what noteWaitResult needs: the
+// not_due reports folded into slot's flight and the kind's Continue count when
+// its child started. The same must-read-before-finishChild rule applies.
+func (p *pool) flightReport(slot int) (nextDue NextDue, continues int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f := p.st.slots[slot].flight
+	return f.nextDue, f.continues
 }
 
 // working reports whether any slot's phase is running — snapshotLocked's
@@ -1099,6 +1162,7 @@ func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 func (p *pool) noteTipMoved(slot int, revision string) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
+		s.tip = revision
 		lifted := s.liftJams(now)
 		if len(lifted) == 0 {
 			return nil

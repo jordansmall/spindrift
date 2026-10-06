@@ -556,7 +556,7 @@ func TestPoolExit3SiblingPhasesNotEngaged(t *testing.T) {
 			} else {
 				p.setPhase(1, tt.siblingPhase)
 			}
-			p.noteWaitResult(0, tt.reportingKind, "rev1", true)
+			p.noteWaitResult(0, tt.reportingKind, "rev1", true, NextDue{}, 0)
 
 			events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 			gotJam := countEvents(eventNames(events), "jam") == 1
@@ -1151,7 +1151,7 @@ func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 	// what siblingsEngaged must see as unengaged.
 	p.noteAwakeClose(1, time.Hour, false)
 
-	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true)
+	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true, NextDue{}, 0)
 
 	events := decodeEvents(t, &buf)
 	foundJam := false
@@ -1203,7 +1203,7 @@ func TestBatonParkPublishesIdle(t *testing.T) {
 		t.Fatalf("phase while parked on the baton = %q, want %q", got, PhaseIdle)
 	}
 
-	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true)
+	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true, NextDue{}, 0)
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	foundJam := false
