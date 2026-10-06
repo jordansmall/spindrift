@@ -21,10 +21,10 @@ var ErrMergeConflict = errors.New("merge conflict")
 var ErrMergeBlockedByChecks = errors.New("merge blocked by checks")
 
 // ErrTransientPushFailure is returned by Rebase when its force-push fails with a
-// transport or server fault (connection reset, timeout, HTTP 5xx). Auth,
-// permission, and missing-repo failures, stale-lease or non-fast-forward
-// rejections, and unrecognised stderr do not wrap it. Callers may retry a
-// bounded number of times.
+// transport or server fault (connection reset, timeout, HTTP 5xx) or is killed
+// by the host's own push deadline. Auth, permission, and missing-repo failures,
+// stale-lease or non-fast-forward rejections, and unrecognised stderr do not
+// wrap it. Callers may retry a bounded number of times.
 var ErrTransientPushFailure = errors.New("transient push failure")
 
 // ErrMergeTransient is returned by Merge when the merge call fails for a

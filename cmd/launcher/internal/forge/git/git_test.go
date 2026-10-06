@@ -723,6 +723,9 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Rebase error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
 	}
+	if !errors.Is(err, forge.ErrTransientPushFailure) {
+		t.Fatalf("Rebase error = %v, want errors.Is(err, forge.ErrTransientPushFailure)", err)
+	}
 }
 
 func TestGitClient_Rebase_ContentConflictReturnsErrMergeConflict(t *testing.T) {
