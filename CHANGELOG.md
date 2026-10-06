@@ -1,5 +1,121 @@
 # Changelog
 
+## [0.23.1](https://github.com/jordansmall/spindrift/compare/v0.23.0...v0.23.1) (2026-10-06)
+
+
+### Features
+
+* **butler:** report next_due when not due ([cc2c393](https://github.com/jordansmall/spindrift/commit/cc2c393fdc86885dbabd0ef450952aa7fe1fb4fa))
+* **chore:** add NextDue for not-due Chores ([9a4b2ed](https://github.com/jordansmall/spindrift/commit/9a4b2edc23c7ac7a8c699cf6606081497e82c34e))
+* **daemon:** add the schedule module ([d48e765](https://github.com/jordansmall/spindrift/commit/d48e765b0abfd3c1706e5b99698763de2760255b)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **daemon:** force a fresh probe after empty child ([1d579b1](https://github.com/jordansmall/spindrift/commit/1d579b1103388c5c9f4a291e11de657e930e0bdc))
+* **daemon:** give probed kinds a start budget ([5e5f004](https://github.com/jordansmall/spindrift/commit/5e5f004f51c7b6d22cc27c0a17bde39ca873db28)), closes [#4576](https://github.com/jordansmall/spindrift/issues/4576)
+* **daemon:** keep rate limits away from the breaker ([ba6a6bf](https://github.com/jordansmall/spindrift/commit/ba6a6bfb58c37698bfd9037ef419a97266957c53))
+* **daemon:** lift a jam when Demand rises ([e4559b6](https://github.com/jordansmall/spindrift/commit/e4559b60e3412a913ae54d835d58368c4aced82e)), closes [#4580](https://github.com/jordansmall/spindrift/issues/4580)
+* **daemon:** name the tracker each probed kind uses ([e5f77b4](https://github.com/jordansmall/spindrift/commit/e5f77b4382605d80e8d520d8de3b83f065bfdb67))
+* **daemon:** park the butler on not_due records ([38230e2](https://github.com/jordansmall/spindrift/commit/38230e25cafa789e2824e669b74ebbd87a9576ff))
+* **daemon:** pause a rate-limited tracker's kinds ([31c6b60](https://github.com/jordansmall/spindrift/commit/31c6b6029f386fdd0701cf858129b34deb005cf9))
+* **daemon:** probe Forgejo issues for demand ([6ea8030](https://github.com/jordansmall/spindrift/commit/6ea8030508921aa1f4f47643567f913cc4d33589)), closes [#4578](https://github.com/jordansmall/spindrift/issues/4578)
+* **daemon:** probe github issues for demand ([b375f30](https://github.com/jordansmall/spindrift/commit/b375f3048ab4d212f854334c82a527f1a56e1f4a))
+* **daemon:** probe jira issues for demand ([921f275](https://github.com/jordansmall/spindrift/commit/921f2759b104e1149dd85c632dfc836f9f512db8))
+* **daemon:** probe local issues for demand ([a6715f3](https://github.com/jordansmall/spindrift/commit/a6715f3ffffbb94f269c32ce7fa664d8573224ae)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **daemon:** release a kind's start budget on claim ([b64b8bd](https://github.com/jordansmall/spindrift/commit/b64b8bdd10ae2cf603d753ceec040a3624fa3825)), closes [#4576](https://github.com/jordansmall/spindrift/issues/4576)
+* **daemon:** report demand per kind in status ([bcc28f5](https://github.com/jordansmall/spindrift/commit/bcc28f50b524a59c66cf34f0055650179e8b1078)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **daemon:** report woke when a kind opens ([1552292](https://github.com/jordansmall/spindrift/commit/1552292efa7958ac88ae3e848b44ce612864a75a)), closes [#4575](https://github.com/jordansmall/spindrift/issues/4575)
+* **daemon:** schedule reported kinds by next_due ([5212603](https://github.com/jordansmall/spindrift/commit/5212603c2b8c07e03bf2dc0080a09a49bc49b684))
+* **daemon:** show butler next_due in status ([d2e7d66](https://github.com/jordansmall/spindrift/commit/d2e7d66496e82cf0386bc4dd267fbd19e0884e02))
+* **daemon:** skip the discovery baton for chores ([2e23c06](https://github.com/jordansmall/spindrift/commit/2e23c06dc1266933d32e485947e5d2b04f397cc2)), closes [#4583](https://github.com/jordansmall/spindrift/issues/4583)
+* **daemon:** start slots from probed tracker demand ([05324fc](https://github.com/jordansmall/spindrift/commit/05324fcb83b472df3402cb8398bf14ae075ba8c1)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **daemon:** step backoff once per no-work burst ([7d2a952](https://github.com/jordansmall/spindrift/commit/7d2a952ae12b5bbe9a4faaea450115fddaaf9a74)), closes [#4618](https://github.com/jordansmall/spindrift/issues/4618)
+* **daemon:** wake parked slots when a kind opens ([f2c189a](https://github.com/jordansmall/spindrift/commit/f2c189aa9236fcdb881923003ac31af1fd38cd88)), closes [#4575](https://github.com/jordansmall/spindrift/issues/4575)
+* **daemon:** warn when a probed kind has no source ([237b042](https://github.com/jordansmall/spindrift/commit/237b042844ccd63c57767125a19250c3588ab322)), closes [#4619](https://github.com/jordansmall/spindrift/issues/4619)
+* **dispatchkind:** add a demand source row ([dd494cf](https://github.com/jordansmall/spindrift/commit/dd494cfa3ccb7995a920f846da05675537fa4b45)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **dispatchkind:** add an Enablement row ([d1aea36](https://github.com/jordansmall/spindrift/commit/d1aea36b3d816fab1f2ffb2dbb3640c609a2a2bc)), closes [#4574](https://github.com/jordansmall/spindrift/issues/4574)
+* **dispatchkind:** add doctor preflight rows ([667780b](https://github.com/jordansmall/spindrift/commit/667780b43a3f2880159333c0c364e7a7d87f73d9)), closes [#4590](https://github.com/jordansmall/spindrift/issues/4590)
+* **forge:** carry the reset time on rate limits ([51f9b00](https://github.com/jordansmall/spindrift/commit/51f9b000d012ad1de8fc47ba65c23164dedc0be8))
+* **forge:** count ready issues for daemon demand ([fb7cdba](https://github.com/jordansmall/spindrift/commit/fb7cdba81953793a338ed9d9ab8d1f116ff85eed)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **forgejo:** count daemon demand from X-Total-Count ([338f02d](https://github.com/jordansmall/spindrift/commit/338f02d4e9d497bb68930e845ef3d7ceb4c37fab)), closes [#4578](https://github.com/jordansmall/spindrift/issues/4578)
+* **github:** count ready issues with ETag probes ([4737de8](https://github.com/jordansmall/spindrift/commit/4737de8d7b420bb36fecb578ce33c91ec4fc3fc6))
+* **gitplumbing:** add HasUnmergedPaths conflict probe ([5ae38e7](https://github.com/jordansmall/spindrift/commit/5ae38e79d397e113da0281d9d8b0149516976712)), closes [#4616](https://github.com/jordansmall/spindrift/issues/4616)
+* **inputdoc:** add Setting for counted doc values ([cd780e4](https://github.com/jordansmall/spindrift/commit/cd780e46eb7d6aa839fc41eaa813e5c5c91d92d0)), closes [#4617](https://github.com/jordansmall/spindrift/issues/4617)
+* **inputdoc:** generate a schema defaults table ([8575bca](https://github.com/jordansmall/spindrift/commit/8575bca2647d8263663fadf0e1969643a260d463)), closes [#4592](https://github.com/jordansmall/spindrift/issues/4592)
+* **jira:** count ready issues with a zero-row search ([8ae82c3](https://github.com/jordansmall/spindrift/commit/8ae82c363da7c1192f79c9314274405a2055b2cd))
+* **rest:** return response headers from DoWithHeader ([a99a650](https://github.com/jordansmall/spindrift/commit/a99a650471cf588b89897b25e0145725340c6dec)), closes [#4578](https://github.com/jordansmall/spindrift/issues/4578)
+
+
+### Bug Fixes
+
+* **daemon:** defer a jam's baseline past an unconfirmed count ([adbfba5](https://github.com/jordansmall/spindrift/commit/adbfba57e7eb121dbc875bc1cb37cb1dac4d6f8a)), closes [#4603](https://github.com/jordansmall/spindrift/issues/4603)
+* **daemon:** fall back to schema defaults for knobs ([2c1d804](https://github.com/jordansmall/spindrift/commit/2c1d80471193f7a7c35b399c8b953cf20caf6b9d)), closes [#4592](https://github.com/jordansmall/spindrift/issues/4592)
+* **daemon:** omit ready_at_jam while the jam's baseline is pending ([8bbe7dc](https://github.com/jordansmall/spindrift/commit/8bbe7dc133402313a310005629918c7b64229ead)), closes [#4603](https://github.com/jordansmall/spindrift/issues/4603)
+* **daemon:** resolve child-shared knobs as children do ([9e9b3d2](https://github.com/jordansmall/spindrift/commit/9e9b3d2f7da2af43a70cb5174c1500e0ba908e73)), closes [#4623](https://github.com/jordansmall/spindrift/issues/4623)
+* **daemon:** resolve doc settings like the child ([8fec887](https://github.com/jordansmall/spindrift/commit/8fec8877f082a667c83ff0e08a9d699dc5451274)), closes [#4617](https://github.com/jordansmall/spindrift/issues/4617)
+* **daemon:** say a stripped env knob is ignored by the daemon too ([30225cd](https://github.com/jordansmall/spindrift/commit/30225cd882482f713e7ed82069f205e652466aaa)), closes [#4623](https://github.com/jordansmall/spindrift/issues/4623)
+* **dogfood:** bake the repo slug into the document ([c774911](https://github.com/jordansmall/spindrift/commit/c774911f74092ec471519dd06888ac4f870a50e8)), closes [#4617](https://github.com/jordansmall/spindrift/issues/4617)
+* **forge:** bound linked-issue lists to budget ([250e301](https://github.com/jordansmall/spindrift/commit/250e3013e2e9434e800c9cf5a264474f0d58616d)), closes [#4614](https://github.com/jordansmall/spindrift/issues/4614)
+* **forge:** cap IssueText after linked section ([6374f96](https://github.com/jordansmall/spindrift/commit/6374f960f8b3cccea68531456d4ac1c05d5dae7e)), closes [#4614](https://github.com/jordansmall/spindrift/issues/4614)
+* **forgejo:** cache an undefined label for 10 min ([4aeb91a](https://github.com/jordansmall/spindrift/commit/4aeb91aee303acbc2173199906d1a670d45f8b2b)), closes [#4594](https://github.com/jordansmall/spindrift/issues/4594)
+* **git:** bound Merge's wait on a held output pipe ([2f1ad89](https://github.com/jordansmall/spindrift/commit/2f1ad89acbba9aad6036c642487b23f8b831eb93)), closes [#4640](https://github.com/jordansmall/spindrift/issues/4640)
+* **git:** classify every merge conflict kind ([4c58996](https://github.com/jordansmall/spindrift/commit/4c58996b72887d573d494d0fd1fe87bc57a17f96)), closes [#4616](https://github.com/jordansmall/spindrift/issues/4616)
+* **github:** only report real conflicts from Rebase ([0786255](https://github.com/jordansmall/spindrift/commit/0786255f4c9e004103aa218ca5d49dbe2c40263b)), closes [#4606](https://github.com/jordansmall/spindrift/issues/4606)
+* **github:** page through every label in ListLabels ([6adb842](https://github.com/jordansmall/spindrift/commit/6adb842e258cdc25466dde06a3fc802ea835089e)), closes [#4607](https://github.com/jordansmall/spindrift/issues/4607)
+* **github:** pin a commit identity on Rebase's clone ([5429602](https://github.com/jordansmall/spindrift/commit/54296022656dd5327ae07b82771d285feae273df)), closes [#4606](https://github.com/jordansmall/spindrift/issues/4606)
+* **github:** read past PRs in the demand probe ([621ff22](https://github.com/jordansmall/spindrift/commit/621ff22454085a2565f7436e137100d314ac2540)), closes [#4596](https://github.com/jordansmall/spindrift/issues/4596)
+* **git:** return ErrMergeConflict only for a real rebase conflict ([875253c](https://github.com/jordansmall/spindrift/commit/875253ccee6e3f6188022c41ee7a3bab073dddd4)), closes [#4615](https://github.com/jordansmall/spindrift/issues/4615)
+* **jira:** count demand via approximate-count on Cloud ([aaa7a16](https://github.com/jordansmall/spindrift/commit/aaa7a16210460e2b65efd9c2f855b7334e6491cc)), closes [#4600](https://github.com/jordansmall/spindrift/issues/4600)
+* **jira:** page search by rows received ([83a9619](https://github.com/jordansmall/spindrift/commit/83a9619134f8380db1ef4687f714fb8d88e477aa)), closes [#4613](https://github.com/jordansmall/spindrift/issues/4613)
+* **jira:** walk Cloud search/jql by nextPageToken ([b6c2d72](https://github.com/jordansmall/spindrift/commit/b6c2d72328e559137818a380149e87f1600048a8)), closes [#4600](https://github.com/jordansmall/spindrift/issues/4600)
+* **launcher:** give the github Rebase the commit identity ([0fb3e8c](https://github.com/jordansmall/spindrift/commit/0fb3e8c64c1845f18c2107dd9700221e460acec8)), closes [#4606](https://github.com/jordansmall/spindrift/issues/4606)
+
+
+### Documentation
+
+* **adr:** note forgejo's undefined-label cache ([e6c6e41](https://github.com/jordansmall/spindrift/commit/e6c6e41718c1e28038fffa0c3e9d0aa0dcd43771))
+* **adr:** schedule the daemon from tracker demand ([bca3917](https://github.com/jordansmall/spindrift/commit/bca3917611e3197488028567576754f62b53b0ba))
+* **context:** define Demand and Start budget ([a0ac0f1](https://github.com/jordansmall/spindrift/commit/a0ac0f1448c2d379919fdd0d19a84bc48e395f84))
+* **forgejo:** fix CreateDraftPR file in test ([5198b65](https://github.com/jordansmall/spindrift/commit/5198b6532b6bfacbfdc2d2c30908028167dd2bac)), closes [#4610](https://github.com/jordansmall/spindrift/issues/4610)
+* **github:** fix CreateDraftPR file in fake gh ([89fa75d](https://github.com/jordansmall/spindrift/commit/89fa75d60f333efc776b7fd57c6460ea768d5842)), closes [#4608](https://github.com/jordansmall/spindrift/issues/4608)
+* **jira:** describe the Cloud search and count paths ([96b5f70](https://github.com/jordansmall/spindrift/commit/96b5f70c16913b952c54ae7eca50107054e8fcfc)), closes [#4600](https://github.com/jordansmall/spindrift/issues/4600)
+* note the deferred jam baseline after an unconfirmed count ([c6afc64](https://github.com/jordansmall/spindrift/commit/c6afc64287732e460cd07bbf8ca5ff6135ad620d)), closes [#4603](https://github.com/jordansmall/spindrift/issues/4603)
+* note the github demand probe reads past PRs ([8bbc997](https://github.com/jordansmall/spindrift/commit/8bbc9972cbb389e7612f06783fae54b465312d1d))
+* **reference:** describe demand_rose ([c0a5246](https://github.com/jordansmall/spindrift/commit/c0a52460337df266a8015e07bdca5239cb7b1adb)), closes [#4580](https://github.com/jordansmall/spindrift/issues/4580)
+* **reference:** describe demand-driven daemon waits ([359fbd1](https://github.com/jordansmall/spindrift/commit/359fbd1df3dbcc01d29e99b3966bf3564f729012)), closes [#4573](https://github.com/jordansmall/spindrift/issues/4573)
+* **reference:** describe rate-limited demand probes ([5fc8037](https://github.com/jordansmall/spindrift/commit/5fc8037da6ecc049bfd355ca9c26d4429033ed1d))
+* **reference:** describe the daemon's start budget ([7c96c8b](https://github.com/jordansmall/spindrift/commit/7c96c8ba0d298c08af9fda2c0a3d1c8ac8263141)), closes [#4576](https://github.com/jordansmall/spindrift/issues/4576)
+* **reference:** describe the github demand probe ([629e7d8](https://github.com/jordansmall/spindrift/commit/629e7d8778b936bc6693658dcbbcf85788261471))
+* **reference:** describe the jira demand probe ([6fac4ee](https://github.com/jordansmall/spindrift/commit/6fac4eeccb2f046fe200f32b9d349acb308564d8))
+* **reference:** describe wakeable daemon parking ([15e2aab](https://github.com/jordansmall/spindrift/commit/15e2aabb171dc265430eb7dcc5689d984bda9cc9)), closes [#4575](https://github.com/jordansmall/spindrift/issues/4575)
+* **reference:** document demand_source_missing ([f16826a](https://github.com/jordansmall/spindrift/commit/f16826ae53d016048b632f9cf3e4af1fd0c32cf4))
+* **reference:** list Forgejo's demand probe and interval ([b86e52e](https://github.com/jordansmall/spindrift/commit/b86e52e731b4a10bdc50fad0e888bda55cd724f0)), closes [#4578](https://github.com/jordansmall/spindrift/issues/4578)
+* **reference:** note a no-work burst counts once ([2a29c6d](https://github.com/jordansmall/spindrift/commit/2a29c6d46cc4687321fad48a7fd90cc578c50dda))
+* **reference:** note chores skip the discovery baton ([1b9e9f5](https://github.com/jordansmall/spindrift/commit/1b9e9f55eb0474858f86a86574800ebf7919ade0))
+* **reference:** note the daemon's knob defaults ([9157b83](https://github.com/jordansmall/spindrift/commit/9157b8381350811e2f69326910ff830a89c737c2)), closes [#4592](https://github.com/jordansmall/spindrift/issues/4592)
+* **reference:** note which doc keys a child loses ([d89fac8](https://github.com/jordansmall/spindrift/commit/d89fac85b1c4fd8d9b15669aef195ee5a8b33060)), closes [#4617](https://github.com/jordansmall/spindrift/issues/4617)
+* **reference:** run forgejo harness from launcher ([27c087f](https://github.com/jordansmall/spindrift/commit/27c087ff59daaabe64b82c4d39b04468121e95a9)), closes [#4609](https://github.com/jordansmall/spindrift/issues/4609)
+* **release-notes:** add 0.23.1 highlights ([db388e5](https://github.com/jordansmall/spindrift/commit/db388e544b47e7f75c075f07fcda69f0c9c1d983))
+* **release-notes:** clarify the GitHub label fix ([07c1a22](https://github.com/jordansmall/spindrift/commit/07c1a224e56c64b64e4f99b6659043fa31c20f26))
+
+
+### Code Refactoring
+
+* **daemon:** alias the schedule's NextDue ([683e3dd](https://github.com/jordansmall/spindrift/commit/683e3ddaf471f5471706e85a9118661aebd8444c))
+* **daemon:** build demand sources via trackerbuild ([3404d3a](https://github.com/jordansmall/spindrift/commit/3404d3ada339ce1354afc1b0ae2be2f7cb1e3c5b)), closes [#4592](https://github.com/jordansmall/spindrift/issues/4592)
+* **daemon:** extract and pin knob resolvers ([98c8da5](https://github.com/jordansmall/spindrift/commit/98c8da5b6dfb4c42bdc9ea8308d1e178d40e3667)), closes [#4623](https://github.com/jordansmall/spindrift/issues/4623)
+* **daemon:** gate kinds on their Enablement row ([6621c76](https://github.com/jordansmall/spindrift/commit/6621c766fc6e1f40ada87a30e266dca8e5d07d1b)), closes [#4574](https://github.com/jordansmall/spindrift/issues/4574)
+* **daemon:** name the tip-move lift ([209629f](https://github.com/jordansmall/spindrift/commit/209629ff254b27c662ad2cc6a5f010adb81d4fdd))
+* **daemon:** pick doctor flags from descriptor ([297d92b](https://github.com/jordansmall/spindrift/commit/297d92bfc1130d6a9b6e8099eff5bd01655488c0)), closes [#4590](https://github.com/jordansmall/spindrift/issues/4590)
+* **daemon:** read daemon-only knobs from inputdoc ([6976283](https://github.com/jordansmall/spindrift/commit/6976283586e33b6e4aa553694d0c3768a33c808f)), closes [#4644](https://github.com/jordansmall/spindrift/issues/4644)
+* **dispatchkind:** fold doctor flag into preflight ([8da0425](https://github.com/jordansmall/spindrift/commit/8da0425d391dcfc2416a01890dbefbc7b23f05b8)), closes [#4627](https://github.com/jordansmall/spindrift/issues/4627)
+* **inputdoc:** generate the daemon-only knob set ([77a9218](https://github.com/jordansmall/spindrift/commit/77a9218cca94b4a04fe53a8fec0a9a2e8b8b0d4d)), closes [#4644](https://github.com/jordansmall/spindrift/issues/4644)
+* **trackerbuild:** share issue tracker construction ([6c1ed05](https://github.com/jordansmall/spindrift/commit/6c1ed05ca31729a8509a871fec51112b45cd23a9)), closes [#4592](https://github.com/jordansmall/spindrift/issues/4592)
+
+
+### Tests
+
+* **box:** stop git auto-maintenance in the seam fixture ([ea8c1fc](https://github.com/jordansmall/spindrift/commit/ea8c1fc395744588c32a2a93c354ea132b92b26d)), closes [#4636](https://github.com/jordansmall/spindrift/issues/4636)
+* **daemon:** pin slot order in tip-move park test ([6070cb3](https://github.com/jordansmall/spindrift/commit/6070cb3c4968788be6a944422b1a8c96087f758a))
+* **github:** page issues and list PRs in fake gh ([6f13e23](https://github.com/jordansmall/spindrift/commit/6f13e2326a40490cb93f8a5a4a26690f56d562ab))
+
 ## [0.23.0](https://github.com/jordansmall/spindrift/compare/v0.22.0...v0.23.0) (2026-10-05)
 
 
