@@ -70,6 +70,9 @@ func TestMarkerVars_AreLowercase(t *testing.T) {
 		"mergeConflictMarkers":      mergeConflictMarkers,
 		"mergeTransientMarkers":     mergeTransientMarkers,
 		"stalePushRejectionMarkers": stalePushRejectionMarkers,
+		"pushTransientMarkers":      pushTransientMarkers,
+		"pushClientErrorMarkers":    pushClientErrorMarkers,
+		"pushRateLimitMarkers":      pushRateLimitMarkers,
 	}
 	for name, markers := range sets {
 		for _, marker := range markers {
@@ -190,9 +193,9 @@ func TestGitForcePush_StaleLeaseIsNotTransient(t *testing.T) {
 	}
 }
 
-// A push failure with no ref-rejection markers in its stderr, such as a
-// network or forge outage, is transient so that callers can retry it.
-func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
+// A push to a missing repository is a permanent failure with no transport or
+// server marker in stderr, so callers must not retry it.
+func TestGitForcePush_MissingRepositoryIsPermanent(t *testing.T) {
 	dir := t.TempDir()
 	work := filepath.Join(dir, "work")
 
@@ -213,16 +216,65 @@ func TestGitForcePush_TransientFailureIsRetryable(t *testing.T) {
 	}
 	run(work, "add", "a.txt")
 	run(work, "commit", "-m", "first")
-	// No real remote: the push fails on a generic infra-shaped error, with
-	// no stale-lease/rejection markers in stderr.
+	// No real remote: the push fails with a missing-repository error.
 	run(work, "remote", "add", "origin", filepath.Join(dir, "does-not-exist"))
 
 	err := GitForcePush(context.Background(), work)
 	if err == nil {
 		t.Fatal("want error, got nil")
 	}
-	if !errors.Is(err, forge.ErrTransientPushFailure) {
-		t.Fatalf("want forge.ErrTransientPushFailure, got: %v", err)
+	if errors.Is(err, forge.ErrTransientPushFailure) {
+		t.Fatalf("want a permanent error for a missing repository, got: %v", err)
+	}
+}
+
+func TestWrapForcePushError_Classification(t *testing.T) {
+	cases := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{"connection reset", "fatal: unable to access 'https://github.com/o/r.git/': Recv failure: Connection reset by peer", true},
+		{"connection refused", "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443 after 3 ms: Connection refused", true},
+		{"timeout", "fatal: unable to access 'https://github.com/o/r.git/': Operation timed out after 300000 milliseconds", true},
+		{"http 502", "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly", true},
+		{"http 503", "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 503", true},
+		{"remote hung up", "fatal: the remote end hung up unexpectedly", true},
+		{"unexpected disconnect", "error: RPC failed; curl 56 GnuTLS recv error (-110): The TLS connection was non-properly terminated.\nfatal: unexpected disconnect while reading sideband packet", true},
+		{"early eof", "error: 1234 bytes of body are still expected\nfatal: early EOF\nfatal: fetch-pack: invalid index-pack output", true},
+		{"network unreachable", "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443: Network is unreachable", true},
+		{"i/o timeout", "fatal: unable to access 'https://github.com/o/r.git/': Get \"https://github.com/\": dial tcp 140.82.112.3:443: i/o timeout", true},
+		{"internal server error", "remote: Internal Server Error\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
+		{"bad gateway", "remote: Bad Gateway\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
+		{"service unavailable", "remote: Service Unavailable\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
+		{"gateway timeout", "remote: Gateway Timeout\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
+		{"ssh kex exchange", "kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.", true},
+		{"broken pipe", "error: send-pack: Broken pipe\nfatal: the remote end hung up unexpectedly", true},
+		{"gnutls handshake", "fatal: unable to access 'https://git.example.com/o/r.git/': gnutls_handshake() failed: The TLS connection was non-properly terminated.", true},
+		{"ssl error syscall", "fatal: unable to access 'https://git.example.com/o/r.git/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104", true},
+		{"http 429", "error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429\nfatal: the remote end hung up unexpectedly", true},
+		{"http 403 then hung up", "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nfatal: the remote end hung up unexpectedly", false},
+		{"http 413 then hung up", "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\nfatal: the remote end hung up unexpectedly", false},
+		{"dns", "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com", true},
+		{"ssh permission denied", "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.", false},
+		{"https auth failed", "fatal: Authentication failed for 'https://github.com/o/r.git/'", false},
+		{"http 403", "remote: Permission to o/r.git denied to bot.\nfatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403", false},
+		{"repo not found", "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found", false},
+		{"unrecognised", "fatal: something unexpected", false},
+		{"empty stderr", "", false},
+		{"stale info", "! [rejected] main -> main (stale info)\nerror: failed to push some refs", false},
+		{"non-fast-forward", "! [rejected] main -> main (non-fast-forward)", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := wrapForcePushError(errors.New("exit status 128"), tc.stderr)
+			if got := errors.Is(err, forge.ErrTransientPushFailure); got != tc.want {
+				t.Fatalf("errors.Is(ErrTransientPushFailure) = %v, want %v: %v", got, tc.want, err)
+			}
+			if !tc.want && strings.Contains(err.Error(), "transient") {
+				t.Fatalf("permanent error mentions transient: %v", err)
+			}
+		})
 	}
 }
 

@@ -62,9 +62,10 @@ func IsMergeTransient(stderr string) bool {
 
 // GitForcePush force-with-lease-pushes the current branch checked out at dir,
 // appending extraArgs after --force-with-lease (e.g. "-u", "origin", ref for a
-// branch with no upstream, issue #1918). A failure with no ref-rejection marker
-// in stderr wraps forge.ErrTransientPushFailure, so callers know a retry is
-// safe. ctx bounds the subprocess because git applies no timeout of its own.
+// branch with no upstream, issue #1918). Only a failure whose stderr carries a
+// transport or server marker wraps forge.ErrTransientPushFailure, so callers
+// know a retry is safe. ctx bounds the subprocess because git applies no
+// timeout of its own.
 func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	// stderr goes to a file, not an io.Writer: Cmd.Run's copy goroutine waits
 	// for EOF on the pipe, which a hung grandchild (git-receive-pack's
@@ -91,20 +92,22 @@ func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	return nil
 }
 
-// wrapForcePushError classifies the failure on raw stderr (isStalePushRejection
-// needs git's exact markers) but redacts the stderr it embeds in the message: a
+// wrapForcePushError classifies the failure on raw stderr (the marker checks
+// need git's exact text) but redacts the stderr it embeds in the message: a
 // credential-bearing CODE_FORGE_REMOTE_URL can appear in git's diagnostics, and
 // this error reaches a public GitHub issue comment (settle.mergeImmediate).
+// Only a positive transport/server marker is transient; everything else,
+// including unrecognised stderr, is permanent.
 func wrapForcePushError(err error, stderr string) error {
 	s := strings.TrimSpace(stderr)
 	suffix := ""
 	if s != "" {
 		suffix = ": " + forge.RedactURLCredentials(s)
 	}
-	if isStalePushRejection(s) {
-		return fmt.Errorf("git push --force-with-lease: %w%s", err, suffix)
+	if !isStalePushRejection(s) && isPushTransient(s) {
+		return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
 	}
-	return fmt.Errorf("git push --force-with-lease: %w%s: %w", err, suffix, forge.ErrTransientPushFailure)
+	return fmt.Errorf("git push --force-with-lease: %w%s", err, suffix)
 }
 
 var stalePushRejectionMarkers = []string{
@@ -119,6 +122,58 @@ var stalePushRejectionMarkers = []string{
 // date) rather than a transient infra or network fault.
 func isStalePushRejection(stderr string) bool {
 	return MatchesAnyMarker(stderr, stalePushRejectionMarkers)
+}
+
+// pushTransientMarkers match transport and server faults a retry may clear. The
+// "returned error: 5" and "rpc failed; http 5" entries catch curl's HTTP 5xx
+// lines without bare digit markers, which would match SHAs and URLs in stderr.
+var pushTransientMarkers = []string{
+	"connection reset",
+	"connection refused",
+	"timed out",
+	"i/o timeout",
+	"remote end hung up",
+	"unexpected disconnect",
+	"early eof",
+	"broken pipe",
+	"kex_exchange_identification",
+	"gnutls_handshake() failed",
+	"ssl_error_syscall",
+	"could not resolve host",
+	"temporary failure in name resolution",
+	"network is unreachable",
+	"returned error: 5",
+	"rpc failed; http 5",
+	"internal server error",
+	"bad gateway",
+	"service unavailable",
+	"gateway timeout",
+}
+
+// pushClientErrorMarkers flag an HTTP 4xx from git's POST stage. Git follows
+// those with "the remote end hung up unexpectedly", so without this veto the
+// symptom markers above would misclassify a permanent 403/413 as transient.
+var pushClientErrorMarkers = []string{
+	"returned error: 4",
+	"rpc failed; http 4",
+}
+
+// pushRateLimitMarkers flag HTTP 429, the one 4xx a retry can clear.
+var pushRateLimitMarkers = []string{
+	"returned error: 429",
+	"rpc failed; http 429",
+}
+
+// isPushTransient reports whether git's stderr positively indicates a
+// transport or server fault that a retry may clear.
+func isPushTransient(stderr string) bool {
+	if MatchesAnyMarker(stderr, pushRateLimitMarkers) {
+		return true
+	}
+	if MatchesAnyMarker(stderr, pushClientErrorMarkers) {
+		return false
+	}
+	return MatchesAnyMarker(stderr, pushTransientMarkers)
 }
 
 // HasUnmergedPaths reports whether the index at dir holds unmerged entries.

@@ -446,8 +446,8 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // onto origin/<base>, and force-pushes. With sync method "merge"
 // (WithSyncMethod) it merges origin/<base> in instead. Returns ErrMergeConflict
 // only when the sync stops on unmerged paths; any other sync failure is
-// returned wrapping git's own output. A force-push that fails for an unrelated
-// reason wraps ErrTransientPushFailure.
+// returned wrapping git's own output. A force-push that fails with a transport
+// or server fault wraps ErrTransientPushFailure.
 func (e *execClient) Rebase(prURL string) error {
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
