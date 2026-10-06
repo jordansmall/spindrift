@@ -147,6 +147,16 @@ api-*)
 			echo "gh: HTTP $FAKE_GH_ISSUES_FAIL_STATUS" >&2
 			exit 1
 		fi
+		if [ -n "$FAKE_GH_ISSUES_RATE_LIMIT_HEADERS" ]; then
+			# Newline-separated header lines to print under a rate-limit 403.
+			printf 'HTTP/2.0 403 Forbidden\r\n'
+			printf '%s\n' "$FAKE_GH_ISSUES_RATE_LIMIT_HEADERS" | while IFS= read -r h; do
+				[ -n "$h" ] && printf '%s\r\n' "$h"
+			done
+			printf '\r\n{"message":"API rate limit exceeded"}'
+			echo "gh: API rate limit exceeded for user ID 1. (HTTP 403)" >&2
+			exit 1
+		fi
 		inm="-"
 		shift 2
 		while [ $# -gt 0 ]; do

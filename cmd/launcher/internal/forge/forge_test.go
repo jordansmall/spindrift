@@ -2,8 +2,10 @@ package forge_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -536,5 +538,29 @@ func TestFake_ListPRFiles(t *testing.T) {
 		if files[i] != want[i] {
 			t.Fatalf("ListPRFiles = %v, want %v", files, want)
 		}
+	}
+}
+
+func TestRateLimitError_MatchesSentinelAndCarriesReset(t *testing.T) {
+	reset := time.Unix(1900000000, 0)
+	inner := errors.New("gh api: boom")
+	err := &forge.RateLimitError{Reset: reset, Err: inner}
+	wrapped := fmt.Errorf("probe: %w", err)
+
+	if !errors.Is(wrapped, forge.ErrRateLimit) {
+		t.Error("wrapped RateLimitError does not match ErrRateLimit")
+	}
+	if !errors.Is(wrapped, inner) {
+		t.Error("wrapped RateLimitError does not unwrap to its cause")
+	}
+	var rl *forge.RateLimitError
+	if !errors.As(wrapped, &rl) || !rl.Reset.Equal(reset) {
+		t.Errorf("errors.As recovered %+v, want Reset %v", rl, reset)
+	}
+	if got, want := err.Error(), "forge rate limited: gh api: boom"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if got := (&forge.RateLimitError{}).Error(); got != forge.ErrRateLimit.Error() {
+		t.Errorf("bare Error() = %q", got)
 	}
 }

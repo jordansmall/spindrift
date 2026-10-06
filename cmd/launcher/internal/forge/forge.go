@@ -6,6 +6,7 @@ package forge
 import (
 	"errors"
 	"strings"
+	"time"
 )
 
 // ErrMergeConflict is returned by Merge when the PR branch conflicts with the
@@ -49,8 +50,30 @@ var ErrBundleNotFound = errors.New("forge bundle not found")
 var ErrNotFound = errors.New("forge: not found")
 
 // ErrRateLimit is returned when GitHub rate-limits the caller, on either the
-// primary hourly quota or the secondary abuse-detection limit.
+// primary hourly quota or the secondary abuse-detection limit. The GitHub
+// adapter returns a *RateLimitError, which matches it under errors.Is and may
+// carry the reset.
 var ErrRateLimit = errors.New("forge rate limited")
+
+// RateLimitError is the typed form of ErrRateLimit, so a caller that wants to
+// wait out the limit can recover when it lifts.
+type RateLimitError struct {
+	// Reset is when the tracker says the limit lifts; zero when it reported none.
+	Reset time.Time
+	// Err is the adapter's own failure, kept for the log text.
+	Err error
+}
+
+func (e *RateLimitError) Error() string {
+	if e.Err == nil {
+		return ErrRateLimit.Error()
+	}
+	return ErrRateLimit.Error() + ": " + e.Err.Error()
+}
+
+func (e *RateLimitError) Is(target error) bool { return target == ErrRateLimit }
+
+func (e *RateLimitError) Unwrap() error { return e.Err }
 
 // ErrAlreadyClaimed is returned by TransitionState when a claim (to ==
 // InProgress) lands on an issue that already carries the InProgress marker,

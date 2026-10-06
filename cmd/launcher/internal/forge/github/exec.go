@@ -39,7 +39,7 @@ func ghCommandErrText(description string, err error, stderr string) error {
 		base = fmt.Errorf("%s: %w", description, err)
 	}
 	if isRateLimited(stderr) {
-		return fmt.Errorf("%w: %w", forge.ErrRateLimit, base)
+		return &forge.RateLimitError{Err: base}
 	}
 	return base
 }

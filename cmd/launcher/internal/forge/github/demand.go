@@ -62,6 +62,10 @@ func (e *execClient) CountReady(fresh bool) (int, error) {
 		if resp.status == 304 {
 			return e.cachedCount()
 		}
+		var rl *forge.RateLimitError
+		if errors.As(cmdErr, &rl) {
+			rl.Reset = resp.rateLimitReset(time.Now())
+		}
 		return 0, fmt.Errorf("%w (HTTP status %d)", cmdErr, resp.status)
 	}
 	resp, err := parseGhInclude(out)
@@ -107,11 +111,32 @@ type ghResponse struct {
 	status int
 	etag   string
 	body   []byte
+
+	retryAfter     string // Retry-After, delta-seconds
+	rateRemaining  string // X-RateLimit-Remaining
+	rateResetEpoch string // X-RateLimit-Reset, Unix seconds
 }
 
-// parseGhInclude splits `gh api -i` output into the status code, the ETag
-// header (names compare case-insensitively; gh prints Go-canonical "Etag"),
-// and the body. Header lines end in CRLF; bare LF is tolerated.
+// rateLimitReset is when the limit lifts per the response headers, or zero when
+// they name none. Retry-After wins, being the only signal for a secondary
+// limit; X-RateLimit-Reset counts only once the primary quota is spent, since
+// it is sent on every response.
+func (r ghResponse) rateLimitReset(now time.Time) time.Time {
+	if n, err := strconv.Atoi(r.retryAfter); err == nil && n >= 0 {
+		return now.Add(time.Duration(n) * time.Second)
+	}
+	if r.rateRemaining == "0" {
+		if n, err := strconv.ParseInt(r.rateResetEpoch, 10, 64); err == nil && n > 0 {
+			return time.Unix(n, 0)
+		}
+	}
+	return time.Time{}
+}
+
+// parseGhInclude splits `gh api -i` output into the status code, the ETag and
+// rate-limit headers (names compare case-insensitively; gh prints Go-canonical
+// "Etag" and "X-Ratelimit-Reset"), and the body. Header lines end in CRLF;
+// bare LF is tolerated.
 func parseGhInclude(out []byte) (ghResponse, error) {
 	var r ghResponse
 	rest := out
@@ -143,8 +168,20 @@ func parseGhInclude(out []byte) (ghResponse, error) {
 			r.body = rest
 			return r, nil
 		}
-		if name, val, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(name), "etag") {
-			r.etag = strings.TrimSpace(val)
+		name, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		switch strings.ToLower(strings.TrimSpace(name)) {
+		case "etag":
+			r.etag = val
+		case "retry-after":
+			r.retryAfter = val
+		case "x-ratelimit-remaining":
+			r.rateRemaining = val
+		case "x-ratelimit-reset":
+			r.rateResetEpoch = val
 		}
 	}
 }
