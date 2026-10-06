@@ -131,6 +131,9 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		if d.Enablement == 0 {
 			t.Fatalf("%s: Enablement unset", d.Name)
 		}
+		if d.Preflight == 0 {
+			t.Fatalf("%s: Preflight unset", d.Name)
+		}
 		if findingLabels[d.FindingLabel] {
 			t.Fatalf("duplicate FindingLabel %q in All", d.FindingLabel)
 		}
@@ -153,6 +156,29 @@ func TestEnablementRows(t *testing.T) {
 	for _, d := range All {
 		if d.Enablement != want[d] {
 			t.Errorf("%s: Enablement = %v, want %v", d.Name, d.Enablement, want[d])
+		}
+	}
+}
+
+// TestDoctorPreflightRows pins how the daemon's startup preflight selects
+// each kind's doctor flag (issue #4590), and that a flag exists exactly when
+// the kind has a preflight behaviour to attach it to.
+func TestDoctorPreflightRows(t *testing.T) {
+	want := map[*Descriptor]struct {
+		preflight DoctorPreflight
+		flag      string
+	}{
+		Work:     {PreflightNone, ""},
+		Research: {PreflightWhenNamed, "--research"},
+		Butler:   {PreflightWhenDrawn, "--butler"},
+	}
+	for _, d := range All {
+		w := want[d]
+		if d.Preflight != w.preflight || d.DoctorFlag != w.flag {
+			t.Errorf("%s: (Preflight, DoctorFlag) = (%v, %q), want (%v, %q)", d.Name, d.Preflight, d.DoctorFlag, w.preflight, w.flag)
+		}
+		if (d.DoctorFlag == "") != (d.Preflight == PreflightNone) {
+			t.Errorf("%s: DoctorFlag %q inconsistent with Preflight %v", d.Name, d.DoctorFlag, d.Preflight)
 		}
 	}
 }
