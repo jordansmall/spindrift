@@ -50,6 +50,11 @@ type Event struct {
 	// Ready is demand_appeared/demand_drained/demand_rose's count of startable
 	// items the probe found. A pointer so a drained event's 0 survives omitempty.
 	Ready *int `json:"ready,omitempty"`
+	// Tracker and Until are probe_rate_limited's (Tracker also probe_resumed's):
+	// the tracker the paused kinds share and the RFC3339 UTC instant the pause
+	// ends.
+	Tracker string `json:"tracker,omitempty"`
+	Until   string `json:"until,omitempty"`
 }
 
 // eventWire is Event's JSON shape: eventFields sheds Event's methods so

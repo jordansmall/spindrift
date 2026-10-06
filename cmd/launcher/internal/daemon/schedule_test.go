@@ -945,3 +945,17 @@ func TestScheduleRateLimitPauseOutlastsJamGate(t *testing.T) {
 		t.Fatalf("view = %#v", v)
 	}
 }
+
+func TestScheduleRateLimitKeepsTheLaterPause(t *testing.T) {
+	now := schedAt(time.Second)
+	reset := schedAt(time.Hour)
+	s := schedObserve(t, githubSchedule(), now,
+		DemandRateLimited{Kind: schedWork, Reset: reset},
+		// A sibling probe already in flight when the tracker paused.
+		DemandRateLimited{Kind: schedResearch})
+	for _, k := range []Kind{schedWork, schedResearch} {
+		if v := s.View(k, now); v.RateLimitedUntil != reset {
+			t.Fatalf("view(%s).RateLimitedUntil = %v, want %v", k, v.RateLimitedUntil, reset)
+		}
+	}
+}
