@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -199,5 +200,46 @@ func TestCountReady_ErrorCarriesHTTPStatus(t *testing.T) {
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
 		t.Errorf("error %q no longer unwraps to *exec.ExitError", err)
+	}
+}
+
+func rateLimitedCountReady(t *testing.T, headers string) *forge.RateLimitError {
+	t.Helper()
+	h := newGithubHarness(t)
+	t.Setenv("FAKE_GH_ISSUES_RATE_LIMIT_HEADERS", headers)
+	_, err := h.tr.(forge.DemandCounter).CountReady(false)
+	if !errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("CountReady error %v does not match ErrRateLimit", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP status 403") {
+		t.Errorf("error %q lacks the HTTP status", err)
+	}
+	var rl *forge.RateLimitError
+	if !errors.As(err, &rl) {
+		t.Fatalf("error %v is not a *RateLimitError", err)
+	}
+	return rl
+}
+
+func TestCountReady_RateLimitResetFromHeaders(t *testing.T) {
+	rl := rateLimitedCountReady(t, "X-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: 1900000000")
+	if want := time.Unix(1900000000, 0); !rl.Reset.Equal(want) {
+		t.Errorf("Reset = %v, want %v", rl.Reset, want)
+	}
+}
+
+func TestCountReady_RateLimitRetryAfter(t *testing.T) {
+	before := time.Now()
+	rl := rateLimitedCountReady(t, "Retry-After: 90")
+	if rl.Reset.Before(before.Add(90*time.Second)) || rl.Reset.After(time.Now().Add(90*time.Second)) {
+		t.Errorf("Reset = %v, want about 90s after %v", rl.Reset, before)
+	}
+}
+
+func TestCountReady_RateLimitWithoutSignalHasZeroReset(t *testing.T) {
+	// X-Ratelimit-Reset is sent on every response, so it only counts at zero remaining.
+	rl := rateLimitedCountReady(t, "X-Ratelimit-Remaining: 12\nX-Ratelimit-Reset: 1900000000")
+	if !rl.Reset.IsZero() {
+		t.Errorf("Reset = %v, want zero", rl.Reset)
 	}
 }
