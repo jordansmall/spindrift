@@ -13,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/trackerbuild"
 )
 
 // backendRow is one registry entry for a named backend: axis validity and
@@ -74,6 +75,25 @@ func remoteLedger(c config, url string, gitArgs ...string) (ledger.Backend, butl
 	return r, tree, cleanup, nil
 }
 
+// trackerSettings projects the launcher config onto the values every Issue
+// Tracker adapter is built from (issue #4592).
+func trackerSettings(c config) trackerbuild.Settings {
+	return trackerbuild.Settings{
+		RepoSlug:          c.repoSlug,
+		BranchPrefix:      c.branchPrefix,
+		LocalIssuesDir:    c.localIssuesDir,
+		ForgejoBaseURL:    c.forgejoBaseURL,
+		ForgejoToken:      c.forgejoToken,
+		JiraBaseURL:       c.jiraBaseURL,
+		JiraProjectKey:    c.jiraProjectKey,
+		JiraEmail:         c.jiraEmail,
+		JiraToken:         c.jiraToken,
+		JiraStatusMapping: c.jiraStatusMapping,
+		Labels:            dispatchLabels(c),
+		VerdictLabels:     researchVerdictLabels(c),
+	}
+}
+
 func forgejoCodeForgeConfig(c config) forgejo.ForgejoCodeForgeConfig {
 	return forgejo.ForgejoCodeForgeConfig{
 		BaseURL:      c.forgejoBaseURL,
@@ -97,7 +117,7 @@ var backendRows = []backendRow{
 		Descriptor: backend.GitHub,
 
 		newIssueTracker: func(c config) forge.IssueTracker {
-			return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithVerdictLabels(researchVerdictLabels(c)))
+			return trackerbuild.GitHub.New(trackerSettings(c))
 		},
 		newCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
@@ -123,13 +143,7 @@ var backendRows = []backendRow{
 		},
 
 		newIssueTracker: func(c config) forge.IssueTracker {
-			return forgejo.NewForgejoClient(forgejo.ForgejoConfig{
-				BaseURL:       c.forgejoBaseURL,
-				Repo:          c.repoSlug,
-				Token:         c.forgejoToken,
-				Labels:        dispatchLabels(c),
-				VerdictLabels: researchVerdictLabels(c),
-			})
+			return trackerbuild.Forgejo.New(trackerSettings(c))
 		},
 		newCodeForge: func(c config, _ local.SanitizedParent, it forge.IssueTracker) forge.CodeForge {
 			return forgejo.NewForgejoCodeForge(forgejoCodeForgeConfig(c), it)
@@ -151,21 +165,7 @@ var backendRows = []backendRow{
 		},
 
 		newIssueTracker: func(c config) forge.IssueTracker {
-			statusMapping, err := jira.ParseStatusMapping(c.jiraStatusMapping)
-			if err != nil {
-				// validate() already rejects a malformed mapping, so fall back
-				// to unmapped (label-only lifecycle).
-				statusMapping = map[forge.DispatchState]string{}
-			}
-			return jira.NewJiraClient(jira.JiraConfig{
-				BaseURL:       c.jiraBaseURL,
-				ProjectKey:    c.jiraProjectKey,
-				Email:         c.jiraEmail,
-				Token:         c.jiraToken,
-				StatusMapping: statusMapping,
-				Labels:        dispatchLabels(c),
-				VerdictLabels: researchVerdictLabels(c),
-			})
+			return trackerbuild.Jira.New(trackerSettings(c))
 		},
 	},
 	{
@@ -182,7 +182,7 @@ var backendRows = []backendRow{
 		},
 
 		newIssueTracker: func(c config) forge.IssueTracker {
-			return local.NewLocalTracker(c.localIssuesDir, dispatchLabels(c), researchVerdictLabels(c))
+			return trackerbuild.Local.New(trackerSettings(c))
 		},
 		newCodeForge: func(c config, parent local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
 			return local.NewLocalCodeForge(c.codeForgeAccumulationRepoDir, c.baseBranch, parent, c.gitUserName, c.gitUserEmail, c.branchPrefix)
