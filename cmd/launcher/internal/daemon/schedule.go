@@ -24,7 +24,8 @@ type Schedule struct {
 // kindSched is one kind's state. interval > 0 marks a probed kind, whose
 // work-or-not answer comes from a Demand count; interval == 0 keeps the
 // exit-driven backoff semantics: both exit 2 and exit 3 back off, Continue
-// resets, a moved tip resets only a jam.
+// resets, a moved tip resets only a jam. A probed kind keeps probing under a
+// jam gate, since a count above readyAtJam lifts it.
 //
 // gate does double duty: for an unprobed kind it is the no-work backoff, for
 // a probed kind only the jam gate (an empty queue is the Demand's job there,
@@ -71,12 +72,14 @@ type Decision interface{ isDecision() }
 type Start struct{ Kind Kind }
 
 // Probe says re-count Demand for Kinds before deciding again: each is stale
-// and sits ahead of every startable kind in priority order.
+// and sits ahead of every startable kind in priority order. A jam-gated kind is
+// probed too, since a rising count lifts the jam.
 type Probe struct{ Kinds []Kind }
 
 // Park says nothing is startable; wait until Until. JamPoll reports that a
-// jammed kind's gate bounds the wait, so the caller slices it by IdleFloor to
-// poll the tip (idleSleep's jammedGate).
+// jammed kind is gated at the decision, so the caller slices the wait by
+// IdleFloor to poll the tip (idleSleep's jammedGate); Until may be a probe due
+// sooner than the jam's end.
 type Park struct {
 	Until   time.Time
 	JamPoll bool
@@ -164,15 +167,17 @@ func (k kindSched) startable(now time.Time, starting int) bool {
 }
 
 // deadline is the instant this kind next needs attention, for a kind that is
-// neither startable nor probe-due. Zero when it has none.
+// neither startable nor probe-due. Zero when it has none. Under a jam gate that
+// is the earlier of the next probe and the jam's end.
 func (k kindSched) deadline(now time.Time) time.Time {
 	if !k.probed() {
 		return k.gate.until
 	}
-	if k.jamGated(now) {
+	next := k.probedAt.Add(k.interval)
+	if k.jamGated(now) && k.gate.until.Before(next) {
 		return k.gate.until
 	}
-	return k.probedAt.Add(k.interval)
+	return next
 }
 
 // Decide chooses the next action for a free slot at now.
@@ -192,7 +197,7 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 			}
 			return Start{Kind: kind}
 		}
-		if ks.probed() && !ks.jamGated(now) && ks.stale(now) {
+		if ks.probed() && ks.stale(now) {
 			stale = append(stale, kind)
 		}
 	}
@@ -229,9 +234,17 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	case DemandProbed:
 		ks.ready, ks.counted = e.Ready, e.Ready
 		// A claim that landed mid-probe moved the count after it was read, so
-		// stay stale (the Claimed zeroed probedAt) and re-probe.
+		// stay stale (the Claimed zeroed probedAt) and re-probe, and never
+		// lift a jam on that pre-claim count.
 		if e.Claims == ks.claims {
 			ks.probedAt = now
+			// More ready than when the jam was recorded means someone added
+			// work, which a fall or a steady count is no evidence of. Strictly
+			// greater: the same count says the jam's cause is still there. An
+			// ended gate has nothing to lift, and a reset would wipe its streak.
+			if ks.jamGated(now) && e.Ready > ks.readyAtJam {
+				ks.gate = ks.gate.reset()
+			}
 		}
 		// Only a fresh probe answers the pending force: a conditional one
 		// already in flight when the child exited 2 must not clear it.

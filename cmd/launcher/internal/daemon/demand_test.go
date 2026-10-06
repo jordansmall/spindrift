@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -442,6 +443,103 @@ func TestLoopJammedProbedKindLiftsOnMovedTip(t *testing.T) {
 	}
 }
 
+// loopJamAnswers runs a probed work kind whose every child jams (exit 3) and
+// whose Demand answers one value per probe, the last repeating, until three
+// children have started. The jam floor (8s) is far longer than the probe
+// interval (1s), so probes land while the first jam is still gated.
+func loopJamAnswers(t *testing.T, answers []int) (offsets []time.Duration, events []Event) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	t0 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	clk := &testClock{now: t0}
+	starts := &startTimes{clk: clk}
+	r := &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 3}}}
+	r.onDemand = func(_ context.Context, k Kind) {
+		n := min(r.demandCount(k), len(answers))
+		r.setDemand(k, answers[n-1])
+	}
+	r.onStart = func(context.Context, ChildRequest) error {
+		starts.record()
+		if starts.len() == 3 {
+			cancel()
+		}
+		return nil
+	}
+	cfg := probedConfig(1, time.Second, workKind)
+	cfg.IdleFloor, cfg.IdleCap = 8*time.Second, 64*time.Second
+	var buf bytes.Buffer
+
+	Loop(ctx, cfg, r, newTestEmitter(&buf), clk)
+
+	return starts.offsets(t0), decodeEvents(t, &buf)
+}
+
+func roseEvents(events []Event) (rose []Event) {
+	for _, ev := range events {
+		if ev.Event == "demand_rose" {
+			rose = append(rose, ev)
+		}
+	}
+	return rose
+}
+
+// The kind jams at Ready 2; the probe one interval later counts 3, which lifts
+// the jam (demand_rose) and starts a child at 1s, well before the 8s gate
+// would have ended. The second jam resets to the floor and the steady count 3
+// then never lifts it, so the third child waits it out (1s + 8s).
+func TestLoopJammedProbedKindLiftsOnRisingDemand(t *testing.T) {
+	got, events := loopJamAnswers(t, []int{2, 3})
+
+	if want := []time.Duration{0, time.Second, 9 * time.Second}; !slices.Equal(got, want) {
+		t.Fatalf("start offsets = %v, want %v (the rise starts a child at 1s)", got, want)
+	}
+	rose := roseEvents(events)
+	if len(rose) != 1 {
+		t.Fatalf("demand_rose events = %+v, want exactly one", rose)
+	}
+	if ev := rose[0]; ev.Kind != workKind || ev.Slot == nil || ev.Ready == nil || *ev.Ready != 3 {
+		t.Fatalf("demand_rose = %+v, want work kind, slot set, ready 3", ev)
+	}
+}
+
+// A count that held or fell since the jam never lifts it: no demand_rose, and
+// no child starts until the 8s gate ends; the next jam's gate has doubled.
+func TestLoopJammedProbedKindStaysJammedOnSteadyOrFallingDemand(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		answers []int
+	}{
+		{"steady", []int{2, 2}},
+		{"falling", []int{2, 1}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, events := loopJamAnswers(t, tt.answers)
+
+			if want := []time.Duration{0, 8 * time.Second, 24 * time.Second}; !slices.Equal(got, want) {
+				t.Fatalf("start offsets = %v, want %v (no start before the gate ends, which then doubles)", got, want)
+			}
+			if rose := roseEvents(events); len(rose) > 0 {
+				t.Fatalf("unexpected demand_rose: %+v", rose)
+			}
+		})
+	}
+}
+
+// A probe counting more than the jam saw, but landing as the 8s gate ends,
+// has no live jam to lift: no demand_rose, and the streak survives, so the
+// next gate has doubled (8s + 16s) rather than reset to the floor.
+func TestLoopRisingDemandAfterGateEndedDoesNotLift(t *testing.T) {
+	got, events := loopJamAnswers(t, []int{2, 2, 2, 2, 2, 2, 2, 2, 3})
+
+	if want := []time.Duration{0, 8 * time.Second, 24 * time.Second}; !slices.Equal(got, want) {
+		t.Fatalf("start offsets = %v, want %v (the doubled gate survives)", got, want)
+	}
+	if rose := roseEvents(events); len(rose) > 0 {
+		t.Fatalf("unexpected demand_rose: %+v", rose)
+	}
+}
+
 // RESEARCH_RESERVATION keeps flooring research while both kinds are probed:
 // research-first until the reserved seats are taken, then work.
 func TestPoolReservationFloorsResearchAlongsideDemand(t *testing.T) {
@@ -862,7 +960,16 @@ func TestLoopPhaseChangeDoesNotWakeParkedSiblings(t *testing.T) {
 func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 	const slots = 3
 	ctx, clk, r := parkedLoopDoubles(t, slots)
-	r.setDemand(workKind, slots)
+	// A tracker that drops one ready issue per claim and keeps `slots` blocked
+	// issues: the jam then records `slots`, which every later probe repeats, so
+	// only the tip move can lift it, never a rising count.
+	r.setDemand(workKind, 2*slots)
+	announce := r.onStart
+	var claimed atomic.Int32
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		r.setDemand(workKind, 2*slots-int(claimed.Add(1)))
+		return announce(ctx, req)
+	}
 	// The three starting resolves, then a move that repeats: a slot whose
 	// pick a sibling's claim spent resolves once more before starting, and a
 	// move seen before anything jams lifts nothing, so the opportunistic

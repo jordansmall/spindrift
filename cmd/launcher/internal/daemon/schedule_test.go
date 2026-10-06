@@ -302,13 +302,33 @@ func TestScheduleDecide(t *testing.T) {
 			want: Park{Until: schedAt(schedFloor), JamPoll: true},
 		},
 		{
-			name: "jam gate hides a stale kind from probing",
+			name: "jam gate does not hide a stale kind from probing",
 			build: func() Schedule {
 				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 500 * time.Millisecond})
 				s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
 			now:  600 * time.Millisecond,
+			want: Probe{Kinds: []Kind{schedWork}},
+		},
+		{
+			name: "jammed kind with a probe due before the jam ends parks until the probe",
+			build: func() Schedule {
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 500 * time.Millisecond})
+				s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
+				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
+			},
+			now:  100 * time.Millisecond,
+			want: Park{Until: schedAt(500 * time.Millisecond), JamPoll: true},
+		},
+		{
+			name: "jammed kind with a probe due after the jam ends parks until the jam ends",
+			build: func() Schedule {
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 2 * schedFloor})
+				s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
+				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
+			},
+			now:  100 * time.Millisecond,
 			want: Park{Until: schedAt(schedFloor), JamPoll: true},
 		},
 		{
@@ -452,6 +472,101 @@ func TestScheduleJamBackoffDoublesAndTipMovedLifts(t *testing.T) {
 	}
 }
 
+// A jam lifts on a moved tip or on a probe counting more than the jam saw
+// (someone labelled more work); a count that held or fell never lifts it.
+func TestScheduleJamLiftsOnDemandRiseOrTipMove(t *testing.T) {
+	const readyAtJam, noProbe = 2, -1
+	for _, tt := range []struct {
+		name     string
+		probed   int
+		tipMoved bool
+		wantJam  bool
+	}{
+		{"count rises", 3, false, false},
+		{"count rises by a lot", 9, false, false},
+		{"count holds", 2, false, true},
+		{"count falls", 1, false, true},
+		{"count drains", 0, false, true},
+		{"tip moves, no probe", noProbe, true, false},
+		{"tip moves, count holds", 2, true, false},
+		{"tip moves, count falls", 1, true, false},
+		{"tip moves, count rises", 3, true, false},
+		{"nothing moves", noProbe, false, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := probedSchedule([]Kind{schedWork}, 0)
+			s = schedObserve(t, s, schedT0,
+				DemandProbed{Kind: schedWork, Ready: readyAtJam},
+				ChildDone{Kind: schedWork, Result: ChildJammed})
+			if !s.View(schedWork, schedT0).Jammed {
+				t.Fatal("setup: kind not jammed")
+			}
+			now := schedAt(schedFloor / 2)
+			if tt.probed != noProbe {
+				s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: tt.probed})
+			}
+			if tt.tipMoved {
+				s, _, _ = s.LiftJams(now)
+			}
+			if got := s.View(schedWork, now).Jammed; got != tt.wantJam {
+				t.Fatalf("Jammed = %v, want %v", got, tt.wantJam)
+			}
+			// A lifted jam is startable; one still gated is not.
+			if _, started := s.Decide(now, Occupancy{}).(Start); started == tt.wantJam {
+				t.Fatalf("Decide started = %v, want %v", started, !tt.wantJam)
+			}
+		})
+	}
+}
+
+// A rise lifts only a jam still gating: once the gate's wait has passed there
+// is nothing to lift, and resetting would wipe the doubling streak.
+func TestScheduleDemandRiseAfterGateExpiredKeepsStreak(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 2},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	now := schedAt(schedFloor * 2)
+	s, woke := s.Observe(now, DemandProbed{Kind: schedWork, Ready: 3})
+	if woke {
+		t.Fatal("a rise after the gate ended woke the kind")
+	}
+	s = schedObserve(t, s, now, ChildDone{Kind: schedWork, Result: ChildJammed})
+	if got := s.View(schedWork, now).JamUntil.Sub(now); got != 2*schedFloor {
+		t.Fatalf("next jam waits %v, want the doubled %v", got, 2*schedFloor)
+	}
+}
+
+// A probe read before a claim moved the count must not lift a jam recorded
+// after it: the higher count it carries is the pre-claim one.
+func TestScheduleDemandRiseFromProbeThatRacedAClaimDoesNotLift(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 3},
+		Claimed{Kind: schedWork},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	now := schedAt(schedFloor / 2)
+	s, woke := s.Observe(now, DemandProbed{Kind: schedWork, Ready: 3, Claims: 0})
+	if woke || s.View(schedWork, now).JamUntil.IsZero() {
+		t.Fatalf("a probe that raced a claim lifted the jam (woke=%v)", woke)
+	}
+}
+
+// The next jam re-records the count, so a rise is judged against the latest jam.
+func TestScheduleDemandRiseComparesAgainstLatestJam(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 2},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	now := schedAt(schedFloor / 2)
+	s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: 3})
+	s = schedObserve(t, s, now, ChildDone{Kind: schedWork, Result: ChildJammed})
+	s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: 3})
+	if !s.View(schedWork, now).Jammed {
+		t.Fatal("a probe at the second jam's count lifted it")
+	}
+}
+
 func TestScheduleProbedEmptyDoesNotGrow(t *testing.T) {
 	s := probedSchedule([]Kind{schedWork}, 0)
 	now := schedT0
@@ -592,7 +707,9 @@ func TestScheduleObserveWokeOnlyWhenStartableSetGrows(t *testing.T) {
 		{"startable kind child empty", probed(probe(schedWork, 2)), 0, work(ChildEmpty), false},
 		{"startable kind child jammed", probed(probe(schedWork, 2)), 0, work(ChildJammed), false},
 		{"startable kind child continues", probed(probe(schedWork, 2)), 0, work(ChildContinue), false},
-		{"jam-gated kind probed while still jammed", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 9), false},
+		{"jam-gated kind probed at the jam's count", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 2), false},
+		{"jam-gated kind probed below the jam's count", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 1), false},
+		{"jam-gated kind probed above the jam's count", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 9), true},
 		{"unstartable kind finishes empty", probed(), 0, work(ChildEmpty), false},
 		{"exit-driven kind's backoff reset by continue",
 			probed(ChildDone{Kind: schedButler, Result: ChildEmpty}), 0, ChildDone{Kind: schedButler, Result: ChildContinue}, true},
