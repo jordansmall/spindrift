@@ -128,6 +128,63 @@ api-*)
 			cat "$DIR/$num/deps"
 		fi
 		;;
+	*/issues\?*)
+		# Conditional page read behind forge.DemandCounter: the open issues
+		# carrying the labels= query value, with an Etag over the body.
+		query=${path#*\?}
+		case "$query" in
+		*sort=updated*) ;;
+		*) echo "fake gh: issues page must sort by update: $path" >&2; exit 1 ;;
+		esac
+		case "$query" in
+		*per_page=100*) ;;
+		*) echo "fake gh: issues page must be 100 per page: $path" >&2; exit 1 ;;
+		esac
+		want=$(printf '%s' "$query" | tr '&' '\n' | sed -n 's/^labels=//p' | sed 's/%20/ /g; s/+/ /g')
+		if [ -n "$FAKE_GH_ISSUES_FAIL_STATUS" ]; then
+			echo "$path - $FAKE_GH_ISSUES_FAIL_STATUS" >> "$STATE_DIR/api.log"
+			printf 'HTTP/2.0 %s Error\r\n\r\n{"message":"boom"}' "$FAKE_GH_ISSUES_FAIL_STATUS"
+			echo "gh: HTTP $FAKE_GH_ISSUES_FAIL_STATUS" >&2
+			exit 1
+		fi
+		inm="-"
+		shift 2
+		while [ $# -gt 0 ]; do
+			case "$1" in
+			-H)
+				case "$2" in
+				If-None-Match:*) inm=${2#If-None-Match: } ;;
+				esac
+				shift 2
+				;;
+			*) shift ;;
+			esac
+		done
+		body=$(
+			printf '['
+			first=1
+			for n in $(ordered_nums); do
+				labf="$DIR/$n/labels"
+				if [ ! -f "$labf" ] || ! grep -qxF "$want" "$labf"; then
+					continue
+				fi
+				[ $first -eq 0 ] && printf ','
+				first=0
+				title=$(cat "$DIR/$n/title" 2>/dev/null)
+				printf '{"number":%s,"title":"%s","labels":%s}' "$n" "$(json_escape "$title")" "$(labels_json "$n")"
+			done
+			printf ']'
+		)
+		etag="\"$(printf '%s' "$body" | cksum | tr -d ' ')\""
+		if [ "$inm" = "$etag" ]; then
+			echo "$path $inm 304" >> "$STATE_DIR/api.log"
+			printf 'HTTP/2.0 304 Not Modified\r\nEtag: %s\r\n\r\n' "$etag"
+			echo "gh: HTTP 304" >&2
+			exit 1
+		fi
+		echo "$path $inm 200" >> "$STATE_DIR/api.log"
+		printf 'HTTP/2.0 200 OK\r\nEtag: %s\r\n\r\n%s' "$etag" "$body"
+		;;
 	esac
 	;;
 esac

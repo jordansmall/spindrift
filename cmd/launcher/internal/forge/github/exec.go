@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -78,6 +79,9 @@ type execClient struct {
 	branchPrefix  string
 	mergeMethod   string // "", "merge", "squash", or "rebase"; "" behaves as "rebase" (mergeMethodFlag)
 	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
+
+	demandMu    sync.Mutex // guards demandCache; CountReady is the only user
+	demandCache *demandCache
 }
 
 // ExecOption sets one optional execClient field. NewExecClient and
