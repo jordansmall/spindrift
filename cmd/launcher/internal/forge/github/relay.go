@@ -24,7 +24,8 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix
 }
 
 // RelayBundle imports ref from the bundle in outboxDir into a fresh clone and
-// force-pushes it to origin with the launcher's own gh-cli credential. A
+// force-pushes it to origin over HTTPS, authenticated by the gh credential
+// helper (see GitRemote), not gh's per-host git_protocol. A
 // missing bundle returns forge.ErrBundleNotFound, the benign "Box wrote
 // nothing" case; a bundle that is present but unreadable or fails `git bundle
 // verify` returns an error so a broken hand-off blocks the seam (issue #2096).
@@ -45,7 +46,7 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 // (falling back to github.com) so a GitHub Enterprise Consumer lands on the
 // same host every other gh path talks to. The empty credential.helper first
 // resets any ambient helper, so the second -c is the only one in effect: the
-// launcher's own gh credential, the same one RelayBundle authenticates with.
+// launcher's own gh credential, the same one the relay clone authenticates with.
 func GitRemote(repo string) (url string, gitArgs []string) {
 	return "https://" + Host() + "/" + repo + ".git",
 		[]string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
