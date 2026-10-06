@@ -86,6 +86,15 @@ const (
 	DemandChildReported                         // only a child run knows (butler: its work is Ledger Chores, not tracker issues)
 )
 
+// DoctorPreflight is when the daemon's startup preflight passes the kind's DoctorFlag.
+type DoctorPreflight int
+
+const (
+	PreflightNone      DoctorPreflight = iota + 1 // never: doctor always checks this kind's config (work's triage labels)
+	PreflightWhenDrawn                            // whenever the kind survives the daemon's enablement gate, bare selector included (butler)
+	PreflightWhenNamed                            // only when the operator's selector names the kind: the bare every-kind default lists it unconditionally, and a repo without its labels must still start (research)
+)
+
 // Prompts names the kind's prompt templates. A zero value means "defer to
 // work's selection" for Base, and "no self-contained sub-mode" for
 // SelfContainedBase.
@@ -111,14 +120,16 @@ type Descriptor struct {
 	ReadOnlyBox    bool // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
 	DemandSource   DemandSource
-	FindingLabel   string         // provenance label settle applies to a filed finding
-	PatchLabel     string         // provenance label joining FindingLabel on a finding the host lands as a patch PR (ADR 0057); butler-only
-	Contract       PromptContract // which shared contract block prompt assembly injects
-	FilerRelayGate string         // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
-	Tracker        Tracker        // which IssueTracker instance this kind's issues live on
-	AnnounceVerb   string         // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
-	Enablement     Enablement     // when the daemon draws this kind; see Enablement
-	UnclaimedGate  bool           // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
+	FindingLabel   string          // provenance label settle applies to a filed finding
+	PatchLabel     string          // provenance label joining FindingLabel on a finding the host lands as a patch PR (ADR 0057); butler-only
+	Contract       PromptContract  // which shared contract block prompt assembly injects
+	FilerRelayGate string          // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
+	Tracker        Tracker         // which IssueTracker instance this kind's issues live on
+	AnnounceVerb   string          // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
+	Enablement     Enablement      // when the daemon draws this kind; see Enablement
+	Preflight      DoctorPreflight // when the daemon's startup preflight passes DoctorFlag; see DoctorPreflight
+	DoctorFlag     string          // doctor flag the preflight adds per DoctorPreflight; "" under PreflightNone
+	UnclaimedGate  bool            // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
 }
 
 var (
@@ -136,6 +147,7 @@ var (
 		FilerRelayGate: "FILER_FILE_RELAY_WORK",
 		Tracker:        TrackerWork,
 		AnnounceVerb:   "implementing",
+		Preflight:      PreflightNone,
 	}
 	Research = &Descriptor{
 		Name:   "research",
@@ -156,6 +168,8 @@ var (
 		FilerRelayGate: "FILER_FILE_RELAY_RESEARCH",
 		Tracker:        TrackerResearch,
 		AnnounceVerb:   "researching",
+		Preflight:      PreflightWhenNamed,
+		DoctorFlag:     "--research",
 	}
 	// Butler is the one-shot butler run (ADR 0056, #3870): it carries one
 	// Ledger Chore (ByChore), never a tracker issue, and files findings the
@@ -187,6 +201,8 @@ var (
 		Tracker:        TrackerWork, // butler files findings onto the work tracker; it has no lifecycle labels of its own
 		AnnounceVerb:   "sweeping",
 		UnclaimedGate:  true,
+		Preflight:      PreflightWhenDrawn,
+		DoctorFlag:     "--butler",
 	}
 )
 
