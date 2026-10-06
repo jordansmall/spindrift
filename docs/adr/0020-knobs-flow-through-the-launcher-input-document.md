@@ -74,7 +74,12 @@ deleted, not maintained.
 - **Release N (transition):** the launcher warns, with provenance, on any
   knob env var found in its environment — `MAX_JOBS set in environment —
   knob env overrides are deprecated; use --max-jobs or
-  dispatch.maxJobs` — and still honors the value.
+  dispatch.maxJobs` — and still honors the value (amended by issue #4623,
+  which extended the document-first rule `childKnob` already applied to the
+  demand knobs and `GH_TOKEN_REFRESH_FILE` to `BASE_BRANCH`, `MAX_PARALLEL`,
+  `DAEMON_AWAKE_WINDOW` and the `BUTLER_*` knobs: the daemon ignores an
+  ambient value for them when the document carries it; only knobs no child
+  reads keep the ambient override).
 - **Release N+1:** the same condition is an error.
 
 Secrets are exempt at both stages. The dev-iteration overrides
