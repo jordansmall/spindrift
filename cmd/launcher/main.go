@@ -1340,7 +1340,16 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	// in flight.
 	stopCh, abortCh, stopCleanup := installStopSignal()
 	defer stopCleanup()
+	return recoverIssue(stopCh, abortCh, false, c, it, cf, caps, pwd, f, s, issueNum, stdout, stderr)
+}
 
+// recoverIssue is recover's one path for a single issue, shared by
+// `recover <n>` and queue mode (queue true). The caller owns the one signal
+// install, so a signal that fired earlier, including during queue mode's
+// eligibility reads, still wins. Queue mode additionally refuses with
+// errRecoverIneligible when the issue is not landable, and takes the label
+// off agent-failed itself, since no workflow has claimed it first.
+func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string, stdout, stderr io.Writer) error {
 	terminated := registryFor(s)
 	reaper := f.AsReaper()
 	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated, c.completeLabel)
@@ -1360,9 +1369,19 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		return waves.ErrSignalledStop
 	}
 
+	// Queue mode has not yet moved the label off agent-failed (the
+	// Failed->InProgress transition below), so recoverFailed's prior-claim
+	// read would restore a stale terminal label over agent-failed.
+	failBeforeLabelClaim := func(err error) error {
+		if queue {
+			return err
+		}
+		return recoverFailed(it, caps, issueNum, err, stdout, stderr)
+	}
+
 	fi, err := it.Issue(issueNum)
 	if err != nil {
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, err), stdout, stderr)
+		return failBeforeLabelClaim(fmt.Errorf("issue %s: %w", issueNum, err))
 	}
 	iss := newIssue(fi)
 	// A live Dispatch for this issue, in any process sharing pwd, holds this
@@ -1372,9 +1391,12 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	if claimErr != nil {
 		if errors.Is(claimErr, dispatch.ErrIssueClaimed) {
 			fmt.Fprintf(stdout, "    #%s  status=skipped  note=another launcher process still owns this issue (Box live or run settling)\n", issueNum)
+			if queue {
+				return errRecoverIneligible
+			}
 			return nil
 		}
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: claim: %w", issueNum, claimErr), stdout, stderr)
+		return failBeforeLabelClaim(fmt.Errorf("issue %s: claim: %w", issueNum, claimErr))
 	}
 	defer release()
 	branch := cf.AgentBranch(iss.number)
@@ -1383,7 +1405,10 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	// sits on top of it: maxAttempts = retries + 1.
 	res, prErr := forge.ResolveOpenPRWithRetry(cf, iss.number, backoff, c.transientRetryMax+1)
 	if prErr != nil {
-		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr), stdout, stderr)
+		return failBeforeLabelClaim(fmt.Errorf("issue %s: resolve PR: %w", issueNum, prErr))
+	}
+	if queue && res.Found {
+		return errRecoverIneligible
 	}
 	if !res.Found {
 		// A resolveErr is logged, not returned: the self-report walk runs
@@ -1398,11 +1423,39 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		if err := os.MkdirAll(dispatch.HostLogDirFor(pwd), 0o755); err != nil {
 			return fmt.Errorf("mkdir logs: %w", err)
 		}
+		result := dispatch.Result{Resolved: resolved}
+		sit := s.SituationFor(iss.number, res.Found, result)
+		if queue {
+			if !sit.BundlePresent || !sit.SelfReportSuccess {
+				return errRecoverIneligible
+			}
+			// Re-checked here, not only at the first checkpoint: a stop sent
+			// during the eligibility reads above must win before the issue's
+			// label is touched.
+			if !gate.Allowed(iss.number) {
+				return waves.ErrSignalledStop
+			}
+			if err := it.TransitionState(iss.number, forge.Failed, forge.InProgress); err != nil {
+				if errors.Is(err, forge.ErrAlreadyClaimed) {
+					fmt.Fprintf(stdout, "    #%s  status=skipped  note=another actor already moved this issue off %s\n", issueNum, c.failedLabel)
+					return errRecoverIneligible
+				}
+				return fmt.Errorf("recover: claim #%s: %w", issueNum, err)
+			}
+		}
 		// New arms this issue's kill latch, so it must run under Gate's own
 		// lock and before the in-flight registration, or a concurrent abort
 		// could snapshot the in-flight set without it (#3522).
 		var d *dispatch.Dispatch
 		if !gate.Launch(iss.number, func() { d = f.New(iss.number, iss.title) }) {
+			if queue {
+				// A stop arrived after the claim above: put the label back so
+				// the issue is not stranded agent-in-progress with no run.
+				if err := it.TransitionState(iss.number, forge.InProgress, forge.Failed); err != nil {
+					fmt.Fprintf(stderr, "    ?? #%s: restore %s: %v\n", issueNum, c.failedLabel, err)
+				}
+				return waves.ErrSignalledStop
+			}
 			// A signal arrived between Allowed and here. Recover never calls
 			// gate.Hold -- the agent-recover workflow holds this issue's claim
 			// and its PR may still be open -- so Launch's decline releases
@@ -1415,8 +1468,6 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		if err := d.EnsureRunLineage(); err != nil {
 			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
-		result := dispatch.Result{Resolved: resolved}
-		sit := s.SituationFor(iss.number, res.Found, result)
 		settled := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
 		// Leave must run before Settle's final abort re-check, or a signal
 		// landing the instant after settling finishes would still find this
@@ -1433,6 +1484,9 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 		}
 		if settled {
 			return nil
+		}
+		if queue {
+			return parkQueueFailure(c, it, issueNum, stdout, stderr)
 		}
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
