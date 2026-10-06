@@ -311,7 +311,8 @@ func TestReadOnlyForgejoCodeForge_CreateDraftPR_Errors(t *testing.T) {
 // already exists", not the "not mergeable" sense the same status carries on
 // the merge endpoint (forgejoStatusMap/errMergeRefused). CreateDraftPR adopts
 // the branch's open PR via OpenPRForBranch and reports created=false, as
-// github's adoption does (relay.go, issue #2407 slice 1/2; issue #2447).
+// github's adoption does (exec_pr.go's execClient.CreateDraftPR, issue #2407
+// slice 1/2; issue #2447).
 func TestReadOnlyForgejoCodeForge_CreateDraftPR_AdoptsExistingOnConflict(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
