@@ -2942,6 +2942,9 @@ generated `flake.nix`.
   reference](flake-options.md). `JIRA_TOKEN` is a secret env var alongside
   `GH_TOKEN`: a Jira API token used alone as a Bearer PAT (Server/Data
   Center), or paired with the non-secret `JIRA_EMAIL` for Basic auth (Cloud).
+  Setting `JIRA_EMAIL` also selects Jira Cloud's search APIs: listing pages
+  `GET /rest/api/2/search/jql` by `nextPageToken`, while Server/Data Center
+  keeps `/rest/api/2/search` paged by `startAt`.
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
   independently of the GitHub Code Forge probe.
 
@@ -6641,11 +6644,11 @@ kinds it covers) replaces "start a child to find out the queue is empty"
 with a cheap tracker-side count. A probed kind carries a flat probe interval
 (`ISSUE_TRACKER=local`: 20s, a scan of the queue directory;
 `ISSUE_TRACKER=forgejo`: 3m, one small request; `github`: 60s, one
-conditional request; `jira`: 5m, one zero-row search; `DAEMON_PROBE_INTERVAL`
-overrides it for every tracker when set, blank keeps the per-tracker
-defaults, and a bad value fails start-up). The Forgejo probe asks for a
-one-item issue page filtered by the dispatch label and reads the total from
-the `X-Total-Count` header; Codeberg sends no `ETag` or `Last-Modified`, so
+conditional request; `jira`: 5m, one zero-row search or approximate count;
+`DAEMON_PROBE_INTERVAL` overrides it for every tracker when set, blank keeps
+the per-tracker defaults, and a bad value fails start-up). The Forgejo probe
+asks for a one-item issue page filtered by the dispatch label and reads the
+total from the `X-Total-Count` header; Codeberg sends no `ETag` or `Last-Modified`, so
 it is not a conditional request. A dispatch label the repo does not define
 counts zero, since Forgejo would otherwise drop the unresolved filter and
 return every open issue. The daemon reads `FORGEJO_BASE_URL`, `REPO_SLUG`
@@ -6716,12 +6719,18 @@ document nor the environment takes its schema default (`ready-for-agent`,
 count a child has already consumed, a probe that counted work followed by a child
 exiting 2 makes the next probe of that kind skip the cache and read fresh.
 
-The Jira probe is one JQL search with `maxResults=0`, reading the
-response's `total` without fetching any issue. The JQL is the one the
-child's dispatch listing uses — project, the statuses `JIRA_STATUS_MAPPING`
-maps to dispatchable or the dispatch label, and a status category that is
-not Done — so the count matches what a child would find. Jira offers no
-conditional request, hence the longer 5m default. The daemon reads
+The Jira probe reads a count without fetching any issue, and its mode
+follows `JIRA_EMAIL`. With an email set (Basic auth, Jira Cloud) it is one
+`POST /rest/api/3/search/approximate-count`, because Cloud retired
+`/rest/api/2/search` (CHANGE-2046). Without one (Bearer PAT, Jira
+Server/Data Center) it is one JQL search with `maxResults=0`, reading the
+response's `total`. The Cloud count is approximate and can lag recent
+updates, which is acceptable because a started child lists the issues
+itself. The JQL is the one the child's dispatch listing uses — project,
+the statuses `JIRA_STATUS_MAPPING` maps to dispatchable or the dispatch
+label, and a status category that is not Done — so the count matches what
+a child would find. Jira offers no conditional request, hence the longer
+5m default. The daemon reads
 `JIRA_BASE_URL`, `JIRA_PROJECT_KEY`, `JIRA_TOKEN`, `JIRA_EMAIL` and
 `JIRA_STATUS_MAPPING` the way a child does, but a token supplied only
 through its `-file` or `-cmd` form is invisible to it, and a missing base

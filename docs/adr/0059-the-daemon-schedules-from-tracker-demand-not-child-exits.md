@@ -40,7 +40,7 @@ each tracker the launcher supports:
 | github | `issues?labels=…&sort=updated&per_page=100` | ETag → 304 on page 1 (Amended by issue #4596: deeper pages when PRs crowd it; see below) |
 | forgejo | `issues?labels=…&limit=1`, read `x-total-count` | none — Codeberg sends no ETag or Last-Modified on issue lists |
 | local | `LocalTracker.ListIssues` over `LOCAL_ISSUES_DIR` | none needed — a directory scan, no network |
-| jira | JQL search, `maxResults=0`, read `total` | none |
+| jira | JQL search, `maxResults=0`, read `total` (Amended by issue #4600: Jira Cloud uses `search/approximate-count`; see below) | none |
 
 ## Decision
 
@@ -89,6 +89,13 @@ by-name check with a descriptor enablement row.
   git-ignored path in the operator's checkout, not the fetched revision)
   against the same directory children use.
 - **jira** reads `total` from a `maxResults=0` search.
+  (Amended by issue #4600: Jira Cloud retired `/rest/api/2/search`, so a
+  `JIRA_EMAIL` (Basic auth) selects Cloud, and the probe is one
+  `POST /rest/api/3/search/approximate-count` with the same JQL, reading
+  `count`. That count is approximate and can lag recent updates, which is
+  acceptable because it only decides whether to start a child, and the child
+  lists issues itself. Server/Data Center, with no `JIRA_EMAIL`, keeps the
+  v2 `total`.)
 - **butler** is `ChildReported`. A new pure `chore.NextDue`, beside
   `chore.Check` and fed the same inputs, maps each not-due reason to when it
   lifts: `IntervalNotElapsed` → last Done + `Every`; `LiveClaim` → claim

@@ -884,10 +884,11 @@ A [[Dispatch kind]]'s cheap answer to "is there work", read by the [[Daemon]]
 itself (ADR 0059): for a tracker kind, `Ready`, the count of open issues
 wearing its dispatchable label, probed per Issue Tracker at a flat interval
 (an ETag'd page on github, `x-total-count` on forgejo, a directory scan on
-local, a zero-row search on jira); for the butler, the instant its next
-[[Chore]] is due, reported by its last child. Advisory only: the child still
-discovers and claims, and `Ready` counts labelled candidates, not dispatchable
-ones — blockers and overlap still surface as a jam.
+local, a zero-row search or an approximate count on jira); for the butler,
+the instant its next [[Chore]] is due, reported by its last child. Advisory
+only: the child still discovers and claims, and `Ready` counts labelled
+candidates, not dispatchable ones — blockers and overlap still surface as a
+jam.
 _Avoid_: queue depth, backlog (that is the Console's pick source), pending.
 
 **Start budget**:
