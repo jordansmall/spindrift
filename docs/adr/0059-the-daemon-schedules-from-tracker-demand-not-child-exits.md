@@ -132,7 +132,11 @@ candidate whatever the budget.
 A jam (exit 3) still backs off on the idle floor/cap and still lifts on a
 moved tip. It records `readyAtJam`, and a later probe that sees `Ready` above
 it also lifts the jam (`demand_rose`): someone labelled more work. A falling
-count never lifts it.
+count never lifts it. (Amended by issue #4603: when a claim or an empty
+child's exit has moved the count since the last probe, the jam takes
+`readyAtJam` from the next probe instead, since the label swap can reach
+the tracker before the daemon counts the claim, and an empty child's zero
+is no tracker count.)
 
 ### Parked slots wake when a kind becomes startable
 
