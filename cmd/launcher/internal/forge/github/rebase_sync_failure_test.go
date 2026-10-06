@@ -97,5 +97,19 @@ func TestRebase_SyncFailureClassification(t *testing.T) {
 				}
 			}
 		})
+
+		t.Run(method+"/commit identity option lets an identity-less host sync", func(t *testing.T) {
+			h := newCodeForgeHarness(t)
+			h.cf = NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-", WithSyncMethod(method),
+				WithCommitIdentity("Spindrift Bot", "bot@example.com"))
+			url := seedDivergedIdentityless(t, h, "3")
+
+			if err := h.cf.Rebase(url); err != nil {
+				t.Fatalf("Rebase with a commit identity: %v", err)
+			}
+			if !h.Rebased("3") {
+				t.Error("PR branch was not pushed after the sync")
+			}
+		})
 	}
 }
