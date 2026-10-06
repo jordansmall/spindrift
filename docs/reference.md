@@ -25,6 +25,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
+| `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, and has a free host claim; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
@@ -2858,7 +2859,10 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   dispatch` never adopts on the strength of the label alone. The unstick is the
   `agent-recover` label (`agent-recover.yml` → `spindrift recover <n>`): an
   operator's explicit assertion that the issue is no longer owned by a live
-  runner, re-running the merge gate on its open PR (draft or not).
+  runner, re-running the merge gate on its open PR (draft or not). Bare
+  `spindrift recover` is still an explicit operator verb: it touches only
+  `agent-failed` issues, using the per-issue host claim as its liveness proof
+  (issue #4654).
 - **A terminal recover failure never downgrades an already-successful issue.**
   The claim above strips whatever terminal label the issue carried (including
   `agent-complete`) before `spindrift recover` ever runs, so a recover attempt
@@ -4242,7 +4246,14 @@ still performs the write host-side at settle.
 If the `status=ready` "land the branch" relay still fails after
 `TRANSIENT_RETRY_MAX` retries (any forge, including `local`), the issue parks
 `agent-failed` with the bundle kept in the outbox;
-`spindrift recover <n>` relays and lands it (issue #4651).
+`spindrift recover <n>` relays and lands it (issue #4651). Bare `spindrift
+recover` finds and lands one such issue itself, moving it `agent-failed` →
+`agent-in-progress` and ending `agent-complete` on a land or back on
+`agent-failed` otherwise (issue #4654). Queue mode refuses `CODE_FORGE=local`;
+a local Recoverable issue stays manual, `spindrift recover <n>` (ADR 0039).
+Eligibility reads the run's last driver self-report, the same evidence
+`recover <n>` trusts, so a run whose earlier pass reported ready and whose
+later pass crashed without reporting still qualifies.
 
 After a successful land (merged, including a hand-run `spindrift recover
 <n>`), the Launcher deletes the issue's `seam.bundle` from the outbox. A
