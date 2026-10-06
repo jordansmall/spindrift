@@ -1257,6 +1257,14 @@ func (p *pool) snapshotLocked() Status {
 			}
 			kc.NextProbe = next.UTC().Format(time.RFC3339)
 		}
+		if v.DueKnown {
+			if v.NextDue.At.IsZero() {
+				kc.NextDue = report.NextDueOnTipMove
+			} else {
+				kc.NextDue = v.NextDue.At.UTC().Format(time.RFC3339)
+				kc.NextDueOnTipMove = v.NextDue.OnTipMove
+			}
+		}
 		if !v.JamUntil.IsZero() {
 			kc.JamUntil = v.JamUntil.UTC().Format(time.RFC3339)
 			if v.Probed {

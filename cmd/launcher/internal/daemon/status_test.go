@@ -706,3 +706,55 @@ func TestPoolSnapshotCarriesDemandFieldsPerKind(t *testing.T) {
 		}
 	}
 }
+
+// TestPoolSnapshotCarriesChildReportedNextDue pins the butler's next_due: none
+// before a child has reported, the instant (also as nextCheck) after a timed
+// report, and on_tip_move with no nextCheck after a tip-only report.
+func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
+	clk := &testClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+	butler := KindOf(dispatchkind.Butler)
+	cfg := testConfig(1)
+	cfg.Kinds = []Kind{butler}
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
+	now := clk.Now()
+
+	if got := p.snapshot().Checks[0]; got.NextDue != "" {
+		t.Errorf("before any report next_due = %q, want empty", got.NextDue)
+	}
+
+	due := now.Add(time.Hour)
+	p.st.sched, _ = p.st.sched.Observe(now, ChildDone{Kind: butler, Result: ChildEmpty, NextDue: NextDue{At: due}})
+	want := due.UTC().Format(time.RFC3339)
+	got := p.snapshot().Checks[0]
+	if got.NextDue != want || got.NextCheck != want {
+		t.Errorf("timed report = next_due %q nextCheck %q, want both %q", got.NextDue, got.NextCheck, want)
+	}
+	data, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"next_due":"`+want+`"`) {
+		t.Errorf("JSON = %s, want next_due %s", data, want)
+	}
+
+	p.st.sched, _ = p.st.sched.Observe(now, ChildDone{Kind: butler, Result: ChildEmpty, NextDue: NextDue{OnTipMove: true}})
+	got = p.snapshot().Checks[0]
+	if got.NextDue != "on_tip_move" || got.NextCheck != "" {
+		t.Errorf("tip-only report = next_due %q nextCheck %q, want on_tip_move and none", got.NextDue, got.NextCheck)
+	}
+	if got.NextDueOnTipMove {
+		t.Error("tip-only report set next_due_on_tip_move, want it only alongside an instant")
+	}
+
+	p.st.sched, _ = p.st.sched.Observe(now, ChildDone{Kind: butler, Result: ChildEmpty, NextDue: NextDue{At: due, OnTipMove: true}})
+	got = p.snapshot().Checks[0]
+	if got.NextDue != want || !got.NextDueOnTipMove {
+		t.Errorf("instant plus tip report = next_due %q on_tip_move %v, want %q and true", got.NextDue, got.NextDueOnTipMove, want)
+	}
+	if data, err = json.Marshal(got); err != nil {
+		t.Fatal(err)
+	} else if !strings.Contains(string(data), `"next_due_on_tip_move":true`) {
+		t.Errorf("JSON = %s, want next_due_on_tip_move true", data)
+	}
+}
