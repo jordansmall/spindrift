@@ -84,7 +84,12 @@ func prNum(ref string) string {
 func (h *codeforgeHarness) SeedLandable(num string) string {
 	branch := h.branchName(num)
 	h.repo.SeedBranch(branch, num)
+	return h.registerPR(num, branch)
+}
 
+// registerPR records PR num's head and base for the fake gh script's `pr view`
+// and `pr merge` handlers and returns its URL.
+func (h *codeforgeHarness) registerPR(num, branch string) string {
 	prDir := filepath.Join(h.prsDir, num)
 	if err := os.MkdirAll(prDir, 0o755); err != nil {
 		h.t.Fatal(err)
