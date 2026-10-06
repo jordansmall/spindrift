@@ -808,7 +808,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	// Built from the daemon's own resolved knobs, per kind row, once the
 	// butler gate has settled which kinds are in play.
-	demand := buildDemandSources(doc, args.Kinds)
+	demand, demandMissing := buildDemandSources(doc, args.Kinds)
 	// The github Demand probe runs gh in this process, so keep its token fresh
 	// the way a child's bootstrap does: an expired token fails every probe,
 	// and probe failures feed the breaker.
@@ -862,6 +862,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// holder dies (including SIGKILL), so a deferred Release here only
 	// needs to cover the ordinary return path.
 	defer func() { _ = lock.Release() }()
+
+	// After the lock: a refused second daemon schedules nothing, so it must
+	// not announce a fallback scheduler.
+	warnUnprobedKinds(demandMissing, stderr, em)
 
 	// Built only now, after the lock acquire above succeeded: the status
 	// file belongs to the daemon that actually holds the checkout, and a

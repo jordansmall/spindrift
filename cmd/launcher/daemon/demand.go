@@ -1,8 +1,11 @@
 package main
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -23,16 +26,21 @@ const jiraProbeTimeout = 30 * time.Second
 // from the map stays exit-driven.
 type demandSources map[daemon.Kind]forge.DemandCounter
 
+// missingSources maps each probed kind that got no Demand source to the reason
+// it stays exit-driven.
+type missingSources map[daemon.Kind]string
+
 // buildDemandSources builds a demand counter for each kind in kinds whose
 // descriptor row says DemandTrackerProbe, from the same settings a child
 // resolves ISSUE_TRACKER, the tracker's own knobs and the work labels from; a
 // blank ISSUE_TRACKER is github, as the launcher defaults it. An unknown
 // tracker or a missing knob yields no source, never an error: the kind then
-// simply stays exit-driven.
+// stays exit-driven. The second result names, per probed kind left without a
+// source, why (never a token or secret value); warnUnprobedKinds reports it.
 //
 // FORGEJO_TOKEN and JIRA_TOKEN are read as plain knobs; a token supplied only
 // through its -file or -cmd form is invisible here, so that deployment stays
-// exit-driven.
+// exit-driven; a set -cmd form earns a hint in the reason (tokenFormHint).
 //
 // A relative LOCAL_ISSUES_DIR is used as written: it resolves against the
 // daemon's cwd, which every child inherits (RunChild sets no cmd.Dir), so
@@ -41,7 +49,7 @@ type demandSources map[daemon.Kind]forge.DemandCounter
 // The github probe runs `gh` in the daemon's own environment, so it sees the
 // daemon's GH_TOKEN; mainRun keeps that fresh from GH_TOKEN_REFRESH_FILE the
 // way a child does.
-func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSources {
+func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSources, missingSources) {
 	var probed []*dispatchkind.Descriptor
 	for _, k := range kinds {
 		if d, ok := dispatchkind.ByVerb(string(k)); ok && d.DemandSource == dispatchkind.DemandTrackerProbe {
@@ -49,7 +57,7 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		}
 	}
 	if len(probed) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Every knob is read whatever the tracker, so one Settings feeds whichever
@@ -67,9 +75,13 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		JiraStatusMapping: childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING")),
 		JiraHTTPClient:    &http.Client{Timeout: jiraProbeTimeout},
 	}
-	tr, ok := trackerbuild.ByName(issueTrackerName(doc))
-	if !ok || tr.Validate(s) != nil {
-		return nil
+	name := issueTrackerName(doc)
+	tr, ok := trackerbuild.ByName(name)
+	if !ok {
+		return nil, allMissing(probed, fmt.Sprintf("unknown ISSUE_TRACKER %q", name))
+	}
+	if err := tr.Validate(s); err != nil {
+		return nil, allMissing(probed, err.Error()+tokenFormHint(doc, name, s))
 	}
 	configured := forge.DispatchLabels{
 		Dispatchable: childKnob(doc, "LABEL", os.Getenv("LABEL")),
@@ -78,10 +90,12 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		Failed:       childKnob(doc, "FAILED_LABEL", os.Getenv("FAILED_LABEL")),
 	}
 
+	missing := missingSources{}
 	sources := demandSources{}
 	for _, d := range probed {
 		labels := forge.FamilyLabels(d.Labels, configured)
 		if labels.Dispatchable == "" {
+			missing[daemon.KindOf(d)] = "set LABEL (the dispatchable label is blank)"
 			continue
 		}
 		s.Labels = labels
@@ -89,11 +103,54 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		// descriptors feed fields counting never reads.
 		counter := forge.ResolveCapabilities(nil, tr.New(s), backend.Descriptor{}, backend.Descriptor{}).DemandCounter
 		if counter == nil {
+			missing[daemon.KindOf(d)] = fmt.Sprintf("ISSUE_TRACKER=%s has no Demand adapter", name)
 			continue
 		}
 		sources[daemon.KindOf(d)] = counter
 	}
-	return sources
+	return sources, missing
+}
+
+// allMissing is the missing result when no probed kind can have a source.
+func allMissing(probed []*dispatchkind.Descriptor, reason string) missingSources {
+	missing := make(missingSources, len(probed))
+	for _, d := range probed {
+		missing[daemon.KindOf(d)] = reason
+	}
+	return missing
+}
+
+// tokenFormHint explains a blank plain token when the tracker's _CMD form is
+// set: the operator believes the token is supplied, but the daemon never runs
+// the command. It names the knobs only, never the command.
+func tokenFormHint(doc *inputdoc.Document, tracker string, s trackerbuild.Settings) string {
+	var plain, cmd string
+	switch {
+	case tracker == "forgejo" && s.ForgejoToken == "":
+		plain, cmd = "FORGEJO_TOKEN", childKnob(doc, "FORGEJO_TOKEN_CMD", os.Getenv("FORGEJO_TOKEN_CMD"))
+	case tracker == "jira" && s.JiraToken == "":
+		plain, cmd = "JIRA_TOKEN", childKnob(doc, "JIRA_TOKEN_CMD", os.Getenv("JIRA_TOKEN_CMD"))
+	}
+	if cmd == "" {
+		return ""
+	}
+	return fmt.Sprintf("; the daemon reads %s only, not %s_CMD", plain, plain)
+}
+
+// warnUnprobedKinds says once at startup, on stderr and in the event stream,
+// that each kind in missing (buildDemandSources' second result) is scheduled
+// from child exits instead of tracker demand: a silent fallback would leave
+// the operator believing the probe was running.
+func warnUnprobedKinds(missing missingSources, stderr io.Writer, em *daemon.Emitter) {
+	kinds := make([]daemon.Kind, 0, len(missing))
+	for k := range missing {
+		kinds = append(kinds, k)
+	}
+	slices.Sort(kinds)
+	for _, k := range kinds {
+		fmt.Fprintf(stderr, "daemon: kind %s has no Demand source: %s; scheduling it from child exits instead\n", k, missing[k])
+		em.Emit(daemon.Event{Event: "demand_source_missing", Kind: k, Reason: missing[k]})
+	}
 }
 
 // issueTrackerName is the ISSUE_TRACKER a child resolves.

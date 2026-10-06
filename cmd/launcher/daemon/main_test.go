@@ -1054,7 +1054,7 @@ var daemonKnobEnvVars = []string{
 	"ISSUE_TRACKER", "LOCAL_ISSUES_DIR", "LABEL", "IN_PROGRESS_LABEL",
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL", "FORGEJO_TOKEN",
 	"GH_TOKEN_REFRESH_FILE", "JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN",
-	"JIRA_STATUS_MAPPING",
+	"JIRA_STATUS_MAPPING", "FORGEJO_TOKEN_CMD", "JIRA_TOKEN_CMD",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
@@ -1282,6 +1282,67 @@ func TestMainRun_InstanceLockRefusal(t *testing.T) {
 	}
 	if !strings.HasPrefix(ev.Reason, "instance-lock:") {
 		t.Errorf("reason = %q, want it to start with %q", ev.Reason, "instance-lock:")
+	}
+}
+
+// demandMissingEventsT decodes stdout's JSON-lines stream and returns its
+// demand_source_missing events.
+func demandMissingEventsT(t *testing.T, stdout string) []daemon.Event {
+	t.Helper()
+	var got []daemon.Event
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var ev daemon.Event
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("decode stdout event %q: %v", line, err)
+		}
+		if ev.Event == "demand_source_missing" {
+			got = append(got, ev)
+		}
+	}
+	return got
+}
+
+// TestMainRun_LockedCheckoutEmitsNoDemandSourceMissing pins that the warning
+// waits for the checkout lock: a refused second daemon never schedules
+// anything, so it must not claim a fallback scheduler.
+func TestMainRun_LockedCheckoutEmitsNoDemandSourceMissing(t *testing.T) {
+	inputPath := lockedCheckoutT(t)
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", inputPath}, &stdout, &stderr)
+	if evs := demandMissingEventsT(t, stdout.String()); len(evs) != 0 {
+		t.Errorf("events = %+v, want no demand_source_missing before the lock is held", evs)
+	}
+	if strings.Contains(stderr.String(), "Demand source") {
+		t.Errorf("stderr = %q, want no Demand source warning", stderr.String())
+	}
+}
+
+// TestMainRun_DemandSourceMissingReachesEventStream pins that a probed kind
+// without a Demand source (no REPO_SLUG on the github tracker) surfaces as a
+// demand_source_missing event on mainRun's stdout stream, once the lock is held.
+func TestMainRun_DemandSourceMissingReachesEventStream(t *testing.T) {
+	path := capturedEnvFixtureT(t, nil)
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+
+	var stdout, stderr bytes.Buffer
+	if got := mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr); got != daemon.ExitPreflightFailed {
+		t.Fatalf("mainRun() = %d, want %d; stderr = %q", got, daemon.ExitPreflightFailed, stderr.String())
+	}
+	evs := demandMissingEventsT(t, stdout.String())
+	if len(evs) != 1 || evs[0].Kind != daemon.KindOf(dispatchkind.Work) {
+		t.Fatalf("demand_source_missing events = %+v, want exactly one for the work kind", evs)
+	}
+	if evs[0].Reason == "" {
+		t.Errorf("event = %+v, want a reason", evs[0])
 	}
 }
 
