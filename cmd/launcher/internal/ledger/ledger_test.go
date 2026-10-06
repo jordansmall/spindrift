@@ -82,3 +82,55 @@ func TestDayTotalsAllErrorWrapsChoreName(t *testing.T) {
 		t.Fatalf("DayTotalsAll error %q, want it to name the failing chore", err)
 	}
 }
+
+func TestDayBounds(t *testing.T) {
+	santiago, err := time.LoadLocation("America/Santiago")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	// Santiago's DST starts 2026-09-06: local 00:00 does not exist and the
+	// clocks jump from 23:59:59 -04 to 01:00 -03.
+	m4, m3 := time.FixedZone("-04", -4*3600), time.FixedZone("-03", -3*3600)
+	tests := []struct {
+		name         string
+		now          time.Time
+		wantMidnight time.Time
+		wantNext     time.Time
+	}{
+		{
+			name:         "UTC",
+			now:          time.Date(2026, 3, 4, 15, 0, 0, 0, time.UTC),
+			wantMidnight: time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC),
+			wantNext:     time.Date(2026, 3, 5, 0, 0, 0, 0, time.UTC),
+		},
+		{
+			name:         "day before the skipped midnight",
+			now:          time.Date(2026, 9, 5, 23, 30, 0, 0, santiago),
+			wantMidnight: time.Date(2026, 9, 5, 0, 0, 0, 0, m4),
+			wantNext:     time.Date(2026, 9, 6, 1, 0, 0, 0, m3),
+		},
+		{
+			name:         "early on the day with no midnight",
+			now:          time.Date(2026, 9, 6, 1, 30, 0, 0, santiago),
+			wantMidnight: time.Date(2026, 9, 6, 1, 0, 0, 0, m3),
+			wantNext:     time.Date(2026, 9, 7, 0, 0, 0, 0, m3),
+		},
+		{
+			name:         "late on the day with no midnight",
+			now:          time.Date(2026, 9, 6, 23, 30, 0, 0, santiago),
+			wantMidnight: time.Date(2026, 9, 6, 1, 0, 0, 0, m3),
+			wantNext:     time.Date(2026, 9, 7, 0, 0, 0, 0, m3),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			midnight, next := ledger.DayBounds(tt.now)
+			if !midnight.Equal(tt.wantMidnight) || !next.Equal(tt.wantNext) {
+				t.Errorf("DayBounds = [%v, %v), want [%v, %v)", midnight, next, tt.wantMidnight, tt.wantNext)
+			}
+			if tt.now.Before(midnight) || !tt.now.Before(next) {
+				t.Errorf("window [%v, %v) does not contain now %v", midnight, next, tt.now)
+			}
+		})
+	}
+}

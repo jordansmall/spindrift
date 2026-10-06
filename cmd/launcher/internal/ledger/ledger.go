@@ -198,9 +198,7 @@ type Totals struct {
 // Reserved and ReservedPatches. One finding may hold both: a patch candidate
 // also keeps a promotion slot for its fallback.
 func DayTotals(b Reader, chore string, now time.Time) (Totals, error) {
-	loc := now.Location()
-	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
-	next := midnight.AddDate(0, 0, 1)
+	midnight, next := DayBounds(now)
 
 	// History's since is only a fetch bound; the [midnight, next) window is
 	// owned here. entries is newest first, so entries[i-1] is entries[i]'s
@@ -265,4 +263,29 @@ func DayTotalsAll(b Reader, chores []string, now time.Time) (Totals, error) {
 		sum = sum.add(t)
 	}
 	return sum, nil
+}
+
+// DayBounds returns the [midnight, next) window of the local calendar day
+// containing now, in now's Location, so midnight <= now < next always. Every
+// consumer of the day boundary (DayTotals, chore.NextDue) must agree on it.
+// Where a DST jump skips 00:00, the day starts at the first instant that
+// exists (e.g. 01:00).
+func DayBounds(now time.Time) (midnight, next time.Time) {
+	y, m, d := now.Date()
+	loc := now.Location()
+	return dayStart(y, m, d, loc), dayStart(y, m, d+1, loc)
+}
+
+// dayStart is the first instant of local date y-m-d in loc. time.Date
+// normalizes a nonexistent 00:00 backward into the previous day; the real day
+// then starts at the zone transition that skipped it.
+func dayStart(y int, m time.Month, d int, loc *time.Location) time.Time {
+	t := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	// Noon is the day's anchor: d may overflow the month (d+1), and noon
+	// normalizes it the same way without ever landing in a skipped hour.
+	if t.YearDay() == time.Date(y, m, d, 12, 0, 0, 0, loc).YearDay() {
+		return t
+	}
+	_, end := t.ZoneBounds()
+	return end
 }
