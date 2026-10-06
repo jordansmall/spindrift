@@ -31,6 +31,9 @@ func newRelayHTTPSHarness(t *testing.T) (*forgetest.GitRepoFixture, *httpsRelayS
 	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
 	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
+	// runner's ociAdapter.Run reaps spindrift-rebase-* in the shared TMPDIR,
+	// deleting a concurrently running package's in-flight Rebase clone.
+	t.Setenv("TMPDIR", t.TempDir())
 
 	repo := forgetest.NewGitRepoFixture(t, "main")
 	// The fake gh still answers the non-clone calls these tests make (pr
