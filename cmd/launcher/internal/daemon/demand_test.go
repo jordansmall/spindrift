@@ -770,3 +770,121 @@ func TestLoopRejectsBadProbeIntervals(t *testing.T) {
 		})
 	}
 }
+
+// parkedLoopDoubles builds the doubles a wake test needs: a clock that parks
+// every Sleep until the test releases it, and a runner holding each slot's
+// child until released. The cleanup cancels the returned ctx and drains the
+// holds so a Loop the test left running exits.
+func parkedLoopDoubles(t *testing.T, slots int) (context.Context, *testClock, *scriptedRunner) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	clk := &testClock{now: time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC), sleepSignal: make(chan struct{}, 64)}
+	clk.park()
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(slots)
+	r.announceEachSlot()
+	t.Cleanup(func() {
+		cancel()
+		for s := 0; s < slots; s++ {
+			select {
+			case r.release[s] <- ChildResult{}:
+			default:
+			}
+		}
+	})
+	return ctx, clk, r
+}
+
+// requireNoRepark fails unless only the slots' initial parks slept: a woken
+// slot starts at once rather than re-parking, and the clock released no sibling.
+func requireNoRepark(t *testing.T, clk *testClock, slots int) {
+	t.Helper()
+	if got := clk.waitCount(); got != slots {
+		t.Fatalf("sleeps = %d, want %d: no slot may re-park, and the siblings must not have been released by the clock", got, slots)
+	}
+}
+
+// One slot's probe finding a backlog wakes every parked sibling at once: the
+// siblings are never released by the clock, so only the wake can start them.
+func TestLoopProbeFindingBacklogWakesParkedSiblings(t *testing.T) {
+	const slots = 3
+	const interval = 10 * time.Second
+	ctx, clk, r := parkedLoopDoubles(t, slots)
+	var buf bytes.Buffer
+	go Loop(ctx, probedConfig(slots, interval, workKind), r, newTestEmitter(&buf), clk)
+
+	clk.awaitSleep(t, slots)
+	r.setDemand(workKind, slots)
+	clk.advanceBy(interval)
+	clk.releaseOne(t)
+
+	for i := 0; i < slots; i++ {
+		r.awaitStart(t)
+	}
+	requireNoRepark(t, clk, slots)
+}
+
+// A phase change cannot grow the startable set, so a slot's child exiting
+// empty leaves its parked siblings asleep.
+func TestLoopPhaseChangeDoesNotWakeParkedSiblings(t *testing.T) {
+	const slots = 3
+	ctx, clk, r := parkedLoopDoubles(t, slots)
+	// One item per slot: with fewer, a slot finds the count spoken for by a
+	// sibling still starting and parks before the exits under test.
+	r.setDemand(workKind, slots)
+	var buf bytes.Buffer
+	go Loop(ctx, probedConfig(slots, time.Hour, workKind), r, newTestEmitter(&buf), clk)
+
+	// Every slot starts, then each exits empty in turn: the parked ones watch
+	// the later slots change phase.
+	for i := 0; i < slots; i++ {
+		r.awaitStart(t)
+	}
+	for s := 0; s < slots; s++ {
+		r.releaseSlot(t, s, ChildResult{Exit: 2})
+		clk.awaitSleep(t, 1)
+	}
+
+	// A woken sibling would re-decide and re-park, entering Sleep again.
+	select {
+	case <-clk.sleepSignal:
+		t.Fatalf("a sibling re-parked: the exit woke it though it grew nothing startable")
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := clk.waitCount(); got != slots {
+		t.Fatalf("sleeps = %d, want %d", got, slots)
+	}
+}
+
+// One slot's opportunistic resolve seeing the tip move lifts the jam and
+// wakes every sibling parked on a JamPoll slice: none is released by the
+// clock, so only the wake can start them.
+func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
+	const slots = 3
+	ctx, clk, r := parkedLoopDoubles(t, slots)
+	r.setDemand(workKind, slots)
+	// The three starting resolves, then a move that repeats: a slot whose
+	// pick a sibling's claim spent resolves once more before starting, and a
+	// move seen before anything jams lifts nothing, so the opportunistic
+	// resolve sees it whichever call it lands on.
+	r.moved = []bool{false, false, false, true}
+	var buf bytes.Buffer
+	go Loop(ctx, probedConfig(slots, time.Hour, workKind), r, newTestEmitter(&buf), clk)
+
+	for i := 0; i < slots; i++ {
+		r.awaitStart(t)
+	}
+	// Each consecutive jam doubles the backoff, so only the last slot to park
+	// has a gate longer than its IdleFloor slice and so resolves when its
+	// slice ends.
+	for s := 0; s < slots; s++ {
+		r.releaseSlot(t, s, ChildResult{Exit: 3})
+		clk.awaitSleep(t, 1)
+	}
+	clk.releaseNth(t, slots-1)
+
+	for i := 0; i < slots; i++ {
+		r.awaitStart(t)
+	}
+	requireNoRepark(t, clk, slots)
+}

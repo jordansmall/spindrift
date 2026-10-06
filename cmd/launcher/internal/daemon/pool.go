@@ -62,6 +62,46 @@ type state struct {
 	b         breaker
 	sched     Schedule
 	batonSlot int
+
+	// wake is the current wake generation: a parked slot sleeps on a context
+	// derived from it, and wakeParked cancels it and installs a fresh one
+	// when a change grows the set of startable kinds (observe, a jam lift).
+	// It lives on state because observe and liftJams run inside mutate, which
+	// hands them nothing but *state. A halt needs no part in it: slots
+	// sleep on pctx too.
+	wake       context.Context
+	wakeCancel context.CancelFunc
+}
+
+// wakeParked ends the current wake generation, waking every slot parked on
+// it, and installs a fresh one for the slots that park next.
+func (s *state) wakeParked() {
+	s.wakeCancel()
+	s.wake, s.wakeCancel = context.WithCancel(context.Background())
+}
+
+// observe folds ev into the schedule and, when Schedule.Observe reports it
+// grew the startable set, wakes every parked slot. Only that result decides a
+// wake: a phase change or a kind going unstartable cannot grow the set, so
+// slots never wake one another in a ring.
+func (s *state) observe(now time.Time, ev SchedEvent) {
+	var woke bool
+	s.sched, woke = s.sched.Observe(now, ev)
+	if woke {
+		s.wakeParked()
+	}
+}
+
+// liftJams ends every jammed kind's gate and returns the kinds lifted, waking
+// every parked slot when Schedule.LiftJams reports the lift grew the
+// startable set — the same wake decision observe makes.
+func (s *state) liftJams(now time.Time) (lifted []Kind) {
+	var woke bool
+	s.sched, lifted, woke = s.sched.LiftJams(now)
+	if woke {
+		s.wakeParked()
+	}
+	return lifted
 }
 
 // slotState is one slot's own state: where it is in its iteration, and
@@ -230,6 +270,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 	for i := range slots {
 		slots[i].phase = PhaseIdle
 	}
+	wake, wakeCancel := context.WithCancel(context.Background())
 	p := &pool{
 		cfg:    cfg,
 		r:      r,
@@ -241,6 +282,9 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 			b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
 			sched:     newSchedule(cfg.Kinds, cfg.ResearchReservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals),
 			batonSlot: leadSlot,
+
+			wake:       wake,
+			wakeCancel: wakeCancel,
 		},
 		demandFlights: make(map[Kind]*demandFlight),
 	}
@@ -334,9 +378,30 @@ func occupancy(s *state) Occupancy {
 // slots can never both take the last reserved seat, and nothing is claimed
 // before startChild, so no early-exit path needs cleanup.
 func (p *pool) decide(now time.Time) Decision {
+	d, _ := p.decideWithWake(now)
+	return d
+}
+
+// decideWithWake is decide plus the wake generation, read in the same p.mu
+// hold: a wake landing between the two reads would cancel a generation the
+// caller never sleeps on, and the slot would sleep through a startable kind.
+func (p *pool) decideWithWake(now time.Time) (Decision, context.Context) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.st.sched.Decide(now, occupancy(&p.st))
+	return p.st.sched.Decide(now, occupancy(&p.st)), p.st.wake
+}
+
+// sleepUntilWoken sleeps d on the Clock, ending early if ctx ends or the wake
+// generation is cancelled; woken reports that the generation has been
+// cancelled by the time it returns, even by a wake just after the sleep ran
+// its full d. The Clock sees only the derived ctx, so its interface stays a
+// plain Sleep.
+func (p *pool) sleepUntilWoken(ctx, wake context.Context, d time.Duration) (woken bool) {
+	sctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(wake, cancel)()
+	p.clk.Sleep(sctx, d)
+	return wake.Err() != nil
 }
 
 // resetKind folds a Continue outcome (exit 0 or 4) into the schedule: a check
@@ -345,7 +410,7 @@ func (p *pool) decide(now time.Time) Decision {
 func (p *pool) resetKind(kind Kind) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
-		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: ChildContinue})
+		s.observe(now, ChildDone{Kind: kind, Result: ChildContinue})
 		return nil
 	})
 }
@@ -373,7 +438,7 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 		result = ChildJammed
 	}
 	p.mutate(func(s *state) []Event {
-		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: result})
+		s.observe(now, ChildDone{Kind: kind, Result: result})
 		// What the kind now waits for: its backoff, or for a probed kind the
 		// interval to its next probe.
 		var wait time.Duration
@@ -461,7 +526,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 		}
 		flight := &s.slots[slot].flight
 		if flight.key != rec.Key {
-			s.sched, _ = s.sched.Observe(now, Claimed{Kind: kind})
+			s.observe(now, Claimed{Kind: kind})
 		}
 		flight.key = rec.Key
 		if issue, _ := rec.Key.Fields(); issue != "" {
@@ -908,8 +973,8 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 // prefer right now. It re-decides rather than taking the caller's Park, so a
 // sibling's reset or a probe landing since is seen; anything but a Park with
 // time left returns at once for the caller to re-decide. With no jammed kind
-// gating the wait (Park.JamPoll false), it sleeps the whole wait in one call,
-// same as ever: a merge can unblock a jammed queue, but it cannot create new
+// gating the wait (Park.JamPoll false), it sleeps the whole wait in one
+// sleep: a merge can unblock a jammed queue, but it cannot create new
 // work in a kind that is merely queue-empty, so resolving early there would
 // only spend a fetch for nothing.
 //
@@ -920,18 +985,23 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 // its next Decide: that resolution, not a call made here, is what can observe
 // Tip.Moved and report it, so the wait's very first IdleFloor slice alone
 // (wantResolve false) resolves nothing extra and fires no tip_moved.
+//
+// Either sleep also ends early when a sibling's event grows the startable
+// set (state.wakeParked cancels the wake generation); a woken slot reports
+// wantResolve false, since the caller's next Decide is what the wake is for.
 func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
-	// Sample now before taking p.mu in decide: p.clk.Sleep and Now must never
-	// run under it.
+	// Sample now before taking p.mu in decideWithWake: p.clk.Sleep and Now
+	// must never run under it.
 	now := p.clk.Now()
-	park, ok := p.decide(now).(Park)
+	d, wake := p.decideWithWake(now)
+	park, ok := d.(Park)
 	if !ok || !park.Until.After(now) {
 		return false
 	}
 	wait := park.Until.Sub(now)
 
 	if !park.JamPoll {
-		p.clk.Sleep(ctx, wait)
+		p.sleepUntilWoken(ctx, wake, wait)
 		return false
 	}
 
@@ -943,11 +1013,12 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 	if slice > wait {
 		slice = wait
 	}
-	p.clk.Sleep(ctx, slice)
-	if p.stopped() || ctx.Err() != nil {
-		// A sibling halted the pool, or the caller's ctx was cancelled,
-		// while this slot slept. The slot's own top-of-loop haltIfStopping
-		// does the halt bookkeeping next; no resolution is worth making.
+	woken := p.sleepUntilWoken(ctx, wake, slice)
+	if woken || p.stopped() || ctx.Err() != nil {
+		// A wake, a sibling halting the pool, or the caller's ctx being
+		// cancelled ended the sleep. The caller's next Decide (or its
+		// top-of-loop haltIfStopping) handles each; no resolution is worth
+		// making.
 		return false
 	}
 	return wait > slice
@@ -1028,8 +1099,7 @@ func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 func (p *pool) noteTipMoved(slot int, revision string) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
-		var lifted []Kind
-		s.sched, lifted, _ = s.sched.LiftJams(now)
+		lifted := s.liftJams(now)
 		if len(lifted) == 0 {
 			return nil
 		}

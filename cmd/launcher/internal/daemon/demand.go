@@ -103,7 +103,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 	now := p.clk.Now()
 	if err != nil {
 		p.mutate(func(s *state) []Event {
-			s.sched, _ = s.sched.Observe(now, DemandFailed{Kind: kind})
+			s.observe(now, DemandFailed{Kind: kind})
 			return nil
 		})
 		return true, err
@@ -112,7 +112,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		// Zero when never probed, so a first probe finding work reads as
 		// appearing and one finding none as nothing at all.
 		prev := s.sched.View(kind, now).Counted
-		s.sched, _ = s.sched.Observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims})
+		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims})
 		switch {
 		case prev == 0 && d.Ready > 0:
 			return []Event{{Event: "demand_appeared", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)}}
