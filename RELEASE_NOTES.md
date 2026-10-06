@@ -9,6 +9,42 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.23.1 — 2026-10-06
+
+The daemon now schedules from real tracker demand: it checks how many
+issues are ready before starting a Box, instead of starting one to find out.
+
+No breaking changes.
+
+- **The daemon looks before it starts.** Each kind's tracker (GitHub,
+  Forgejo, Jira, or the local queue) is asked how many issues are ready,
+  using cheap count queries, and the daemon only starts slots for work
+  that's actually there. A per-kind start budget stops it from starting
+  more Boxes than there are issues. Parked slots wake as soon as demand
+  rises or a kind opens up, rather than sitting out a long backoff, and
+  `status` now shows demand per kind.
+- **Rate limits pause, they don't break.** When a tracker reports a rate
+  limit, the daemon pauses just the kinds that use it until the reset time
+  instead of tripping its failure breaker.
+- **The butler waits until it's due.** A Chore that isn't due reports when
+  it next will be, the daemon parks the butler until then, and `status`
+  shows the time. Chores also skip the discovery handoff that issue-backed
+  kinds use, so they don't hold up other slots.
+- **Daemon settings resolve the way a Box sees them.** Knobs the daemon
+  reads now fall back to the documented defaults, and values from the
+  input document are resolved exactly as a child run would resolve them.
+  An empty value in the document (like `"REPO_SLUG": ""`) no longer
+  silently disables demand checks; the daemon warns when a kind has
+  nowhere to count demand from.
+- **Rebases and merges are more reliable.** A GitHub rebase only reports
+  a conflict when there really is one, and no longer fails for lack of a
+  commit identity. Every kind of merge conflict is recognized, and a merge
+  can't hang on a subprocess that holds its output open.
+- **Tracker fixes.** GitHub label lists read past the first page, Jira Cloud
+  search pages correctly through large result sets, Forgejo stops
+  re-asking about a label that doesn't exist (cached for 10 minutes), and
+  an issue with many linked issues stays within the prompt's size budget.
+
 ## 0.23.0 — 2026-10-05
 
 Tighter handling of issue comments, Forgejo runs that don't need a GitHub
