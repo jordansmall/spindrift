@@ -131,3 +131,11 @@ func ParseDuration(name, label, raw string, min time.Duration) (time.Duration, e
 	}
 	return d, nil
 }
+
+// SchemaDefault returns key's schema default, or "" when the knob has none or
+// is secret. It is the daemon's copy of the launcher's schemaDefault fallback
+// (generated from the same lib/env-schema.nix), so a knob unset in both the
+// document and the environment resolves the same in the daemon as in a child.
+func SchemaDefault(key string) string {
+	return schemaDefaults[key]
+}

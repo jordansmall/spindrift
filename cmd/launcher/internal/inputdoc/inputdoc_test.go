@@ -262,3 +262,18 @@ func TestDocumentSetting(t *testing.T) {
 		})
 	}
 }
+
+func TestSchemaDefault(t *testing.T) {
+	for key, want := range map[string]string{
+		"ISSUE_TRACKER":    "github",
+		"LABEL":            "ready-for-agent",
+		"LOCAL_ISSUES_DIR": ".spindrift/issues",
+		"JIRA_BASE_URL":    "", // a knob with no schema default
+		"GH_TOKEN":         "", // secret knobs are never tabulated
+		"NO_SUCH_KNOB":     "",
+	} {
+		if got := SchemaDefault(key); got != want {
+			t.Errorf("SchemaDefault(%q) = %q, want %q", key, got, want)
+		}
+	}
+}
