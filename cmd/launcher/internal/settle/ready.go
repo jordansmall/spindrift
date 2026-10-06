@@ -437,7 +437,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			mergeTransientAttempts++
 			fmt.Printf("    #%s  landing=%s  status=merge-transient-retry  attempt=%d/%d  !! %v\n",
 				num, pr, mergeTransientAttempts, s.cfg.Policy.Max, err)
-			s.rebasePushBackoff().Do(mergeTransientAttempts)
+			s.transientBackoff().Do(mergeTransientAttempts)
 			continue
 		}
 		if !errors.Is(err, forge.ErrMergeConflict) {
@@ -472,7 +472,7 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 			pushRetries++
 			fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 				num, pr, pushRetries, s.cfg.MaxRebaseAttempts, rbErr)
-			s.rebasePushBackoff().Do(pushRetries)
+			s.transientBackoff().Do(pushRetries)
 			rbErr = cf.Rebase(pr)
 		}
 		if rbErr != nil {
@@ -503,9 +503,10 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	}
 }
 
-// rebasePushBackoff builds the linear backoff both rebase-push retry loops
-// share, so the two call sites cannot drift apart (issue #2095).
-func (s *Settle) rebasePushBackoff() retry.LinearBackoff {
+// transientBackoff builds the jittered linear backoff the rebase-push, merge
+// transient, and bundle-relay retry loops share, so the call sites cannot drift
+// apart (issue #2095, issue #4649).
+func (s *Settle) transientBackoff() retry.LinearBackoff {
 	b := s.cfg.Policy.Backoff(s.clock)
 	b.Jitter = s.cfg.Policy.Jitter
 	return b
@@ -534,7 +535,7 @@ func (s *Settle) preflightStaleBase(num string, gen uint64, pr string, d dispatc
 	for pushRetries := 0; rbErr != nil && errors.Is(rbErr, forge.ErrTransientPushFailure) && pushRetries < s.cfg.MaxRebaseAttempts; pushRetries++ {
 		fmt.Printf("    #%s  landing=%s  status=rebase-push-retry  attempt=%d/%d  !! %v\n",
 			num, pr, pushRetries+1, s.cfg.MaxRebaseAttempts, rbErr)
-		s.rebasePushBackoff().Do(pushRetries + 1)
+		s.transientBackoff().Do(pushRetries + 1)
 		rbErr = cf.Rebase(pr)
 	}
 	if rbErr != nil {
