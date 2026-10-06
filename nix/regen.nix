@@ -54,6 +54,7 @@ let
   daemonKnobDefaultsGo = renderers.renderDaemonKnobDefaultsGo schema;
   emptyIsSettingGo = renderers.renderEmptyIsSettingGo schema;
   schemaDefaultsGo = renderers.renderSchemaDefaultsGo schema;
+  daemonOnlyKnobsGo = renderers.renderDaemonOnlyKnobsGo schema;
   legacySettingsSection = import ../lib/legacy-settings-section.nix;
   legacySettingsMappingDoc = renderers.renderLegacySettingsMappingDoc legacySettingsSection schema;
   promptAssemblyBoxEnv = import ../lib/promptassembly-boxenv.nix;
@@ -193,6 +194,8 @@ pkgs.writeShellApplication {
     gofmt -w "$root/cmd/launcher/internal/inputdoc/emptyissetting_gen.go"
     ${writeGenerated "cmd/launcher/internal/inputdoc/schemadefaults_gen.go" schemaDefaultsGo}
     gofmt -w "$root/cmd/launcher/internal/inputdoc/schemadefaults_gen.go"
+    ${writeGenerated "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go" daemonOnlyKnobsGo}
+    gofmt -w "$root/cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go"
     ${concatStrings (map regenRowScript documentedFacts)}
     ${writeBetweenGenerated "MIGRATING.md"
       "<!-- BEGIN GENERATED LEGACY SETTINGS MAPPING -- nix run .#regen -- DO NOT EDIT -->"

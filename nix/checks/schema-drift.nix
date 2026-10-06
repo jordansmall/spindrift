@@ -692,6 +692,26 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when a knob's launcherIgnores in
+  # lib/env-schema.nix changes; gofmt-normalized the same way regen normalizes
+  # it (issue #4644).
+  daemon-only-knobs-gen-go =
+    let
+      raw = pkgs.writeText "daemononlyknobs_gen.go.raw" (renderers.renderDaemonOnlyKnobsGo schema);
+    in
+    pkgs.runCommand "daemon-only-knobs-gen-go"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regenerate with `nix run .#regen` when lib/labels.nix changes. The raw
   # renderer output is gofmt-normalized here the same way regen normalizes it
   # (issue #2528).
