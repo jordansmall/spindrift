@@ -656,6 +656,31 @@ func TestReadStatus_GarbageStatusUnderHeldLockKeepsLockHeld(t *testing.T) {
 	}
 }
 
+// TestPoolSnapshotOmitsReadyAtJamWhileBaselinePending pins that a jam whose
+// baseline awaits its next probe reports no ready_at_jam rather than a
+// count the claim's fold already skewed.
+func TestPoolSnapshotOmitsReadyAtJamWhileBaselinePending(t *testing.T) {
+	clk := &testClock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)}
+	work := KindOf(dispatchkind.Work)
+	cfg := testConfig(1)
+	cfg.Kinds = []Kind{work}
+	cfg.ProbeIntervals = map[Kind]time.Duration{work: time.Minute}
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), clk)
+
+	now := clk.Now()
+	s := p.st.sched
+	s, _ = s.Observe(now, DemandProbed{Kind: work, Ready: 2})
+	s, _ = s.Observe(now, Claimed{Kind: work})
+	s, _ = s.Observe(now, ChildDone{Kind: work, Result: ChildJammed})
+	p.st.sched = s
+
+	w := p.snapshot().Checks[0]
+	if w.JamUntil == "" || w.ReadyAtJam != nil {
+		t.Errorf("work = %+v, want jam_until set and ready_at_jam omitted", w)
+	}
+}
+
 // TestPoolSnapshotCarriesDemandFieldsPerKind pins which per-kind Demand
 // fields a snapshot carries: a probed kind with a count, an exit-driven kind
 // with none, and a jam-gated probed kind that also carries its jam.
