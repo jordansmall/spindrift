@@ -6198,13 +6198,20 @@ image tag here for concurrent children to race over.
 
 **Child environment.** Every child the daemon starts — a dispatch child, a
 research child, and the doctor preflight below — execs with the daemon's own
-environment minus every key present in the `--input` document's `settings`
-(`withoutKeys`, `cmd/launcher/internal/daemon/command.go`, called from both
+environment minus every key whose `--input` document `settings` value
+counts (`withoutKeys`, `cmd/launcher/internal/daemon/command.go`, called from both
 `ChildCommand` and `DoctorCommand`; assigned to `cmd.Env` by `RunChild` and
-`RunDoctor` in `cmd/launcher/daemon/runner.go`). That strips exactly the
-non-secret knobs — a secret knob never enters the document at all — so a
-child's only knob source becomes its own input document plus the argv the
-daemon built for it. Everything else — secrets, `PATH`, `HOME`, `NIX_*`,
+`RunDoctor` in `cmd/launcher/daemon/runner.go`). A value counts when it is
+non-empty, or empty for a knob where empty is itself a setting — a bool knob,
+whose `false` Nix renders as `""`, or an `emptyDisables` knob
+(`inputdoc.Document.Setting`). That strips exactly the
+non-secret knobs the document sets — a secret knob never enters the document
+at all — so a child's only source for them becomes its own input document
+plus the argv the daemon built for it. A key the document carries empty
+otherwise, such as the `"REPO_SLUG":""` `mkRun {}` bakes in for a
+runtime-supplied slug, is not stripped: the child inherits the ambient value
+its own resolution picks anyway, and the daemon's Demand sources read that
+same value (issue #4617). Everything else — secrets, `PATH`, `HOME`, `NIX_*`,
 `XDG_*`, and any variable the document does not name — passes through
 untouched, which is why the `EnvironmentFile` recipe under **Service unit**
 below still reaches a child's forge credentials unmolested.
