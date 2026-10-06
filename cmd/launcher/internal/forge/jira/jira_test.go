@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1225,5 +1226,63 @@ func TestJiraClient_CreateLabel_NoOp(t *testing.T) {
 	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok"})
 	if err := jc.CreateLabel("agent-failed", "desc", "d93f0b"); err != nil {
 		t.Fatalf("CreateLabel: %v", err)
+	}
+}
+
+// Cloud removed v2 /search, so doSearch walks /search/jql: it must name its
+// fields (Cloud returns only the id otherwise) and hand each page's
+// nextPageToken back, stopping at isLast.
+func TestJiraClient_ListIssues_CloudWalksSearchJQLByToken(t *testing.T) {
+	var tokens []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/search/jql" {
+			t.Errorf("path = %q, want /rest/api/2/search/jql", r.URL.Path)
+		}
+		q := r.URL.Query()
+		if got := q.Get("fields"); got != "summary,description,status,labels" {
+			t.Errorf("fields = %q, want summary,description,status,labels", got)
+		}
+		tokens = append(tokens, q.Get("nextPageToken"))
+		if q.Get("nextPageToken") == "" {
+			w.Write([]byte(`{"issues":[{"key":"PROJ-1","fields":{"summary":"a"}}],"nextPageToken":"tok-2","isLast":false}`))
+			return
+		}
+		w.Write([]byte(`{"issues":[{"key":"PROJ-2","fields":{"summary":"b"}}],"isLast":true}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Email: "bot@example.com", Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
+	issues, err := jc.ListIssues(forge.Dispatchable)
+	if err != nil {
+		t.Fatalf("ListIssues: %v", err)
+	}
+	if len(issues) != 2 || issues[0].Number != "PROJ-1" || issues[1].Number != "PROJ-2" {
+		t.Errorf("issues = %+v, want PROJ-1 then PROJ-2", issues)
+	}
+	if want := []string{"", "tok-2"}; !slices.Equal(tokens, want) {
+		t.Errorf("nextPageToken per request = %q, want %q", tokens, want)
+	}
+}
+
+func TestJiraClient_ListIssues_CloudFailsOnRepeatedNextPageToken(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		// Cap the stub so a missing guard fails the test instead of hanging it.
+		if requests > 5 {
+			w.Write([]byte(`{"issues":[],"isLast":true}`))
+			return
+		}
+		w.Write([]byte(`{"issues":[{"key":"PROJ-1","fields":{"summary":"a"}}],"nextPageToken":"same","isLast":false}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Email: "bot@example.com", Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
+	_, err := jc.ListIssues(forge.Dispatchable)
+	if err == nil {
+		t.Fatalf("ListIssues error = nil after %d requests, want a repeated-nextPageToken error", requests)
+	}
+	if requests != 2 {
+		t.Errorf("requests = %d, want 2 (first page, then the repeat)", requests)
 	}
 }

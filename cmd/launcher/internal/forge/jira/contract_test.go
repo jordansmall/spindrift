@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -47,19 +48,31 @@ type jiraHarness struct {
 	// maxResults, as a real Jira server may.
 	pageCap int
 
-	srv *httptest.Server
-	tr  forge.IssueTracker
+	cloud bool // serves Cloud's search/jql + approximate-count; rejects v2 /search (410)
+	srv   *httptest.Server
+	tr    forge.IssueTracker
 }
 
 var jqlLabelClause = regexp.MustCompile(`labels = "([^"]+)"`)
 
-func newJiraHarness(t *testing.T) *jiraHarness {
-	h := &jiraHarness{issues: map[string]*jiraIssueRecord{}}
+// newJiraHarness builds a Server/DC harness; newJiraCloudHarness a Cloud one,
+// which the adapter selects by configuring an Email.
+func newJiraHarness(t *testing.T) *jiraHarness { return newJiraHarnessMode(t, false) }
+
+func newJiraCloudHarness(t *testing.T) *jiraHarness { return newJiraHarnessMode(t, true) }
+
+func newJiraHarnessMode(t *testing.T, cloud bool) *jiraHarness {
+	h := &jiraHarness{cloud: cloud, issues: map[string]*jiraIssueRecord{}}
+	email := ""
+	if cloud {
+		email = "bot@example.com"
+	}
 	h.srv = httptest.NewServer(http.HandlerFunc(h.handle))
 	t.Cleanup(h.srv.Close)
 	h.tr = jira.NewJiraClient(jira.JiraConfig{
 		BaseURL:       h.srv.URL,
 		ProjectKey:    "PROJ",
+		Email:         email,
 		Token:         "tok",
 		Labels:        testLabels,
 		VerdictLabels: forge.ResearchVerdictLabels(),
@@ -144,19 +157,11 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/search":
-		q := r.URL.Query().Get("jql")
-		var wantLabel string
-		if sub := jqlLabelClause.FindStringSubmatch(q); sub != nil {
-			wantLabel = sub[1]
+		if h.cloud {
+			w.WriteHeader(http.StatusGone)
+			return
 		}
-		var out []map[string]any
-		for _, num := range h.order {
-			rec := h.issues[num]
-			if wantLabel != "" && !contains(rec.labels, wantLabel) {
-				continue
-			}
-			out = append(out, h.payload(num, rec))
-		}
+		out := h.matching(r.URL.Query().Get("jql"), fullPayload)
 
 		// Genuinely paginate on startAt/maxResults (issue #2265), matching the
 		// real Jira search response shape jiraSearchPayload decodes. total is
@@ -179,23 +184,66 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 		if h.pageCap > 0 && maxResults > h.pageCap {
 			maxResults = h.pageCap
 		}
-		var window []map[string]any
-		if startAt < len(out) {
-			end := startAt + maxResults
-			if end > len(out) {
-				end = len(out)
-			}
-			window = out[startAt:end]
-		}
-		if window == nil {
-			window = []map[string]any{}
-		}
+		window := pageWindow(out, startAt, maxResults)
 		json.NewEncoder(w).Encode(map[string]any{
 			"issues":     window,
 			"startAt":    startAt,
 			"maxResults": maxResults,
 			"total":      len(out),
 		})
+		return
+
+	case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/search/jql":
+		if !h.cloud {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		q := r.URL.Query()
+		// Like real Cloud, search/jql returns only the id unless fields names
+		// what it should include, so a missing fields param fails the contract.
+		shape := idOnly
+		if q.Get("fields") != "" {
+			shape = fullPayload
+		}
+		out := h.matching(q.Get("jql"), shape)
+
+		// The token is opaque to the client; here it encodes the next offset.
+		// maxResults is honoured, and no total is returned.
+		start := 0
+		if tok := q.Get("nextPageToken"); tok != "" {
+			v, err := strconv.Atoi(strings.TrimPrefix(tok, "off-"))
+			if err != nil || v < 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			start = v
+		}
+		size := len(out)
+		if m := q.Get("maxResults"); m != "" {
+			if v, err := strconv.Atoi(m); err == nil && v > 0 {
+				size = v
+			}
+		}
+		resp := map[string]any{"issues": pageWindow(out, start, size)}
+		if end := start + size; end < len(out) {
+			resp["nextPageToken"] = fmt.Sprintf("off-%d", end)
+			resp["isLast"] = false
+		} else {
+			resp["isLast"] = true
+		}
+		json.NewEncoder(w).Encode(resp)
+		return
+
+	case r.Method == http.MethodPost && r.URL.Path == "/rest/api/3/search/approximate-count":
+		if !h.cloud {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		var body struct {
+			JQL string `json:"jql"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		json.NewEncoder(w).Encode(map[string]any{"count": len(h.matching(body.JQL, fullPayload))})
 		return
 
 	case r.Method == http.MethodGet && matchIssuePath(r.URL.Path) != "":
@@ -287,6 +335,10 @@ func TestJiraClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newJiraHarness(t))
 }
 
+func TestJiraClient_TrackerContract_Cloud(t *testing.T) {
+	forgetest.RunTrackerContract(t, newJiraCloudHarness(t))
+}
+
 // seedAndListPaged seeds n Dispatchable issues PROJ-1..PROJ-n and asserts
 // ListIssues returns every one in creation order: h.order's append sequence
 // stands in for Jira's created-time ordering.
@@ -320,7 +372,54 @@ func seedAndListPaged(t *testing.T, h *jiraHarness, n int) {
 // Seeding more than forge.ResultPageLimit issues forces doSearch (issue #2265)
 // to walk at least two real pages.
 func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
-	seedAndListPaged(t, newJiraHarness(t), forge.ResultPageLimit+30)
+	for name, newHarness := range map[string]func(*testing.T) *jiraHarness{
+		"DC":    newJiraHarness,
+		"Cloud": newJiraCloudHarness,
+	} {
+		t.Run(name, func(t *testing.T) {
+			seedAndListPaged(t, newHarness(t), forge.ResultPageLimit+30)
+		})
+	}
+}
+
+// payloadShape picks how much of each issue the harness search returns.
+type payloadShape int
+
+const (
+	fullPayload payloadShape = iota
+	idOnly
+)
+
+// matching returns the payloads of the issues whose labels satisfy the JQL's
+// labels clause, in creation order. With idOnly it returns only the id, as
+// real Cloud search/jql does when no fields are requested.
+func (h *jiraHarness) matching(jql string, shape payloadShape) []map[string]any {
+	var wantLabel string
+	if sub := jqlLabelClause.FindStringSubmatch(jql); sub != nil {
+		wantLabel = sub[1]
+	}
+	var out []map[string]any
+	for _, num := range h.order {
+		rec := h.issues[num]
+		if wantLabel != "" && !contains(rec.labels, wantLabel) {
+			continue
+		}
+		if shape == fullPayload {
+			out = append(out, h.payload(num, rec))
+		} else {
+			out = append(out, map[string]any{"id": num})
+		}
+	}
+	return out
+}
+
+// pageWindow slices out[start:start+size], never nil so it encodes as [].
+func pageWindow(out []map[string]any, start, size int) []map[string]any {
+	if start >= len(out) {
+		return []map[string]any{}
+	}
+	end := min(start+size, len(out))
+	return out[start:end]
 }
 
 // A server that caps pages below the requested maxResults must not make
