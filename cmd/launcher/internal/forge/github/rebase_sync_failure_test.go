@@ -113,3 +113,22 @@ func TestRebase_SyncFailureClassification(t *testing.T) {
 		})
 	}
 }
+
+// TestRebase_CheckoutFailureSurfacesGitOutput pins that a failed checkout of
+// the PR head carries git's own message rather than a bare exit status.
+func TestRebase_CheckoutFailureSurfacesGitOutput(t *testing.T) {
+	t.Setenv("LC_ALL", "C")
+	h := newCodeForgeHarness(t)
+	url := h.registerPR("4", h.branchName("no-such-branch"))
+
+	err := h.cf.Rebase(url)
+	if err == nil {
+		t.Fatal("Rebase succeeded for a missing head branch, want an error")
+	}
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Rebase err = %v, must not be ErrMergeConflict", err)
+	}
+	if !strings.Contains(err.Error(), "did not match") {
+		t.Errorf("Rebase err = %q, want git's checkout message", err)
+	}
+}

@@ -480,17 +480,14 @@ func (e *execClient) Rebase(prURL string) error {
 	if err := e.setCommitIdentity(gitIn); err != nil {
 		return err
 	}
-	if err := gitIn("checkout", head).Run(); err != nil {
-		return fmt.Errorf("git checkout %s: %w", head, err)
+	if out, err := runRedacted(gitIn("checkout", head)); err != nil {
+		return fmt.Errorf("git checkout %s: %w: %s", head, err, out)
 	}
 	syncVerb := "rebase"
 	if e.syncMethod == "merge" {
 		syncVerb = "merge"
 	}
-	var syncOut bytes.Buffer
-	syncCmd := gitIn(syncVerb, "origin/"+base)
-	syncCmd.Stdout, syncCmd.Stderr = &syncOut, &syncOut
-	if err := syncCmd.Run(); err != nil {
+	if syncOut, err := runRedacted(gitIn(syncVerb, "origin/"+base)); err != nil {
 		// Unmerged index entries cover content, modify/delete and rename
 		// conflicts alike, which matching git's output text misses.
 		conflict := hasUnmergedPaths(gitIn)
@@ -498,12 +495,19 @@ func (e *execClient) Rebase(prURL string) error {
 		if conflict {
 			return forge.ErrMergeConflict
 		}
-		return fmt.Errorf("git %s origin/%s: %w: %s", syncVerb, base, err,
-			forge.RedactURLCredentials(strings.TrimSpace(syncOut.String())))
+		return fmt.Errorf("git %s origin/%s: %w: %s", syncVerb, base, err, syncOut)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
 	defer cancel()
 	return gitplumbing.GitForcePush(ctx, dir)
+}
+
+// runRedacted runs cmd and returns its trimmed, credential-redacted stdout+stderr.
+func runRedacted(cmd *exec.Cmd) (string, error) {
+	var buf bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &buf, &buf
+	err := cmd.Run()
+	return forge.RedactURLCredentials(strings.TrimSpace(buf.String())), err
 }
 
 // setCommitIdentity pins the configured committer name and email on the clone
