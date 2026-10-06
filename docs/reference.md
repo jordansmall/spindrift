@@ -24,7 +24,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift butler [--chore <name>]` | one-shot butler sweep of the first due enabled Chore (`BUTLER_CHORES` order), or only the one named — claims the Chore's Ledger, scans the next slice of the tree, runs one advise-only Box, files findings (the host, never the Box, may promote a finding to `ready-for-agent` or land it as a patch PR, ADR 0057; both opt-in, off while `BUTLER_MAX_PROMOTIONS_PER_DAY` / `BUTLER_MAX_PATCHES_PER_DAY` stay `0`), writes a done Ledger commit; exits "no work" (2) if none is due — `local`, `github`, or `forgejo` forge, see [Butler](#butler) |
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
-| `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`)       |
+| `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
@@ -1564,7 +1564,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate. Not a rate-limit lever: the gate issues one strictly-serialized, single-point GraphQL query at a time, only while a PR is actively mid-landing, bounded by `MERGE_POLL_TIMEOUT` — it never bursts. The cadence-sensitive pollers are the *continuous refill* ticker (runs for the launcher's whole lifetime and bursts outside its ticker) and the *console backlog* poll — slow those in a rate-limit sweep, not this knob. The interval is also reused as four fixed-call-count delays (the `SUCCESS` confirm re-poll, the `3 ×` check-registration window, the merge-blocked-by-checks retry, and the fix-pass no-op confirm), so raising it stretches every landing for zero rate-limit benefit (issue #3249) |
 | `MERGE_POLL_TIMEOUT`   | `3600`  | `branches`         | seconds to wait for CI green before abandoning the merge — at the default, a merge that rides out the full deadline can outlive an installation token's ~1h lifetime when `GH_TOKEN_REFRESH_FILE` is unset (see [GitHub App installation token](#github-app-installation-token-recommended)) |
 | `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
-| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649) |
+| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649); once the `status=ready` landing relay exhausts them the issue parks `agent-failed` (issue #4651), while the fix-pass and conflict-resolve relays never park |
 | `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry; also the backoff between host-side bundle relay retries for a read-only Box (issue #4649) |
 | `HOLD_JITTER_SECS`     | `5`     | `selfHealing`      | jitter added to a 429 hold-until-reset before re-dispatch |
 | `DEV_SHELL_NAME`       | `default` | `sandbox`        | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
@@ -2787,6 +2787,21 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   `Closes #N` in the PR body closes the issue whenever the PR merges.
   (Dependency ordering keys off the PR actually being merged, not this label —
   see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
+- **A relay that exhausts its retries parks the issue.** When a read-only Box
+  prints `status=ready` but the Launcher's host-side bundle relay still fails
+  (anything but a missing bundle) after `TRANSIENT_RETRY_MAX` retries, settle
+  swaps `agent-in-progress` → `agent-failed` and comments `bundle relay failed:
+  <err>` with the work preserved in the outbox (issue #4651). This holds on
+  the PR-shaped path and on the push-only `CODE_FORGE=local` path alike; the
+  fix-pass and conflict-resolve relays do not park. Run `spindrift recover
+  <n>` on the host holding the outbox to relay and land the bundle (opening
+  the PR and driving the merge gate on a PR-shaped forge); landing strips the
+  stale `agent-failed`, leaving `agent-complete`. Under `ISSUE_TRACKER=jira`
+  with a status mapping, a workflow lacking a Failed→Complete transition
+  falls back to adding the `agent-complete` label while the native status
+  stays Failed (the gap recovering after red CI already has). On the
+  PR-shaped path a missing bundle or a failed draft-PR create still posts
+  "merge blocked" and leaves the issue `agent-in-progress`.
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
@@ -4223,6 +4238,11 @@ form. By default (`BOX_SIGNAL_CARRIER` unset, i.e. `socket`) the same
 signals cross the seam over the [Signal
 socket](#signal-socket-box_signal_carriersocket) instead, and the Launcher
 still performs the write host-side at settle.
+
+If the `status=ready` "land the branch" relay still fails after
+`TRANSIENT_RETRY_MAX` retries (any forge, including `local`), the issue parks
+`agent-failed` with the bundle kept in the outbox;
+`spindrift recover <n>` relays and lands it (issue #4651).
 
 After a successful land (merged, including a hand-run `spindrift recover
 <n>`), the Launcher deletes the issue's `seam.bundle` from the outbox. A
