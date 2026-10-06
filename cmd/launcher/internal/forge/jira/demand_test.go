@@ -23,6 +23,12 @@ func TestJiraClient_CountReady_ZeroRowSearchReadsTotal(t *testing.T) {
 		queries = append(queries, map[string]string{
 			"jql": q.Get("jql"), "maxResults": q.Get("maxResults"), "startAt": q.Get("startAt"),
 		})
+		if q.Get("maxResults") != "0" {
+			// A real page walk over an empty backlog; a nonzero total here would
+			// be an empty page before total, which doSearch rightly rejects.
+			w.Write([]byte(`{"issues":[],"startAt":0,"total":0}`))
+			return
+		}
 		w.Write([]byte(`{"issues":[],"startAt":0,"maxResults":0,"total":7}`))
 	}))
 	defer srv.Close()
