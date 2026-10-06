@@ -16,8 +16,8 @@ var fakeGHHostMediation string
 
 // hostMediationHarness is a forgetest.HostMediationHarness backed by a real
 // bare git repo (RelayBundle's genuine push target) plus a scripted `gh`
-// stand-in for repo-clone/pr-create/issue-comment, mirroring relay_test.go's
-// newRelayHarness.
+// stand-in for pr-create/issue-comment; RelayBundle itself clones and pushes
+// over HTTPS, as in relay_test.go's newRelayHarness.
 type hostMediationHarness struct {
 	t          *testing.T
 	repo       *forgetest.GitRepoFixture
@@ -43,8 +43,9 @@ func newHostMediationHarness(t *testing.T) *hostMediationHarness {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", scriptDir+":"+os.Getenv("PATH"))
-	t.Setenv("REMOTE", repo.Bare)
 	t.Setenv("STATE_DIR", stateDir)
+	// RelayBundle clones and pushes over HTTPS, not through the fake gh.
+	serveRelayOverHTTPS(t, repo, "relay-token")
 
 	return &hostMediationHarness{
 		t:          t,
