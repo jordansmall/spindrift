@@ -380,7 +380,6 @@ func TestReadOnlyCodeForge_RelayBundle_ReRelayForceUpdatesRef(t *testing.T) {
 // (issue #3876 review) instead of always hitting github.com, which would
 // strand a GitHub Enterprise Consumer's Ledger on the wrong host.
 func TestGitRemote_FollowsGHHost(t *testing.T) {
-	wantArgs := []string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
 	cases := []struct {
 		name    string
 		ghHost  string
@@ -395,6 +394,11 @@ func TestGitRemote_FollowsGHHost(t *testing.T) {
 			url, gitArgs := GitRemote("owner/repo")
 			if url != tc.wantURL {
 				t.Errorf("url = %q, want %q", url, tc.wantURL)
+			}
+			wantArgs := []string{
+				"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential",
+				"-c", "url." + tc.wantURL + ".insteadOf=" + tc.wantURL,
+				"-c", "url." + tc.wantURL + ".pushInsteadOf=" + tc.wantURL,
 			}
 			if strings.Join(gitArgs, "|") != strings.Join(wantArgs, "|") {
 				t.Errorf("gitArgs = %v, want %v", gitArgs, wantArgs)
