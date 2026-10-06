@@ -2670,6 +2670,33 @@ func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
 	}
 }
 
+// TestPoolStartChildChoreKeyedNonHolderNeverSwitchesToIssueKeyed pins issue #4583:
+// a slot that skipped the baton for a butler provisional kind is not the
+// discovering slot, so startChild must keep the butler rather than re-decide
+// onto work. The baton holder (leadSlot) discovers anyway and may take work.
+func TestPoolStartChildChoreKeyedNonHolderNeverSwitchesToIssueKeyed(t *testing.T) {
+	work, butler := KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)
+	tests := []struct {
+		name string
+		slot int
+		want Kind
+	}{
+		{"non-holder keeps the butler", leadSlot + 1, butler},
+		{"baton holder may switch to work", leadSlot, work},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			p, _ := newPool(context.Background(), triKindConfig(2, 0), &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
+			defer p.cancel()
+
+			if got, ok := p.startChild(tt.slot, butler, "rev1"); !ok || got != tt.want {
+				t.Fatalf("startChild chose %q (ok=%v), want %q", got, ok, tt.want)
+			}
+		})
+	}
+}
+
 // TestPoolStartChildFallsBackToProvisionalKindWhenNothingRunnable pins the
 // fallback: a kind runnable at pick time that a sibling gated since still
 // starts as the provisional kind rather than as an empty one.

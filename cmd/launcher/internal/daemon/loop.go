@@ -541,12 +541,19 @@ slotLoop:
 		// holds the baton across a resolve; every path that loops back to
 		// the top passes it first (see the release sites below).
 		//
+		// A Chore-keyed kind skips it: the Ledger's compare-and-swap settles
+		// races between its children, and it selects no tracker issue, so
+		// waiting would only delay a butler start behind a work or research
+		// child's discovery.
+		//
 		// The re-check matters because awaitBaton also returns on ctx.Done
 		// without the baton, and because the holder passes only after its
 		// round's halt decision (issue #4365): a halt that decision reaches
 		// has already landed by the time this slot wakes, so it must see it
 		// rather than start a child on a pool that has stopped.
-		p.awaitBaton(ctx, slot)
+		if !kind.choreKeyed() {
+			p.awaitBaton(ctx, slot)
+		}
 		if p.haltIfStopping(ctx, kind) {
 			return
 		}
@@ -565,10 +572,17 @@ slotLoop:
 
 		kind, started := p.startChild(slot, kind, revision)
 		if !started {
-			// Outpaced while parked on the baton: nothing is startable now,
-			// so decide again (probe or park) instead of spawning.
+			// Outpaced while parked on the baton, or a Chore-keyed non-holder
+			// refused an issue-keyed kind: nothing is startable now, so
+			// decide again (probe or park) instead of spawning.
 			p.passBaton(slot, batonPassOutpaced)
 			continue
+		}
+		if kind.choreKeyed() {
+			// Held here only by the pre-assigned leader or after startChild
+			// switched kinds; a Chore discovers no issue, so nothing is left
+			// to hold the baton for. A no-op when this slot does not hold it.
+			p.passBaton(slot, batonPassChoreKeyed)
 		}
 		req := ChildRequest{
 			Slot:     slot,
