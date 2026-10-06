@@ -79,6 +79,8 @@ type execClient struct {
 	branchPrefix  string
 	mergeMethod   string // "", "merge", "squash", or "rebase"; "" behaves as "rebase" (mergeMethodFlag)
 	syncMethod    string // "", "rebase", or "merge"; "" behaves as "rebase"
+	userName      string // committer identity Rebase sets on its clone; empty keeps ambient git config
+	userEmail     string
 
 	demandMu    sync.Mutex // guards demandCache; CountReady is the only user
 	demandCache *demandCache
@@ -104,6 +106,14 @@ func WithMergeMethod(method string) ExecOption {
 // a PR branch up to date with its base. Omitted, it stays on rebase.
 func WithSyncMethod(method string) ExecOption {
 	return func(e *execClient) { e.syncMethod = method }
+}
+
+// WithCommitIdentity sets the committer identity Rebase configures on its
+// throwaway clone, so a sync that writes a commit does not depend on ambient
+// git config, which a bare CI runner lacks. An empty name or email leaves that
+// key unset.
+func WithCommitIdentity(name, email string) ExecOption {
+	return func(e *execClient) { e.userName, e.userEmail = name, email }
 }
 
 // NewExecClient returns the gh-exec adapter for the given repo slug. One

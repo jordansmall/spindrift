@@ -477,6 +477,9 @@ func (e *execClient) Rebase(prURL string) error {
 		return exec.Command("git", append([]string{"-C", dir}, args...)...)
 	}
 
+	if err := e.setCommitIdentity(gitIn); err != nil {
+		return err
+	}
 	if err := gitIn("checkout", head).Run(); err != nil {
 		return fmt.Errorf("git checkout %s: %w", head, err)
 	}
@@ -501,6 +504,20 @@ func (e *execClient) Rebase(prURL string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
 	defer cancel()
 	return gitplumbing.GitForcePush(ctx, dir)
+}
+
+// setCommitIdentity pins the configured committer name and email on the clone
+// gitIn runs in, skipping whichever is empty.
+func (e *execClient) setCommitIdentity(gitIn func(args ...string) *exec.Cmd) error {
+	for _, kv := range [][2]string{{"user.name", e.userName}, {"user.email", e.userEmail}} {
+		if kv[1] == "" {
+			continue
+		}
+		if err := gitIn("config", kv[0], kv[1]).Run(); err != nil {
+			return fmt.Errorf("git config %s: %w", kv[0], err)
+		}
+	}
+	return nil
 }
 
 // hasUnmergedPaths reports whether the clone gitIn runs in has unmerged index
