@@ -218,6 +218,7 @@ func TestBuildDemandSources_NoAdapterOrMissingKnobsHasNoSource(t *testing.T) {
 		"jira without token":                  {"ISSUE_TRACKER": "jira", "JIRA_BASE_URL": "http://x", "JIRA_PROJECT_KEY": "P", "LABEL": "ready-for-agent"},
 		"jira with malformed status mapping":  {"ISSUE_TRACKER": "jira", "JIRA_BASE_URL": "http://x", "JIRA_PROJECT_KEY": "P", "JIRA_TOKEN": "t", "JIRA_STATUS_MAPPING": "garbage", "LABEL": "ready-for-agent"},
 		"forgejo":                             {"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
+		"unknown tracker":                     {"ISSUE_TRACKER": "bogus", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
 		"absent":                              {},
 	} {
 		t.Run(name, func(t *testing.T) {
