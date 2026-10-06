@@ -29,7 +29,10 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   completed).
 - `agent-failed` — the Box failed or stopped `status=blocked`, or its PR
   could not land (e.g. red CI after the fix passes, a merge-gate failure, no
-  PR found); needs human triage, re-label to retry.
+  PR found), or a read-only Box's host-side bundle relay exhausted its
+  retries on any code forge (the bundle stays in the outbox; `spindrift
+  recover <n>` relays and lands it, clearing this label); needs human
+  triage, re-label to retry.
 - `agent-ambiguous-spec` — the pre-implement gate found the issue internally
   contradictory and the Box halted on purpose (`status=ambiguous`), posting
   its questions as a comment. Not a crash and never `agent-failed`; a human
