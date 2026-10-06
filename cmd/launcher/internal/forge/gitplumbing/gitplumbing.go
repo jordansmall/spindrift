@@ -62,10 +62,10 @@ func IsMergeTransient(stderr string) bool {
 
 // GitForcePush force-with-lease-pushes the current branch checked out at dir,
 // appending extraArgs after --force-with-lease (e.g. "-u", "origin", ref for a
-// branch with no upstream, issue #1918). Only a failure whose stderr carries a
-// transport or server marker wraps forge.ErrTransientPushFailure, so callers
-// know a retry is safe. ctx bounds the subprocess because git applies no
-// timeout of its own.
+// branch with no upstream, issue #1918). A failure whose stderr carries a
+// transport or server marker, or a ctx deadline kill, wraps
+// forge.ErrTransientPushFailure so callers know a retry is safe. ctx bounds
+// the subprocess because git applies no timeout of its own.
 func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	// stderr goes to a file, not an io.Writer: Cmd.Run's copy goroutine waits
 	// for EOF on the pipe, which a hung grandchild (git-receive-pack's
@@ -81,10 +81,11 @@ func GitForcePush(ctx context.Context, dir string, extraArgs ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Stderr = stderrFile
 	if err := cmd.Run(); err != nil {
-		// A deadline kill leaves none of git's own rejection markers in stderr,
-		// so the timeout is reported rather than run through wrapForcePushError.
+		// A deadline kill is transient: every caller builds a fresh deadline per
+		// push, and a retry re-takes the lease. It carries no stderr markers, so
+		// it skips wrapForcePushError.
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("git push --force-with-lease: timed out: %w", ctx.Err())
+			return fmt.Errorf("git push --force-with-lease: timed out: %w: %w", ctx.Err(), forge.ErrTransientPushFailure)
 		}
 		stderr, _ := os.ReadFile(stderrFile.Name())
 		return wrapForcePushError(err, string(stderr))
