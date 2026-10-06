@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // Schedule is the daemon's one scheduling decision-maker (ADR 0059): which
@@ -22,27 +23,9 @@ type Schedule struct {
 	state       map[Kind]kindSched
 }
 
-// NextDue is when a child-reported kind next has work, as one child's
-// not_due records report it: At is the earliest instant a Chore lifts (zero
-// for none) and OnTipMove that some Chore waits on a tip move rather than a
-// clock. The zero value is no report.
-type NextDue struct {
-	At        time.Time
-	OnTipMove bool
-}
-
-// IsZero reports that n carries no report.
-func (n NextDue) IsZero() bool { return n.At.IsZero() && !n.OnTipMove }
-
-// Merge folds another record into n: the earliest non-zero instant, and
-// OnTipMove if either has it.
-func (n NextDue) Merge(o NextDue) NextDue {
-	if !o.At.IsZero() && (n.At.IsZero() || o.At.Before(n.At)) {
-		n.At = o.At
-	}
-	n.OnTipMove = n.OnTipMove || o.OnTipMove
-	return n
-}
+// NextDue is when a child-reported kind next has work; the zero value is no
+// report.
+type NextDue = report.NextDue
 
 // kindSched is one kind's state. interval > 0 marks a probed kind, whose
 // work-or-not answer comes from a Demand count; interval == 0 keeps the

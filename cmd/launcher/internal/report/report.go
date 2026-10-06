@@ -56,6 +56,16 @@ type NextDue struct {
 // IsZero reports that n carries no answer.
 func (n NextDue) IsZero() bool { return n.At.IsZero() && !n.OnTipMove }
 
+// Merge folds another record into n: the earliest non-zero instant, and
+// OnTipMove if either has it.
+func (n NextDue) Merge(o NextDue) NextDue {
+	if !o.At.IsZero() && (n.At.IsZero() || o.At.Before(n.At)) {
+		n.At = o.At
+	}
+	n.OnTipMove = n.OnTipMove || o.OnTipMove
+	return n
+}
+
 // wire is n's next_due string: UTC at full nanosecond precision, since a live
 // claim lifts one nanosecond past its timeout. "" for the zero value.
 func (n NextDue) wire() string {
