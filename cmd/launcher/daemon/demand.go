@@ -169,17 +169,16 @@ func probeIntervals(src demandSources, override time.Duration) map[daemon.Kind]t
 	return out
 }
 
-// childKnob is the value a child launcher resolves for key. Every key the
-// --input document carries is stripped from the child's env (withoutKeys), so
-// the child reads the document alone and an ambient override is invisible to
-// it; a key the document lacks is not stripped, so the child inherits the
-// daemon's ambient value. The caller passes ambient as a literal os.Getenv so
-// knob_env_guard_test.go still sees which keys the daemon reads.
+// childKnob is the value a child launcher resolves for key. A key whose
+// --input document value counts (Document.Setting) is stripped from the
+// child's env (withoutKeys), so the child reads the document alone and an
+// ambient override is invisible to it; any other key is not stripped, so the
+// child inherits the daemon's ambient value. The caller passes ambient as a
+// literal os.Getenv so knob_env_guard_test.go still sees which keys the daemon
+// reads.
 func childKnob(doc *inputdoc.Document, key, ambient string) string {
-	if doc != nil {
-		if v, ok := doc.Settings[key]; ok {
-			return v
-		}
+	if v, ok := doc.Setting(key); ok {
+		return v
 	}
 	return ambient
 }

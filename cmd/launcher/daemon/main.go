@@ -160,19 +160,19 @@ func researchPromoted(args parsedArgs) bool {
 	return args.ExplicitSelector && slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Research))
 }
 
-// settingsKeys returns doc's settings keys, sorted, so the warning loop and
-// the runner's stripped-key list both read from one source and come out in
-// a fixed order for an operator — a Go map's own iteration order is random,
-// which would otherwise reshuffle the warnings between runs. A nil doc or a
-// nil Settings map (the JSON shape when the document carries no "settings"
-// key at all) yields an empty slice rather than panicking.
-func settingsKeys(doc *inputdoc.Document) []string {
+// strippedKeys returns the keys of doc's settings that count (Document.Setting),
+// sorted so warnings come out in a stable order. It is the child strip list: a
+// key whose value does not count is left for the child to inherit from the
+// ambient env. A nil doc or nil Settings yields an empty slice.
+func strippedKeys(doc *inputdoc.Document) []string {
 	if doc == nil {
 		return nil
 	}
 	keys := make([]string, 0, len(doc.Settings))
 	for k := range doc.Settings {
-		keys = append(keys, k)
+		if _, ok := doc.Setting(k); ok {
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
 	return keys
@@ -663,8 +663,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// Computed once here, right after the document loads (the earliest
 	// point the key set is known) and reused below for the runner config,
 	// so the warning and the actual strip act on the same list.
-	strippedKeys := settingsKeys(doc)
-	warnStrippedChildEnv(strippedKeys, stderr)
+	stripped := strippedKeys(doc)
+	warnStrippedChildEnv(stripped, stderr)
 
 	appAttr, err := doc.Resolve("DAEMON_APP", stderr)
 	if err != nil {
@@ -861,7 +861,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
 		env:   os.Environ(),
-		knobs: strippedKeys,
+		knobs: stripped,
 		// A butler gateKinds dropped, or an explicit dispatch/research
 		// selector, must never refuse startup over butler config. Research is
 		// promoted only when explicitly selected: the bare selector always

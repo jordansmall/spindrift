@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -580,6 +581,36 @@ func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 		t.Fatalf("read dumped env: %v", err)
 	}
 	assertEnvStripsKnobsKeepsSecrets(t, string(dumped))
+}
+
+// A document key whose value does not count is left out of the strip list, so
+// the child inherits the daemon's ambient value; a counting key is still
+// stripped.
+func TestRunChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	dumpFile := filepath.Join(t.TempDir(), "env.out")
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", fmt.Sprintf(`{ echo "REPO_SLUG=${REPO_SLUG-<unset>}"; echo "MODEL=${MODEL-<unset>}"; } >%q`, dumpFile))
+	}
+	doc := &inputdoc.Document{Settings: map[string]string{"REPO_SLUG": "", "MODEL": "x"}}
+
+	r := mustHostRunner(t, hostRunnerConfig{
+		repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux",
+		env:   []string{"REPO_SLUG=o/r", "MODEL=from-shell", "PATH=/bin:/usr/bin"},
+		knobs: strippedKeys(doc),
+	})
+	if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+		t.Fatalf("RunChild() unexpected error: %v", err)
+	}
+	dumped, err := os.ReadFile(dumpFile)
+	if err != nil {
+		t.Fatalf("read dumped env: %v", err)
+	}
+	if got, want := string(dumped), "REPO_SLUG=o/r\nMODEL=<unset>\n"; got != want {
+		t.Errorf("child env = %q, want %q", got, want)
+	}
 }
 
 // TestRunChild_ChildInOwnProcessGroup asserts the child started through the
