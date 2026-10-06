@@ -1340,3 +1340,159 @@ func TestReferenceDocBatonReasonsMatchConstants(t *testing.T) {
 		}
 	}
 }
+
+// startBatonSibling starts runSlot for slot on its own goroutine, tracked by
+// wg, for the tests below that stage a holder and a sibling one at a time.
+func startBatonSibling(ctx context.Context, wg *sync.WaitGroup, slot int, cfg Config, p *pool) {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runSlot(ctx, slot, cfg, p)
+	}()
+}
+
+// TestPoolButlerStartSkipsTheBatonWhileWorkHoldsIt pins issue #4583: a Chore-
+// keyed kind selects no tracker issue and its races are settled by the
+// Ledger, so a butler start never waits behind a work child still in its
+// discovery phase.
+func TestPoolButlerStartSkipsTheBatonWhileWorkHoldsIt(t *testing.T) {
+	cfg := triKindConfig(2, 0)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(2)
+	clk := &testClock{}
+	nw := newNotifyWriter()
+	p, pctx := newPool(context.Background(), cfg, r, newTestEmitter(nw), clk)
+	defer p.cancel()
+	p.markNoWork(KindOf(dispatchkind.Research), clk.Now(), false)
+
+	var wg sync.WaitGroup
+	startBatonSibling(pctx, &wg, 0, cfg, p)
+	if slot := r.awaitStart(t); slot != 0 {
+		t.Fatalf("started slot = %d, want 0 (the initial baton holder)", slot)
+	}
+	// Slot 0's work child holds the baton: it has announced no Box.
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
+
+	startBatonSibling(pctx, &wg, 1, cfg, p)
+	if slot := r.awaitStart(t); slot != 1 {
+		t.Fatalf("started slot = %d, want 1", slot)
+	}
+	calls := r.calls()
+	if len(calls) != 2 || calls[0].Kind != KindOf(dispatchkind.Work) || calls[1].Kind != KindOf(dispatchkind.Butler) {
+		t.Fatalf("calls = %v, want work on slot 0 then butler on slot 1", calls)
+	}
+	if strings.Contains(nw.String(), "\"event\":\"baton_hold\"") {
+		t.Fatal("a butler slot emitted baton_hold, want the butler start to skip the baton")
+	}
+
+	haltThenRelease(t, r, pctx, 1, 0)
+	awaitWG(t, r, &wg)
+}
+
+// TestPoolIssueKeyedStartsStillWaitOnEachOthersBaton pins the other half of
+// issue #4583: work and research keep sharing the baton, so two children never
+// race for one issue and research never runs against work on one issue.
+func TestPoolIssueKeyedStartsStillWaitOnEachOthersBaton(t *testing.T) {
+	work, research := KindOf(dispatchkind.Work), KindOf(dispatchkind.Research)
+	for _, tc := range []struct {
+		name            string
+		holder, sibling Kind
+	}{
+		{"work start waits on a research holder", research, work},
+		{"research start waits on a work holder", work, research},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := dualKindConfig(2, 0)
+			r := &scriptedRunner{revisions: []string{"rev1"}}
+			r.holdSlots(2)
+			clk := &testClock{}
+			nw := newNotifyWriter()
+			p, pctx := newPool(context.Background(), cfg, r, newTestEmitter(nw), clk)
+			defer p.cancel()
+			// Back the sibling's kind off so the holder's first pick is
+			// the holder kind; then swap, so the sibling re-decides to its own kind.
+			p.markNoWork(tc.sibling, clk.Now(), false)
+
+			var wg sync.WaitGroup
+			startBatonSibling(pctx, &wg, 0, cfg, p)
+			if slot := r.awaitStart(t); slot != 0 {
+				t.Fatalf("started slot = %d, want 0 (the initial baton holder)", slot)
+			}
+			p.markNoWork(tc.holder, clk.Now(), false)
+			p.resetKind(tc.sibling)
+
+			startBatonSibling(pctx, &wg, 1, cfg, p)
+			nw.waitForLine(t, "\"event\":\"baton_hold\"")
+			select {
+			case got := <-r.started:
+				t.Fatalf("slot %d started while the other kind's child held the baton", got)
+			default:
+			}
+
+			r.fireOnIssue(t, 0, "42")
+			if slot := r.awaitStart(t); slot != 1 {
+				t.Fatalf("started slot = %d, want 1 once the baton passed", slot)
+			}
+			if calls := r.calls(); len(calls) != 2 || calls[0].Kind != tc.holder || calls[1].Kind != tc.sibling {
+				t.Fatalf("calls = %v, want %s then %s", calls, tc.holder, tc.sibling)
+			}
+
+			haltThenRelease(t, r, pctx, 0, 1)
+			awaitWG(t, r, &wg)
+		})
+	}
+}
+
+// TestPoolHolderStartingButlerPassesTheBatonAtOnce pins that a slot holding
+// the baton when it starts a Chore-keyed child (the pre-assigned leader's first
+// round) passes it at the start, so a butler run never holds the pool until
+// its Box record.
+func TestPoolHolderStartingButlerPassesTheBatonAtOnce(t *testing.T) {
+	cfg := triKindConfig(2, 0)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(2)
+	clk := &testClock{}
+	nw := newNotifyWriter()
+	p, pctx := newPool(context.Background(), cfg, r, newTestEmitter(nw), clk)
+	defer p.cancel()
+	p.markNoWork(KindOf(dispatchkind.Work), clk.Now(), false)
+	p.markNoWork(KindOf(dispatchkind.Research), clk.Now(), false)
+
+	var wg sync.WaitGroup
+	startBatonSibling(pctx, &wg, 0, cfg, p)
+	if slot := r.awaitStart(t); slot != 0 {
+		t.Fatalf("started slot = %d, want 0", slot)
+	}
+	p.resetKind(KindOf(dispatchkind.Work))
+
+	// No Box record from the butler child: the sibling's start proves the
+	// baton passed at the child's start.
+	startBatonSibling(pctx, &wg, 1, cfg, p)
+	if slot := r.awaitStart(t); slot != 1 {
+		t.Fatalf("started slot = %d, want 1", slot)
+	}
+	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
+	assertBatonPassReason(t, events, batonPassChoreKeyed)
+	for _, ev := range events {
+		if ev.Event == "baton_hold" {
+			t.Fatalf("baton_hold event %+v, want none: the baton was already passed", ev)
+		}
+	}
+
+	haltThenRelease(t, r, pctx, 1, 0)
+	awaitWG(t, r, &wg)
+}
+
+// haltThenRelease ends a two-slot test: haltSlot's child exits host-tainted
+// and the pool's halt lands before other's child releases, so other cannot
+// loop around and start another child on a pool that has not yet halted.
+func haltThenRelease(t *testing.T, r *scriptedRunner, pctx context.Context, haltSlot, other int) {
+	t.Helper()
+	r.releaseSlot(t, haltSlot, ChildResult{Exit: 5})
+	select {
+	case <-pctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("pool did not halt within 5s of the host-tainted exit")
+	}
+	r.releaseSlot(t, other, ChildResult{Exit: 0})
+}

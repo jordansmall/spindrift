@@ -223,6 +223,11 @@ const (
 	// the baton must not stay with it through that round's probe or idle
 	// wait.
 	batonPassOutpaced batonReason = "a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"
+	// batonPassChoreKeyed fires when the holder starts a Chore-keyed child.
+	// Such a kind selects no tracker issue, so the baton has nothing to
+	// guard for it; the pass happens at the start rather than at the box
+	// record so a butler run never holds the baton through its run.
+	batonPassChoreKeyed batonReason = "the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"
 	// batonPassStopped fires when the holder returns before any of the
 	// above resolved (a cancelled ctx, a halt, a self-build mismatch, or a
 	// HaltPool child exit or breaker trip, whose pass waits until after the
@@ -496,12 +501,13 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 // therefore always visible to any snapshot that publishes alongside this
 // event, which a hand-placed write after a separately-emitted child_start
 // could not otherwise guarantee. The kind is re-chosen inside that same
-// mutate (see Schedule.Decide). When that re-decide is not a Start, what
-// follows depends on provisional, the kind runSlot decided on. A probed
-// kind's count is what says there is work, so a sibling's exit 2 zeroing it
-// while this slot waited on the baton means nothing is marked and ok is
-// false: the caller decides again rather than spawn an empty child (ADR
-// 0059). An exit-driven kind has only its backoff to go on, and a child is
+// mutate (see Schedule.Decide). When that re-decide is not a Start (or is a
+// Start onto an issue-keyed kind that a non-holder deciding on a Chore-keyed
+// provisional is refused), what follows depends on provisional, the kind
+// runSlot decided on. A probed kind's count is what says there is work, so a
+// sibling's exit 2 zeroing it while this slot waited on the baton means
+// nothing is marked and ok is false: the caller decides again rather than
+// spawn an empty child (ADR 0059). An exit-driven kind has only its backoff to go on, and a child is
 // how it finds work at all, so it still starts as provisional. child_start carries no
 // dispatch key (neither issue nor chore): the daemon cannot know which key
 // a freshly started child will work until it reports a "box" record, and
@@ -512,7 +518,11 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, ok bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
-		if st, started := s.sched.Decide(now, occupancy(s)).(Start); started {
+		// A slot not holding the baton, deciding on a Chore-keyed
+		// provisional kind, must not switch to an issue-keyed one: only the
+		// holder discovers issues.
+		discovers := !provisional.choreKeyed() || p.baton == nil || s.batonSlot == slot
+		if st, started := s.sched.Decide(now, occupancy(s)).(Start); started && (discovers || st.Kind.choreKeyed()) {
 			kind = st.Kind
 		} else if v := s.sched.View(provisional, now); v.Probed || !v.NextDue.IsZero() {
 			return nil
@@ -752,8 +762,8 @@ func (p *pool) noteAwakeOpen(slot int) {
 // since every acquisition site is paired with a pass before the next
 // acquisition, but checked directly rather than assumed).
 //
-// The batonSlot check is tried first: this is called on every iteration of
-// every slot, and once a slot holds the baton a re-check costs one lock and
+// The batonSlot check is tried first: this is called on every issue-keyed round
+// of every slot, and once a slot holds the baton a re-check costs one lock and
 // nothing more. Only a slot that does not hold it falls through to the
 // non-blocking receive (the token may already be waiting on the channel),
 // and only after that misses does it emit baton_hold and actually block, on

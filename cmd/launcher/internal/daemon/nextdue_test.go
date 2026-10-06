@@ -185,10 +185,11 @@ func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
 	}
 }
 
-// TestLoopButlerOnlyPoolStartsOneDiscoveryChild: a butler-only multi-slot
-// Daemon starts one butler child, not one per slot — the sibling slot parks
-// on the discovery baton the first child holds.
-func TestLoopButlerOnlyPoolStartsOneDiscoveryChild(t *testing.T) {
+// TestLoopButlerOnlyPoolStartsEveryChildWithoutTheBaton: a Chore-keyed kind
+// skips the discovery baton (issue #4583) — the Ledger's compare-and-swap
+// settles races between butler children — so every slot of a butler-only
+// Daemon starts its own child at once, none parking on baton_hold.
+func TestLoopButlerOnlyPoolStartsEveryChildWithoutTheBaton(t *testing.T) {
 	cfg := butlerOnlyConfig()
 	cfg.Slots = 3
 	r := &scriptedRunner{revisions: []string{"rev1"}}
@@ -200,23 +201,21 @@ func TestLoopButlerOnlyPoolStartsOneDiscoveryChild(t *testing.T) {
 	done := make(chan Halt, 1)
 	go func() { done <- Loop(ctx, cfg, r, newTestEmitter(nw), clk) }()
 
-	if got := r.awaitStart(t); got != 0 {
-		t.Fatalf("first butler child on slot %d, want 0 (the initial baton holder)", got)
+	seen := map[int]bool{}
+	for range cfg.Slots {
+		seen[r.awaitStart(t)] = true
 	}
-	nw.waitForLine(t, "\"event\":\"baton_hold\"")
-	nw.waitForLine(t, "\"event\":\"baton_hold\"")
-
-	if n := r.kindCount(KindOf(dispatchkind.Butler)); n != 1 {
-		t.Fatalf("butler children started = %d, want exactly 1 across %d slots", n, cfg.Slots)
+	if len(seen) != cfg.Slots || r.kindCount(KindOf(dispatchkind.Butler)) != cfg.Slots {
+		t.Fatalf("started slots = %v with %d butler children, want one butler child per slot", seen, r.kindCount(KindOf(dispatchkind.Butler)))
 	}
-	select {
-	case got := <-r.started:
-		t.Fatalf("slot %d started a second butler child while the first was discovering", got)
-	default:
+	if strings.Contains(nw.String(), "\"event\":\"baton_hold\"") {
+		t.Fatal("a butler slot emitted baton_hold, want butler starts to skip the baton")
 	}
 
 	cancel()
-	r.releaseSlot(t, 0, ChildResult{Exit: 2})
+	for slot := 0; slot < cfg.Slots; slot++ {
+		r.releaseSlot(t, slot, ChildResult{Exit: 2})
+	}
 	<-done
 }
 
@@ -259,18 +258,25 @@ func TestLoopButlerTipMoveDuringChildIsNotParkedOn(t *testing.T) {
 	}
 	r.fireOnRecord(t, 1, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("bugs"), NextDue: report.NextDue{OnTipMove: true}})
 
-	// The merge lands: slot 0 resolves the moved tip, then parks on the
-	// baton the butler child holds.
+	// The merge lands: slot 0 resolves the moved tip. Slot 1's butler child
+	// then exits with its on_tip_move report, run at the old revision.
 	r.releaseSlot(t, 0, ChildResult{Exit: 0})
-	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 	r.releaseSlot(t, 1, ChildResult{Exit: 2})
 
-	for i := 0; r.kindCount(butler) < 2; i++ {
+	butlerOnSlot1 := func() (n int) {
+		for _, c := range r.calls() {
+			if c.Kind == butler && c.Slot == 1 {
+				n++
+			}
+		}
+		return n
+	}
+	for i := 0; butlerOnSlot1() < 2; i++ {
 		if i == 20 {
 			t.Fatal("butler did not start again after its on_tip_move report went stale; it parked on a spent tip move")
 		}
 		slot := r.awaitStart(t)
-		if r.kindCount(butler) < 2 {
+		if butlerOnSlot1() < 2 || slot != 1 {
 			r.releaseSlot(t, slot, ChildResult{Exit: 2})
 		}
 	}
