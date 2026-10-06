@@ -258,9 +258,15 @@ func TestLoopButlerTipMoveDuringChildIsNotParkedOn(t *testing.T) {
 	}
 	r.fireOnRecord(t, 1, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("bugs"), NextDue: report.NextDue{OnTipMove: true}})
 
-	// The merge lands: slot 0 resolves the moved tip. Slot 1's butler child
-	// then exits with its on_tip_move report, run at the old revision.
+	// The merge lands: slot 0 resolves the moved tip and starts its next
+	// child, held from here on (its Box announced, so the baton passes) so
+	// only slot 1 cycles below. Slot 1's butler child then exits with its
+	// on_tip_move report, run at the old revision.
 	r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	if got := r.awaitStart(t); got != 0 {
+		t.Fatalf("child after the merge on slot %d, want 0", got)
+	}
+	r.fireOnIssue(t, 0, "43")
 	r.releaseSlot(t, 1, ChildResult{Exit: 2})
 
 	butlerOnSlot1 := func() (n int) {
