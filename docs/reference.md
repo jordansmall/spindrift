@@ -6044,7 +6044,8 @@ it creates its own, so a loser that slips past the runner's own
 log aside before the container-name collision (issue #3633) tells it to
 skip; the winner's own settle then reads an empty log and parks a genuinely
 green run as `agent-failed`. The discovery baton (issue #3684) closes the
-window that makes that race possible: at most one slot may be between
+window that makes that race possible: at most one slot running an
+issue-keyed child (a Chore-keyed one skips the baton, below) may be between
 "started" and "announced a Box" at any moment, not just on the pool's first
 wave but on every refill for the life of the process — the one-shot gate
 issue #3634 first shipped only enforced that on the first wave, so two
@@ -6078,8 +6079,22 @@ runnable kind before an idle sleep — but since the baton is now acquired
 after both of those points, only the pre-assigned initial holder's very
 first round can ever reach them still holding it; every later round for
 every slot has already passed the baton, or not yet acquired it, by the
-time either can fire. `MAX_PARALLEL=1` builds no baton at all and emits
-no baton event — a single slot has no sibling to stagger
+time either can fire. Chore-keyed kinds (the butler, keyed `ByChore` on the
+dispatch-kind descriptor) skip the baton: `awaitBaton` is not called for
+them, because two butler children racing for one Chore are settled by the
+Ledger's compare-and-swap (`LostRace`) and a Chore selects no tracker
+issue, so a butler start never delays a work or research start. Work and
+research keep sharing one baton, since the cross-family exclusion reads the
+other family's in-progress labels during discovery (ADR 0059, "Chore-keyed
+kinds skip the baton"). A slot not holding the baton never switches from a
+Chore-keyed kind to an issue-keyed one at `startChild`, and a holder that
+starts a Chore-keyed child passes the baton at once (`batonPassChoreKeyed`)
+rather than holding it through a butler run. Because a butler slot does not
+wait on the baton, it does not get the holder's halt-ordering guarantee
+(issue #4365): a butler child can start just before a work holder's
+`HaltPool` halt lands and is then cancelled with the pool, the same window
+a non-holder's halt already has. `MAX_PARALLEL=1` builds no baton at all
+and emits no baton event — a single slot has no sibling to stagger
 against. Serialized discovery is an accepted cost, not a shortfall to work
 around: a child's start-to-claim is on the order of fifteen seconds against
 Box runs of tens of minutes, and a daemon runs unattended, so fill latency
