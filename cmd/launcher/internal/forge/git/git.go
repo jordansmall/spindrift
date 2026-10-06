@@ -149,7 +149,7 @@ func (g *gitClient) Merge(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
 	}
-	_, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-merge-*", g.cloneTimeout)
+	dir, gitIn, cleanup, err := cloneToTemp(g.remoteURL, "spindrift-git-forge-merge-*", g.cloneTimeout)
 	if err != nil {
 		return err
 	}
@@ -172,12 +172,17 @@ func (g *gitClient) Merge(branch string) error {
 	mergeCmd.Stdout = &out
 	mergeCmd.Stderr = &out
 	if err := mergeCmd.Run(); err != nil {
+		// A fresh context: the merge's own may already have expired. A failed
+		// probe falls through to the wrapped error, which keeps git's output.
+		checkCtx, checkCancel := context.WithTimeout(context.Background(), g.opTimeout)
+		conflicted, _ := gitplumbing.HasUnmergedPaths(checkCtx, dir)
+		checkCancel()
 		_ = g.runGit(gitIn, "merge", "--abort")
-		if gitplumbing.IsMergeConflict(out.String()) {
-			return forge.ErrMergeConflict
-		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("git merge %s: timed out after %s: %w", branch, g.opTimeout, ctx.Err())
+		}
+		if conflicted {
+			return forge.ErrMergeConflict
 		}
 		return fmt.Errorf("git merge %s: %w: %s", branch, err, forge.RedactURLCredentials(strings.TrimSpace(out.String())))
 	}
