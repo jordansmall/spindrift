@@ -552,6 +552,82 @@ func TestScheduleDemandRiseFromProbeThatRacedAClaimDoesNotLift(t *testing.T) {
 	}
 }
 
+// The child swaps the label before the daemon folds its Claimed, so a probe
+// can read the post-swap count first; the fold's decrement then counts that
+// claim twice and would make the same count look like a rise.
+func TestScheduleDemandSteadyAfterPostSwapProbeAndClaimDoesNotLift(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 2, Claims: 0}, // post-swap count, pre-fold
+		Claimed{Kind: schedWork},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	now := schedAt(schedFloor / 2)
+	s, woke := s.Observe(now, DemandProbed{Kind: schedWork, Ready: 2, Claims: 1})
+	if woke || s.View(schedWork, now).JamUntil.IsZero() {
+		t.Fatalf("steady count lifted the jam (woke=%v)", woke)
+	}
+	if v := s.View(schedWork, now); v.JamBaselinePending || v.ReadyAtJam != 2 {
+		t.Fatalf("view = %+v, want baseline 2 taken from the probe", v)
+	}
+	s, woke = s.Observe(now, DemandProbed{Kind: schedWork, Ready: 3, Claims: 1})
+	if !woke || !s.View(schedWork, now).JamUntil.IsZero() {
+		t.Fatalf("a rise past the deferred baseline kept the jam (woke=%v)", woke)
+	}
+}
+
+// A failed probe keeps the claim-decremented count, so it is no confirmation.
+func TestScheduleDemandSteadyAfterFailedProbeAndClaimDoesNotLift(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 2, Claims: 0},
+		Claimed{Kind: schedWork},
+		DemandFailed{Kind: schedWork},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	now := schedAt(schedFloor / 2)
+	if v := s.View(schedWork, now); !v.JamBaselinePending {
+		t.Fatalf("view = %+v, want the baseline pending", v)
+	}
+	s, woke := s.Observe(now, DemandProbed{Kind: schedWork, Ready: 2, Claims: 1})
+	if woke || s.View(schedWork, now).JamUntil.IsZero() {
+		t.Fatalf("steady count lifted the jam (woke=%v)", woke)
+	}
+}
+
+// A probe confirming the count after the claim leaves nothing to defer.
+func TestScheduleJamAfterConfirmedClaimTakesBaselineAtOnce(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 3, Claims: 0},
+		Claimed{Kind: schedWork},
+		DemandProbed{Kind: schedWork, Ready: 2, Claims: 1},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	if v := s.View(schedWork, schedT0); v.JamBaselinePending || v.ReadyAtJam != 2 {
+		t.Fatalf("view = %+v, want baseline 2 at once", v)
+	}
+}
+
+// An empty child zeroes the count with no tracker observation, so a jam after
+// it must not record that zero as the baseline for the next probe to beat.
+func TestScheduleJamAfterChildEmptyDefersBaseline(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0,
+		DemandProbed{Kind: schedWork, Ready: 2, Claims: 0},
+		ChildDone{Kind: schedWork, Result: ChildEmpty},
+		ChildDone{Kind: schedWork, Result: ChildJammed})
+	now := schedAt(schedFloor / 2)
+	if v := s.View(schedWork, now); !v.JamBaselinePending {
+		t.Fatalf("view = %+v, want the baseline pending", v)
+	}
+	s, woke := s.Observe(now, DemandProbed{Kind: schedWork, Ready: 2, Claims: 0})
+	v := s.View(schedWork, now)
+	if woke || v.JamUntil.IsZero() {
+		t.Fatalf("steady count lifted the jam (woke=%v)", woke)
+	}
+	if v.ReadyAtJam != 2 || v.JamBaselinePending {
+		t.Fatalf("view = %+v, want baseline 2 settled", v)
+	}
+}
+
 // The next jam re-records the count, so a rise is judged against the latest jam.
 func TestScheduleDemandRiseComparesAgainstLatestJam(t *testing.T) {
 	s := probedSchedule([]Kind{schedWork}, 0)
