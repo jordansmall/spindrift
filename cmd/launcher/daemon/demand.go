@@ -5,14 +5,12 @@ import (
 	"os"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/forge/forgejo"
-	"spindrift.dev/launcher/internal/forge/github"
-	"spindrift.dev/launcher/internal/forge/jira"
-	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/trackerbuild"
 )
 
 // jiraProbeTimeout bounds each Jira Demand probe: the adapter otherwise falls
@@ -54,52 +52,23 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		return nil
 	}
 
-	var newTracker func(forge.DispatchLabels) forge.IssueTracker
-	switch issueTrackerName(doc) {
-	case "local":
-		dir := childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR"))
-		if dir == "" {
-			return nil
-		}
-		newTracker = func(l forge.DispatchLabels) forge.IssueTracker { return local.NewLocalTracker(dir, l) }
-	case "forgejo":
-		baseURL := childKnob(doc, "FORGEJO_BASE_URL", os.Getenv("FORGEJO_BASE_URL"))
-		repo := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
-		token := childKnob(doc, "FORGEJO_TOKEN", os.Getenv("FORGEJO_TOKEN"))
-		if repo == "" || token == "" {
-			return nil
-		}
-		newTracker = func(l forge.DispatchLabels) forge.IssueTracker {
-			return forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: baseURL, Repo: repo, Token: token, Labels: l})
-		}
-	case "jira":
-		baseURL := childKnob(doc, "JIRA_BASE_URL", os.Getenv("JIRA_BASE_URL"))
-		projectKey := childKnob(doc, "JIRA_PROJECT_KEY", os.Getenv("JIRA_PROJECT_KEY"))
-		token := childKnob(doc, "JIRA_TOKEN", os.Getenv("JIRA_TOKEN"))
-		rawMapping := childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING"))
-		// The child's validate() runs the same check and fails startup on it, so
-		// a deployment it rejects has no children to count demand for. The check
-		// parses rawMapping too, so the parse below cannot fail.
-		if jira.ValidateJiraEnv(baseURL, projectKey, token, rawMapping) != nil {
-			return nil
-		}
-		statusMapping, _ := jira.ParseStatusMapping(rawMapping)
-		email := childKnob(doc, "JIRA_EMAIL", os.Getenv("JIRA_EMAIL"))
-		newTracker = func(l forge.DispatchLabels) forge.IssueTracker {
-			return jira.NewJiraClient(jira.JiraConfig{
-				BaseURL: baseURL, ProjectKey: projectKey, Email: email, Token: token,
-				StatusMapping: statusMapping, Labels: l,
-				HTTPClient: &http.Client{Timeout: jiraProbeTimeout},
-			})
-		}
-	case "github":
-		slug := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
-		if slug == "" {
-			return nil
-		}
-		// The branch prefix only names agent branches, which counting never touches.
-		newTracker = func(l forge.DispatchLabels) forge.IssueTracker { return github.NewExecClient(slug, l, "") }
-	default:
+	// Every knob is read whatever the tracker, so one Settings feeds whichever
+	// adapter ISSUE_TRACKER names. The branch prefix is left blank: it only names
+	// agent branches, which counting never touches.
+	s := trackerbuild.Settings{
+		RepoSlug:          childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG")),
+		LocalIssuesDir:    childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR")),
+		ForgejoBaseURL:    childKnob(doc, "FORGEJO_BASE_URL", os.Getenv("FORGEJO_BASE_URL")),
+		ForgejoToken:      childKnob(doc, "FORGEJO_TOKEN", os.Getenv("FORGEJO_TOKEN")),
+		JiraBaseURL:       childKnob(doc, "JIRA_BASE_URL", os.Getenv("JIRA_BASE_URL")),
+		JiraProjectKey:    childKnob(doc, "JIRA_PROJECT_KEY", os.Getenv("JIRA_PROJECT_KEY")),
+		JiraEmail:         childKnob(doc, "JIRA_EMAIL", os.Getenv("JIRA_EMAIL")),
+		JiraToken:         childKnob(doc, "JIRA_TOKEN", os.Getenv("JIRA_TOKEN")),
+		JiraStatusMapping: childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING")),
+		JiraHTTPClient:    &http.Client{Timeout: jiraProbeTimeout},
+	}
+	tr, ok := trackerbuild.ByName(issueTrackerName(doc))
+	if !ok || tr.Validate(s) != nil {
 		return nil
 	}
 	configured := forge.DispatchLabels{
@@ -115,8 +84,11 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		if labels.Dispatchable == "" {
 			continue
 		}
-		counter, ok := newTracker(labels).(forge.DemandCounter)
-		if !ok {
+		s.Labels = labels
+		// Only the tracker's capabilities matter: no code forge is in play, and the
+		// descriptors feed fields counting never reads.
+		counter := forge.ResolveCapabilities(nil, tr.New(s), backend.Descriptor{}, backend.Descriptor{}).DemandCounter
+		if counter == nil {
 			continue
 		}
 		sources[daemon.KindOf(d)] = counter
