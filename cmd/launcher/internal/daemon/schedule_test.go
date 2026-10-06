@@ -48,6 +48,9 @@ func TestScheduleDecide(t *testing.T) {
 	running := func(research int) Occupancy {
 		return Occupancy{Running: map[Kind]int{schedResearch: research}}
 	}
+	starting := func(kind Kind, n int) Occupancy {
+		return Occupancy{Running: map[Kind]int{kind: n}, Starting: map[Kind]int{kind: n}}
+	}
 	probed := func(s Schedule, now time.Time, kind Kind, ready int) Schedule {
 		return schedObserve(t, s, now, DemandProbed{Kind: kind, Ready: ready})
 	}
@@ -167,6 +170,96 @@ func TestScheduleDecide(t *testing.T) {
 			},
 			occ:  running(0),
 			want: Start{Kind: schedWork},
+		},
+		{
+			name: "start budget spent: ready 1 starting 1 parks until the next probe",
+			build: func() Schedule {
+				return probed(probedSchedule([]Kind{schedWork}, 0), schedT0, schedWork, 1)
+			},
+			occ:  starting(schedWork, 1),
+			now:  3 * time.Second,
+			want: Park{Until: schedAt(schedInterval)},
+		},
+		{
+			name: "start budget left: ready 3 starting 2 starts",
+			build: func() Schedule {
+				return probed(probedSchedule([]Kind{schedWork}, 0), schedT0, schedWork, 3)
+			},
+			occ:  starting(schedWork, 2),
+			want: Start{Kind: schedWork},
+		},
+		{
+			name: "start budget over-spent against a lower count still does not start",
+			build: func() Schedule {
+				return probed(probedSchedule([]Kind{schedWork}, 0), schedT0, schedWork, 1)
+			},
+			occ:  starting(schedWork, 2),
+			want: Park{Until: schedAt(schedInterval)},
+		},
+		{
+			name: "start budget spent: the next kind in priority order starts",
+			build: func() Schedule {
+				s := probed(probedSchedule(allKinds(), 0), schedT0, schedWork, 1)
+				return probed(s, schedT0, schedResearch, 1)
+			},
+			occ:  starting(schedWork, 1),
+			want: Start{Kind: schedResearch},
+		},
+		{
+			name: "start budget is per kind: starting research leaves work its budget",
+			build: func() Schedule {
+				s := probed(probedSchedule(allKinds(), 0), schedT0, schedWork, 1)
+				return probed(s, schedT0, schedResearch, 1)
+			},
+			occ:  starting(schedResearch, 1),
+			want: Start{Kind: schedWork},
+		},
+		{
+			name: "start budget spent on reserved kind with floor unmet: work starts",
+			build: func() Schedule {
+				s := probed(probedSchedule(allKinds(), 2), schedT0, schedWork, 1)
+				return probed(s, schedT0, schedResearch, 1)
+			},
+			occ:  starting(schedResearch, 1),
+			want: Start{Kind: schedWork},
+		},
+		{
+			name: "start budget spent on both probed kinds: the butler starts",
+			build: func() Schedule {
+				s := probed(probedSchedule(allKinds(), 2), schedT0, schedWork, 1)
+				return probed(s, schedT0, schedResearch, 1)
+			},
+			occ: Occupancy{
+				Running:  map[Kind]int{schedWork: 1, schedResearch: 1},
+				Starting: map[Kind]int{schedWork: 1, schedResearch: 1},
+			},
+			want: Start{Kind: schedButler},
+		},
+		{
+			name: "start budget spent does not hide a stale kind behind it from probing",
+			build: func() Schedule {
+				s := probed(probedSchedule([]Kind{schedWork, schedResearch}, 0), schedT0, schedWork, 1)
+				return probed(s, schedT0.Add(-schedInterval), schedResearch, 1)
+			},
+			occ:  starting(schedWork, 1),
+			want: Probe{Kinds: []Kind{schedResearch}},
+		},
+		{
+			name: "start budget spent on a stale kind probes it rather than starting",
+			build: func() Schedule {
+				return probed(probedSchedule([]Kind{schedWork}, 0), schedT0, schedWork, 1)
+			},
+			occ:  starting(schedWork, 1),
+			now:  schedInterval,
+			want: Probe{Kinds: []Kind{schedWork}},
+		},
+		{
+			name: "unprobed kind ignores the start budget",
+			build: func() Schedule {
+				return newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil)
+			},
+			occ:  starting(schedButler, 3),
+			want: Start{Kind: schedButler},
 		},
 		{
 			name: "jammed kind parks until the jam ends with JamPoll",
@@ -369,6 +462,40 @@ func TestScheduleContinueMakesDemandStale(t *testing.T) {
 	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 5}, ChildDone{Kind: schedWork, Result: ChildJammed})
 	if p := s.Decide(schedT0, Occupancy{}).(Park); p.Until != schedAt(schedFloor) {
 		t.Fatalf("jam after Continue parks until %v, want floor", p.Until)
+	}
+}
+
+// A claim spends the count a child was started against: the kind is re-probed
+// before the next start, so the budget is never judged on a count the claim
+// has already moved.
+func TestScheduleClaimedMakesDemandStale(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork, schedButler}, 0)
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 5})
+	if d := s.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedWork}) {
+		t.Fatalf("before Claimed: %#v, want Start", d)
+	}
+	s = schedObserve(t, s, schedT0, Claimed{Kind: schedWork})
+	if d := s.Decide(schedT0, Occupancy{}); !reflect.DeepEqual(d, Probe{Kinds: []Kind{schedWork}}) {
+		t.Fatalf("after Claimed: %#v, want Probe", d)
+	}
+	if v := s.View(schedWork, schedT0); v.Ready != 5 || v.Counted != 5 {
+		t.Fatalf("Claimed changed the count: %+v", v)
+	}
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 1})
+	if d := s.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedWork}) {
+		t.Fatalf("after re-probe: %#v, want Start", d)
+	}
+}
+
+func TestScheduleClaimedLeavesUnprobedKindAlone(t *testing.T) {
+	s := newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil)
+	s = schedObserve(t, s, schedT0, ChildDone{Kind: schedButler, Result: ChildEmpty})
+	after := schedObserve(t, s, schedT0, Claimed{Kind: schedButler})
+	if !reflect.DeepEqual(after, s) {
+		t.Fatal("Claimed changed an unprobed kind")
+	}
+	if got, _ := s.Observe(schedT0, Claimed{Kind: "nope"}); !reflect.DeepEqual(got, s) {
+		t.Fatal("Claimed for an unknown kind changed the schedule")
 	}
 }
 

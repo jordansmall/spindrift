@@ -45,8 +45,14 @@ type kindSched struct {
 
 // Occupancy is what the pool's slot phases say is running, passed in on each
 // Decide rather than tracked twice.
+//
+// Starting counts the slots that chose a kind and whose child has not yet
+// reported its claim; the pool counts a running slot with no flight key as
+// starting, so Starting is a subset of Running. Running alone feeds the
+// reservation floor.
 type Occupancy struct {
-	Running map[Kind]int
+	Running  map[Kind]int
+	Starting map[Kind]int
 }
 
 // Decision is what a free slot should do next: Start, Probe, or Park.
@@ -101,9 +107,14 @@ type DemandProbed struct {
 // DemandFailed: a probe of Kind errored.
 type DemandFailed struct{ Kind Kind }
 
+// Claimed: a child of Kind reported its claim, taking an item out of the count
+// it was started against.
+type Claimed struct{ Kind Kind }
+
 func (e ChildDone) kind() Kind    { return e.Kind }
 func (e DemandProbed) kind() Kind { return e.Kind }
 func (e DemandFailed) kind() Kind { return e.Kind }
+func (e Claimed) kind() Kind      { return e.Kind }
 
 // newSchedule builds a Schedule over kinds. probe holds the Demand interval
 // for each probed kind; a kind absent or at 0 stays exit-driven. floor and
@@ -128,12 +139,15 @@ func (k kindSched) jamGated(now time.Time) bool {
 	return k.gate.jammedNow() && !k.gate.runnable(now)
 }
 
-// startable reports whether a child of this kind may start at now.
-func (k kindSched) startable(now time.Time) bool {
+// startable reports whether a child of this kind may start at now, with
+// starting children yet to claim. A starting child's item is still counted in
+// ready, so a probed kind may have at most ready-starting children in
+// discovery; an exit-driven kind has no count to spend.
+func (k kindSched) startable(now time.Time, starting int) bool {
 	if !k.probed() {
 		return k.gate.runnable(now)
 	}
-	return !k.jamGated(now) && !k.stale(now) && k.ready > 0
+	return !k.jamGated(now) && !k.stale(now) && k.ready > starting
 }
 
 // deadline is the instant this kind next needs attention, for a kind that is
@@ -159,7 +173,7 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 	var stale []Kind
 	for _, kind := range slotOrder(s.kinds, running < s.reservation) {
 		ks := s.state[kind]
-		if ks.startable(now) {
+		if ks.startable(now, occ.Starting[kind]) {
 			if len(stale) > 0 {
 				return Probe{Kinds: stale}
 			}
@@ -205,6 +219,10 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 		// Keep the old count: only a rest from probing, so siblings don't
 		// hammer a failing tracker.
 		ks.probedAt = now
+	case Claimed:
+		if ks.probed() {
+			ks.probedAt = time.Time{} // the claim moved the count; re-probe before the next start
+		}
 	}
 	return s.with(kind, ks), false
 }
