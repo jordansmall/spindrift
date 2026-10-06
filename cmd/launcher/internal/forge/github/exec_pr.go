@@ -445,8 +445,9 @@ func (e *execClient) CreateLabel(name, description, color string) error {
 // Rebase checks out the PR's head branch into a temporary clone, rebases it
 // onto origin/<base>, and force-pushes. With sync method "merge"
 // (WithSyncMethod) it merges origin/<base> in instead. Returns ErrMergeConflict
-// if the sync cannot complete automatically, or an error wrapping
-// ErrTransientPushFailure if the force-push fails for an unrelated reason.
+// only when the sync stops on unmerged paths; any other sync failure is
+// returned wrapping git's own output. A force-push that fails for an unrelated
+// reason wraps ErrTransientPushFailure.
 func (e *execClient) Rebase(prURL string) error {
 	out, err := exec.Command("gh", "pr", "view", prURL,
 		"--json", "headRefName,baseRefName",
@@ -483,13 +484,32 @@ func (e *execClient) Rebase(prURL string) error {
 	if e.syncMethod == "merge" {
 		syncVerb = "merge"
 	}
-	if err := gitIn(syncVerb, "origin/"+base).Run(); err != nil {
+	var syncOut bytes.Buffer
+	syncCmd := gitIn(syncVerb, "origin/"+base)
+	syncCmd.Stdout, syncCmd.Stderr = &syncOut, &syncOut
+	if err := syncCmd.Run(); err != nil {
+		// Unmerged index entries cover content, modify/delete and rename
+		// conflicts alike, which matching git's output text misses.
+		conflict := hasUnmergedPaths(gitIn)
 		_ = gitIn(syncVerb, "--abort").Run()
-		return forge.ErrMergeConflict
+		if conflict {
+			return forge.ErrMergeConflict
+		}
+		return fmt.Errorf("git %s origin/%s: %w: %s", syncVerb, base, err,
+			forge.RedactURLCredentials(strings.TrimSpace(syncOut.String())))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), rebaseForcePushTimeout)
 	defer cancel()
 	return gitplumbing.GitForcePush(ctx, dir)
+}
+
+// hasUnmergedPaths reports whether the clone gitIn runs in has unmerged index
+// entries, i.e. a sync stopped on a genuine conflict. A failing ls-files reads
+// as no conflict, which fails safe: Rebase returns a plain error, so no
+// ResolveConflict Box is dispatched.
+func hasUnmergedPaths(gitIn func(args ...string) *exec.Cmd) bool {
+	out, err := gitIn("ls-files", "-u").Output()
+	return err == nil && len(bytes.TrimSpace(out)) > 0
 }
 
 // relayClone builds the `gh repo clone` closure bundlerelay's Relay,
