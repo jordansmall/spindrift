@@ -1931,11 +1931,9 @@ func TestRunDoctor_ArgvIsDoctorCommand(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_ButlerAppendsFlag asserts a runner constructed with the
-// butler kind in play threads "--butler" into the doctor argv (issue #3920):
-// the startup preflight must also run the butler's own config checks
-// whenever the butler is one of the gated kinds, never only when explicitly
-// requested at the command line.
+// TestRunDoctor_ButlerAppendsFlag asserts the runner passes its configured
+// doctor flags through to the doctor argv (issue #3920). Which flags a run
+// gets is doctorPreflightFlags's job, not the runner's.
 func TestRunDoctor_ButlerAppendsFlag(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -1947,7 +1945,7 @@ func TestRunDoctor_ButlerAppendsFlag(t *testing.T) {
 	}
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), butler: true})
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), doctorFlags: []string{"--butler"}})
 	if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 		t.Fatalf("RunDoctor() unexpected error: %v", err)
 	}
@@ -1958,9 +1956,8 @@ func TestRunDoctor_ButlerAppendsFlag(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_NoButlerOmitsFlag asserts the converse: a runner built
-// without the butler kind in play never passes --butler, so an explicit
-// dispatch/research selector is never refused over butler-only config.
+// TestRunDoctor_NoButlerOmitsFlag asserts the converse: a runner built with
+// no doctor flags adds none to the doctor argv.
 func TestRunDoctor_NoButlerOmitsFlag(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -1979,7 +1976,7 @@ func TestRunDoctor_NoButlerOmitsFlag(t *testing.T) {
 
 	for _, tok := range gotArgs {
 		if tok == "--butler" {
-			t.Errorf("argv %v carries --butler, want none (butler not in play)", gotArgs)
+			t.Errorf("argv %v carries --butler, want none (no doctor flags)", gotArgs)
 		}
 	}
 }
@@ -2628,8 +2625,8 @@ func TestFetchRevision_RealGitFetchErrorRedactsURLCredentials(t *testing.T) {
 	}
 }
 
-// TestRunDoctor_ResearchAppendsFlag asserts the research kind in play threads
-// "--research" into the preflight doctor argv, and its absence omits it.
+// TestRunDoctor_ResearchAppendsFlag asserts a "--research" doctor flag reaches
+// the preflight doctor argv, and its absence omits it.
 func TestRunDoctor_ResearchAppendsFlag(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -2641,13 +2638,17 @@ func TestRunDoctor_ResearchAppendsFlag(t *testing.T) {
 	}
 
 	revision := "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
-	for _, research := range []bool{true, false} {
-		r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), research: research})
+	for _, withFlag := range []bool{true, false} {
+		var flags []string
+		if withFlag {
+			flags = []string{"--research"}
+		}
+		r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), doctorFlags: flags})
 		if _, _, err := r.RunDoctor(context.Background(), revision); err != nil {
 			t.Fatalf("RunDoctor() unexpected error: %v", err)
 		}
-		if got := slices.Contains(gotArgs, "--research"); got != research {
-			t.Errorf("research=%v: argv %v, --research present = %v", research, gotArgs, got)
+		if got := slices.Contains(gotArgs, "--research"); got != withFlag {
+			t.Errorf("withFlag=%v: argv %v, --research present = %v", withFlag, gotArgs, got)
 		}
 	}
 }
