@@ -772,3 +772,34 @@ func TestWarnUnprobedKinds_NothingMissingEmitsNothing(t *testing.T) {
 		t.Errorf("output = %q / %q, want none", stdout.String(), stderr.String())
 	}
 }
+
+func TestRequiredChildKnob(t *testing.T) {
+	tests := []struct {
+		name     string
+		settings map[string]string
+		ambient  string
+		want     string
+		wantErr  string
+	}{
+		{name: "document wins over a differing ambient", settings: map[string]string{"BASE_BRANCH": "main"}, ambient: "dev", want: "main"},
+		{name: "empty document value falls to ambient", settings: map[string]string{"BASE_BRANCH": ""}, ambient: "dev", want: "dev"},
+		{name: "absent from document falls to ambient", ambient: "dev", want: "dev"},
+		{name: "document and ambient agree", settings: map[string]string{"BASE_BRANCH": "main"}, ambient: "main", want: "main"},
+		{name: "neither is a config error", wantErr: "no value for BASE_BRANCH (not in environment or --input document settings)"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			doc := &inputdoc.Document{Settings: tt.settings}
+			got, err := requiredChildKnob(doc, "BASE_BRANCH", tt.ambient)
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Errorf("requiredChildKnob() = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}

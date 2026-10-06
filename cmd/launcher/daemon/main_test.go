@@ -2279,6 +2279,7 @@ func TestStrippedKeys(t *testing.T) {
 func TestStrippedKeys_OmitsKeysWhoseValueDoesNotCount(t *testing.T) {
 	doc := &inputdoc.Document{Settings: map[string]string{
 		"REPO_SLUG":           "",
+		"BASE_BRANCH":         "",
 		"MODEL":               "x",
 		"MEMORY_LIMIT":        "",
 		"CONTINUOUS_DISPATCH": "",
@@ -2607,6 +2608,31 @@ func TestMainRun_FeatureBranchPrintsStartupLineAndReachesDoctor(t *testing.T) {
 				t.Errorf("doctor argv %v does not carry %q", gotArgv, tt.wantArgvHas)
 			}
 		})
+	}
+}
+
+// TestMainRun_DocumentBaseBranchBeatsAmbient pins issue #4623: a document
+// BASE_BRANCH is stripped from the child's env, so the child reads the
+// document alone; the daemon must track the same branch, not an ambient
+// override the child never sees.
+func TestMainRun_DocumentBaseBranchBeatsAmbient(t *testing.T) {
+	path := capturedEnvFixtureT(t, nil)
+	t.Setenv("BASE_BRANCH", "dev")
+	gitRunT(t, "", "checkout", "-b", "feature-x")
+	gitRunT(t, "", "push", "-u", "origin", "feature-x")
+	gitRunT(t, "", "checkout", "main")
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", path, "--feature-branch", "feature-x", "dispatch"}, &stdout, &stderr)
+	want := "daemon: tracking main; children target feature-x"
+	if !strings.Contains(stderr.String(), want) {
+		t.Errorf("stderr = %q, want it to contain %q (document BASE_BRANCH, not ambient dev)", stderr.String(), want)
 	}
 }
 

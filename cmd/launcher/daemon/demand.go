@@ -203,11 +203,26 @@ func probeIntervals(src demandSources, override time.Duration) map[daemon.Kind]t
 // reads. A key unset in both the document and the environment falls back to
 // its schema default, as the child's schemaDefault does.
 func childKnob(doc *inputdoc.Document, key, ambient string) string {
-	if v, ok := doc.Setting(key); ok {
+	if v, ok := childValue(doc, key, ambient); ok {
 		return v
 	}
-	if ambient != "" {
-		return ambient
-	}
 	return inputdoc.SchemaDefault(key)
+}
+
+// requiredChildKnob is childKnob for a knob the daemon needs a value for: one
+// absent from both the document and the environment is a configuration error
+// (as Document.Resolve reports it), not a schema default.
+func requiredChildKnob(doc *inputdoc.Document, key, ambient string) (string, error) {
+	if v, ok := childValue(doc, key, ambient); ok {
+		return v, nil
+	}
+	return "", inputdoc.MissingValueError(key)
+}
+
+// childValue is the document-then-ambient part of the child's resolution.
+func childValue(doc *inputdoc.Document, key, ambient string) (string, bool) {
+	if v, ok := doc.Setting(key); ok {
+		return v, true
+	}
+	return ambient, ambient != ""
 }

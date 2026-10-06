@@ -678,15 +678,20 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	stripped := strippedKeys(doc)
 	warnStrippedChildEnv(stripped, stderr)
 
+	// DAEMON_APP and the daemon's own tuning knobs below are read by no child
+	// launcher, so they keep Lookup's ambient-wins override (ADR 0020).
 	appAttr, err := doc.Resolve("DAEMON_APP", stderr)
 	if err != nil {
 		return fail(stderr, err)
 	}
-	baseBranch, err := doc.Resolve("BASE_BRANCH", stderr)
+	// BASE_BRANCH and MAX_PARALLEL, like the knobs further down that a child
+	// also reads, resolve as childKnob does (document first, since the child
+	// never sees the ambient value) so the daemon and its children agree (issue #4623).
+	baseBranch, err := requiredChildKnob(doc, "BASE_BRANCH", os.Getenv("BASE_BRANCH"))
 	if err != nil {
 		return fail(stderr, err)
 	}
-	maxParallelRaw, err := doc.Resolve("MAX_PARALLEL", stderr)
+	maxParallelRaw, err := requiredChildKnob(doc, "MAX_PARALLEL", os.Getenv("MAX_PARALLEL"))
 	if err != nil {
 		return fail(stderr, err)
 	}
@@ -753,9 +758,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 
 	// The schema validates DAEMON_AWAKE_WINDOW at Nix eval time, but an
-	// ambient env override (Lookup above) bypasses that entirely, so
-	// this runtime parse is the actual guarantee.
-	awakeRaw := doc.ResolveOptional("DAEMON_AWAKE_WINDOW", stderr)
+	// ambient env value (used when the document does not carry the key)
+	// bypasses that entirely, so this runtime parse is the actual guarantee.
+	// Resolved as childKnob does, like the other knobs a child also reads.
+	awakeRaw := childKnob(doc, "DAEMON_AWAKE_WINDOW", os.Getenv("DAEMON_AWAKE_WINDOW"))
 	awake, err := daemon.ParseWindow(awakeRaw)
 	if err != nil {
 		return fail(stderr, err)
@@ -783,11 +789,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	// ResolveOptional, like DAEMON_AWAKE_WINDOW: an empty BUTLER_CHORES is the
+	// childKnob, like DAEMON_AWAKE_WINDOW: an empty BUTLER_CHORES is the
 	// default, not a configuration error.
-	butlerChores := doc.ResolveOptional("BUTLER_CHORES", stderr)
-	butlerEvery := doc.ResolveOptional("BUTLER_EVERY", stderr)
-	butlerChoreClasses := doc.ResolveOptional("BUTLER_CHORE_CLASSES", stderr)
+	butlerChores := childKnob(doc, "BUTLER_CHORES", os.Getenv("BUTLER_CHORES"))
+	butlerEvery := childKnob(doc, "BUTLER_EVERY", os.Getenv("BUTLER_EVERY"))
+	butlerChoreClasses := childKnob(doc, "BUTLER_CHORE_CLASSES", os.Getenv("BUTLER_CHORE_CLASSES"))
 	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: butlerChores, Every: butlerEvery, Classes: butlerChoreClasses})
 	if err != nil {
 		return fail(stderr, err)

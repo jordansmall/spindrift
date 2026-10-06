@@ -87,7 +87,14 @@ func (d *Document) Resolve(envVar string, stderr io.Writer) (string, error) {
 	if v, ok := d.Lookup(envVar, stderr); ok {
 		return v, nil
 	}
-	return "", fmt.Errorf("no value for %s (not in environment or --input document settings)", envVar)
+	return "", MissingValueError(envVar)
+}
+
+// MissingValueError is the configuration error for a required knob found in
+// neither the environment nor the --input document. Resolve and the daemon's
+// document-first resolution share it so the two cannot word it differently.
+func MissingValueError(envVar string) error {
+	return fmt.Errorf("no value for %s (not in environment or --input document settings)", envVar)
 }
 
 // ResolveOptional wraps Lookup for knobs whose schema default is itself the
