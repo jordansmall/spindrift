@@ -73,7 +73,7 @@ type state struct {
 	// wake is the current wake generation: a parked slot sleeps on a context
 	// derived from it, and wakeParked cancels it and installs a fresh one
 	// when a change grows the set of startable kinds (observe, a jam lift).
-	// It lives on state because observe and liftJams run inside mutate, which
+	// It lives on state because observe and tipMoved run inside mutate, which
 	// hands them nothing but *state. A halt needs no part in it: slots
 	// sleep on pctx too.
 	wake       context.Context
@@ -99,12 +99,13 @@ func (s *state) observe(now time.Time, ev SchedEvent) {
 	}
 }
 
-// liftJams ends every jammed kind's gate and returns the kinds lifted, waking
-// every parked slot when Schedule.LiftJams reports the lift grew the
-// startable set — the same wake decision observe makes.
-func (s *state) liftJams(now time.Time) (lifted []Kind) {
+// tipMoved ends every jammed kind's gate and every reported kind's tip wait,
+// returns the kinds lifted, and wakes every parked slot when
+// Schedule.TipMoved reports the lift grew the startable set — the same wake
+// decision observe makes.
+func (s *state) tipMoved(now time.Time) (lifted []Kind) {
 	var woke bool
-	s.sched, lifted, woke = s.sched.LiftJams(now)
+	s.sched, lifted, woke = s.sched.TipMoved(now)
 	if woke {
 		s.wakeParked()
 	}
@@ -513,7 +514,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 	p.mutate(func(s *state) []Event {
 		if st, started := s.sched.Decide(now, occupancy(s)).(Start); started {
 			kind = st.Kind
-		} else if v := s.sched.View(provisional, now); v.Probed || v.DueKnown {
+		} else if v := s.sched.View(provisional, now); v.Probed || !v.NextDue.IsZero() {
 			return nil
 		} else {
 			kind = provisional
@@ -1036,18 +1037,19 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 // prefer right now. It re-decides rather than taking the caller's Park, so a
 // sibling's reset or a probe landing since is seen; anything but a Park with
 // time left returns at once for the caller to re-decide. With no jammed kind
-// gating the wait (Park.TipPoll false), it sleeps the whole wait in one
-// sleep: a merge can unblock a jammed queue, but it cannot create new
-// work in a kind that is merely queue-empty, so resolving early there would
-// only spend a fetch for nothing.
+// or reported kind's tip wait gating the wait (Park.TipPoll false), it sleeps
+// the whole wait in one sleep: a merge can unblock a jammed queue, but it
+// cannot create new work in a kind that is merely queue-empty, so resolving
+// early there would only spend a fetch for nothing.
 //
-// With a jammed kind gating it, it instead sleeps only one IdleFloor-sized
-// slice (or the whole wait, if that is shorter) and reports back, via
-// wantResolve, whether time remained afterward — exactly the condition under
-// which runSlot (loop.go) should make one opportunistic resolution before
-// its next Decide: that resolution, not a call made here, is what can observe
-// Tip.Moved and report it, so the wait's very first IdleFloor slice alone
-// (wantResolve false) resolves nothing extra and fires no tip_moved.
+// With a jammed kind or tip wait gating it, it instead sleeps only one
+// IdleFloor-sized slice (or the whole wait, if that is shorter) and reports
+// back, via wantResolve, whether time remained afterward — exactly the
+// condition under which runSlot (loop.go) should make one opportunistic
+// resolution before its next Decide: that resolution, not a call made here,
+// is what can observe Tip.Moved and report it, so the wait's very first
+// IdleFloor slice alone (wantResolve false) resolves nothing extra and fires
+// no tip_moved.
 //
 // Either sleep also ends early when a sibling's event grows the startable
 // set (state.wakeParked cancels the wake generation); a woken slot reports
@@ -1140,13 +1142,13 @@ func (p *pool) resolveOpportunistic(ctx context.Context, slot int) (Tip, bool) {
 // as moved (Tip.Moved), and lifts every currently-jammed kind's gate — the
 // observed change ends each of their no-work streaks same as real work
 // would (a queue-empty kind's streak is untouched, since a moved tip is not
-// evidence an empty queue refilled). No single Kind names this: several
-// kinds can be jammed at once, and the tip that moved is evidence for all of
-// them, not whichever this slot happened to be running. Kinds names the set
-// actually lifted, in configured order. The lift and the tip_moved event
-// itself happen in one mutate, so the set an operator reads on the event
-// is exactly the set that was lifted, not a snapshot taken a moment either
-// side of it.
+// evidence an empty queue refilled) — and every reported kind's on_tip_move
+// wait. No single Kind names this: several kinds can be lifted at once, and
+// the tip that moved is evidence for all of them, not whichever this slot
+// happened to be running. Kinds names the set actually lifted, in configured
+// order. The lift and the tip_moved event itself happen in one mutate, so the
+// set an operator reads on the event is exactly the set that was lifted, not a
+// snapshot taken a moment either side of it.
 //
 // The event is emitted only when the lifted set is non-empty: resolveTip
 // (pool.go, see its own doc) reports every per-iteration fetch's Moved tip
@@ -1163,11 +1165,11 @@ func (p *pool) noteTipMoved(slot int, revision string) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
 		s.tip = revision
-		lifted := s.liftJams(now)
+		lifted := s.tipMoved(now)
 		if len(lifted) == 0 {
 			return nil
 		}
-		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue", Kinds: lifted}}
+		return []Event{{Event: "tip_moved", Slot: intPtr(slot), Revision: revision, Reason: "a merge can unblock a jammed queue or end a reported kind's on_tip_move wait", Kinds: lifted}}
 	})
 }
 
@@ -1257,7 +1259,7 @@ func (p *pool) snapshotLocked() Status {
 			}
 			kc.NextProbe = next.UTC().Format(time.RFC3339)
 		}
-		if v.DueKnown {
+		if !v.NextDue.IsZero() {
 			if v.NextDue.At.IsZero() {
 				kc.NextDue = report.NextDueOnTipMove
 			} else {
