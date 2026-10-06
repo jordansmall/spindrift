@@ -869,7 +869,7 @@ in
     env = "DAEMON_PROBE_INTERVAL";
     group = "dispatch";
     default = "";
-    doc = "overrides every tracker's default Demand probe interval, the pause between the daemon's cheap ready-issue counts that start slots from tracker demand (blank keeps the per-tracker defaults: each tracker adapter declares its own, local 20s today, and the others as their adapters gain Demand); an override must be at least 1s; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    doc = "overrides every tracker's default Demand probe interval, the pause between the daemon's cheap ready-issue counts that start slots from tracker demand (blank keeps the per-tracker defaults: each tracker adapter declares its own, local 20s and forgejo 3m today, and the others as their adapters gain Demand); an override must be at least 1s; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
     launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
