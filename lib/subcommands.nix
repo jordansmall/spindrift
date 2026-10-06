@@ -48,8 +48,8 @@
   }
   {
     name = "recover";
-    usage = "<issue>";
-    doc = "run the merge gate for a single issue";
+    usage = "[issue]";
+    doc = "run the merge gate for one issue; with none, recover one eligible agent-failed issue";
     dynamicIssueCompletion = true;
   }
   {

@@ -1131,7 +1131,8 @@ func checkBwrapOverlayGate(c config) error {
 	return runner.ValidateOverlay()
 }
 
-// errQueueEmpty means discoverIssues found no open dispatchable issues. It and
+// errQueueEmpty means discoverIssues found no open dispatchable issues, or
+// queue-mode recover found no eligible agent-failed issue. It and
 // its sibling sentinels each map to a distinct exit code so a driving loop
 // like the daemon can tell terminations apart without a separate gh probe; see
 // exitCodeFor and bootstrapExitCode for the full mapping.
@@ -1989,6 +1990,20 @@ func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) in
 	return 1
 }
 
+// cmdRecoverQueue is `recover` with no issue number: recover one eligible
+// agent-failed issue off the queue. Exit codes follow exitCodeFor (0 attempted,
+// 2 none eligible, 7 operator stop); an empty queue and a stop are verdicts,
+// not failures, so neither prints to stderr.
+func cmdRecoverQueue(lc *launchContext, stdout, stderr io.Writer) int {
+	defer lc.cleanup()
+	err := recoverQueueOne(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), stdout, stderr)
+	code := exitCodeFor(err)
+	if code == 1 && err != nil {
+		fmt.Fprintf(stderr, "%s\n", err)
+	}
+	return code
+}
+
 // cmdPreview is the `preview` subcommand: report what dispatch would do
 // without launching any Box.
 func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
@@ -2151,14 +2166,16 @@ var verbHandlers = map[string]verbHandler{
 			fmt.Fprintln(stderr, "flag --self-contained is only valid for the research subcommand")
 			return 1
 		}
-		if len(parsed.remaining) < 1 {
-			fmt.Fprintln(stderr, "usage: spindrift recover <issue-number>")
-			return 1
-		}
 		lc, err := bootstrap(stdout, true, dispatchkind.Work, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
+			if len(parsed.remaining) < 1 {
+				return bootstrapExitCode(err)
+			}
 			return 1
+		}
+		if len(parsed.remaining) < 1 {
+			return cmdRecoverQueue(lc, stdout, stderr)
 		}
 		return cmdRecover(lc, parsed.remaining[0], stdout, stderr)
 	},

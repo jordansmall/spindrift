@@ -403,3 +403,67 @@ func TestRecoverQueueOne_PreClaimErrorFailsWithoutTransition(t *testing.T) {
 		})
 	}
 }
+
+func queueLaunchContext(t *testing.T, x *queueRecoverFixture, cleaned *bool) *launchContext {
+	t.Helper()
+	return &launchContext{
+		config:       x.c,
+		pwd:          x.dir,
+		issueTracker: x.tracker,
+		codeForge:    x.cf,
+		capabilities: capsFor(x.tracker, x.cf),
+		factory:      testFactory(t, x.dir, nil),
+		settle:       testNewSettle(x.c, x.tracker, testWired(x.tracker), x.cf),
+		cleanup:      func() { *cleaned = true },
+	}
+}
+
+// cmdRecoverQueue maps recoverQueueOne's verdicts onto exit codes (0
+// attempted, 2 none eligible, 1 refusal) and runs cleanup on each; an empty
+// queue is a verdict, so it prints nothing to stderr.
+func TestCmdRecoverQueue_ExitCodesAndCleanup(t *testing.T) {
+	cases := []struct {
+		name       string
+		setup      func(*testing.T, *queueRecoverFixture) *launchContext
+		want       int
+		wantStderr string
+	}{
+		{"attempted", func(t *testing.T, x *queueRecoverFixture) *launchContext {
+			x.addFailed(t, "42", "ready")
+			return nil
+		}, 0, ""},
+		{"nothing eligible", func(t *testing.T, x *queueRecoverFixture) *launchContext { return nil }, 2, ""},
+		{"no PR forge", func(t *testing.T, x *queueRecoverFixture) *launchContext {
+			x.addFailed(t, "42", "ready")
+			lc := queueLaunchContext(t, x, new(bool))
+			lc.capabilities = forge.Capabilities{}
+			return lc
+		}, 1, "PR-shaped Code Forge"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			x := newQueueRecoverFixture(t)
+			var cleaned bool
+			lc := tc.setup(t, x)
+			if lc == nil {
+				lc = queueLaunchContext(t, x, &cleaned)
+			} else {
+				lc.cleanup = func() { cleaned = true }
+			}
+			var stdout, stderr strings.Builder
+			if got := cmdRecoverQueue(lc, &stdout, &stderr); got != tc.want {
+				t.Errorf("cmdRecoverQueue = %d, want %d (stderr %q)", got, tc.want, stderr.String())
+			}
+			if tc.wantStderr == "" {
+				if stderr.Len() != 0 {
+					t.Errorf("stderr = %q, want empty", stderr.String())
+				}
+			} else if !strings.Contains(stderr.String(), tc.wantStderr) {
+				t.Errorf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			}
+			if !cleaned {
+				t.Error("cmdRecoverQueue did not run lc.cleanup()")
+			}
+		})
+	}
+}
