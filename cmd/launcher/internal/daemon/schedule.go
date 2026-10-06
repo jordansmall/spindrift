@@ -149,6 +149,10 @@ type ChildDone struct {
 	// NextDue is the child's report of when its kind next has work; read only
 	// for a child-reported kind.
 	NextDue NextDue
+	// GateGen is the kind's gate generation (Schedule.gateGenOf) when the child
+	// started, so a burst of concurrent no-work results raises an exit-driven
+	// kind's backoff once, not once per slot (issue #4618).
+	GateGen int
 }
 
 // DemandProbed: a probe of Kind counted Ready startable items.
@@ -324,7 +328,7 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	case DemandRateLimited:
 		return s.rateLimited(now, kind, e.Reset), false
 	case ChildDone:
-		ks = ks.childDone(now, e.Result, e.NextDue)
+		ks = ks.childDone(now, e.Result, e.NextDue, e.GateGen)
 	case DemandProbed:
 		ks.ready, ks.counted, ks.fault = e.Ready, e.Ready, probeClean
 		// A claim that landed mid-probe moved the count after it was read, so
@@ -397,7 +401,7 @@ func opened(before, after kindSched, now time.Time) bool {
 	return after.startable(now, 0) && !before.startable(now, 0)
 }
 
-func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue) kindSched {
+func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen int) kindSched {
 	if k.reported {
 		k.due = NextDue{}
 		switch {
@@ -408,7 +412,7 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue) kindSche
 			// A swept Chore may leave another due; the next child re-reports.
 			k.gate = k.gate.reset()
 		default:
-			k.gate, _ = k.gate.markNoWork(now, r == ChildJammed)
+			k.gate = k.gate.markNoWorkUnder(now, r == ChildJammed, gateGen)
 		}
 		return k
 	}
@@ -416,7 +420,7 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue) kindSche
 		if r == ChildContinue {
 			k.gate = k.gate.reset()
 		} else {
-			k.gate, _ = k.gate.markNoWork(now, r == ChildJammed)
+			k.gate = k.gate.markNoWorkUnder(now, r == ChildJammed, gateGen)
 		}
 		return k
 	}
@@ -462,6 +466,10 @@ func (s Schedule) TipMoved(now time.Time) (_ Schedule, lifted []Kind, woke bool)
 
 // claimsOf is the number of claims folded into kind, 0 for an unknown kind.
 func (s Schedule) claimsOf(kind Kind) int { return s.state[kind].claims }
+
+// gateGenOf is kind's gate generation, 0 for an unknown kind: what a child
+// started now carries back in ChildDone.GateGen (issue #4618).
+func (s Schedule) gateGenOf(kind Kind) int { return s.state[kind].gate.gen }
 
 // with returns a copy of s holding ks for kind, leaving s's own map alone.
 func (s Schedule) with(kind Kind, ks kindSched) Schedule {

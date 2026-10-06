@@ -170,7 +170,7 @@ func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
 	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("b"), NextDue: report.NextDue{At: early}})
 	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("c"), NextDue: report.NextDue{OnTipMove: true}})
 
-	gotDue, _ := p.flightReport(0)
+	gotDue := p.flightReport(0).nextDue
 	if got, want := gotDue, (NextDue{At: early, OnTipMove: true}); !got.At.Equal(want.At) || got.OnTipMove != want.OnTipMove {
 		t.Fatalf("flightReport nextDue = %+v, want %+v", got, want)
 	}
@@ -180,7 +180,7 @@ func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
 
 	p.finishChild(0)
 	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: early}})
-	if got, _ := p.flightReport(0); !got.IsZero() {
+	if got := p.flightReport(0).nextDue; !got.IsZero() {
 		t.Fatalf("flightReport nextDue after finish = %+v, want zero: a late record is dropped", got)
 	}
 }
@@ -321,9 +321,9 @@ func TestPoolNotDueFromChildStaleAfterSiblingContinue(t *testing.T) {
 				p.finishChild(0)
 				p.resetKind(butler)
 			}
-			nextDue, continues := p.flightReport(1)
+			flight := p.flightReport(1)
 			p.finishChild(1)
-			p.noteWaitResult(1, butler, "rev1", false, nextDue, continues)
+			p.noteWaitResult(1, butler, "rev1", false, flight)
 
 			p.mu.Lock()
 			v := p.st.sched.View(butler, clk.Now())

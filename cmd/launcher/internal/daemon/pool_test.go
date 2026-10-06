@@ -556,7 +556,7 @@ func TestPoolExit3SiblingPhasesNotEngaged(t *testing.T) {
 			} else {
 				p.setPhase(1, tt.siblingPhase)
 			}
-			p.noteWaitResult(0, tt.reportingKind, "rev1", true, NextDue{}, 0)
+			p.noteWaitResult(0, tt.reportingKind, "rev1", true, slotFlight{})
 
 			events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 			gotJam := countEvents(eventNames(events), "jam") == 1
@@ -1151,7 +1151,7 @@ func TestJamIgnoresSiblingAwaitingWindow(t *testing.T) {
 	// what siblingsEngaged must see as unengaged.
 	p.noteAwakeClose(1, time.Hour, false)
 
-	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true, NextDue{}, 0)
+	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true, slotFlight{})
 
 	events := decodeEvents(t, &buf)
 	foundJam := false
@@ -1203,7 +1203,7 @@ func TestBatonParkPublishesIdle(t *testing.T) {
 		t.Fatalf("phase while parked on the baton = %q, want %q", got, PhaseIdle)
 	}
 
-	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true, NextDue{}, 0)
+	p.noteWaitResult(0, KindOf(dispatchkind.Work), "rev1", true, slotFlight{})
 
 	events := decodeEvents(t, bytes.NewBufferString(nw.String()))
 	foundJam := false
@@ -2761,5 +2761,45 @@ func TestOccupancyCountsRunningAndStartingPerKind(t *testing.T) {
 	}
 	if want := map[Kind]int{work: 2, research: 1}; !reflect.DeepEqual(occ.Starting, want) {
 		t.Errorf("Starting = %v, want %v", occ.Starting, want)
+	}
+}
+
+// TestPoolConcurrentNoWorkUnderOneGateRaisesBackoffOnce: four slots of one
+// exit-driven kind start under the same gate and all exit empty. They are one
+// observation of the same empty queue, so the kind climbs one backoff step,
+// not the four it would if each result escalated (issue #4618). A prior empty
+// result puts the gate generation above zero, so a child that failed to carry
+// its start gate back would read as stale instead of passing by coincidence.
+func TestPoolConcurrentNoWorkUnderOneGateRaisesBackoffOnce(t *testing.T) {
+	work := KindOf(dispatchkind.Work)
+	const slots = 4
+	clk := &testClock{}
+	clk.setNow(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), testConfig(slots), &scriptedRunner{}, newTestEmitter(&buf), clk)
+	defer p.cancel()
+
+	if got := p.markNoWork(work, clk.Now(), false); got != testIdleFloor {
+		t.Fatalf("first empty result gated for %v, want the floor %v", got, testIdleFloor)
+	}
+	clk.advanceBy(testIdleFloor)
+
+	for slot := 0; slot < slots; slot++ {
+		p.startChild(slot, work, "rev1")
+	}
+	for slot := 0; slot < slots; slot++ {
+		flight := p.flightReport(slot)
+		p.finishChild(slot)
+		p.noteWaitResult(slot, work, "rev1", false, flight)
+	}
+
+	p.mu.Lock()
+	v := p.st.sched.View(work, clk.Now())
+	p.mu.Unlock()
+	if !v.Gated {
+		t.Fatal("work not gated after four concurrent empty exits")
+	}
+	if got, want := v.Until.Sub(clk.Now()), 2*testIdleFloor; got != want {
+		t.Fatalf("work gated for %v, want one step up to %v (cap %v)", got, want, testIdleCap)
 	}
 }

@@ -614,7 +614,7 @@ slotLoop:
 		// slot's flight: this is the only place the key (issue or Chore)
 		// the child claimed is still available at all.
 		key := p.flightClaim(slot)
-		nextDue, continues := p.flightReport(slot)
+		flight := p.flightReport(slot)
 		p.finishChild(slot)
 		// Every post-child exit without a claim passes the baton, but only
 		// after the round's halt decision: Continue/Wait pass ChildEnded
@@ -674,7 +674,7 @@ slotLoop:
 			// jam-vs-idle predicate together, in one mutate — see its own
 			// doc for why the two must not be read from two different
 			// instants.
-			p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable, nextDue, continues)
+			p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable, flight)
 			p.passBaton(slot, batonPassChildEnded)
 			// No sleep here: this kind is now gated until its gate
 			// deadline, and the top of the loop's Decide/idleSleep decides

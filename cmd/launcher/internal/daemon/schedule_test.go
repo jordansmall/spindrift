@@ -400,7 +400,7 @@ func TestScheduleUnprobedKeepsExitDrivenBackoff(t *testing.T) {
 		if i%2 == 1 {
 			res = ChildJammed
 		}
-		s = schedObserve(t, s, now, ChildDone{Kind: schedButler, Result: res})
+		s = schedObserve(t, s, now, ChildDone{Kind: schedButler, Result: res, GateGen: s.gateGenOf(schedButler)})
 		p := s.Decide(now, Occupancy{}).(Park)
 		waits = append(waits, p.Until.Sub(now))
 		now = p.Until
@@ -414,7 +414,7 @@ func TestScheduleUnprobedKeepsExitDrivenBackoff(t *testing.T) {
 	if d := s.Decide(now, Occupancy{}); d != (Start{Kind: schedButler}) {
 		t.Fatalf("after Continue: %#v, want Start", d)
 	}
-	s = schedObserve(t, s, now, ChildDone{Kind: schedButler, Result: ChildEmpty})
+	s = schedObserve(t, s, now, ChildDone{Kind: schedButler, Result: ChildEmpty, GateGen: s.gateGenOf(schedButler)})
 	if p := s.Decide(now, Occupancy{}).(Park); p.Until.Sub(now) != schedFloor {
 		t.Fatalf("backoff after Continue reset waits %v, want floor", p.Until.Sub(now))
 	}
@@ -1093,5 +1093,116 @@ func TestScheduleReportedView(t *testing.T) {
 	backoff := schedObserve(t, s, schedT0, ChildDone{Kind: schedButler, Result: ChildEmpty})
 	if v := backoff.View(schedButler, schedT0); !v.NextDue.IsZero() || !v.Gated || !v.Until.Equal(schedAt(schedFloor)) {
 		t.Fatalf("fallback view = %+v, want the backoff gate", v)
+	}
+}
+
+// burst feeds n no-work results of res to kind, all from children started
+// under gate, a few seconds apart from at.
+func burst(t *testing.T, s Schedule, at time.Time, kind Kind, res ChildOutcome, gateGen, n int) Schedule {
+	t.Helper()
+	for i := 0; i < n; i++ {
+		s = schedObserve(t, s, at.Add(time.Duration(i)*time.Second), ChildDone{Kind: kind, Result: res, GateGen: gateGen})
+	}
+	return s
+}
+
+func TestScheduleUnprobedBurstRaisesBackoffOnce(t *testing.T) {
+	const floor, ceil = 5 * time.Minute, 30 * time.Minute
+	newS := func(kind Kind) Schedule { return newSchedule([]Kind{kind}, 0, floor, ceil, nil, nil) }
+
+	t.Run("burst from ungated start gates at floor", func(t *testing.T) {
+		s := burst(t, newS(schedResearch), schedT0, schedResearch, ChildEmpty, 0, 4)
+		if v := s.View(schedResearch, schedT0); !v.Gated || v.Until != schedT0.Add(floor) {
+			t.Fatalf("View = %+v, want gated until floor", v)
+		}
+	})
+
+	for _, kind := range []Kind{schedResearch, schedButler} {
+		t.Run("burst under a lapsed gate steps once "+string(kind), func(t *testing.T) {
+			s := burst(t, newS(kind), schedT0, kind, ChildEmpty, 0, 1)
+			end := schedT0.Add(floor)
+			s = burst(t, s, end, kind, ChildEmpty, s.gateGenOf(kind), 4)
+			if v := s.View(kind, end); v.Until != end.Add(2*floor) {
+				t.Fatalf("Until = %v, want first result + %v", v.Until.Sub(end), 2*floor)
+			}
+		})
+	}
+
+	t.Run("distinct windows still double to cap", func(t *testing.T) {
+		s := newS(schedResearch)
+		now := schedT0
+		var waits []time.Duration
+		for i := 0; i < 5; i++ {
+			s = schedObserve(t, s, now, ChildDone{Kind: schedResearch, Result: ChildEmpty, GateGen: s.gateGenOf(schedResearch)})
+			v := s.View(schedResearch, now)
+			waits = append(waits, v.Until.Sub(now))
+			now = v.Until
+		}
+		want := []time.Duration{floor, 2 * floor, 4 * floor, ceil, ceil}
+		if !reflect.DeepEqual(waits, want) {
+			t.Fatalf("waits = %v, want %v", waits, want)
+		}
+	})
+
+	t.Run("jammed burst is one step and tip-liftable", func(t *testing.T) {
+		s := burst(t, newS(schedWork), schedT0, schedWork, ChildJammed, 0, 4)
+		if v := s.View(schedWork, schedT0); !v.Jammed || v.Until != schedT0.Add(floor) {
+			t.Fatalf("View = %+v, want jammed at floor", v)
+		}
+		s, lifted, _ := s.TipMoved(schedT0)
+		if !reflect.DeepEqual(lifted, []Kind{schedWork}) {
+			t.Fatalf("lifted = %v", lifted)
+		}
+		if d := s.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedWork}) {
+			t.Fatalf("after lift: %#v, want Start", d)
+		}
+	})
+
+	t.Run("empty then jammed in one burst is jammed", func(t *testing.T) {
+		s := burst(t, newS(schedWork), schedT0, schedWork, ChildEmpty, 0, 1)
+		s = burst(t, s, schedT0, schedWork, ChildJammed, 0, 1)
+		if v := s.View(schedWork, schedT0); !v.Jammed || v.Until != schedT0.Add(floor) {
+			t.Fatalf("View = %+v, want jammed at floor", v)
+		}
+	})
+
+	t.Run("stale-gen empty result after the gate lapsed marks afresh", func(t *testing.T) {
+		s := burst(t, newS(schedResearch), schedT0, schedResearch, ChildEmpty, 0, 1)
+		end := schedT0.Add(floor)
+		s = burst(t, s, end, schedResearch, ChildEmpty, 0, 1)
+		if v := s.View(schedResearch, end); !v.Gated || v.Until != end.Add(2*floor) {
+			t.Fatalf("View = %+v, want gated until %v", v, 2*floor)
+		}
+	})
+
+	t.Run("stale-gen jammed result after the gate lapsed re-gates the kind", func(t *testing.T) {
+		s := burst(t, newS(schedWork), schedT0, schedWork, ChildEmpty, 0, 1)
+		end := schedT0.Add(floor)
+		s = burst(t, s, end, schedWork, ChildJammed, 0, 1)
+		if v := s.View(schedWork, end); !v.Gated || !v.Jammed || v.Until != end.Add(2*floor) {
+			t.Fatalf("View = %+v, want jammed and gated until %v", v, 2*floor)
+		}
+	})
+
+	t.Run("stale gate after a Continue reset still marks", func(t *testing.T) {
+		s := newS(schedResearch)
+		s = burst(t, s, schedT0, schedResearch, ChildEmpty, 0, 1)
+		s = schedObserve(t, s, schedT0, ChildDone{Kind: schedResearch, Result: ChildContinue})
+		s = burst(t, s, schedT0, schedResearch, ChildEmpty, 0, 1)
+		if v := s.View(schedResearch, schedT0); v.Until != schedT0.Add(floor) {
+			t.Fatalf("Until = %v, want floor", v.Until.Sub(schedT0))
+		}
+	})
+}
+
+func TestScheduleProbedEmptyBurstStillResets(t *testing.T) {
+	s := probedSchedule([]Kind{schedWork}, 0)
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 5})
+	s = burst(t, s, schedT0, schedWork, ChildEmpty, 0, 4)
+	if v := s.View(schedWork, schedT0); v.Jammed {
+		t.Fatalf("View = %+v, want not jammed", v)
+	}
+	if got := s.gateGenOf(schedWork); got != 0 {
+		t.Fatalf("probed empty burst set %d gates, want 0", got)
 	}
 }
