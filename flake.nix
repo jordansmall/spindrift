@@ -135,6 +135,7 @@
               infra.nix.storeWritable = dogfoodDefaults.nixStoreWritable;
               infra.limits.memory = dogfoodDefaults.defaults.memoryLimit;
               agents.skills = dogfoodSkills;
+              forge.repoSlug = dogfoodDefaults.defaults.repoSlug;
               git.merge.policy = dogfoodDefaults.defaults.mergeMode;
               forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
               agents.format.enable = dogfoodDefaults.defaults.autoFormat;
