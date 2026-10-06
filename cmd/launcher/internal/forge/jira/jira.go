@@ -22,7 +22,7 @@ import (
 type JiraConfig struct {
 	BaseURL    string // Jira site base URL, e.g. https://yourcompany.atlassian.net
 	ProjectKey string
-	Email      string // Jira Cloud Basic auth; empty selects Bearer-token auth (Server/Data Center PAT)
+	Email      string // Jira Cloud: Basic auth and Cloud search APIs; empty selects Bearer-token auth and v2 /search (Server/Data Center PAT)
 	Token      string
 
 	// StatusMapping maps canonical DispatchState values to native Jira status
@@ -92,6 +92,9 @@ func ValidateJiraEnv(baseURL, projectKey, token, statusMapping string) error {
 type jiraClient struct {
 	cfg  JiraConfig
 	rest *rest.Client
+	// cloud is decided once from cfg.Email; Cloud dropped v2 /search (410), so
+	// search calls branch on it rather than falling back on a failed call.
+	cloud bool
 }
 
 // NewJiraClient returns an IssueTracker backed by the Jira REST API.
@@ -101,7 +104,7 @@ func NewJiraClient(cfg JiraConfig) forge.IssueTracker {
 		hc = http.DefaultClient
 	}
 	restClient := rest.New(cfg.BaseURL, jiraAuthStrategy{email: cfg.Email, token: cfg.Token}, "jira", jiraStatusMap(), hc)
-	return &jiraClient{cfg: cfg, rest: restClient}
+	return &jiraClient{cfg: cfg, rest: restClient, cloud: cfg.Email != ""}
 }
 
 // jiraAuthStrategy implements rest.AuthStrategy: HTTP Basic (base64
@@ -438,8 +441,20 @@ const demandProbeInterval = 5 * time.Minute
 func (j *jiraClient) ProbeInterval() time.Duration { return demandProbeInterval }
 
 // CountReady implements forge.DemandCounter: the open Dispatchable issues,
-// read from the total of a zero-row search rather than by walking them.
+// read without walking them: Cloud's approximate-count endpoint (the count may
+// lag recent updates, which a demand probe tolerates since the child lists
+// issues itself), or the total of a zero-row v2 search on Server/DC.
 func (j *jiraClient) CountReady(_ bool) (int, error) {
+	if j.cloud {
+		var out struct {
+			Count int `json:"count"`
+		}
+		body := map[string]string{"jql": j.stateJQL(forge.Dispatchable)}
+		if err := j.rest.Do(http.MethodPost, "/rest/api/3/search/approximate-count", body, &out); err != nil {
+			return 0, err
+		}
+		return out.Count, nil
+	}
 	q := url.Values{
 		"jql":        {j.stateJQL(forge.Dispatchable)},
 		"maxResults": {"0"},
