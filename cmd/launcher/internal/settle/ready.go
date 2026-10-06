@@ -260,8 +260,11 @@ func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) l
 // landPushOnly lands a push-only forge, where there is no PR or CI to watch, so
 // the issue goes Complete immediately and MERGE_MODE applies straight against
 // the forge's Merge and Rebase. A merge failure leaves the issue Complete with
-// a merge-blocked note, never demoted to Failed (ADR 0012). An immediate merge
-// drops the landed bundle here, since verifyMerged never runs without a PR.
+// a merge-blocked note, never demoted to Failed (ADR 0012). A relay that fails
+// with its bundle still in the outbox parks the issue Failed instead (issue
+// #4651) and returns landingFailed, the transition and comment already done.
+// An immediate merge drops the landed bundle here, since verifyMerged never
+// runs without a PR.
 func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
 	// No CI watch here, so this is the only checkpoint before landing —
 	// an aborted run must not merge or commit Complete (issue #3523).
@@ -280,6 +283,10 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	}
 	if errors.Is(relayErr, errAbandoned) {
 		return landingAbandoned
+	}
+	if relayFailureParkable(relayErr) {
+		s.parkRelayFailure(num, branch, relayErr)
+		return landingFailed
 	}
 	s.transitionState(num, forge.InProgress, forge.Complete, "")
 	err := relayErr
@@ -637,7 +644,10 @@ func (s *Settle) relayBoxBundle(num string, gen uint64) (ref string, err error) 
 	if s.cfg.OutboxDir == nil {
 		return ref, fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
 	}
-	return ref, s.retryingRelay(num, gen, br).RelayBundle(s.cfg.OutboxDir(num), ref)
+	if err := s.retryingRelay(num, gen, br).RelayBundle(s.cfg.OutboxDir(num), ref); err != nil {
+		return ref, fmt.Errorf("%w: %w", errRelayBundle, err)
+	}
+	return ref, nil
 }
 
 // rewaitAfterForcePush waits for CI to reach green on the PR's current head

@@ -2,6 +2,7 @@ package settle
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -215,7 +216,9 @@ func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testi
 // A misconfigured Settle (a Code Forge implementing forge.BundleRelay with no
 // OutboxDir resolver supplied) must error instead of silently relaying against
 // an empty path, so a wiring bug shows up immediately rather than as a
-// confusing "bundle missing" note pointing at "/seam.bundle".
+// confusing "bundle missing" note pointing at "/seam.bundle". It is a wiring
+// error, not an exhausted relay, so it never parks the issue Failed (issue
+// #4651): recover could not fix it.
 func TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -229,12 +232,15 @@ func TestSelfHeal_LocalForge_NilOutboxDirFailsLoudly(t *testing.T) {
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual when OutboxDir is unset", landing)
 	}
+	if iss, _ := fc.Issue("1"); containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("a wiring error must not park the issue agent-failed; labels=%v", iss.Labels)
+	}
 	if len(fc.RelayBundleCalls) != 0 {
 		t.Errorf("RelayBundle must not be called with no OutboxDir resolver, got %+v", fc.RelayBundleCalls)
 	}
 }
 
-// A RelayBundle failure (missing or malformed bundle, ADR 0033) leaves the
+// A missing bundle (forge.ErrBundleNotFound, ADR 0033) leaves the
 // seam unlanded with the same merge-blocked-stays-complete posture an ordinary
 // push failure gets (TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed):
 // never demoted to agent-failed, and Merge itself is never attempted.
@@ -244,14 +250,14 @@ func TestSelfHeal_LocalForge_MissingBundleBlocksNotFails(t *testing.T) {
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
-	fc.RelayBundleErr = errors.New("bundle missing")
+	fc.RelayBundleErr = fmt.Errorf("outbox: %w", forge.ErrBundleNotFound)
 	branch := "agent/issue-1"
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch)
 
 	if landing != landingManual {
-		t.Errorf("selfHeal = %v, want landingManual when the bundle relay fails", landing)
+		t.Errorf("selfHeal = %v, want landingManual when the bundle is missing", landing)
 	}
 	if fc.Merged != "" {
 		t.Errorf("Merge must not be called when relay fails; fc.Merged=%q", fc.Merged)
