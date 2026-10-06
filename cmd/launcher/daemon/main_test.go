@@ -2309,7 +2309,7 @@ func TestMainRun_StrippedEnvWarningSkipsKeyWhoseDocumentValueDoesNotCount(t *tes
 	var stdout, stderr bytes.Buffer
 	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
 	out := stderr.String()
-	if !strings.Contains(out, "MODEL=opus set in environment — not forwarded to children") {
+	if !strings.Contains(out, "MODEL=opus set in environment — ignored by the daemon and its children") {
 		t.Errorf("stderr = %q, want the MODEL stripped-env warning", out)
 	}
 	if strings.Contains(out, "REPO_SLUG=") {
@@ -2318,18 +2318,31 @@ func TestMainRun_StrippedEnvWarningSkipsKeyWhoseDocumentValueDoesNotCount(t *tes
 }
 
 // TestWarnStrippedChildEnv_SetKnobWarnsExactlyOnce asserts an exported knob
-// present in keys produces exactly one "not forwarded to children" line
+// present in keys produces exactly one "ignored by the daemon and its children" line
 // naming it — not zero, not a duplicate.
 func TestWarnStrippedChildEnv_SetKnobWarnsExactlyOnce(t *testing.T) {
 	t.Setenv("MODEL", "opus")
 	var stderr bytes.Buffer
 	warnStrippedChildEnv([]string{"MODEL"}, &stderr)
-	got := strings.Count(stderr.String(), "not forwarded to children")
+	got := strings.Count(stderr.String(), "ignored by the daemon and its children")
 	if got != 1 {
 		t.Errorf("warning count = %d, want 1; stderr=%q", got, stderr.String())
 	}
 	if !strings.Contains(stderr.String(), "MODEL=opus") {
 		t.Errorf("stderr = %q, want it to name MODEL=opus", stderr.String())
+	}
+}
+
+// TestWarnStrippedChildEnv_DaemonOnlyKnobKeepsNotForwardedWording asserts a
+// daemon-only knob is still honoured from the ambient env by
+// inputdoc.Document.Lookup, so its line must not claim the daemon ignores it.
+func TestWarnStrippedChildEnv_DaemonOnlyKnobKeepsNotForwardedWording(t *testing.T) {
+	t.Setenv("DAEMON_IDLE_FLOOR", "5s")
+	var stderr bytes.Buffer
+	warnStrippedChildEnv([]string{"DAEMON_IDLE_FLOOR"}, &stderr)
+	want := "DAEMON_IDLE_FLOOR=5s set in environment — not forwarded to children; use the --input document's settings.DAEMON_IDLE_FLOOR\n"
+	if stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
 	}
 }
 
@@ -2408,7 +2421,7 @@ func TestMainRun_StrippedEnvWarningPrecedesPreflight(t *testing.T) {
 		t.Errorf("mainRun() = %d, want 1", got)
 	}
 	out := stderr.String()
-	iWarn := strings.Index(out, "MODEL=opus set in environment — not forwarded to children")
+	iWarn := strings.Index(out, "MODEL=opus set in environment — ignored by the daemon and its children")
 	iGit := strings.Index(out, "not a git checkout")
 	if iWarn == -1 {
 		t.Fatalf("stderr = %q, want the stripped-env warning", out)
@@ -2436,7 +2449,7 @@ func TestMainRun_NoKnobsSetNoWarning(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
-	if strings.Contains(stderr.String(), "not forwarded to children") {
+	if strings.Contains(stderr.String(), "set in environment") {
 		t.Errorf("stderr = %q, want no stripped-env warning", stderr.String())
 	}
 }
