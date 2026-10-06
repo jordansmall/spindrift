@@ -229,9 +229,13 @@ func seedLedgerRemote(t *testing.T) (bare string, env map[string]string) {
 	seamGit(t, gitEnv, seed, "commit", "-q", "-m", "seed")
 	seamGit(t, gitEnv, seed, "push", "-q", bare, "main")
 	return bare, map[string]string{
-		"GIT_CONFIG_COUNT":   "1",
+		// pushInsteadOf too: GitRemote pins both keys to the exact URL (issue
+		// #4665), and a matching pushInsteadOf shadows insteadOf for pushes.
+		"GIT_CONFIG_COUNT":   "2",
 		"GIT_CONFIG_KEY_0":   "url." + bare + ".insteadOf",
 		"GIT_CONFIG_VALUE_0": "https://github.com/" + smokeRepo + ".git",
+		"GIT_CONFIG_KEY_1":   "url." + bare + ".pushInsteadOf",
+		"GIT_CONFIG_VALUE_1": "https://github.com/" + smokeRepo + ".git",
 	}
 }
 

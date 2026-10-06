@@ -47,9 +47,21 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 // same host every other gh path talks to. The empty credential.helper first
 // resets any ambient helper, so the second -c is the only one in effect: the
 // launcher's own gh credential, the same one httpsClone authenticates with.
+//
+// The identity insteadOf/pushInsteadOf rules pin the URL against an ambient
+// `url.git@<host>:.insteadOf https://<host>/` (issue #4665): git applies only
+// the longest matching prefix, and the full URL outranks any shorter ambient
+// rule. An ambient rule on the exact same URL ties, and the rule git reads
+// first wins: global config and GIT_CONFIG_COUNT beat these -c args on the
+// Ledger's path, while httpsClone's copies, persisted in the clone's local
+// config, lose to global but beat GIT_CONFIG_COUNT. That tie is accepted.
 func GitRemote(repo string) (url string, gitArgs []string) {
-	return "https://" + Host() + "/" + repo + ".git",
-		[]string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}
+	url = "https://" + Host() + "/" + repo + ".git"
+	return url, []string{
+		"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential",
+		"-c", "url." + url + ".insteadOf=" + url,
+		"-c", "url." + url + ".pushInsteadOf=" + url,
+	}
 }
 
 var _ forge.BundleCommitSubjects = (*readOnlyCodeForge)(nil)
