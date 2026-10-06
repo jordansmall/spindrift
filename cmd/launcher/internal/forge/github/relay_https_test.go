@@ -11,9 +11,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/ledger"
 )
 
 // fakeGHHTTPSRelay stands in for the gh CLI on a host whose gh config prefers
@@ -295,5 +297,74 @@ func TestReadOnlyCodeForge_RelayBundle_HonoursRefreshedGHToken(t *testing.T) {
 	}
 	if !srv.sawAuthorised("/git-receive-pack") {
 		t.Error("server saw no authorised git-receive-pack after the refresh")
+	}
+}
+
+// writeAmbientSSHRewrite plants a global gitconfig rewriting the GH_HOST HTTPS
+// URL space to SSH under key (insteadOf or pushInsteadOf), as a developer's
+// ~/.gitconfig commonly does. The harness's SSH is `false`, so any rewrite
+// that takes effect fails the operation (issue #4665). GIT_CONFIG_GLOBAL is
+// pinned to the planted file so a runner's own setting cannot bypass it.
+func writeAmbientSSHRewrite(t *testing.T, key string) {
+	t.Helper()
+	host := os.Getenv("GH_HOST")
+	cfg := "[url \"git@" + host + ":\"]\n\t" + key + " = https://" + host + "/\n"
+	path := filepath.Join(os.Getenv("HOME"), ".gitconfig")
+	if err := os.WriteFile(path, []byte(cfg), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", path)
+}
+
+// An ambient url.<ssh>.insteadOf / pushInsteadOf must not drag the relay's
+// clone or push off HTTPS (issue #4665). Each key is tested alone because
+// insteadOf would otherwise shadow pushInsteadOf for pushes.
+func TestReadOnlyCodeForge_RelayBundle_IgnoresAmbientSSHRewrite(t *testing.T) {
+	for _, key := range []string{"insteadOf", "pushInsteadOf"} {
+		t.Run(key, func(t *testing.T) {
+			repo, srv := newRelayHTTPSHarness(t)
+			writeAmbientSSHRewrite(t, key)
+			outbox := t.TempDir()
+			branch := "agent/issue-4665"
+			wantSHA := forgetest.SeedRelayBundle(t, repo.Bare, "main", outbox, branch)
+
+			cf := NewReadOnlyCodeForge("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+			if err := cf.(forge.BundleRelay).RelayBundle(outbox, branch); err != nil {
+				t.Fatalf("RelayBundle: %v", err)
+			}
+			if got := forgetest.RevParse(t, repo.Bare, "refs/heads/"+branch); got != wantSHA {
+				t.Errorf("refs/heads/%s = %s, want %s", branch, got, wantSHA)
+			}
+			if !srv.sawAuthorised("/git-receive-pack") {
+				t.Error("server saw no authorised git-receive-pack request")
+			}
+		})
+	}
+}
+
+// The Ledger talks to GitRemote's URL directly (fetch and push), so the
+// neutralisation must ride in the returned gitArgs, not in httpsClone.
+func TestGitRemote_LedgerIgnoresAmbientSSHRewrite(t *testing.T) {
+	for _, key := range []string{"insteadOf", "pushInsteadOf"} {
+		t.Run(key, func(t *testing.T) {
+			repo, srv := newRelayHTTPSHarness(t)
+			writeAmbientSSHRewrite(t, key)
+
+			url, gitArgs := GitRemote("owner/repo")
+			remote, err := ledger.NewRemote(t.TempDir(), url, gitArgs...)
+			if err != nil {
+				t.Fatalf("NewRemote: %v", err)
+			}
+			commit, err := remote.Append("chore", "", ledger.State{Phase: ledger.Done}, time.Now())
+			if err != nil {
+				t.Fatalf("Append: %v", err)
+			}
+			if got := forgetest.RevParse(t, repo.Bare, ledger.RefPrefix+"chore"); got != commit {
+				t.Errorf("%schore = %s, want %s", ledger.RefPrefix, got, commit)
+			}
+			if !srv.sawAuthorised("/git-receive-pack") {
+				t.Error("server saw no authorised git-receive-pack request")
+			}
+		})
 	}
 }
