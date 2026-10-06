@@ -170,6 +170,10 @@ func (h *forgejoHarness) handle(w http.ResponseWriter, r *http.Request) {
 			out = append(out, h.issuePayload(rec))
 		}
 
+		// Like real Forgejo, report the pre-pagination total so a one-item
+		// page still carries the full count.
+		w.Header().Set("X-Total-Count", strconv.Itoa(len(out)))
+
 		// Genuinely paginate on page/limit (issue #2265). Production code always
 		// sends both, 1-indexed, so an out-of-range page must come back as an
 		// empty page rather than an error, matching the real Forgejo API: an
