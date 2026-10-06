@@ -120,11 +120,13 @@ func (d DispatchLabels) AlreadyClaimed(from, to DispatchState, labels []string) 
 	return slices.Contains(labels, d.InProgress)
 }
 
-// ClaimRemoveLabels returns the labels a TransitionState call should remove.
-// A claim (to == InProgress) also strips any stale Complete/Failed/Ambiguous
-// label left by a prior run, matching the claim-remove-labels set in
-// .github/workflows/agent-dispatch.yml (#1985).
-func (d DispatchLabels) ClaimRemoveLabels(from, to DispatchState) []string {
+// TransitionRemoveLabels returns the labels a TransitionState(from, to)
+// call removes: from's label, plus on a claim (to == InProgress) any stale
+// Complete/Failed/Ambiguous label left by a prior run, matching the
+// claim-remove-labels set in .github/workflows/agent-dispatch.yml (#1985),
+// and on a landing (to == Complete) a stale Failed, since a local
+// `spindrift recover` never re-claims an issue parked agent-failed (#4651).
+func (d DispatchLabels) TransitionRemoveLabels(from, to DispatchState) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(l string) {
@@ -138,6 +140,9 @@ func (d DispatchLabels) ClaimRemoveLabels(from, to DispatchState) []string {
 		add(d.Complete)
 		add(d.Failed)
 		add(d.Ambiguous)
+	}
+	if to == Complete {
+		add(d.Failed)
 	}
 	return out
 }

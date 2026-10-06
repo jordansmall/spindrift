@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -748,6 +749,59 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	}
 	if containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must not carry agent-failed after an adopted-and-merged landing; labels=%v", iss.Labels)
+	}
+}
+
+// The parked-relay recovery path (issue #4651): the issue wears only
+// agent-failed (settle parked an exhausted bundle relay) and a local
+// `spindrift recover` never re-claims it, so landing the preserved bundle
+// must leave agent-complete without the stale agent-failed.
+func TestSettle_SettleRelayedBranch_LandsFromParkedFailedIssue(t *testing.T) {
+	const issNum = "4651"
+	const prURL = "https://github.com/owner/repo/pull/4651"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-failed"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	// The parked run's own outcome line, resolved the way recover does.
+	logPath := filepath.Join(t.TempDir(), "issue-4651.log")
+	line := "SPINDRIFT_OUTCOME issue=4651 landing=" + fc.AgentBranch(issNum) + " status=ready note=ok\n"
+	if err := os.WriteFile(logPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := outcome.Resolve([]outcome.PassLog{{Path: logPath}}, "")
+	if err != nil {
+		t.Fatalf("outcome.Resolve: %v", err)
+	}
+	result := dispatch.Result{Resolved: resolved}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	sit := s.SituationFor(issNum, false, result)
+	if !s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result) {
+		t.Fatalf("SettleRelayedBranch = false, want true")
+	}
+	if want := (forge.RelayBundleCall{OutboxDir: "/outbox/4651", Ref: fc.AgentBranch(issNum)}); len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != want {
+		t.Fatalf("RelayBundleCalls = %+v, want exactly [%+v]", fc.RelayBundleCalls, want)
+	}
+	if len(fc.CreateDraftPRCalls) != 1 {
+		t.Fatalf("CreateDraftPRCalls = %+v, want exactly 1", fc.CreateDraftPRCalls)
+	}
+	if fc.Merged != prURL {
+		t.Errorf("expected Merge(%q) to have run; fc.Merged=%q", prURL, fc.Merged)
+	}
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("issue must carry agent-complete; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must not keep the parked agent-failed; labels=%v", iss.Labels)
 	}
 }
 

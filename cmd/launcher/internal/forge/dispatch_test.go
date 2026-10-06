@@ -1,6 +1,9 @@
 package forge
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // Untriaged must map to the empty label string, so a
 // TransitionState(Untriaged, X) promotion never asks an adapter to remove a
@@ -73,7 +76,7 @@ func TestDispatchLabels_Ambiguous_LabelAndAllLabels(t *testing.T) {
 // A claim (to == InProgress) removes the from-state label plus the Complete,
 // Failed, and Ambiguous labels, deduplicated. Both github's execClient and
 // forge.Fake call this one method, so the two cannot drift apart (#1985).
-func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T) {
+func TestDispatchLabels_TransitionRemoveLabels_ClaimStripsStaleTerminals(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
 		InProgress:   "agent-in-progress",
@@ -81,31 +84,32 @@ func TestDispatchLabels_ClaimRemoveLabels_ClaimStripsStaleTerminals(t *testing.T
 		Failed:       "agent-failed",
 		Ambiguous:    "agent-ambiguous-spec",
 	}
-	got := d.ClaimRemoveLabels(Dispatchable, InProgress)
+	got := d.TransitionRemoveLabels(Dispatchable, InProgress)
 	want := []string{"ready-for-agent", "agent-complete", "agent-failed", "agent-ambiguous-spec"}
 	if len(got) != len(want) {
-		t.Fatalf("ClaimRemoveLabels = %v, want %v", got, want)
+		t.Fatalf("TransitionRemoveLabels = %v, want %v", got, want)
 	}
 	for i, l := range want {
 		if got[i] != l {
-			t.Errorf("ClaimRemoveLabels[%d] = %q, want %q", i, got[i], l)
+			t.Errorf("TransitionRemoveLabels[%d] = %q, want %q", i, got[i], l)
 		}
 	}
 }
 
-// A transition that does not land on InProgress removes only the from-state
-// label, matching TransitionState's prior one-label contract.
-func TestDispatchLabels_ClaimRemoveLabels_NonClaimOnlyRemovesFrom(t *testing.T) {
+// A transition that is neither a claim nor a landing (to == Complete) removes
+// only the from-state label, matching TransitionState's prior one-label
+// contract.
+func TestDispatchLabels_TransitionRemoveLabels_NeitherClaimNorLandingOnlyRemovesFrom(t *testing.T) {
 	d := DispatchLabels{
 		Dispatchable: "ready-for-agent",
 		InProgress:   "agent-in-progress",
 		Complete:     "agent-complete",
 		Failed:       "agent-failed",
 	}
-	got := d.ClaimRemoveLabels(InProgress, Complete)
+	got := d.TransitionRemoveLabels(InProgress, Failed)
 	want := []string{"agent-in-progress"}
 	if len(got) != 1 || got[0] != want[0] {
-		t.Errorf("ClaimRemoveLabels = %v, want %v", got, want)
+		t.Errorf("TransitionRemoveLabels = %v, want %v", got, want)
 	}
 }
 
@@ -140,5 +144,21 @@ func TestDispatchLabels_AlreadyClaimed(t *testing.T) {
 	// claimed".
 	if d.AlreadyClaimed(InProgress, Complete, []string{"agent-in-progress"}) {
 		t.Error("AlreadyClaimed(InProgress, Complete, [agent-in-progress]) = true, want false")
+	}
+}
+
+// A landing (to == Complete) also strips a stale Failed, so a recovered issue
+// parked agent-failed never wears both terminal labels (#4651).
+func TestDispatchLabels_TransitionRemoveLabels_CompleteStripsStaleFailed(t *testing.T) {
+	d := DispatchLabels{
+		Dispatchable: "ready-for-agent",
+		InProgress:   "agent-in-progress",
+		Complete:     "agent-complete",
+		Failed:       "agent-failed",
+	}
+	got := d.TransitionRemoveLabels(InProgress, Complete)
+	want := []string{"agent-in-progress", "agent-failed"}
+	if !slices.Equal(got, want) {
+		t.Errorf("TransitionRemoveLabels = %v, want %v", got, want)
 	}
 }

@@ -10,10 +10,10 @@ import (
 
 // Four workflow files (agent-dispatch.yml and agent-recover.yml under both
 // .github and .forgejo) hand-list the labels a claim removes, and only a
-// human keeps them in sync with ClaimRemoveLabels (#2507). The check is a
+// human keeps them in sync with TransitionRemoveLabels (#2507). The check is a
 // subset, not set equality: agent-trigger and agent-recover are Actions
 // trigger labels with no forge.DispatchState equivalent, so Go never emits them.
-func TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles(t *testing.T) {
+func TestDispatchLabels_TransitionRemoveLabels_MatchesWorkflowFiles(t *testing.T) {
 	labels := forge.DispatchLabels{
 		Dispatchable: "ready-for-agent",
 		InProgress:   "agent-in-progress",
@@ -21,9 +21,9 @@ func TestDispatchLabels_ClaimRemoveLabels_MatchesWorkflowFiles(t *testing.T) {
 		Failed:       "agent-failed",
 		Ambiguous:    "agent-ambiguous-spec",
 	}
-	want := labels.ClaimRemoveLabels(forge.Dispatchable, forge.InProgress)
+	want := labels.TransitionRemoveLabels(forge.Dispatchable, forge.InProgress)
 	if len(want) == 0 {
-		t.Fatal("ClaimRemoveLabels(Dispatchable, InProgress) returned no labels — parity check would pass vacuously")
+		t.Fatal("TransitionRemoveLabels(Dispatchable, InProgress) returned no labels — parity check would pass vacuously")
 	}
 
 	repoRoot := filepath.Join("..", "..", "..", "..")

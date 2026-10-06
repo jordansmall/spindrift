@@ -2132,3 +2132,22 @@ func TestForgejoClient_AddLabels_GenuineFailureSurfaced(t *testing.T) {
 		t.Errorf("error must surface the unexpected status, got: %v", err)
 	}
 }
+
+// A landing (to == Complete) also drops a stale agent-failed, so a recovered
+// issue parked agent-failed ends wearing only agent-complete (#4651).
+func TestForgejoClient_TransitionState_CompleteStripsStaleFailed(t *testing.T) {
+	h := newForgejoHarness(t)
+	h.SeedIssue(forge.Issue{Number: "42", Title: "parked", Labels: []string{"agent-failed"}})
+
+	if err := h.Tracker().TransitionState("42", forge.InProgress, forge.Complete); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+
+	iss, err := h.Tracker().Issue("42")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if len(iss.Labels) != 1 || iss.Labels[0] != "agent-complete" {
+		t.Errorf("labels = %v, want exactly [agent-complete]", iss.Labels)
+	}
+}

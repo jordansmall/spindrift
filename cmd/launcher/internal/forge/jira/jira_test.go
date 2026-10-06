@@ -466,8 +466,9 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	if postedTransitionID != "11" {
 		t.Errorf("posted transition id = %q, want 11", postedTransitionID)
 	}
-	if len(labelCleanupOps) != 1 || labelCleanupOps[0]["remove"] != "ready-for-agent" || labelCleanupOps[0]["add"] != "" {
-		t.Errorf("label cleanup ops = %v, want a single remove of ready-for-agent (no add)", labelCleanupOps)
+	wantCleanup := []map[string]string{{"remove": "ready-for-agent"}, {"remove": "agent-complete"}, {"remove": "agent-failed"}}
+	if !reflect.DeepEqual(labelCleanupOps, wantCleanup) {
+		t.Errorf("label cleanup ops = %v, want %v (from label plus stale terminals, no add)", labelCleanupOps, wantCleanup)
 	}
 }
 
@@ -507,8 +508,8 @@ func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
 	if err := jc.TransitionState("PROJ-2", forge.Dispatchable, forge.InProgress); err != nil {
 		t.Fatalf("TransitionState: %v", err)
 	}
-	want := []map[string]string{{"remove": "ready-for-agent"}, {"add": "agent-in-progress"}}
-	if len(gotLabelOps) != len(want) || gotLabelOps[0]["remove"] != want[0]["remove"] || gotLabelOps[1]["add"] != want[1]["add"] {
+	want := []map[string]string{{"remove": "ready-for-agent"}, {"remove": "agent-complete"}, {"remove": "agent-failed"}, {"add": "agent-in-progress"}}
+	if !reflect.DeepEqual(gotLabelOps, want) {
 		t.Errorf("label ops = %v, want %v", gotLabelOps, want)
 	}
 }
@@ -1284,5 +1285,42 @@ func TestJiraClient_ListIssues_CloudFailsOnRepeatedNextPageToken(t *testing.T) {
 	}
 	if requests != 2 {
 		t.Errorf("requests = %d, want 2 (first page, then the repeat)", requests)
+	}
+}
+
+// A landing in label-fallback mode removes the from label and a stale
+// agent-failed in one update, so a recovered issue parked agent-failed ends
+// wearing only agent-complete (#4651).
+func TestJiraClient_TransitionState_CompleteFallbackStripsStaleFailed(t *testing.T) {
+	var gotLabelOps []map[string]string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-8":
+			var body struct {
+				Update struct {
+					Labels []map[string]string `json:"labels"`
+				} `json:"update"`
+			}
+			json.NewDecoder(r.Body).Decode(&body)
+			gotLabelOps = body.Update.Labels
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL: srv.URL,
+		Token:   "tok",
+		Labels:  testLabels,
+	})
+
+	if err := jc.TransitionState("PROJ-8", forge.InProgress, forge.Complete); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	want := []map[string]string{{"remove": "agent-in-progress"}, {"remove": "agent-failed"}, {"add": "agent-complete"}}
+	if !reflect.DeepEqual(gotLabelOps, want) {
+		t.Errorf("label ops = %v, want %v", gotLabelOps, want)
 	}
 }
