@@ -1550,8 +1550,8 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `DAEMON_AWAKE_WINDOW`  | `` (always awake) | — (post-freeze; no legacy alias — set `dispatch.daemonAwakeWindow`) | daily local-time span the daemon may start a new Box in, `HH:MM-HH:MM IANA-zone` (e.g. `22:00-06:00 Europe/London`); gates only starting a Box, not one already running; the zone is explicit and never inherited from the host; read by the daemon, and by `spindrift butler` for the zone its daily budgets reset in — see [Daemon](#daemon) |
 | `DAEMON_SELF_APP`      | `.#daemon` | — (post-freeze; no legacy alias — set `dispatch.daemonSelfApp`) | flake app attribute of the daemon itself, evaluated at each fetched tip to notice its own build changed and halt — distinct from `DAEMON_APP`, the child Dispatch app; a Consumer that re-exports the daemon under another top-level attribute (e.g. spindrift's own `.#dogfood-bwrap-daemon`) must set this to match, or the check would evaluate a different harness's daemon and report a permanent, spurious change; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `RESEARCH_RESERVATION` | `1`     | — (post-freeze; no legacy alias — set `dispatch.researchReservation`) | the minimum number of research Dispatches the daemon keeps running out of `MAX_PARALLEL`'s pool slots — a floor, not a ceiling; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
-| `DAEMON_IDLE_FLOOR`    | `5m`    | — (post-freeze; no legacy alias — set `dispatch.daemonIdleFloor`) | the jam gate's first wait: when a tracker-probed kind (dispatch, research) has open issues but none dispatchable, the wait before the daemon's first re-check, which is also the poll slice size while riding out the jam; each further consecutive check doubles the wait up to `DAEMON_IDLE_CAP`, and a kind whose child keeps exiting 3 then waits `DAEMON_IDLE_CAP` between checks; a kind with no tracker Demand probe (the butler, and a tracker kind whose knobs the daemon can't read) is exit-driven and uses this as its whole no-work backoff instead; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
-| `DAEMON_IDLE_CAP`      | `30m`   | — (post-freeze; no legacy alias — set `dispatch.daemonIdleCap`) | ceiling the jam gate's doubling wait reaches, starting from `DAEMON_IDLE_FLOOR`, for a tracker-probed kind (dispatch, research); for an exit-driven kind (the butler, and a tracker kind whose knobs the daemon can't read) it is the ceiling of the whole per-kind no-work backoff; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start if the cap is below the floor; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
+| `DAEMON_IDLE_FLOOR`    | `5m`    | — (post-freeze; no legacy alias — set `dispatch.daemonIdleFloor`) | the jam gate's first wait: when a tracker-probed kind (dispatch, research) has open issues but none dispatchable, the wait before the daemon's first re-check, which is also the poll slice size while riding out the jam; each further consecutive check doubles the wait up to `DAEMON_IDLE_CAP`, and a kind whose child keeps exiting 3 then waits `DAEMON_IDLE_CAP` between checks; a kind with no tracker Demand probe (a tracker kind whose knobs the daemon can't read) is exit-driven and uses this as its whole no-work backoff instead; the butler sleeps until its next Chore is due (the next_due its last not-due child reported) and uses this only as the fallback backoff when that child reports none (a Chore held by a claim with no recorded claimant has no instant that lifts it, so it reports none and, when it is the only not-due Chore, the butler falls back too); a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
+| `DAEMON_IDLE_CAP`      | `30m`   | — (post-freeze; no legacy alias — set `dispatch.daemonIdleCap`) | ceiling the jam gate's doubling wait reaches, starting from `DAEMON_IDLE_FLOOR`, for a tracker-probed kind (dispatch, research); for an exit-driven kind (a tracker kind whose knobs the daemon can't read) it is the ceiling of the whole per-kind no-work backoff, and the butler's ceiling when a not-due child reports no next_due; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start if the cap is below the floor; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_PROBE_INTERVAL` | `` (per-tracker defaults) | — (post-freeze; no legacy alias — set `dispatch.daemonProbeInterval`) | overrides every tracker's default Demand probe interval, the pause between the daemon's cheap ready-issue counts that start slots from tracker demand (blank keeps the per-tracker defaults: each tracker adapter declares its own, local 20s, forgejo 3m, github 60s, jira 5m); an override must be at least 1s; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_FAILURE_BACKOFF` | `1m`  | — (post-freeze; no legacy alias — set `dispatch.daemonFailureBackoff`) | wait a slot backs off for after an unclassified child failure before refilling itself; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `DAEMON_BREAKER_THRESHOLD` | `5` | — (post-freeze; no legacy alias — set `dispatch.daemonBreakerThreshold`) | pool-wide unclassified failures within `DAEMON_BREAKER_WINDOW` that trip the circuit breaker and halt the whole daemon; validated by the daemon at startup, which refuses to start on a non-positive value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
@@ -5069,6 +5069,22 @@ exits "no work" (exit code 2, the same signal `dispatch` gives an empty
 queue) and prints why on stderr, e.g. `interval not elapsed` or `nothing to
 scan`, per candidate Chore.
 
+When the whole run ends not due, it also writes one `not_due` record per
+not-due Chore to the daemon's report pipe, `{"event":"not_due","chore":"<name>","next_due":"<instant>"}`
+(issue #4581). `next_due` is when that Chore's blocking reason lifts: for an
+interval not yet elapsed, its last done commit plus its `BUTLER_EVERY`
+interval; for a live claim, the moment the claim goes stale
+(`BUTLER_CLAIM_TIMEOUT` after it was taken); for a spent daily budget, the
+next midnight in the `DAEMON_AWAKE_WINDOW` zone; and `on_tip_move` for
+"nothing new to scan", which only a moved branch tip lifts. An instant is
+RFC3339 UTC. A daemon with the butler kind starts one butler child after
+start-up to learn this, then sleeps the kind until the earliest `next_due`
+(or until the tip moves, for `on_tip_move`) instead of re-running the
+child on a backoff; it never reads the Ledger itself. A butler child
+that reports no `not_due` record leaves the daemon on its
+`DAEMON_IDLE_FLOOR`..`DAEMON_IDLE_CAP` backoff. See [Daemon](#daemon)'s
+**Child-reported due**.
+
 A Consumer adds its own Chore, or overrides a built-in one's prompt, by
 shipping `<name>.md` at the root of mkHarness's `choresDir` and naming
 it in `BUTLER_CHORES`. Setting `choresDir` replaces the whole built-in
@@ -6460,6 +6476,12 @@ cleared, so advisory rather than a promise of dispatchable work; `0` is
 present, not elided), `probed_at` and `next_probe` (RFC3339) once
 probed — absent from a child's exit 0 or 4, or a child's claim, until
 the re-probe lands, and always absent for an exit-driven kind.
+A child-reported kind (the butler) carries `next_due` instead: the
+RFC3339 instant its last not-due child said its next Chore is due, or
+`on_tip_move` when only a moved branch tip lifts it (then `nextCheck` is
+empty, since no instant ends the wait); `next_due_on_tip_move: true` rides
+alongside an instant when a moved tip would also lift it early. It is
+absent until a child has reported, and again once a later child has run.
 `jam_until` (RFC3339) appears only while a jam gate is live, and on a
 probed kind `ready_at_jam` is the `ready` count that jam froze. A paused
 kind's `nextCheck` is the end of its tracker's rate-limit pause or later. The
@@ -6511,14 +6533,15 @@ have just reported no work. A butler child
 already running is never preempted when dispatch or research work shows up:
 the Awake window rule only ever gates *starting* a child, never stopping one,
 so a Chore in progress runs to completion even if the queue fills mid-run.
-The butler backs off on its own idle timer the same way dispatch and
-research do (the per-kind idle backoff described below), so a butler check
-that finds no Chore due waits out its own growing interval independently of
-the other two kinds'. Nothing here limits the butler to one slot at a time:
+The butler waits on its own timer, independent of the other two kinds': a
+butler check that finds no Chore due parks the kind until the `next_due` the
+child reported (**Child-reported due**, below), or, when it reports none, on
+its own growing idle backoff as dispatch and research do (the per-kind idle
+backoff described below). Nothing here limits the butler to one slot at a time:
 once dispatch and research have both backed off, every free slot may pick
 the butler at once, and whichever loses the Chore claim race just reports no
-work (exit 2) — which still steps the butler's shared idle backoff, same as
-any other empty check.
+work (exit 2) with no `not_due` record, which steps the butler's fallback idle
+backoff.
 
 **Cross-family discovery.** Running both kinds off one pool means the same
 issue can legitimately be dispatchable and researchable at once — the two
@@ -6558,10 +6581,11 @@ Each child's exit code is interpreted the same way `spindrift`'s own exit
 codes are (see the [exit-code table](#dispatch-exit-codes) in Dispatch exit
 codes above, which this table's meanings link back to) — but the daemon's
 *action* on each code is its own. The wait below is no longer a fixed
-interval. Which of two policies applies is per kind: a kind whose tracker
-reports **Demand** is scheduled from that count (below); any other kind —
-the butler, and a tracker kind whose knobs the daemon can't read (below) — is
-exit-driven, and its wait is an idle backoff, one
+interval. Which of three policies applies is per kind: a kind whose tracker
+reports **Demand** is scheduled from that count (below); the butler is
+scheduled from the `next_due` its own child reports (**Child-reported
+due**, below); any other kind — a tracker kind whose knobs the daemon
+can't read (below) — is exit-driven, and its wait is an idle backoff, one
 per configured Dispatch kind (`kindBackoff`,
 `cmd/launcher/internal/daemon/backoff.go`) rather than one pool-wide timer
 (issue #3541 split it: an empty work queue must not slow research down,
@@ -6651,7 +6675,7 @@ inside that first page. The daemon runs `gh` in its own environment, so it
 needs `GH_TOKEN` (or a `gh` login) of its own; when
 `GH_TOKEN_REFRESH_FILE` is set it polls that file into its own `GH_TOKEN` as
 a child does, so an expired App token does not fail every probe into the
-breaker. A blank `REPO_SLUG` leaves every kind exit-driven, and a blank
+breaker. A blank `REPO_SLUG` leaves every tracker-probed kind exit-driven, and a blank
 `LABEL` the work kind. Because a 304 can repeat a count a
 child has already consumed, a probe that counted work followed by a child
 exiting 2 makes the next probe of that kind skip the cache and read fresh.
@@ -6668,6 +6692,20 @@ through its `-file` or `-cmd` form is invisible to it, and a missing base
 URL, project key or token, or a malformed mapping, leaves the kind
 exit-driven.
 
+**Child-reported due.** The butler has no tracker queue to count, so the
+daemon asks the butler itself, and never reads the Ledger. It starts one
+butler child after start-up. When every Chore is not due, that child exits
+2 after writing one `not_due` record per Chore on the report pipe (see
+[Butler](#butler)); the daemon parks the kind until the earliest
+`next_due` among them, then starts the next child. A record saying
+`on_tip_move` parks the kind until the branch tip moves: while waiting on
+a tip move the parked slot polls the tip every `DAEMON_IDLE_FLOOR`, as for
+a jam, and `tip_moved` can name the butler among its lifted kinds. A child
+that sweeps (exit 0) clears what was learned, so the next child
+reports afresh. An exit 2 with no `not_due` record falls back to the
+exit-driven backoff, `DAEMON_IDLE_FLOOR` doubling to `DAEMON_IDLE_CAP`.
+The status `checks[]` entry shows the answer as `next_due`.
+
 **Start budget.** A probed kind is started only while its Ready count
 exceeds the slots *starting* it — slots running a child of that
 kind that has not yet reported its claim (a `box` record naming a new
@@ -6682,8 +6720,8 @@ the budget, lowers the kind's count by one and makes it stale, so the
 kind's next start re-probes first; a probe already in flight when the
 claim lands does not count as fresh. The budget applies across tiers,
 and `RESEARCH_RESERVATION`'s floor still counts research children that
-are starting. An exit-driven kind (the butler, an unprobed tracker)
-has no count and so no budget. See ADR 0059 and the glossary's **Start
+are starting. An exit-driven kind (an unprobed tracker) and the butler
+have no count and so no budget. See ADR 0059 and the glossary's **Start
 budget** (`CONTEXT.md`).
 
 Because the wait is now per kind, a `Wait` outcome (exit 2 or 3) no
@@ -6695,7 +6733,7 @@ does not idle a slot that could be running research, and an empty work-and-
 research pair does not idle a slot the butler could still fill. Only once
 every configured kind is gated does the pool
 actually sleep, and then for the shortest of the gated kinds' remaining
-waits — a probed kind's next probe, a jam gate's end, or an exit-driven
+waits — a probed kind's next probe, a jam gate's end, the butler's reported `next_due`, or an exit-driven
 kind's backoff end. That park is wakeable: when one slot makes a kind
 startable that was not before, every parked slot wakes at once and
 re-decides, so a fresh backlog fills all free slots instead of being
@@ -6703,7 +6741,7 @@ drained by the one slot that found it. Four things do that: a probe
 finds Ready above 0; a probe refreshes (or a failed probe revives) a
 stale count above 0 on a kind with no jam gate; an exit-driven kind's
 child exits 0 or 4 and lifts that kind's backoff; and a moved tip lifts
-a jam on a kind whose count is above 0 and still fresh. Only that growth
+a jam on a kind whose count is above 0 and still fresh, or the butler's wait on `on_tip_move`. Only that growth
 in the set of startable kinds wakes anyone: a child exiting 2 or 3, a
 count dropping to zero, or any other slot changing phase leaves parked
 siblings asleep until their own deadline. A daemon restricted to one kind
@@ -6714,7 +6752,7 @@ degenerates to the old single-timer in-place wait.
 | exit | meaning | daemon action |
 |------|---------|----------------|
 | 0    | dispatched work | go again at once; resets this kind's idle backoff to `IdleFloor` (every other configured kind's timer is untouched). A probed kind's Demand count becomes stale, so the next decision re-probes it |
-| 2    | queue empty | record it against this kind's own backoff (emit `idle`) — for a probed kind, Ready 0 and a re-probe after one probe interval rather than a growing backoff — then loop back around: switch to the next configured kind in preference order at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
+| 2    | queue empty | record it against this kind's own backoff (emit `idle`) — for a probed kind, Ready 0 and a re-probe after one probe interval rather than a growing backoff; for the butler, the earliest `next_due` its `not_due` records report (or a wait on a moved tip), falling back to the growing backoff when it reports none — then loop back around: switch to the next configured kind in preference order at once if it is still runnable, or sleep — via the shared `idleSleep` — only if every kind is now gated. A queue-empty gate is never itself polled mid-wait: a merge cannot create work in an empty queue, so polling for one would only spend a query for nothing |
 | 3    | none dispatchable | with any sibling slot `running` — something that could still release an issue this read found blocked — routine: record it against this kind's backoff (emit `idle`) the same as exit 2 (for a probed kind this is the jam gate, `IdleFloor` doubling to `IdleCap`, not a flat probe interval; a probe counting above `ready_at_jam` lifts it early, emitting `demand_rose`). Exception: a `running` sibling whose child is a butler Chore doesn't count, since a butler run never releases an issue a dispatch/research read found blocked or overlap-deferred, promoted findings (#3880) included; a `running` research sibling still counts, since its verdict can close a blocker by rejecting the issue. A `resolving` sibling holds no claim yet, so it never counts (issue #3735). A `backing_off` sibling holds nothing it could release either — its child already exited, or it failed before taking a claim — so it never counts (issue #4205). Only once no sibling counts — `idle`, `awaiting_window` and `backing_off` siblings never do — is it recorded as a jam instead (emit `jam`), same routing (a single-slot daemon has no siblings at all and so reports every exit 3 as a jam). Either way the slot switches to the next configured kind in preference order at once if that kind is still runnable; only once every kind is gated, *and* at least one of them is jammed, does the shared `idleSleep` sleep in `IdleFloor`-sized slices, since a merge here *can* unblock the jam — there is no separate poll: the slot sleeps one slice, and the next round's own resolution, made before it picks a kind, is what finds out, so a jammed wait costs one fetch per slice, not one for a poll and another for the round it unblocks. The first no-work wait for a kind is exactly one `IdleFloor` slice and so still resolves nothing extra, with the next round's own resolution asked for only once that kind's backoff has grown past the floor; if that resolution reports the tip moved (`Tip.Moved`), the slot resets *every currently-jammed kind's* backoff to `IdleFloor` (the observed change is evidence for all of them, not just the kind this slot was running), and goes again at once instead of riding out the rest of the wait. That reset is a pool-level effect, recorded by at most one `tip_moved` pool-wide rather than one per slot, so this slot may be released by a sibling's reset without emitting `tip_moved` itself (see `tip_moved`'s row below). A mid-wait resolution that fails is treated as no change observed — it never feeds the breaker, since the iteration's own post-`pickKind` resolution is what reports a broken fetch |
 | 4    | image stale | go again at once — every child is born from a freshly resolved revision, so the next iteration's pin is the rebuild; resets this kind's idle backoff to `IdleFloor` (every other configured kind's timer is untouched); a probed kind's Demand count becomes stale, as for exit 0 |
 | 5    | host-tainted | halt the pool |
@@ -7290,9 +7328,9 @@ which runs outside every slot's own goroutine.
 | `probe_rate_limited` | `time`, `kind`, `slot`, `tracker`, `until`, `reason` | a kind's Demand probe was refused by the tracker's rate limit, pausing every kind on `tracker` until `until` (RFC3339 UTC); emitted each time a pause begins, not again by a probe that lands while one holds |
 | `probe_failed` | `time`, `kind`, `slot`, `reason` | a kind's Demand probe failed for any other reason (`reason` `demand: ...`); transition only, and the usual `backoff` event still follows |
 | `probe_resumed` | `time`, `kind`, `slot`, `tracker` | a kind's first successful probe after a `probe_failed` or `probe_rate_limited` |
-| `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `running` (a `running` butler sibling never counts); `wait` carries `kind`'s own idle backoff (for a probed kind, the time to its next probe, flat rather than widening), so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
+| `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `running` (a `running` butler sibling never counts); `wait` carries `kind`'s own idle backoff (for a probed kind, the time to its next probe, flat rather than widening; for the butler, the time to its reported `next_due`), so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
 | `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with every sibling slot `idle`, `awaiting_window`, `resolving` or `backing_off` (a sibling `running` a butler child counts as idle here too) — nothing that could unblock it running anywhere else in the pool, and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own jam gate for a probed kind and its idle backoff for an exit-driven one, same as `idle` above |
-| `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out and so resets at least one jammed kind's backoff — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. The event is emitted only when that reset actually ended at least one kind's backoff, so `kinds` is never empty, and an ordinary advance of the base branch with nothing jammed emits no `tip_moved` at all — its absence does not mean the tip stood still. One move therefore yields at most one `tip_moved` pool-wide, not one per idling slot: `slot` names whichever slot's resolve observed the move (slots sharing one coalesced fetch all see it, but only the first to report it still finds a jammed kind to reset). `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
+| `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out and so resets at least one jammed kind's backoff, or lifts a butler waiting on `on_tip_move` — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. The event is emitted only when that reset actually ended at least one kind's backoff, so `kinds` is never empty, and an ordinary advance of the base branch with nothing jammed emits no `tip_moved` at all — its absence does not mean the tip stood still. One move therefore yields at most one `tip_moved` pool-wide, not one per idling slot: `slot` names whichever slot's resolve observed the move (slots sharing one coalesced fetch all see it, but only the first to report it still finds a jammed kind to reset). `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |

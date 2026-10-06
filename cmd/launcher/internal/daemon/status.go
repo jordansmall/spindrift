@@ -94,7 +94,8 @@ const (
 // KindCheck is one configured kind's next-poll status.
 type KindCheck struct {
 	Kind Kind `json:"kind"`
-	// NextCheck is RFC3339 UTC; empty means the kind is runnable now. It
+	// NextCheck is RFC3339 UTC; empty means the kind is runnable now, or
+	// that it waits only on a tip move (then NextDue is "on_tip_move"). It
 	// is the later of the kind's own backoff deadline and the instant a
 	// shut Awake window reopens, so an asleep daemon never reports a kind
 	// as runnable now. In the walk-exhausted degraded case (see
@@ -119,6 +120,14 @@ type KindCheck struct {
 	// holding back.
 	JamUntil   string `json:"jam_until,omitempty"`
 	ReadyAtJam *int   `json:"ready_at_jam,omitempty"`
+
+	// NextDue is a child-reported kind's (the butler's) answer, set only
+	// while its last child's report stands: an RFC3339 UTC instant, or
+	// report.NextDueOnTipMove when only a moved tip lifts it.
+	NextDue string `json:"next_due,omitempty"`
+	// NextDueOnTipMove is set only when NextDue is an instant and a moved
+	// tip would also lift the wait early.
+	NextDueOnTipMove bool `json:"next_due_on_tip_move,omitempty"`
 }
 
 // State is the daemon's published operator-facing state; the pool computes

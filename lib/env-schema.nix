@@ -845,7 +845,7 @@ in
     env = "DAEMON_IDLE_FLOOR";
     group = "dispatch";
     default = "5m";
-    doc = "the jam gate's first wait: when a tracker-probed kind (dispatch, research) has open issues but none dispatchable, the wait before the daemon's first re-check, which is also the poll slice size while riding out the jam; each further consecutive check doubles the wait up to DAEMON_IDLE_CAP, and a kind whose child keeps exiting 3 then waits DAEMON_IDLE_CAP between checks; a kind with no tracker Demand probe (the butler, and a tracker kind whose knobs the daemon can't read) is exit-driven and uses this as its whole no-work backoff instead; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    doc = "the jam gate's first wait: when a tracker-probed kind (dispatch, research) has open issues but none dispatchable, the wait before the daemon's first re-check, which is also the poll slice size while riding out the jam; each further consecutive check doubles the wait up to DAEMON_IDLE_CAP, and a kind whose child keeps exiting 3 then waits DAEMON_IDLE_CAP between checks; a kind with no tracker Demand probe (a tracker kind whose knobs the daemon can't read) is exit-driven and uses this as its whole no-work backoff instead; the butler sleeps until its next Chore is due (the next_due its last not-due child reported) and uses this only as the fallback backoff when that child reports none (a Chore held by a claim with no recorded claimant has no instant that lifts it, so it reports none and, when it is the only not-due Chore, the butler falls back too); a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
     launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
@@ -857,7 +857,7 @@ in
     env = "DAEMON_IDLE_CAP";
     group = "dispatch";
     default = "30m";
-    doc = "ceiling the jam gate's doubling wait reaches, starting from DAEMON_IDLE_FLOOR, for a tracker-probed kind (dispatch, research); for an exit-driven kind (the butler, and a tracker kind whose knobs the daemon can't read) it is the ceiling of the whole per-kind no-work backoff; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
+    doc = "ceiling the jam gate's doubling wait reaches, starting from DAEMON_IDLE_FLOOR, for a tracker-probed kind (dispatch, research); for an exit-driven kind (a tracker kind whose knobs the daemon can't read) it is the ceiling of the whole per-kind no-work backoff, and the butler's ceiling when a not-due child reports no next_due; a Go time.ParseDuration string, validated by the daemon at startup; read by the daemon only, the launcher itself ignores it";
     flakeOption = true;
     launcherIgnores = true;
     # Postdates the ADR 0037 Pass 2 freeze -- never had a settings.<section>
