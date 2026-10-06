@@ -6240,16 +6240,27 @@ environment (`strippedKeys` and `warnStrippedChildEnv`,
 stderr line before the startup preflight runs:
 
 ```
-MODEL=x set in environment — not forwarded to children; use the --input document's settings.MODEL
+MODEL=x set in environment — ignored by the daemon and its children; use the --input document's settings.MODEL
 ```
 
 It never refuses to start over this, unlike the `BOX_SIGNAL_CARRIER` check
-that runs after it. An exported `CONTINUOUS_DISPATCH=1` or `ISSUE_NUMBER` or
-`MODEL` now configures the daemon alone — its own knob resolution is
-unchanged, and an ambient value still wins there with its own, separate
-deprecation warning (`inputdoc.Document.Lookup`,
-`cmd/launcher/internal/inputdoc/inputdoc.go`) — it simply never reaches a
-child. Anything a child's own wrapper re-sources from `harness.env` in its
+that runs after it. The daemon resolves every knob a child also reads
+(`BASE_BRANCH`, `MAX_PARALLEL`, `DAEMON_AWAKE_WINDOW`, `BUTLER_*`, ...) the
+way the child does, document value first (issue #4623). An exported
+`CONTINUOUS_DISPATCH=1`, `ISSUE_NUMBER`, or `MODEL` is ignored by the
+daemon, which never reads them, and by a child whenever the document
+carries them, since they are stripped. Only the daemon-only knobs — the ones the flag table marks "read by the daemon
+only", which no child reads (`daemonOnlyKnobs`,
+`cmd/launcher/daemon/main.go`) — still let an ambient value win in the
+daemon, with its own, separate deprecation warning
+(`inputdoc.Document.Lookup`, `cmd/launcher/internal/inputdoc/inputdoc.go`);
+their line keeps the older wording:
+
+```
+DAEMON_IDLE_FLOOR=5s set in environment — not forwarded to children; use the --input document's settings.DAEMON_IDLE_FLOOR
+```
+
+Anything a child's own wrapper re-sources from `harness.env` in its
 working directory is outside the daemon's control and stays so.
 
 Every child's stdin is `/dev/null`: it runs in its own process group (see

@@ -190,14 +190,32 @@ func strippedKeys(doc *inputdoc.Document) []string {
 	return keys
 }
 
+// daemonOnlyKnobs are the knobs the daemon reads through
+// inputdoc.Document.Lookup, where an ambient env value still wins (ADR 0020).
+// No child reads them, so that override is kept deliberately; every other
+// stripped knob resolves document-first via childKnob, as a child sees it
+// (issue #4623). TestDaemonOnlyKnobs_MatchesDocLookupSites keeps it in step
+// with the call sites.
+var daemonOnlyKnobs = map[string]bool{
+	"DAEMON_APP":               true,
+	"DAEMON_SELF_APP":          true,
+	"DAEMON_IDLE_FLOOR":        true,
+	"DAEMON_IDLE_CAP":          true,
+	"DAEMON_PROBE_INTERVAL":    true,
+	"DAEMON_FAILURE_BACKOFF":   true,
+	"DAEMON_BREAKER_THRESHOLD": true,
+	"DAEMON_BREAKER_WINDOW":    true,
+	"RESEARCH_RESERVATION":     true,
+}
+
 // warnStrippedChildEnv prints one stderr line per key in keys that is
 // actually set in the daemon's own environment (matching
 // inputdoc.Document.Lookup's own "set" test: non-empty os.Getenv, so an
-// exported-but-empty knob is not "set" here either). This is distinct from
-// Lookup's deprecation warning: that one flags the daemon itself still
-// honouring an ambient override; this one flags a key that a child will
-// never see at all, because withoutKeys (internal/daemon/command.go)
-// strips it before exec.
+// exported-but-empty knob is not "set" here either). withoutKeys
+// (internal/daemon/command.go) strips every such key before exec, so no
+// child sees it; the daemon ignores it too unless it is a daemonOnlyKnobs
+// key, where Lookup still honours it and prints its own deprecation
+// warning.
 func warnStrippedChildEnv(keys []string, stderr io.Writer) {
 	for _, key := range keys {
 		if v := os.Getenv(key); v != "" {
@@ -209,7 +227,11 @@ func warnStrippedChildEnv(keys []string, stderr io.Writer) {
 			// draws only on flakeOption schema entries, and
 			// lib/env-schema.nix marks no entry both flakeOption and
 			// secret. So no credential reaches this line.
-			fmt.Fprintf(stderr, "%s=%s set in environment — not forwarded to children; use the --input document's settings.%s\n", key, v, key)
+			scope := "ignored by the daemon and its children"
+			if daemonOnlyKnobs[key] {
+				scope = "not forwarded to children"
+			}
+			fmt.Fprintf(stderr, "%s=%s set in environment — %s; use the --input document's settings.%s\n", key, v, scope, key)
 		}
 	}
 }
