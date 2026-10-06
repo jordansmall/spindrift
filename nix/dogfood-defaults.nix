@@ -46,6 +46,7 @@ in
     };
   };
   defaults = {
+    repoSlug = "jordansmall/spindrift";
     model = "claude-opus-5-5";
     effort = "high";
     mergeMode = "immediate";
