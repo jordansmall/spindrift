@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -773,33 +774,126 @@ func TestWarnUnprobedKinds_NothingMissingEmitsNothing(t *testing.T) {
 	}
 }
 
-func TestRequiredChildKnob(t *testing.T) {
-	tests := []struct {
-		name     string
-		settings map[string]string
-		ambient  string
-		want     string
-		wantErr  string
-	}{
-		{name: "document wins over a differing ambient", settings: map[string]string{"BASE_BRANCH": "main"}, ambient: "dev", want: "main"},
-		{name: "empty document value falls to ambient", settings: map[string]string{"BASE_BRANCH": ""}, ambient: "dev", want: "dev"},
-		{name: "absent from document falls to ambient", ambient: "dev", want: "dev"},
-		{name: "document and ambient agree", settings: map[string]string{"BASE_BRANCH": "main"}, ambient: "main", want: "main"},
-		{name: "neither is a config error", wantErr: "no value for BASE_BRANCH (not in environment or --input document settings)"},
+// sharedKnobAccessors maps each knob the daemon resolves as a child does to
+// its field, so TestResolveChildSharedKnobs can read the value the daemon
+// resolved for exactly that key.
+var sharedKnobAccessors = map[string]func(childSharedKnobs) string{
+	"BASE_BRANCH":          func(k childSharedKnobs) string { return k.baseBranch },
+	"MAX_PARALLEL":         func(k childSharedKnobs) string { return k.maxParallel },
+	"DAEMON_AWAKE_WINDOW":  func(k childSharedKnobs) string { return k.awakeWindow },
+	"BUTLER_CHORES":        func(k childSharedKnobs) string { return k.butlerChores },
+	"BUTLER_EVERY":         func(k childSharedKnobs) string { return k.butlerEvery },
+	"BUTLER_CHORE_CLASSES": func(k childSharedKnobs) string { return k.butlerChoreClasses },
+}
+
+// TestResolveChildSharedKnobs pins issue #4623 for every knob a child also
+// reads: the daemon resolves the value the child gets (document first, then
+// ambient, then the schema default). Every key carries a distinct value, so a
+// key resolved from another key's slot fails the case.
+func TestResolveChildSharedKnobs(t *testing.T) {
+	const wantErr = "no value for %s (not in environment or --input document settings)"
+	required := map[string]bool{"BASE_BRANCH": true, "MAX_PARALLEL": true}
+	type knobCase struct {
+		name         string
+		doc, ambient string
+		docSet       bool
+		want         string
+		wantErr      string
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			doc := &inputdoc.Document{Settings: tt.settings}
-			got, err := requiredChildKnob(doc, "BASE_BRANCH", tt.ambient)
-			if tt.wantErr != "" {
-				if err == nil || err.Error() != tt.wantErr {
-					t.Fatalf("err = %v, want %q", err, tt.wantErr)
+	for key, get := range sharedKnobAccessors {
+		cases := []knobCase{
+			{name: "document wins over a differing ambient", docSet: true, doc: "doc-" + key, ambient: "amb-" + key, want: "doc-" + key},
+			{name: "empty document value falls to ambient", docSet: true, ambient: "amb-" + key, want: "amb-" + key},
+			{name: "absent from document falls to ambient", ambient: "amb-" + key, want: "amb-" + key},
+			{name: "document and ambient agree", docSet: true, doc: "same-" + key, ambient: "same-" + key, want: "same-" + key},
+		}
+		if required[key] {
+			cases = append(cases, knobCase{name: "neither is a config error", wantErr: fmt.Sprintf(wantErr, key)})
+		} else {
+			cases = append(cases, knobCase{name: "neither is the schema default", want: inputdoc.SchemaDefault(key)})
+		}
+		for _, tt := range cases {
+			t.Run(key+"/"+tt.name, func(t *testing.T) {
+				clearKnobEnvT(t)
+				settings := map[string]string{}
+				for other := range sharedKnobAccessors {
+					t.Setenv(other, "other-"+other)
 				}
-				return
-			}
-			if err != nil || got != tt.want {
-				t.Errorf("requiredChildKnob() = %q, %v; want %q", got, err, tt.want)
-			}
-		})
+				t.Setenv(key, tt.ambient)
+				if tt.docSet {
+					settings[key] = tt.doc
+				}
+				got, err := resolveChildSharedKnobs(&inputdoc.Document{Settings: settings})
+				if tt.wantErr != "" {
+					if err == nil || err.Error() != tt.wantErr {
+						t.Fatalf("err = %v, want %q", err, tt.wantErr)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("resolveChildSharedKnobs() err = %v", err)
+				}
+				if v := get(got); v != tt.want {
+					t.Errorf("%s = %q, want %q", key, v, tt.want)
+				}
+			})
+		}
+	}
+}
+
+// TestResolveChildSharedKnobs_ButlerEveryDefault pins the one default value
+// the table above only checks against SchemaDefault itself.
+func TestResolveChildSharedKnobs_ButlerEveryDefault(t *testing.T) {
+	clearKnobEnvT(t)
+	got, err := resolveChildSharedKnobs(&inputdoc.Document{Settings: map[string]string{"BASE_BRANCH": "main", "MAX_PARALLEL": "1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.butlerEvery != "6h" {
+		t.Errorf("butlerEvery = %q, want the schema default 6h", got.butlerEvery)
+	}
+}
+
+// TestResolveDaemonOnlyKnobs_AmbientWins pins ADR 0020 for the knobs no child
+// reads: a non-empty ambient value beats a differing document value. It walks
+// daemonOnlyKnobs, so a key moved off Lookup (and out of the set) or added to
+// it must change this test too.
+func TestResolveDaemonOnlyKnobs_AmbientWins(t *testing.T) {
+	accessors := map[string]func(daemonOnlyRaw) string{
+		"DAEMON_APP":               func(k daemonOnlyRaw) string { return k.app },
+		"DAEMON_SELF_APP":          func(k daemonOnlyRaw) string { return k.selfApp },
+		"DAEMON_IDLE_FLOOR":        func(k daemonOnlyRaw) string { return k.idleFloor },
+		"DAEMON_IDLE_CAP":          func(k daemonOnlyRaw) string { return k.idleCap },
+		"DAEMON_PROBE_INTERVAL":    func(k daemonOnlyRaw) string { return k.probeInterval },
+		"DAEMON_FAILURE_BACKOFF":   func(k daemonOnlyRaw) string { return k.failureBackoff },
+		"DAEMON_BREAKER_THRESHOLD": func(k daemonOnlyRaw) string { return k.breakerThreshold },
+		"DAEMON_BREAKER_WINDOW":    func(k daemonOnlyRaw) string { return k.breakerWindow },
+		"RESEARCH_RESERVATION":     func(k daemonOnlyRaw) string { return k.researchReservation },
+	}
+	for key := range daemonOnlyKnobs {
+		if accessors[key] == nil {
+			t.Errorf("daemonOnlyKnobs lists %s but this test has no accessor for it", key)
+		}
+	}
+	for key := range accessors {
+		if !daemonOnlyKnobs[key] {
+			t.Errorf("test reads %s, which is not in daemonOnlyKnobs", key)
+		}
+	}
+	clearKnobEnvT(t)
+	settings := map[string]string{}
+	for key := range daemonOnlyKnobs {
+		settings[key] = "doc-" + key
+		t.Setenv(key, "amb-"+key)
+	}
+	const withSelf, multiKind = true, true
+	got, err := resolveDaemonOnlyKnobs(&inputdoc.Document{Settings: settings}, io.Discard, withSelf, multiKind)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key := range daemonOnlyKnobs {
+		if want, v := "amb-"+key, accessors[key](got); v != want {
+			t.Errorf("%s = %q, want ambient %q over the document value", key, v, want)
+		}
 	}
 }
