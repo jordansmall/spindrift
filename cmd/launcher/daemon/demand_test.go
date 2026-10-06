@@ -376,19 +376,54 @@ func TestMainRun_BadDaemonProbeIntervalFailsStartup(t *testing.T) {
 
 var _ forge.DemandCounter = fixedInterval(0)
 
-// A blank LABEL leaves work with nothing to count, so it stays exit-driven;
-// research's family is fixed and unaffected.
-func TestBuildDemandSources_BlankWorkLabelLeavesWorkExitDriven(t *testing.T) {
-	clearKnobEnvT(t)
-	src := buildDemandSources(demandDocT(map[string]string{
-		"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": t.TempDir(),
-	}), allDemandKinds)
-	if _, ok := src[daemon.KindOf(dispatchkind.Work)]; ok {
-		t.Error("work has a source despite a blank LABEL")
-	}
-	if _, ok := src[daemon.KindOf(dispatchkind.Research)]; !ok {
-		t.Error("research lost its source")
-	}
+// A knob unset in both the document and the environment resolves to its
+// schema default, as in a child: LABEL probes work for ready-for-agent,
+// LOCAL_ISSUES_DIR is .spindrift/issues under the cwd, and ISSUE_TRACKER is
+// github.
+func TestBuildDemandSources_UnsetKnobsResolveToSchemaDefaults(t *testing.T) {
+	t.Run("LABEL", func(t *testing.T) {
+		clearKnobEnvT(t)
+		dir := t.TempDir()
+		writeIssueFileT(t, dir, "w", "ready-for-agent")
+		src := buildDemandSources(demandDocT(map[string]string{
+			"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": dir,
+		}), allDemandKinds)
+		c, ok := src[daemon.KindOf(dispatchkind.Work)]
+		if !ok {
+			t.Fatal("work has no source though LABEL defaults to ready-for-agent")
+		}
+		if _, ok := src[daemon.KindOf(dispatchkind.Research)]; !ok {
+			t.Error("research has no source")
+		}
+		if got, err := c.CountReady(false); err != nil || got != 1 {
+			t.Errorf("CountReady() = %d, %v; want 1, nil", got, err)
+		}
+	})
+	t.Run("LOCAL_ISSUES_DIR", func(t *testing.T) {
+		clearKnobEnvT(t)
+		cwd := t.TempDir()
+		writeIssueFileT(t, filepath.Join(cwd, ".spindrift", "issues"), "x", "ready-for-agent")
+		t.Chdir(cwd)
+		src := buildDemandSources(demandDocT(map[string]string{"ISSUE_TRACKER": "local"}), allDemandKinds)
+		c, ok := src[daemon.KindOf(dispatchkind.Work)]
+		if !ok {
+			t.Fatal("work has no source though LOCAL_ISSUES_DIR defaults to .spindrift/issues")
+		}
+		if got, err := c.CountReady(false); err != nil || got != 1 {
+			t.Errorf("CountReady() = %d, %v; want 1, nil", got, err)
+		}
+	})
+	t.Run("ISSUE_TRACKER", func(t *testing.T) {
+		clearKnobEnvT(t)
+		doc := demandDocT(map[string]string{"REPO_SLUG": "o/r"})
+		if got := issueTrackerName(doc); got != "github" {
+			t.Fatalf("issueTrackerName() = %q, want github", got)
+		}
+		src := buildDemandSources(doc, allDemandKinds)
+		if len(src) != 2 {
+			t.Fatalf("sources = %v, want work and research over the default github tracker", src)
+		}
+	})
 }
 
 func TestBuildDemandSources_ForgejoPerKindSourceWithProbeInterval(t *testing.T) {

@@ -124,13 +124,9 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 	return sources
 }
 
-// issueTrackerName is the ISSUE_TRACKER a child resolves, a blank one being
-// github as the launcher defaults it.
+// issueTrackerName is the ISSUE_TRACKER a child resolves.
 func issueTrackerName(doc *inputdoc.Document) string {
-	if name := childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER")); name != "" {
-		return name
-	}
-	return "github"
+	return childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER"))
 }
 
 // trackers is daemon.Config.Trackers for src: every probed kind counts against
@@ -175,10 +171,14 @@ func probeIntervals(src demandSources, override time.Duration) map[daemon.Kind]t
 // ambient override is invisible to it; any other key is not stripped, so the
 // child inherits the daemon's ambient value. The caller passes ambient as a
 // literal os.Getenv so knob_env_guard_test.go still sees which keys the daemon
-// reads.
+// reads. A key unset in both the document and the environment falls back to
+// its schema default, as the child's schemaDefault does.
 func childKnob(doc *inputdoc.Document, key, ambient string) string {
 	if v, ok := doc.Setting(key); ok {
 		return v
 	}
-	return ambient
+	if ambient != "" {
+		return ambient
+	}
+	return inputdoc.SchemaDefault(key)
 }
