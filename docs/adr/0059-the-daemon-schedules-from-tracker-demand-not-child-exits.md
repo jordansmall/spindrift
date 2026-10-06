@@ -76,7 +76,8 @@ by-name check with a descriptor enablement row.
 - **forgejo** reads `x-total-count` from a `limit=1` page. It keeps
   `definedLabels`' pre-check, cached across probes: Forgejo silently drops an
   unresolved `labels=` filter (#3952), so an undefined label would otherwise
-  count every open issue.
+  count every open issue. Amended by issue #4594: a missing label's verdict
+  is cached for `undefinedLabelTTL`, so it is not re-walked every probe.
 - **local** runs `ListIssues` in-process, resolving `LOCAL_ISSUES_DIR` (a
   git-ignored path in the operator's checkout, not the fetched revision)
   against the same directory children use.
