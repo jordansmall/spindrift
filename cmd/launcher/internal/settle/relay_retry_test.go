@@ -367,6 +367,94 @@ func TestSettle_GithubReadOnly_BlockedRelayExhaustsRetriesAndLogsLastError(t *te
 	}
 }
 
+// Pins issue #4651: a status=ready relay that exhausts its retries parks the
+// issue agent-failed and leaves the Box's bundle in the outbox for
+// `spindrift recover`.
+func TestSettle_GithubReadOnly_ReadyRelayExhaustsRetriesParksFailedWithBundlePreserved(t *testing.T) {
+	const issNum = "4651"
+	outbox := t.TempDir()
+	bundle := filepath.Join(outbox, seambundle.FileName)
+	if err := os.WriteFile(bundle, []byte("bundle-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = errors.New("ssh auth blip")
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+	c := baseConfig()
+	c.ReadOnly = true
+	c.Policy = retry.Policy{Max: 2, Unit: time.Second}
+	_, c.Clock = recordingClock()
+	c.OutboxDir = func(string) string { return outbox }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), issNum, 0, result) })
+
+	if len(fc.RelayBundleCalls) != 3 {
+		t.Errorf("RelayBundle calls = %d, want Policy.Max+1 = 3", len(fc.RelayBundleCalls))
+	}
+	if len(fc.CreateDraftPRCalls) != 0 {
+		t.Errorf("CreateDraftPR must not run after an exhausted relay, got %+v", fc.CreateDraftPRCalls)
+	}
+	assertRelayFailureParked(t, fc, issNum)
+	if !strings.Contains(stdout, "status=relay-failed") {
+		t.Errorf("stdout must carry a status=relay-failed line, got:\n%s", stdout)
+	}
+	if got, err := os.ReadFile(bundle); err != nil || string(got) != "bundle-bytes" {
+		t.Errorf("outbox bundle must be preserved untouched, got %q, %v", got, err)
+	}
+}
+
+// A Box that wrote no bundle has nothing preserved to recover, so a missing
+// bundle under status=ready keeps the merge-blocked, agent-in-progress outcome.
+func TestSettle_GithubReadOnly_ReadyBundleNotFoundStaysBlockedInProgress(t *testing.T) {
+	const issNum = "4651"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = fmt.Errorf("outbox: %w", forge.ErrBundleNotFound)
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+	c := baseConfig()
+	c.ReadOnly = true
+	c.Policy = retry.Policy{Max: 2, Unit: time.Second}
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	captureStdout(t, func() { s.Settle(dispatch.NewFake(), issNum, 0, result) })
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle calls = %d, want 1 (not retried)", len(fc.RelayBundleCalls))
+	}
+	iss, _ := fc.Issue(issNum)
+	if containsLabel(iss.Labels, "agent-failed") || !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a missing bundle stays agent-in-progress, never agent-failed; labels=%v", iss.Labels)
+	}
+	if comments := issueComments(fc); len(comments) != 1 || !strings.Contains(comments[0], "merge blocked") {
+		t.Errorf("want exactly one merge-blocked comment, got %q", comments)
+	}
+}
+
 // stopOnRelayBackoff builds a clock whose sleep marks num terminated once the
 // relay has been attempted, so the stop lands inside the relay's backoff and
 // never in an earlier gate or confirm sleep. It records every sleep.
@@ -442,9 +530,11 @@ func TestSelfHeal_LocalForge_RelayStoppedDuringBackoff_AbandonsWithoutComplete(t
 	assertClaimUntouched(t, fc)
 }
 
-// ADR 0012 on the push-only path: a relay that never succeeds is a blocked
-// landing, not an abandon, so the issue still goes Complete with a comment.
-func TestSelfHeal_LocalForge_RelayExhaustedStillCompletesAndBlocks(t *testing.T) {
+// Issue #4651 on the push-only path: a relay that exhausts its retries leaves
+// the bundle in the outbox, so the issue parks agent-failed (never Complete)
+// with one comment naming `spindrift recover`. landingFailed tells every caller
+// the transition and comment are already done.
+func TestSelfHeal_LocalForge_RelayExhaustedParksFailed(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
 	c := baseConfig()
@@ -457,22 +547,19 @@ func TestSelfHeal_LocalForge_RelayExhaustedStillCompletesAndBlocks(t *testing.T)
 	var landing landingResult
 	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1")) })
 
-	if landing != landingManual {
-		t.Errorf("selfHeal = %v, want landingManual", landing)
+	if landing != landingFailed {
+		t.Errorf("selfHeal = %v, want landingFailed", landing)
 	}
 	if len(fc.RelayBundleCalls) != 2 {
 		t.Errorf("RelayBundle calls = %d, want 2 (1 + Max retries)", len(fc.RelayBundleCalls))
 	}
-	iss, _ := fc.Issue("1")
-	if !containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("issue must carry agent-complete after a blocked landing; labels=%v", iss.Labels)
-	}
 	if fc.Merged != "" {
 		t.Errorf("Merge must not run after a failed relay; fc.Merged=%q", fc.Merged)
 	}
-	if len(fc.CommentCalls) != 1 || !strings.Contains(fc.CommentCalls[0].Body, "landing blocked") || !strings.Contains(fc.CommentCalls[0].Body, "ssh auth blip") {
-		t.Errorf("want one 'landing blocked' comment carrying the relay error, got %+v", fc.CommentCalls)
+	if len(fc.TransitionStateCalls) != 1 {
+		t.Errorf("want exactly one transition, got %+v", fc.TransitionStateCalls)
 	}
+	assertRelayFailureParked(t, fc, "1")
 }
 
 // Pins issue #4649: a stop during the fix-pass relay's backoff abandons at
@@ -653,5 +740,42 @@ func TestSettle_ReadOnlyBlocked_RelayStoppedDuringBackoff_PostsNoComment(t *test
 				t.Errorf("RelayBundle calls = %d, want 1", len(fc.RelayBundleCalls))
 			}
 		})
+	}
+}
+
+// assertRelayFailureParked pins issue #4651: an exhausted host-side relay moves
+// the issue agent-in-progress -> agent-failed with exactly one comment pointing
+// at `spindrift recover`, and never the old merge-blocked comment.
+func assertRelayFailureParked(t *testing.T, fc *forge.Fake, num string) {
+	t.Helper()
+	iss, _ := fc.Issue(num)
+	if !containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("an exhausted relay must park the issue agent-failed; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("agent-in-progress must be cleared by the transition; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-complete") {
+		t.Errorf("an exhausted relay must NOT carry agent-complete (#2036); labels=%v", iss.Labels)
+	}
+	// postUsageComment adds one empty-bodied comment under dispatch.NewFake, so
+	// count CommentCalls directly: the parking comment plus at most that one.
+	var parked []string
+	for _, c := range fc.CommentCalls {
+		if c.Body != "" {
+			parked = append(parked, c.Body)
+		}
+	}
+	if len(parked) != 1 || len(fc.CommentCalls) > 2 {
+		t.Fatalf("expected exactly one parking comment, got %d of %d calls: %+v", len(parked), len(fc.CommentCalls), fc.CommentCalls)
+	}
+	body := parked[0]
+	if strings.Contains(body, "merge blocked") {
+		t.Errorf("comment must not be the merge-blocked one: %q", body)
+	}
+	for _, want := range []string{"spindrift recover " + num, "outbox"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("comment %q must contain %q", body, want)
+		}
 	}
 }

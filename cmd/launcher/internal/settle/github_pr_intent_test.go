@@ -164,12 +164,11 @@ func TestSettle_GithubReadOnly_ReadyRelaysThenCreatesDraftPRThenMerges_LocalTrac
 	}
 }
 
-// The genuinely-nothing-to-hand-off case: issue #2447 made RelayBundle always
-// run whether or not a PR-intent line is present, so blocking now needs both a
-// missing PR-intent line and a failed relay. The hand-off is left visibly
-// not-done (#2046): the issue stays agent-in-progress, not the agent-complete
-// an operator reads as merged (#2036), and is never demoted to agent-failed.
-func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails(t *testing.T) {
+// Issue #2447 made RelayBundle always run whether or not a PR-intent line is
+// present, so a missing PR-intent line plus a failed relay parks the issue: the
+// bundle is preserved in the outbox, so it is agent-failed (issue #4651), never
+// agent-complete (#2036), and the comment names `spindrift recover`.
+func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureParksFailed(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
 
@@ -202,25 +201,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureBlocksNotFails(t *t
 	if fc.Merged != "" {
 		t.Errorf("Merge must not be called when no PR was ever opened; fc.Merged=%q", fc.Merged)
 	}
-	iss, _ := fc.Issue(issNum)
-	if containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("a nudge-exhausted blocked hand-off must NOT carry agent-complete — it reads as merged/done to an operator (#2046, the #2036 confusion); labels=%v", iss.Labels)
-	}
-	if !containsLabel(iss.Labels, "agent-in-progress") {
-		t.Errorf("a nudge-exhausted blocked hand-off is left in-progress, visibly not-done; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must NOT carry agent-failed after a blocked hand-off; labels=%v", iss.Labels)
-	}
-	var blockedCalls []forge.CommentCall
-	for _, c := range fc.CommentCalls {
-		if strings.Contains(c.Body, "merge blocked") {
-			blockedCalls = append(blockedCalls, c)
-		}
-	}
-	if len(blockedCalls) != 1 {
-		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
-	}
+	assertRelayFailureParked(t, fc, issNum)
 }
 
 // The issue #2447 fallback: a status=ready Box with no usable PR-intent line
@@ -811,9 +792,9 @@ func TestSettle_GithubReadOnly_CodeForgeLacksCommitSubjectsBlocksNotFails(t *tes
 	}
 }
 
-// A missing or malformed bundle blocks the hand-off before any draft PR is
-// attempted: RelayBundle must run, and fail, ahead of CreateDraftPR.
-func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) {
+// A failed relay parks the issue before any draft PR is attempted: RelayBundle
+// must run, and fail, ahead of CreateDraftPR.
+func TestSettle_GithubReadOnly_RelayFailureParksFailedBeforeCreatingPR(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
 
@@ -841,13 +822,7 @@ func TestSettle_GithubReadOnly_RelayFailureBlocksBeforeCreatingPR(t *testing.T) 
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
 	}
-	iss, _ := fc.Issue(issNum)
-	if containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("a blocked relay must NOT carry agent-complete — it reads as merged/done (#2046); labels=%v", iss.Labels)
-	}
-	if !containsLabel(iss.Labels, "agent-in-progress") {
-		t.Errorf("a blocked relay is left in-progress, visibly not-done; labels=%v", iss.Labels)
-	}
+	assertRelayFailureParked(t, fc, issNum)
 }
 
 // The read-write path (Config.ReadOnly false) never consults BundleRelay or
@@ -974,4 +949,16 @@ func TestSettle_GithubReadOnly_MergedStatus_HostileLandingIgnored_UsesAgentBranc
 	if bad := "landing=" + hostileLanding + "  status=verified-merged"; strings.Contains(out, bad) {
 		t.Fatalf("verifyMerged must never verify against the hostile landing=%s; got: %q", hostileLanding, out)
 	}
+}
+
+// issueComments returns the bodies of fc's comments, dropping the usage report
+// postUsageComment adds after a blocked hand-off (empty under dispatch.NewFake).
+func issueComments(fc *forge.Fake) []string {
+	var bodies []string
+	for _, c := range fc.CommentCalls {
+		if c.Body != "" {
+			bodies = append(bodies, c.Body)
+		}
+	}
+	return bodies
 }

@@ -42,7 +42,11 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 		if errors.Is(err, errAbandoned) {
 			return "", handoffAbandoned
 		}
-		s.blockHandoff(num, branch, err)
+		if relayFailureParkable(err) {
+			s.parkRelayFailure(num, branch, err)
+		} else {
+			s.blockHandoff(num, branch, err)
+		}
 		return "", handoffBlocked
 	}
 	// created is false when Open adopted a pre-existing box-authored PR (issue
@@ -129,14 +133,25 @@ func logBlockedHandoffRelayFailure(num string, err error) {
 	fmt.Fprintf(os.Stderr, "    ?? #%s: could not relay blocked-hand-off bundle: %v\n", num, err)
 }
 
-// blockHandoff posts a merge-blocked comment, the shared outcome for every
-// hostMediateDraftPR failure, and leaves the issue in agent-in-progress rather
-// than transitioning it (issue #2046): agent-complete reads as merged and
-// green (issue #2036), and agent-failed (ADR 0012) is reserved for a Box that
-// exited non-zero, which this one did not.
+// blockHandoff posts a merge-blocked comment for a hostMediateDraftPR failure
+// other than an exhausted relay, and leaves the issue in agent-in-progress
+// rather than transitioning it (issue #2046): agent-complete reads as merged
+// and green (issue #2036), and agent-failed would send the operator to
+// `spindrift recover`, which has nothing to relay here (unlike parkRelayFailure).
 func (s *Settle) blockHandoff(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
+}
+
+// parkRelayFailure fails an issue whose bundle relay failed (issue #4651).
+// Unlike blockHandoff's cases, the bundle is intact in the outbox, so
+// `spindrift recover` can land it; agent-failed is what routes the operator
+// there. A missing bundle (forge.ErrBundleNotFound) preserves nothing and never
+// reaches here.
+func (s *Settle) parkRelayFailure(num, branch string, err error) {
+	fmt.Printf("    #%s  landing=%s  status=relay-failed  !! %v\n", num, branch, err)
+	s.it.Comment(num, fmt.Sprintf("bundle relay failed: %v. The Box's bundle is preserved in the outbox; run `spindrift recover %s` to retry relaying and landing it.", err, num))
+	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox")
 }
 
 // closingKeywordPattern matches GitHub's closing keywords (close, fix, resolve

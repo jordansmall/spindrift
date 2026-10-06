@@ -42,6 +42,13 @@ var ErrNoPRIntent = errors.New("no usable PR-intent line found in the box's log"
 // draft-PR-create failure with errors.Is instead of matching message text.
 var errRelayBundle = errors.New("relay bundle failed")
 
+// relayFailureParkable reports an exhausted relay of a bundle still in the
+// outbox, which `spindrift recover` can retry; a missing bundle or a wiring
+// error leaves nothing recover can fix.
+func relayFailureParkable(err error) bool {
+	return errors.Is(err, errRelayBundle) && !errors.Is(err, forge.ErrBundleNotFound)
+}
+
 // errCreateDraftPR is the CreateDraftPR analog of errRelayBundle.
 var errCreateDraftPR = errors.New("draft PR create failed")
 
