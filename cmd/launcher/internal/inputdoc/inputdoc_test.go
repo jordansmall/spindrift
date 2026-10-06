@@ -230,3 +230,35 @@ func TestParseDuration(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentSetting(t *testing.T) {
+	doc := &Document{Settings: map[string]string{
+		"BASE_BRANCH":           "develop",
+		"REPO_SLUG":             "",
+		"LOCAL_ISSUE_REFERENCE": "",
+		"MEMORY_LIMIT":          "",
+	}}
+	tests := []struct {
+		name    string
+		doc     *Document
+		key     string
+		want    string
+		wantSet bool
+	}{
+		{"nil document", nil, "BASE_BRANCH", "", false},
+		{"absent key", doc, "NOT_THERE", "", false},
+		{"absent bool key", doc, "AUTO_FORMAT", "", false},
+		{"non-empty value", doc, "BASE_BRANCH", "develop", true},
+		{"empty plain string knob is unset", doc, "REPO_SLUG", "", false},
+		{"empty bool knob is a setting", doc, "LOCAL_ISSUE_REFERENCE", "", true},
+		{"empty emptyDisables knob is a setting", doc, "MEMORY_LIMIT", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := tc.doc.Setting(tc.key)
+			if got != tc.want || ok != tc.wantSet {
+				t.Errorf("Setting(%q) = (%q, %v), want (%q, %v)", tc.key, got, ok, tc.want, tc.wantSet)
+			}
+		})
+	}
+}

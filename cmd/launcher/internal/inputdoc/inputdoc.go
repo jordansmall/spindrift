@@ -44,7 +44,8 @@ func Load(path string) (*Document, error) {
 // ambient env wins anyway, it prints a provenance warning to stderr —
 // otherwise nothing records which value actually drove the run, and a stale
 // exported override silently wins (ADR 0020). d may be nil (no --input
-// document loaded).
+// document loaded). Unlike Setting, an empty document value always means unset
+// here: the daemon's own knobs are strings, none bool or emptyDisables.
 func (d *Document) Lookup(envVar string, stderr io.Writer) (string, bool) {
 	if v := os.Getenv(envVar); v != "" {
 		if d != nil {
@@ -60,6 +61,23 @@ func (d *Document) Lookup(envVar string, stderr io.Writer) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// Setting returns the document's value for key and whether it counts as a
+// setting. A non-empty value always counts; an empty one counts only for a
+// knob where empty is itself a setting (bool knobs — Nix renders false as ""
+// — and emptyDisables knobs). Mirrors flagEntry.emptyIsSetting in
+// cmd/launcher/flags.go, whose set is generated into emptyissetting_gen.go so
+// the daemon can apply the same rule. d may be nil.
+func (d *Document) Setting(key string) (string, bool) {
+	if d == nil {
+		return "", false
+	}
+	v, ok := d.Settings[key]
+	if !ok {
+		return "", false
+	}
+	return v, v != "" || emptyIsSetting[key]
 }
 
 // Resolve wraps Lookup for knobs that must have a value: the default lives
