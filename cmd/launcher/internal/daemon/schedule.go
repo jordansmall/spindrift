@@ -50,9 +50,18 @@ type kindSched struct {
 	// reports, and again once a child runs.
 	due NextDue
 
-	ready      int
-	probedAt   time.Time // zero = never probed, or invalidated by a Continue
-	readyAtJam int       // ready as of the Jammed result that set the gate
+	ready    int
+	probedAt time.Time // zero = never probed, or invalidated by a Continue
+	// readyAtJam is ready as of the jam; while jamBaselinePending it still
+	// holds the previous jam's count until the next accepted probe sets it.
+	readyAtJam int
+
+	// readyUnconfirmed is set while ready carries an adjustment no accepted
+	// probe has confirmed: a Claimed's decrement or a child's exit 2 zeroing it.
+	readyUnconfirmed bool
+	// jamBaselinePending is set when a jam was recorded while readyUnconfirmed,
+	// so readyAtJam waits for the next accepted probe instead of taking ready.
+	jamBaselinePending bool
 
 	// counted is the tracker's last probed count, set only by DemandProbed.
 	// ready is also zeroed by a child's exit 2, which is no tracker
@@ -336,11 +345,19 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 		// lift a jam on that pre-claim count.
 		if e.Claims == ks.claims {
 			ks.probedAt = now
+			ks.readyUnconfirmed = false
 			// More ready than when the jam was recorded means someone added
 			// work, which a fall or a steady count is no evidence of. Strictly
 			// greater: the same count says the jam's cause is still there. An
 			// ended gate has nothing to lift, and a reset would wipe its streak.
-			if ks.jamGated(now) && e.Ready > ks.readyAtJam {
+			switch {
+			case ks.jamBaselinePending:
+				// This probe is the baseline, not a rise against one. A genuine
+				// rise landing between the jam and this probe is absorbed into
+				// it; a moved tip or the jam's expiry still covers that. No
+				// jamGated check: readyAtJam is only read under a live gate.
+				ks.readyAtJam, ks.jamBaselinePending = e.Ready, false
+			case ks.jamGated(now) && e.Ready > ks.readyAtJam:
 				ks.gate = ks.gate.reset()
 			}
 		}
@@ -361,6 +378,7 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 			if ks.ready > 0 {
 				ks.ready--
 			}
+			ks.readyUnconfirmed = true
 			ks.probedAt = time.Time{} // the claim moved the count; re-probe before the next start
 		}
 	}
@@ -433,13 +451,21 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen 
 		// The child's answer is a fresh observation: one interval of rest,
 		// not a growing backoff, so an empty queue never becomes a spawn loop.
 		k.gate = k.gate.reset()
-		k.ready, k.probedAt = 0, now
+		k.ready, k.probedAt, k.readyUnconfirmed = 0, now, true
 		if k.counted > 0 {
 			k.fresh = true
 		}
 	case ChildJammed:
 		k.gate, _ = k.gate.markNoWork(now, true)
-		k.readyAtJam = k.ready
+		// The child swaps the label before the daemon folds its Claimed, so an
+		// unconfirmed ready may count that claim twice. The signal is
+		// readyUnconfirmed, not a zero probedAt: a failed probe sets probedAt
+		// but keeps the decremented count, and a Continue zeroes probedAt
+		// without decrementing.
+		k.jamBaselinePending = k.readyUnconfirmed
+		if !k.jamBaselinePending {
+			k.readyAtJam = k.ready
+		}
 	}
 	return k
 }
@@ -499,14 +525,15 @@ type KindView struct {
 	RateLimitedUntil time.Time // zero unless paused at now
 	fault            probeFault
 
-	Probed     bool
-	Ready      int
-	ProbedAt   time.Time
-	NextProbe  time.Time // zero when never probed
-	JamUntil   time.Time // zero unless jam-gated
-	ReadyAtJam int
-	Counted    int  // last probed count; unlike Ready, a child's exit 2 leaves it
-	Fresh      bool // the next probe must skip any adapter cache
+	Probed             bool
+	Ready              int
+	ProbedAt           time.Time
+	NextProbe          time.Time // zero when never probed
+	JamUntil           time.Time // zero unless jam-gated
+	ReadyAtJam         int
+	JamBaselinePending bool // ReadyAtJam awaits the next probe
+	Counted            int  // last probed count; unlike Ready, a child's exit 2 leaves it
+	Fresh              bool // the next probe must skip any adapter cache
 
 	NextDue NextDue // a child-reported kind's due state; zero when none is known
 }
@@ -546,6 +573,7 @@ func (ks kindSched) view(now time.Time) KindView {
 	}
 	v.Probed, v.Ready, v.Counted, v.ProbedAt, v.ReadyAtJam = true, ks.ready, ks.counted, ks.probedAt, ks.readyAtJam
 	v.Fresh = ks.fresh
+	v.JamBaselinePending = ks.jamBaselinePending
 	if !ks.probedAt.IsZero() {
 		v.NextProbe = ks.probedAt.Add(ks.interval)
 	}
