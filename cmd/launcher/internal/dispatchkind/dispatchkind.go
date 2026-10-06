@@ -86,14 +86,63 @@ const (
 	DemandChildReported                         // only a child run knows (butler: its work is Ledger Chores, not tracker issues)
 )
 
-// DoctorPreflight is when the daemon's startup preflight passes the kind's DoctorFlag.
-type DoctorPreflight int
+// preflightWhen is when the daemon's startup preflight passes a kind's doctor flag.
+type preflightWhen int
 
 const (
-	PreflightNone      DoctorPreflight = iota + 1 // never: doctor always checks this kind's config (work's triage labels)
-	PreflightWhenDrawn                            // whenever the kind survives the daemon's enablement gate, bare selector included (butler)
-	PreflightWhenNamed                            // only when the operator's selector names the kind: the bare every-kind default lists it unconditionally, and a repo without its labels must still start (research)
+	preflightNone      preflightWhen = iota + 1 // never: doctor always checks this kind's config (work's triage labels)
+	preflightWhenDrawn                          // whenever the kind survives the daemon's enablement gate, bare selector included (butler)
+	preflightWhenNamed                          // only when the operator's selector names the kind: the bare every-kind default lists it unconditionally, and a repo without its labels must still start (research)
 )
+
+// DoctorPreflight is how the daemon's startup preflight treats a kind: when it
+// passes the kind's doctor flag, and which flag. It is a struct so a mode and
+// its flag cannot drift apart; only the constructors below build one. The zero
+// value is unset, and Flag panics on it.
+type DoctorPreflight struct {
+	when preflightWhen
+	flag string
+}
+
+// NoPreflight is the preflight of a kind whose config doctor always checks.
+func NoPreflight() DoctorPreflight {
+	return DoctorPreflight{when: preflightNone}
+}
+
+// PreflightWhenDrawn passes flag whenever the daemon draws the kind.
+func PreflightWhenDrawn(flag string) DoctorPreflight {
+	return newPreflight(preflightWhenDrawn, flag)
+}
+
+// PreflightWhenNamed passes flag only when the operator's selector names the kind.
+func PreflightWhenNamed(flag string) DoctorPreflight {
+	return newPreflight(preflightWhenNamed, flag)
+}
+
+func newPreflight(when preflightWhen, flag string) DoctorPreflight {
+	if flag == "" {
+		panic("dispatchkind: preflight needs a doctor flag")
+	}
+	return DoctorPreflight{when: when, flag: flag}
+}
+
+// Flag returns the doctor flag the preflight adds for this kind, or "" for
+// none. explicitSelector is whether the operator named kinds rather than
+// taking the bare every-kind default.
+func (p DoctorPreflight) Flag(explicitSelector bool) string {
+	switch p.when {
+	case preflightNone:
+		return ""
+	case preflightWhenDrawn:
+		return p.flag
+	case preflightWhenNamed:
+		if explicitSelector {
+			return p.flag
+		}
+		return ""
+	}
+	panic("dispatchkind: doctor preflight unset")
+}
 
 // Prompts names the kind's prompt templates. A zero value means "defer to
 // work's selection" for Base, and "no self-contained sub-mode" for
@@ -127,8 +176,7 @@ type Descriptor struct {
 	Tracker        Tracker         // which IssueTracker instance this kind's issues live on
 	AnnounceVerb   string          // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
 	Enablement     Enablement      // when the daemon draws this kind; see Enablement
-	Preflight      DoctorPreflight // when the daemon's startup preflight passes DoctorFlag; see DoctorPreflight
-	DoctorFlag     string          // doctor flag the preflight adds per DoctorPreflight; "" under PreflightNone
+	Preflight      DoctorPreflight // how the daemon's startup preflight passes this kind's doctor flag; see DoctorPreflight
 	UnclaimedGate  bool            // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
 }
 
@@ -147,7 +195,7 @@ var (
 		FilerRelayGate: "FILER_FILE_RELAY_WORK",
 		Tracker:        TrackerWork,
 		AnnounceVerb:   "implementing",
-		Preflight:      PreflightNone,
+		Preflight:      NoPreflight(),
 	}
 	Research = &Descriptor{
 		Name:   "research",
@@ -168,8 +216,7 @@ var (
 		FilerRelayGate: "FILER_FILE_RELAY_RESEARCH",
 		Tracker:        TrackerResearch,
 		AnnounceVerb:   "researching",
-		Preflight:      PreflightWhenNamed,
-		DoctorFlag:     "--research",
+		Preflight:      PreflightWhenNamed("--research"),
 	}
 	// Butler is the one-shot butler run (ADR 0056, #3870): it carries one
 	// Ledger Chore (ByChore), never a tracker issue, and files findings the
@@ -201,8 +248,7 @@ var (
 		Tracker:        TrackerWork, // butler files findings onto the work tracker; it has no lifecycle labels of its own
 		AnnounceVerb:   "sweeping",
 		UnclaimedGate:  true,
-		Preflight:      PreflightWhenDrawn,
-		DoctorFlag:     "--butler",
+		Preflight:      PreflightWhenDrawn("--butler"),
 	}
 )
 
