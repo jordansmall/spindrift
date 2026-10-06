@@ -48,9 +48,39 @@ func seamResult(text string) string {
 	return string(b) + "\n"
 }
 
+// seamGitQuietConfig turns off auto-gc and auto-maintenance: git can fork them
+// detached after a commit, fetch or rebase, and one still writing .git/objects
+// fails t.TempDir()'s RemoveAll with "directory not empty". The test's own git
+// takes it as -c flags (seamGitArgs); the box and Driver children read it from
+// the per-run $HOME/.gitconfig (seamQuietHome).
+var seamGitQuietConfig = []struct{ key, value string }{
+	{"gc.auto", "0"},
+	{"maintenance.auto", "false"},
+}
+
+// seamGitArgs is `-C dir`, the quiet -c flags, then args.
+func seamGitArgs(dir string, args ...string) []string {
+	out := []string{"-C", dir}
+	for _, c := range seamGitQuietConfig {
+		out = append(out, "-c", c.key+"="+c.value)
+	}
+	return append(out, args...)
+}
+
+// seamQuietHome writes seamGitQuietConfig into home's .gitconfig.
+func seamQuietHome(t *testing.T, home string) {
+	t.Helper()
+	for _, c := range seamGitQuietConfig {
+		cmd := exec.Command("git", "config", "--file", filepath.Join(home, ".gitconfig"), c.key, c.value)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git config %s: %v\n%s", c.key, err, out)
+		}
+	}
+}
+
 func seamGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd := exec.Command("git", seamGitArgs(dir, args...)...)
 	cmd.Env = append(os.Environ(),
 		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
 	if out, err := cmd.CombinedOutput(); err != nil {
@@ -74,6 +104,10 @@ func seamRepoAt(t *testing.T, dir string) string {
 	}
 	origin := seamOriginPath(dir)
 	seamGit(t, t.TempDir(), "init", "-q", "--bare", "-b", "main", origin)
+	// receive-pack runs auto-maintenance after each push on its own
+	// receive.autogc switch, and a push from the scratch clone or the box would
+	// otherwise leave one detached in origin.
+	seamGit(t, origin, "config", "receive.autogc", "false")
 	scratch := t.TempDir()
 	seamGit(t, scratch, "init", "-q", "-b", "main")
 	seamGit(t, scratch, "remote", "add", "origin", origin)
@@ -360,6 +394,7 @@ func runBoxSeam(t *testing.T, c seamCase) seamRun {
 	mergeEnv(env, c.env,
 		seamtest.WriteFakeConfig(t, "claude", seamtest.DriverConfig{Record: driverRec, Runs: c.driverRuns}),
 		seamtest.WriteFakeConfig(t, "orchestrator", orchCfg))
+	seamQuietHome(t, home)
 	seamCloneRoute(t, c.repo, home, env)
 	nixRec := filepath.Join(tmp, "nix.rec")
 	if c.nix != nil {
@@ -883,6 +918,7 @@ func TestBoxSeamDriverInvocationGolden(t *testing.T) {
 			if err := os.MkdirAll(home, 0o755); err != nil {
 				t.Fatal(err)
 			}
+			seamQuietHome(t, home)
 			registryEnv := map[string]string{}
 			if c.registry {
 				registryEnv = seamRegistryRoute(t, workDir)
@@ -1282,11 +1318,7 @@ func seamRebaseInProgress(dir string) bool {
 
 func seamRevParse(t *testing.T, dir, rev string) string {
 	t.Helper()
-	out, err := exec.Command("git", "-C", dir, "rev-parse", rev).Output()
-	if err != nil {
-		t.Fatalf("git rev-parse %s: %v", rev, err)
-	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(seamGitOut(t, dir, "rev-parse", rev))
 }
 
 // seamResolveRebase is the Driver side effect that finishes the conflicted
@@ -2249,7 +2281,7 @@ func TestBoxSeamBranchRecoveryGhFailureAborts(t *testing.T) {
 
 func seamGitOut(t *testing.T, dir string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
+	out, err := exec.Command("git", seamGitArgs(dir, args...)...).Output()
 	if err != nil {
 		t.Fatalf("git %v: %v", args, err)
 	}
