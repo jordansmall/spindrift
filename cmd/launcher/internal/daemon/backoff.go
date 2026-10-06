@@ -67,6 +67,10 @@ type kindBackoff struct {
 	b      idleBackoff
 	until  time.Time
 	jammed bool
+	// gen counts the gates markNoWork has set. Never reset: a child that
+	// started under an earlier gen is told apart from one started under the
+	// current gate, even across a reset in between.
+	gen int
 }
 
 // newKindBackoff builds a kindBackoff whose underlying idleBackoff starts at
@@ -92,7 +96,25 @@ func (k kindBackoff) markNoWork(now time.Time, jammed bool) (kindBackoff, time.D
 	k.b = b
 	k.until = now.Add(wait)
 	k.jammed = jammed
+	k.gen++
 	return k, wait
+}
+
+// markNoWorkUnder records a no-work result from a child that started when the
+// kind's gate generation was gen (issue #4618). If a sibling's result has
+// gated the kind since then and nothing has reset it, this result is the same
+// observation as that sibling's — one burst of concurrent children polling one
+// queue — so it neither doubles the backoff nor moves the deadline; it only
+// refreshes jammed, last-wins as markNoWork does. A result arriving once the
+// gate has lapsed is a fresh observation and marks normally: absorbing it
+// would leave the kind runnable at once, or jammed with no live gate.
+func (k kindBackoff) markNoWorkUnder(now time.Time, jammed bool, gen int) kindBackoff {
+	if gen != k.gen && !k.runnable(now) {
+		k.jammed = jammed
+		return k
+	}
+	k, _ = k.markNoWork(now, jammed)
+	return k
 }
 
 // runnable reports whether this kind may be tried at now, shared with

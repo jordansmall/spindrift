@@ -271,6 +271,8 @@ type slotFlight struct {
 	nextDue NextDue
 	// continues is state.continues[kind] when the child started.
 	continues int
+	// gateGen is the kind's Schedule.gateGenOf when the child started.
+	gateGen int
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -454,21 +456,24 @@ func (p *pool) resetKind(kind Kind) {
 // kindBackoff.markNoWork), while the alarm only fires when no sibling is
 // running a child that counts (issue #3571, #3735, #4205).
 //
-// nextDue is the child's not_due report and continues is what
-// flightContinues read for it. A report that went stale while the child ran
+// f is the flight snapshot flightReport read for the child: its not_due report,
+// Continue count, and the gate generation that lets a burst of results from one
+// gate raise
+// the kind's backoff once. A report that went stale while the child ran
 // (see reportStale) is replaced by "due now": one spurious child start just
 // re-reports, where parking on a stale report can idle the kind indefinitely.
-func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool, nextDue NextDue, continues int) {
+func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatchable bool, f slotFlight) {
 	now := p.clk.Now()
+	nextDue := f.nextDue
 	result := ChildEmpty
 	if noneDispatchable {
 		result = ChildJammed
 	}
 	p.mutate(func(s *state) []Event {
-		if s.reportStale(kind, revision, continues, nextDue) {
+		if s.reportStale(kind, revision, f.continues, nextDue) {
 			nextDue = NextDue{At: now}
 		}
-		s.observe(now, ChildDone{Kind: kind, Result: result, NextDue: nextDue})
+		s.observe(now, ChildDone{Kind: kind, Result: result, NextDue: nextDue, GateGen: f.gateGen})
 		// What the kind now waits for: its backoff, or for a probed kind the
 		// interval to its next probe.
 		var wait time.Duration
@@ -530,7 +535,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 			kind = provisional
 		}
 		ok = true
-		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind]}}
+		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind], gateGen: s.sched.gateGenOf(kind)}}
 		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)}}
 	})
 	return kind, ok
@@ -636,14 +641,14 @@ func (p *pool) flightClaim(slot int) dispatchkey.Key {
 	return p.st.slots[slot].flight.key
 }
 
-// flightReport is flightClaim's sibling for what noteWaitResult needs: the
-// not_due reports folded into slot's flight and the kind's Continue count when
-// its child started. The same must-read-before-finishChild rule applies.
-func (p *pool) flightReport(slot int) (nextDue NextDue, continues int) {
+// flightReport is flightClaim's sibling for what noteWaitResult needs: slot's
+// flight snapshot — the folded not_due reports, and the kind's Continue count
+// gate generation when its child started. The same
+// must-read-before-finishChild rule applies.
+func (p *pool) flightReport(slot int) slotFlight {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	f := p.st.slots[slot].flight
-	return f.nextDue, f.continues
+	return p.st.slots[slot].flight
 }
 
 // working reports whether any slot's phase is running — snapshotLocked's

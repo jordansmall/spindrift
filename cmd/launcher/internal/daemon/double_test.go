@@ -1230,7 +1230,7 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
 	}
 	var wait time.Duration
 	p.mutate(func(s *state) []Event {
-		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: result})
+		s.sched, _ = s.sched.Observe(now, ChildDone{Kind: kind, Result: result, GateGen: s.sched.gateGenOf(kind)})
 		if v := s.sched.View(kind, now); v.Gated {
 			wait = v.Until.Sub(now)
 		}
