@@ -288,3 +288,56 @@ func TestBuildDemandSources_BlankWorkLabelLeavesWorkExitDriven(t *testing.T) {
 		t.Error("research lost its source")
 	}
 }
+
+func TestBuildDemandSources_ForgejoPerKindSourceWithProbeInterval(t *testing.T) {
+	clearKnobEnvT(t)
+	src := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER": "forgejo",
+		"REPO_SLUG":     "owner/repo",
+		"FORGEJO_TOKEN": "tok",
+		"LABEL":         "ready-for-agent",
+	}), allDemandKinds)
+
+	if _, ok := src[daemon.KindOf(dispatchkind.Butler)]; ok {
+		t.Error("butler (DemandChildReported) got a tracker demand source")
+	}
+	for _, kind := range []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)} {
+		c, ok := src[kind]
+		if !ok {
+			t.Fatalf("no demand source for %s", kind)
+		}
+		if got := c.ProbeInterval(); got != 3*time.Minute {
+			t.Errorf("%s ProbeInterval() = %v, want 3m", kind, got)
+		}
+	}
+}
+
+// The token and slug fall back to the ambient env when the document lacks
+// them, as the child inherits them.
+func TestBuildDemandSources_ForgejoAmbientKnobsHonoured(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Setenv("REPO_SLUG", "owner/repo")
+	t.Setenv("FORGEJO_TOKEN", "tok")
+	src := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER": "forgejo", "LABEL": "ready-for-agent",
+	}), allDemandKinds)
+	if _, ok := src[daemon.KindOf(dispatchkind.Work)]; !ok {
+		t.Error("work source missing")
+	}
+}
+
+func TestBuildDemandSources_ForgejoMissingKnobHasNoSource(t *testing.T) {
+	clearKnobEnvT(t)
+	for name, settings := range map[string]map[string]string{
+		"no token":     {"REPO_SLUG": "owner/repo"},
+		"no repo slug": {"FORGEJO_TOKEN": "tok"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			settings["ISSUE_TRACKER"] = "forgejo"
+			settings["LABEL"] = "ready-for-agent"
+			if src := buildDemandSources(demandDocT(settings), allDemandKinds); len(src) != 0 {
+				t.Errorf("sources = %v, want none (kind stays exit-driven)", src)
+			}
+		})
+	}
+}
