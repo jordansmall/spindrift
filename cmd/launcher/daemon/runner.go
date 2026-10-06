@@ -34,8 +34,7 @@ type hostRunner struct {
 	nixSystem     string
 	env           []string      // the daemon's own environment, captured once (os.Environ()) so every child sees the same snapshot
 	knobs         []string      // keys of the Launcher input document's settings map, stripped from env before a child sees it
-	butler        bool          // the butler kind survived gateKinds; RunDoctor then adds doctor --butler (issue #3920)
-	research      bool          // the research kind is explicitly selected (not the bare every-kind default); RunDoctor then adds doctor --research
+	doctorFlags   []string      // kind flags RunDoctor adds to doctor (see doctorPreflightFlags in main.go)
 	demand        demandSources // per-kind tracker Demand counters; a kind absent here is exit-driven
 
 	// flightMu guards flight below, plus the Moved baseline and the
@@ -90,8 +89,7 @@ type hostRunnerConfig struct {
 	nixSystem     string
 	env           []string
 	knobs         []string
-	butler        bool
-	research      bool
+	doctorFlags   []string
 	demand        demandSources
 }
 
@@ -113,8 +111,7 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		nixSystem:     cfg.nixSystem,
 		env:           cfg.env,
 		knobs:         cfg.knobs,
-		butler:        cfg.butler,
-		research:      cfg.research,
+		doctorFlags:   cfg.doctorFlags,
 		demand:        cfg.demand,
 	}, nil
 }
@@ -542,7 +539,7 @@ var runnerDoctorCommand = exec.CommandContext
 // startupPreflight needs the line itself so its halt can name which labels
 // are missing.
 func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, labelsLine string, err error) {
-	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch, Butler: r.butler, Research: r.research})
+	doctorCmd, err := daemon.DoctorCommand(daemon.DoctorSpec{RepoPath: r.repoPath, AppAttr: r.appAttr, Revision: revision, Env: r.env, Knobs: r.knobs, FeatureBranch: r.featureBranch, Flags: r.doctorFlags})
 	if err != nil {
 		return 0, "", err
 	}

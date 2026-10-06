@@ -294,18 +294,18 @@ func TestDoctorCommand(t *testing.T) {
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--base-branch", "feat/thing"},
 		},
 		{
-			name: "butler appends --butler after doctor",
-			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: true},
+			name: "flags append after doctor",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Flags: []string{"--butler"}},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--butler"},
 		},
 		{
-			name: "butler and feature branch: --butler before --base-branch",
-			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: true, FeatureBranch: "feat/thing"},
+			name: "flags and feature branch: flags before --base-branch",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Flags: []string{"--butler"}, FeatureBranch: "feat/thing"},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor", "--butler", "--base-branch", "feat/thing"},
 		},
 		{
-			name: "no butler: no --butler flag",
-			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: false},
+			name: "no flags: bare doctor",
+			spec: DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123"},
 			want: []string{"nix", "run", "git+file:///home/op/repo?rev=abc123&allRefs=1", "--", "doctor"},
 		},
 	}
@@ -547,9 +547,9 @@ func TestDoctorCommandStripsAmbientReportFD(t *testing.T) {
 	}
 }
 
-func TestDoctorCommand_ResearchAppendsFlag(t *testing.T) {
+func TestDoctorCommand_AppendsFlags(t *testing.T) {
 	base := "git+file:///home/op/repo?rev=abc123&allRefs=1"
-	got, err := DoctorCommand(DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Butler: true, Research: true, FeatureBranch: "feat/thing"})
+	got, err := DoctorCommand(DoctorSpec{RepoPath: "/home/op/repo", AppAttr: ".#", Revision: "abc123", Flags: []string{"--butler", "--research"}, FeatureBranch: "feat/thing"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,6 +562,6 @@ func TestDoctorCommand_ResearchAppendsFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	if slices.Contains(got.Argv, "--research") {
-		t.Errorf("argv = %v carries --research with Research unset", got.Argv)
+		t.Errorf("argv = %v carries --research with Flags unset", got.Argv)
 	}
 }

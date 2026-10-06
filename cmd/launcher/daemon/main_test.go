@@ -3128,26 +3128,38 @@ func TestStartupPreflight_ExitFourNamesMissingLabels(t *testing.T) {
 	}
 }
 
-// TestResearchPromoted pins that only an explicit research selector makes
-// the preflight demand the research labels: the bare every-kind default
-// lists research too, and a dispatch-only repo must still start.
-func TestResearchPromoted(t *testing.T) {
+// TestDoctorPreflightFlags pins which kind flags the preflight gets, per each
+// kind's Preflight row: a kept butler always carries --butler, but research
+// carries --research only when named, since the bare every-kind default lists
+// it and a dispatch-only repo without the research labels must still start.
+func TestDoctorPreflightFlags(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		argv []string
-		want bool
+		name   string
+		argv   []string
+		chores string
+		want   []string
 	}{
-		{"bare", []string{"--input", "x.json"}, false},
-		{"dispatch", []string{"--input", "x.json", "dispatch"}, false},
-		{"research", []string{"--input", "x.json", "research"}, true},
+		{"bare without chores", nil, "", nil},
+		{"dispatch", []string{"dispatch"}, "bugs", nil},
+		{"research", []string{"research"}, "", []string{"--research"}},
+		{"bare with chores", nil, "bugs", []string{"--butler"}},
+		{"butler", []string{"butler"}, "bugs", []string{"--butler"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args, err := parseArgs(tc.argv)
+			args, err := parseArgs(append([]string{"--input", "x.json"}, tc.argv...))
 			if err != nil {
 				t.Fatalf("parseArgs: %v", err)
 			}
-			if got := researchPromoted(args); got != tc.want {
-				t.Errorf("researchPromoted = %v, want %v (kinds %v, explicit %v)", got, tc.want, args.Kinds, args.ExplicitSelector)
+			args.Kinds, err = gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: tc.chores})
+			if err != nil {
+				t.Fatalf("gateKinds: %v", err)
+			}
+			got, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
+			if err != nil {
+				t.Fatalf("doctorPreflightFlags: %v", err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("doctorPreflightFlags = %v, want %v (kinds %v, explicit %v)", got, tc.want, args.Kinds, args.ExplicitSelector)
 			}
 		})
 	}

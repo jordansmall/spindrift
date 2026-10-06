@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -153,11 +152,32 @@ func gateKinds(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([
 	return kept, nil
 }
 
-// researchPromoted reports whether doctor's preflight should require the
-// research labels: only when the operator named the research kind, since the
-// bare every-kind default includes it unconditionally.
-func researchPromoted(args parsedArgs) bool {
-	return args.ExplicitSelector && slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Research))
+// doctorPreflightFlags returns the kind flags doctor's preflight gets, from
+// each kind's Preflight row. kinds must be post-gateKinds, so a kind
+// gateKinds dropped never refuses startup over its own config. A
+// PreflightWhenNamed kind is promoted only when the operator named it: the
+// bare selector lists every kind, and a repo that never set one up (say,
+// without the research labels) must still start.
+func doctorPreflightFlags(kinds []daemon.Kind, explicitSelector bool) ([]string, error) {
+	var flags []string
+	for _, k := range kinds {
+		d, ok := dispatchkind.ByVerb(string(k))
+		if !ok {
+			return nil, fmt.Errorf("unknown kind %q", k)
+		}
+		switch d.Preflight {
+		case dispatchkind.PreflightNone:
+		case dispatchkind.PreflightWhenDrawn:
+			flags = append(flags, d.DoctorFlag)
+		case dispatchkind.PreflightWhenNamed:
+			if explicitSelector {
+				flags = append(flags, d.DoctorFlag)
+			}
+		default:
+			return nil, fmt.Errorf("%s: unknown doctor preflight %d", d.Verb, d.Preflight)
+		}
+	}
+	return flags, nil
 }
 
 // strippedKeys returns the keys of doc's settings that count (Document.Setting),
@@ -781,6 +801,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	args.Kinds = gatedKinds
+	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
+	if err != nil {
+		return fail(stderr, err)
+	}
 
 	// Built from the daemon's own resolved knobs, per kind row, once the
 	// butler gate has settled which kinds are in play.
@@ -860,16 +884,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		nixSystem:     nixSystem,
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
-		env:   os.Environ(),
-		knobs: stripped,
-		// A butler gateKinds dropped, or an explicit dispatch/research
-		// selector, must never refuse startup over butler config. Research is
-		// promoted only when explicitly selected: the bare selector always
-		// lists it, and a dispatch-only repo without the research labels
-		// must still start.
-		butler:   slices.Contains(args.Kinds, daemon.KindOf(dispatchkind.Butler)),
-		research: researchPromoted(args),
-		demand:   demand,
+		env:         os.Environ(),
+		knobs:       stripped,
+		doctorFlags: doctorFlags,
+		demand:      demand,
 	})
 	if err != nil {
 		return fail(stderr, err)
