@@ -58,7 +58,20 @@ type kindSched struct {
 	// limitedUntil is when the tracker's rate-limit pause ends; the zero time
 	// or a past instant means not paused.
 	limitedUntil time.Time
+
+	// fault is how the kind's own last probe ended, so the pool announces
+	// transitions rather than every repeat.
+	fault probeFault
 }
+
+// probeFault is how a kind's last probe ended.
+type probeFault int
+
+const (
+	probeClean       probeFault = iota // answered, or never probed
+	probeFailed                        // errored
+	probeRateLimited                   // refused by the tracker's rate limit
+)
 
 // Occupancy is what the pool's slot phases say is running, passed in on each
 // Decide rather than tracked twice.
@@ -261,14 +274,13 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	if !ok {
 		return s, false
 	}
-	if e, ok := ev.(DemandRateLimited); ok {
-		return s.rateLimited(now, ks, e.Reset), false
-	}
 	switch e := ev.(type) {
+	case DemandRateLimited:
+		return s.rateLimited(now, kind, e.Reset), false
 	case ChildDone:
 		ks = ks.childDone(now, e.Result)
 	case DemandProbed:
-		ks.ready, ks.counted = e.Ready, e.Ready
+		ks.ready, ks.counted, ks.fault = e.Ready, e.Ready, probeClean
 		// A claim that landed mid-probe moved the count after it was read, so
 		// stay stale (the Claimed zeroed probedAt) and re-probe, and never
 		// lift a jam on that pre-claim count.
@@ -290,7 +302,7 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	case DemandFailed:
 		// Keep the old count: only a rest from probing, so siblings don't
 		// hammer a failing tracker.
-		ks.probedAt = now
+		ks.probedAt, ks.fault = now, probeFailed
 	case Claimed:
 		if ks.probed() {
 			ks.claims++
@@ -305,18 +317,28 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	return s.with(kind, ks), opened(s.state[kind], ks, now)
 }
 
-// rateLimited pauses every kind on observed's tracker until reset. A zero or
+// rateLimitFallbackIntervals is how many probe intervals a rate limit without
+// a usable reset pauses for.
+const rateLimitFallbackIntervals = 4
+
+// rateLimited pauses every kind on kind's tracker until reset. A zero or
 // already-past reset would re-probe straight into the limit, so the pause is
 // four of the observed kind's intervals instead. Counts are left as read.
-func (s Schedule) rateLimited(now time.Time, observed kindSched, reset time.Time) Schedule {
+func (s Schedule) rateLimited(now time.Time, kind Kind, reset time.Time) Schedule {
+	observed := s.state[kind]
 	until := reset
 	if !reset.After(now) {
-		until = now.Add(4 * observed.interval)
+		until = now.Add(rateLimitFallbackIntervals * observed.interval)
 	}
 	m := make(map[Kind]kindSched, len(s.state))
 	for k, ks := range s.state {
-		if ks.tracker == observed.tracker {
+		// Keep the later deadline: a sibling probe already in flight when the
+		// tracker paused may report a limit with no reset.
+		if ks.tracker == observed.tracker && until.After(ks.limitedUntil) {
 			ks.limitedUntil = until
+		}
+		if k == kind {
+			ks.fault = probeRateLimited
 		}
 		m[k] = ks
 	}
@@ -403,6 +425,7 @@ type KindView struct {
 
 	Tracker          string
 	RateLimitedUntil time.Time // zero unless paused at now
+	fault            probeFault
 
 	Probed     bool
 	Ready      int
@@ -421,7 +444,7 @@ func (s Schedule) View(kind Kind, now time.Time) KindView {
 		return KindView{}
 	}
 	v := ks.view(now)
-	v.Tracker = ks.tracker
+	v.Tracker, v.fault = ks.tracker, ks.fault
 	if ks.paused(now) {
 		v.RateLimitedUntil, v.Gated = ks.limitedUntil, true
 		if ks.limitedUntil.After(v.Until) {

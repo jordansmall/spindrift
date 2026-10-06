@@ -36,6 +36,16 @@ type Status struct {
 	Reason string       `json:"reason,omitempty"`
 	Slots  []SlotStatus `json:"slots"`
 	Checks []KindCheck  `json:"checks"`
+	// Trackers has one entry per distinct tracker the probed kinds count
+	// against, in configured kind order (ADR 0059).
+	Trackers []TrackerCheck `json:"trackers,omitempty"`
+}
+
+// TrackerCheck is one tracker's rate-limit standing.
+type TrackerCheck struct {
+	Tracker string `json:"tracker"`
+	// RateLimitedUntil is RFC3339 UTC, set only while a pause holds.
+	RateLimitedUntil string `json:"rate_limited_until,omitempty"`
 }
 
 // SlotStatus is one pool slot's occupancy at the moment of publish.

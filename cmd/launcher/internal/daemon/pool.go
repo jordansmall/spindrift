@@ -1155,12 +1155,22 @@ func (p *pool) snapshotLocked() Status {
 		windowWalkExhausted = exhausted
 	}
 	checks := make([]KindCheck, 0, len(p.cfg.Kinds))
+	var trackers []TrackerCheck
+	seenTracker := make(map[string]bool)
 	allGated := true
 	anyJammed := false
 	for _, k := range p.cfg.Kinds {
 		v := p.st.sched.View(k, now)
 		at := v.Until // zero unless Gated, never a stale deadline
 		kc := KindCheck{Kind: k}
+		if v.Probed && !seenTracker[v.Tracker] {
+			seenTracker[v.Tracker] = true
+			tc := TrackerCheck{Tracker: v.Tracker}
+			if !v.RateLimitedUntil.IsZero() {
+				tc.RateLimitedUntil = v.RateLimitedUntil.UTC().Format(time.RFC3339)
+			}
+			trackers = append(trackers, tc)
+		}
 		if v.Gated {
 			// A probed kind's Jammed flag lingers past its gate; only a live
 			// jam gate (JamUntil) counts, not a fresh-empty Demand's wait.
@@ -1177,7 +1187,11 @@ func (p *pool) snapshotLocked() Status {
 			ready := v.Ready
 			kc.Ready = &ready
 			kc.ProbedAt = v.ProbedAt.UTC().Format(time.RFC3339)
-			kc.NextProbe = v.NextProbe.UTC().Format(time.RFC3339)
+			next := v.NextProbe
+			if v.RateLimitedUntil.After(next) {
+				next = v.RateLimitedUntil
+			}
+			kc.NextProbe = next.UTC().Format(time.RFC3339)
 		}
 		if !v.JamUntil.IsZero() {
 			kc.JamUntil = v.JamUntil.UTC().Format(time.RFC3339)
@@ -1240,11 +1254,12 @@ func (p *pool) snapshotLocked() Status {
 	copy(kinds, p.cfg.Kinds)
 
 	return Status{
-		Kinds:  kinds,
-		State:  computedState,
-		Reason: reason,
-		Slots:  slots,
-		Checks: checks,
+		Kinds:    kinds,
+		State:    computedState,
+		Reason:   reason,
+		Slots:    slots,
+		Checks:   checks,
+		Trackers: trackers,
 	}
 }
 

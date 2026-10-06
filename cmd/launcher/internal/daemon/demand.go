@@ -2,7 +2,11 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
+
+	"spindrift.dev/launcher/internal/forge"
 )
 
 // Demand is a kind's tracker-side answer to "is there anything for a child
@@ -40,6 +44,12 @@ const (
 // fault the breaker exists for. It still Observes DemandFailed first, so the
 // kind rests one interval instead of every slot re-probing it at once.
 //
+// A rate limit is the exception (ADR 0059): it is the tracker refusing us for
+// a known span, not a fault, so it never reaches the breaker or the failure
+// backoff. The schedule has paused the tracker's kinds; the slot hands on the
+// baton and returns to the top of the loop, where Decide parks it until the
+// pause ends.
+//
 // The Awake window is re-checked before every kind: a probe in flight can
 // outlive the window, and the slot must park in awaitWindow (probeRetop)
 // rather than ask the tracker about the next kind while it is shut.
@@ -56,6 +66,11 @@ func (p *pool) probe(ctx context.Context, slot int, kinds []Kind) probeResult {
 			continue
 		}
 		if err != nil {
+			if errors.Is(err, forge.ErrRateLimit) {
+				p.setPhase(slot, PhaseIdle)
+				p.passBaton(slot, batonPassIdle)
+				return probeRetop
+			}
 			if p.backoffOrHalt(ctx, slot, kind, "", fmt.Sprintf("demand: %v", err), batonPassFailed) {
 				return probeHalted
 			}
@@ -103,9 +118,31 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 	d, err := p.r.Demand(ctx, kind, fresh)
 	now := p.clk.Now()
 	if err != nil {
+		var rl *forge.RateLimitError
+		limited := errors.Is(err, forge.ErrRateLimit)
+		var reset time.Time
+		if limited && errors.As(err, &rl) {
+			reset = rl.Reset
+		}
 		p.mutate(func(s *state) []Event {
-			s.observe(now, DemandFailed{Kind: kind})
-			return nil
+			before := s.sched.View(kind, now)
+			prev := before.fault
+			if !limited {
+				s.observe(now, DemandFailed{Kind: kind})
+				if prev == probeFailed {
+					return nil
+				}
+				return []Event{{Event: "probe_failed", Kind: kind, Slot: intPtr(slot), Reason: fmt.Sprintf("demand: %v", err)}}
+			}
+			s.observe(now, DemandRateLimited{Kind: kind, Reset: reset})
+			// A pause that lapsed with no successful probe since is over, so a
+			// fresh one announces itself; only a repeat inside a live pause is quiet.
+			if prev == probeRateLimited && !before.RateLimitedUntil.IsZero() {
+				return nil
+			}
+			v := s.sched.View(kind, now)
+			// The pause always outlasts now: a probed kind has a positive interval.
+			return []Event{{Event: "probe_rate_limited", Kind: kind, Slot: intPtr(slot), Tracker: v.Tracker, Until: v.RateLimitedUntil.UTC().Format(time.RFC3339), Reason: fmt.Sprintf("demand: %v", err)}}
 		})
 		return true, err
 	}
@@ -115,6 +152,9 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		before := s.sched.View(kind, now)
 		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh})
 		var evs []Event
+		if before.fault != probeClean {
+			evs = append(evs, Event{Event: "probe_resumed", Kind: kind, Slot: intPtr(slot), Tracker: before.Tracker})
+		}
 		switch {
 		case before.Counted == 0 && d.Ready > 0:
 			evs = append(evs, Event{Event: "demand_appeared", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
