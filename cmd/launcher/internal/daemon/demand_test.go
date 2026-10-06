@@ -309,6 +309,16 @@ func TestLoopConcurrentSlotsShareOneDemandProbe(t *testing.T) {
 	r.setDemand(workKind, slots)
 	r.holdSlots(slots)
 	r.announceEachSlot()
+	// Sampled when the first child starts: the baton keeps every sibling
+	// from starting before that child claims, and the claim re-probes by
+	// design, so only this count measures the slots' shared probe.
+	var probesAtFirstStart int
+	var sample sync.Once
+	announce := r.onStart
+	r.onStart = func(ctx context.Context, req ChildRequest) error {
+		sample.Do(func() { probesAtFirstStart = r.demandCount(workKind) })
+		return announce(ctx, req)
+	}
 	release := make(chan struct{})
 	// Every call parks, so a Loop that failed to coalesce would show up as a
 	// second Demand call rather than a hang.
@@ -334,8 +344,8 @@ func TestLoopConcurrentSlotsShareOneDemandProbe(t *testing.T) {
 		r.awaitStart(t)
 	}
 
-	if got := r.demandCount(workKind); got != 1 {
-		t.Fatalf("Demand calls = %d for %d slots asking at once, want exactly 1", got, slots)
+	if probesAtFirstStart != 1 {
+		t.Fatalf("Demand calls = %d for %d slots asking at once, want exactly 1", probesAtFirstStart, slots)
 	}
 
 	cancel()
@@ -631,7 +641,9 @@ func TestLoopExtraSlotsDoNotSpawnAfterSiblingExitTwoZeroedDemand(t *testing.T) {
 	clk.park()
 	r := &scriptedRunner{revisions: []string{"rev1"}}
 	r.holdSlots(slots)
-	r.setDemand(workKind, 1)
+	// Deep enough that the start budget (ready minus starting) leaves every
+	// sibling a Start to decide.
+	r.setDemand(workKind, slots)
 	nw := newNotifyWriter()
 	done := make(chan Halt, 1)
 	go func() { done <- Loop(ctx, probedConfig(slots, time.Hour, workKind), r, newTestEmitter(nw), clk) }()
