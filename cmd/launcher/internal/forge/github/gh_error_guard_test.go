@@ -121,8 +121,7 @@ func condChecksErrVar(cond ast.Expr, errVar string) bool {
 // collectFuncLits finds function literals directly reachable from n without
 // crossing into a nested block-bearing statement's body, which
 // collectGhCallSites walks itself. It reaches gh exec calls written inside a
-// closure argument, such as relay.go's RelayBundle passing a
-// func(dir string) error literal that runs gh repo clone.
+// closure argument.
 func collectFuncLits(n ast.Node) []*ast.FuncLit {
 	var lits []*ast.FuncLit
 	ast.Inspect(n, func(x ast.Node) bool {
