@@ -910,6 +910,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		IdleFloor:           idleFloor,
 		IdleCap:             idleCap,
 		ProbeIntervals:      probeIntervals(demand, probeOverride),
+		Trackers:            trackers(demand, doc),
 		Slots:               slots,
 		SelfProgram:         selfProgram,
 		FailureBackoff:      failureBackoff,

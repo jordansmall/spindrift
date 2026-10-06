@@ -55,7 +55,7 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 	}
 
 	var newTracker func(forge.DispatchLabels) forge.IssueTracker
-	switch childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER")) {
+	switch issueTrackerName(doc) {
 	case "local":
 		dir := childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR"))
 		if dir == "" {
@@ -92,7 +92,7 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 				HTTPClient: &http.Client{Timeout: jiraProbeTimeout},
 			})
 		}
-	case "github", "":
+	case "github":
 		slug := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
 		if slug == "" {
 			return nil
@@ -122,6 +122,26 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		sources[daemon.KindOf(d)] = counter
 	}
 	return sources
+}
+
+// issueTrackerName is the ISSUE_TRACKER a child resolves, a blank one being
+// github as the launcher defaults it.
+func issueTrackerName(doc *inputdoc.Document) string {
+	if name := childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER")); name != "" {
+		return name
+	}
+	return "github"
+}
+
+// trackers is daemon.Config.Trackers for src: every probed kind counts against
+// the one ISSUE_TRACKER, so they share a rate-limit pause (ADR 0059).
+func trackers(src demandSources, doc *inputdoc.Document) map[daemon.Kind]string {
+	name := issueTrackerName(doc)
+	out := make(map[daemon.Kind]string, len(src))
+	for k := range src {
+		out[k] = name
+	}
+	return out
 }
 
 // parseProbeInterval turns DAEMON_PROBE_INTERVAL's resolved value into the

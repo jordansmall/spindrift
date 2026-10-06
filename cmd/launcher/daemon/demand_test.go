@@ -441,3 +441,24 @@ func TestBuildDemandSources_ForgejoMissingKnobHasNoSource(t *testing.T) {
 		})
 	}
 }
+
+func TestTrackers_KindsShareTheIssueTrackerName(t *testing.T) {
+	work, research := daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)
+	src := demandSources{work: fixedInterval(time.Second), research: fixedInterval(time.Second)}
+
+	for _, tc := range []struct{ tracker, want string }{
+		{"local", "local"},
+		{"forgejo", "forgejo"},
+		{"github", "github"},
+		{"", "github"},
+	} {
+		clearKnobEnvT(t)
+		got := trackers(src, demandDocT(map[string]string{"ISSUE_TRACKER": tc.tracker}))
+		if len(got) != 2 || got[work] != tc.want || got[research] != tc.want {
+			t.Errorf("ISSUE_TRACKER=%q: trackers = %v, want work and research -> %q", tc.tracker, got, tc.want)
+		}
+	}
+	if got := trackers(nil, demandDocT(nil)); len(got) != 0 {
+		t.Errorf("trackers(no sources) = %v, want empty", got)
+	}
+}
