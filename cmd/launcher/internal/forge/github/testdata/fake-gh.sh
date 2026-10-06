@@ -130,18 +130,26 @@ api-*)
 		;;
 	*/issues\?*)
 		# Conditional page read behind forge.DemandCounter: the open issues
-		# carrying the labels= query value, with an Etag over the body.
+		# carrying the labels= query value, 100 per page (page=N, default 1),
+		# with an Etag over the served page's body. Real GitHub orders by
+		# updated desc; the fake orders by number ascending instead. An issue
+		# dir holding a pull_request marker file is listed as a pull request.
+		# FAKE_GH_ISSUES_FAIL_STATUS fails the read with that HTTP status;
+		# FAKE_GH_ISSUES_FAIL_PAGE scopes it to one page number.
 		query=${path#*\?}
+		size=100
 		case "$query" in
 		*sort=updated*) ;;
 		*) echo "fake gh: issues page must sort by update: $path" >&2; exit 1 ;;
 		esac
 		case "$query" in
-		*per_page=100*) ;;
-		*) echo "fake gh: issues page must be 100 per page: $path" >&2; exit 1 ;;
+		*per_page="$size"*) ;;
+		*) echo "fake gh: issues page must be $size per page: $path" >&2; exit 1 ;;
 		esac
 		want=$(printf '%s' "$query" | tr '&' '\n' | sed -n 's/^labels=//p' | sed 's/%20/ /g; s/+/ /g')
-		if [ -n "$FAKE_GH_ISSUES_FAIL_STATUS" ]; then
+		page=$(printf '%s' "$query" | tr '&' '\n' | sed -n 's/^page=//p')
+		[ -n "$page" ] || page=1
+		if [ -n "$FAKE_GH_ISSUES_FAIL_STATUS" ] && { [ -z "$FAKE_GH_ISSUES_FAIL_PAGE" ] || [ "$FAKE_GH_ISSUES_FAIL_PAGE" = "$page" ]; }; then
 			echo "$path - $FAKE_GH_ISSUES_FAIL_STATUS" >> "$STATE_DIR/api.log"
 			printf 'HTTP/2.0 %s Error\r\n\r\n{"message":"boom"}' "$FAKE_GH_ISSUES_FAIL_STATUS"
 			echo "gh: HTTP $FAKE_GH_ISSUES_FAIL_STATUS" >&2
@@ -173,15 +181,24 @@ api-*)
 		body=$(
 			printf '['
 			first=1
+			idx=0
+			size=100
+			lo=$(( (page - 1) * size ))
 			for n in $(ordered_nums); do
 				labf="$DIR/$n/labels"
 				if [ ! -f "$labf" ] || ! grep -qxF "$want" "$labf"; then
 					continue
 				fi
+				idx=$((idx + 1))
+				if [ "$idx" -le "$lo" ] || [ "$idx" -gt $((lo + size)) ]; then
+					continue
+				fi
 				[ $first -eq 0 ] && printf ','
 				first=0
 				title=$(cat "$DIR/$n/title" 2>/dev/null)
-				printf '{"number":%s,"title":"%s","labels":%s}' "$n" "$(json_escape "$title")" "$(labels_json "$n")"
+				pr=""
+				[ -f "$DIR/$n/pull_request" ] && pr=',"pull_request":{"url":"x"}'
+				printf '{"number":%s,"title":"%s","labels":%s%s}' "$n" "$(json_escape "$title")" "$(labels_json "$n")" "$pr"
 			done
 			printf ']'
 		)
