@@ -6701,9 +6701,11 @@ inside that first page. The daemon runs `gh` in its own environment, so it
 needs `GH_TOKEN` (or a `gh` login) of its own; when
 `GH_TOKEN_REFRESH_FILE` is set it polls that file into its own `GH_TOKEN` as
 a child does, so an expired App token does not fail every probe into the
-breaker. A blank `REPO_SLUG` leaves every tracker-probed kind exit-driven, and a blank
-`LABEL` the work kind. Because a 304 can repeat a count a
-child has already consumed, a probe that counted work followed by a child
+breaker. A blank `REPO_SLUG` leaves every tracker-probed kind exit-driven,
+while a `LABEL`, `ISSUE_TRACKER`, or `LOCAL_ISSUES_DIR` set in neither the
+document nor the environment takes its schema default (`ready-for-agent`,
+`github`, `.spindrift/issues`), as in a child. Because a 304 can repeat a
+count a child has already consumed, a probe that counted work followed by a child
 exiting 2 makes the next probe of that kind skip the cache and read fresh.
 
 The Jira probe is one JQL search with `maxResults=0`, reading the
