@@ -6461,7 +6461,12 @@ present, not elided), `probed_at` and `next_probe` (RFC3339) once
 probed — absent from a child's exit 0 or 4, or a child's claim, until
 the re-probe lands, and always absent for an exit-driven kind.
 `jam_until` (RFC3339) appears only while a jam gate is live, and on a
-probed kind `ready_at_jam` is the `ready` count that jam froze.
+probed kind `ready_at_jam` is the `ready` count that jam froze. A paused
+kind's `nextCheck` is the end of its tracker's rate-limit pause or later. The
+top-level `trackers` array has one entry per distinct tracker the probed
+kinds count against, in configured kind order: `tracker` (its name) and
+`rate_limited_until` (RFC3339 UTC), present only while a rate-limit pause
+holds.
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
@@ -6617,12 +6622,25 @@ claim overtook in flight, or a probe landing after the jam already
 ended. A parked slot wakes at the earlier of the next probe and the
 jam's end. The count is advisory: children still discover and
 claim for themselves, so a stale or wrong count costs an empty child or a
-delayed start, never a wrong claim. A probe that errors counts toward the
-breaker below (`reason` `demand: ...`) and rests the kind for one interval.
+delayed start, never a wrong claim. A probe refused by the tracker's rate limit
+(`forge.ErrRateLimit`, a `*forge.RateLimitError`) is not a failure: it pauses
+probes and child starts for every kind on that tracker (work and research
+share `ISSUE_TRACKER` today) until the reset the tracker reported (GitHub:
+`Retry-After`, else `X-RateLimit-Reset` once `X-RateLimit-Remaining` is 0), or
+four probe intervals when none was reported or it has already passed. It never
+counts toward the breaker and never sleeps `DAEMON_FAILURE_BACKOFF`; the slot
+parks until the pause ends (a parked slot's deadline includes the rate-limit
+end), then the kinds re-probe. A child started into an empty bucket would only
+fail bootstrap and turn a polite wait into a breaker strike, and the daemon
+shares its `GH_TOKEN` bucket with its children (ADR 0059). Every other probe
+error backs off and counts toward the breaker below (`reason` `demand: ...`),
+like a tip-fetch failure.
 `demand_appeared` and `demand_drained` (events table below) report a kind's
-Ready crossing zero, and `demand_rose` a rising count lifting a jam;
-`ready`, `probed_at`, `next_probe`, `jam_until` and `ready_at_jam` on each
-status `kinds` entry show the state.
+Ready crossing zero, `demand_rose` a rising count lifting a jam, and
+`probe_rate_limited`, `probe_failed` and `probe_resumed` the probe outcome
+changing; `ready`, `probed_at`, `next_probe`, `jam_until` and `ready_at_jam`
+on each status `kinds` entry, and `rate_limited_until` on each `trackers`
+entry, show the state.
 
 The GitHub probe is one conditional request: `gh api` for the first 100
 open issues carrying the kind's dispatch label, sorted by last update, with
@@ -7269,6 +7287,9 @@ which runs outside every slot's own goroutine.
 | `demand_appeared` | `time`, `kind`, `slot`, `ready` | a Demand probe of a probed kind found startable items (`ready` above 0) where the previous count was 0, or the kind had never been probed; emitted on the zero crossing only, so a count that merely changes between two positive values emits nothing |
 | `demand_drained` | `time`, `kind`, `slot`, `ready` | a Demand probe found none (`ready` is 0) where the previous count was above 0 — the opposite zero crossing to `demand_appeared`, and a kind probed empty again emits nothing. Neither event is emitted for an exit-driven kind, which has no probe |
 | `demand_rose` | `time`, `kind`, `slot`, `ready` | a Demand probe of a jammed probed kind counted `ready` strictly above the kind's `ready_at_jam` (the count the jam froze), which lifts the jam — resetting its gate to `IdleFloor`, as a moved tip does — and wakes parked slots if the kind is now startable. The wait policy above lists the probes that lift nothing. Probed kinds only; it can accompany `demand_appeared` on the same probe |
+| `probe_rate_limited` | `time`, `kind`, `slot`, `tracker`, `until`, `reason` | a kind's Demand probe was refused by the tracker's rate limit, pausing every kind on `tracker` until `until` (RFC3339 UTC); emitted each time a pause begins, not again by a probe that lands while one holds |
+| `probe_failed` | `time`, `kind`, `slot`, `reason` | a kind's Demand probe failed for any other reason (`reason` `demand: ...`); transition only, and the usual `backoff` event still follows |
+| `probe_resumed` | `time`, `kind`, `slot`, `tracker` | a kind's first successful probe after a `probe_failed` or `probe_rate_limited` |
 | `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `running` (a `running` butler sibling never counts); `wait` carries `kind`'s own idle backoff (for a probed kind, the time to its next probe, flat rather than widening), so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
 | `jam` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | recording a no-work result against `kind` after `none-dispatchable` with every sibling slot `idle`, `awaiting_window`, `resolving` or `backing_off` (a sibling `running` a butler child counts as idle here too) — nothing that could unblock it running anywhere else in the pool, and nothing dispatchable, worth reporting loudly since only an operator (merging a blocker, relabelling an issue) clears it; `wait` carries `kind`'s own jam gate for a probed kind and its idle backoff for an exit-driven one, same as `idle` above |
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out and so resets at least one jammed kind's backoff — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. The event is emitted only when that reset actually ended at least one kind's backoff, so `kinds` is never empty, and an ordinary advance of the base branch with nothing jammed emits no `tip_moved` at all — its absence does not mean the tip stood still. One move therefore yields at most one `tip_moved` pool-wide, not one per idling slot: `slot` names whichever slot's resolve observed the move (slots sharing one coalesced fetch all see it, but only the first to report it still finds a jammed kind to reset). `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
