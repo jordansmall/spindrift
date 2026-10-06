@@ -172,7 +172,9 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `outcome`, `runner`, `driver` (the Driver interface and registry; each
   Driver's own behavior lives in a sibling subpackage, e.g. `driver/claude`),
   `backend` (the Descriptor registry; `registry_gen.go` is generated from
-  `lib/backends/default.nix`), `usage`. The flag table (`flagtable_gen.go`),
+  `lib/backends/default.nix`), `trackerbuild` (the shared Issue Tracker
+  adapter construction the launcher and daemon both use), `usage`. The
+  flag table (`flagtable_gen.go`),
   which also carries each knob's baked-in default (`schemaFlags[].dflt`), is
   generated and pinned by a check; don't hand-edit it — neither are
   `registry_gen.go` nor `cliflags_gen.go` (generated from `lib/cli-flags.nix`
