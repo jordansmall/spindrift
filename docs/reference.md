@@ -3053,12 +3053,13 @@ explicitly, **pre-release or on demand**, on a host with `podman` or
 `docker` and network egress to pull the image:
 
 ```sh
-go test -tags integration -run TestForgejoIntegration ./cmd/launcher/internal/forge/forgejo/
+cd cmd/launcher
+go test -tags integration -run TestForgejoIntegration ./internal/forge/forgejo/
 ```
 
-One command boots, seeds, runs the loop, asserts, and tears the container down
-— no external service and no credential beyond the throwaway admin account the
-test itself creates inside the disposable, localhost-only instance. The image
+The one `go test` run boots, seeds, runs the loop, asserts, and tears the
+container down — no external service and no credential beyond the throwaway
+admin account the test itself creates inside the disposable, localhost-only instance. The image
 defaults to `codeberg.org/forgejo/forgejo:11`; set `SPINDRIFT_FORGEJO_IMAGE` to
 pin a different tag or a local mirror.
 
@@ -3068,8 +3069,8 @@ Seam tests (issue #4280) are `integration`-tagged Go tests that read the
 artifacts Nix renders (`nix/seam-fixtures.nix`: the run-input document, the
 contracts, the preambles) instead of hand-written copies. The `seamtest`
 package resolves them from `SPINDRIFT_SEAM_FIXTURES_DIR`, else by running
-`nix build .#seam-fixtures`, so `go test -tags integration ./...` in the
-devshell builds them automatically and skips where `nix` is absent. `nix flake
+`nix build .#seam-fixtures`, so `go test -tags integration ./...` from
+`cmd/launcher` in the devshell builds them automatically and skips where `nix` is absent. `nix flake
 check` and the in-box `nix build .#checks-inbox` both run them through
 `launcher-go-seam-test`, which sets the variable to the built store path. The
 bats checks export the same variable and `tests/helper.bash` reads the
