@@ -12,8 +12,9 @@ import (
 )
 
 // writeBundle writes a seam.bundle file into dir. The content does not matter
-// because settle only stats it; the fixed name is what relayBundle and
-// bundlePresent key off (internal/seambundle.FileName).
+// because settle only stats it or deletes it on land; the fixed name is what
+// relayBundle, bundlePresent and removeLandedBundle key off
+// (internal/seambundle.FileName).
 func writeBundle(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, seambundle.FileName), []byte("bundle"), 0o644); err != nil {
