@@ -120,3 +120,15 @@ var stalePushRejectionMarkers = []string{
 func isStalePushRejection(stderr string) bool {
 	return MatchesAnyMarker(stderr, stalePushRejectionMarkers)
 }
+
+// HasUnmergedPaths reports whether the index at dir holds unmerged entries.
+// It classifies git's own merge/rebase failures independent of locale and
+// conflict kind (modify/delete and rename/rename print no "merge conflict"
+// text), so call it before --abort clears the index.
+func HasUnmergedPaths(ctx context.Context, dir string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "git", "-C", dir, "ls-files", "-u").Output()
+	if err != nil {
+		return false, fmt.Errorf("git ls-files -u: %w", err)
+	}
+	return len(strings.TrimSpace(string(out))) > 0, nil
+}

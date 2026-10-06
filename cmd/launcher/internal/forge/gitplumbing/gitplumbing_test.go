@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgetest"
 )
 
 func TestMatchesAnyMarker(t *testing.T) {
@@ -240,5 +241,41 @@ func TestWrapForcePushError_RedactsCredentialsFromStderr(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("wrapForcePushError leaks embedded credential: %v", err)
+	}
+}
+
+func TestHasUnmergedPaths(t *testing.T) {
+	d := t.TempDir()
+	write := func(contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(d, "a.txt"), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	forgetest.Run(t, d, "init", "-b", "main")
+	forgetest.Run(t, d, "config", "user.email", "test@example.com")
+	forgetest.Run(t, d, "config", "user.name", "Test")
+	write("base\n")
+	forgetest.Run(t, d, "add", "a.txt")
+	forgetest.Run(t, d, "commit", "-m", "base")
+
+	got, err := HasUnmergedPaths(context.Background(), d)
+	if err != nil || got {
+		t.Fatalf("clean repo: HasUnmergedPaths = %v, %v; want false, nil", got, err)
+	}
+
+	forgetest.Run(t, d, "checkout", "-b", "other")
+	write("other\n")
+	forgetest.Run(t, d, "commit", "-am", "other")
+	forgetest.Run(t, d, "checkout", "main")
+	write("main\n")
+	forgetest.Run(t, d, "commit", "-am", "main")
+	// The merge conflicts on purpose; only the resulting index state matters.
+	_ = exec.Command("git", "-C", d, "merge", "other").Run()
+
+	got, err = HasUnmergedPaths(context.Background(), d)
+	if err != nil || !got {
+		t.Fatalf("conflicted repo: HasUnmergedPaths = %v, %v; want true, nil", got, err)
 	}
 }
