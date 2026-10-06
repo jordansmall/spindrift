@@ -165,9 +165,11 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 				startAt = v
 			}
 		}
+		// maxResults=0 is a valid zero-row page: real Jira returns no issues
+		// and the full total, which the demand probe reads.
 		maxResults := len(out)
 		if m := r.URL.Query().Get("maxResults"); m != "" {
-			if v, err := strconv.Atoi(m); err == nil && v > 0 {
+			if v, err := strconv.Atoi(m); err == nil && v >= 0 {
 				maxResults = v
 			}
 		}

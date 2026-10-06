@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
@@ -421,6 +422,38 @@ type jiraSearchPayload struct {
 // and always ORs in the fallback label, so issues that fell back to a label
 // are still found.
 func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	issues, err := j.doSearch(j.stateJQL(state) + " order by created asc")
+	if err != nil {
+		return nil, err
+	}
+	return issuesFromIssues(issues), nil
+}
+
+// demandProbeInterval is how often the daemon re-counts Jira demand. A JQL
+// search carries no conditional-request support, and Jira Cloud rate-limits
+// REST calls, so the probe stays infrequent.
+const demandProbeInterval = 5 * time.Minute
+
+// ProbeInterval implements forge.DemandCounter.
+func (j *jiraClient) ProbeInterval() time.Duration { return demandProbeInterval }
+
+// CountReady implements forge.DemandCounter: the open Dispatchable issues,
+// read from the total of a zero-row search rather than by walking them.
+func (j *jiraClient) CountReady(_ bool) (int, error) {
+	q := url.Values{
+		"jql":        {j.stateJQL(forge.Dispatchable)},
+		"maxResults": {"0"},
+	}
+	var payload jiraSearchPayload
+	if err := j.rest.Do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, &payload); err != nil {
+		return 0, err
+	}
+	return payload.Total, nil
+}
+
+// stateJQL is the unordered JQL ListIssues and CountReady share, so the demand
+// probe counts exactly the set a dispatch would list.
+func (j *jiraClient) stateJQL(state forge.DispatchState) string {
 	clauses := []string{fmt.Sprintf("project = %q", j.cfg.ProjectKey)}
 	var stateClauses []string
 	if target, ok := j.cfg.StatusMapping[state]; ok && target != "" {
@@ -435,13 +468,7 @@ func (j *jiraClient) ListIssues(state forge.DispatchState) ([]forge.Issue, error
 	// A resolved issue must never come back as dispatchable, even when it still
 	// carries a stale dispatch label from an earlier fallback transition.
 	clauses = append(clauses, "statusCategory != Done")
-	jql := strings.Join(clauses, " AND ") + " order by created asc"
-
-	issues, err := j.doSearch(jql)
-	if err != nil {
-		return nil, err
-	}
-	return issuesFromIssues(issues), nil
+	return strings.Join(clauses, " AND ")
 }
 
 // ListOpenIssues returns every open issue in the project, created-time
