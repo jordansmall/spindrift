@@ -144,3 +144,50 @@ func TestPolicy_Backoff_WiresUnitAndClockOnly(t *testing.T) {
 		t.Errorf("recorded = %v, want %v", rc.recorded, want)
 	}
 }
+
+func TestLinearBackoff_DoUnless_SleepsFullDurationInSlices(t *testing.T) {
+	rc := newRecordingClock()
+	b := LinearBackoff{Unit: 2500 * time.Millisecond, Clock: rc.Clock()}
+
+	if b.DoUnless(1, func() bool { return false }) {
+		t.Fatal("DoUnless reported stopped though stop never fired")
+	}
+
+	var total time.Duration
+	for _, d := range rc.recorded {
+		if d <= 0 || d > stopSlice {
+			t.Errorf("slice %v outside (0, %v]", d, stopSlice)
+		}
+		total += d
+	}
+	if total != b.Duration(1) {
+		t.Errorf("slept %v in total, want %v", total, b.Duration(1))
+	}
+	if len(rc.recorded) < 2 {
+		t.Errorf("recorded %v, want the wait split into several slices", rc.recorded)
+	}
+}
+
+func TestLinearBackoff_DoUnless_StopMidwayEndsEarly(t *testing.T) {
+	rc := newRecordingClock()
+	b := LinearBackoff{Unit: 30 * time.Second, Clock: rc.Clock()}
+
+	if !b.DoUnless(1, func() bool { return len(rc.recorded) >= 2 }) {
+		t.Fatal("DoUnless did not report the stop")
+	}
+	if len(rc.recorded) != 2 {
+		t.Errorf("recorded %d sleeps, want 2 (no sleep after stop): %v", len(rc.recorded), rc.recorded)
+	}
+}
+
+func TestLinearBackoff_DoUnless_StopAlreadyTrueSleepsNothing(t *testing.T) {
+	rc := newRecordingClock()
+	b := LinearBackoff{Unit: 30 * time.Second, Clock: rc.Clock()}
+
+	if !b.DoUnless(1, func() bool { return true }) {
+		t.Fatal("DoUnless did not report the stop")
+	}
+	if len(rc.recorded) != 0 {
+		t.Errorf("recorded %v, want no sleeps", rc.recorded)
+	}
+}

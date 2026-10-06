@@ -73,3 +73,23 @@ type Policy struct {
 func (p Policy) Backoff(c Clock) LinearBackoff {
 	return LinearBackoff{Unit: p.Unit, Clock: c}
 }
+
+// stopSlice bounds each sleep DoUnless takes, so a stop signal is noticed within
+// one slice rather than after a whole multi-second backoff.
+const stopSlice = time.Second
+
+// DoUnless sleeps the Duration for attempt in stopSlice slices through the
+// Clock, checking stop before each. It reports true as soon as stop does, having
+// slept no further; false once the full wait has elapsed. The stop sources it
+// serves (a termination registry) expose no channel to select on, only a poll.
+func (b LinearBackoff) DoUnless(attempt int, stop func() bool) (stopped bool) {
+	for remaining := b.Duration(attempt); remaining > 0; {
+		if stop() {
+			return true
+		}
+		slice := min(remaining, stopSlice)
+		b.Clock.Sleep(slice)
+		remaining -= slice
+	}
+	return stop()
+}
