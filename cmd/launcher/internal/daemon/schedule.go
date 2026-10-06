@@ -45,6 +45,11 @@ type kindSched struct {
 	// claims counts the Claimed events folded into this kind, so a probe can
 	// tell whether one landed while it was in flight.
 	claims int
+
+	// fresh forces the next probe to skip any adapter cache: Demand said
+	// there was work and the child found none, so the cached count is
+	// suspect.
+	fresh bool
 }
 
 // Occupancy is what the pool's slot phases say is running, passed in on each
@@ -108,6 +113,7 @@ type DemandProbed struct {
 	Ready int
 	// Claims is the kind's claim count when the probe began.
 	Claims int
+	Fresh  bool // the probe skipped any adapter cache
 }
 
 // DemandFailed: a probe of Kind errored.
@@ -227,6 +233,11 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 		if e.Claims == ks.claims {
 			ks.probedAt = now
 		}
+		// Only a fresh probe answers the pending force: a conditional one
+		// already in flight when the child exited 2 must not clear it.
+		if e.Fresh {
+			ks.fresh = false
+		}
 	case DemandFailed:
 		// Keep the old count: only a rest from probing, so siblings don't
 		// hammer a failing tracker.
@@ -269,6 +280,9 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome) kindSched {
 		// not a growing backoff, so an empty queue never becomes a spawn loop.
 		k.gate = k.gate.reset()
 		k.ready, k.probedAt = 0, now
+		if k.counted > 0 {
+			k.fresh = true
+		}
 	case ChildJammed:
 		k.gate, _ = k.gate.markNoWork(now, true)
 		k.readyAtJam = k.ready
@@ -323,7 +337,8 @@ type KindView struct {
 	NextProbe  time.Time // zero when never probed
 	JamUntil   time.Time // zero unless jam-gated
 	ReadyAtJam int
-	Counted    int // last probed count; unlike Ready, a child's exit 2 leaves it
+	Counted    int  // last probed count; unlike Ready, a child's exit 2 leaves it
+	Fresh      bool // the next probe must skip any adapter cache
 }
 
 // View describes kind at now; the zero KindView for an unknown kind.
@@ -341,6 +356,7 @@ func (s Schedule) View(kind Kind, now time.Time) KindView {
 		return v
 	}
 	v.Probed, v.Ready, v.Counted, v.ProbedAt, v.ReadyAtJam = true, ks.ready, ks.counted, ks.probedAt, ks.readyAtJam
+	v.Fresh = ks.fresh
 	if !ks.probedAt.IsZero() {
 		v.NextProbe = ks.probedAt.Add(ks.interval)
 	}

@@ -152,7 +152,7 @@ func (tf *IssueTrackerFake) ListIssues(state DispatchState) ([]Issue, error) {
 // ListIssues (a failing tracker fails both) but, unlike ListIssues, is not
 // recorded in ListIssuesCalls, so a demand probe never perturbs a test that
 // asserts which states the dispatch loop listed.
-func (tf *IssueTrackerFake) CountReady() (int, error) {
+func (tf *IssueTrackerFake) CountReady(_ bool) (int, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	if tf.ListIssuesErr != nil {
