@@ -934,6 +934,10 @@ checkedMerge {
         "REGISTRY_PROXY_MANIFEST" # launcher-minted, read by driver-exec bindregistry
         # Naming-convention fallback for --secret-cmd, not a registered knob.
         "SECRET_CMD"
+        # Per-secret <NAME>_CMD siblings the daemon reads only to hint that its
+        # Demand probe ignores them (cmd/launcher/daemon/demand.go tokenFormHint).
+        "FORGEJO_TOKEN_CMD"
+        "JIRA_TOKEN_CMD"
       ];
       # Reverse direction: every name read anywhere in non-test cmd/launcher
       # source; testdata fixtures are skipped since Go never builds them.
