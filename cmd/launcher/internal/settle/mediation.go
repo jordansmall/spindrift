@@ -58,7 +58,7 @@ type Mediation struct {
 
 // mediationFor resolves num's own Code Forge and builds the branch and
 // Mediation every host-mediated hand-off call site shares.
-func (s *Settle) mediationFor(num string) (branch string, m *Mediation) {
+func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediation) {
 	cf := s.cfForNum(num)
 	// s.cfForNum resolves cf fresh per num (ADR 0033's per-issue wiring under
 	// CODE_FORGE=local), so the receiver state must come from cf, not from
@@ -66,7 +66,11 @@ func (s *Settle) mediationFor(num string) (branch string, m *Mediation) {
 	// New was built with, so it holds the wrong per-issue state for every other
 	// num. Only the descriptors are config-time and safe to reuse.
 	caps := forge.ResolveCapabilities(cf, s.it, s.cfg.Capabilities.ForgeDescriptor, s.cfg.Capabilities.TrackerDescriptor)
-	return cf.AgentBranch(num), NewMediation(caps, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	m = NewMediation(caps, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
+	// Wrapped here, not in NewMediation, so Open and relayBlockedWork's direct
+	// push-only relay share the one retry policy (issue #4649).
+	m.br = s.retryingRelay(num, gen, m.br)
+	return cf.AgentBranch(num), m
 }
 
 // NewMediation builds a Mediation from caps' relay and PR-creating fields

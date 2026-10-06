@@ -9,6 +9,10 @@ package forge
 type HostMediationFake struct {
 	*core
 
+	// RelayBundleErrs, if non-empty, scripts the first len(RelayBundleErrs)
+	// RelayBundle calls one error each (nil succeeds); later calls fall back to
+	// RelayBundleErr. It lets a test fail a relay N times then succeed.
+	RelayBundleErrs []error
 	// RelayBundleErr, if non-nil, fails every RelayBundle call, scripting
 	// CODE_FORGE=local's missing or malformed bundle failure (ADR 0033).
 	// Only AsLocal() and AsGithubReadOnly() reach it.
@@ -94,6 +98,11 @@ func (hm *HostMediationFake) relayBundle(outboxDir, ref string) error {
 	hm.mu.Lock()
 	defer hm.mu.Unlock()
 	hm.RelayBundleCalls = append(hm.RelayBundleCalls, RelayBundleCall{OutboxDir: outboxDir, Ref: ref})
+	if len(hm.RelayBundleErrs) > 0 {
+		err := hm.RelayBundleErrs[0]
+		hm.RelayBundleErrs = hm.RelayBundleErrs[1:]
+		return err
+	}
 	return hm.RelayBundleErr
 }
 

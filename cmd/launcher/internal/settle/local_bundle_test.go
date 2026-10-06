@@ -142,7 +142,7 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	}
 }
 
-// When Config.CodeForgeForIssue is set, mergeImmediate's RelayBundle and Merge
+// When Config.CodeForgeForIssue is set, landPushOnly's RelayBundle and Merge
 // calls must land through the resolved-for-this-issue instance it returns, not
 // the single cf New() received (ADR 0033, issue #1734). CODE_FORGE=local keys
 // the Integration branch per seam, so a mixed-parent batch must merge each seam

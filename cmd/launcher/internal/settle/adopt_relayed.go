@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -52,10 +53,16 @@ func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num strin
 // adoptAndGate is the shared adopt+gate tail behind tryAdoptRelayedBranch
 // (#2224) and SettleRelayedBranch (#2225): open a PR on num's relayed branch,
 // print the status=adopted line, then drive the same merge gate the "ready"
-// path uses. Returns false, with no side effect, when no PR could be opened.
+// path uses. Returns false, with no side effect, when no PR could be opened,
+// and true, also with no side effect, when a stop abandoned the relay.
 func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) bool {
-	pr, ok := s.adoptRelayedBranch(num, result)
-	if !ok {
+	pr, handoff := s.adoptRelayedBranch(num, gen, result)
+	switch handoff {
+	case handoffAbandoned:
+		// Handled: false would send the caller's blocked handling to comment on
+		// and transition an issue the stop already released (issue #3523).
+		return true
+	case handoffBlocked:
 		return false
 	}
 
@@ -132,13 +139,16 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 // landing= field (#1949): a prompt-injected read-only Box controls that field.
 // FallbackDefault means a missing PR-intent line falls back to an issue-derived
 // default instead of blocking, since this Box was cut short before that step.
-func (s *Settle) adoptRelayedBranch(num string, result dispatch.Result) (string, bool) {
-	branch, m := s.mediationFor(num)
+func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (string, handoffResult) {
+	branch, m := s.mediationFor(num, gen)
 	url, _, _, err := m.Open(num, branch, result, FallbackDefault)
-	if err != nil {
-		return "", false
+	if errors.Is(err, errAbandoned) {
+		return "", handoffAbandoned
 	}
-	return url, true
+	if err != nil {
+		return "", handoffBlocked
+	}
+	return url, handoffOpened
 }
 
 // tryMarkRecoverable promotes a local push-only issue to Recoverable (ADR
