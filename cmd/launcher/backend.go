@@ -120,10 +120,10 @@ var backendRows = []backendRow{
 			return trackerbuild.GitHub.New(trackerSettings(c))
 		},
 		newCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
-			return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
+			return github.NewExecClient(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod), github.WithCommitIdentity(c.gitUserName, c.gitUserEmail))
 		},
 		newReadOnlyCodeForge: func(c config, _ local.SanitizedParent, _ forge.IssueTracker) forge.CodeForge {
-			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod))
+			return github.NewReadOnlyCodeForge(c.repoSlug, dispatchLabels(c), c.branchPrefix, github.WithMergeMethod(c.mergeMethod), github.WithSyncMethod(c.syncMethod), github.WithCommitIdentity(c.gitUserName, c.gitUserEmail))
 		},
 		newLedger: func(c config) (ledger.Backend, butler.Tree, func(), error) {
 			url, gitArgs := github.GitRemote(c.repoSlug)
