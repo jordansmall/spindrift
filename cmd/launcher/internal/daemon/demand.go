@@ -110,17 +110,23 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		return true, err
 	}
 	p.mutate(func(s *state) []Event {
-		// Zero when never probed, so a first probe finding work reads as
-		// appearing and one finding none as nothing at all.
-		prev := s.sched.View(kind, now).Counted
+		// before.Counted is zero when never probed, so a first probe finding
+		// work reads as appearing and one finding none as nothing at all.
+		before := s.sched.View(kind, now)
 		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh})
+		var evs []Event
 		switch {
-		case prev == 0 && d.Ready > 0:
-			return []Event{{Event: "demand_appeared", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)}}
-		case prev > 0 && d.Ready == 0:
-			return []Event{{Event: "demand_drained", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)}}
+		case before.Counted == 0 && d.Ready > 0:
+			evs = append(evs, Event{Event: "demand_appeared", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
+		case before.Counted > 0 && d.Ready == 0:
+			evs = append(evs, Event{Event: "demand_drained", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
 		}
-		return nil
+		// This mutate observes only the probe, so a jam gate live before it
+		// and gone after it was lifted by the probe's rise.
+		if !before.JamUntil.IsZero() && s.sched.View(kind, now).JamUntil.IsZero() {
+			evs = append(evs, Event{Event: "demand_rose", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
+		}
+		return evs
 	})
 	return true, nil
 }
