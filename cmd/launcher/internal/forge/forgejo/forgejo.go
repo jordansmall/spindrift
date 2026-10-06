@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
@@ -71,6 +72,15 @@ type forgejoClient struct {
 	// lifetime once not unknown (issue #4034). Success is never cached: org
 	// labels can be added mid-run.
 	orgLabelsState atomic.Int32
+
+	// definedCache holds labels ListLabels has seen defined; see
+	// labelKnownDefined for why only positive verdicts are kept.
+	definedMu    sync.Mutex
+	definedCache map[string]struct{}
+
+	// labelCheckWarned is set once labelKnownDefined has warned about a failing
+	// ListLabels and cleared when one succeeds, so an outage warns once, not per probe.
+	labelCheckWarned atomic.Bool
 }
 
 // orgLabelsState values. Only orgLabelsUnreadable means org labels may be
@@ -221,18 +231,14 @@ func (c *forgejoClient) listIssues(restState, label string) ([]forge.Issue, erro
 // warnings.
 const issueListSource = "forgejo: issue list"
 
-// definedLabels filters labels down to the ones ListLabels reports as defined
-// on the repo or its owning org. The match is exact (case-sensitive) even
-// though Forgejo's DB name lookup can be case-insensitive on MySQL, so a
-// configured label differing only by case is treated as undefined. A
-// ListLabels error is a transient outage, not evidence the labels are
-// absent, so it falls back to treating every requested label as defined
-// rather than returning none.
-func (c *forgejoClient) definedLabels(labels []string) []string {
+// checkLabels filters labels down to the ones ListLabels reports as defined on
+// the repo or its owning org. The match is exact (case-sensitive) even though
+// Forgejo's DB name lookup can be case-insensitive on MySQL, so a configured
+// label differing only by case is treated as undefined.
+func (c *forgejoClient) checkLabels(labels []string) ([]string, error) {
 	defined, err := c.ListLabels()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "WARNING: %s: ListLabels failed, querying all %d requested label(s) without the existence pre-check: %v\n", issueListSource, len(labels), err)
-		return labels
+		return nil, err
 	}
 	var present []string
 	for _, l := range labels {
@@ -240,7 +246,106 @@ func (c *forgejoClient) definedLabels(labels []string) []string {
 			present = append(present, l)
 		}
 	}
+	return present, nil
+}
+
+// warnLabelCheckFailed reports that the existence pre-check was skipped.
+func warnLabelCheckFailed(n int, err error) {
+	fmt.Fprintf(os.Stderr, "WARNING: %s: ListLabels failed, querying all %d requested label(s) without the existence pre-check: %v\n", issueListSource, n, err)
+}
+
+// definedLabels is checkLabels with a fallback: a ListLabels error is a
+// transient outage, not evidence the labels are absent, so it treats every
+// requested label as defined rather than returning none.
+func (c *forgejoClient) definedLabels(labels []string) []string {
+	present, err := c.checkLabels(labels)
+	if err != nil {
+		warnLabelCheckFailed(len(labels), err)
+		return labels
+	}
 	return present
+}
+
+// demandProbeInterval is how often the daemon re-counts Forgejo demand. A probe
+// is one small request, but Codeberg sends no ETag or Last-Modified, so no
+// conditional request makes it free.
+const demandProbeInterval = 3 * time.Minute
+
+// ProbeInterval implements forge.DemandCounter.
+func (c *forgejoClient) ProbeInterval() time.Duration { return demandProbeInterval }
+
+// CountReady implements forge.DemandCounter: the open Dispatchable issues,
+// read from the X-Total-Count of a one-item page rather than by walking them.
+// A configured label the repo doesn't define counts zero without an issue
+// query, because Forgejo silently drops an unresolved labels= filter and would
+// count every open issue (issue #3952).
+func (c *forgejoClient) CountReady() (int, error) {
+	label := c.cfg.Labels.Label(forge.Dispatchable)
+	if !c.labelKnownDefined(label) {
+		return 0, nil
+	}
+	q := url.Values{
+		"state":  {"open"},
+		"type":   {"issues"},
+		"limit":  {"1"},
+		"page":   {"1"},
+		"labels": {label},
+	}
+	var page []forgejoIssuePayload
+	hdr, err := c.rest.DoWithHeader(http.MethodGet, c.repoPath()+"/issues?"+q.Encode(), nil, &page)
+	if err != nil {
+		return 0, err
+	}
+	raw := hdr.Get("X-Total-Count")
+	total, err := strconv.Atoi(raw)
+	if err != nil || total < 0 {
+		return 0, fmt.Errorf("forgejo: demand count: missing or invalid X-Total-Count header %q", raw)
+	}
+	// The label was deleted after it was cached, so Forgejo dropped the filter
+	// and total counts unrelated issues.
+	if len(page) > 0 && !slices.Contains(labelNames(page[0].Labels), label) {
+		c.forgetDefinedLabel(label)
+		return 0, nil
+	}
+	return total, nil
+}
+
+// labelKnownDefined reports whether label is defined, consulting ListLabels
+// only until it first sees the label. Only that positive verdict is cached: an
+// operator may create a missing label while the daemon runs, so a negative one
+// must be re-checked each probe, and the ListLabels-error fallback is a guess,
+// not a verdict.
+func (c *forgejoClient) labelKnownDefined(label string) bool {
+	c.definedMu.Lock()
+	_, known := c.definedCache[label]
+	c.definedMu.Unlock()
+	if known {
+		return true
+	}
+	present, err := c.checkLabels([]string{label})
+	if err != nil {
+		if !c.labelCheckWarned.Swap(true) {
+			warnLabelCheckFailed(1, err)
+		}
+		return true
+	}
+	c.labelCheckWarned.Store(false)
+	if len(present) == 0 {
+		return false
+	}
+	c.definedMu.Lock()
+	if c.definedCache == nil {
+		c.definedCache = map[string]struct{}{}
+	}
+	c.definedCache[label] = struct{}{}
+	c.definedMu.Unlock()
+	return true
+}
+
+func (c *forgejoClient) forgetDefinedLabel(label string) {
+	c.definedMu.Lock()
+	delete(c.definedCache, label)
+	c.definedMu.Unlock()
 }
 
 // ListIssuesWithLabels implements forge.LabeledBacklogLister (issue #3873):
