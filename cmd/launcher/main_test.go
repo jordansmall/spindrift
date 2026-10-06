@@ -77,7 +77,7 @@ func TestMainRun_LeadingFlagsBeforeVerb_ReachVerbHandler(t *testing.T) {
 		want string
 	}{
 		{[]string{"--self-contained", "dispatch"}, "flag --self-contained is only valid for the research subcommand"},
-		{[]string{"--yes", "recover"}, "usage: spindrift recover <issue-number>"},
+		{[]string{"--self-contained", "recover"}, "flag --self-contained is only valid for the research subcommand"},
 		{[]string{"--force", "registry"}, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]"},
 		{[]string{"--no-build", "doctor"}, "unrecognized argument: --no-build"},
 		{[]string{"--no-build", "doctor", "--butler"}, "unrecognized argument: --no-build"},
@@ -350,19 +350,20 @@ func TestRecover_RejectsSelfContained(t *testing.T) {
 }
 
 // `recover` routes through parseIssuePositionals rather than reading args[0]
-// raw (issue #3054). Before the fix "recover --yes" treated "--yes" itself as
-// the issue number, so the usage check never fired and the bad ID reached
-// bootstrap. "recover --yes 42" is the mirror case.
+// raw (issue #3054). "recover --yes" has no positional left once the flag is
+// stripped, so it is queue mode (issue #4654) and reaches bootstrap; before the
+// fix "--yes" itself was taken as the issue ID. "recover --yes 42" is the
+// mirror case.
 func TestMainRun_Recover_StripsFlagsBeforeIssueID(t *testing.T) {
 	t.Setenv("REPO_SLUG", "")
 
 	var stdout, stderr bytes.Buffer
 	code := mainRun([]string{"recover", "--yes"}, &stdout, &stderr)
-	if code != 1 {
-		t.Errorf("mainRun(recover --yes) code = %d, want 1", code)
+	if code != exitConfigInvalid {
+		t.Errorf("mainRun(recover --yes) code = %d, want %d (queue-mode bootstrap exit code)", code, exitConfigInvalid)
 	}
-	if !strings.Contains(stderr.String(), "usage: spindrift recover <issue-number>") {
-		t.Errorf("mainRun(recover --yes) stderr = %q, want the usage message (no numeric issue ID present)", stderr.String())
+	if !strings.Contains(stderr.String(), "REPO_SLUG") {
+		t.Errorf("mainRun(recover --yes) stderr = %q, want a REPO_SLUG validation error (queue mode reached bootstrap; --yes not read as an issue ID)", stderr.String())
 	}
 
 	stdout.Reset()

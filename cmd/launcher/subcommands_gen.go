@@ -10,7 +10,7 @@ var subcommandRegistry = []subcommandEntry{
 	{name: "butler", usage: "[--chore <name>] [--no-build]", doc: "one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)"},
 	{name: "preview", usage: "[issue...]", doc: "dry-run: show what dispatch would pick up, in order"},
 	{name: "build", usage: "", doc: "realize the agent image without running any agent"},
-	{name: "recover", usage: "<issue>", doc: "run the merge gate for a single issue"},
+	{name: "recover", usage: "[issue]", doc: "run the merge gate for one issue; with none, recover one eligible agent-failed issue"},
 	{name: "doctor", usage: "[--verbose|-v] [--butler] [--research]", doc: "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)"},
 	{name: "reconcile", usage: "", doc: "local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)"},
 	{name: "registry", usage: "discover <repo-dir> <routes-file> [--force]", doc: "discover registry routes from a Target repo checkout and write the routes file (ADR 0045)"},
