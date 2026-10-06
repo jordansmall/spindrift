@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/retry"
 )
 
 // retryingRelay wraps br so every bundle relay shares one retry-with-backoff
@@ -13,14 +14,21 @@ func (s *Settle) retryingRelay(num string, gen uint64, br forge.BundleRelay) for
 	if br == nil {
 		return nil
 	}
-	return &retryingBundleRelay{s: s, num: num, gen: gen, inner: br}
+	return &retryingBundleRelay{
+		backoff:    s.transientBackoff(),
+		maxRetries: s.cfg.Policy.Max,
+		stopped:    func() bool { return s.terminated(num, gen) },
+		num:        num,
+		inner:      br,
+	}
 }
 
 type retryingBundleRelay struct {
-	s     *Settle
-	num   string
-	gen   uint64
-	inner forge.BundleRelay
+	backoff    retry.LinearBackoff
+	maxRetries int
+	stopped    func() bool
+	num        string // log lines only
+	inner      forge.BundleRelay
 }
 
 // RelayBundle retries every failure whatever its class: the relay re-fetches a
@@ -31,15 +39,14 @@ type retryingBundleRelay struct {
 // no bundle, which no amount of waiting changes. An operator stop during a
 // backoff returns errAbandoned wrapping the last relay error.
 func (r *retryingBundleRelay) RelayBundle(outboxDir, ref string) error {
-	backoff := r.s.transientBackoff()
 	for attempt := 1; ; attempt++ {
 		err := r.inner.RelayBundle(outboxDir, ref)
-		if err == nil || errors.Is(err, forge.ErrBundleNotFound) || attempt > r.s.cfg.Policy.Max {
+		if err == nil || errors.Is(err, forge.ErrBundleNotFound) || attempt > r.maxRetries {
 			return err
 		}
 		fmt.Printf("    #%s  landing=%s  status=relay-retry  attempt=%d/%d  !! %v\n",
-			r.num, ref, attempt, r.s.cfg.Policy.Max, err)
-		if backoff.DoUnless(attempt, func() bool { return r.s.terminated(r.num, r.gen) }) {
+			r.num, ref, attempt, r.maxRetries, err)
+		if r.backoff.DoUnless(attempt, r.stopped) {
 			return fmt.Errorf("%w: %w", errAbandoned, err)
 		}
 	}

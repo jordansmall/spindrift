@@ -201,7 +201,12 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			// work until this relay lands it. It must run before the no-op check
 			// below, which would otherwise misread every read-only fix pass as a
 			// no-op. Best-effort: a failure here only logs.
-			if err := s.relayBoxBundle(num); err != nil {
+			if _, err := s.relayBoxBundle(num, gen); err != nil {
+				// A stop mid-backoff already released num (issue #3523); falling
+				// through would log a failure and sleep the no-op confirm poll.
+				if errors.Is(err, errAbandoned) {
+					return landingAbandoned, ""
+				}
 				fmt.Printf("    #%s  landing=%s  status=fix-relay-failed  !! %v\n", num, pr, err)
 			}
 			// A fix pass that exits zero but pushes no new commit leaves CI's
@@ -262,8 +267,25 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	if s.terminated(num, gen) {
 		return landingAbandoned
 	}
+	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
+	// instead of pushing, so relay it in first (ADR 0033). It runs ahead of the
+	// Complete commit because a stop during the relay's retry backoff (issue
+	// #4649) has already released num (issue #3523). branch is re-derived from
+	// cf.AgentBranch, never trusted from the Agent-controlled outcome line
+	// (#1949).
+	relayedRef, relayErr := s.relayBoxBundle(num, gen)
+	if relayedRef != "" {
+		branch = relayedRef
+	}
+	if errors.Is(relayErr, errAbandoned) {
+		return landingAbandoned
+	}
 	s.transitionState(num, forge.InProgress, forge.Complete, "")
-	if err := s.applyMergeMode(num, gen, branch, nil); err != nil {
+	err := relayErr
+	if err == nil {
+		err = s.applyMergeMode(num, gen, branch, nil)
+	}
+	if err != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
 		return landingManual
@@ -398,20 +420,6 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 	// cf is num's own parent-keyed instance when Config.CodeForgeForIssue is set
 	// (CODE_FORGE=local, issue #1734), otherwise New's cf unchanged.
 	cf := s.cfForNum(num)
-	// Merge needs the ref to exist as a branch, but the read-only Box bundled it
-	// instead of pushing, so relay it in first (ADR 0033); a relay failure has no
-	// retry. Only the push-only path relays here, since hostMediateDraftPR already
-	// relayed a PR-shaped read-only forge (#1919). pr is re-derived from
-	// cf.AgentBranch, never trusted from the Agent-controlled outcome line (#1949).
-	if br, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
-		if s.cfg.OutboxDir == nil {
-			return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
-		}
-		pr = cf.AgentBranch(num)
-		if err := br.RelayBundle(s.cfg.OutboxDir(num), pr); err != nil {
-			return err
-		}
-	}
 	for {
 		if s.terminated(num, gen) {
 			return errAbandoned
@@ -601,7 +609,12 @@ func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.D
 	// resolved branch to the outbox, and nothing else relays that bundle in, so
 	// without this the caller's rewaitAfterForcePush would poll CI on the
 	// still-conflicted pre-resolve head forever.
-	if err := s.relayBoxBundle(num); err != nil {
+	if _, err := s.relayBoxBundle(num, gen); err != nil {
+		// A stop mid-backoff must stay errAbandoned, not become a never-green
+		// Failed demotion of an issue Terminate already released (issue #3523).
+		if errors.Is(err, errAbandoned) {
+			return err
+		}
 		return fmt.Errorf("%w: relay after conflict-resolve failed: %v", errLandingNeverGreen, err)
 	}
 	return nil
@@ -610,17 +623,19 @@ func (s *Settle) resolveConflict(num string, gen uint64, pr string, d dispatch.D
 // relayBoxBundle relays num's outbox bundle in via the Code Forge's optional
 // forge.BundleRelay hook (issue #1919), for callers whose Box may have bundled
 // instead of pushing. A read-write Code Forge never implements BundleRelay, so
-// this is a no-op there: its Box already pushed during its own run.
-func (s *Settle) relayBoxBundle(num string) error {
+// this is a no-op there: its Box already pushed during its own run. ref is the
+// branch it relays, empty when the Code Forge is not a BundleRelay.
+func (s *Settle) relayBoxBundle(num string, gen uint64) (ref string, err error) {
 	cf := s.cfForNum(num)
 	br, ok := cf.(forge.BundleRelay)
 	if !ok {
-		return nil
+		return "", nil
 	}
+	ref = cf.AgentBranch(num)
 	if s.cfg.OutboxDir == nil {
-		return fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay")
+		return ref, fmt.Errorf("settle: Config.OutboxDir is unset but the Code Forge implements forge.BundleRelay — every CODE_FORGE=local construction site must supply an OutboxDir resolver")
 	}
-	return br.RelayBundle(s.cfg.OutboxDir(num), cf.AgentBranch(num))
+	return ref, s.retryingRelay(num, gen, br).RelayBundle(s.cfg.OutboxDir(num), ref)
 }
 
 // rewaitAfterForcePush waits for CI to reach green on the PR's current head
