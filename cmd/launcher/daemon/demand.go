@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"time"
 
@@ -9,9 +10,15 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/github"
+	"spindrift.dev/launcher/internal/forge/jira"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/inputdoc"
 )
+
+// jiraProbeTimeout bounds each Jira Demand probe: the adapter otherwise falls
+// back to the untimed http.DefaultClient, and a server that accepts the
+// connection but never answers would stall the kind's probe for good.
+const jiraProbeTimeout = 30 * time.Second
 
 // demandSources maps each kind the daemon schedules from tracker demand
 // (ADR 0059) to the counter that answers its Demand probe. A kind absent
@@ -21,13 +28,13 @@ type demandSources map[daemon.Kind]forge.DemandCounter
 // buildDemandSources builds a demand counter for each kind in kinds whose
 // descriptor row says DemandTrackerProbe, from the same settings a child
 // resolves ISSUE_TRACKER, the tracker's own knobs and the work labels from; a
-// blank ISSUE_TRACKER is github, as the launcher defaults it. A tracker
-// without a forge.DemandCounter adapter (everything but local, forgejo and
-// github so far) or a missing knob yields no source, never an error: the kind
-// then simply stays exit-driven.
+// blank ISSUE_TRACKER is github, as the launcher defaults it. An unknown
+// tracker or a missing knob yields no source, never an error: the kind then
+// simply stays exit-driven.
 //
-// FORGEJO_TOKEN is read as a plain knob; a token supplied only through its
-// -file or -cmd form is invisible here, so that deployment stays exit-driven.
+// FORGEJO_TOKEN and JIRA_TOKEN are read as plain knobs; a token supplied only
+// through its -file or -cmd form is invisible here, so that deployment stays
+// exit-driven.
 //
 // A relative LOCAL_ISSUES_DIR is used as written: it resolves against the
 // daemon's cwd, which every child inherits (RunChild sets no cmd.Dir), so
@@ -64,6 +71,26 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) demandSourc
 		}
 		newTracker = func(l forge.DispatchLabels) forge.IssueTracker {
 			return forgejo.NewForgejoClient(forgejo.ForgejoConfig{BaseURL: baseURL, Repo: repo, Token: token, Labels: l})
+		}
+	case "jira":
+		baseURL := childKnob(doc, "JIRA_BASE_URL", os.Getenv("JIRA_BASE_URL"))
+		projectKey := childKnob(doc, "JIRA_PROJECT_KEY", os.Getenv("JIRA_PROJECT_KEY"))
+		token := childKnob(doc, "JIRA_TOKEN", os.Getenv("JIRA_TOKEN"))
+		rawMapping := childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING"))
+		// The child's validate() runs the same check and fails startup on it, so
+		// a deployment it rejects has no children to count demand for. The check
+		// parses rawMapping too, so the parse below cannot fail.
+		if jira.ValidateJiraEnv(baseURL, projectKey, token, rawMapping) != nil {
+			return nil
+		}
+		statusMapping, _ := jira.ParseStatusMapping(rawMapping)
+		email := childKnob(doc, "JIRA_EMAIL", os.Getenv("JIRA_EMAIL"))
+		newTracker = func(l forge.DispatchLabels) forge.IssueTracker {
+			return jira.NewJiraClient(jira.JiraConfig{
+				BaseURL: baseURL, ProjectKey: projectKey, Email: email, Token: token,
+				StatusMapping: statusMapping, Labels: l,
+				HTTPClient: &http.Client{Timeout: jiraProbeTimeout},
+			})
 		}
 	case "github", "":
 		slug := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))

@@ -3,9 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,13 +146,77 @@ func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 	}
 }
 
+// jira builds a source per probed kind that counts through a zero-row search
+// whose JQL is the one ListIssues would run: the project, the status mapping
+// and the kind's own dispatchable label.
+func TestBuildDemandSources_JiraCountsWithStatusMappingAndPerKindLabel(t *testing.T) {
+	clearKnobEnvT(t)
+	var mu sync.Mutex
+	var jqls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/search" {
+			http.NotFound(w, r)
+			return
+		}
+		mu.Lock()
+		jqls = append(jqls, r.URL.Query().Get("jql"))
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"total": 7, "issues": []}`))
+	}))
+	defer srv.Close()
+
+	src := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER":       "jira",
+		"JIRA_BASE_URL":       srv.URL,
+		"JIRA_PROJECT_KEY":    "PROJ",
+		"JIRA_TOKEN":          "tok",
+		"JIRA_STATUS_MAPPING": `{"dispatchable":"To Do"}`,
+		"LABEL":               "ready-for-agent",
+	}), allDemandKinds)
+	if len(src) != 2 {
+		t.Fatalf("sources = %v, want work and research", src)
+	}
+	for kind, label := range map[daemon.Kind]string{
+		daemon.KindOf(dispatchkind.Work):     "ready-for-agent",
+		daemon.KindOf(dispatchkind.Research): "agent-research",
+	} {
+		c, ok := src[kind]
+		if !ok {
+			t.Fatalf("no demand source for %s", kind)
+		}
+		if got := c.ProbeInterval(); got != 5*time.Minute {
+			t.Errorf("%s ProbeInterval() = %v, want 5m", kind, got)
+		}
+		mu.Lock()
+		jqls = nil
+		mu.Unlock()
+		got, err := c.CountReady(false)
+		if err != nil || got != 7 {
+			t.Errorf("%s CountReady() = %d, %v; want 7, nil", kind, got, err)
+		}
+		mu.Lock()
+		seen := append([]string(nil), jqls...)
+		mu.Unlock()
+		if len(seen) != 1 {
+			t.Fatalf("%s: %d searches, want 1", kind, len(seen))
+		}
+		for _, want := range []string{`project = "PROJ"`, `status = "To Do"`, `labels = "` + label + `"`} {
+			if !strings.Contains(seen[0], want) {
+				t.Errorf("%s JQL %q lacks %s", kind, seen[0], want)
+			}
+		}
+	}
+}
+
 func TestBuildDemandSources_NoAdapterOrMissingKnobsHasNoSource(t *testing.T) {
 	clearKnobEnvT(t)
 	for name, settings := range map[string]map[string]string{
-		"github without slug": {"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent"},
-		"jira":                {"ISSUE_TRACKER": "jira", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
-		"forgejo":             {"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
-		"absent":              {},
+		"github without slug":                 {"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent"},
+		"jira without base URL/project/token": {"ISSUE_TRACKER": "jira", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
+		"jira without token":                  {"ISSUE_TRACKER": "jira", "JIRA_BASE_URL": "http://x", "JIRA_PROJECT_KEY": "P", "LABEL": "ready-for-agent"},
+		"jira with malformed status mapping":  {"ISSUE_TRACKER": "jira", "JIRA_BASE_URL": "http://x", "JIRA_PROJECT_KEY": "P", "JIRA_TOKEN": "t", "JIRA_STATUS_MAPPING": "garbage", "LABEL": "ready-for-agent"},
+		"forgejo":                             {"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
+		"absent":                              {},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := buildDemandSources(demandDocT(settings), allDemandKinds)
