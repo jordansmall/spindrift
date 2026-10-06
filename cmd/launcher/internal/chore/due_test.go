@@ -320,3 +320,178 @@ func TestBudgetsValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestNextDue(t *testing.T) {
+	est := time.FixedZone("UTC-5", -5*3600)
+	// 22:00 local on the 27th is already 03:00 UTC on the 28th.
+	evening := time.Date(2026, 9, 27, 22, 0, 0, 0, est)
+	nextLocalMidnight := time.Date(2026, 9, 28, 0, 0, 0, 0, est)
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: 2 * time.Hour}
+	doneTip := ledger.Tip{Commit: "c1", State: ledger.State{LastSwept: "old", Phase: ledger.Done}}
+	claimStart := now.Add(-30 * time.Minute)
+	newestDone := now.Add(-10 * time.Minute)
+
+	tests := []struct {
+		name       string
+		tip        ledger.Tip
+		recent     []ledger.Entry
+		head       string
+		now        time.Time
+		room       chore.Room
+		wantAt     time.Time
+		wantOnMove bool
+	}{
+		{
+			name:   "due returns now",
+			tip:    doneTip,
+			head:   "new",
+			now:    now,
+			wantAt: now,
+		},
+		{
+			name: "live claim lifts one ns past the claim timeout",
+			tip: ledger.Tip{Commit: "c1", State: ledger.State{
+				LastSwept: "old", Phase: ledger.Claimed,
+				ClaimedBy: &ledger.ClaimedBy{Start: claimStart},
+			}},
+			head:   "new",
+			now:    now,
+			wantAt: claimStart.Add(cfg.ClaimTimeout + time.Nanosecond),
+		},
+		{
+			name: "interval not elapsed lifts at newest in-window done plus Every",
+			tip:  doneTip,
+			recent: []ledger.Entry{
+				{At: now.Add(-40 * time.Minute), State: ledger.State{Phase: ledger.Done}},
+				{At: newestDone, State: ledger.State{Phase: ledger.Done}},
+				{At: now.Add(-20 * time.Minute), State: ledger.State{Phase: ledger.Done}},
+				{At: now.Add(-5 * time.Minute), State: ledger.State{Phase: ledger.Claimed}},
+			},
+			head:   "new",
+			now:    now,
+			wantAt: newestDone.Add(cfg.Every),
+		},
+		{
+			name:       "nothing to scan lifts on a tip move",
+			tip:        ledger.Tip{Commit: "c1", State: ledger.State{LastSwept: "h1", Phase: ledger.Done}},
+			head:       "h1",
+			now:        now,
+			wantOnMove: true,
+		},
+		{
+			name:   "sweep budget spent lifts at local midnight",
+			tip:    doneTip,
+			head:   "new",
+			now:    evening,
+			room:   chore.Room{Reason: chore.SweepBudgetSpent},
+			wantAt: nextLocalMidnight,
+		},
+		{
+			name:   "finding budget spent lifts at local midnight",
+			tip:    doneTip,
+			head:   "new",
+			now:    evening,
+			room:   chore.Room{Reason: chore.FindingBudgetSpent},
+			wantAt: nextLocalMidnight,
+		},
+		{
+			name:   "sweep findings exceed headroom lifts at local midnight",
+			tip:    doneTip,
+			head:   "new",
+			now:    evening,
+			room:   chore.Room{Reason: chore.SweepFindingsExceedHeadroom},
+			wantAt: nextLocalMidnight,
+		},
+		{
+			name:   "token ceiling reached lifts at local midnight",
+			tip:    doneTip,
+			head:   "new",
+			now:    evening,
+			room:   chore.Room{Reason: chore.TokenCeilingReached},
+			wantAt: nextLocalMidnight,
+		},
+		{
+			name: "interval lift before midnight with a spent budget lifts at midnight",
+			tip:  doneTip,
+			recent: []ledger.Entry{
+				{At: evening.Add(-10 * time.Minute), State: ledger.State{Phase: ledger.Done}},
+			},
+			head:   "new",
+			now:    evening,
+			room:   chore.Room{Reason: chore.SweepBudgetSpent},
+			wantAt: nextLocalMidnight,
+		},
+		{
+			name: "interval lift after midnight with a spent budget stays the interval lift",
+			tip:  doneTip,
+			recent: []ledger.Entry{
+				{At: evening.Add(90 * time.Minute).Add(-10 * time.Minute), State: ledger.State{Phase: ledger.Done}},
+			},
+			head:   "new",
+			now:    evening.Add(90 * time.Minute),
+			room:   chore.Room{Reason: chore.SweepBudgetSpent},
+			wantAt: evening.Add(90 * time.Minute).Add(-10 * time.Minute).Add(cfg.Every),
+		},
+		{
+			name: "live claim lift before midnight with a spent budget lifts at midnight",
+			tip: ledger.Tip{Commit: "c1", State: ledger.State{
+				LastSwept: "old", Phase: ledger.Claimed,
+				ClaimedBy: &ledger.ClaimedBy{Start: evening.Add(-30 * time.Minute)},
+			}},
+			head:   "new",
+			now:    evening,
+			room:   chore.Room{Reason: chore.FindingBudgetSpent},
+			wantAt: nextLocalMidnight,
+		},
+	}
+	// Santiago's DST starts at midnight, so 2026-09-06 has no 00:00: the budget
+	// day must still end after now, at the next day's first instant.
+	if santiago, err := time.LoadLocation("America/Santiago"); err != nil {
+		t.Logf("skipping DST row: %v", err)
+	} else {
+		for _, c := range []struct {
+			name string
+			now  time.Time
+		}{
+			{"midday", time.Date(2026, 9, 6, 12, 0, 0, 0, santiago)},
+			{"late evening", time.Date(2026, 9, 6, 23, 30, 0, 0, santiago)},
+		} {
+			row := tests[0]
+			row.name = "budget lift across a DST jump that skips midnight, " + c.name
+			row.now = c.now
+			row.room = chore.Room{Reason: chore.SweepBudgetSpent}
+			row.wantAt = time.Date(2026, 9, 7, 0, 0, 0, 0, time.FixedZone("-03", -3*3600))
+			tests = append(tests, row)
+		}
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			at, onMove := chore.NextDue(tt.tip, tt.recent, tt.head, tt.now, tt.room, cfg)
+			if !at.Equal(tt.wantAt) || onMove != tt.wantOnMove {
+				t.Fatalf("NextDue = (%v, %v), want (%v, %v)", at, onMove, tt.wantAt, tt.wantOnMove)
+			}
+			if tt.wantOnMove || at.IsZero() {
+				return
+			}
+			// The instant is the earliest the reason lifts: Check at it no
+			// longer blocks on that reason, one ns earlier still does.
+			before := chore.Check(tt.tip, tt.recent, tt.head, tt.now, tt.room, cfg)
+			if before == chore.Due {
+				return
+			}
+			if tt.room.Reason != chore.Due {
+				if at.Location() != tt.now.Location() || !at.After(tt.now) {
+					t.Fatalf("budget lift %v is not the next local midnight of %v", at, tt.now)
+				}
+				return
+			}
+			if got := chore.Check(tt.tip, tt.recent, tt.head, at, tt.room, cfg); got == before {
+				t.Errorf("Check at lift instant = %v, want the reason lifted", got)
+			}
+			if got := chore.Check(tt.tip, tt.recent, tt.head, at.Add(-time.Nanosecond), tt.room, cfg); got != before {
+				t.Errorf("Check 1ns before lift instant = %v, want %v", got, before)
+			}
+		})
+	}
+}

@@ -142,12 +142,8 @@ func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, ro
 		return LiveClaim
 	}
 
-	if cfg.Every > 0 {
-		for _, e := range recent {
-			if e.State.Phase == ledger.Done && now.Sub(e.At) < cfg.Every {
-				return IntervalNotElapsed
-			}
-		}
+	if _, ok := newestDoneWithin(recent, now, cfg.Every); ok {
+		return IntervalNotElapsed
 	}
 
 	if room.Reason != Due {
@@ -161,4 +157,63 @@ func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, ro
 	}
 
 	return Due
+}
+
+// newestDoneWithin is the interval rule Check and NextDue share: the time of
+// the newest Done entry in recent younger than every, and whether one exists.
+// A zero every means no interval, so none exists.
+func newestDoneWithin(recent []ledger.Entry, now time.Time, every time.Duration) (time.Time, bool) {
+	if every <= 0 {
+		return time.Time{}, false
+	}
+	var newest time.Time
+	var found bool
+	for _, e := range recent {
+		if e.State.Phase == ledger.Done && now.Sub(e.At) < every && (!found || e.At.After(newest)) {
+			newest, found = e.At, true
+		}
+	}
+	return newest, found
+}
+
+// NextDue maps the reason Check returns for the same inputs to the earliest
+// instant that reason lifts, and whether it lifts only when the branch head
+// moves. Due yields (now, false). Daily budgets lift at the next midnight in
+// now's Location, matching ledger.DayTotals, so the caller passes now already
+// in the policy zone. A live claim lifts at the first instant StaleClaim is
+// true, one nanosecond past the timeout, since StaleClaim is strictly-after
+// and an earlier re-check would still say LiveClaim. A live claim or an
+// unelapsed interval masks a spent budget in Check, so when room also says
+// spent, the lift is the later of its own and the next midnight.
+// NothingToScan lifts only on a head move: (zero, true). A Claimed tip with no
+// ClaimedBy is never stale, so no time lifts it: (zero, false).
+func NextDue(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, room Room, cfg DueConfig) (at time.Time, onTipMove bool) {
+	// laterOfBudget holds a lift back to the next midnight when the budget is
+	// spent too, since a re-check any earlier would only meet that budget.
+	laterOfBudget := func(lift time.Time) time.Time {
+		if room.Reason == Due {
+			return lift
+		}
+		if _, next := ledger.DayBounds(now); next.After(lift) {
+			return next
+		}
+		return lift
+	}
+	switch Check(tip, recent, head, now, room, cfg) {
+	case LiveClaim:
+		if tip.State.ClaimedBy == nil {
+			return time.Time{}, false
+		}
+		return laterOfBudget(tip.State.ClaimedBy.Start.Add(cfg.ClaimTimeout + time.Nanosecond)), false
+	case IntervalNotElapsed:
+		newest, _ := newestDoneWithin(recent, now, cfg.Every)
+		return laterOfBudget(newest.Add(cfg.Every)), false
+	case NothingToScan:
+		return time.Time{}, true
+	case SweepBudgetSpent, FindingBudgetSpent, SweepFindingsExceedHeadroom, TokenCeilingReached:
+		_, next := ledger.DayBounds(now)
+		return next, false
+	default:
+		return now, false
+	}
 }
