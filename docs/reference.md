@@ -6639,12 +6639,21 @@ does not idle a slot that could be running research, and an empty work-and-
 research pair does not idle a slot the butler could still fill. Only once
 every configured kind is gated does the pool
 actually sleep, and then for the shortest of the gated kinds' remaining
-waits — the pool as a whole can move the instant any one kind's gate
-lifts, even though a given slot only picks up work once it wakes and
-re-checks. A daemon restricted to one kind by its positional verb never
-sees this switch: with one kind configured, a `Wait` outcome always finds
-every configured kind gated, so it degenerates to the old single-timer
-in-place wait.
+waits — a probed kind's next probe, a jam gate's end, or an exit-driven
+kind's backoff end. That park is wakeable: when one slot makes a kind
+startable that was not before, every parked slot wakes at once and
+re-decides, so a fresh backlog fills all free slots instead of being
+drained by the one slot that found it. Four things do that: a probe
+finds Ready above 0; a probe refreshes (or a failed probe revives) a
+stale count above 0 on a kind with no jam gate; an exit-driven kind's
+child exits 0 or 4 and lifts that kind's backoff; and a moved tip lifts
+a jam on a kind whose count is above 0 and still fresh. Only that growth
+in the set of startable kinds wakes anyone: a child exiting 2 or 3, a
+count dropping to zero, or any other slot changing phase leaves parked
+siblings asleep until their own deadline. A daemon restricted to one kind
+by its positional verb never sees this switch: with one kind configured,
+a `Wait` outcome always finds every configured kind gated, so it
+degenerates to the old single-timer in-place wait.
 
 | exit | meaning | daemon action |
 |------|---------|----------------|
