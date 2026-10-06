@@ -61,6 +61,7 @@ const defaultForgejoBaseURL = "https://codeberg.org"
 type forgejoClient struct {
 	cfg  ForgejoConfig
 	rest *rest.Client
+	now  func() time.Time // the clock behind labelVerdict.undefinedUntil
 
 	// orgLabelsAuthWarnOnce gates ListLabels' missing-scope warning to once
 	// per client: orgLabelsState stops the repeat lookup after the first
@@ -73,14 +74,22 @@ type forgejoClient struct {
 	// labels can be added mid-run.
 	orgLabelsState atomic.Int32
 
-	// definedCache holds labels ListLabels has seen defined; see
-	// labelKnownDefined for why only positive verdicts are kept.
-	definedMu    sync.Mutex
-	definedCache map[string]struct{}
+	// labelVerdicts holds ListLabels' verdict per label: defined until
+	// forgotten, undefined for 10 minutes (undefinedLabelTTL). See
+	// labelKnownDefined.
+	definedMu     sync.Mutex
+	labelVerdicts map[string]labelVerdict
 
 	// labelCheckWarned is set once labelKnownDefined has warned about a failing
 	// ListLabels and cleared when one succeeds, so an outage warns once, not per probe.
 	labelCheckWarned atomic.Bool
+}
+
+// labelVerdict is a cached ListLabels result. A defined label never
+// expires; undefinedUntil is the instant an undefined one is re-walked.
+type labelVerdict struct {
+	defined        bool
+	undefinedUntil time.Time
 }
 
 // orgLabelsState values. Only orgLabelsUnreadable means org labels may be
@@ -107,7 +116,7 @@ func NewForgejoClient(cfg ForgejoConfig) forge.IssueTracker {
 	// here so the disambiguation still works when NewForgejoCodeForge reuses
 	// this tracker's *rest.Client (issue #2256).
 	restClient := rest.New(cfg.BaseURL, rest.TokenAuth{Scheme: "token", Token: cfg.Token}, "forgejo", forgejoStatusMap(), hc)
-	return &forgejoClient{cfg: cfg, rest: restClient}
+	return &forgejoClient{cfg: cfg, rest: restClient, now: time.Now}
 }
 
 func (c *forgejoClient) repoPath() string {
@@ -271,6 +280,11 @@ func (c *forgejoClient) definedLabels(labels []string) []string {
 // conditional request makes it free.
 const demandProbeInterval = 3 * time.Minute
 
+// undefinedLabelTTL bounds how long an operator-created label waits to be
+// noticed, while sparing an undefined label (e.g. the research kind's
+// agent-research on a bare every-kind daemon) a label walk every probe.
+const undefinedLabelTTL = 10 * time.Minute
+
 // ProbeInterval implements forge.DemandCounter.
 func (c *forgejoClient) ProbeInterval() time.Duration { return demandProbeInterval }
 
@@ -311,16 +325,16 @@ func (c *forgejoClient) CountReady(_ bool) (int, error) {
 }
 
 // labelKnownDefined reports whether label is defined, consulting ListLabels
-// only until it first sees the label. Only that positive verdict is cached: an
-// operator may create a missing label while the daemon runs, so a negative one
-// must be re-checked each probe, and the ListLabels-error fallback is a guess,
-// not a verdict.
+// only until it has a verdict. A positive verdict is cached until
+// forgotten; a negative one holds 10 minutes (undefinedLabelTTL), since an
+// operator may create the missing label while the daemon runs. The
+// ListLabels-error fallback is a guess, not a verdict, so it is never cached.
 func (c *forgejoClient) labelKnownDefined(label string) bool {
 	c.definedMu.Lock()
-	_, known := c.definedCache[label]
+	v, ok := c.labelVerdicts[label]
 	c.definedMu.Unlock()
-	if known {
-		return true
+	if ok && (v.defined || c.now().Before(v.undefinedUntil)) {
+		return v.defined
 	}
 	present, err := c.checkLabels([]string{label})
 	if err != nil {
@@ -330,21 +344,22 @@ func (c *forgejoClient) labelKnownDefined(label string) bool {
 		return true
 	}
 	c.labelCheckWarned.Store(false)
-	if len(present) == 0 {
-		return false
+	v = labelVerdict{defined: len(present) > 0}
+	if !v.defined {
+		v.undefinedUntil = c.now().Add(undefinedLabelTTL)
 	}
 	c.definedMu.Lock()
-	if c.definedCache == nil {
-		c.definedCache = map[string]struct{}{}
+	if c.labelVerdicts == nil {
+		c.labelVerdicts = map[string]labelVerdict{}
 	}
-	c.definedCache[label] = struct{}{}
+	c.labelVerdicts[label] = v
 	c.definedMu.Unlock()
-	return true
+	return v.defined
 }
 
 func (c *forgejoClient) forgetDefinedLabel(label string) {
 	c.definedMu.Lock()
-	delete(c.definedCache, label)
+	delete(c.labelVerdicts, label)
 	c.definedMu.Unlock()
 }
 

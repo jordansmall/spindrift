@@ -53,6 +53,13 @@ func (f *demandFake) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func newDemandCounter(t *testing.T, f *demandFake) forge.DemandCounter {
 	t.Helper()
+	return newDemandCounterAt(t, f, nil)
+}
+
+// newDemandCounterAt is newDemandCounter with an injected clock; nil means the
+// real one.
+func newDemandCounterAt(t *testing.T, f *demandFake, now func() time.Time) forge.DemandCounter {
+	t.Helper()
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	tr := forgejo.NewForgejoClient(forgejo.ForgejoConfig{
@@ -61,6 +68,9 @@ func newDemandCounter(t *testing.T, f *demandFake) forge.DemandCounter {
 		Token:   "tok",
 		Labels:  forge.DispatchLabels{Dispatchable: "ready"},
 	})
+	if now != nil {
+		forgejo.SetNow(tr, now)
+	}
 	dc, ok := tr.(forge.DemandCounter)
 	if !ok {
 		t.Fatal("forgejo client does not implement forge.DemandCounter")
@@ -106,17 +116,49 @@ func TestForgejoDemand_UndefinedLabelCountsZeroWithoutIssueQuery(t *testing.T) {
 	}
 }
 
-func TestForgejoDemand_UndefinedLabelIsRecheckedEveryProbe(t *testing.T) {
+func TestForgejoDemand_UndefinedLabelIsRecheckedAfterTTL(t *testing.T) {
 	f := &demandFake{labelsBody: `[]`, issuesBody: readyItem, totalHeader: "2"}
-	dc := newDemandCounter(t, f)
+	clock := time.Unix(1_000_000, 0)
+	dc := newDemandCounterAt(t, f, func() time.Time { return clock })
 	if n, _ := dc.CountReady(false); n != 0 {
 		t.Fatalf("first CountReady = %d, want 0", n)
 	}
+	if got := f.labelReqs.Load(); got != 1 {
+		t.Fatalf("label walks after first probe = %d, want 1", got)
+	}
 
 	f.labelsBody = `[{"id":1,"name":"ready"}]`
+	clock = clock.Add(9 * time.Minute)
+	if n, err := dc.CountReady(false); err != nil || n != 0 {
+		t.Fatalf("CountReady inside the window = %d, %v; want 0, nil", n, err)
+	}
+	if got := f.labelReqs.Load(); got != 1 {
+		t.Fatalf("label walks inside the window = %d, want 1 (negative verdict cached)", got)
+	}
+
+	// Exactly at expiry the verdict is stale: the window is half-open.
+	clock = clock.Add(1 * time.Minute)
 	n, err := dc.CountReady(false)
 	if err != nil || n != 2 {
-		t.Fatalf("CountReady after label created = %d, %v; want 2, nil", n, err)
+		t.Fatalf("CountReady at the window's end = %d, %v; want 2, nil", n, err)
+	}
+	if got := f.labelReqs.Load(); got != 2 {
+		t.Fatalf("label walks at the window's end = %d, want 2", got)
+	}
+}
+
+func TestForgejoDemand_LabelCheckFailureIsNotCachedAsUndefined(t *testing.T) {
+	f := &demandFake{issuesBody: readyItem, totalHeader: "2"}
+	f.labelsFail.Store(true)
+	clock := time.Unix(1_000_000, 0)
+	dc := newDemandCounterAt(t, f, func() time.Time { return clock })
+	for i := 0; i < 2; i++ {
+		if n, err := dc.CountReady(false); err != nil || n != 2 {
+			t.Fatalf("CountReady #%d on a failing registry = %d, %v; want 2, nil", i, n, err)
+		}
+	}
+	if got := f.labelReqs.Load(); got != 2 {
+		t.Fatalf("label walks = %d, want 2 (an error is never cached)", got)
 	}
 }
 
@@ -182,7 +224,8 @@ func TestForgejoDemand_DroppedFilterCountsZeroAndRechecksLabels(t *testing.T) {
 
 func TestForgejoDemand_LabelCheckFailureWarnsOncePerOutage(t *testing.T) {
 	f := &demandFake{labelsBody: `[]`, issuesBody: readyItem, totalHeader: "1"}
-	dc := newDemandCounter(t, f)
+	clock := time.Unix(1_000_000, 0)
+	dc := newDemandCounterAt(t, f, func() time.Time { return clock })
 	const warning = "ListLabels failed"
 
 	warnings := func() int {
@@ -207,6 +250,8 @@ func TestForgejoDemand_LabelCheckFailureWarnsOncePerOutage(t *testing.T) {
 	if got := warnings(); got != 0 {
 		t.Fatalf("recovered probe warned %d times, want 0", got)
 	}
+	// The undefined verdict just cached would hide the outage until it expires.
+	clock = clock.Add(11 * time.Minute)
 	f.labelsFail.Store(true)
 	if got := warnings(); got != 1 {
 		t.Fatalf("first failing probe after recovery warned %d times, want 1", got)
