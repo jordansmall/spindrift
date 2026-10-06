@@ -36,3 +36,8 @@ func Box(key dispatchkey.Key, phase string) {
 func Settled(key dispatchkey.Key, state, note string) {
 	Default().Settled(key, state, note)
 }
+
+// NotDue forwards to Default().NotDue.
+func NotDue(key dispatchkey.Key, next NextDue) {
+	Default().NotDue(key, next)
+}

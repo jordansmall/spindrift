@@ -45,7 +45,8 @@ var ErrKindMismatch = errors.New("record key does not match child kind")
 // and chore (report.Record's decoder rejects it). So does a known event
 // with no key, an invalid one, or one whose shape doesn't match kind: a
 // Chore-keyed record from a non-butler child, or an issue-keyed record from
-// a butler child.
+// a butler child. A not_due record with a missing or unparseable next_due
+// (report.ParseNextDue) is malformed too.
 func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	if line == "" {
 		return Record{}, false, nil
@@ -55,7 +56,7 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 		return Record{}, false, err
 	}
 	switch rec.Event {
-	case report.EventBox, report.EventSettled:
+	case report.EventBox, report.EventSettled, report.EventNotDue:
 	default:
 		return Record{}, false, nil
 	}
@@ -75,6 +76,9 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 			shape = "chore-keyed"
 		}
 		return Record{}, false, fmt.Errorf("record: %s child sent %s record %q: %w", kind, shape, rec.Key, ErrKindMismatch)
+	}
+	if rec.Event == report.EventNotDue && rec.NextDue.IsZero() {
+		return Record{}, false, fmt.Errorf("record: not_due for %q: missing next_due", rec.Key)
 	}
 	return rec, true, nil
 }
