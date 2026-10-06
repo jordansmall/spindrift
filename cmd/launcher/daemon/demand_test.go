@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -461,4 +463,142 @@ func TestTrackers_KindsShareTheIssueTrackerName(t *testing.T) {
 	if got := trackers(nil, demandDocT(nil)); len(got) != 0 {
 		t.Errorf("trackers(no sources) = %v, want empty", got)
 	}
+}
+
+// A document value that is empty does not count as a setting the child reads:
+// the child resolves the ambient value, so the daemon's count must too.
+func TestBuildDemandSources_EmptyDocumentValueFallsBackToAmbient(t *testing.T) {
+	jiraSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"total": 1, "issues": []}`))
+	}))
+	defer jiraSrv.Close()
+	localDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		doc     map[string]string
+		ambient map[string]string
+		check   func(t *testing.T, c forge.DemandCounter)
+	}{
+		{
+			name:    "github REPO_SLUG",
+			doc:     map[string]string{"REPO_SLUG": ""},
+			ambient: map[string]string{"REPO_SLUG": "o/r"},
+			check: func(t *testing.T, c forge.DemandCounter) {
+				// execClient is unexported; its dump names the type and repo.
+				if got := fmt.Sprintf("%T %+v", c, c); !strings.Contains(got, "github.execClient") || !strings.Contains(got, "repo:o/r") {
+					t.Errorf("source = %s, want a github client for o/r", got)
+				}
+			},
+		},
+		{
+			name:    "forgejo REPO_SLUG and FORGEJO_BASE_URL",
+			doc:     map[string]string{"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "", "FORGEJO_BASE_URL": ""},
+			ambient: map[string]string{"REPO_SLUG": "o/r", "FORGEJO_BASE_URL": "http://forgejo.example", "FORGEJO_TOKEN": "tok"},
+		},
+		{
+			name: "jira JIRA_BASE_URL",
+			doc: map[string]string{
+				"ISSUE_TRACKER": "jira", "JIRA_BASE_URL": "", "JIRA_PROJECT_KEY": "PROJ",
+				"JIRA_STATUS_MAPPING": `{"dispatchable":"To Do"}`,
+			},
+			ambient: map[string]string{"JIRA_BASE_URL": jiraSrv.URL, "JIRA_TOKEN": "tok"},
+		},
+		{
+			name:    "local LOCAL_ISSUES_DIR",
+			doc:     map[string]string{"ISSUE_TRACKER": "local", "LOCAL_ISSUES_DIR": ""},
+			ambient: map[string]string{"LOCAL_ISSUES_DIR": localDir},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearKnobEnvT(t)
+			for k, v := range tt.ambient {
+				t.Setenv(k, v)
+			}
+			tt.doc["LABEL"] = "ready-for-agent"
+			src := buildDemandSources(demandDocT(tt.doc), allDemandKinds)
+			if len(src) != 2 {
+				t.Errorf("sources = %v, want work and research", src)
+			}
+			if tt.check != nil {
+				for _, c := range src {
+					tt.check(t, c)
+				}
+			}
+		})
+	}
+}
+
+// A probed work kind whose repo slug is supplied at runtime (an empty document
+// value over an ambient one) is drawn by the loop: a child starts once Demand
+// rises from 0 mid-run.
+func TestLoop_ProbedWorkKindWithRuntimeSlugStartsWhenDemandRises(t *testing.T) {
+	clearKnobEnvT(t)
+	var probes atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/o/r/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		total := "0"
+		if probes.Add(1) > 2 {
+			total = "1"
+		}
+		w.Header().Set("X-Total-Count", total)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	t.Setenv("REPO_SLUG", "o/r")
+	t.Setenv("FORGEJO_TOKEN", "tok")
+
+	work := daemon.KindOf(dispatchkind.Work)
+	src := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "", "FORGEJO_BASE_URL": srv.URL, "LABEL": "ready-for-agent",
+	}), []daemon.Kind{work})
+	if _, ok := src[work]; !ok {
+		t.Fatal("no demand source for work")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	r := &demandLoopRunner{hostRunner: mustHostRunner(t, hostRunnerConfig{env: os.Environ(), demand: src}), cancel: cancel}
+	cfg := daemon.Config{
+		Kinds:            []daemon.Kind{work},
+		ProbeIntervals:   probeIntervals(src, time.Millisecond),
+		IdleFloor:        time.Millisecond,
+		IdleCap:          time.Hour,
+		FailureBackoff:   time.Millisecond,
+		BreakerThreshold: 1000,
+		BreakerWindow:    time.Minute,
+		Slots:            1,
+	}
+	var out bytes.Buffer
+	em := daemon.NewEmitter(&out, &out, time.Now)
+	daemon.Loop(ctx, cfg, r, em, hostClock{})
+
+	if r.started.Load() != 1 {
+		t.Fatalf("children started = %d, want 1 (after %d probes)", r.started.Load(), probes.Load())
+	}
+	if probes.Load() < 3 {
+		t.Errorf("probes = %d, want the child to start only once demand rose", probes.Load())
+	}
+}
+
+// demandLoopRunner answers Demand from the real host runner's sources and
+// stands in for git and nix: a fixed tip, and a child that stops the loop.
+type demandLoopRunner struct {
+	*hostRunner
+	cancel  context.CancelFunc
+	started atomic.Int32
+}
+
+func (r *demandLoopRunner) ResolveTip(context.Context) (daemon.Tip, error) {
+	return daemon.Tip{Revision: "rev1"}, nil
+}
+
+func (r *demandLoopRunner) RunChild(context.Context, daemon.ChildRequest) (daemon.ChildResult, error) {
+	r.started.Add(1)
+	r.cancel()
+	return daemon.ChildResult{}, nil
 }

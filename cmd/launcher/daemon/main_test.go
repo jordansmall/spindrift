@@ -2189,26 +2189,69 @@ func TestFinish_OnePathForEveryPreLoopHalt(t *testing.T) {
 	})
 }
 
-// TestSettingsKeys pins settingsKeys' sorted-order contract and its nil
+// TestStrippedKeys pins strippedKeys' sorted-order contract and its nil
 // handling: a nil doc and a doc with a nil Settings map must both come back
 // as an empty slice rather than panicking (JSON with no "settings" key
 // unmarshals to a nil map, not an empty one).
-func TestSettingsKeys(t *testing.T) {
-	if got := settingsKeys(nil); len(got) != 0 {
-		t.Errorf("settingsKeys(nil) = %v, want empty", got)
+func TestStrippedKeys(t *testing.T) {
+	if got := strippedKeys(nil); len(got) != 0 {
+		t.Errorf("strippedKeys(nil) = %v, want empty", got)
 	}
-	if got := settingsKeys(&inputdoc.Document{}); len(got) != 0 {
-		t.Errorf("settingsKeys(&inputdoc.Document{}) = %v, want empty", got)
+	if got := strippedKeys(&inputdoc.Document{}); len(got) != 0 {
+		t.Errorf("strippedKeys(&inputdoc.Document{}) = %v, want empty", got)
 	}
 	doc := &inputdoc.Document{Settings: map[string]string{
 		"MODEL":        "opus",
 		"BASE_BRANCH":  "main",
 		"MAX_PARALLEL": "1",
 	}}
-	got := settingsKeys(doc)
+	got := strippedKeys(doc)
 	want := []string{"BASE_BRANCH", "MAX_PARALLEL", "MODEL"}
 	if !slices.Equal(got, want) {
-		t.Errorf("settingsKeys(doc) = %v, want %v (sorted)", got, want)
+		t.Errorf("strippedKeys(doc) = %v, want %v (sorted)", got, want)
+	}
+}
+
+// A key whose document value does not count is not stripped from the children's
+// env, so it is not in the strip list; an empty value for a knob whose empty
+// value is itself a setting still is.
+func TestStrippedKeys_OmitsKeysWhoseValueDoesNotCount(t *testing.T) {
+	doc := &inputdoc.Document{Settings: map[string]string{
+		"REPO_SLUG":           "",
+		"MODEL":               "x",
+		"MEMORY_LIMIT":        "",
+		"CONTINUOUS_DISPATCH": "",
+	}}
+	got := strippedKeys(doc)
+	want := []string{"CONTINUOUS_DISPATCH", "MEMORY_LIMIT", "MODEL"}
+	if !slices.Equal(got, want) {
+		t.Errorf("strippedKeys(doc) = %v, want %v", got, want)
+	}
+}
+
+// An ambient knob the document carries only as an empty value is not warned
+// about: the child still inherits it, so it is not "not forwarded".
+func TestMainRun_StrippedEnvWarningSkipsKeyWhoseDocumentValueDoesNotCount(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	clearKnobEnvT(t)
+	t.Setenv("MODEL", "opus")
+	t.Setenv("REPO_SLUG", "o/r")
+	doc := validKnobDocument()
+	doc.Settings["MODEL"] = "x"
+	doc.Settings["REPO_SLUG"] = ""
+	path := writeInputDocument(t, doc)
+	t.Chdir(t.TempDir())
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+	out := stderr.String()
+	if !strings.Contains(out, "MODEL=opus set in environment — not forwarded to children") {
+		t.Errorf("stderr = %q, want the MODEL stripped-env warning", out)
+	}
+	if strings.Contains(out, "REPO_SLUG=") {
+		t.Errorf("stderr = %q, want no REPO_SLUG warning", out)
 	}
 }
 
@@ -2259,7 +2302,7 @@ func TestWarnStrippedChildEnv_EmptyExportWarnsNever(t *testing.T) {
 }
 
 // TestWarnStrippedChildEnv_MultipleKeysSortedOrder asserts multiple set
-// knobs are warned about in the order keys arrives in (settingsKeys already
+// knobs are warned about in the order keys arrives in (strippedKeys already
 // sorts, so this pins that warnStrippedChildEnv does not itself reorder).
 func TestWarnStrippedChildEnv_MultipleKeysSortedOrder(t *testing.T) {
 	t.Setenv("BASE_BRANCH", "main")

@@ -6224,7 +6224,7 @@ choices refuses the daemon's start — exit 1, with a stderr line naming the
 knob (`validateSignalCarrier`, `cmd/launcher/daemon/main.go`) — before any
 child is spawned. Earlier still, right after the input document loads and
 ahead of that refusal, the daemon checks each stripped key against its own
-environment (`settingsKeys` and `warnStrippedChildEnv`,
+environment (`strippedKeys` and `warnStrippedChildEnv`,
 `cmd/launcher/daemon/main.go`) and, for every one actually set, prints one
 stderr line before the startup preflight runs:
 
