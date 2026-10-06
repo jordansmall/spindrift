@@ -260,7 +260,8 @@ func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) l
 // landPushOnly lands a push-only forge, where there is no PR or CI to watch, so
 // the issue goes Complete immediately and MERGE_MODE applies straight against
 // the forge's Merge and Rebase. A merge failure leaves the issue Complete with
-// a merge-blocked note, never demoted to Failed (ADR 0012).
+// a merge-blocked note, never demoted to Failed (ADR 0012). An immediate merge
+// drops the landed bundle here, since verifyMerged never runs without a PR.
 func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
 	// No CI watch here, so this is the only checkpoint before landing —
 	// an aborted run must not merge or commit Complete (issue #3523).
@@ -302,6 +303,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 				fmt.Printf("    #%s  landing=%s  status=landing-ref-unresolved  !! %v\n", num, branch, err)
 			}
 		}
+		s.removeLandedBundle(num)
 		return landingMerged
 	}
 	return landingManual

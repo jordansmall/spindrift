@@ -37,12 +37,14 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 
 // verifyMerged confirms a PR reported merged carries both a MERGED state and
 // the CompleteLabel, and demotes the issue to Failed otherwise, since a gap
-// there means something merged outside the gate.
+// there means something merged outside the gate. A verified merge also drops
+// the landed bundle; a demoted settle keeps it.
 func (s *Settle) verifyMerged(num, pr string) {
 	prState, _ := s.pr.PRState(pr)
 	iss, _ := s.it.Issue(num)
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
 		fmt.Printf("    #%s  landing=%s  status=verified-merged\n", num, pr)
+		s.removeLandedBundle(num)
 		s.closeIssue(num)
 		return
 	}

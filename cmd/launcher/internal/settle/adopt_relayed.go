@@ -3,6 +3,7 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -177,11 +178,35 @@ func (s *Settle) tryMarkRecoverable(num string, result dispatch.Result) bool {
 // stats rather than calling RelayBundle: detecting Recoverable must never
 // import or land anything.
 func (s *Settle) bundlePresent(num string) bool {
-	if s.cfg.OutboxDir == nil {
+	path, ok := s.bundlePath(num)
+	if !ok {
 		return false
 	}
-	_, err := os.Stat(filepath.Join(s.cfg.OutboxDir(num), seambundle.FileName))
+	_, err := os.Stat(path)
 	return err == nil
+}
+
+// bundlePath is num's seam.bundle path, or false when no outbox is configured.
+func (s *Settle) bundlePath(num string) (string, bool) {
+	if s.cfg.OutboxDir == nil {
+		return "", false
+	}
+	return filepath.Join(s.cfg.OutboxDir(num), seambundle.FileName), true
+}
+
+// removeLandedBundle deletes num's seam.bundle once its work has merged. A
+// bundle left behind reads as unlanded work to recover's queue mode and the
+// outbox Demand (issue #4652). Only the bundle goes: the outbox also holds the
+// pass manifest. Best-effort, since a leftover file must never fail a landing
+// that already merged (issue #4653).
+func (s *Settle) removeLandedBundle(num string) {
+	path, ok := s.bundlePath(num)
+	if !ok {
+		return
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		fmt.Printf("    #%s  status=bundle-remove-failed  !! %v\n", num, err)
+	}
 }
 
 // isSuccessSelfReport reports whether a driver self-report's Status means the

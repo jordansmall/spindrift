@@ -56,9 +56,9 @@ type Config struct {
 
 	// OutboxDir resolves an issue number to its Box's writable outbox directory
 	// (CODE_FORGE=local, ADR 0033), which the Code Forge's BundleRelay hook
-	// reads the code-out bundle from before Merge. Nil at every non-local
-	// construction site, and read only when the Code Forge implements
-	// forge.BundleRelay.
+	// reads the code-out bundle from before Merge, and which a merged landing
+	// then removes the bundle from (issue #4653). Nil disables both; the relay
+	// read happens only when the Code Forge implements forge.BundleRelay.
 	OutboxDir func(num string) string
 
 	// CodeForgeForIssue resolves num's own CodeForge for the parent-sensitive
