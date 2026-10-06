@@ -110,13 +110,46 @@ func TestBuildDemandSources_RelativeDirResolvesAgainstCwd(t *testing.T) {
 	}
 }
 
-func TestBuildDemandSources_NonLocalTrackerOrMissingKnobsHasNoSource(t *testing.T) {
+// github (the launcher's default tracker, so a blank ISSUE_TRACKER too) builds
+// a gh-backed source per probed kind. CountReady is never called: it would
+// reach the real GitHub.
+func TestBuildDemandSources_GitHubBuildsProbeSource(t *testing.T) {
+	clearKnobEnvT(t)
+	for name, tracker := range map[string]string{"github": "github", "blank": ""} {
+		t.Run(name, func(t *testing.T) {
+			src := buildDemandSources(demandDocT(map[string]string{
+				"ISSUE_TRACKER": tracker, "REPO_SLUG": "o/r", "LABEL": "ready-for-agent",
+			}), allDemandKinds)
+			if len(src) != 2 {
+				t.Fatalf("sources = %v, want work and research", src)
+			}
+			for kind, c := range src {
+				if got := c.ProbeInterval(); got != time.Minute {
+					t.Errorf("%s ProbeInterval() = %v, want 1m", kind, got)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
+	clearKnobEnvT(t)
+	t.Setenv("REPO_SLUG", "o/r")
+	src := buildDemandSources(demandDocT(map[string]string{
+		"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent",
+	}), allDemandKinds)
+	if len(src) != 2 {
+		t.Errorf("sources = %v, want work and research", src)
+	}
+}
+
+func TestBuildDemandSources_NoAdapterOrMissingKnobsHasNoSource(t *testing.T) {
 	clearKnobEnvT(t)
 	for name, settings := range map[string]map[string]string{
-		"github":  {"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent"},
-		"jira":    {"ISSUE_TRACKER": "jira", "LABEL": "ready-for-agent"},
-		"forgejo": {"ISSUE_TRACKER": "forgejo", "LABEL": "ready-for-agent"},
-		"absent":  {},
+		"github without slug": {"ISSUE_TRACKER": "github", "LABEL": "ready-for-agent"},
+		"jira":                {"ISSUE_TRACKER": "jira", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
+		"forgejo":             {"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "LABEL": "ready-for-agent"},
+		"absent":              {},
 	} {
 		t.Run(name, func(t *testing.T) {
 			src := buildDemandSources(demandDocT(settings), allDemandKinds)

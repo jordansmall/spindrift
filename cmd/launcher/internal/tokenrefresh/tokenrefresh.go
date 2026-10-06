@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+// Interval is how often a caller of Watch polls GH_TOKEN_REFRESH_FILE for a
+// freshly minted token. An installation token lives about an hour (issue #1027).
+const Interval = 60 * time.Second
+
 // ReadIfChanged reports whether path holds a non-empty token differing from prev.
 // On a read error, or on empty or unchanged contents, it returns prev, so the
 // caller never clears GH_TOKEN out from under an in-flight gh call.

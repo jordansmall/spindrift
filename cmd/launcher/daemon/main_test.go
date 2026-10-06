@@ -1053,6 +1053,7 @@ var daemonKnobEnvVars = []string{
 	"DAEMON_SELF_APP", "SPINDRIFT_DAEMON_PROGRAM", "DAEMON_PROBE_INTERVAL",
 	"ISSUE_TRACKER", "LOCAL_ISSUES_DIR", "LABEL", "IN_PROGRESS_LABEL",
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL", "FORGEJO_TOKEN",
+	"GH_TOKEN_REFRESH_FILE",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
