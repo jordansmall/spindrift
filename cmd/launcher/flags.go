@@ -156,6 +156,7 @@ type flagEntry struct {
 // setting rather than "unset" (which falls back to the default): true iff the
 // knob is bool kind (parseFlags encodes a bool's explicit off as set-but-empty)
 // or emptyDisables. Read env through ambientSetting; never re-derive this.
+// inputdoc.Document.Setting applies the same rule to a document value.
 func (e flagEntry) emptyIsSetting() bool {
 	return e.kind == "bool" || e.emptyDisables
 }

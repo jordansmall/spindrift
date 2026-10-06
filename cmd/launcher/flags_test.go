@@ -2291,3 +2291,14 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 		t.Errorf("parseFlags(dispatch --research) = nil error, want unknown flag")
 	}
 }
+
+// TestEmptyIsSettingParityWithInputdoc keeps inputdoc.Document.Setting's
+// generated set in sync with flagEntry.emptyIsSetting.
+func TestEmptyIsSettingParityWithInputdoc(t *testing.T) {
+	for _, e := range schemaFlags {
+		doc := &inputdoc.Document{Settings: map[string]string{e.env: ""}}
+		if _, ok := doc.Setting(e.env); ok != e.emptyIsSetting() {
+			t.Errorf("%s: inputdoc Setting(empty) ok = %v, flagEntry.emptyIsSetting() = %v", e.env, ok, e.emptyIsSetting())
+		}
+	}
+}

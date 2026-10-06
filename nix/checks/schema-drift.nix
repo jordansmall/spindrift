@@ -652,6 +652,26 @@ checkedMerge {
       "backend-registry-axis-read-guard (issue #4183): a row setting trackerAxisRead, trackerAxisWrite, and trackerAxisFiler must still render successfully, but it failed";
     pkgs.runCommand "backend-registry-axis-read-guard" { } "touch $out";
 
+  # Regenerate with `nix run .#regen` when lib/env-schema.nix's bool or
+  # emptyDisables knobs change; gofmt-normalized the same way regen
+  # normalizes it (issue #4617).
+  empty-is-setting-gen-go =
+    let
+      raw = pkgs.writeText "emptyissetting_gen.go.raw" (renderers.renderEmptyIsSettingGo schema);
+    in
+    pkgs.runCommand "empty-is-setting-gen-go"
+      {
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/inputdoc/emptyissetting_gen.go;
+      }
+      ''
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/inputdoc/emptyissetting_gen.go is out of sync with lib/env-schema.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regenerate with `nix run .#regen` when lib/labels.nix changes. The raw
   # renderer output is gofmt-normalized here the same way regen normalizes it
   # (issue #2528).
