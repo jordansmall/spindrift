@@ -51,6 +51,13 @@ type kindSched struct {
 	// there was work and the child found none, so the cached count is
 	// suspect.
 	fresh bool
+
+	// tracker keys the rate-limit pause kinds share: kinds counting against one
+	// tracker are paused together, since they spend one quota.
+	tracker string
+	// limitedUntil is when the tracker's rate-limit pause ends; the zero time
+	// or a past instant means not paused.
+	limitedUntil time.Time
 }
 
 // Occupancy is what the pool's slot phases say is running, passed in on each
@@ -126,18 +133,34 @@ type DemandFailed struct{ Kind Kind }
 // it was started against.
 type Claimed struct{ Kind Kind }
 
+// DemandRateLimited: a probe of Kind was refused by its tracker's rate limit.
+// Reset is when the tracker says the limit lifts; zero when it reported none.
+// The pause covers every kind on the same tracker, not just Kind.
+type DemandRateLimited struct {
+	Kind  Kind
+	Reset time.Time
+}
+
 func (e ChildDone) kind() Kind    { return e.Kind }
 func (e DemandProbed) kind() Kind { return e.Kind }
 func (e DemandFailed) kind() Kind { return e.Kind }
 func (e Claimed) kind() Kind      { return e.Kind }
 
+func (e DemandRateLimited) kind() Kind { return e.Kind }
+
 // newSchedule builds a Schedule over kinds. probe holds the Demand interval
 // for each probed kind; a kind absent or at 0 stays exit-driven. floor and
-// cap bound the per-kind backoff, as for idleBackoff.
-func newSchedule(kinds []Kind, reservation int, floor, cap time.Duration, probe map[Kind]time.Duration) Schedule {
+// cap bound the per-kind backoff, as for idleBackoff. trackers names the
+// tracker each kind's Demand counts against; a kind without an entry is its
+// own tracker, so it shares no rate-limit pause.
+func newSchedule(kinds []Kind, reservation int, floor, cap time.Duration, probe map[Kind]time.Duration, trackers map[Kind]string) Schedule {
 	s := Schedule{kinds: kinds, reservation: reservation, state: make(map[Kind]kindSched, len(kinds))}
 	for _, k := range kinds {
-		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, cap)}
+		tracker, ok := trackers[k]
+		if !ok {
+			tracker = string(k)
+		}
+		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, cap), tracker: tracker}
 	}
 	return s
 }
@@ -148,6 +171,9 @@ func (k kindSched) probed() bool { return k.interval > 0 }
 func (k kindSched) stale(now time.Time) bool {
 	return k.probedAt.IsZero() || !now.Before(k.probedAt.Add(k.interval))
 }
+
+// paused reports whether the tracker's rate-limit pause still holds at now.
+func (k kindSched) paused(now time.Time) bool { return now.Before(k.limitedUntil) }
 
 // jamGated reports whether a Jammed gate still holds at now.
 func (k kindSched) jamGated(now time.Time) bool {
@@ -160,6 +186,9 @@ func (k kindSched) jamGated(now time.Time) bool {
 // total: ready-starting is how many more may start. An exit-driven kind has
 // no count to spend.
 func (k kindSched) startable(now time.Time, starting int) bool {
+	if k.paused(now) {
+		return false
+	}
 	if !k.probed() {
 		return k.gate.runnable(now)
 	}
@@ -170,6 +199,9 @@ func (k kindSched) startable(now time.Time, starting int) bool {
 // neither startable nor probe-due. Zero when it has none. Under a jam gate that
 // is the earlier of the next probe and the jam's end.
 func (k kindSched) deadline(now time.Time) time.Time {
+	if k.paused(now) {
+		return k.limitedUntil
+	}
 	if !k.probed() {
 		return k.gate.until
 	}
@@ -197,7 +229,7 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 			}
 			return Start{Kind: kind}
 		}
-		if ks.probed() && ks.stale(now) {
+		if ks.probed() && !ks.paused(now) && ks.stale(now) {
 			stale = append(stale, kind)
 		}
 	}
@@ -221,12 +253,16 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 
 // Observe folds ev into the schedule at now and returns the updated copy.
 // woke reports that the event made its kind startable when it was not before.
-// Only the observed kind changes, so that is the whole startable set growing.
+// Only the observed kind changes — except DemandRateLimited, which pauses
+// every kind on its tracker and only ever closes kinds, so woke is false.
 func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	kind := ev.kind()
 	ks, ok := s.state[kind]
 	if !ok {
 		return s, false
+	}
+	if e, ok := ev.(DemandRateLimited); ok {
+		return s.rateLimited(now, ks, e.Reset), false
 	}
 	switch e := ev.(type) {
 	case ChildDone:
@@ -267,6 +303,25 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 		}
 	}
 	return s.with(kind, ks), opened(s.state[kind], ks, now)
+}
+
+// rateLimited pauses every kind on observed's tracker until reset. A zero or
+// already-past reset would re-probe straight into the limit, so the pause is
+// four of the observed kind's intervals instead. Counts are left as read.
+func (s Schedule) rateLimited(now time.Time, observed kindSched, reset time.Time) Schedule {
+	until := reset
+	if !reset.After(now) {
+		until = now.Add(4 * observed.interval)
+	}
+	m := make(map[Kind]kindSched, len(s.state))
+	for k, ks := range s.state {
+		if ks.tracker == observed.tracker {
+			ks.limitedUntil = until
+		}
+		m[k] = ks
+	}
+	s.state = m
+	return s
 }
 
 // opened reports that a kind startable after a change was not before it.
@@ -340,9 +395,14 @@ type KindView struct {
 	// Until the instant that ends it: the backoff for an unprobed kind, the
 	// jam or the fresh-empty Demand for a probed one. Until is zero when not
 	// Gated, never a stale deadline.
+	// A rate-limit pause also Gates, with Until the later of its end and any
+	// other gate's.
 	Gated  bool
 	Until  time.Time
 	Jammed bool
+
+	Tracker          string
+	RateLimitedUntil time.Time // zero unless paused at now
 
 	Probed     bool
 	Ready      int
@@ -360,6 +420,19 @@ func (s Schedule) View(kind Kind, now time.Time) KindView {
 	if !ok {
 		return KindView{}
 	}
+	v := ks.view(now)
+	v.Tracker = ks.tracker
+	if ks.paused(now) {
+		v.RateLimitedUntil, v.Gated = ks.limitedUntil, true
+		if ks.limitedUntil.After(v.Until) {
+			v.Until = ks.limitedUntil
+		}
+	}
+	return v
+}
+
+// view is View without the tracker or rate-limit pause.
+func (ks kindSched) view(now time.Time) KindView {
 	v := KindView{Jammed: ks.gate.jammedNow()}
 	if !ks.probed() {
 		v.Until, v.Gated = ks.gate.readyAt(now)

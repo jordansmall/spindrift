@@ -27,7 +27,7 @@ func schedAt(d time.Duration) time.Time { return schedT0.Add(d) }
 func probedSchedule(kinds []Kind, reservation int) Schedule {
 	return newSchedule(kinds, reservation, schedFloor, schedCap, map[Kind]time.Duration{
 		schedWork: schedInterval, schedResearch: schedInterval,
-	})
+	}, nil)
 }
 
 func schedObserve(t *testing.T, s Schedule, now time.Time, evs ...SchedEvent) Schedule {
@@ -287,7 +287,7 @@ func TestScheduleDecide(t *testing.T) {
 		{
 			name: "unprobed kind ignores the start budget",
 			build: func() Schedule {
-				return newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil)
+				return newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil, nil)
 			},
 			occ:  startingRunning(schedButler, 3),
 			want: Start{Kind: schedButler},
@@ -304,7 +304,7 @@ func TestScheduleDecide(t *testing.T) {
 		{
 			name: "jam gate does not hide a stale kind from probing",
 			build: func() Schedule {
-				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 500 * time.Millisecond})
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 500 * time.Millisecond}, nil)
 				s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
@@ -314,7 +314,7 @@ func TestScheduleDecide(t *testing.T) {
 		{
 			name: "jammed kind with a probe due before the jam ends parks until the probe",
 			build: func() Schedule {
-				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 500 * time.Millisecond})
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 500 * time.Millisecond}, nil)
 				s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
@@ -324,7 +324,7 @@ func TestScheduleDecide(t *testing.T) {
 		{
 			name: "jammed kind with a probe due after the jam ends parks until the jam ends",
 			build: func() Schedule {
-				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 2 * schedFloor})
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{schedWork: 2 * schedFloor}, nil)
 				s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 3})
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
@@ -352,14 +352,14 @@ func TestScheduleDecide(t *testing.T) {
 		{
 			name: "single unprobed kind: never gated, starts",
 			build: func() Schedule {
-				return newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil)
+				return newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil, nil)
 			},
 			want: Start{Kind: schedButler},
 		},
 		{
 			name: "single unprobed kind: empty exit parks on the backoff",
 			build: func() Schedule {
-				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil)
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil, nil)
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildEmpty})
 			},
 			want: Park{Until: schedAt(schedFloor)},
@@ -367,7 +367,7 @@ func TestScheduleDecide(t *testing.T) {
 		{
 			name: "single unprobed kind: jammed exit parks with JamPoll",
 			build: func() Schedule {
-				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil)
+				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil, nil)
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
 			want: Park{Until: schedAt(schedFloor), JamPoll: true},
@@ -391,7 +391,7 @@ func TestScheduleDecide(t *testing.T) {
 }
 
 func TestScheduleUnprobedKeepsExitDrivenBackoff(t *testing.T) {
-	s := newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil)
+	s := newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil, nil)
 	now := schedT0
 	var waits []time.Duration
 	for i := 0; i < 5; i++ {
@@ -421,7 +421,7 @@ func TestScheduleUnprobedKeepsExitDrivenBackoff(t *testing.T) {
 }
 
 func TestScheduleTipMovedResetsOnlyJammedKinds(t *testing.T) {
-	s := newSchedule(allKinds(), 0, schedFloor, schedCap, nil)
+	s := newSchedule(allKinds(), 0, schedFloor, schedCap, nil, nil)
 	s = schedObserve(t, s, schedT0,
 		ChildDone{Kind: schedWork, Result: ChildJammed},
 		ChildDone{Kind: schedResearch, Result: ChildEmpty},
@@ -652,7 +652,7 @@ func TestScheduleDemandProbedAcrossClaimStaysStale(t *testing.T) {
 }
 
 func TestScheduleClaimedLeavesUnprobedKindAlone(t *testing.T) {
-	s := newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil)
+	s := newSchedule([]Kind{schedButler}, 0, schedFloor, schedCap, nil, nil)
 	s = schedObserve(t, s, schedT0, ChildDone{Kind: schedButler, Result: ChildEmpty})
 	after := schedObserve(t, s, schedT0, Claimed{Kind: schedButler})
 	if !reflect.DeepEqual(after, s) {
@@ -726,7 +726,7 @@ func TestScheduleObserveWokeOnlyWhenStartableSetGrows(t *testing.T) {
 }
 
 func TestScheduleObserveKeepsValueSemantics(t *testing.T) {
-	old := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil)
+	old := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil, nil)
 	_ = schedObserve(t, old, schedT0, ChildDone{Kind: schedWork, Result: ChildEmpty})
 	if d := old.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedWork}) {
 		t.Fatalf("original schedule mutated by Observe: %#v", d)
@@ -846,5 +846,102 @@ func TestScheduleEmptyChildAfterDemandForcesFreshProbe(t *testing.T) {
 	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 0}, empty)
 	if s.View(schedWork, schedT0).Fresh {
 		t.Fatal("Fresh after exit 2 with Counted==0")
+	}
+}
+
+// githubSchedule puts work and research on one tracker; the butler stays its own.
+func githubSchedule() Schedule {
+	return newSchedule(allKinds(), 0, schedFloor, schedCap, map[Kind]time.Duration{
+		schedWork: schedInterval, schedResearch: schedInterval,
+	}, map[Kind]string{schedWork: "github", schedResearch: "github"})
+}
+
+func TestScheduleRateLimitPausesSharedTracker(t *testing.T) {
+	reset := schedAt(3 * schedInterval)
+	ready := func() Schedule {
+		return schedObserve(t, githubSchedule(), schedT0,
+			DemandProbed{Kind: schedWork, Ready: 2}, DemandProbed{Kind: schedResearch, Ready: 2})
+	}
+	s, woke := ready().Observe(schedAt(time.Second), DemandRateLimited{Kind: schedWork, Reset: reset})
+	if woke {
+		t.Fatal("a rate limit woke the pool")
+	}
+	// Work and research are both paused: neither starts, probes, or is stale-listed.
+	for _, now := range []time.Duration{schedInterval, 2 * schedInterval} {
+		got := s.Decide(schedAt(now), Occupancy{})
+		if want := (Start{Kind: schedButler}); got != want {
+			// the butler is exit-driven and not on the tracker, so it may start.
+			t.Fatalf("at %s decide = %#v, want %#v", now, got, want)
+		}
+	}
+	for _, k := range []Kind{schedWork, schedResearch} {
+		v := s.View(k, schedAt(2*schedInterval))
+		if !v.Gated || v.Until != reset || v.RateLimitedUntil != reset || v.Tracker != "github" {
+			t.Fatalf("view(%s) = %#v", k, v)
+		}
+		if v.Ready != 2 || v.Counted != 2 {
+			t.Fatalf("view(%s) lost its count: %#v", k, v)
+		}
+	}
+	if v := s.View(schedButler, schedAt(2*schedInterval)); v.RateLimitedUntil != (time.Time{}) || v.Tracker != string(schedButler) {
+		t.Fatalf("butler view = %#v", v)
+	}
+	// The pause lapsing leaves the count stale, so both kinds re-probe.
+	got := s.Decide(reset, Occupancy{})
+	if want := (Probe{Kinds: []Kind{schedWork, schedResearch}}); !reflect.DeepEqual(got, want) {
+		t.Fatalf("after the pause decide = %#v, want %#v", got, want)
+	}
+	if v := s.View(schedWork, reset); v.Gated || v.RateLimitedUntil != (time.Time{}) {
+		t.Fatalf("view after the pause = %#v", v)
+	}
+}
+
+func TestScheduleRateLimitParksUntilThePauseEnds(t *testing.T) {
+	reset := schedAt(3 * schedInterval)
+	s := newSchedule([]Kind{schedWork, schedResearch}, 0, schedFloor, schedCap,
+		map[Kind]time.Duration{schedWork: schedInterval, schedResearch: schedInterval},
+		map[Kind]string{schedWork: "github", schedResearch: "github"})
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 2}, DemandProbed{Kind: schedResearch, Ready: 2})
+	s = schedObserve(t, s, schedAt(time.Second), DemandRateLimited{Kind: schedWork, Reset: reset})
+	if got, want := s.Decide(schedAt(2*schedInterval), Occupancy{}), (Park{Until: reset}); got != want {
+		t.Fatalf("decide = %#v, want %#v", got, want)
+	}
+}
+
+func TestScheduleRateLimitWithoutUsableResetPausesFourIntervals(t *testing.T) {
+	now := schedAt(time.Second)
+	for name, reset := range map[string]time.Time{
+		"no reset":      {},
+		"reset in past": schedT0,
+		"reset is now":  now,
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := schedObserve(t, githubSchedule(), now, DemandRateLimited{Kind: schedResearch, Reset: reset})
+			want := now.Add(4 * schedInterval)
+			for _, k := range []Kind{schedWork, schedResearch} {
+				if v := s.View(k, now); v.RateLimitedUntil != want {
+					t.Fatalf("view(%s).RateLimitedUntil = %v, want %v", k, v.RateLimitedUntil, want)
+				}
+			}
+		})
+	}
+}
+
+func TestScheduleRateLimitOnUntrackedKindStaysAlone(t *testing.T) {
+	s := schedObserve(t, githubSchedule(), schedT0, DemandRateLimited{Kind: schedButler})
+	for _, k := range []Kind{schedWork, schedResearch} {
+		if v := s.View(k, schedT0); v.RateLimitedUntil != (time.Time{}) {
+			t.Fatalf("view(%s) paused by another tracker: %#v", k, v)
+		}
+	}
+}
+
+func TestScheduleRateLimitPauseOutlastsJamGate(t *testing.T) {
+	s := schedObserve(t, githubSchedule(), schedT0,
+		DemandProbed{Kind: schedWork, Ready: 1},
+		ChildDone{Kind: schedWork, Result: ChildJammed},
+		DemandRateLimited{Kind: schedWork, Reset: schedAt(time.Minute)})
+	if v := s.View(schedWork, schedT0); !v.Gated || v.Until != schedAt(time.Minute) || !v.Jammed {
+		t.Fatalf("view = %#v", v)
 	}
 }

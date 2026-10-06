@@ -280,7 +280,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		st: state{
 			slots:     slots,
 			b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
-			sched:     newSchedule(cfg.Kinds, cfg.ResearchReservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals),
+			sched:     newSchedule(cfg.Kinds, cfg.ResearchReservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals, cfg.Trackers),
 			batonSlot: leadSlot,
 
 			wake:       wake,
