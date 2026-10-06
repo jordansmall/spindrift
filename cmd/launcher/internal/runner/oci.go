@@ -782,6 +782,10 @@ func (a *ociAdapter) probeRegistryTCPOnce(host string, addHost bool) error {
 // .git/ do not touch it), so it is not a liveness signal.
 const orphanedRebaseDirAge = 24 * time.Hour
 
+// rebaseTempRoot is where forge.Rebase makes its clones; a var so this
+// package's tests can keep Run's reap out of the shared temp dir.
+var rebaseTempRoot = os.TempDir
+
 // reapOrphanedRebaseDirs removes leftover spindrift-rebase-* directories in
 // root. forge.Rebase cleans these up with defer, which a killed launcher skips.
 // It only takes dirs older than orphanedRebaseDirAge: root is shared, so a
@@ -828,7 +832,7 @@ func ociRunEnv(boxEnv map[string]string) []string {
 
 // Run launches a single issue into a podman/docker container.
 func (a *ociAdapter) Run(box Box) error {
-	reapOrphanedRebaseDirs(os.TempDir())
+	reapOrphanedRebaseDirs(rebaseTempRoot())
 	// Never touch a live container: a concurrent launcher invocation may own
 	// one that is not terminal and still within midCreationGrace, and a
 	// force-remove would destroy that run's work silently. A live container
