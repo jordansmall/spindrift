@@ -2292,6 +2292,27 @@ func TestDoctorFlagArgs_Research(t *testing.T) {
 	}
 }
 
+// TestDaemonOnlyKnobsParityWithInputdoc keeps inputdoc's generated daemon-only
+// set in sync with flagEntry.launcherIgnores, and every member a real
+// flag-table entry (issue #4644). Both render from the same schema predicate,
+// so this only catches a hand-edited generated file; it stays because the
+// daemon cannot import the flag table to check that itself, the same reason
+// TestEmptyIsSettingParityWithInputdoc exists.
+func TestDaemonOnlyKnobsParityWithInputdoc(t *testing.T) {
+	inTable := map[string]bool{}
+	for _, e := range schemaFlags {
+		inTable[e.env] = true
+		if got := inputdoc.IsDaemonOnly(e.env); got != e.launcherIgnores {
+			t.Errorf("%s: inputdoc IsDaemonOnly = %v, flagEntry.launcherIgnores = %v", e.env, got, e.launcherIgnores)
+		}
+	}
+	for _, k := range inputdoc.DaemonOnlyKnobs() {
+		if !inTable[k] {
+			t.Errorf("%s: in inputdoc.DaemonOnlyKnobs but not in the flag table", k)
+		}
+	}
+}
+
 // TestEmptyIsSettingParityWithInputdoc keeps inputdoc.Document.Setting's
 // generated set in sync with flagEntry.emptyIsSetting.
 func TestEmptyIsSettingParityWithInputdoc(t *testing.T) {

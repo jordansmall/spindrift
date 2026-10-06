@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -145,4 +146,21 @@ func ParseDuration(name, label, raw string, min time.Duration) (time.Duration, e
 // document and the environment resolves the same in the daemon as in a child.
 func SchemaDefault(key string) string {
 	return schemaDefaults[key]
+}
+
+// IsDaemonOnly reports whether key is a knob only the daemon reads
+// (launcherIgnores in lib/env-schema.nix).
+func IsDaemonOnly(key string) bool {
+	return daemonOnlyKnobs[key]
+}
+
+// DaemonOnlyKnobs returns the daemon-only knob env names, sorted, for the
+// daemon's guard tests to walk.
+func DaemonOnlyKnobs() []string {
+	out := make([]string, 0, len(daemonOnlyKnobs))
+	for k := range daemonOnlyKnobs {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

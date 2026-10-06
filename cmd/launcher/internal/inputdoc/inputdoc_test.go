@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -260,6 +261,34 @@ func TestDocumentSetting(t *testing.T) {
 				t.Errorf("Setting(%q) = (%q, %v), want (%q, %v)", tc.key, got, ok, tc.want, tc.wantSet)
 			}
 		})
+	}
+}
+
+func TestIsDaemonOnly(t *testing.T) {
+	for key, want := range map[string]bool{
+		"DAEMON_IDLE_FLOOR":    true,
+		"RESEARCH_RESERVATION": true,
+		"MAX_PARALLEL":         false,
+		"NO_SUCH_KNOB":         false,
+	} {
+		if got := IsDaemonOnly(key); got != want {
+			t.Errorf("IsDaemonOnly(%q) = %v, want %v", key, got, want)
+		}
+	}
+}
+
+func TestDaemonOnlyKnobs(t *testing.T) {
+	got := DaemonOnlyKnobs()
+	if len(got) == 0 {
+		t.Fatal("DaemonOnlyKnobs() is empty")
+	}
+	if !sort.StringsAreSorted(got) {
+		t.Errorf("DaemonOnlyKnobs() = %v, want sorted", got)
+	}
+	for _, k := range got {
+		if !IsDaemonOnly(k) {
+			t.Errorf("%s listed by DaemonOnlyKnobs but IsDaemonOnly is false", k)
+		}
 	}
 }
 
