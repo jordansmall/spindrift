@@ -6249,10 +6249,11 @@ that runs after it. The daemon resolves every knob a child also reads
 way the child does, document value first (issue #4623). An exported
 `CONTINUOUS_DISPATCH=1`, `ISSUE_NUMBER`, or `MODEL` is ignored by the
 daemon, which never reads them, and by a child whenever the document
-carries them, since they are stripped. Only the daemon-only knobs — the ones the flag table marks "read by the daemon
-only", which no child reads (`daemonOnlyKnobs`,
-`cmd/launcher/daemon/main.go`) — still let an ambient value win in the
-daemon, with its own, separate deprecation warning
+carries them, since they are stripped. Only the daemon-only knobs — the ones
+`lib/env-schema.nix` marks `launcherIgnores`, which no child reads (the daemon
+tests them with `inputdoc.IsDaemonOnly`, over the set generated into
+`cmd/launcher/internal/inputdoc/daemononlyknobs_gen.go`) — still let an ambient
+value win in the daemon, with its own, separate deprecation warning
 (`inputdoc.Document.Lookup`, `cmd/launcher/internal/inputdoc/inputdoc.go`);
 their line keeps the older wording:
 

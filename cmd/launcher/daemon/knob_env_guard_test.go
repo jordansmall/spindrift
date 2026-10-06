@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/inputdoc"
 )
 
 // knobEnvGuardAllowlist maps a FuncDecl name to the normalised selector
@@ -233,10 +235,11 @@ func TestClearKnobEnvT_CoversEveryKnob(t *testing.T) {
 	}
 }
 
-// TestDaemonOnlyKnobs_MatchesDocLookupSites pins daemonOnlyKnobs to the keys
-// the daemon still reads through inputdoc.Document's ambient-wins Lookup
-// path: a knob added via doc.Resolve without being listed, or moved to
-// childKnob but left listed, would make warnStrippedChildEnv's wording lie.
+// TestDaemonOnlyKnobs_MatchesDocLookupSites pins the schema's launcherIgnores
+// set (inputdoc.IsDaemonOnly) to the keys the daemon still reads through
+// inputdoc.Document's ambient-wins Lookup path: a knob added via doc.Resolve
+// without being in that set, or moved to childKnob but left in it, would make
+// warnStrippedChildEnv's wording lie.
 func TestDaemonOnlyKnobs_MatchesDocLookupSites(t *testing.T) {
 	files, err := filepath.Glob("*.go")
 	if err != nil {
@@ -273,70 +276,13 @@ func TestDaemonOnlyKnobs_MatchesDocLookupSites(t *testing.T) {
 		t.Fatal("scan found no doc.Resolve/ResolveOptional/Lookup sites — a rename likely broke the walk")
 	}
 	for k := range got {
-		if !daemonOnlyKnobs[k] {
-			t.Errorf("%s is read via doc.Resolve/ResolveOptional/Lookup but missing from daemonOnlyKnobs", k)
+		if !inputdoc.IsDaemonOnly(k) {
+			t.Errorf("%s is read via doc.Resolve/ResolveOptional/Lookup but not in the daemon-only set (inputdoc.IsDaemonOnly)", k)
 		}
 	}
-	for k := range daemonOnlyKnobs {
+	for _, k := range inputdoc.DaemonOnlyKnobs() {
 		if !got[k] {
-			t.Errorf("daemonOnlyKnobs lists %s, but no doc.Resolve/ResolveOptional/Lookup site reads it", k)
-		}
-	}
-}
-
-// TestDaemonOnlyKnobs_AreLauncherIgnoresInFlagTable ties daemonOnlyKnobs to
-// the generated flag table, whose launcherIgnores entries are the knobs "read
-// by the daemon only": a key listed here that the table does not mark (or
-// the reverse) means a child may read a knob the daemon resolves ambient-first.
-// The parent package's source is in the nix go-test sandbox, which copies the
-// whole cmd/launcher tree.
-func TestDaemonOnlyKnobs_AreLauncherIgnoresInFlagTable(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "../flagtable_gen.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ignores := make(map[string]bool)
-	ast.Inspect(file, func(n ast.Node) bool {
-		lit, ok := n.(*ast.CompositeLit)
-		if !ok {
-			return true
-		}
-		var env string
-		var ignored bool
-		for _, el := range lit.Elts {
-			kv, ok := el.(*ast.KeyValueExpr)
-			if !ok {
-				return true
-			}
-			key, ok := kv.Key.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			switch v := kv.Value.(type) {
-			case *ast.BasicLit:
-				if key.Name == "env" && v.Kind == token.STRING {
-					env, _ = strconv.Unquote(v.Value)
-				}
-			case *ast.Ident:
-				ignored = ignored || (key.Name == "launcherIgnores" && v.Name == "true")
-			}
-		}
-		if env != "" && ignored {
-			ignores[env] = true
-		}
-		return true
-	})
-	if len(ignores) == 0 {
-		t.Fatal("found no launcherIgnores entries in ../flagtable_gen.go — a rename likely broke the walk")
-	}
-	for k := range daemonOnlyKnobs {
-		if !ignores[k] {
-			t.Errorf("daemonOnlyKnobs lists %s, but flagtable_gen.go does not mark it launcherIgnores", k)
-		}
-	}
-	for k := range ignores {
-		if !daemonOnlyKnobs[k] {
-			t.Errorf("flagtable_gen.go marks %s launcherIgnores, but daemonOnlyKnobs omits it", k)
+			t.Errorf("the daemon-only set (inputdoc.IsDaemonOnly) lists %s, but no doc.Resolve/ResolveOptional/Lookup site reads it", k)
 		}
 	}
 }
