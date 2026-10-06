@@ -293,13 +293,13 @@ func TestScheduleDecide(t *testing.T) {
 			want: Start{Kind: schedButler},
 		},
 		{
-			name: "jammed kind parks until the jam ends with JamPoll",
+			name: "jammed kind parks until the jam ends with TipPoll",
 			build: func() Schedule {
 				s := probed(probedSchedule([]Kind{schedWork}, 0), schedT0, schedWork, 3)
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
 			now:  500 * time.Millisecond,
-			want: Park{Until: schedAt(schedFloor), JamPoll: true},
+			want: Park{Until: schedAt(schedFloor), TipPoll: true},
 		},
 		{
 			name: "jam gate does not hide a stale kind from probing",
@@ -319,7 +319,7 @@ func TestScheduleDecide(t *testing.T) {
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
 			now:  100 * time.Millisecond,
-			want: Park{Until: schedAt(500 * time.Millisecond), JamPoll: true},
+			want: Park{Until: schedAt(500 * time.Millisecond), TipPoll: true},
 		},
 		{
 			name: "jammed kind with a probe due after the jam ends parks until the jam ends",
@@ -329,7 +329,7 @@ func TestScheduleDecide(t *testing.T) {
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
 			now:  100 * time.Millisecond,
-			want: Park{Until: schedAt(schedFloor), JamPoll: true},
+			want: Park{Until: schedAt(schedFloor), TipPoll: true},
 		},
 		{
 			name: "jam elapsed with fresh demand starts again",
@@ -365,12 +365,12 @@ func TestScheduleDecide(t *testing.T) {
 			want: Park{Until: schedAt(schedFloor)},
 		},
 		{
-			name: "single unprobed kind: jammed exit parks with JamPoll",
+			name: "single unprobed kind: jammed exit parks with TipPoll",
 			build: func() Schedule {
 				s := newSchedule([]Kind{schedWork}, 0, schedFloor, schedCap, nil, nil)
 				return schedObserve(t, s, schedT0, ChildDone{Kind: schedWork, Result: ChildJammed})
 			},
-			want: Park{Until: schedAt(schedFloor), JamPoll: true},
+			want: Park{Until: schedAt(schedFloor), TipPoll: true},
 		},
 		{
 			name: "single probed kind never probed",
@@ -450,8 +450,8 @@ func TestScheduleJamBackoffDoublesAndTipMovedLifts(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: 5}, ChildDone{Kind: schedWork, Result: ChildJammed})
 		p := s.Decide(now, Occupancy{}).(Park)
-		if !p.JamPoll {
-			t.Fatalf("jam %d: JamPoll false", i)
+		if !p.TipPoll {
+			t.Fatalf("jam %d: TipPoll false", i)
 		}
 		waits = append(waits, p.Until.Sub(now))
 		now = p.Until
@@ -573,7 +573,7 @@ func TestScheduleProbedEmptyDoesNotGrow(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		s = schedObserve(t, s, now, DemandProbed{Kind: schedWork, Ready: 1}, ChildDone{Kind: schedWork, Result: ChildEmpty})
 		p := s.Decide(now, Occupancy{}).(Park)
-		if p.Until.Sub(now) != schedInterval || p.JamPoll {
+		if p.Until.Sub(now) != schedInterval || p.TipPoll {
 			t.Fatalf("empty %d: Park %#v, want exactly one interval", i, p)
 		}
 		now = p.Until
@@ -927,6 +927,65 @@ func TestScheduleRateLimitWithoutUsableResetPausesFourIntervals(t *testing.T) {
 	}
 }
 
+func reportedSchedule(kinds ...Kind) Schedule {
+	return newSchedule(kinds, 0, schedFloor, schedCap, nil, nil)
+}
+
+func TestScheduleReportedKind(t *testing.T) {
+	due := schedAt(time.Hour)
+	empty := func(nd NextDue) SchedEvent {
+		return ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: nd}
+	}
+	tests := []struct {
+		name  string
+		kinds []Kind
+		evs   []SchedEvent
+		now   time.Duration
+		want  Decision
+	}{
+		{"starts at start-up to learn next_due", []Kind{schedButler}, nil, 0,
+			Start{Kind: schedButler}},
+		{"empty with an instant parks until it", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{At: due})}, 0,
+			Park{Until: due}},
+		{"empty with an instant starts at it", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{At: due})}, time.Hour,
+			Start{Kind: schedButler}},
+		{"empty on tip move only parks one cap out and polls", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{OnTipMove: true})}, 0,
+			Park{Until: schedAt(schedCap), TipPoll: true}},
+		{"tip-move only never starts by time", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{OnTipMove: true})}, 24 * time.Hour,
+			Park{Until: schedAt(24*time.Hour + schedCap), TipPoll: true}},
+		{"instant and tip move parks until the instant and polls", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{At: due, OnTipMove: true})}, 0,
+			Park{Until: due, TipPoll: true}},
+		{"empty with no report falls back to the backoff", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{})}, 0,
+			Park{Until: schedAt(schedFloor)}},
+		{"continue is startable", []Kind{schedButler},
+			[]SchedEvent{empty(NextDue{At: due}), ChildDone{Kind: schedButler, Result: ChildContinue}}, 0,
+			Start{Kind: schedButler}},
+		{"jammed backs off with a poll", []Kind{schedButler},
+			[]SchedEvent{ChildDone{Kind: schedButler, Result: ChildJammed}}, 0,
+			Park{Until: schedAt(schedFloor), TipPoll: true}},
+		{"a waiting reported kind does not block a normal kind", []Kind{schedButler, schedWork},
+			[]SchedEvent{empty(NextDue{At: due})}, 0,
+			Start{Kind: schedWork}},
+		{"a waiting reported kind leaves the sooner sibling deadline", []Kind{schedButler, schedWork},
+			[]SchedEvent{empty(NextDue{At: due}), ChildDone{Kind: schedWork, Result: ChildEmpty}}, 0,
+			Park{Until: schedAt(schedFloor)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schedObserve(t, reportedSchedule(tt.kinds...), schedT0, tt.evs...)
+			if got := s.Decide(schedAt(tt.now), Occupancy{}); got != tt.want {
+				t.Fatalf("Decide = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestScheduleRateLimitOnUntrackedKindStaysAlone(t *testing.T) {
 	s := schedObserve(t, githubSchedule(), schedT0, DemandRateLimited{Kind: schedButler})
 	for _, k := range []Kind{schedWork, schedResearch} {
@@ -957,5 +1016,82 @@ func TestScheduleRateLimitKeepsTheLaterPause(t *testing.T) {
 		if v := s.View(k, now); v.RateLimitedUntil != reset {
 			t.Fatalf("view(%s).RateLimitedUntil = %v, want %v", k, v.RateLimitedUntil, reset)
 		}
+	}
+}
+
+func TestScheduleReportedTipMoveLiftsWaitingKind(t *testing.T) {
+	s := schedObserve(t, reportedSchedule(schedWork, schedButler), schedT0,
+		ChildDone{Kind: schedWork, Result: ChildEmpty},
+		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{OnTipMove: true}})
+	s, lifted, woke := s.LiftJams(schedT0)
+	if want := []Kind{schedButler}; !reflect.DeepEqual(lifted, want) || !woke {
+		t.Fatalf("lifted = %v woke = %v, want %v and woke", lifted, woke, want)
+	}
+	if d := s.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedButler}) {
+		t.Fatalf("after lift: %#v, want Start butler", d)
+	}
+	if _, lifted, _ = s.LiftJams(schedT0); len(lifted) != 0 {
+		t.Fatalf("second lift = %v, want none", lifted)
+	}
+}
+
+func TestScheduleReportedTipMoveDoesNotLiftTimedWait(t *testing.T) {
+	s := schedObserve(t, reportedSchedule(schedButler), schedT0,
+		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{At: schedAt(time.Hour)}})
+	if _, lifted, woke := s.LiftJams(schedT0); len(lifted) != 0 || woke {
+		t.Fatalf("lifted = %v woke = %v, want neither", lifted, woke)
+	}
+}
+
+func TestNextDueMerge(t *testing.T) {
+	a, b := schedAt(time.Hour), schedAt(2*time.Hour)
+	tests := []struct {
+		name       string
+		n, o, want NextDue
+	}{
+		{"zero folds to the record", NextDue{}, NextDue{At: b}, NextDue{At: b}},
+		{"earliest instant wins", NextDue{At: b}, NextDue{At: a}, NextDue{At: a}},
+		{"later instant is ignored", NextDue{At: a}, NextDue{At: b}, NextDue{At: a}},
+		{"tip move ORs in", NextDue{At: a}, NextDue{OnTipMove: true}, NextDue{At: a, OnTipMove: true}},
+		{"tip move is kept", NextDue{OnTipMove: true}, NextDue{At: a}, NextDue{At: a, OnTipMove: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.n.Merge(tt.o); got != tt.want {
+				t.Fatalf("Merge = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestScheduleReportedView(t *testing.T) {
+	due := schedAt(time.Hour)
+	s := reportedSchedule(schedWork, schedButler)
+	if v := s.View(schedWork, schedT0); v.Reported || v.DueKnown {
+		t.Fatalf("work view = %+v, want not reported", v)
+	}
+	if v := s.View(schedButler, schedT0); !v.Reported || v.DueKnown || v.Gated {
+		t.Fatalf("start-up butler view = %+v, want reported, unknown, ungated", v)
+	}
+
+	timed := schedObserve(t, s, schedT0,
+		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{At: due}})
+	v := timed.View(schedButler, schedT0)
+	if !v.Reported || !v.DueKnown || v.NextDue.At != due || !v.Gated || v.Until != due {
+		t.Fatalf("timed view = %+v, want gated until %v", v, due)
+	}
+	if v := timed.View(schedButler, due); v.Gated || !v.Until.IsZero() {
+		t.Fatalf("view at due = %+v, want ungated with zero Until", v)
+	}
+
+	tip := schedObserve(t, s, schedT0,
+		ChildDone{Kind: schedButler, Result: ChildEmpty, NextDue: NextDue{OnTipMove: true}})
+	if v := tip.View(schedButler, schedT0); !v.Gated || !v.Until.IsZero() || !v.NextDue.OnTipMove {
+		t.Fatalf("tip-only view = %+v, want gated with zero Until", v)
+	}
+
+	backoff := schedObserve(t, s, schedT0, ChildDone{Kind: schedButler, Result: ChildEmpty})
+	if v := backoff.View(schedButler, schedT0); v.DueKnown || !v.Gated || !v.Until.Equal(schedAt(schedFloor)) {
+		t.Fatalf("fallback view = %+v, want the backoff gate", v)
 	}
 }

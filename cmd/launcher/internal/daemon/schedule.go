@@ -16,9 +16,32 @@ import (
 // copy and the pool stores it back under p.mu. Observe clones the per-kind
 // map, so an older copy never sees a later Observe.
 type Schedule struct {
-	kinds       []Kind // configured order; slotOrder derives priority from it
-	reservation int    // running reserved-tier children the reserved tier is owed first
+	kinds       []Kind        // configured order; slotOrder derives priority from it
+	reservation int           // running reserved-tier children the reserved tier is owed first
+	idleCap     time.Duration // the backoff cap: how far ahead a tip-only Park sets Until
 	state       map[Kind]kindSched
+}
+
+// NextDue is when a child-reported kind next has work, as one child's
+// not_due records report it: At is the earliest instant a Chore lifts (zero
+// for none) and OnTipMove that some Chore waits on a tip move rather than a
+// clock. The zero value is no report.
+type NextDue struct {
+	At        time.Time
+	OnTipMove bool
+}
+
+// IsZero reports that n carries no report.
+func (n NextDue) IsZero() bool { return n.At.IsZero() && !n.OnTipMove }
+
+// Merge folds another record into n: the earliest non-zero instant, and
+// OnTipMove if either has it.
+func (n NextDue) Merge(o NextDue) NextDue {
+	if !o.At.IsZero() && (n.At.IsZero() || o.At.Before(n.At)) {
+		n.At = o.At
+	}
+	n.OnTipMove = n.OnTipMove || o.OnTipMove
+	return n
 }
 
 // kindSched is one kind's state. interval > 0 marks a probed kind, whose
@@ -27,12 +50,22 @@ type Schedule struct {
 // resets, a moved tip resets only a jam. A probed kind keeps probing under a
 // jam gate, since a count above readyAtJam lifts it.
 //
+// A reported kind (the descriptor's DemandChildReported) is exit-driven
+// until a child reports when it next has work: then it waits for that
+// instant (or a moved tip) instead of backing off. Without a report it falls
+// back to the exit-driven backoff, so an older child still behaves.
+//
 // gate does double duty: for an unprobed kind it is the no-work backoff, for
 // a probed kind only the jam gate (an empty queue is the Demand's job there,
 // and waits exactly one interval rather than growing).
 type kindSched struct {
 	interval time.Duration
 	gate     kindBackoff
+
+	reported bool
+	// dueKnown: a child reported due, and no child has run since it lifted.
+	dueKnown bool
+	due      NextDue
 
 	ready      int
 	probedAt   time.Time // zero = never probed, or invalidated by a Continue
@@ -96,13 +129,15 @@ type Start struct{ Kind Kind }
 // probed too, since a rising count lifts the jam.
 type Probe struct{ Kinds []Kind }
 
-// Park says nothing is startable; wait until Until. JamPoll reports that a
-// jammed kind is gated at the decision, so the caller slices the wait by
-// IdleFloor to poll the tip (idleSleep's jammedGate); Until may be a probe due
-// sooner than the jam's end.
+// Park says nothing is startable; wait until Until. TipPoll reports that a
+// moved tip can end the wait early — a jammed kind's gate, or a reported kind
+// waiting on a tip move — so the caller slices it by IdleFloor to poll the
+// tip. Until may be a probe due sooner than the jam's end, and is after the
+// Decide's now whenever TipPoll is set, or idleSleep would return at once and
+// the slot would spin instead of slicing.
 type Park struct {
 	Until   time.Time
-	JamPoll bool
+	TipPoll bool
 }
 
 func (Start) isDecision() {}
@@ -128,6 +163,9 @@ type SchedEvent interface {
 type ChildDone struct {
 	Kind   Kind
 	Result ChildOutcome
+	// NextDue is the child's report of when its kind next has work; read only
+	// for a child-reported kind.
+	NextDue NextDue
 }
 
 // DemandProbed: a probe of Kind counted Ready startable items.
@@ -163,19 +201,27 @@ func (e DemandRateLimited) kind() Kind { return e.Kind }
 
 // newSchedule builds a Schedule over kinds. probe holds the Demand interval
 // for each probed kind; a kind absent or at 0 stays exit-driven. floor and
-// cap bound the per-kind backoff, as for idleBackoff. trackers names the
+// idleCap bound the per-kind backoff, as for idleBackoff. trackers names the
 // tracker each kind's Demand counts against; a kind without an entry is its
 // own tracker, so it shares no rate-limit pause.
-func newSchedule(kinds []Kind, reservation int, floor, cap time.Duration, probe map[Kind]time.Duration, trackers map[Kind]string) Schedule {
-	s := Schedule{kinds: kinds, reservation: reservation, state: make(map[Kind]kindSched, len(kinds))}
+func newSchedule(kinds []Kind, reservation int, floor, idleCap time.Duration, probe map[Kind]time.Duration, trackers map[Kind]string) Schedule {
+	s := Schedule{kinds: kinds, reservation: reservation, idleCap: idleCap, state: make(map[Kind]kindSched, len(kinds))}
 	for _, k := range kinds {
 		tracker, ok := trackers[k]
 		if !ok {
 			tracker = string(k)
 		}
-		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, cap), tracker: tracker}
+		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, idleCap), tracker: tracker, reported: kindReported(k) && probe[k] == 0}
 	}
 	return s
+}
+
+// kindReported reports that only a child of k knows when it next has work
+// (the descriptor's DemandChildReported), so the schedule learns it from the
+// child's report rather than a probe.
+func kindReported(k Kind) bool {
+	d, ok := dispatchkind.ByVerb(string(k))
+	return ok && d.DemandSource == dispatchkind.DemandChildReported
 }
 
 func (k kindSched) probed() bool { return k.interval > 0 }
@@ -202,11 +248,17 @@ func (k kindSched) startable(now time.Time, starting int) bool {
 	if k.paused(now) {
 		return false
 	}
+	if k.dueKnown {
+		return !k.due.At.IsZero() && !now.Before(k.due.At)
+	}
 	if !k.probed() {
 		return k.gate.runnable(now)
 	}
 	return !k.jamGated(now) && !k.stale(now) && k.ready > starting
 }
+
+// tipWait reports that only a moved tip can lift this kind's known due state.
+func (k kindSched) tipWait() bool { return k.dueKnown && k.due.OnTipMove }
 
 // deadline is the instant this kind next needs attention, for a kind that is
 // neither startable nor probe-due. Zero when it has none. Under a jam gate that
@@ -214,6 +266,9 @@ func (k kindSched) startable(now time.Time, starting int) bool {
 func (k kindSched) deadline(now time.Time) time.Time {
 	if k.paused(now) {
 		return k.limitedUntil
+	}
+	if k.dueKnown {
+		return k.due.At
 	}
 	if !k.probed() {
 		return k.gate.until
@@ -250,18 +305,25 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 		return Probe{Kinds: stale}
 	}
 	var until time.Time
-	jamPoll := false
+	tipPoll, tipWait := false, false
 	for _, kind := range s.kinds {
 		ks := s.state[kind]
 		if at := ks.deadline(now); !at.IsZero() && (until.IsZero() || at.Before(until)) {
 			until = at
 		}
-		jamPoll = jamPoll || ks.jamGated(now)
+		tipPoll = tipPoll || ks.jamGated(now) || ks.tipWait()
+		tipWait = tipWait || ks.tipWait()
 	}
 	if until.IsZero() {
 		until = now
+		if tipWait {
+			// Nothing is timed, but idleSleep returns at once for a wait not
+			// after now and slices only a longer one: give it a wait to slice
+			// so the slot resolves the tip each slice.
+			until = now.Add(s.idleCap)
+		}
 	}
-	return Park{Until: until, JamPoll: jamPoll}
+	return Park{Until: until, TipPoll: tipPoll}
 }
 
 // Observe folds ev into the schedule at now and returns the updated copy.
@@ -278,7 +340,7 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	case DemandRateLimited:
 		return s.rateLimited(now, kind, e.Reset), false
 	case ChildDone:
-		ks = ks.childDone(now, e.Result)
+		ks = ks.childDone(now, e.Result, e.NextDue)
 	case DemandProbed:
 		ks.ready, ks.counted, ks.fault = e.Ready, e.Ready, probeClean
 		// A claim that landed mid-probe moved the count after it was read, so
@@ -351,7 +413,21 @@ func opened(before, after kindSched, now time.Time) bool {
 	return after.startable(now, 0) && !before.startable(now, 0)
 }
 
-func (k kindSched) childDone(now time.Time, r ChildOutcome) kindSched {
+func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue) kindSched {
+	if k.reported {
+		k.dueKnown, k.due = false, NextDue{}
+		switch {
+		case r == ChildEmpty && !nd.IsZero():
+			k.dueKnown, k.due = true, nd
+			k.gate = k.gate.reset()
+		case r == ChildContinue:
+			// A swept Chore may leave another due; the next child re-reports.
+			k.gate = k.gate.reset()
+		default:
+			k.gate, _ = k.gate.markNoWork(now, r == ChildJammed)
+		}
+		return k
+	}
 	if !k.probed() {
 		if r == ChildContinue {
 			k.gate = k.gate.reset()
@@ -380,15 +456,18 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome) kindSched {
 	return k
 }
 
-// LiftJams ends every jammed kind's gate — a moved tip is evidence a merge
-// unblocked them, though not that an empty queue refilled — and returns the
-// kinds lifted in configured order, for the tip_moved event. woke is Observe's
+// LiftJams is the schedule's answer to a moved tip. It ends every jammed
+// kind's gate — a moved tip is evidence a merge unblocked them, though not
+// that an empty queue refilled — and forgets the due state of a reported kind
+// waiting on a tip move, so its next child re-reports. It returns the kinds
+// lifted in configured order, for the tip_moved event. woke is Observe's
 // answer for the lift: some lifted kind is startable at now that was not.
 func (s Schedule) LiftJams(now time.Time) (_ Schedule, lifted []Kind, woke bool) {
 	for _, kind := range s.kinds {
-		if ks := s.state[kind]; ks.gate.jammedNow() {
+		if ks := s.state[kind]; ks.gate.jammedNow() || ks.tipWait() {
 			before := ks
 			ks.gate = ks.gate.reset()
+			ks.dueKnown, ks.due = false, NextDue{}
 			s = s.with(kind, ks)
 			lifted = append(lifted, kind)
 			woke = woke || opened(before, ks, now)
@@ -415,8 +494,9 @@ func (s Schedule) with(kind Kind, ks kindSched) Schedule {
 type KindView struct {
 	// Gated reports the kind cannot start at now for a timed reason, with
 	// Until the instant that ends it: the backoff for an unprobed kind, the
-	// jam or the fresh-empty Demand for a probed one. Until is zero when not
-	// Gated, never a stale deadline.
+	// jam or the fresh-empty Demand for a probed one, the reported due instant
+	// for a child-reported one. Until is zero when not Gated, never a stale
+	// deadline; it is also zero for a kind waiting only on a tip move.
 	// A rate-limit pause also Gates, with Until the later of its end and any
 	// other gate's.
 	Gated  bool
@@ -435,6 +515,10 @@ type KindView struct {
 	ReadyAtJam int
 	Counted    int  // last probed count; unlike Ready, a child's exit 2 leaves it
 	Fresh      bool // the next probe must skip any adapter cache
+
+	Reported bool    // a child-reported kind
+	DueKnown bool    // a child reported NextDue and none has run since
+	NextDue  NextDue // meaningful only while DueKnown
 }
 
 // View describes kind at now; the zero KindView for an unknown kind.
@@ -456,7 +540,13 @@ func (s Schedule) View(kind Kind, now time.Time) KindView {
 
 // view is View without the tracker or rate-limit pause.
 func (ks kindSched) view(now time.Time) KindView {
-	v := KindView{Jammed: ks.gate.jammedNow()}
+	v := KindView{Jammed: ks.gate.jammedNow(), Reported: ks.reported, DueKnown: ks.dueKnown, NextDue: ks.due}
+	if ks.dueKnown {
+		if !ks.startable(now, 0) {
+			v.Gated, v.Until = true, ks.due.At
+		}
+		return v
+	}
 	if !ks.probed() {
 		v.Until, v.Gated = ks.gate.readyAt(now)
 		if !v.Gated {
