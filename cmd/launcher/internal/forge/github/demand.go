@@ -18,92 +18,136 @@ var _ forge.DemandCounter = (*execClient)(nil)
 
 // demandProbeInterval is how often the daemon re-counts GitHub demand. An
 // unchanged page answers 304, which is free against the primary rate limit,
-// but a changed one costs a request, so the cadence stays relaxed.
+// but a changed one costs a request (up to demandMaxPages when PRs crowd page
+// 1), so the cadence stays relaxed.
 const demandProbeInterval = 60 * time.Second
 
-// demandPageSize is the one page CountReady reads, and the REST per_page
-// maximum.
+// demandPageSize is the REST per_page maximum, and the size of one probe page.
+// Pull requests share the endpoint and take slots on the page, so CountReady
+// reads deeper pages when they crowd out the issues.
 const demandPageSize = 100
 
-// demandCache is the last 200 response CountReady saw: the validator to send
-// back and the count it produced.
+// demandMaxPages bounds the pages one probe reads. Deeper pages are read only
+// when page 1 is read in full (changed, fresh, or uncached), but a PR-heavy
+// label then costs a request per page, so past this depth the probe settles
+// for an under-count.
+const demandMaxPages = 5
+
+// demandCache is the last 200 response CountReady saw: page 1's validator to
+// send back and the count summed over the pages read, clamped to
+// forge.ResultPageLimit.
 type demandCache struct {
 	etag  string
 	count int
 }
 
 // CountReady implements forge.DemandCounter with one conditional request for
-// the first page of open Dispatchable issues, newest-updated first.
+// the first page of open Dispatchable issues, newest-updated first, plus
+// unconditional deeper pages when pull requests crowd it.
 //
 // The page is sorted by update time, not creation: relabelling an old issue
 // bumps its updated_at but leaves the created-order first page untouched, so a
-// created-sorted 304 would hide the newly ready issue. A 304 returns the
-// cached count and costs nothing against the primary rate limit. fresh skips
-// If-None-Match, forcing a full read after a count the child contradicted.
+// created-sorted 304 would hide the newly ready issue. A 304 on page 1 returns
+// the cached count at no primary-rate-limit cost. fresh skips If-None-Match,
+// forcing a full read after a count the child contradicted.
+//
+// A full page 1 (PRs share the endpoint) is followed by deeper pages, summed
+// up to forge.ResultPageLimit issues and demandMaxPages pages. Page 1's ETag
+// does not cover them; ADR 0059 covers the resulting staleness and over-count.
 func (e *execClient) CountReady(fresh bool) (int, error) {
 	e.demandMu.Lock()
 	defer e.demandMu.Unlock()
 
 	path := fmt.Sprintf("repos/%s/issues?state=open&labels=%s&sort=updated&direction=desc&per_page=%d",
 		e.repo, url.QueryEscape(e.labels.Label(forge.Dispatchable)), demandPageSize)
-	args := []string{"api", path, "-i"}
-	if !fresh && e.demandCache != nil && e.demandCache.etag != "" {
-		args = append(args, "-H", "If-None-Match: "+e.demandCache.etag)
+	count, entries, etag := 0, demandPageSize, ""
+	for page := 1; entries >= demandPageSize && count < forge.ResultPageLimit && page <= demandMaxPages; page++ {
+		pagePath, inm := path, ""
+		if page > 1 {
+			pagePath = fmt.Sprintf("%s&page=%d", path, page)
+		} else if !fresh && e.demandCache != nil {
+			inm = e.demandCache.etag
+		}
+		resp, err := fetchDemandPage(pagePath, inm)
+		if err != nil {
+			return 0, fmt.Errorf("page %d: %w", page, err)
+		}
+		if resp.status == 304 {
+			if page == 1 {
+				return e.cachedCount()
+			}
+			// No If-None-Match goes out on a deeper page, so a 304 is a protocol
+			// surprise whose empty body would otherwise read as a short page.
+			return 0, fmt.Errorf("page %d: gh api issues: unexpected HTTP status %d", page, resp.status)
+		}
+		issues, n, err := countPage(resp.body)
+		if err != nil {
+			return 0, fmt.Errorf("page %d: gh api issues: %w", page, err)
+		}
+		if page == 1 {
+			etag = resp.etag
+		}
+		count += issues
+		entries = n
 	}
-	cmd := exec.Command("gh", args...)
-	out, err := cmd.Output()
+	count = min(count, forge.ResultPageLimit)
+	e.demandCache = &demandCache{etag: etag, count: count}
+	return count, nil
+}
+
+// fetchDemandPage reads one issues page, conditional on etag when non-empty.
+// It returns a 200 or 304 response; every other outcome is an error.
+func fetchDemandPage(path, etag string) (ghResponse, error) {
+	args := []string{"api", path, "-i"}
+	if etag != "" {
+		args = append(args, "-H", "If-None-Match: "+etag)
+	}
+	out, err := exec.Command("gh", args...).Output()
 	if err != nil {
 		// gh exits 1 on a 304 yet still prints the status line and headers.
 		cmdErr := ghCommandErr("gh api issues", err)
 		resp, perr := parseGhInclude(out)
 		if perr != nil {
-			return 0, cmdErr
+			return ghResponse{}, cmdErr
 		}
 		if resp.status == 304 {
-			return e.cachedCount()
+			return resp, nil
 		}
 		var rl *forge.RateLimitError
 		if errors.As(cmdErr, &rl) {
 			rl.Reset = resp.rateLimitReset(time.Now())
 		}
-		return 0, fmt.Errorf("%w (HTTP status %d)", cmdErr, resp.status)
+		return ghResponse{}, fmt.Errorf("%w (HTTP status %d)", cmdErr, resp.status)
 	}
 	resp, err := parseGhInclude(out)
 	if err != nil {
-		return 0, fmt.Errorf("gh api issues: %w", err)
+		return ghResponse{}, fmt.Errorf("gh api issues: %w", err)
 	}
-	if resp.status == 304 {
-		return e.cachedCount()
+	if resp.status != 200 && resp.status != 304 {
+		return ghResponse{}, fmt.Errorf("gh api issues: unexpected HTTP status %d", resp.status)
 	}
-	if resp.status != 200 {
-		return 0, fmt.Errorf("gh api issues: unexpected HTTP status %d", resp.status)
-	}
-	count, err := countNonPRItems(resp.body)
-	if err != nil {
-		return 0, fmt.Errorf("gh api issues: %w", err)
-	}
-	e.demandCache = &demandCache{etag: resp.etag, count: count}
-	return count, nil
+	return resp, nil
 }
 
 // ProbeInterval implements forge.DemandCounter.
 func (e *execClient) ProbeInterval() time.Duration { return demandProbeInterval }
 
-// countNonPRItems counts the entries of a REST issues page that are issues:
+// countPage counts the entries of a REST issues page that are issues:
 // the endpoint also lists pull requests, marked by a pull_request key, which
-// `gh issue list` (and so ListIssues) never returns.
-func countNonPRItems(body []byte) (int, error) {
-	var items []map[string]json.RawMessage
-	if err := json.Unmarshal(body, &items); err != nil {
-		return 0, fmt.Errorf("decode issues page: %w", err)
+// `gh issue list` (and so ListIssues) never returns. It also returns the
+// page's total entry count, PRs included, so the caller can tell a full page
+// (another may follow) from a short one.
+func countPage(body []byte) (issues, entries int, err error) {
+	var page []map[string]json.RawMessage
+	if err := json.Unmarshal(body, &page); err != nil {
+		return 0, 0, fmt.Errorf("decode issues page: %w", err)
 	}
-	n := 0
-	for _, it := range items {
+	for _, it := range page {
 		if _, isPR := it["pull_request"]; !isPR {
-			n++
+			issues++
 		}
 	}
-	return n, nil
+	return issues, len(page), nil
 }
 
 // ghResponse is the parsed output of `gh api -i`.

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -123,11 +124,11 @@ func TestCountReady_FreshSkipsConditionalHeader(t *testing.T) {
 }
 
 func TestCountReady_PullRequestsNotCounted(t *testing.T) {
-	got, err := countNonPRItems([]byte(`[{"number":1},{"number":2,"pull_request":{"url":"x"}},{"number":3}]`))
-	if err != nil || got != 2 {
-		t.Fatalf("countNonPRItems = %d, %v; want 2, nil", got, err)
+	issues, entries, err := countPage([]byte(`[{"number":1},{"number":2,"pull_request":{"url":"x"}},{"number":3}]`))
+	if err != nil || issues != 2 || entries != 3 {
+		t.Fatalf("countPage = %d, %d, %v; want 2, 3, nil", issues, entries, err)
 	}
-	if _, err := countNonPRItems([]byte(`{"message":"nope"}`)); err == nil {
+	if _, _, err := countPage([]byte(`{"message":"nope"}`)); err == nil {
 		t.Error("non-array body decoded without error")
 	}
 }
@@ -241,5 +242,140 @@ func TestCountReady_RateLimitWithoutSignalHasZeroReset(t *testing.T) {
 	rl := rateLimitedCountReady(t, "X-Ratelimit-Remaining: 12\nX-Ratelimit-Reset: 1900000000")
 	if !rl.Reset.IsZero() {
 		t.Errorf("Reset = %v, want zero", rl.Reset)
+	}
+}
+
+// seedLabelled writes count Dispatchable items numbered from first straight
+// into the fake's state, as pull requests when pr is set; going through
+// TransitionState would cost a gh call per item. The fake lists items by
+// number ascending, so seed PRs at lower numbers than the issues for them to
+// lead the page.
+func seedLabelled(t *testing.T, h *githubHarness, first, count int, pr bool) {
+	t.Helper()
+	for n := first; n < first+count; n++ {
+		dir := h.issueDir(strconv.Itoa(n))
+		files := map[string]string{"title": "item", "labels": testLabels.Dispatchable + "\n"}
+		if pr {
+			files["pull_request"] = ""
+		}
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestCountReady_PullRequestsCrowdingPageOneAreReadPast(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, demandPageSize, true)
+	seedLabelled(t, h, 1001, 3, false)
+
+	if got := countReady(t, h, false); got != 3 {
+		t.Fatalf("count = %d, want 3 issues past the PR-filled first page", got)
+	}
+	log := apiLog(t)
+	if len(log) != 2 {
+		t.Fatalf("api.log = %v, want page 1 and page 2", log)
+	}
+	path, inm, _ := logEntry(t, log[1])
+	if !strings.Contains(path, "page=2") || inm != "-" {
+		t.Errorf("second call path=%q inm=%s, want page=2 without If-None-Match", path, inm)
+	}
+
+	if got := countReady(t, h, false); got != 3 {
+		t.Fatalf("second count = %d, want cached 3", got)
+	}
+	log = apiLog(t)
+	if len(log) != 3 {
+		t.Fatalf("api.log = %v, want exactly one more call (page 1's 304)", log)
+	}
+	_, inm, status := logEntry(t, log[2])
+	if inm == "-" || status != "304" {
+		t.Errorf("third call inm=%s status=%s, want an etag and 304", inm, status)
+	}
+}
+
+func TestCountReady_FullPageOfIssuesNeedsNoSecondPage(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, demandPageSize, false)
+
+	if got := countReady(t, h, false); got != demandPageSize {
+		t.Fatalf("count = %d, want %d", got, demandPageSize)
+	}
+	if log := apiLog(t); len(log) != 1 {
+		t.Fatalf("api.log = %v, want a single request", log)
+	}
+}
+
+func TestCountReady_CountAcrossPagesClampsAtTheCap(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, 40, true)
+	seedLabelled(t, h, 101, 120, false)
+
+	if got := countReady(t, h, false); got != forge.ResultPageLimit {
+		t.Fatalf("count = %d, want clamp at %d", got, forge.ResultPageLimit)
+	}
+}
+
+func TestCountReady_DeeperPageFailureLeavesCacheUntouched(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, demandPageSize, true)
+	seedLabelled(t, h, 1001, 3, false)
+	t.Setenv("FAKE_GH_ISSUES_FAIL_STATUS", "500")
+	t.Setenv("FAKE_GH_ISSUES_FAIL_PAGE", "2")
+
+	if _, err := h.tr.(forge.DemandCounter).CountReady(false); err == nil {
+		t.Fatal("CountReady succeeded though page 2 failed")
+	}
+	if c := h.tr.(*execClient).demandCache; c != nil {
+		t.Errorf("cache = %+v after a failed deeper page, want none", c)
+	}
+}
+
+func TestCountReady_StopsAtThePageBound(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, demandMaxPages*demandPageSize+1, true)
+	seedLabelled(t, h, 10001, 3, false)
+
+	if got := countReady(t, h, false); got != 0 {
+		t.Fatalf("count = %d, want the documented under-count of 0 past the page bound", got)
+	}
+	if log := apiLog(t); len(log) != demandMaxPages {
+		t.Fatalf("api.log has %d entries, want %d (the page bound)", len(log), demandMaxPages)
+	}
+}
+
+func TestCountReady_StopsOnceTheCapIsReached(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, 50, true)
+	seedLabelled(t, h, 101, 250, false)
+
+	if got := countReady(t, h, false); got != forge.ResultPageLimit {
+		t.Fatalf("count = %d, want %d", got, forge.ResultPageLimit)
+	}
+	if log := apiLog(t); len(log) != 2 {
+		t.Fatalf("api.log = %v, want pages 1 and 2 only", log)
+	}
+}
+
+func TestCountReady_FreshRereadsEveryPageUnconditionally(t *testing.T) {
+	h := newGithubHarness(t)
+	seedLabelled(t, h, 1, demandPageSize, true)
+	seedLabelled(t, h, 1001, 3, false)
+	countReady(t, h, false)
+
+	if got := countReady(t, h, true); got != 3 {
+		t.Fatalf("fresh count = %d, want 3", got)
+	}
+	log := apiLog(t)
+	if len(log) != 4 {
+		t.Fatalf("api.log = %v, want page 1 and 2 again after the first probe's two", log)
+	}
+	for i, want := range []string{"", "page=2"} {
+		path, inm, status := logEntry(t, log[2+i])
+		if inm != "-" || status != "200" || !strings.Contains(path, want) {
+			t.Errorf("fresh call %d path=%q inm=%s status=%s, want %q with no If-None-Match and 200", i+1, path, inm, status, want)
+		}
 	}
 }
