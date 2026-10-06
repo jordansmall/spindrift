@@ -104,8 +104,9 @@ func TestUniqueAcrossAll(t *testing.T) {
 
 // TestEveryAxisSetForEveryKind guards against a future kind adding a
 // Descriptor without setting every axis (issue #3989): a zero value here
-// (empty string, or 0 for the iota-from-1 enums) would silently misbehave
-// downstream rather than fail loudly like ByName's unknown-family panic.
+// (empty string, 0 for the iota-from-1 enums, or a zero DoctorPreflight)
+// would misbehave downstream rather than fail loudly like ByName's
+// unknown-family panic.
 func TestEveryAxisSetForEveryKind(t *testing.T) {
 	findingLabels := make(map[string]bool, len(All))
 	filerRelayGates := make(map[string]bool, len(All))
@@ -131,7 +132,7 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		if d.Enablement == 0 {
 			t.Fatalf("%s: Enablement unset", d.Name)
 		}
-		if d.Preflight == 0 {
+		if d.Preflight.when == 0 {
 			t.Fatalf("%s: Preflight unset", d.Name)
 		}
 		if findingLabels[d.FindingLabel] {
@@ -161,26 +162,72 @@ func TestEnablementRows(t *testing.T) {
 }
 
 // TestDoctorPreflightRows pins how the daemon's startup preflight selects
-// each kind's doctor flag (issue #4590), and that a flag exists exactly when
-// the kind has a preflight behaviour to attach it to.
+// each kind's doctor flag (issue #4590).
 func TestDoctorPreflightRows(t *testing.T) {
-	want := map[*Descriptor]struct {
-		preflight DoctorPreflight
-		flag      string
-	}{
-		Work:     {PreflightNone, ""},
-		Research: {PreflightWhenNamed, "--research"},
-		Butler:   {PreflightWhenDrawn, "--butler"},
+	want := map[*Descriptor]DoctorPreflight{
+		Work:     NoPreflight(),
+		Research: PreflightWhenNamed("--research"),
+		Butler:   PreflightWhenDrawn("--butler"),
 	}
 	for _, d := range All {
-		w := want[d]
-		if d.Preflight != w.preflight || d.DoctorFlag != w.flag {
-			t.Errorf("%s: (Preflight, DoctorFlag) = (%v, %q), want (%v, %q)", d.Name, d.Preflight, d.DoctorFlag, w.preflight, w.flag)
-		}
-		if (d.DoctorFlag == "") != (d.Preflight == PreflightNone) {
-			t.Errorf("%s: DoctorFlag %q inconsistent with Preflight %v", d.Name, d.DoctorFlag, d.Preflight)
+		if d.Preflight != want[d] {
+			t.Errorf("%s: Preflight = %+v, want %+v", d.Name, d.Preflight, want[d])
 		}
 	}
+}
+
+// TestPreflightConstructorsRejectEmptyFlag guards the invariant the struct
+// exists for: a mode that passes a flag always has one.
+func TestPreflightConstructorsRejectEmptyFlag(t *testing.T) {
+	for name, build := range map[string]func(string) DoctorPreflight{
+		"PreflightWhenDrawn": PreflightWhenDrawn,
+		"PreflightWhenNamed": PreflightWhenNamed,
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("%s(\"\") did not panic", name)
+				}
+			}()
+			build("")
+		}()
+	}
+}
+
+// TestDoctorPreflightFlag pins the flag each preflight mode passes under a
+// bare and an explicit selector (issue #4627).
+func TestDoctorPreflightFlag(t *testing.T) {
+	cases := []struct {
+		name     string
+		p        DoctorPreflight
+		explicit bool
+		want     string
+	}{
+		{"none bare", NoPreflight(), false, ""},
+		{"none explicit", NoPreflight(), true, ""},
+		{"drawn bare", PreflightWhenDrawn("--x"), false, "--x"},
+		{"drawn explicit", PreflightWhenDrawn("--x"), true, "--x"},
+		{"named bare", PreflightWhenNamed("--x"), false, ""},
+		{"named explicit", PreflightWhenNamed("--x"), true, "--x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.Flag(tc.explicit); got != tc.want {
+				t.Errorf("Flag(%v) = %q, want %q", tc.explicit, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDoctorPreflightFlagPanicsOnUnset keeps an unset preflight loud: Flag
+// panics rather than reading the zero value as no flag (issue #4627).
+func TestDoctorPreflightFlagPanicsOnUnset(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Flag on a zero DoctorPreflight did not panic")
+		}
+	}()
+	DoctorPreflight{}.Flag(true)
 }
 
 // TestPatchLabelIsButlerOnly guards PatchLabel's butler-only scope (issue

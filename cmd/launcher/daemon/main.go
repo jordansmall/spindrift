@@ -165,16 +165,8 @@ func doctorPreflightFlags(kinds []daemon.Kind, explicitSelector bool) ([]string,
 		if !ok {
 			return nil, fmt.Errorf("unknown kind %q", k)
 		}
-		switch d.Preflight {
-		case dispatchkind.PreflightNone:
-		case dispatchkind.PreflightWhenDrawn:
-			flags = append(flags, d.DoctorFlag)
-		case dispatchkind.PreflightWhenNamed:
-			if explicitSelector {
-				flags = append(flags, d.DoctorFlag)
-			}
-		default:
-			return nil, fmt.Errorf("%s: unknown doctor preflight %d", d.Verb, d.Preflight)
+		if f := d.Preflight.Flag(explicitSelector); f != "" {
+			flags = append(flags, f)
 		}
 	}
 	return flags, nil
