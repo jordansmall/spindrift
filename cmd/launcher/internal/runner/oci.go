@@ -776,8 +776,16 @@ func (a *ociAdapter) probeRegistryTCPOnce(host string, addHost bool) error {
 	return fmt.Errorf("registry proxy transport probe: %s: tcp-reachability sub-probe container exited 0, want %d (capable) or %d (incapable) -- possible launcher/image version mismatch: %w", a.cli, registryprobe.ExitCapable, registryprobe.ExitIncapable, errProbeNoVerdict)
 }
 
+// orphanedRebaseDirAge is generous because forge.Rebase's clone and sync are
+// unbounded; a killed launcher's leftover just lingers a day longer. The dir's
+// mtime is roughly when the clone started, not its last activity (writes under
+// .git/ do not touch it), so it is not a liveness signal.
+const orphanedRebaseDirAge = 24 * time.Hour
+
 // reapOrphanedRebaseDirs removes leftover spindrift-rebase-* directories in
 // root. forge.Rebase cleans these up with defer, which a killed launcher skips.
+// It only takes dirs older than orphanedRebaseDirAge: root is shared, so a
+// concurrent launcher's live Rebase clone also lives there (issue #4658).
 func reapOrphanedRebaseDirs(root string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
@@ -785,6 +793,10 @@ func reapOrphanedRebaseDirs(root string) {
 	}
 	for _, e := range entries {
 		if !e.IsDir() || !strings.HasPrefix(e.Name(), "spindrift-rebase-") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || time.Since(info.ModTime()) < orphanedRebaseDirAge {
 			continue
 		}
 		path := filepath.Join(root, e.Name())

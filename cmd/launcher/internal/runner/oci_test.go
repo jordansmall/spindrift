@@ -159,6 +159,14 @@ func TestReapOrphanedRebaseDirs_RemovesStaleAndKeepsOthers(t *testing.T) {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
+		old := time.Now().Add(-orphanedRebaseDirAge - time.Hour)
+		if err := os.Chtimes(d, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fresh := filepath.Join(root, "spindrift-rebase-live789")
+	if err := os.MkdirAll(fresh, 0o755); err != nil {
+		t.Fatal(err)
 	}
 	other := filepath.Join(root, "not-a-rebase-dir")
 	if err := os.MkdirAll(other, 0o755); err != nil {
@@ -174,6 +182,9 @@ func TestReapOrphanedRebaseDirs_RemovesStaleAndKeepsOthers(t *testing.T) {
 	}
 	if _, err := os.Stat(other); os.IsNotExist(err) {
 		t.Errorf("expected non-rebase dir %s to be kept", filepath.Base(other))
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("expected fresh (possibly live) rebase dir %s to be kept: %v", filepath.Base(fresh), err)
 	}
 }
 
