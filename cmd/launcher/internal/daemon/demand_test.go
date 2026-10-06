@@ -965,7 +965,7 @@ func TestLoopPhaseChangeDoesNotWakeParkedSiblings(t *testing.T) {
 }
 
 // One slot's opportunistic resolve seeing the tip move lifts the jam and
-// wakes every sibling parked on a JamPoll slice: none is released by the
+// wakes every sibling parked on a TipPoll slice: none is released by the
 // clock, so only the wake can start them.
 func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 	const slots = 3

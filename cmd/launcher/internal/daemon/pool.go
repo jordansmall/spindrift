@@ -442,7 +442,7 @@ func (p *pool) noteWaitResult(slot int, kind Kind, revision string, noneDispatch
 		// What the kind now waits for: its backoff, or for a probed kind the
 		// interval to its next probe.
 		var wait time.Duration
-		if v := s.sched.View(kind, now); v.Gated {
+		if v := s.sched.View(kind, now); v.Gated && !v.Until.IsZero() {
 			wait = v.Until.Sub(now)
 		}
 		if noneDispatchable && !s.siblingsEngaged(slot) {
@@ -475,7 +475,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 	p.mutate(func(s *state) []Event {
 		if st, started := s.sched.Decide(now, occupancy(s)).(Start); started {
 			kind = st.Kind
-		} else if s.sched.View(provisional, now).Probed {
+		} else if v := s.sched.View(provisional, now); v.Probed || v.DueKnown {
 			return nil
 		} else {
 			kind = provisional
@@ -973,7 +973,7 @@ func resolveFailure(tip Tip, err error) (revision, reason string) {
 // prefer right now. It re-decides rather than taking the caller's Park, so a
 // sibling's reset or a probe landing since is seen; anything but a Park with
 // time left returns at once for the caller to re-decide. With no jammed kind
-// gating the wait (Park.JamPoll false), it sleeps the whole wait in one
+// gating the wait (Park.TipPoll false), it sleeps the whole wait in one
 // sleep: a merge can unblock a jammed queue, but it cannot create new
 // work in a kind that is merely queue-empty, so resolving early there would
 // only spend a fetch for nothing.
@@ -1000,7 +1000,7 @@ func (p *pool) idleSleep(ctx context.Context, slot int) (wantResolve bool) {
 	}
 	wait := park.Until.Sub(now)
 
-	if !park.JamPoll {
+	if !park.TipPoll {
 		p.sleepUntilWoken(ctx, wake, wait)
 		return false
 	}
