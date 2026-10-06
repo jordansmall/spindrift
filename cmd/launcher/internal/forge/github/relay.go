@@ -30,7 +30,7 @@ func NewReadOnlyCodeForge(repo string, labels forge.DispatchLabels, branchPrefix
 // nothing" case; a bundle that is present but unreadable or fails `git bundle
 // verify` returns an error so a broken hand-off blocks the seam (issue #2096).
 func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
-	return bundlerelay.Relay("github", outboxDir, ref, c.relayClone("relay bundle"))
+	return bundlerelay.Relay("github", outboxDir, ref, c.httpsClone("relay bundle"))
 }
 
 // CommitSubjects returns the bundle's one-line commit subjects for ref
@@ -38,7 +38,7 @@ func (c *readOnlyCodeForge) RelayBundle(outboxDir, ref string) error {
 // (issue #2447). It never checks anything out or pushes, so it cannot mutate
 // the remote.
 func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
-	return bundlerelay.CommitSubjects("github", outboxDir, base, ref, c.relayClone("commit subjects"))
+	return bundlerelay.CommitSubjects("github", outboxDir, base, ref, c.httpsClone("commit subjects"))
 }
 
 // GitRemote builds the git remote URL and auth args for pushing straight to
@@ -46,7 +46,7 @@ func (c *readOnlyCodeForge) CommitSubjects(outboxDir, base, ref string) ([]strin
 // (falling back to github.com) so a GitHub Enterprise Consumer lands on the
 // same host every other gh path talks to. The empty credential.helper first
 // resets any ambient helper, so the second -c is the only one in effect: the
-// launcher's own gh credential, the same one the relay clone authenticates with.
+// launcher's own gh credential, the same one httpsClone authenticates with.
 func GitRemote(repo string) (url string, gitArgs []string) {
 	return "https://" + Host() + "/" + repo + ".git",
 		[]string{"-c", "credential.helper=", "-c", "credential.helper=!gh auth git-credential"}

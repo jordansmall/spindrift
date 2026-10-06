@@ -283,28 +283,22 @@ fi
 	}
 }
 
-// The error must carry gh's stderr text. The old path called cmd.Run with no
+// The error must carry git's stderr text. The old path called cmd.Run with no
 // Stderr wired, so a clone failure degraded to a bare "exit status 1" (issue
-// #2864). The fake gh must answer `pr view` first, because Rebase reads the
-// branch names before it clones.
+// #2864). The server rejects the clone's token, so git fails with its own
+// "Authentication failed" stderr; the PR is registered first because Rebase
+// reads the branch names before it clones.
 func TestRebase_CloneFailureSurfacesStderr(t *testing.T) {
-	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
-  printf 'feature\tmain\n'
-  exit 0
-fi
-if [ "$1" = "repo" ] && [ "$2" = "clone" ]; then
-  printf 'HTTP 500: Internal Server Error\n' >&2
-  exit 1
-fi
-`)
+	h := newCodeForgeHarness(t)
+	h.srv.expectToken("some-other-token")
+	url := h.SeedLandable("42")
 
-	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	err := c.Rebase("https://github.com/owner/repo/pull/42")
+	err := h.cf.Rebase(url)
 	if err == nil {
 		t.Fatal("Rebase: want error, got nil")
 	}
-	if !strings.Contains(err.Error(), "HTTP 500: Internal Server Error") {
-		t.Fatalf("Rebase error must surface gh's stderr; got: %v", err)
+	if !strings.Contains(err.Error(), "Authentication failed") {
+		t.Fatalf("Rebase error must surface git's stderr; got: %v", err)
 	}
 }
 

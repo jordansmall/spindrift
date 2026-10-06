@@ -26,10 +26,6 @@ repo-view)
 	esac
 	printf '%s' "$3"
 	;;
-repo-clone)
-	dir="$4"
-	git clone "$REMOTE" "$dir" >&2
-	;;
 pr-view)
 	num=$(pr_num "$3")
 	head=$(cat "$STATE_DIR/prs/$num/head")

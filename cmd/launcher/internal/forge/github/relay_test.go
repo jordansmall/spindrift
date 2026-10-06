@@ -22,7 +22,8 @@ func newRelayHarness(t *testing.T) *forgetest.GitRepoFixture {
 }
 
 // newRelayHTTPSHarness serves the fixture's bare repo as owner/repo over HTTPS,
-// the only way the relay clone reaches it (see serveRelayOverHTTPS). The fake
+// the only way httpsClone reaches it, for the relay and Rebase alike (see
+// serveRelayOverHTTPS). The fake
 // gh script from codeforge_contract_test.go still handles every other gh call.
 func newRelayHTTPSHarness(t *testing.T) (*forgetest.GitRepoFixture, *httpsRelayServer) {
 	t.Helper()
