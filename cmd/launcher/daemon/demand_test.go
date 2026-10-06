@@ -786,6 +786,21 @@ var sharedKnobAccessors = map[string]func(childSharedKnobs) string{
 	"BUTLER_CHORE_CLASSES": func(k childSharedKnobs) string { return k.butlerChoreClasses },
 }
 
+// daemonOnlyKnobAccessors maps each daemon-only knob to its field, so
+// TestResolveDaemonOnlyKnobs_AmbientWins can read the value the daemon
+// resolved for exactly that key.
+var daemonOnlyKnobAccessors = map[string]func(daemonOnlyRaw) string{
+	"DAEMON_APP":               func(k daemonOnlyRaw) string { return k.app },
+	"DAEMON_SELF_APP":          func(k daemonOnlyRaw) string { return k.selfApp },
+	"DAEMON_IDLE_FLOOR":        func(k daemonOnlyRaw) string { return k.idleFloor },
+	"DAEMON_IDLE_CAP":          func(k daemonOnlyRaw) string { return k.idleCap },
+	"DAEMON_PROBE_INTERVAL":    func(k daemonOnlyRaw) string { return k.probeInterval },
+	"DAEMON_FAILURE_BACKOFF":   func(k daemonOnlyRaw) string { return k.failureBackoff },
+	"DAEMON_BREAKER_THRESHOLD": func(k daemonOnlyRaw) string { return k.breakerThreshold },
+	"DAEMON_BREAKER_WINDOW":    func(k daemonOnlyRaw) string { return k.breakerWindow },
+	"RESEARCH_RESERVATION":     func(k daemonOnlyRaw) string { return k.researchReservation },
+}
+
 // TestResolveChildSharedKnobs pins issue #4623 for every knob a child also
 // reads: the daemon resolves the value the child gets (document first, then
 // ambient, then the schema default). Every key carries a distinct value, so a
@@ -856,33 +871,22 @@ func TestResolveChildSharedKnobs_ButlerEveryDefault(t *testing.T) {
 
 // TestResolveDaemonOnlyKnobs_AmbientWins pins ADR 0020 for the knobs no child
 // reads: a non-empty ambient value beats a differing document value. It walks
-// daemonOnlyKnobs, so a key moved off Lookup (and out of the set) or added to
-// it must change this test too.
+// inputdoc.DaemonOnlyKnobs, so a key moved off Lookup (and out of the
+// daemon-only set) or added to it must change this test too.
 func TestResolveDaemonOnlyKnobs_AmbientWins(t *testing.T) {
-	accessors := map[string]func(daemonOnlyRaw) string{
-		"DAEMON_APP":               func(k daemonOnlyRaw) string { return k.app },
-		"DAEMON_SELF_APP":          func(k daemonOnlyRaw) string { return k.selfApp },
-		"DAEMON_IDLE_FLOOR":        func(k daemonOnlyRaw) string { return k.idleFloor },
-		"DAEMON_IDLE_CAP":          func(k daemonOnlyRaw) string { return k.idleCap },
-		"DAEMON_PROBE_INTERVAL":    func(k daemonOnlyRaw) string { return k.probeInterval },
-		"DAEMON_FAILURE_BACKOFF":   func(k daemonOnlyRaw) string { return k.failureBackoff },
-		"DAEMON_BREAKER_THRESHOLD": func(k daemonOnlyRaw) string { return k.breakerThreshold },
-		"DAEMON_BREAKER_WINDOW":    func(k daemonOnlyRaw) string { return k.breakerWindow },
-		"RESEARCH_RESERVATION":     func(k daemonOnlyRaw) string { return k.researchReservation },
-	}
-	for key := range daemonOnlyKnobs {
-		if accessors[key] == nil {
-			t.Errorf("daemonOnlyKnobs lists %s but this test has no accessor for it", key)
+	for _, key := range inputdoc.DaemonOnlyKnobs() {
+		if daemonOnlyKnobAccessors[key] == nil {
+			t.Errorf("the daemon-only set (inputdoc.IsDaemonOnly) lists %s but this test has no accessor for it", key)
 		}
 	}
-	for key := range accessors {
-		if !daemonOnlyKnobs[key] {
-			t.Errorf("test reads %s, which is not in daemonOnlyKnobs", key)
+	for key := range daemonOnlyKnobAccessors {
+		if !inputdoc.IsDaemonOnly(key) {
+			t.Errorf("test reads %s, which is not in the daemon-only set (inputdoc.IsDaemonOnly)", key)
 		}
 	}
 	clearKnobEnvT(t)
 	settings := map[string]string{}
-	for key := range daemonOnlyKnobs {
+	for _, key := range inputdoc.DaemonOnlyKnobs() {
 		settings[key] = "doc-" + key
 		t.Setenv(key, "amb-"+key)
 	}
@@ -891,8 +895,8 @@ func TestResolveDaemonOnlyKnobs_AmbientWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key := range daemonOnlyKnobs {
-		if want, v := "amb-"+key, accessors[key](got); v != want {
+	for _, key := range inputdoc.DaemonOnlyKnobs() {
+		if want, v := "amb-"+key, daemonOnlyKnobAccessors[key](got); v != want {
 			t.Errorf("%s = %q, want ambient %q over the document value", key, v, want)
 		}
 	}

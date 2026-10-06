@@ -254,8 +254,9 @@ func resolveChildSharedKnobs(doc *inputdoc.Document) (childSharedKnobs, error) {
 	return k, nil
 }
 
-// daemonOnlyRaw are the raw values of the daemonOnlyKnobs. selfApp and
-// researchReservation stay empty when their gate is off.
+// daemonOnlyRaw are the raw values of the daemon-only knobs
+// (inputdoc.IsDaemonOnly). selfApp and researchReservation stay empty when
+// their gate is off.
 type daemonOnlyRaw struct {
 	app, selfApp, idleFloor, idleCap, probeInterval string
 	failureBackoff, breakerThreshold, breakerWindow string
