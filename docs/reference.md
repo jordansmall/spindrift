@@ -6458,11 +6458,10 @@ A probed kind (one with a Demand probe interval, ADR 0059) also carries
 carrying the kind's dispatchable label, whose blockers may not have
 cleared, so advisory rather than a promise of dispatchable work; `0` is
 present, not elided), `probed_at` and `next_probe` (RFC3339) once
-probed — absent from a child's exit 0 or 4 until the re-probe lands,
-and always absent
-for an exit-driven kind. `jam_until` (RFC3339) appears only while a jam
-gate is live, and on a probed kind `ready_at_jam` is the `ready` count
-that jam froze.
+probed — absent from a child's exit 0 or 4, or a child's claim, until
+the re-probe lands, and always absent for an exit-driven kind.
+`jam_until` (RFC3339) appears only while a jam gate is live, and on a
+probed kind `ready_at_jam` is the `ready` count that jam froze.
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
@@ -6598,11 +6597,11 @@ exit-driven. A free slot with the Awake window open probes inline,
 before it starts anything: the count is how many items of that kind are
 startable, a kind is probed once however many slots find it stale at the
 same moment (the rest wait for that answer), and a kind with Ready above 0
-is started like a kind with an open gate. A kind probed empty is simply
-re-probed one interval later — a flat wait, no exponential backoff — and a
-child's exit 2 on a probed kind records Ready 0 and re-probes after one
-interval likewise; exit 0 or 4 makes the count stale, so the next decision
-re-probes rather than trusting a count the child just consumed from. The
+is started like a kind with an open gate, within its start budget
+(below). A kind probed empty is simply re-probed one interval later — a
+flat wait, no exponential backoff — and a child's exit 2 on a probed
+kind records Ready 0 and re-probes after one interval likewise; exit 0
+or 4 makes the count stale, so the next decision re-probes rather than trusting a count the child just consumed from. The
 exit-3 jam gate is the one backoff a probed kind keeps: `DAEMON_IDLE_FLOOR`
 doubling to `DAEMON_IDLE_CAP`, lifted early when the tip moves, exactly as
 for an exit-driven kind. The count is advisory: children still discover and
@@ -6612,6 +6611,24 @@ breaker below (`reason` `demand: ...`) and rests the kind for one interval.
 `demand_appeared` and `demand_drained` (events table below) report a kind's
 Ready crossing zero; `ready`, `probed_at`, `next_probe`, `jam_until` and
 `ready_at_jam` on each status `kinds` entry show the state.
+
+**Start budget.** A probed kind is started only while its Ready count
+exceeds the slots *starting* it — slots running a child of that
+kind that has not yet reported its claim (a `box` record naming a new
+key). One queued issue therefore starts one child however many slots are
+free, and three queued issues with two free slots start two; dispatch
+and research still share the discovery baton, so they start one after
+another, each once the previous child claims. A slot out of budget
+parks until the kind's next probe, so a starting child that crashes
+before it claims leaves its siblings idle for up to one probe interval
+while its item is still queued. A child's claim releases its share of
+the budget, lowers the kind's count by one and makes it stale, so the
+kind's next start re-probes first; a probe already in flight when the
+claim lands does not count as fresh. The budget applies across tiers,
+and `RESEARCH_RESERVATION`'s floor still counts research children that
+are starting. An exit-driven kind (the butler, an unprobed tracker)
+has no count and so no budget. See ADR 0059 and the glossary's **Start
+budget** (`CONTEXT.md`).
 
 Because the wait is now per kind, a `Wait` outcome (exit 2 or 3) no
 longer sleeps the slot in place: the slot records the no-work result
