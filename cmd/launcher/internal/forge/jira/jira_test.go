@@ -958,9 +958,9 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 					{"key": "PROJ-2", "fields": {"summary": "second", "status": {"name": "To Do"}, "labels": []}}
 				]
 			}`))
-		case "100":
+		case "2":
 			w.Write([]byte(`{
-				"startAt": 100, "maxResults": 100, "total": 3,
+				"startAt": 2, "maxResults": 100, "total": 3,
 				"issues": [
 					{"key": "PROJ-3", "fields": {"summary": "third", "status": {"name": "To Do"}, "labels": []}}
 				]
@@ -993,7 +993,7 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 	if len(issues) != 3 || issues[0].Number != "PROJ-1" || issues[1].Number != "PROJ-2" || issues[2].Number != "PROJ-3" {
 		t.Fatalf("issues = %+v, want PROJ-1, PROJ-2, PROJ-3 in fetch order", issues)
 	}
-	wantStartAt := []string{"0", "100"}
+	wantStartAt := []string{"0", "2"}
 	if len(gotStartAt) != len(wantStartAt) || gotStartAt[0] != wantStartAt[0] || gotStartAt[1] != wantStartAt[1] {
 		t.Errorf("startAt per request = %v, want %v", gotStartAt, wantStartAt)
 	}
@@ -1001,6 +1001,90 @@ func TestJiraClient_ListIssues_WalksAllPages(t *testing.T) {
 		if mr != "100" {
 			t.Errorf("maxResults per request = %v, want every request to send 100", gotMaxResults)
 		}
+	}
+}
+
+// An empty page before total must fail loudly rather than return a short
+// result under WalksAllPages' completeness promise.
+func TestJiraClient_ListIssues_EmptyPageBeforeTotalErrors(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests > 5 {
+			t.Errorf("walk issued %d requests, want it bounded", requests)
+			w.Write([]byte(`{"issues": [], "total": 0}`))
+			return
+		}
+		if r.URL.Query().Get("startAt") == "0" {
+			w.Write([]byte(`{"total": 5, "issues": [
+				{"key": "PROJ-1", "fields": {"summary": "first", "status": {"name": "To Do"}, "labels": []}},
+				{"key": "PROJ-2", "fields": {"summary": "second", "status": {"name": "To Do"}, "labels": []}}
+			]}`))
+			return
+		}
+		w.Write([]byte(`{"total": 5, "issues": []}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:    srv.URL,
+		Token:      "tok",
+		ProjectKey: "PROJ",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.Dispatchable: "To Do",
+		},
+		Labels: testLabels,
+	})
+
+	issues, err := jc.ListIssues(forge.Dispatchable)
+	if err == nil {
+		t.Fatalf("ListIssues = %+v, nil error; want error for empty page before total", issues)
+	}
+	if !strings.Contains(err.Error(), "startAt 2") || !strings.Contains(err.Error(), "total 5") {
+		t.Errorf("err = %q, want it to name startAt 2 and total 5", err)
+	}
+	if requests != 2 {
+		t.Errorf("server received %d requests, want 2", requests)
+	}
+}
+
+// A server that ignores startAt replays the same page; the walk must error
+// rather than append duplicates until total is reached.
+func TestJiraClient_ListIssues_RepeatedPageErrors(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests > 5 {
+			t.Errorf("walk issued %d requests, want it bounded", requests)
+			w.Write([]byte(`{"issues": [], "total": 0}`))
+			return
+		}
+		w.Write([]byte(`{"total": 5, "issues": [
+			{"key": "PROJ-1", "fields": {"summary": "first", "status": {"name": "To Do"}, "labels": []}},
+			{"key": "PROJ-2", "fields": {"summary": "second", "status": {"name": "To Do"}, "labels": []}}
+		]}`))
+	}))
+	defer srv.Close()
+
+	jc := jira.NewJiraClient(jira.JiraConfig{
+		BaseURL:    srv.URL,
+		Token:      "tok",
+		ProjectKey: "PROJ",
+		StatusMapping: map[forge.DispatchState]string{
+			forge.Dispatchable: "To Do",
+		},
+		Labels: testLabels,
+	})
+
+	issues, err := jc.ListIssues(forge.Dispatchable)
+	if err == nil {
+		t.Fatalf("ListIssues = %+v, nil error; want error for a repeated page", issues)
+	}
+	if !strings.Contains(err.Error(), "PROJ-1") {
+		t.Errorf("err = %q, want it to name the repeated key PROJ-1", err)
+	}
+	if requests != 2 {
+		t.Errorf("server received %d requests, want 2", requests)
 	}
 }
 

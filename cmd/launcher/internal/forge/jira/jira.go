@@ -532,11 +532,16 @@ func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
 // doSearch runs a JQL search, walking every result page so a backlog larger
 // than one ResultPageLimit page is never silently truncated. JQL orders
 // results server-side, so appending pages in fetch order preserves
-// oldest-first without a client-side sort.
+// oldest-first without a client-side sort. The walk returns an error rather
+// than a short result when a page comes back empty before total or repeats
+// the previous page, so a nil error means the result is complete.
 func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 	var all []jiraIssuePayload
-	err := j.rest.Paginate(func(page int) (bool, error) {
-		startAt := (page - 1) * forge.ResultPageLimit
+	var prevFirstKey string
+	err := j.rest.Paginate(func(int) (bool, error) {
+		// Advance by rows received, not a fixed stride: the server may cap the
+		// page below maxResults.
+		startAt := len(all)
 		q := url.Values{
 			"jql":        {jql},
 			"startAt":    {fmt.Sprintf("%d", startAt)},
@@ -546,8 +551,19 @@ func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 		if err := j.rest.Do(http.MethodGet, "/rest/api/2/search?"+q.Encode(), nil, &payload); err != nil {
 			return false, err
 		}
+		if len(payload.Issues) == 0 && startAt < payload.Total {
+			return false, fmt.Errorf("jira: search returned an empty page at startAt %d before total %d", startAt, payload.Total)
+		}
+		// A server ignoring startAt replays the previous page; appending it would
+		// duplicate rows until total is reached.
+		if startAt > 0 && len(payload.Issues) > 0 && payload.Issues[0].Key == prevFirstKey {
+			return false, fmt.Errorf("jira: search repeated the page starting at %s for startAt %d", prevFirstKey, startAt)
+		}
 		all = append(all, payload.Issues...)
-		return startAt+len(payload.Issues) >= payload.Total, nil
+		if len(payload.Issues) > 0 {
+			prevFirstKey = payload.Issues[0].Key
+		}
+		return len(all) >= payload.Total, nil
 	})
 	if err != nil {
 		return nil, err

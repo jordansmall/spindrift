@@ -43,6 +43,9 @@ type jiraHarness struct {
 	mu     sync.Mutex
 	order  []string
 	issues map[string]*jiraIssueRecord
+	// pageCap, when > 0, caps rows per search page below the requested
+	// maxResults, as a real Jira server may.
+	pageCap int
 
 	srv *httptest.Server
 	tr  forge.IssueTracker
@@ -157,8 +160,8 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 
 		// Genuinely paginate on startAt/maxResults (issue #2265), matching the
 		// real Jira search response shape jiraSearchPayload decodes. total is
-		// the full matching count, which doSearch's startAt+len(issues) >= total
-		// "done" check relies on.
+		// the full matching count; doSearch stops once rows received reach it
+		// (and errors on an empty page before it).
 		startAt := 0
 		if s := r.URL.Query().Get("startAt"); s != "" {
 			if v, err := strconv.Atoi(s); err == nil && v >= 0 {
@@ -172,6 +175,9 @@ func (h *jiraHarness) handle(w http.ResponseWriter, r *http.Request) {
 			if v, err := strconv.Atoi(m); err == nil && v >= 0 {
 				maxResults = v
 			}
+		}
+		if h.pageCap > 0 && maxResults > h.pageCap {
+			maxResults = h.pageCap
 		}
 		var window []map[string]any
 		if startAt < len(out) {
@@ -281,15 +287,13 @@ func TestJiraClient_TrackerContract(t *testing.T) {
 	forgetest.RunTrackerContract(t, newJiraHarness(t))
 }
 
-// Seeding more than forge.ResultPageLimit issues forces doSearch (issue #2265)
-// to walk at least two real pages. The order assertion holds because h.order's
-// append sequence stands in for Jira's created-time ordering.
-func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
-	h := newJiraHarness(t)
-	const seeded = forge.ResultPageLimit + 30
-
+// seedAndListPaged seeds n Dispatchable issues PROJ-1..PROJ-n and asserts
+// ListIssues returns every one in creation order: h.order's append sequence
+// stands in for Jira's created-time ordering.
+func seedAndListPaged(t *testing.T, h *jiraHarness, n int) {
+	t.Helper()
 	var want []string
-	for i := 1; i <= seeded; i++ {
+	for i := 1; i <= n; i++ {
 		num := fmt.Sprintf("PROJ-%d", i)
 		want = append(want, num)
 		h.SeedIssue(forge.Issue{
@@ -303,12 +307,53 @@ func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListIssues(Dispatchable): %v", err)
 	}
-	if len(issues) != seeded {
-		t.Fatalf("ListIssues(Dispatchable) returned %d issues, want %d", len(issues), seeded)
+	if len(issues) != n {
+		t.Fatalf("ListIssues(Dispatchable) returned %d issues, want %d", len(issues), n)
 	}
 	for i, iss := range issues {
 		if iss.Number != want[i] {
 			t.Fatalf("ListIssues(Dispatchable)[%d].Number = %q, want %q (creation order not preserved)", i, iss.Number, want[i])
 		}
+	}
+}
+
+// Seeding more than forge.ResultPageLimit issues forces doSearch (issue #2265)
+// to walk at least two real pages.
+func TestJiraClient_ListIssues_PaginatesAcrossMultipleRealPages(t *testing.T) {
+	seedAndListPaged(t, newJiraHarness(t), forge.ResultPageLimit+30)
+}
+
+// A server that caps pages below the requested maxResults must not make
+// doSearch skip rows: the walk advances by rows received, not a fixed stride.
+func TestJiraClient_ListIssues_PaginatesAcrossServerCappedPages(t *testing.T) {
+	h := newJiraHarness(t)
+	h.pageCap = 30
+	seedAndListPaged(t, h, 75)
+}
+
+// The server's page cap must never touch the maxResults=0 zero-row page
+// CountReady reads the total from.
+func TestJiraClient_CountReady_FullTotalUnderPageCap(t *testing.T) {
+	h := newJiraHarness(t)
+	h.pageCap = 30
+	const seeded = 75
+	for i := 1; i <= seeded; i++ {
+		h.SeedIssue(forge.Issue{
+			Number: fmt.Sprintf("PROJ-%d", i),
+			Title:  "counted",
+			Labels: []string{testLabels.Dispatchable},
+		})
+	}
+
+	dc, ok := h.Tracker().(forge.DemandCounter)
+	if !ok {
+		t.Fatal("tracker does not implement forge.DemandCounter")
+	}
+	got, err := dc.CountReady(false)
+	if err != nil {
+		t.Fatalf("CountReady: %v", err)
+	}
+	if got != seeded {
+		t.Errorf("CountReady = %d, want %d (the full total, not the page cap)", got, seeded)
 	}
 }
