@@ -468,9 +468,8 @@ func (e *execClient) Rebase(prURL string) error {
 	}
 	defer os.RemoveAll(dir)
 
-	if _, err := exec.Command("gh", "repo", "clone", e.repo, dir,
-		"--", "--no-single-branch").Output(); err != nil {
-		return ghCommandErr("gh repo clone", err)
+	if err := e.httpsClone("rebase")(dir); err != nil {
+		return err
 	}
 
 	gitIn := func(args ...string) *exec.Cmd {
@@ -529,14 +528,15 @@ func hasUnmergedPaths(gitIn func(args ...string) *exec.Cmd) bool {
 	return err == nil && len(bytes.TrimSpace(out)) > 0
 }
 
-// relayClone builds the clone closure bundlerelay's Relay, CommitSubjects, and
-// PushBranch all take as their clone step: op names the caller for the wrapped
-// ghCommandErr's description. It clones GitRemote's HTTPS URL, not `gh repo
-// clone`, which follows the operator's per-host gh git_protocol and so can pick
-// a personal SSH key (issue #4647). The -c pairs after `clone` are clone's own
-// --config: they land in the new repo's config, so the plain `git push` the
-// callers run later authenticates through the same gh credential helper.
-func (e *execClient) relayClone(op string) func(dir string) error {
+// httpsClone builds the clone closure bundlerelay's Relay, CommitSubjects, and
+// PushBranch take as their clone step, and Rebase clones with: op names the
+// caller for the wrapped ghCommandErr's description. It clones GitRemote's
+// HTTPS URL, not `gh repo clone`, which follows the operator's per-host gh
+// git_protocol and so can pick a personal SSH key (issues #4647, #4650). The -c
+// pairs after `clone` are clone's own --config: they land in the new repo's
+// config, so the plain `git push` the callers run later authenticates through
+// the same gh credential helper.
+func (e *execClient) httpsClone(op string) func(dir string) error {
 	return func(dir string) error {
 		url, gitArgs := GitRemote(e.repo)
 		args := append([]string{"clone"}, gitArgs...)
@@ -552,7 +552,7 @@ func (e *execClient) relayClone(op string) func(dir string) error {
 // at srcDir, over HTTPS through the gh credential helper (issue #4071, ADR
 // 0057); refuses if branch already exists, or is base (issue #4104).
 func (e *execClient) PushBranch(srcDir, localRef, branch, base string) error {
-	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, e.relayClone("push branch"))
+	return bundlerelay.PushBranch("github", srcDir, localRef, branch, base, e.httpsClone("push branch"))
 }
 
 // DeleteBranch deletes branch from the target repo with the launcher's own

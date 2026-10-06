@@ -27,29 +27,22 @@ type codeforgeHarness struct {
 	prsDir string
 	base   string
 	cf     forge.CodeForge
+	srv    *httpsRelayServer
 }
 
 func newCodeForgeHarness(t *testing.T) *codeforgeHarness {
 	t.Helper()
-	t.Setenv("GIT_AUTHOR_NAME", "Test Bot")
-	t.Setenv("GIT_AUTHOR_EMAIL", "bot@example.com")
-	t.Setenv("GIT_COMMITTER_NAME", "Test Bot")
-	t.Setenv("GIT_COMMITTER_EMAIL", "bot@example.com")
-
-	repo := forgetest.NewGitRepoFixture(t, "main")
+	// Rebase clones and pushes over https://$GH_HOST/owner/repo.git, so the
+	// bare repo is served the way the relay tests serve it; the fake gh
+	// scripts only the PR-indirection calls on top of that.
+	repo, srv := newRelayHTTPSHarness(t)
+	t.Setenv("REMOTE", repo.Bare)
 	stateDir := t.TempDir()
+	t.Setenv("STATE_DIR", stateDir)
 	prsDir := filepath.Join(stateDir, "prs")
 	if err := os.MkdirAll(prsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	scriptDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(scriptDir, "gh"), []byte(fakeGHCodeForge), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", scriptDir+":"+os.Getenv("PATH"))
-	t.Setenv("REMOTE", repo.Bare)
-	t.Setenv("STATE_DIR", stateDir)
 
 	return &codeforgeHarness{
 		t:      t,
@@ -57,6 +50,7 @@ func newCodeForgeHarness(t *testing.T) *codeforgeHarness {
 		prsDir: prsDir,
 		base:   "main",
 		cf:     NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-"),
+		srv:    srv,
 	}
 }
 

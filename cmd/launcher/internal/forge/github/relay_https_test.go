@@ -90,11 +90,12 @@ func (s *httpsRelayServer) authorise(r *http.Request) bool {
 	return good
 }
 
-// serveRelayOverHTTPS makes the launcher's relay clone reach repo only
-// through https://$GH_HOST/owner/repo.git authenticated by the gh credential
-// helper. It models a host whose gh prefers SSH: an empty HOME, no SSH agent,
-// an ssh binary that always fails, and a gh config with git_protocol: ssh, so
-// a relay that follows gh's protocol preference (or any ambient SSH key)
+// serveRelayOverHTTPS makes the launcher's httpsClone (relay and Rebase alike)
+// reach repo only through https://$GH_HOST/owner/repo.git authenticated by the
+// gh credential helper. It models a host whose gh prefers SSH: an empty HOME,
+// no SSH agent, an ssh binary that always fails, and a gh config with
+// git_protocol: ssh, so a clone that follows gh's protocol preference (or any
+// ambient SSH key)
 // fails. The initial GH_TOKEN, and the one the server expects, is token.
 func serveRelayOverHTTPS(t *testing.T, repo *forgetest.GitRepoFixture, token string) *httpsRelayServer {
 	t.Helper()
@@ -241,6 +242,26 @@ func TestExecClient_PushBranch_AuthenticatesOverHTTPSNotSSH(t *testing.T) {
 	}
 	for _, suffix := range []string{"/git-upload-pack", "/git-receive-pack"} {
 		if !srv.sawAuthorised(suffix) {
+			t.Errorf("server saw no authorised %s request", suffix)
+		}
+	}
+}
+
+// The merge gate's Rebase must clone and force-push over the token-authenticated
+// HTTPS remote too, not through `gh repo clone` (issue #4650).
+func TestExecClient_Rebase_AuthenticatesOverHTTPSNotSSH(t *testing.T) {
+	h := newCodeForgeHarness(t)
+	url := h.SeedLandable("4650")
+	h.AdvanceBase()
+
+	if err := h.cf.Rebase(url); err != nil {
+		t.Fatalf("Rebase: %v", err)
+	}
+	if !h.Rebased("4650") {
+		t.Errorf("%s does not contain main's tip after Rebase", h.branchName("4650"))
+	}
+	for _, suffix := range []string{"/git-upload-pack", "/git-receive-pack"} {
+		if !h.srv.sawAuthorised(suffix) {
 			t.Errorf("server saw no authorised %s request", suffix)
 		}
 	}
