@@ -526,9 +526,10 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 // sleep behaviour the 5 ad-hoc fake clocks it replaces needed: an instant
 // default advance, a parked mode that blocks until woken or cancelled, a
 // step mode that releases every parked sleeper at once over a fresh
-// barrier so N concurrent sleeps never additively stack, and a
-// sleep-entry signal plus onSleep hook for tests that need to know the
-// instant a slot genuinely idles.
+// barrier so N concurrent sleeps never additively stack, a releaseOne that
+// frees only the longest-parked sleeper, and a sleep-entry signal plus
+// onSleep hook for tests that need to know the instant a slot genuinely
+// idles.
 type testClock struct {
 	mu       sync.Mutex
 	now      time.Time
@@ -542,6 +543,10 @@ type testClock struct {
 	parked        bool
 	barrier       chan struct{}
 	barrierClosed bool
+
+	// sleepers queues one release channel per parked Sleep, oldest first, for
+	// releaseOne; each Sleep drops its own on return by any route.
+	sleepers []chan struct{}
 
 	// sleepSignal, if set, gets a non-blocking best-effort send on every
 	// Sleep entry; a dropped send (nobody draining) must never block a
@@ -594,6 +599,26 @@ func (c *testClock) step(now time.Time) {
 	if old != nil && !wasClosed {
 		close(old)
 	}
+}
+
+// releaseOne frees only the longest-parked sleeper still waiting, leaving its
+// siblings parked. It does not advance now; callers move the clock separately
+// (advanceBy) when the freed sleeper's next Decide needs time to have passed.
+func (c *testClock) releaseOne(t *testing.T) {
+	t.Helper()
+	c.releaseNth(t, 0)
+}
+
+// releaseNth is releaseOne for the n'th-longest-parked sleeper.
+func (c *testClock) releaseNth(t *testing.T, n int) {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if n >= len(c.sleepers) {
+		t.Fatalf("testClock: releaseNth(%d) with %d parked sleepers", n, len(c.sleepers))
+	}
+	close(c.sleepers[n])
+	c.sleepers = append(c.sleepers[:n], c.sleepers[n+1:]...)
 }
 
 func (c *testClock) setNow(t time.Time) {
@@ -654,6 +679,11 @@ func (c *testClock) Sleep(ctx context.Context, d time.Duration) {
 		c.now = c.now.Add(d)
 	}
 	barrier := c.barrier
+	var release chan struct{}
+	if parked {
+		release = make(chan struct{})
+		c.sleepers = append(c.sleepers, release)
+	}
 	sig := c.sleepSignal
 	onSleep := c.onSleep
 	c.mu.Unlock()
@@ -671,8 +701,19 @@ func (c *testClock) Sleep(ctx context.Context, d time.Duration) {
 	if !parked {
 		return
 	}
+	defer func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		for i, ch := range c.sleepers {
+			if ch == release {
+				c.sleepers = append(c.sleepers[:i], c.sleepers[i+1:]...)
+				return
+			}
+		}
+	}()
 	select {
 	case <-barrier:
+	case <-release:
 	case <-ctx.Done():
 	}
 }
