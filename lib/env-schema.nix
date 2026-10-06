@@ -353,7 +353,7 @@ in
   jiraEmail = {
     env = "JIRA_EMAIL";
     group = "issues";
-    doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; leave empty for Bearer-token auth (Jira Server/Data Center PATs)";
+    doc = "Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; setting it also selects Jira Cloud's search APIs; leave empty for Bearer-token auth (Jira Server/Data Center PATs, which keep the v2 /search)";
     flakeOption = true;
     nixSubPath = "jira.email";
     boxEnv = false;
