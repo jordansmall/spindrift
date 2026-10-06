@@ -41,7 +41,14 @@ it is most needed. It never picks, starts, stops, or settles anything.
 
 The Dashboard reads **only what the Daemon publishes**, never Daemon or
 launcher internals, so it can later move to its own repo without a rewrite.
-To make that sufficient, the Daemon publishes three more things:
+The compiler enforces that, not a convention: the Dashboard is its own Go
+module in its own top-level directory, standard library only, so it cannot
+import the launcher's `internal/` packages. That also keeps it outside the
+Daemon's source fileset, so a Dashboard commit never moves the Daemon's
+store path and halts a running Daemon on self-change. Moving it out later is
+the directory plus a flake of its own.
+
+To make published files sufficient, the Daemon publishes three more things:
 
 1. **An Events file** beside the status file — the same lines it writes to
    stdout, size-capped with one rotated generation, a fixed default with no
@@ -63,9 +70,12 @@ crashing or misreading.
 
 The v1 page is a pool header, slot cards (idle slots included), a history
 timeline, and a per-Dispatch drill-in following its Child log and Pass logs
-live, with links out to the issue and PR. It is plain Go: HTML, CSS, and JS
-embedded with `go:embed`, live updates over Server-Sent Events, and no npm
-toolchain or vendored library. It binds loopback by default and takes
+live, with links out to the issue and PR. Logs show raw, ANSI colour
+rendered; the Console's Activity-feed rendering is not in v1, since its
+parser is per-Driver launcher code the Dashboard cannot import. It is plain
+Go: HTML, CSS, and JS embedded with `go:embed`, live updates over
+Server-Sent Events, files followed by polling, and no npm toolchain,
+vendored library, or Go dependency. It binds loopback by default and takes
 `--listen` to serve a LAN; it has no authentication yet, and says so on
 start.
 
@@ -82,10 +92,17 @@ start.
 - **Derive Pass log paths with `dispatch.LogPaths`** — no new event field,
   rejected: it imports launcher naming, has nothing for a Chore, and cannot
   tell which Dispatch a rotated-aside attempt belonged to.
-- **A separate repo from the start** — rejected for now: it turns three
-  merely documented surfaces into a cross-repo versioned contract before the
-  view has shown anything. The published-files-only rule keeps the move
-  cheap later.
+- **A separate repo from the start** — rejected for now, after a second
+  look. It would remove the self-halt hazard and keep UI churn out of
+  spindrift's releases, but most of the work is Daemon-side and lands here
+  regardless, the Dashboard couldn't be exercised until a release carried
+  those fields, and it would need its own dispatch setup. A separate module
+  in this repo gets the isolation without those costs.
+- **A package in the launcher's module, reusing the Activity-feed parser**
+  — rejected: it ties the Dashboard to launcher internals (making the move
+  a rewrite), and it places the Dashboard inside the Daemon's source
+  fileset, where every Dashboard commit would halt a running Daemon unless
+  carved back out.
 - **An SPA built with npm** — rejected: a JS toolchain, lockfile hash churn,
   and a second lint and test stack in a Go/Nix/bash repo for one read-only
   page; the flash is in the CSS, not the framework.
@@ -99,4 +116,7 @@ start.
   largely duplicating Pass logs); Pass logs already do. Pruning both is a
   known gap, to be revisited.
 - Deferred, each a later decision: stats over the Events file, a terminal
-  rendering of the Dashboard, authentication, and any steering action.
+  rendering of the Dashboard, authentication, any steering action, and an
+  Activity-feed view of Pass logs (which would need the Driver on `box`
+  events and a parser the Dashboard can reach without importing the
+  launcher).
