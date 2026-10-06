@@ -1091,14 +1091,15 @@ func TestExecClient_TransitionState_ClaimStripsStaleLabels(t *testing.T) {
 	}
 }
 
-// The stale-terminal-label strip is claim-only, so a transition that does not
+// The stale-terminal-label strip is claim-only (bar a landing clearing a stale
+// Failed, see CompleteStripsStaleFailed below), so a transition that does not
 // land on InProgress still emits exactly one --add-label/--remove-label pair
 // (#1985).
 func TestExecClient_TransitionState_NonClaimTransitionUnchanged(t *testing.T) {
 	dir := prependFakeGH(t, "")
 
 	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
-	if err := c.TransitionState("10", forge.InProgress, forge.Complete); err != nil {
+	if err := c.TransitionState("10", forge.InProgress, forge.Failed); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1112,6 +1113,25 @@ func TestExecClient_TransitionState_NonClaimTransitionUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(argv, "--remove-label\nagent-in-progress") {
 		t.Errorf("argv = %q, want --remove-label agent-in-progress", argv)
+	}
+}
+
+// A landing (to == Complete) also removes a stale agent-failed, so a recovered
+// issue parked agent-failed ends wearing only agent-complete (#4651).
+func TestExecClient_TransitionState_CompleteStripsStaleFailed(t *testing.T) {
+	h := newGithubHarness(t)
+	h.SeedIssue(forge.Issue{Number: "56", Title: "parked", Labels: []string{"agent-failed"}})
+
+	if err := h.Tracker().TransitionState("56", forge.InProgress, forge.Complete); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+
+	iss, err := h.Tracker().Issue("56")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if len(iss.Labels) != 1 || iss.Labels[0] != "agent-complete" {
+		t.Errorf("labels = %v, want exactly [agent-complete]", iss.Labels)
 	}
 }
 
@@ -1141,7 +1161,7 @@ func TestExecClient_TransitionState_NormalClaimUnchanged(t *testing.T) {
 // cannot drift apart (#1985). The reverse is not asserted: agent-trigger and
 // agent-recover are GitHub Actions trigger gestures with no forge.DispatchState
 // equivalent, so the Go claim cannot strip them.
-func TestExecClient_TransitionState_ClaimRemoveLabelsMatchDispatchWorkflow(t *testing.T) {
+func TestExecClient_TransitionState_TransitionRemoveLabelsMatchDispatchWorkflow(t *testing.T) {
 	workflowSet, rawValue := forgetest.ParseWorkflowRemoveLabelSet(t,
 		filepath.Join("..", "..", "..", "..", "..", ".github", "workflows", "agent-dispatch.yml"),
 		"claim-remove-labels")

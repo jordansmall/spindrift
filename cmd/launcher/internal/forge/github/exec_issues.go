@@ -234,10 +234,11 @@ func (e *execClient) StateLabels() forge.DispatchLabels {
 }
 
 // TransitionState swaps the from-state label for the to-state label on issue
-// num. A claim (to == InProgress) also strips the stale terminal labels
-// DispatchLabels.ClaimRemoveLabels names, matching the dispatch workflow's
-// claim-remove-labels set (#1985), so a re-triggered or recovered issue
-// cannot run while still wearing a prior run's terminal label.
+// num, removing the labels DispatchLabels.TransitionRemoveLabels names. A claim
+// (to == InProgress) also strips the stale terminal labels, matching the
+// dispatch workflow's claim-remove-labels set (#1985), so a re-triggered or
+// recovered issue cannot run while still wearing a prior run's terminal label;
+// a landing (to == Complete) strips a stale Failed (#4651).
 //
 // A claim first reads num's labels and errors on forge.ErrAlreadyClaimed
 // without editing anything when InProgress is already present (#3887). The
@@ -255,7 +256,7 @@ func (e *execClient) TransitionState(num string, from, to forge.DispatchState) e
 	}
 	add := e.labels.Label(to)
 	args := []string{"issue", "edit", num, "--repo", e.repo, "--add-label", add}
-	for _, remove := range e.labels.ClaimRemoveLabels(from, to) {
+	for _, remove := range e.labels.TransitionRemoveLabels(from, to) {
 		args = append(args, "--remove-label", remove)
 	}
 	cmd := exec.Command("gh", args...)

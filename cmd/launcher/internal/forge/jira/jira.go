@@ -315,12 +315,15 @@ func (j *jiraClient) transitionByStatus(num, targetStatus string) error {
 		map[string]any{"transition": map[string]string{"id": transitionID}}, nil)
 }
 
-// swapLabel adds the add label and removes the remove label on issue num via
-// a single label-field update. Either may be empty to skip that half.
-func (j *jiraClient) swapLabel(num, add, remove string) error {
+// swapLabel adds the add label and removes every removes label on issue num
+// via a single label-field update. add and any removes entry may be empty to
+// skip that op.
+func (j *jiraClient) swapLabel(num, add string, removes ...string) error {
 	var ops []map[string]string
-	if remove != "" {
-		ops = append(ops, map[string]string{"remove": remove})
+	for _, remove := range removes {
+		if remove != "" {
+			ops = append(ops, map[string]string{"remove": remove})
+		}
 	}
 	if add != "" {
 		ops = append(ops, map[string]string{"add": add})
@@ -349,7 +352,9 @@ func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.D
 // TransitionState moves issue num from state from to state to via the Jira
 // workflow transition matching StatusMapping[to]. When to is unmapped or that
 // transition is unavailable, it swaps the DispatchLabels for from/to instead
-// (ADR 0013) so the lifecycle always makes progress.
+// (ADR 0013) so the lifecycle always makes progress. Either way it removes the
+// labels forge.DispatchLabels.TransitionRemoveLabels names, so a claim or
+// landing also strips a stale terminal label like the other trackers.
 //
 // A claim (to == InProgress) first GETs num and errors on
 // forge.ErrAlreadyClaimed without transitioning when either the native status
@@ -371,10 +376,11 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 		err := j.transitionByStatus(num, target)
 		if err == nil {
 			// ListIssues matches a state by status OR its fallback label, so a
-			// stale from label must not survive a successful native transition.
-			// Best-effort: a cleanup failure must not undo the transition that
-			// already succeeded.
-			_ = j.swapLabel(num, "", j.cfg.Labels.Label(from))
+			// stale from label (or a stale terminal the shared rule strips)
+			// must not survive a successful native transition. Best-effort: a
+			// cleanup failure must not undo the transition that already
+			// succeeded.
+			_ = j.swapLabel(num, "", j.cfg.Labels.TransitionRemoveLabels(from, to)...)
 			return nil
 		}
 		if !errors.Is(err, errTransitionUnavailable) {
@@ -385,7 +391,7 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 	if toLabel == "" {
 		return fmt.Errorf("jira: no status mapping or fallback label configured for state %v", to)
 	}
-	return j.swapLabel(num, toLabel, j.cfg.Labels.Label(from))
+	return j.swapLabel(num, toLabel, j.cfg.Labels.TransitionRemoveLabels(from, to)...)
 }
 
 // CompleteVerdict swaps num's InProgress fallback label for verdict's terminal
