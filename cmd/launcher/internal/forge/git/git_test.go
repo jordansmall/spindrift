@@ -319,25 +319,19 @@ func TestGitClient_Merge_CloneFailureDoesNotLeakCredentials(t *testing.T) {
 	}
 }
 
-// This test crosses the same public-comment trust boundary as the clone and
-// probe tests above, but reaches it through git.go's non-conflict merge
-// branch: the credential text comes from a rejecting hook's own output rather
-// than from the remote URL.
-func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
-	const secret = "sometoken123"
-	bare := newBareRemoteWithBranches(t)
-
-	// init.templateDir is how the hook reaches the fresh clone cloneToTemp
-	// makes. The hook stands in for a merge driver that leaks a
-	// credential-bearing URL: it rejects the merge and writes the credential
-	// to stderr, which mergeCmd captures.
+// installLeakingHook makes every fresh clone carry a hookName hook that rejects
+// the operation and writes a credential-bearing URL to stderr. init.templateDir
+// (via a throwaway HOME's .gitconfig) is how the hook reaches the temp clone
+// that cloneToTemp makes.
+func installLeakingHook(t *testing.T, hookName, secret string) {
+	t.Helper()
 	home := t.TempDir()
 	templateDir := filepath.Join(home, "template")
 	hooksDir := filepath.Join(templateDir, "hooks")
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	hookPath := filepath.Join(hooksDir, "pre-merge-commit")
+	hookPath := filepath.Join(hooksDir, hookName)
 	gitWriteFile(t, hookPath, "#!/bin/sh\necho 'fatal: unable to access "+
 		"https://oauth2:"+secret+"@git.example.com/org/repo.git/' >&2\nexit 1\n")
 	if err := os.Chmod(hookPath, 0o755); err != nil {
@@ -345,17 +339,31 @@ func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
 	}
 	gitWriteFile(t, filepath.Join(home, ".gitconfig"), "[init]\n\ttemplateDir = "+templateDir+"\n")
 	t.Setenv("HOME", home)
+}
+
+// This test crosses the same public-comment trust boundary as the clone and
+// probe tests above, but reaches it through git.go's non-conflict merge
+// branch: the credential text comes from a rejecting hook's own output rather
+// than from the remote URL.
+func TestGitClient_Merge_HookOutputDoesNotLeakCredentials(t *testing.T) {
+	const secret = "sometoken123"
+	t.Setenv("LC_ALL", "C")
+	bare := newBareRemoteWithBranches(t)
+	installLeakingHook(t, "pre-merge-commit", secret)
 
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
 	err := g.Merge("agent/issue-1")
 	if err == nil {
 		t.Fatal("Merge: want error from failing pre-commit hook, got nil")
 	}
-	if err == forge.ErrMergeConflict {
+	if errors.Is(err, forge.ErrMergeConflict) {
 		t.Fatal("Merge: want non-conflict hook failure, got forge.ErrMergeConflict")
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("Merge error leaks hook output credential: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unable to access") {
+		t.Fatalf("Merge error should carry the redacted hook output: %v", err)
 	}
 }
 
@@ -655,5 +663,105 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 	}
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Rebase error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
+	}
+}
+
+func TestGitClient_Rebase_ContentConflictReturnsErrMergeConflict(t *testing.T) {
+	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
+		func(w string) {
+			gitWriteFile(t, filepath.Join(w, "shared.txt"), "feature change\n")
+			gitRun(t, w, "add", "shared.txt")
+		},
+		func(w string) {
+			gitWriteFile(t, filepath.Join(w, "shared.txt"), "conflicting main change\n")
+			gitRun(t, w, "add", "shared.txt")
+		})
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Rebase: want forge.ErrMergeConflict, got: %v", err)
+	}
+}
+
+func TestGitClient_Rebase_ModifyDeleteConflictReturnsErrMergeConflict(t *testing.T) {
+	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
+		func(w string) {
+			gitWriteFile(t, filepath.Join(w, "shared.txt"), "feature change\n")
+			gitRun(t, w, "add", "shared.txt")
+		},
+		func(w string) { gitRun(t, w, "rm", "shared.txt") })
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Rebase: want forge.ErrMergeConflict, got: %v", err)
+	}
+}
+
+// Git prints neither "Merge conflict in" nor a content marker for a rename
+// conflict, so this covers the "CONFLICT (" classification beyond content.
+func TestGitClient_Rebase_RenameConflictReturnsErrMergeConflict(t *testing.T) {
+	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
+		func(w string) { gitRun(t, w, "mv", "shared.txt", "feature-name.txt") },
+		func(w string) { gitRun(t, w, "mv", "shared.txt", "main-name.txt") })
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	if err := g.Rebase("agent/issue-1"); !errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Rebase: want forge.ErrMergeConflict, got: %v", err)
+	}
+}
+
+// A rebase onto a base that does not exist fails without stopping on a
+// conflict, so it must surface git's own message instead of masquerading as
+// forge.ErrMergeConflict.
+func TestGitClient_Rebase_MissingBaseIsNotConflict(t *testing.T) {
+	// git translates its messages; the assertion below needs the C locale.
+	t.Setenv("LC_ALL", "C")
+	bare := newBareRemoteWithBranches(t)
+	g := NewGitClient(bare, "no-such-base", "Test Bot", "bot@example.com", "agent/issue-")
+
+	err := g.Rebase("agent/issue-1")
+	if err == nil {
+		t.Fatal("Rebase: want error for missing base, got nil")
+	}
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Rebase: missing base must not be forge.ErrMergeConflict: %v", err)
+	}
+	for _, want := range []string{"no-such-base", "invalid upstream"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Rebase error should carry git's own output (%q): %v", want, err)
+		}
+	}
+}
+
+// Mirrors the Merge hook-leak test for Rebase's non-conflict failure branch.
+func TestGitClient_Rebase_HookOutputDoesNotLeakCredentials(t *testing.T) {
+	const secret = "sometoken123"
+	t.Setenv("LC_ALL", "C")
+	// main must be ahead of the branch: pre-rebase does not fire when the
+	// branch is already up to date.
+	bare := conflictRemote(t, map[string]string{"shared.txt": "base\n"},
+		func(w string) {
+			gitWriteFile(t, filepath.Join(w, "feature.txt"), "feature\n")
+			gitRun(t, w, "add", "feature.txt")
+		},
+		func(w string) {
+			gitWriteFile(t, filepath.Join(w, "later.txt"), "later\n")
+			gitRun(t, w, "add", "later.txt")
+		})
+	installLeakingHook(t, "pre-rebase", secret)
+
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+	err := g.Rebase("agent/issue-1")
+	if err == nil {
+		t.Fatal("Rebase: want error from failing pre-rebase hook, got nil")
+	}
+	if errors.Is(err, forge.ErrMergeConflict) {
+		t.Fatalf("Rebase: want non-conflict hook failure, got forge.ErrMergeConflict")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("Rebase error leaks hook output credential: %v", err)
+	}
+	if !strings.Contains(err.Error(), "unable to access") {
+		t.Fatalf("Rebase error should carry the redacted hook output: %v", err)
 	}
 }

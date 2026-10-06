@@ -190,8 +190,8 @@ func (g *gitClient) Merge(branch string) error {
 }
 
 // Rebase rebases branch onto baseBranch and force-pushes it back to the remote.
-// It returns forge.ErrMergeConflict when the rebase cannot complete
-// automatically.
+// It returns forge.ErrMergeConflict only when the rebase stops on a conflict;
+// any other failure (e.g. a missing base) is returned as a distinct error.
 func (g *gitClient) Rebase(branch string) error {
 	if err := validateGitRef(branch); err != nil {
 		return err
@@ -211,12 +211,28 @@ func (g *gitClient) Rebase(branch string) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer cancel()
-	if err := gitIn(ctx, "rebase", "origin/"+g.baseBranch).Run(); err != nil {
+	var out bytes.Buffer
+	rebaseCmd := gitIn(ctx, "rebase", "origin/"+g.baseBranch)
+	rebaseCmd.Stdout = &out
+	rebaseCmd.Stderr = &out
+	// A hook's grandchild can hold the output pipe open after git exits;
+	// without WaitDelay, Run blocks until that grandchild exits. ErrWaitDelay
+	// means git itself exited 0, so the rebase succeeded.
+	rebaseCmd.WaitDelay = time.Second
+	if err := rebaseCmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
+		// A fresh context: the rebase's own may already have expired. A failed
+		// probe falls through to the wrapped error, which keeps git's output.
+		checkCtx, checkCancel := context.WithTimeout(context.Background(), g.opTimeout)
+		conflicted, _ := gitplumbing.HasUnmergedPaths(checkCtx, dir)
+		checkCancel()
 		_ = g.runGit(gitIn, "rebase", "--abort")
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return fmt.Errorf("git rebase origin/%s: timed out after %s: %w", g.baseBranch, g.opTimeout, ctx.Err())
 		}
-		return forge.ErrMergeConflict
+		if conflicted {
+			return forge.ErrMergeConflict
+		}
+		return fmt.Errorf("git rebase origin/%s: %w: %s", g.baseBranch, err, forge.RedactURLCredentials(strings.TrimSpace(out.String())))
 	}
 	pushCtx, pushCancel := context.WithTimeout(context.Background(), g.opTimeout)
 	defer pushCancel()
