@@ -6737,6 +6737,13 @@ through its `-file` or `-cmd` form is invisible to it, and a missing base
 URL, project key or token, or a malformed mapping, leaves the kind
 exit-driven.
 
+Whenever a tracker-probed kind is left exit-driven this way — an unknown
+`ISSUE_TRACKER`, a missing knob, or a tracker with no Demand adapter — the
+daemon says so once at startup: one stderr line naming the kind and the
+missing knob (never a token or secret value; a set `FORGEJO_TOKEN_CMD` or
+`JIRA_TOKEN_CMD` gets a hint that the daemon reads only the plain token), and
+a `demand_source_missing` event (see **Event stream** below).
+
 **Child-reported due.** The butler has no tracker queue to count, so the
 daemon asks the butler itself, and never reads the Ledger. It starts one
 butler child after start-up. When every Chore is not due, that child exits
@@ -7354,7 +7361,9 @@ the receiver is identified by the `child_start` that follows, not by the
 pass event itself. `halt` and `shutdown` are the only events with no `slot` at
 all, since neither belongs to one slot: `halt` is the pool-wide exit, and
 `shutdown` is emitted from `announceStop` (`cmd/launcher/daemon/main.go`),
-which runs outside every slot's own goroutine.
+which runs outside every slot's own goroutine. The startup
+`demand_source_missing` warning carries no `slot` either: it precedes every
+slot.
 
 | event | fields | when |
 |-------|--------|------|
@@ -7371,6 +7380,7 @@ which runs outside every slot's own goroutine.
 | `demand_drained` | `time`, `kind`, `slot`, `ready` | a Demand probe found none (`ready` is 0) where the previous count was above 0 — the opposite zero crossing to `demand_appeared`, and a kind probed empty again emits nothing. Neither event is emitted for an exit-driven kind, which has no probe |
 | `demand_rose` | `time`, `kind`, `slot`, `ready` | a Demand probe of a jammed probed kind counted `ready` strictly above the kind's `ready_at_jam` (the count the jam froze), which lifts the jam — resetting its gate to `IdleFloor`, as a moved tip does — and wakes parked slots if the kind is now startable. The wait policy above lists the probes that lift nothing. Probed kinds only; it can accompany `demand_appeared` on the same probe |
 | `probe_rate_limited` | `time`, `kind`, `slot`, `tracker`, `until`, `reason` | a kind's Demand probe was refused by the tracker's rate limit, pausing every kind on `tracker` until `until` (RFC3339 UTC); emitted each time a pause begins, not again by a probe that lands while one holds |
+| `demand_source_missing` | `time`, `kind`, `reason` | at startup, once per tracker-probed kind (dispatch, research) the daemon built no Demand source for, so it is scheduled from child exits instead; `reason` names the missing knob, or the unknown or adapterless `ISSUE_TRACKER`, never a token or secret value. A kind with a source, and the butler, never emit it |
 | `probe_failed` | `time`, `kind`, `slot`, `reason` | a kind's Demand probe failed for any other reason (`reason` `demand: ...`); transition only, and the usual `backoff` event still follows |
 | `probe_resumed` | `time`, `kind`, `slot`, `tracker` | a kind's first successful probe after a `probe_failed` or `probe_rate_limited` |
 | `idle` | `time`, `kind`, `wait`, `slot` | recording a no-work result against `kind` after `queue-empty`, or after `none-dispatchable` with a sibling slot `running` (a `running` butler sibling never counts); `wait` carries `kind`'s own idle backoff (for a probed kind, the time to its next probe, flat rather than widening; for the butler, the time to its reported `next_due`), so a widening `wait` across successive `idle` events for the same `kind` is how that kind's growing backoff reaches the stream |
