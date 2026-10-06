@@ -6505,12 +6505,13 @@ empty, since no instant ends the wait); `next_due_on_tip_move: true` rides
 alongside an instant when a moved tip would also lift it early. It is
 absent until a child has reported, and again once a later child has run.
 `jam_until` (RFC3339) appears only while a jam gate is live, and on a
-probed kind `ready_at_jam` is the `ready` count that jam froze. A paused
-kind's `nextCheck` is the end of its tracker's rate-limit pause or later. The
-top-level `trackers` array has one entry per distinct tracker the probed
-kinds count against, in configured kind order: `tracker` (its name) and
-`rate_limited_until` (RFC3339 UTC), present only while a rate-limit pause
-holds.
+probed kind `ready_at_jam` is the `ready` count that jam froze (absent
+until the first probe after a jam that followed an unconfirmed claim or
+empty child). A paused kind's `nextCheck` is the end of its tracker's
+rate-limit pause or later. The top-level `trackers` array has one entry
+per distinct tracker the probed kinds count against, in configured kind
+order: `tracker` (its name) and `rate_limited_until` (RFC3339 UTC),
+present only while a rate-limit pause holds.
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
@@ -6668,10 +6669,11 @@ counting more than `ready_at_jam` lifts the jam early too
 like the work the jam saw. An equal or falling count never lifts it — a
 claim elsewhere shrinks the queue without making anything dispatchable —
 and neither does a changed candidate set at the same count, a probe a
-claim overtook in flight, or a probe landing after the jam already
-ended. A parked slot wakes at the earlier of the next probe and the
-jam's end. The count is advisory: children still discover and
-claim for themselves, so a stale or wrong count costs an empty child or a
+claim overtook in flight, the first probe after a jam that followed an
+unconfirmed claim or empty child (it sets the baseline instead), or a probe
+landing after the jam already ended. A parked slot wakes at the earlier of the
+next probe and the jam's end. The count is advisory: children still discover
+and claim for themselves, so a stale or wrong count costs an empty child or a
 delayed start, never a wrong claim. A probe refused by the tracker's rate limit
 (`forge.ErrRateLimit`, a `*forge.RateLimitError`) is not a failure: it pauses
 probes and child starts for every kind on that tracker (work and research
