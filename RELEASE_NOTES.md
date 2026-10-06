@@ -40,10 +40,12 @@ No breaking changes.
   a conflict when there really is one, and no longer fails for lack of a
   commit identity. Every kind of merge conflict is recognized, and a merge
   can't hang on a subprocess that holds its output open.
-- **Tracker fixes.** GitHub label lists read past the first page, Jira Cloud
-  search pages correctly through large result sets, Forgejo stops
-  re-asking about a label that doesn't exist (cached for 10 minutes), and
-  an issue with many linked issues stays within the prompt's size budget.
+- **Tracker fixes.** On a GitHub repo with more than 100 labels, `doctor`
+  no longer reports existing labels as missing and filed issues keep their
+  labels. Jira Cloud search pages correctly through large result sets,
+  Forgejo stops re-asking about a label that doesn't exist (cached for 10
+  minutes), and an issue with many linked issues stays within the prompt's
+  size budget.
 
 ## 0.23.0 — 2026-10-05
 
