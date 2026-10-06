@@ -4224,6 +4224,11 @@ signals cross the seam over the [Signal
 socket](#signal-socket-box_signal_carriersocket) instead, and the Launcher
 still performs the write host-side at settle.
 
+After a successful land (merged, including a hand-run `spindrift recover
+<n>`), the Launcher deletes the issue's `seam.bundle` from the outbox. A
+blocked, failed, or left-open-for-a-human landing keeps it, and a failed
+deletion is logged and never fails the landing (issue #4653).
+
 A stray `git push` in the "land the branch" row above — the agent guessing at
 the read-write workflow — fails locally instead of reaching the forge and
 403ing there (issue #2463): the Box repoints `origin`'s push URL at a
