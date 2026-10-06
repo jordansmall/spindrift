@@ -569,12 +569,13 @@ func TestGitClient_Merge_TimesOutOnHangingPush(t *testing.T) {
 	}
 }
 
-// installHangingGitRebaseShim puts a "git" shim ahead of the real one on
-// PATH. It sleeps forever on a non-abort `git ... rebase <ref>` and passes
-// every other subcommand through. Rebase's checkout and rebase steps run
-// locally, with no network round trip that hangingRemoteURL or a pre-receive
-// hook could hang, so the shim is the only deterministic way to stall them.
-func installHangingGitRebaseShim(t *testing.T) {
+// installGitShim puts a "git" shim ahead of the real one on PATH. On a
+// non-abort `git ... <subcommand> ...` it runs action, a shell snippet, then
+// passes through to the real git; every other subcommand passes straight
+// through. Checkout, merge, and rebase run locally, with no network round trip
+// that hangingRemoteURL or a pre-receive hook could hang, so the shim is the
+// only deterministic way to stall them.
+func installGitShim(t *testing.T, subcommand, action string) {
 	t.Helper()
 	realGit, err := exec.LookPath("git")
 	if err != nil {
@@ -582,8 +583,8 @@ func installHangingGitRebaseShim(t *testing.T) {
 	}
 	shimDir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$3\" = \"rebase\" ] && [ \"$4\" != \"--abort\" ]; then\n" +
-		"  sleep 999\n" +
+		"if [ \"$3\" = \"" + subcommand + "\" ] && [ \"$4\" != \"--abort\" ]; then\n" +
+		"  " + action + "\n" +
 		"fi\n" +
 		"exec " + realGit + " \"$@\"\n"
 	shim := filepath.Join(shimDir, "git")
@@ -594,11 +595,69 @@ func installHangingGitRebaseShim(t *testing.T) {
 	t.Setenv("PATH", shimDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
+// installHangingGitShim makes a non-abort `git ... <subcommand> ...` sleep forever.
+func installHangingGitShim(t *testing.T, subcommand string) {
+	t.Helper()
+	installGitShim(t, subcommand, "sleep 999")
+}
+
+// The op timeout has to cover the merge invocation itself, not just the
+// clone and the push around it.
+func TestGitClient_Merge_TimesOutOnHangingMerge(t *testing.T) {
+	bare := newBareRemoteWithBranches(t)
+	installHangingGitShim(t, "merge")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
+		WithOpTimeout(200*time.Millisecond))
+
+	start := time.Now()
+	err := g.Merge("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Merge against hanging merge invocation: want error, got nil")
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Merge took %s to return, want it bounded by the configured op timeout", elapsed)
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Merge error = %q, want it to mention timing out", err.Error())
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Merge error = %v, want errors.Is(err, context.DeadlineExceeded)", err)
+	}
+}
+
+// A hook's backgrounded grandchild inherits git's output pipe and outlives git;
+// Merge must not wait on it, and git's own exit 0 still means the merge landed.
+func TestGitClient_Merge_SucceedsWhenGrandchildHoldsOutputPipe(t *testing.T) {
+	bare := newBareRemoteWithBranches(t)
+	installGitShim(t, "merge", "sleep 5 &")
+	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-")
+
+	start := time.Now()
+	err := g.Merge("agent/issue-1")
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("Merge took %s to return, want it not to wait on a grandchild holding the output pipe", elapsed)
+	}
+
+	verify := t.TempDir()
+	gitRun(t, "", "clone", bare, verify)
+	gitRun(t, verify, "checkout", "main")
+	if _, err := os.Stat(filepath.Join(verify, "feature.txt")); err != nil {
+		t.Errorf("main does not contain feature.txt after Merge: %v", err)
+	}
+}
+
 // The op timeout has to cover Rebase's post-clone subprocesses (checkout,
 // rebase) too, not just the clone.
 func TestGitClient_Rebase_TimesOutOnHangingRebase(t *testing.T) {
 	bare := newBareRemoteWithBranches(t)
-	installHangingGitRebaseShim(t)
+	installHangingGitShim(t, "rebase")
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
 		WithOpTimeout(200*time.Millisecond))
 

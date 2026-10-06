@@ -25,6 +25,12 @@ const defaultCloneTimeout = 5 * time.Minute
 // diverge them deliberately.
 const defaultOpTimeout = defaultCloneTimeout
 
+// gitOutputWaitDelay bounds Cmd.WaitDelay for Merge and Rebase. A hook's
+// grandchild can hold the output pipe open after git exits, and a killed git's
+// child can hold it past the context deadline; without WaitDelay, Run blocks
+// until that grandchild exits. ErrWaitDelay means git itself exited 0.
+const gitOutputWaitDelay = time.Second
+
 // gitClient is the push-only Code Forge adapter for a plain git remote
 // (self-hosted git, gitea, GitLab-without-MRs, a bare server repo). It has no
 // PR or CI concept, so it implements forge.CodeForge only, never PRForge, and
@@ -171,7 +177,8 @@ func (g *gitClient) Merge(branch string) error {
 	mergeCmd := gitIn(ctx, "merge", "--no-ff", "FETCH_HEAD")
 	mergeCmd.Stdout = &out
 	mergeCmd.Stderr = &out
-	if err := mergeCmd.Run(); err != nil {
+	mergeCmd.WaitDelay = gitOutputWaitDelay
+	if err := mergeCmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		// A fresh context: the merge's own may already have expired. A failed
 		// probe falls through to the wrapped error, which keeps git's output.
 		checkCtx, checkCancel := context.WithTimeout(context.Background(), g.opTimeout)
@@ -215,10 +222,7 @@ func (g *gitClient) Rebase(branch string) error {
 	rebaseCmd := gitIn(ctx, "rebase", "origin/"+g.baseBranch)
 	rebaseCmd.Stdout = &out
 	rebaseCmd.Stderr = &out
-	// A hook's grandchild can hold the output pipe open after git exits;
-	// without WaitDelay, Run blocks until that grandchild exits. ErrWaitDelay
-	// means git itself exited 0, so the rebase succeeded.
-	rebaseCmd.WaitDelay = time.Second
+	rebaseCmd.WaitDelay = gitOutputWaitDelay
 	if err := rebaseCmd.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		// A fresh context: the rebase's own may already have expired. A failed
 		// probe falls through to the wrapped error, which keeps git's output.
