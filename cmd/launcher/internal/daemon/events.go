@@ -28,8 +28,9 @@ type Event struct {
 	// the wire's unchanged "issue"/"chore" fields (see MarshalJSON/
 	// UnmarshalJSON, issue #3988), never as "key" itself.
 	Key dispatchkey.Key `json:"-"`
-	// Phase is the box event's own field — "initial", "fix-pass-N" or
-	// "conflict-resolve" — carried straight from the child's report.Record
+	// Phase is the box event's own field — "initial", "fix-pass-N",
+	// "conflict-resolve" or "recover" (report.PhaseRecover, queue-mode
+	// recover's claim) — carried straight from the child's report.Record
 	// (issue #3627); no other event sets it.
 	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`

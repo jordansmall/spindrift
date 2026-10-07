@@ -159,15 +159,18 @@ func ParseNextDue(s string) (NextDue, error) {
 	return NextDue{At: at}, nil
 }
 
-// PhaseInitial and PhaseConflictResolve are two of the three Box.phase
-// values this package's callers ever pass; the third, a fix pass, has no
-// fixed spelling since it carries a pass number — build it with
-// PhaseFixPass instead. Naming the fixed two here, rather than leaving them
-// as bare literals at each dispatch call site, keeps the vocabulary this
-// doc comment above and dispatch's announce map between spelled once.
+// PhaseInitial, PhaseConflictResolve and PhaseRecover are three of the four
+// Box.phase values this package's callers ever pass; the fourth, a fix pass,
+// has no fixed spelling since it carries a pass number — build it with
+// PhaseFixPass instead. Naming the fixed three here, rather than leaving them
+// as bare literals at each call site, keeps the vocabulary this doc comment
+// above and dispatch's announce map between spelled once. PhaseRecover is
+// queue-mode recover's claim: it runs no Box, so it announces itself with this
+// phase to give the daemon's flight its key.
 const (
 	PhaseInitial         = "initial"
 	PhaseConflictResolve = "conflict-resolve"
+	PhaseRecover         = "recover"
 )
 
 // PhaseFixPass builds the phase value for a fix pass ("fix-pass-N"), the one
