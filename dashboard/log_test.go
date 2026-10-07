@@ -489,6 +489,7 @@ func TestLogFinishedDispatchSupersededByReplacementBeforeNewBoxEvent(t *testing.
 	for _, pass := range []string{".spindrift/logs/issue-42.log", ".spindrift/logs/issue-butler-docs.log"} {
 		appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
 		p := writeLog(t, checkout, pass, "old run\n")
+		stamp(t, p, "2026-10-07T12:03:08Z")
 		_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
 		collect(t, st, "old run")
 
@@ -670,10 +671,7 @@ func TestLogFollowingTabSupersededWhenFinishedOwnerQuarantined(t *testing.T) {
 	if err := os.Rename(p, p+".prior-run.1"); err != nil {
 		t.Fatal(err)
 	}
-	text, events := drainFrames(t, st)
-	if text != "" || len(events) != 1 || events[0] != "superseded" {
-		t.Fatalf("after the old bytes: log %q, frames %v; want [superseded]", text, events)
-	}
+	wantSupersededAfterOldBytes(t, st)
 }
 
 // A .prior-run sibling is only this owner's own copy when written at or after
@@ -701,4 +699,109 @@ func TestLogMissingFileWithoutOwnQuarantineSiblingIsPruned(t *testing.T) {
 			wantClosed(t, st)
 		})
 	}
+}
+
+// A finished Dispatch never writes its Pass log again, so a file modified well
+// past the finish is a later run's that reached the path before its box event.
+func TestLogFinishedOwnerFileModifiedAfterFinishIsSupersededUnread(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+	p := writeLog(t, checkout, pass, "newer run\n")
+	stamp(t, p, "2026-10-07T13:00:10Z")
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	st.expect(t, "superseded", pass)
+	wantClosed(t, st)
+}
+
+func TestLogFinishedOwnerTabNeverReadsPastItsOpenSize(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+	p := writeLog(t, checkout, pass, "old run\n")
+	stamp(t, p, "2026-10-07T12:03:09Z") // within the finish slack
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	collect(t, st, "old run")
+
+	appendTo(t, p, "newer\n")
+	wantSupersededAfterOldBytes(t, st)
+}
+
+func TestLogRunningOwnerTabStreamsAppends(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass))
+	p := writeLog(t, checkout, pass, "first\n")
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	collect(t, st, "first")
+	appendTo(t, p, "second\n")
+	if got := collect(t, st, "second"); got != "second\n" {
+		t.Fatalf("appended bytes = %q", got)
+	}
+}
+
+func TestLogNilOwnerOnFinishedChildStreamsFreshFile(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+	p := writeLog(t, checkout, pass, "fresh\n")
+	stamp(t, p, "2026-10-07T13:00:10Z")
+	_, st := openLog(t, ts, pass)
+	collect(t, st, "fresh")
+	appendTo(t, p, "more\n")
+	collect(t, st, "more")
+}
+
+// wantSupersededAfterOldBytes expects the stream to end with exactly one
+// superseded frame and no bytes beyond what the caller already collected.
+func wantSupersededAfterOldBytes(t *testing.T, st *stream) {
+	t.Helper()
+	text, events := drainFrames(t, st)
+	if text != "" || len(events) != 1 || events[0] != "superseded" {
+		t.Fatalf("after the old bytes: log %q, frames %v; want [superseded]", text, events)
+	}
+}
+
+// A fix-pass or conflict-resolve tab follows its log while the owner runs; a
+// later Dispatch's launcher then quarantines it, though its box event names
+// only the initial log.
+func TestLogFollowingFixOrConflictTabSupersededWhenQuarantinedByLaterDispatch(t *testing.T) {
+	cases := []struct{ name, path, phase string }{
+		{"fix pass", ".spindrift/logs/issue-42-fix-1.log", "fix-pass-1"},
+		{"conflict resolve", ".spindrift/logs/issue-42-conflict-resolve.log", "conflict-resolve"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, checkout := logServer(t)
+			appendTo(t, eventsOf(checkout), slotLine("box", 0, "2026-10-07T12:03:05Z",
+				`,"phase":"`+tc.phase+`","issue":"42","pass_log":"`+tc.path+`"`))
+			p := writeLog(t, checkout, tc.path, "old run\n")
+			stamp(t, p, "2026-10-07T12:03:07Z")
+			_, st := openLogQuery(t, ts, ownerQuery(tc.path, 0, olderAt, 0))
+			collect(t, st, "old run")
+
+			appendTo(t, eventsOf(checkout), childFinishLine()+
+				slotLine("child_start", 1, newerAt, `,"child_log":"logs/newer.log"`)+
+				slotLine("box", 1, "2026-10-07T13:00:05Z",
+					`,"phase":"initial","issue":"42","pass_log":".spindrift/logs/issue-42.log"`))
+			if err := os.Rename(p, p+".prior-run.1"); err != nil {
+				t.Fatal(err)
+			}
+			wantSupersededAfterOldBytes(t, st)
+		})
+	}
+}
+
+// With no child_finish (a Daemon that died), the slot's next child_start ends
+// the Dispatch; a file modified past that start is a later run's.
+func TestLogFinishInferredFromLaterChildStartSupersedesModifiedFile(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass)+
+		slotLine("child_start", 0, newerAt, `,"child_log":"logs/newer.log"`))
+	p := writeLog(t, checkout, pass, "newer run\n")
+	stamp(t, p, "2026-10-07T13:00:05Z")
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	st.expect(t, "superseded", pass)
+	wantClosed(t, st)
 }
