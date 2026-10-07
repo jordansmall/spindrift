@@ -72,8 +72,8 @@ type Runner interface {
 	// tells an adapter that caches to skip its cache and re-read. inFlight is
 	// the keys the pool's own children hold at probe time: a source whose work
 	// those children can hold (the host outbox) leaves them out of its count,
-	// a tracker counter ignores it. Read-only; never retain it.
-	Demand(ctx context.Context, kind Kind, fresh bool, inFlight map[dispatchkey.Key]bool) (Demand, error)
+	// a tracker counter ignores it.
+	Demand(ctx context.Context, kind Kind, fresh bool, inFlight dispatchkey.Set) (Demand, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
 }
 

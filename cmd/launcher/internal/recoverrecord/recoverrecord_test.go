@@ -207,7 +207,7 @@ func TestEligible_IdentityTracksTheBundle(t *testing.T) {
 }
 
 func TestEligible_InFlight(t *testing.T) {
-	inFlight := map[dispatchkey.Key]bool{dispatchkey.Issue("1"): true}
+	inFlight := dispatchkey.Set{dispatchkey.Issue("1"): true}
 	cases := []struct {
 		name string
 		seed func(t *testing.T, pwd string)

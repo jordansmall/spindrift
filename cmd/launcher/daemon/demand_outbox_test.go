@@ -136,7 +136,7 @@ func TestHostRunnerDemand_OutboxSkipsKeysThePoolHolds(t *testing.T) {
 	c := outboxCounterT(t, nil, now)
 	seedOutboxBundleT(t, "7")
 	r := &hostRunner{demand: demandSources{recoverKind: c, workKind: fixedReady(4)}}
-	ready := func(kind daemon.Kind, inFlight map[dispatchkey.Key]bool) int {
+	ready := func(kind daemon.Kind, inFlight dispatchkey.Set) int {
 		t.Helper()
 		d, err := r.Demand(context.Background(), kind, false, inFlight)
 		if err != nil {
@@ -148,16 +148,16 @@ func TestHostRunnerDemand_OutboxSkipsKeysThePoolHolds(t *testing.T) {
 	if got := ready(recoverKind, nil); got != 1 {
 		t.Errorf("no children: Ready = %d, want 1", got)
 	}
-	if got := ready(recoverKind, map[dispatchkey.Key]bool{dispatchkey.Issue("7"): true}); got != 0 {
+	if got := ready(recoverKind, dispatchkey.Set{dispatchkey.Issue("7"): true}); got != 0 {
 		t.Errorf("a child holds issue 7: Ready = %d, want 0", got)
 	}
-	if d, err := r.Demand(context.Background(), recoverKind, false, map[dispatchkey.Key]bool{dispatchkey.Issue("7"): true}); err != nil || len(d.IDs) != 0 {
+	if d, err := r.Demand(context.Background(), recoverKind, false, dispatchkey.Set{dispatchkey.Issue("7"): true}); err != nil || len(d.IDs) != 0 {
 		t.Errorf("a child holds issue 7: IDs = %v, %v, want none", d.IDs, err)
 	}
-	if got := ready(recoverKind, map[dispatchkey.Key]bool{dispatchkey.Issue("8"): true}); got != 1 {
+	if got := ready(recoverKind, dispatchkey.Set{dispatchkey.Issue("8"): true}); got != 1 {
 		t.Errorf("a child holds another issue: Ready = %d, want 1", got)
 	}
-	if got := ready(workKind, map[dispatchkey.Key]bool{dispatchkey.Issue("7"): true}); got != 4 {
+	if got := ready(workKind, dispatchkey.Set{dispatchkey.Issue("7"): true}); got != 4 {
 		t.Errorf("tracker counter: Ready = %d, want its plain CountReady 4", got)
 	}
 }
@@ -267,7 +267,7 @@ func (r *wiringRunner) ResolveTip(context.Context) (daemon.Tip, error) {
 	return daemon.Tip{Revision: "rev1"}, nil
 }
 
-func (r *wiringRunner) Demand(ctx context.Context, k daemon.Kind, fresh bool, inFlight map[dispatchkey.Key]bool) (daemon.Demand, error) {
+func (r *wiringRunner) Demand(ctx context.Context, k daemon.Kind, fresh bool, inFlight dispatchkey.Set) (daemon.Demand, error) {
 	return (&hostRunner{demand: r.demand}).Demand(ctx, k, fresh, inFlight)
 }
 
