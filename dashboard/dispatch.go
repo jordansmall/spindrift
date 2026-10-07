@@ -201,14 +201,19 @@ func (s *server) dispatch(w http.ResponseWriter, r *http.Request) {
 	}
 	// A missing, unreadable or skewed status only costs the issue links.
 	st, _, _ := readStatus(s.statusPath)
-	repo := repoURLOf(st)
-	for i := range d.Subject {
-		d.Subject[i] = d.Subject[i].linked(repo)
-	}
+	linkSubjects(d, repoURLOf(st))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := s.tmpl.ExecuteTemplate(w, "dispatch.html.tmpl", d); err != nil {
 		writeRenderError(w, err)
+	}
+}
+
+// linkSubjects links d's subjects in place, so the page and the head frame
+// render the same issue links.
+func linkSubjects(d *dispatchView, repoURL string) {
+	for i := range d.Subject {
+		d.Subject[i] = d.Subject[i].linked(repoURL)
 	}
 }
 
@@ -218,13 +223,14 @@ func writeRenderError(w io.Writer, err error) {
 	fmt.Fprintf(w, "<!-- render error: %v -->", err)
 }
 
-// dispatchEvents streams a Dispatch's Pass logs as Server-Sent Events so an
-// open drill-in page can add a tab as each one appears: a pass frame per Pass
-// log, all current ones on connect, then each new one as the Events file
-// grows, and a closed frame once the Dispatch has ended. A query without at
-// is pinned to the Dispatch it first resolves, so a later child_start closes
-// the stream rather than swapping it. Frames carry JSON, not HTML, as
-// dispatch.js builds its DOM from text and never parses markup.
+// dispatchEvents streams a Dispatch's header and Pass logs as Server-Sent
+// Events so an open drill-in page follows it live: a head frame with the
+// header's HTML on connect and whenever it changes, a pass frame per Pass log
+// so the page can add a tab, all current ones on connect, then each new one
+// as the Events file grows, and a closed frame once the Dispatch has ended.
+// A query without at is pinned to the Dispatch it first resolves, so a later
+// child_start closes the stream rather than swapping it. Pass frames carry
+// JSON, as dispatch.js builds the tabs from text.
 func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -247,6 +253,11 @@ func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-store")
 
+	// Read once, like the page: a missing, unreadable or skewed status only
+	// costs the links.
+	st, _, _ := readStatus(s.statusPath)
+	repo := repoURLOf(st)
+
 	// A child_start without a time cannot be named again, so the loop could
 	// only drift to another Dispatch: treat it as the last word on this one.
 	unnameable := d.Started == ""
@@ -258,8 +269,19 @@ func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 	// PassLogs only ever grows and each poll mutates d in place, so a count
 	// says which entries have gone out.
 	sent := 0
+	// Empty at first, so the connect always sends the header: a reconnecting
+	// client re-syncs one that went stale during the gap.
+	lastHead := ""
 	// step sends what d adds and reports whether the stream goes on.
 	step := func() bool {
+		linkSubjects(d, repo)
+		// Before closed, so the exit child_finish brings is not lost.
+		if head := s.render("dispatch-head", d); head != lastHead {
+			lastHead = head
+			if writeFrame(w, "head", head) != nil || rc.Flush() != nil {
+				return false
+			}
+		}
 		for ; sent < len(d.PassLogs); sent++ {
 			data, err := json.Marshal(d.PassLogs[sent])
 			if err != nil || writeFrame(w, "pass", string(data)) != nil || rc.Flush() != nil {
