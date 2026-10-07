@@ -1,5 +1,125 @@
 # Changelog
 
+## [0.23.3](https://github.com/jordansmall/spindrift/compare/v0.23.2...v0.23.3) (2026-10-07)
+
+
+### Features
+
+* **daemon:** carry pass_log on the box event ([cc66a40](https://github.com/jordansmall/spindrift/commit/cc66a40b1c0ed677947f19a9c957ba59942f8618)), closes [#4717](https://github.com/jordansmall/spindrift/issues/4717)
+* **daemon:** mirror the event stream to an Events file ([584c431](https://github.com/jordansmall/spindrift/commit/584c4317dd1b559258b47c267e16b212c22136ff)), closes [#4714](https://github.com/jordansmall/spindrift/issues/4714)
+* **daemon:** name each child's Child log on child_start ([23fc82c](https://github.com/jordansmall/spindrift/commit/23fc82c3138becb146a201800d44063d8a199f38)), closes [#4716](https://github.com/jordansmall/spindrift/issues/4716)
+* **daemon:** publish a running slot's active model ([43b48d4](https://github.com/jordansmall/spindrift/commit/43b48d455c8d5141cc3b6a275aa6ecc3e23a916c)), closes [#4744](https://github.com/jordansmall/spindrift/issues/4744)
+* **daemon:** publish a running slot's current Pass ([8d13576](https://github.com/jordansmall/spindrift/commit/8d13576be47a307dcc28dd6a555d62a8793dff09)), closes [#4743](https://github.com/jordansmall/spindrift/issues/4743)
+* **daemon:** publish each running slot's child_start ([92a2ffd](https://github.com/jordansmall/spindrift/commit/92a2ffdc75595bd8b27812b17f1e7e9fbce40ec7))
+* **daemon:** publish the repo URL and settled PR ([e042ddb](https://github.com/jordansmall/spindrift/commit/e042ddb2d3e4ba0486c15e19cd59ec0f6d35f349)), closes [#4718](https://github.com/jordansmall/spindrift/issues/4718)
+* **daemon:** publish when each slot entered its phase ([96a656f](https://github.com/jordansmall/spindrift/commit/96a656f253072ed14138b151ce2f029e51d6aa74)), closes [#4712](https://github.com/jordansmall/spindrift/issues/4712)
+* **daemon:** tee each child's output to its Child log ([565a10d](https://github.com/jordansmall/spindrift/commit/565a10dc4c0dfe571b5def6acaab46b64b226eb0)), closes [#4716](https://github.com/jordansmall/spindrift/issues/4716)
+* **daemon:** version the status file and event stream ([9867ec0](https://github.com/jordansmall/spindrift/commit/9867ec09df6f9312cef9ff77f6b4cdf0c13b80c9)), closes [#4713](https://github.com/jordansmall/spindrift/issues/4713)
+* **dashboard:** add Pass log tabs as they start ([0a1f78f](https://github.com/jordansmall/spindrift/commit/0a1f78fa17de0e1db29b8d954d03d20f94324447)), closes [#4729](https://github.com/jordansmall/spindrift/issues/4729)
+* **dashboard:** add Pass log tabs to the drill-in ([b2a5179](https://github.com/jordansmall/spindrift/commit/b2a5179eda6f225261f4874745168eb4a9cf652a)), closes [#4717](https://github.com/jordansmall/spindrift/issues/4717)
+* **dashboard:** add the Dispatch drill-in page ([8f9022f](https://github.com/jordansmall/spindrift/commit/8f9022f55f7ba683e7f1283acbd8876cb4d7fc20)), closes [#4716](https://github.com/jordansmall/spindrift/issues/4716)
+* **dashboard:** apply live frames on the page ([20ead4a](https://github.com/jordansmall/spindrift/commit/20ead4a0f049ea569789ceac7151a32f00a9228e))
+* **dashboard:** degrade on a status schema it does not know ([8922208](https://github.com/jordansmall/spindrift/commit/89222082533af843f261332d568ff65cf3ab3ec1)), closes [#4713](https://github.com/jordansmall/spindrift/issues/4713)
+* **dashboard:** follow the Child log on the drill-in ([6f54e30](https://github.com/jordansmall/spindrift/commit/6f54e309921ef08d6b802aa9f3447426ef462b77)), closes [#4716](https://github.com/jordansmall/spindrift/issues/4716)
+* **dashboard:** follow the Events file across rotation ([a6dc9db](https://github.com/jordansmall/spindrift/commit/a6dc9db237b16d404c096a64b95e1a707b469fc6))
+* **dashboard:** give each time element a datetime ([0c63fee](https://github.com/jordansmall/spindrift/commit/0c63fee2d5fed6462a047963dc2b6ca226b9452b)), closes [#4741](https://github.com/jordansmall/spindrift/issues/4741)
+* **dashboard:** link Dispatches to their issue and PR ([96e715d](https://github.com/jordansmall/spindrift/commit/96e715d6d00f965b67675dec9819ab389b1e11c1)), closes [#4718](https://github.com/jordansmall/spindrift/issues/4718)
+* **dashboard:** note a Pass log a later run reused ([8e27ad0](https://github.com/jordansmall/spindrift/commit/8e27ad039d5de9096bae2cfd207e4b011522afe3)), closes [#4730](https://github.com/jordansmall/spindrift/issues/4730)
+* **dashboard:** pin the slot card to its Dispatch ([7f7a5b2](https://github.com/jordansmall/spindrift/commit/7f7a5b235a1ff9bfcc0e80aa08cac65e34caa94b))
+* **dashboard:** serve Pass logs named by box events ([63ac993](https://github.com/jordansmall/spindrift/commit/63ac99374c831c6616b7467930a19d85b2c7d513)), closes [#4717](https://github.com/jordansmall/spindrift/issues/4717)
+* **dashboard:** serve the Daemon's status as a web page ([a99ef78](https://github.com/jordansmall/spindrift/commit/a99ef780ce23f4f889634e43c6f7791b74686e35)), closes [#4712](https://github.com/jordansmall/spindrift/issues/4712)
+* **dashboard:** show a busy slot's active model ([afc9c7f](https://github.com/jordansmall/spindrift/commit/afc9c7f08d4051ec6ddff26498e6503f767b4dc1)), closes [#4744](https://github.com/jordansmall/spindrift/issues/4744)
+* **dashboard:** show a busy slot's current Pass ([ea5d5e0](https://github.com/jordansmall/spindrift/commit/ea5d5e000dac54527675aca8f28b722856a7ce46)), closes [#4743](https://github.com/jordansmall/spindrift/issues/4743)
+* **dashboard:** show a waiting note until a log appears ([2ff3bcb](https://github.com/jordansmall/spindrift/commit/2ff3bcb985415f2fd7ec2d2b6f47598a9c9296ab)), closes [#4726](https://github.com/jordansmall/spindrift/issues/4726)
+* **dashboard:** show the Daemon's history timeline ([ed2fbcb](https://github.com/jordansmall/spindrift/commit/ed2fbcb9cc8533b8e44959353ab90a93c61ee324)), closes [#4714](https://github.com/jordansmall/spindrift/issues/4714)
+* **dashboard:** show times in the viewer's zone ([9663696](https://github.com/jordansmall/spindrift/commit/96636968173784d612170ef4e83031217cfe3959)), closes [#4741](https://github.com/jordansmall/spindrift/issues/4741)
+* **dashboard:** stream a Dispatch's header facts ([93dc199](https://github.com/jordansmall/spindrift/commit/93dc1995fd54d3674df098d6e431ea7dd668d1c5))
+* **dashboard:** stream a Dispatch's Pass logs ([d3b8299](https://github.com/jordansmall/spindrift/commit/d3b82998b818897eff709a05f625b689926dc9bf)), closes [#4729](https://github.com/jordansmall/spindrift/issues/4729)
+* **dashboard:** stream a named Child log over SSE ([3ef9046](https://github.com/jordansmall/spindrift/commit/3ef9046466aa18ba5e3e74040d826a65b8383581)), closes [#4716](https://github.com/jordansmall/spindrift/issues/4716)
+* **dashboard:** stream status and history over SSE ([3a83457](https://github.com/jordansmall/spindrift/commit/3a83457f83ffb338a92e015f6bf06d888651d60b))
+* **dashboard:** swap the drill-in header on a head frame ([6a23b17](https://github.com/jordansmall/spindrift/commit/6a23b176a76be217c183067ff372a2795c5ff1ac))
+* **driver:** report the Claude Box's active model ([ab206ec](https://github.com/jordansmall/spindrift/commit/ab206ec3feea6d14a9f68190c2d2785105b36532)), closes [#4744](https://github.com/jordansmall/spindrift/issues/4744)
+* **driver:** report the opencode Box's active model ([ce8c4e3](https://github.com/jordansmall/spindrift/commit/ce8c4e3c3c6cec93f1c4cf2e86d21c57a4cd913f)), closes [#4745](https://github.com/jordansmall/spindrift/issues/4745)
+* **report:** add a model record ([77aa555](https://github.com/jordansmall/spindrift/commit/77aa555972520c2e721600a49b4548c0940d467e)), closes [#4744](https://github.com/jordansmall/spindrift/issues/4744)
+* **report:** name the Pass log on each box record ([d001661](https://github.com/jordansmall/spindrift/commit/d00166145000ffa4fa95bc68ac9362ab972b1e8b)), closes [#4717](https://github.com/jordansmall/spindrift/issues/4717)
+* **report:** name the PR on each settled record ([5a8fab2](https://github.com/jordansmall/spindrift/commit/5a8fab2d8fc4f6f5690d32860bcea09a63e3470a)), closes [#4718](https://github.com/jordansmall/spindrift/issues/4718)
+
+
+### Bug Fixes
+
+* **dashboard:** clear the waiting note on opened ([01c7590](https://github.com/jordansmall/spindrift/commit/01c75903e0f490f5eda417b7915ee0c713b4297f)), closes [#4739](https://github.com/jordansmall/spindrift/issues/4739)
+* **dashboard:** keep a later run out of a done tab ([c36e107](https://github.com/jordansmall/spindrift/commit/c36e107dc4c83d66d50c7af220e7754469967d20)), closes [#4746](https://github.com/jordansmall/spindrift/issues/4746)
+* **dashboard:** send an opened frame after waiting ([635ff5f](https://github.com/jordansmall/spindrift/commit/635ff5f13eb586a3f09d500d12d70b564f23363c)), closes [#4739](https://github.com/jordansmall/spindrift/issues/4739)
+* **dashboard:** spot a Pass log moved aside ([1a34d75](https://github.com/jordansmall/spindrift/commit/1a34d750be0b55e3219b5630c7843edf4482b995)), closes [#4746](https://github.com/jordansmall/spindrift/issues/4746)
+* **dashboard:** stop old Pass log tabs following reuse ([5464ff1](https://github.com/jordansmall/spindrift/commit/5464ff114a8133728d637eddfa2331d28655a892)), closes [#4730](https://github.com/jordansmall/spindrift/issues/4730)
+* **dashboard:** stream a log tab only while shown ([e62a863](https://github.com/jordansmall/spindrift/commit/e62a8630e2b465f4ccb760f87b6e486d3e2c3ad6)), closes [#4731](https://github.com/jordansmall/spindrift/issues/4731)
+* **dashboard:** wait for a log its child has yet to create ([fa7a2e7](https://github.com/jordansmall/spindrift/commit/fa7a2e755b216104e54c8919701d1ce53d751774)), closes [#4726](https://github.com/jordansmall/spindrift/issues/4726)
+
+
+### Performance Improvements
+
+* **dashboard:** follow a Dispatch's events stream ([6447f81](https://github.com/jordansmall/spindrift/commit/6447f81428090e477071383618477fd8fd48961e)), closes [#4749](https://github.com/jordansmall/spindrift/issues/4749)
+
+
+### Security
+
+* **dashboard:** refuse requests with a foreign Host ([301819a](https://github.com/jordansmall/spindrift/commit/301819a7d7b973dee34cab8c17cdbf18ff11bb3c)), closes [#4719](https://github.com/jordansmall/spindrift/issues/4719)
+
+
+### Documentation
+
+* **adr:** add a read-only Dashboard for the daemon ([20075a9](https://github.com/jordansmall/spindrift/commit/20075a9e0f595541f6d014707bd1dc0b927b631f))
+* **adr:** allow one node test check in 0060 ([87d96a0](https://github.com/jordansmall/spindrift/commit/87d96a059e2598aa3c2d1793d8bc9edd9a9ddc83)), closes [#4727](https://github.com/jordansmall/spindrift/issues/4727)
+* **adr:** give the Dashboard its own Go module ([af8e7a3](https://github.com/jordansmall/spindrift/commit/af8e7a3b14196685b11eeceaead7a8156d1cb959))
+* **adr:** list live.js under the dashboard JS check ([7871da6](https://github.com/jordansmall/spindrift/commit/7871da6780872f2b46f85d9ed69ec98822dd5c8c)), closes [#4751](https://github.com/jordansmall/spindrift/issues/4751)
+* **context:** define Dashboard and its log terms ([02d557f](https://github.com/jordansmall/spindrift/commit/02d557f5877d9db69148b67a641fd68f866c7be0))
+* name the constant parity check on both sides ([2b5c091](https://github.com/jordansmall/spindrift/commit/2b5c091b3713d03f61a28eb0172070a79b0c517c))
+* note the Dashboard shows times in local zone ([5125fd6](https://github.com/jordansmall/spindrift/commit/5125fd6ea82e1b22220055cc6ba26625873bcdb2)), closes [#4741](https://github.com/jordansmall/spindrift/issues/4741)
+* record why Pass log names stay fixed per issue ([aa5ffbd](https://github.com/jordansmall/spindrift/commit/aa5ffbd0e54646211211a3eda6fa12cd90d9f132)), closes [#4730](https://github.com/jordansmall/spindrift/issues/4730)
+* **reference:** document a slot's current Pass ([9085591](https://github.com/jordansmall/spindrift/commit/90855917879e9bfefaf9ac791bac5e4f8fcc1a4f)), closes [#4743](https://github.com/jordansmall/spindrift/issues/4743)
+* **reference:** document Child logs and the drill-in ([33ecc51](https://github.com/jordansmall/spindrift/commit/33ecc51d061045239d63e8fecb4fdda38779ffc3)), closes [#4716](https://github.com/jordansmall/spindrift/issues/4716)
+* **reference:** document live Dashboard updates ([3e8c395](https://github.com/jordansmall/spindrift/commit/3e8c3955d7d6eb84fe54480cf823cdadf6bac6de))
+* **reference:** document Pass logs in the drill-in ([f0c9040](https://github.com/jordansmall/spindrift/commit/f0c90402c1e7887be15133ff6a1cec0dbdb1c10d)), closes [#4717](https://github.com/jordansmall/spindrift/issues/4717)
+* **reference:** document repo_url and pr_url ([7483d3f](https://github.com/jordansmall/spindrift/commit/7483d3f2cd06060b96bacd668007a160dd4d668f)), closes [#4718](https://github.com/jordansmall/spindrift/issues/4718)
+* **reference:** document the Dashboard and slot since ([179219d](https://github.com/jordansmall/spindrift/commit/179219d8424f7b64febe8765f087b855d23c1520)), closes [#4712](https://github.com/jordansmall/spindrift/issues/4712)
+* **reference:** document the Dashboard Host check ([e10d27c](https://github.com/jordansmall/spindrift/commit/e10d27c282f3d044f5cc662ebc155cd727096db8))
+* **reference:** document the Events file and history ([be7aef0](https://github.com/jordansmall/spindrift/commit/be7aef048df1bde2e0f454b4a511b8492e0d5370)), closes [#4714](https://github.com/jordansmall/spindrift/issues/4714)
+* **reference:** document the model record and card line ([4e56d25](https://github.com/jordansmall/spindrift/commit/4e56d259f434cfae21659a2d415961b2c51c67f1)), closes [#4744](https://github.com/jordansmall/spindrift/issues/4744)
+* **reference:** document the slot card's Dispatch pin ([2c33369](https://github.com/jordansmall/spindrift/commit/2c33369d78fac758b2fc638a097a760a0fb973b8))
+* **reference:** document the status schema and event version ([21bf732](https://github.com/jordansmall/spindrift/commit/21bf7328264dd1b4b7c2ad068503c5f0b15085ec)), closes [#4713](https://github.com/jordansmall/spindrift/issues/4713)
+* **reference:** note opencode reports the model ([fdf8f2c](https://github.com/jordansmall/spindrift/commit/fdf8f2c0ec9166994c805b1aa4b4f6c65a28de3d)), closes [#4745](https://github.com/jordansmall/spindrift/issues/4745)
+* **reference:** note the drill-in's tabs are live ([04a6a80](https://github.com/jordansmall/spindrift/commit/04a6a808c19bfa517195af065f069f9a8ff2dea2)), closes [#4729](https://github.com/jordansmall/spindrift/issues/4729)
+* **reference:** say a log tab streams only while shown ([eab03c8](https://github.com/jordansmall/spindrift/commit/eab03c877dab74bb60114a27b6e711d43c480c8f))
+* **reference:** say how /log spots reuse on disk ([7182e6c](https://github.com/jordansmall/spindrift/commit/7182e6c8ada208d2105c235dc7b119297155bfeb)), closes [#4746](https://github.com/jordansmall/spindrift/issues/4746)
+* **reference:** say the drill-in's facts are live ([bed0326](https://github.com/jordansmall/spindrift/commit/bed0326bca18ef1bf13903ac114bebd1353839fe))
+* **release-notes:** add 0.23.3 highlights ([ca045fb](https://github.com/jordansmall/spindrift/commit/ca045fb3cfb93c68c99414b45f1cb0ad4981c011))
+
+
+### Code Refactoring
+
+* **dashboard:** split a raw-event tail out ([1f9bd8b](https://github.com/jordansmall/spindrift/commit/1f9bd8b44366b4509e170e0c5747fd7fb8329645)), closes [#4749](https://github.com/jordansmall/spindrift/issues/4749)
+
+
+### Tests
+
+* **checks:** run the dashboard js tests in nix ([d68a87c](https://github.com/jordansmall/spindrift/commit/d68a87cdf8646b79628f6de285b97157dadd8a5e)), closes [#4727](https://github.com/jordansmall/spindrift/issues/4727)
+* **dashboard:** cover dispatch.js with node tests ([26f43c9](https://github.com/jordansmall/spindrift/commit/26f43c91878aa7622c475529331ef62233e7953f)), closes [#4727](https://github.com/jordansmall/spindrift/issues/4727)
+* **dashboard:** pin live.js localising each SSE swap ([f39bb71](https://github.com/jordansmall/spindrift/commit/f39bb71dd06f49e4060be58cff5ce5c47fd263bd)), closes [#4751](https://github.com/jordansmall/spindrift/issues/4751)
+* **git:** give the hanging-push rebase test room ([5266ea7](https://github.com/jordansmall/spindrift/commit/5266ea76a12d61b29a62f969a0f29a4e9f432330))
+* **recover:** give queue settle tests a runner ([2825133](https://github.com/jordansmall/spindrift/commit/2825133463e28212abefb5a5f19f0ca5a3c0e45c))
+
+
+### Build System
+
+* **nix:** expose the Dashboard app and gate its module ([75b35ea](https://github.com/jordansmall/spindrift/commit/75b35ea0ee2848c1efbb0f0a4f4abce935d7f4dc)), closes [#4712](https://github.com/jordansmall/spindrift/issues/4712)
+
+
+### Miscellaneous Chores
+
+* **checks:** pin Dashboard constants to daemon's ([9381393](https://github.com/jordansmall/spindrift/commit/93813930f51c439f5497cfedb573a73294e02dac)), closes [#4722](https://github.com/jordansmall/spindrift/issues/4722)
+* **dogfood:** sweep the butler every two hours ([be0de85](https://github.com/jordansmall/spindrift/commit/be0de8553ddedb35de7a946995d54007842a7faa))
+* ignore the Dashboard's go build output ([ec85f42](https://github.com/jordansmall/spindrift/commit/ec85f42ea072ecbc5c91edfe60a99f6735b7e7fb))
+
 ## [0.23.2](https://github.com/jordansmall/spindrift/compare/v0.23.1...v0.23.2) (2026-10-07)
 
 
