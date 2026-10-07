@@ -6669,7 +6669,16 @@ possible. Its Demand comes from the host outbox, not a tracker
 whose give-up has not posted and that are either at `MAX_RECOVER_ATTEMPTS` or
 out of their `TRANSIENT_BACKOFF_SECS` backoff, reading only the host
 filesystem, so an idle slot no longer starts a `recover` child just to learn
-there is nothing to do. The count is an upper bound: the child still checks
+there is nothing to do. A bundle whose issue a daemon child is running right
+now (a work run still settling or watching CI, or a `recover` child already
+on it) is left out of the count and of the bundle identities below, so a
+healthy run never draws a `recover` child, and the bundle counts and is named
+again at the next outbox probe after that child
+finishes, so a `recover` child starts within one probe interval rather than
+waiting out backoff an earlier empty child left (issue #4706). The daemon does
+not probe the host claim, so a launcher run by hand from the same directory
+is still counted, and its `recover` child skips the claimed issue. The count
+is an upper bound: the child still checks
 the label, the self-report and any open PR after it takes the host claim,
 and may exit 2, which records Ready 0 like any probed kind's empty child. A
 counted bundle can still be one the child declines (a green PR waiting on a

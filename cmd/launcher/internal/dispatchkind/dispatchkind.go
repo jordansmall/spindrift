@@ -264,8 +264,9 @@ var (
 	// PriorityFirst lands stranded work before a new Box starts, so each
 	// rebases onto as little new main as possible. Its work is outbox
 	// bundles, not tracker issues, so the host counts the eligible ones itself
-	// (DemandHostOutbox); the count is an upper bound, so a child may still
-	// exit 2 (nothing eligible).
+	// (DemandHostOutbox), leaving out bundles a running daemon child holds;
+	// the count is an upper bound, so a child may still exit 2 (nothing
+	// eligible).
 	Recover = &Descriptor{
 		Name:           "recover",
 		Verb:           "recover",
