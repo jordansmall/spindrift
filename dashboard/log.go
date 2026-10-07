@@ -32,7 +32,9 @@ type logStatus struct {
 	// namedAt is when the latest naming event that set named happened, and
 	// finishedAt when the slot event (a child_finish, or a later child_start)
 	// that set finished did. Event times are second-precision RFC3339; either is
-	// zero when unset or unparsable.
+	// zero when unset or unparsable. finishedAt is also zero when finished is
+	// inferred from a naming with no slot, or one that aged out of the Events
+	// file; a zero finishedAt skips the modified-after-finish check.
 	namedAt, finishedAt time.Time
 }
 
@@ -45,15 +47,45 @@ func eventTime(ev Event) time.Time {
 	return t
 }
 
-// supersededAt reports whether a Dispatch's tab must answer superseded for the
-// file at full: another Dispatch named the path, or a later run quarantined
-// this finished owner's file. A later Dispatch's launcher moves every prior
-// Pass log of the issue aside as <path>.prior-run.N, but its box event names
-// only the initial path and may land after the rename. The rename keeps mtime,
-// so a sibling written at or after this owner named the path is its own copy;
-// siblings left by earlier Dispatches are older. Only a Dispatch's tab gets
-// this; a nil owner never reports superseded.
-func (st logStatus) supersededAt(full string) bool {
+// finishSlack is how far past its stamped finish a finished Dispatch's last
+// write to its Pass log may land: event times are truncated to the second.
+const finishSlack = time.Second
+
+// priorRunInfix joins a Pass log's path to the N of the copy a later Dispatch's
+// launcher moves it to. The launcher owns the naming: see quarantinePriorRunLogs
+// in cmd/launcher/internal/dispatch/box.go (fmt.Sprintf("%s.prior-run.%d", ...)).
+const priorRunInfix = ".prior-run."
+
+// modifiedAfterFinish reports whether a Dispatch's tab must answer superseded
+// for the file open at info: another Dispatch named the path, or the file was
+// modified past this owner's finish. A finished owner never writes its Pass log
+// again (assuming the launcher of a finish inferred from a later child_start
+// died with its Daemon; an orphan still writing would read as superseded), so
+// such a file is a later run's that recreated the path before its box event
+// reached the Events file. A nil owner never reports superseded.
+//
+// Residual: a newer run whose writes all land within finishSlack of the old
+// finish passes this check, so those newer bytes can stream to the old tab,
+// until the file grows past its open size and the tab hears superseded.
+func (st logStatus) modifiedAfterFinish(info os.FileInfo) bool {
+	if !st.owned {
+		return false
+	}
+	return st.superseded || st.finished && !st.finishedAt.IsZero() &&
+		info.ModTime().After(st.finishedAt.Add(finishSlack))
+}
+
+// movedAside reports whether a Dispatch's tab must answer superseded for the
+// missing file at full: another Dispatch named the path, or a later Dispatch's
+// launcher moved every prior Pass log of the issue aside as <path>.prior-run.N.
+// The rename keeps mtime, so a sibling written at or after this owner named the
+// path is its own copy, while siblings left by earlier Dispatches are older. A
+// nil owner never reports superseded.
+//
+// Residual: namedAt is truncated to the second, so an earlier Dispatch's copy
+// last written in the same second as this owner's box event also matches and
+// answers superseded rather than pruned (very unlikely).
+func (st logStatus) movedAside(full string) bool {
 	if !st.owned {
 		return false
 	}
@@ -63,17 +95,26 @@ func (st logStatus) supersededAt(full string) bool {
 	if !st.finished || st.namedAt.IsZero() {
 		return false
 	}
-	entries, err := os.ReadDir(filepath.Dir(full))
+	dir := filepath.Dir(full)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
+		log.Printf("dashboard: log %s: %v", full, err)
 		return false
 	}
-	prefix := filepath.Base(full) + ".prior-run."
+	prefix := filepath.Base(full) + priorRunInfix
 	for _, e := range entries {
 		n, ok := strings.CutPrefix(e.Name(), prefix)
 		if !ok || n == "" || strings.Trim(n, "0123456789") != "" {
 			continue
 		}
-		if info, err := e.Info(); err == nil && !info.ModTime().Before(st.namedAt) {
+		info, err := e.Info()
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				log.Printf("dashboard: log %s: %v", filepath.Join(dir, e.Name()), err)
+			}
+			continue
+		}
+		if !info.ModTime().Before(st.namedAt) {
 			return true
 		}
 	}
@@ -143,11 +184,14 @@ func (s *server) logState(path string, owner *logOwner) logStatus {
 // A Pass log tab also passes its Dispatch (slot, at and n, as the dispatch page
 // takes them but with at required), because the path is reused by later
 // Dispatches of the same issue.
-// Once another Dispatch has named the path, or the file is replaced after this
-// Dispatch finished (it never retries, so the replacement is a later
-// Dispatch's, possibly before its box event reached the Events file), the
-// stream sends what its open file held and a single superseded frame, never
-// the newer run's bytes.
+// Once another Dispatch has named the path, the stream sends what its open
+// file held and a single superseded frame, never the newer run's bytes. A
+// finished Dispatch never writes again (a finish inferred from a later
+// child_start assumes the Daemon's launcher died with it), so a later run's file
+// may reach the path before its box event reaches the Events file; superseded
+// also covers that Dispatch's file moved to <path>.prior-run.N, a file modified
+// after it finished (none of its bytes sent), and a file that grows past its
+// size when the tab opened (the tab never reads past that size).
 func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -192,7 +236,7 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		if st.finished {
-			if st.supersededAt(full) {
+			if st.movedAside(full) {
 				send("superseded", path)
 			} else {
 				send("pruned", path)
@@ -224,6 +268,22 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	}
 	defer f.Close()
 
+	openInfo, err := f.Stat()
+	if err != nil {
+		log.Printf("dashboard: log %s: %v", path, err)
+		return
+	}
+	if st.modifiedAfterFinish(openInfo) {
+		send("superseded", path)
+		return
+	}
+	// A tab opened after its Dispatch finished is capped at the size it found.
+	var rd io.Reader = f
+	capped := st.owned && st.finished
+	if capped {
+		rd = io.LimitReader(f, openInfo.Size())
+	}
+
 	// held bytes are an incomplete trailing rune, or a trailing CR, carried to the
 	// next read, so a frame never splits a character or a CRLF (writeFrame would
 	// turn each half into its own line break).
@@ -231,7 +291,7 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	held := 0
 	drain := func() bool {
 		for {
-			n, err := f.Read(buf[held : held+logFrameMax])
+			n, err := rd.Read(buf[held : held+logFrameMax])
 			if n > 0 {
 				total := held + n
 				cut := completeRunes(buf[:total])
@@ -259,11 +319,17 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		// missing path is the gap between rename and create while the child runs, so
 		// keep following; once it has finished the path is gone for good, and drain
 		// has already sent what the open file held.
+		if capped {
+			if fi, err := f.Stat(); err == nil && fi.Size() > openInfo.Size() {
+				send("superseded", path)
+				return
+			}
+		}
 		cur, statErr := os.Stat(full)
 		if statErr == nil {
-			if openInfo, openErr := f.Stat(); openErr == nil && !os.SameFile(cur, openInfo) {
+			if !os.SameFile(cur, openInfo) {
 				if owner != nil {
-					if cur := s.logState(path, owner); cur.finished || cur.superseded {
+					if now := s.logState(path, owner); now.finished || now.superseded {
 						if drain() {
 							send("superseded", path)
 						}
@@ -272,11 +338,11 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else if errors.Is(statErr, fs.ErrNotExist) {
-			if cur := s.logState(path, owner); cur.superseded || !cur.named || cur.finished {
+			if now := s.logState(path, owner); now.superseded || !now.named || now.finished {
 				// The child may have appended its last bytes and finished, and the
 				// file been deleted, within one poll; the open descriptor still has them.
 				if drain() {
-					if cur.supersededAt(full) {
+					if now.movedAside(full) {
 						send("superseded", path)
 					} else {
 						send("pruned", path)
