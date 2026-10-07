@@ -6573,8 +6573,11 @@ has stopped for good — the pool is halting, and this slot's goroutine has
 already returned — reads `idle` as well: it holds nothing, so it must not
 read as engaged while a sibling drains its own child. `busy` is
 exactly `phase == "running"` and nothing more — a reader that only knows
-`busy` sees what it always saw. The `jam` alarm (see `jam` in **Event
-stream**, below) fires only when every *sibling* slot is `idle`,
+`busy` sees what it always saw. `since` (RFC3339 UTC, always present) is
+when the slot entered its current `phase`: it moves when the phase
+changes and is kept across publishes that leave the phase alone, so it
+reads as time in phase, not time since the last write. The `jam` alarm
+(see `jam` in **Event stream**, below) fires only when every *sibling* slot is `idle`,
 `awaiting_window`, `resolving` (it holds no claim yet, issue #3735), or
 `backing_off` (it holds nothing it could release, issue #4205); only a
 sibling that is `running` suppresses it — except one whose child is a
@@ -7288,7 +7291,8 @@ Substitute the checkout path, the directories holding the real `nix` and
 placeholders. `ExecStart` is argv, not a shell line, so it takes no shell
 quoting and no `&&`. `StartLimitIntervalSec`/`StartLimitBurst` are
 `[Unit]` directives, not `[Service]` ones, however much they read like
-part of the restart policy.
+part of the restart policy. The [Dashboard](#dashboard) has its own,
+smaller unit, given below as **Dashboard service unit**.
 
 `Environment=PATH=` matters even with an absolute `ExecStart`, and it is
 the line most easily dropped from a pasted unit. The daemon execs both
@@ -7415,6 +7419,32 @@ evaluation at a clean commit anyway, so a daemon started from one does
 reach its first iteration boundary and halts at 10 there, however the
 restart policy is written. Point the unit at its own checkout if the
 operator also wants one to edit in.
+
+**Dashboard service unit.** A systemd user unit shaped like the daemon's, minus what
+only the daemon needs:
+
+```
+[Unit]
+Description=spindrift dashboard
+
+[Service]
+Type=simple
+WorkingDirectory=%h/spindrift-checkout
+Environment=PATH=/absolute/path/to/nix-dir:/absolute/path/to/git-dir:/usr/bin:/bin
+ExecStart=/absolute/path/to/nix run .#dashboard
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+`KillMode=mixed` and `TimeoutStopSec` are the daemon's, for draining its
+children; the Dashboard has none, so the defaults do. `Environment=PATH=`
+is the daemon's line unchanged: the Dashboard's own wrapper brings its
+`git`, but `nix run` still evaluates the checkout's flake under this
+`PATH`. Do not order the unit after the daemon's
+or bind it to it: it is meant to stay up while the daemon is down, which
+is when its "no Daemon running" page is most useful.
 
 **Awake window.** `DAEMON_AWAKE_WINDOW` (default empty, `lib/env-schema.nix`)
 names a daily local-time span the daemon may start a new Box in, as
@@ -7602,6 +7632,57 @@ daemon's favour — the daemon is its replacement as the way to hold a pool
 of Boxes — but not removed: the knob still works for an operator who wants
 no daemon at all, and it remains the Console's engine unchanged, see
 **Deprecated** under [Continuous dispatch](#continuous-dispatch).
+
+## Dashboard
+
+The Dashboard is a read-only web view of one [Daemon](#daemon)'s state. It
+is its own process and its own Go module (`dashboard/`, stdlib only), not
+part of the daemon: it reads the status file the daemon publishes
+(`spindrift-daemon.status` in the checkout's git dir) and nothing else,
+and it never picks, starts, stops, or settles anything. Because it never
+takes the daemon's lock, it stays up while the daemon is down. See [ADR
+0060](adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md).
+
+> **The Dashboard is unauthenticated.** Anyone who can reach the listen
+> address can read the daemon's state: issue numbers, Chores, revisions,
+> host, and pid. The default binds loopback only; `--listen 0.0.0.0:8099`
+> serves the whole LAN. There is no authentication yet, so do not expose
+> it beyond a network you trust. It prints one line on start saying so
+> and naming the bound address. The server does not check the `Host`
+> header, so any web page the operator visits can read it through DNS
+> rebinding even on loopback, exposing issue numbers, host, and pid.
+
+Run it from the daemon's checkout:
+
+```sh
+nix run .#dashboard
+nix run .#dashboard -- --listen 0.0.0.0:8099
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--checkout` | git root of the working directory | The daemon's checkout. The status file is read from that checkout's git dir, resolved with `git rev-parse --absolute-git-dir`, the same way the daemon resolves it. |
+| `--listen` | `127.0.0.1:8099` | Address to serve on. |
+
+A taken port exits 1 with `dashboard: listen <addr>: bind: address already
+in use`.
+
+The page is a snapshot taken on load: reload to refresh (live updates are
+not in yet). It shows a pool header — state and reason, host, pid, uptime,
+busy/total slots, each kind's next check, the jam alarm, Demand, next
+due, and the tracker's rate limits — then one card per slot, idle ones
+included, with its phase, kind, issue(s) or Chore, revision, and time in
+phase (from the slot's `since`; see **Status file** under [Daemon](#daemon)).
+
+Three cases are shown rather than hidden. The page reads "no Daemon
+running" when the status file is absent or its pid is not live on this
+host; liveness is judged by pid, never by taking the lock. A dead pid's
+page still shows the last state it published, and any published reason
+shows either way, a halt being normally the Daemon's last write before it
+exits. A status file that does not parse shows an error banner
+with the raw content.
+
+**Service unit.** The Dashboard has its own, smaller systemd user unit, given beside the daemon's under [Daemon](#daemon) as **Dashboard service unit**.
 
 ## Shell completion
 
