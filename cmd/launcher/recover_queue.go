@@ -58,19 +58,17 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 }
 
 // finishQueueSettle records queue mode's settle verdict: a landed issue's
-// attempt record is cleared, a failed one is parked. A drain stop abandons
-// nothing, so the verdict is recorded before exiting on it; returning early
-// would strand a failed settle on in-progress (#4679).
-func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec recoverAttempts, settled, signalled bool, stdout, stderr io.Writer) error {
+// attempt record is cleared, a failed one is parked. It returns only the
+// record/park error; the caller records the verdict before honouring a drain
+// stop, which abandons nothing, since exiting early would strand a failed
+// settle on in-progress (#4679).
+func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec recoverAttempts, settled bool, settleErr error, stdout, stderr io.Writer) error {
 	if settled {
 		if err := os.Remove(recoverAttemptsPath(pwd, num)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(stderr, "    ?? #%s: remove recover attempts: %v\n", num, err)
 		}
-	} else if err := parkQueueFailure(c, it, num, rec, time.Now(), stdout, stderr); err != nil {
+	} else if err := parkQueueFailure(c, it, num, rec, settleErr, time.Now(), stdout, stderr); err != nil {
 		return err
-	}
-	if signalled {
-		return waves.ErrSignalledStop
 	}
 	return nil
 }
@@ -82,12 +80,17 @@ func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec rec
 // which queue mode never revisits); either or both are returned, after the park
 // is attempted. Only the attempt that reaches c.maxRecoverAttempts comments,
 // once, saying auto-recover gave up (issue #4655); earlier failures stay
-// silent and are retried after a backoff. The settler does not hand back why
-// the landing failed, so the comment names the stages (bundle relay, draft PR
-// creation) rather than a cause; a merge-gate failure is parked by the settler
-// itself and never reaches here.
-func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverAttempts, now time.Time, stdout, stderr io.Writer) error {
-	fmt.Fprintf(stdout, "    #%s  status=failed  note=queue recover could not land the outbox bundle\n", num)
+// silent and are retried after a backoff. The comment names the last attempt's
+// cause (settleErr, kept in the record for a later pass; a nil settleErr keeps
+// the earlier cause); a merge-gate failure is parked by the settler itself and
+// never reaches here.
+func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverAttempts, settleErr error, now time.Time, stdout, stderr io.Writer) error {
+	note := "queue recover could not land the outbox bundle"
+	if settleErr != nil {
+		rec.LastError = normalizeCause(settleErr.Error())
+		note += ": " + rec.LastError
+	}
+	fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", num, note)
 	rec.Count++
 	rec.Last = now
 	if rec.Count >= c.maxRecoverAttempts {

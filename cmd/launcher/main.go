@@ -1507,7 +1507,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		if err := d.EnsureRunLineage(); err != nil {
 			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
-		settled, _ := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
+		settled, settleErr := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
 		// Leave must run before Settle's final abort re-check, or a signal
 		// landing the instant after settling finishes would still find this
 		// issue in-flight and reclaim it right back to Dispatchable (#3522).
@@ -1523,13 +1523,19 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			return waves.ErrSignalledStop
 		}
 		if queue {
-			return finishQueueSettle(c, it, pwd, issueNum, rec, settled, gate.Signalled(), stdout, stderr)
+			if err := finishQueueSettle(c, it, pwd, issueNum, rec, settled, settleErr, stdout, stderr); err != nil {
+				return err
+			}
 		}
 		if gate.Signalled() {
 			return waves.ErrSignalledStop
 		}
-		if settled {
+		if queue || settled {
 			return nil
+		}
+		if settleErr != nil {
+			fmt.Fprintf(stdout, "    #%s  status=failed  note=%v\n", issueNum, settleErr)
+			return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, settleErr), stdout, stderr)
 		}
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)
