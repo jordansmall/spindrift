@@ -400,6 +400,7 @@ git.user.name  = "bot";
 git.user.email = "bot@example.com";
 dispatch.retry.maxFix           = 3;
 dispatch.retry.maxRebase        = 3;
+dispatch.retry.maxRecover       = 3;
 dispatch.retry.holdJitter       = 5;
 dispatch.retry.transientBackoff = 30;
 dispatch.retry.transientMax     = 3;
@@ -1559,6 +1560,7 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `DAEMON_BREAKER_WINDOW` | `15m`  | — (post-freeze; no legacy alias — set `dispatch.daemonBreakerWindow`) | trailing window the circuit breaker counts `DAEMON_BREAKER_THRESHOLD` unclassified failures within; a Go time.ParseDuration string, validated by the daemon at startup, which refuses to start on a bad value; read by the daemon only, the launcher itself ignores it (its `--flag` is accepted but inert) — see [Daemon](#daemon) |
 | `MAX_FIX_ATTEMPTS`     | `3`     | `selfHealing`      | fix-box passes when CI is genuinely red before `agent-failed` (`0` disables self-healing) |
 | `MAX_REBASE_ATTEMPTS`  | `3`     | `selfHealing`      | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge (`0` disables rebase retries); also caps the opt-in [Stale-base preflight](#stale-base-preflight)'s rebase budget |
+| `MAX_RECOVER_ATTEMPTS` | `3`     | — (post-freeze; no legacy alias — set `dispatch.retry.maxRecover`) | queue-mode `spindrift recover` (no issue number) attempts per agent-failed issue and outbox bundle before it gives up with one comment; between attempts the issue waits `TRANSIENT_BACKOFF_SECS` times its attempt count; a hand-run `spindrift recover <n>` ignores the bound |
 | `MAX_BUDGET_TOKENS`    | `0`     | `selfHealing`      | cumulative tokens (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the token budget cap); also forwarded into the Box, where the orchestrator's own review loop applies the same threshold to its own fresh, Box-local sum (implement/fix/review passes plus dispatched workers in *this* Box only, not the host's cross-Box figure) to commit to a terminal land pass instead of a further BLOCK-triggered review round |
 | `MAX_BUDGET_USD`       | `0`     | `selfHealing`      | cumulative cost in USD (every pass and every retried attempt within it) before stopping self-heal short of `MAX_FIX_ATTEMPTS` (`0` disables the cost budget cap); quote fractional values in flake settings, e.g. `"4.44"`; also forwarded into the Box for the orchestrator's own review-loop budget cap, same as `MAX_BUDGET_TOKENS` (same threshold, same fresh-per-Box sum, not the host's own cross-Box one) |
 | `PREFLIGHT_STALE_BASE` | `` (off) | `selfHealing`    | opt-in: proactively rebase a green-but-behind PR (no conflict) and re-green it before merging — see [Stale-base preflight](#stale-base-preflight); off by default merges a green-but-behind PR as-is |

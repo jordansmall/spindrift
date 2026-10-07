@@ -48,6 +48,7 @@ var schemaDefaults = map[string]string{
 	"MAX_JOBS":                      "0",
 	"MAX_PARALLEL":                  "3",
 	"MAX_REBASE_ATTEMPTS":           "3",
+	"MAX_RECOVER_ATTEMPTS":          "3",
 	"MEMORY_LIMIT":                  "5g",
 	"MERGE_GUARD_PATHS":             ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**",
 	"MERGE_METHOD":                  "rebase",

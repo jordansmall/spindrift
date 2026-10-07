@@ -112,6 +112,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 | `perSystem.spindrift.dispatch.retry.holdJitter` | `HOLD_JITTER_SECS` | `5` | jitter seconds added to 429 hold duration to spread re-dispatch |
 | `perSystem.spindrift.dispatch.retry.maxFix` | `MAX_FIX_ATTEMPTS` | `3` | fix-agent passes when CI is genuinely red before marking agent-failed; 0 disables self-healing |
 | `perSystem.spindrift.dispatch.retry.maxRebase` | `MAX_REBASE_ATTEMPTS` | `3` | rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries |
+| `perSystem.spindrift.dispatch.retry.maxRecover` | `MAX_RECOVER_ATTEMPTS` | `3` | queue-mode `spindrift recover` (no issue number) attempts per agent-failed issue and outbox bundle before it gives up with one comment; between attempts the issue waits TRANSIENT_BACKOFF_SECS times its attempt count; a hand-run `spindrift recover <n>` ignores the bound |
 | `perSystem.spindrift.dispatch.retry.transientBackoff` | `TRANSIENT_BACKOFF_SECS` | `30` | base backoff seconds per retry for 529/overloaded and network transients |
 | `perSystem.spindrift.dispatch.retry.transientMax` | `TRANSIENT_RETRY_MAX` | `3` | max retries for transient exits (529/network backoff; consecutive 429 holds) |
 
