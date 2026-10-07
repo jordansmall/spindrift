@@ -182,7 +182,7 @@ and in the in-box `box` program; the only bash left is the generated shim that
   by `renderers.nix`'s `renderCliFlagsGo`, pinned by the `cli-flags-gen` check).
   Go tests use standard `_test` files alongside the code.
 - **`dashboard/`** — the read-only Dashboard web view of the Daemon's status
-  file ([ADR 0060](docs/adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md)).
+  file and Events file ([ADR 0060](docs/adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md)).
   Its own Go module (own `go.mod`, stdlib only), kept outside the
   Daemon/launcher filesets so a Dashboard commit never moves the Daemon's
   store path; `nix/dashboard.nix` builds it.
