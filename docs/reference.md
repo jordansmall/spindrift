@@ -7797,6 +7797,13 @@ file goes away or its pid dies, and one that comes back both show up
 live, with no Dashboard restart. While the stream is down the heading
 reads "(reconnecting)", and the browser reconnects on its own.
 
+Every time on both pages, the timeline and the Dispatch drill-in's
+`started` included, shows in the viewer's own timezone and locale format,
+with the zone named; hovering one shows the UTC value the daemon wrote.
+Without JavaScript the page shows that UTC value instead. Durations
+(uptime, a slot's elapsed time) and times inside a Box log are left as
+they are.
+
 **Dispatch drill-in.** Clicking a busy slot card, or a timeline row whose
 Dispatch's `child_start` the scan saw, opens that Dispatch's drill-in,
 `/dispatch?slot=N&at=T`; a row whose `child_start` lies beyond the two
