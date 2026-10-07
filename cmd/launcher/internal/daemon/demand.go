@@ -15,6 +15,9 @@ import (
 // empty child or a delayed start, never a wrong claim.
 type Demand struct {
 	Ready int
+	// IDs names the counted items, when the source can (a DemandHostOutbox
+	// kind's bundles); nil otherwise.
+	IDs []string
 }
 
 // demandFlight is one in-flight Runner.Demand call for a kind, shared by

@@ -115,19 +115,21 @@ func (r Record) Due(now time.Time, maxAttempts int, unit time.Duration) bool {
 	return r.Count >= maxAttempts || !r.BackingOff(now, unit)
 }
 
-// CountEligible counts outbox bundles a recover pass would act on now: a bundle
-// is present and its record is Due. Chore-keyed (butler) outboxes are never
-// recover's work. The count is an upper bound; the recover child re-checks
-// everything else (self-report, open PR, claim).
-func CountEligible(pwd string, maxAttempts int, unit time.Duration, now time.Time) (int, error) {
+// Eligible names the outbox bundles a recover pass would act on now: a bundle
+// is present and its record is Due. Each is named by outbox key and BundleID,
+// so a re-run that leaves a new bundle under the same key reads as a new item
+// (issue #4705). Chore-keyed (butler) outboxes are never recover's work. The
+// result is an upper bound; the recover child re-checks everything else
+// (self-report, open PR, claim).
+func Eligible(pwd string, maxAttempts int, unit time.Duration, now time.Time) ([]string, error) {
 	entries, err := os.ReadDir(hostpaths.OutboxRoot(pwd))
 	if errors.Is(err, fs.ErrNotExist) {
-		return 0, nil
+		return nil, nil
 	}
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	n := 0
+	var ids []string
 	for _, e := range entries {
 		key := e.Name()
 		if !e.IsDir() || dispatchkey.IsChoreKey(key) {
@@ -138,14 +140,15 @@ func CountEligible(pwd string, maxAttempts int, unit time.Duration, now time.Tim
 			continue
 		}
 		if err != nil {
-			// Unreadable but present: count it rather than hide work from the daemon.
-			n++
+			// Unreadable but present: name it by key alone rather than hide work from the daemon.
+			// Once readable it becomes key@id, a new identity that lifts the daemon's gate once more.
+			ids = append(ids, key)
 			continue
 		}
 		rec := Load(pwd, key, id)
 		if rec.Due(now, maxAttempts, unit) {
-			n++
+			ids = append(ids, key+"@"+id)
 		}
 	}
-	return n, nil
+	return ids, nil
 }

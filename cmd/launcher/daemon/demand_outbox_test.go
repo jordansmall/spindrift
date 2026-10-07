@@ -308,3 +308,33 @@ func TestRecoverOutboxDemand_DrivesTheLoopThroughTheDaemonWiring(t *testing.T) {
 		t.Errorf("recover started %s after the bundle appeared, want within one probe interval %s", got, interval)
 	}
 }
+
+func TestHostRunnerDemand_OutboxNamesItsBundles(t *testing.T) {
+	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	c := outboxCounterT(t, nil, now)
+	r := mustHostRunner(t, hostRunnerConfig{env: []string{}, demand: map[daemon.Kind]forge.DemandCounter{recoverKind: c}})
+	demand := func() daemon.Demand {
+		t.Helper()
+		d, err := r.Demand(context.Background(), recoverKind, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+
+	seedOutboxBundleT(t, "1")
+	seedOutboxBundleT(t, "2")
+	before := demand()
+	if before.Ready != 2 || len(before.IDs) != 2 {
+		t.Fatalf("Demand = %+v, want Ready 2 with two IDs", before)
+	}
+
+	writeFileT(t, filepath.Join(hostpaths.OutboxDir("", "1"), seambundle.FileName), "a replacement bundle")
+	after := demand()
+	if len(after.IDs) != 2 {
+		t.Fatalf("Demand = %+v, want two IDs", after)
+	}
+	if after.Ready != before.Ready || after.IDs[0] == before.IDs[0] || after.IDs[1] != before.IDs[1] {
+		t.Errorf("replaced bundle 1: %+v -> %+v, want same Ready and only key 1's ID changed", before, after)
+	}
+}

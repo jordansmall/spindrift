@@ -3,6 +3,8 @@ package recoverrecord
 import (
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -46,14 +48,14 @@ func seedRecord(t *testing.T, pwd, num string, r Record) {
 
 func count(t *testing.T, pwd string, max int) int {
 	t.Helper()
-	n, err := CountEligible(pwd, max, unit, now)
+	ids, err := Eligible(pwd, max, unit, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return n
+	return len(ids)
 }
 
-func TestCountEligible(t *testing.T) {
+func TestEligible(t *testing.T) {
 	cases := []struct {
 		name string
 		seed func(t *testing.T, pwd string)
@@ -119,13 +121,13 @@ func TestCountEligible(t *testing.T) {
 			pwd := t.TempDir()
 			tc.seed(t, pwd)
 			if got := count(t, pwd, 3); got != tc.want {
-				t.Errorf("CountEligible = %d, want %d", got, tc.want)
+				t.Errorf("len(Eligible) = %d, want %d", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestCountEligible_OutboxRootUnreadable(t *testing.T) {
+func TestEligible_OutboxRootUnreadable(t *testing.T) {
 	pwd := t.TempDir()
 	if err := os.MkdirAll(filepath.Dir(hostpaths.OutboxRoot(pwd)), 0o755); err != nil {
 		t.Fatal(err)
@@ -133,7 +135,7 @@ func TestCountEligible_OutboxRootUnreadable(t *testing.T) {
 	if err := os.WriteFile(hostpaths.OutboxRoot(pwd), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CountEligible(pwd, 3, unit, now); err == nil {
+	if _, err := Eligible(pwd, 3, unit, now); err == nil {
 		t.Fatal("want error when the outbox root is not a directory")
 	}
 }
@@ -168,5 +170,37 @@ func TestDue(t *testing.T) {
 				t.Errorf("Due = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestEligible_IdentityTracksTheBundle(t *testing.T) {
+	pwd := t.TempDir()
+	seedBundle(t, pwd, "1")
+	seedBundle(t, pwd, "2")
+	before, err := Eligible(pwd, 3, unit, now)
+	if err != nil || len(before) != 2 {
+		t.Fatalf("Eligible = %v, %v, want 2 identities", before, err)
+	}
+	if before[0] == before[1] || !strings.HasPrefix(before[0], "1@") || !strings.HasPrefix(before[1], "2@") {
+		t.Errorf("identities %v: want distinct, key-ordered key@id names", before)
+	}
+	again, err := Eligible(pwd, 3, unit, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(before, again) {
+		t.Errorf("unchanged outbox: %v then %v, want stable identities", before, again)
+	}
+
+	file := filepath.Join(hostpaths.OutboxDir(pwd, "1"), seambundle.FileName)
+	if err := os.WriteFile(file, []byte("a different bundle"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := Eligible(pwd, 3, unit, now)
+	if err != nil || len(after) != 2 {
+		t.Fatalf("Eligible = %v, %v, want 2 identities", after, err)
+	}
+	if after[0] == before[0] || after[1] != before[1] {
+		t.Errorf("rewrote bundle 1: %v -> %v, want only key 1's identity to change", before, after)
 	}
 }
