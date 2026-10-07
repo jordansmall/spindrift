@@ -9,22 +9,14 @@
   {{- end}}
 {{- end -}}
 {{define "published"}}<div><span class="label">published</span><time>{{.Written}}</time></div>{{end -}}
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Spindrift Dashboard</title>
-<link rel="stylesheet" href="/static/style.css">
-</head>
-<body>
+{{define "status" -}}
 <header class="top">
   <h1>Spindrift Daemon</h1>
 {{- if .Live}}
   <span class="pill state-{{.State}}">{{.State}}</span>
 {{- end}}
 </header>
-<main>
+<div class="sections">
 {{- if .Errored}}
   <section class="banner error">
     <strong>The status file could not be read.</strong>
@@ -92,7 +84,7 @@
   <h2>Slots</h2>
   <section class="grid slots">
     {{- range .Slots}}
-    <article class="card phase-{{.Phase}}">
+    <article class="card phase-{{.Phase}}" data-slot="{{.Slot}}" data-phase="{{.Phase}}">
       <header>
         <span class="slotno">slot {{.Slot}}</span>
         <span class="pill phase-{{.Phase}}">{{.Phase}}</span>
@@ -107,29 +99,45 @@
     {{- end}}
   </section>
 {{- end}}
-
-  <h2>History</h2>
-  <section class="history">
+</div>
+{{- end}}
+{{define "entry" -}}
+<div class="entry ev-{{.Event}}">
+  <time>{{.Time}}</time>
+  <span class="evname">{{.Event}}</span>
+  {{- if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}
+  {{- if .Subject}} <span class="chip">{{.Subject}}</span>{{end}}
+  {{- if .Slot}} <span class="muted">slot {{.Slot}}</span>{{end}}
+  {{- if .Outcome}} <span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{end}}
+  {{- if .Detail}} <span class="detail">{{.Detail}}</span>{{end}}
+  {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
+</div>
+{{- end}}
+{{define "history" -}}
     {{- if .HistoryErr}}
     <p class="muted">history unreadable: {{.HistoryErr}}</p>
     {{- end}}
     {{- range .History}}
-    <div class="entry ev-{{.Event}}">
-      <time>{{.Time}}</time>
-      <span class="evname">{{.Event}}</span>
-      {{- if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}
-      {{- if .Subject}} <span class="chip">{{.Subject}}</span>{{end}}
-      {{- if .Slot}} <span class="muted">slot {{.Slot}}</span>{{end}}
-      {{- if .Outcome}} <span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{end}}
-      {{- if .Detail}} <span class="detail">{{.Detail}}</span>{{end}}
-      {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
-    </div>
+    {{template "entry" .}}
     {{- else}}
     {{- if not .HistoryErr}}
-    <p class="muted">no history yet</p>
+    <p class="muted empty">no history yet</p>
     {{- end}}
     {{- end}}
-  </section>
+{{- end}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Spindrift Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="status">{{template "status" .}}</div>
+<main>
+  <h2>History</h2>
+  <section class="history" id="history" data-limit="{{historyLimit}}">{{template "history" .}}</section>
 </main>
 </body>
 </html>
