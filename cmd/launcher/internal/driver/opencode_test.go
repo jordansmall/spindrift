@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -68,6 +69,30 @@ func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "#77") {
 		t.Errorf("heartbeat output missing issue prefix: %q", out.String())
+	}
+}
+
+func TestOpencodeDriverHeartbeatWriterForwardsOnModel(t *testing.T) {
+	d, err := New("opencode")
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+
+	type call struct{ model, role string }
+	var got []call
+	opts := driverkit.RenderOptions{OnModel: func(model, role string) {
+		got = append(got, call{model, role})
+	}}
+	var raw, out bytes.Buffer
+	w := d.NewHeartbeatWriter(&raw, "77", &out, opts)
+
+	ndjson := `{"type":"step_finish","part":{"modelID":"m1"}}` + "\n"
+	if _, err := w.Write([]byte(ndjson)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if want := []call{{"m1", ""}}; !slices.Equal(got, want) {
+		t.Errorf("OnModel calls = %v, want %v", got, want)
 	}
 }
 

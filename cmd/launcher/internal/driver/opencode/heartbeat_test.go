@@ -3,6 +3,7 @@ package opencode_test
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -115,5 +116,53 @@ func TestWriter_SanitizesAndBoundsHeartbeat(t *testing.T) {
 				t.Errorf("narration %d runes, max %d", n, driverkit.NarrationMaxRunes)
 			}
 		})
+	}
+}
+
+// OnModel fires once per change of the model named by step_finish events,
+// reports no role, and leaves the raw bytes and heartbeat output untouched.
+func TestWriter_OnModelFiresOnChangeOnly(t *testing.T) {
+	type call struct{ model, role string }
+	step := func(model string) string {
+		part := `"messageID":"m"`
+		if model != "" {
+			part += `,"modelID":"` + model + `"`
+		}
+		return `{"type":"step_finish","part":{` + part + `}}` + "\n"
+	}
+	text := `{"type":"text","part":{"text":"Working on it."}}` + "\n"
+	stream := step("A") + step("A") + text + step("") + step("A") + step("B") + step("B")
+
+	var got []call
+	var raw, out bytes.Buffer
+	w := opencode.New(&raw, "42", &out).OnModel(func(model, role string) {
+		got = append(got, call{model, role})
+	})
+	if _, err := w.Write([]byte(stream)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	want := []call{{"A", ""}, {"B", ""}}
+	if !slices.Equal(got, want) {
+		t.Errorf("OnModel calls = %v, want %v", got, want)
+	}
+
+	var plainRaw, plainOut bytes.Buffer
+	if _, err := opencode.New(&plainRaw, "42", &plainOut).Write([]byte(stream)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if raw.String() != stream {
+		t.Errorf("raw = %q, want the stream byte-for-byte", raw.String())
+	}
+	if out.String() != plainOut.String() {
+		t.Errorf("out = %q, want %q (unchanged by OnModel)", out.String(), plainOut.String())
+	}
+}
+
+func TestWriter_NilOnModelDoesNotPanic(t *testing.T) {
+	var raw, out bytes.Buffer
+	w := opencode.New(&raw, "42", &out).OnModel(nil)
+	if _, err := w.Write([]byte(`{"type":"step_finish","part":{"modelID":"A"}}` + "\n")); err != nil {
+		t.Fatalf("Write: %v", err)
 	}
 }

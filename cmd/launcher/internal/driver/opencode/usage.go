@@ -13,7 +13,8 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// stepEvent decodes only the opencode NDJSON fields this file reads.
+// stepEvent decodes only the opencode NDJSON fields this file and the
+// heartbeat Writer read.
 type stepEvent struct {
 	Type      string   `json:"type"`
 	Timestamp int64    `json:"timestamp"`
@@ -23,6 +24,7 @@ type stepEvent struct {
 type stepPart struct {
 	MessageID string     `json:"messageID"`
 	ModelID   string     `json:"modelID"`
+	Text      string     `json:"text"`
 	Tokens    stepTokens `json:"tokens"`
 	Cost      float64    `json:"cost"`
 }

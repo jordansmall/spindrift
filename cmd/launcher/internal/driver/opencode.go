@@ -21,10 +21,10 @@ func (opencodeDriver) ClassifyTransient(logPath string) (Classification, error) 
 }
 
 // NewHeartbeatWriter ignores opts.TopLevelRole (opencode's transcript carries no
-// role attribution, issue #2092) and opts.OnModel (it cannot attribute a model
-// to a message).
+// role attribution, issue #2092) but forwards opts.OnModel, reporting the model
+// with no role.
 func (opencodeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
-	return opencode.New(raw, issue, out)
+	return opencode.New(raw, issue, out).OnModel(opts.OnModel)
 }
 
 func (opencodeDriver) ExtractUsage(logPath string) (usage.Report, error) {
