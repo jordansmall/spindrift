@@ -144,6 +144,11 @@ type Config struct {
 
 	Slots int
 
+	// RepoURL is the Target repo's web URL, published on every status write;
+	// issue links are built from it plus the issue number. "" when the tracker
+	// has no web repo.
+	RepoURL string
+
 	// Stop and Abort are the operator-stop/hard-abort latch (issue #3626):
 	// the same two-channel shape the Launcher's own shutdown gate and
 	// signal relay already use. A closed Stop halts the pool with

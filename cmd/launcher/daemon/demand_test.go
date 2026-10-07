@@ -903,3 +903,39 @@ func TestResolveDaemonOnlyKnobs_AmbientWins(t *testing.T) {
 		}
 	}
 }
+
+func TestRepoURL(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		settings map[string]string
+		want     string
+	}{
+		{"github", map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r"}, "https://github.com/o/r"},
+		{"forgejo trailing slash", map[string]string{"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r", "FORGEJO_BASE_URL": "https://git.example.com/"}, "https://git.example.com/o/r"},
+		{"local", map[string]string{"ISSUE_TRACKER": "local", "REPO_SLUG": "o/r"}, ""},
+		{"jira", map[string]string{"ISSUE_TRACKER": "jira", "REPO_SLUG": "o/r"}, ""},
+		{"empty slug", map[string]string{"ISSUE_TRACKER": "github"}, ""},
+		{"forgejo default base url", map[string]string{"ISSUE_TRACKER": "forgejo", "REPO_SLUG": "o/r"}, "https://codeberg.org/o/r"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, k := range []string{"ISSUE_TRACKER", "REPO_SLUG", "FORGEJO_BASE_URL", "GH_HOST"} {
+				t.Setenv(k, "")
+			}
+			if got := repoURL(demandDocT(tc.settings)); got != tc.want {
+				t.Errorf("repoURL = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// GH_HOST is ambient only, so a GitHub Enterprise tracker links to its own host.
+func TestRepoURL_GitHubEnterpriseHost(t *testing.T) {
+	for _, k := range []string{"ISSUE_TRACKER", "REPO_SLUG"} {
+		t.Setenv(k, "")
+	}
+	t.Setenv("GH_HOST", "ghe.corp.example")
+	doc := demandDocT(map[string]string{"ISSUE_TRACKER": "github", "REPO_SLUG": "o/r"})
+	if got, want := repoURL(doc), "https://ghe.corp.example/o/r"; got != want {
+		t.Errorf("repoURL = %q, want %q", got, want)
+	}
+}

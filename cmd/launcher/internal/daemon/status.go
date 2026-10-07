@@ -47,6 +47,10 @@ type Status struct {
 	// Trackers has one entry per distinct tracker the probed kinds count
 	// against, in configured kind order (ADR 0059).
 	Trackers []TrackerCheck `json:"trackers,omitempty"`
+	// RepoURL is the Target repo's web URL, so a reader can link an issue
+	// number without the checkout's config; empty when the tracker has no
+	// web repo.
+	RepoURL string `json:"repo_url,omitempty"`
 }
 
 // TrackerCheck is one tracker's rate-limit standing.

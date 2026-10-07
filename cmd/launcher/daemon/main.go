@@ -927,6 +927,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		IdleCap:             idleCap,
 		ProbeIntervals:      probeIntervals(demand, probeOverride),
 		Trackers:            trackers(demand, doc),
+		RepoURL:             repoURL(doc),
 		Slots:               slots,
 		SelfProgram:         selfProgram,
 		FailureBackoff:      failureBackoff,

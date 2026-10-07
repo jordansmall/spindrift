@@ -2152,7 +2152,7 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 			// neither an event nor an error — never crash the slot
 			// goroutine mid-run.
 			req.OnRecord(Record{Event: "heartbeat", Key: dispatchkey.Issue("99")})
-			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged clean"})
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged clean", PRURL: "https://github.com/o/r/pull/7"})
 			return nil
 		},
 	}
@@ -2188,8 +2188,8 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 		t.Errorf("box event = %+v, want issue 42 phase initial pass_log .spindrift/logs/issue-42.log", box)
 	}
 	settled := events[2]
-	if settled.Key != dispatchkey.Issue("42") || settled.State != "complete" || settled.Note != "merged clean" {
-		t.Errorf("settled event = %+v, want issue 42 state complete note %q", settled, "merged clean")
+	if settled.Key != dispatchkey.Issue("42") || settled.State != "complete" || settled.Note != "merged clean" || settled.PRURL != "https://github.com/o/r/pull/7" {
+		t.Errorf("settled event = %+v, want issue 42 state complete note %q pr_url https://github.com/o/r/pull/7", settled, "merged clean")
 	}
 	finish := events[3]
 	if finish.Key != dispatchkey.Issue("42") {
@@ -2530,5 +2530,53 @@ func TestChildLogPathNeverCollidesWithinASecond(t *testing.T) {
 	}
 	if got, want := childLogPath(a, 2, k), ".spindrift/logs/daemon/20261007T120304.100Z-slot2-research.log"; got != want {
 		t.Errorf("childLogPath = %q, want %q", got, want)
+	}
+}
+
+// TestLoopSettledWithoutPRCarriesNoPRURL pins that a settled record with no
+// PR (a failed record, as a failure before any PR opened leaves) yields a
+// settled event with no pr_url, not an empty-string field on the wire.
+func TestLoopSettledWithoutPRCarriesNoPRURL(t *testing.T) {
+	clk := &testClock{}
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Issue("42"), State: "failed"})
+			return nil
+		},
+	}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	if !strings.Contains(buf.String(), `"event":"settled"`) {
+		t.Fatalf("no settled event emitted: %s", buf.String())
+	}
+	if strings.Contains(buf.String(), "pr_url") {
+		t.Errorf("event stream names pr_url for a settled record with none: %s", buf.String())
+	}
+}
+
+// TestLoopPublishesRepoURL pins that Config.RepoURL reaches the status
+// file, so a reader can build issue links without the checkout's config.
+func TestLoopPublishesRepoURL(t *testing.T) {
+	dir := t.TempDir()
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Status = NewStatusWriter(dir, clk.Now)
+	cfg.RepoURL = "https://github.com/o/r"
+	Loop(context.Background(), cfg, &scriptedRunner{revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}}}, em, clk)
+
+	report, err := ReadStatus(dir)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if report.Status == nil || report.Status.RepoURL != "https://github.com/o/r" {
+		t.Fatalf("published status = %+v, want repo_url https://github.com/o/r", report.Status)
 	}
 }
