@@ -329,9 +329,9 @@ func TestDispatchListsChildLogThenPassLogsInEventOrder(t *testing.T) {
 	last := 0
 	for _, w := range []string{
 		`data-src="/log?path=logs%2fchild.log" data-stream-filter`,
-		`id="tab-pass-0" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42.log"`,
-		`id="tab-pass-1" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42-fix-1.log"`,
-		`id="tab-pass-2" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42-conflict-resolve.log"`,
+		`id="tab-pass-0" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42.log&`,
+		`id="tab-pass-1" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42-fix-1.log&`,
+		`id="tab-pass-2" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42-conflict-resolve.log&`,
 	} {
 		i := strings.Index(low, strings.ToLower(w))
 		if i < last {
@@ -363,9 +363,31 @@ func TestDispatchChoreKeyedRendersPassLogTabs(t *testing.T) {
 	if got, want := strings.Join(tabOrder(body), ","), "child-log,pass-0"; got != want {
 		t.Errorf("tabs = %s, want %s", got, want)
 	}
-	for _, w := range []string{"docs-drift", ">initial</button>", `data-src="/log?path=.spindrift%2flogs%2fissue-butler-docs-drift.log"`} {
+	for _, w := range []string{"docs-drift", ">initial</button>", `data-src="/log?path=.spindrift%2flogs%2fissue-butler-docs-drift.log&`} {
 		if !strings.Contains(body, w) {
 			t.Errorf("missing %q in\n%s", w, body)
+		}
+	}
+}
+
+func TestDispatchPassLogSrcCarriesDispatchIdentity(t *testing.T) {
+	ev := `{"time":"2026-10-07T10:00:00Z","event":"child_start","kind":"work","slot":3,"child_log":"logs/a.log"}
+{"time":"2026-10-07T10:00:00Z","event":"child_start","kind":"work","slot":3,"child_log":"logs/b.log"}
+{"time":"2026-10-07T10:00:05Z","event":"box","slot":3,"phase":"initial","issue":"42","pass_log":".spindrift/logs/issue-42.log"}
+`
+	want := `data-src="/log?path=.spindrift%2flogs%2fissue-42.log&slot=3&at=2026-10-07t10%3a00%3a00z&n=1"`
+	// Loaded with no at, the page still learns the Dispatch's concrete identity.
+	for _, q := range []string{"?slot=3", "?slot=3&at=2026-10-07T10:00:00Z&n=1"} {
+		code, body := getDispatch(t, ev, q)
+		if code != 200 {
+			t.Fatalf("%s: status %d", q, code)
+		}
+		if !strings.Contains(strings.ToLower(body), want) {
+			t.Errorf("%s: missing %q in\n%s", q, want, body)
+		}
+		// html/template escapes with lowercase hex, so match the lowered body.
+		if strings.Contains(strings.ToLower(body), `data-src="/log?path=logs%2fb.log&`) {
+			t.Errorf("%s: the Child log src must stay path-only", q)
 		}
 	}
 }
