@@ -7667,6 +7667,16 @@ cost the tail of the note, never the whole record.
 The doctor preflight (**Startup preflight**, above) gets neither the
 variable nor the descriptor — it dispatches nothing and settles no issue,
 so it has nothing to report.
+A `box` record is
+`{"event":"box","issue":"<N>","phase":"<phase>","pass_log":"<path>"}`,
+with `chore` in place of `issue` for a butler child. `pass_log` is the
+Pass log that Box writes, relative to the checkout: `.spindrift/logs/`
+then `issue-<N>.log` for the initial pass, `issue-<N>-fix-<K>.log` for
+fix pass `K`, or `issue-<N>-conflict-resolve.log`; a butler child's
+initial pass writes `issue-butler-<chore>.log`. It names the file the
+Box actually writes, after any stale log there was rotated aside to a
+numbered sibling. A `recover` record runs no Box and carries none. The
+daemon copies it onto the `box` event unchanged.
 
 **What this first cut doesn't do.** The instance lock, the queryable status
 file (issue #3545, above), the self-change halt (issue #3543, above) and
@@ -7775,11 +7785,19 @@ button resumes), and renders ANSI colour. The Box's stream-JSON lines
 toggle, so the launcher's own lines aren't buried. A named log whose
 file no longer exists reads "log pruned"; a `child_start` without
 `child_log`, from a daemon that predates Child logs, says it names none.
+After it comes one tab per Pass log, labelled with its phase, in the
+order the Dispatch's `box` events named them (`pass_log`); a retry that
+names the same file again adds no second tab. A Pass log tab follows
+its log the same way from `/log?path=<pass_log>`, starting when the tab
+is first shown, with the same ANSI rendering, scroll-back, and "log
+pruned" note, but shows every line, since a Pass log is mostly the Box's
+stream-JSON. Butler Dispatches get the same tabs, named by their
+Chore-keyed `box` events.
 `/log` serves only a path some `child_start` in either Events generation
-names, exactly; anything else, a `..` traversal included, is a 404. So
-a Child log becomes unreachable once its `child_start` rotates out of
-the Events file, and the Dashboard serves nothing else under the
-checkout.
+names as its `child_log`, or some `box` names as its `pass_log`,
+exactly; anything else, a `..` traversal included, is a 404. So a log
+becomes unreachable once the event naming it rotates out of the Events
+file, and the Dashboard serves nothing else under the checkout.
 
 Four cases are shown rather than hidden. The page reads "no Daemon
 running" when the status file is absent or its pid is not live on this
