@@ -345,3 +345,72 @@ func TestFollowerSkipsNonTimelineEvents(t *testing.T) {
 	appendTo(t, path, evLine("t1", "heartbeat")+"not json\n"+evLine("t2", "halt"))
 	wantTimes(t, pollTimes(t, f), "t2")
 }
+
+// tailGens polls the tail once and returns "time@gen" for each event, gen read
+// from the tail as the callback runs.
+func tailGens(t *testing.T, tl *eventsTail) []string {
+	t.Helper()
+	var got []string
+	if err := tl.poll(genRecorder(tl, &got)); err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	return got
+}
+
+// genRecorder appends each event as "time@gen", gen being the tail's own.
+func genRecorder(tl *eventsTail, got *[]string) func(Event) {
+	return func(ev Event) { *got = append(*got, fmt.Sprintf("%s@%d", ev.Time, tl.gen)) }
+}
+
+func wantGens(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("events = %v, want %v", got, want)
+	}
+}
+
+func TestEventsTailGenerations(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	appendTo(t, path+rotatedSuffix, evLine("t1", "child_start"))
+	appendTo(t, path, evLine("t2", "child_start"))
+	tl := &eventsTail{path: path}
+	defer tl.Close()
+	var got []string
+	if err := tl.open(genRecorder(tl, &got)); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	wantGens(t, got, "t1@0", "t2@1")
+
+	appendTo(t, path, evLine("t3", "child_start"))
+	wantGens(t, tailGens(t, tl), "t3@1")
+
+	renameAside := func() {
+		t.Helper()
+		if err := os.Rename(path, path+rotatedSuffix); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendTo(t, path, evLine("t4", "child_start"))
+	renameAside()
+	appendTo(t, path, evLine("t5", "child_start"))
+	wantGens(t, tailGens(t, tl), "t4@1", "t5@2")
+
+	// A missing path is a gap, not a crossing: the held file is still current.
+	appendTo(t, path, evLine("t6", "child_start"))
+	renameAside()
+	wantGens(t, tailGens(t, tl), "t6@2")
+	wantGens(t, tailGens(t, tl))
+	appendTo(t, path, evLine("t7", "child_start"))
+	wantGens(t, tailGens(t, tl), "t7@3")
+}
+
+func TestEventsTailGapFromEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	tl := &eventsTail{path: path}
+	defer tl.Close()
+	if err := tl.open(func(Event) { t.Fatal("event from nothing") }); err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	appendTo(t, path, evLine("t1", "child_start"))
+	wantGens(t, tailGens(t, tl), "t1@1")
+}
