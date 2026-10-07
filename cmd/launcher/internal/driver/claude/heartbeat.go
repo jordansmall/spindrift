@@ -32,7 +32,20 @@ type Writer struct {
 	lastHeaderModel    string                    // model of last emitted switch header
 	roleCounts         map[string]map[string]int // tool counts per role
 	rolePhase          map[string]string         // current phase per role
+
+	// onModel, when set, hears each change of the (role, exact model id) pair.
+	// Tracked apart from currentModel, which is the coarse family the heartbeat
+	// groups by.
+	onModel func(model, role string)
+	last    modelChange
+	// pendingModels holds changes parseLine found during one Write, delivered
+	// after mu is released so the Writer never calls out while holding its lock.
+	// Callback order matches last only because Writes are serial (os/exec runs
+	// one copy goroutine when Stdout and Stderr share a writer).
+	pendingModels []modelChange
 }
+
+type modelChange struct{ model, role string }
 
 // New returns a Writer that emits heartbeat lines for issue to out.
 func New(raw io.Writer, issue string, out io.Writer) *Writer {
@@ -55,6 +68,14 @@ func NewWithTopLevelRole(raw io.Writer, issue string, out io.Writer, topLevelRol
 	}
 }
 
+// OnModel sets fn to be called with the exact model id and role whenever the
+// pair behind the streamed assistant messages changes, and returns w. A
+// message carrying no model id, or the CLI's "<synthetic>" sentinel, is skipped.
+func (w *Writer) OnModel(fn func(model, role string)) *Writer {
+	w.onModel = fn
+	return w
+}
+
 // Write forwards all bytes to raw unchanged, then parses complete lines for
 // heartbeat events.
 func (w *Writer) Write(p []byte) (int, error) {
@@ -62,10 +83,21 @@ func (w *Writer) Write(p []byte) (int, error) {
 	if err != nil {
 		return n, err
 	}
+	for _, c := range w.parse(p[:n]) {
+		w.onModel(c.model, c.role)
+	}
+	return n, nil
+}
+
+// parse feeds b to the line framer under mu and returns the model changes it
+// found. The deferred unlock keeps mu released if parsing panics.
+func (w *Writer) parse(b []byte) []modelChange {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	w.frame.Push(p[:n], w.parseLine)
-	return n, nil
+	w.frame.Push(b, w.parseLine)
+	pending := w.pendingModels
+	w.pendingModels = nil
+	return pending
 }
 
 func (w *Writer) parseLine(line string) {
@@ -90,6 +122,11 @@ func (w *Writer) parseLine(line string) {
 			// The final per-model token table (usage.go) diverges on purpose
 			// and keys on the exact id (issue #2110).
 			model := ModelFamily(ev.Message.Model)
+
+			if cur := (modelChange{ev.Message.Model, role}); w.onModel != nil && cur.model != "" && cur.model != syntheticModelSentinel && cur != w.last {
+				w.last = cur
+				w.pendingModels = append(w.pendingModels, cur)
+			}
 
 			if role != w.currentRole || model != w.currentModel {
 				w.flushCounts(w.currentRole)

@@ -1592,3 +1592,44 @@ func TestEncodeSpindriftOpSignalRoundTrip(t *testing.T) {
 		t.Errorf("round-tripped SpindriftOp = %+v, want %+v", *ev.SpindriftOp, want)
 	}
 }
+
+// OnModel fires once per change of the (role, exact model id) pair behind the
+// streamed assistant messages, never per message.
+func TestWriterOnModelFiresOnPairChangeOnly(t *testing.T) {
+	type call struct{ model, role string }
+	var got []call
+	w := claude.New(&bytes.Buffer{}, "4744", &bytes.Buffer{}).OnModel(func(model, role string) {
+		got = append(got, call{model, role})
+	})
+
+	top := func(model, text string) string {
+		return `{"type":"assistant","message":{"model":"` + model + `","content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
+	}
+	spawn := `{"type":"assistant","message":{"model":"claude-sonnet-5-5","content":[{"type":"tool_use","name":"Task","id":"tu_w","input":{"subagent_type":"scout"}}]}}` + "\n"
+	sub := func(model string) string {
+		return `{"type":"assistant","parent_tool_use_id":"tu_w","message":{"model":"` + model + `","content":[{"type":"tool_use","name":"Read","id":"r","input":{}}]}}` + "\n"
+	}
+	for _, line := range []string{
+		top("claude-sonnet-5-5", "one"),
+		spawn,
+		top("claude-sonnet-5-5", "two"),
+		sub("claude-haiku-4-5"),
+		sub("claude-haiku-4-5"),
+		top("claude-sonnet-5-5", "three"),
+		top("claude-sonnet-5-5", "four"),
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"no model"}]}}` + "\n",
+		`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"text","text":"limit"}]},"error":"rate_limit"}` + "\n",
+		top("claude-sonnet-5-5", "five"),
+	} {
+		fmt.Fprint(w, line)
+	}
+
+	want := []call{
+		{"claude-sonnet-5-5", claude.ImplementorRole},
+		{"claude-haiku-4-5", "scout"},
+		{"claude-sonnet-5-5", claude.ImplementorRole},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("OnModel calls = %v, want %v", got, want)
+	}
+}

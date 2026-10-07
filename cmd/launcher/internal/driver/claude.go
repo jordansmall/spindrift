@@ -20,7 +20,7 @@ func (claudeDriver) ClassifyTransient(logPath string) (Classification, error) {
 }
 
 func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
-	return claude.NewWithTopLevelRole(raw, issue, out, opts.TopLevelRole)
+	return claude.NewWithTopLevelRole(raw, issue, out, opts.TopLevelRole).OnModel(opts.OnModel)
 }
 
 func (claudeDriver) ExtractUsage(logPath string) (usage.Report, error) {

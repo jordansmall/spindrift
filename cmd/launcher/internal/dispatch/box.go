@@ -528,11 +528,14 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		}
 	}
 
+	renderOpts := driverkit.RenderOptions{
+		OnModel: func(model, role string) { report.Model(d.subject.key, model, role) },
+	}
 	box := runner.Box{
 		Issue:             d.number,
 		Name:              name,
 		Env:               env,
-		Output:            d.driver.NewHeartbeatWriter(boxLog.stream(), d.number, d.humanOut(), driverkit.RenderOptions{}),
+		Output:            d.driver.NewHeartbeatWriter(boxLog.stream(), d.number, d.humanOut(), renderOpts),
 		DriverCacheDir:    driverCacheDir,
 		OutboxDir:         outboxDir,
 		RegistryProxy:     registryProxyLocation,

@@ -9,4 +9,10 @@ type RenderOptions struct {
 	// parent_tool_use_id) messages; empty means the implementor's own
 	// default (issue #2092).
 	TopLevelRole string
+
+	// OnModel is called with the exact model id and the role whenever the
+	// (role, model) pair behind the streamed messages changes; nil means no one
+	// listens. An implementor that cannot attribute a model to a message (e.g.
+	// opencode) ignores it.
+	OnModel func(model, role string)
 }

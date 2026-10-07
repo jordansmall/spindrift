@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -260,5 +262,73 @@ func TestDispatch_BoxRecordNamesUnsuffixedLogAfterStaleRotation(t *testing.T) {
 				t.Errorf("stale log was not rotated aside: %v", err)
 			}
 		})
+	}
+}
+
+// modelSwitchStream is a Claude stream-json transcript that goes coordinator
+// -> worker (a spawned scout) -> coordinator, each side repeating a message.
+const modelSwitchStream = `{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"plan"}]}}
+{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"tool_use","name":"Task","id":"tu_w","input":{"subagent_type":"scout"}}]}}
+{"type":"assistant","parent_tool_use_id":"tu_w","message":{"model":"claude-haiku-4-5","content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}
+{"type":"assistant","parent_tool_use_id":"tu_w","message":{"model":"claude-haiku-4-5","content":[{"type":"tool_use","name":"Read","id":"r2","input":{}}]}}
+{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"back"}]}}
+{"type":"assistant","message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"again"}]}}
+`
+
+func runClaudeModelSwitch(t *testing.T) string {
+	t.Helper()
+	drv, err := driver.New("claude")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	fr := runner.NewFake()
+	fr.WriteToOutput = []byte(modelSwitchStream)
+	f, err := NewFactory(retryConfig(3, 0, 0), tempLogDir(t), fr, drv, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	t.Cleanup(f.Cleanup)
+	d := f.New("1", "t")
+	return testutil.CaptureStdout(t, func() { d.Run() })
+}
+
+// Under the Claude driver a coordinator -> worker -> coordinator stream yields
+// exactly three model records carrying exact ids; repeats yield none.
+func TestDispatch_Run_ClaudeStreamEmitsModelRecordPerPairChange(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+
+	runClaudeModelSwitch(t)
+
+	type pair struct{ model, role string }
+	var got []pair
+	for _, rec := range readRecords() {
+		if rec.Event != report.EventModel {
+			continue
+		}
+		if rec.Key != dispatchkey.Issue("1") {
+			t.Errorf("model record key = %v, want issue 1", rec.Key)
+		}
+		got = append(got, pair{rec.Model, rec.ModelRole})
+	}
+	want := []pair{
+		{"claude-opus-4-7", claude.ImplementorRole},
+		{"claude-haiku-4-5", "scout"},
+		{"claude-opus-4-7", claude.ImplementorRole},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("model records = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("model record %d = %v, want %v", i, got[i], want[i])
+		}
+	}
+}
+
+// With no reporter installed a model change is a silent no-op: it neither
+// panics nor disturbs the human output.
+func TestDispatch_Run_ClaudeStreamModelChangeWithoutReporter(t *testing.T) {
+	if out := runClaudeModelSwitch(t); !strings.Contains(out, "    -> #1: t\n") {
+		t.Errorf("human output lost the announce line: %q", out)
 	}
 }
