@@ -7561,7 +7561,7 @@ slot.
 | `baton_hold` | `time`, `slot`, `reason` | a slot reaches `awaitBaton` (`pool.go`) and finds another slot still discovering, so it parks — one event per park, since each parking slot logs independently on its own pass through the loop; `reason` is the fixed `batonHoldReason`, `"waiting for the discovery baton: another slot's child is still discovering"`, matching the other wait events in this stream |
 | `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error, so long as that exit does not halt the pool (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs —, the holder re-deciding at `startChild` and finding a sibling's result (an exit 2 zeroing a probed kind's count) took away the Start it decided on before blocking on the baton (`batonPassOutpaced`, `"a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"`), or the holder starting a Chore-keyed child, which discovers no tracker issue, so the baton passes at the start rather than at a `box` record (`batonPassChoreKeyed`, `"the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"`), or the holder returning for any reason at all before its round otherwise resolved, including a child exit that halts the pool or trips the breaker, whose pass waits until after the `halt` event so no sibling starts a child on a halting pool (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, a gone feature branch, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal (doctor's verdict or a gone feature branch), a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the three the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-feature-branch-gone` for a `--feature-branch` naming a branch origin does not have, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
-| `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched; carries no `issue` or `chore` — the daemon cannot know which issue or chore a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
+| `child_start` | `time`, `kind`, `revision`, `slot`, `child_log` | just before a child is launched. `child_log` names the child's **Child log** (below), relative to the checkout; a daemon that predates Child logs omits it. Carries no `issue` or `chore` — the daemon cannot know which issue or chore a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
 | `box` | `time`, `kind`, `issue` or `chore`, `phase`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later. A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
 | `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle |
@@ -7596,6 +7596,27 @@ the daemon holding the checkout lock, so a second daemon refused by that
 lock still writes its `halt` to stdout, but that line never reaches the
 holder's file; a restart appends to it rather than starting over. The
 [Dashboard](#dashboard) reads both generations for its history timeline.
+
+**Child log.** Each child's stdout and stderr are teed, byte for byte, to
+its own Child log as well as to the daemon's stderr, which is unchanged,
+so the journal still shows the same output. It is the only record of a
+Dispatch that failed outside its Box: a build failure, a claim race, red
+CI, a merge-gate refusal. The file is
+`.spindrift/logs/daemon/<start>-slot<N>-<kind>.log` under the checkout,
+where `<start>` is the child's start in UTC with milliseconds, `<N>` the
+0-based slot, and `<kind>` the Dispatch kind (`dispatch`, `research`,
+`butler`, `recover`), for example
+`.spindrift/logs/daemon/20261007T120304.123Z-slot0-dispatch.log`. The
+milliseconds keep apart two children one slot starts inside the same
+second. `child_start`'s `child_log` names the file, relative to the
+checkout, so nothing has to derive it. Child logs are never pruned and
+grow without bound; prune `.spindrift/logs/daemon/` by hand. A Child log
+that cannot be created or written prints `daemon: child log ...` on
+stderr and costs neither the stderr copy nor the Dispatch. While a Child
+log is in use the child's stdout and stderr are a pipe the daemon tees, not
+the daemon's own stderr, so the child sees no TTY and output that checks for
+a terminal may change. Output a grandchild writes after the child exits and
+a 5-second grace period is lost.
 
 **Reasons and credentials.** A `reason` that embeds captured git or nix
 stderr (a failed `git fetch`, `git ls-remote`, or `nix eval`) has URL userinfo
@@ -7668,17 +7689,19 @@ no daemon at all, and it remains the Console's engine unchanged, see
 
 The Dashboard is a read-only web view of one [Daemon](#daemon)'s state. It
 is its own process and its own Go module (`dashboard/`, stdlib only), not
-part of the daemon: it reads the files the daemon publishes in the
-checkout's git dir, the status file (`spindrift-daemon.status`) and the
-Events file (`spindrift-daemon.events` and its `.1` generation), and
-nothing else, and it never picks, starts, stops, or settles anything.
+part of the daemon: it reads only what the daemon publishes, the status
+file (`spindrift-daemon.status`) and the Events file
+(`spindrift-daemon.events` and its `.1` generation) in the checkout's
+git dir, plus the Child logs those events name, and it never picks,
+starts, stops, or settles anything.
 Because it never takes the daemon's lock, it stays up while the daemon is
 down. See [ADR
 0060](adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md).
 
 > **The Dashboard is unauthenticated.** Anyone who can reach the listen
 > address can read the daemon's state and history: issue numbers, Chores,
-> revisions, settle notes, host, and pid. The default binds loopback
+> revisions, settle notes, host, pid, and every Child log the Events file
+> still names. The default binds loopback
 > only; `--listen 0.0.0.0:8099` serves the whole LAN. There is no
 > authentication yet, so do not expose it beyond a network you trust. It
 > prints one line on start saying so and naming the bound address. The
@@ -7695,7 +7718,7 @@ nix run .#dashboard -- --listen 0.0.0.0:8099
 
 | Flag | Default | Meaning |
 |---|---|---|
-| `--checkout` | git root of the working directory | The daemon's checkout. The status file is read from that checkout's git dir, resolved with `git rev-parse --absolute-git-dir`, the same way the daemon resolves it. |
+| `--checkout` | git root of the working directory | The daemon's checkout. The status file is read from that checkout's git dir, resolved with `git rev-parse --absolute-git-dir`, the same way the daemon resolves it. Child log paths resolve against the checkout itself, so give its root. |
 | `--listen` | `127.0.0.1:8099` | Address to serve on. |
 
 A taken port exits 1 with `dashboard: listen <addr>: bind: address already
@@ -7729,6 +7752,34 @@ neither drops nor repeats a row. A daemon that stops, whether its status
 file goes away or its pid dies, and one that comes back both show up
 live, with no Dashboard restart. While the stream is down the heading
 reads "(reconnecting)", and the browser reconnects on its own.
+
+**Dispatch drill-in.** Clicking a busy slot card, or a timeline row whose
+Dispatch's `child_start` the scan saw, opens that Dispatch's drill-in,
+`/dispatch?slot=N&at=T`; a row whose `child_start` lies beyond the two
+Events generations gets no link. A Dispatch is keyed by its slot plus its
+`child_start` time: the drill-in shows the `child_start` on slot `N` at
+exactly `T` (the slot's latest when `at` is absent), and a `T` that is not
+a `child_start` time on that slot is a 404. Every timeline row links with
+the `child_start` time of the Dispatch it belongs to, not its own. Event
+times have one-second resolution, so when two `child_start`s on one slot
+share a second, `&n=K` picks the one in position `K` (from 0) within that
+second; a `K` out of range is a 404. The
+drill-in shows the Dispatch's kind, start, revision, issue(s) or Chore, last
+phase, outcome and note, and exit, read from the events that followed it
+on that slot. Its Child log tab follows the **Child log** (see under
+[Daemon](#daemon)) live: it streams the bytes already written, then
+each append, over Server-Sent Events from `/log?path=<child_log>`. It
+opens at the end, stops following when you scroll up (a "jump to end"
+button resumes), and renders ANSI colour. The Box's stream-JSON lines
+(JSON objects with a string `type`) are hidden behind a "show all"
+toggle, so the launcher's own lines aren't buried. A named log whose
+file no longer exists reads "log pruned"; a `child_start` without
+`child_log`, from a daemon that predates Child logs, says it names none.
+`/log` serves only a path some `child_start` in either Events generation
+names, exactly; anything else, a `..` traversal included, is a 404. So
+a Child log becomes unreachable once its `child_start` rotates out of
+the Events file, and the Dashboard serves nothing else under the
+checkout.
 
 Four cases are shown rather than hidden. The page reads "no Daemon
 running" when the status file is absent or its pid is not live on this
