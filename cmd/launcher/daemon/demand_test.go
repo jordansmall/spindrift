@@ -351,11 +351,11 @@ func TestHostRunnerDemand(t *testing.T) {
 	}), allDemandKinds)
 	r := mustHostRunner(t, hostRunnerConfig{env: []string{}, demand: src})
 
-	d, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Work), false)
+	d, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Work), false, nil)
 	if err != nil || d.Ready != 1 {
 		t.Errorf("Demand(work) = %+v, %v; want Ready 1, nil", d, err)
 	}
-	if _, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Butler), false); err == nil {
+	if _, err := r.Demand(context.Background(), daemon.KindOf(dispatchkind.Butler), false, nil); err == nil {
 		t.Error("Demand(butler) = nil error, want an error: no demand source")
 	}
 }

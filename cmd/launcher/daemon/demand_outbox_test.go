@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -230,7 +231,7 @@ func (r *wiringRunner) ResolveTip(context.Context) (daemon.Tip, error) {
 	return daemon.Tip{Revision: "rev1"}, nil
 }
 
-func (r *wiringRunner) Demand(_ context.Context, k daemon.Kind, fresh bool) (daemon.Demand, error) {
+func (r *wiringRunner) Demand(_ context.Context, k daemon.Kind, fresh bool, _ map[dispatchkey.Key]bool) (daemon.Demand, error) {
 	n, err := r.demand[k].CountReady(fresh)
 	return daemon.Demand{Ready: n}, err
 }
@@ -315,7 +316,7 @@ func TestHostRunnerDemand_OutboxNamesItsBundles(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{env: []string{}, demand: map[daemon.Kind]forge.DemandCounter{recoverKind: c}})
 	demand := func() daemon.Demand {
 		t.Helper()
-		d, err := r.Demand(context.Background(), recoverKind, false)
+		d, err := r.Demand(context.Background(), recoverKind, false, nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -105,6 +105,8 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 	f := &demandFlight{done: make(chan struct{})}
 	p.demandFlights[kind] = f
 	claims := p.st.sched.claimsOf(kind)
+	// Snapshotted with claims so the count excludes what a live child holds.
+	live := liveKeys(&p.st)
 	fresh := p.st.sched.View(kind, p.clk.Now()).Fresh
 	p.mu.Unlock()
 
@@ -118,7 +120,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		close(f.done)
 	}()
 
-	d, err := p.r.Demand(ctx, kind, fresh)
+	d, err := p.r.Demand(ctx, kind, fresh, live)
 	now := p.clk.Now()
 	if err != nil {
 		var rl *forge.RateLimitError

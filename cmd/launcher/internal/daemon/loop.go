@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/report"
 )
@@ -68,8 +69,11 @@ type Runner interface {
 	ResolveTip(ctx context.Context) (Tip, error)
 	// Demand counts the startable items a child of kind could claim. Only
 	// asked for a kind with a Config.ProbeIntervals entry (ADR 0059). fresh
-	// tells an adapter that caches to skip its cache and re-read.
-	Demand(ctx context.Context, kind Kind, fresh bool) (Demand, error)
+	// tells an adapter that caches to skip its cache and re-read. inFlight is
+	// the keys the pool's own children hold at probe time: a source whose work
+	// those children can hold (the host outbox) leaves them out of its count,
+	// a tracker counter ignores it. Read-only; never retain it.
+	Demand(ctx context.Context, kind Kind, fresh bool, inFlight map[dispatchkey.Key]bool) (Demand, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
 }
 

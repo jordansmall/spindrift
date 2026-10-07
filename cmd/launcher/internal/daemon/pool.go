@@ -392,6 +392,19 @@ func occupancy(s *state) Occupancy {
 	return Occupancy{Running: running, Starting: starting}
 }
 
+// liveKeys is the set of dispatch keys the pool's running children hold. A
+// finished slot's key is zeroed by finishChild and its phase leaves
+// PhaseRunning, so only live claims appear. The caller holds p.mu.
+func liveKeys(s *state) map[dispatchkey.Key]bool {
+	keys := make(map[dispatchkey.Key]bool)
+	for _, sl := range s.slots {
+		if sl.phase == PhaseRunning && !sl.flight.key.IsZero() {
+			keys[sl.flight.key] = true
+		}
+	}
+	return keys
+}
+
 // decide asks the Schedule what a free slot should do at now. A pure read,
 // not a mutate: now is sampled by the caller before the lock (never call the
 // Clock under it), and the answer is provisional — a sibling can start or

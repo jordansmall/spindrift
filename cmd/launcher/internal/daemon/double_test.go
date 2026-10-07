@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sync"
 	"testing"
@@ -101,6 +102,11 @@ type scriptedRunner struct {
 	demandCalls map[Kind]int
 	demandFresh map[Kind][]bool // the fresh flag of each Demand call, in order
 	onDemand    func(ctx context.Context, kind Kind)
+	// outbox models a host-outbox-backed kind (setOutbox): its Demand names and counts
+	// the keys not in the probe's inFlight; exclusive with demand for a kind
+	// (the setters panic on both). demandInFlight
+	outbox         map[Kind][]dispatchkey.Key
+	demandInFlight map[Kind][]map[dispatchkey.Key]bool
 
 	mu           sync.Mutex
 	resolveCalls int
@@ -1157,6 +1163,9 @@ func TestTestClockOnSleepFires(t *testing.T) {
 func (r *scriptedRunner) setDemand(kind Kind, ready int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if _, ok := r.outbox[kind]; ok {
+		panic("scriptedRunner: setDemand on a kind already scripted with setOutbox")
+	}
 	if r.demand == nil {
 		r.demand = make(map[Kind]Demand)
 	}
@@ -1194,7 +1203,7 @@ func (r *scriptedRunner) demandFreshCalls(kind Kind) []bool {
 
 // Demand answers from setDemand/setDemandErr: an unscripted kind has no
 // demand, never an error.
-func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool) (Demand, error) {
+func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool, inFlight map[dispatchkey.Key]bool) (Demand, error) {
 	r.mu.Lock()
 	if r.demandCalls == nil {
 		r.demandCalls = make(map[Kind]int)
@@ -1202,6 +1211,10 @@ func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool) (Dem
 	}
 	r.demandCalls[kind]++
 	r.demandFresh[kind] = append(r.demandFresh[kind], fresh)
+	if r.demandInFlight == nil {
+		r.demandInFlight = make(map[Kind][]map[dispatchkey.Key]bool)
+	}
+	r.demandInFlight[kind] = append(r.demandInFlight[kind], maps.Clone(inFlight))
 	hook := r.onDemand
 	r.mu.Unlock()
 	if hook != nil {
@@ -1212,7 +1225,38 @@ func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool) (Dem
 	if err := r.demandErr[kind]; err != nil {
 		return Demand{}, err
 	}
+	if keys, ok := r.outbox[kind]; ok {
+		var ids []string
+		for _, k := range keys {
+			if !inFlight[k] {
+				ids = append(ids, k.String()+"@bundle")
+			}
+		}
+		return Demand{Ready: len(ids), IDs: ids}, nil
+	}
 	return r.demand[kind], nil
+}
+
+// setOutbox makes kind an outbox-backed kind holding bundles for keys: its
+// Demand names (and counts) those the probe's inFlight does not hold, as the
+// host outbox does.
+func (r *scriptedRunner) setOutbox(kind Kind, keys ...dispatchkey.Key) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.demand[kind]; ok {
+		panic("scriptedRunner: setOutbox on a kind already scripted with setDemand")
+	}
+	if r.outbox == nil {
+		r.outbox = make(map[Kind][]dispatchkey.Key)
+	}
+	r.outbox[kind] = keys
+}
+
+// demandInFlightCalls reports the inFlight set of each Demand call for kind.
+func (r *scriptedRunner) demandInFlightCalls(kind Kind) []map[dispatchkey.Key]bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.demandInFlight[kind])
 }
 
 // pickKind is the test view of decide: the kind a free slot would start now.
