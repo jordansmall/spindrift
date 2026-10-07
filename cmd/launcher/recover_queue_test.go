@@ -14,7 +14,9 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/seambundle"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // queueRecoverFixture is a github-shaped tracker plus a working dir whose
@@ -287,6 +289,14 @@ func TestRecoverQueueOne_PRLessForgeRefuses(t *testing.T) {
 // first checkpoint. The returned func is safe to call more than once.
 func withControlledStop(t *testing.T) (stop func()) {
 	t.Helper()
+	stop, _ = withControlledSignals(t)
+	return stop
+}
+
+// withControlledSignals is withControlledStop plus the second-signal abort
+// func, equally safe to call more than once.
+func withControlledSignals(t *testing.T) (stop, abort func()) {
+	t.Helper()
 	stopCh := make(chan struct{})
 	abortCh := make(chan struct{})
 	orig := installStopSignal
@@ -294,8 +304,9 @@ func withControlledStop(t *testing.T) (stop func()) {
 		return stopCh, abortCh, func() {}
 	}
 	t.Cleanup(func() { installStopSignal = orig })
-	var once sync.Once
-	return func() { once.Do(func() { close(stopCh) }) }
+	var stopOnce, abortOnce sync.Once
+	return func() { stopOnce.Do(func() { close(stopCh) }) },
+		func() { abortOnce.Do(func() { close(abortCh) }) }
 }
 
 // stopOnPRLookup stops the run from inside the PR lookup. It embeds PRForge as
@@ -328,8 +339,122 @@ func (w stopAfterClaim) TransitionState(num string, from, to forge.DispatchState
 
 func (x *queueRecoverFixture) runOn(t *testing.T, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities) int {
 	t.Helper()
-	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), io.Discard, io.Discard)
+	return x.runOnSettler(t, it, cf, caps, newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf))
+}
+
+func (x *queueRecoverFixture) runOnSettler(t *testing.T, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, s settle.WorkSettler) int {
+	t.Helper()
+	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, nil), s, io.Discard, io.Discard)
 	return exitCodeFor(err)
+}
+
+// stopInSettle drain-stops the run from inside the settle, then settles as
+// normal, so the stop lands after the settle began but before its verdict.
+type stopInSettle struct {
+	settle.WorkSettler
+	stop func()
+}
+
+func (w stopInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) bool {
+	w.stop()
+	return w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
+}
+
+// A drain stop does not abandon the settle, so a settle that then fails to
+// land must still park the issue and count the attempt before the stop exit
+// (#4679); otherwise it is stranded on in-progress.
+func TestRecoverQueueOne_StopDuringFailedSettleParksAndExitsSeven(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	stop := withControlledStop(t)
+	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
+
+	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+
+	if code != exitSignalledStop {
+		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	}
+	got := x.labels(t, "42")
+	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
+		t.Errorf("labels = %v, want %q and not %q", got, x.c.failedLabel, x.c.inProgressLabel)
+	}
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 1 {
+		t.Errorf("attempt count = %d, want 1", rec.Count)
+	}
+}
+
+// abortInSettle aborts from inside the settle and waits for the watcher's
+// reclaim to start, so the abort provably lands while the issue is in flight.
+type abortInSettle struct {
+	settle.WorkSettler
+	abort  func()
+	killed <-chan string
+}
+
+func (w abortInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) bool {
+	w.abort()
+	select {
+	case <-w.killed:
+	case <-time.After(5 * time.Second):
+		panic("timed out waiting for the watcher to reclaim " + num)
+	}
+	return w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
+}
+
+// An abort abandons the settle and reclaims the issue to dispatchable, so a
+// settle that fails under it must not also park the issue or count an attempt.
+func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	_, abort := withControlledSignals(t)
+	rf := newKillHook(runner.NewFake())
+	s := abortInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort, killed: rf.killed}
+
+	err := recoverQueueOne(x.c, x.fc, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
+	code := exitCodeFor(err)
+
+	if code != exitSignalledStop {
+		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	}
+	got := x.labels(t, "42")
+	if !slices.Contains(got, x.c.label) {
+		t.Errorf("labels = %v, want dispatchable %q", got, x.c.label)
+	}
+	for _, unwanted := range []string{x.c.failedLabel, x.c.inProgressLabel} {
+		if slices.Contains(got, unwanted) {
+			t.Errorf("labels = %v, want no %q", got, unwanted)
+		}
+	}
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 0 {
+		t.Errorf("attempt count = %d, want 0", rec.Count)
+	}
+}
+
+func TestRecoverQueueOne_StopDuringLandingSettleRemovesRecordAndExitsSeven(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-time.Hour)})
+	stop := withControlledStop(t)
+	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
+
+	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+
+	if code != exitSignalledStop {
+		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	}
+	if _, err := os.Stat(recoverAttemptsPath(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("record stat err = %v, want not-exist", err)
+	}
 }
 
 // A stop landing during the eligibility reads is only seen by the one handler
