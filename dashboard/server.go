@@ -40,7 +40,7 @@ func newServer(checkout, statusPath string) *server {
 		alive:      processAlive,
 		tmpl: template.Must(template.New("index.html.tmpl").
 			Funcs(template.FuncMap{"historyLimit": func() int { return historyLimit }}).
-			ParseFS(webFS, "web/index.html.tmpl")),
+			ParseFS(webFS, "web/index.html.tmpl", "web/dispatch.html.tmpl")),
 		poll:   defaultPoll,
 		static: http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 	}
@@ -55,6 +55,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/":
 		s.page(w)
+	case r.URL.Path == "/dispatch":
+		s.dispatch(w, r)
 	case r.URL.Path == "/events":
 		s.events(w, r)
 	case r.URL.Path == "/log":
@@ -73,7 +75,7 @@ func (s *server) page(w http.ResponseWriter) {
 	w.Header().Set("Cache-Control", "no-store")
 	if err := s.tmpl.Execute(w, v); err != nil {
 		// Headers are gone; all that is left is to cut the page short.
-		fmt.Fprintf(w, "<!-- render error: %v -->", err)
+		writeRenderError(w, err)
 	}
 }
 
@@ -207,12 +209,7 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		if sl.Busy {
 			v.Busy++
 		}
-		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Elapsed: "unknown"}
-		if len(sl.Revision) > revisionLen {
-			sv.Rev = sl.Revision[:revisionLen]
-		} else {
-			sv.Rev = sl.Revision
-		}
+		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Rev: shortRev(sl.Revision), Elapsed: "unknown"}
 		for _, is := range sl.Issues {
 			sv.Subject = append(sv.Subject, issueLabel(is))
 		}

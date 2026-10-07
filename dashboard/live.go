@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -93,7 +92,7 @@ func (s *server) render(name string, data any) string {
 	var buf bytes.Buffer
 	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
 		log.Printf("dashboard: render %s: %v", name, err)
-		fmt.Fprintf(&buf, "<!-- render error: %v -->", err)
+		writeRenderError(&buf, err)
 	}
 	return buf.String()
 }

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dispatch on slot {{.Slot}} - Spindrift Dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/dispatch.js" defer></script>
+</head>
+<body>
+<main class="dispatch">
+  <p><a href="/">&larr; Dashboard</a></p>
+  <header class="dispatch-head">
+    <h1>slot {{.Slot}}{{if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}</h1>
+    <div class="facts">
+      <div><span class="label">started</span><time>{{.Started}}</time></div>
+      {{- if .Rev}}<div><span class="label">revision</span><code>{{.Rev}}</code></div>{{end}}
+      {{- if .Phase}}<div><span class="label">phase</span><span>{{.Phase}}</span></div>{{end}}
+      {{- if .Exit}}<div><span class="label">exit</span><span>{{.Exit}}</span></div>{{end}}
+    </div>
+    {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}<span class="chip">{{$s}}</span>{{end}}</div>{{end}}
+    {{- if .Outcome}}<div><span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span></div>{{end}}
+    {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
+  </header>
+  <nav class="tabs">
+    <button type="button" class="tab active" data-tab="child-log">Child log</button>
+  </nav>
+  <section class="tabbody" id="tab-child-log">
+    {{- if .ChildLog}}
+    <div class="logbar">
+      <label><input type="checkbox" id="show-all"> show all</label>
+      <span id="follow-state"></span>
+    </div>
+    <pre class="log" id="log" data-src="/log?path={{.ChildLog}}"></pre>
+    {{- else}}
+    <p class="muted">This Dispatch's child_start names no Child log (the Daemon predates Child logs).</p>
+    {{- end}}
+  </section>
+</main>
+</body>
+</html>

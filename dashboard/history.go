@@ -39,6 +39,8 @@ type Event struct {
 	Note     string `json:"note"`
 	Failures *int   `json:"failures"`
 	ChildLog string `json:"child_log"`
+	Exit     *int   `json:"exit"`
+	Revision string `json:"revision"`
 }
 
 // historyEntry is one rendered timeline row.
@@ -51,6 +53,40 @@ type historyEntry struct {
 	Outcome string // settled's state, which styles the row
 	Detail  string
 	Note    string
+	// Started and StartN name the Dispatch the row belongs to: the time of its
+	// child_start and how many earlier child_starts on the slot share that time.
+	// Started is empty when the scan saw no child_start for the slot.
+	Started string
+	StartN  int
+}
+
+// dispatchKey is the owning child_start of a slot's latest Dispatch.
+type dispatchKey struct {
+	started string
+	n       int
+}
+
+// dispatchOwners tracks each slot's latest child_start across a scan, so every
+// later row on the slot can name its Dispatch. Event times have one-second
+// resolution, so a row's own time cannot: a child_finish and the next
+// child_start can share a second, and so can two child_starts.
+type dispatchOwners map[int]dispatchKey
+
+// claim sets e's owning Dispatch from ev, which must be e's event.
+func (o dispatchOwners) claim(ev Event, e *historyEntry) {
+	if ev.Slot == nil {
+		return
+	}
+	if ev.Event == "child_start" {
+		k := dispatchKey{started: ev.Time}
+		if prev, ok := o[*ev.Slot]; ok && prev.started == ev.Time {
+			k.n = prev.n + 1
+		}
+		o[*ev.Slot] = k
+	}
+	if k, ok := o[*ev.Slot]; ok {
+		e.Started, e.StartN = k.started, k.n
+	}
 }
 
 // timeline maps each event worth a row to what it adds to the row; the rest
@@ -125,6 +161,7 @@ type eventsFollower struct {
 	path   string
 	f      *os.File // nil until the current generation exists
 	offset int64
+	owners dispatchOwners
 }
 
 // openEvents returns the newest historyLimit timeline entries (newest first,
@@ -136,7 +173,7 @@ func openEvents(eventsPath string) (*eventsFollower, []historyEntry, error) {
 	cur, curErr := os.Open(eventsPath)
 	older, olderErr := os.Open(eventsPath + rotatedSuffix)
 	older = dropRotatedAlias(older, cur)
-	fol := &eventsFollower{path: eventsPath}
+	fol := &eventsFollower{path: eventsPath, owners: dispatchOwners{}}
 	var chrono []historyEntry
 	var errs []error
 	for _, g := range []struct {
@@ -159,7 +196,7 @@ func openEvents(eventsPath string) (*eventsFollower, []historyEntry, error) {
 		if g.rotated {
 			opts |= scanFinal
 		}
-		chrono, n, err = scanTimeline(chrono, g.f, opts)
+		chrono, n, err = scanTimeline(chrono, g.f, fol.owners, opts)
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -247,7 +284,7 @@ func (fol *eventsFollower) drain(out []historyEntry, final bool) ([]historyEntry
 	if final {
 		opts = scanFinal
 	}
-	out, n, err := scanTimeline(out, io.NewSectionReader(fol.f, fol.offset, math.MaxInt64-fol.offset), opts)
+	out, n, err := scanTimeline(out, io.NewSectionReader(fol.f, fol.offset, math.MaxInt64-fol.offset), fol.owners, opts)
 	fol.offset += n
 	return out, err
 }
@@ -287,7 +324,7 @@ const (
 
 // scanTimeline appends r's timeline entries to entries and returns how many
 // bytes it consumed: through the last newline, or to EOF under scanFinal.
-func scanTimeline(entries []historyEntry, r io.Reader, opts scanOpts) ([]historyEntry, int64, error) {
+func scanTimeline(entries []historyEntry, r io.Reader, owners dispatchOwners, opts scanOpts) ([]historyEntry, int64, error) {
 	br := bufio.NewReader(r)
 	var consumed int64
 	for {
@@ -297,7 +334,9 @@ func scanTimeline(entries []historyEntry, r io.Reader, opts scanOpts) ([]history
 			consumed += int64(len(line))
 			var ev Event
 			if json.Unmarshal(line, &ev) == nil && timeline[ev.Event] != nil {
-				entries = append(entries, ev.entry())
+				e := ev.entry()
+				owners.claim(ev, &e)
+				entries = append(entries, e)
 				if opts&scanTrim != 0 && len(entries) > 2*historyLimit {
 					entries = append(entries[:0], entries[len(entries)-historyLimit:]...)
 				}
