@@ -40,12 +40,18 @@ type NextDue = report.NextDue
 //
 // gate does double duty: for an unprobed kind it is the no-work backoff, for
 // a probed kind only the jam gate (an empty queue is the Demand's job there,
-// and waits exactly one interval rather than growing).
+// and waits exactly one interval rather than growing). The exception is an
+// upper-bound kind: its count cannot see tracker state, so a child's exit 2
+// against a nonzero count grows the gate like an exit-driven kind's backoff.
 type kindSched struct {
 	interval time.Duration
 	gate     kindBackoff
 
 	reported bool
+	// upperBound marks a kind whose Demand count (the descriptor's
+	// DemandHostOutbox) over-counts: tracker-side checks run only in the child,
+	// so its exit 2 is the only evidence a counted item is not landable.
+	upperBound bool
 	// due is a child's report of when it next has work; zero until one
 	// reports, and again once a child runs.
 	due NextDue
@@ -53,7 +59,9 @@ type kindSched struct {
 	ready    int
 	probedAt time.Time // zero = never probed, or invalidated by a Continue
 	// readyAtJam is ready as of the jam; while jamBaselinePending it still
-	// holds the previous jam's count until the next accepted probe sets it.
+	// holds the previous jam's count until the next accepted probe sets it. For
+	// an upper-bound kind it also holds the no-work baseline: the count at the
+	// exit 2 that grew the gate.
 	readyAtJam int
 
 	// readyUnconfirmed is set while ready carries an adjustment no accepted
@@ -61,6 +69,8 @@ type kindSched struct {
 	readyUnconfirmed bool
 	// jamBaselinePending is set when a jam was recorded while readyUnconfirmed,
 	// so readyAtJam waits for the next accepted probe instead of taking ready.
+	// An upper-bound kind's no-work baseline never sets it: that baseline is
+	// taken from counted at once.
 	jamBaselinePending bool
 
 	// counted is the tracker's last probed count, set only by DemandProbed.
@@ -207,17 +217,20 @@ func newSchedule(kinds []Kind, reservation int, floor, idleCap time.Duration, pr
 		if !ok {
 			tracker = string(k)
 		}
-		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, idleCap), tracker: tracker, reported: kindReported(k) && probe[k] == 0}
+		src := kindDemandSource(k)
+		s.state[k] = kindSched{interval: probe[k], gate: newKindBackoff(floor, idleCap), tracker: tracker, reported: src == dispatchkind.DemandChildReported && probe[k] == 0, upperBound: src == dispatchkind.DemandHostOutbox}
 	}
 	return s
 }
 
-// kindReported reports that only a child of k knows when it next has work
-// (the descriptor's DemandChildReported), so the schedule learns it from the
-// child's report rather than a probe.
-func kindReported(k Kind) bool {
+// kindDemandSource is how k's Demand is learned; zero for a verb no descriptor
+// names, which matches no DemandSource.
+func kindDemandSource(k Kind) dispatchkind.DemandSource {
 	d, ok := dispatchkind.ByVerb(string(k))
-	return ok && d.DemandSource == dispatchkind.DemandChildReported
+	if !ok {
+		return 0
+	}
+	return d.DemandSource
 }
 
 func (k kindSched) probed() bool { return k.interval > 0 }
@@ -235,6 +248,13 @@ func (k kindSched) jamGated(now time.Time) bool {
 	return k.gate.jammedNow() && !k.gate.runnable(now)
 }
 
+// gated reports whether a probed kind's gate still holds at now: a jam, or for
+// an upper-bound kind a no-work backoff. Any other probed kind's no-work result
+// resets the gate, so only a jam can hold it.
+func (k kindSched) gated(now time.Time) bool {
+	return (k.gate.jammedNow() || k.upperBound) && !k.gate.runnable(now)
+}
+
 // startable reports whether a child of this kind may start at now, with
 // starting children yet to claim. A starting child's item is still counted in
 // ready, so a probed kind's children in discovery are capped at ready in
@@ -250,15 +270,16 @@ func (k kindSched) startable(now time.Time, starting int) bool {
 	if !k.probed() {
 		return k.gate.runnable(now)
 	}
-	return !k.jamGated(now) && !k.stale(now) && k.ready > starting
+	return !k.gated(now) && !k.stale(now) && k.ready > starting
 }
 
 // tipWait reports that only a moved tip can lift this kind's known due state.
 func (k kindSched) tipWait() bool { return k.due.OnTipMove }
 
 // deadline is the instant this kind next needs attention, for a kind that is
-// neither startable nor probe-due. Zero when it has none. Under a jam gate that
-// is the earlier of the next probe and the jam's end.
+// neither startable nor probe-due. Zero when it has none. Under a gate (a jam, or
+// an upper-bound kind's no-work backoff) that is the earlier of the next probe
+// and the gate's end.
 func (k kindSched) deadline(now time.Time) time.Time {
 	if k.paused(now) {
 		return k.limitedUntil
@@ -270,7 +291,7 @@ func (k kindSched) deadline(now time.Time) time.Time {
 		return k.gate.until
 	}
 	next := k.probedAt.Add(k.interval)
-	if k.jamGated(now) && k.gate.until.Before(next) {
+	if k.gated(now) && k.gate.until.Before(next) {
 		return k.gate.until
 	}
 	return next
@@ -357,8 +378,11 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 				// it; a moved tip or the jam's expiry still covers that. No
 				// jamGated check: readyAtJam is only read under a live gate.
 				ks.readyAtJam, ks.jamBaselinePending = e.Ready, false
-			case ks.jamGated(now) && e.Ready > ks.readyAtJam:
+			case ks.gated(now) && e.Ready > ks.readyAtJam:
 				ks.gate = ks.gate.reset()
+			case ks.upperBound && ks.gated(now) && e.Ready < ks.readyAtJam:
+				// A fall means the gated item left, so a later rise is a new one.
+				ks.readyAtJam = e.Ready
 			}
 		}
 		// Only a fresh probe answers the pending force: a conditional one
@@ -448,13 +472,20 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen 
 		// The child just consumed from the count; re-probe rather than trust it.
 		k.probedAt = time.Time{}
 	case ChildEmpty:
-		// The child's answer is a fresh observation: one interval of rest,
-		// not a growing backoff, so an empty queue never becomes a spawn loop.
-		k.gate = k.gate.reset()
 		k.ready, k.probedAt, k.readyUnconfirmed = 0, now, true
 		if k.counted > 0 {
 			k.fresh = true
 		}
+		if k.upperBound && k.counted > 0 {
+			// A count with nothing landable behind it would restart a child every
+			// interval; back off, lifting only on a count above this one.
+			k.gate = k.gate.markNoWorkUnder(now, false /* jammed */, gateGen)
+			k.readyAtJam, k.jamBaselinePending = k.counted, false
+			break
+		}
+		// The child's answer is a fresh observation: one interval of rest,
+		// not a growing backoff, so an empty queue never becomes a spawn loop.
+		k.gate = k.gate.reset()
 	case ChildJammed:
 		k.gate, _ = k.gate.markNoWork(now, true)
 		// The child swaps the label before the daemon folds its Claimed, so an
@@ -511,10 +542,11 @@ func (s Schedule) with(kind Kind, ks kindSched) Schedule {
 // KindView is a read-only per-kind picture for status and events.
 type KindView struct {
 	// Gated reports the kind cannot start at now, with Until the instant that
-	// ends it: the backoff for an unprobed kind, the jam or the fresh-empty
-	// Demand for a probed one, the reported due instant for a child-reported
-	// one. Until is zero when not Gated, never a stale deadline, and also zero
-	// for a Gated kind waiting only on a tip move: no clock lifts it.
+	// ends it: the backoff for an unprobed kind, the jam (or an upper-bound
+	// kind's no-work backoff) or the fresh-empty Demand for a probed one, the
+	// reported due instant for a child-reported one. Until is zero when not
+	// Gated, never a stale deadline, and also zero for a Gated kind waiting
+	// only on a tip move: no clock lifts it.
 	// A rate-limit pause also Gates, with Until the later of its end and any
 	// other gate's.
 	Gated  bool
@@ -580,6 +612,8 @@ func (ks kindSched) view(now time.Time) KindView {
 	switch {
 	case ks.jamGated(now):
 		v.Gated, v.Until, v.JamUntil = true, ks.gate.until, ks.gate.until
+	case ks.gated(now):
+		v.Gated, v.Until = true, ks.gate.until
 	case !ks.stale(now) && ks.ready == 0:
 		v.Gated, v.Until = true, v.NextProbe
 	}

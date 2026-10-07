@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -13,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
+	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/trackerbuild"
 )
 
@@ -21,22 +24,26 @@ import (
 // connection but never answers would stall the kind's probe for good.
 const jiraProbeTimeout = 30 * time.Second
 
-// demandSources maps each kind the daemon schedules from tracker demand
-// (ADR 0059) to the counter that answers its Demand probe. A kind absent
-// from the map stays exit-driven.
+// demandSources maps each kind the daemon schedules from host-side demand
+// (ADR 0059: a tracker probe or the outbox count) to the counter that answers
+// its Demand probe. A kind absent from the map stays exit-driven.
 type demandSources map[daemon.Kind]forge.DemandCounter
 
 // missingSources maps each probed kind that got no Demand source to the reason
 // it stays exit-driven.
 type missingSources map[daemon.Kind]string
 
-// buildDemandSources builds a demand counter for each kind in kinds whose
-// descriptor row says DemandTrackerProbe, from the same settings a child
-// resolves ISSUE_TRACKER, the tracker's own knobs and the work labels from; a
-// blank ISSUE_TRACKER is github, as the launcher defaults it. An unknown
-// tracker or a missing knob yields no source, never an error: the kind then
-// stays exit-driven. The second result names, per probed kind left without a
-// source, why (never a token or secret value); warnUnprobedKinds reports it.
+// buildDemandSources builds the Demand counter of each kind in kinds the
+// daemon schedules from host-side demand, per its descriptor row. A
+// DemandTrackerProbe kind counts against ISSUE_TRACKER, resolved with the
+// tracker's own knobs and the work labels from the same settings a child uses
+// (a blank ISSUE_TRACKER is github, as the launcher defaults it); an unknown
+// tracker or a missing knob yields no source, never an error, and the kind then
+// stays exit-driven. A DemandHostOutbox kind always gets its outbox counter: it
+// reads only the host filesystem, so a misconfigured tracker cannot take it
+// away. A DemandChildReported kind never gets one. The second result names, per
+// tracker-probed kind left without a source, why (never a token or secret
+// value); warnUnprobedKinds reports it.
 //
 // FORGEJO_TOKEN and JIRA_TOKEN are read as plain knobs; a token supplied only
 // through its -file or -cmd form is invisible here, so that deployment stays
@@ -51,15 +58,34 @@ type missingSources map[daemon.Kind]string
 // way a child does.
 func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSources, missingSources) {
 	var probed []*dispatchkind.Descriptor
+	sources := demandSources{}
 	for _, k := range kinds {
-		if d, ok := dispatchkind.ByVerb(string(k)); ok && d.DemandSource == dispatchkind.DemandTrackerProbe {
+		d, ok := dispatchkind.ByVerb(string(k))
+		if !ok {
+			continue
+		}
+		switch d.DemandSource {
+		case dispatchkind.DemandTrackerProbe:
 			probed = append(probed, d)
+		case dispatchkind.DemandHostOutbox:
+			sources[daemon.KindOf(d)] = newOutboxDemand(doc)
+		case dispatchkind.DemandChildReported:
+			// No host-side source: only a child run knows, so the kind stays
+			// exit-driven.
+		default:
+			panic(fmt.Sprintf("daemon: kind %s has unhandled DemandSource %d", k, d.DemandSource))
 		}
 	}
 	if len(probed) == 0 {
-		return nil, nil
+		return sources, nil
 	}
+	tracked, missing := buildTrackerSources(doc, probed)
+	maps.Copy(sources, tracked)
+	return sources, missing
+}
 
+// buildTrackerSources is the DemandTrackerProbe half of buildDemandSources.
+func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descriptor) (demandSources, missingSources) {
 	// Every knob is read whatever the tracker, so one Settings feeds whichever
 	// adapter ISSUE_TRACKER names. The branch prefix is left blank: it only names
 	// agent branches, which counting never touches.
@@ -111,6 +137,60 @@ func buildDemandSources(doc *inputdoc.Document, kinds []daemon.Kind) (demandSour
 	return sources, missing
 }
 
+// outboxDemandInterval paces the outbox scan: a local directory read, so as
+// cheap as the local tracker's.
+const outboxDemandInterval = 20 * time.Second
+
+// outboxDemand answers a DemandHostOutbox kind's Demand probe from the host
+// filesystem alone: no tracker call and no child (ADR 0059). The count is an
+// upper bound (recoverrecord.CountEligible), so a child may still exit 2.
+type outboxDemand struct {
+	maxAttempts int
+	backoffUnit time.Duration
+	now         func() time.Time
+}
+
+// newOutboxDemand resolves the attempt bound and backoff as a recover child
+// does; the outbox is read relative to the daemon's cwd, which every child
+// inherits (RunChild sets no cmd.Dir).
+func newOutboxDemand(doc *inputdoc.Document) *outboxDemand {
+	return &outboxDemand{
+		maxAttempts: launcherInt(doc, "MAX_RECOVER_ATTEMPTS", os.Getenv("MAX_RECOVER_ATTEMPTS")),
+		backoffUnit: time.Duration(launcherInt(doc, "TRANSIENT_BACKOFF_SECS", os.Getenv("TRANSIENT_BACKOFF_SECS"))) * time.Second,
+		now:         time.Now,
+	}
+}
+
+func (o *outboxDemand) CountReady(bool) (int, error) {
+	return recoverrecord.CountEligible("", o.maxAttempts, o.backoffUnit, o.now())
+}
+
+func (o *outboxDemand) ProbeInterval() time.Duration { return outboxDemandInterval }
+
+// launcherInt resolves key as the launcher's atoiSchema does for a child: a
+// positive integer, else the default, which is the document's own value for
+// key parsed with strconv.Atoi (so a document "0" or an unparseable value is
+// 0, not the schema default) or, absent from the document, the schema default.
+// A document value that counts as a setting strips the ambient env from the
+// child, so it never competes with ambient. Keep in step with atoi,
+// atoiSchema and schemaDefault in cmd/launcher/main.go.
+func launcherInt(doc *inputdoc.Document, key, ambient string) int {
+	def := inputdoc.SchemaDefault(key)
+	if doc != nil {
+		if v, ok := doc.Settings[key]; ok {
+			def = v
+		}
+		if _, counted := doc.Setting(key); counted {
+			ambient = ""
+		}
+	}
+	d, _ := strconv.Atoi(def)
+	if n, err := strconv.Atoi(ambient); err == nil && n > 0 {
+		return n
+	}
+	return d
+}
+
 // allMissing is the missing result when no probed kind can have a source.
 func allMissing(probed []*dispatchkind.Descriptor, reason string) missingSources {
 	missing := make(missingSources, len(probed))
@@ -158,8 +238,11 @@ func issueTrackerName(doc *inputdoc.Document) string {
 	return childKnob(doc, "ISSUE_TRACKER", os.Getenv("ISSUE_TRACKER"))
 }
 
-// trackers is daemon.Config.Trackers for src: every probed kind counts against
-// the one ISSUE_TRACKER, so they share a rate-limit pause (ADR 0059).
+// trackers is daemon.Config.Trackers for src: every kind with a Demand source
+// counts against the one ISSUE_TRACKER, so they share a rate-limit pause (ADR
+// 0059). The outbox kind shares it although its count never calls the tracker:
+// each child it starts does (ListIssues, label swaps, merge), so it must not
+// keep starting while the tracker is paused.
 func trackers(src demandSources, doc *inputdoc.Document) map[daemon.Kind]string {
 	name := issueTrackerName(doc)
 	out := make(map[daemon.Kind]string, len(src))

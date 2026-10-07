@@ -1282,3 +1282,125 @@ func TestScheduleProbedEmptyBurstStillResets(t *testing.T) {
 		t.Fatalf("probed empty burst set %d gates, want 0", got)
 	}
 }
+
+var schedRecover = KindOf(dispatchkind.Recover)
+
+// upperBoundSchedule probes recover (an upper-bound kind) and work (a tracker
+// kind) at the same interval.
+func upperBoundSchedule() Schedule {
+	return newSchedule([]Kind{schedRecover, schedWork}, 0, schedFloor, schedCap, map[Kind]time.Duration{
+		schedRecover: schedInterval, schedWork: schedInterval,
+	}, nil)
+}
+
+// An upper-bound kind's exit 2 against a nonzero count grows the gate instead
+// of resting one interval: re-probing the same count must not start it again
+// until the gate lapses, and the gate doubles up to the cap.
+func TestScheduleUpperBoundEmptyBacksOffAndCountCannotRestart(t *testing.T) {
+	s := upperBoundSchedule()
+	now := schedT0
+	var waits []time.Duration
+	for i := 0; i < 4; i++ {
+		s = schedObserve(t, s, now, DemandProbed{Kind: schedRecover, Ready: 1})
+		if d := s.Decide(now, Occupancy{}); d != (Start{Kind: schedRecover}) {
+			t.Fatalf("round %d: %#v, want Start", i, d)
+		}
+		s = schedObserve(t, s, now, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+		v := s.View(schedRecover, now)
+		if !v.Gated || v.Jammed {
+			t.Fatalf("round %d: Gated=%v Jammed=%v, want a gated, unjammed kind", i, v.Gated, v.Jammed)
+		}
+		waits = append(waits, v.Until.Sub(now))
+		// The same count re-probed inside the gate must not start it.
+		mid := now.Add(v.Until.Sub(now) / 2)
+		s = schedObserve(t, s, mid, DemandProbed{Kind: schedRecover, Ready: 1})
+		if _, started := s.Decide(mid, Occupancy{}).(Start); started {
+			t.Fatalf("round %d: started on an unchanged count under the gate", i)
+		}
+		now = v.Until
+	}
+	want := []time.Duration{schedFloor, 2 * schedFloor, 4 * schedFloor, 4 * schedFloor}
+	if !reflect.DeepEqual(waits, want) {
+		t.Fatalf("gate waits = %v, want %v", waits, want)
+	}
+}
+
+func TestScheduleUpperBoundGateHoldsAndLiftsOnRise(t *testing.T) {
+	gated := func() Schedule {
+		s := upperBoundSchedule()
+		s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedRecover, Ready: 2})
+		// Two empties: the gate is now 2s, longer than the probe rest.
+		s = schedObserve(t, s, schedT0, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+		s = schedObserve(t, s, schedAt(schedFloor), ChildDone{Kind: schedRecover, Result: ChildEmpty})
+		return s
+	}
+	now := schedAt(schedFloor + schedFloor/2)
+	for _, tt := range []struct {
+		name      string
+		probed    int
+		wantStart bool
+	}{
+		{"count holds", 2, false},
+		{"count falls", 1, false},
+		{"count rises", 3, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schedObserve(t, gated(), now, DemandProbed{Kind: schedRecover, Ready: tt.probed})
+			if _, started := s.Decide(now, Occupancy{}).(Start); started != tt.wantStart {
+				t.Fatalf("started = %v, want %v", started, tt.wantStart)
+			}
+		})
+	}
+
+	t.Run("falls then rises past the lower count", func(t *testing.T) {
+		s := schedObserve(t, gated(), now, DemandProbed{Kind: schedRecover, Ready: 0})
+		s = schedObserve(t, s, now, DemandProbed{Kind: schedRecover, Ready: 1})
+		if d := s.Decide(now, Occupancy{}); d != (Start{Kind: schedRecover}) {
+			t.Fatalf("%#v, want Start: a new bundle after the old one left", d)
+		}
+	})
+}
+
+func TestScheduleUpperBoundGateParksUntilItEnds(t *testing.T) {
+	s := upperBoundSchedule()
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 0}, DemandProbed{Kind: schedRecover, Ready: 1})
+	s = schedObserve(t, s, schedT0, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+	s = schedObserve(t, s, schedT0, ChildDone{Kind: schedRecover, Result: ChildEmpty}, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+	// GateGen 0 was the generation before any gate; the burst's later results
+	// are absorbed, so the gate is 1s, not 4s.
+	p, ok := s.Decide(schedAt(schedFloor/2), Occupancy{}).(Park)
+	if !ok || p.TipPoll || !p.Until.Equal(schedAt(schedFloor)) {
+		t.Fatalf("Decide = %#v, want a non-tip Park until the gate ends at %v", p, schedAt(schedFloor))
+	}
+}
+
+// ChildContinue resets an upper-bound gate; a tracker-probed kind keeps its
+// one-interval rest and never grows a gate.
+func TestScheduleUpperBoundContinueResetsAndTrackerKindKeepsOneIntervalRest(t *testing.T) {
+	s := upperBoundSchedule()
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedRecover, Ready: 3},
+		ChildDone{Kind: schedRecover, Result: ChildEmpty})
+	if !s.View(schedRecover, schedT0).Gated {
+		t.Fatal("setup: upper-bound kind not gated")
+	}
+	s = schedObserve(t, s, schedT0, ChildDone{Kind: schedRecover, Result: ChildContinue})
+	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedRecover, Ready: 3})
+	if d := s.Decide(schedT0, Occupancy{}); d != (Start{Kind: schedRecover}) {
+		t.Fatalf("after Continue: %#v, want Start", d)
+	}
+	s = schedObserve(t, s, schedT0, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+	if p := s.View(schedRecover, schedT0).Until; p.Sub(schedT0) != schedFloor {
+		t.Fatalf("gate after Continue then Empty = %v, want the floor", p.Sub(schedT0))
+	}
+
+	w := upperBoundSchedule()
+	w = schedObserve(t, w, schedT0, DemandProbed{Kind: schedWork, Ready: 3}, ChildDone{Kind: schedWork, Result: ChildEmpty})
+	if v := w.View(schedWork, schedT0); v.Jammed || !v.Until.Equal(schedAt(schedInterval)) {
+		t.Fatalf("work after Empty: Jammed=%v Until=%v, want one interval of rest", v.Jammed, v.Until)
+	}
+	later := schedAt(schedInterval)
+	w = schedObserve(t, w, later, DemandProbed{Kind: schedRecover, Ready: 0}, DemandProbed{Kind: schedWork, Ready: 3})
+	if d := w.Decide(later, Occupancy{}); d != (Start{Kind: schedWork}) {
+		t.Fatalf("work after one interval and the same count: %#v, want Start", d)
+	}
+}

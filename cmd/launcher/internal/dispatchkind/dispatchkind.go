@@ -89,6 +89,7 @@ type DemandSource int
 const (
 	DemandTrackerProbe  DemandSource = iota + 1 // the host asks the kind's tracker (forge.DemandCounter), when the adapter has one
 	DemandChildReported                         // only a child run knows (butler: its work is Ledger Chores, not tracker issues)
+	DemandHostOutbox                            // the host counts eligible outbox bundles itself, from the filesystem alone (recover)
 )
 
 // preflightWhen is when the daemon's startup preflight passes a kind's doctor flag.
@@ -262,9 +263,9 @@ var (
 	// every FindingLabel literal from this file.
 	// PriorityFirst lands stranded work before a new Box starts, so each
 	// rebases onto as little new main as possible. Its work is outbox
-	// bundles, not tracker issues, so only the child's exit code (2 = nothing
-	// eligible) reports demand until ADR 0059's scheduler gives it an outbox
-	// source.
+	// bundles, not tracker issues, so the host counts the eligible ones itself
+	// (DemandHostOutbox); the count is an upper bound, so a child may still
+	// exit 2 (nothing eligible).
 	Recover = &Descriptor{
 		Name:           "recover",
 		Verb:           "recover",
@@ -273,7 +274,7 @@ var (
 		Settle:         SettleMerge,
 		DaemonPriority: PriorityFirst,
 		Enablement:     EnabledByOutboxRelay,
-		DemandSource:   DemandChildReported,
+		DemandSource:   DemandHostOutbox,
 		FindingLabel:   "agent-review-finding",
 		Contract:       ContractLanding,
 		FilerRelayGate: "FILER_FILE_RELAY_WORK",

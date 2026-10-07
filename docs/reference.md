@@ -6663,10 +6663,25 @@ with it.
 a starting slot tries it before every other kind, on every slot
 (`slotOrder`, `dispatchkind.PriorityFirst`, issue #4656). Stranded finished
 work lands before a new Box starts, so it rebases onto as little new main as
-possible. It is exit-driven like the butler: a child that finds nothing
-eligible exits 2, which backs the kind off like any other kind's no-work
-exit, until it gets an outbox Demand source under ADR 0059's Demand
-scheduler.
+possible. Its Demand comes from the host outbox, not a tracker
+(`dispatchkind.DemandHostOutbox`, issue #4657): every 20s
+(`DAEMON_PROBE_INTERVAL` overrides it) the daemon counts the outbox bundles
+whose give-up has not posted and that are either at `MAX_RECOVER_ATTEMPTS` or
+out of their `TRANSIENT_BACKOFF_SECS` backoff, reading only the host
+filesystem, so an idle slot no longer starts a `recover` child just to learn
+there is nothing to do. The count is an upper bound: the child still checks
+the label, the self-report and any open PR after it takes the host claim,
+and may exit 2, which records Ready 0 like any probed kind's empty child. A
+counted bundle can still be one the child declines (a green PR waiting on a
+`MERGE_MODE=manual` merge, a run still settling, a self-report that is not
+ready), so an exit 2 against a nonzero count backs `recover` off, doubling
+from `DAEMON_IDLE_FLOOR` toward `DAEMON_IDLE_CAP`, and a rise in the count
+lifts that backoff at once. A bundle whose give-up comment has not posted
+stays counted, so the comment is retried; one whose issue lost the failed
+label, or whose self-report is not success, never posts it and stays counted,
+which the `DAEMON_IDLE_CAP` backoff bounds to about one child per cap.
+`recover` counts against `ISSUE_TRACKER`'s rate-limit pause like every probed
+kind: its count never calls the tracker, but each child it starts does.
 
 **Idle tier.** The butler sits outside the research/work preference above:
 while fewer than `RESEARCH_RESERVATION` research children are running, a
