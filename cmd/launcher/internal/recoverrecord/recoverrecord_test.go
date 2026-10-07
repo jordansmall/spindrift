@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/seambundle"
 )
@@ -48,7 +49,7 @@ func seedRecord(t *testing.T, pwd, num string, r Record) {
 
 func count(t *testing.T, pwd string, max int) int {
 	t.Helper()
-	ids, err := Eligible(pwd, max, unit, now)
+	ids, err := Eligible(pwd, max, unit, now, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestEligible_OutboxRootUnreadable(t *testing.T) {
 	if err := os.WriteFile(hostpaths.OutboxRoot(pwd), nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Eligible(pwd, 3, unit, now); err == nil {
+	if _, err := Eligible(pwd, 3, unit, now, nil); err == nil {
 		t.Fatal("want error when the outbox root is not a directory")
 	}
 }
@@ -177,14 +178,14 @@ func TestEligible_IdentityTracksTheBundle(t *testing.T) {
 	pwd := t.TempDir()
 	seedBundle(t, pwd, "1")
 	seedBundle(t, pwd, "2")
-	before, err := Eligible(pwd, 3, unit, now)
+	before, err := Eligible(pwd, 3, unit, now, nil)
 	if err != nil || len(before) != 2 {
 		t.Fatalf("Eligible = %v, %v, want 2 identities", before, err)
 	}
 	if before[0] == before[1] || !strings.HasPrefix(before[0], "1@") || !strings.HasPrefix(before[1], "2@") {
 		t.Errorf("identities %v: want distinct, key-ordered key@id names", before)
 	}
-	again, err := Eligible(pwd, 3, unit, now)
+	again, err := Eligible(pwd, 3, unit, now, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,11 +197,46 @@ func TestEligible_IdentityTracksTheBundle(t *testing.T) {
 	if err := os.WriteFile(file, []byte("a different bundle"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	after, err := Eligible(pwd, 3, unit, now)
+	after, err := Eligible(pwd, 3, unit, now, nil)
 	if err != nil || len(after) != 2 {
 		t.Fatalf("Eligible = %v, %v, want 2 identities", after, err)
 	}
 	if after[0] == before[0] || after[1] != before[1] {
 		t.Errorf("rewrote bundle 1: %v -> %v, want only key 1's identity to change", before, after)
+	}
+}
+
+func TestEligible_InFlight(t *testing.T) {
+	inFlight := map[dispatchkey.Key]bool{dispatchkey.Issue("1"): true}
+	cases := []struct {
+		name string
+		seed func(t *testing.T, pwd string)
+		want int
+	}{
+		{"due bundle in flight is skipped", func(t *testing.T, pwd string) { seedBundle(t, pwd, "1") }, 0},
+		{"due bundle outside the set counts", func(t *testing.T, pwd string) { seedBundle(t, pwd, "2") }, 1},
+		{"only the in-flight key is skipped", func(t *testing.T, pwd string) {
+			seedBundle(t, pwd, "1")
+			seedBundle(t, pwd, "2")
+		}, 1},
+		{"unreadable bundle id in flight is skipped", func(t *testing.T, pwd string) {
+			// A directory where the bundle file belongs: present but unreadable.
+			if err := os.MkdirAll(filepath.Join(hostpaths.OutboxDir(pwd, "1"), seambundle.FileName), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pwd := t.TempDir()
+			tc.seed(t, pwd)
+			ids, err := Eligible(pwd, 3, unit, now, inFlight)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ids) != tc.want {
+				t.Errorf("Eligible = %v, want %d identities", ids, tc.want)
+			}
+		})
 	}
 }

@@ -118,10 +118,11 @@ func (r Record) Due(now time.Time, maxAttempts int, unit time.Duration) bool {
 // Eligible names the outbox bundles a recover pass would act on now: a bundle
 // is present and its record is Due. Each is named by outbox key and BundleID,
 // so a re-run that leaves a new bundle under the same key reads as a new item
-// (issue #4705). Chore-keyed (butler) outboxes are never recover's work. The
+// (issue #4705). Chore-keyed (butler) outboxes are never recover's work, and
+// so is an entry whose key is in inFlight, which a live child holds. The
 // result is an upper bound; the recover child re-checks everything else
 // (self-report, open PR, claim).
-func Eligible(pwd string, maxAttempts int, unit time.Duration, now time.Time) ([]string, error) {
+func Eligible(pwd string, maxAttempts int, unit time.Duration, now time.Time, inFlight map[dispatchkey.Key]bool) ([]string, error) {
 	entries, err := os.ReadDir(hostpaths.OutboxRoot(pwd))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -132,7 +133,7 @@ func Eligible(pwd string, maxAttempts int, unit time.Duration, now time.Time) ([
 	var ids []string
 	for _, e := range entries {
 		key := e.Name()
-		if !e.IsDir() || dispatchkey.IsChoreKey(key) {
+		if !e.IsDir() || dispatchkey.IsChoreKey(key) || inFlight[dispatchkey.Issue(key)] {
 			continue
 		}
 		id, err := BundleID(pwd, key)
