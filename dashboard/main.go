@@ -75,7 +75,13 @@ func run(args []string, stderr io.Writer, hooks *runHooks) int {
 		}()
 	}
 
-	srv := &http.Server{Handler: newServer(statusPath), ReadHeaderTimeout: 10 * time.Second}
+	// BaseContext ties the long-lived /events streams to shutdown; otherwise
+	// Shutdown would wait out its timeout on every open page.
+	srv := &http.Server{
+		Handler:           newServer(statusPath),
+		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return ctx },
+	}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ln) }()
 	select {

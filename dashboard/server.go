@@ -23,6 +23,7 @@ type server struct {
 	alive      func(pid int, host string) bool
 	tmpl       *template.Template
 	static     http.Handler
+	poll       time.Duration // how often /events looks for file changes
 }
 
 func newServer(statusPath string) *server {
@@ -35,8 +36,11 @@ func newServer(statusPath string) *server {
 		eventsPath: filepath.Join(filepath.Dir(statusPath), eventsFileName),
 		now:        time.Now,
 		alive:      processAlive,
-		tmpl:       template.Must(template.ParseFS(webFS, "web/index.html.tmpl")),
-		static:     http.StripPrefix("/static/", http.FileServerFS(staticFS)),
+		tmpl: template.Must(template.New("index.html.tmpl").
+			Funcs(template.FuncMap{"historyLimit": func() int { return historyLimit }}).
+			ParseFS(webFS, "web/index.html.tmpl")),
+		poll:   defaultPoll,
+		static: http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 	}
 }
 
@@ -49,6 +53,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/":
 		s.page(w)
+	case r.URL.Path == "/events":
+		s.events(w, r)
 	case strings.HasPrefix(r.URL.Path, "/static/"):
 		s.static.ServeHTTP(w, r)
 	default:
@@ -134,8 +140,14 @@ type slotView struct {
 	Elapsed string
 }
 
+// buildView reads the status file afresh; viewFrom is the part a stream can
+// run on its own cached read.
 func (s *server) buildView() view {
 	st, raw, err := readStatus(s.statusPath)
+	return s.viewFrom(st, raw, err)
+}
+
+func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 	var skew *schemaError
 	switch {
 	// Before the generic error case: a skew is an error too, but gets its own banner.
