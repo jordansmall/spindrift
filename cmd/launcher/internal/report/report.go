@@ -143,7 +143,8 @@ const (
 )
 
 // NextDueOnTipMove is the next_due wire value for a Chore that only a
-// branch-head move lifts, so no instant names when it becomes due.
+// branch-head move lifts, so no instant names when it becomes due. The
+// Dashboard mirrors it (nix/checks/dashboard-constant-parity.nix).
 const NextDueOnTipMove = "on_tip_move"
 
 // ParseNextDue is the one decoder for a not_due record's NextDue: the

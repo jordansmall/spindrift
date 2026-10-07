@@ -14,7 +14,8 @@ import (
 const statusFileName = "spindrift-daemon.status"
 
 // statusSchema is the status-file schema this Dashboard understands. It
-// mirrors the daemon's statusSchema and must bump with it.
+// mirrors the daemon's statusSchema and must bump with it, as
+// nix/checks/dashboard-constant-parity.nix enforces.
 const statusSchema = 1
 
 // schemaError is readStatus's report of a status file written at a schema the
