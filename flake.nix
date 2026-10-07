@@ -184,6 +184,13 @@
                 type = "app";
                 program = "${import ./nix/quickstart.nix { inherit pkgs; }}/bin/quickstart";
               };
+
+              # The read-only Dashboard (ADR 0060): standalone, no Consumer
+              # input document, so it stays outside lib/mkHarness.nix.
+              dashboard = {
+                type = "app";
+                program = "${import ./nix/dashboard.nix { inherit pkgs; }}/bin/dashboard";
+              };
             }
             # regen-goldens runs the prompt-assembly golden test in update mode
             # (issue #2951), and nix/checks/promptassembly.nix pins it to the
