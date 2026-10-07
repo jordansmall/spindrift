@@ -12,7 +12,7 @@ type RenderOptions struct {
 
 	// OnModel is called with the exact model id and the role whenever the
 	// (role, model) pair behind the streamed messages changes; nil means no one
-	// listens. An implementor that cannot attribute a model to a message (e.g.
-	// opencode) ignores it.
+	// listens. An implementor that cannot attribute a role (e.g. opencode) passes
+	// role "".
 	OnModel func(model, role string)
 }
