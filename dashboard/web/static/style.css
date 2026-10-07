@@ -86,3 +86,16 @@ dt { color: var(--muted); }
 dd { margin: 0; overflow-wrap: anywhere; }
 .tag.jam { color: var(--jammed); }
 .trackers { display: flex; flex-wrap: wrap; gap: .5rem 1.5rem; }
+
+.outcome-complete { --c: var(--running); }
+.outcome-failed { --c: var(--halted); }
+.outcome-recoverable { --c: var(--backing_off); }
+.outcome-ambiguous { --c: var(--jammed); }
+.history .entry { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: 4px; padding: .35rem .7rem; margin-bottom: .35rem; }
+.history .ev-halt, .history .ev-breaker_trip { border-left-color: var(--halted); }
+.history .ev-backoff { border-left-color: var(--backing_off); }
+.history .ev-jam { border-left-color: var(--jammed); }
+.history .ev-settled { border-left-color: var(--running); }
+.history .evname { font-weight: 600; }
+.history .detail { color: var(--muted); }
+.history .note { color: var(--muted); margin-top: .2rem; white-space: pre-wrap; word-break: break-word; }

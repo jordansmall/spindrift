@@ -102,6 +102,29 @@
     {{- end}}
   </section>
 {{- end}}
+
+  <h2>History</h2>
+  <section class="history">
+    {{- if .HistoryErr}}
+    <p class="muted">history unreadable: {{.HistoryErr}}</p>
+    {{- end}}
+    {{- range .History}}
+    <div class="entry ev-{{.Event}}">
+      <time>{{.Time}}</time>
+      <span class="evname">{{.Event}}</span>
+      {{- if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}
+      {{- if .Subject}} <span class="chip">{{.Subject}}</span>{{end}}
+      {{- if .Slot}} <span class="muted">slot {{.Slot}}</span>{{end}}
+      {{- if .Outcome}} <span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{end}}
+      {{- if .Detail}} <span class="detail">{{.Detail}}</span>{{end}}
+      {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
+    </div>
+    {{- else}}
+    {{- if not .HistoryErr}}
+    <p class="muted">no history yet</p>
+    {{- end}}
+    {{- end}}
+  </section>
 </main>
 </body>
 </html>

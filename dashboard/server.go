@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ var webFS embed.FS
 
 type server struct {
 	statusPath string
+	eventsPath string
 	now        func() time.Time
 	alive      func(pid int, host string) bool
 	tmpl       *template.Template
@@ -29,6 +31,7 @@ func newServer(statusPath string) *server {
 	}
 	return &server{
 		statusPath: statusPath,
+		eventsPath: filepath.Join(filepath.Dir(statusPath), eventsFileName),
 		now:        time.Now,
 		alive:      processAlive,
 		tmpl:       template.Must(template.ParseFS(webFS, "web/index.html.tmpl")),
@@ -54,6 +57,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) page(w http.ResponseWriter) {
 	v := s.buildView()
+	v.History, v.HistoryErr = readHistory(s.eventsPath)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := s.tmpl.Execute(w, v); err != nil {
@@ -93,6 +97,9 @@ type view struct {
 	Kinds    []kindView
 	Trackers []TrackerCheck
 	Slots    []slotView
+
+	History    []historyEntry // newest first; shown in every mode
+	HistoryErr error          // an Events generation that exists but could not be read
 }
 
 // The template branches on these rather than on mode literals.
