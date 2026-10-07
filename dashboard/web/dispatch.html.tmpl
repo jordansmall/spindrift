@@ -9,7 +9,7 @@
 <script src="/static/dispatch.js" defer></script>
 </head>
 <body>
-<main class="dispatch">
+<main class="dispatch"{{if and .Started (not .Closed)}} data-events="/dispatch/events?slot={{.Slot}}&amp;at={{.Started | urlquery}}&amp;n={{.StartN}}"{{end}}>
   <p><a href="/">&larr; Dashboard</a></p>
   <header class="dispatch-head">
     <h1>slot {{.Slot}}{{if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}</h1>
@@ -41,7 +41,7 @@
     {{- end}}
   </section>
   {{- range $i, $p := .PassLogs}}
-  <section class="tabbody" id="tab-pass-{{$i}}" hidden>
+  <section class="tabbody" data-pass-log="{{$p.Path}}" id="tab-pass-{{$i}}" hidden>
     <div class="logbar"><span class="follow-state"></span></div>
     <pre class="log" data-src="/log?path={{$p.Path}}&slot={{$.Slot}}&at={{$.Started}}&n={{$.StartN}}"></pre>
   </section>

@@ -18,7 +18,8 @@ type dispatchView struct {
 	Slot     int
 	Kind     string
 	Started  string
-	StartN   int // how many earlier child_starts on the slot share Started
+	StartN   int  // how many earlier child_starts on the slot share Started
+	Closed   bool // the child finished or a later child_start took over the slot
 	ChildLog string
 	Rev      string
 	Subject  []subject // box events' issue/chore, deduplicated
@@ -31,7 +32,10 @@ type dispatchView struct {
 }
 
 // passLog is one Pass log a box event named; Phase labels its tab.
-type passLog struct{ Phase, Path string }
+type passLog struct {
+	Phase string `json:"phase"`
+	Path  string `json:"path"`
+}
 
 // addPassLog records ev's Pass log once: a transient retry re-announces the
 // same phase with the same path, and recover boxes name none.
@@ -52,7 +56,9 @@ func (v *dispatchView) absorb(ev Event) {
 	switch ev.Event {
 	case "box":
 		v.Phase = ev.Phase
-		v.addPassLog(ev)
+		if !v.Closed { // the tab set is final once the Dispatch ends
+			v.addPassLog(ev)
+		}
 		s := subjectOf(ev.Issue, ev.Chore)
 		if s.Label == "" {
 			return
@@ -67,6 +73,7 @@ func (v *dispatchView) absorb(ev Event) {
 		v.Outcome, v.Note, v.PRURL = ev.State, ev.Note, ev.PRURL
 	case "child_finish":
 		v.Exit = ev.Exit
+		v.Closed = true
 		if v.Rev == "" {
 			v.Rev = shortRev(ev.Revision)
 		}
@@ -102,6 +109,9 @@ func (s *server) findDispatch(slot int, at string, n int) (*dispatchView, bool) 
 				cur.absorb(ev)
 			}
 			return
+		}
+		if cur != nil {
+			cur.Closed = true
 		}
 		cur = nil
 		if at == "" || (e.Started == at && e.StartN == n) {
@@ -173,8 +183,8 @@ func (s *server) dispatch(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	d, ok := s.findDispatch(slot, at, n)
-	if !ok {
+	d, found := s.findDispatch(slot, at, n)
+	if !found {
 		http.NotFound(w, r)
 		return
 	}
@@ -195,4 +205,81 @@ func (s *server) dispatch(w http.ResponseWriter, r *http.Request) {
 // headers are gone by then, so the page can only be cut short.
 func writeRenderError(w io.Writer, err error) {
 	fmt.Fprintf(w, "<!-- render error: %v -->", err)
+}
+
+// dispatchEvents streams a Dispatch's Pass logs as Server-Sent Events so an
+// open drill-in page can add a tab as each one appears: a pass frame per Pass
+// log, all current ones on connect, then each new one as the Events file
+// grows, and a closed frame once the Dispatch has ended. A query without at
+// is pinned to the Dispatch it first resolves, so a later child_start closes
+// the stream rather than swapping it. Frames carry JSON, not HTML, as
+// dispatch.js builds its DOM from text and never parses markup.
+func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	slot, at, n, ok := dispatchIDOf(r.URL.Query())
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	d, found := s.findDispatch(slot, at, n)
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	rc := http.NewResponseController(w)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+
+	// A child_start without a time cannot be named again, so the loop could
+	// only drift to another Dispatch: treat it as the last word on this one.
+	unnameable := d.Started == ""
+	at, n = d.Started, d.StartN
+	sendClosed := func() {
+		writeFrame(w, "closed", "")
+		rc.Flush()
+	}
+
+	// PassLogs only ever grows, so a count says which entries have gone out:
+	// rotation drops a box event no sooner than its child_start, and losing
+	// that ends the stream below first.
+	sent := 0
+	// step sends what d adds and reports whether the stream goes on.
+	step := func() bool {
+		for ; sent < len(d.PassLogs); sent++ {
+			data, err := json.Marshal(d.PassLogs[sent])
+			if err != nil || writeFrame(w, "pass", string(data)) != nil || rc.Flush() != nil {
+				return false
+			}
+		}
+		if d.Closed || unnameable {
+			sendClosed()
+			return false
+		}
+		return true
+	}
+	if !step() {
+		return
+	}
+
+	tick := time.NewTicker(s.poll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-tick.C:
+		}
+		// Rotation can drop the Dispatch's child_start; nothing more is coming.
+		if d, found = s.findDispatch(slot, at, n); !found {
+			sendClosed()
+			return
+		}
+		if !step() {
+			return
+		}
+	}
 }

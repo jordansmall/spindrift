@@ -57,6 +57,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.page(w)
 	case r.URL.Path == "/dispatch":
 		s.dispatch(w, r)
+	case r.URL.Path == "/dispatch/events":
+		s.dispatchEvents(w, r)
 	case r.URL.Path == "/events":
 		s.events(w, r)
 	case r.URL.Path == "/log":
