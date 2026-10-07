@@ -368,7 +368,7 @@ type stopInSettle struct {
 	stop func()
 }
 
-func (w stopInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) bool {
+func (w stopInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
 	w.stop()
 	return w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
 }
@@ -409,7 +409,7 @@ type abortInSettle struct {
 	killed <-chan string
 }
 
-func (w abortInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) bool {
+func (w abortInSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
 	w.abort()
 	select {
 	case <-w.killed:

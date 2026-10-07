@@ -692,8 +692,8 @@ func TestWire_ComposedLoop_NoOutcomeBundlePresentRecoversAndLands(t *testing.T) 
 	// the pass logs.
 	recoverResult := dispatch.Result{Resolved: outcome.Resolved{SelfReport: outcome.SelfReport{Status: "ready"}, SelfReportFound: true}}
 	sit := s.SituationFor(num, false, recoverResult)
-	if !s.SettleRelayedBranch(dispatch.NewFake(), num, 0, sit, recoverResult) {
-		t.Fatalf("SettleRelayedBranch(%s) = false, want true", num)
+	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), num, 0, sit, recoverResult); !got || err != nil {
+		t.Fatalf("SettleRelayedBranch(%s) = %v, %v; want true, nil", num, got, err)
 	}
 
 	iss, err = it.Issue(num)

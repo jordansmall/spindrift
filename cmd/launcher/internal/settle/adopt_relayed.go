@@ -29,7 +29,7 @@ func (s *Settle) tryAdoptRelayedBranch(d dispatch.Dispatcher, num string, gen ui
 		return false
 	}
 
-	return s.adoptAndGate(d, num, gen, result, "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch")
+	return s.adoptAndGateLogged(d, num, gen, result, "backstop-synthetic blocked overridden by genuine success self-report; PR opened on relayed branch")
 }
 
 // tryAdoptRelayedBranchNoOutcome is tryAdoptRelayedBranch for a Box that died
@@ -48,23 +48,35 @@ func (s *Settle) tryAdoptRelayedBranchNoOutcome(d dispatch.Dispatcher, num strin
 		return false
 	}
 
-	return s.adoptAndGate(d, num, gen, result, "no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch")
+	return s.adoptAndGateLogged(d, num, gen, result, "no outcome line; genuine success self-report and relayed bundle; PR opened on relayed branch")
+}
+
+// adoptAndGateLogged runs adoptAndGate for a caller that can only return a
+// bool, logging the cause to stderr.
+func (s *Settle) adoptAndGateLogged(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) bool {
+	adopted, err := s.adoptAndGate(d, num, gen, result, note)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: adopt relayed branch: %v\n", num, err)
+	}
+	return adopted
 }
 
 // adoptAndGate is the shared adopt+gate tail behind tryAdoptRelayedBranch
 // (#2224) and SettleRelayedBranch (#2225): open a PR on num's relayed branch,
 // print the status=adopted line, then drive the same merge gate the "ready"
-// path uses. Returns false, with no side effect, when no PR could be opened,
-// and true, also with no side effect, when a stop abandoned the relay.
-func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) bool {
-	pr, handoff := s.adoptRelayedBranch(num, gen, result)
+// path uses. Returns false, with no side effect, when no PR could be opened (the
+// cause is non-nil only for a relay or draft-PR-create failure, nil for a
+// wiring or missing-PR-intent failure), and true, also with no side effect, when a stop abandoned the
+// relay.
+func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result, note string) (bool, error) {
+	pr, handoff, err := s.adoptRelayedBranch(num, gen, result)
 	switch handoff {
 	case handoffAbandoned:
 		// Handled: false would send the caller's blocked handling to comment on
 		// and transition an issue the stop already released (issue #3523).
-		return true
+		return true, nil
 	case handoffBlocked:
-		return false
+		return false, err
 	}
 
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, pr, note)
@@ -82,10 +94,10 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 	case landingAbandoned:
 		// See landingAbandoned: another actor owns the issue, so a usage
 		// comment here would be noise.
-		return true
+		return true, nil
 	}
 	s.postUsageComment(num, d)
-	return true
+	return true, nil
 }
 
 // SettleRelayedBranch is spindrift recover's adopt-a-relayed-branch arm
@@ -94,24 +106,25 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 // SettleAdopted's job, so sit.OpenPRFound returns false; every production
 // caller passes false today, so this guard only protects a future caller.
 // Local push-only has no PR to open (ADR 0039, #2254), where a bundle alone
-// is evidence (#2378).
-func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool {
+// is evidence (#2378). The error is non-nil only when relaying the branch or
+// opening its draft PR failed.
+func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
 	defer s.flushSettled(num)
 	if sit.OpenPRFound {
-		return false
+		return false, nil
 	}
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if sit.SelfReportSuccess {
-			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed")
+			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed"), nil
 		}
 		if sit.BundlePresent {
-			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed")
+			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed"), nil
 		}
-		return false
+		return false, nil
 	}
 	if !sit.SelfReportSuccess {
-		return false
+		return false, nil
 	}
 	return s.adoptAndGate(d, num, gen, result, "genuine success self-report; PR opened on relayed branch")
 }
@@ -140,16 +153,22 @@ func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, ge
 // landing= field (#1949): a prompt-injected read-only Box controls that field.
 // FallbackDefault means a missing PR-intent line falls back to an issue-derived
 // default instead of blocking, since this Box was cut short before that step.
-func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (string, handoffResult) {
+// The error is non-nil only with handoffBlocked, and only for a relay or
+// draft-PR-create failure; other Open failures (wiring, missing PR intent)
+// block with a nil error so recover's own "no open PR" handling runs.
+func (s *Settle) adoptRelayedBranch(num string, gen uint64, result dispatch.Result) (string, handoffResult, error) {
 	branch, m := s.mediationFor(num, gen)
 	url, _, _, err := m.Open(num, branch, result, FallbackDefault)
 	if errors.Is(err, errAbandoned) {
-		return "", handoffAbandoned
+		return "", handoffAbandoned, nil
 	}
 	if err != nil {
-		return "", handoffBlocked
+		if errors.Is(err, errRelayBundle) || errors.Is(err, errCreateDraftPR) {
+			return "", handoffBlocked, err
+		}
+		return "", handoffBlocked, nil
 	}
-	return url, handoffOpened
+	return url, handoffOpened, nil
 }
 
 // tryMarkRecoverable promotes a local push-only issue to Recoverable (ADR
