@@ -166,7 +166,7 @@ func newOutboxDemand(doc *inputdoc.Document) *outboxDemand {
 
 // ReadyIDs names each eligible bundle by outbox key and BundleID.
 func (o *outboxDemand) ReadyIDs() ([]string, error) {
-	return recoverrecord.Eligible("", o.maxAttempts, o.backoffUnit, o.now())
+	return recoverrecord.Eligible("", o.maxAttempts, o.backoffUnit, o.now(), nil)
 }
 
 func (o *outboxDemand) CountReady(bool) (int, error) {
