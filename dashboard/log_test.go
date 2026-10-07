@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -46,7 +47,13 @@ func writeLog(t *testing.T, checkout, rel, content string) string {
 
 func openLog(t *testing.T, ts *httptest.Server, path string) (*http.Response, *stream) {
 	t.Helper()
-	resp, err := http.Get(ts.URL + "/log?path=" + url.QueryEscape(path))
+	return openLogQuery(t, ts, "path="+url.QueryEscape(path))
+}
+
+// openLogQuery opens /log with a raw query string.
+func openLogQuery(t *testing.T, ts *httptest.Server, query string) (*http.Response, *stream) {
+	t.Helper()
+	resp, err := http.Get(ts.URL + "/log?" + query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,4 +386,214 @@ func TestLogFollowEndsPrunedWhenNamingEventAgesOut(t *testing.T) {
 	}
 	st.expect(t, "pruned", testLogPath)
 	wantClosed(t, st)
+}
+
+func slotLine(event string, slot int, at, extra string) string {
+	return fmt.Sprintf(`{"time":%q,"event":%q,"kind":"work","slot":%d%s}`+"\n", at, event, slot, extra)
+}
+
+// ownerQuery is the query a Pass log tab sends for the Dispatch that began on
+// slot at the given child_start time.
+func ownerQuery(path string, slot int, at string, n int) string {
+	return fmt.Sprintf("path=%s&slot=%d&at=%s&n=%d", url.QueryEscape(path), slot, url.QueryEscape(at), n)
+}
+
+// drainFrames reads st to its close, returning the log text and every
+// non-log frame's event name.
+func drainFrames(t *testing.T, st *stream) (text string, events []string) {
+	t.Helper()
+	var got strings.Builder
+	for {
+		select {
+		case f, ok := <-st.frames:
+			if !ok {
+				return got.String(), events
+			}
+			if f.event == "log" {
+				got.WriteString(f.data)
+			} else {
+				events = append(events, f.event)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("stream stayed open; log so far %q", got.String())
+		}
+	}
+}
+
+const (
+	olderAt = "2026-10-07T12:03:04Z" // logServer's own child_start, slot 0
+	newerAt = "2026-10-07T13:00:00Z"
+)
+
+// TestLogSupersededByLaterDispatchOnSamePath covers a Pass log path reused by a
+// later Dispatch of the same issue or Chore: the older Dispatch's tab must never
+// show the newer run.
+func TestLogSupersededByLaterDispatchOnSamePath(t *testing.T) {
+	cases := []struct {
+		name        string
+		path        string
+		extra       string // the box event's subject
+		newerSlot   int
+		finishOlder bool
+	}{
+		{"same slot", ".spindrift/logs/issue-42.log", `,"issue":"42"`, 0, true},
+		{"different slot", ".spindrift/logs/issue-42.log", `,"issue":"42"`, 1, false},
+		{"butler chore", ".spindrift/logs/issue-butler-docs.log", `,"chore":"docs"`, 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, checkout := logServer(t)
+			box := func(slot int, at string) string {
+				return slotLine("box", slot, at, `,"phase":"initial","pass_log":"`+tc.path+`"`+tc.extra)
+			}
+			ev := box(0, "2026-10-07T12:03:05Z")
+			if tc.finishOlder {
+				ev += slotLine("child_finish", 0, "2026-10-07T12:30:00Z", `,"exit":0`)
+			}
+			ev += slotLine("child_start", tc.newerSlot, newerAt, `,"child_log":"logs/newer.log"`) +
+				box(tc.newerSlot, "2026-10-07T13:00:05Z")
+			appendTo(t, eventsOf(checkout), ev)
+			writeLog(t, checkout, tc.path, "newer run\n")
+
+			_, st := openLogQuery(t, ts, ownerQuery(tc.path, 0, olderAt, 0))
+			f := st.expect(t, "superseded", tc.path)
+			if f.data != tc.path {
+				t.Fatalf("superseded data = %q, want %q", f.data, tc.path)
+			}
+			if text, events := drainFrames(t, st); text != "" || len(events) != 0 {
+				t.Fatalf("after superseded: log %q, events %v; want the stream closed", text, events)
+			}
+
+			_, st = openLogQuery(t, ts, ownerQuery(tc.path, tc.newerSlot, newerAt, 0))
+			if got := collect(t, st, "newer run"); got != "newer run\n" {
+				t.Fatalf("newer Dispatch bytes = %q", got)
+			}
+		})
+	}
+}
+
+func TestLogSupersededWhileWaitingForFile(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass))
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	st.expect(t, "waiting", pass)
+	appendTo(t, eventsOf(checkout), slotLine("child_start", 1, newerAt, "")+
+		slotLine("box", 1, "2026-10-07T13:00:05Z", `,"issue":"42","pass_log":"`+pass+`"`))
+	st.expect(t, "superseded", pass)
+	wantClosed(t, st)
+}
+
+func TestLogFinishedDispatchSupersededByReplacementBeforeNewBoxEvent(t *testing.T) {
+	ts, checkout := logServer(t)
+	for _, pass := range []string{".spindrift/logs/issue-42.log", ".spindrift/logs/issue-butler-docs.log"} {
+		appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+		p := writeLog(t, checkout, pass, "old run\n")
+		_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+		collect(t, st, "old run")
+
+		// The later Dispatch quarantines the file and starts a fresh one before its
+		// box event reaches the Events file.
+		if err := os.Rename(p, p+".prior-run.1"); err != nil {
+			t.Fatal(err)
+		}
+		writeLog(t, checkout, pass, "newer run\n")
+		text, events := drainFrames(t, st)
+		if strings.Contains(text, "newer run") {
+			t.Fatalf("%s: the older Dispatch streamed the newer run: %q", pass, text)
+		}
+		if len(events) != 1 || events[0] != "superseded" {
+			t.Fatalf("%s: frames after the old bytes = %v, want [superseded]", pass, events)
+		}
+	}
+}
+
+// The newer Dispatch's box event lands before it quarantines the prior log, so
+// a still-running older tab on another slot is superseded, not merely pruned.
+func TestLogFollowingTabSupersededWhenPathRenamedAfterNewerBox(t *testing.T) {
+	for _, pass := range []string{".spindrift/logs/issue-42.log", ".spindrift/logs/issue-butler-docs.log"} {
+		subject := `,"issue":"42"`
+		if strings.Contains(pass, "butler") {
+			subject = `,"chore":"docs"`
+		}
+		for _, recreate := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s recreate=%v", pass, recreate), func(t *testing.T) {
+				ts, checkout := logServer(t)
+				appendTo(t, eventsOf(checkout), boxLine(pass))
+				p := writeLog(t, checkout, pass, "old run\n")
+				_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+				collect(t, st, "old run")
+
+				appendTo(t, eventsOf(checkout), slotLine("child_start", 1, newerAt, "")+
+					slotLine("box", 1, "2026-10-07T13:00:05Z", subject+`,"pass_log":"`+pass+`"`))
+				if err := os.Rename(p, p+".prior-run.1"); err != nil {
+					t.Fatal(err)
+				}
+				if recreate {
+					writeLog(t, checkout, pass, "newer run\n")
+				}
+				text, events := drainFrames(t, st)
+				if strings.Contains(text, "newer run") {
+					t.Fatalf("the older Dispatch streamed the newer run: %q", text)
+				}
+				if len(events) != 1 || events[0] != "superseded" {
+					t.Fatalf("frames after the old bytes = %v, want [superseded]", events)
+				}
+			})
+		}
+	}
+}
+
+func TestLogRunningDispatchRetryStillEndsStreamForReconnect(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass))
+	p := writeLog(t, checkout, pass, "dead attempt\n")
+	q := ownerQuery(pass, 0, olderAt, 0)
+	_, st := openLogQuery(t, ts, q)
+	collect(t, st, "dead attempt")
+
+	if err := os.Rename(p, p+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeLog(t, checkout, pass, "new attempt\n")
+	if text, events := drainFrames(t, st); text != "" || len(events) != 0 {
+		t.Fatalf("retry ended the stream with log %q, events %v; want a bare close", text, events)
+	}
+
+	_, st = openLogQuery(t, ts, q)
+	if got := collect(t, st, "new attempt"); got != "new attempt\n" {
+		t.Fatalf("reconnect bytes = %q", got)
+	}
+}
+
+func TestLogOwnerParamsJunkOrUnnamedIs404(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass))
+	writeLog(t, checkout, pass, "x")
+	esc := url.QueryEscape(pass)
+	for _, q := range []string{
+		"slot=abc&at=" + olderAt,
+		"slot=-1&at=" + olderAt,
+		"slot=0",
+		"slot=0&at=yesterday",
+		"slot=0&at=" + olderAt + "&n=x",
+		"slot=0&at=" + olderAt + "&n=-1",
+		"at=" + olderAt,
+		"n=0",
+		// Well-formed, but no such Dispatch named the path.
+		"slot=1&at=" + olderAt,
+		"slot=0&at=" + newerAt,
+		"slot=0&at=" + olderAt + "&n=1",
+	} {
+		resp, err := http.Get(ts.URL + "/log?path=" + esc + "&" + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("%q: status = %d, want 404", q, resp.StatusCode)
+		}
+	}
 }

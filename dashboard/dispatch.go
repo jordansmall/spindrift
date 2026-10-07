@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -17,6 +18,7 @@ type dispatchView struct {
 	Slot     int
 	Kind     string
 	Started  string
+	StartN   int // how many earlier child_starts on the slot share Started
 	ChildLog string
 	Rev      string
 	Subject  []subject // box events' issue/chore, deduplicated
@@ -103,7 +105,7 @@ func (s *server) findDispatch(slot int, at string, n int) (*dispatchView, bool) 
 		}
 		cur = nil
 		if at == "" || (e.Started == at && e.StartN == n) {
-			cur = &dispatchView{Slot: slot, Kind: ev.Kind, Started: ev.Time,
+			cur = &dispatchView{Slot: slot, Kind: ev.Kind, Started: ev.Time, StartN: e.StartN,
 				ChildLog: ev.ChildLog, Rev: shortRev(ev.Revision)}
 			found = cur
 		}
@@ -143,27 +145,33 @@ func scanEvents(r io.Reader, fn func(Event)) {
 	}
 }
 
-func (s *server) dispatch(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+// dispatchIDOf reads the Dispatch identity a query names: slot, an optional
+// at (empty, or RFC3339) and an optional n. ok is false for a missing or junk
+// value. at is parsed only to reject junk; findDispatch compares the raw string.
+func dispatchIDOf(q url.Values) (slot int, at string, n int, ok bool) {
 	slot, err := strconv.Atoi(q.Get("slot"))
 	if err != nil || slot < 0 {
-		http.NotFound(w, r)
-		return
+		return 0, "", 0, false
 	}
-	// Parsed only to reject junk; findDispatch compares the raw string.
-	at := q.Get("at")
+	at = q.Get("at")
 	if at != "" {
 		if _, err := time.Parse(time.RFC3339, at); err != nil {
-			http.NotFound(w, r)
-			return
+			return 0, "", 0, false
 		}
 	}
-	n := 0
 	if raw := q.Get("n"); raw != "" {
 		if n, err = strconv.Atoi(raw); err != nil || n < 0 {
-			http.NotFound(w, r)
-			return
+			return 0, "", 0, false
 		}
+	}
+	return slot, at, n, true
+}
+
+func (s *server) dispatch(w http.ResponseWriter, r *http.Request) {
+	slot, at, n, ok := dispatchIDOf(r.URL.Query())
+	if !ok {
+		http.NotFound(w, r)
+		return
 	}
 	d, ok := s.findDispatch(slot, at, n)
 	if !ok {
