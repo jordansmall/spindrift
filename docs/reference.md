@@ -6584,7 +6584,8 @@ exact model id and optional role of the latest `model` record its child
 reported (see `model` in **Event stream**, below). Each later `model` record
 replaces them, and each new `box` record clears them. They are absent before
 the child's first `model` record and on any other phase, and never carry to the
-next child. They are additive and omitted when empty, so `schema` does not bump.
+next child. In practice only the Claude driver reports them. They are additive
+and omitted when empty, so `schema` does not bump.
 `phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
@@ -7709,6 +7710,14 @@ fixed name. A `recover` record runs no Box and carries none. The
 daemon copies it onto the `box` event unchanged. A `settled` record likewise
 carries `pr_url`, the PR the Dispatch opened or adopted, when there is one;
 the daemon copies it onto the `settled` event unchanged (issue #4718).
+A `model` record is
+`{"event":"model","issue":"<N>","model":"<id>","model_role":"<role>"}`, with
+`chore` in place of `issue` for a butler child. `model` is the exact model id
+behind the Box's messages and is required: the daemon's reader rejects a
+record without one. `model_role` names the role speaking (a worker, a
+reviewer) and is omitted when the driver cannot name one. Under the Claude
+driver the launcher sends one whenever the Box's active (role, model) pair
+changes, never once per message; other drivers send none.
 
 **What this first cut doesn't do.** The instance lock, the queryable status
 file (issue #3545, above), the self-change halt (issue #3543, above) and
@@ -7791,6 +7800,11 @@ A busy card also names the Pass its Dispatch is running, as
 the same label a drill-in Pass log tab carries, though a `recover` Pass
 has no Pass log and so no tab. A card whose slot carries
 no `pass` shows nothing extra.
+A card also names the Box's active model, as `role · model` (for example
+`worker · claude-sonnet-5-5`), or just the model when no role is known, from
+the slot's `model` and `model_role`. It is the exact model id, not the
+heartbeat's family label, and follows whichever of the coordinator and its
+subagents spoke last. A slot carrying no `model` shows nothing extra.
 
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
