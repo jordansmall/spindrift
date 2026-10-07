@@ -25,7 +25,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift preview [issue...]`   | dry run: show what `dispatch` would pick up, and the wave ordering               |
 | `spindrift build`                | realize/load the agent image (or store closures) without running any agent      |
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
-| `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, and has a free host claim; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
+| `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
@@ -4256,6 +4256,21 @@ a local Recoverable issue stays manual, `spindrift recover <n>` (ADR 0039).
 Eligibility reads the run's last driver self-report, the same evidence
 `recover <n>` trusts, so a run whose earlier pass reported ready and whose
 later pass crashed without reporting still qualifies.
+
+Queue mode keeps a per-issue attempt record beside the issue's log
+(`.spindrift/logs/issue-<n>.recover.json`): the failure count, the last
+attempt's time, and a hash of the bundle it tried (issue #4655). After a
+failed attempt the issue is skipped until `TRANSIENT_BACKOFF_SECS` times its
+failure count has passed. The failure that reaches `MAX_RECOVER_ATTEMPTS`
+(default 3) posts one comment saying auto-recover gave up and naming
+`spindrift recover <n>`; earlier failures post none. A new bundle (a new Box
+run) starts the count over, and a queue-mode attempt that opens the PR removes
+the record, whether or not the PR then merges. Once the give-up comment posts
+and the record saves, queue mode never picks the issue again for that bundle,
+even if `MAX_RECOVER_ATTEMPTS` is later raised. If the comment fails to post, a
+later queue pass retries it; lowering `MAX_RECOVER_ATTEMPTS` below a record's
+count posts it on the next pass. If the record cannot be saved, the run
+exits 1. A hand-run `spindrift recover <n>` ignores the record.
 
 After a successful land (merged, including a hand-run `spindrift recover
 <n>`), the Launcher deletes the issue's `seam.bundle` from the outbox. A
