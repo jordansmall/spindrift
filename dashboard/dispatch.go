@@ -24,6 +24,24 @@ type dispatchView struct {
 	Outcome  string   // settled's state
 	Note     string
 	Exit     *int // child_finish's exit; nil until the child finishes
+	PassLogs []passLog
+}
+
+// passLog is one Pass log a box event named; Phase labels its tab.
+type passLog struct{ Phase, Path string }
+
+// addPassLog records ev's Pass log once: a transient retry re-announces the
+// same phase with the same path, and recover boxes name none.
+func (v *dispatchView) addPassLog(ev Event) {
+	if ev.PassLog == "" {
+		return
+	}
+	for _, p := range v.PassLogs {
+		if p.Path == ev.PassLog {
+			return
+		}
+	}
+	v.PassLogs = append(v.PassLogs, passLog{Phase: ev.Phase, Path: ev.PassLog})
 }
 
 // absorb folds a later event on the Dispatch's slot into v.
@@ -31,6 +49,7 @@ func (v *dispatchView) absorb(ev Event) {
 	switch ev.Event {
 	case "box":
 		v.Phase = ev.Phase
+		v.addPassLog(ev)
 		subject := ev.Chore
 		if ev.Issue != "" {
 			subject = issueLabel(ev.Issue)

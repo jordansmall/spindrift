@@ -1,9 +1,5 @@
 (function () {
   "use strict";
-  var log = document.getElementById("log");
-  if (!log || !window.EventSource) return;
-  var showAll = document.getElementById("show-all");
-  var followState = document.getElementById("follow-state");
 
   // Log text is untrusted (issue comments can reach it): the DOM is built only
   // from createElement/createTextNode/style, never innerHTML.
@@ -125,164 +121,221 @@
     return /^\s*\{\s*"type"\s*:\s*"/.test(stripAnsi(partial.slice(0, 256)));
   }
 
-  var state = newState(); // SGR state carried across committed lines
-  var pending = "";       // the unfinished last line
-  var pendingEl = null;   // its provisional element, always log's last child
-  var queue = [];
-  var qi = 0;
-  var scheduled = false;
-  var following = true;
-  var note = "";
-  var BUDGET_MS = 12;
+  // One live follower per log pane.
+  function follow(section) {
+    var log = section.querySelector("pre.log");
+    if (!log) return;
+    var showAll = section.querySelector(".show-all");
+    var followState = section.querySelector(".follow-state");
+    // Pass logs are mostly stream-JSON, so only a pane that opts in hides it.
+    var filter = log.hasAttribute("data-stream-filter");
 
-  function lineEl(text) {
-    var el = document.createElement("div");
-    el.className = isStreamLine(text) ? "ln stream" : "ln";
-    renderAnsi(el, text, state);
-    return el;
-  }
+    var state = newState(); // SGR state carried across committed lines
+    var pending = "";       // the unfinished last line
+    var pendingEl = null;   // its provisional element, always log's last child
+    var queue = [];
+    var qi = 0;
+    var scheduled = false;
+    var following = true;
+    var note = "";
+    var BUDGET_MS = 12;
 
-  function renderPending() {
-    if (pending === "") {
-      if (pendingEl) { log.removeChild(pendingEl); pendingEl = null; }
-      return;
+    function lineEl(text) {
+      var el = document.createElement("div");
+      el.className = filter && isStreamLine(text) ? "ln stream" : "ln";
+      renderAnsi(el, text, state);
+      return el;
     }
-    if (!pendingEl) {
-      pendingEl = document.createElement("div");
-      log.appendChild(pendingEl);
+
+    function renderPending() {
+      if (pending === "") {
+        if (pendingEl) { log.removeChild(pendingEl); pendingEl = null; }
+        return;
+      }
+      if (!pendingEl) {
+        pendingEl = document.createElement("div");
+        log.appendChild(pendingEl);
+      }
+      var hidden = filter && looksStream(pending);
+      pendingEl.className = hidden ? "ln stream" : "ln";
+      pendingEl.textContent = "";
+      // Rendering a multi-MB hidden line on every frame is wasted work.
+      if (hidden && !(showAll && showAll.checked)) return;
+      renderAnsi(pendingEl, pending.replace(/\r/g, ""), cloneState(state));
     }
-    var hidden = looksStream(pending);
-    pendingEl.className = hidden ? "ln stream" : "ln";
-    pendingEl.textContent = "";
-    // Rendering a multi-MB hidden line on every frame is wasted work.
-    if (hidden && !(showAll && showAll.checked)) return;
-    renderAnsi(pendingEl, pending.replace(/\r/g, ""), cloneState(state));
-  }
 
-  function atBottom() {
-    return log.scrollHeight - log.scrollTop - log.clientHeight <= 4;
-  }
-
-  function scrollToEnd() {
-    log.scrollTop = log.scrollHeight;
-  }
-
-  function updateIndicator() {
-    if (!followState) return;
-    followState.textContent = "";
-    var parts = [];
-    if (note) parts.push(note);
-    if (following) {
-      parts.push("following");
-    } else {
-      parts.push("paused");
+    function atBottom() {
+      return log.scrollHeight - log.scrollTop - log.clientHeight <= 4;
     }
-    followState.appendChild(
-      document.createTextNode(parts.join(" · ") + (following ? "" : " · ")),
-    );
-    if (!following) {
-      var jump = document.createElement("button");
-      jump.type = "button";
-      jump.className = "jump";
-      jump.textContent = "jump to end";
-      jump.addEventListener("click", function () {
-        following = true;
-        scrollToEnd();
-        updateIndicator();
-      });
-      followState.appendChild(jump);
+
+    function scrollToEnd() {
+      log.scrollTop = log.scrollHeight;
     }
-  }
 
-  function setFollowing(v) {
-    if (v === following) return;
-    following = v;
-    updateIndicator();
-  }
-
-  // Drains the queue within a time budget per animation frame so a multi-MB
-  // log arriving as 64 KiB frames neither janks the page nor thrashes layout.
-  function flush() {
-    scheduled = false;
-    var frag = document.createDocumentFragment();
-    var start = performance.now();
-    while (qi < queue.length && performance.now() - start < BUDGET_MS) {
-      var parts = (pending + queue[qi++]).split("\n");
-      pending = parts.pop();
-      for (var i = 0; i < parts.length; i++) {
-        var line = parts[i].replace(/\r/g, "");
-        frag.appendChild(lineEl(line));
+    function updateIndicator() {
+      if (!followState) return;
+      followState.textContent = "";
+      var parts = [];
+      if (note) parts.push(note);
+      if (following) {
+        parts.push("following");
+      } else {
+        parts.push("paused");
+      }
+      followState.appendChild(
+        document.createTextNode(parts.join(" · ") + (following ? "" : " · ")),
+      );
+      if (!following) {
+        var jump = document.createElement("button");
+        jump.type = "button";
+        jump.className = "jump";
+        jump.textContent = "jump to end";
+        jump.addEventListener("click", function () {
+          following = true;
+          scrollToEnd();
+          updateIndicator();
+        });
+        followState.appendChild(jump);
       }
     }
-    if (qi >= queue.length) { queue = []; qi = 0; }
-    log.insertBefore(frag, pendingEl);
-    renderPending();
-    if (following) scrollToEnd();
-    if (qi < queue.length) schedule();
-  }
 
-  function schedule() {
-    if (scheduled) return;
-    scheduled = true;
-    requestAnimationFrame(flush);
-  }
+    function setFollowing(v) {
+      if (v === following) return;
+      following = v;
+      updateIndicator();
+    }
 
-  function reset() {
-    queue = [];
-    qi = 0;
-    pending = "";
-    pendingEl = null;
-    state = newState();
-    log.textContent = "";
-    following = true;
-  }
-
-  log.addEventListener("scroll", function () { setFollowing(atBottom()); });
-
-  if (showAll) {
-    var applyShowAll = function () {
-      log.classList.toggle("show-all", showAll.checked);
+    // Drains the queue within a time budget per animation frame so a multi-MB
+    // log arriving as 64 KiB frames neither janks the page nor thrashes layout.
+    function flush() {
+      scheduled = false;
+      var frag = document.createDocumentFragment();
+      var start = performance.now();
+      while (qi < queue.length && performance.now() - start < BUDGET_MS) {
+        var parts = (pending + queue[qi++]).split("\n");
+        pending = parts.pop();
+        for (var i = 0; i < parts.length; i++) {
+          var line = parts[i].replace(/\r/g, "");
+          frag.appendChild(lineEl(line));
+        }
+      }
+      if (qi >= queue.length) { queue = []; qi = 0; }
+      log.insertBefore(frag, pendingEl);
       renderPending();
       if (following) scrollToEnd();
-    };
-    showAll.addEventListener("change", applyShowAll);
-    applyShowAll(); // the browser may restore the checkbox across a reload
-  }
+      if (qi < queue.length) schedule();
+    }
 
-  var es = new EventSource(log.dataset.src);
-  var opened = false;
-  var done = false;
+    function schedule() {
+      if (scheduled) return;
+      scheduled = true;
+      requestAnimationFrame(flush);
+    }
 
-  es.onopen = function () {
-    // The server re-sends the whole log after a reconnect.
-    if (opened) reset();
-    opened = true;
-    note = "";
-    updateIndicator();
-  };
+    function reset() {
+      queue = [];
+      qi = 0;
+      pending = "";
+      pendingEl = null;
+      state = newState();
+      log.textContent = "";
+      following = true;
+    }
 
-  es.addEventListener("log", function (e) {
-    queue.push(e.data);
-    schedule();
-  });
+    // A hidden pane has no layout: scroll metrics read as zero, so a scroll
+    // event then must not be taken as the reader leaving the end.
+    log.addEventListener("scroll", function () {
+      if (section.hidden) return;
+      setFollowing(atBottom());
+    });
 
-  es.addEventListener("pruned", function () {
-    done = true;
-    es.close();
-    note = "log pruned";
-    updateIndicator();
-  });
+    // Tab switching un-hides the section; catch up to the end if following.
+    section.addEventListener("tabshown", function () {
+      if (following) scrollToEnd();
+    });
 
-  es.onerror = function () {
-    if (done) return;
-    if (es.readyState === EventSource.CLOSED) {
-      done = true;
-      note = "log unavailable";
+    if (showAll) {
+      var applyShowAll = function () {
+        log.classList.toggle("show-all", showAll.checked);
+        renderPending();
+        if (following) scrollToEnd();
+      };
+      showAll.addEventListener("change", applyShowAll);
+      applyShowAll(); // the browser may restore the checkbox across a reload
+    }
+
+    // Opened on first show, then kept open: browsers cap HTTP/1.1 at six
+    // connections per host, and a Dispatch with several fix passes would
+    // otherwise stall the panes past the cap.
+    function connect() {
+      var es = new EventSource(log.dataset.src);
+      var opened = false;
+      var done = false;
+
+      es.onopen = function () {
+        // The server re-sends the whole log after a reconnect.
+        if (opened) reset();
+        opened = true;
+        note = "";
+        updateIndicator();
+      };
+
+      es.addEventListener("log", function (e) {
+        queue.push(e.data);
+        schedule();
+      });
+
+      es.addEventListener("pruned", function () {
+        done = true;
+        es.close();
+        note = "log pruned";
+        updateIndicator();
+      });
+
+      es.onerror = function () {
+        if (done) return;
+        if (es.readyState === EventSource.CLOSED) {
+          done = true;
+          note = "log unavailable";
+        } else {
+          note = "reconnecting";
+        }
+        updateIndicator();
+      };
+    }
+
+    if (section.hidden) {
+      section.addEventListener("tabshown", connect, { once: true });
     } else {
-      note = "reconnecting";
+      connect();
     }
     updateIndicator();
-  };
+  }
 
-  updateIndicator();
+  var tabs = document.querySelectorAll(".tab");
+  var bodies = document.querySelectorAll(".tabbody");
+
+  function showTab(name) {
+    var i;
+    for (i = 0; i < tabs.length; i++) {
+      tabs[i].classList.toggle("active", tabs[i].getAttribute("data-tab") === name);
+    }
+    for (i = 0; i < bodies.length; i++) {
+      var show = bodies[i].id === "tab-" + name;
+      var wasHidden = bodies[i].hidden;
+      bodies[i].hidden = !show;
+      if (show && wasHidden) bodies[i].dispatchEvent(new Event("tabshown"));
+    }
+  }
+
+  for (var t = 0; t < tabs.length; t++) {
+    tabs[t].addEventListener("click", function () {
+      showTab(this.getAttribute("data-tab"));
+    });
+  }
+
+  // Without EventSource only the live streaming is lost; tabs still switch.
+  if (window.EventSource) {
+    for (var b = 0; b < bodies.length; b++) follow(bodies[b]);
+  }
 })();

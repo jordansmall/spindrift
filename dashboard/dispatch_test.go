@@ -85,8 +85,8 @@ func TestDispatchNotFound(t *testing.T) {
 func TestDispatchLogHook(t *testing.T) {
 	_, body := getDispatch(t, dispatchEvents, "?slot=0")
 	for _, w := range []string{
-		`<pre class="log" id="log" data-src="/log?path=logs%2fa%20b%26c.log"`,
-		`id="show-all"`, `id="follow-state"`, `src="/static/dispatch.js"`, `href="/"`,
+		`<pre class="log" data-src="/log?path=logs%2fa%20b%26c.log" data-stream-filter`,
+		`class="show-all"`, `class="follow-state"`, `src="/static/dispatch.js"`, `href="/"`,
 		`pill outcome-complete`,
 	} {
 		if !strings.Contains(strings.ToLower(body), strings.ToLower(w)) {
@@ -101,7 +101,7 @@ func TestDispatchWithoutChildLog(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	if !strings.Contains(body, "names no Child log") || strings.Contains(body, `id="log"`) {
+	if !strings.Contains(body, "names no Child log") || strings.Contains(body, `class="log"`) {
 		t.Errorf("want the no-log note and no log element:\n%s", body)
 	}
 }
@@ -257,5 +257,76 @@ func TestDispatchTimeNamingNoChildStartIs404(t *testing.T) {
 	// Inside the first Dispatch but not its child_start's own time.
 	if code, _ := getDispatch(t, dispatchEvents, "?slot=0&at=2026-10-07T09:10:00Z"); code != 404 {
 		t.Errorf("status %d, want 404", code)
+	}
+}
+
+const passLogEvents = `{"time":"2026-10-07T09:00:00Z","event":"child_start","kind":"work","slot":0,"child_log":"logs/old.log"}
+{"time":"2026-10-07T09:00:05Z","event":"box","slot":0,"phase":"initial","issue":"1","pass_log":"logs/old-pass.log"}
+{"time":"2026-10-07T10:00:00Z","event":"child_start","kind":"work","slot":0,"child_log":"logs/child.log"}
+{"time":"2026-10-07T10:00:05Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":".spindrift/logs/issue-42.log"}
+{"time":"2026-10-07T10:00:06Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":".spindrift/logs/issue-42.log"}
+{"time":"2026-10-07T10:00:07Z","event":"box","slot":0,"phase":"recover","issue":"42"}
+{"time":"2026-10-07T10:01:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":".spindrift/logs/issue-42-fix-1.log"}
+{"time":"2026-10-07T10:02:00Z","event":"box","slot":0,"phase":"conflict-resolve","issue":"42","pass_log":".spindrift/logs/issue-42-conflict-resolve.log"}
+`
+
+func tabOrder(body string) []string {
+	var out []string
+	for _, part := range strings.Split(body, `data-tab="`)[1:] {
+		out = append(out, part[:strings.Index(part, `"`)])
+	}
+	return out
+}
+
+func TestDispatchListsChildLogThenPassLogsInEventOrder(t *testing.T) {
+	code, body := getDispatch(t, passLogEvents, "?slot=0")
+	if code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	if got, want := strings.Join(tabOrder(body), ","), "child-log,pass-0,pass-1,pass-2"; got != want {
+		t.Errorf("tabs = %s, want %s", got, want)
+	}
+	low := strings.ToLower(body)
+	last := 0
+	for _, w := range []string{
+		`data-src="/log?path=logs%2fchild.log" data-stream-filter`,
+		`id="tab-pass-0" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42.log"`,
+		`id="tab-pass-1" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42-fix-1.log"`,
+		`id="tab-pass-2" hidden`, `data-src="/log?path=.spindrift%2flogs%2fissue-42-conflict-resolve.log"`,
+	} {
+		i := strings.Index(low, strings.ToLower(w))
+		if i < last {
+			t.Fatalf("%q missing or out of order in\n%s", w, body)
+		}
+		last = i
+	}
+	for _, w := range []string{">fix-pass-1</button>", ">conflict-resolve</button>"} {
+		if !strings.Contains(body, w) {
+			t.Errorf("missing tab label %q", w)
+		}
+	}
+	if strings.Contains(body, "old-pass") {
+		t.Error("an earlier Dispatch's Pass log leaked in")
+	}
+	if n := strings.Count(body, "issue-42.log"); n != 1 {
+		t.Errorf("repeated phase announced its Pass log %d times, want 1", n)
+	}
+}
+
+func TestDispatchChoreKeyedRendersPassLogTabs(t *testing.T) {
+	ev := `{"time":"2026-10-07T09:00:00Z","event":"child_start","kind":"butler","slot":2,"child_log":"logs/butler.log"}
+{"time":"2026-10-07T09:00:05Z","event":"box","slot":2,"kind":"butler","phase":"initial","chore":"docs-drift","pass_log":".spindrift/logs/issue-butler-docs-drift.log"}
+`
+	code, body := getDispatch(t, ev, "?slot=2")
+	if code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	if got, want := strings.Join(tabOrder(body), ","), "child-log,pass-0"; got != want {
+		t.Errorf("tabs = %s, want %s", got, want)
+	}
+	for _, w := range []string{"docs-drift", ">initial</button>", `data-src="/log?path=.spindrift%2flogs%2fissue-butler-docs-drift.log"`} {
+		if !strings.Contains(body, w) {
+			t.Errorf("missing %q in\n%s", w, body)
+		}
 	}
 }
