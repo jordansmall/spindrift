@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
@@ -66,9 +67,9 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 // record/park error; the caller records the verdict before honouring a drain
 // stop, which abandons nothing, since exiting early would strand a failed
 // settle on in-progress (#4679).
-func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec recoverAttempts, settled bool, settleErr error, stdout, stderr io.Writer) error {
+func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec recoverrecord.Record, settled bool, settleErr error, stdout, stderr io.Writer) error {
 	if settled {
-		if err := os.Remove(recoverAttemptsPath(pwd, num)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := os.Remove(recoverrecord.Path(pwd, num)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			fmt.Fprintf(stderr, "    ?? #%s: remove recover attempts: %v\n", num, err)
 		}
 	} else if err := parkQueueFailure(c, it, num, rec, settleErr, time.Now(), stdout, stderr); err != nil {
@@ -88,7 +89,7 @@ func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec rec
 // cause (settleErr, kept in the record for a later pass; a nil settleErr keeps
 // the earlier cause); a merge-gate failure is parked by the settler itself and
 // never reaches here.
-func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverAttempts, settleErr error, now time.Time, stdout, stderr io.Writer) error {
+func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverrecord.Record, settleErr error, now time.Time, stdout, stderr io.Writer) error {
 	note := "queue recover could not land the outbox bundle"
 	if settleErr != nil {
 		rec.LastError = normalizeCause(settleErr.Error())
@@ -98,10 +99,10 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverAt
 	rec.Count++
 	rec.Last = now
 	if rec.Count >= c.maxRecoverAttempts {
-		rec.giveUp(it, num, stderr)
+		giveUpRecover(&rec, it, num, stderr)
 	}
 	// Without the record the next pass would retry with no backoff and no bound.
-	saveErr := rec.save()
+	saveErr := rec.Save()
 	var parkErr error
 	if err := it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
 		parkErr = fmt.Errorf("recover: park #%s on %s: %w", num, c.failedLabel, err)

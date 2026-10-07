@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -145,13 +146,13 @@ func (d *Dispatch) conflictLogPath() string {
 // settle's bundle relay computes the identical path runOnce mounts without
 // holding the Dispatch itself.
 func OutboxDirFor(pwd, number string) string {
-	return filepath.Join(pwd, ".spindrift", "outbox", number)
+	return hostpaths.OutboxDir(pwd, number)
 }
 
 // HostLogDirFor returns the host-side log directory for a working dir, the
 // single source of truth for `<pwd>/.spindrift/logs` so it cannot drift.
 func HostLogDirFor(pwd string) string {
-	return filepath.Join(pwd, ".spindrift", "logs")
+	return hostpaths.LogDir(pwd)
 }
 
 // logPathFor, fixLogPathFor, and conflictLogPathFor are the single source of

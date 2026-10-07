@@ -100,3 +100,12 @@ func TestChoreSpellingMatchesBoxSeam(t *testing.T) {
 		t.Error("butler-prompt.md still spells the butler- prefix itself (should read DISPATCH_KEY instead)")
 	}
 }
+
+func TestIsChoreKey(t *testing.T) {
+	if !IsChoreKey(Chore("bugs").String()) {
+		t.Error("a rendered Chore key must be a chore key")
+	}
+	if IsChoreKey(Issue("42").String()) {
+		t.Error("a bare issue number is not a chore key")
+	}
+}

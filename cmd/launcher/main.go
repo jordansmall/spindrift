@@ -30,6 +30,7 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
+	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
@@ -1426,33 +1427,32 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		}
 		result := dispatch.Result{Resolved: resolved}
 		sit := s.SituationFor(iss.number, res.Found, result)
-		var rec recoverAttempts
+		var rec recoverrecord.Record
 		if queue {
 			if !sit.BundlePresent || !sit.SelfReportSuccess {
 				return errRecoverIneligible
 			}
-			bundleID, err := recoverBundleID(pwd, iss.number)
+			bundleID, err := recoverrecord.BundleID(pwd, iss.number)
 			if err != nil {
 				return fmt.Errorf("recover: identify bundle for #%s: %w", issueNum, err)
 			}
-			rec = loadRecoverAttempts(pwd, iss.number, bundleID)
+			rec = recoverrecord.Load(pwd, iss.number, bundleID)
 			now := time.Now()
-			if rec.GaveUp || rec.Count >= c.maxRecoverAttempts {
-				// A gave-up record stays ineligible even if the bound is
-				// later raised. Count reaches here unposted when the bound was
-				// lowered below it, or when parkQueueFailure's comment failed.
+			if !rec.Due(now, c.maxRecoverAttempts, backoff.Unit) {
 				if !rec.GaveUp {
-					rec.giveUp(it, issueNum, stderr)
-					if rec.GaveUp {
-						if err := rec.save(); err != nil {
-							return err
-						}
-					}
+					fmt.Fprintf(stdout, "    #%s  status=skipped  note=backing off after %d failed attempts\n", issueNum, rec.Count)
 				}
 				return errRecoverIneligible
 			}
-			if wait := backoff.Duration(rec.Count); now.Before(rec.Last.Add(wait)) {
-				fmt.Fprintf(stdout, "    #%s  status=skipped  note=backing off after %d failed attempts\n", issueNum, rec.Count)
+			if rec.Exhausted(c.maxRecoverAttempts) {
+				// Count reaches here unposted when the bound was lowered
+				// below it, or when parkQueueFailure's comment failed.
+				giveUpRecover(&rec, it, issueNum, stderr)
+				if rec.GaveUp {
+					if err := rec.Save(); err != nil {
+						return err
+					}
+				}
 				return errRecoverIneligible
 			}
 			// Re-checked here, not only at the first checkpoint: a stop sent
