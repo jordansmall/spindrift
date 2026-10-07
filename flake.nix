@@ -147,6 +147,9 @@
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
               dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;
               dispatch.butler.maxPatchesPerDay = dogfoodDefaults.defaults.butlerMaxPatchesPerDay;
+              dispatch.butler.every = dogfoodDefaults.defaults.butlerEvery;
+              dispatch.butler.maxSweepsPerDay = dogfoodDefaults.defaults.butlerMaxSweepsPerDay;
+              dispatch.butler.maxFindingsPerDay = dogfoodDefaults.defaults.butlerMaxFindingsPerDay;
             };
 
             checks = checksResult.checks;
