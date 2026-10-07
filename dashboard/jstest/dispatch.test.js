@@ -157,33 +157,44 @@ class FakeEventSource {
     this.listeners = {};
     this.onopen = null;
     this.onerror = null;
+    FakeEventSource.openAtConnect.push(
+      FakeEventSource.instances.filter((e) => e.readyState !== FakeEventSource.CLOSED).length + 1);
     FakeEventSource.instances.push(this);
   }
   addEventListener(type, fn) {
     (this.listeners[type] = this.listeners[type] || []).push(fn);
   }
   emit(type, data) {
+    if (this.readyState === FakeEventSource.CLOSED) return;
     (this.listeners[type] || []).forEach((fn) => fn({ type, data }));
   }
   close() { this.readyState = FakeEventSource.CLOSED; }
 }
 FakeEventSource.CLOSED = 2;
+FakeEventSource.openAtConnect = [];
 FakeEventSource.instances = [];
 
-// Builds one .tabbody pane, runs dispatch.js against it, and opens the stream.
-function page(opts) {
-  opts = opts || {};
-  const body = new Element("body");
+// One .tabbody pane: its optional tab button, log, optional show-all box and
+// follow-state note. Pane `name` streams /log/<name> unless o.src says otherwise.
+function makePane(body, o) {
+  let tab = null;
+  if (o.tab) {
+    tab = new Element("button");
+    tab.className = "tab";
+    tab.setAttribute("data-tab", o.name);
+    body.appendChild(tab);
+  }
   const section = new Element("section");
   section.className = "tabbody";
-  section.id = "tab-log";
+  section.id = "tab-" + o.name;
+  section.hidden = !!o.hidden;
   const log = new Element("pre");
   log.className = "log";
-  log.dataset.src = "/log/stream";
-  if (opts.filter) log.setAttribute("data-stream-filter", "");
+  log.dataset.src = o.src;
+  if (o.filter) log.setAttribute("data-stream-filter", "");
   section.appendChild(log);
   let showAll = null;
-  if (opts.showAll) {
+  if (o.showAll) {
     showAll = new Element("input");
     showAll.className = "show-all";
     section.appendChild(showAll);
@@ -191,16 +202,12 @@ function page(opts) {
   const followState = new Element("span");
   followState.className = "follow-state";
   section.appendChild(followState);
-  let tab = null;
-  if (opts.tab) {
-    tab = new Element("button");
-    tab.className = "tab";
-    tab.setAttribute("data-tab", "log");
-    body.appendChild(tab);
-  }
   body.appendChild(section);
-  section.hidden = !!opts.hidden;
+  return { tab, section, log, showAll, followState };
+}
 
+// Runs dispatch.js against body's DOM; frames queue until drain() runs them.
+function runPage(body, clockStep) {
   const frames = [];
   let clock = 0;
   FakeEventSource.instances = [];
@@ -214,15 +221,38 @@ function page(opts) {
     window: { EventSource: FakeEventSource },
     EventSource: FakeEventSource,
     Event,
-    // Each read advances the clock by opts.clockStep ms; the default 0 never
+    // Each read advances the clock by clockStep ms; the default 0 never
     // trips the 12ms per-frame budget, so one frame drains everything.
-    performance: { now: () => { const t = clock; clock += opts.clockStep || 0; return t; } },
+    performance: { now: () => { const t = clock; clock += clockStep || 0; return t; } },
     requestAnimationFrame: (fn) => { frames.push(fn); },
   };
   vm.runInNewContext(SOURCE, sandbox);
+  return { frames, drain() { while (frames.length) frames.shift()(); } };
+}
+
+// Scrolls a log away from its end, which pauses following.
+function pauseLog(log) {
+  log.scrollHeight = 1000;
+  log.clientHeight = 100;
+  log.scrollTop = 0;
+  log.dispatchEvent(new Event("scroll"));
+}
+
+// Builds one .tabbody pane, runs dispatch.js against it, and opens the stream.
+function page(opts) {
+  opts = opts || {};
+  const body = new Element("body");
+  const { tab, section, log, showAll, followState } = makePane(body, {
+    name: "log",
+    src: "/log/stream",
+    tab: opts.tab,
+    hidden: opts.hidden,
+    filter: opts.filter,
+    showAll: opts.showAll,
+  });
+  const { frames, drain } = runPage(body, opts.clockStep);
 
   const es = FakeEventSource.instances[0];
-  const drain = () => { while (frames.length) frames.shift()(); };
   if (es) es.onopen();
   return {
     section, log, showAll, followState, es, tab, frames, drain,
@@ -230,13 +260,28 @@ function page(opts) {
     lines() { return log.children; },
     jump() { return followState.children.find((c) => c.className === "jump"); },
     scrollEvent() { log.dispatchEvent(new Event("scroll")); },
-    // Scrolls away from the end, which pauses following.
-    pause() {
-      log.scrollHeight = 1000;
-      log.clientHeight = 100;
-      log.scrollTop = 0;
-      this.scrollEvent();
+    pause() { pauseLog(log); },
+  };
+}
+
+// n log panes with a tab each, the first one shown: how a Dispatch with
+// Pass logs lays out. Pane i streams /log/i.
+function tabsPage(n) {
+  const body = new Element("body");
+  const panes = [];
+  for (let i = 0; i < n; i++) {
+    panes.push(makePane(body, { name: "t" + i, src: "/log/" + i, tab: true, hidden: i !== 0 }));
+  }
+  const { drain } = runPage(body);
+  return {
+    panes,
+    show(i) { panes[i].tab.dispatchEvent(new Event("click")); },
+    drain,
+    open() {
+      return FakeEventSource.instances.filter((e) => e.readyState !== FakeEventSource.CLOSED);
     },
+    latest() { return FakeEventSource.instances[FakeEventSource.instances.length - 1]; },
+    texts(i) { return panes[i].log.children.map((l) => l.textContent); },
   };
 }
 
@@ -492,7 +537,7 @@ test("a scroll event on a hidden section is ignored", () => {
   assert.strictEqual(p.followState.textContent, "following");
 });
 
-test("a hidden section connects only when its tab is first clicked", () => {
+test("a hidden section connects when its tab is clicked, and clicking the active tab does nothing", () => {
   const p = page({ hidden: true, tab: true });
   assert.strictEqual(FakeEventSource.instances.length, 0);
   assert.ok(!p.tab.classList.contains("active"));
@@ -551,4 +596,100 @@ test("a closed stream that errors reports the log as unavailable", () => {
   p.es.readyState = FakeEventSource.CLOSED;
   p.es.onerror();
   assert.strictEqual(p.followState.textContent, "log unavailable · following");
+});
+
+test("hiding a tab closes its stream and showing it opens a new one", () => {
+  const p = tabsPage(2);
+  const first = p.latest();
+  assert.strictEqual(FakeEventSource.instances.length, 1);
+  p.show(1);
+  assert.strictEqual(first.readyState, FakeEventSource.CLOSED);
+  assert.strictEqual(FakeEventSource.instances.length, 2);
+  assert.strictEqual(p.open().length, 1);
+  p.show(0);
+  assert.strictEqual(FakeEventSource.instances.length, 3);
+  assert.strictEqual(p.latest().url, "/log/0");
+  assert.notStrictEqual(p.latest(), first);
+  assert.deepStrictEqual(p.open(), [p.latest()]);
+});
+
+test("switching back to an earlier tab never has two streams open at once", () => {
+  const p = tabsPage(3);
+  p.show(2);
+  FakeEventSource.openAtConnect = [];
+  p.show(0);
+  assert.deepStrictEqual(FakeEventSource.openAtConnect, [1]);
+  assert.strictEqual(p.open().length, 1);
+});
+
+test("showing a tab again replays its log without duplicated lines", () => {
+  const p = tabsPage(2);
+  const es1 = p.latest();
+  es1.onopen();
+  es1.emit("log", "a\nb\n");
+  p.drain();
+  assert.deepStrictEqual(p.texts(0), ["a", "b"]);
+  p.show(1);
+  p.show(0);
+  const es2 = p.latest();
+  es2.onopen();
+  es2.emit("log", "a\nb\n");
+  p.drain();
+  assert.deepStrictEqual(p.texts(0), ["a", "b"]);
+});
+
+test("showing a tab again follows the end and drops stale notes", () => {
+  const p = tabsPage(2);
+  const es1 = p.latest();
+  es1.onopen();
+  pauseLog(p.panes[0].log);
+  es1.emit("pruned");
+  assert.ok(p.panes[0].followState.textContent.startsWith("log pruned · paused"));
+  p.show(1);
+  p.show(0);
+  assert.strictEqual(p.panes[0].followState.textContent, "following");
+});
+
+test("cycling through many tabs never holds more than one stream open", () => {
+  const p = tabsPage(8);
+  assert.deepStrictEqual(p.open().map((e) => e.url), ["/log/0"]);
+  for (let i = 1; i < 8; i++) {
+    p.show(i);
+    assert.deepStrictEqual(p.open().map((e) => e.url), ["/log/" + i]);
+  }
+  for (let i = 0; i < 8; i++) {
+    p.show(i);
+    assert.strictEqual(p.open().length, 1);
+    assert.strictEqual(p.latest().url, "/log/" + i);
+    p.open()[0].emit("log", "line " + i + "\n");
+    p.drain();
+    assert.deepStrictEqual(p.texts(i), ["line " + i]);
+  }
+});
+
+test("a tab hidden and shown again starts without the carried SGR state", () => {
+  const p = tabsPage(2);
+  const es1 = p.latest();
+  es1.onopen();
+  es1.emit("log", "\x1b[31mred\n");
+  p.drain();
+  assert.ok(pieces(p.panes[0].log.children[0]).some((x) => typeof x === "object"));
+  p.show(1);
+  p.show(0);
+  const es2 = p.latest();
+  es2.onopen();
+  es2.emit("log", "plain\n");
+  p.drain();
+  assert.deepStrictEqual(p.texts(0), ["plain"]);
+  assert.deepStrictEqual(pieces(p.panes[0].log.children[0]), ["plain"]);
+});
+
+test("a pruned tab answers pruned again when shown again", () => {
+  const p = tabsPage(2);
+  p.latest().emit("pruned");
+  p.show(1);
+  p.show(0);
+  p.latest().emit("pruned");
+  assert.strictEqual(p.panes[0].followState.textContent, "log pruned · following");
+  assert.strictEqual(p.latest().readyState, FakeEventSource.CLOSED);
 });

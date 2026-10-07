@@ -249,11 +249,6 @@
       setFollowing(atBottom());
     });
 
-    // Tab switching un-hides the section; catch up to the end if following.
-    section.addEventListener("tabshown", function () {
-      if (following) scrollToEnd();
-    });
-
     if (showAll) {
       var applyShowAll = function () {
         log.classList.toggle("show-all", showAll.checked);
@@ -264,11 +259,14 @@
       applyShowAll(); // the browser may restore the checkbox across a reload
     }
 
-    // Opened on first show, then kept open: browsers cap HTTP/1.1 at six
-    // connections per host, and a Dispatch with several fix passes would
+    // A pane streams only while its tab is shown: browsers cap HTTP/1.1 at
+    // six connections per host, and a Dispatch with several fix passes would
     // otherwise stall the panes past the cap.
+    var current = null;
+
     function connect() {
       var es = new EventSource(log.dataset.src);
+      current = es;
       var opened = false;
       var done = false;
 
@@ -313,11 +311,23 @@
       };
     }
 
-    if (section.hidden) {
-      section.addEventListener("tabshown", connect, { once: true });
-    } else {
-      connect();
+    function disconnect() {
+      if (!current) return;
+      current.close();
+      current = null;
     }
+
+    // The server replays the whole log on every connection, so a re-shown
+    // pane starts over rather than appending to what it already holds.
+    section.addEventListener("tabshown", function () {
+      reset();
+      note = "";
+      updateIndicator();
+      connect();
+    });
+    section.addEventListener("tabhidden", disconnect);
+
+    if (!section.hidden) connect();
     updateIndicator();
   }
 
@@ -329,12 +339,17 @@
     for (i = 0; i < tabs.length; i++) {
       tabs[i].classList.toggle("active", tabs[i].getAttribute("data-tab") === name);
     }
+    // Every tabhidden first, so the old stream closes before the new one
+    // opens whatever the tabs' page order.
+    var shown = [];
     for (i = 0; i < bodies.length; i++) {
       var show = bodies[i].id === "tab-" + name;
       var wasHidden = bodies[i].hidden;
       bodies[i].hidden = !show;
-      if (show && wasHidden) bodies[i].dispatchEvent(new Event("tabshown"));
+      if (show && wasHidden) shown.push(bodies[i]);
+      if (!show && !wasHidden) bodies[i].dispatchEvent(new Event("tabhidden"));
     }
+    for (i = 0; i < shown.length; i++) shown[i].dispatchEvent(new Event("tabshown"));
   }
 
   for (var t = 0; t < tabs.length; t++) {
