@@ -57,6 +57,7 @@ code, time, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; f
 .banner.halted { border-color: var(--halted); }
 .banner.halted .reason { color: var(--halted); font-size: 1.15rem; font-weight: 600; }
 .banner.error { border-color: var(--halted); }
+.banner.skew { border-color: var(--jammed); }
 .banner.none { border-color: var(--idle); }
 .banner.note { border-color: var(--jammed); }
 .raw { overflow-x: auto; white-space: pre-wrap; word-break: break-all; background: var(--bg); padding: .6rem; border-radius: 4px; }

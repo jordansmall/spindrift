@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,7 +49,7 @@ func statusJSON(t *testing.T, state, reason string, slots string) string {
 	if reason != "" {
 		r = `"reason":"` + reason + `",`
 	}
-	return `{"pid":` + itoa(os.Getpid()) + `,"host":"` + hostname(t) + `",` +
+	return `{"schema":1,"pid":` + itoa(os.Getpid()) + `,"host":"` + hostname(t) + `",` +
 		`"started":"2026-10-07T10:00:00Z","time":"2026-10-07T11:59:58Z",` +
 		`"kinds":["work","research"],"state":"` + state + `",` + r +
 		`"slots":` + slots + `,"checks":[],"trackers":[]}`
@@ -229,6 +230,54 @@ func TestUnparseableFile(t *testing.T) {
 	if !strings.Contains(body, "class=\"banner error\"") ||
 		!strings.Contains(body, "{not json &lt;script&gt;alert(1)&lt;/script&gt;") {
 		t.Errorf("error banner / escaped raw content missing:\n%s", body)
+	}
+}
+
+var skewBanner = fmt.Sprintf("Daemon schema 999, Dashboard understands %d: restart the Dashboard", statusSchema)
+
+func TestUnknownSchemaShowsBannerAndRawJSON(t *testing.T) {
+	c := strings.Replace(statusJSON(t, "working", "",
+		`[{"slot":0,"phase":"zz_phase","busy":true,"since":"2026-10-07T11:00:00Z","issues":["4713"]}]`),
+		`"schema":1`, `"schema":999`, 1)
+	code, body := get(t, &c, "/")
+	if code != 200 {
+		t.Fatalf("code = %d", code)
+	}
+	for _, want := range []string{skewBanner, `<pre class="raw">`, "&#34;schema&#34;:999", "zz_phase"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q:\n%s", want, body)
+		}
+	}
+	for _, bad := range []string{"state-", `class="card`, "phase-zz_phase", "#4713", "Slots</h2>"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("body renders the views despite schema skew (%q):\n%s", bad, body)
+		}
+	}
+}
+
+func TestUnknownSchemaWithChangedFieldTypesStillShowsSkew(t *testing.T) {
+	c := `{"schema":999,"pid":"abc","slots":{}}`
+	_, body := get(t, &c, "/")
+	if !strings.Contains(body, skewBanner) {
+		t.Errorf("skew banner missing:\n%s", body)
+	}
+	if strings.Contains(body, "could not be read") {
+		t.Errorf("skew reported as a parse error:\n%s", body)
+	}
+}
+
+func TestKnownSchemaRendersLive(t *testing.T) {
+	known := statusJSON(t, "working", "", `[]`)
+	for name, c := range map[string]string{
+		"explicit": known,
+		"missing":  strings.Replace(known, `"schema":1,`, "", 1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, body := get(t, &c, "/")
+			if !strings.Contains(body, "state-working") || strings.Contains(body, "restart the Dashboard") {
+				t.Errorf("schema-1 file not rendered live:\n%s", body)
+			}
+		})
 	}
 }
 

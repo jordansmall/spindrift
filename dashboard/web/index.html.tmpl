@@ -31,6 +31,11 @@
     <p>{{.Err}}</p>
     {{- if .Raw}}<pre class="raw">{{.Raw}}</pre>{{end}}
   </section>
+{{- else if .Skewed}}
+  <section class="banner skew">
+    <strong>{{.Err}}</strong>
+    <pre class="raw">{{.Raw}}</pre>
+  </section>
 {{- else if .None}}
   <section class="banner none">
     <strong>no Daemon running</strong>

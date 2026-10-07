@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -73,6 +74,7 @@ const (
 	// record, if any.
 	modeNone  viewMode = iota
 	modeError          // unreadable status file
+	modeSkew           // status file at a schema this Dashboard does not understand
 	modeLive
 )
 
@@ -106,6 +108,7 @@ type view struct {
 func (v view) Live() bool    { return v.mode == modeLive }
 func (v view) Errored() bool { return v.mode == modeError }
 func (v view) None() bool    { return v.mode == modeNone }
+func (v view) Skewed() bool  { return v.mode == modeSkew }
 
 type kindView struct {
 	Kind        string
@@ -133,7 +136,11 @@ type slotView struct {
 
 func (s *server) buildView() view {
 	st, raw, err := readStatus(s.statusPath)
+	var skew *schemaError
 	switch {
+	// Before the generic error case: a skew is an error too, but gets its own banner.
+	case errors.As(err, &skew):
+		return view{mode: modeSkew, Err: skew.Error(), Raw: string(raw)}
 	case err != nil:
 		return view{mode: modeError, Err: err.Error(), Raw: string(raw)}
 	case st == nil:
