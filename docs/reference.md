@@ -7710,26 +7710,41 @@ down. See [ADR
 
 > **The Dashboard is unauthenticated.** Anyone who can reach the listen
 > address can read the daemon's state and history: issue numbers, Chores,
-> revisions, settle notes, host, pid, and every Child log the Events file
-> still names. The default binds loopback
-> only; `--listen 0.0.0.0:8099` serves the whole LAN. There is no
+> revisions, settle notes, host, pid, and every Child log and Pass log
+> (a full agent transcript) the Events file still names. The default binds
+> loopback only; `--listen 0.0.0.0:8099` serves the whole LAN. There is no
 > authentication yet, so do not expose it beyond a network you trust. It
 > prints one line on start saying so and naming the bound address. The
-> server does not check the `Host` header, so any web page the operator
-> visits can read it through DNS rebinding even on loopback, exposing
-> issue numbers, host, and pid.
+> server answers 403 to any request whose `Host` is not `localhost`, an IP
+> literal, or an allowed name, which blocks DNS rebinding. That is not
+> authentication: anyone who reaches the address directly still reads
+> everything.
+
+On every bind, loopback or LAN, a request passes only if its `Host`
+hostname (port, IPv6 brackets, and one trailing root dot stripped,
+case-insensitive) is `localhost`, an IP literal, the host named in
+`--listen`, or a name given to `--allow-host`; anything else, including
+an empty `Host`, gets a plain-text 403 before any route runs. IP literals
+are safe because rebinding needs a DNS name the attacker controls, and a
+request addressed to an IP cannot come from one. A page in the operator's
+browser can rebind a name onto a LAN address just as onto loopback, so the
+check also holds on a LAN bind: to reach the Dashboard by a LAN hostname
+such as `box.lan`, name it in `--listen` or pass `--allow-host box.lan`.
+Reaching it by IP needs nothing.
 
 Run it from the daemon's checkout:
 
 ```sh
 nix run .#dashboard
 nix run .#dashboard -- --listen 0.0.0.0:8099
+nix run .#dashboard -- --listen 0.0.0.0:8099 --allow-host box.lan
 ```
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--checkout` | git root of the working directory | The daemon's checkout. The status file is read from that checkout's git dir, resolved with `git rev-parse --absolute-git-dir`, the same way the daemon resolves it. Child log paths resolve against the checkout itself, so give its root. |
-| `--listen` | `127.0.0.1:8099` | Address to serve on. |
+| `--listen` | `127.0.0.1:8099` | Address to serve on. A host name in it is also allowed as a `Host`. |
+| `--allow-host` | none | Repeatable. A host name the Dashboard may be reached by, beyond `localhost`, IP literals, and the `--listen` host. The value is a bare hostname: a port or brackets (`box.lan:8099`, `[box.lan]`), an IP literal (including bare IPv6, which is always allowed), or an empty name exits 2. |
 
 A taken port exits 1 with `dashboard: listen <addr>: bind: address already
 in use`.
