@@ -7862,7 +7862,9 @@ button resumes), and renders ANSI colour. The Box's stream-JSON lines
 (JSON objects with a string `type`) are hidden behind a "show all"
 toggle, so the launcher's own lines aren't buried. A named log not yet
 created while its child runs reads "waiting for log" and streams once
-it appears; once the child has finished (its slot's `child_finish`, or
+it appears (one `opened` frame, data the path, clears the note once the
+log is created, even before any bytes arrive); once the child has
+finished (its slot's `child_finish`, or
 a later `child_start`), a missing log reads "log pruned", whether
 pruned by hand, never created (say, the Child log could not be
 opened), or deleted while being followed. A missing log whose naming
