@@ -24,18 +24,27 @@
   </header>
   <nav class="tabs">
     <button type="button" class="tab active" data-tab="child-log">Child log</button>
+    {{- range $i, $p := .PassLogs}}
+    <button type="button" class="tab" data-tab="pass-{{$i}}">{{$p.Phase}}</button>
+    {{- end}}
   </nav>
   <section class="tabbody" id="tab-child-log">
     {{- if .ChildLog}}
     <div class="logbar">
-      <label><input type="checkbox" id="show-all"> show all</label>
-      <span id="follow-state"></span>
+      <label><input type="checkbox" class="show-all"> show all</label>
+      <span class="follow-state"></span>
     </div>
-    <pre class="log" id="log" data-src="/log?path={{.ChildLog}}"></pre>
+    <pre class="log" data-src="/log?path={{.ChildLog}}" data-stream-filter></pre>
     {{- else}}
     <p class="muted">This Dispatch's child_start names no Child log (the Daemon predates Child logs).</p>
     {{- end}}
   </section>
+  {{- range $i, $p := .PassLogs}}
+  <section class="tabbody" id="tab-pass-{{$i}}" hidden>
+    <div class="logbar"><span class="follow-state"></span></div>
+    <pre class="log" data-src="/log?path={{$p.Path}}"></pre>
+  </section>
+  {{- end}}
 </main>
 </body>
 </html>
