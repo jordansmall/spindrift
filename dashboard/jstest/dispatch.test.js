@@ -591,6 +591,18 @@ test("stream errors and pruning are reported next to the follow state", () => {
   assert.strictEqual(p.followState.textContent, "log pruned · following");
 });
 
+test("a superseded log closes the stream and names the kept copy", () => {
+  const p = page();
+  p.es.emit("superseded", "issue-7.log");
+  assert.strictEqual(
+    p.followState.textContent,
+    "log reused by a later run, kept as issue-7.log.prior-run.N · following",
+  );
+  assert.strictEqual(p.es.readyState, FakeEventSource.CLOSED);
+  p.es.onerror();
+  assert.ok(p.followState.textContent.startsWith("log reused by a later run"));
+});
+
 test("a closed stream that errors reports the log as unavailable", () => {
   const p = page();
   p.es.readyState = FakeEventSource.CLOSED;
