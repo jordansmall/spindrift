@@ -128,7 +128,8 @@ the rejected "SPA built with npm" option still stand for what ships. What
 changes is that the drill-in's client logic in `dispatch.js` (ANSI/SGR
 rendering, the stream-JSON "show all" filter, and the scroll-back pause)
 now has one test check, `dashboard-js-test`. It runs Node's built-in test
-runner from `pkgs.nodejs` against `dispatch.js` unmodified, inside a
+runner from `pkgs.nodejs` against `dispatch.js` and `time.js` (the
+timestamp localiser both pages share, issue #4741) unmodified, inside a
 hand-written fake DOM. There is no `package.json`, npm, lockfile, jsdom,
 or other library; nothing is added to the page, and the served JS is not
 restructured for testing.
