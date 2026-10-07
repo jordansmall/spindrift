@@ -11,10 +11,16 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
+// eventVersion is every event line's "v". Bump it only on a breaking change
+// — a rename, a removal, or a changed meaning; adding a field never bumps it
+// (issue #4713).
+const eventVersion = 1
+
 // Event is one JSON-lines record in the daemon's event stream: the durable,
 // machine-readable record of every child started and finished, and every
 // halt with its reason.
 type Event struct {
+	V     int    `json:"v"`
 	Time  string `json:"time"`
 	Event string `json:"event"`
 	Kind  Kind   `json:"kind,omitempty"`
@@ -144,6 +150,7 @@ func (e *Emitter) warnf(format string, args ...any) {
 // slice tees child output from another goroutine while the loop goroutine
 // emits its own events.
 func (e *Emitter) Emit(ev Event) {
+	ev.V = eventVersion
 	ev.Time = e.now().UTC().Format(time.RFC3339)
 	e.mu.Lock()
 	defer e.mu.Unlock()

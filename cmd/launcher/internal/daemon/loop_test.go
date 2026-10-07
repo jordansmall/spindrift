@@ -2017,6 +2017,55 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	}
 }
 
+// TestLoopStampsSchemaAndEventVersion asserts, on the raw wire bytes, that
+// every emitted event line carries "v" and the published status file carries
+// "schema" (issue #4713) — the literal keys, not just the struct fields.
+func TestLoopStampsSchemaAndEventVersion(t *testing.T) {
+	dir := t.TempDir()
+	clk := &testClock{}
+	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42")})
+			return nil
+		},
+	}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	cfg := testConfig(1)
+	cfg.Status = sw
+	Loop(context.Background(), cfg, r, em, clk)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("event lines = %d, want several", len(lines))
+	}
+	for _, line := range lines {
+		var raw map[string]any
+		if err := json.Unmarshal([]byte(line), &raw); err != nil {
+			t.Fatalf("decode %q: %v", line, err)
+		}
+		if got, ok := raw["v"].(float64); !ok || got != float64(eventVersion) {
+			t.Errorf("event line %q: v = %v, want %d", line, raw["v"], eventVersion)
+		}
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, statusFileName))
+	if err != nil {
+		t.Fatalf("read status file: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("decode status file: %v", err)
+	}
+	if got, ok := raw["schema"].(float64); !ok || got != float64(statusSchema) {
+		t.Errorf("status file schema = %v, want %d", raw["schema"], statusSchema)
+	}
+}
+
 // childStartNoKeyWhy is the rationale both loop tests' child_start
 // assertions cite, kept in one place so the two copies cannot drift.
 const childStartNoKeyWhy = "the daemon cannot know a child's dispatch key until its first box record (see startChild in pool.go)"
