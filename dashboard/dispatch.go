@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 )
@@ -124,35 +122,14 @@ func (s *server) findDispatch(slot int, at string, n int) (*dispatchView, bool) 
 }
 
 // scanGenerations calls fn for each well-formed event in the older Events
-// generation then the current one, oldest first. As openEvents does, it opens
-// current first and drops an older that a rotation made the same file, so
-// nothing is read twice.
+// generation then the current one, oldest first, reading as openEvents does so
+// nothing is read twice. The current generation's last line is skipped while it
+// lacks its newline; a generation that fails to read partway yields only the
+// events before the failure.
 func scanGenerations(eventsPath string, fn func(Event)) {
-	cur, _ := os.Open(eventsPath)
-	older, _ := os.Open(eventsPath + rotatedSuffix)
-	older = dropRotatedAlias(older, cur)
-	for _, f := range []*os.File{older, cur} {
-		if f != nil {
-			scanEvents(f, fn)
-			f.Close()
-		}
-	}
-}
-
-// scanEvents calls fn for each well-formed line, oldest first. A line is read
-// whole however long, as scanTimeline does.
-func scanEvents(r io.Reader, fn func(Event)) {
-	br := bufio.NewReader(r)
-	for {
-		line, err := br.ReadBytes('\n')
-		var ev Event
-		if json.Unmarshal(line, &ev) == nil {
-			fn(ev)
-		}
-		if err != nil {
-			return
-		}
-	}
+	t := eventsTail{path: eventsPath}
+	t.open(fn)
+	t.Close()
 }
 
 // dispatchIDOf reads the Dispatch identity a query names: slot, an optional
