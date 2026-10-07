@@ -154,6 +154,30 @@ func TestRunningSlotShowsPass(t *testing.T) {
 	}
 }
 
+func TestRunningSlotShowsModel(t *testing.T) {
+	running := func(model string) string {
+		return statusJSON(t, "working", "", `[{"slot":0,"phase":"running","busy":true,"since":"2026-10-07T11:00:00Z","kind":"work","issues":["7"]`+model+`}]`)
+	}
+	cases := []struct {
+		name, fields, want string
+	}{
+		{"role and model", `,"model":"claude-sonnet-5-5","model_role":"worker"`, `<div class="model">worker · claude-sonnet-5-5</div>`},
+		{"model alone", `,"model":"claude-sonnet-5-5"`, `<div class="model">claude-sonnet-5-5</div>`},
+	}
+	for _, c := range cases {
+		st := running(c.fields)
+		_, body := get(t, &st, "/")
+		if !strings.Contains(body, c.want) {
+			t.Errorf("%s: want %q in card:\n%s", c.name, c.want, body)
+		}
+	}
+	none := running("")
+	_, body := get(t, &none, "/")
+	if strings.Contains(body, `class="model"`) {
+		t.Errorf("model element rendered with no model published:\n%s", body)
+	}
+}
+
 func TestKindAndTrackerRows(t *testing.T) {
 	c := `{"pid":` + itoa(os.Getpid()) + `,"host":"` + hostname(t) + `","started":"2026-10-07T10:00:00Z",
 	"time":"2026-10-07T11:59:58Z","kinds":["work","butler"],"state":"jammed","slots":[],
