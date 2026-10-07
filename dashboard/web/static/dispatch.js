@@ -268,28 +268,29 @@
     function connect() {
       var es = new EventSource(log.dataset.src);
       current = es;
-      var opened = false;
+      var connected = false;
       var done = false;
 
       es.onopen = function () {
         // The server re-sends the whole log after a reconnect.
-        if (opened) reset();
-        opened = true;
+        if (connected) reset();
+        connected = true;
         note = "";
         updateIndicator();
       };
 
       es.addEventListener("log", function (e) {
-        if (note) {
-          note = "";
-          updateIndicator();
-        }
         queue.push(e.data);
         schedule();
       });
 
       es.addEventListener("waiting", function () {
         note = "waiting for log";
+        updateIndicator();
+      });
+
+      es.addEventListener("opened", function () {
+        note = "";
         updateIndicator();
       });
 
