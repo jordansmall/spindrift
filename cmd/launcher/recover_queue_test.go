@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -112,7 +113,7 @@ func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverA
 		bundle = id
 	}
 	rec := loadRecoverAttempts(x.dir, num, bundle)
-	rec.Count, rec.Last, rec.GaveUp = seed.Count, seed.Last, seed.GaveUp
+	rec.Count, rec.Last, rec.GaveUp, rec.LastError = seed.Count, seed.Last, seed.GaveUp, seed.LastError
 	if err := rec.save(); err != nil {
 		t.Fatal(err)
 	}
@@ -220,10 +221,13 @@ func TestRecoverQueueOne_RelayFailureEndsAgentFailed(t *testing.T) {
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
 
-	code, _ := x.run(t)
+	code, out := x.run(t)
 
 	if code != 0 {
 		t.Errorf("exit = %d, want 0 (an issue was attempted)", code)
+	}
+	if !strings.Contains(out, "relay bundle failed: relay: boom") {
+		t.Errorf("output = %q, want the relay cause on the per-attempt line", out)
 	}
 	if len(x.fc.CommentCalls) != 0 {
 		t.Errorf("comments = %v, want none for an intermediate failure", x.fc.CommentCalls)
@@ -848,7 +852,7 @@ func TestRecoverQueueOne_GivesUpAfterBoundWithOneComment(t *testing.T) {
 		}
 	}
 	body := fmt.Sprint(x.fc.CommentCalls[0])
-	for _, sub := range []string{"Auto-recover gave up", "3 attempts", "spindrift recover 42"} {
+	for _, sub := range []string{"Auto-recover gave up", "3 attempts", "spindrift recover 42", "relay bundle failed", "relay: boom"} {
 		if !strings.Contains(body, sub) {
 			t.Errorf("comment %q missing %q", body, sub)
 		}
@@ -865,6 +869,29 @@ func TestRecoverQueueOne_GivesUpAfterBoundWithOneComment(t *testing.T) {
 	}
 	if len(x.fc.CommentCalls) != 1 || len(x.fc.TransitionStateCalls) != transitions {
 		t.Errorf("4th run wrote the tracker: comments=%v transitions=%v", x.fc.CommentCalls, x.fc.TransitionStateCalls[transitions:])
+	}
+}
+
+// The give-up comment names the draft PR failure, not just the relay stage.
+func TestRecoverQueueOne_GiveUpCommentNamesDraftPRFailure(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.CreateDraftPRErr = errors.New("pr: boom")
+
+	for run := 1; run <= 3; run++ {
+		if code, _ := x.run(t); code != 0 {
+			t.Fatalf("run %d: exit = %d, want 0", run, code)
+		}
+	}
+
+	if len(x.fc.CommentCalls) != 1 {
+		t.Fatalf("comments = %v, want exactly one", x.fc.CommentCalls)
+	}
+	body := fmt.Sprint(x.fc.CommentCalls[0])
+	for _, sub := range []string{"draft PR create failed", "pr: boom"} {
+		if !strings.Contains(body, sub) {
+			t.Errorf("comment %q missing %q", body, sub)
+		}
 	}
 }
 
@@ -945,6 +972,66 @@ func TestRecoverQueueOne_RecordPastBoundGetsOneComment(t *testing.T) {
 	}
 	if len(x.fc.TransitionStateCalls) != 0 {
 		t.Errorf("transitions = %v, want none", x.fc.TransitionStateCalls)
+	}
+	if body := fmt.Sprint(x.fc.CommentCalls); !strings.Contains(body, "kept failing") || strings.Contains(body, "failed with") {
+		t.Errorf("comment %q, want the generic wording for a record with no cause", body)
+	}
+}
+
+// A record carrying the last cause lets a give-up posted on a later pass, with
+// no settle to produce an error, still name it.
+func TestRecoverQueueOne_RecordPastBoundNamesStoredCause(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 5, Last: time.Now().Add(-time.Hour), LastError: "relay bundle failed: relay: boom"})
+
+	if code, _ := x.run(t); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+
+	if body := fmt.Sprint(x.fc.CommentCalls); !strings.Contains(body, "failed with: relay bundle failed: relay: boom") {
+		t.Errorf("comment %q, want the stored cause", body)
+	}
+}
+
+// A record written before LastError existed must still load.
+func TestLoadRecoverAttempts_RecordWithoutLastErrorLoads(t *testing.T) {
+	dir := tempLogDir(t)
+	if err := os.WriteFile(recoverAttemptsPath(dir, "42"), []byte(`{"count":2,"last":"2026-01-02T03:04:05Z","bundle":"abc","gave_up":false}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := loadRecoverAttempts(dir, "42", "abc")
+
+	if rec.Count != 2 || rec.LastError != "" {
+		t.Errorf("rec = %+v, want count 2 and no LastError", rec)
+	}
+}
+
+// Manual recover has no attempt record; it reports the settle's cause instead
+// of misreading a failed relay as a missing PR.
+func TestCmdRecover_RelayFailureReportsCauseNotNoOpenPR(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	lc := &launchContext{
+		config:       x.c,
+		pwd:          x.dir,
+		issueTracker: x.fc,
+		codeForge:    x.cf,
+		factory:      testFactory(t, x.dir, nil),
+		settle:       testNewSettle(x.c, x.fc, testWired(x.fc), x.cf),
+		cleanup:      func() {},
+	}
+
+	var stdout, stderr strings.Builder
+	got := cmdRecover(lc, "42", &stdout, &stderr)
+
+	if got != 1 {
+		t.Errorf("cmdRecover = %d, want 1", got)
+	}
+	if !strings.Contains(stdout.String(), "relay bundle failed: relay: boom") || strings.Contains(stdout.String(), "no open PR") {
+		t.Errorf("stdout = %q, want the relay cause and no %q", stdout.String(), "no open PR")
 	}
 }
 
@@ -1069,5 +1156,53 @@ func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 	after, err := os.ReadFile(recoverAttemptsPath(x.dir, "42"))
 	if err != nil || string(after) != string(before) {
 		t.Errorf("record changed: err=%v before=%q after=%q", err, before, after)
+	}
+}
+
+// A failed attempt with no error of its own must not erase the cause an
+// earlier attempt stored: the give-up it triggers still names it.
+func TestParkQueueFailure_NilErrorKeepsEarlierCause(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 2, Last: time.Now().Add(-time.Hour), LastError: "X"})
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := loadRecoverAttempts(x.dir, "42", id)
+
+	if err := parkQueueFailure(x.c, x.fc, "42", rec, nil, time.Now(), io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	if body := fmt.Sprint(x.fc.CommentCalls); !strings.Contains(body, "failed with: X.") {
+		t.Errorf("comment %q, want the earlier cause X", body)
+	}
+}
+
+// A multi-line, over-long cause reaches the public comment and the one-line
+// stdout note as a single capped line.
+func TestParkQueueFailure_NormalizesCause(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 2, Last: time.Now().Add(-time.Hour)})
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := loadRecoverAttempts(x.dir, "42", id)
+	cause := "line one\n\tline two\n" + strings.Repeat("é", 400)
+	var out strings.Builder
+
+	if err := parkQueueFailure(x.c, x.fc, "42", rec, errors.New(cause), time.Now(), &out, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Count(out.String(), "\n") != 1 || !strings.Contains(out.String(), "line one line two ") {
+		t.Errorf("stdout = %q, want one line with whitespace collapsed", out.String())
+	}
+	saved := loadRecoverAttempts(x.dir, "42", id).LastError
+	if len(saved) > maxCauseBytes+len("…") || !strings.HasSuffix(saved, "…") || !utf8.ValidString(saved) || strings.ContainsAny(saved, "\n\t") {
+		t.Errorf("stored cause = %q (%d bytes), want a single capped UTF-8 line", saved, len(saved))
 	}
 }
