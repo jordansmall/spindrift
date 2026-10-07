@@ -106,6 +106,28 @@ func TestMerge_BlockedByChecks(t *testing.T) {
 	}
 }
 
+// A merge that landed by another path between the gate and the POST makes the
+// endpoint refuse; the PR reporting merged is success, not a conflict.
+func TestMerge_RefusedButAlreadyMerged_Succeeds(t *testing.T) {
+	for _, status := range []int{http.StatusMethodNotAllowed, http.StatusConflict} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			cf := newMergeTestForge(t, "", func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPost:
+					w.WriteHeader(status)
+				case http.MethodGet:
+					w.Write([]byte(pullJSON(206, "closed", true, false, false, "add feature", "agent/issue-206", "abc123", "main")))
+				default:
+					http.NotFound(w, r)
+				}
+			})
+			if err := cf.Merge("https://forge.test/owner/repo/pulls/206"); err != nil {
+				t.Fatalf("Merge(...): want nil for an already-merged PR, got %v", err)
+			}
+		})
+	}
+}
+
 // Only Forgejo's refusal statuses (405/409) get disambiguated through the
 // pull's mergeable field. Every other non-2xx must come back as a raw error
 // naming the status, so a 403, 429 or 500 is never misread as a conflict. The

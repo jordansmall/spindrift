@@ -147,10 +147,14 @@ func (f *forgejoCodeForge) Mergeable(prURL string) (forge.MergeableState, error)
 	if err != nil {
 		return forge.MergeableUnknown, err
 	}
+	return p.mergeableState(), nil
+}
+
+func (p forgejoPullPayload) mergeableState() forge.MergeableState {
 	if p.Mergeable {
-		return forge.MergeableMergeable, nil
+		return forge.MergeableMergeable
 	}
-	return forge.MergeableConflicting, nil
+	return forge.MergeableConflicting
 }
 
 // listPulls walks every page of the pulls listing in the given state ("open" or
