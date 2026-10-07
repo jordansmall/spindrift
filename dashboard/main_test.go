@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -114,5 +115,73 @@ func TestResolveCheckoutNotAGitCheckoutNamesFlag(t *testing.T) {
 	dir := t.TempDir()
 	if _, err := resolveCheckout(dir); err == nil || !strings.Contains(err.Error(), "--checkout "+dir) {
 		t.Errorf("err = %v, want it to name --checkout %s", err, dir)
+	}
+}
+
+func TestRunEmptyAllowHostExitsTwo(t *testing.T) {
+	var stderr bytes.Buffer
+	if code := run([]string{"--allow-host", ""}, &stderr, nil); code != 2 {
+		t.Errorf("exit = %d, want 2; stderr %q", code, stderr.String())
+	}
+}
+
+func TestRunRejectsForeignHostHeader(t *testing.T) {
+	checkout := gitInit(t)
+	var stderr bytes.Buffer
+	ready := make(chan net.Addr, 1)
+	stop := make(chan struct{})
+	done := make(chan int, 1)
+	go func() {
+		done <- run([]string{"--checkout", checkout, "--listen", "127.0.0.1:0"}, &stderr, &runHooks{ready: ready, stop: stop})
+	}()
+	addr := (<-ready).String()
+	defer func() { close(stop); <-done }()
+
+	for _, tt := range []struct {
+		host string
+		want int
+	}{
+		{"attacker.example", http.StatusForbidden},
+		{addr, http.StatusOK},
+	} {
+		req, err := http.NewRequest(http.MethodGet, "http://"+addr+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = tt.host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != tt.want {
+			t.Errorf("Host %q: status = %d, want %d", tt.host, resp.StatusCode, tt.want)
+		}
+	}
+}
+
+func TestRunMalformedAllowHostExitsTwo(t *testing.T) {
+	tests := []struct {
+		value string
+		want  string
+	}{
+		{"box.lan:8099", "without a port"},
+		{"[box.lan]", "without a port"},
+		{"[::1]:8099", "without a port"},
+		{"::1", "IP literals are always allowed"},
+		{"[::1]", "IP literals are always allowed"},
+		{"10.0.0.5", "IP literals are always allowed"},
+		{".", "must not be empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			var stderr bytes.Buffer
+			if code := run([]string{"--allow-host", tt.value}, &stderr, nil); code != 2 {
+				t.Errorf("exit = %d, want 2; stderr %q", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Errorf("stderr %q, want it to contain %q", stderr.String(), tt.want)
+			}
+		})
 	}
 }
