@@ -37,6 +37,20 @@ func run(args []string, stderr io.Writer, hooks *runHooks) int {
 	fs.SetOutput(stderr)
 	checkout := fs.String("checkout", "", "checkout the Daemon runs in (default: git root of the working directory)")
 	listen := fs.String("listen", defaultListen, "address to listen on")
+	var allowedHosts []string
+	fs.Func("allow-host", "extra hostname the Dashboard may be reached by, without a port (repeatable; localhost and IP literals are always allowed)", func(v string) error {
+		if hostOnly(v) == "" {
+			return errors.New("host name must not be empty")
+		}
+		if net.ParseIP(strings.TrimSuffix(strings.TrimPrefix(v, "["), "]")) != nil {
+			return fmt.Errorf("host %q is an IP literal; IP literals are always allowed and need no --allow-host", v)
+		}
+		if strings.ContainsAny(v, ":[]") {
+			return fmt.Errorf("host %q must be a bare hostname without a port (the Host check compares names only)", v)
+		}
+		allowedHosts = append(allowedHosts, v)
+		return nil
+	})
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return 0
@@ -53,6 +67,11 @@ func run(args []string, stderr io.Writer, hooks *runHooks) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "dashboard: %v\n", err)
 		return 1
+	}
+
+	// The --listen host is always an allowed Host, merged with the --allow-host values.
+	if h, _, err := net.SplitHostPort(*listen); err == nil && h != "" {
+		allowedHosts = append(allowedHosts, h)
 	}
 
 	// Bind before announcing so a taken port fails here, naming the address.
@@ -83,7 +102,7 @@ func run(args []string, stderr io.Writer, hooks *runHooks) int {
 	// BaseContext ties the long-lived /events streams to shutdown; otherwise
 	// Shutdown would wait out its timeout on every open page.
 	srv := &http.Server{
-		Handler:           newServer(root, statusPath),
+		Handler:           hostGuard(newServer(root, statusPath), allowedHosts),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
