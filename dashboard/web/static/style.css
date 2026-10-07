@@ -100,3 +100,19 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .history .evname { font-weight: 600; }
 .history .detail { color: var(--muted); }
 .history .note { color: var(--muted); margin-top: .2rem; white-space: pre-wrap; word-break: break-word; }
+body.disconnected #status .top h1::after { content: " (reconnecting)"; color: var(--muted); font-size: .8rem; font-weight: 400; }
+
+@keyframes phase-pulse {
+  from { box-shadow: 0 0 0 3px var(--c, var(--muted)); }
+  to { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes entry-fresh {
+  from { background: var(--border); }
+  to { background: var(--panel); }
+}
+/* Keep in step with PULSE_MS in live.js, which resumes the pulse on each redrawn card. */
+.card.phase-changed { animation: phase-pulse .9s ease-out; }
+.history .entry.fresh { animation: entry-fresh 1.5s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .card.phase-changed, .history .entry.fresh { animation: none; }
+}
