@@ -4272,6 +4272,14 @@ later queue pass retries it; lowering `MAX_RECOVER_ATTEMPTS` below a record's
 count posts it on the next pass. If the record cannot be saved, the run
 exits 1. A hand-run `spindrift recover <n>` ignores the record.
 
+Queue mode re-checks just before the claim and skips an issue no longer on
+`agent-failed`, so a relabel made while it worked earlier candidates is usually
+left alone (issue #4679); the check narrows the window, it does not close it. A
+drain stop (the first signal) lets the attempt in hand finish settling, parks a
+failed landing back on `agent-failed` (counting the attempt), and then exits 7;
+an abort (the second signal) reclaims the issue to `ready-for-agent` as before. If putting `agent-failed` back fails, the run
+exits 1, so an issue stranded on `agent-in-progress` is visible.
+
 After a successful land (merged, including a hand-run `spindrift recover
 <n>`), the Launcher deletes the issue's `seam.bundle` from the outbox. A
 blocked, failed, or left-open-for-a-human landing keeps it, and a failed
