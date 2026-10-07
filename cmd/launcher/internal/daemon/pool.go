@@ -119,7 +119,10 @@ func (s *state) tipMoved(now time.Time) (lifted []Kind) {
 // flight a bare setPhase left behind is never reachable as stale occupancy
 // data.
 type slotState struct {
-	phase  Phase
+	phase Phase
+	// since is when phase last changed; mutate maintains it, so no phase
+	// assignment site needs to.
+	since  time.Time
 	flight slotFlight
 }
 
@@ -146,7 +149,20 @@ type slotState struct {
 // changes rather than the nine hand-placed call sites it replaces.
 func (p *pool) mutate(f func(s *state) []Event) {
 	p.mu.Lock()
+	before := make([]slotState, len(p.st.slots))
+	copy(before, p.st.slots)
 	evs := f(&p.st)
+	// startChild and finishChild replace a whole slotState, zeroing since, and
+	// noteAwakeOpen re-sets idle on every iteration; restoring the prior
+	// since unless the phase moved keeps both from resetting it.
+	now := p.clk.Now()
+	for i := range p.st.slots {
+		if p.st.slots[i].phase == before[i].phase {
+			p.st.slots[i].since = before[i].since
+		} else {
+			p.st.slots[i].since = now
+		}
+	}
 	for _, ev := range evs {
 		p.em.Emit(ev)
 	}
@@ -289,6 +305,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 	slots := make([]slotState, cfg.Slots)
 	for i := range slots {
 		slots[i].phase = PhaseIdle
+		slots[i].since = clk.Now()
 	}
 	wake, wakeCancel := context.WithCancel(context.Background())
 	p := &pool{
@@ -1223,7 +1240,7 @@ func (p *pool) snapshot() Status {
 func (p *pool) snapshotLocked() Status {
 	slots := make([]SlotStatus, len(p.st.slots))
 	for i, ss := range p.st.slots {
-		slots[i] = SlotStatus{Slot: i, Phase: ss.phase, Busy: ss.phase == PhaseRunning}
+		slots[i] = SlotStatus{Slot: i, Phase: ss.phase, Busy: ss.phase == PhaseRunning, Since: ss.since.UTC().Format(time.RFC3339)}
 		if ss.phase != PhaseRunning {
 			continue
 		}

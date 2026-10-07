@@ -1901,6 +1901,61 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	}
 }
 
+// TestLoopPublishesSlotSince asserts a running slot's since is the moment it
+// entered that phase, and that a publish which leaves the phase unchanged
+// does not move it.
+func TestLoopPublishesSlotSince(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	clk := &testClock{}
+	clk.setNow(t0)
+	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+
+	var first, second StatusReport
+	var err1, err2 error
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 5}},
+		// Moves the clock after the slot was stamped idle at pool start and
+		// before the child starts, so a since stuck at pool start differs
+		// from one stamped at the phase change.
+		onResolve: func(context.Context, int) error {
+			clk.advanceBy(time.Hour)
+			return nil
+		},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42")})
+			first, err1 = ReadStatus(dir)
+			clk.advanceBy(time.Hour)
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("43")})
+			second, err2 = ReadStatus(dir)
+			return nil
+		},
+	}
+	var buf bytes.Buffer
+	cfg := testConfig(1)
+	cfg.Status = sw
+	Loop(context.Background(), cfg, r, newTestEmitter(&buf), clk)
+
+	if err1 != nil || err2 != nil {
+		t.Fatalf("ReadStatus during RunChild: %v, %v", err1, err2)
+	}
+	want := t0.Add(time.Hour).Format(time.RFC3339)
+	for i, rep := range []StatusReport{first, second} {
+		if rep.Status == nil || len(rep.Status.Slots) != 1 {
+			t.Fatalf("read %d: status = %+v, want one slot", i, rep.Status)
+		}
+		if got := rep.Status.Slots[0].Since; got != want {
+			t.Fatalf("read %d: since = %q, want %q (the child-start time)", i, got, want)
+		}
+	}
+	// The second read must be a publish made after the clock moved, or it
+	// proves nothing about an unchanged phase keeping its since.
+	if !reflect.DeepEqual(second.Status.Slots[0].Issues, []string{"42", "43"}) {
+		t.Fatalf("second read slot = %+v, want issues [42 43] from a republish", second.Status.Slots[0])
+	}
+}
+
 // TestLoopPublishesLiveStatus drives a Loop run with Config.Status pointed
 // at a temp dir and asserts the status file names the in-flight child's
 // kind/revision/issues while RunChild is still running, and that a valid
