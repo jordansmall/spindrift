@@ -123,6 +123,32 @@ func TestEmitterOmitsEmptyExit(t *testing.T) {
 	}
 }
 
+func TestEmitterKeepsPresetTime(t *testing.T) {
+	var buf bytes.Buffer
+	e := newTestEmitter(&buf)
+	e.Emit(Event{Event: "child_start", Time: "2026-03-04T05:06:07Z"})
+	e.Emit(Event{Event: "idle"})
+
+	var got []Event
+	dec := json.NewDecoder(&buf)
+	for dec.More() {
+		var ev Event
+		if err := dec.Decode(&ev); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		got = append(got, ev)
+	}
+	if len(got) != 2 {
+		t.Fatalf("events = %d, want 2", len(got))
+	}
+	if got[0].Time != "2026-03-04T05:06:07Z" {
+		t.Errorf("preset time = %q, want it kept", got[0].Time)
+	}
+	if want := time.Unix(0, 0).UTC().Format(time.RFC3339); got[1].Time != want {
+		t.Errorf("unset time = %q, want emitter clock %q", got[1].Time, want)
+	}
+}
+
 func TestEmitterEncodeFailureReportsDiagnosticAndDoesNotPanic(t *testing.T) {
 	var errBuf bytes.Buffer
 	e := newTestEmitterErr(failWriter{}, &errBuf)

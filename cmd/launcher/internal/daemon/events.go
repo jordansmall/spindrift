@@ -132,10 +132,11 @@ type Emitter struct {
 	file *EventsFile
 }
 
-// NewEmitter builds an Emitter writing to w, stamping each Event with now().
-// now is injected so tests get a deterministic timestamp and a later slice
-// can hand the emitter a real clock. errW is where advisory write failures —
-// a failed event or status-file write — are reported; nil means io.Discard.
+// NewEmitter builds an Emitter writing to w, stamping each Event that has no
+// Time of its own with now(). now is injected so tests get a deterministic
+// timestamp and a later slice can hand the emitter a real clock. errW is
+// where advisory write failures — a failed event or status-file write — are
+// reported; nil means io.Discard.
 func NewEmitter(w, errW io.Writer, now func() time.Time) *Emitter {
 	if errW == nil {
 		errW = io.Discard
@@ -154,10 +155,13 @@ func (e *Emitter) warnf(format string, args ...any) {
 
 // Emit writes ev as one JSON line. It is safe to call concurrently — a later
 // slice tees child output from another goroutine while the loop goroutine
-// emits its own events.
+// emits its own events. A caller-preset ev.Time is kept; otherwise now()
+// stamps it.
 func (e *Emitter) Emit(ev Event) {
 	ev.V = eventVersion
-	ev.Time = e.now().UTC().Format(time.RFC3339)
+	if ev.Time == "" {
+		ev.Time = e.now().UTC().Format(time.RFC3339)
+	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var line bytes.Buffer
