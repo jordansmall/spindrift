@@ -598,6 +598,15 @@ test("stream errors and pruning are reported next to the follow state", () => {
   assert.strictEqual(p.followState.textContent, "log pruned · following");
 });
 
+test("an opened frame clears the waiting note without adding content", () => {
+  const p = page();
+  p.es.emit("waiting");
+  assert.strictEqual(p.followState.textContent, "waiting for log · following");
+  p.es.emit("opened", "issue-7.log");
+  assert.strictEqual(p.followState.textContent, "following");
+  assert.strictEqual(p.lines().length, 0);
+});
+
 test("a superseded log closes the stream and names the kept copy", () => {
   const p = page();
   p.es.emit("superseded", "issue-7.log");
