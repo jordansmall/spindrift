@@ -549,10 +549,11 @@ func (lt *LocalTracker) Probe() (string, error) {
 	return abs, nil
 }
 
-// ListLabels returns the four dispatch state markers, reported present
-// unconditionally because the local adapter has no label registry to check
-// against. AllLabels omits Recoverable as a local-only frontmatter marker that
-// is never a real GitHub label, so it needs no membership check here (#2254).
+// ListLabels returns the dispatch state markers AllLabels names, reported
+// present unconditionally because the local adapter has no label registry to
+// check against. AllLabels omits Recoverable as a local-only frontmatter
+// marker that is never a real GitHub label, so it needs no membership check
+// here (#2254).
 func (lt *LocalTracker) ListLabels() ([]string, error) {
 	return lt.labels.AllLabels(), nil
 }

@@ -3971,7 +3971,11 @@ landing: "https://github.com/owner/repo/pull/123"
   `ready-for-agent` / `agent-in-progress` / `agent-complete` / `agent-failed`
   by default (same names as `LABEL`/`IN_PROGRESS_LABEL`/`COMPLETE_LABEL`/
   `FAILED_LABEL`, which still apply — the local adapter uses them as the
-  frontmatter value instead of a GitHub label).
+  frontmatter value instead of a GitHub label). Two further, fixed values can
+  appear: `agent-ambiguous-spec` after a `status=ambiguous` stop, and the
+  local-only `agent-recoverable` marker when a `CODE_FORGE=local` run that
+  self-reported success (or was killed by a signal) leaves a bundle in the
+  outbox for `spindrift recover` (ADR 0039).
 - `parent` is optional and opaque — the local tracker is standalone; any
   linkage to an upstream tracker (a GitHub URL, a Jira key, another local
   issue's slug) is out of scope (ADR 0013) and never resolved by spindrift
@@ -4006,8 +4010,10 @@ landing: "https://github.com/owner/repo/pull/123"
 - **Dependencies** come from a `## Blocked by` section: one issue slug per
   bullet, no `#N` refs (local issues aren't numbered).
 - `spindrift doctor`'s label-presence check always passes for the local
-  adapter — there is no separate label registry to check; the four dispatch
-  markers above always exist as values the `state` field can take.
+  adapter — there is no separate label registry to check; the five dispatch
+  markers above (the four configurable ones plus `agent-ambiguous-spec`)
+  always exist as values the `state` field can take. `agent-recoverable` is
+  local-only and never part of the label-presence check.
 - **Selective dispatch by slug**: `spindrift dispatch <slug>` (and
   `preview`/`research`) takes the same selective path as a numeric ID list
   like `spindrift dispatch 42 57` — every positional is an opaque issue ID
