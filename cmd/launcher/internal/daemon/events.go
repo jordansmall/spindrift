@@ -57,6 +57,9 @@ type Event struct {
 	// (complete/failed/recoverable/ambiguous) and any free-text detail.
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
+	// PRURL is the settled event's PR link when the issue opened one, carried
+	// unchanged from the child's record.
+	PRURL string `json:"pr_url,omitempty"`
 	// Failures is the breaker's failure count, stamped on breaker_trip so
 	// the event names the transition without cross-referencing an earlier
 	// backoff event.

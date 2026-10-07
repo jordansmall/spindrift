@@ -700,7 +700,7 @@ func (p *pool) noteNotDue(slot int, rec Record) {
 // it would lose the one event that answers "what happened to #123".
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
 	p.mutate(func(*state) []Event {
-		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, Slot: intPtr(slot)}}
 	})
 }
 
@@ -1426,6 +1426,7 @@ func (p *pool) snapshotLocked() Status {
 		Slots:    slots,
 		Checks:   checks,
 		Trackers: trackers,
+		RepoURL:  p.cfg.RepoURL,
 	}
 }
 

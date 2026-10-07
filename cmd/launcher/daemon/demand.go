@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -15,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/github"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/trackerbuild"
@@ -400,4 +402,27 @@ func resolveDaemonOnlyKnobs(doc *inputdoc.Document, stderr io.Writer, withSelf, 
 		}
 	}
 	return k, nil
+}
+
+// repoURL is the Target repo's web URL for the ISSUE_TRACKER, "" when that
+// tracker has no web repo to link (local, jira) or its knobs are unset. It is
+// derived from the issue tracker, not CODE_FORGE, because the link it feeds is
+// an issue link; GitHub and Forgejo both serve one at <repo>/issues/<n>.
+// A GitHub Enterprise host comes from GH_HOST, as the gh CLI reads it.
+func repoURL(doc *inputdoc.Document) string {
+	slug := childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG"))
+	if slug == "" {
+		return ""
+	}
+	switch issueTrackerName(doc) {
+	case "github":
+		return "https://" + github.Host() + "/" + slug
+	case "forgejo":
+		base := strings.TrimSuffix(childKnob(doc, "FORGEJO_BASE_URL", os.Getenv("FORGEJO_BASE_URL")), "/")
+		if base == "" {
+			return ""
+		}
+		return base + "/" + slug
+	}
+	return ""
 }
