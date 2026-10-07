@@ -32,7 +32,7 @@ func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchS
 	// (issue #3627): the record is what the host decided, not whether the
 	// tracker write landed.
 	if to.Terminal() {
-		report.Settled(dispatchkey.Issue(num), to.String(), note)
+		report.Settled(dispatchkey.Issue(num), to.String(), note, "")
 	}
 }
 

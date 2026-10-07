@@ -33,8 +33,8 @@ func Box(key dispatchkey.Key, phase, passLog string) {
 }
 
 // Settled forwards to Default().Settled.
-func Settled(key dispatchkey.Key, state, note string) {
-	Default().Settled(key, state, note)
+func Settled(key dispatchkey.Key, state, note, prURL string) {
+	Default().Settled(key, state, note, prURL)
 }
 
 // NotDue forwards to Default().NotDue.

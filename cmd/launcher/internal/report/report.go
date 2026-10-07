@@ -44,6 +44,9 @@ type Record struct {
 	// to the checkout. Empty on every other event, and on a recover box, which
 	// runs no Box.
 	PassLog string
+	// PRURL is a settled record's PR: the one the Dispatch opened or adopted,
+	// empty when none (and on every other event).
+	PRURL string
 	// NextDue is a not_due record's answer, parsed off the wire by
 	// UnmarshalJSON; zero on every other event.
 	NextDue NextDue
@@ -94,12 +97,13 @@ type recordWire struct {
 	Note  string `json:"note,omitempty"`
 
 	PassLog string `json:"pass_log,omitempty"`
+	PRURL   string `json:"pr_url,omitempty"`
 	NextDue string `json:"next_due,omitempty"`
 }
 
 func (r Record) MarshalJSON() ([]byte, error) {
 	issue, chore := r.Key.Fields()
-	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, NextDue: r.NextDue.wire()})
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, PRURL: r.PRURL, NextDue: r.NextDue.wire()})
 }
 
 // UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
@@ -126,7 +130,7 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, NextDue: nd}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, PRURL: w.PRURL, NextDue: nd}
 	return nil
 }
 
@@ -212,9 +216,10 @@ func (r *Reporter) Box(key dispatchkey.Key, phase, passLog string) {
 }
 
 // Settled records key's terminal state, once, using the host-decided
-// vocabulary from the existing outcome/settle machinery.
-func (r *Reporter) Settled(key dispatchkey.Key, state, note string) {
-	r.emit(Record{Event: EventSettled, Key: key, State: state, Note: note})
+// vocabulary from the existing outcome/settle machinery. prURL is the PR the
+// Dispatch opened or adopted, "" when none.
+func (r *Reporter) Settled(key dispatchkey.Key, state, note, prURL string) {
+	r.emit(Record{Event: EventSettled, Key: key, State: state, Note: note, PRURL: prURL})
 }
 
 // NotDue records that key's Chore is not due, and when it will be. A zero

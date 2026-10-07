@@ -58,6 +58,10 @@ type Mediation struct {
 	outboxDir  func(num string) string
 	baseBranch string
 
+	// onOpen receives each PR URL Open resolves, latching the host-proven PR at
+	// its source for every hand-off path. Nil outside mediationFor.
+	onOpen func(url string)
+
 	br  forge.BundleRelay
 	dpc forge.DraftPRCreator
 	bcs forge.BundleCommitSubjects
@@ -77,6 +81,7 @@ func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediati
 	// Wrapped here, not in NewMediation, so Open and relayBlockedWork's direct
 	// push-only relay share the one retry policy (issue #4649).
 	m.br = s.retryingRelay(num, gen, m.br)
+	m.onOpen = func(url string) { s.latchPR(num, url) }
 	return cf.AgentBranch(num), m
 }
 
@@ -132,6 +137,9 @@ func (m *Mediation) Open(num, branch string, result dispatch.Result, fallback Fa
 	url, created, err = m.dpc.CreateDraftPR(title, body, m.baseBranch, branch)
 	if err != nil {
 		return "", false, TextSourceUnknown, fmt.Errorf("%w: %w", errCreateDraftPR, err)
+	}
+	if m.onOpen != nil && url != "" {
+		m.onOpen(url)
 	}
 	return url, created, source, nil
 }

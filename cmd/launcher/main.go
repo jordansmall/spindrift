@@ -1493,7 +1493,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// the issue is not stranded agent-in-progress with no run.
 				restoreErr := it.TransitionState(iss.number, forge.InProgress, forge.Failed)
 				// Reported even if the restore failed, as transitionState does.
-				report.Settled(dispatchkey.Issue(iss.number), forge.Failed.String(), "stopped before the bundle relay")
+				report.Settled(dispatchkey.Issue(iss.number), forge.Failed.String(), "stopped before the bundle relay", "")
 				if restoreErr != nil {
 					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
 				}
@@ -1598,7 +1598,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// caller settles that failure itself. Inline rather than through
 	// settle/gate.go's latch, which exists for a path that can reach a second,
 	// contradicting terminal transition; this one reaches at most one.
-	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note)
+	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note, "")
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}

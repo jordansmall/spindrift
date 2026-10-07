@@ -47,7 +47,7 @@ func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
 	}
 
 	// Package-level Settled/Box on a nil default must not panic.
-	Settled(dispatchkey.Issue("1"), "merged", "")
+	Settled(dispatchkey.Issue("1"), "merged", "", "")
 	Box(dispatchkey.Chore("bugs"), "initial", "")
-	Settled(dispatchkey.Chore("bugs"), "complete", "")
+	Settled(dispatchkey.Chore("bugs"), "complete", "", "")
 }
