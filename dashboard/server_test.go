@@ -138,6 +138,22 @@ func TestIdleSlotRendersAsIdleCard(t *testing.T) {
 	}
 }
 
+func TestRunningSlotShowsPass(t *testing.T) {
+	running := func(pass string) string {
+		return statusJSON(t, "working", "", `[{"slot":0,"phase":"running","busy":true,"since":"2026-10-07T11:00:00Z","kind":"work","issues":["7"]`+pass+`}]`)
+	}
+	with := running(`,"pass":"fix-pass-2"`)
+	_, body := get(t, &with, "/")
+	if !strings.Contains(body, `<div class="pass">pass fix-pass-2</div>`) {
+		t.Errorf("pass missing from running slot card:\n%s", body)
+	}
+	without := running("")
+	_, body = get(t, &without, "/")
+	if strings.Contains(body, `class="pass"`) {
+		t.Errorf("pass element rendered with no pass published:\n%s", body)
+	}
+}
+
 func TestKindAndTrackerRows(t *testing.T) {
 	c := `{"pid":` + itoa(os.Getpid()) + `,"host":"` + hostname(t) + `","started":"2026-10-07T10:00:00Z",
 	"time":"2026-10-07T11:59:58Z","kinds":["work","butler"],"state":"jammed","slots":[],

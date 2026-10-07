@@ -148,6 +148,7 @@ type slotView struct {
 	Elapsed     string
 	ChildStart  string
 	ChildStartN int
+	Pass        string
 }
 
 // viewFrom builds the view from one read of the status file, which a stream
@@ -209,7 +210,17 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		if sl.Busy {
 			v.Busy++
 		}
-		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Rev: shortRev(sl.Revision), Elapsed: "unknown", ChildStart: sl.ChildStart, ChildStartN: sl.ChildStartN}
+		sv := slotView{
+			Slot:        sl.Slot,
+			Phase:       sl.Phase,
+			Busy:        sl.Busy,
+			Kind:        sl.Kind,
+			Rev:         shortRev(sl.Revision),
+			Elapsed:     "unknown",
+			ChildStart:  sl.ChildStart,
+			ChildStartN: sl.ChildStartN,
+			Pass:        sl.Pass,
+		}
 		for _, is := range sl.Issues {
 			sv.Subject = append(sv.Subject, issueSubject(is).linked(repo))
 		}
