@@ -16,7 +16,8 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-// Retry knobs New applies to transient (429/5xx) responses.
+// Retry knobs New applies to transient responses: 429 for any method, 5xx only
+// for idempotent ones (see isRetryable).
 const (
 	defaultBackoffUnit = 200 * time.Millisecond
 	defaultBackoffCap  = 2 * time.Second
@@ -117,8 +118,23 @@ func New(baseURL string, auth AuthStrategy, backend string, statuses StatusMap, 
 	}
 }
 
-func isTransientStatus(status int) bool {
-	return status == http.StatusTooManyRequests || (status >= 500 && status < 600)
+// isRetryable reports whether a request with method may be retried after
+// status. A 429 means the server refused the request, so it is safe to retry
+// for any method; a 5xx may arrive after the server committed the write, so only idempotent
+// methods retry it (RFC 9110) — a re-sent POST or PATCH could duplicate a
+// create or turn a landed merge into a false failure.
+func isRetryable(method string, status int) bool {
+	if status == http.StatusTooManyRequests {
+		return true
+	}
+	if status < 500 || status >= 600 {
+		return false
+	}
+	switch method {
+	case http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions:
+		return true
+	}
+	return false
 }
 
 // maxErrorMessageLen bounds StatusError.Message to this many runes (plus a
@@ -236,7 +252,7 @@ func (c *Client) DoWithHeader(method, path string, body, out any) (http.Header, 
 			return resp.Header, nil
 		}
 
-		if isTransientStatus(resp.StatusCode) && attempt < c.maxAttempts {
+		if isRetryable(method, resp.StatusCode) && attempt < c.maxAttempts {
 			io.Copy(io.Discard, resp.Body) //nolint:errcheck // draining to allow keep-alive reuse; a drain error is not actionable here
 			resp.Body.Close()
 			c.backoff.Do(attempt)
