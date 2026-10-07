@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -110,17 +111,38 @@ func (ev Event) entry() historyEntry {
 // contributes nothing and a malformed line is skipped; any other failure to
 // read a generation is returned alongside whatever was read.
 func readHistory(eventsPath string) ([]historyEntry, error) {
+	f, entries, err := openEvents(eventsPath)
+	f.Close()
+	return entries, err
+}
+
+// eventsFollower tails the current Events generation across the Daemon's
+// rotation. It holds the current file open and the offset consumed through the
+// last newline, so a rotation (our file renamed to the older name, a fresh one
+// created) is told apart from an append by file identity, not by size.
+type eventsFollower struct {
+	path   string
+	f      *os.File // nil until the current generation exists
+	offset int64
+}
+
+// openEvents returns the newest historyLimit timeline entries (newest first,
+// as readHistory) and a follower positioned just after them. The follower must
+// be closed.
+func openEvents(eventsPath string) (*eventsFollower, []historyEntry, error) {
 	// Current first: a rotation between the two opens then leaves the older
 	// name on the file already open, rather than on one neither open sees.
 	cur, curErr := os.Open(eventsPath)
 	older, olderErr := os.Open(eventsPath + rotatedSuffix)
 	older = dropRotatedAlias(older, cur)
+	fol := &eventsFollower{path: eventsPath}
 	var chrono []historyEntry
 	var errs []error
 	for _, g := range []struct {
-		f   *os.File
-		err error
-	}{{older, olderErr}, {cur, curErr}} {
+		f       *os.File
+		err     error
+		rotated bool
+	}{{older, olderErr, true}, {cur, curErr, false}} {
 		if g.err != nil {
 			if !errors.Is(g.err, fs.ErrNotExist) {
 				errs = append(errs, g.err)
@@ -130,11 +152,20 @@ func readHistory(eventsPath string) ([]historyEntry, error) {
 		if g.f == nil {
 			continue
 		}
+		var n int64
 		var err error
-		chrono, err = appendTimeline(chrono, g.f)
-		g.f.Close()
+		opts := scanTrim
+		if g.rotated {
+			opts |= scanFinal
+		}
+		chrono, n, err = scanTimeline(chrono, g.f, opts)
 		if err != nil {
 			errs = append(errs, err)
+		}
+		if g.rotated {
+			g.f.Close()
+		} else {
+			fol.f, fol.offset = g.f, n
 		}
 	}
 	if len(chrono) > historyLimit {
@@ -144,7 +175,87 @@ func readHistory(eventsPath string) ([]historyEntry, error) {
 	for i, e := range chrono {
 		out[len(chrono)-1-i] = e
 	}
-	return out, errors.Join(errs...)
+	return fol, out, errors.Join(errs...)
+}
+
+// poll returns the timeline entries appended since the last call (or since
+// openEvents), oldest first. A trailing line without its newline is left for a
+// later poll, except on a generation the Daemon has rotated away, which is
+// closed for writing. Entries read before an error are returned with it.
+func (fol *eventsFollower) poll() ([]historyEntry, error) {
+	var out []historyEntry
+	// Open before comparing, and compare the opened file rather than a stat of
+	// the path: a rotation between a stat and a later open would otherwise
+	// leave the generation in between unread.
+	f, openErr := os.Open(fol.path)
+	if openErr != nil && !errors.Is(openErr, fs.ErrNotExist) {
+		return nil, openErr
+	}
+	// f is nil exactly when the path is missing.
+	if fol.f != nil {
+		heldInfo, err := fol.f.Stat()
+		if err != nil {
+			closeIfOpen(f)
+			return nil, err
+		}
+		if f != nil {
+			newInfo, err := f.Stat()
+			if err != nil {
+				f.Close()
+				return nil, err
+			}
+			if os.SameFile(newInfo, heldInfo) {
+				f.Close()
+				if heldInfo.Size() < fol.offset {
+					// Truncated in place. The Daemon only rotates by rename, so
+					// a copytruncate that outgrows the old offset before this
+					// poll is out of contract and loses entries.
+					fol.offset = 0
+				}
+				return fol.drain(out, false)
+			}
+		}
+		rotated := f != nil
+		out, err = fol.drain(out, rotated)
+		if err != nil || !rotated {
+			// A missing path is the gap between the Daemon's rename and its
+			// re-create: keep the file and wait for the new generation.
+			closeIfOpen(f)
+			return out, err
+		}
+		fol.f.Close()
+		fol.f, fol.offset = nil, 0
+	}
+	if f == nil {
+		return out, nil
+	}
+	fol.f = f
+	return fol.drain(out, false)
+}
+
+func closeIfOpen(f *os.File) {
+	if f != nil {
+		f.Close()
+	}
+}
+
+// drain appends the timeline entries from the held file's offset to out and
+// advances the offset past the lines consumed.
+func (fol *eventsFollower) drain(out []historyEntry, final bool) ([]historyEntry, error) {
+	var opts scanOpts
+	if final {
+		opts = scanFinal
+	}
+	out, n, err := scanTimeline(out, io.NewSectionReader(fol.f, fol.offset, math.MaxInt64-fol.offset), opts)
+	fol.offset += n
+	return out, err
+}
+
+func (fol *eventsFollower) Close() {
+	if fol.f != nil {
+		fol.f.Close()
+		fol.f = nil
+	}
 }
 
 // dropRotatedAlias closes older and returns nil when it is the same file as
@@ -162,24 +273,40 @@ func dropRotatedAlias(older, cur *os.File) *os.File {
 	return older
 }
 
-func appendTimeline(entries []historyEntry, f *os.File) ([]historyEntry, error) {
-	r := bufio.NewReader(f)
+type scanOpts uint8
+
+const (
+	// scanFinal treats a last line without its newline as complete, for a
+	// generation the Daemon has closed for writing.
+	scanFinal scanOpts = 1 << iota
+	// scanTrim cuts entries back lazily so a big file never holds more than
+	// twice the cap.
+	scanTrim
+)
+
+// scanTimeline appends r's timeline entries to entries and returns how many
+// bytes it consumed: through the last newline, or to EOF under scanFinal.
+func scanTimeline(entries []historyEntry, r io.Reader, opts scanOpts) ([]historyEntry, int64, error) {
+	br := bufio.NewReader(r)
+	var consumed int64
 	for {
 		// A line is read whole however long; the file can reach tens of MB.
-		line, err := r.ReadBytes('\n')
-		var ev Event
-		if json.Unmarshal(line, &ev) == nil && timeline[ev.Event] != nil {
-			entries = append(entries, ev.entry())
-			// Trim lazily so a big file never holds more than twice the cap.
-			if len(entries) > 2*historyLimit {
-				entries = append(entries[:0], entries[len(entries)-historyLimit:]...)
+		line, err := br.ReadBytes('\n')
+		if err == nil || (err == io.EOF && opts&scanFinal != 0) {
+			consumed += int64(len(line))
+			var ev Event
+			if json.Unmarshal(line, &ev) == nil && timeline[ev.Event] != nil {
+				entries = append(entries, ev.entry())
+				if opts&scanTrim != 0 && len(entries) > 2*historyLimit {
+					entries = append(entries[:0], entries[len(entries)-historyLimit:]...)
+				}
 			}
 		}
 		if err != nil {
 			if err == io.EOF {
 				err = nil
 			}
-			return entries, err
+			return entries, consumed, err
 		}
 	}
 }
