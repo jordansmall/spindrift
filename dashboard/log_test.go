@@ -199,3 +199,68 @@ func TestLogKeepsCRLFTogetherAcrossFrames(t *testing.T) {
 		t.Fatalf("line break at the frame boundary = %q, want a single newline", got[len(head)-1:])
 	}
 }
+
+func boxLine(path string) string {
+	return `{"time":"2026-10-07T12:03:05Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"` + path + `"}` + "\n"
+}
+
+func TestLogServesPassLogNamedOnlyByBoxEvent(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42-fix-1.log"
+	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(pass))
+	writeLog(t, checkout, pass, "pass line\n")
+	_, frames := openLog(t, ts, pass)
+	if got := collect(t, frames, "pass line"); got != "pass line\n" {
+		t.Fatalf("bytes = %q", got)
+	}
+}
+
+func TestLogMissingPassLogSendsPruned(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(pass))
+	_, frames := openLog(t, ts, pass)
+	if f := <-frames; f.event != "pruned" || f.data != pass {
+		t.Fatalf("frame = %+v, want pruned %q", f, pass)
+	}
+}
+
+func TestLogPassLogNotNamedIs404(t *testing.T) {
+	ts, checkout := logServer(t)
+	writeLog(t, checkout, ".spindrift/logs/issue-42.log", "x")
+	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(".spindrift/logs/issue-42-fix-1.log"))
+	resp, err := http.Get(ts.URL + "/log?path=" + url.QueryEscape(".spindrift/logs/issue-42.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", resp.StatusCode)
+	}
+}
+
+func TestLogEndsStreamWhenRetryRotatesPassLogAside(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(pass))
+	p := writeLog(t, checkout, pass, "dead attempt\n")
+	_, frames := openLog(t, ts, pass)
+	collect(t, frames, "dead attempt")
+
+	if err := os.Rename(p, p+".1"); err != nil {
+		t.Fatal(err)
+	}
+	writeLog(t, checkout, pass, "new attempt\n")
+	for open := true; open; {
+		select {
+		case _, open = <-frames:
+		case <-time.After(5 * time.Second):
+			t.Fatal("stream stayed open after the Pass log was rotated aside")
+		}
+	}
+
+	_, frames = openLog(t, ts, pass)
+	if got := collect(t, frames, "new attempt"); got != "new attempt\n" {
+		t.Fatalf("reconnect bytes = %q", got)
+	}
+}

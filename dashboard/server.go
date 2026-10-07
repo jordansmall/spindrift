@@ -60,7 +60,7 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/events":
 		s.events(w, r)
 	case r.URL.Path == "/log":
-		s.childLog(w, r)
+		s.serveLog(w, r)
 	case strings.HasPrefix(r.URL.Path, "/static/"):
 		s.static.ServeHTTP(w, r)
 	default:

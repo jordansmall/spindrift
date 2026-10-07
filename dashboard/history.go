@@ -39,6 +39,7 @@ type Event struct {
 	Note     string `json:"note"`
 	Failures *int   `json:"failures"`
 	ChildLog string `json:"child_log"`
+	PassLog  string `json:"pass_log"`
 	Exit     *int   `json:"exit"`
 	Revision string `json:"revision"`
 }
