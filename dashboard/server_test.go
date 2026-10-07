@@ -296,6 +296,16 @@ func TestAssetsServed(t *testing.T) {
 	}
 }
 
+func TestPageLoadsLiveScript(t *testing.T) {
+	c := statusJSON(t, "waiting", "", `[]`)
+	if _, body := get(t, &c, "/"); !strings.Contains(body, `<script src="/static/live.js"`) {
+		t.Error("page does not load /static/live.js")
+	}
+	if code, body := get(t, nil, "/static/live.js"); code != 200 || !strings.Contains(body, `EventSource("/events")`) {
+		t.Errorf("live.js: code=%d, no EventSource", code)
+	}
+}
+
 func TestFormatDuration(t *testing.T) {
 	for _, tc := range []struct {
 		d    time.Duration
