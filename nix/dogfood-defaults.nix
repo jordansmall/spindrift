@@ -63,7 +63,7 @@ in
     # Sweep bugs and docs-drift on idle Daemon slots (ADR 0056), and
     # let a few allow-listed, reviewer-backed findings self-promote.
     butlerChores = "bugs docs-drift";
-    butlerMaxPromotionsPerDay = 3;
+    butlerMaxPromotionsPerDay = 5;
     # Let the host land up to five docs-drift patch PRs a day (ADR 0057), on
     # the default patch classes and paths; mergeMode = "immediate" merges
     # each once green.
