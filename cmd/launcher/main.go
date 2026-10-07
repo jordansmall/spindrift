@@ -1461,6 +1461,19 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			if !gate.Allowed(iss.number) {
 				return waves.ErrSignalledStop
 			}
+			// The list is a snapshot, and the claim below cannot refuse an
+			// issue a human moved to another non-in-progress state, so
+			// re-list here; Issue.Labels would miss a Failed held as a native
+			// status (Jira). A label edit cannot be atomic; this narrows the
+			// window rather than closing it.
+			fresh, err := it.ListIssues(forge.Failed)
+			if err != nil {
+				return fmt.Errorf("recover: re-list %s issues for #%s: %w", c.failedLabel, issueNum, err)
+			}
+			if !slices.ContainsFunc(fresh, func(f forge.Issue) bool { return f.Number == iss.number }) {
+				fmt.Fprintf(stdout, "    #%s  status=skipped  note=no longer wears %s\n", issueNum, c.failedLabel)
+				return errRecoverIneligible
+			}
 			if err := it.TransitionState(iss.number, forge.Failed, forge.InProgress); err != nil {
 				if errors.Is(err, forge.ErrAlreadyClaimed) {
 					fmt.Fprintf(stdout, "    #%s  status=skipped  note=another actor already moved this issue off %s\n", issueNum, c.failedLabel)
