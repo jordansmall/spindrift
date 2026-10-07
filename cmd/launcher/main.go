@@ -1511,19 +1511,20 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		if err := d.EnsureRunLineage(); err != nil {
 			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
-		settled, settleErr := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
+		const gen = 0 // recover settles at generation 0; the abort check below must match
+		settled, settleErr := s.SettleRelayedBranch(d, iss.number, gen, sit, result)
 		// Leave must run before Settle's final abort re-check, or a signal
 		// landing the instant after settling finishes would still find this
 		// issue in-flight and reclaim it right back to Dispatchable (#3522).
 		gate.Leave(iss.number)
 		gate.Settle()
-		// Second checkpoint: a mid-flight abort reclaims the in-flight issue
-		// off in-progress on its own (the watcher), and the settle above
-		// abandoned at its next checkpoint through the shared registry's
-		// mark — an abort wins over the settle's own verdict, recoverFailed
-		// included, as run()'s signalledOr does for a wave (#3522). A queue
-		// drain stop instead records the verdict first (finishQueueSettle).
-		if gate.Aborted() {
+		// Second checkpoint. An abort that reclaimed this issue (the watcher
+		// marked it in the registry) abandoned the settle and wins over its
+		// verdict, recoverFailed included, as run()'s signalledOr does for a
+		// wave (#3522). An abort that found the issue no longer in flight, or
+		// skipped it as already complete, reclaimed nothing: it is handled like
+		// a drain stop, the verdict recorded first.
+		if gate.Aborted() && terminated.Marked(iss.number, gen) {
 			return waves.ErrSignalledStop
 		}
 		if queue {
