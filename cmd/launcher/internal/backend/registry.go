@@ -73,9 +73,10 @@ type Descriptor struct {
 	// LabelRegistry is true for an ISSUE_TRACKER backend whose labels are
 	// registered objects that ListLabels and CreateLabel manage, so a doctor
 	// preflight can require one and create it when missing. True for github,
-	// forgejo; false for local (ListLabels reports only the four dispatch
-	// markers and CreateLabel is a no-op) and jira (ListLabels reports only
-	// labels already applied to an issue, and CreateLabel is a no-op).
+	// forgejo; false for local (ListLabels reports only the dispatch
+	// markers AllLabels names and CreateLabel is a no-op) and jira
+	// (ListLabels reports only labels already applied to an issue, and
+	// CreateLabel is a no-op).
 	LabelRegistry bool
 
 	// TrackerAxisRead is this tracker's read-step axis value ("GITHUB",

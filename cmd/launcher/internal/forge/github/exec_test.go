@@ -16,7 +16,7 @@ import (
 )
 
 // testLabels mirrors the lifecycle labels in lib/env-schema.nix (issue #460),
-// so no test has to restate the four label strings.
+// so no test has to restate the label strings.
 var testLabels = forge.DispatchLabels{
 	Dispatchable: "ready-for-agent",
 	InProgress:   "agent-in-progress",
