@@ -129,3 +129,7 @@ a.entry[href]:hover, .card:has(.cardlink):hover { border-color: var(--muted); }
 .tab.active { color: var(--text); border-bottom-color: var(--muted); }
 .logbar { display: flex; gap: 1rem; align-items: center; margin-bottom: .4rem; }
 .log { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: .6rem; margin: 0; max-height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+.log:not(.show-all) .stream { display: none; }
+.log .ln:empty::before { content: "\200b"; }
+#follow-state { color: var(--muted); }
+#follow-state .jump { background: none; border: 0; padding: 0; font: inherit; color: var(--waiting); text-decoration: underline; cursor: pointer; }

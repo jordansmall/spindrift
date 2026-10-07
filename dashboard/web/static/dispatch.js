@@ -1,0 +1,288 @@
+(function () {
+  "use strict";
+  var log = document.getElementById("log");
+  if (!log || !window.EventSource) return;
+  var showAll = document.getElementById("show-all");
+  var followState = document.getElementById("follow-state");
+
+  // Log text is untrusted (issue comments can reach it): the DOM is built only
+  // from createElement/createTextNode/style, never innerHTML.
+
+  // Fixed palette tuned for the dark theme; "black" is lifted so it stays legible.
+  var PALETTE = [
+    "#3d4556", "#e06c75", "#98c379", "#e5c07b", "#61afef", "#c678dd", "#56b6c2", "#c8ccd4",
+    "#6b7488", "#ff8b94", "#b5e890", "#f5d98b", "#7ec3ff", "#e0a0ff", "#7fdbe6", "#ffffff"
+  ];
+
+  // CSI (any final byte), OSC (BEL or ESC \ terminated; an unterminated one
+  // swallows the rest of the line), then truncated CSI and stray ESC.
+  var ESCAPES = new RegExp(
+    "\\u001b\\[([0-?]*)[ -/]*([@-~])" +
+    "|\\u001b\\][^\\u0007\\u001b]*(?:\\u0007|\\u001b\\\\|$)" +
+    "|\\u001b\\[[0-?]*[ -/]*$" +
+    "|\\u001b", "g");
+
+  function stripAnsi(s) { return s.replace(ESCAPES, ""); }
+
+  function color256(n) {
+    if (n < 16) return PALETTE[n];
+    if (n >= 232) { var g = 8 + 10 * (n - 232); return "rgb(" + g + "," + g + "," + g + ")"; }
+    n -= 16;
+    var lv = function (v) { return v ? 55 + 40 * v : 0; };
+    return "rgb(" + lv(Math.floor(n / 36)) + "," + lv(Math.floor(n / 6) % 6) + "," + lv(n % 6) + ")";
+  }
+
+  function rgb(r, g, b) {
+    function c(v) { return Math.max(0, Math.min(255, v)); }
+    return "rgb(" + c(r) + "," + c(g) + "," + c(b) + ")";
+  }
+
+  function newState() {
+    return { bold: false, dim: false, italic: false, underline: false, fg: null, bg: null };
+  }
+
+  function cloneState(s) {
+    return { bold: s.bold, dim: s.dim, italic: s.italic, underline: s.underline, fg: s.fg, bg: s.bg };
+  }
+
+  function plain(s) {
+    return !(s.bold || s.dim || s.italic || s.underline || s.fg || s.bg);
+  }
+
+  // Applies the parameters of one SGR sequence to s in place.
+  function applySGR(s, params) {
+    var codes = params === "" ? [0] : params.split(";").map(function (p) {
+      return p === "" ? 0 : parseInt(p, 10);
+    });
+    for (var i = 0; i < codes.length; i++) {
+      var c = codes[i];
+      if (c === 0) { var z = newState(); s.bold = z.bold; s.dim = z.dim; s.italic = z.italic; s.underline = z.underline; s.fg = z.fg; s.bg = z.bg; }
+      else if (c === 1) s.bold = true;
+      else if (c === 2) s.dim = true;
+      else if (c === 3) s.italic = true;
+      else if (c === 4) s.underline = true;
+      else if (c === 22) { s.bold = false; s.dim = false; }
+      else if (c === 23) s.italic = false;
+      else if (c === 24) s.underline = false;
+      else if (c >= 30 && c <= 37) s.fg = PALETTE[c - 30];
+      else if (c >= 90 && c <= 97) s.fg = PALETTE[c - 90 + 8];
+      else if (c >= 40 && c <= 47) s.bg = PALETTE[c - 40];
+      else if (c >= 100 && c <= 107) s.bg = PALETTE[c - 100 + 8];
+      else if (c === 39) s.fg = null;
+      else if (c === 49) s.bg = null;
+      else if (c === 38 || c === 48) {
+        var col = null;
+        if (codes[i + 1] === 5 && codes[i + 2] >= 0) { col = color256(Math.min(codes[i + 2], 255)); i += 2; }
+        else if (codes[i + 1] === 2 && codes[i + 4] >= 0) { col = rgb(codes[i + 2], codes[i + 3], codes[i + 4]); i += 4; }
+        else break; // malformed: the remaining parameters are unreliable
+        if (c === 38) s.fg = col; else s.bg = col;
+      }
+    }
+  }
+
+  function appendText(parent, text, s) {
+    if (text === "") return;
+    var node = document.createTextNode(text);
+    if (plain(s)) { parent.appendChild(node); return; }
+    var span = document.createElement("span");
+    if (s.bold) span.style.fontWeight = "bold";
+    if (s.dim) span.style.opacity = "0.6";
+    if (s.italic) span.style.fontStyle = "italic";
+    if (s.underline) span.style.textDecoration = "underline";
+    if (s.fg) span.style.color = s.fg;
+    if (s.bg) span.style.backgroundColor = s.bg;
+    span.appendChild(node);
+    parent.appendChild(span);
+  }
+
+  // Renders text into parent, advancing s across every SGR sequence.
+  function renderAnsi(parent, text, s) {
+    var last = 0, m;
+    ESCAPES.lastIndex = 0;
+    while ((m = ESCAPES.exec(text)) !== null) {
+      appendText(parent, text.slice(last, m.index), s);
+      last = m.index + m[0].length;
+      if (m[2] === "m") applySGR(s, m[1]);
+    }
+    appendText(parent, text.slice(last), s);
+  }
+
+  // A Box stream-JSON line: an object with a string "type".
+  function isStreamLine(line) {
+    var t = stripAnsi(line).replace(/^\s+/, "");
+    if (t.charAt(0) !== "{") return false;
+    try {
+      var o = JSON.parse(t);
+      return o !== null && typeof o === "object" && !Array.isArray(o) && typeof o.type === "string";
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // The unfinished last line cannot be parsed yet; guess from its opening so a
+  // stream line stays hidden while it arrives.
+  function looksStream(partial) {
+    return /^\s*\{\s*"type"\s*:\s*"/.test(stripAnsi(partial.slice(0, 256)));
+  }
+
+  var state = newState(); // SGR state carried across committed lines
+  var pending = "";       // the unfinished last line
+  var pendingEl = null;   // its provisional element, always log's last child
+  var queue = [];
+  var qi = 0;
+  var scheduled = false;
+  var following = true;
+  var note = "";
+  var BUDGET_MS = 12;
+
+  function lineEl(text) {
+    var el = document.createElement("div");
+    el.className = isStreamLine(text) ? "ln stream" : "ln";
+    renderAnsi(el, text, state);
+    return el;
+  }
+
+  function renderPending() {
+    if (pending === "") {
+      if (pendingEl) { log.removeChild(pendingEl); pendingEl = null; }
+      return;
+    }
+    if (!pendingEl) {
+      pendingEl = document.createElement("div");
+      log.appendChild(pendingEl);
+    }
+    var hidden = looksStream(pending);
+    pendingEl.className = hidden ? "ln stream" : "ln";
+    pendingEl.textContent = "";
+    // Rendering a multi-MB hidden line on every frame is wasted work.
+    if (hidden && !(showAll && showAll.checked)) return;
+    renderAnsi(pendingEl, pending.replace(/\r/g, ""), cloneState(state));
+  }
+
+  function atBottom() {
+    return log.scrollHeight - log.scrollTop - log.clientHeight <= 4;
+  }
+
+  function scrollToEnd() {
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function updateIndicator() {
+    if (!followState) return;
+    followState.textContent = "";
+    var parts = [];
+    if (note) parts.push(note);
+    if (following) {
+      parts.push("following");
+    } else {
+      parts.push("paused");
+    }
+    followState.appendChild(
+      document.createTextNode(parts.join(" · ") + (following ? "" : " · ")),
+    );
+    if (!following) {
+      var jump = document.createElement("button");
+      jump.type = "button";
+      jump.className = "jump";
+      jump.textContent = "jump to end";
+      jump.addEventListener("click", function () {
+        following = true;
+        scrollToEnd();
+        updateIndicator();
+      });
+      followState.appendChild(jump);
+    }
+  }
+
+  function setFollowing(v) {
+    if (v === following) return;
+    following = v;
+    updateIndicator();
+  }
+
+  // Drains the queue within a time budget per animation frame so a multi-MB
+  // log arriving as 64 KiB frames neither janks the page nor thrashes layout.
+  function flush() {
+    scheduled = false;
+    var frag = document.createDocumentFragment();
+    var start = performance.now();
+    while (qi < queue.length && performance.now() - start < BUDGET_MS) {
+      var parts = (pending + queue[qi++]).split("\n");
+      pending = parts.pop();
+      for (var i = 0; i < parts.length; i++) {
+        var line = parts[i].replace(/\r/g, "");
+        frag.appendChild(lineEl(line));
+      }
+    }
+    if (qi >= queue.length) { queue = []; qi = 0; }
+    log.insertBefore(frag, pendingEl);
+    renderPending();
+    if (following) scrollToEnd();
+    if (qi < queue.length) schedule();
+  }
+
+  function schedule() {
+    if (scheduled) return;
+    scheduled = true;
+    requestAnimationFrame(flush);
+  }
+
+  function reset() {
+    queue = [];
+    qi = 0;
+    pending = "";
+    pendingEl = null;
+    state = newState();
+    log.textContent = "";
+    following = true;
+  }
+
+  log.addEventListener("scroll", function () { setFollowing(atBottom()); });
+
+  if (showAll) {
+    var applyShowAll = function () {
+      log.classList.toggle("show-all", showAll.checked);
+      renderPending();
+      if (following) scrollToEnd();
+    };
+    showAll.addEventListener("change", applyShowAll);
+    applyShowAll(); // the browser may restore the checkbox across a reload
+  }
+
+  var es = new EventSource(log.dataset.src);
+  var opened = false;
+  var done = false;
+
+  es.onopen = function () {
+    // The server re-sends the whole log after a reconnect.
+    if (opened) reset();
+    opened = true;
+    note = "";
+    updateIndicator();
+  };
+
+  es.addEventListener("log", function (e) {
+    queue.push(e.data);
+    schedule();
+  });
+
+  es.addEventListener("pruned", function () {
+    done = true;
+    es.close();
+    note = "log pruned";
+    updateIndicator();
+  });
+
+  es.onerror = function () {
+    if (done) return;
+    if (es.readyState === EventSource.CLOSED) {
+      done = true;
+      note = "log unavailable";
+    } else {
+      note = "reconnecting";
+    }
+    updateIndicator();
+  };
+
+  updateIndicator();
+})();
