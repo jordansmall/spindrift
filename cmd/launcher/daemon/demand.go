@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -142,11 +143,14 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 const outboxDemandInterval = 20 * time.Second
 
 // idReader is a demand source that names its ready items, not only counts them.
-type idReader interface{ ReadyIDs() ([]string, error) }
+type idReader interface {
+	ReadyIDs(inFlight map[dispatchkey.Key]bool) ([]string, error)
+}
 
 // outboxDemand answers a DemandHostOutbox kind's Demand probe from the host
 // filesystem alone: no tracker call and no child (ADR 0059). The count is an
-// upper bound (recoverrecord.Eligible), so a child may still exit 2.
+// upper bound (recoverrecord.Eligible), so a child may still exit 2. It leaves
+// out the keys the pool's own children hold.
 type outboxDemand struct {
 	maxAttempts int
 	backoffUnit time.Duration
@@ -164,13 +168,14 @@ func newOutboxDemand(doc *inputdoc.Document) *outboxDemand {
 	}
 }
 
-// ReadyIDs names each eligible bundle by outbox key and BundleID.
-func (o *outboxDemand) ReadyIDs() ([]string, error) {
-	return recoverrecord.Eligible("", o.maxAttempts, o.backoffUnit, o.now(), nil)
+// ReadyIDs names each eligible bundle by outbox key and BundleID, leaving out
+// the bundles of inFlight keys.
+func (o *outboxDemand) ReadyIDs(inFlight map[dispatchkey.Key]bool) ([]string, error) {
+	return recoverrecord.Eligible("", o.maxAttempts, o.backoffUnit, o.now(), inFlight)
 }
 
 func (o *outboxDemand) CountReady(bool) (int, error) {
-	ids, err := o.ReadyIDs()
+	ids, err := o.ReadyIDs(nil)
 	return len(ids), err
 }
 

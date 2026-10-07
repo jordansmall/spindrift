@@ -348,16 +348,17 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 }
 
 // Demand counts a kind's ready issues in-process: by name from the source's
-// ReadyIDs when it has one (the host outbox), else from its tracker counter. A
+// ReadyIDs when it has one (the host outbox, which leaves out the inFlight keys
+// the pool's own children hold), else from its tracker counter. A
 // kind with no source is an error: the pool only asks for kinds named in
 // Config.ProbeIntervals, which probeIntervals derives from the same map.
-func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, _ map[dispatchkey.Key]bool) (daemon.Demand, error) {
+func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, inFlight map[dispatchkey.Key]bool) (daemon.Demand, error) {
 	c, ok := r.demand[kind]
 	if !ok {
 		return daemon.Demand{}, fmt.Errorf("no demand source for kind %q", kind)
 	}
 	if named, ok := c.(idReader); ok {
-		ids, err := named.ReadyIDs()
+		ids, err := named.ReadyIDs(inFlight)
 		if err != nil {
 			return daemon.Demand{}, err
 		}
