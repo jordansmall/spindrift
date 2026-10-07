@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -115,6 +116,8 @@ type Emitter struct {
 	w    io.Writer
 	errW io.Writer
 	now  func() time.Time
+	// file, when set, receives a copy of every line written to w.
+	file *EventsFile
 }
 
 // NewEmitter builds an Emitter writing to w, stamping each Event with now().
@@ -144,13 +147,32 @@ func (e *Emitter) Emit(ev Event) {
 	ev.Time = e.now().UTC().Format(time.RFC3339)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	enc := json.NewEncoder(e.w)
+	var line bytes.Buffer
 	// Encode appends the trailing newline each JSON-lines record needs. A
 	// marshal failure is unreachable (no Event field is unmarshalable), but
-	// Encode also does the write, and a closed or full e.w makes that fail —
-	// silently dropping the record would make the durable stream lie about
-	// what happened, so report it instead of swallowing it.
-	if err := enc.Encode(ev); err != nil {
+	// report it rather than silently drop a record from the durable stream.
+	if err := json.NewEncoder(&line).Encode(ev); err != nil {
+		fmt.Fprintf(e.errW, "daemon: event encode failed: %v\n", err)
+		return
+	}
+	// A closed or full e.w makes this fail — silently dropping the record
+	// would make the durable stream lie about what happened, so report it.
+	if _, err := e.w.Write(line.Bytes()); err != nil {
 		fmt.Fprintf(e.errW, "daemon: event stream write failed: %v\n", err)
 	}
+	// Independent of the stdout write above: neither failure may cost the
+	// other copy.
+	if e.file != nil {
+		if err := e.file.append(line.Bytes()); err != nil {
+			fmt.Fprintf(e.errW, "daemon: events file write failed: %v\n", err)
+		}
+	}
+}
+
+// TeeEvents makes every later Emit also append its line to f. A second call
+// replaces f.
+func (e *Emitter) TeeEvents(f *EventsFile) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.file = f
 }

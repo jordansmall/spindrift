@@ -852,6 +852,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// needs to cover the ordinary return path.
 	defer func() { _ = lock.Release() }()
 
+	// Lock-first, like the status writer below: a refused second daemon must
+	// not append to or rotate the holder's Events file. Before
+	// warnUnprobedKinds, whose events belong in the durable copy too.
+	em.TeeEvents(daemon.NewEventsFile(gitDirPath))
+
 	// After the lock: a refused second daemon schedules nothing, so it must
 	// not announce a fallback scheduler.
 	warnUnprobedKinds(demandMissing, stderr, em)
