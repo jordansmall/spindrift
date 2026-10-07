@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -155,6 +156,19 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	// bootstrap, which must stay quiet.
 	if c.boxForgeAndIssueAccess == "read-write" {
 		rep.Success("BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op")
+	}
+	// Kinds are picked by the same Enablement row and backend.RelaysOutbox
+	// predicate the daemon's gateKinds uses, so doctor cannot disagree with
+	// it. Off is a normal configuration, hence Success rather than a finding.
+	for _, d := range dispatchkind.All {
+		if d.Enablement != dispatchkind.EnabledByOutboxRelay {
+			continue
+		}
+		if backend.RelaysOutbox(c.codeForge, c.boxForgeAndIssueAccess) {
+			rep.Success("%s kind: on — CODE_FORGE=%s relays a read-only Box's outbox bundle", d.Name, c.codeForge)
+		} else {
+			rep.Success("%s kind: off — CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s relays no outbox bundle; run `spindrift %s <n>` by hand", d.Name, c.codeForge, c.boxForgeAndIssueAccess, d.Verb)
+		}
 	}
 	// Walk the launch gates (issue #2942) through the same
 	// splitGateRegistryByNetwork construction gatedContext enforces with, not
