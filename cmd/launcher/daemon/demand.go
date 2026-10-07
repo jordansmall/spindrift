@@ -141,9 +141,12 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 // cheap as the local tracker's.
 const outboxDemandInterval = 20 * time.Second
 
+// idReader is a demand source that names its ready items, not only counts them.
+type idReader interface{ ReadyIDs() ([]string, error) }
+
 // outboxDemand answers a DemandHostOutbox kind's Demand probe from the host
 // filesystem alone: no tracker call and no child (ADR 0059). The count is an
-// upper bound (recoverrecord.CountEligible), so a child may still exit 2.
+// upper bound (recoverrecord.Eligible), so a child may still exit 2.
 type outboxDemand struct {
 	maxAttempts int
 	backoffUnit time.Duration
@@ -161,8 +164,14 @@ func newOutboxDemand(doc *inputdoc.Document) *outboxDemand {
 	}
 }
 
+// ReadyIDs names each eligible bundle by outbox key and BundleID.
+func (o *outboxDemand) ReadyIDs() ([]string, error) {
+	return recoverrecord.Eligible("", o.maxAttempts, o.backoffUnit, o.now())
+}
+
 func (o *outboxDemand) CountReady(bool) (int, error) {
-	return recoverrecord.CountEligible("", o.maxAttempts, o.backoffUnit, o.now())
+	ids, err := o.ReadyIDs()
+	return len(ids), err
 }
 
 func (o *outboxDemand) ProbeInterval() time.Duration { return outboxDemandInterval }
