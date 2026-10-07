@@ -82,6 +82,10 @@ type SlotStatus struct {
 	// Pass is the Pass label (Record.Phase) of the running child's most
 	// recent box record.
 	Pass string `json:"pass,omitempty"`
+	// Model and ModelRole are the exact model id and optional role of the
+	// running child's latest model record since its latest box record.
+	Model     string `json:"model,omitempty"`
+	ModelRole string `json:"model_role,omitempty"`
 	// ChildStart and ChildStartN pin the running child's Dispatch as the
 	// dashboard names it: the time string of its child_start event, and how
 	// many earlier child_starts on this slot share that exact string.

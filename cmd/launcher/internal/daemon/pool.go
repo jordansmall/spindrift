@@ -310,6 +310,11 @@ type slotFlight struct {
 	// pass is the Pass label (Record.Phase) of the child's most recent box
 	// record.
 	pass string
+	// model and modelRole are the exact model id and optional role of the
+	// child's latest model record; noteBox clears them, since a new Pass
+	// starts on a model of its own.
+	model     string
+	modelRole string
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -662,6 +667,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 		}
 		flight.key = rec.Key
 		flight.pass = rec.Phase
+		flight.model, flight.modelRole = "", ""
 		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
 			for _, existing := range flight.issues {
@@ -675,6 +681,20 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 			}
 		}
 		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Key: rec.Key, Phase: rec.Phase, PassLog: rec.PassLog, Slot: intPtr(slot)}}
+	})
+}
+
+// noteModel folds a model record into slot's flight and emits it as a model
+// event. A no-op if slot is not running: a late record from a child whose slot
+// already cleared.
+func (p *pool) noteModel(slot int, kind Kind, revision string, rec Record) {
+	p.mutate(func(s *state) []Event {
+		if s.slots[slot].phase != PhaseRunning {
+			return nil
+		}
+		flight := &s.slots[slot].flight
+		flight.model, flight.modelRole = rec.Model, rec.ModelRole
+		return []Event{{Event: report.EventModel, Kind: kind, Revision: revision, Key: rec.Key, Model: rec.Model, ModelRole: rec.ModelRole, Slot: intPtr(slot)}}
 	})
 }
 
@@ -1297,6 +1317,8 @@ func (p *pool) snapshotLocked() Status {
 		slots[i].ChildStartN = ss.flight.childStart.n
 		_, slots[i].Chore = ss.flight.key.Fields()
 		slots[i].Pass = ss.flight.pass
+		slots[i].Model = ss.flight.model
+		slots[i].ModelRole = ss.flight.modelRole
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.

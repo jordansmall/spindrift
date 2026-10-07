@@ -2290,6 +2290,82 @@ func TestPoolSnapshotPublishesLatestBoxPhaseAsPass(t *testing.T) {
 	}
 }
 
+// TestPoolSnapshotPublishesLatestModelRecord pins that a running slot's
+// status carries its child's latest model record, that a later model record
+// replaces it and a later box record clears it, and that neither a finished
+// child nor a fresh one on the same slot inherits it. Each record is also
+// emitted as a model event.
+func TestPoolSnapshotPublishesLatestModelRecord(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	work := KindOf(dispatchkind.Work)
+	key := dispatchkey.Issue("123")
+	model := func(id, role string) {
+		p.noteModel(0, work, "rev1", Record{Event: report.EventModel, Key: key, Model: id, ModelRole: role})
+	}
+	got := func() (string, string) {
+		s := p.snapshot().Slots[0]
+		return s.Model, s.ModelRole
+	}
+	want := func(step, id, role string) {
+		t.Helper()
+		if m, r := got(); m != id || r != role {
+			t.Fatalf("%s: model, role = %q, %q; want %q, %q", step, m, r, id, role)
+		}
+	}
+	start := func() {
+		t.Helper()
+		if _, _, ok := p.startChild(0, work, "rev1"); !ok {
+			t.Fatal("startChild refused the slot")
+		}
+	}
+
+	start()
+	want("before any model record", "", "")
+	model("claude-sonnet-5-5", "worker")
+	want("after model record", "claude-sonnet-5-5", "worker")
+	model("claude-opus-5-5", "")
+	want("after later model record", "claude-opus-5-5", "")
+	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
+	want("after box record", "", "")
+	model("claude-opus-5-5", "reviewer")
+	want("after model record in new pass", "claude-opus-5-5", "reviewer")
+
+	p.finishChild(0)
+	want("after finishChild", "", "")
+	start()
+	want("new child before its first model record", "", "")
+
+	events := wantEvents(t, &buf, []string{"child_start", "model", "model", "box", "model", "child_start"}, "")
+	if ev := events[1]; ev.Model != "claude-sonnet-5-5" || ev.ModelRole != "worker" || ev.Key != key || ev.Kind != work || ev.Slot == nil || *ev.Slot != 0 {
+		t.Errorf("first model event = %+v", ev)
+	}
+	if ev := events[2]; ev.Model != "claude-opus-5-5" || ev.ModelRole != "" {
+		t.Errorf("second model event = %+v", ev)
+	}
+}
+
+// TestPoolNoteModelDroppedWhenSlotNotRunning pins noteBox's race guard for
+// model records: one reported after the slot cleared changes nothing and
+// emits nothing.
+func TestPoolNoteModelDroppedWhenSlotNotRunning(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	p.noteModel(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventModel, Key: dispatchkey.Issue("1"), Model: "m"})
+	if s := p.snapshot().Slots[0]; s.Model != "" {
+		t.Errorf("model on idle slot = %q, want empty", s.Model)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("events = %q, want none", buf.String())
+	}
+}
+
 // TestPoolSnapshotCopiesKindsSlice pins that snapshot's Kinds is a copy of
 // cfg.Kinds, not an alias: mutating the caller's slice after snapshot must
 // never change what was already handed out (mirrors

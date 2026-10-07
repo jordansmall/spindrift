@@ -47,11 +47,15 @@ type Event struct {
 	// PassLog is the box event's own field: the Pass log that phase writes,
 	// relative to the checkout, carried unchanged from the child's record.
 	PassLog string `json:"pass_log,omitempty"`
-	Slot    *int   `json:"slot,omitempty"`
-	Exit    *int   `json:"exit,omitempty"`
-	Outcome string `json:"outcome,omitempty"`
-	Reason  string `json:"reason,omitempty"`
-	Wait    string `json:"wait,omitempty"`
+	// Model and ModelRole are the model event's own fields: the exact model
+	// id and optional role, carried unchanged from the child's report.Record.
+	Model     string `json:"model,omitempty"`
+	ModelRole string `json:"model_role,omitempty"`
+	Slot      *int   `json:"slot,omitempty"`
+	Exit      *int   `json:"exit,omitempty"`
+	Outcome   string `json:"outcome,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Wait      string `json:"wait,omitempty"`
 	// State and Note are the settled event's own fields, carried straight
 	// from the child's report.Record — issue's terminal outcome
 	// (complete/failed/recoverable/ambiguous) and any free-text detail.

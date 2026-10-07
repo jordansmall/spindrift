@@ -104,6 +104,27 @@ func TestSlotStatus_PassMarshalsUnderPassKeyAndOmitsWhenEmpty(t *testing.T) {
 	}
 }
 
+// TestSlotStatus_ModelMarshalsUnderModelKeysAndOmitsWhenEmpty pins the
+// additive "model" and "model_role" keys, absent until a model record.
+func TestSlotStatus_ModelMarshalsUnderModelKeysAndOmitsWhenEmpty(t *testing.T) {
+	data, err := json.Marshal(SlotStatus{Busy: true, Model: "claude-opus-5-5", ModelRole: "reviewer"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{`"model":"claude-opus-5-5"`, `"model_role":"reviewer"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("marshalled = %s, want it to contain %q", data, want)
+		}
+	}
+	data, err = json.Marshal(SlotStatus{Busy: true})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"model`) {
+		t.Errorf("marshalled = %s, want no model keys when empty", data)
+	}
+}
+
 func TestStatusWriter_StampsPidHostStartedTime(t *testing.T) {
 	dir := t.TempDir()
 	fixed := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)

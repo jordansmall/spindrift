@@ -611,6 +611,8 @@ slotLoop:
 					// A claim settles discovery the moment it happens, live,
 					// rather than waiting for this child to exit.
 					p.passBaton(slot, batonPassClaimed)
+				case report.EventModel:
+					p.noteModel(slot, kind, revision, rec)
 				case report.EventSettled:
 					p.noteSettled(slot, kind, revision, rec)
 				case report.EventNotDue:
