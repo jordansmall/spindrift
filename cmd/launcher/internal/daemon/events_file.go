@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 )
 
+// The Dashboard mirrors both names; nix/checks/dashboard-constant-parity.nix
+// pins them.
 const (
 	eventsFileName = "spindrift-daemon.events"
 
