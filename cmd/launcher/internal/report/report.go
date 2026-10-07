@@ -40,6 +40,10 @@ type Record struct {
 	Phase string
 	State string
 	Note  string
+	// PassLog is a box record's Pass log: the file that pass writes, relative
+	// to the checkout. Empty on every other event, and on a recover box, which
+	// runs no Box.
+	PassLog string
 	// NextDue is a not_due record's answer, parsed off the wire by
 	// UnmarshalJSON; zero on every other event.
 	NextDue NextDue
@@ -89,12 +93,13 @@ type recordWire struct {
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
 
+	PassLog string `json:"pass_log,omitempty"`
 	NextDue string `json:"next_due,omitempty"`
 }
 
 func (r Record) MarshalJSON() ([]byte, error) {
 	issue, chore := r.Key.Fields()
-	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, NextDue: r.NextDue.wire()})
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, NextDue: r.NextDue.wire()})
 }
 
 // UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
@@ -121,7 +126,7 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, NextDue: nd}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, NextDue: nd}
 	return nil
 }
 
@@ -199,9 +204,10 @@ type Reporter struct {
 // Box records that a Box started for key at phase (e.g. "initial",
 // "fix-pass-N", "conflict-resolve"). key is issue-keyed for an ordinary
 // dispatch or Chore-keyed for a butler run (ADR 0056) — same method, either
-// key shape.
-func (r *Reporter) Box(key dispatchkey.Key, phase string) {
-	r.emit(Record{Event: EventBox, Key: key, Phase: phase})
+// key shape. passLog is the Pass log the phase writes, relative to the
+// checkout; "" when the phase runs no Box (PhaseRecover).
+func (r *Reporter) Box(key dispatchkey.Key, phase, passLog string) {
+	r.emit(Record{Event: EventBox, Key: key, Phase: phase, PassLog: passLog})
 }
 
 // Settled records key's terminal state, once, using the host-decided
