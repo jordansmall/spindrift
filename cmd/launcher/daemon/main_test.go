@@ -1416,6 +1416,35 @@ func TestMainRun_DemandSourceMissingReachesEventStream(t *testing.T) {
 	}
 }
 
+// TestMainRun_EventsFileMirrorsStartupWarnings pins that the Events file tee
+// is attached before the startup warnings, which emit through the same
+// Emitter, or the durable copy misses them.
+func TestMainRun_EventsFileMirrorsStartupWarnings(t *testing.T) {
+	path := capturedEnvFixtureT(t, nil)
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+
+	var stdout, stderr bytes.Buffer
+	if got := mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr); got != daemon.ExitPreflightFailed {
+		t.Fatalf("mainRun() = %d, want %d; stderr = %q", got, daemon.ExitPreflightFailed, stderr.String())
+	}
+	gitDirPath, err := gitDir(".")
+	if err != nil {
+		t.Fatalf("gitDir: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(gitDirPath, "spindrift-daemon.events"))
+	if err != nil {
+		t.Fatalf("read Events file: %v", err)
+	}
+	if string(got) != stdout.String() {
+		t.Errorf("Events file != stdout\nfile:   %q\nstdout: %q", got, stdout.String())
+	}
+}
+
 // failingWriter stands in for a closed or full stdout pipe.
 type failingWriter struct{}
 
