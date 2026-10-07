@@ -351,10 +351,11 @@ func (tf *IssueTrackerFake) DepsOf(num string) ([]Dependency, error) {
 }
 
 // BlocksOf returns every issue number keyed in NativeDeps whose own deps name
-// num as a blocker, the reverse of DepsOf, which the github and jira adapters
-// can query because they store the relationship both ways (issue #1744). It is
-// always DepSourceNative, sorted numerically only for deterministic assertions:
-// NativeDeps is an unordered map, so a real adapter may order the set its way.
+// num as a blocker, the reverse of DepsOf, which every BlockersLister adapter
+// can query because it stores the relationship both ways (issue #1744). It
+// is always DepSourceNative, sorted numerically only for
+// deterministic assertions: NativeDeps is an unordered map, so a real adapter
+// may order the set its way.
 func (tf *IssueTrackerFake) BlocksOf(num string) ([]Dependency, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
