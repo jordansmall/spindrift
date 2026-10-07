@@ -579,6 +579,117 @@ func TestRecoverQueueOne_LostClaimRaceIsSkipped(t *testing.T) {
 	}
 }
 
+// relabelAfterList simulates a human relabeling an issue between the queue's
+// list snapshot and the claim.
+type relabelAfterList struct {
+	forge.IssueTracker
+	fc     *forge.Fake
+	num    string
+	labels []string
+}
+
+func (r *relabelAfterList) ListIssues(state forge.DispatchState) ([]forge.Issue, error) {
+	got, err := r.IssueTracker.ListIssues(state)
+	r.fc.SetIssue(forge.Issue{Number: r.num, Labels: r.labels})
+	return got, err
+}
+
+// The list is a snapshot: an issue a human moved off agent-failed before the
+// claim must be left alone, not stacked with agent-in-progress.
+func TestRecoverQueueOne_RelabeledBeforeClaimIsSkipped(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.tracker = &relabelAfterList{IssueTracker: x.fc, fc: x.fc, num: "42", labels: []string{"ready-for-agent"}}
+
+	code, out := x.run(t)
+
+	if code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(out, "status=skipped") {
+		t.Errorf("output = %q, want a skipped line", out)
+	}
+	if got := x.labels(t, "42"); !slices.Equal(got, []string{"ready-for-agent"}) {
+		t.Errorf("labels = %v, want only ready-for-agent", got)
+	}
+	if len(x.fc.TransitionStateCalls) != 0 {
+		t.Errorf("transitions = %v, want none", x.fc.TransitionStateCalls)
+	}
+	if x.fc.Merged != "" {
+		t.Errorf("Merged = %q, want none", x.fc.Merged)
+	}
+}
+
+// nativeFailed simulates a tracker whose Failed state is a workflow status
+// (Jira), not a label: ListIssues still lists the issue, but Issue().Labels
+// never carries the failed label.
+type nativeFailed struct {
+	forge.IssueTracker
+	failed string
+}
+
+func (n nativeFailed) Issue(num string) (forge.Issue, error) {
+	iss, err := n.IssueTracker.Issue(num)
+	iss.Labels = slices.DeleteFunc(slices.Clone(iss.Labels), func(l string) bool { return l == n.failed })
+	return iss, err
+}
+
+// The pre-claim re-check must ask the tracker for the Failed state, not look
+// for the label: a native-status Failed issue is still eligible.
+func TestRecoverQueueOne_NativeFailedStatusIsNotSkipped(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.tracker = nativeFailed{IssueTracker: x.fc, failed: x.c.failedLabel}
+
+	code, out := x.run(t)
+
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 (output %q)", code, out)
+	}
+	if x.fc.Merged != testReconcilePR {
+		t.Errorf("Merged = %q, want %q", x.fc.Merged, testReconcilePR)
+	}
+	if len(x.fc.TransitionStateCalls) == 0 {
+		t.Fatal("no tracker transitions recorded, want a 42 Failed->InProgress claim first")
+	}
+	first := x.fc.TransitionStateCalls[0]
+	if first.Num != "42" || first.From != forge.Failed || first.To != forge.InProgress {
+		t.Errorf("first transition = %+v, want 42 Failed->InProgress", first)
+	}
+}
+
+// reListFails lets the scan's own list through and fails the pre-claim re-list.
+type reListFails struct {
+	forge.IssueTracker
+	calls int
+}
+
+func (r *reListFails) ListIssues(s forge.DispatchState) ([]forge.Issue, error) {
+	r.calls++
+	if r.calls > 1 {
+		return nil, errors.New("tracker: boom")
+	}
+	return r.IssueTracker.ListIssues(s)
+}
+
+func TestRecoverQueueOne_ReListFailureExitsOneWithoutClaim(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.tracker = &reListFails{IssueTracker: x.fc}
+
+	code, out := x.run(t)
+
+	if code != 1 {
+		t.Errorf("exit = %d, want 1 (output %q)", code, out)
+	}
+	if len(x.fc.TransitionStateCalls) != 0 {
+		t.Errorf("transitions = %v, want none", x.fc.TransitionStateCalls)
+	}
+	if x.fc.Merged != "" {
+		t.Errorf("Merged = %q, want none", x.fc.Merged)
+	}
+}
+
 // A lookup outage must surface, not read as an empty queue. Queue mode has
 // claimed nothing before these reads, so a stale prior Complete state must not
 // let the failure path write the tracker or mark the issue complete.
