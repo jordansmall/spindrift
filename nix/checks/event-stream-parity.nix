@@ -367,7 +367,7 @@ let
     }
     {
       name = "event-stream-parity-docs-loses-field";
-      inputs = editDocs "`issue` or `chore`, `phase`, `revision`, `slot` |" "`issue` or `chore`, `revision`, `slot` |";
+      inputs = editDocs "`issue` or `chore`, `phase`, `pass_log`, `revision`, `slot` |" "`issue` or `chore`, `pass_log`, `revision`, `slot` |";
       expect = [
         "`box`"
         "set `phase`"
