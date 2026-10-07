@@ -52,15 +52,17 @@ type TrackerCheck struct {
 
 // SlotStatus is one slot of the Daemon's pool; Since is when it entered Phase.
 type SlotStatus struct {
-	Slot     int      `json:"slot"`
-	Phase    string   `json:"phase"`
-	Busy     bool     `json:"busy"`
-	Since    string   `json:"since"`
-	Kind     string   `json:"kind,omitempty"`
-	Revision string   `json:"revision,omitempty"`
-	Issues   []string `json:"issues,omitempty"`
-	Chore    string   `json:"chore,omitempty"`
-	Pass     string   `json:"pass,omitempty"`
+	Slot      int      `json:"slot"`
+	Phase     string   `json:"phase"`
+	Busy      bool     `json:"busy"`
+	Since     string   `json:"since"`
+	Kind      string   `json:"kind,omitempty"`
+	Revision  string   `json:"revision,omitempty"`
+	Issues    []string `json:"issues,omitempty"`
+	Chore     string   `json:"chore,omitempty"`
+	Pass      string   `json:"pass,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	ModelRole string   `json:"model_role,omitempty"`
 	// ChildStart is the exact time string of a running slot's child_start event;
 	// ChildStartN counts earlier child_starts on the slot sharing that string.
 	ChildStart  string `json:"child_start,omitempty"`
