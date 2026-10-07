@@ -42,7 +42,7 @@ func TestDispatchResolvesBySlotAndTime(t *testing.T) {
 		{"row inside the first dispatch", "?slot=0&at=2026-10-07T09:00:00Z",
 			[]string{"#11", "first went wrong", "exit", "0123456789ab", "logs%2ffirst.log"}, []string{"second landed", "#22"}},
 		{"child_start resolves to itself", "?slot=0&at=2026-10-07T10:00:00Z",
-			[]string{"#22", "second landed"}, []string{"first went wrong"}},
+			[]string{"#22", "second landed", `<time datetime="2026-10-07T10:00:00Z">2026-10-07T10:00:00Z</time>`}, []string{"first went wrong"}},
 		{"at absent is the latest", "?slot=0",
 			[]string{"#22", "second landed", "fix-pass-1"}, []string{"first went wrong"}},
 		{"other slot", "?slot=1&at=2026-10-07T09:30:00Z",
@@ -274,7 +274,7 @@ func TestRenderedRowsLinkToOwningDispatch(t *testing.T) {
 	body := strings.ToLower(getHistory(t, &c, map[string]string{eventsFileName: sameSecondEvents}))
 	for _, w := range []string{
 		`<div class="entry ev-settled">`,
-		`<a class="rowlink" href="/dispatch?slot=0&at=2026-10-07t09%3a00%3a00z">`,
+		`<a class="rowlink" href="/dispatch?slot=0&at=2026-10-07t09%3a00%3a00z"><time datetime="2026-10-07t09:10:01z">2026-10-07t09:10:01z</time></a>`,
 		`<div class="entry ev-box">`,
 		`<a class="rowlink" href="/dispatch?slot=0&at=2026-10-07t09%3a10%3a01z&n=1">`,
 	} {
@@ -389,5 +389,14 @@ func TestDispatchPassLogSrcCarriesDispatchIdentity(t *testing.T) {
 		if strings.Contains(strings.ToLower(body), `data-src="/log?path=logs%2fb.log&`) {
 			t.Errorf("%s: the Child log src must stay path-only", q)
 		}
+	}
+}
+
+func TestRowWithoutDispatchStillCarriesDatetime(t *testing.T) {
+	c := statusJSON(t, "working", "", `[]`)
+	events := `{"time":"2026-10-07T08:00:00Z","event":"settled","slot":0,"issue":"11","state":"failed","note":"orphan"}` + "\n"
+	body := getHistory(t, &c, map[string]string{eventsFileName: events})
+	if want := `<time datetime="2026-10-07T08:00:00Z">2026-10-07T08:00:00Z</time>`; !strings.Contains(body, want) {
+		t.Errorf("missing %q in %s", want, body)
 	}
 }

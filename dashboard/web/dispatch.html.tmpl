@@ -13,7 +13,7 @@
   <header class="dispatch-head">
     <h1>slot {{.Slot}}{{if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}</h1>
     <div class="facts">
-      <div><span class="label">started</span><time>{{.Started}}</time></div>
+      <div><span class="label">started</span>{{template "time" .Started}}</div>
       {{- if .Rev}}<div><span class="label">revision</span><code>{{.Rev}}</code></div>{{end}}
       {{- if .Phase}}<div><span class="label">phase</span><span>{{.Phase}}</span></div>{{end}}
       {{- if .Exit}}<div><span class="label">exit</span><span>{{.Exit}}</span></div>{{end}}
