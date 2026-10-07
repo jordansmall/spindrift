@@ -64,6 +64,10 @@ in
     # let a few allow-listed, reviewer-backed findings self-promote.
     butlerChores = "bugs docs-drift";
     butlerMaxPromotionsPerDay = 3;
+    # Let the host land up to five docs-drift patch PRs a day (ADR 0057), on
+    # the default patch classes and paths; mergeMode = "immediate" merges
+    # each once green.
+    butlerMaxPatchesPerDay = 5;
     # A cold checks-inbox gate outruns the 10-minute stock Bash cap; 30 minutes
     # lets it finish in one blocking call (issue #4409).
     driverBashTimeoutMs = 1800000;
