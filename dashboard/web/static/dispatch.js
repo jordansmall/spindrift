@@ -299,6 +299,16 @@
         updateIndicator();
       });
 
+      // A later Dispatch reused the fixed Pass log path; e.data is that path.
+      // The ".prior-run.N" suffix mirrors quarantinePriorRunLogs in
+      // cmd/launcher/internal/dispatch/box.go.
+      es.addEventListener("superseded", function (e) {
+        done = true;
+        es.close();
+        note = "log reused by a later run, kept as " + e.data + ".prior-run.N";
+        updateIndicator();
+      });
+
       es.onerror = function () {
         if (done) return;
         if (es.readyState === EventSource.CLOSED) {
