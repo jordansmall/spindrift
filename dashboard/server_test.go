@@ -153,6 +153,10 @@ func TestKindAndTrackerRows(t *testing.T) {
 		"2026-10-07T11:55:00Z", "2026-10-07T12:10:00Z",
 		"on tip move", "2026-10-07T13:00:00Z",
 		"github", "2026-10-07T12:20:00Z",
+		`<time datetime="2026-10-07T11:59:58Z">2026-10-07T11:59:58Z</time>`,
+		`<time datetime="2026-10-07T12:05:00Z">`, `<time datetime="2026-10-07T12:30:00Z">`,
+		`<time datetime="2026-10-07T11:55:00Z">`, `<time datetime="2026-10-07T12:10:00Z">`,
+		`<time datetime="2026-10-07T13:00:00Z">`, `<time datetime="2026-10-07T12:20:00Z">`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q", want)

@@ -8,7 +8,8 @@
   <section class="banner note"><p class="reason">{{.Reason}}</p></section>
   {{- end}}
 {{- end -}}
-{{define "published"}}<div><span class="label">published</span><time>{{.Written}}</time></div>{{end -}}
+{{define "time"}}<time datetime="{{.}}">{{.}}</time>{{end -}}
+{{define "published"}}<div><span class="label">published</span>{{template "time" .Written}}</div>{{end -}}
 {{define "status" -}}
 <header class="top">
   <h1>Spindrift Daemon</h1>
@@ -57,13 +58,13 @@
     <article class="kind{{if .Jammed}} jammed{{end}}">
       <h3>{{.Kind}}{{if .Jammed}} <span class="tag jam">jammed</span>{{end}}</h3>
       <dl>
-        <dt>next check</dt><dd>{{if .NextCheck}}<time>{{.NextCheck}}</time>{{else if .OnTipMove}}on tip move{{else}}runnable now{{end}}</dd>
-        {{- if .JamUntil}}<dt>jam until</dt><dd><time>{{.JamUntil}}</time></dd>{{end}}
+        <dt>next check</dt><dd>{{if .NextCheck}}{{template "time" .NextCheck}}{{else if .OnTipMove}}on tip move{{else}}runnable now{{end}}</dd>
+        {{- if .JamUntil}}<dt>jam until</dt><dd>{{template "time" .JamUntil}}</dd>{{end}}
         {{- if .ReadyAtJam}}<dt>ready at jam</dt><dd>{{.ReadyAtJam}}</dd>{{end}}
         {{- if .Ready}}<dt>demand ready</dt><dd>{{.Ready}}</dd>{{end}}
-        {{- if .ProbedAt}}<dt>probed at</dt><dd><time>{{.ProbedAt}}</time></dd>{{end}}
-        {{- if .NextProbe}}<dt>next probe</dt><dd><time>{{.NextProbe}}</time></dd>{{end}}
-        {{- if .NextDue}}<dt>next due</dt><dd>{{if .OnTipMove}}on tip move{{else}}<time>{{.NextDue}}</time>{{if .AlsoTipMove}} (or earlier on tip move){{end}}{{end}}</dd>{{end}}
+        {{- if .ProbedAt}}<dt>probed at</dt><dd>{{template "time" .ProbedAt}}</dd>{{end}}
+        {{- if .NextProbe}}<dt>next probe</dt><dd>{{template "time" .NextProbe}}</dd>{{end}}
+        {{- if .NextDue}}<dt>next due</dt><dd>{{if .OnTipMove}}on tip move{{else}}{{template "time" .NextDue}}{{if .AlsoTipMove}} (or earlier on tip move){{end}}{{end}}</dd>{{end}}
       </dl>
     </article>
     {{- end}}
@@ -75,7 +76,7 @@
   <section class="trackers">
     {{- range .Trackers}}
     <div class="tracker">{{.Tracker}}:
-      {{if .RateLimitedUntil}}<span class="tag jam">rate limited until <time>{{.RateLimitedUntil}}</time></span>{{else}}ok{{end}}
+      {{if .RateLimitedUntil}}<span class="tag jam">rate limited until {{template "time" .RateLimitedUntil}}</span>{{else}}ok{{end}}
     </div>
     {{- end}}
   </section>
@@ -110,7 +111,7 @@
 {{define "entry" -}}
 {{/* Not itself an anchor: the issue and PR links cannot nest inside the drill-in link, so rowlink stretches over the row instead. */ -}}
 <div class="entry ev-{{.Event}}">
-  {{if .Started}}<a class="rowlink" href="/dispatch?slot={{.Slot}}&at={{.Started}}{{if .StartN}}&n={{.StartN}}{{end}}"><time>{{.Time}}</time></a>{{else}}<time>{{.Time}}</time>{{end}}
+  {{if .Started}}<a class="rowlink" href="/dispatch?slot={{.Slot}}&at={{.Started}}{{if .StartN}}&n={{.StartN}}{{end}}">{{template "time" .Time}}</a>{{else}}{{template "time" .Time}}{{end}}
   <span class="evname">{{.Event}}</span>
   {{- if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}
   {{- if .Subject.Label}} {{template "chip" .Subject}}{{end}}
