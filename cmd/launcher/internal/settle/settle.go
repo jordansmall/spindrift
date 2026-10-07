@@ -174,6 +174,10 @@ type Settle struct {
 	// decision should ever reach the daemon as a settled record, once
 	// (issue #3627).
 	settledLatch map[string]settledLatch
+	// prLatch holds the PR each in-flight issue's gate is working, apart from
+	// settledLatch because transitionState overwrites that entry and the PR
+	// must survive it. Guarded by settledMu.
+	prLatch map[string]string
 }
 
 // Registrar is the "settler that owns a termination registry" seam: a caller

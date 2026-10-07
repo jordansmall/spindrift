@@ -111,6 +111,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		if s.readOnly && s.relayBlockedWork(num, gen, result) {
 			return
 		}
+		// A read-write Box may have opened its draft PR before stopping.
+		s.latchBranchPR(num)
 		if demotedResolved {
 			// postBlockedNoteComment skips read-write on the assumption the
 			// Box commented itself, but an agent that believed it was done
@@ -143,6 +145,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			// never reaches this branch (s.pr is nil for its push-only forge).
 			s.recordLanding(num, pr)
 		}
+		// A read-write Box opened its PR before printing ready.
+		s.latchBranchPR(num)
 		landing, reason := s.selfHeal(d, num, gen, pr)
 		switch landing {
 		case landingMerged:
@@ -338,12 +342,45 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState, note 
 func (s *Settle) flushSettled(num string) {
 	s.settledMu.Lock()
 	rec, ok := s.settledLatch[num]
-	if ok {
-		delete(s.settledLatch, num)
-	}
+	pr := s.prLatch[num]
+	delete(s.settledLatch, num)
+	delete(s.prLatch, num)
 	s.settledMu.Unlock()
 	if ok {
-		report.Settled(dispatchkey.Issue(num), rec.state, rec.note)
+		report.Settled(dispatchkey.Issue(num), rec.state, rec.note, pr)
+	}
+}
+
+// latchPR records the PR num's gate is working, for flushSettled to name on
+// the settled record. Only host-proven URLs latch, each at its source: Open's
+// result, the agent branch's open PR, and SettleAdopted's prURL. The Box's own
+// landing= is never latched. Latching is not tied to merge, so a red-CI or
+// failed landing still names its PR.
+func (s *Settle) latchPR(num, pr string) {
+	s.settledMu.Lock()
+	defer s.settledMu.Unlock()
+	if s.prLatch == nil {
+		s.prLatch = make(map[string]string)
+	}
+	s.prLatch[num] = pr
+}
+
+// latchBranchPR latches the open PR on num's agent branch. The branch is
+// reused across retries, so only an open PR counts: an earlier run's closed PR
+// must not be named on this run's record (ResolveOpenPR, unlike PRForBranch,
+// ignores it). A no-op for read-only and push-only forges; read-only latches at
+// Open's source.
+func (s *Settle) latchBranchPR(num string) {
+	if s.readOnly || s.pr == nil {
+		return
+	}
+	res, err := forge.ResolveOpenPR(s.cf, num)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not resolve PR for settled record: %v\n", num, err)
+		return
+	}
+	if res.Found {
+		s.latchPR(num, res.URL)
 	}
 }
 

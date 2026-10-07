@@ -387,7 +387,7 @@ func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 		t.Fatalf("report.FromEnv: got nil Reporter")
 	}
 	note := strings.Repeat("a", 5000)
-	rep.Settled(dispatchkey.Issue("123"), "blocked", note)
+	rep.Settled(dispatchkey.Issue("123"), "blocked", note, "")
 	pw.Close()
 	line, err := io.ReadAll(pr)
 	if err != nil {

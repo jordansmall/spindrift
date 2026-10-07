@@ -15,6 +15,9 @@ import (
 // rollup registered (issue #1652), bounded by registrationWindowPolls (#2475).
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	defer s.flushSettled(num)
+	// Host-discovered, so it names the record even if the gate never gets a
+	// CheckState answer.
+	s.latchPR(num, prURL)
 	branch := s.cf.AgentBranch(num)
 	note := fmt.Sprintf("no outcome line; PR discovered on %s", branch)
 	if s.cfg.Unclaimed {

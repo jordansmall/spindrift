@@ -39,7 +39,7 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 	}
 
 	rep.Box(dispatchkey.Issue("3627"), "initial", ".spindrift/logs/issue-3627.log")
-	rep.Settled(dispatchkey.Issue("3627"), "merged", "landed clean")
+	rep.Settled(dispatchkey.Issue("3627"), "merged", "landed clean", "")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -87,7 +87,7 @@ func TestFromEnv_ChoreRoundTrip(t *testing.T) {
 	}
 
 	rep.Box(dispatchkey.Chore("bugs"), "initial", "")
-	rep.Settled(dispatchkey.Chore("bugs"), "complete", "2 filed")
+	rep.Settled(dispatchkey.Chore("bugs"), "complete", "2 filed", "")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -133,7 +133,7 @@ func TestFromEnv_Unset(t *testing.T) {
 	}
 	// Nil-receiver methods must be no-ops, not panics.
 	rep.Box(dispatchkey.Issue("1"), "initial", "")
-	rep.Settled(dispatchkey.Issue("1"), "merged", "")
+	rep.Settled(dispatchkey.Issue("1"), "merged", "", "")
 }
 
 func TestFromEnv_RegularFileRefused(t *testing.T) {
@@ -309,7 +309,7 @@ func TestSettled_LongNoteIsClippedToFitMaxLine(t *testing.T) {
 
 	rep := &Reporter{fd: int(w.Fd())}
 	note := strings.Repeat("a", 5000)
-	rep.Settled(dispatchkey.Issue("123"), "blocked", note)
+	rep.Settled(dispatchkey.Issue("123"), "blocked", note, "")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -432,7 +432,7 @@ func TestEmit_ShortRecordUnchanged(t *testing.T) {
 	t.Cleanup(func() { w.Close() })
 
 	rep := &Reporter{fd: int(w.Fd())}
-	rep.Settled(dispatchkey.Issue("123"), "merged", "landed clean")
+	rep.Settled(dispatchkey.Issue("123"), "merged", "landed clean", "")
 	w.Close()
 
 	got, err := io.ReadAll(r)
@@ -471,5 +471,32 @@ func TestClip_LastRuneOverflowKeepsAllButOne(t *testing.T) {
 	}
 	if n := len([]rune(strings.TrimSuffix(got.Note, clipMark))); n != kept {
 		t.Errorf("kept %d runes, want %d (all but the final escaped one)", n, kept)
+	}
+}
+
+// A settled record names the PR the Dispatch opened or adopted as pr_url, and
+// omits the key entirely when there is none.
+func TestSettled_PRURLRoundTrip(t *testing.T) {
+	with, err := json.Marshal(Record{Event: EventSettled, Key: dispatchkey.Issue("1"), State: "complete", PRURL: "https://example.test/pr/9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(with), `"pr_url":"https://example.test/pr/9"`) {
+		t.Errorf("record = %s, want pr_url on the wire", with)
+	}
+	var got Record
+	if err := json.Unmarshal(with, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.PRURL != "https://example.test/pr/9" {
+		t.Errorf("PRURL = %q after round trip", got.PRURL)
+	}
+
+	without, err := json.Marshal(Record{Event: EventSettled, Key: dispatchkey.Issue("1"), State: "complete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(without), "pr_url") {
+		t.Errorf("record = %s, want no pr_url when empty", without)
 	}
 }
