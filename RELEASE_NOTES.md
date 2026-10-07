@@ -9,6 +9,41 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.23.3 — 2026-10-07
+
+A read-only web Dashboard for the daemon, so you can watch slots, history
+and live agent logs from a browser.
+
+No breaking changes.
+
+- **New: a Dashboard for the daemon.** Run `nix run .#dashboard` from the
+  daemon's checkout and open `http://127.0.0.1:8099`. It shows the pool
+  header and one card per slot (phase, kind, issue, how long it's been in
+  that phase, the Pass it's on and the model it's using), plus a history
+  timeline. It's a separate process that only reads what the daemon
+  publishes, so it stays up while the daemon restarts and never changes
+  anything.
+- **Drill into any Dispatch.** Each Dispatch has its own page with links to
+  its issue and PR, a live tail of its child output, and one tab per Pass
+  log that appears as each Pass starts. A tab waits for a log that doesn't
+  exist yet, only streams while it's on screen, and notices when a later
+  run reuses the same log name.
+- **Everything updates live.** Status, history, header facts and logs all
+  stream into the page with no reload, and the daemon stopping or coming
+  back shows up without restarting the Dashboard. Times show in your own
+  time zone.
+- **No login, so mind where you bind it.** The Dashboard has no
+  authentication. It listens on loopback by default; `--listen
+  0.0.0.0:8099` opens it to your LAN. It refuses requests with an
+  unexpected `Host` header (blocking DNS rebinding), so to reach it by a
+  LAN hostname, name that host in `--listen` or pass `--allow-host`.
+- **The daemon publishes more about each run.** It now writes an Events
+  file alongside its status file, records each child's output to a Child
+  log, and reports the repo, PR, Pass log and active model (for both
+  Claude and opencode Boxes). Both files carry a format version; a
+  Dashboard older than the daemon shows the raw status and tells you to
+  restart it.
+
 ## 0.23.2 — 2026-10-07
 
 A read-only Box's finished work no longer gets stranded when the host
