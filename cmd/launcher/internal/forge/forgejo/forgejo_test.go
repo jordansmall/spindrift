@@ -99,8 +99,8 @@ func TestForgejoClient_Probe_NotFound(t *testing.T) {
 }
 
 // Both the sentinel and the wire status must survive so a caller can tell an
-// unmapped status from a genuine 404. Uses 400 rather than a 5xx: every 5xx is
-// transient per rest's isTransientStatus, so a 5xx here would sleep through a
+// unmapped status from a genuine 404. Uses 400 rather than a 5xx: a GET 5xx is
+// retried per rest's isRetryable, so a 5xx here would sleep through a
 // real LinearBackoff before Do gives up and returns.
 func TestForgejoClient_Probe_ServerError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

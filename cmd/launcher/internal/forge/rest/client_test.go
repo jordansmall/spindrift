@@ -326,20 +326,9 @@ func TestDoAppliesAuthStrategy(t *testing.T) {
 	}
 }
 
-func TestDoRetriesTransientThenSucceeds(t *testing.T) {
-	var requests int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests++
-		if requests == 1 {
-			w.WriteHeader(http.StatusTooManyRequests)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer srv.Close()
-
-	c := New(srv.URL, nil, "testbackend", nil, nil)
-
+// recordSleeps swaps c's backoff clock for one that records each sleep instead
+// of taking it.
+func recordSleeps(c *Client) *[]time.Duration {
 	var recorded []time.Duration
 	c.backoff.Clock = retry.Clock{
 		Now: time.Now,
@@ -347,15 +336,38 @@ func TestDoRetriesTransientThenSucceeds(t *testing.T) {
 			recorded = append(recorded, d)
 		},
 	}
+	return &recorded
+}
 
-	if err := c.Do(http.MethodGet, "/widgets/1", nil, nil); err != nil {
-		t.Fatalf("Do returned unexpected error: %v", err)
-	}
-	if requests != 2 {
-		t.Fatalf("server saw %d requests, want 2", requests)
-	}
-	if len(recorded) != 1 {
-		t.Fatalf("recorded sleeps = %v, want exactly one sleep", recorded)
+// A 429 is retried for every method, POST included.
+func TestDoRetriesTransientThenSucceeds(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			var requests int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				if requests == 1 {
+					w.WriteHeader(http.StatusTooManyRequests)
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			c := New(srv.URL, nil, "testbackend", nil, nil)
+
+			recorded := recordSleeps(c)
+
+			if err := c.Do(method, "/widgets/1", nil, nil); err != nil {
+				t.Fatalf("Do returned unexpected error: %v", err)
+			}
+			if requests != 2 {
+				t.Fatalf("server saw %d requests, want 2", requests)
+			}
+			if len(*recorded) != 1 {
+				t.Fatalf("recorded sleeps = %v, want exactly one sleep", *recorded)
+			}
+		})
 	}
 }
 
@@ -373,13 +385,7 @@ func TestDoRetries5xxThenSucceeds(t *testing.T) {
 
 	c := New(srv.URL, nil, "testbackend", nil, nil)
 
-	var recorded []time.Duration
-	c.backoff.Clock = retry.Clock{
-		Now: time.Now,
-		Sleep: func(d time.Duration) {
-			recorded = append(recorded, d)
-		},
-	}
+	recorded := recordSleeps(c)
 
 	if err := c.Do(http.MethodGet, "/widgets/1", nil, nil); err != nil {
 		t.Fatalf("Do returned unexpected error: %v", err)
@@ -387,8 +393,37 @@ func TestDoRetries5xxThenSucceeds(t *testing.T) {
 	if requests != 2 {
 		t.Fatalf("server saw %d requests, want 2", requests)
 	}
-	if len(recorded) != 1 {
-		t.Fatalf("recorded sleeps = %v, want exactly one sleep", recorded)
+	if len(*recorded) != 1 {
+		t.Fatalf("recorded sleeps = %v, want exactly one sleep", *recorded)
+	}
+}
+
+func TestDoDoesNotRetry5xxForNonIdempotentMethod(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodPatch} {
+		t.Run(method, func(t *testing.T) {
+			var requests int
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				w.WriteHeader(http.StatusBadGateway)
+			}))
+			defer srv.Close()
+
+			c := New(srv.URL, nil, "testbackend", nil, nil)
+
+			recorded := recordSleeps(c)
+
+			err := c.Do(method, "/widgets", map[string]string{"k": "v"}, nil)
+			var statusErr StatusError
+			if !errors.As(err, &statusErr) || statusErr.Status != http.StatusBadGateway {
+				t.Fatalf("Do error = %v, want StatusError{Status: %d}", err, http.StatusBadGateway)
+			}
+			if requests != 1 {
+				t.Fatalf("server saw %d requests, want 1", requests)
+			}
+			if len(*recorded) != 0 {
+				t.Fatalf("recorded sleeps = %v, want none", *recorded)
+			}
+		})
 	}
 }
 
@@ -402,13 +437,7 @@ func TestDoDoesNotRetryNonTransient4xx(t *testing.T) {
 
 	c := New(srv.URL, nil, "testbackend", StatusMap{http.StatusNotFound: errNotFoundStub}, nil)
 
-	var recorded []time.Duration
-	c.backoff.Clock = retry.Clock{
-		Now: time.Now,
-		Sleep: func(d time.Duration) {
-			recorded = append(recorded, d)
-		},
-	}
+	recorded := recordSleeps(c)
 
 	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
 	if err == nil {
@@ -420,8 +449,8 @@ func TestDoDoesNotRetryNonTransient4xx(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("server saw %d requests, want 1 (no retry for non-transient status)", requests)
 	}
-	if len(recorded) != 0 {
-		t.Fatalf("recorded sleeps = %v, want no sleeps for non-transient status", recorded)
+	if len(*recorded) != 0 {
+		t.Fatalf("recorded sleeps = %v, want no sleeps for non-transient status", *recorded)
 	}
 }
 
@@ -438,13 +467,7 @@ func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
 
 	c := New(srv.URL, nil, "testbackend", StatusMap{http.StatusNotFound: errNotFoundStub}, nil)
 
-	var recorded []time.Duration
-	c.backoff.Clock = retry.Clock{
-		Now: time.Now,
-		Sleep: func(d time.Duration) {
-			recorded = append(recorded, d)
-		},
-	}
+	recorded := recordSleeps(c)
 
 	err := c.Do(http.MethodGet, "/widgets/1", nil, nil)
 	if err == nil {
@@ -466,8 +489,8 @@ func TestDoExhaustsRetriesOnPersistentTransient(t *testing.T) {
 	if requests != defaultMaxAttempts {
 		t.Fatalf("server saw %d requests, want %d (defaultMaxAttempts)", requests, defaultMaxAttempts)
 	}
-	if len(recorded) != defaultMaxAttempts-1 {
-		t.Fatalf("recorded sleeps = %v, want exactly %d sleeps", recorded, defaultMaxAttempts-1)
+	if len(*recorded) != defaultMaxAttempts-1 {
+		t.Fatalf("recorded sleeps = %v, want exactly %d sleeps", *recorded, defaultMaxAttempts-1)
 	}
 }
 
