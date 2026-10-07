@@ -1,10 +1,14 @@
 // Package glob implements doublestar-style glob semantics: "**" matches zero
-// or more path segments, on top of the "*" and "?" that path.Match supports.
+// or more path segments, on top of the "*", "?" and "[...]" that path.Match
+// supports.
 package glob
 
 import (
 	"path"
+	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Match reports whether p matches pattern. Unlike path.Match, "**" matches
@@ -40,6 +44,8 @@ func matchSegments(pattern, p []string) bool {
 }
 
 // Overlap reports whether patterns a and b could both match some common path.
+// A malformed pattern (e.g. "a/[") is reported as overlapping: a missed overlap
+// lets colliding work run concurrently, a false one only defers a dispatch.
 func Overlap(a, b string) bool {
 	return segmentsOverlap(strings.Split(a, "/"), strings.Split(b, "/"))
 }
@@ -72,17 +78,197 @@ func segmentsOverlap(a, b []string) bool {
 	return dp[0][0]
 }
 
+// segmentOverlap reports whether some name satisfies both single-segment
+// patterns. It walks the two patterns as a product automaton: cell j of the
+// row for i means ta[i:] and tb[j:] can still match a common string, with
+// next holding row i+1 and cur row i. That is O(len(a)*len(b)) time however
+// many "*" the patterns hold, and two rolling rows keep memory linear.
 func segmentOverlap(a, b string) bool {
 	if a == b {
 		return true
 	}
-	if strings.ContainsAny(a, "*?") {
-		if ok, err := path.Match(a, b); err == nil && ok {
-			return true
+	ta, okA := tokenize(a)
+	tb, okB := tokenize(b)
+	if !okA || !okB {
+		// A malformed pattern fails closed: a missed overlap lets colliding
+		// work run concurrently, a false one only defers a dispatch.
+		return true
+	}
+	n, m := len(ta), len(tb)
+	cur, next := make([]bool, m+1), make([]bool, m+1)
+	for i := n; i >= 0; i-- {
+		clear(cur)
+		for j := m; j >= 0; j-- {
+			starA := i < n && ta[i].star
+			starB := j < m && tb[j].star
+			switch {
+			case i == n && j == m:
+				cur[j] = true
+			case (starA && next[j]) || (starB && cur[j+1]):
+				cur[j] = true
+			case i < n && j < m && !(starA && starB) && setsIntersect(ta[i].set, tb[j].set):
+				// Consume one shared rune; a star stays put so it can eat more.
+				nj := j + 1
+				if starB {
+					nj = j
+				}
+				if starA {
+					cur[j] = cur[nj]
+				} else {
+					cur[j] = next[nj]
+				}
+			}
+		}
+		cur, next = next, cur
+	}
+	return next[0]
+}
+
+// runeRange is an inclusive span of runes.
+type runeRange struct{ lo, hi rune }
+
+// token is one element of a segment pattern: "*", or a single rune drawn from
+// set. set is sorted, disjoint and merged so setsIntersect can walk it linearly.
+type token struct {
+	star bool
+	set  []runeRange
+}
+
+// anyRune is what "?" and a star's per-rune choice match. A segment never
+// holds "/", so unlike path.Match this need not carve it out.
+var anyRune = []runeRange{{0, unicode.MaxRune}}
+
+// tokenize splits a segment pattern into tokens using path.Match's syntax. ok
+// is false when the pattern is malformed. Invalid UTF-8 counts as malformed:
+// []rune would fold it to U+FFFD while path.Match compares bytes.
+func tokenize(pat string) (toks []token, ok bool) {
+	if !utf8.ValidString(pat) {
+		return nil, false
+	}
+	rs := []rune(pat)
+	for i := 0; i < len(rs); {
+		switch c := rs[i]; c {
+		case '*':
+			toks = append(toks, token{star: true, set: anyRune})
+			i++
+		case '?':
+			toks = append(toks, token{set: anyRune})
+			i++
+		case '[':
+			set, next, ok := parseClass(rs, i+1)
+			if !ok {
+				return nil, false
+			}
+			toks = append(toks, token{set: set})
+			i = next
+		case '\\':
+			if i+1 >= len(rs) {
+				return nil, false
+			}
+			toks = append(toks, token{set: []runeRange{{rs[i+1], rs[i+1]}}})
+			i += 2
+		default:
+			toks = append(toks, token{set: []runeRange{{c, c}}})
+			i++
 		}
 	}
-	if strings.ContainsAny(b, "*?") {
-		if ok, err := path.Match(b, a); err == nil && ok {
+	return toks, true
+}
+
+// parseClass parses a character class whose "[" precedes rs[i], returning the
+// normalised rune set and the index just past the closing "]".
+func parseClass(rs []rune, i int) (set []runeRange, next int, ok bool) {
+	negate := i < len(rs) && rs[i] == '^'
+	if negate {
+		i++
+	}
+	// A leading "]" or "-" is malformed in path.Match, so every entry reads a
+	// bound first and only then checks for the closing bracket.
+	for n := 0; ; n++ {
+		if i >= len(rs) {
+			return nil, 0, false
+		}
+		if rs[i] == ']' && n > 0 {
+			i++
+			break
+		}
+		lo, after, ok := classRune(rs, i)
+		if !ok {
+			return nil, 0, false
+		}
+		hi := lo
+		i = after
+		if i < len(rs) && rs[i] == '-' {
+			if hi, i, ok = classRune(rs, i+1); !ok {
+				return nil, 0, false
+			}
+		}
+		if lo <= hi {
+			set = append(set, runeRange{lo, hi})
+		}
+	}
+	set = mergeRanges(set)
+	if negate {
+		set = complement(set)
+	}
+	return set, i, true
+}
+
+// classRune reads one possibly "\"-escaped class bound at rs[i].
+func classRune(rs []rune, i int) (r rune, next int, ok bool) {
+	if i >= len(rs) || rs[i] == '-' || rs[i] == ']' {
+		return 0, 0, false
+	}
+	if rs[i] == '\\' {
+		i++
+		if i >= len(rs) {
+			return 0, 0, false
+		}
+	}
+	return rs[i], i + 1, true
+}
+
+// mergeRanges sorts rs in place, so callers must not pass a shared slice.
+func mergeRanges(rs []runeRange) []runeRange {
+	sort.Slice(rs, func(i, j int) bool { return rs[i].lo < rs[j].lo })
+	var out []runeRange
+	for _, r := range rs {
+		if k := len(out) - 1; k >= 0 && r.lo <= out[k].hi+1 {
+			if r.hi > out[k].hi {
+				out[k].hi = r.hi
+			}
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// complement inverts a merged set over every rune.
+func complement(rs []runeRange) []runeRange {
+	var out []runeRange
+	next := rune(0)
+	for _, r := range rs {
+		if r.lo > next {
+			out = append(out, runeRange{next, r.lo - 1})
+		}
+		next = r.hi + 1
+	}
+	if next <= unicode.MaxRune {
+		out = append(out, runeRange{next, unicode.MaxRune})
+	}
+	return out
+}
+
+// setsIntersect reports whether two merged sets share a rune, in one linear
+// pass over both.
+func setsIntersect(a, b []runeRange) bool {
+	for i, j := 0, 0; i < len(a) && j < len(b); {
+		if a[i].hi < b[j].lo {
+			i++
+		} else if b[j].hi < a[i].lo {
+			j++
+		} else {
 			return true
 		}
 	}
