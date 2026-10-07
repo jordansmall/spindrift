@@ -1503,21 +1503,20 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		// Second checkpoint: a mid-flight abort reclaims the in-flight issue
 		// off in-progress on its own (the watcher), and the settle above
 		// abandoned at its next checkpoint through the shared registry's
-		// mark — this wins over the settle's own verdict, recoverFailed
-		// included, exactly as run()'s signalledOr does for a wave (#3522).
+		// mark — an abort wins over the settle's own verdict, recoverFailed
+		// included, as run()'s signalledOr does for a wave (#3522). A queue
+		// drain stop instead records the verdict first (finishQueueSettle).
+		if gate.Aborted() {
+			return waves.ErrSignalledStop
+		}
+		if queue {
+			return finishQueueSettle(c, it, pwd, issueNum, rec, settled, gate.Signalled(), stdout, stderr)
+		}
 		if gate.Signalled() {
 			return waves.ErrSignalledStop
 		}
 		if settled {
-			if queue {
-				if err := os.Remove(recoverAttemptsPath(pwd, iss.number)); err != nil && !errors.Is(err, os.ErrNotExist) {
-					fmt.Fprintf(stderr, "    ?? #%s: remove recover attempts: %v\n", issueNum, err)
-				}
-			}
 			return nil
-		}
-		if queue {
-			return parkQueueFailure(c, it, issueNum, rec, time.Now(), stdout, stderr)
 		}
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
 		return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: no open PR", issueNum), stdout, stderr)

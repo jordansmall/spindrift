@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -21,9 +22,10 @@ var errRecoverIneligible = errors.New("recover: issue not eligible for queue rec
 // hand-run recover trusts, through recoverIssue's relayed-branch arm, doing in
 // process the label work agent-recover.yml does around a manual recover. At
 // most one issue is attempted per call. It returns errQueueEmpty when none
-// qualified, and waves.ErrSignalledStop on an operator stop, which never parks
-// the issue. A tracker or forge outage during the scan is returned as an
-// error rather than read as "nothing eligible".
+// qualified, and waves.ErrSignalledStop on an operator stop; a drain stop
+// during a settle that fails still parks the issue first, while an abort
+// leaves it to the watcher's reclaim. A tracker or forge outage during the
+// scan is returned as an error rather than read as "nothing eligible".
 func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, stdout, stderr io.Writer) error {
 	if caps.PRForge == nil {
 		return errors.New("recover: queue mode needs a PR-shaped Code Forge (github or forgejo); a CODE_FORGE=local Recoverable issue stays manual, run `spindrift recover <n>` (ADR 0039)")
@@ -52,6 +54,24 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	}
 	fmt.Fprintf(stdout, "recover: no %s issue has a landable bundle and a genuine ready self-report\n", c.failedLabel)
 	return errQueueEmpty
+}
+
+// finishQueueSettle records queue mode's settle verdict: a landed issue's
+// attempt record is cleared, a failed one is parked. A drain stop abandons
+// nothing, so the verdict is recorded before exiting on it; returning early
+// would strand a failed settle on in-progress (#4679).
+func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec recoverAttempts, settled, signalled bool, stdout, stderr io.Writer) error {
+	if settled {
+		if err := os.Remove(recoverAttemptsPath(pwd, num)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			fmt.Fprintf(stderr, "    ?? #%s: remove recover attempts: %v\n", num, err)
+		}
+	} else if err := parkQueueFailure(c, it, num, rec, time.Now(), stdout, stderr); err != nil {
+		return err
+	}
+	if signalled {
+		return waves.ErrSignalledStop
+	}
+	return nil
 }
 
 // parkQueueFailure parks an issue queue mode claimed but could not land back on
