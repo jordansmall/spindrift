@@ -119,7 +119,10 @@ func TestDispatchSpansGenerations(t *testing.T) {
 	}
 }
 
-func TestIndexLinksToDispatch(t *testing.T) {
+// TestIndexLinksTimelineAndUnpinnedSlotCard covers a status without
+// child_start (an older daemon): the slot card links bare ?slot=N, timeline
+// rows pin their Dispatch, and an idle slot does not link.
+func TestIndexLinksTimelineAndUnpinnedSlotCard(t *testing.T) {
 	slots := `[{"slot":0,"phase":"running","busy":true,"kind":"work","issues":["5"],"since":"2026-10-07T11:00:00Z"},{"slot":1,"phase":"idle"}]`
 	c := statusJSON(t, "working", "", slots)
 	body := getHistory(t, &c, map[string]string{eventsFileName: dispatchEvents})
@@ -133,6 +136,40 @@ func TestIndexLinksToDispatch(t *testing.T) {
 	}
 	if strings.Contains(body, `href="/dispatch?slot=1"`) {
 		t.Error("idle slot must not link")
+	}
+}
+
+func TestIndexSlotCardLinksToRunningDispatch(t *testing.T) {
+	const at = "2026-10-07T11%3a00%3a00Z"
+	for _, tc := range []struct{ name, extra, want string }{
+		{"child_start", `,"child_start":"2026-10-07T11:00:00Z"`, `href="/dispatch?slot=0&at=` + at + `"`},
+		{"child_start_n", `,"child_start":"2026-10-07T11:00:00Z","child_start_n":1`, `href="/dispatch?slot=0&at=` + at + `&n=1"`},
+		{"older daemon", ``, `href="/dispatch?slot=0"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			slots := `[{"slot":0,"phase":"running","busy":true,"kind":"work","issues":["5"],"since":"2026-10-07T11:00:00Z"` + tc.extra + `},{"slot":1,"phase":"idle"}]`
+			c := statusJSON(t, "working", "", slots)
+			body := strings.ToLower(getHistory(t, &c, map[string]string{eventsFileName: "\n"}))
+			if want := strings.ToLower(`class="slotno cardlink" ` + tc.want + `>slot 0`); !strings.Contains(body, want) {
+				t.Errorf("missing %q in %s", want, body)
+			}
+			if strings.Contains(body, `href="/dispatch?slot=1`) {
+				t.Error("idle slot must not link")
+			}
+		})
+	}
+}
+
+func TestSlotCardLinkResolvesToRunningDispatch(t *testing.T) {
+	const at = "2026-10-07T09:10:01Z"
+	c := statusJSON(t, "working", "", `[{"slot":0,"phase":"running","busy":true,"kind":"work","since":"`+at+`","child_start":"`+at+`","child_start_n":1}]`)
+	body := getHistory(t, &c, map[string]string{eventsFileName: sameSecondEvents})
+	if want := `class="slotno cardlink" href="/dispatch?slot=0&at=2026-10-07T09%3a10%3a01Z&n=1"`; !strings.Contains(strings.ToLower(body), strings.ToLower(want)) {
+		t.Fatalf("missing %q in %s", want, body)
+	}
+	code, page := getDispatch(t, sameSecondEvents, "?slot=0&at="+at+"&n=1")
+	if code != 200 || !strings.Contains(page, "logs%2fc.log") {
+		t.Errorf("status %d, want the second same-second Dispatch (c.log):\n%s", code, page)
 	}
 }
 
