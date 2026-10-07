@@ -7853,7 +7853,8 @@ share a second, `&n=K` picks the one in position `K` (from 0) within that
 second; a `K` out of range is a 404. The
 drill-in shows the Dispatch's kind, start, revision, issue(s) or Chore, last
 phase, outcome and note, and exit, read from the events that followed it
-on that slot. Its Child log tab follows the **Child log** (see under
+on that slot, and updates them live while the Dispatch runs. Its Child log
+tab follows the **Child log** (see under
 [Daemon](#daemon)) live: it streams the bytes already written, then
 each append, over Server-Sent Events from `/log?path=<child_log>`. It
 opens at the end, stops following when you scroll up (a "jump to end"
