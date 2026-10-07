@@ -49,10 +49,10 @@ list) toggles a help overlay listing every binding across every view.
 `enter` on a highlighted Backlog row opens its ticket detail modal: the
 issue's full body plus its Blocked-by and Blocks lists, each resolved
 directly from the issue's own dependency edge. On a `local` tracker the
-Blocks list is always empty — only GitHub and Jira expose a native,
-bidirectional blocked/blocking relationship (`forge.BlockersLister`); a
-`local` issue's only blocker concept is one-directional body-text parsing,
-with no reverse edge to query.
+Blocks list is always empty — only GitHub, Jira, and Forgejo expose a
+native, bidirectional blocked/blocking relationship
+(`forge.BlockersLister`); a `local` issue's only blocker concept is
+one-directional body-text parsing, with no reverse edge to query.
 
 | key | effect |
 |-----|--------|

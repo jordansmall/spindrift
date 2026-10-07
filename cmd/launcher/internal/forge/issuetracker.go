@@ -103,9 +103,9 @@ type IssueTracker interface {
 
 // BlockersLister is the optional IssueTracker capability for adapters with a
 // native reverse-dependency concept, the issues a given issue blocks. Only
-// github and jira track blocked/blocking bidirectionally, so the reverse
-// direction costs one more native call rather than a whole-backlog scan
-// (issue #1744).
+// github, jira, and forgejo track blocked/blocking bidirectionally, so the
+// reverse direction costs one more native call rather than a whole-backlog
+// scan (issue #1744).
 type BlockersLister interface {
 	// BlocksOf returns the canonical issues that num blocks, DepsOf's
 	// reverse direction. Always DepSourceNative: no body-text grammar
