@@ -50,6 +50,11 @@ type Record struct {
 	// NextDue is a not_due record's answer, parsed off the wire by
 	// UnmarshalJSON; zero on every other event.
 	NextDue NextDue
+	// Model and ModelRole are a model record's fields: the exact model id now
+	// behind the Box's messages and the role speaking (empty when the driver
+	// cannot name one). Empty on every other event.
+	Model     string
+	ModelRole string
 }
 
 // NextDue is a not_due record's answer: the earliest instant a Chore lifts
@@ -99,11 +104,14 @@ type recordWire struct {
 	PassLog string `json:"pass_log,omitempty"`
 	PRURL   string `json:"pr_url,omitempty"`
 	NextDue string `json:"next_due,omitempty"`
+
+	Model     string `json:"model,omitempty"`
+	ModelRole string `json:"model_role,omitempty"`
 }
 
 func (r Record) MarshalJSON() ([]byte, error) {
 	issue, chore := r.Key.Fields()
-	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, PRURL: r.PRURL, NextDue: r.NextDue.wire()})
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, PRURL: r.PRURL, NextDue: r.NextDue.wire(), Model: r.Model, ModelRole: r.ModelRole})
 }
 
 // UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
@@ -130,20 +138,22 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, PRURL: w.PRURL, NextDue: nd}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, PRURL: w.PRURL, NextDue: nd, Model: w.Model, ModelRole: w.ModelRole}
 	return nil
 }
 
-// EventBox, EventSettled and EventNotDue are the Record.Event values this
-// package ever writes. Naming them once here and using the name everywhere else
-// (internal/daemon's parser, dispatch loop, and pool event stream) means a
-// typo in the wire value is a compile error, not a silent parse miss on the
-// reading side — issue #3627's review finding. The JSON on the wire is
-// unchanged: these are still the bare strings "box"/"settled"/"not_due".
+// EventBox, EventSettled, EventNotDue and EventModel are the Record.Event
+// values this package ever writes. Naming them once here and using the name
+// everywhere else (internal/daemon's parser, dispatch loop, and pool event
+// stream) means a typo in the wire value is a compile error, not a silent parse
+// miss on the reading side — issue #3627's review finding. The JSON on the
+// wire is unchanged: these are still the bare strings
+// "box"/"settled"/"not_due"/"model".
 const (
 	EventBox     = "box"
 	EventSettled = "settled"
 	EventNotDue  = "not_due"
+	EventModel   = "model"
 )
 
 // NextDueOnTipMove is the next_due wire value for a Chore that only a
@@ -230,6 +240,13 @@ func (r *Reporter) NotDue(key dispatchkey.Key, next NextDue) {
 		return
 	}
 	r.emit(Record{Event: EventNotDue, Key: key, NextDue: next})
+}
+
+// Model records that the Box's messages now come from the exact model id
+// model, speaking as role ("" when the driver cannot name one). The caller
+// debounces: one record per change of the (role, model) pair, not per message.
+func (r *Reporter) Model(key dispatchkey.Key, model, role string) {
+	r.emit(Record{Event: EventModel, Key: key, Model: model, ModelRole: role})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe

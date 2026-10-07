@@ -267,3 +267,21 @@ func TestParseRecord_NotDue(t *testing.T) {
 		})
 	}
 }
+
+func TestParseRecord_Model(t *testing.T) {
+	work := KindOf(dispatchkind.Work)
+	got, ok, err := ParseRecord(`{"event":"model","issue":"42","model":"claude-sonnet-5-5","model_role":"coordinator"}`, work)
+	if err != nil || !ok {
+		t.Fatalf("ParseRecord = (%v, %v), want an accepted record", ok, err)
+	}
+	want := Record{Event: report.EventModel, Key: dispatchkey.Issue("42"), Model: "claude-sonnet-5-5", ModelRole: "coordinator"}
+	if got != want {
+		t.Errorf("ParseRecord = %+v, want %+v", got, want)
+	}
+	if _, ok, err := ParseRecord(`{"event":"model","issue":"42","model":"claude-haiku-4-5"}`, work); err != nil || !ok {
+		t.Errorf("roleless model record = (%v, %v), want accepted", ok, err)
+	}
+	if _, ok, err := ParseRecord(`{"event":"model","issue":"42","model_role":"worker"}`, work); err == nil || ok {
+		t.Errorf("model record without model = (%v, %v), want an error", ok, err)
+	}
+}
