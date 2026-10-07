@@ -23,8 +23,8 @@ import (
 	"spindrift.dev/launcher/internal/forge/rest"
 )
 
-// Forgejo implements only the IssueTracker seam (ADR 0013); code still lands
-// via the github CodeForge.
+// The Forgejo client satisfies the IssueTracker seam (ADR 0013); the Code
+// Forge that lands code is chosen separately, by CODE_FORGE.
 func TestForgejoClient_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = forgejo.NewForgejoClient(forgejo.ForgejoConfig{})
 }

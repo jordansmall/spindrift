@@ -1,6 +1,6 @@
 // Package jira is the Jira REST adapter. It satisfies only the parent forge
-// package's IssueTracker interface; code still lands via the github Code Forge
-// (ADR 0013).
+// package's IssueTracker interface; code lands via whichever Code Forge
+// CODE_FORGE selects (ADR 0013).
 package jira
 
 import (
