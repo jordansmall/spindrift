@@ -13,9 +13,9 @@ import (
 	"spindrift.dev/launcher/internal/report"
 )
 
-// triKindConfig is dualKindConfig's three-kind sibling (issue #3878): all
-// three kinds share one pool, in the daemon's default order (dispatch,
-// research, butler — dispatchkind.All's declaration order).
+// triKindConfig is dualKindConfig's three-kind sibling (issue #3878): the
+// work, research and butler kinds share one pool, in the order
+// dispatchkind.All declares them (recover, its fourth, is left out).
 func triKindConfig(slots, reservation int) Config {
 	cfg := testConfig(slots)
 	cfg.Kinds = []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}

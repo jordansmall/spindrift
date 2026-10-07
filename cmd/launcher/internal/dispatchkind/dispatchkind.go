@@ -62,20 +62,25 @@ const (
 )
 
 // DaemonPriority is a kind's standing in the daemon's slotOrder preference.
+// The values name tiers, not ranks (PriorityNormal must stay the zero value), so
+// never compare them with <; slotOrder in internal/daemon/pool.go is the only
+// ordering.
 type DaemonPriority int
 
 const (
 	PriorityNormal   DaemonPriority = iota // preferred whenever the research floor is met
 	PriorityReserved                       // preferred only while fewer than RESEARCH_RESERVATION of them are running, last otherwise
 	PriorityIdle                           // tried only after every other kind on every slot (butler, ADR 0056: a slot picks it only when nothing else has work)
+	PriorityFirst                          // tried ahead of every other kind on every slot (recover, issue #4656: stranded finished work lands before new work starts, rebasing onto as little new main as possible)
 )
 
 // Enablement is when the daemon draws a kind at all.
 type Enablement int
 
 const (
-	EnabledAlways   Enablement = iota + 1 // drawn whenever selected
-	EnabledByChores                       // drawn only while BUTLER_CHORES enables at least one Chore; the daemon resolves that, since this leaf package cannot import chore
+	EnabledAlways        Enablement = iota + 1 // drawn whenever selected
+	EnabledByChores                            // drawn only while BUTLER_CHORES enables at least one Chore; the daemon resolves that, since this leaf package cannot import chore
+	EnabledByOutboxRelay                       // drawn only when CODE_FORGE relays a read-only Box's outbox bundle (OutboxRelayCapable) and BOX_FORGE_AND_ISSUE_ACCESS=read-only; never on local or read-write; the daemon resolves it, since this leaf package cannot import backend
 )
 
 // DemandSource is how the daemon learns whether a kind has work waiting.
@@ -250,11 +255,37 @@ var (
 		UnclaimedGate:  true,
 		Preflight:      PreflightWhenDrawn("--butler"),
 	}
+	// Recover is queue-mode `spindrift recover` (issue #4656): it relays a
+	// finished work Box's stranded outbox bundle through the work merge gate
+	// and runs no Box of its own, so its Box-facing fields mirror work's,
+	// spelled as literals because nix/checks/dispatch-labels.nix extracts
+	// every FindingLabel literal from this file.
+	// PriorityFirst lands stranded work before a new Box starts, so each
+	// rebases onto as little new main as possible. Its work is outbox
+	// bundles, not tracker issues, so only the child's exit code (2 = nothing
+	// eligible) reports demand until ADR 0059's scheduler gives it an outbox
+	// source.
+	Recover = &Descriptor{
+		Name:           "recover",
+		Verb:           "recover",
+		Keying:         ByIssue,
+		Labels:         LabelsConfigured,
+		Settle:         SettleMerge,
+		DaemonPriority: PriorityFirst,
+		Enablement:     EnabledByOutboxRelay,
+		DemandSource:   DemandChildReported,
+		FindingLabel:   "agent-review-finding",
+		Contract:       ContractLanding,
+		FilerRelayGate: "FILER_FILE_RELAY_WORK",
+		Tracker:        TrackerWork,
+		AnnounceVerb:   "recovering",
+		Preflight:      NoPreflight(),
+	}
 )
 
 // All lists every kind in declaration order; that order is the daemon's
 // default pool order.
-var All = []*Descriptor{Work, Research, Butler}
+var All = []*Descriptor{Work, Research, Butler, Recover}
 
 // ByName looks up a kind by its Name. "" is not special here — callers that
 // default "" to work do so explicitly via Work.Name.

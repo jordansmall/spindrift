@@ -227,7 +227,7 @@ func TestParseArgs(t *testing.T) {
 			name:      "no positional verb defaults to every kind",
 			args:      []string{"--input", "/tmp/in.json"},
 			wantPath:  "/tmp/in.json",
-			wantKinds: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)},
+			wantKinds: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler), daemon.KindOf(dispatchkind.Recover)},
 		},
 		{
 			name:                 "explicit dispatch is work-only",
@@ -251,6 +251,13 @@ func TestParseArgs(t *testing.T) {
 			wantExplicitSelector: true,
 		},
 		{
+			name:                 "explicit recover is recover-only",
+			args:                 []string{"--input", "/tmp/in.json", "recover"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Recover)},
+			wantExplicitSelector: true,
+		},
+		{
 			name:    "unknown kind rejected",
 			args:    []string{"--input", "/tmp/in.json", "bogus"},
 			wantErr: true,
@@ -269,7 +276,7 @@ func TestParseArgs(t *testing.T) {
 			name:              "feature branch alone",
 			args:              []string{"--input", "/tmp/in.json", "--feature-branch", "feature-x"},
 			wantPath:          "/tmp/in.json",
-			wantKinds:         []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)},
+			wantKinds:         []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler), daemon.KindOf(dispatchkind.Recover)},
 			wantFeatureBranch: "feature-x",
 		},
 		{
@@ -353,6 +360,8 @@ func TestParseArgs(t *testing.T) {
 // a chore.Load error fails startup outright.
 func TestGateKinds(t *testing.T) {
 	every := []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler)}
+	recoverKind := daemon.KindOf(dispatchkind.Recover)
+	everyWithRecover := append(slices.Clone(every), recoverKind)
 	tests := []struct {
 		name             string
 		kinds            []daemon.Kind
@@ -360,6 +369,8 @@ func TestGateKinds(t *testing.T) {
 		butlerChores     string
 		butlerEvery      string
 		butlerClasses    string
+		codeForge        string // resolved CODE_FORGE; "" is not a backend
+		boxAccess        string // resolved BOX_FORGE_AND_ISSUE_ACCESS
 		want             []daemon.Kind
 		wantErr          bool
 		wantErrIs        error  // when set, err must wrap it
@@ -439,10 +450,67 @@ func TestGateKinds(t *testing.T) {
 			wantErr:          true,
 			wantErrIs:        chore.ErrNoChores,
 		},
+		{
+			name:      "bare default keeps recover for github read-only",
+			kinds:     everyWithRecover,
+			codeForge: "github", boxAccess: "read-only",
+			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), recoverKind},
+		},
+		{
+			name:      "bare default keeps recover for forgejo read-only",
+			kinds:     everyWithRecover,
+			codeForge: "forgejo", boxAccess: "read-only",
+			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), recoverKind},
+		},
+		{
+			name:      "bare default drops recover for local read-only",
+			kinds:     everyWithRecover,
+			codeForge: "local", boxAccess: "read-only",
+			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
+		},
+		{
+			name:      "bare default drops recover for git read-only",
+			kinds:     everyWithRecover,
+			codeForge: "git", boxAccess: "read-only",
+			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
+		},
+		{
+			name:      "bare default drops recover for github read-write",
+			kinds:     everyWithRecover,
+			codeForge: "github", boxAccess: "read-write",
+			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research)},
+		},
+		{
+			name:             "explicit recover with relay disabled fails on the sentinel",
+			kinds:            []daemon.Kind{recoverKind},
+			explicitSelector: true,
+			codeForge:        "github", boxAccess: "read-write",
+			wantErr:    true,
+			wantErrIs:  errNoOutboxRelay,
+			wantErrMsg: "recover selected but",
+		},
+		{
+			name:             "explicit recover with relay enabled yields just recover",
+			kinds:            []daemon.Kind{recoverKind},
+			explicitSelector: true,
+			codeForge:        "forgejo", boxAccess: "read-only",
+			want: []daemon.Kind{recoverKind},
+		},
+		{
+			name:             "explicit dispatch excludes recover whatever the relay",
+			kinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
+			explicitSelector: true,
+			codeForge:        "github", boxAccess: "read-only",
+			want: []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			knobs := chore.Knobs{Chores: tt.butlerChores, Every: tt.butlerEvery, Classes: tt.butlerClasses}
+			knobs := gateKnobs{
+				chores:    chore.Knobs{Chores: tt.butlerChores, Every: tt.butlerEvery, Classes: tt.butlerClasses},
+				codeForge: tt.codeForge,
+				boxAccess: tt.boxAccess,
+			}
 			got, err := gateKinds(tt.kinds, tt.explicitSelector, knobs)
 			if tt.wantErr {
 				if err == nil {
@@ -1055,6 +1123,7 @@ var daemonKnobEnvVars = []string{
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL", "FORGEJO_TOKEN",
 	"GH_TOKEN_REFRESH_FILE", "JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN",
 	"JIRA_STATUS_MAPPING", "FORGEJO_TOKEN_CMD", "JIRA_TOKEN_CMD",
+	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
@@ -3250,7 +3319,7 @@ func TestDoctorPreflightFlags(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs: %v", err)
 			}
-			args.Kinds, err = gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: tc.chores})
+			args.Kinds, err = gateKinds(args.Kinds, args.ExplicitSelector, gateKnobs{chores: chore.Knobs{Chores: tc.chores}})
 			if err != nil {
 				t.Fatalf("gateKinds: %v", err)
 			}

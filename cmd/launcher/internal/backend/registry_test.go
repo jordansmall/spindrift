@@ -210,3 +210,28 @@ func TestTrackerAxisAndForgeBackendSignals(t *testing.T) {
 		})
 	}
 }
+
+// TestRelaysOutbox pins the one predicate for "a read-only Box's outbox
+// bundle gets relayed" (issue #4656): an OutboxRelayCapable CODE_FORGE under
+// read-only access, and nothing else.
+func TestRelaysOutbox(t *testing.T) {
+	cases := []struct {
+		codeForge, boxAccess string
+		want                 bool
+	}{
+		{"github", "read-only", true},
+		{"forgejo", "read-only", true},
+		{"github", "read-write", false},
+		{"forgejo", "read-write", false},
+		{"local", "read-only", false},
+		{"git", "read-only", false},
+		{"nope", "read-only", false},
+		{"", "read-only", false},
+		{"github", "", false},
+	}
+	for _, tc := range cases {
+		if got := RelaysOutbox(tc.codeForge, tc.boxAccess); got != tc.want {
+			t.Errorf("RelaysOutbox(%q, %q) = %v, want %v", tc.codeForge, tc.boxAccess, got, tc.want)
+		}
+	}
+}

@@ -781,3 +781,20 @@ func TestBacklogDedupIndex_OpenFailureWarnsAndKeepsClosedKeys(t *testing.T) {
 		t.Errorf("stderr = %q, want a warning naming issue #100, \"open\", and the underlying error", stderr)
 	}
 }
+
+// Recover shares work's FindingLabel, so findingLabels must list it once, not
+// once per kind.
+func TestFindingLabelsListsEachLabelOnce(t *testing.T) {
+	seen := map[string]bool{}
+	for _, l := range findingLabels {
+		if seen[l] {
+			t.Errorf("findingLabels lists %q more than once: %v", l, findingLabels)
+		}
+		seen[l] = true
+	}
+	for _, d := range dispatchkind.All {
+		if !seen[d.FindingLabel] {
+			t.Errorf("findingLabels omits %s's FindingLabel %q", d.Name, d.FindingLabel)
+		}
+	}
+}

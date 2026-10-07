@@ -320,26 +320,27 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 }
 
 // slotOrder returns the kinds a starting slot tries, most preferred first, in
-// three tiers: the reserved kind (dispatchkind.PriorityReserved, i.e.
-// research), normal kinds (dispatchkind.PriorityNormal, e.g. work), and idle
-// kinds (dispatchkind.PriorityIdle, i.e. the butler, ADR 0056) — idle kinds
-// are always tried last, since a slot must only pick one once every other kind
-// has reported no work. Within that, preferReserved puts the reserved tier
-// ahead of normal; otherwise normal comes ahead of reserved. The order is
-// derived from kinds — only the reserved kind's position moves relative to
-// normal, so a kind added later keeps its configured place within its own
-// tier instead of silently inheriting one half of a hardcoded pair. A kind
-// with no descriptor (ByVerb misses) is treated as normal priority, not
-// reserved or idle. preferReserved comes from Schedule.Decide.
+// four tiers: first (dispatchkind.PriorityFirst, recover, issue #4656),
+// reserved (PriorityReserved, research), normal (PriorityNormal, e.g. work)
+// and idle (PriorityIdle, the butler, ADR 0056). First kinds always go
+// first, so stranded finished work lands before a new Box starts; idle kinds
+// always go last, since a slot must only pick one once every other kind has
+// reported no work. preferReserved (from Schedule.Decide) puts the reserved
+// tier ahead of normal, else behind it. The order is derived from kinds, so
+// a later kind keeps its configured place within its own tier. A kind with
+// no descriptor (ByVerb misses) is treated as normal.
 func slotOrder(kinds []Kind, preferReserved bool) []Kind {
 	if len(kinds) < 2 {
 		return kinds
 	}
+	first := make([]Kind, 0, 1)
 	reserved := make([]Kind, 0, 1)
 	normal := make([]Kind, 0, len(kinds))
 	idle := make([]Kind, 0, 1)
 	for _, k := range kinds {
 		switch kindPriority(k) {
+		case dispatchkind.PriorityFirst:
+			first = append(first, k)
 		case dispatchkind.PriorityReserved:
 			reserved = append(reserved, k)
 		case dispatchkind.PriorityIdle:
@@ -349,6 +350,7 @@ func slotOrder(kinds []Kind, preferReserved bool) []Kind {
 		}
 	}
 	order := make([]Kind, 0, len(kinds))
+	order = append(order, first...)
 	if preferReserved {
 		order = append(order, reserved...)
 		order = append(order, normal...)
