@@ -190,7 +190,7 @@ func (d *Dispatch) Run() Disposition {
 
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
-		d.announce(report.PhaseInitial)
+		d.announce(report.PhaseInitial, logPath)
 		if !resumeAfterHold && !d.runner.IsRunning(BoxName(d.number)) {
 			// Only on this Run()'s first attempt, and only when no live
 			// container owns this issue's log (the same guard
@@ -221,7 +221,7 @@ func (d *Dispatch) Run() Disposition {
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
-		d.announce(report.PhaseFixPass(pass))
+		d.announce(report.PhaseFixPass(pass), logPath)
 		env, err := buildBoxEnv(d.cfg, d.subject, pass, ciFailureSummary, d.nonce)
 		if err != nil {
 			return err
@@ -236,13 +236,14 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
 // bundled to the outbox for the launcher to relay, issue #1979), and exits
 // without the main agent prompt, so it needs neither retry nor driver cache.
 func (d *Dispatch) ResolveConflict(pr string) error {
-	d.announce(report.PhaseConflictResolve)
+	logPath := d.conflictLogPath()
+	d.announce(report.PhaseConflictResolve, logPath)
 	env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
 	if err != nil {
 		return err
 	}
 	env["CONFLICT_RESOLVE_PR_URL"] = pr
-	return d.runOnce(d.conflictLogPath(), env, "")
+	return d.runOnce(logPath, env, "")
 }
 
 // announce prints the human announce line for phase and emits the matching
@@ -251,9 +252,18 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // report.PhaseConflictResolve, and report.PhaseFixPass; humanPhase maps it
 // onto announceLine's own vocabulary here rather than at the two call sites,
 // so a phase name only needs to be spelled once per caller.
-func (d *Dispatch) announce(phase string) {
+//
+// logPath is the Pass log the phase writes, absolute under d.pwd; the record
+// carries it relative to the checkout. It is the un-suffixed path even when a
+// stale log is rotated aside, since runOnce moves the old file to logPath.N.
+func (d *Dispatch) announce(phase, logPath string) {
 	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title))
-	report.Box(d.subject.key, phase)
+	rel, err := filepath.Rel(d.pwd, logPath)
+	if err != nil {
+		// rel is "": the record then names no Pass log.
+		fmt.Fprintf(os.Stderr, "    ?? #%s: pass log path: %v\n", d.number, err)
+	}
+	report.Box(d.subject.key, phase, rel)
 }
 
 // humanPhase maps report's phase vocabulary onto announceLine's

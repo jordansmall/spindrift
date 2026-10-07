@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -33,8 +34,8 @@ func TestDispatch_Run_EmitsBoxRecordAndUnchangedHumanLine(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "initial" {
-		t.Errorf("record = %+v, want event=box issue=1 phase=initial", recs[0])
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "initial" || recs[0].PassLog != ".spindrift/logs/issue-1.log" {
+		t.Errorf("record = %+v, want event=box issue=1 phase=initial pass_log=.spindrift/logs/issue-1.log", recs[0])
 	}
 }
 
@@ -60,8 +61,8 @@ func TestDispatch_Run_ChoreDispatch_EmitsChoreBoxRecord(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Chore("bugs") || recs[0].Phase != "initial" {
-		t.Errorf("record = %+v, want event=box chore=bugs issue=\"\" phase=initial", recs[0])
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Chore("bugs") || recs[0].Phase != "initial" || recs[0].PassLog != ".spindrift/logs/issue-butler-bugs.log" {
+		t.Errorf("record = %+v, want event=box chore=bugs issue=\"\" phase=initial pass_log=.spindrift/logs/issue-butler-bugs.log", recs[0])
 	}
 }
 
@@ -82,8 +83,8 @@ func TestDispatch_Fix_EmitsBoxRecordWithFixPassPhase(t *testing.T) {
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "fix-pass-2" {
-		t.Errorf("record = %+v, want event=box issue=1 phase=fix-pass-2", recs[0])
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "fix-pass-2" || recs[0].PassLog != ".spindrift/logs/issue-1-fix-2.log" {
+		t.Errorf("record = %+v, want event=box issue=1 phase=fix-pass-2 pass_log=.spindrift/logs/issue-1-fix-2.log", recs[0])
 	}
 }
 
@@ -104,8 +105,8 @@ func TestDispatch_ResolveConflict_EmitsBoxRecordWithConflictResolvePhase(t *test
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
-	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "conflict-resolve" {
-		t.Errorf("record = %+v, want event=box issue=1 phase=conflict-resolve", recs[0])
+	if recs[0].Event != "box" || recs[0].Key != dispatchkey.Issue("1") || recs[0].Phase != "conflict-resolve" || recs[0].PassLog != ".spindrift/logs/issue-1-conflict-resolve.log" {
+		t.Errorf("record = %+v, want event=box issue=1 phase=conflict-resolve pass_log=.spindrift/logs/issue-1-conflict-resolve.log", recs[0])
 	}
 }
 
@@ -217,5 +218,47 @@ func TestFD3ClosedHelperProcess(t *testing.T) {
 
 	if writeErr == nil {
 		t.Fatal("scripted subprocess write to fd 3 succeeded, want failure")
+	}
+}
+
+// TestDispatch_BoxRecordNamesUnsuffixedLogAfterStaleRotation pins that the
+// record names the file the pass writes — logPath itself — not the .N sibling
+// a stale log is rotated to.
+func TestDispatch_BoxRecordNamesUnsuffixedLogAfterStaleRotation(t *testing.T) {
+	cases := []struct {
+		name string
+		path func(*Dispatch) string
+		run  func(*Dispatch)
+		want string
+		// wantRotated: the stale log is rotated aside to logPath.1. Run
+		// quarantines prior logs by its own mechanism, not rotateStaleLog.
+		wantRotated bool
+	}{
+		{"initial", (*Dispatch).logPath, func(d *Dispatch) { d.Run() }, ".spindrift/logs/issue-1.log", false},
+		{"fix-pass", func(d *Dispatch) string { return d.fixLogPath(2) }, func(d *Dispatch) { d.Fix(2, "") }, ".spindrift/logs/issue-1-fix-2.log", true},
+		{"conflict-resolve", (*Dispatch).conflictLogPath, func(d *Dispatch) { d.ResolveConflict("https://example.com/pr/1") }, ".spindrift/logs/issue-1-conflict-resolve.log", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			readRecords := testutil.InstallPipeReporter(t)
+			d := newTestDispatch(t, retryConfig(3, 0, 0), runner.NewFake(), fakeDriver{}, RealClock())
+			stale := tc.path(d)
+			if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(stale, []byte("stale"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			testutil.CaptureStdout(t, func() { tc.run(d) })
+
+			recs := readRecords()
+			if len(recs) != 1 || recs[0].PassLog != tc.want {
+				t.Fatalf("records = %+v, want one box record with PassLog %q", recs, tc.want)
+			}
+			if _, err := os.Stat(stale + ".1"); err != nil && tc.wantRotated {
+				t.Errorf("stale log was not rotated aside: %v", err)
+			}
+		})
 	}
 }

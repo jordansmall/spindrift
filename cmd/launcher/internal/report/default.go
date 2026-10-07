@@ -28,8 +28,8 @@ func Default() *Reporter {
 }
 
 // Box forwards to Default().Box.
-func Box(key dispatchkey.Key, phase string) {
-	Default().Box(key, phase)
+func Box(key dispatchkey.Key, phase, passLog string) {
+	Default().Box(key, phase, passLog)
 }
 
 // Settled forwards to Default().Settled.

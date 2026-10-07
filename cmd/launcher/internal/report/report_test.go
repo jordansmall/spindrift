@@ -38,7 +38,7 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 		t.Fatalf("unexpected stderr on success: %s", stderr.String())
 	}
 
-	rep.Box(dispatchkey.Issue("3627"), "initial")
+	rep.Box(dispatchkey.Issue("3627"), "initial", ".spindrift/logs/issue-3627.log")
 	rep.Settled(dispatchkey.Issue("3627"), "merged", "landed clean")
 	w.Close()
 
@@ -57,7 +57,7 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 	if len(recs) != 2 {
 		t.Fatalf("got %d records, want 2: %+v", len(recs), recs)
 	}
-	wantBox := Record{Event: "box", Key: dispatchkey.Issue("3627"), Phase: "initial"}
+	wantBox := Record{Event: "box", Key: dispatchkey.Issue("3627"), Phase: "initial", PassLog: ".spindrift/logs/issue-3627.log"}
 	if recs[0] != wantBox {
 		t.Errorf("box record = %+v, want %+v", recs[0], wantBox)
 	}
@@ -86,7 +86,7 @@ func TestFromEnv_ChoreRoundTrip(t *testing.T) {
 		t.Fatalf("FromEnv returned nil, stderr: %s", stderr.String())
 	}
 
-	rep.Box(dispatchkey.Chore("bugs"), "initial")
+	rep.Box(dispatchkey.Chore("bugs"), "initial", "")
 	rep.Settled(dispatchkey.Chore("bugs"), "complete", "2 filed")
 	w.Close()
 
@@ -132,7 +132,7 @@ func TestFromEnv_Unset(t *testing.T) {
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 	// Nil-receiver methods must be no-ops, not panics.
-	rep.Box(dispatchkey.Issue("1"), "initial")
+	rep.Box(dispatchkey.Issue("1"), "initial", "")
 	rep.Settled(dispatchkey.Issue("1"), "merged", "")
 }
 
@@ -153,7 +153,7 @@ func TestFromEnv_RegularFileRefused(t *testing.T) {
 		t.Errorf("stderr = %q, want mention of 'not a pipe'", stderr.String())
 	}
 
-	rep.Box(dispatchkey.Issue("1"), "initial") // no-op on nil, must not touch the file
+	rep.Box(dispatchkey.Issue("1"), "initial", "") // no-op on nil, must not touch the file
 
 	got, err := os.ReadFile(f.Name())
 	if err != nil {
