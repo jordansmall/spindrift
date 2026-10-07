@@ -15,27 +15,37 @@ import (
 // logFrameMax caps the bytes one log frame carries.
 const logFrameMax = 64 << 10
 
-// namesLog reports whether any event in either Events generation announced path:
-// a child_start as its child_log or a box as its pass_log. Only a path the
-// Daemon announced is served, so the query string cannot be used to read
-// arbitrary files under the checkout.
-func (s *server) namesLog(path string) bool {
-	found := false
+// logState reports whether the Daemon announced path, and whether the child
+// that owns it has finished. A child_start names it as its child_log and a box
+// as its pass_log; only a path the Daemon announced is served, so the query
+// string cannot be used to read arbitrary files under the checkout. The child
+// finished once its slot saw a child_finish, or a later child_start (a Daemon
+// that died without one). The latest naming wins, and a naming that carries no
+// slot cannot be followed to a finish, so it counts as finished already.
+func (s *server) logState(path string) (named, finished bool) {
+	var slot *int
 	scanGenerations(s.eventsPath, func(ev Event) {
 		if (ev.Event == "child_start" && ev.ChildLog == path) ||
 			(ev.Event == "box" && ev.PassLog == path) {
-			found = true
+			named, finished, slot = true, ev.Slot == nil, ev.Slot
+			return
+		}
+		if named && slot != nil && ev.Slot != nil && *ev.Slot == *slot &&
+			(ev.Event == "child_finish" || ev.Event == "child_start") {
+			finished = true
 		}
 	})
-	return found
+	return named, finished
 }
 
 // serveLog streams one Child log or Pass log as Server-Sent Events: its
-// existing bytes and then each append as log frames. A named log since deleted
-// (operators prune by hand) gets a single pruned frame instead, an answer
-// rather than an error. An unreadable log ends the stream after logging, and so
-// does a log replaced at its path (a retried Pass rotating the old one aside);
-// either way the client's reconnect opens whatever file the path names now.
+// existing bytes and then each append as log frames. A named log not yet on
+// disk while its child runs gets a waiting frame, then streams once it appears;
+// one missing for good gets a single pruned frame, an answer rather than an
+// error, and so does one deleted mid-follow. An unreadable log ends the stream
+// after logging, and so does a log replaced at its path (a retried Pass
+// rotating the old one aside); either way the client's reconnect opens
+// whatever file the path names now.
 func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		w.Header().Set("Allow", "GET")
@@ -43,7 +53,12 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := r.URL.Query().Get("path")
-	if !filepath.IsLocal(path) || !s.namesLog(path) {
+	if !filepath.IsLocal(path) {
+		http.NotFound(w, r)
+		return
+	}
+	named, finished := s.logState(path)
+	if !named {
 		http.NotFound(w, r)
 		return
 	}
@@ -54,14 +69,42 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		return writeFrame(w, event, data) == nil && rc.Flush() == nil
 	}
 
-	f, err := os.Open(filepath.Join(s.checkout, path))
-	if errors.Is(err, fs.ErrNotExist) {
-		send("pruned", path)
-		return
+	full := filepath.Join(s.checkout, path)
+	tick := time.NewTicker(s.poll)
+	defer tick.Stop()
+	var f *os.File
+	var err error
+	waited := false
+	for {
+		f, err = os.Open(full)
+		if !errors.Is(err, fs.ErrNotExist) {
+			break
+		}
+		if finished {
+			send("pruned", path)
+			return
+		}
+		if !waited {
+			if !send("waiting", path) {
+				return
+			}
+			waited = true
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-tick.C:
+		}
+		// A naming event that aged out of the Events file leaves nothing to create
+		// the file, so it counts as finished too.
+		stillNamed, fin := s.logState(path)
+		finished = !stillNamed || fin
 	}
 	if err != nil {
 		log.Printf("dashboard: log %s: %v", path, err)
-		http.Error(w, "log unreadable", http.StatusInternalServerError)
+		if !waited {
+			http.Error(w, "log unreadable", http.StatusInternalServerError)
+		}
 		return
 	}
 	defer f.Close()
@@ -95,14 +138,24 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	tick := time.NewTicker(s.poll)
-	defer tick.Stop()
 	for drain() {
 		// A retried Pass rotates its log aside and creates a fresh one at the same
 		// path; ending the stream lets the client reconnect onto the new file. A
-		// missing path is the gap between rename and create, so keep following.
-		if cur, statErr := os.Stat(filepath.Join(s.checkout, path)); statErr == nil {
+		// missing path is the gap between rename and create while the child runs, so
+		// keep following; once it has finished the path is gone for good, and drain
+		// has already sent what the open file held.
+		cur, statErr := os.Stat(full)
+		if statErr == nil {
 			if openInfo, openErr := f.Stat(); openErr == nil && !os.SameFile(cur, openInfo) {
+				return
+			}
+		} else if errors.Is(statErr, fs.ErrNotExist) {
+			if stillNamed, fin := s.logState(path); !stillNamed || fin {
+				// The child may have appended its last bytes and finished, and the
+				// file been deleted, within one poll; the open descriptor still has them.
+				if drain() {
+					send("pruned", path)
+				}
 				return
 			}
 		}
