@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -12,7 +13,7 @@ import (
 )
 
 // errRecoverIneligible is recoverIssue's queue-mode verdict that an issue is not
-// landable and the scan should move on; nothing was written for it.
+// landable and the scan should move on; it may have posted a give-up comment.
 var errRecoverIneligible = errors.New("recover: issue not eligible for queue recovery")
 
 // recoverQueueOne is `spindrift recover` with no issue number: it walks the
@@ -54,19 +55,28 @@ func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 }
 
 // parkQueueFailure parks an issue queue mode claimed but could not land back on
-// agent-failed with a comment, and reports the attempt as made (nil): an issue
-// was tried, so the run exits 0. The settler does not hand back why the landing
-// failed, so the comment names the stages (bundle relay, draft PR creation)
-// rather than a cause; a merge-gate failure is parked by the settler itself and
-// never reaches here.
-func parkQueueFailure(c config, it forge.IssueTracker, num string, stdout, stderr io.Writer) error {
+// agent-failed, records the failed attempt, and reports the attempt as made
+// (nil): an issue was tried, so the run exits 0, unless the record cannot be
+// saved, which is returned after parking. Only the attempt that reaches
+// c.maxRecoverAttempts comments, once, saying auto-recover gave up (issue
+// #4655); earlier failures stay silent and are retried after a backoff. The
+// settler does not hand back why the landing failed, so the comment names the
+// stages (bundle relay, draft PR creation) rather than a cause; a merge-gate
+// failure is parked by the settler itself and never reaches here.
+func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverAttempts, now time.Time, stdout, stderr io.Writer) error {
 	fmt.Fprintf(stdout, "    #%s  status=failed  note=queue recover could not land the outbox bundle\n", num)
-	body := fmt.Sprintf("Queue-mode `spindrift recover` claimed this issue but the outbox bundle did not land: the bundle relay or draft PR creation failed. Fix the cause, then re-run `spindrift recover %s`.", num)
-	if err := it.Comment(num, body); err != nil {
-		fmt.Fprintf(stderr, "    ?? #%s: comment: %v\n", num, err)
+	rec.Count++
+	rec.Last = now
+	if rec.Count >= c.maxRecoverAttempts {
+		rec.giveUp(it, num, stderr)
 	}
+	saveErr := rec.save()
 	if err := it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: park on %s: %v\n", num, c.failedLabel, err)
+	}
+	if saveErr != nil {
+		// Without the record the next pass would retry with no backoff and no bound.
+		return saveErr
 	}
 	return nil
 }

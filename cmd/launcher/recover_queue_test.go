@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
@@ -31,6 +33,7 @@ type queueRecoverFixture struct {
 func newQueueRecoverFixture(t *testing.T) *queueRecoverFixture {
 	t.Helper()
 	c := reconcileConfig()
+	c.maxRecoverAttempts = 3
 	fc := forge.NewFake(dispatchLabels(c))
 	fc.BranchPrefix = c.branchPrefix
 	fc.CreateDraftPRURL = testReconcilePR
@@ -54,6 +57,11 @@ func (x *queueRecoverFixture) addFailed(t *testing.T, num, report string) {
 	}
 	if report == "" {
 		return
+	}
+	// The marker a real Box run's Run() leaves, so recover's EnsureRunLineage
+	// keeps this log rather than quarantining it as a prior run's.
+	if err := os.WriteFile(filepath.Join(dispatch.HostLogDirFor(x.dir), "issue-"+num+".run-lineage"), nil, 0o644); err != nil {
+		t.Fatal(err)
 	}
 	log := filepath.Join(dispatch.HostLogDirFor(x.dir), "issue-"+num+".log")
 	if err := os.WriteFile(log, []byte("SPINDRIFT_OUTCOME: issue="+num+" landing="+x.fc.AgentBranch(num)+" status="+report+"\n"), 0o644); err != nil {
@@ -86,6 +94,25 @@ func (x *queueRecoverFixture) assertUntouched(t *testing.T) {
 	t.Helper()
 	if len(x.fc.TransitionStateCalls) != 0 || len(x.fc.CommentCalls) != 0 {
 		t.Errorf("tracker written: transitions=%v comments=%v", x.fc.TransitionStateCalls, x.fc.CommentCalls)
+	}
+}
+
+// seedRecord saves seed as num's attempt record; an empty seed.Bundle means the
+// issue's current outbox bundle.
+func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverAttempts) {
+	t.Helper()
+	bundle := seed.Bundle
+	if bundle == "" {
+		id, err := recoverBundleID(x.dir, num)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bundle = id
+	}
+	rec := loadRecoverAttempts(x.dir, num, bundle)
+	rec.Count, rec.Last, rec.GaveUp = seed.Count, seed.Last, seed.GaveUp
+	if err := rec.save(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -195,6 +222,9 @@ func TestRecoverQueueOne_RelayFailureEndsAgentFailed(t *testing.T) {
 
 	if code != 0 {
 		t.Errorf("exit = %d, want 0 (an issue was attempted)", code)
+	}
+	if len(x.fc.CommentCalls) != 0 {
+		t.Errorf("comments = %v, want none for an intermediate failure", x.fc.CommentCalls)
 	}
 	got := x.labels(t, "42")
 	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) || slices.Contains(got, x.c.completeLabel) {
@@ -465,5 +495,283 @@ func TestCmdRecoverQueue_ExitCodesAndCleanup(t *testing.T) {
 				t.Error("cmdRecoverQueue did not run lc.cleanup()")
 			}
 		})
+	}
+}
+
+func TestRecoverQueueOne_InsideBackoffWindowIsSkipped(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.c.transientBackoffSecs = 3600
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now()})
+
+	code, out := x.run(t)
+
+	if code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(out, "status=skipped") {
+		t.Errorf("output = %q, want a skipped line", out)
+	}
+	x.assertUntouched(t)
+	if x.fc.Merged != "" {
+		t.Errorf("Merged = %q, want none", x.fc.Merged)
+	}
+}
+
+func TestRecoverQueueOne_OutsideBackoffWindowIsAttempted(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.c.transientBackoffSecs = 3600
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-24 * time.Hour)})
+
+	code, _ := x.run(t)
+
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+	if x.fc.Merged == "" {
+		t.Error("issue not merged")
+	}
+}
+
+func TestRecoverQueueOne_GivesUpAfterBoundWithOneComment(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+
+	for run := 1; run <= 3; run++ {
+		if code, _ := x.run(t); code != 0 {
+			t.Fatalf("run %d: exit = %d, want 0", run, code)
+		}
+		want := 0
+		if run == 3 {
+			want = 1
+		}
+		if len(x.fc.CommentCalls) != want {
+			t.Fatalf("after run %d: comments = %v, want %d", run, x.fc.CommentCalls, want)
+		}
+	}
+	body := fmt.Sprint(x.fc.CommentCalls[0])
+	for _, sub := range []string{"Auto-recover gave up", "3 attempts", "spindrift recover 42"} {
+		if !strings.Contains(body, sub) {
+			t.Errorf("comment %q missing %q", body, sub)
+		}
+	}
+
+	transitions := len(x.fc.TransitionStateCalls)
+	code, out := x.run(t)
+
+	if code != 2 {
+		t.Errorf("4th run exit = %d, want 2", code)
+	}
+	if strings.Contains(out, "#42") {
+		t.Errorf("output = %q, want no per-issue line once the give-up comment is posted", out)
+	}
+	if len(x.fc.CommentCalls) != 1 || len(x.fc.TransitionStateCalls) != transitions {
+		t.Errorf("4th run wrote the tracker: comments=%v transitions=%v", x.fc.CommentCalls, x.fc.TransitionStateCalls[transitions:])
+	}
+}
+
+// The Last stamp is what keeps a failed bundle out of the very next pass: with
+// a long backoff, the second run must not touch the issue at all.
+func TestRecoverQueueOne_FailedAttemptBacksOffTheNextRun(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.c.transientBackoffSecs = 3600
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+
+	if code, _ := x.run(t); code != 0 {
+		t.Fatalf("first run exit = %d, want 0", code)
+	}
+	transitions := len(x.fc.TransitionStateCalls)
+
+	code, _ := x.run(t)
+
+	if code != 2 {
+		t.Errorf("second run exit = %d, want 2", code)
+	}
+	if len(x.fc.TransitionStateCalls) != transitions || len(x.fc.CommentCalls) != 0 {
+		t.Errorf("second run wrote the tracker: transitions=%v comments=%v", x.fc.TransitionStateCalls[transitions:], x.fc.CommentCalls)
+	}
+	if x.fc.Merged != "" {
+		t.Errorf("Merged = %q, want none", x.fc.Merged)
+	}
+}
+
+// A give-up comment that fails to post is retried by the next pass, once, and
+// never again after it lands.
+func TestRecoverQueueOne_GiveUpCommentFailureIsRetriedOnce(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	x.fc.CommentErr = errors.New("comment: boom")
+
+	for run := 1; run <= 3; run++ {
+		if code, _ := x.run(t); code != 0 {
+			t.Fatalf("run %d: exit = %d, want 0", run, code)
+		}
+	}
+	if len(x.fc.CommentCalls) != 1 {
+		t.Fatalf("comments after failing give-up = %d, want 1 attempt", len(x.fc.CommentCalls))
+	}
+	x.fc.CommentErr = nil
+	transitions := len(x.fc.TransitionStateCalls)
+
+	if code, _ := x.run(t); code != 2 {
+		t.Errorf("retry run exit = %d, want 2", code)
+	}
+	if len(x.fc.CommentCalls) != 2 {
+		t.Errorf("comments after retry = %d, want 2", len(x.fc.CommentCalls))
+	}
+	if code, out := x.run(t); code != 2 || strings.Contains(out, "#42") {
+		t.Errorf("further run = %d %q, want 2 and no per-issue line", code, out)
+	}
+	if len(x.fc.CommentCalls) != 2 || len(x.fc.TransitionStateCalls) != transitions {
+		t.Errorf("further runs wrote the tracker: comments=%d transitions=%v", len(x.fc.CommentCalls), x.fc.TransitionStateCalls[transitions:])
+	}
+}
+
+// An operator lowering MAX_RECOVER_ATTEMPTS below an existing count must still
+// get the give-up comment, with no claim.
+func TestRecoverQueueOne_RecordPastBoundGetsOneComment(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 5, Last: time.Now().Add(-time.Hour)})
+
+	for run := 1; run <= 2; run++ {
+		if code, _ := x.run(t); code != 2 {
+			t.Fatalf("run %d: exit = %d, want 2", run, code)
+		}
+	}
+
+	if len(x.fc.CommentCalls) != 1 {
+		t.Errorf("comments = %v, want exactly one", x.fc.CommentCalls)
+	}
+	if len(x.fc.TransitionStateCalls) != 0 {
+		t.Errorf("transitions = %v, want none", x.fc.TransitionStateCalls)
+	}
+}
+
+// An unwritable record must not strand the issue on agent-in-progress: it is
+// parked first and the save failure is reported after.
+func TestRecoverQueueOne_UnsavableRecordStillParksAndFails(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	if err := os.Mkdir(recoverAttemptsPath(x.dir, "42"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _ := x.run(t)
+
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	calls := x.fc.TransitionStateCalls
+	if len(calls) == 0 {
+		t.Fatal("no transitions recorded")
+	}
+	if last := calls[len(calls)-1]; last.From != forge.InProgress || last.To != forge.Failed {
+		t.Errorf("last transition = %+v, want InProgress->Failed", last)
+	}
+}
+
+// A gave-up record stays ineligible for its bundle even when the bound is
+// raised above its count: the give-up is final, not a function of the bound.
+func TestRecoverQueueOne_GaveUpRecordStaysIneligibleAfterRaisedBound(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	x.seedRecord(t, "42", recoverAttempts{Count: 3, Last: time.Now().Add(-time.Hour), GaveUp: true})
+	x.c.maxRecoverAttempts = 4
+
+	if code, _ := x.run(t); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+
+	if len(x.fc.CommentCalls) != 0 {
+		t.Errorf("comments = %v, want none", x.fc.CommentCalls)
+	}
+	if len(x.fc.TransitionStateCalls) != 0 {
+		t.Errorf("transitions = %v, want none", x.fc.TransitionStateCalls)
+	}
+}
+
+// A record at the bound whose give-up cannot be saved exits 1 after posting
+// the comment once. The record stays readable so load still sees the count.
+func TestRecoverQueueOne_GiveUpSaveFailureExitsOne(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores the read-only mode this test relies on")
+	}
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: x.c.maxRecoverAttempts, Last: time.Now().Add(-time.Hour)})
+	path := recoverAttemptsPath(x.dir, "42")
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(path, 0o644) })
+
+	code, _ := x.run(t)
+
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if len(x.fc.CommentCalls) != 1 {
+		t.Errorf("comments = %v, want exactly one", x.fc.CommentCalls)
+	}
+}
+
+func TestRecoverQueueOne_NewBundleResetsTheCount(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 3, Last: time.Now(), Bundle: "sha-of-an-older-bundle"})
+
+	code, _ := x.run(t)
+
+	if code != 0 {
+		t.Errorf("exit = %d, want 0", code)
+	}
+	if x.fc.Merged == "" {
+		t.Error("issue not merged")
+	}
+}
+
+func TestRecoverQueueOne_SuccessRemovesRecord(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-time.Hour)})
+
+	if code, out := x.run(t); code != 0 {
+		t.Log(out)
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if _, err := os.Stat(recoverAttemptsPath(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("record stat err = %v, want not-exist", err)
+	}
+}
+
+func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.c.transientBackoffSecs = 3600
+	x.seedRecord(t, "42", recoverAttempts{Count: 3, Last: time.Now()})
+	before, err := os.ReadFile(recoverAttemptsPath(x.dir, "42"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	x.fc.SetIssue(forge.Issue{Number: "42", Labels: []string{x.c.inProgressLabel}})
+
+	err = recoverByNumber(x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), "42", io.Discard, io.Discard)
+
+	if err != nil {
+		t.Fatalf("recoverByNumber: %v", err)
+	}
+	if x.fc.Merged == "" {
+		t.Error("issue not merged")
+	}
+	after, err := os.ReadFile(recoverAttemptsPath(x.dir, "42"))
+	if err != nil || string(after) != string(before) {
+		t.Errorf("record changed: err=%v before=%q after=%q", err, before, after)
 	}
 }
