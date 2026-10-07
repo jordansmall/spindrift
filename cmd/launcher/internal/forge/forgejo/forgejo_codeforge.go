@@ -193,15 +193,20 @@ func (f *forgejoCodeForge) Merge(prURL string) error {
 }
 
 // classifyMergeFailure tells a genuine merge conflict apart from a PR merely
-// blocked by pending or failing checks, by querying the PR's mergeable state and
-// handing it to forge.ClassifyMergeFailure. Only the 405 and 409 refusals reach
-// here; every other status (403 without merge scope, 429, 500) is a real failure
-// Merge returns as-is rather than masking it as a conflict.
+// blocked by pending or failing checks, by fetching the PR and handing its
+// mergeable state to forge.ClassifyMergeFailure. Only the 405 and 409 refusals
+// reach here; every other status (403 without merge scope, 429, 500) is a real
+// failure Merge returns as-is rather than masking it as a conflict. A PR already
+// reporting merged landed by another path, so the refusal is success (nil).
 func (f *forgejoCodeForge) classifyMergeFailure(prURL string, cause error) error {
-	state, err := f.Mergeable(prURL)
+	p, err := f.getPull(prURL)
 	if err != nil {
-		return fmt.Errorf("forgejo: merge %s: %w (mergeable state unavailable: %w)", prURL, cause, err)
+		return fmt.Errorf("forgejo: merge %s: %w (PR lookup failed: %w)", prURL, cause, err)
 	}
+	if p.Merged {
+		return nil
+	}
+	state := p.mergeableState()
 	if sentinel, ok := forge.ClassifyMergeFailure(state); ok {
 		return sentinel
 	}
