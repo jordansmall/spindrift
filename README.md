@@ -215,7 +215,7 @@ report. See the [threat model](docs/reference.md#threat-model).
 | `spindrift research [N…]` | Reviews each `agent-research` issue and posts one verdict comment |
 | `spindrift console` | Browses the backlog, dispatches picked issues, and tails or stops live Boxes |
 | `spindrift recover N` | Re-runs the merge gate for one issue |
-| `nix run .#daemon` | Keeps working every configured queue — dispatch, research, and (once opted in) the butler — picking up issues or due Chores as they arrive |
+| `nix run .#daemon` | Keeps working every configured queue — dispatch, research, and (once opted in) the butler, plus auto-recovery of stranded outbox bundles on a read-only Box — picking up issues or due Chores as they arrive |
 
 The CLI ships tab completion for bash, fish, and zsh. See
 [Shell completion](docs/reference.md#shell-completion).

@@ -7,7 +7,7 @@ Issues live on GitHub (`jordansmall/spindrift`). File agent-ready issues via the
 
 ### Dispatch kinds
 
-The three kinds (work, research, butler) are declared once, in
+The four kinds (work, research, butler, recover) are declared once, in
 `cmd/launcher/internal/dispatchkind`. Every kind fact — keying, label
 family, prompt file, settle strategy, and the rest — is a row on that
 descriptor; neither the launcher nor the Box branches on a kind name to
@@ -31,8 +31,12 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   could not land (e.g. red CI after the fix passes, a merge-gate failure, no
   PR found), or a read-only Box's host-side bundle relay exhausted its
   retries on any code forge (the bundle stays in the outbox; `spindrift
-  recover <n>` relays and lands it, clearing this label); needs human
-  triage, re-label to retry.
+  recover <n>` relays and lands it, clearing this label; on a
+  `github`/`forgejo` read-only deployment the daemon's recover kind lands it
+  itself when the bundle is relayable, the run self-reported ready, and the
+  host claim is free, with bounded attempts and one give-up comment naming
+  `spindrift recover <n>`); needs human triage,
+  re-label to retry.
 - `agent-ambiguous-spec` — the pre-implement gate found the issue internally
   contradictory and the Box halted on purpose (`status=ambiguous`), posting
   its questions as a comment. Not a crash and never `agent-failed`; a human
@@ -164,8 +168,9 @@ token](docs/reference.md#research-token-least-privilege-optional). To drive
 research continuously instead of a one-off `spindrift research`, run the
 daemon (`nix run .#daemon`) with the `research` kind selector — `nix run
 .#daemon -- research` — or omit the selector to draw from every configured
-kind (dispatch, research, and, once `BUTLER_CHORES` enables one, the
-butler) off one pool (issue #3541, #3878).
+kind (dispatch, research, the butler once `BUTLER_CHORES` enables one, and,
+on a read-only outbox-relay-capable Code Forge, recover) off one pool
+(issue #3541, #3878, #4656).
 
 ### Comment injection trust boundary
 

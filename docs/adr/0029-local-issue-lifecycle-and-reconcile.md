@@ -43,7 +43,9 @@ between-runs cases — a runner that died, or a PR sitting in approval limbo. It
 
 An open PR — green-and-mergeable or in approval limbo — is left untouched;
 merging stays with `dispatch` (immediate mode) and the explicit, #600-gated
-`recover` gesture. A later sweep closes the issue once the PR merges elsewhere.
+`recover` gesture (the daemon's recover kind never adopts an open-PR issue
+either; see the issue #4656 Amendment). A later sweep closes the issue once
+the PR merges elsewhere.
 
 **The landing ref is recorded via an optional `IssueTracker` method**, the
 PRForge optional-interface pattern (ADR 0013 amendment): only `local` implements
@@ -56,7 +58,8 @@ never cached; it stays the Code Forge's live truth, re-checked each reconcile.
 #600 established that a bare `InProgress` issue is never auto-adopted or reset,
 because durable state "carries no liveness signal, so it cannot be told apart
 from an issue a live runner is actively committing to" — the only reset path is
-the explicit operator gesture `spindrift recover <n>`. Reconcile's orphan-reset
+the explicit operator gesture `spindrift recover <n>` (amended by issue #4656
+for stranded `agent-failed` bundles, below). Reconcile's orphan-reset
 does not overturn that; it **supplies the missing liveness signal**. It resets
 `InProgress → Dispatchable` only behind a strong composite death signal: no
 merged/open PR or agent branch, **and** `logs/issue-<num>.log` stale beyond a
@@ -95,6 +98,8 @@ on the Target repo.
 - **Reconcile also merges mergeable PRs** (reusing recover's adopt-and-gate) —
   rejected: it would land code without the explicit per-issue gesture #600
   requires and could merge a holding-pattern PR before its human approval.
+  (Issue #4656's daemon recover kind is a different path: it never adopts an
+  open PR, only a stranded bundle.)
 - **Cache merge-state in frontmatter** — rejected: duplicates the forge's
   authoritative truth and risks staleness; reconcile re-checks live.
 
@@ -127,3 +132,33 @@ after a real merge would also leave `Complete` with no `landing` recorded.
 Reconcile inferring a close from `Complete` alone would be guessing, not
 observing; closing already-resolved issues stays settle's job, done at the
 point that already knows there is no merge to wait for.
+
+## Amendment (issue #4656): the daemon auto-recovers relayed bundles
+
+#600's rule was that a stranded issue is recovered explicitly, never adopted
+automatically. That amends to: automatic adoption is allowed when the
+evidence is a relayable outbox bundle plus a genuine `status=ready`
+self-report from the run, and the per-issue host claim is free. The daemon
+runs queue-mode `spindrift recover` (issues #4654, #4655) as a fourth
+Dispatch kind, `recover`, wherever `CODE_FORGE` is `github` or `forgejo` and
+the Box is read-only, so finished work stranded by a failed relay lands
+without an operator typing `spindrift recover <n>`.
+
+**Why it is safe.** The bundle plus a genuine ready self-report is the same
+evidence a hand-run `recover <n>` trusts; nothing weaker is accepted. The
+per-issue host claim is the liveness signal #600 lacked, the same move as
+"Gated auto-reset qualifies #600" above: an issue a live runner holds fails
+the claim, so a live run is never raced. Attempts are bounded by
+`MAX_RECOVER_ATTEMPTS` with a backoff between them, and the attempt that
+reaches the bound posts one give-up comment naming `spindrift recover <n>`.
+
+**What does not change.**
+
+- A `local` Recoverable issue stays manual (ADR 0039); the kind is off on
+  `CODE_FORGE=local` and on a read-write Box, which has no outbox.
+- An issue with an open PR stays with manual `recover <n>`.
+- A blocked or crashed run never auto-lands: only a genuine ready
+  self-report qualifies.
+- A bare `agent-in-progress` label is still never adopted. Queue mode
+  touches only `agent-failed` issues.
+- `agent-recover.yml` and `spindrift recover <n>` behave as before.
