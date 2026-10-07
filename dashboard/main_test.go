@@ -93,3 +93,26 @@ func TestRunBadCheckout(t *testing.T) {
 		t.Errorf("stderr = %q", stderr.String())
 	}
 }
+
+func TestResolveCheckoutSubdirectoryIsToplevel(t *testing.T) {
+	checkout := gitInit(t)
+	sub := filepath.Join(checkout, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveCheckout(sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := filepath.EvalSymlinks(checkout)
+	if gotReal, _ := filepath.EvalSymlinks(got); gotReal != want {
+		t.Errorf("resolveCheckout(%s) = %s, want %s", sub, got, want)
+	}
+}
+
+func TestResolveCheckoutNotAGitCheckoutNamesFlag(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := resolveCheckout(dir); err == nil || !strings.Contains(err.Error(), "--checkout "+dir) {
+		t.Errorf("err = %v, want it to name --checkout %s", err, dir)
+	}
+}

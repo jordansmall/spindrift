@@ -38,6 +38,7 @@ type Event struct {
 	State    string `json:"state"`
 	Note     string `json:"note"`
 	Failures *int   `json:"failures"`
+	ChildLog string `json:"child_log"`
 }
 
 // historyEntry is one rendered timeline row.

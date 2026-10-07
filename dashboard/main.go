@@ -44,7 +44,12 @@ func run(args []string, stderr io.Writer, hooks *runHooks) int {
 		return 2
 	}
 
-	statusPath, err := resolveStatusPath(*checkout)
+	root, err := resolveCheckout(*checkout)
+	if err != nil {
+		fmt.Fprintf(stderr, "dashboard: %v\n", err)
+		return 1
+	}
+	statusPath, err := statusPathFor(root)
 	if err != nil {
 		fmt.Fprintf(stderr, "dashboard: %v\n", err)
 		return 1
@@ -78,7 +83,7 @@ func run(args []string, stderr io.Writer, hooks *runHooks) int {
 	// BaseContext ties the long-lived /events streams to shutdown; otherwise
 	// Shutdown would wait out its timeout on every open page.
 	srv := &http.Server{
-		Handler:           newServer(statusPath),
+		Handler:           newServer(root, statusPath),
 		ReadHeaderTimeout: 10 * time.Second,
 		BaseContext:       func(net.Listener) context.Context { return ctx },
 	}
@@ -108,15 +113,21 @@ func listenReason(err error) string {
 	return err.Error()
 }
 
-func resolveStatusPath(checkout string) (string, error) {
-	if checkout == "" {
-		root, err := gitRevParse(".", "--show-toplevel")
+func resolveCheckout(checkout string) (string, error) {
+	if checkout != "" {
+		// A subdirectory would make every Child log path, which is relative to
+		// the work-tree root, miss.
+		root, err := gitRevParse(checkout, "--show-toplevel")
 		if err != nil {
-			return "", fmt.Errorf("no --checkout given and the working directory is not in a git checkout: %w", err)
+			return "", fmt.Errorf("--checkout %s is not in a git checkout: %w", checkout, err)
 		}
-		checkout = root
+		return root, nil
 	}
-	return statusPathFor(checkout)
+	root, err := gitRevParse(".", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("no --checkout given and the working directory is not in a git checkout: %w", err)
+	}
+	return root, nil
 }
 
 // statusPathFor resolves checkout's git dir the way the daemon does, so a

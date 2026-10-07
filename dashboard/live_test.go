@@ -89,7 +89,7 @@ func openStream(t *testing.T, initial, events string) *stream {
 	if events != "" {
 		appendTo(t, st.events(), events)
 	}
-	srv := newServer(st.status())
+	srv := newServer("", st.status())
 	srv.now = func() time.Time { return testNow }
 	srv.alive = func(int, string) bool { return alive.Load() }
 	srv.poll = 10 * time.Millisecond
@@ -231,7 +231,7 @@ func TestEventsSurvivesUnreadableStatus(t *testing.T) {
 }
 
 func TestEventsRejectsHeadAndPost(t *testing.T) {
-	srv := newServer(filepath.Join(t.TempDir(), statusFileName))
+	srv := newServer("", filepath.Join(t.TempDir(), statusFileName))
 	for _, m := range []string{http.MethodHead, http.MethodPost} {
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, httptest.NewRequest(m, "/events", nil))
