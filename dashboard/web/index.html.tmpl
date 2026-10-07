@@ -91,6 +91,7 @@
         <span class="pill phase-{{.Phase}}">{{.Phase}}</span>
       </header>
       {{- if .Kind}}<div class="kindname">{{.Kind}}</div>{{end}}
+      {{- if .Pass}}<div class="pass">pass {{.Pass}}</div>{{end}}
       {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}{{template "chip" $s}}{{end}}</div>{{end}}
       {{- if .Rev}}<div class="rev"><code>{{.Rev}}</code></div>{{end}}
       <div class="inphase"><span class="label">in phase</span> <span>{{.Elapsed}}</span></div>
