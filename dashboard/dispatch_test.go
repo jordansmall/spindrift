@@ -239,7 +239,7 @@ func TestFindDispatchSameSecondChildStarts(t *testing.T) {
 	if !ok {
 		t.Fatal("second same-second Dispatch not found")
 	}
-	if len(next.Subject) != 1 || next.Subject[0] != "#33" {
+	if len(next.Subject) != 1 || next.Subject[0].Label != "#33" {
 		t.Errorf("second same-second Dispatch lacks its box event: %+v", next)
 	}
 }
@@ -273,8 +273,10 @@ func TestRenderedRowsLinkToOwningDispatch(t *testing.T) {
 	c := statusJSON(t, "working", "", `[]`)
 	body := strings.ToLower(getHistory(t, &c, map[string]string{eventsFileName: sameSecondEvents}))
 	for _, w := range []string{
-		`<a class="entry ev-settled" href="/dispatch?slot=0&at=2026-10-07t09%3a00%3a00z">`,
-		`<a class="entry ev-box" href="/dispatch?slot=0&at=2026-10-07t09%3a10%3a01z&n=1">`,
+		`<div class="entry ev-settled">`,
+		`<a class="rowlink" href="/dispatch?slot=0&at=2026-10-07t09%3a00%3a00z">`,
+		`<div class="entry ev-box">`,
+		`<a class="rowlink" href="/dispatch?slot=0&at=2026-10-07t09%3a10%3a01z&n=1">`,
 	} {
 		if !strings.Contains(body, w) {
 			t.Errorf("missing %q in %s", w, body)

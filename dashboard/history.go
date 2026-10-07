@@ -42,6 +42,7 @@ type Event struct {
 	PassLog  string `json:"pass_log"`
 	Exit     *int   `json:"exit"`
 	Revision string `json:"revision"`
+	PRURL    string `json:"pr_url"`
 }
 
 // historyEntry is one rendered timeline row.
@@ -49,8 +50,9 @@ type historyEntry struct {
 	Time    string
 	Event   string
 	Kind    string
-	Subject string
+	Subject subject
 	Slot    string
+	PRURL   string // settled's PR, when it opened one
 	Outcome string // settled's state, which styles the row
 	Detail  string
 	Note    string
@@ -100,7 +102,7 @@ var timeline = map[string]func(ev Event, e *historyEntry, add func(string)){
 		add(ev.Phase)
 	},
 	"settled": func(ev Event, e *historyEntry, _ func(string)) {
-		e.Outcome, e.Note = ev.State, ev.Note
+		e.Outcome, e.Note, e.PRURL = ev.State, ev.Note, ev.PRURL
 	},
 	"backoff": func(ev Event, _ *historyEntry, add func(string)) {
 		add(ev.Wait)
@@ -124,12 +126,7 @@ var timeline = map[string]func(ev Event, e *historyEntry, add func(string)){
 
 func (ev Event) entry() historyEntry {
 	e := historyEntry{Time: ev.Time, Event: ev.Event, Kind: ev.Kind}
-	switch {
-	case ev.Issue != "":
-		e.Subject = issueLabel(ev.Issue)
-	case ev.Chore != "":
-		e.Subject = ev.Chore
-	}
+	e.Subject = subjectOf(ev.Issue, ev.Chore)
 	if ev.Slot != nil {
 		e.Slot = strconv.Itoa(*ev.Slot)
 	}
@@ -349,5 +346,13 @@ func scanTimeline(entries []historyEntry, r io.Reader, owners dispatchOwners, op
 			}
 			return entries, consumed, err
 		}
+	}
+}
+
+// linkEntries links entries' subjects in place, so a snapshot read off disk
+// renders the same issue links as live-tailed events.
+func linkEntries(entries []historyEntry, repoURL string) {
+	for i := range entries {
+		entries[i].Subject = entries[i].Subject.linked(repoURL)
 	}
 }

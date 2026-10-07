@@ -18,8 +18,8 @@
       {{- if .Phase}}<div><span class="label">phase</span><span>{{.Phase}}</span></div>{{end}}
       {{- if .Exit}}<div><span class="label">exit</span><span>{{.Exit}}</span></div>{{end}}
     </div>
-    {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}<span class="chip">{{$s}}</span>{{end}}</div>{{end}}
-    {{- if .Outcome}}<div><span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span></div>{{end}}
+    {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}{{template "chip" $s}}{{end}}</div>{{end}}
+    {{- if .Outcome}}<div><span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{if .PRURL}} {{template "prlink" .PRURL}}{{end}}</div>{{end}}
     {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
   </header>
   <nav class="tabs">

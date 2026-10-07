@@ -117,11 +117,15 @@ body.disconnected #status .top h1::after { content: " (reconnecting)"; color: va
   .card.phase-changed, .history .entry.fresh { animation: none; }
 }
 
-a.entry { display: block; color: inherit; text-decoration: none; }
-a.entry[href], .cardlink { cursor: pointer; }
-a.entry[href]:hover, .card:has(.cardlink):hover { border-color: var(--muted); }
+.entry { position: relative; color: inherit; }
+.rowlink { color: inherit; text-decoration: none; cursor: pointer; }
+.rowlink::after { content: ""; position: absolute; inset: 0; }
+.history .entry:has(.rowlink):hover, .card:has(.cardlink):hover { border-color: var(--muted); }
+/* Above the stretched drill-in link, so a click on the chip opens the forge. */
+.extlink { position: relative; z-index: 1; color: inherit; text-decoration: none; }
+.extlink:hover { border-color: var(--muted); text-decoration: underline; }
 .card { position: relative; }
-.cardlink { color: inherit; text-decoration: none; }
+.cardlink { color: inherit; text-decoration: none; cursor: pointer; }
 .cardlink::after { content: ""; position: absolute; inset: 0; }
 .dispatch-head .note { color: var(--muted); white-space: pre-wrap; word-break: break-word; }
 .tabs { margin: 1rem 0 .5rem; border-bottom: 1px solid var(--border); }

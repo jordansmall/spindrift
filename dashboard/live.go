@@ -38,6 +38,7 @@ func (s *server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	renderStatus := func() string { return s.render("status", s.viewFrom(st, raw, rerr)) }
 
+	linkEntries(snapshot, repoURLOf(st))
 	lastStatus := renderStatus()
 	if !send("status", lastStatus) ||
 		!send("history", s.render("history", view{History: snapshot, HistoryErr: histErr})) {
@@ -80,7 +81,9 @@ func (s *server) events(w http.ResponseWriter, r *http.Request) {
 				log.Printf("dashboard: events: %v", err)
 			}
 		}
+		repo := repoURLOf(st)
 		for _, e := range entries {
+			e.Subject = e.Subject.linked(repo)
 			if !send("entry", s.render("entry", e)) {
 				return
 			}
