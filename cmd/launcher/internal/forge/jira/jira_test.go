@@ -66,8 +66,8 @@ func TestParseStatusMapping_InvalidJSON(t *testing.T) {
 	}
 }
 
-// Jira implements only the IssueTracker seam, per ADR 0013. Code still lands
-// through the github CodeForge.
+// Jira implements only the IssueTracker seam, per ADR 0013. Code lands through
+// whichever Code Forge CODE_FORGE selects.
 func TestJiraClient_ImplementsIssueTracker(t *testing.T) {
 	var _ forge.IssueTracker = jira.NewJiraClient(jira.JiraConfig{})
 }

@@ -97,7 +97,7 @@ func (f *fakeForgejoIssueServer) handler(t *testing.T, repoPath string, num int)
 // TestSettle_ImmediateMergeClosesIssue (issue #2259): a real forgejoClient
 // pointed at an httptest server is Settle's IssueTracker, so a confirmed merge
 // drives CloseMergedIssue over a real HTTP PATCH. The Code Forge stays
-// forge.Fake because forgejo implements only the IssueTracker seam (ADR 0013).
+// forge.Fake: this test exercises only the tracker side (ADR 0013).
 func TestSettle_ImmediateMergeClosesForgejoIssue(t *testing.T) {
 	const issNum = "55"
 	const repoPath = "/api/v1/repos/owner/repo"
