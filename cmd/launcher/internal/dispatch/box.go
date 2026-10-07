@@ -256,6 +256,9 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 // logPath is the Pass log the phase writes, absolute under d.pwd; the record
 // carries it relative to the checkout. It is the un-suffixed path even when a
 // stale log is rotated aside, since runOnce moves the old file to logPath.N.
+// A later Dispatch of the same issue (or Chore) reuses the path once
+// quarantinePriorRunLogs moves the earlier run's log to logPath.prior-run.N;
+// the name stays fixed per issue (see docs/reference.md).
 func (d *Dispatch) announce(phase, logPath string) {
 	fmt.Fprint(d.humanOut(), announceLine(d.number, humanPhase(phase), d.subject.title))
 	rel, err := filepath.Rel(d.pwd, logPath)
