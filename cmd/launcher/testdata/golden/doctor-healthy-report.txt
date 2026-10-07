@@ -22,6 +22,7 @@ ok: label "agent-butler-finding" present
 ok: label "agent-butler-patch" present
 ok: all triage, research, priority, ambiguous-spec, and butler labels present
 ok: BOX_FORGE_AND_ISSUE_ACCESS=read-write — read-only token gate is a no-op
+ok: recover kind: off — CODE_FORGE=github with BOX_FORGE_AND_ISSUE_ACCESS=read-write relays no outbox bundle; run `spindrift recover <n>` by hand
 ok: read-only-capability
 ok: network-mode-runtime
 ok: signal-carrier-network-mode

@@ -706,3 +706,42 @@ func TestRequiredLabels(t *testing.T) {
 		})
 	}
 }
+
+// The daemon's auto-recover kind is on only where backend.RelaysOutbox holds;
+// doctor reports which side this configuration is on, and why, as a plain ok:
+// row — off is a normal configuration, never a warning.
+func TestRunDoctor_ReportsRecoverKind(t *testing.T) {
+	tests := []struct {
+		name, codeForge, access string
+		want                    string
+	}{
+		{"github read-only is on", "github", "read-only",
+			"ok: recover kind: on — CODE_FORGE=github relays a read-only Box's outbox bundle\n"},
+		{"forgejo read-only is on", "forgejo", "read-only",
+			"ok: recover kind: on — CODE_FORGE=forgejo relays a read-only Box's outbox bundle\n"},
+		{"github read-write is off", "github", "read-write",
+			"ok: recover kind: off — CODE_FORGE=github with BOX_FORGE_AND_ISSUE_ACCESS=read-write relays no outbox bundle; run `spindrift recover <n>` by hand\n"},
+		{"local read-only is off", "local", "read-only",
+			"ok: recover kind: off — CODE_FORGE=local with BOX_FORGE_AND_ISSUE_ACCESS=read-only relays no outbox bundle; run `spindrift recover <n>` by hand\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
+			f.Labels = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+			c := minimalValidConfig()
+			c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+			c.codeForge, c.boxForgeAndIssueAccess, c.maxRecoverAttempts = tc.codeForge, tc.access, 3
+			t.Setenv("BOX_GH_TOKEN", "")
+
+			var buf bytes.Buffer
+			// The error is ignored: a read-only gate may fail with no token,
+			// but only the printed row matters here.
+			_ = runDoctor(f, f, c, doctor.NewReporter(&buf, true), &buf, strings.NewReader(""), false, nil)
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Errorf("runDoctor() output = %q, want it to contain %q", buf.String(), tc.want)
+			}
+		})
+	}
+}
