@@ -362,7 +362,9 @@ func (x *queueRecoverFixture) runOn(t *testing.T, it forge.IssueTracker, cf forg
 
 func (x *queueRecoverFixture) runOnSettler(t *testing.T, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, s settle.WorkSettler) int {
 	t.Helper()
-	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, nil), s, io.Discard, io.Discard)
+	// A real runner, not nil: an abort whose watcher wins the race reaps
+	// through the factory's runner.Kill.
+	err := recoverQueueOne(x.c, it, cf, caps, x.dir, testFactory(t, x.dir, runner.NewFake()), s, io.Discard, io.Discard)
 	return exitCodeFor(err)
 }
 
