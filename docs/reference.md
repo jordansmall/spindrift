@@ -7854,7 +7854,18 @@ a later Dispatch has named the path, or the file is replaced after this
 Dispatch finished, the stream sends what its open file held and then one
 `superseded` frame (data: the path) instead of the newer run's bytes; the
 tab reads "log reused by a later run, kept as `<path>.prior-run.N`", the
-earlier run's copy the launcher moved aside. A `child_start` without
+earlier run's copy the launcher moved aside. The later run's `box` event
+names only its own phase's log and can reach the Events file after the
+launcher has already moved every earlier Pass log of the issue aside, so
+for a finished Dispatch the Dashboard also reads the files themselves: a
+missing path with a `<path>.prior-run.N` sibling last written at or after this
+Dispatch named it, a file modified more than a second after this
+Dispatch finished, or a file that grows past the size it had when the
+tab opened all answer `superseded` too, never `pruned` and never the
+newer bytes. A newer run whose writes all land within that second of
+the old finish is not caught by the modified-time check, so its bytes
+can reach the old tab until the file grows past the size it opened at.
+A `child_start` without
 `child_log`, from a daemon that predates Child logs, says it names none.
 After it comes one tab per Pass log, labelled with its phase, in the
 order the Dispatch's `box` events named them (`pass_log`); a retry that
