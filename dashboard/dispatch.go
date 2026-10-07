@@ -93,32 +93,66 @@ func shortRev(r string) string {
 // link built from a history row resolves to the Dispatch the row was owned by;
 // a time or n that names no child_start is not found.
 func (s *server) findDispatch(slot int, at string, n int) (*dispatchView, bool) {
-	owners := dispatchOwners{}
-	var found *dispatchView
-	var cur *dispatchView // nil once a later child_start has closed the candidate
-	scanGenerations(s.eventsPath, func(ev Event) {
-		if ev.Slot == nil || *ev.Slot != slot {
-			return
+	f := s.followDispatch(slot, at, n)
+	f.Close()
+	return f.d, f.d != nil
+}
+
+// dispatchFollow is findDispatch's scan kept open: the Dispatch it found and the
+// tail positioned after what the scan read, so later events fold in without
+// rereading. The caller closes tail.
+type dispatchFollow struct {
+	slot     int
+	at       string
+	n        int
+	owners   dispatchOwners
+	d        *dispatchView // nil when no child_start matched
+	cur      *dispatchView // nil once a later child_start has closed the candidate
+	startGen int           // the tail generation that held d's child_start
+	pinned   bool          // the scan is over: d is the Dispatch, whatever starts next
+	tail     eventsTail
+}
+
+func (s *server) followDispatch(slot int, at string, n int) *dispatchFollow {
+	f := &dispatchFollow{slot: slot, at: at, n: n, owners: dispatchOwners{}, tail: eventsTail{path: s.eventsPath}}
+	f.tail.open(f.fold) // an unreadable generation just yields no Dispatch, so not found
+	f.pinned = true
+	return f
+}
+
+// poll folds in what the Events file gained since the last scan or poll.
+func (f *dispatchFollow) poll() error { return f.tail.poll(f.fold) }
+
+func (f *dispatchFollow) Close() { f.tail.Close() }
+
+// rotatedAway reports whether rotation has taken the generation holding the
+// child_start: findDispatch no longer resolves the Dispatch, so a reload 404s.
+// It assumes at most one rotation per poll, as the Daemon's size cap allows.
+func (f *dispatchFollow) rotatedAway() bool { return f.tail.gen-f.startGen >= 2 }
+
+func (f *dispatchFollow) fold(ev Event) {
+	if ev.Slot == nil || *ev.Slot != f.slot {
+		return
+	}
+	var e historyEntry
+	if !f.pinned {
+		f.owners.claim(ev, &e)
+	}
+	if ev.Event != "child_start" {
+		if f.cur != nil {
+			f.cur.absorb(ev)
 		}
-		var e historyEntry
-		owners.claim(ev, &e)
-		if ev.Event != "child_start" {
-			if cur != nil {
-				cur.absorb(ev)
-			}
-			return
-		}
-		if cur != nil {
-			cur.Closed = true
-		}
-		cur = nil
-		if at == "" || (e.Started == at && e.StartN == n) {
-			cur = &dispatchView{Slot: slot, Kind: ev.Kind, Started: ev.Time, StartN: e.StartN,
-				ChildLog: ev.ChildLog, Rev: shortRev(ev.Revision)}
-			found = cur
-		}
-	})
-	return found, found != nil
+		return
+	}
+	if f.cur != nil {
+		f.cur.Closed = true
+	}
+	f.cur = nil
+	if !f.pinned && (f.at == "" || (e.Started == f.at && e.StartN == f.n)) {
+		f.cur = &dispatchView{Slot: f.slot, Kind: ev.Kind, Started: ev.Time, StartN: e.StartN,
+			ChildLog: ev.ChildLog, Rev: shortRev(ev.Revision)}
+		f.d, f.startGen = f.cur, f.tail.gen
+	}
 }
 
 // scanGenerations calls fn for each well-formed event in the older Events
@@ -202,8 +236,10 @@ func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	d, found := s.findDispatch(slot, at, n)
-	if !found {
+	f := s.followDispatch(slot, at, n)
+	defer f.Close()
+	d := f.d
+	if d == nil {
 		http.NotFound(w, r)
 		return
 	}
@@ -214,15 +250,13 @@ func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 	// A child_start without a time cannot be named again, so the loop could
 	// only drift to another Dispatch: treat it as the last word on this one.
 	unnameable := d.Started == ""
-	at, n = d.Started, d.StartN
 	sendClosed := func() {
 		writeFrame(w, "closed", "")
 		rc.Flush()
 	}
 
-	// PassLogs only ever grows, so a count says which entries have gone out:
-	// rotation drops a box event no sooner than its child_start, and losing
-	// that ends the stream below first.
+	// PassLogs only ever grows and each poll mutates d in place, so a count
+	// says which entries have gone out.
 	sent := 0
 	// step sends what d adds and reports whether the stream goes on.
 	step := func() bool {
@@ -250,12 +284,15 @@ func (s *server) dispatchEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-tick.C:
 		}
-		// Rotation can drop the Dispatch's child_start; nothing more is coming.
-		if d, found = s.findDispatch(slot, at, n); !found {
-			sendClosed()
+		// A failed poll is retried by the next tick, even forever: the stream then
+		// lives until the client leaves rather than closing as a rescan would.
+		f.poll()
+		if !step() {
 			return
 		}
-		if !step() {
+		// End as findDispatch would once rotation has taken the child_start.
+		if f.rotatedAway() {
+			sendClosed()
 			return
 		}
 	}

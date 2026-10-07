@@ -97,12 +97,21 @@ func openStream(t *testing.T, initial, events string) *stream {
 // openStreamAt is openStream for any SSE route, path including its query.
 func openStreamAt(t *testing.T, path, initial, events string) *stream {
 	t.Helper()
+	return openStreamOver(t, path, initial, "", events)
+}
+
+// openStreamOver is openStreamAt with an older Events generation on disk too.
+func openStreamOver(t *testing.T, path, initial, older, events string) *stream {
+	t.Helper()
 	dir := t.TempDir()
 	alive := &atomic.Bool{}
 	alive.Store(true)
 	st := &stream{frames: make(chan frame, 64), dir: dir, alive: alive}
 	if initial != "" {
 		st.writeStatus(t, initial)
+	}
+	if older != "" {
+		appendTo(t, st.events()+rotatedSuffix, older)
 	}
 	if events != "" {
 		appendTo(t, st.events(), events)
