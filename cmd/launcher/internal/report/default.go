@@ -41,3 +41,8 @@ func Settled(key dispatchkey.Key, state, note, prURL string) {
 func NotDue(key dispatchkey.Key, next NextDue) {
 	Default().NotDue(key, next)
 }
+
+// Model forwards to Default().Model.
+func Model(key dispatchkey.Key, model, role string) {
+	Default().Model(key, model, role)
+}

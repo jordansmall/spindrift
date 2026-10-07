@@ -500,3 +500,52 @@ func TestSettled_PRURLRoundTrip(t *testing.T) {
 		t.Errorf("record = %s, want no pr_url when empty", without)
 	}
 }
+
+// A model record round-trips through the Reporter's pipe with and without a
+// role, and omits both keys from the wire when empty.
+func TestModel_RoundTrip(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer r.Close()
+	t.Cleanup(func() { w.Close() })
+
+	rep := FromEnv(getenvFor(map[string]string{"SPINDRIFT_REPORT_FD": fmt.Sprint(int(w.Fd()))}), io.Discard)
+	if rep == nil {
+		t.Fatal("FromEnv returned nil")
+	}
+	rep.Model(dispatchkey.Issue("4744"), "claude-sonnet-5-5", "coordinator")
+	rep.Model(dispatchkey.Chore("bugs"), "claude-haiku-4-5", "")
+	w.Close()
+
+	scanner := bufio.NewScanner(r)
+	var lines []string
+	var recs []Record
+	for scanner.Scan() {
+		var rec Record
+		if err := json.Unmarshal(scanner.Bytes(), &rec); err != nil {
+			t.Fatalf("unmarshal %q: %v", scanner.Text(), err)
+		}
+		lines = append(lines, scanner.Text())
+		recs = append(recs, rec)
+	}
+	want := []Record{
+		{Event: EventModel, Key: dispatchkey.Issue("4744"), Model: "claude-sonnet-5-5", ModelRole: "coordinator"},
+		{Event: EventModel, Key: dispatchkey.Chore("bugs"), Model: "claude-haiku-4-5"},
+	}
+	if len(recs) != len(want) {
+		t.Fatalf("got %d records, want %d: %+v", len(recs), len(want), recs)
+	}
+	for i := range want {
+		if recs[i] != want[i] {
+			t.Errorf("record %d = %+v, want %+v", i, recs[i], want[i])
+		}
+	}
+	if !strings.Contains(lines[0], `"model":"claude-sonnet-5-5"`) || !strings.Contains(lines[0], `"model_role":"coordinator"`) {
+		t.Errorf("line = %s, want model and model_role on the wire", lines[0])
+	}
+	if strings.Contains(lines[1], "model_role") {
+		t.Errorf("line = %s, want no model_role when empty", lines[1])
+	}
+}
