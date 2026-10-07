@@ -9,6 +9,41 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.23.2 — 2026-10-07
+
+A read-only Box's finished work no longer gets stranded when the host
+fails to push it: spindrift retries, then recovers it on its own.
+
+No breaking changes.
+
+- **Stranded landings recover themselves.** When the host can't relay a
+  read-only Box's branch, the issue parks on `agent-failed` with the
+  bundle kept in the outbox. Running `spindrift recover` with no issue
+  number now finds one such issue and lands it. It only picks issues whose
+  run reported ready, that have no open PR, and that no other runner holds.
+  The daemon runs this as a new `recover` kind, switched on automatically
+  for read-only Boxes on GitHub or Forgejo, and `doctor` tells you whether
+  it's on. The local forge stays manual (`spindrift recover <n>`).
+- **Recover knows when to stop.** Each issue gets `MAX_RECOVER_ATTEMPTS`
+  tries (default 3) with a growing wait between them, then one comment
+  saying why landing failed. A hand-run `spindrift recover <n>` ignores
+  the limit.
+- **Relays retry before giving up.** Every bundle relay now retries
+  transient errors, treats an ordinary push rejection as final instead of
+  retrying it, and parks the issue as failed once retries run out rather
+  than leaving it hanging. Failure messages say whether the relay or the
+  PR create broke. A successful landing clears a leftover `agent-failed`
+  label and deletes the issue's bundle from the outbox.
+- **GitHub pushes and rebases go over HTTPS.** The relay and rebase use
+  the `gh` credential over HTTPS and ignore git `insteadOf` rules that
+  would quietly switch them to SSH. Rebase errors include git's own
+  output.
+- **Smaller fixes.** On Forgejo, a merge refused because the PR is
+  already merged now counts as a success, and the REST client only
+  retries server errors for requests that are safe to repeat. Local
+  tracker labels containing quotes round-trip correctly, and a
+  path-overlap check no longer eats memory on awkward glob patterns.
+
 ## 0.23.1 — 2026-10-06
 
 The daemon now schedules from real tracker demand: it checks how many
