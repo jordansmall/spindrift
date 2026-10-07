@@ -28,7 +28,7 @@ func getHistory(t *testing.T, status *string, files map[string]string) string {
 			t.Fatal(err)
 		}
 	}
-	srv := newServer(statusPath)
+	srv := newServer("", statusPath)
 	srv.now = func() time.Time { return testNow }
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
@@ -117,7 +117,7 @@ func TestHistoryUnreadableIsNotAbsent(t *testing.T) {
 		t.Fatal("readHistory err = nil for an unreadable Events file")
 	}
 	rec := httptest.NewRecorder()
-	newServer(filepath.Join(dir, statusFileName)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+	newServer("", filepath.Join(dir, statusFileName)).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	body := rec.Body.String()
 	if !strings.Contains(body, "history unreadable") {
 		t.Errorf("page lacks the unreadable-history message")

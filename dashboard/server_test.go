@@ -35,7 +35,7 @@ func get(t *testing.T, content *string, path string) (int, string) {
 			t.Fatal(err)
 		}
 	}
-	srv := newServer(statusPath)
+	srv := newServer("", statusPath)
 	srv.now = func() time.Time { return testNow }
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))

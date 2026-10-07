@@ -17,6 +17,7 @@ import (
 var webFS embed.FS
 
 type server struct {
+	checkout   string // the Daemon's work-tree root, which Child log paths are relative to
 	statusPath string
 	eventsPath string
 	now        func() time.Time
@@ -26,12 +27,13 @@ type server struct {
 	poll       time.Duration // how often /events looks for file changes
 }
 
-func newServer(statusPath string) *server {
+func newServer(checkout, statusPath string) *server {
 	staticFS, err := fs.Sub(webFS, "web/static")
 	if err != nil {
 		panic(err)
 	}
 	return &server{
+		checkout:   checkout,
 		statusPath: statusPath,
 		eventsPath: filepath.Join(filepath.Dir(statusPath), eventsFileName),
 		now:        time.Now,
@@ -55,6 +57,8 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.page(w)
 	case r.URL.Path == "/events":
 		s.events(w, r)
+	case r.URL.Path == "/log":
+		s.childLog(w, r)
 	case strings.HasPrefix(r.URL.Path, "/static/"):
 		s.static.ServeHTTP(w, r)
 	default:
