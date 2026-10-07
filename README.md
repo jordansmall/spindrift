@@ -216,6 +216,7 @@ report. See the [threat model](docs/reference.md#threat-model).
 | `spindrift console` | Browses the backlog, dispatches picked issues, and tails or stops live Boxes |
 | `spindrift recover N` | Re-runs the merge gate for one issue |
 | `nix run .#daemon` | Keeps working every configured queue — dispatch, research, and (once opted in) the butler, plus auto-recovery of stranded outbox bundles on a read-only Box — picking up issues or due Chores as they arrive |
+| `nix run .#dashboard` | Serves a read-only web page of the daemon's status (unauthenticated; loopback by default) — see [Dashboard](docs/reference.md#dashboard) |
 
 The CLI ships tab completion for bash, fish, and zsh. See
 [Shell completion](docs/reference.md#shell-completion).

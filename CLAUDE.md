@@ -333,7 +333,8 @@ sync — every Nix expression that needs Go pulls `pkgs.go`/`p.go` from
 the single `nixpkgs` flake input, so the floor is sourced transitively
 through `flake.lock`. Bumping the `go.mod` directive only requires
 re-verifying that the locked `nixpkgs` input's `go.version` still meets
-the new floor.
+the new floor. The Dashboard module carries its own `go` directive in
+`dashboard/go.mod`; bump it alongside `cmd/launcher/go.mod`.
 
 ## Shell edits
 
