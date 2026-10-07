@@ -2660,7 +2660,7 @@ func TestPoolStartChildChoosesKindFromLiveReservedCount(t *testing.T) {
 				startChildAs(p, 0, tt.sibling, "rev1")
 			}
 
-			if got, _ := p.startChild(1, work, "rev1"); got != tt.want {
+			if got, _, _ := p.startChild(1, work, "rev1"); got != tt.want {
 				t.Fatalf("startChild chose %q, want %q", got, tt.want)
 			}
 			if got := p.snapshot().Slots[1].Kind; got != tt.want {
@@ -2690,7 +2690,7 @@ func TestPoolStartChildChoreKeyedNonHolderNeverSwitchesToIssueKeyed(t *testing.T
 			p, _ := newPool(context.Background(), triKindConfig(2, 0), &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
 			defer p.cancel()
 
-			if got, ok := p.startChild(tt.slot, butler, "rev1"); !ok || got != tt.want {
+			if got, _, ok := p.startChild(tt.slot, butler, "rev1"); !ok || got != tt.want {
 				t.Fatalf("startChild chose %q (ok=%v), want %q", got, ok, tt.want)
 			}
 		})
@@ -2709,7 +2709,7 @@ func TestPoolStartChildFallsBackToProvisionalKindWhenNothingRunnable(t *testing.
 	p.markNoWork(work, clk.Now(), false)
 	p.markNoWork(research, clk.Now(), false)
 
-	if got, _ := p.startChild(0, work, "rev1"); got != work {
+	if got, _, _ := p.startChild(0, work, "rev1"); got != work {
 		t.Fatalf("startChild chose %q, want the provisional %q", got, work)
 	}
 }
@@ -2729,7 +2729,7 @@ func TestPoolStartChildDeclinesProbedKindWhoseCountZeroed(t *testing.T) {
 		return nil
 	})
 
-	if kind, ok := p.startChild(0, workKind, "rev1"); ok {
+	if kind, _, ok := p.startChild(0, workKind, "rev1"); ok {
 		t.Fatalf("startChild started %q, want no start", kind)
 	}
 	if got := p.snapshot().Slots[0].Phase; got == PhaseRunning {

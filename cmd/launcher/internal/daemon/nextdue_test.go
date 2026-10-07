@@ -163,7 +163,7 @@ func TestPoolNoteNotDueMergesWithoutClaiming(t *testing.T) {
 
 	late := time.Date(2026, 1, 2, 5, 0, 0, 0, time.UTC)
 	early := late.Add(-time.Hour)
-	if _, ok := p.startChild(0, KindOf(dispatchkind.Butler), "rev1"); !ok {
+	if _, _, ok := p.startChild(0, KindOf(dispatchkind.Butler), "rev1"); !ok {
 		t.Fatal("startChild did not start the butler")
 	}
 	p.noteNotDue(0, Record{Event: report.EventNotDue, Key: dispatchkey.Chore("a"), NextDue: report.NextDue{At: late}})

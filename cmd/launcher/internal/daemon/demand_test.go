@@ -560,10 +560,10 @@ func TestPoolReservationFloorsResearchAlongsideDemand(t *testing.T) {
 		return nil
 	})
 
-	if got, _ := p.startChild(0, workKind, "rev1"); got != researchKind {
+	if got, _, _ := p.startChild(0, workKind, "rev1"); got != researchKind {
 		t.Fatalf("first child kind = %q, want research: the reservation is unmet", got)
 	}
-	if got, _ := p.startChild(1, researchKind, "rev1"); got != workKind {
+	if got, _, _ := p.startChild(1, researchKind, "rev1"); got != workKind {
 		t.Fatalf("second child kind = %q, want work: the reserved seat is taken", got)
 	}
 }

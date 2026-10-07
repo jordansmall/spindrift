@@ -2430,3 +2430,49 @@ func TestLoopCoalescedResolveFailureBacksOffEverySlot(t *testing.T) {
 		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the shared resolve failure itself", reason)
 	}
 }
+
+func TestChildStartNamesTheChildLogTheRunnerIsHanded(t *testing.T) {
+	start := time.Date(2026, 10, 7, 12, 3, 4, 123_000_000, time.UTC)
+	want := ".spindrift/logs/daemon/20261007T120304.123Z-slot0-dispatch.log"
+	var handed []string
+	r := &scriptedRunner{
+		revisions: []string{"rev1"}, results: []ChildResult{{Exit: 5}},
+		onStart: func(_ context.Context, req ChildRequest) error {
+			handed = append(handed, req.ChildLog)
+			return nil
+		},
+	}
+	clk := &testClock{}
+	clk.setNow(start)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	Loop(context.Background(), testConfig(1), r, em, clk)
+
+	events := decodeEvents(t, &buf)
+	var got []string
+	for _, ev := range events {
+		if ev.Event == "child_start" {
+			got = append(got, ev.ChildLog)
+		} else if ev.ChildLog != "" {
+			t.Errorf("%s event carries child_log %q, want only child_start to", ev.Event, ev.ChildLog)
+		}
+	}
+	if len(got) == 0 || got[0] != want {
+		t.Fatalf("child_start child_log = %q, want first %q", got, want)
+	}
+	if len(handed) == 0 || handed[0] != got[0] {
+		t.Errorf("ChildRequest.ChildLog = %q, want the path child_start named (%q)", handed, got)
+	}
+}
+
+func TestChildLogPathNeverCollidesWithinASecond(t *testing.T) {
+	a := time.Date(2026, 10, 7, 12, 3, 4, 100_000_000, time.UTC)
+	k := KindOf(dispatchkind.Research)
+	if childLogPath(a, 2, k) == childLogPath(a.Add(time.Millisecond), 2, k) {
+		t.Error("two children on one slot a millisecond apart share a log path")
+	}
+	if got, want := childLogPath(a, 2, k), ".spindrift/logs/daemon/20261007T120304.100Z-slot2-research.log"; got != want {
+		t.Errorf("childLogPath = %q, want %q", got, want)
+	}
+}
