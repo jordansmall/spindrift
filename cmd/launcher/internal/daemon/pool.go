@@ -395,8 +395,8 @@ func occupancy(s *state) Occupancy {
 // liveKeys is the set of dispatch keys the pool's running children hold. A
 // finished slot's key is zeroed by finishChild and its phase leaves
 // PhaseRunning, so only live claims appear. The caller holds p.mu.
-func liveKeys(s *state) map[dispatchkey.Key]bool {
-	keys := make(map[dispatchkey.Key]bool)
+func liveKeys(s *state) dispatchkey.Set {
+	keys := make(dispatchkey.Set)
 	for _, sl := range s.slots {
 		if sl.phase == PhaseRunning && !sl.flight.key.IsZero() {
 			keys[sl.flight.key] = true

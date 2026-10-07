@@ -106,7 +106,7 @@ type scriptedRunner struct {
 	// the keys not in the probe's inFlight; exclusive with demand for a kind
 	// (the setters panic on both). demandInFlight
 	outbox         map[Kind][]dispatchkey.Key
-	demandInFlight map[Kind][]map[dispatchkey.Key]bool
+	demandInFlight map[Kind][]dispatchkey.Set
 
 	mu           sync.Mutex
 	resolveCalls int
@@ -1203,7 +1203,7 @@ func (r *scriptedRunner) demandFreshCalls(kind Kind) []bool {
 
 // Demand answers from setDemand/setDemandErr: an unscripted kind has no
 // demand, never an error.
-func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool, inFlight map[dispatchkey.Key]bool) (Demand, error) {
+func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool, inFlight dispatchkey.Set) (Demand, error) {
 	r.mu.Lock()
 	if r.demandCalls == nil {
 		r.demandCalls = make(map[Kind]int)
@@ -1212,7 +1212,7 @@ func (r *scriptedRunner) Demand(ctx context.Context, kind Kind, fresh bool, inFl
 	r.demandCalls[kind]++
 	r.demandFresh[kind] = append(r.demandFresh[kind], fresh)
 	if r.demandInFlight == nil {
-		r.demandInFlight = make(map[Kind][]map[dispatchkey.Key]bool)
+		r.demandInFlight = make(map[Kind][]dispatchkey.Set)
 	}
 	r.demandInFlight[kind] = append(r.demandInFlight[kind], maps.Clone(inFlight))
 	hook := r.onDemand
@@ -1253,7 +1253,7 @@ func (r *scriptedRunner) setOutbox(kind Kind, keys ...dispatchkey.Key) {
 }
 
 // demandInFlightCalls reports the inFlight set of each Demand call for kind.
-func (r *scriptedRunner) demandInFlightCalls(kind Kind) []map[dispatchkey.Key]bool {
+func (r *scriptedRunner) demandInFlightCalls(kind Kind) []dispatchkey.Set {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.demandInFlight[kind])

@@ -144,7 +144,7 @@ const outboxDemandInterval = 20 * time.Second
 
 // idReader is a demand source that names its ready items, not only counts them.
 type idReader interface {
-	ReadyIDs(inFlight map[dispatchkey.Key]bool) ([]string, error)
+	ReadyIDs(inFlight dispatchkey.Set) ([]string, error)
 }
 
 // outboxDemand answers a DemandHostOutbox kind's Demand probe from the host
@@ -170,7 +170,7 @@ func newOutboxDemand(doc *inputdoc.Document) *outboxDemand {
 
 // ReadyIDs names each eligible bundle by outbox key and BundleID, leaving out
 // the bundles of inFlight keys.
-func (o *outboxDemand) ReadyIDs(inFlight map[dispatchkey.Key]bool) ([]string, error) {
+func (o *outboxDemand) ReadyIDs(inFlight dispatchkey.Set) ([]string, error) {
 	return recoverrecord.Eligible("", o.maxAttempts, o.backoffUnit, o.now(), inFlight)
 }
 

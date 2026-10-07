@@ -19,6 +19,11 @@ type Key struct {
 	chore string
 }
 
+// Set is the keys a live daemon child holds. It is shared read-only with
+// whoever receives it: the receiver must not mutate or retain it. A nil Set
+// is empty.
+type Set map[Key]bool
+
 // Issue builds a Key for a tracker-issue-keyed Dispatch.
 func Issue(number string) Key { return Key{issue: number} }
 

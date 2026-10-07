@@ -2813,7 +2813,7 @@ func TestLiveKeysCollectsOnlyRunningSlotsKeys(t *testing.T) {
 		{phase: PhaseIdle},
 	}}
 	got := liveKeys(s)
-	if want := map[dispatchkey.Key]bool{dispatchkey.Issue("1"): true}; !reflect.DeepEqual(got, want) {
+	if want := (dispatchkey.Set{dispatchkey.Issue("1"): true}); !reflect.DeepEqual(got, want) {
 		t.Fatalf("liveKeys = %v, want %v: only a running slot's non-zero key", got, want)
 	}
 }
