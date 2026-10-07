@@ -6573,6 +6573,12 @@ enough to correlate a running Box with the commit that produced it.
 a Chore, and names the most recent one — the same key as the `chore`
 field on the `box`/`settled`/`child_finish` events below, so status
 and the event stream join on it — and is never folded into `issues`.
+`pass` can be present only on a `running` slot, and is the `phase` of the
+most recent `box` record its child reported (`initial`, `fix-pass-N`,
+`conflict-resolve`, `recover`; see `box` in **Event stream**, below). Each
+later `box` record replaces it. It is absent before the child's first
+`box` record and on any other phase, and never carries to the next
+child. It is additive and omitted when empty, so `schema` does not bump.
 `phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
@@ -7773,6 +7779,11 @@ busy/total slots, each kind's next check, the jam alarm, Demand, next
 due, and the tracker's rate limits — then one card per slot, idle ones
 included, with its phase, kind, issue(s) or Chore, revision, and time in
 phase (from the slot's `since`; see **Status file** under [Daemon](#daemon)).
+A busy card also names the Pass its Dispatch is running, as
+`pass <phase>` (for example `pass fix-pass-2`), from the slot's `pass` —
+the same label a drill-in Pass log tab carries, though a `recover` Pass
+has no Pass log and so no tab. A card whose slot carries
+no `pass` shows nothing extra.
 
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
