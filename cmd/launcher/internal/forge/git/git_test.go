@@ -704,8 +704,11 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 		t.Fatalf("chmod pre-receive hook: %v", err)
 	}
 
+	// Every step gets its own op timeout, so it must outlast the local clone
+	// and rebase on a loaded CI runner: 200ms once expired mid-rebase there,
+	// failing before the push this test targets.
 	g := NewGitClient(bare, "main", "Test Bot", "bot@example.com", "agent/issue-",
-		WithOpTimeout(200*time.Millisecond))
+		WithOpTimeout(2*time.Second))
 
 	start := time.Now()
 	err := g.Rebase("agent/issue-1")
@@ -714,7 +717,7 @@ func TestGitClient_Rebase_TimesOutOnHangingPush(t *testing.T) {
 	if err == nil {
 		t.Fatal("Rebase against hanging push: want error, got nil")
 	}
-	if elapsed > 5*time.Second {
+	if elapsed > 15*time.Second {
 		t.Fatalf("Rebase took %s to return, want it bounded by the configured op timeout", elapsed)
 	}
 	if !strings.Contains(err.Error(), "timed out") {
