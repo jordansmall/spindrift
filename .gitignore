@@ -21,5 +21,6 @@ ab-results/
 # OS
 .DS_Store
 
-# go build output in the launcher module
+# go build output in the launcher and Dashboard modules
 /cmd/launcher/launcher
+/dashboard/dashboard
