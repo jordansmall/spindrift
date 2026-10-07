@@ -4265,18 +4265,24 @@ later pass crashed without reporting still qualifies.
 
 Queue mode keeps a per-issue attempt record beside the issue's log
 (`.spindrift/logs/issue-<n>.recover.json`): the failure count, the last
-attempt's time, and a hash of the bundle it tried (issue #4655). After a
-failed attempt the issue is skipped until `TRANSIENT_BACKOFF_SECS` times its
-failure count has passed. The failure that reaches `MAX_RECOVER_ATTEMPTS`
-(default 3) posts one comment saying auto-recover gave up and naming
-`spindrift recover <n>`; earlier failures post none. A new bundle (a new Box
+attempt's time, the last failure's cause, and a hash of the bundle it tried
+(issue #4655). After a failed attempt the issue is skipped until
+`TRANSIENT_BACKOFF_SECS` times its failure count has passed. The failure that
+reaches `MAX_RECOVER_ATTEMPTS` (default 3) posts one comment saying
+auto-recover gave up, naming the last failure's cause (kept from an
+earlier attempt when the last failure has none; generic wording only when no
+cause was ever recorded, as for a record written before the cause was kept)
+and `spindrift recover <n>`; earlier failures post none. A new bundle (a new Box
 run) starts the count over, and a queue-mode attempt that opens the PR removes
 the record, whether or not the PR then merges. Once the give-up comment posts
 and the record saves, queue mode never picks the issue again for that bundle,
 even if `MAX_RECOVER_ATTEMPTS` is later raised. If the comment fails to post, a
 later queue pass retries it; lowering `MAX_RECOVER_ATTEMPTS` below a record's
 count posts it on the next pass. If the record cannot be saved, the run
-exits 1. A hand-run `spindrift recover <n>` ignores the record.
+exits 1. A hand-run `spindrift recover <n>` ignores the record; when the
+relay or draft PR creation fails it prints `status=failed note=<cause>`
+rather than `no open PR`; that includes an outbox with no bundle on a
+relay-capable forge, which surfaces as a relay failure.
 
 Queue mode re-checks just before the claim and skips an issue no longer on
 `agent-failed`, so a relabel made while it worked earlier candidates is usually
