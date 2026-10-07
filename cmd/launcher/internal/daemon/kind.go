@@ -7,9 +7,9 @@ import (
 )
 
 // Kind is the Dispatch kind the daemon drives: work dispatch, advise-only
-// research, or the advise-only butler (ADR 0056). All three are driven
-// through the same exit-code interpretation (ADR 0022), which is why one
-// loop drives them all.
+// research, the advise-only butler (ADR 0056), or recover (re-landing a
+// stranded outbox bundle, issue #4656). All four are driven through the same
+// exit-code interpretation (ADR 0022), which is why one loop drives them all.
 type Kind string
 
 // KindOf is d's daemon Kind: its Verb, the string the daemon's bookkeeping
@@ -39,11 +39,12 @@ func ParseKind(s string) (Kind, error) {
 
 // ParseKinds parses the daemon's argv verb as a set of kinds to draw from one
 // pool (issue #3541). Unlike ParseKind, "" here means "every kind" rather
-// than "dispatch": a bare daemon invocation now runs work, research, and the
-// butler off the same pool by default (ADR 0056, #3878), while "dispatch",
-// "research", or "butler" alone still restrict it to one kind for callers
-// that want that. The daemon binary still drops the butler from "" when
-// BUTLER_CHORES enables no Chore (cmd/launcher/daemon's gateKinds).
+// than "dispatch": a bare daemon invocation now runs work, research, the
+// butler, and recover off the same pool by default (ADR 0056, #3878, #4656),
+// while "dispatch", "research", "butler", or "recover" alone still restrict
+// it to one kind for callers that want that. The daemon binary still drops
+// the butler from "" when BUTLER_CHORES enables no Chore, and recover where
+// no outbox bundle is relayed (cmd/launcher/daemon's gateKinds).
 func ParseKinds(s string) ([]Kind, error) {
 	if s == "" {
 		kinds := make([]Kind, 0, len(dispatchkind.All))

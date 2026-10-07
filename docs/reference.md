@@ -61,6 +61,11 @@ The checks `spindrift doctor` runs, grouped by what it probes.
   offer below still run (issue #2798).
 - `recoverable-issues`, required: counts the issues wearing the recoverable
   state label and names `spindrift recover <issue>` as the way to land each.
+- `recover kind`, always ok: reports whether the daemon's recover kind is on
+  (`CODE_FORGE` github or forgejo with a read-only Box, which relays the
+  outbox bundle) or off, and when off, the `CODE_FORGE` and
+  `BOX_FORGE_AND_ISSUE_ACCESS` in effect and that a stranded issue needs
+  `spindrift recover <n>` (issue #4656).
 - Container runtime readiness — advisory only (issue #2561).
 
 **Labels**
@@ -2854,17 +2859,20 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   pushed or bundled; an outbox bundle arriving with the claim demotes it
   host-side too. Either way the issue settles `agent-failed`, stays open,
   and gets the corrective note as a comment.
-- **Stranded issues are recovered explicitly, never adopted automatically.** A
-  bare `agent-in-progress` label carries no liveness signal — it cannot tell an
-  issue a crashed launcher stranded apart from one a live runner (another Box,
-  or an overlapping local run) is actively committing to right now. `spindrift
-  dispatch` never adopts on the strength of the label alone. The unstick is the
-  `agent-recover` label (`agent-recover.yml` → `spindrift recover <n>`): an
-  operator's explicit assertion that the issue is no longer owned by a live
-  runner, re-running the merge gate on its open PR (draft or not). Bare
-  `spindrift recover` is still an explicit operator verb: it touches only
-  `agent-failed` issues, using the per-issue host claim as its liveness proof
-  (issue #4654).
+- **A bare `agent-in-progress` label is never adopted automatically.** It
+  carries no liveness signal — it cannot tell an issue a crashed launcher
+  stranded apart from one a live runner (another Box, or an overlapping local
+  run) is actively committing to right now. `spindrift dispatch` never adopts
+  on the strength of the label alone. The unstick is the `agent-recover` label
+  (`agent-recover.yml` → `spindrift recover <n>`): an operator's explicit
+  assertion that the issue is no longer owned by a live runner, re-running the
+  merge gate on its open PR (draft or not). The one automatic path is the
+  [daemon](#daemon)'s `recover` kind, which runs bare `spindrift recover`
+  (issue #4656). It touches only `agent-failed` issues, on evidence the label
+  never supplied: a relayable outbox bundle, a genuine `status=ready`
+  self-report in the run's logs, no open PR, and the per-issue host claim as
+  its liveness proof (issues #4654, #4656; ADR 0029's amendment). A hand-run
+  bare `spindrift recover` follows the same rules.
 - **A terminal recover failure never downgrades an already-successful issue.**
   The claim above strips whatever terminal label the issue carried (including
   `agent-complete`) before `spindrift recover` ever runs, so a recover attempt
@@ -4257,8 +4265,10 @@ If the `status=ready` "land the branch" relay still fails after
 `spindrift recover <n>` relays and lands it (issue #4651). Bare `spindrift
 recover` finds and lands one such issue itself, moving it `agent-failed` →
 `agent-in-progress` and ending `agent-complete` on a land or back on
-`agent-failed` otherwise (issue #4654). Queue mode refuses `CODE_FORGE=local`;
-a local Recoverable issue stays manual, `spindrift recover <n>` (ADR 0039).
+`agent-failed` otherwise (issue #4654). The [daemon](#daemon) runs it as its
+`recover` kind where enabled (issue #4656). Queue mode refuses
+`CODE_FORGE=local`; a local Recoverable issue stays manual, `spindrift
+recover <n>` (ADR 0039).
 Eligibility reads the run's last driver self-report, the same evidence
 `recover <n>` trusts, so a run whose earlier pass reported ready and whose
 later pass crashed without reporting still qualifies.
@@ -5974,16 +5984,26 @@ Consumer beside `apps.default` (`lib/mkHarness.nix`), it's run as `nix run
 `nix run .#dogfood-bwrap-daemon`. It takes an optional positional argument
 selecting which Dispatch kinds it draws from: `dispatch` restricts it to
 work, `research` restricts it to advise-only research, `butler` restricts it
-to Chore upkeep (ADR 0056, issue #3878), and omitting the argument (the
-default, issue #3541) draws from every kind off the single pool described
-under **Pool** below — except the butler, which the bare default drops when
-`BUTLER_CHORES` enables no Chore (its own default), so an operator who has
-opted into no Chore sees the same two-kind daemon as before; naming `butler`
+to Chore upkeep (ADR 0056, issue #3878), `recover` restricts it to
+re-landing stranded outbox bundles (issue #4656), and omitting the argument
+(the default, issue #3541) draws from every kind off the single pool
+described under **Pool** below — except the butler, which the bare default
+drops when `BUTLER_CHORES` enables no Chore (its own default), so an operator
+who has opted into no Chore sees the same daemon as before; naming `butler`
 explicitly with an empty `BUTLER_CHORES` fails startup instead of running a
 kind that could only ever report no work (`daemon: butler selected but no
-chores enabled (BUTLER_CHORES is empty)`). `gateKinds`
-(`cmd/launcher/daemon/main.go`) decides this from each kind's descriptor
-`Enablement` row, never from its name. `status` is the other positional, and
+chores enabled (BUTLER_CHORES is empty)`). The same holds for `recover`: it
+is on only when `CODE_FORGE` is `github` or `forgejo` and
+`BOX_FORGE_AND_ISSUE_ACCESS=read-only` (one predicate, `backend.RelaysOutbox`,
+since only then does a Box leave a bundle in the outbox), never on
+`CODE_FORGE=local` (ADR 0039) or a read-write Box. The bare default includes
+it where enabled and silently drops it elsewhere; naming `recover` where it is
+disabled fails startup (`daemon: recover selected but CODE_FORGE=<x> with
+BOX_FORGE_AND_ISSUE_ACCESS=<y>: no outbox bundle is relayed (recover needs
+CODE_FORGE github or forgejo with BOX_FORGE_AND_ISSUE_ACCESS=read-only)`).
+`gateKinds` (`cmd/launcher/daemon/main.go`) decides all of this from each
+kind's descriptor `Enablement` row (`EnabledByOutboxRelay` for `recover`),
+never from its name. `status` is the other positional, and
 it is dispatched ahead of that kind-selector parse rather than sharing its slot —
 `nix run .#daemon -- status` prints the checkout's current daemon state and
 exits without starting anything, needing no `--input` document (reading
@@ -5995,14 +6015,14 @@ JSON, one object (`lockHeld`, `holder`, `live`, `stale`, `status`, and
 whenever it produced an answer, "no daemon running" included — a scripting
 caller reads `.live`, not the exit code, and this binary's own exit-code
 table already spends 1 on a genuine failure. See **Status file** below for
-what it reads. `dispatch`, `research`, and `butler` alone each still run
-work-only, research-only, or butler-only, in turn: `dispatch` is how an
+what it reads. `dispatch`, `research`, `butler`, and `recover` alone each
+still run that one kind only, in turn: `dispatch` is how an
 operator who has not created the research labels runs the daemon, work-only,
 exactly as before this ticket. The default draws from every configured kind
 because an operator no longer has to choose between advancing the queue,
-enriching the backlog, and keeping up with Chore upkeep — a daemon left
-running just does whichever of the three it's configured for. Unlike a
-single `spindrift dispatch`/`research`/`butler` invocation, the daemon keeps
+enriching the backlog, keeping up with Chore upkeep, and landing stranded
+bundles — a daemon left running just does whichever of those it's configured
+for. Unlike a single `spindrift dispatch`/`research`/`butler` invocation, the daemon keeps
 working the queue after it drains, so work labelled later is picked up without a
 restart. It supersedes continuous dispatch as the way to hold a pool of
 Boxes, which is deprecated in its favour but not removed (issue #3547) —
@@ -6635,6 +6655,15 @@ operator who wants that single slot work-first instead sets
 1 is a defensible first cut, not a tuned final answer — issue #3541 put the
 final value out of scope, and it expects a real unattended run to argue
 with it.
+
+**First tier.** `recover` sits ahead of the research/work preference above:
+a starting slot tries it before every other kind, on every slot
+(`slotOrder`, `dispatchkind.PriorityFirst`, issue #4656). Stranded finished
+work lands before a new Box starts, so it rebases onto as little new main as
+possible. It is exit-driven like the butler: a child that finds nothing
+eligible exits 2, which backs the kind off like any other kind's no-work
+exit, until it gets an outbox Demand source under ADR 0059's Demand
+scheduler.
 
 **Idle tier.** The butler sits outside the research/work preference above:
 while fewer than `RESEARCH_RESERVATION` research children are running, a
@@ -7458,7 +7487,7 @@ slot.
 | `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error, so long as that exit does not halt the pool (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs —, the holder re-deciding at `startChild` and finding a sibling's result (an exit 2 zeroing a probed kind's count) took away the Start it decided on before blocking on the baton (`batonPassOutpaced`, `"a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"`), or the holder starting a Chore-keyed child, which discovers no tracker issue, so the baton passes at the start rather than at a `box` record (`batonPassChoreKeyed`, `"the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"`), or the holder returning for any reason at all before its round otherwise resolved, including a child exit that halts the pool or trips the breaker, whose pass waits until after the `halt` event so no sibling starts a child on a halting pool (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, a gone feature branch, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal (doctor's verdict or a gone feature branch), a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the three the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-feature-branch-gone` for a `--feature-branch` naming a branch origin does not have, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot` | just before a child is launched; carries no `issue` or `chore` — the daemon cannot know which issue or chore a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
-| `box` | `time`, `kind`, `issue` or `chore`, `phase`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later. A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set |
+| `box` | `time`, `kind`, `issue` or `chore`, `phase`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later. A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
 | `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle |
 | `demand_appeared` | `time`, `kind`, `slot`, `ready` | a Demand probe of a probed kind found startable items (`ready` above 0) where the previous count was 0, or the kind had never been probed; emitted on the zero crossing only, so a count that merely changes between two positive values emits nothing |

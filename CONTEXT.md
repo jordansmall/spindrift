@@ -600,18 +600,21 @@ _Avoid_: bare "Disposition" (ambiguous with the freshness one), success flag.
 **Dispatch kind**:
 The axis naming what a Dispatch delivers: `work` (the original kind — lands
 code through the Code Forge), `research` (lands a verdict and enrichment
-comments on the Issue Tracker; never touches the Code Forge), or `butler`
-(sweeps one [[Chore]] and files findings; keyed by Chore, not issue). Kinds
-share the canonical Dispatch lifecycle; on the `github` tracker each kind
-maps the states to its own label family.
+comments on the Issue Tracker; never touches the Code Forge), `butler`
+(sweeps one [[Chore]] and files findings; keyed by Chore, not issue), or
+`recover` (re-lands a finished work Box's stranded outbox bundle through the
+work merge gate; keyed by issue; runs no Box; scheduled by the
+[[Daemon]], or run by hand as bare `spindrift recover`). Kinds share the
+canonical Dispatch lifecycle; on the `github` tracker each kind maps the
+states to its own label family.
 _Avoid_: mode, dispatch type, pipeline.
 
 **Dispatch key**:
-The one value naming what a Dispatch works: an issue number for the `work`
-and `research` kinds, or a [[Chore]] name for the `butler` — never both,
-never neither. It renders as the bare issue number or `butler-` plus the
-Chore name, and that text is the Box name, log path, claim, and the outcome
-line's `issue=` field. `internal/dispatchkey` holds it; the report record,
+The one value naming what a Dispatch works: an issue number for the `work`,
+`research`, and `recover` kinds, or a [[Chore]] name for the `butler` —
+never both, never neither. It renders as the bare issue number or `butler-`
+plus the Chore name, and that text is the Box name, log path, claim, and the
+outcome line's `issue=` field. `internal/dispatchkey` holds it; the report record,
 [[Daemon]] event, slot flight, and Box env builder all carry it.
 _Avoid_: issue number (for a butler run), Dispatch ID, subject.
 
@@ -865,9 +868,11 @@ daemon the bwrap runtime is "daemonless" of.
 The shipped unattended [[Driving loop]]: `apps.daemon`, generated per-Consumer
 by `mkHarness` beside `apps.default`. It holds `MAX_PARALLEL` slots and fills
 each with one single-Box launcher invocation pinned to a fetched revision,
-drawing from every configured [[Dispatch kind]] — `work`, `research`, and
-`butler` once `BUTLER_CHORES` enables a [[Chore]] — against that one pool; a
-kind selector (`dispatch`, `research`, `butler`) narrows it to that one kind.
+drawing from every configured [[Dispatch kind]] — `work`, `research`,
+`butler` once `BUTLER_CHORES` enables a [[Chore]], and `recover` where a
+read-only Box relays an outbox bundle — against that one pool; a kind
+selector (`dispatch`, `research`, `butler`, `recover`) narrows it to that
+one kind.
 This makes it the owner of dispatch concurrency, superseding continuous
 dispatch — deprecated in its favour, but kept for operators who want no daemon
 and retained as the Console's engine. It supervises and re-invokes; it never

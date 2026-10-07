@@ -71,7 +71,10 @@ described by `agent-complete` (the agent is done) plus the issue being **open**
 (not yet merged); when the merge lands — by human, by GitHub `--auto`, or
 immediately — the PR closes the issue, and open-vs-closed *is* the merged
 signal. Adoption (automatic, at the time this ADR was written; explicit-only
-via `spindrift recover <n>` since #600) keys only on `agent-in-progress`, so a
+via `spindrift recover <n>` since #600) keys only on `agent-in-progress`
+(amended by issue #4656: the daemon's recover kind also adopts automatically,
+but only `agent-failed` issues with a relayable bundle, a genuine ready
+self-report, and a free host claim, per the ADR 0029 amendment), so a
 handed-off `agent-complete` issue is left alone on later runs regardless.
 
 ## The dependency-satisfaction fix this forces (ADR is authoritative)
