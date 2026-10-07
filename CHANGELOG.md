@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.23.2](https://github.com/jordansmall/spindrift/compare/v0.23.1...v0.23.2) (2026-10-07)
+
+
+### Features
+
+* **daemon:** leave in-flight bundles out of recover Demand ([90cad52](https://github.com/jordansmall/spindrift/commit/90cad52bf18b3c5213a7feb943de9b8e1ca8232a)), closes [#4706](https://github.com/jordansmall/spindrift/issues/4706)
+* **daemon:** name each recover bundle in its Demand ([d130013](https://github.com/jordansmall/spindrift/commit/d1300133a3794ba61941e42fc88fea99203fffd9)), closes [#4705](https://github.com/jordansmall/spindrift/issues/4705)
+* **daemon:** pass live flight keys to Demand probes ([e53f875](https://github.com/jordansmall/spindrift/commit/e53f875ee3b6b0b98500c6bb5ea77f0ee26a61ae)), closes [#4706](https://github.com/jordansmall/spindrift/issues/4706)
+* **daemon:** read recover Demand from the host outbox ([b597c7b](https://github.com/jordansmall/spindrift/commit/b597c7b49ddb96c367ceaca2a3c55e286548b907)), closes [#4657](https://github.com/jordansmall/spindrift/issues/4657)
+* **daemon:** schedule recover as a fourth dispatch kind ([cdf57e1](https://github.com/jordansmall/spindrift/commit/cdf57e1f7ea041b88f5c1cfcf6b26df32d1597f6)), closes [#4656](https://github.com/jordansmall/spindrift/issues/4656)
+* **doctor:** report whether the recover kind is on ([1a62a30](https://github.com/jordansmall/spindrift/commit/1a62a3003481a445f6c0542062ab0fe7f32655ec)), closes [#4656](https://github.com/jordansmall/spindrift/issues/4656)
+* **env-schema:** add the MAX_RECOVER_ATTEMPTS knob ([fc0f7ed](https://github.com/jordansmall/spindrift/commit/fc0f7ed52203e8205482f6fba1e16696e95dd9b1)), closes [#4655](https://github.com/jordansmall/spindrift/issues/4655)
+* **recover:** back off and bound queue-mode attempts ([5f8e341](https://github.com/jordansmall/spindrift/commit/5f8e34149716eac472f1a38c5835d67ff9359980)), closes [#4655](https://github.com/jordansmall/spindrift/issues/4655)
+* **recover:** land one eligible agent-failed issue off the queue ([a87f059](https://github.com/jordansmall/spindrift/commit/a87f059e82841a7665f3d8edabb187ff5fc1a357)), closes [#4654](https://github.com/jordansmall/spindrift/issues/4654)
+* **recover:** name the landing failure's cause ([64458dc](https://github.com/jordansmall/spindrift/commit/64458dceb46e0321446e689056d8de812aba283a)), closes [#4680](https://github.com/jordansmall/spindrift/issues/4680)
+* **recover:** report queue-mode attempts to the daemon ([e8c7900](https://github.com/jordansmall/spindrift/commit/e8c7900dd8d09cb5b3f742f46b259e74652bf3ad)), closes [#4656](https://github.com/jordansmall/spindrift/issues/4656)
+* **recover:** run the queue when given no issue ([f778920](https://github.com/jordansmall/spindrift/commit/f778920a4fc1f445672e97997c032077332c7d5a)), closes [#4654](https://github.com/jordansmall/spindrift/issues/4654)
+* **recover:** skip in-flight keys in Eligible ([cf7c1a5](https://github.com/jordansmall/spindrift/commit/cf7c1a535ab111194ca9bbd8ec816378bbcc2f0a)), closes [#4706](https://github.com/jordansmall/spindrift/issues/4706)
+* **settle:** park an exhausted relay as failed ([7de0eff](https://github.com/jordansmall/spindrift/commit/7de0eff82dd5f6786b45aacf636c194984ed4c64)), closes [#4651](https://github.com/jordansmall/spindrift/issues/4651)
+* **settle:** remove a landed issue's outbox bundle ([2e35ef1](https://github.com/jordansmall/spindrift/commit/2e35ef153b4140b3a5213ff5a5245dfc13443ca5)), closes [#4653](https://github.com/jordansmall/spindrift/issues/4653)
+* **settle:** retry every bundle relay call site ([5a0e339](https://github.com/jordansmall/spindrift/commit/5a0e3394cfaffb0c06d05dfbfcd8f23de9f9accd)), closes [#4649](https://github.com/jordansmall/spindrift/issues/4649)
+* **settle:** return the relay or PR-create error ([92c5948](https://github.com/jordansmall/spindrift/commit/92c5948fb11b200c733e62375ea45688f48d69af)), closes [#4680](https://github.com/jordansmall/spindrift/issues/4680)
+
+
+### Bug Fixes
+
+* **daemon:** lift recover's gate on a new bundle ([1565edd](https://github.com/jordansmall/spindrift/commit/1565eddf063a3d299ff3069653df8405705f6b25)), closes [#4705](https://github.com/jordansmall/spindrift/issues/4705)
+* **forge/rest:** retry 5xx only for idempotent methods ([708e488](https://github.com/jordansmall/spindrift/commit/708e4883a810f3cbd355cb1c10d638399b2da992)), closes [#4683](https://github.com/jordansmall/spindrift/issues/4683)
+* **forgejo:** treat a refused merge of a merged PR as success ([30eefee](https://github.com/jordansmall/spindrift/commit/30eefeef3828fa8c81d0534238a6d33ad3755f6a)), closes [#4683](https://github.com/jordansmall/spindrift/issues/4683)
+* **forge:** strip a stale agent-failed on landing ([f327b92](https://github.com/jordansmall/spindrift/commit/f327b927dd3bee670beedc800ed3e56428709038)), closes [#4651](https://github.com/jordansmall/spindrift/issues/4651)
+* **github:** include git output in Rebase checkout errors ([f25d541](https://github.com/jordansmall/spindrift/commit/f25d541cf301ebff376bfd05d2801117a5484e8a)), closes [#4658](https://github.com/jordansmall/spindrift/issues/4658)
+* **github:** pin GitRemote against insteadOf rules ([58baa11](https://github.com/jordansmall/spindrift/commit/58baa11e311ad60657154e059842197e08a18386)), closes [#4665](https://github.com/jordansmall/spindrift/issues/4665)
+* **github:** rebase over HTTPS with gh credential ([d2cf636](https://github.com/jordansmall/spindrift/commit/d2cf636be61f9e06559b689c46e53a1bfabbff16)), closes [#4650](https://github.com/jordansmall/spindrift/issues/4650)
+* **github:** relay over HTTPS with the gh credential ([1afba6c](https://github.com/jordansmall/spindrift/commit/1afba6c80ecd517ae4d354b590c38ecda8c7327b)), closes [#4647](https://github.com/jordansmall/spindrift/issues/4647)
+* **gitplumbing:** treat a force-push deadline kill as transient ([e2574b9](https://github.com/jordansmall/spindrift/commit/e2574b93450c78914a790c2d1c5b2aaa3d7efe64)), closes [#4667](https://github.com/jordansmall/spindrift/issues/4667)
+* **gitplumbing:** treat push errors as permanent by default ([c6ac129](https://github.com/jordansmall/spindrift/commit/c6ac1292574e1ebcda48070fe056fd0f3425d53a)), closes [#4648](https://github.com/jordansmall/spindrift/issues/4648)
+* **glob:** keep segmentsOverlap memory linear ([5b2b1c6](https://github.com/jordansmall/spindrift/commit/5b2b1c63830b28d82c251f97c03dbb2cfef27be0)), closes [#4690](https://github.com/jordansmall/spindrift/issues/4690)
+* **local:** open a quoted label only at start ([7fc32df](https://github.com/jordansmall/spindrift/commit/7fc32df3645c8c2c16c6725b528522d7445b39c8)), closes [#4700](https://github.com/jordansmall/spindrift/issues/4700)
+* **local:** quote labels containing a quote ([956b033](https://github.com/jordansmall/spindrift/commit/956b033380e3c5ddae8d7a3aebd78eb6024cf00f))
+* **recover:** fail the run when a queue restore fails ([418948b](https://github.com/jordansmall/spindrift/commit/418948b8b0c3a6a01e16ea6bf60af8b7952705b0)), closes [#4679](https://github.com/jordansmall/spindrift/issues/4679)
+* **recover:** park a failed queue settle on a drain stop ([96f08c2](https://github.com/jordansmall/spindrift/commit/96f08c2f6b5bc628f7b0cc3e94aa20ac6f6ae5b3)), closes [#4679](https://github.com/jordansmall/spindrift/issues/4679)
+* **recover:** park a settle an abort did not reclaim ([5b10bda](https://github.com/jordansmall/spindrift/commit/5b10bdaedf82dfbbd39ea79c5434d8a34bf939e5)), closes [#4694](https://github.com/jordansmall/spindrift/issues/4694)
+* **recover:** skip a queue issue relabeled before claim ([273b2df](https://github.com/jordansmall/spindrift/commit/273b2df3b58523f070d669080128380cbc33783f)), closes [#4679](https://github.com/jordansmall/spindrift/issues/4679)
+* **runner:** reap only day-old rebase temp dirs ([d6674cc](https://github.com/jordansmall/spindrift/commit/d6674ccb3d509c483497553d5f298c5c2e6e57dc)), closes [#4658](https://github.com/jordansmall/spindrift/issues/4658)
+
+
+### Documentation
+
+* amend the never-auto-adopt policy for recover ([8304d79](https://github.com/jordansmall/spindrift/commit/8304d79aebec07b7c896014c50810c6714466afd)), closes [#4656](https://github.com/jordansmall/spindrift/issues/4656)
+* describe parking an exhausted relay failed ([1e136d4](https://github.com/jordansmall/spindrift/commit/1e136d41f7f57acef6b4f167e45bc5f998bca853)), closes [#4651](https://github.com/jordansmall/spindrift/issues/4651)
+* **env-schema:** point ISSUE_TRACKER at CODE_FORGE ([d4b1534](https://github.com/jordansmall/spindrift/commit/d4b15344b55f6ff7794c829f365ea468df33afe5)), closes [#4684](https://github.com/jordansmall/spindrift/issues/4684)
+* **forge:** drop github-only landing claims ([90abe34](https://github.com/jordansmall/spindrift/commit/90abe34786cc6f5542b8ed5f83799c3b13558d59)), closes [#4684](https://github.com/jordansmall/spindrift/issues/4684)
+* **forge:** name forgejo as a BlockersLister ([f0cfeee](https://github.com/jordansmall/spindrift/commit/f0cfeeea2652697cbaf14b8e912efd5f05277744)), closes [#4685](https://github.com/jordansmall/spindrift/issues/4685)
+* **github:** describe the relay's HTTPS credential ([4d23dd1](https://github.com/jordansmall/spindrift/commit/4d23dd14503f16d9703115ef99e547eb409632df))
+* **local:** drop the stale stdlib-only rationale from parseLocalIssue ([0743d2f](https://github.com/jordansmall/spindrift/commit/0743d2fd9239c31ab9281dc0ec2340e425d9853b)), closes [#4687](https://github.com/jordansmall/spindrift/issues/4687)
+* **local:** stop calling the dispatch markers four ([39348dd](https://github.com/jordansmall/spindrift/commit/39348ddd473fc03b90dead8a5e8aa4cc5617ba23)), closes [#4686](https://github.com/jordansmall/spindrift/issues/4686)
+* **reference:** describe queue recover's stop and skip rules ([a89c8a6](https://github.com/jordansmall/spindrift/commit/a89c8a69b73699cadab42a1dd121354435624c14)), closes [#4679](https://github.com/jordansmall/spindrift/issues/4679)
+* **reference:** describe queue-mode recover ([c56d75c](https://github.com/jordansmall/spindrift/commit/c56d75c46492f37548f40280c33da833fb823151)), closes [#4654](https://github.com/jordansmall/spindrift/issues/4654)
+* **reference:** describe queue-mode recover's attempt record ([0cc7d5e](https://github.com/jordansmall/spindrift/commit/0cc7d5eb332e860fcca17745ad567984aa2769d0)), closes [#4655](https://github.com/jordansmall/spindrift/issues/4655)
+* **reference:** note the outbox bundle goes on land ([c32d0f5](https://github.com/jordansmall/spindrift/commit/c32d0f56afb8ab87b21e23313b57007b1e5b711e))
+* **reference:** note the transient knobs bound relay retries ([425f435](https://github.com/jordansmall/spindrift/commit/425f435bdab3aa459a748f6fcce7ec5847ce73fa)), closes [#4649](https://github.com/jordansmall/spindrift/issues/4649)
+* **reference:** say a new recover bundle lifts its backoff ([f71e01e](https://github.com/jordansmall/spindrift/commit/f71e01e6ef00f8fad4bdeb00519e56793f23fed9)), closes [#4705](https://github.com/jordansmall/spindrift/issues/4705)
+* **reference:** say the give-up comment names the cause ([846ac66](https://github.com/jordansmall/spindrift/commit/846ac66e44dc7d206bb4ed6141fe5e03ed710b57)), closes [#4680](https://github.com/jordansmall/spindrift/issues/4680)
+* **reference:** say when an abort reclaims a recover ([41fadf9](https://github.com/jordansmall/spindrift/commit/41fadf9f6351d749080b9e1a935f7508ce963cdd)), closes [#4694](https://github.com/jordansmall/spindrift/issues/4694)
+* **release-notes:** add 0.23.2 highlights ([7827a26](https://github.com/jordansmall/spindrift/commit/7827a26fb732bc3c2ed10706428601f5e3c72638))
+
+
+### Code Refactoring
+
+* **dispatchkey:** name the in-flight key set ([ffc6945](https://github.com/jordansmall/spindrift/commit/ffc694528a585114a8110b599afe41f65333fcb1))
+* **recover:** share the attempt record with the daemon ([b1ea1b8](https://github.com/jordansmall/spindrift/commit/b1ea1b84870b7cba24b8aef8db2dd070f0f65808)), closes [#4657](https://github.com/jordansmall/spindrift/issues/4657)
+* **settle:** add a retrying bundle relay seam ([88c2f83](https://github.com/jordansmall/spindrift/commit/88c2f835334e147b62ff0dce33c3a674579b32f7)), closes [#4649](https://github.com/jordansmall/spindrift/issues/4649)
+* **shutdown:** report whether the abort stage fired ([c605d3c](https://github.com/jordansmall/spindrift/commit/c605d3c79531be1c5c5c4e2d2d7dd360bcfedc75)), closes [#4679](https://github.com/jordansmall/spindrift/issues/4679)
+
+
+### Tests
+
+* **github:** cover ambient SSH rewrite on relay ([9cc4dc8](https://github.com/jordansmall/spindrift/commit/9cc4dc8e49f9cb13ad9071b6d184252634f177ec)), closes [#4665](https://github.com/jordansmall/spindrift/issues/4665)
+* **github:** give HTTPS harness its own TMPDIR ([c0545bb](https://github.com/jordansmall/spindrift/commit/c0545bb4801573c774b1255f087d30373e73af27))
+* **github:** quiet the modify/delete conflict clone ([a4aa7c9](https://github.com/jordansmall/spindrift/commit/a4aa7c9b038fdfbd9cd1365271c416d16202d35c)), closes [#4658](https://github.com/jordansmall/spindrift/issues/4658)
+* **runner:** keep Run's reap out of the shared TMPDIR ([d1f3a29](https://github.com/jordansmall/spindrift/commit/d1f3a29afd137e06d84ce5f33fc2d0b108f45be4)), closes [#4658](https://github.com/jordansmall/spindrift/issues/4658)
+* **settle:** pin no retry on a permanent push failure ([2060d22](https://github.com/jordansmall/spindrift/commit/2060d2271adfd24583e719ce3a11e69a6c9aecc4))
+
+
+### Miscellaneous Chores
+
+* **dogfood:** let the butler land patch PRs ([53c0075](https://github.com/jordansmall/spindrift/commit/53c007576d796edfc9e0f5961d6ece5af7864760))
+* **dogfood:** raise butler promotions to five ([30bb645](https://github.com/jordansmall/spindrift/commit/30bb645494690feae91a1ec39920c873b34b6ce6))
+* **gitignore:** ignore the built launcher binary ([69e31f5](https://github.com/jordansmall/spindrift/commit/69e31f5e97413c5419fee30aad609454b92eb50b)), closes [#4680](https://github.com/jordansmall/spindrift/issues/4680)
+
 ## [0.23.1](https://github.com/jordansmall/spindrift/compare/v0.23.0...v0.23.1) (2026-10-06)
 
 
