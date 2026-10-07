@@ -597,3 +597,108 @@ func TestLogOwnerParamsJunkOrUnnamedIs404(t *testing.T) {
 		}
 	}
 }
+
+// stamp sets p's mtime to the RFC3339 time at, so a fixture's age sits
+// deterministically against the fixed times of its events.
+func stamp(t *testing.T, p, at string) {
+	t.Helper()
+	mt, err := time.Parse(time.RFC3339, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, mt, mt); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A later Dispatch's launcher quarantines every prior Pass log of the issue,
+// but its box event names only the initial path; the older tab for a fix or
+// conflict-resolve log must still hear superseded.
+func TestLogOlderFixOrConflictLogQuarantinedByLaterDispatchIsSuperseded(t *testing.T) {
+	cases := []struct{ name, path, phase string }{
+		{"fix pass", ".spindrift/logs/issue-42-fix-1.log", "fix-pass-1"},
+		{"conflict resolve", ".spindrift/logs/issue-42-conflict-resolve.log", "conflict-resolve"},
+	}
+	for _, tc := range cases {
+		for _, newerSlot := range []int{0, 1} {
+			t.Run(fmt.Sprintf("%s newer slot %d", tc.name, newerSlot), func(t *testing.T) {
+				ts, checkout := logServer(t)
+				initial := ".spindrift/logs/issue-42.log"
+				appendTo(t, eventsOf(checkout),
+					slotLine("box", 0, "2026-10-07T12:03:05Z", `,"phase":"`+tc.phase+`","issue":"42","pass_log":"`+tc.path+`"`)+
+						slotLine("child_finish", 0, "2026-10-07T12:30:00Z", `,"exit":0`)+
+						slotLine("child_start", newerSlot, newerAt, `,"child_log":"logs/newer.log"`)+
+						slotLine("box", newerSlot, "2026-10-07T13:00:05Z", `,"phase":"initial","issue":"42","pass_log":"`+initial+`"`))
+				p := writeLog(t, checkout, tc.path, "old run\n")
+				stamp(t, p, "2026-10-07T12:20:00Z")
+				if err := os.Rename(p, p+".prior-run.1"); err != nil {
+					t.Fatal(err)
+				}
+
+				_, st := openLogQuery(t, ts, ownerQuery(tc.path, 0, olderAt, 0))
+				st.expect(t, "superseded", tc.path)
+				wantClosed(t, st)
+			})
+		}
+	}
+}
+
+func TestLogFinishedOwnerQuarantinedBeforeNewBoxEventIsSuperseded(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+	p := writeLog(t, checkout, pass, "old run\n")
+	stamp(t, p, "2026-10-07T12:03:07Z")
+	if err := os.Rename(p, p+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	st.expect(t, "superseded", pass)
+	wantClosed(t, st)
+}
+
+func TestLogFollowingTabSupersededWhenFinishedOwnerQuarantined(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass))
+	p := writeLog(t, checkout, pass, "old run\n")
+	stamp(t, p, "2026-10-07T12:03:07Z")
+	_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+	collect(t, st, "old run")
+
+	appendTo(t, eventsOf(checkout), childFinishLine())
+	if err := os.Rename(p, p+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	text, events := drainFrames(t, st)
+	if text != "" || len(events) != 1 || events[0] != "superseded" {
+		t.Fatalf("after the old bytes: log %q, frames %v; want [superseded]", text, events)
+	}
+}
+
+// A .prior-run sibling is only this owner's own copy when written at or after
+// the owner named the path; earlier Dispatches' leftovers, and names that are
+// not a quarantine suffix, leave a missing log pruned.
+func TestLogMissingFileWithoutOwnQuarantineSiblingIsPruned(t *testing.T) {
+	cases := []struct{ name, sibling, stampAt string }{
+		{"older dispatch's copy", "issue-42.log.prior-run.1", "2026-10-07T12:00:00Z"},
+		{"non-digit suffix", "issue-42.log.prior-run.x", "2026-10-07T12:20:00Z"},
+		{"no suffix number", "issue-42.log.prior-run.", "2026-10-07T12:20:00Z"},
+		{"other issue", "issue-43.log.prior-run.1", "2026-10-07T12:20:00Z"},
+		{"no sibling", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ts, checkout := logServer(t)
+			pass := ".spindrift/logs/issue-42.log"
+			appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+			if tc.sibling != "" {
+				p := writeLog(t, checkout, ".spindrift/logs/"+tc.sibling, "other run\n")
+				stamp(t, p, tc.stampAt)
+			}
+			_, st := openLogQuery(t, ts, ownerQuery(pass, 0, olderAt, 0))
+			st.expect(t, "pruned", pass)
+			wantClosed(t, st)
+		})
+	}
+}

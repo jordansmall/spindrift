@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -22,6 +23,63 @@ type logOwner struct {
 	key  dispatchKey
 }
 
+// logStatus is what the Events file says about one Pass or Child log path; see
+// logState.
+type logStatus struct {
+	named, finished, superseded bool
+	// owned is set when the status was read for a Dispatch (a non-nil owner).
+	owned bool
+	// namedAt is when the latest naming event that set named happened, and
+	// finishedAt when the slot event (a child_finish, or a later child_start)
+	// that set finished did. Event times are second-precision RFC3339; either is
+	// zero when unset or unparsable.
+	namedAt, finishedAt time.Time
+}
+
+// eventTime parses an Event's time, or returns the zero time.
+func eventTime(ev Event) time.Time {
+	t, err := time.Parse(time.RFC3339, ev.Time)
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
+// supersededAt reports whether a Dispatch's tab must answer superseded for the
+// file at full: another Dispatch named the path, or a later run quarantined
+// this finished owner's file. A later Dispatch's launcher moves every prior
+// Pass log of the issue aside as <path>.prior-run.N, but its box event names
+// only the initial path and may land after the rename. The rename keeps mtime,
+// so a sibling written at or after this owner named the path is its own copy;
+// siblings left by earlier Dispatches are older. Only a Dispatch's tab gets
+// this; a nil owner never reports superseded.
+func (st logStatus) supersededAt(full string) bool {
+	if !st.owned {
+		return false
+	}
+	if st.superseded {
+		return true
+	}
+	if !st.finished || st.namedAt.IsZero() {
+		return false
+	}
+	entries, err := os.ReadDir(filepath.Dir(full))
+	if err != nil {
+		return false
+	}
+	prefix := filepath.Base(full) + ".prior-run."
+	for _, e := range entries {
+		n, ok := strings.CutPrefix(e.Name(), prefix)
+		if !ok || n == "" || strings.Trim(n, "0123456789") != "" {
+			continue
+		}
+		if info, err := e.Info(); err == nil && !info.ModTime().Before(st.namedAt) {
+			return true
+		}
+	}
+	return false
+}
+
 // logState reports whether the Daemon announced path, and whether the child
 // that owns it has finished. A child_start names it as its child_log and a box
 // as its pass_log; only a path the Daemon announced is served, so the query
@@ -29,6 +87,8 @@ type logOwner struct {
 // finished once its slot saw a child_finish, or a later child_start (a Daemon
 // that died without one). The latest naming wins, and a naming that carries no
 // slot cannot be followed to a finish, so it counts as finished already.
+// namedAt and finishedAt are the times of the events that set named and
+// finished.
 //
 // Pass log paths are fixed per issue or Chore, so a later Dispatch reuses the
 // path an earlier one named. With a non-nil owner the answers are that
@@ -36,7 +96,8 @@ type logOwner struct {
 // slot has since finished, and superseded means a different Dispatch (on any
 // slot) named path after it, so the file at path is no longer its run's. A nil
 // owner never reports superseded.
-func (s *server) logState(path string, owner *logOwner) (named, finished, superseded bool) {
+func (s *server) logState(path string, owner *logOwner) logStatus {
+	st := logStatus{owned: owner != nil}
 	var slot *int
 	owners := dispatchOwners{}
 	var e historyEntry // claim's required out-param; only owners is read
@@ -46,23 +107,28 @@ func (s *server) logState(path string, owner *logOwner) (named, finished, supers
 			(ev.Event == "box" && ev.PassLog == path)
 		switch {
 		case naming && owner == nil:
-			named, finished, slot = true, ev.Slot == nil, ev.Slot
+			st.named, st.finished, slot = true, ev.Slot == nil, ev.Slot
+			st.namedAt, st.finishedAt = eventTime(ev), time.Time{}
 			return
 		case naming && ev.Slot != nil && *ev.Slot == owner.slot &&
 			owners[*ev.Slot] == owner.key:
 			// The owner is the latest namer again, so the file is its run's after all.
-			named, finished, superseded, slot = true, false, false, ev.Slot
+			st.named, st.finished, st.superseded, slot = true, false, false, ev.Slot
+			st.namedAt, st.finishedAt = eventTime(ev), time.Time{}
 			return
 		case naming:
-			superseded = superseded || named
+			st.superseded = st.superseded || st.named
 			return
 		}
-		if named && slot != nil && ev.Slot != nil && *ev.Slot == *slot &&
+		if st.named && slot != nil && ev.Slot != nil && *ev.Slot == *slot &&
 			(ev.Event == "child_finish" || ev.Event == "child_start") {
-			finished = true
+			if !st.finished {
+				st.finishedAt = eventTime(ev)
+			}
+			st.finished = true
 		}
 	})
-	return named, finished, superseded
+	return st
 }
 
 // serveLog streams one Child log or Pass log as Server-Sent Events: its
@@ -98,8 +164,8 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	named, finished, superseded := s.logState(path, owner)
-	if !named {
+	st := s.logState(path, owner)
+	if !st.named {
 		http.NotFound(w, r)
 		return
 	}
@@ -117,7 +183,7 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	var err error
 	waited := false
 	for {
-		if superseded {
+		if st.superseded {
 			send("superseded", path)
 			return
 		}
@@ -125,8 +191,12 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		if !errors.Is(err, fs.ErrNotExist) {
 			break
 		}
-		if finished {
-			send("pruned", path)
+		if st.finished {
+			if st.supersededAt(full) {
+				send("superseded", path)
+			} else {
+				send("pruned", path)
+			}
 			return
 		}
 		if !waited {
@@ -142,9 +212,8 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		}
 		// A naming event that aged out of the Events file leaves nothing to create
 		// the file, so it counts as finished too.
-		var stillNamed, fin bool
-		stillNamed, fin, superseded = s.logState(path, owner)
-		finished = !stillNamed || fin
+		st = s.logState(path, owner)
+		st.finished = st.finished || !st.named
 	}
 	if err != nil {
 		log.Printf("dashboard: log %s: %v", path, err)
@@ -194,7 +263,7 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 		if statErr == nil {
 			if openInfo, openErr := f.Stat(); openErr == nil && !os.SameFile(cur, openInfo) {
 				if owner != nil {
-					if _, fin, sup := s.logState(path, owner); fin || sup {
+					if cur := s.logState(path, owner); cur.finished || cur.superseded {
 						if drain() {
 							send("superseded", path)
 						}
@@ -203,11 +272,11 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else if errors.Is(statErr, fs.ErrNotExist) {
-			if stillNamed, fin, sup := s.logState(path, owner); sup || !stillNamed || fin {
+			if cur := s.logState(path, owner); cur.superseded || !cur.named || cur.finished {
 				// The child may have appended its last bytes and finished, and the
 				// file been deleted, within one poll; the open descriptor still has them.
 				if drain() {
-					if sup {
+					if cur.supersededAt(full) {
 						send("superseded", path)
 					} else {
 						send("pruned", path)
