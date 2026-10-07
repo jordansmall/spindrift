@@ -7828,11 +7828,14 @@ the Events file while the page waits on it. A `child_start` without
 After it comes one tab per Pass log, labelled with its phase, in the
 order the Dispatch's `box` events named them (`pass_log`); a retry that
 names the same file again adds no second tab. A Pass log tab follows
-its log the same way from `/log?path=<pass_log>`, starting when the tab
-is first shown, with the same ANSI rendering, scroll-back, and notes,
-but shows every line, since a Pass log is mostly the Box's
-stream-JSON. Butler Dispatches get the same tabs, named by their
-Chore-keyed `box` events.
+its log the same way from `/log?path=<pass_log>`, with the same ANSI
+rendering, scroll-back, and notes, but shows every line, since a Pass
+log is mostly the Box's stream-JSON. Every log tab, the Child log's
+included, streams only while it is shown: hiding it closes the stream
+(browsers cap HTTP/1.1 at six connections per host, which a Dispatch
+with several fix passes would otherwise exceed), and showing it again
+replays the log from the start. Butler Dispatches get the same tabs,
+named by their Chore-keyed `box` events.
 
 Slot cards, timeline rows and the drill-in link the issue chip to
 `<repo_url>/issues/<n>` (`repo_url` from the status file) and show a `PR`
