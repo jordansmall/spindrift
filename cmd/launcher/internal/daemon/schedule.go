@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"slices"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -31,7 +32,8 @@ type NextDue = report.NextDue
 // work-or-not answer comes from a Demand count; interval == 0 keeps the
 // exit-driven backoff semantics: both exit 2 and exit 3 back off, Continue
 // resets, a moved tip resets only a jam. A probed kind keeps probing under a
-// jam gate, since a count above readyAtJam lifts it.
+// jam gate, since a count above readyAtJam lifts it (an upper-bound kind also
+// lifts on an item its baseline lacks).
 //
 // A reported kind (the descriptor's DemandChildReported) is exit-driven
 // until a child reports when it next has work: then it waits for that
@@ -63,6 +65,9 @@ type kindSched struct {
 	// an upper-bound kind it also holds the no-work baseline: the count at the
 	// exit 2 that grew the gate.
 	readyAtJam int
+	// idsAtJam names the items behind that no-work baseline; nil when the
+	// source counts without naming them.
+	idsAtJam []string
 
 	// readyUnconfirmed is set while ready carries an adjustment no accepted
 	// probe has confirmed: a Claimed's decrement or a child's exit 2 zeroing it.
@@ -77,6 +82,9 @@ type kindSched struct {
 	// ready is also zeroed by a child's exit 2, which is no tracker
 	// observation, so zero crossings compare against this instead.
 	counted int
+	// countedIDs names counted's items. Replaced whole, never edited in place:
+	// Schedule is a value and Observe copies its map shallowly.
+	countedIDs []string
 
 	// claims counts the Claimed events folded into this kind, so a probe can
 	// tell whether one landed while it was in flight.
@@ -97,6 +105,16 @@ type kindSched struct {
 	// fault is how the kind's own last probe ended, so the pool announces
 	// transitions rather than every repeat.
 	fault probeFault
+}
+
+// subset reports whether every id is in of.
+func subset(ids, of []string) bool {
+	for _, id := range ids {
+		if !slices.Contains(of, id) {
+			return false
+		}
+	}
+	return true
 }
 
 // probeFault is how a kind's last probe ended.
@@ -180,7 +198,9 @@ type DemandProbed struct {
 	Ready int
 	// Claims is the kind's claim count when the probe began.
 	Claims int
-	Fresh  bool // the probe skipped any adapter cache
+	// IDs names the counted items when the source can; nil for a count-only one.
+	IDs   []string
+	Fresh bool // the probe skipped any adapter cache
 }
 
 // DemandFailed: a probe of Kind errored.
@@ -360,7 +380,7 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	case ChildDone:
 		ks = ks.childDone(now, e.Result, e.NextDue, e.GateGen)
 	case DemandProbed:
-		ks.ready, ks.counted, ks.fault = e.Ready, e.Ready, probeClean
+		ks.ready, ks.counted, ks.countedIDs, ks.fault = e.Ready, e.Ready, e.IDs, probeClean
 		// A claim that landed mid-probe moved the count after it was read, so
 		// stay stale (the Claimed zeroed probedAt) and re-probe, and never
 		// lift a jam on that pre-claim count.
@@ -368,21 +388,29 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 			ks.probedAt = now
 			ks.readyUnconfirmed = false
 			// More ready than when the jam was recorded means someone added
-			// work, which a fall or a steady count is no evidence of. Strictly
-			// greater: the same count says the jam's cause is still there. An
-			// ended gate has nothing to lift, and a reset would wipe its streak.
+			// work, which a fall or a steady count is no evidence of (an
+			// upper-bound kind also lifts on a new identity at any count).
+			// Strictly greater: the same count says the jam's cause is still
+			// there. An ended gate has nothing to lift, and a reset would wipe
+			// its streak.
 			switch {
 			case ks.jamBaselinePending:
 				// This probe is the baseline, not a rise against one. A genuine
 				// rise landing between the jam and this probe is absorbed into
 				// it; a moved tip or the jam's expiry still covers that. No
 				// jamGated check: readyAtJam is only read under a live gate.
-				ks.readyAtJam, ks.jamBaselinePending = e.Ready, false
+				ks.readyAtJam, ks.idsAtJam, ks.jamBaselinePending = e.Ready, e.IDs, false
+			case ks.upperBound && ks.gated(now):
+				// A bundle can replace a declined one between two probes and leave
+				// the count flat, so lift on any identity the baseline lacks.
+				// Otherwise narrow the baseline: an item that left and returns is new.
+				if e.Ready > ks.readyAtJam || !subset(e.IDs, ks.idsAtJam) {
+					ks.gate = ks.gate.reset()
+				} else {
+					ks.readyAtJam, ks.idsAtJam = e.Ready, e.IDs
+				}
 			case ks.gated(now) && e.Ready > ks.readyAtJam:
 				ks.gate = ks.gate.reset()
-			case ks.upperBound && ks.gated(now) && e.Ready < ks.readyAtJam:
-				// A fall means the gated item left, so a later rise is a new one.
-				ks.readyAtJam = e.Ready
 			}
 		}
 		// Only a fresh probe answers the pending force: a conditional one
@@ -478,9 +506,10 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen 
 		}
 		if k.upperBound && k.counted > 0 {
 			// A count with nothing landable behind it would restart a child every
-			// interval; back off, lifting only on a count above this one.
+			// interval; back off, lifting only on an item not in this count.
 			k.gate = k.gate.markNoWorkUnder(now, false /* jammed */, gateGen)
 			k.readyAtJam, k.jamBaselinePending = k.counted, false
+			k.idsAtJam = k.countedIDs
 			break
 		}
 		// The child's answer is a fresh observation: one interval of rest,
@@ -495,7 +524,7 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen 
 		// without decrementing.
 		k.jamBaselinePending = k.readyUnconfirmed
 		if !k.jamBaselinePending {
-			k.readyAtJam = k.ready
+			k.readyAtJam, k.idsAtJam = k.ready, k.countedIDs
 		}
 	}
 	return k

@@ -153,7 +153,7 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 		// before.Counted is zero when never probed, so a first probe finding
 		// work reads as appearing and one finding none as nothing at all.
 		before := s.sched.View(kind, now)
-		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh})
+		s.observe(now, DemandProbed{Kind: kind, Ready: d.Ready, Claims: claims, Fresh: fresh, IDs: d.IDs})
 		var evs []Event
 		if before.fault != probeClean {
 			evs = append(evs, Event{Event: "probe_resumed", Kind: kind, Slot: intPtr(slot), Tracker: before.Tracker})
@@ -165,7 +165,8 @@ func (p *pool) probeKind(ctx context.Context, slot int, kind Kind) (led bool, er
 			evs = append(evs, Event{Event: "demand_drained", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
 		}
 		// This mutate observes only the probe, so a jam gate live before it
-		// and gone after it was lifted by the probe's rise.
+		// and gone after it was lifted by the probe: a rise, or for an
+		// upper-bound kind a new identity.
 		if !before.JamUntil.IsZero() && s.sched.View(kind, now).JamUntil.IsZero() {
 			evs = append(evs, Event{Event: "demand_rose", Kind: kind, Slot: intPtr(slot), Ready: intPtr(d.Ready)})
 		}

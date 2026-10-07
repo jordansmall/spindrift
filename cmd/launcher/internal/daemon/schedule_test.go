@@ -1361,6 +1361,41 @@ func TestScheduleUpperBoundGateHoldsAndLiftsOnRise(t *testing.T) {
 	})
 }
 
+// A bundle identity the backoff has not seen lifts the gate whatever the
+// count does (issue #4705).
+func TestScheduleUpperBoundGateLiftsOnNewIdentity(t *testing.T) {
+	gated := func() Schedule {
+		s := upperBoundSchedule()
+		s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedRecover, Ready: 2, IDs: []string{"1@a", "2@b"}})
+		s = schedObserve(t, s, schedT0, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+		return schedObserve(t, s, schedAt(schedFloor), ChildDone{Kind: schedRecover, Result: ChildEmpty})
+	}
+	now := schedAt(schedFloor + schedFloor/2)
+	probe := func(ready int, ids ...string) SchedEvent {
+		return DemandProbed{Kind: schedRecover, Ready: ready, IDs: ids}
+	}
+	for _, tt := range []struct {
+		name      string
+		probes    []SchedEvent
+		wantStart bool
+	}{
+		{"same identities", []SchedEvent{probe(2, "1@a", "2@b")}, false},
+		{"one swapped at the same count", []SchedEvent{probe(2, "1@a", "2@c")}, true},
+		{"same key with a new bundle", []SchedEvent{probe(2, "1@z", "2@b")}, true},
+		{"subset", []SchedEvent{probe(1, "1@a")}, false},
+		{"subset then a new identity", []SchedEvent{probe(1, "1@a"), probe(2, "1@a", "3@c")}, true},
+		{"subset then the dropped one returns", []SchedEvent{probe(1, "1@a"), probe(2, "1@a", "2@b")}, true},
+		{"emptied then a replacement", []SchedEvent{probe(0), probe(1, "3@c")}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := schedObserve(t, gated(), now, tt.probes...)
+			if _, started := s.Decide(now, Occupancy{}).(Start); started != tt.wantStart {
+				t.Fatalf("started = %v, want %v", started, tt.wantStart)
+			}
+		})
+	}
+}
+
 func TestScheduleUpperBoundGateParksUntilItEnds(t *testing.T) {
 	s := upperBoundSchedule()
 	s = schedObserve(t, s, schedT0, DemandProbed{Kind: schedWork, Ready: 0}, DemandProbed{Kind: schedRecover, Ready: 1})
