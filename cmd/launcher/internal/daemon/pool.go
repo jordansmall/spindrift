@@ -65,6 +65,13 @@ type state struct {
 	sched     Schedule
 	batonSlot int
 
+	// lastStart is each slot's latest child_start, kept on state rather than
+	// slotFlight because finishChild zeroes the flight. It starts empty per
+	// process, so a restart that starts a child in the same second as the
+	// prior process's last child_start publishes n=0 where the dashboard,
+	// counting both Events generations, numbers it 1: an accepted gap.
+	lastStart []childStartPin
+
 	// tip is the last revision a resolution observed as moved, and
 	// continues counts each kind's children that ended Continue. A child's
 	// not_due report is only as fresh as these were when it started: see
@@ -80,6 +87,13 @@ type state struct {
 	// sleep on pctx too.
 	wake       context.Context
 	wakeCancel context.CancelFunc
+}
+
+// childStartPin is a child_start's time string and its ordinal among the
+// slot's child_starts sharing that string.
+type childStartPin struct {
+	time string
+	n    int
 }
 
 // wakeParked ends the current wake generation, waking every slot parked on
@@ -291,6 +305,8 @@ type slotFlight struct {
 	continues int
 	// gateGen is the kind's Schedule.gateGenOf when the child started.
 	gateGen int
+	// childStart pins the child_start event; see startChild.
+	childStart childStartPin
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -318,6 +334,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		cancel: cancel,
 		st: state{
 			slots:     slots,
+			lastStart: make([]childStartPin, cfg.Slots),
 			b:         newBreaker(cfg.BreakerThreshold, cfg.BreakerWindow),
 			sched:     newSchedule(cfg.Kinds, cfg.ResearchReservation, cfg.IdleFloor, cfg.IdleCap, cfg.ProbeIntervals, cfg.Trackers),
 			batonSlot: leadSlot,
@@ -569,9 +586,19 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 			kind = provisional
 		}
 		ok = true
-		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind], gateGen: s.sched.gateGenOf(kind)}}
+		// The event's time is stamped here from this one clock read, not by
+		// the emitter, so the status's child_start matches it byte for byte;
+		// the ordinal follows the dashboard's dispatchOwners rule (prev is the
+		// slot's latest child_start), or its link 404s.
+		started := p.clk.Now().UTC().Format(time.RFC3339)
+		pin := childStartPin{time: started}
+		if prev := s.lastStart[slot]; prev.time == started {
+			pin.n = prev.n + 1
+		}
+		s.lastStart[slot] = pin
+		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind], gateGen: s.sched.gateGenOf(kind), childStart: pin}}
 		childLog = childLogPath(now, slot, kind)
-		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
+		return []Event{{Event: "child_start", Time: started, Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
 	})
 	return kind, childLog, ok
 }
@@ -1262,6 +1289,8 @@ func (p *pool) snapshotLocked() Status {
 		}
 		slots[i].Kind = ss.flight.kind
 		slots[i].Revision = ss.flight.revision
+		slots[i].ChildStart = ss.flight.childStart.time
+		slots[i].ChildStartN = ss.flight.childStart.n
 		_, slots[i].Chore = ss.flight.key.Fields()
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot

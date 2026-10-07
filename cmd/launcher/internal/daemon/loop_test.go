@@ -1956,6 +1956,62 @@ func TestLoopPublishesSlotSince(t *testing.T) {
 	}
 }
 
+// TestLoopPublishesChildStartPin asserts a running slot publishes the exact
+// time string of its child_start event and an ordinal that counts earlier
+// child_starts on the slot sharing it, so the dashboard link names the same
+// Dispatch the events file does. The emitter's clock differs from the pool's:
+// the time must come from the pool's one read, not the emitter's.
+func TestLoopPublishesChildStartPin(t *testing.T) {
+	dir := t.TempDir()
+	t0 := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	clk := &testClock{}
+	clk.setNow(t0)
+	sw := NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
+
+	var reads []StatusReport
+	r := &scriptedRunner{
+		revisions: []string{"rev1"},
+		results:   []ChildResult{{Exit: 0}, {Exit: 0}, {Exit: 5}},
+		onStart: func(ctx context.Context, req ChildRequest) error {
+			rep, err := ReadStatus(dir)
+			if err != nil {
+				t.Errorf("ReadStatus during RunChild: %v", err)
+			}
+			reads = append(reads, rep)
+			return nil
+		},
+	}
+	var buf bytes.Buffer
+	cfg := testConfig(1)
+	cfg.Status = sw
+	Loop(context.Background(), cfg, r, newTestEmitter(&buf), clk)
+
+	var starts []Event
+	for _, ev := range decodeEvents(t, &buf) {
+		if ev.Event == "child_start" {
+			starts = append(starts, ev)
+		}
+	}
+	if len(starts) != 3 || len(reads) != 3 {
+		t.Fatalf("child_starts = %d, reads = %d, want 3 each", len(starts), len(reads))
+	}
+	for i, ev := range starts {
+		if want := t0.Format(time.RFC3339); ev.Time != want {
+			t.Fatalf("child_start %d time = %q, want the pool clock %q", i, ev.Time, want)
+		}
+		if reads[i].Status == nil || len(reads[i].Status.Slots) != 1 {
+			t.Fatalf("read %d: status = %+v, want one slot", i, reads[i].Status)
+		}
+		slot := reads[i].Status.Slots[0]
+		if slot.ChildStart != ev.Time {
+			t.Errorf("read %d: child_start = %q, want event time %q", i, slot.ChildStart, ev.Time)
+		}
+		if slot.ChildStartN != i {
+			t.Errorf("read %d: child_start_n = %d, want %d (same-second starts on the slot)", i, slot.ChildStartN, i)
+		}
+	}
+}
+
 // TestLoopPublishesLiveStatus drives a Loop run with Config.Status pointed
 // at a temp dir and asserts the status file names the in-flight child's
 // kind/revision/issues while RunChild is still running, and that a valid

@@ -75,6 +75,11 @@ type SlotStatus struct {
 	// Only the name: a Chore's class, allow-list disposition, and promotion
 	// budget live in the Box and host-side settle config, never the pool.
 	Chore string `json:"chore,omitempty"`
+	// ChildStart and ChildStartN pin the running child's Dispatch as the
+	// dashboard names it: the time string of its child_start event, and how
+	// many earlier child_starts on this slot share that exact string.
+	ChildStart  string `json:"child_start,omitempty"`
+	ChildStartN int    `json:"child_start_n,omitempty"`
 }
 
 // Phase is one slot's own position in its iteration, published per slot
