@@ -75,9 +75,27 @@ func (st *stream) quiet(t *testing.T) {
 	}
 }
 
+func (st *stream) ended(t *testing.T) {
+	t.Helper()
+	select {
+	case f, ok := <-st.frames:
+		if ok {
+			t.Fatalf("stream still open, got %s frame:\n%s", f.event, f.data)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not end within 5s")
+	}
+}
+
 // openStream serves a temp checkout dir over httptest and connects to /events.
 // The status file starts as initial, or absent when empty.
 func openStream(t *testing.T, initial, events string) *stream {
+	t.Helper()
+	return openStreamAt(t, "/events", initial, events)
+}
+
+// openStreamAt is openStream for any SSE route, path including its query.
+func openStreamAt(t *testing.T, path, initial, events string) *stream {
 	t.Helper()
 	dir := t.TempDir()
 	alive := &atomic.Bool{}
@@ -96,7 +114,7 @@ func openStream(t *testing.T, initial, events string) *stream {
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 
-	resp, err := http.Get(ts.URL + "/events")
+	resp, err := http.Get(ts.URL + path)
 	if err != nil {
 		t.Fatal(err)
 	}

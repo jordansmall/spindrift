@@ -347,7 +347,7 @@ func TestDispatchListsChildLogThenPassLogsInEventOrder(t *testing.T) {
 	if strings.Contains(body, "old-pass") {
 		t.Error("an earlier Dispatch's Pass log leaked in")
 	}
-	if n := strings.Count(body, "issue-42.log"); n != 1 {
+	if n := strings.Count(low, `data-src="/log?path=.spindrift%2flogs%2fissue-42.log&`); n != 1 {
 		t.Errorf("repeated phase announced its Pass log %d times, want 1", n)
 	}
 }
@@ -398,5 +398,165 @@ func TestRowWithoutDispatchStillCarriesDatetime(t *testing.T) {
 	body := getHistory(t, &c, map[string]string{eventsFileName: events})
 	if want := `<time datetime="2026-10-07T08:00:00Z">2026-10-07T08:00:00Z</time>`; !strings.Contains(body, want) {
 		t.Errorf("missing %q in %s", want, body)
+	}
+}
+
+const liveStart = `{"time":"2026-10-07T10:00:00Z","event":"child_start","kind":"work","slot":0,"child_log":"logs/child.log"}
+{"time":"2026-10-07T10:00:05Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":"logs/one.log"}
+`
+
+const liveQuery = "/dispatch/events?slot=0&at=2026-10-07T10:00:00Z"
+
+func TestDispatchEventsSendsPassLogsAsTheyAppear(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "pass", `"phase":"initial"`, `"path":"logs/one.log"`)
+	st.quiet(t)
+
+	appendTo(t, st.events(), `{"time":"2026-10-07T10:01:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/two.log"}`+"\n")
+	st.expect(t, "pass", `"phase":"fix-pass-1"`, `"path":"logs/two.log"`)
+	st.quiet(t)
+}
+
+func TestDispatchEventsIgnoresRepeatsAndOtherSlots(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "pass", "logs/one.log")
+	appendTo(t, st.events(),
+		`{"time":"2026-10-07T10:00:06Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":"logs/one.log"}`+"\n"+
+			`{"time":"2026-10-07T10:00:07Z","event":"box","slot":1,"phase":"initial","issue":"7","pass_log":"logs/elsewhere.log"}`+"\n")
+	st.quiet(t)
+}
+
+func TestDispatchEventsClosesWhenALaterChildStartEndsTheDispatch(t *testing.T) {
+	for _, tc := range []struct{ name, query string }{
+		{"with at", liveQuery},
+		{"without at", "/dispatch/events?slot=0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := openStreamAt(t, tc.query, "", liveStart)
+			st.expect(t, "pass", "logs/one.log")
+			appendTo(t, st.events(),
+				`{"time":"2026-10-07T11:00:00Z","event":"child_start","kind":"work","slot":0}`+"\n"+
+					`{"time":"2026-10-07T11:00:05Z","event":"box","slot":0,"phase":"initial","issue":"43","pass_log":"logs/next.log"}`+"\n")
+			st.expect(t, "closed")
+			st.ended(t)
+		})
+	}
+}
+
+func TestDispatchEventsClosesWhenRotationDropsItsChildStart(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "pass", "logs/one.log")
+	if err := os.Remove(st.events() + rotatedSuffix); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	other := `{"time":"2026-10-07T12:00:00Z","event":"child_start","kind":"work","slot":1}` + "\n"
+	if err := os.WriteFile(st.events(), []byte(other), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsWithoutATimeClosesAfterItsPassLogs(t *testing.T) {
+	st := openStreamAt(t, "/dispatch/events?slot=0", "",
+		`{"event":"child_start","kind":"work","slot":0}`+"\n"+
+			`{"time":"2026-10-07T10:00:05Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":"logs/one.log"}`+"\n")
+	st.expect(t, "pass", "logs/one.log")
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsClosesOnChildFinishAfterSendingLastPassLog(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "pass", "logs/one.log")
+	appendTo(t, st.events(),
+		`{"time":"2026-10-07T10:02:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/two.log"}`+"\n"+
+			`{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":0}`+"\n")
+	st.expect(t, "pass", "logs/two.log")
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsAddsNoPassLogAfterChildFinish(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "pass", "logs/one.log")
+	appendTo(t, st.events(),
+		`{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":0}`+"\n"+
+			`{"time":"2026-10-07T10:03:05Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/late.log"}`+"\n")
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsClosedAtConnectSendsItsPassLogsThenCloses(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart+
+		`{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":0}`+"\n")
+	st.expect(t, "pass", "logs/one.log")
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsWithoutAtResolvesTheLatestOnConnect(t *testing.T) {
+	st := openStreamAt(t, "/dispatch/events?slot=0", "", dispatchEvents+
+		`{"time":"2026-10-07T10:06:00Z","event":"box","slot":0,"phase":"fix-pass-1","pass_log":"logs/late.log"}`+"\n")
+	st.expect(t, "pass", "logs/late.log")
+	st.quiet(t)
+}
+
+func TestDispatchEventsRejects(t *testing.T) {
+	dir := t.TempDir()
+	appendTo(t, filepath.Join(dir, eventsFileName), liveStart)
+	srv := newServer(dir, filepath.Join(dir, statusFileName))
+	for _, tc := range []struct {
+		method, query string
+		want          int
+	}{
+		{http.MethodHead, liveQuery, 405},
+		{http.MethodPost, liveQuery, 405},
+		{http.MethodGet, "/dispatch/events", 404},
+		{http.MethodGet, "/dispatch/events?slot=x", 404},
+		{http.MethodGet, "/dispatch/events?slot=0&at=junk", 404},
+		{http.MethodGet, liveQuery + "&n=-1", 404},
+		{http.MethodGet, liveQuery + "&n=1", 404},
+		{http.MethodGet, "/dispatch/events?slot=0&at=2026-10-07T10:00:01Z", 404},
+		{http.MethodGet, "/dispatch/events?slot=3", 404},
+	} {
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.query, nil))
+		if rec.Code != tc.want {
+			t.Errorf("%s %s = %d, want %d", tc.method, tc.query, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestDispatchPageCarriesItsLiveIdentity(t *testing.T) {
+	want := `data-events="/dispatch/events?slot=0&amp;at=2026-10-07T10%3A00%3A00Z&amp;n=0"`
+	for _, q := range []string{"?slot=0", "?slot=0&at=2026-10-07T10:00:00Z"} {
+		_, body := getDispatch(t, liveStart, q)
+		if !strings.Contains(body, want) {
+			t.Errorf("%s: page lacks %s in\n%s", q, want, body)
+		}
+	}
+	_, body := getDispatch(t, liveStart, "?slot=0")
+	if !strings.Contains(body, `data-pass-log="logs/one.log"`) {
+		t.Errorf("pass section lacks data-pass-log in\n%s", body)
+	}
+}
+
+func TestDispatchPageOmitsEventsOnceClosed(t *testing.T) {
+	for _, tc := range []struct{ name, events string }{
+		{"finished", liveStart + `{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"exit":0}` + "\n"},
+		{"replaced", liveStart + `{"time":"2026-10-07T11:00:00Z","event":"child_start","kind":"work","slot":0}` + "\n"},
+	} {
+		_, body := getDispatch(t, tc.events, "?slot=0&at=2026-10-07T10:00:00Z")
+		if strings.Contains(body, "data-events") {
+			t.Errorf("%s: closed Dispatch still names a stream:\n%s", tc.name, body)
+		}
+	}
+}
+
+func TestDispatchPageWithoutAStartTimeNamesNoStream(t *testing.T) {
+	_, body := getDispatch(t, `{"event":"child_start","kind":"work","slot":0}`+"\n", "?slot=0")
+	if strings.Contains(body, "data-events") {
+		t.Errorf("page with an unnameable child_start names a stream:\n%s", body)
 	}
 }
