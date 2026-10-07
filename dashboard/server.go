@@ -137,13 +137,15 @@ type kindView struct {
 }
 
 type slotView struct {
-	Slot    int
-	Phase   string
-	Busy    bool
-	Kind    string
-	Subject []string
-	Rev     string
-	Elapsed string
+	Slot        int
+	Phase       string
+	Busy        bool
+	Kind        string
+	Subject     []string
+	Rev         string
+	Elapsed     string
+	ChildStart  string
+	ChildStartN int
 }
 
 // buildView reads the status file afresh; viewFrom is the part a stream can
@@ -209,7 +211,7 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		if sl.Busy {
 			v.Busy++
 		}
-		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Rev: shortRev(sl.Revision), Elapsed: "unknown"}
+		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Rev: shortRev(sl.Revision), Elapsed: "unknown", ChildStart: sl.ChildStart, ChildStartN: sl.ChildStartN}
 		for _, is := range sl.Issues {
 			sv.Subject = append(sv.Subject, issueLabel(is))
 		}

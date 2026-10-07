@@ -57,6 +57,10 @@ type SlotStatus struct {
 	Revision string   `json:"revision,omitempty"`
 	Issues   []string `json:"issues,omitempty"`
 	Chore    string   `json:"chore,omitempty"`
+	// ChildStart is the exact time string of a running slot's child_start event;
+	// ChildStartN counts earlier child_starts on the slot sharing that string.
+	ChildStart  string `json:"child_start,omitempty"`
+	ChildStartN int    `json:"child_start_n,omitempty"`
 }
 
 // KindCheck is the Daemon's per-kind next-check, jam and Demand state.
