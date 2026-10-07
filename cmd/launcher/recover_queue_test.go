@@ -15,6 +15,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/seambundle"
 	"spindrift.dev/launcher/internal/settle"
@@ -102,19 +103,19 @@ func (x *queueRecoverFixture) assertUntouched(t *testing.T) {
 
 // seedRecord saves seed as num's attempt record; an empty seed.Bundle means the
 // issue's current outbox bundle.
-func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverAttempts) {
+func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverrecord.Record) {
 	t.Helper()
 	bundle := seed.Bundle
 	if bundle == "" {
-		id, err := recoverBundleID(x.dir, num)
+		id, err := recoverrecord.BundleID(x.dir, num)
 		if err != nil {
 			t.Fatal(err)
 		}
 		bundle = id
 	}
-	rec := loadRecoverAttempts(x.dir, num, bundle)
+	rec := recoverrecord.Load(x.dir, num, bundle)
 	rec.Count, rec.Last, rec.GaveUp, rec.LastError = seed.Count, seed.Last, seed.GaveUp, seed.LastError
-	if err := rec.save(); err != nil {
+	if err := rec.Save(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -396,11 +397,11 @@ func TestRecoverQueueOne_StopDuringFailedSettleParksAndExitsSeven(t *testing.T) 
 	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
 		t.Errorf("labels = %v, want %q and not %q", got, x.c.failedLabel, x.c.inProgressLabel)
 	}
-	id, err := recoverBundleID(x.dir, "42")
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 1 {
+	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != 1 {
 		t.Errorf("attempt count = %d, want 1", rec.Count)
 	}
 }
@@ -448,11 +449,11 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 			t.Errorf("labels = %v, want no %q", got, unwanted)
 		}
 	}
-	id, err := recoverBundleID(x.dir, "42")
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 0 {
+	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != 0 {
 		t.Errorf("attempt count = %d, want 0", rec.Count)
 	}
 }
@@ -490,7 +491,7 @@ func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testin
 	if slices.Contains(got, x.c.inProgressLabel) {
 		t.Errorf("labels = %v, want no %q", got, x.c.inProgressLabel)
 	}
-	id, err := recoverBundleID(x.dir, "42")
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -500,7 +501,7 @@ func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testin
 	} else if !slices.Contains(got, x.c.label) {
 		t.Errorf("labels = %v, want parked %q or dispatchable %q", got, x.c.failedLabel, x.c.label)
 	}
-	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != want {
+	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != want {
 		t.Errorf("attempt count = %d, want %d (labels %v)", rec.Count, want, got)
 	}
 }
@@ -510,7 +511,7 @@ func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testin
 func TestRecoverQueueOne_AbortAfterLandingSettleRemovesRecordAndExitsSeven(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-time.Hour)})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-time.Hour)})
 	_, abort := withControlledSignals(t)
 	s := abortAfterSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort}
 
@@ -519,7 +520,7 @@ func TestRecoverQueueOne_AbortAfterLandingSettleRemovesRecordAndExitsSeven(t *te
 	if code != exitSignalledStop {
 		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
 	}
-	if _, err := os.Stat(recoverAttemptsPath(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(recoverrecord.Path(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("record stat err = %v, want not-exist", err)
 	}
 }
@@ -527,7 +528,7 @@ func TestRecoverQueueOne_AbortAfterLandingSettleRemovesRecordAndExitsSeven(t *te
 func TestRecoverQueueOne_StopDuringLandingSettleRemovesRecordAndExitsSeven(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-time.Hour)})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-time.Hour)})
 	stop := withControlledStop(t)
 	s := stopInSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), stop: stop}
 
@@ -536,7 +537,7 @@ func TestRecoverQueueOne_StopDuringLandingSettleRemovesRecordAndExitsSeven(t *te
 	if code != exitSignalledStop {
 		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
 	}
-	if _, err := os.Stat(recoverAttemptsPath(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(recoverrecord.Path(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("record stat err = %v, want not-exist", err)
 	}
 }
@@ -591,7 +592,7 @@ func TestRecoverQueueOne_StopAfterClaimFailedRestoreExitsOne(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	stop := withControlledStop(t)
-	id, err := recoverBundleID(x.dir, "42")
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -606,7 +607,7 @@ func TestRecoverQueueOne_StopAfterClaimFailedRestoreExitsOne(t *testing.T) {
 	if !slices.Contains(got, x.c.inProgressLabel) || slices.Contains(got, x.c.failedLabel) {
 		t.Errorf("labels = %v, want agent-in-progress and not agent-failed", got)
 	}
-	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 0 {
+	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != 0 {
 		t.Errorf("attempt count = %d, want 0", rec.Count)
 	}
 }
@@ -617,7 +618,7 @@ func TestRecoverQueueOne_FailedParkExitsOneAndKeepsRecord(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
-	id, err := recoverBundleID(x.dir, "42")
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +628,7 @@ func TestRecoverQueueOne_FailedParkExitsOneAndKeepsRecord(t *testing.T) {
 	if code != 1 {
 		t.Errorf("exit = %d, want 1", code)
 	}
-	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 1 {
+	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != 1 {
 		t.Errorf("attempt count = %d, want 1", rec.Count)
 	}
 }
@@ -869,7 +870,7 @@ func TestRecoverQueueOne_InsideBackoffWindowIsSkipped(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.c.transientBackoffSecs = 3600
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now()})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now()})
 
 	code, out := x.run(t)
 
@@ -889,7 +890,7 @@ func TestRecoverQueueOne_OutsideBackoffWindowIsAttempted(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.c.transientBackoffSecs = 3600
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-24 * time.Hour)})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-24 * time.Hour)})
 
 	code, _ := x.run(t)
 
@@ -1026,7 +1027,7 @@ func TestRecoverQueueOne_GiveUpCommentFailureIsRetriedOnce(t *testing.T) {
 func TestRecoverQueueOne_RecordPastBoundGetsOneComment(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 5, Last: time.Now().Add(-time.Hour)})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 5, Last: time.Now().Add(-time.Hour)})
 
 	for run := 1; run <= 2; run++ {
 		if code, _ := x.run(t); code != 2 {
@@ -1050,7 +1051,7 @@ func TestRecoverQueueOne_RecordPastBoundGetsOneComment(t *testing.T) {
 func TestRecoverQueueOne_RecordPastBoundNamesStoredCause(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 5, Last: time.Now().Add(-time.Hour), LastError: "relay bundle failed: relay: boom"})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 5, Last: time.Now().Add(-time.Hour), LastError: "relay bundle failed: relay: boom"})
 
 	if code, _ := x.run(t); code != 2 {
 		t.Fatalf("exit = %d, want 2", code)
@@ -1064,11 +1065,11 @@ func TestRecoverQueueOne_RecordPastBoundNamesStoredCause(t *testing.T) {
 // A record written before LastError existed must still load.
 func TestLoadRecoverAttempts_RecordWithoutLastErrorLoads(t *testing.T) {
 	dir := tempLogDir(t)
-	if err := os.WriteFile(recoverAttemptsPath(dir, "42"), []byte(`{"count":2,"last":"2026-01-02T03:04:05Z","bundle":"abc","gave_up":false}`), 0o644); err != nil {
+	if err := os.WriteFile(recoverrecord.Path(dir, "42"), []byte(`{"count":2,"last":"2026-01-02T03:04:05Z","bundle":"abc","gave_up":false}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	rec := loadRecoverAttempts(dir, "42", "abc")
+	rec := recoverrecord.Load(dir, "42", "abc")
 
 	if rec.Count != 2 || rec.LastError != "" {
 		t.Errorf("rec = %+v, want count 2 and no LastError", rec)
@@ -1108,7 +1109,7 @@ func TestRecoverQueueOne_UnsavableRecordStillParksAndFails(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
-	if err := os.Mkdir(recoverAttemptsPath(x.dir, "42"), 0o755); err != nil {
+	if err := os.Mkdir(recoverrecord.Path(x.dir, "42"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1132,7 +1133,7 @@ func TestRecoverQueueOne_GaveUpRecordStaysIneligibleAfterRaisedBound(t *testing.
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	x.fc.RelayBundleErr = errors.New("relay: boom")
-	x.seedRecord(t, "42", recoverAttempts{Count: 3, Last: time.Now().Add(-time.Hour), GaveUp: true})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 3, Last: time.Now().Add(-time.Hour), GaveUp: true})
 	x.c.maxRecoverAttempts = 4
 
 	if code, _ := x.run(t); code != 2 {
@@ -1155,8 +1156,8 @@ func TestRecoverQueueOne_GiveUpSaveFailureExitsOne(t *testing.T) {
 	}
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: x.c.maxRecoverAttempts, Last: time.Now().Add(-time.Hour)})
-	path := recoverAttemptsPath(x.dir, "42")
+	x.seedRecord(t, "42", recoverrecord.Record{Count: x.c.maxRecoverAttempts, Last: time.Now().Add(-time.Hour)})
+	path := recoverrecord.Path(x.dir, "42")
 	if err := os.Chmod(path, 0o444); err != nil {
 		t.Fatal(err)
 	}
@@ -1175,7 +1176,7 @@ func TestRecoverQueueOne_GiveUpSaveFailureExitsOne(t *testing.T) {
 func TestRecoverQueueOne_NewBundleResetsTheCount(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 3, Last: time.Now(), Bundle: "sha-of-an-older-bundle"})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 3, Last: time.Now(), Bundle: "sha-of-an-older-bundle"})
 
 	code, _ := x.run(t)
 
@@ -1190,13 +1191,13 @@ func TestRecoverQueueOne_NewBundleResetsTheCount(t *testing.T) {
 func TestRecoverQueueOne_SuccessRemovesRecord(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-time.Hour)})
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 1, Last: time.Now().Add(-time.Hour)})
 
 	if code, out := x.run(t); code != 0 {
 		t.Log(out)
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	if _, err := os.Stat(recoverAttemptsPath(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(recoverrecord.Path(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("record stat err = %v, want not-exist", err)
 	}
 }
@@ -1205,8 +1206,8 @@ func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	x.c.transientBackoffSecs = 3600
-	x.seedRecord(t, "42", recoverAttempts{Count: 3, Last: time.Now()})
-	before, err := os.ReadFile(recoverAttemptsPath(x.dir, "42"))
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 3, Last: time.Now()})
+	before, err := os.ReadFile(recoverrecord.Path(x.dir, "42"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1220,7 +1221,7 @@ func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 	if x.fc.Merged == "" {
 		t.Error("issue not merged")
 	}
-	after, err := os.ReadFile(recoverAttemptsPath(x.dir, "42"))
+	after, err := os.ReadFile(recoverrecord.Path(x.dir, "42"))
 	if err != nil || string(after) != string(before) {
 		t.Errorf("record changed: err=%v before=%q after=%q", err, before, after)
 	}
@@ -1231,12 +1232,12 @@ func TestRecoverByNumber_IgnoresAttemptRecord(t *testing.T) {
 func TestParkQueueFailure_NilErrorKeepsEarlierCause(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 2, Last: time.Now().Add(-time.Hour), LastError: "X"})
-	id, err := recoverBundleID(x.dir, "42")
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 2, Last: time.Now().Add(-time.Hour), LastError: "X"})
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := loadRecoverAttempts(x.dir, "42", id)
+	rec := recoverrecord.Load(x.dir, "42", id)
 
 	if err := parkQueueFailure(x.c, x.fc, "42", rec, nil, time.Now(), io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
@@ -1252,12 +1253,12 @@ func TestParkQueueFailure_NilErrorKeepsEarlierCause(t *testing.T) {
 func TestParkQueueFailure_NormalizesCause(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
-	x.seedRecord(t, "42", recoverAttempts{Count: 2, Last: time.Now().Add(-time.Hour)})
-	id, err := recoverBundleID(x.dir, "42")
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 2, Last: time.Now().Add(-time.Hour)})
+	id, err := recoverrecord.BundleID(x.dir, "42")
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := loadRecoverAttempts(x.dir, "42", id)
+	rec := recoverrecord.Load(x.dir, "42", id)
 	cause := "line one\n\tline two\n" + strings.Repeat("é", 400)
 	var out strings.Builder
 
@@ -1268,7 +1269,7 @@ func TestParkQueueFailure_NormalizesCause(t *testing.T) {
 	if strings.Count(out.String(), "\n") != 1 || !strings.Contains(out.String(), "line one line two ") {
 		t.Errorf("stdout = %q, want one line with whitespace collapsed", out.String())
 	}
-	saved := loadRecoverAttempts(x.dir, "42", id).LastError
+	saved := recoverrecord.Load(x.dir, "42", id).LastError
 	if len(saved) > maxCauseBytes+len("…") || !strings.HasSuffix(saved, "…") || !utf8.ValidString(saved) || strings.ContainsAny(saved, "\n\t") {
 		t.Errorf("stored cause = %q (%d bytes), want a single capped UTF-8 line", saved, len(saved))
 	}

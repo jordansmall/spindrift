@@ -6,7 +6,10 @@
 // internal/dispatch, which imports internal/report and would cycle.
 package dispatchkey
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Key identifies a Dispatch: either a tracker issue number or a butler
 // Chore name. Fields are unexported so no caller can construct a value with
@@ -22,12 +25,19 @@ func Issue(number string) Key { return Key{issue: number} }
 // Chore builds a Key for a butler Chore-keyed Dispatch (ADR 0056).
 func Chore(name string) Key { return Key{chore: name} }
 
-// String renders the key: the bare issue number, or "butler-" + chore name.
+// ChorePrefix leads the rendered form of every Chore Key.
+const ChorePrefix = "butler-"
+
+// IsChoreKey reports whether s is a rendered Chore Key, as opposed to a bare
+// issue number.
+func IsChoreKey(s string) bool { return strings.HasPrefix(s, ChorePrefix) }
+
+// String renders the key: the bare issue number, or ChorePrefix + chore name.
 // buildBoxEnv forwards it to the Box as DISPATCH_KEY, which
 // agent/entrypoint.sh and butler-prompt.md's OUTCOME line both read.
 func (k Key) String() string {
 	if k.chore != "" {
-		return "butler-" + k.chore
+		return ChorePrefix + k.chore
 	}
 	return k.issue
 }
