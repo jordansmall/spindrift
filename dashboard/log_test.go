@@ -44,7 +44,7 @@ func writeLog(t *testing.T, checkout, rel, content string) string {
 	return p
 }
 
-func openLog(t *testing.T, ts *httptest.Server, path string) (*http.Response, chan frame) {
+func openLog(t *testing.T, ts *httptest.Server, path string) (*http.Response, *stream) {
 	t.Helper()
 	resp, err := http.Get(ts.URL + "/log?path=" + url.QueryEscape(path))
 	if err != nil {
@@ -72,16 +72,16 @@ func openLog(t *testing.T, ts *httptest.Server, path string) (*http.Response, ch
 			}
 		}
 	}()
-	return resp, frames
+	return resp, &stream{frames: frames}
 }
 
 // collect joins log frames until the text so far contains want.
-func collect(t *testing.T, frames chan frame, want string) string {
+func collect(t *testing.T, st *stream, want string) string {
 	t.Helper()
 	var got strings.Builder
 	for !strings.Contains(got.String(), want) {
 		select {
-		case f, ok := <-frames:
+		case f, ok := <-st.frames:
 			if !ok {
 				t.Fatalf("stream closed; got %q, want %q", got.String(), want)
 			}
@@ -99,15 +99,15 @@ func collect(t *testing.T, frames chan frame, want string) string {
 func TestLogSendsExistingBytesThenAppends(t *testing.T) {
 	ts, checkout := logServer(t)
 	p := writeLog(t, checkout, testLogPath, "first\n")
-	resp, frames := openLog(t, ts, testLogPath)
+	resp, st := openLog(t, ts, testLogPath)
 	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
 		t.Fatalf("Content-Type = %q", ct)
 	}
-	if got := collect(t, frames, "first"); got != "first\n" {
+	if got := collect(t, st, "first"); got != "first\n" {
 		t.Fatalf("existing bytes = %q", got)
 	}
 	appendTo(t, p, "second\n")
-	if got := collect(t, frames, "second"); got != "second\n" {
+	if got := collect(t, st, "second"); got != "second\n" {
 		t.Fatalf("appended bytes = %q", got)
 	}
 }
@@ -117,7 +117,7 @@ func TestLogNotNamedOrNotLocalIs404(t *testing.T) {
 	writeLog(t, checkout, testLogPath, "x")
 	writeLog(t, checkout, ".spindrift/logs/daemon/other.log", "secret")
 	// Named by an event but escaping the checkout.
-	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), childStartLine("../../etc/passwd")+childStartLine("/etc/passwd"))
+	appendTo(t, eventsOf(checkout), childStartLine("../../etc/passwd")+childStartLine("/etc/passwd"))
 	for _, path := range []string{"", ".spindrift/logs/daemon/other.log", "../x", "../../etc/passwd", "/etc/passwd", testLogPath + "/../other.log"} {
 		resp, err := http.Get(ts.URL + "/log?path=" + url.QueryEscape(path))
 		if err != nil {
@@ -135,30 +135,126 @@ func TestLogNamedInRotatedGeneration(t *testing.T) {
 	other := ".spindrift/logs/daemon/old.log"
 	writeLog(t, checkout, other, "old\n")
 	appendTo(t, filepath.Join(checkout, ".git", eventsFileName+rotatedSuffix), childStartLine(other))
-	_, frames := openLog(t, ts, other)
-	collect(t, frames, "old")
+	_, st := openLog(t, ts, other)
+	collect(t, st, "old")
 }
 
-func TestLogMissingFileSendsPruned(t *testing.T) {
-	ts, _ := logServer(t)
-	resp, frames := openLog(t, ts, testLogPath)
+func childFinishLine() string {
+	return `{"time":"2026-10-07T12:03:09Z","event":"child_finish","kind":"work","slot":0,"exit":0}` + "\n"
+}
+
+func eventsOf(checkout string) string {
+	return filepath.Join(checkout, ".git", eventsFileName)
+}
+
+func wantClosed(t *testing.T, st *stream) {
+	t.Helper()
+	select {
+	case f, ok := <-st.frames:
+		if ok {
+			t.Fatalf("stream stayed open, got frame %+v", f)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream stayed open")
+	}
+}
+
+func TestLogMissingNamedWithoutSlotSendsPruned(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), `{"time":"2026-10-07T12:03:05Z","event":"box","pass_log":"`+pass+`"}`+"\n")
+	_, st := openLog(t, ts, pass)
+	st.expect(t, "pruned", pass)
+	wantClosed(t, st)
+}
+
+func TestLogMissingAfterFinishSendsPruned(t *testing.T) {
+	ts, checkout := logServer(t)
+	appendTo(t, eventsOf(checkout), childFinishLine())
+	resp, st := openLog(t, ts, testLogPath)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	f := <-frames
-	if f.event != "pruned" || f.data != testLogPath {
-		t.Fatalf("frame = %+v, want pruned %q", f, testLogPath)
+	st.expect(t, "pruned", testLogPath)
+	wantClosed(t, st)
+}
+
+func TestLogMissingWhileRunningWaitsThenStreams(t *testing.T) {
+	ts, checkout := logServer(t)
+	_, st := openLog(t, ts, testLogPath)
+	st.expect(t, "waiting", testLogPath)
+	st.quiet(t)
+	writeLog(t, checkout, testLogPath, "hello\n")
+	if got := collect(t, st, "hello"); got != "hello\n" {
+		t.Fatalf("bytes = %q", got)
 	}
-	if _, ok := <-frames; ok {
-		t.Fatal("stream stayed open after pruned")
+}
+
+func TestLogMissingPassLogWhileRunningWaitsThenStreams(t *testing.T) {
+	ts, checkout := logServer(t)
+	pass := ".spindrift/logs/issue-42.log"
+	appendTo(t, eventsOf(checkout), boxLine(pass))
+	_, st := openLog(t, ts, pass)
+	st.expect(t, "waiting", pass)
+	writeLog(t, checkout, pass, "pass line\n")
+	if got := collect(t, st, "pass line"); got != "pass line\n" {
+		t.Fatalf("bytes = %q", got)
 	}
+}
+
+func TestLogWaitingEndsPrunedWhenChildFinishes(t *testing.T) {
+	ts, checkout := logServer(t)
+	_, st := openLog(t, ts, testLogPath)
+	st.expect(t, "waiting", testLogPath)
+	appendTo(t, eventsOf(checkout), childFinishLine())
+	st.expect(t, "pruned", testLogPath)
+	wantClosed(t, st)
+}
+
+func TestLogLaterChildStartOnSlotCountsAsFinished(t *testing.T) {
+	ts, checkout := logServer(t)
+	appendTo(t, eventsOf(checkout), childStartLine(".spindrift/logs/daemon/next.log"))
+	_, st := openLog(t, ts, testLogPath)
+	st.expect(t, "pruned", testLogPath)
+	wantClosed(t, st)
+}
+
+func TestLogRenamedChildLogIsRunningAgain(t *testing.T) {
+	ts, checkout := logServer(t)
+	appendTo(t, eventsOf(checkout), childFinishLine()+childStartLine(testLogPath))
+	_, st := openLog(t, ts, testLogPath)
+	st.expect(t, "waiting", testLogPath)
+}
+
+func TestLogDeletedMidFollowAfterFinishSendsPruned(t *testing.T) {
+	ts, checkout := logServer(t)
+	p := writeLog(t, checkout, testLogPath, "last words\n")
+	_, st := openLog(t, ts, testLogPath)
+	collect(t, st, "last words")
+	appendTo(t, eventsOf(checkout), childFinishLine())
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	st.expect(t, "pruned", testLogPath)
+	wantClosed(t, st)
+}
+
+func TestLogDeletedMidFollowWhileRunningKeepsStreaming(t *testing.T) {
+	ts, checkout := logServer(t)
+	p := writeLog(t, checkout, testLogPath, "line\n")
+	_, st := openLog(t, ts, testLogPath)
+	collect(t, st, "line")
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	st.quiet(t)
 }
 
 func TestLogNeverSplitsARuneAcrossAppends(t *testing.T) {
 	ts, checkout := logServer(t)
 	p := writeLog(t, checkout, testLogPath, "a")
-	_, frames := openLog(t, ts, testLogPath)
-	collect(t, frames, "a")
+	_, st := openLog(t, ts, testLogPath)
+	collect(t, st, "a")
 	euro := "€" // e2 82 ac
 	f, err := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
@@ -166,13 +262,9 @@ func TestLogNeverSplitsARuneAcrossAppends(t *testing.T) {
 	}
 	defer f.Close()
 	f.WriteString(euro[:2])
-	select {
-	case fr := <-frames:
-		t.Fatalf("partial rune sent as %s frame %q", fr.event, fr.data)
-	case <-time.After(150 * time.Millisecond):
-	}
+	st.quiet(t)
 	f.WriteString(euro[2:])
-	if got := collect(t, frames, euro); got != euro {
+	if got := collect(t, st, euro); got != euro {
 		t.Fatalf("got %q, want %q", got, euro)
 	}
 }
@@ -194,8 +286,8 @@ func TestLogKeepsCRLFTogetherAcrossFrames(t *testing.T) {
 	// The CR is the last byte of the first read, the LF the first of the next.
 	head := strings.Repeat("a", logFrameMax-1)
 	writeLog(t, checkout, testLogPath, head+"\r\nb\n")
-	_, frames := openLog(t, ts, testLogPath)
-	if got := collect(t, frames, "b\n"); got != head+"\nb\n" {
+	_, st := openLog(t, ts, testLogPath)
+	if got := collect(t, st, "b\n"); got != head+"\nb\n" {
 		t.Fatalf("line break at the frame boundary = %q, want a single newline", got[len(head)-1:])
 	}
 }
@@ -207,28 +299,26 @@ func boxLine(path string) string {
 func TestLogServesPassLogNamedOnlyByBoxEvent(t *testing.T) {
 	ts, checkout := logServer(t)
 	pass := ".spindrift/logs/issue-42-fix-1.log"
-	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(pass))
+	appendTo(t, eventsOf(checkout), boxLine(pass))
 	writeLog(t, checkout, pass, "pass line\n")
-	_, frames := openLog(t, ts, pass)
-	if got := collect(t, frames, "pass line"); got != "pass line\n" {
+	_, st := openLog(t, ts, pass)
+	if got := collect(t, st, "pass line"); got != "pass line\n" {
 		t.Fatalf("bytes = %q", got)
 	}
 }
 
-func TestLogMissingPassLogSendsPruned(t *testing.T) {
+func TestLogMissingPassLogAfterFinishSendsPruned(t *testing.T) {
 	ts, checkout := logServer(t)
 	pass := ".spindrift/logs/issue-42.log"
-	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(pass))
-	_, frames := openLog(t, ts, pass)
-	if f := <-frames; f.event != "pruned" || f.data != pass {
-		t.Fatalf("frame = %+v, want pruned %q", f, pass)
-	}
+	appendTo(t, eventsOf(checkout), boxLine(pass)+childFinishLine())
+	_, st := openLog(t, ts, pass)
+	st.expect(t, "pruned", pass)
 }
 
 func TestLogPassLogNotNamedIs404(t *testing.T) {
 	ts, checkout := logServer(t)
 	writeLog(t, checkout, ".spindrift/logs/issue-42.log", "x")
-	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(".spindrift/logs/issue-42-fix-1.log"))
+	appendTo(t, eventsOf(checkout), boxLine(".spindrift/logs/issue-42-fix-1.log"))
 	resp, err := http.Get(ts.URL + "/log?path=" + url.QueryEscape(".spindrift/logs/issue-42.log"))
 	if err != nil {
 		t.Fatal(err)
@@ -242,10 +332,10 @@ func TestLogPassLogNotNamedIs404(t *testing.T) {
 func TestLogEndsStreamWhenRetryRotatesPassLogAside(t *testing.T) {
 	ts, checkout := logServer(t)
 	pass := ".spindrift/logs/issue-42.log"
-	appendTo(t, filepath.Join(checkout, ".git", eventsFileName), boxLine(pass))
+	appendTo(t, eventsOf(checkout), boxLine(pass))
 	p := writeLog(t, checkout, pass, "dead attempt\n")
-	_, frames := openLog(t, ts, pass)
-	collect(t, frames, "dead attempt")
+	_, st := openLog(t, ts, pass)
+	collect(t, st, "dead attempt")
 
 	if err := os.Rename(p, p+".1"); err != nil {
 		t.Fatal(err)
@@ -253,14 +343,40 @@ func TestLogEndsStreamWhenRetryRotatesPassLogAside(t *testing.T) {
 	writeLog(t, checkout, pass, "new attempt\n")
 	for open := true; open; {
 		select {
-		case _, open = <-frames:
+		case _, open = <-st.frames:
 		case <-time.After(5 * time.Second):
 			t.Fatal("stream stayed open after the Pass log was rotated aside")
 		}
 	}
 
-	_, frames = openLog(t, ts, pass)
-	if got := collect(t, frames, "new attempt"); got != "new attempt\n" {
+	_, st = openLog(t, ts, pass)
+	if got := collect(t, st, "new attempt"); got != "new attempt\n" {
 		t.Fatalf("reconnect bytes = %q", got)
 	}
+}
+
+func TestLogWaitingEndsPrunedWhenNamingEventAgesOut(t *testing.T) {
+	ts, checkout := logServer(t)
+	_, st := openLog(t, ts, testLogPath)
+	st.expect(t, "waiting", testLogPath)
+	if err := os.WriteFile(eventsOf(checkout), []byte(childStartLine(".spindrift/logs/daemon/other.log")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st.expect(t, "pruned", testLogPath)
+	wantClosed(t, st)
+}
+
+func TestLogFollowEndsPrunedWhenNamingEventAgesOut(t *testing.T) {
+	ts, checkout := logServer(t)
+	p := writeLog(t, checkout, testLogPath, "line\n")
+	_, st := openLog(t, ts, testLogPath)
+	collect(t, st, "line")
+	if err := os.WriteFile(eventsOf(checkout), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	st.expect(t, "pruned", testLogPath)
+	wantClosed(t, st)
 }
