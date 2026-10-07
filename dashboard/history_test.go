@@ -215,3 +215,133 @@ func TestHistoryCapKeepsNewest(t *testing.T) {
 		t.Errorf("oldest entry survived the cap")
 	}
 }
+
+func evLine(ts, event string) string {
+	return fmt.Sprintf(`{"time":%q,"event":%q,"kind":"work","slot":0}`+"\n", ts, event)
+}
+
+func appendTo(t *testing.T, path, s string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(s); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// pollTimes polls once and returns the entry times, oldest first.
+func pollTimes(t *testing.T, f *eventsFollower) []string {
+	t.Helper()
+	got, err := f.poll()
+	if err != nil {
+		t.Fatalf("poll: %v", err)
+	}
+	var times []string
+	for _, e := range got {
+		times = append(times, e.Time)
+	}
+	return times
+}
+
+func wantTimes(t *testing.T, got []string, want ...string) {
+	t.Helper()
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("times = %v, want %v", got, want)
+	}
+}
+
+func openFollower(t *testing.T, path string) (*eventsFollower, []historyEntry) {
+	t.Helper()
+	f, snap, err := openEvents(path)
+	if err != nil {
+		t.Fatalf("openEvents: %v", err)
+	}
+	t.Cleanup(f.Close)
+	return f, snap
+}
+
+func TestFollowerReturnsOnlyNewEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	appendTo(t, path, evLine("t1", "child_start"))
+	f, snap := openFollower(t, path)
+	if len(snap) != 1 || snap[0].Time != "t1" {
+		t.Fatalf("snapshot = %v", snap)
+	}
+	wantTimes(t, pollTimes(t, f))
+	appendTo(t, path, evLine("t2", "child_start")+evLine("t3", "halt"))
+	wantTimes(t, pollTimes(t, f), "t2", "t3")
+	wantTimes(t, pollTimes(t, f))
+}
+
+func TestFollowerWaitsForACompleteLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	appendTo(t, path, evLine("t1", "child_start"))
+	f, _ := openFollower(t, path)
+	line := evLine("t2", "child_start")
+	appendTo(t, path, line[:len(line)-10])
+	wantTimes(t, pollTimes(t, f))
+	appendTo(t, path, line[len(line)-10:])
+	wantTimes(t, pollTimes(t, f), "t2")
+	wantTimes(t, pollTimes(t, f))
+}
+
+func TestFollowerSnapshotLeavesPartialLineForPoll(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	line := evLine("t2", "child_start")
+	appendTo(t, path, evLine("t1", "child_start")+line[:20])
+	f, snap := openFollower(t, path)
+	if len(snap) != 1 {
+		t.Fatalf("snapshot = %v, want only the complete line", snap)
+	}
+	appendTo(t, path, line[20:])
+	wantTimes(t, pollTimes(t, f), "t2")
+}
+
+func TestFollowerAcrossRotation(t *testing.T) {
+	for _, newCurrentAtPoll := range []bool{true, false} {
+		t.Run(fmt.Sprintf("newCurrentAtPoll=%v", newCurrentAtPoll), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), eventsFileName)
+			appendTo(t, path, evLine("t1", "child_start"))
+			f, _ := openFollower(t, path)
+
+			appendTo(t, path, evLine("t2", "child_start"))
+			if err := os.Rename(path, path+rotatedSuffix); err != nil {
+				t.Fatal(err)
+			}
+			if newCurrentAtPoll {
+				appendTo(t, path, evLine("t3", "child_start"))
+				wantTimes(t, pollTimes(t, f), "t2", "t3")
+			} else {
+				wantTimes(t, pollTimes(t, f), "t2")
+				wantTimes(t, pollTimes(t, f))
+				appendTo(t, path, evLine("t3", "child_start"))
+				wantTimes(t, pollTimes(t, f), "t3")
+			}
+			wantTimes(t, pollTimes(t, f))
+			appendTo(t, path, evLine("t4", "child_start"))
+			wantTimes(t, pollTimes(t, f), "t4")
+		})
+	}
+}
+
+func TestFollowerFileAbsentAtOpen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	f, snap := openFollower(t, path)
+	if len(snap) != 0 {
+		t.Fatalf("snapshot = %v", snap)
+	}
+	wantTimes(t, pollTimes(t, f))
+	appendTo(t, path, evLine("t1", "child_start"))
+	wantTimes(t, pollTimes(t, f), "t1")
+	wantTimes(t, pollTimes(t, f))
+}
+
+func TestFollowerSkipsNonTimelineEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	f, _ := openFollower(t, path)
+	appendTo(t, path, evLine("t1", "heartbeat")+"not json\n"+evLine("t2", "halt"))
+	wantTimes(t, pollTimes(t, f), "t2")
+}
