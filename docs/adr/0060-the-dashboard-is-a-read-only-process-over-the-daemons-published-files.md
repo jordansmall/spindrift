@@ -120,3 +120,21 @@ start.
   Activity-feed view of Pass logs (which would need the Driver on `box`
   events and a parser the Dashboard can reach without importing the
   launcher).
+
+## Amendment (issue #4727): one dependency-free Node test check
+
+The Decision (no npm toolchain, vendored library, or Go dependency) and
+the rejected "SPA built with npm" option still stand for what ships. What
+changes is that the drill-in's client logic in `dispatch.js` (ANSI/SGR
+rendering, the stream-JSON "show all" filter, and the scroll-back pause)
+now has one test check, `dashboard-js-test`. It runs Node's built-in test
+runner from `pkgs.nodejs` against `dispatch.js` unmodified, inside a
+hand-written fake DOM. There is no `package.json`, npm, lockfile, jsdom,
+or other library; nothing is added to the page, and the served JS is not
+restructured for testing.
+
+The accepted cost is that Node joins the check closure: the "second test
+stack" the rejection named, kept to built-ins so there is no lockfile to
+churn. The limit is that the fake DOM has no layout or CSS, so the test
+sets scroll metrics itself and never exercises the rule that hides
+`.ln.stream`. It pins the logic, not the rendering.
