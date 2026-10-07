@@ -457,6 +457,73 @@ func TestRecoverQueueOne_AbortDuringFailedSettleReclaimsAndDoesNotPark(t *testin
 	}
 }
 
+// abortAfterSettle aborts as the inner settle returns, before gate.Leave, so
+// the watcher races Leave and usually loses, finding nothing in flight.
+type abortAfterSettle struct {
+	settle.WorkSettler
+	abort func()
+}
+
+func (w abortAfterSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
+	settled, err := w.WorkSettler.SettleRelayedBranch(d, num, gen, sit, result)
+	w.abort()
+	return settled, err
+}
+
+// An abort that reclaims nothing is handled like a drain stop: a failed settle
+// must still park the issue, counting the attempt, rather than strand it on
+// in-progress (#4694). If the watcher wins the race it reclaims the issue to
+// dispatchable instead, with no attempt counted.
+func TestRecoverQueueOne_AbortAfterFailedSettleDoesNotStrandInProgress(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	_, abort := withControlledSignals(t)
+	s := abortAfterSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort}
+
+	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+
+	if code != exitSignalledStop {
+		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	}
+	got := x.labels(t, "42")
+	if slices.Contains(got, x.c.inProgressLabel) {
+		t.Errorf("labels = %v, want no %q", got, x.c.inProgressLabel)
+	}
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := 0
+	if slices.Contains(got, x.c.failedLabel) {
+		want = 1
+	} else if !slices.Contains(got, x.c.label) {
+		t.Errorf("labels = %v, want parked %q or dispatchable %q", got, x.c.failedLabel, x.c.label)
+	}
+	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != want {
+		t.Errorf("attempt count = %d, want %d (labels %v)", rec.Count, want, got)
+	}
+}
+
+// A landed settle has already written agent-complete, so the watcher's reclaim
+// skips it deterministically; the attempt record must still be removed (#4694).
+func TestRecoverQueueOne_AbortAfterLandingSettleRemovesRecordAndExitsSeven(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverAttempts{Count: 1, Last: time.Now().Add(-time.Hour)})
+	_, abort := withControlledSignals(t)
+	s := abortAfterSettle{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), abort: abort}
+
+	code := x.runOnSettler(t, x.fc, x.cf, capsFor(x.tracker, x.cf), s)
+
+	if code != exitSignalledStop {
+		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	}
+	if _, err := os.Stat(recoverAttemptsPath(x.dir, "42")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("record stat err = %v, want not-exist", err)
+	}
+}
+
 func TestRecoverQueueOne_StopDuringLandingSettleRemovesRecordAndExitsSeven(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")

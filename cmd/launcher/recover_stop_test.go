@@ -237,27 +237,36 @@ func TestRecoverByNumber_IssueFetchFails_NoWatcherLeak(t *testing.T) {
 	}
 }
 
-// abortAfterSettleAdopted closes abortCh only once the underlying
-// SettleAdopted call has returned, standing in for a second operator signal
-// landing the instant after the PR merged and the issue was labelled
+// abortAfterFakeSettle closes abortCh only once the underlying SettleAdopted
+// or SettleRelayedBranch call has returned, standing in for a second operator
+// signal landing the instant after the settle labelled the issue
 // agent-complete -- the blocking finding's own scenario (issue #3522,
-// recoverByNumber's SettleAdopted arm). It also flips the issue to Complete first, mirroring what a
-// real settle does on that path, so a wrongly-triggered reclaim is visible
-// as a Complete->Dispatchable transition plus a reclaim comment under any
-// trigger, not just a missing one.
-type abortAfterSettleAdopted struct {
+// recoverByNumber's SettleAdopted arm). It also flips the issue to Complete
+// first, mirroring what a real settle does on that path, so a wrongly-triggered
+// reclaim is visible as a Complete->Dispatchable transition plus a reclaim
+// comment under any trigger, not just a missing one.
+type abortAfterFakeSettle struct {
 	*settle.Fake
 	fc      *forge.Fake
 	num     string
 	abortCh chan struct{}
 }
 
-func (a *abortAfterSettleAdopted) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+func (a *abortAfterFakeSettle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	a.Fake.SettleAdopted(d, num, gen, prURL)
 	if err := a.fc.TransitionState(a.num, forge.InProgress, forge.Complete); err != nil {
 		panic(err)
 	}
 	close(a.abortCh)
+}
+
+func (a *abortAfterFakeSettle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
+	settled, err := a.Fake.SettleRelayedBranch(d, num, gen, sit, result)
+	if terr := a.fc.TransitionState(a.num, forge.InProgress, forge.Complete); terr != nil {
+		panic(terr)
+	}
+	close(a.abortCh)
+	return settled, err
 }
 
 // TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim pins the blocking
@@ -284,7 +293,7 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 	fc.SetPR(branch, forge.PR{URL: testReconcilePR})
 
 	dir := tempLogDir(t)
-	s := &abortAfterSettleAdopted{Fake: settle.NewFake(), fc: fc, num: "42", abortCh: abortCh}
+	s := &abortAfterFakeSettle{Fake: settle.NewFake(), fc: fc, num: "42", abortCh: abortCh}
 
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
 
@@ -309,6 +318,46 @@ func TestRecoverByNumber_AbortAfterSettleAdopted_NoReclaim(t *testing.T) {
 		if strings.Contains(comment.Body, terminate.CommentSuffix) {
 			t.Errorf("issue #42 got a reclaim comment after it already settled: %q", comment.Body)
 		}
+	}
+}
+
+// TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed
+// pins issue #4694: an abort landing after the relayed-branch settle finished,
+// which the watcher did not reclaim, must still exit as a stop and never reach
+// recoverFailed's agent-failed park.
+func TestRecoverByNumber_AbortAfterSettleRelayed_ExitsStopWithoutRecoverFailed(t *testing.T) {
+	orig := installStopSignal
+	stopCh := make(chan struct{})
+	abortCh := make(chan struct{})
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		return stopCh, abortCh, func() {}
+	}
+	t.Cleanup(func() { installStopSignal = orig })
+
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+
+	dir := tempLogDir(t)
+	fk := settle.NewFake()
+	fk.SettleRelayedBranchErr = errors.New("relay: boom")
+	s := &abortAfterFakeSettle{Fake: fk, fc: fc, num: "42", abortCh: abortCh}
+
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, runner.NewFake()), s, "42", io.Discard, io.Discard)
+
+	if !errors.Is(err, waves.ErrSignalledStop) {
+		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
+	}
+	if len(s.SettleRelayedBranchCalls) != 1 {
+		t.Fatalf("SettleRelayedBranchCalls = %d, want 1", len(s.SettleRelayedBranchCalls))
+	}
+	iss, ierr := fc.Issue("42")
+	if ierr != nil {
+		t.Fatalf("fc.Issue(42): %v", ierr)
+	}
+	if containsLabel(iss.Labels, c.failedLabel) {
+		t.Errorf("issue #42 labels = %v, want no %q (recoverFailed must not run)", iss.Labels, c.failedLabel)
 	}
 }
 

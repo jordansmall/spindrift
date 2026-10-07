@@ -25,10 +25,12 @@ var errRecoverIneligible = errors.New("recover: issue not eligible for queue rec
 // process the label work agent-recover.yml does around a manual recover. At
 // most one issue is attempted per call. It returns errQueueEmpty when none
 // qualified, and waves.ErrSignalledStop on an operator stop; a drain stop
-// during a settle that fails still parks the issue first, while an abort
-// leaves it to the watcher's reclaim. A tracker or forge outage during the
-// scan is returned as an error rather than read as "nothing eligible", as is a
-// failed restore or park that would leave the issue on agent-in-progress.
+// during a settle that fails still parks the issue first, as does an abort
+// that reclaimed nothing (the settle already finished or landed it); an abort
+// that took the issue is left to the watcher's reclaim. A tracker or forge
+// outage during the scan is returned as an error rather than read as "nothing
+// eligible", as is a failed restore or park that would leave the issue on
+// agent-in-progress.
 func recoverQueueOne(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, stdout, stderr io.Writer) error {
 	if caps.PRForge == nil {
 		return errors.New("recover: queue mode needs a PR-shaped Code Forge (github or forgejo); a CODE_FORGE=local Recoverable issue stays manual, run `spindrift recover <n>` (ADR 0039)")
