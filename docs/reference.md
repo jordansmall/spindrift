@@ -6585,7 +6585,13 @@ exactly `phase == "running"` and nothing more — a reader that only knows
 `busy` sees what it always saw. `since` (RFC3339 UTC, always present) is
 when the slot entered its current `phase`: it moves when the phase
 changes and is kept across publishes that leave the phase alone, so it
-reads as time in phase, not time since the last write. The `jam` alarm
+reads as time in phase, not time since the last write. A `running`
+slot also carries `child_start`, the exact `time` string of its child's
+`child_start` event, and `child_start_n`, how many earlier
+`child_start`s on that slot share that string (omitted when 0) —
+together the Dashboard's `at`/`n` key for the running Dispatch (see
+**Dispatch drill-in** under [Dashboard](#dashboard)). Both are absent
+on any other phase, and from a daemon that predates them. The `jam` alarm
 (see `jam` in **Event stream**, below) fires only when every *sibling* slot is `idle`,
 `awaiting_window`, `resolving` (it holds no claim yet, issue #3735), or
 `backing_off` (it holds nothing it could release, issue #4205); only a
@@ -7766,9 +7772,13 @@ reads "(reconnecting)", and the browser reconnects on its own.
 **Dispatch drill-in.** Clicking a busy slot card, or a timeline row whose
 Dispatch's `child_start` the scan saw, opens that Dispatch's drill-in,
 `/dispatch?slot=N&at=T`; a row whose `child_start` lies beyond the two
-Events generations gets no link. A Dispatch is keyed by its slot plus its
-`child_start` time: the drill-in shows the `child_start` on slot `N` at
-exactly `T` (the slot's latest when `at` is absent), and a `T` that is not
+Events generations gets no link. A slot card pins its own Dispatch from
+the slot's `child_start`/`child_start_n` in the status file, so a stale
+page or a bookmark still opens the Dispatch the card showed; against a
+daemon that predates those fields it links bare `?slot=N`, the slot's
+latest. A Dispatch is keyed by its slot plus its `child_start` time:
+the drill-in shows the `child_start` on slot `N` at exactly `T` (the
+slot's latest when `at` is absent), and a `T` that is not
 a `child_start` time on that slot is a 404. Every timeline row links with
 the `child_start` time of the Dispatch it belongs to, not its own. Event
 times have one-second resolution, so when two `child_start`s on one slot
