@@ -29,6 +29,16 @@ let
     export PATH="$TMPDIR/fakebin:$PATH"
     cd src/cmd/launcher
   '';
+  # The Dashboard is a separate dependency-free module (ADR 0060), so the
+  # vendored-launcher GOFLAGS=-mod=vendor from goCheckEnv is reset: it has no
+  # vendor/ tree. Ends with src as the working directory.
+  dashboardPrologue = ''
+    cp -r ${../../dashboard} src
+    chmod -R +w src
+    ${goCheckEnv}
+    export GOFLAGS=
+    cd src
+  '';
 in
 {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
@@ -40,6 +50,36 @@ in
     fi
     touch $out
   '';
+
+  dashboard-go-fmt = pkgs.runCommand "dashboard-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
+    unformatted=$(gofmt -l ${../../dashboard})
+    if [ -n "$unformatted" ]; then
+      echo "gofmt violations:" >&2
+      echo "$unformatted" >&2
+      exit 1
+    fi
+    touch $out
+  '';
+
+  dashboard-go-vet = pkgs.runCommand "dashboard-go-vet" { nativeBuildInputs = [ pkgs.go ]; } ''
+    ${dashboardPrologue}
+    go vet ./...
+    touch $out
+  '';
+
+  dashboard-go-test =
+    pkgs.runCommand "dashboard-go-test"
+      {
+        nativeBuildInputs = [
+          pkgs.go
+          pkgs.git
+        ];
+      }
+      ''
+        ${dashboardPrologue}
+        go test ./...
+        touch $out
+      '';
 
   # The file set is derived from the tree, so a new .nix file can't escape the
   # gate. The quickstart golden flake.nix fixtures are included on purpose:
