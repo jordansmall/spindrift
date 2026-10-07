@@ -107,6 +107,7 @@ func TestLogSendsExistingBytesThenAppends(t *testing.T) {
 	ts, checkout := logServer(t)
 	p := writeLog(t, checkout, testLogPath, "first\n")
 	resp, st := openLog(t, ts, testLogPath)
+	// collect fails on any non-log frame: a log present on first open gets no opened.
 	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
 		t.Fatalf("Content-Type = %q", ct)
 	}
@@ -192,6 +193,7 @@ func TestLogMissingWhileRunningWaitsThenStreams(t *testing.T) {
 	st.expect(t, "waiting", testLogPath)
 	st.quiet(t)
 	writeLog(t, checkout, testLogPath, "hello\n")
+	st.expect(t, "opened", testLogPath)
 	if got := collect(t, st, "hello"); got != "hello\n" {
 		t.Fatalf("bytes = %q", got)
 	}
@@ -204,7 +206,21 @@ func TestLogMissingPassLogWhileRunningWaitsThenStreams(t *testing.T) {
 	_, st := openLog(t, ts, pass)
 	st.expect(t, "waiting", pass)
 	writeLog(t, checkout, pass, "pass line\n")
+	st.expect(t, "opened", pass)
 	if got := collect(t, st, "pass line"); got != "pass line\n" {
+		t.Fatalf("bytes = %q", got)
+	}
+}
+
+func TestLogEmptyLogCreatedAfterWaitingSendsOpened(t *testing.T) {
+	ts, checkout := logServer(t)
+	_, st := openLog(t, ts, testLogPath)
+	st.expect(t, "waiting", testLogPath)
+	p := writeLog(t, checkout, testLogPath, "")
+	st.expect(t, "opened", testLogPath)
+	st.quiet(t)
+	appendTo(t, p, "late\n")
+	if got := collect(t, st, "late"); got != "late\n" {
 		t.Fatalf("bytes = %q", got)
 	}
 }

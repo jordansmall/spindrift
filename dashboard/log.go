@@ -174,12 +174,12 @@ func (s *server) logState(path string, owner *logOwner) logStatus {
 
 // serveLog streams one Child log or Pass log as Server-Sent Events: its
 // existing bytes and then each append as log frames. A named log not yet on
-// disk while its child runs gets a waiting frame, then streams once it appears;
-// one missing for good gets a single pruned frame, an answer rather than an
-// error, and so does one deleted mid-follow. An unreadable log ends the stream
-// after logging, and so does a log replaced at its path (a retried Pass
-// rotating the old one aside); either way the client's reconnect opens
-// whatever file the path names now.
+// disk while its child runs gets a waiting frame, then an opened frame and the
+// stream once it appears; one missing for good gets a single pruned frame, an
+// answer rather than an error, and so does one deleted mid-follow. An
+// unreadable log ends the stream after logging, and so does a log replaced at
+// its path (a retried Pass rotating the old one aside); either way the
+// client's reconnect opens whatever file the path names now.
 //
 // A Pass log tab also passes its Dispatch (slot, at and n, as the dispatch page
 // takes them but with at required), because the path is reused by later
@@ -275,6 +275,10 @@ func (s *server) serveLog(w http.ResponseWriter, r *http.Request) {
 	}
 	if st.modifiedAfterFinish(openInfo) {
 		send("superseded", path)
+		return
+	}
+	// An empty log sends no bytes, which would leave the client's waiting note up.
+	if waited && !send("opened", path) {
 		return
 	}
 	// A tab opened after its Dispatch finished is capped at the size it found.
