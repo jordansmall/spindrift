@@ -7701,8 +7701,7 @@ nix run .#dashboard -- --listen 0.0.0.0:8099
 A taken port exits 1 with `dashboard: listen <addr>: bind: address already
 in use`.
 
-The page is a snapshot taken on load: reload to refresh (live updates are
-not in yet). It shows a pool header — state and reason, host, pid, uptime,
+The page shows a pool header — state and reason, host, pid, uptime,
 busy/total slots, each kind's next check, the jam alarm, Demand, next
 due, and the tracker's rate limits — then one card per slot, idle ones
 included, with its phase, kind, issue(s) or Chore, revision, and time in
@@ -7716,6 +7715,20 @@ The timeline shows in every case below, so a stopped or restarted daemon
 still leaves its history on the page. An absent Events file just means no
 history yet; if a generation exists but cannot be read, the page shows
 `history unreadable: <error>` above whatever history it could read.
+
+The page updates itself, with no reload. It follows `/events`, a
+Server-Sent Events stream, and the Dashboard polls for it every half
+second (re-reading the small status file, and following the Events file
+by identity and byte offset; no file-watch API). The follower assumes
+the Daemon's rename rotation, so truncating the Events file in place
+(logrotate `copytruncate`) is unsupported and can lose rows. A
+status-file rewrite redraws the header and slot cards, a slot whose phase
+changed pulses, and each event appended to the Events file adds a
+timeline row, all within about a second. A rotation of the Events file
+neither drops nor repeats a row. A daemon that stops, whether its status
+file goes away or its pid dies, and one that comes back both show up
+live, with no Dashboard restart. While the stream is down the heading
+reads "(reconnecting)", and the browser reconnects on its own.
 
 Four cases are shown rather than hidden. The page reads "no Daemon
 running" when the status file is absent or its pid is not live on this
