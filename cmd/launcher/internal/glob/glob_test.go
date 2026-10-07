@@ -145,15 +145,17 @@ func TestOverlap_LongSegmentDoesNotHang(t *testing.T) {
 		{"wide classes", strings.Repeat("[a-bd-fh-jl-n]*", 300), strings.Repeat("*[c-eg-ik-m]", 300), true},
 	}
 	for _, tc := range cases {
-		done := make(chan bool, 1)
-		go func() { done <- Overlap(tc.a, tc.b) }()
-		select {
-		case got := <-done:
-			if got != tc.want {
-				t.Errorf("%s: Overlap = %v, want %v", tc.name, got, tc.want)
+		for _, o := range []struct{ order, x, y string }{{"a,b", tc.a, tc.b}, {"b,a", tc.b, tc.a}} {
+			done := make(chan bool, 1)
+			go func() { done <- Overlap(o.x, o.y) }()
+			select {
+			case got := <-done:
+				if got != tc.want {
+					t.Errorf("%s (%s): Overlap = %v, want %v", tc.name, o.order, got, tc.want)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s (%s): Overlap did not return within 2s", tc.name, o.order)
 			}
-		case <-time.After(2 * time.Second):
-			t.Fatalf("%s: Overlap did not return within 2s", tc.name)
 		}
 	}
 }
@@ -176,9 +178,33 @@ func TestMatchOverlapConsistency(t *testing.T) {
 		{"a/[a-c]?", "a/bz"},
 	}
 	for _, tc := range cases {
-		if Match(tc.pattern, tc.path) != Overlap(tc.pattern, tc.path) {
+		m := Match(tc.pattern, tc.path)
+		if m != Overlap(tc.pattern, tc.path) {
 			t.Errorf("Match(%q, %q) and Overlap(%q, %q) disagree", tc.pattern, tc.path, tc.pattern, tc.path)
 		}
+		if m != Overlap(tc.path, tc.pattern) {
+			t.Errorf("Match(%q, %q) and Overlap(%q, %q) disagree", tc.pattern, tc.path, tc.path, tc.pattern)
+		}
+	}
+}
+
+// overlapAllocBound caps what one Overlap call may allocate in the memory tests.
+const overlapAllocBound = 4 << 20
+
+// checkOverlapAlloc fails t if Overlap(a, b) != want or allocates over the
+// bound; label names the argument order so a failure says which one.
+func checkOverlapAlloc(t *testing.T, label, a, b string, want bool) {
+	t.Helper()
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	got := Overlap(a, b)
+	runtime.ReadMemStats(&after)
+	if got != want {
+		t.Errorf("%s: Overlap = %v, want %v", label, got, want)
+	}
+	if delta := after.TotalAlloc - before.TotalAlloc; delta > overlapAllocBound {
+		t.Errorf("%s: Overlap allocated %d bytes, want under 4 MiB", label, delta)
 	}
 }
 
@@ -187,15 +213,15 @@ func TestMatchOverlapConsistency(t *testing.T) {
 func TestOverlap_LongSegmentMemoryNotQuadratic(t *testing.T) {
 	a := strings.Repeat("a", 4000) + "*"
 	b := "*" + strings.Repeat("b", 4000)
-	var before, after runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&before)
-	got := Overlap(a, b)
-	runtime.ReadMemStats(&after)
-	if !got {
-		t.Error("Overlap = false, want true")
-	}
-	if delta := after.TotalAlloc - before.TotalAlloc; delta > 4<<20 {
-		t.Errorf("Overlap allocated %d bytes, want under 4 MiB", delta)
-	}
+	checkOverlapAlloc(t, "a,b", a, b, true)
+	checkOverlapAlloc(t, "b,a", b, a, true)
+}
+
+// segmentsOverlap must keep memory linear in segment count: a full table is
+// ~16 MB here and per-cell tokenizing/rows add GBs, so a small bound catches both.
+func TestOverlap_ManySegmentsMemoryNotQuadratic(t *testing.T) {
+	a := strings.Repeat("[ab]/", 4000) + "**"
+	b := strings.Repeat("a/", 4000) + "y"
+	checkOverlapAlloc(t, "a,b", a, b, true)
+	checkOverlapAlloc(t, "b,a", b, a, true)
 }

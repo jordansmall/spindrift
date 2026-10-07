@@ -47,55 +47,87 @@ func matchSegments(pattern, p []string) bool {
 // A malformed pattern (e.g. "a/[") is reported as overlapping: a missed overlap
 // lets colliding work run concurrently, a false one only defers a dispatch.
 func Overlap(a, b string) bool {
-	return segmentsOverlap(strings.Split(a, "/"), strings.Split(b, "/"))
+	return segmentsOverlap(tokenizeSegments(a), tokenizeSegments(b))
 }
 
-// segmentsOverlap fills a bottom-up O(len(a)*len(b)) table where dp[i][j] means
-// a[i:] and b[j:] can overlap. Patterns come from untrusted prompt input, so a
-// hostile issue body can declare many "**" segments, and a naive "try every
-// split" recursion would blow up exponentially on them when nothing overlaps.
-func segmentsOverlap(a, b []string) bool {
-	dp := make([][]bool, len(a)+1)
-	for i := range dp {
-		dp[i] = make([]bool, len(b)+1)
+// segment is a path segment pattern tokenized once, so the quadratic walk in
+// segmentsOverlap does not re-parse it for every cell it sits in. ok is false
+// for a malformed segment; "**" is never tokenized.
+type segment struct {
+	pat  string
+	toks []token
+	ok   bool
+}
+
+// tokenizeSegments splits pattern on "/" and tokenizes each segment.
+func tokenizeSegments(pattern string) []segment {
+	pats := strings.Split(pattern, "/")
+	segs := make([]segment, len(pats))
+	for i, p := range pats {
+		segs[i].pat = p
+		if p != "**" {
+			segs[i].toks, segs[i].ok = tokenize(p)
+		}
 	}
+	return segs
+}
+
+// segmentsOverlap walks a bottom-up O(len(a)*len(b)) table where cell j of the
+// row for i means a[i:] and b[j:] can overlap, with next holding row i+1 and
+// cur row i. Patterns come from untrusted prompt input, so a hostile issue body
+// can declare many "**" segments, and a naive "try every split" recursion would
+// blow up exponentially on them when nothing overlaps. Two rolling rows keep
+// memory linear; scratch is shared with every segmentOverlap call so the walk
+// allocates nothing per cell.
+func segmentsOverlap(a, b []segment) bool {
+	maxToks := 0
+	for _, segs := range [][]segment{a, b} {
+		for _, s := range segs {
+			maxToks = max(maxToks, len(s.toks))
+		}
+	}
+	scratch := make([]bool, 2*(maxToks+1))
+	cur, next := make([]bool, len(b)+1), make([]bool, len(b)+1)
 	for i := len(a); i >= 0; i-- {
+		clear(cur)
 		for j := len(b); j >= 0; j-- {
 			switch {
 			case i == len(a) && j == len(b):
-				dp[i][j] = true
-			case i < len(a) && a[i] == "**":
-				dp[i][j] = dp[i+1][j] || (j < len(b) && dp[i][j+1])
-			case j < len(b) && b[j] == "**":
-				dp[i][j] = dp[i][j+1] || (i < len(a) && dp[i+1][j])
+				cur[j] = true
+			case i < len(a) && a[i].pat == "**":
+				cur[j] = next[j] || (j < len(b) && cur[j+1])
+			case j < len(b) && b[j].pat == "**":
+				cur[j] = cur[j+1] || (i < len(a) && next[j])
 			case i < len(a) && j < len(b):
-				dp[i][j] = segmentOverlap(a[i], b[j]) && dp[i+1][j+1]
-			default:
-				dp[i][j] = false
+				cur[j] = next[j+1] && segmentOverlap(a[i], b[j], scratch)
 			}
 		}
+		cur, next = next, cur
 	}
-	return dp[0][0]
+	return next[0]
 }
 
 // segmentOverlap reports whether some name satisfies both single-segment
 // patterns. It walks the two patterns as a product automaton: cell j of the
 // row for i means ta[i:] and tb[j:] can still match a common string, with
 // next holding row i+1 and cur row i. That is O(len(a)*len(b)) time however
-// many "*" the patterns hold, and two rolling rows keep memory linear.
-func segmentOverlap(a, b string) bool {
-	if a == b {
+// many "*" the patterns hold, and two rolling rows keep memory linear. The rows
+// are carved from scratch, which must hold 2*(len(b.toks)+1) bools; the caller
+// sizes it for the longest segment on either side, so argument order is free.
+// next is never read before the first row is written, so stale contents are
+// harmless.
+func segmentOverlap(a, b segment, scratch []bool) bool {
+	if a.pat == b.pat {
 		return true
 	}
-	ta, okA := tokenize(a)
-	tb, okB := tokenize(b)
-	if !okA || !okB {
+	if !a.ok || !b.ok {
 		// A malformed pattern fails closed: a missed overlap lets colliding
 		// work run concurrently, a false one only defers a dispatch.
 		return true
 	}
+	ta, tb := a.toks, b.toks
 	n, m := len(ta), len(tb)
-	cur, next := make([]bool, m+1), make([]bool, m+1)
+	cur, next := scratch[:m+1], scratch[m+1:2*(m+1)]
 	for i := n; i >= 0; i-- {
 		clear(cur)
 		for j := m; j >= 0; j-- {
