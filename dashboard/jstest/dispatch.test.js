@@ -53,8 +53,9 @@ class Container {
     if (v !== "") this.appendChild(new Text(String(v)));
   }
 
-  // dispatch.js must build the DOM from createElement/createTextNode only
-  // (see its untrusted-log header comment), so any innerHTML write is a test failure.
+  // dispatch.js builds log DOM from createElement/createTextNode only (see its
+  // untrusted-log header comment), so an innerHTML write is a test failure;
+  // the one server-rendered header swap overrides this on its own element.
   set innerHTML(v) { throw new Error("innerHTML written: " + v); }
 
   insertBefore(node, ref) {
@@ -213,7 +214,7 @@ function makePane(body, o) {
 }
 
 // Runs dispatch.js against body's DOM; frames queue until drain() runs them.
-function runPage(body, clockStep) {
+function runPage(body, clockStep, windowExtras) {
   const frames = [];
   let clock = 0;
   FakeEventSource.instances = [];
@@ -225,7 +226,7 @@ function runPage(body, clockStep) {
       querySelectorAll: (sel) => body.querySelectorAll(sel),
       querySelector: (sel) => body.querySelector(sel),
     },
-    window: { EventSource: FakeEventSource },
+    window: Object.assign({ EventSource: FakeEventSource }, windowExtras),
     EventSource: FakeEventSource,
     Event,
     // Each read advances the clock by clockStep ms; the default 0 never
@@ -721,6 +722,13 @@ function dispatchPage(opts) {
   main.className = "dispatch";
   if (opts.events) main.setAttribute("data-events", opts.events);
   body.appendChild(main);
+  const head = new Element("header");
+  head.className = "dispatch-head";
+  const headWrites = [];
+  Object.defineProperty(head, "innerHTML", {
+    set(v) { headWrites.push(v); },
+  });
+  main.appendChild(head);
   const nav = new Element("nav");
   nav.className = "tabs";
   main.appendChild(nav);
@@ -742,10 +750,11 @@ function dispatchPage(opts) {
     main.appendChild(sec);
   });
 
-  runPage(body);
+  const localized = [];
+  runPage(body, 0, opts.localize === false ? {} : { localizeTimes: (el) => localized.push(el) });
   const events = FakeEventSource.instances.find((e) => e.url === opts.events);
   return {
-    main, events,
+    main, events, head, headWrites, localized,
     tabs: () => nav.children,
     panes: () => main.querySelectorAll(".tabbody"),
     logStreams: () => FakeEventSource.instances.filter((e) => e.url.startsWith("/log")),
@@ -818,6 +827,22 @@ test("a closed frame closes the events stream", () => {
   assert.notStrictEqual(p.events.readyState, FakeEventSource.CLOSED);
   p.events.emit("closed", "");
   assert.strictEqual(p.events.readyState, FakeEventSource.CLOSED);
+});
+
+test("a head frame replaces the header's contents and localizes its times", () => {
+  const p = dispatchPage({ events: EVENTS });
+  p.events.emit("head", "<h1>x</h1><time>t</time>");
+  assert.deepStrictEqual(p.headWrites, ["<h1>x</h1><time>t</time>"]);
+  assert.deepStrictEqual(p.localized, [p.head]);
+  p.events.emit("head", "<h1>y</h1>");
+  assert.deepStrictEqual(p.headWrites, ["<h1>x</h1><time>t</time>", "<h1>y</h1>"]);
+  assert.strictEqual(p.localized.length, 2);
+});
+
+test("a head frame still applies without window.localizeTimes", () => {
+  const p = dispatchPage({ events: EVENTS, localize: false });
+  p.events.emit("head", "<h1>x</h1>");
+  assert.deepStrictEqual(p.headWrites, ["<h1>x</h1>"]);
 });
 
 test("a page without data-events opens no dispatch events stream", () => {

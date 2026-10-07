@@ -2,7 +2,8 @@
   "use strict";
 
   // Log text is untrusted (issue comments can reach it): the DOM is built only
-  // from createElement/createTextNode/style, never innerHTML.
+  // from createElement/createTextNode/style, never innerHTML (the one exception
+  // is the server-rendered header frame, at the events listener below).
 
   // Fixed palette tuned for the dark theme; "black" is lifted so it stays legible.
   var PALETTE = [
@@ -442,6 +443,15 @@
       try { p = JSON.parse(ev.data); } catch (e) { return; }
       if (!p || typeof p.phase !== "string" || typeof p.path !== "string") return;
       addPass(p.phase, p.path);
+    });
+    // Deliberate, narrow innerHTML exception: the frame is server-rendered and
+    // template-escaped, the same trust live.js extends to its swaps.
+    var localize = window.localizeTimes || function () {};
+    events.addEventListener("head", function (ev) {
+      var head = main.querySelector("header.dispatch-head");
+      if (!head) return;
+      head.innerHTML = ev.data;
+      localize(head);
     });
     events.addEventListener("closed", function () { events.close(); });
   }
