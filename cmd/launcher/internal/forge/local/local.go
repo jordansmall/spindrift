@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -723,17 +725,25 @@ func parseFlowList(s string) []string {
 }
 
 // splitFlowListElements splits s on element-separating commas, skipping commas
-// inside a quoted element so a label like "a,b" round-trips whole. A blind
+// inside a quoted element so a label like "a,b" round-trips whole. A quote
+// opens a quoted element only at its start, as in YAML flow scalars. A blind
 // strings.Split(s, ",") cannot tell the two kinds of comma apart.
 func splitFlowListElements(s string) []string {
 	var out []string
 	var cur strings.Builder
 	var quote byte
+	started := false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
 		case quote != 0:
 			cur.WriteByte(c)
+			// YAML escapes a single quote inside single quotes by doubling it.
+			if c == '\'' && quote == '\'' && i+1 < len(s) && s[i+1] == '\'' {
+				i++
+				cur.WriteByte(s[i])
+				continue
+			}
 			if c == '\\' && quote == '"' && i+1 < len(s) {
 				i++
 				cur.WriteByte(s[i])
@@ -742,12 +752,21 @@ func splitFlowListElements(s string) []string {
 			if c == quote {
 				quote = 0
 			}
-		case c == '"' || c == '\'':
+		case (c == '"' || c == '\'') && !started:
 			quote = c
+			started = true
 			cur.WriteByte(c)
 		case c == ',':
 			out = append(out, cur.String())
 			cur.Reset()
+			started = false
+		case !started:
+			// Match parseFlowList's strings.TrimSpace, which also strips
+			// \v, \f and non-ASCII spaces.
+			r, size := utf8.DecodeRuneInString(s[i:])
+			started = !unicode.IsSpace(r)
+			cur.WriteString(s[i : i+size])
+			i += size - 1
 		default:
 			cur.WriteByte(c)
 		}

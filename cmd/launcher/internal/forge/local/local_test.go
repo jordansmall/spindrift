@@ -1,6 +1,7 @@
 package local
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1345,24 +1346,56 @@ func TestLocalTracker_PostIssue_NewlineTitle_NoFrontmatterInjection(t *testing.T
 }
 
 // PostIssue's labels argument is caller-supplied since issue #2018, so a
-// label holding a comma, bracket, or newline must round-trip whole rather
-// than fragment the frontmatter flow-list.
+// label holding a comma, bracket, newline, or quote must round-trip whole
+// rather than fragment the frontmatter flow-list.
 func TestLocalTracker_PostIssue_LabelInjection_RoundTripsExactLabels(t *testing.T) {
-	dir := t.TempDir()
-	lt := NewLocalTracker(dir, testLabels)
+	for _, labels := range [][]string{
+		{"a,b", "x[y]", "line1\nline2: pwned"},
+		{"a'b", "c"},
+		{"c\"d", "e"},
+		{"x'y", "z'w"},
+		{"'lead", "tail'"},
+	} {
+		t.Run(fmt.Sprintf("%q", labels), func(t *testing.T) {
+			lt := NewLocalTracker(t.TempDir(), testLabels)
 
-	labels := []string{"a,b", "x[y]", "line1\nline2: pwned"}
-	ref, err := lt.PostIssue("Fix the Thing", "body", labels)
-	if err != nil {
-		t.Fatalf("PostIssue: %v", err)
-	}
+			ref, err := lt.PostIssue("Fix the Thing", "body", labels)
+			if err != nil {
+				t.Fatalf("PostIssue: %v", err)
+			}
 
-	iss, err := lt.Issue(strings.TrimPrefix(ref, "local:"))
-	if err != nil {
-		t.Fatalf("Issue: %v", err)
+			iss, err := lt.Issue(strings.TrimPrefix(ref, "local:"))
+			if err != nil {
+				t.Fatalf("Issue: %v", err)
+			}
+			if !reflect.DeepEqual(iss.Labels, labels) {
+				t.Errorf("Labels = %q, want %q (exact round-trip, not fragmented)", iss.Labels, labels)
+			}
+		})
 	}
-	if !reflect.DeepEqual(iss.Labels, labels) {
-		t.Errorf("Labels = %v, want %v (exact round-trip, not fragmented)", iss.Labels, labels)
+}
+
+// Hand-edited files reach the parser directly, and a quote only opens a quoted
+// element at its start, as in YAML flow scalars. The writer quotes every
+// quote-bearing label, so this test is what pins the parser's behaviour.
+func TestParseFlowList_QuoteOnlyOpensAtElementStart(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want []string
+	}{
+		{"[a'b, c]", []string{"a'b", "c"}},
+		{`[a"b, c]`, []string{`a"b`, "c"}},
+		{`["a,b", 'c']`, []string{"a,b", "c"}},
+		{`[ "a,b" , c]`, []string{"a,b", "c"}},
+		{`[a'b, 'c,d']`, []string{"a'b", "c,d"}},
+		{"[\v'a,b', c]", []string{"a,b", "c"}},
+		{"[ 'a,b', c]", []string{"a,b", "c"}},
+		// Known limitation: unquote does not decode YAML's '' escape.
+		{`['it''s, x', c]`, []string{"it''s, x", "c"}},
+	} {
+		if got := parseFlowList(tc.in); !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("parseFlowList(%s) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
