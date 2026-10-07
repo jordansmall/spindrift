@@ -79,6 +79,9 @@ type SlotStatus struct {
 	// Only the name: a Chore's class, allow-list disposition, and promotion
 	// budget live in the Box and host-side settle config, never the pool.
 	Chore string `json:"chore,omitempty"`
+	// Pass is the Pass label (Record.Phase) of the running child's most
+	// recent box record.
+	Pass string `json:"pass,omitempty"`
 	// ChildStart and ChildStartN pin the running child's Dispatch as the
 	// dashboard names it: the time string of its child_start event, and how
 	// many earlier child_starts on this slot share that exact string.

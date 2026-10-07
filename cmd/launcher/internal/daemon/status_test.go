@@ -85,6 +85,25 @@ func TestSlotStatus_ChoreMarshalsUnderChoreKey(t *testing.T) {
 	}
 }
 
+// TestSlotStatus_PassMarshalsUnderPassKeyAndOmitsWhenEmpty pins the additive
+// "pass" key, which must stay absent on a slot with no box record yet.
+func TestSlotStatus_PassMarshalsUnderPassKeyAndOmitsWhenEmpty(t *testing.T) {
+	data, err := json.Marshal(SlotStatus{Busy: true, Pass: "initial"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"pass":"initial"`) {
+		t.Errorf("marshalled = %s, want it to contain %q", data, `"pass":"initial"`)
+	}
+	data, err = json.Marshal(SlotStatus{Busy: true})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"pass"`) {
+		t.Errorf("marshalled = %s, want no pass key when empty", data)
+	}
+}
+
 func TestStatusWriter_StampsPidHostStartedTime(t *testing.T) {
 	dir := t.TempDir()
 	fixed := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
