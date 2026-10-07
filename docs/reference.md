@@ -7815,15 +7815,22 @@ each append, over Server-Sent Events from `/log?path=<child_log>`. It
 opens at the end, stops following when you scroll up (a "jump to end"
 button resumes), and renders ANSI colour. The Box's stream-JSON lines
 (JSON objects with a string `type`) are hidden behind a "show all"
-toggle, so the launcher's own lines aren't buried. A named log whose
-file no longer exists reads "log pruned"; a `child_start` without
+toggle, so the launcher's own lines aren't buried. A named log not yet
+created while its child runs reads "waiting for log" and streams once
+it appears; once the child has finished (its slot's `child_finish`, or
+a later `child_start`), a missing log reads "log pruned", whether
+pruned by hand, never created (say, the Child log could not be
+opened), or deleted while being followed. A missing log whose naming
+event carries no `slot` (so its finish cannot be tracked) reads "log
+pruned" straight away, and so does one whose naming event ages out of
+the Events file while the page waits on it. A `child_start` without
 `child_log`, from a daemon that predates Child logs, says it names none.
 After it comes one tab per Pass log, labelled with its phase, in the
 order the Dispatch's `box` events named them (`pass_log`); a retry that
 names the same file again adds no second tab. A Pass log tab follows
 its log the same way from `/log?path=<pass_log>`, starting when the tab
-is first shown, with the same ANSI rendering, scroll-back, and "log
-pruned" note, but shows every line, since a Pass log is mostly the Box's
+is first shown, with the same ANSI rendering, scroll-back, and notes,
+but shows every line, since a Pass log is mostly the Box's
 stream-JSON. Butler Dispatches get the same tabs, named by their
 Chore-keyed `box` events.
 

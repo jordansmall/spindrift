@@ -281,8 +281,17 @@
       };
 
       es.addEventListener("log", function (e) {
+        if (note) {
+          note = "";
+          updateIndicator();
+        }
         queue.push(e.data);
         schedule();
+      });
+
+      es.addEventListener("waiting", function () {
+        note = "waiting for log";
+        updateIndicator();
       });
 
       es.addEventListener("pruned", function () {
