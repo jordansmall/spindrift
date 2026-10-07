@@ -267,3 +267,14 @@ func TestEventsInPlaceRewriteKeepingSizeAndMtimeSendsFrame(t *testing.T) {
 	}
 	st.expect(t, "status", "state-halted")
 }
+
+func TestEventsLiveRowCarriesOwningDispatch(t *testing.T) {
+	st := openStream(t, statusJSON(t, "working", "", noSlots), evLine("2026-10-07T11:00:00Z", "child_start"))
+	st.expect(t, "status")
+	st.expect(t, "history")
+	appendTo(t, st.events(), evLine("2026-10-07T11:02:00Z", "backoff"))
+	f := st.expect(t, "entry", "ev-backoff")
+	if want := `href="/dispatch?slot=0&at=2026-10-07T11%3a00%3a00Z"`; !strings.Contains(f.data, want) {
+		t.Errorf("entry does not link to the snapshot's child_start:\n%s", f.data)
+	}
+}

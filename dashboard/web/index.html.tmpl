@@ -86,7 +86,7 @@
     {{- range .Slots}}
     <article class="card phase-{{.Phase}}" data-slot="{{.Slot}}" data-phase="{{.Phase}}">
       <header>
-        <span class="slotno">slot {{.Slot}}</span>
+        {{if .Kind}}<a class="slotno cardlink" href="/dispatch?slot={{.Slot}}">slot {{.Slot}}</a>{{else}}<span class="slotno">slot {{.Slot}}</span>{{end}}
         <span class="pill phase-{{.Phase}}">{{.Phase}}</span>
       </header>
       {{- if .Kind}}<div class="kindname">{{.Kind}}</div>{{end}}
@@ -102,7 +102,7 @@
 </div>
 {{- end}}
 {{define "entry" -}}
-<div class="entry ev-{{.Event}}">
+<a class="entry ev-{{.Event}}"{{if .Started}} href="/dispatch?slot={{.Slot}}&at={{.Started}}{{if .StartN}}&n={{.StartN}}{{end}}"{{end}}>
   <time>{{.Time}}</time>
   <span class="evname">{{.Event}}</span>
   {{- if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}
@@ -111,7 +111,7 @@
   {{- if .Outcome}} <span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{end}}
   {{- if .Detail}} <span class="detail">{{.Detail}}</span>{{end}}
   {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
-</div>
+</a>
 {{- end}}
 {{define "history" -}}
     {{- if .HistoryErr}}

@@ -1,9 +1,6 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"io/fs"
@@ -22,35 +19,13 @@ const logFrameMax = 64 << 10
 // carries path as its child_log. Only a path the Daemon announced is served, so
 // the query string cannot be used to read arbitrary files under the checkout.
 func (s *server) namesChildLog(path string) bool {
-	for _, name := range []string{s.eventsPath + rotatedSuffix, s.eventsPath} {
-		f, err := os.Open(name)
-		if err != nil {
-			continue
+	found := false
+	scanGenerations(s.eventsPath, func(ev Event) {
+		if ev.Event == "child_start" && ev.ChildLog == path {
+			found = true
 		}
-		found := scanChildLog(f, path)
-		f.Close()
-		if found {
-			return true
-		}
-	}
-	return false
-}
-
-func scanChildLog(r io.Reader, path string) bool {
-	br := bufio.NewReader(r)
-	for {
-		// A line is read whole however long, as scanTimeline does.
-		line, err := br.ReadBytes('\n')
-		if bytes.Contains(line, []byte(`"child_log"`)) {
-			var ev Event
-			if json.Unmarshal(line, &ev) == nil && ev.Event == "child_start" && ev.ChildLog == path {
-				return true
-			}
-		}
-		if err != nil {
-			return false
-		}
-	}
+	})
+	return found
 }
 
 // childLog streams one Child log as Server-Sent Events: its existing bytes and
