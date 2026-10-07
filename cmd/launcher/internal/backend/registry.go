@@ -5,6 +5,8 @@
 // (cmd/launcher/backend.go).
 package backend
 
+import "sort"
+
 // Descriptor is the config-independent metadata for one registered backend.
 type Descriptor struct {
 	Name string
@@ -175,4 +177,26 @@ func NeedsGHToken(forge, tracker Descriptor) bool {
 		forge.TokenEnvVar == GitHub.TokenEnvVar ||
 		forge.InBoxGHCredentialHelper ||
 		!forge.ValidAsCodeForge
+}
+
+// OutboxRelayBackends lists, sorted, the CODE_FORGE names RelaysOutbox accepts.
+func OutboxRelayBackends() []string {
+	var names []string
+	for _, d := range Registry {
+		if d.OutboxRelayCapable {
+			names = append(names, d.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// RelaysOutbox reports whether a Box under codeForge and boxAccess hands its
+// finished branch back as an outbox bundle the host relays (issue #4656): an
+// OutboxRelayCapable CODE_FORGE under BOX_FORGE_AND_ISSUE_ACCESS=read-only.
+// Both arguments are resolved knob values; an unset CODE_FORGE is not
+// defaulted here, so "" is not a backend and relays nothing.
+func RelaysOutbox(codeForge, boxAccess string) bool {
+	d, ok := ByName(codeForge)
+	return ok && d.OutboxRelayCapable && boxAccess == "read-only"
 }

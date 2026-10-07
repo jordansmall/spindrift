@@ -778,12 +778,14 @@ func TestWarnUnprobedKinds_NothingMissingEmitsNothing(t *testing.T) {
 // its field, so TestResolveChildSharedKnobs can read the value the daemon
 // resolved for exactly that key.
 var sharedKnobAccessors = map[string]func(childSharedKnobs) string{
-	"BASE_BRANCH":          func(k childSharedKnobs) string { return k.baseBranch },
-	"MAX_PARALLEL":         func(k childSharedKnobs) string { return k.maxParallel },
-	"DAEMON_AWAKE_WINDOW":  func(k childSharedKnobs) string { return k.awakeWindow },
-	"BUTLER_CHORES":        func(k childSharedKnobs) string { return k.butlerChores },
-	"BUTLER_EVERY":         func(k childSharedKnobs) string { return k.butlerEvery },
-	"BUTLER_CHORE_CLASSES": func(k childSharedKnobs) string { return k.butlerChoreClasses },
+	"BASE_BRANCH":                func(k childSharedKnobs) string { return k.baseBranch },
+	"MAX_PARALLEL":               func(k childSharedKnobs) string { return k.maxParallel },
+	"DAEMON_AWAKE_WINDOW":        func(k childSharedKnobs) string { return k.awakeWindow },
+	"BUTLER_CHORES":              func(k childSharedKnobs) string { return k.butlerChores },
+	"BUTLER_EVERY":               func(k childSharedKnobs) string { return k.butlerEvery },
+	"BUTLER_CHORE_CLASSES":       func(k childSharedKnobs) string { return k.butlerChoreClasses },
+	"CODE_FORGE":                 func(k childSharedKnobs) string { return k.codeForge },
+	"BOX_FORGE_AND_ISSUE_ACCESS": func(k childSharedKnobs) string { return k.boxAccess },
 }
 
 // daemonOnlyKnobAccessors maps each daemon-only knob to its field, so

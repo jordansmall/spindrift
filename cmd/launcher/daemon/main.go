@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -39,8 +40,9 @@ var installStopSignal = stopsignal.Notify
 const inputFlag = "--input"
 
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
-// optional positional kind-set selector (dispatch|research|butler, default
-// every kind — see parseArgs) and an optional `--feature-branch <branch>`.
+// optional positional kind-set selector (dispatch|research|butler|recover,
+// default every kind — see parseArgs) and an optional
+// `--feature-branch <branch>`.
 type parsedArgs struct {
 	InputPath        string
 	Kinds            []daemon.Kind
@@ -49,16 +51,18 @@ type parsedArgs struct {
 }
 
 // parseArgs parses `daemon --input <path> [--feature-branch <branch>]
-// [dispatch|research|butler]` — --feature-branch may appear before or after
-// the positional kind selector. With no positional verb the daemon draws
-// from every kind off one pool (issue #3541, #3878) — an operator stops
+// [dispatch|research|butler|recover]` — --feature-branch may appear before
+// or after the positional kind selector. With no positional verb the daemon
+// draws from every kind off one pool (issue #3541, #3878) — an operator stops
 // having to choose between advancing work, enriching the backlog, and
 // butler upkeep. `dispatch` alone keeps work-only operation, which is how an
 // operator who has not created the research labels on their target repo
 // runs the daemon; `research` alone restricts it to advise-only research;
-// `butler` alone restricts it to the chore. The bare default's butler is
-// provisional until gateKinds, since parseArgs has no document to
-// resolve BUTLER_CHORES against.
+// `butler` alone restricts it to the chore; `recover` alone restricts it to
+// queue-mode `spindrift recover` (issue #4656). The bare default's butler
+// and recover are provisional until gateKinds, since parseArgs has no
+// document to resolve BUTLER_CHORES, CODE_FORGE or
+// BOX_FORGE_AND_ISSUE_ACCESS against.
 func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
 	var havePath bool
@@ -108,20 +112,32 @@ func parseArgs(args []string) (parsedArgs, error) {
 	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch}, nil
 }
 
+// errNoOutboxRelay is why a recover kind is disabled: no read-only Box's
+// outbox bundle is relayed, so there is nothing for it to land.
+var errNoOutboxRelay = fmt.Errorf("no outbox bundle is relayed (recover needs CODE_FORGE %s with BOX_FORGE_AND_ISSUE_ACCESS=read-only)", strings.Join(backend.OutboxRelayBackends(), " or "))
+
+// gateKnobs are the resolved knob values gateKinds judges each kind's
+// Enablement row by.
+type gateKnobs struct {
+	chores               chore.Knobs
+	codeForge, boxAccess string
+}
+
 // gateKinds drops from a bare invocation's kinds every kind whose descriptor
 // Enablement row is unmet, so a bare daemon without Chores runs the other
-// kinds rather than being refused by startupPreflight's `doctor --butler`. A
-// kind named explicitly fails startup instead of running nothing. A butler that survives
-// this gate has the rest of its config validated by that same `doctor
-// --butler` (issue #3920).
+// kinds rather than being refused by startupPreflight's `doctor --butler`,
+// and one whose Box relays no outbox bundle runs without recover. A kind
+// named explicitly fails startup instead of running nothing. A butler that
+// survives this gate has the rest of its config validated by that same
+// `doctor --butler` (issue #3920).
 // Without an EnabledByChores kind among kinds the three knobs are never
 // parsed, so a dispatch- or research-only daemon never fails on butler config
-// it does not use. With one among kinds but knobs.Chores empty, chore.Load
+// it does not use. With one among kinds but knobs.chores.Chores empty, chore.Load
 // itself short-circuits before touching BUTLER_EVERY or
 // BUTLER_CHORE_CLASSES, so only a chore.Load error with at least one Chore
 // enabled fails startup.
-func gateKinds(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([]daemon.Kind, error) {
-	loadChores := sync.OnceValues(func() ([]chore.Chore, error) { return chore.Load(knobs) })
+func gateKinds(kinds []daemon.Kind, explicitSelector bool, knobs gateKnobs) ([]daemon.Kind, error) {
+	loadChores := sync.OnceValues(func() ([]chore.Chore, error) { return chore.Load(knobs.chores) })
 	kept := make([]daemon.Kind, 0, len(kinds))
 	for _, k := range kinds {
 		d, ok := dispatchkind.ByVerb(string(k))
@@ -138,6 +154,10 @@ func gateKinds(kinds []daemon.Kind, explicitSelector bool, knobs chore.Knobs) ([
 			}
 			if len(resolved) == 0 {
 				disabled = chore.ErrNoChores
+			}
+		case dispatchkind.EnabledByOutboxRelay:
+			if !backend.RelaysOutbox(knobs.codeForge, knobs.boxAccess) {
+				disabled = fmt.Errorf("CODE_FORGE=%s with BOX_FORGE_AND_ISSUE_ACCESS=%s: %w", knobs.codeForge, knobs.boxAccess, errNoOutboxRelay)
 			}
 		default:
 			return nil, fmt.Errorf("%s: unknown enablement %d", d.Verb, d.Enablement)
@@ -703,7 +723,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 
-	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, chore.Knobs{Chores: shared.butlerChores, Every: shared.butlerEvery, Classes: shared.butlerChoreClasses})
+	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, gateKnobs{
+		chores:    chore.Knobs{Chores: shared.butlerChores, Every: shared.butlerEvery, Classes: shared.butlerChoreClasses},
+		codeForge: shared.codeForge,
+		boxAccess: shared.boxAccess,
+	})
 	if err != nil {
 		return fail(stderr, err)
 	}

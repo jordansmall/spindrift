@@ -29,6 +29,7 @@ func TestParseKind(t *testing.T) {
 		{"dispatch", "dispatch", KindOf(dispatchkind.Work), false},
 		{"research", "research", KindOf(dispatchkind.Research), false},
 		{"butler", "butler", KindOf(dispatchkind.Butler), false},
+		{"recover", "recover", KindOf(dispatchkind.Recover), false},
 		{"unknown", "bogus", "", true},
 	}
 	for _, tc := range cases {
@@ -57,10 +58,11 @@ func TestParseKinds(t *testing.T) {
 		want    []Kind
 		wantErr bool
 	}{
-		{"empty defaults to every kind", "", []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler)}, false},
+		{"empty defaults to every kind", "", []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Research), KindOf(dispatchkind.Butler), KindOf(dispatchkind.Recover)}, false},
 		{"dispatch", "dispatch", []Kind{KindOf(dispatchkind.Work)}, false},
 		{"research", "research", []Kind{KindOf(dispatchkind.Research)}, false},
 		{"butler", "butler", []Kind{KindOf(dispatchkind.Butler)}, false},
+		{"recover", "recover", []Kind{KindOf(dispatchkind.Recover)}, false},
 		{"unknown", "bogus", nil, true},
 	}
 	for _, tc := range cases {

@@ -232,6 +232,7 @@ func childValue(doc *inputdoc.Document, key, ambient string) (string, bool) {
 type childSharedKnobs struct {
 	baseBranch, maxParallel, awakeWindow          string
 	butlerChores, butlerEvery, butlerChoreClasses string
+	codeForge, boxAccess                          string
 }
 
 // resolveChildSharedKnobs resolves every knob both the daemon and its
@@ -251,6 +252,8 @@ func resolveChildSharedKnobs(doc *inputdoc.Document) (childSharedKnobs, error) {
 	k.butlerChores = childKnob(doc, "BUTLER_CHORES", os.Getenv("BUTLER_CHORES"))
 	k.butlerEvery = childKnob(doc, "BUTLER_EVERY", os.Getenv("BUTLER_EVERY"))
 	k.butlerChoreClasses = childKnob(doc, "BUTLER_CHORE_CLASSES", os.Getenv("BUTLER_CHORE_CLASSES"))
+	k.codeForge = childKnob(doc, "CODE_FORGE", os.Getenv("CODE_FORGE"))
+	k.boxAccess = childKnob(doc, "BOX_FORGE_AND_ISSUE_ACCESS", os.Getenv("BOX_FORGE_AND_ISSUE_ACCESS"))
 	return k, nil
 }
 
