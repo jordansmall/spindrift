@@ -1,6 +1,7 @@
 package glob
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,72 @@ func TestOverlap_ManyDoubleStarsDoesNotHang(t *testing.T) {
 	}
 }
 
+// Two patterns overlap when some name satisfies both, even if neither pattern
+// is a literal one the other matches.
+func TestOverlap_Segments(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"cmd/*.go", "cmd/main*", true},
+		{"src/foo*", "src/*bar", true},
+		{"a/*x", "a/x*", true},
+		{"a/?b", "a/a?", true},
+		{"**/*.go", "cmd/main*", true},
+		{"a/[ab]c", "a/a?", true},
+		{"a/[ab]", "a/a", true},
+		{"cmd/launcher/internal/forge/*.go", "cmd/launcher/internal/forge/verdict*", true},
+		{"a/[^b]", "a/?", true},
+		{`a/\*`, "a/*", true},
+		{"a/[a-c]", "a/[c-e]", true},
+		{"src/*.go", "src/*.md", false},
+		{"a/[ab]", "a/c", false},
+		{"a/[^a]", "a/a", false},
+		{"a/?", "a/ab", false},
+		{"a/[a-c]", "a/[d-f]", false},
+		{"a/[^a-z]", "a/[a-z]", false},
+		{`a/\*`, "a/b", false},
+		// Malformed patterns fail closed.
+		{"a/[", "a/b", true},
+		{`a/\`, "a/b", true},
+		{"\xc3?", "é", true},
+	}
+	for _, tc := range cases {
+		if got := Overlap(tc.a, tc.b); got != tc.want {
+			t.Errorf("Overlap(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+		if got := Overlap(tc.b, tc.a); got != tc.want {
+			t.Errorf("Overlap(%q, %q) = %v, want %v", tc.b, tc.a, got, tc.want)
+		}
+	}
+}
+
+// A single segment full of "*" must not backtrack exponentially, and a long
+// run of character classes must stay polynomial too.
+func TestOverlap_LongSegmentDoesNotHang(t *testing.T) {
+	cases := []struct {
+		name string
+		a, b string
+		want bool
+	}{
+		{"stars", strings.Repeat("*a", 500) + "b", strings.Repeat("*a", 500) + "c", false},
+		{"classes", "x" + strings.Repeat("[ac]", 500), "y" + strings.Repeat("[bd]", 500), false},
+		{"wide classes", strings.Repeat("[a-bd-fh-jl-n]*", 300), strings.Repeat("*[c-eg-ik-m]", 300), true},
+	}
+	for _, tc := range cases {
+		done := make(chan bool, 1)
+		go func() { done <- Overlap(tc.a, tc.b) }()
+		select {
+		case got := <-done:
+			if got != tc.want {
+				t.Errorf("%s: Overlap = %v, want %v", tc.name, got, tc.want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s: Overlap did not return within 2s", tc.name)
+		}
+	}
+}
+
 // Match and Overlap must give the same pattern syntax the same meaning, so a
 // literal path that a pattern matches also overlaps that pattern.
 func TestMatchOverlapConsistency(t *testing.T) {
@@ -103,10 +170,32 @@ func TestMatchOverlapConsistency(t *testing.T) {
 		{"**/CLAUDE.md", "services/api/CLAUDE.md"},
 		{"cmd/launcher/*.go", "docs/reference.md"},
 		{"docs/*.md", "cmd/launcher/internal/forge/exec.go"},
+		{"a/[ab]", "a/a"},
+		{"a/[ab]", "a/c"},
+		{"a/[^b]c", "a/ac"},
+		{"a/[a-c]?", "a/bz"},
 	}
 	for _, tc := range cases {
 		if Match(tc.pattern, tc.path) != Overlap(tc.pattern, tc.path) {
 			t.Errorf("Match(%q, %q) and Overlap(%q, %q) disagree", tc.pattern, tc.path, tc.pattern, tc.path)
 		}
+	}
+}
+
+// The product automaton must keep memory linear in segment length: a full
+// (len(a)+1)*(len(b)+1) table is ~16 MB here, so a small bound catches it.
+func TestOverlap_LongSegmentMemoryNotQuadratic(t *testing.T) {
+	a := strings.Repeat("a", 4000) + "*"
+	b := "*" + strings.Repeat("b", 4000)
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	got := Overlap(a, b)
+	runtime.ReadMemStats(&after)
+	if !got {
+		t.Error("Overlap = false, want true")
+	}
+	if delta := after.TotalAlloc - before.TotalAlloc; delta > 4<<20 {
+		t.Errorf("Overlap allocated %d bytes, want under 4 MiB", delta)
 	}
 }
