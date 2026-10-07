@@ -38,6 +38,12 @@ class Container {
     this.listeners = {};
   }
 
+  get nextSibling() {
+    if (!this.parentNode) return null;
+    const sibs = this.parentNode.childNodes;
+    return sibs[sibs.indexOf(this) + 1] || null;
+  }
+
   get children() { return this.childNodes.filter((n) => n.nodeType === 1); }
 
   get textContent() { return this.childNodes.map((n) => n.textContent).join(""); }
@@ -217,6 +223,7 @@ function runPage(body, clockStep) {
       createTextNode: (data) => new Text(data),
       createDocumentFragment: () => new Container(11),
       querySelectorAll: (sel) => body.querySelectorAll(sel),
+      querySelector: (sel) => body.querySelector(sel),
     },
     window: { EventSource: FakeEventSource },
     EventSource: FakeEventSource,
@@ -704,4 +711,116 @@ test("a pruned tab answers pruned again when shown again", () => {
   p.latest().emit("pruned");
   assert.strictEqual(p.panes[0].followState.textContent, "log pruned · following");
   assert.strictEqual(p.latest().readyState, FakeEventSource.CLOSED);
+});
+
+// A drill-in page: tabs and Pass panes as dispatch.html.tmpl renders them,
+// with the dispatch events stream opened when events is given.
+function dispatchPage(opts) {
+  const body = new Element("body");
+  const main = new Element("main");
+  main.className = "dispatch";
+  if (opts.events) main.setAttribute("data-events", opts.events);
+  body.appendChild(main);
+  const nav = new Element("nav");
+  nav.className = "tabs";
+  main.appendChild(nav);
+  (opts.passes || []).forEach((q, i) => {
+    const tab = new Element("button");
+    tab.className = "tab";
+    tab.setAttribute("data-tab", "pass-" + i);
+    tab.textContent = q.phase;
+    nav.appendChild(tab);
+    const sec = new Element("section");
+    sec.className = "tabbody";
+    sec.id = "tab-pass-" + i;
+    sec.setAttribute("data-pass-log", q.path);
+    sec.hidden = true;
+    const pre = new Element("pre");
+    pre.className = "log";
+    pre.dataset.src = "/log?path=" + q.path;
+    sec.appendChild(pre);
+    main.appendChild(sec);
+  });
+
+  runPage(body);
+  const events = FakeEventSource.instances.find((e) => e.url === opts.events);
+  return {
+    main, events,
+    tabs: () => nav.children,
+    panes: () => main.querySelectorAll(".tabbody"),
+    logStreams: () => FakeEventSource.instances.filter((e) => e.url.startsWith("/log")),
+    pass(phase, logPath) { events.emit("pass", JSON.stringify({ phase, path: logPath })); },
+  };
+}
+
+const EVENTS = "/dispatch/events?slot=s&at=a&n=1";
+
+test("a new pass frame adds a tab and a hidden pane after the existing ones", () => {
+  const p = dispatchPage({ events: EVENTS, passes: [{ phase: "plan", path: "/l/0" }] });
+  p.pass("implement", "/l/a b&c");
+  assert.strictEqual(p.tabs().length, 2);
+  const tab = p.tabs()[1];
+  assert.strictEqual(tab.textContent, "implement");
+  assert.strictEqual(tab.getAttribute("data-tab"), "pass-1");
+  assert.ok(tab.classList.contains("tab"));
+  const panes = p.panes();
+  assert.strictEqual(panes.length, 2);
+  assert.strictEqual(p.main.children[p.main.children.length - 1], panes[1]);
+  assert.strictEqual(panes[1].id, "tab-pass-1");
+  assert.strictEqual(panes[1].hidden, true);
+  assert.strictEqual(panes[1].getAttribute("data-pass-log"), "/l/a b&c");
+  assert.strictEqual(
+    panes[1].querySelector("pre.log").dataset.src, "/log?path=" + encodeURIComponent("/l/a b&c") + "&slot=s&at=a&n=1");
+});
+
+test("a live pane opens its log stream only when its tab is first clicked", () => {
+  const p = dispatchPage({ events: EVENTS, passes: [{ phase: "plan", path: "/l/0" }] });
+  p.pass("implement", "/l/1");
+  assert.strictEqual(p.logStreams().length, 0);
+  p.tabs()[1].dispatchEvent(new Event("click"));
+  assert.strictEqual(p.panes()[1].hidden, false);
+  assert.ok(p.tabs()[1].classList.contains("active"));
+  assert.strictEqual(p.panes()[0].hidden, true);
+  assert.strictEqual(p.logStreams().length, 1);
+  assert.strictEqual(p.logStreams()[0].url, "/log?path=" + encodeURIComponent("/l/1") + "&slot=s&at=a&n=1");
+});
+
+test("a pass frame for a path already on the page adds nothing", () => {
+  const p = dispatchPage({ events: EVENTS, passes: [{ phase: "plan", path: "/l/0" }] });
+  p.pass("plan", "/l/0");
+  p.pass("review", "/l/1");
+  p.pass("review", "/l/1");
+  assert.strictEqual(p.tabs().length, 2);
+  assert.strictEqual(p.panes().length, 2);
+});
+
+test("a live pane's log src re-escapes the events URL's slot, at and n", () => {
+  const p = dispatchPage({
+    events: "/dispatch/events?slot=a%22b&at=2026-10-07T19%3A20%3A00%2B02%3A00&n=1&x=%3Cy%3E",
+    passes: [{ phase: "plan", path: "/l/0" }],
+  });
+  p.pass("implement", "/l/1");
+  assert.strictEqual(
+    p.panes()[1].querySelector("pre.log").dataset.src,
+    "/log?path=%2Fl%2F1&slot=a%22b&at=2026-10-07T19%3A20%3A00%2B02%3A00&n=1");
+});
+
+test("a hostile phase lands as text", () => {
+  const p = dispatchPage({ events: EVENTS, passes: [{ phase: "plan", path: "/l/0" }] });
+  p.pass("<img src=x onerror=alert(1)>", "/l/1");
+  const tab = p.tabs()[1];
+  assert.strictEqual(tab.textContent, "<img src=x onerror=alert(1)>");
+  assert.strictEqual(tab.children.length, 0);
+});
+
+test("a closed frame closes the events stream", () => {
+  const p = dispatchPage({ events: EVENTS });
+  assert.notStrictEqual(p.events.readyState, FakeEventSource.CLOSED);
+  p.events.emit("closed", "");
+  assert.strictEqual(p.events.readyState, FakeEventSource.CLOSED);
+});
+
+test("a page without data-events opens no dispatch events stream", () => {
+  dispatchPage({ passes: [{ phase: "plan", path: "/l/0" }] });
+  assert.strictEqual(FakeEventSource.instances.length, 0);
 });

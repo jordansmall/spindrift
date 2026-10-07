@@ -341,8 +341,10 @@
     updateIndicator();
   }
 
-  var tabs = document.querySelectorAll(".tab");
-  var bodies = document.querySelectorAll(".tabbody");
+  // Arrays, not live NodeLists: Pass tabs added later join them.
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  var bodies = Array.prototype.slice.call(document.querySelectorAll(".tabbody"));
+  var haveES = !!window.EventSource;
 
   function showTab(name) {
     var i;
@@ -362,14 +364,85 @@
     for (i = 0; i < shown.length; i++) shown[i].dispatchEvent(new Event("tabshown"));
   }
 
-  for (var t = 0; t < tabs.length; t++) {
-    tabs[t].addEventListener("click", function () {
+  function wireTab(tab) {
+    tab.addEventListener("click", function () {
       showTab(this.getAttribute("data-tab"));
     });
   }
 
+  tabs.forEach(wireTab);
+
   // Without EventSource only the live streaming is lost; tabs still switch.
-  if (window.EventSource) {
-    for (var b = 0; b < bodies.length; b++) follow(bodies[b]);
+  if (haveES) bodies.forEach(follow);
+
+  function addPass(phase, path) {
+    var nav = document.querySelector("nav.tabs");
+    var last = bodies[bodies.length - 1];
+    if (!nav || !last) return;
+    var k = 0;
+    for (var i = 0; i < bodies.length; i++) {
+      if (!bodies[i].hasAttribute("data-pass-log")) continue;
+      if (bodies[i].getAttribute("data-pass-log") === path) return;
+      k++;
+    }
+
+    var tab = document.createElement("button");
+    tab.setAttribute("type", "button");
+    tab.className = "tab";
+    tab.setAttribute("data-tab", "pass-" + k);
+    tab.textContent = phase;
+    nav.appendChild(tab);
+    wireTab(tab);
+    tabs.push(tab);
+
+    var pane = document.createElement("section");
+    pane.className = "tabbody";
+    pane.id = "tab-pass-" + k;
+    pane.setAttribute("data-pass-log", path);
+    pane.hidden = true;
+    var bar = document.createElement("div");
+    bar.className = "logbar";
+    var state = document.createElement("span");
+    state.className = "follow-state";
+    bar.appendChild(state);
+    var pre = document.createElement("pre");
+    pre.className = "log";
+    // /log needs this Dispatch's slot, at and n so a later run's reuse of
+    // the path is not followed; each is re-escaped, never copied raw from
+    // the page.
+    pre.dataset.src = "/log?path=" + encodeURIComponent(path) +
+      "&slot=" + encodeURIComponent(eventsParam("slot")) +
+      "&at=" + encodeURIComponent(eventsParam("at")) +
+      "&n=" + encodeURIComponent(eventsParam("n"));
+    pane.appendChild(bar);
+    pane.appendChild(pre);
+    last.parentNode.insertBefore(pane, last.nextSibling);
+    bodies.push(pane);
+    // follow() streams the pane only while it is shown, which keeps the
+    // browser under its per-host connection cap.
+    follow(pane);
+  }
+
+  function eventsParam(name) {
+    var q = eventsURL.slice(eventsURL.indexOf("?") + 1).split("&");
+    for (var i = 0; i < q.length; i++) {
+      var eq = q[i].indexOf("=");
+      if (q[i].slice(0, eq) === name) return decodeURIComponent(q[i].slice(eq + 1));
+    }
+    return "";
+  }
+
+  var main = document.querySelector("main.dispatch");
+  var eventsURL = main && main.getAttribute("data-events");
+  if (eventsURL && haveES) {
+    var events = new EventSource(eventsURL);
+    // Reconnects replay every Pass; the path dedupe absorbs the repeats.
+    events.addEventListener("pass", function (ev) {
+      var p;
+      try { p = JSON.parse(ev.data); } catch (e) { return; }
+      if (!p || typeof p.phase !== "string" || typeof p.path !== "string") return;
+      addPass(p.phase, p.path);
+    });
+    events.addEventListener("closed", function () { events.close(); });
   }
 })();
