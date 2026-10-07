@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
@@ -350,7 +351,7 @@ func (r *hostRunner) resolveTipOnce(ctx context.Context) (daemon.Tip, error) {
 // ReadyIDs when it has one (the host outbox), else from its tracker counter. A
 // kind with no source is an error: the pool only asks for kinds named in
 // Config.ProbeIntervals, which probeIntervals derives from the same map.
-func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool) (daemon.Demand, error) {
+func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, _ map[dispatchkey.Key]bool) (daemon.Demand, error) {
 	c, ok := r.demand[kind]
 	if !ok {
 		return daemon.Demand{}, fmt.Errorf("no demand source for kind %q", kind)

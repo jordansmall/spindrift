@@ -2803,3 +2803,17 @@ func TestPoolConcurrentNoWorkUnderOneGateRaisesBackoffOnce(t *testing.T) {
 		t.Fatalf("work gated for %v, want one step up to %v (cap %v)", got, want, testIdleCap)
 	}
 }
+
+func TestLiveKeysCollectsOnlyRunningSlotsKeys(t *testing.T) {
+	work := KindOf(dispatchkind.Work)
+	s := &state{slots: []slotState{
+		{phase: PhaseRunning, flight: slotFlight{kind: work, key: dispatchkey.Issue("1")}},
+		{phase: PhaseRunning, flight: slotFlight{kind: work}},
+		{phase: PhaseBackingOff, flight: slotFlight{kind: work, key: dispatchkey.Issue("2")}},
+		{phase: PhaseIdle},
+	}}
+	got := liveKeys(s)
+	if want := map[dispatchkey.Key]bool{dispatchkey.Issue("1"): true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("liveKeys = %v, want %v: only a running slot's non-zero key", got, want)
+	}
+}

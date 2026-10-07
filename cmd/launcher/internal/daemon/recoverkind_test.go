@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
@@ -226,4 +227,126 @@ func TestLoopRecoverDemandRiseLiftsExitTwoBackoff(t *testing.T) {
 	// Probes land at 1s, 2s and 3s; the rise seen at the third starts the
 	// second child at 3s, before the 4s first backoff would have lapsed.
 	requireOffsets(t, got, []time.Duration{0, 3 * s})
+}
+
+// workHoldingBundleLoop runs a two-slot pool probing recover (an outbox kind
+// holding a bundle for issue 7) and work, with work's child holding issue 7
+// open. It returns once the work child is claimed and the other slot has
+// probed recover with that key in flight; the caller drives the rest.
+func workHoldingBundleLoop(t *testing.T) (r *scriptedRunner, clk *testClock, workSlot int) {
+	t.Helper()
+	recoverKind := KindOf(dispatchkind.Recover)
+	ctx, clk, r := parkedLoopDoubles(t, 2)
+	r.onStart = nil
+	r.setDemand(workKind, 1)
+	cfg := probedConfig(2, 10*time.Second, recoverKind, workKind)
+	cfg.IdleFloor, cfg.IdleCap = time.Hour, 2*time.Hour
+	var buf bytes.Buffer
+	go Loop(ctx, cfg, r, newTestEmitter(&buf), clk)
+
+	workSlot = r.awaitStart(t)
+	r.setDemand(workKind, 0)
+	// The bundle appears only once the claim is reported. The sibling probes
+	// before it waits on the baton, so a bundle visible earlier could be
+	// counted by a probe that predates the claim and so lacks the flight key.
+	r.fireOnIssue(t, workSlot, "7")
+	r.setOutbox(recoverKind, dispatchkey.Issue("7"))
+	clk.awaitSleep(t, 1)
+
+	// The idle slot's next probe is due, with the work child still in flight.
+	clk.advanceBy(10 * time.Second)
+	clk.releaseOne(t)
+	clk.awaitSleep(t, 1)
+	return r, clk, workSlot
+}
+
+// A work child's key is held in its slot while its in-process settle and CI
+// watch run with the bundle already in the outbox; recover must not count that
+// bundle, or it starts a child that exits 2 and grows its own gate.
+func TestLoopRecoverDoesNotCountBundleHeldByLiveWorkChild(t *testing.T) {
+	recoverKind := KindOf(dispatchkind.Recover)
+	r, _, _ := workHoldingBundleLoop(t)
+
+	calls := r.demandInFlightCalls(recoverKind)
+	last := calls[len(calls)-1]
+	if !last[dispatchkey.Issue("7")] {
+		t.Fatalf("last recover probe inFlight = %v, want it to hold issue 7", last)
+	}
+	if n := r.kindCount(recoverKind); n != 0 {
+		t.Fatalf("recover children started = %d while the work child holds the bundle, want 0", n)
+	}
+}
+
+// Once the work child finishes and leaves its bundle stranded, recover starts
+// within one probe interval: the bundle was never counted, so no grown gate
+// waits for a rise the flat count will not make.
+func TestLoopRecoverStartsWithinOneProbeAfterWorkChildLeavesBundle(t *testing.T) {
+	const interval = 10 * time.Second
+	recoverKind := KindOf(dispatchkind.Recover)
+	r, clk, workSlot := workHoldingBundleLoop(t)
+
+	r.releaseSlot(t, workSlot, ChildResult{Exit: 1})
+	// The freed slot decides and finds nothing due, so its sleep says the
+	// finish (which zeroes the flight key) is settled.
+	clk.awaitSleep(t, 1)
+	clk.advanceBy(interval)
+	clk.releaseOne(t)
+
+	r.awaitStart(t)
+	calls := r.calls()
+	if got := calls[len(calls)-1].Kind; got != recoverKind {
+		t.Fatalf("started kind after the work child left its bundle = %v, want recover", got)
+	}
+}
+
+// A gate the recover kind grew on an earlier exit 2 must not outlast the work
+// child's bundle: while the work child holds issue 7 the count stays at the
+// one other bundle the gate was grown against, and once the child finishes
+// the rise to two lifts the gate within one probe, not after the hour wait.
+func TestLoopRecoverGrownGateLiftsWithinOneProbeAfterWorkChildLeavesBundle(t *testing.T) {
+	const interval = 10 * time.Second
+	recoverKind := KindOf(dispatchkind.Recover)
+	ctx, clk, r := parkedLoopDoubles(t, 2)
+	r.onStart = nil
+	r.setOutbox(recoverKind, dispatchkey.Issue("8"))
+	cfg := probedConfig(2, interval, recoverKind, workKind)
+	cfg.IdleFloor, cfg.IdleCap = time.Hour, 2*time.Hour
+	var buf bytes.Buffer
+	go Loop(ctx, cfg, r, newTestEmitter(&buf), clk)
+
+	// The recover child finds its one bundle ineligible and exits 2, growing
+	// the gate against that count of one.
+	recoverSlot := r.awaitStart(t)
+	r.releaseSlot(t, recoverSlot, ChildResult{Exit: 2})
+	clk.awaitSleep(t, 2)
+
+	r.setDemand(workKind, 1)
+	clk.advanceBy(interval)
+	clk.releaseOne(t)
+	workSlot := r.awaitStart(t)
+	r.setDemand(workKind, 0)
+	// Bundle 7 appears only after the claim, as in workHoldingBundleLoop.
+	r.fireOnIssue(t, workSlot, "7")
+	r.setOutbox(recoverKind, dispatchkey.Issue("7"), dispatchkey.Issue("8"))
+	clk.awaitSleep(t, 1)
+
+	// The sibling's probe, with the work child still in flight, sees only
+	// bundle 8: the count stays at the gate's baseline and no child starts.
+	clk.advanceBy(interval)
+	clk.releaseOne(t)
+	clk.awaitSleep(t, 1)
+	if n := r.kindCount(recoverKind); n != 1 {
+		t.Fatalf("recover children started = %d while the work child holds bundle 7, want only the first", n)
+	}
+
+	r.releaseSlot(t, workSlot, ChildResult{Exit: 1})
+	clk.awaitSleep(t, 1)
+	clk.advanceBy(interval)
+	clk.releaseOne(t)
+
+	r.awaitStart(t)
+	calls := r.calls()
+	if got := calls[len(calls)-1].Kind; got != recoverKind {
+		t.Fatalf("started kind after the work child left its bundle = %v, want recover", got)
+	}
 }
