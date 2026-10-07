@@ -18,10 +18,16 @@ import (
 // — see ReadStatus.
 const statusFileName = "spindrift-daemon.status"
 
+// statusSchema is the status file's top-level "schema". Bump it only on a
+// breaking change — a rename, a removal, or a changed meaning; adding a
+// field never bumps it (issue #4713).
+const statusSchema = 1
+
 // Status is the daemon's published state, written by StatusWriter and read
 // by ReadStatus (issue #3545). It is a point-in-time snapshot: a reader gets
 // whatever was last published, not a live stream.
 type Status struct {
+	Schema  int    `json:"schema"`
 	Pid     int    `json:"pid"`
 	Host    string `json:"host"`
 	Started string `json:"started"` // RFC3339 UTC, daemon start
@@ -218,6 +224,7 @@ func (w *StatusWriter) Publish(seq uint64, s Status) error {
 	}
 	w.lastSeq = seq
 
+	s.Schema = statusSchema
 	s.Pid = w.pid
 	s.Host = w.host
 	s.Started = w.started
