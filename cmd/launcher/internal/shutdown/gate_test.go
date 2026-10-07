@@ -143,6 +143,27 @@ func TestAbort_ReclaimsEveryInFlightIssueExactlyOnce(t *testing.T) {
 	}
 }
 
+func TestAborted_DistinguishesDrainStopFromAbort(t *testing.T) {
+	fc := newFakeForge(t, "1")
+	stop := make(chan struct{})
+	abort := make(chan struct{})
+	g := shutdown.NewGate(stop, abort, fc, fc, &stubReaper{}, nil, "agent-complete")
+
+	close(stop)
+	g.Allowed("1")
+	g.Settle()
+	if g.Aborted() || !g.Signalled() {
+		t.Fatalf("after stop: Aborted=%v Signalled=%v, want false/true", g.Aborted(), g.Signalled())
+	}
+
+	close(abort)
+	g.Allowed("1")
+	g.Settle()
+	if !g.Aborted() {
+		t.Fatal("Aborted: want true once abort is closed")
+	}
+}
+
 func TestLeave_BeforeAbort_IssueNotReclaimed(t *testing.T) {
 	fc := newFakeForge(t, "1", "2")
 	reaper := &stubReaper{}

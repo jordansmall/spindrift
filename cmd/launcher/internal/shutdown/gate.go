@@ -303,6 +303,13 @@ func (g *Gate) Signalled() bool {
 	return g.signalled || g.aborted
 }
 
+// Aborted reports whether the abort stage fired. Valid after Settle.
+func (g *Gate) Aborted() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.aborted
+}
+
 // reclaimOne runs terminate.Reclaim for a single issue, logging a failure to
 // stderr rather than returning it -- the same best-effort discipline
 // AbortInFlight uses per issue.
