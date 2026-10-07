@@ -307,6 +307,9 @@ type slotFlight struct {
 	gateGen int
 	// childStart pins the child_start event; see startChild.
 	childStart childStartPin
+	// pass is the Pass label (Record.Phase) of the child's most recent box
+	// record.
+	pass string
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -658,6 +661,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 			s.observe(now, Claimed{Kind: kind})
 		}
 		flight.key = rec.Key
+		flight.pass = rec.Phase
 		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
 			for _, existing := range flight.issues {
@@ -1292,6 +1296,7 @@ func (p *pool) snapshotLocked() Status {
 		slots[i].ChildStart = ss.flight.childStart.time
 		slots[i].ChildStartN = ss.flight.childStart.n
 		_, slots[i].Chore = ss.flight.key.Fields()
+		slots[i].Pass = ss.flight.pass
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.

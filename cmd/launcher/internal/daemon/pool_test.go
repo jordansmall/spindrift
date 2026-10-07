@@ -2242,6 +2242,54 @@ func TestPoolNoteBoxDedupesRepeatIssueInStatusButNotInEvents(t *testing.T) {
 	}
 }
 
+// TestPoolSnapshotPublishesLatestBoxPhaseAsPass pins that a running slot's
+// status carries the phase of its child's most recent box record, and that
+// neither a finished child nor a fresh one on the same slot inherits it.
+func TestPoolSnapshotPublishesLatestBoxPhaseAsPass(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	work := KindOf(dispatchkind.Work)
+	box := func(phase string) {
+		p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: dispatchkey.Issue("123"), Phase: phase})
+	}
+	pass := func() string { return p.snapshot().Slots[0].Pass }
+	start := func() {
+		t.Helper()
+		if _, _, ok := p.startChild(0, work, "rev1"); !ok {
+			t.Fatal("startChild refused the slot")
+		}
+		if ph := p.snapshot().Slots[0].Phase; ph != PhaseRunning {
+			t.Fatalf("phase after startChild = %q, want %q", ph, PhaseRunning)
+		}
+	}
+
+	start()
+	if got := pass(); got != "" {
+		t.Fatalf("pass before first box = %q, want empty", got)
+	}
+	box("initial")
+	if got := pass(); got != "initial" {
+		t.Fatalf("pass after first box = %q, want initial", got)
+	}
+	box("fix-pass-1")
+	if got := pass(); got != "fix-pass-1" {
+		t.Fatalf("pass after later box = %q, want fix-pass-1", got)
+	}
+
+	p.finishChild(0)
+	if got := pass(); got != "" {
+		t.Fatalf("pass after finishChild = %q, want empty", got)
+	}
+
+	start()
+	if got := pass(); got != "" {
+		t.Fatalf("pass on new child before its first box = %q, want empty", got)
+	}
+}
+
 // TestPoolSnapshotCopiesKindsSlice pins that snapshot's Kinds is a copy of
 // cfg.Kinds, not an alias: mutating the caller's slice after snapshot must
 // never change what was already handed out (mirrors
