@@ -1481,6 +1481,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				}
 				return fmt.Errorf("recover: claim #%s: %w", issueNum, err)
 			}
+			report.Box(dispatchkey.Issue(iss.number), report.PhaseRecover)
 		}
 		// New arms this issue's kill latch, so it must run under Gate's own
 		// lock and before the in-flight registration, or a concurrent abort
@@ -1490,8 +1491,11 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			if queue {
 				// A stop arrived after the claim above: put the label back so
 				// the issue is not stranded agent-in-progress with no run.
-				if err := it.TransitionState(iss.number, forge.InProgress, forge.Failed); err != nil {
-					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, err)
+				restoreErr := it.TransitionState(iss.number, forge.InProgress, forge.Failed)
+				// Reported even if the restore failed, as transitionState does.
+				report.Settled(dispatchkey.Issue(iss.number), forge.Failed.String(), "stopped before the bundle relay")
+				if restoreErr != nil {
+					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
 				}
 				return waves.ErrSignalledStop
 			}
