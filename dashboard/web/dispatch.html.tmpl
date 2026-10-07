@@ -1,3 +1,15 @@
+{{define "dispatch-head" -}}
+  <h1>slot {{.Slot}}{{if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}</h1>
+  <div class="facts">
+    <div><span class="label">started</span>{{template "time" .Started}}</div>
+    {{- if .Rev}}<div><span class="label">revision</span><code>{{.Rev}}</code></div>{{end}}
+    {{- if .Phase}}<div><span class="label">phase</span><span>{{.Phase}}</span></div>{{end}}
+    {{- if .Exit}}<div><span class="label">exit</span><span>{{.Exit}}</span></div>{{end}}
+  </div>
+  {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}{{template "chip" $s}}{{end}}</div>{{end}}
+  {{- if .Outcome}}<div><span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{if .PRURL}} {{template "prlink" .PRURL}}{{end}}</div>{{end}}
+  {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
+{{- end}}
 <!doctype html>
 <html lang="en">
 <head>
@@ -11,18 +23,7 @@
 <body>
 <main class="dispatch"{{if and .Started (not .Closed)}} data-events="/dispatch/events?slot={{.Slot}}&amp;at={{.Started | urlquery}}&amp;n={{.StartN}}"{{end}}>
   <p><a href="/">&larr; Dashboard</a></p>
-  <header class="dispatch-head">
-    <h1>slot {{.Slot}}{{if .Kind}} <span class="kindname">{{.Kind}}</span>{{end}}</h1>
-    <div class="facts">
-      <div><span class="label">started</span>{{template "time" .Started}}</div>
-      {{- if .Rev}}<div><span class="label">revision</span><code>{{.Rev}}</code></div>{{end}}
-      {{- if .Phase}}<div><span class="label">phase</span><span>{{.Phase}}</span></div>{{end}}
-      {{- if .Exit}}<div><span class="label">exit</span><span>{{.Exit}}</span></div>{{end}}
-    </div>
-    {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}{{template "chip" $s}}{{end}}</div>{{end}}
-    {{- if .Outcome}}<div><span class="pill outcome-{{.Outcome}}">{{.Outcome}}</span>{{if .PRURL}} {{template "prlink" .PRURL}}{{end}}</div>{{end}}
-    {{- if .Note}}<div class="note">{{.Note}}</div>{{end}}
-  </header>
+  <header class="dispatch-head">{{template "dispatch-head" .}}</header>
   <nav class="tabs">
     <button type="button" class="tab active" data-tab="child-log">Child log</button>
     {{- range $i, $p := .PassLogs}}

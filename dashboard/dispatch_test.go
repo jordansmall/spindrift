@@ -409,16 +409,19 @@ const liveQuery = "/dispatch/events?slot=0&at=2026-10-07T10:00:00Z"
 
 func TestDispatchEventsSendsPassLogsAsTheyAppear(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "head")
 	st.expect(t, "pass", `"phase":"initial"`, `"path":"logs/one.log"`)
 	st.quiet(t)
 
 	appendTo(t, st.events(), `{"time":"2026-10-07T10:01:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/two.log"}`+"\n")
+	st.expect(t, "head", "fix-pass-1")
 	st.expect(t, "pass", `"phase":"fix-pass-1"`, `"path":"logs/two.log"`)
 	st.quiet(t)
 }
 
 func TestDispatchEventsIgnoresRepeatsAndOtherSlots(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 	appendTo(t, st.events(),
 		`{"time":"2026-10-07T10:00:06Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":"logs/one.log"}`+"\n"+
@@ -433,6 +436,7 @@ func TestDispatchEventsClosesWhenALaterChildStartEndsTheDispatch(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			st := openStreamAt(t, tc.query, "", liveStart)
+			st.expect(t, "head")
 			st.expect(t, "pass", "logs/one.log")
 			appendTo(t, st.events(),
 				`{"time":"2026-10-07T11:00:00Z","event":"child_start","kind":"work","slot":0}`+"\n"+
@@ -461,10 +465,12 @@ func liveBox(ts, path string) string {
 
 func TestDispatchEventsClosesOnceRotationsDropItsChildStart(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 
 	rotate(t, st, liveElsewhere) // the child_start is now in the older generation
 	appendTo(t, st.events(), liveBox("2026-10-07T12:00:01Z", "logs/two.log"))
+	st.expect(t, "head", "fix-pass-1")
 	st.expect(t, "pass", "logs/two.log")
 	st.quiet(t)
 
@@ -478,6 +484,7 @@ func TestDispatchEventsClosesOnceRotationsDropItsChildStart(t *testing.T) {
 
 func TestDispatchEventsClosesWhenOneRotationDropsAnOlderChildStart(t *testing.T) {
 	st := openStreamOver(t, liveQuery, "", liveStart, liveElsewhere)
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 	st.quiet(t)
 
@@ -488,6 +495,7 @@ func TestDispatchEventsClosesWhenOneRotationDropsAnOlderChildStart(t *testing.T)
 
 func TestDispatchEventsDoesNotReReadBytesAlreadyRead(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 
 	f, err := os.OpenFile(st.events(), os.O_WRONLY, 0)
@@ -507,6 +515,7 @@ func TestDispatchEventsDoesNotReReadBytesAlreadyRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendTo(t, st.events(), liveBox("2026-10-07T10:01:00Z", "logs/two.log"))
+	st.expect(t, "head", "fix-pass-1")
 	st.expect(t, "pass", "logs/two.log")
 	st.quiet(t)
 }
@@ -515,6 +524,7 @@ func TestDispatchEventsWithoutATimeClosesAfterItsPassLogs(t *testing.T) {
 	st := openStreamAt(t, "/dispatch/events?slot=0", "",
 		`{"event":"child_start","kind":"work","slot":0}`+"\n"+
 			`{"time":"2026-10-07T10:00:05Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":"logs/one.log"}`+"\n")
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 	st.expect(t, "closed")
 	st.ended(t)
@@ -522,10 +532,12 @@ func TestDispatchEventsWithoutATimeClosesAfterItsPassLogs(t *testing.T) {
 
 func TestDispatchEventsClosesOnChildFinishAfterSendingLastPassLog(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 	appendTo(t, st.events(),
 		`{"time":"2026-10-07T10:02:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/two.log"}`+"\n"+
 			`{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":0}`+"\n")
+	st.expect(t, "head", "fix-pass-1")
 	st.expect(t, "pass", "logs/two.log")
 	st.expect(t, "closed")
 	st.ended(t)
@@ -533,10 +545,12 @@ func TestDispatchEventsClosesOnChildFinishAfterSendingLastPassLog(t *testing.T) 
 
 func TestDispatchEventsAddsNoPassLogAfterChildFinish(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 	appendTo(t, st.events(),
 		`{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":0}`+"\n"+
 			`{"time":"2026-10-07T10:03:05Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/late.log"}`+"\n")
+	st.expect(t, "head", "exit")
 	st.expect(t, "closed")
 	st.ended(t)
 }
@@ -544,6 +558,7 @@ func TestDispatchEventsAddsNoPassLogAfterChildFinish(t *testing.T) {
 func TestDispatchEventsClosedAtConnectSendsItsPassLogsThenCloses(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart+
 		`{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":0}`+"\n")
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/one.log")
 	st.expect(t, "closed")
 	st.ended(t)
@@ -552,8 +567,39 @@ func TestDispatchEventsClosedAtConnectSendsItsPassLogsThenCloses(t *testing.T) {
 func TestDispatchEventsWithoutAtResolvesTheLatestOnConnect(t *testing.T) {
 	st := openStreamAt(t, "/dispatch/events?slot=0", "", dispatchEvents+
 		`{"time":"2026-10-07T10:06:00Z","event":"box","slot":0,"phase":"fix-pass-1","pass_log":"logs/late.log"}`+"\n")
+	st.expect(t, "head")
 	st.expect(t, "pass", "logs/late.log")
 	st.quiet(t)
+}
+
+func TestDispatchEventsKeepsTheHeaderCurrent(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	f := st.expect(t, "head", "initial", "42")
+	if !strings.Contains(f.data, "\n") || strings.Contains(f.data, "<html") {
+		t.Errorf("head frame should be the multi-line header contents:\n%s", f.data)
+	}
+	st.expect(t, "pass", "logs/one.log")
+
+	appendTo(t, st.events(), `{"time":"2026-10-07T10:01:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"43","pass_log":"logs/two.log"}`+"\n")
+	st.expect(t, "head", "fix-pass-1", "42", "43")
+	st.expect(t, "pass", "logs/two.log")
+
+	appendTo(t, st.events(), `{"time":"2026-10-07T10:02:00Z","event":"settled","slot":0,"issue":"42","state":"complete","note":"landed","pr_url":"`+testPRURL+`"}`+"\n")
+	st.expect(t, "head", "outcome-complete", "landed", testPRURL)
+	st.quiet(t)
+
+	appendTo(t, st.events(), `{"time":"2026-10-07T10:03:00Z","event":"child_finish","slot":0,"issue":"42","exit":7,"revision":"0123456789abcdef0123"}`+"\n")
+	st.expect(t, "head", "<span>7</span>", "0123456789ab")
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsLinksTheHeaderSubjects(t *testing.T) {
+	st := openStreamAt(t, liveQuery, statusJSONRepo(t, "working", "", `[]`, testRepoURL), liveStart)
+	st.expect(t, "head", testRepoURL+"/issues/42")
+	st.expect(t, "pass", "logs/one.log")
+	appendTo(t, st.events(), `{"time":"2026-10-07T10:01:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"43"}`+"\n")
+	st.expect(t, "head", testRepoURL+"/issues/42", testRepoURL+"/issues/43")
 }
 
 func TestDispatchEventsRejects(t *testing.T) {
