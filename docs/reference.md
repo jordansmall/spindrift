@@ -7866,7 +7866,15 @@ included, streams only while it is shown: hiding it closes the stream
 (browsers cap HTTP/1.1 at six connections per host, which a Dispatch
 with several fix passes would otherwise exceed), and showing it again
 replays the log from the start. Butler Dispatches get the same tabs,
-named by their Chore-keyed `box` events.
+named by their Chore-keyed `box` events. The tab set is live while the
+Dispatch runs: the page follows `/dispatch/events` (the Dispatch's own
+`slot`, `at` and `n`), so a fix pass or conflict-resolve that starts
+after you open the drill-in gets its tab, appended after the others,
+without a reload. That stream holds one more connection, and ends once
+the Dispatch does (its slot's `child_finish`, or a later
+`child_start`); an already finished Dispatch's page opens none. It also
+ends if Events rotation drops the Dispatch's `child_start`, and a
+`child_start` with no time gets no live tabs.
 
 Slot cards, timeline rows and the drill-in link the issue chip to
 `<repo_url>/issues/<n>` (`repo_url` from the status file) and show a `PR`
