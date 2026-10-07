@@ -68,6 +68,12 @@ in
     # the default patch classes and paths; mergeMode = "immediate" merges
     # each once green.
     butlerMaxPatchesPerDay = 5;
+    # Sweep more often than the 6h/8-sweep defaults; the findings cap rises
+    # too, or two full sweeps leave less than one sweep's headroom and end
+    # the butler's day early.
+    butlerEvery = "2h";
+    butlerMaxSweepsPerDay = 16;
+    butlerMaxFindingsPerDay = 30;
     # A cold checks-inbox gate outruns the 10-minute stock Bash cap; 30 minutes
     # lets it finish in one blocking call (issue #4409).
     driverBashTimeoutMs = 1800000;
