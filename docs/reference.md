@@ -6449,9 +6449,18 @@ Every publish stamps the same envelope onto the object regardless of what
 changed: `pid` and `host` (`os.Hostname`; the literal string `unknown` if
 that fails) identify the writing process, `started` and `time` are both
 RFC3339 UTC — `started` fixed at process start, `time` moving on every
-publish — and `kinds` names the configured kind set. `state`, `reason`,
+publish — `kinds` names the configured kind set, and `schema` is the
+status-file schema (`statusSchema`, currently 1). `state`, `reason`,
 `slots[]` and `checks[]` (below) are what actually varies between
 publishes.
+
+`schema` is bumped only on a breaking
+change: a rename, a removal, or a changed meaning. Adding a field never
+bumps it, so a reader ignores fields it does not know and reads `schema`
+only to tell a shape it understands from one it does not. The daemon and
+the [Dashboard](#dashboard) restart independently and so can run
+different revisions; `schema` makes that skew visible instead of silent
+(issue #4713).
 
 The lock is the liveness truth and the status file is advisory data. A
 killed daemon cannot clean up its status file — that is exactly the path
@@ -7504,7 +7513,12 @@ see [Butler](#butler)).
 JSON-lines stream, which a service manager can capture as it is. stdout is
 the machine stream only; human-facing output and the child's own
 stdout/stderr go to stderr instead. Event names and fields
-(`cmd/launcher/internal/daemon/events.go`, `loop.go`). The stream is the
+(`cmd/launcher/internal/daemon/events.go`, `loop.go`). Every event line
+carries a `v` integer (`eventVersion`, currently 1), stamped by the
+emitter beside `time` so no event can omit it; the table below leaves it
+out of each row's fields for that reason. Like the status file's
+`schema`, it is bumped only on a breaking change — a rename, a removal,
+or a changed meaning — and never for an added field. The stream is the
 history; the **Status file** (above) is the present — a reader wanting
 only "what is happening right now" reads that file instead of replaying
 the stream from the top:
@@ -7703,13 +7717,17 @@ still leaves its history on the page. An absent Events file just means no
 history yet; if a generation exists but cannot be read, the page shows
 `history unreadable: <error>` above whatever history it could read.
 
-Three cases are shown rather than hidden. The page reads "no Daemon
+Four cases are shown rather than hidden. The page reads "no Daemon
 running" when the status file is absent or its pid is not live on this
 host; liveness is judged by pid, never by taking the lock. A dead pid's
 page still shows the last state it published, and any published reason
 shows either way, a halt being normally the Daemon's last write before it
 exits. A status file that does not parse shows an error banner
-with the raw content.
+with the raw content. A status file at a `schema` this Dashboard does not
+understand (see **Status file** under [Daemon](#daemon)) shows a banner
+naming both versions — "Daemon schema N, Dashboard understands M: restart
+the Dashboard" — and the raw JSON in place of the header and slot views;
+a file without `schema` predates the field and reads as schema 1.
 
 **Service unit.** The Dashboard has its own, smaller systemd user unit, given beside the daemon's under [Daemon](#daemon) as **Dashboard service unit**.
 
