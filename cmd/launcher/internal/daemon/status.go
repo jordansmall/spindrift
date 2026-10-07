@@ -54,8 +54,11 @@ type SlotStatus struct {
 	// Phase is the slot's own position in its iteration (issue #3623).
 	// No omitempty: idle is a real, reportable value, and eliding it would
 	// make a slot that has never run look identical to a missing field.
-	Phase    Phase    `json:"phase"`
-	Busy     bool     `json:"busy"`
+	Phase Phase `json:"phase"`
+	Busy  bool  `json:"busy"`
+	// Since is RFC3339 UTC: when the slot entered its current phase. No
+	// omitempty, for the same reason as Phase: every slot always has one.
+	Since    string   `json:"since"`
 	Kind     Kind     `json:"kind,omitempty"`
 	Revision string   `json:"revision,omitempty"`
 	Issues   []string `json:"issues,omitempty"`
