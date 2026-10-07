@@ -4299,7 +4299,10 @@ Queue mode re-checks just before the claim and skips an issue no longer on
 left alone (issue #4679); the check narrows the window, it does not close it. A
 drain stop (the first signal) lets the attempt in hand finish settling, parks a
 failed landing back on `agent-failed` (counting the attempt), and then exits 7;
-an abort (the second signal) reclaims the issue to `ready-for-agent` as before. If putting `agent-failed` back fails, the run
+an abort (the second signal) reclaims to `ready-for-agent` an issue still in
+flight and not yet labelled `agent-complete`; an abort that reclaims nothing
+(the settle already finished, or already landed it) is handled like a drain
+stop. If putting `agent-failed` back fails, the run
 exits 1, so an issue stranded on `agent-in-progress` is visible.
 
 After a successful land (merged, including a hand-run `spindrift recover
