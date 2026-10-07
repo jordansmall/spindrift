@@ -722,7 +722,10 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	if err != nil {
+		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
+	}
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
 	}
@@ -784,8 +787,8 @@ func TestSettle_SettleRelayedBranch_LandsFromParkedFailedIssue(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.SituationFor(issNum, false, result)
-	if !s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result) {
-		t.Fatalf("SettleRelayedBranch = false, want true")
+	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
 	}
 	if want := (forge.RelayBundleCall{OutboxDir: "/outbox/4651", Ref: fc.AgentBranch(issNum)}); len(fc.RelayBundleCalls) != 1 || fc.RelayBundleCalls[0] != want {
 		t.Fatalf("RelayBundleCalls = %+v, want exactly [%+v]", fc.RelayBundleCalls, want)
@@ -830,7 +833,10 @@ func TestSettle_SettleRelayedBranch_NonSuccessSelfReportDoesNotAdopt(t *testing.
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	if err != nil {
+		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
+	}
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false")
 	}
@@ -878,7 +884,10 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	if !errors.Is(err, errRelayBundle) || !errors.Is(err, fc.RelayBundleErr) {
+		t.Fatalf("SettleRelayedBranch err = %v, want errRelayBundle wrapping %v", err, fc.RelayBundleErr)
+	}
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false")
 	}
@@ -897,5 +906,38 @@ func TestSettle_SettleRelayedBranch_BundleMissingDoesNotAdopt(t *testing.T) {
 	}
 	if containsLabel(iss.Labels, "agent-complete") {
 		t.Errorf("issue must not carry agent-complete; labels=%v", iss.Labels)
+	}
+}
+
+// A draft-PR create failure on the relayed branch must surface as an error
+// naming that stage, not the relay's, so recover can tell the two apart.
+func TestSettle_SettleRelayedBranch_DraftPRCreateFailureSurfacesError(t *testing.T) {
+	const issNum = "4680"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRErr = errors.New("create draft PR: 500")
+
+	result := dispatch.Result{Resolved: outcome.Resolved{
+		SelfReportFound: true,
+		SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
+	}}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	sit := s.situationFor(issNum, false, result)
+	got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result)
+	if !errors.Is(err, errCreateDraftPR) || !errors.Is(err, fc.CreateDraftPRErr) {
+		t.Fatalf("SettleRelayedBranch err = %v, want errCreateDraftPR wrapping %v", err, fc.CreateDraftPRErr)
+	}
+	if errors.Is(err, errRelayBundle) {
+		t.Errorf("err = %v must not name the relay stage", err)
+	}
+	if got {
+		t.Fatalf("SettleRelayedBranch = true, want false")
 	}
 }

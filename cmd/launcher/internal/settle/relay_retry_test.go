@@ -662,7 +662,11 @@ func TestSettle_SettleRelayedBranch_RelayStoppedDuringBackoff_HandledWithoutWrit
 	sit := s.situationFor(issNum, false, result)
 
 	var got bool
-	captureStdout(t, func() { got = s.SettleRelayedBranch(dispatch.NewFake(), issNum, gen, sit, result) })
+	var err error
+	captureStdout(t, func() { got, err = s.SettleRelayedBranch(dispatch.NewFake(), issNum, gen, sit, result) })
+	if err != nil {
+		t.Errorf("SettleRelayedBranch err = %v, want nil", err)
+	}
 
 	if !got {
 		t.Errorf("SettleRelayedBranch = false, want true (handled; the stop owns the issue)")

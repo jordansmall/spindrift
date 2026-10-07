@@ -51,6 +51,7 @@ type Fake struct {
 	FailCalls                 []FailCall
 	SettleRelayedBranchCalls  []SettleRelayedBranchCall
 	SettleRelayedBranchReturn bool
+	SettleRelayedBranchErr    error
 	SituationForCalls         []SituationForCall
 	SituationForReturn        Situation
 }
@@ -84,12 +85,13 @@ func (f *Fake) Fail(num string, gen uint64, result dispatch.Result) {
 	f.FailCalls = append(f.FailCalls, FailCall{Num: num, Gen: gen, Result: result})
 }
 
-// SettleRelayedBranch records the call and returns SettleRelayedBranchReturn.
-func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool {
+// SettleRelayedBranch records the call and returns SettleRelayedBranchReturn
+// and SettleRelayedBranchErr.
+func (f *Fake) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleRelayedBranchCalls = append(f.SettleRelayedBranchCalls, SettleRelayedBranchCall{Num: num, Gen: gen, Sit: sit, Result: result})
-	return f.SettleRelayedBranchReturn
+	return f.SettleRelayedBranchReturn, f.SettleRelayedBranchErr
 }
 
 // SituationFor records the call and returns SituationForReturn.

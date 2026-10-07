@@ -120,8 +120,11 @@ type WorkSettler interface {
 	// false when sit.OpenPRFound is true, since that shape is SettleAdopted's
 	// job, and false when result carries no relayable success evidence, leaving
 	// the caller's own "no open PR" handling unchanged. Otherwise it relays the
-	// branch, opens a PR, and runs the same merge gate.
-	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) bool
+	// branch, opens a PR, and runs the same merge gate. The error is non-nil
+	// only when relaying the branch or creating its draft PR failed (wrapping
+	// that failure); every other false return, including a Code Forge that
+	// cannot relay, carries nil.
+	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error)
 
 	// SituationFor computes num's adoption-evidence Situation (issue #2501) so
 	// main.go's recoverByNumber can thread the same value into

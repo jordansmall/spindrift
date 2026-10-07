@@ -379,7 +379,10 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyLandsRelayedBranch(t *testing.T
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	if err != nil {
+		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
+	}
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
 	}
@@ -430,7 +433,10 @@ func TestSettle_SettleRelayedBranch_GitPushOnlyStillReturnsFalse(t *testing.T) {
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	if err != nil {
+		t.Fatalf("SettleRelayedBranch err = %v, want nil for a git-shaped push-only forge", err)
+	}
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false for a git-shaped push-only forge")
 	}
@@ -467,7 +473,10 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyBundleAloneLandsRelayedBranch(t
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	if err != nil {
+		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
+	}
 	if !got {
 		t.Fatalf("SettleRelayedBranch = false, want true")
 	}
@@ -516,7 +525,10 @@ func TestSettle_SettleRelayedBranch_LocalPushOnlyNoBundleNoSelfReportReturnsFals
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	sit := s.situationFor(issNum, false, result)
-	got := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	got, err := s.SettleRelayedBranch(d, issNum, 0, sit, result)
+	if err != nil {
+		t.Fatalf("SettleRelayedBranch err = %v, want nil", err)
+	}
 	if got {
 		t.Fatalf("SettleRelayedBranch = true, want false with neither a bundle nor a self-report")
 	}

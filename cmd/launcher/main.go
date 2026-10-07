@@ -1507,7 +1507,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		if err := d.EnsureRunLineage(); err != nil {
 			fmt.Fprintf(stderr, "    ?? #%s: ensure run lineage: %v\n", issueNum, err)
 		}
-		settled := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
+		settled, _ := s.SettleRelayedBranch(d, iss.number, 0, sit, result)
 		// Leave must run before Settle's final abort re-check, or a signal
 		// landing the instant after settling finishes would still find this
 		// issue in-flight and reclaim it right back to Dispatchable (#3522).
