@@ -146,6 +146,7 @@
               agents.bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
               dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;
+              dispatch.butler.maxPatchesPerDay = dogfoodDefaults.defaults.butlerMaxPatchesPerDay;
             };
 
             checks = checksResult.checks;
