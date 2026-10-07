@@ -1399,6 +1399,21 @@ func TestParseFlowList_QuoteOnlyOpensAtElementStart(t *testing.T) {
 	}
 }
 
+// The parser alone round-trips mid-label quotes, so only the rendered bytes
+// pin labelNeedsQuoting's quote-anywhere rule.
+func TestLocalIssue_Render_QuotesMidLabelQuote(t *testing.T) {
+	li := localIssue{frontmatter: localFrontmatter{
+		Title:   "t",
+		State:   "open",
+		Labels:  []string{"a'b", `c"d`, "e"},
+		Created: "2026-07-09T12:00:00Z",
+	}}
+	want := `labels: ["a'b", "c\"d", e]` + "\n"
+	if got := li.render(); !strings.Contains(got, want) {
+		t.Errorf("render() = %q, want it to contain %q", got, want)
+	}
+}
+
 // A title with no [a-z0-9] characters must fall back to a usable slug rather
 // than produce a bare ".md" file.
 func TestLocalTracker_PostIssue_PunctuationTitle_FallsBackToIssueSlug(t *testing.T) {

@@ -626,10 +626,12 @@ func renderScalar(s string) string {
 }
 
 // labelNeedsQuoting adds to scalarNeedsQuoting the cases specific to a
-// "labels: [...]" element: a comma, which separates elements, and a bracket,
-// which would read as nesting or closing the list.
+// "labels: [...]" element: a comma, which separates elements, a bracket,
+// which would read as nesting or closing the list, and a quote anywhere
+// (scalarNeedsQuoting covers a leading one), so the file does not depend on
+// every reader agreeing a quote only opens a quoted element at its start.
 func labelNeedsQuoting(s string) bool {
-	return scalarNeedsQuoting(s) || strings.ContainsAny(s, ",[]")
+	return scalarNeedsQuoting(s) || strings.ContainsAny(s, ",[]\"'")
 }
 
 // renderLabel returns s as a bare or quoted flow-list element, the write side
