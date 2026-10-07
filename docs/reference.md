@@ -7501,13 +7501,13 @@ butler's daily budgets reset at midnight there (UTC when the knob is unset;
 see [Butler](#butler)).
 
 **Event stream.** The daemon writes one JSON object per line to stdout — a
-JSON-lines stream, so a service manager captures the run's history without
-the daemon owning a log format or a rotation policy. stdout is the machine
-stream only; human-facing output and the child's own stdout/stderr go to
-stderr instead. Event names and fields (`cmd/launcher/internal/daemon/events.go`,
-`loop.go`). The stream is the history; the **Status file** (above) is the
-present — a reader wanting only "what is happening right now" reads that
-file instead of replaying the stream from the top:
+JSON-lines stream, which a service manager can capture as it is. stdout is
+the machine stream only; human-facing output and the child's own
+stdout/stderr go to stderr instead. Event names and fields
+(`cmd/launcher/internal/daemon/events.go`, `loop.go`). The stream is the
+history; the **Status file** (above) is the present — a reader wanting
+only "what is happening right now" reads that file instead of replaying
+the stream from the top:
 
 Every per-slot event — `child_start`, `box`, `settled`, `child_finish`, `idle`, `jam`,
 `tip_moved`, `backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
@@ -7565,6 +7565,23 @@ slot.
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`/`config-invalid:`, never started; `reason` is prefixed by cause, one of `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal carries `context-cancelled: …` instead), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above), `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above), `config-invalid: …` (the daemon's own startup config failed validation — a non-positive slot count, an unknown or duplicate kind, and the like — before any pool existed), `context-cancelled: …` (the operator's stop signal, or a caller's own cancelled context, ended the loop — `context-cancelled: stop requested` for the former, see **Halting** above), `breaker: …` (the pool-wide breaker tripped — see the `breaker_trip` row above and **Failures**), and, with no detail after it, a halt-mapped child outcome: `outcome: host-tainted` (a child exited 5), `outcome: config-invalid` (a child exited 6), or `outcome: signalled-stop` (a child exited 7 once the operator's Stop latch was already closed) — see the exit-code table above **Failures** |
+
+**Events file.** Every line the daemon writes to stdout is also appended,
+unchanged, to `spindrift-daemon.events` beside the status file in the
+checkout's git dir (`cmd/launcher/internal/daemon/events_file.go`), so the
+history survives however the daemon is supervised: under systemd, in a
+foreground terminal, or anything else. The status file is the present; the
+Events file is the history. The file is capped at a fixed 32 MiB, with no
+knob: a write that would pass the cap first renames it to
+`spindrift-daemon.events.1`, replacing any earlier one, so exactly one
+older generation survives and a line never splits across the two. At
+about 2 MB a week that holds months. A failed append prints `daemon:
+events file write failed: ...` on stderr and costs neither the stdout
+copy nor the run. Like the status file, the Events file is written only by
+the daemon holding the checkout lock, so a second daemon refused by that
+lock still writes its `halt` to stdout, but that line never reaches the
+holder's file; a restart appends to it rather than starting over. The
+[Dashboard](#dashboard) reads both generations for its history timeline.
 
 **Reasons and credentials.** A `reason` that embeds captured git or nix
 stderr (a failed `git fetch`, `git ls-remote`, or `nix eval`) has URL userinfo
@@ -7637,20 +7654,23 @@ no daemon at all, and it remains the Console's engine unchanged, see
 
 The Dashboard is a read-only web view of one [Daemon](#daemon)'s state. It
 is its own process and its own Go module (`dashboard/`, stdlib only), not
-part of the daemon: it reads the status file the daemon publishes
-(`spindrift-daemon.status` in the checkout's git dir) and nothing else,
-and it never picks, starts, stops, or settles anything. Because it never
-takes the daemon's lock, it stays up while the daemon is down. See [ADR
+part of the daemon: it reads the files the daemon publishes in the
+checkout's git dir, the status file (`spindrift-daemon.status`) and the
+Events file (`spindrift-daemon.events` and its `.1` generation), and
+nothing else, and it never picks, starts, stops, or settles anything.
+Because it never takes the daemon's lock, it stays up while the daemon is
+down. See [ADR
 0060](adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md).
 
 > **The Dashboard is unauthenticated.** Anyone who can reach the listen
-> address can read the daemon's state: issue numbers, Chores, revisions,
-> host, and pid. The default binds loopback only; `--listen 0.0.0.0:8099`
-> serves the whole LAN. There is no authentication yet, so do not expose
-> it beyond a network you trust. It prints one line on start saying so
-> and naming the bound address. The server does not check the `Host`
-> header, so any web page the operator visits can read it through DNS
-> rebinding even on loopback, exposing issue numbers, host, and pid.
+> address can read the daemon's state and history: issue numbers, Chores,
+> revisions, settle notes, host, and pid. The default binds loopback
+> only; `--listen 0.0.0.0:8099` serves the whole LAN. There is no
+> authentication yet, so do not expose it beyond a network you trust. It
+> prints one line on start saying so and naming the bound address. The
+> server does not check the `Host` header, so any web page the operator
+> visits can read it through DNS rebinding even on loopback, exposing
+> issue numbers, host, and pid.
 
 Run it from the daemon's checkout:
 
@@ -7673,6 +7693,15 @@ busy/total slots, each kind's next check, the jam alarm, Demand, next
 due, and the tracker's rate limits — then one card per slot, idle ones
 included, with its phase, kind, issue(s) or Chore, revision, and time in
 phase (from the slot's `since`; see **Status file** under [Daemon](#daemon)).
+
+Below them is a history timeline, newest first, of the last 200 child
+starts, Box passes, settles (with their outcome and note), backoffs, jams,
+breaker trips, and halts, read from both generations of the Events file
+(see **Events file** under [Daemon](#daemon)). Other events are left out.
+The timeline shows in every case below, so a stopped or restarted daemon
+still leaves its history on the page. An absent Events file just means no
+history yet; if a generation exists but cannot be read, the page shows
+`history unreadable: <error>` above whatever history it could read.
 
 Three cases are shown rather than hidden. The page reads "no Daemon
 running" when the status file is absent or its pid is not live on this
