@@ -6675,11 +6675,14 @@ and may exit 2, which records Ready 0 like any probed kind's empty child. A
 counted bundle can still be one the child declines (a green PR waiting on a
 `MERGE_MODE=manual` merge, a run still settling, a self-report that is not
 ready), so an exit 2 against a nonzero count backs `recover` off, doubling
-from `DAEMON_IDLE_FLOOR` toward `DAEMON_IDLE_CAP`, and a rise in the count
-lifts that backoff at once. A bundle whose give-up comment has not posted
-stays counted, so the comment is retried; one whose issue lost the failed
-label, or whose self-report is not success, never posts it and stays counted,
-which the `DAEMON_IDLE_CAP` backoff bounds to about one child per cap.
+from `DAEMON_IDLE_FLOOR` toward `DAEMON_IDLE_CAP`, and a bundle the
+backoff has not seen lifts it at once: a rise in the count, or a new
+bundle (named by outbox key and bundle hash) replacing one that left,
+even when the count holds (issue #4705). A bundle whose give-up comment
+has not posted stays counted, so the comment is retried; one whose issue
+lost the failed label, or whose self-report is not success, never posts
+it and stays counted, which the `DAEMON_IDLE_CAP` backoff bounds to
+about one child per cap.
 `recover` counts against `ISSUE_TRACKER`'s rate-limit pause like every probed
 kind: its count never calls the tracker, but each child it starts does.
 
@@ -6804,7 +6807,8 @@ counting more than `ready_at_jam` lifts the jam early too
 (`demand_rose`): someone labelled more work, which may not be blocked
 like the work the jam saw. An equal or falling count never lifts it — a
 claim elsewhere shrinks the queue without making anything dispatchable —
-and neither does a changed candidate set at the same count, a probe a
+and neither does a changed candidate set at the same count (except
+`recover`, which lifts on a bundle its backoff has not seen), a probe a
 claim overtook in flight, the first probe after a jam that followed an
 unconfirmed claim or empty child (it sets the baseline instead), or a probe
 landing after the jam already ended. A parked slot wakes at the earlier of the
@@ -6824,11 +6828,11 @@ shares its `GH_TOKEN` bucket with its children (ADR 0059). Every other probe
 error backs off and counts toward the breaker below (`reason` `demand: ...`),
 like a tip-fetch failure.
 `demand_appeared` and `demand_drained` (events table below) report a kind's
-Ready crossing zero, `demand_rose` a rising count lifting a jam, and
-`probe_rate_limited`, `probe_failed` and `probe_resumed` the probe outcome
-changing; `ready`, `probed_at`, `next_probe`, `jam_until` and `ready_at_jam`
-on each status `kinds` entry, and `rate_limited_until` on each `trackers`
-entry, show the state.
+Ready crossing zero, `demand_rose` a rising count (or a new `recover`
+bundle) lifting a jam, and `probe_rate_limited`, `probe_failed` and
+`probe_resumed` the probe outcome changing; `ready`, `probed_at`,
+`next_probe`, `jam_until` and `ready_at_jam` on each status `kinds`
+entry, and `rate_limited_until` on each `trackers` entry, show the state.
 
 The GitHub probe is usually one conditional request: `gh api` for the first
 100 open issues carrying the kind's dispatch label, sorted by last update,
@@ -7510,7 +7514,7 @@ slot.
 | `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle |
 | `demand_appeared` | `time`, `kind`, `slot`, `ready` | a Demand probe of a probed kind found startable items (`ready` above 0) where the previous count was 0, or the kind had never been probed; emitted on the zero crossing only, so a count that merely changes between two positive values emits nothing |
 | `demand_drained` | `time`, `kind`, `slot`, `ready` | a Demand probe found none (`ready` is 0) where the previous count was above 0 — the opposite zero crossing to `demand_appeared`, and a kind probed empty again emits nothing. Neither event is emitted for an exit-driven kind, which has no probe |
-| `demand_rose` | `time`, `kind`, `slot`, `ready` | a Demand probe of a jammed probed kind counted `ready` strictly above the kind's `ready_at_jam` (the count the jam froze), which lifts the jam — resetting its gate to `IdleFloor`, as a moved tip does — and wakes parked slots if the kind is now startable. The wait policy above lists the probes that lift nothing. Probed kinds only; it can accompany `demand_appeared` on the same probe |
+| `demand_rose` | `time`, `kind`, `slot`, `ready` | a Demand probe of a jammed probed kind counted `ready` strictly above the kind's `ready_at_jam` (the count the jam froze), or, for `recover`, named a bundle the backoff's baseline lacks at any count, which lifts the jam — resetting its gate to `IdleFloor`, as a moved tip does — and wakes parked slots if the kind is now startable. The wait policy above lists the probes that lift nothing. Probed kinds only; it can accompany `demand_appeared` on the same probe |
 | `probe_rate_limited` | `time`, `kind`, `slot`, `tracker`, `until`, `reason` | a kind's Demand probe was refused by the tracker's rate limit, pausing every kind on `tracker` until `until` (RFC3339 UTC); emitted each time a pause begins, not again by a probe that lands while one holds |
 | `demand_source_missing` | `time`, `kind`, `reason` | at startup, once per tracker-probed kind (dispatch, research) the daemon built no Demand source for, so it is scheduled from child exits instead; `reason` names the missing knob, or the unknown or adapterless `ISSUE_TRACKER`, never a token or secret value. A kind with a source, and the butler, never emit it |
 | `probe_failed` | `time`, `kind`, `slot`, `reason` | a kind's Demand probe failed for any other reason (`reason` `demand: ...`); transition only, and the usual `backoff` event still follows |
