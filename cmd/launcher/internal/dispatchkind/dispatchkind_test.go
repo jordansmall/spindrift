@@ -277,6 +277,7 @@ func TestDemandSource(t *testing.T) {
 		{Work, DemandTrackerProbe},
 		{Research, DemandTrackerProbe},
 		{Butler, DemandChildReported},
+		{Recover, DemandHostOutbox},
 	} {
 		if tc.d.DemandSource != tc.want {
 			t.Errorf("%s: DemandSource = %v, want %v", tc.d.Name, tc.d.DemandSource, tc.want)
@@ -285,8 +286,8 @@ func TestDemandSource(t *testing.T) {
 }
 
 // TestRecoverRow pins the recover kind's place on the descriptor (issue
-// #4656): it runs ahead of every other kind, learns of work only from its
-// own exit code, and settles through the work merge gate on work's tracker.
+// #4656, #4657): it runs ahead of every other kind, learns of work from the
+// host outbox count, and settles through the work merge gate on work's tracker.
 func TestRecoverRow(t *testing.T) {
 	d, ok := ByVerb("recover")
 	if !ok || d != Recover || d.Name != "recover" {
@@ -298,8 +299,8 @@ func TestRecoverRow(t *testing.T) {
 	if d.DaemonPriority != PriorityFirst {
 		t.Errorf("DaemonPriority = %v, want PriorityFirst", d.DaemonPriority)
 	}
-	if d.DemandSource != DemandChildReported {
-		t.Errorf("DemandSource = %v, want DemandChildReported", d.DemandSource)
+	if d.DemandSource != DemandHostOutbox {
+		t.Errorf("DemandSource = %v, want DemandHostOutbox", d.DemandSource)
 	}
 	if d.Settle != SettleMerge || d.Tracker != TrackerWork || d.Labels != LabelsConfigured || d.Keying != ByIssue {
 		t.Errorf("recover must settle through work's merge gate on work's tracker and labels: %+v", d)
