@@ -443,18 +443,72 @@ func TestDispatchEventsClosesWhenALaterChildStartEndsTheDispatch(t *testing.T) {
 	}
 }
 
-func TestDispatchEventsClosesWhenRotationDropsItsChildStart(t *testing.T) {
+// rotate renames the current Events file to the older name and starts a fresh
+// one with fresh, as the Daemon does.
+func rotate(t *testing.T, st *stream, fresh string) {
+	t.Helper()
+	if err := os.Rename(st.events(), st.events()+rotatedSuffix); err != nil {
+		t.Fatal(err)
+	}
+	appendTo(t, st.events(), fresh)
+}
+
+const liveElsewhere = `{"time":"2026-10-07T12:00:00Z","event":"child_start","kind":"work","slot":1}` + "\n"
+
+func liveBox(ts, path string) string {
+	return `{"time":"` + ts + `","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"` + path + `"}` + "\n"
+}
+
+func TestDispatchEventsClosesOnceRotationsDropItsChildStart(t *testing.T) {
 	st := openStreamAt(t, liveQuery, "", liveStart)
 	st.expect(t, "pass", "logs/one.log")
-	if err := os.Remove(st.events() + rotatedSuffix); err != nil && !os.IsNotExist(err) {
-		t.Fatal(err)
-	}
-	other := `{"time":"2026-10-07T12:00:00Z","event":"child_start","kind":"work","slot":1}` + "\n"
-	if err := os.WriteFile(st.events(), []byte(other), 0o644); err != nil {
-		t.Fatal(err)
-	}
+
+	rotate(t, st, liveElsewhere) // the child_start is now in the older generation
+	appendTo(t, st.events(), liveBox("2026-10-07T12:00:01Z", "logs/two.log"))
+	st.expect(t, "pass", "logs/two.log")
+	st.quiet(t)
+
+	// A Pass log read in the tick that crosses the rotation goes out before closed.
+	appendTo(t, st.events(), liveBox("2026-10-07T12:00:02Z", "logs/three.log"))
+	rotate(t, st, liveElsewhere)
+	st.expect(t, "pass", "logs/three.log")
 	st.expect(t, "closed")
 	st.ended(t)
+}
+
+func TestDispatchEventsClosesWhenOneRotationDropsAnOlderChildStart(t *testing.T) {
+	st := openStreamOver(t, liveQuery, "", liveStart, liveElsewhere)
+	st.expect(t, "pass", "logs/one.log")
+	st.quiet(t)
+
+	rotate(t, st, liveElsewhere)
+	st.expect(t, "closed")
+	st.ended(t)
+}
+
+func TestDispatchEventsDoesNotReReadBytesAlreadyRead(t *testing.T) {
+	st := openStreamAt(t, liveQuery, "", liveStart)
+	st.expect(t, "pass", "logs/one.log")
+
+	f, err := os.OpenFile(st.events(), os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	// A valid box line of the first line's length: a tail that rewound would
+	// read it and send logs/reread.log.
+	box := `{"event":"box","slot":0,"phase":"initial","issue":"","pass_log":"logs/reread.log"}`
+	first := strings.Index(liveStart, "\n")
+	if first < len(box) {
+		t.Fatalf("first line is %d bytes, too short for %d", first, len(box))
+	}
+	box = strings.Replace(box, `"issue":""`, `"issue":"`+strings.Repeat("x", first-len(box))+`"`, 1)
+	if _, err := f.WriteAt([]byte(box), 0); err != nil {
+		t.Fatal(err)
+	}
+	appendTo(t, st.events(), liveBox("2026-10-07T10:01:00Z", "logs/two.log"))
+	st.expect(t, "pass", "logs/two.log")
+	st.quiet(t)
 }
 
 func TestDispatchEventsWithoutATimeClosesAfterItsPassLogs(t *testing.T) {
@@ -558,5 +612,54 @@ func TestDispatchPageWithoutAStartTimeNamesNoStream(t *testing.T) {
 	_, body := getDispatch(t, `{"event":"child_start","kind":"work","slot":0}`+"\n", "?slot=0")
 	if strings.Contains(body, "data-events") {
 		t.Errorf("page with an unnameable child_start names a stream:\n%s", body)
+	}
+}
+
+// benchServer serves an ~8 MB single-generation Events file: liveStart's
+// child_start then box events on slot 0.
+func benchServer(b *testing.B) (*server, string) {
+	b.Helper()
+	path := filepath.Join(b.TempDir(), eventsFileName)
+	line := liveBox("2026-10-07T10:01:00Z", "logs/two.log")
+	body := liveStart + strings.Repeat(line, 8<<20/len(line))
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		b.Fatal(err)
+	}
+	return &server{eventsPath: path}, path
+}
+
+// BenchmarkDispatchRescan is one full findDispatch scan, which every page load
+// and every pre-#4749 stream tick paid.
+func BenchmarkDispatchRescan(b *testing.B) {
+	s, _ := benchServer(b)
+	b.ResetTimer()
+	for range b.N {
+		if _, ok := s.findDispatch(0, "2026-10-07T10:00:00Z", 0); !ok {
+			b.Fatal("not found")
+		}
+	}
+}
+
+func BenchmarkDispatchFollowTick(b *testing.B) {
+	s, path := benchServer(b)
+	f := s.followDispatch(0, "2026-10-07T10:00:00Z", 0)
+	defer f.Close()
+	if f.d == nil {
+		b.Fatal("not found")
+	}
+	app, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer app.Close()
+	line := liveBox("2026-10-07T10:02:00Z", "logs/three.log")
+	b.ResetTimer()
+	for range b.N {
+		if _, err := app.WriteString(line); err != nil {
+			b.Fatal(err)
+		}
+		if err := f.poll(); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
