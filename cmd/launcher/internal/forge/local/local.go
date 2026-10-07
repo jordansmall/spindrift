@@ -44,7 +44,7 @@ type localIssue struct {
 
 // parseLocalIssue splits data into its YAML frontmatter block and Markdown
 // body. It reads only scalar "key: value" lines and a "labels: [a, b]" flow
-// list, so the launcher module stays stdlib-only (lib/mkHarness.nix).
+// list: a deliberately small grammar, the same one render emits.
 func parseLocalIssue(data []byte) (localIssue, error) {
 	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
 	if len(lines) == 0 || strings.TrimSpace(lines[0]) != frontmatterDelim {
