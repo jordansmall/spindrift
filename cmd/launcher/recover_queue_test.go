@@ -337,6 +337,19 @@ func (w stopAfterClaim) TransitionState(num string, from, to forge.DispatchState
 	return err
 }
 
+// failRestore fails the InProgress->Failed transition (restore or park) and
+// passes every other transition through, so the claim still succeeds.
+type failRestore struct {
+	forge.IssueTracker
+}
+
+func (w failRestore) TransitionState(num string, from, to forge.DispatchState) error {
+	if from == forge.InProgress && to == forge.Failed {
+		return errors.New("transition: boom")
+	}
+	return w.IssueTracker.TransitionState(num, from, to)
+}
+
 func (x *queueRecoverFixture) runOn(t *testing.T, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities) int {
 	t.Helper()
 	return x.runOnSettler(t, it, cf, caps, newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf))
@@ -498,6 +511,53 @@ func TestRecoverQueueOne_StopAfterClaimRestoresAgentFailed(t *testing.T) {
 	got := x.labels(t, "42")
 	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.inProgressLabel) {
 		t.Errorf("labels = %v, want agent-failed and not agent-in-progress", got)
+	}
+}
+
+// A stop after the claim whose label restore also fails must not exit 7: the
+// issue is stranded on agent-in-progress, which queue mode never revisits.
+func TestRecoverQueueOne_StopAfterClaimFailedRestoreExitsOne(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	stop := withControlledStop(t)
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	it := failRestore{IssueTracker: stopAfterClaim{IssueTracker: x.fc, stop: stop}}
+	code := x.runOn(t, it, x.cf, capsFor(x.tracker, x.cf))
+
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	got := x.labels(t, "42")
+	if !slices.Contains(got, x.c.inProgressLabel) || slices.Contains(got, x.c.failedLabel) {
+		t.Errorf("labels = %v, want agent-in-progress and not agent-failed", got)
+	}
+	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 0 {
+		t.Errorf("attempt count = %d, want 0", rec.Count)
+	}
+}
+
+// A landing failure whose park transition fails exits 1, not 0, but the
+// attempt record is saved first so the next pass still backs off.
+func TestRecoverQueueOne_FailedParkExitsOneAndKeepsRecord(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = errors.New("relay: boom")
+	id, err := recoverBundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	code := x.runOn(t, failRestore{IssueTracker: x.fc}, x.cf, capsFor(x.tracker, x.cf))
+
+	if code != 1 {
+		t.Errorf("exit = %d, want 1", code)
+	}
+	if rec := loadRecoverAttempts(x.dir, "42", id); rec.Count != 1 {
+		t.Errorf("attempt count = %d, want 1", rec.Count)
 	}
 }
 

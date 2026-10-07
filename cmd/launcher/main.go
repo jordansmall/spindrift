@@ -1478,7 +1478,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// A stop arrived after the claim above: put the label back so
 				// the issue is not stranded agent-in-progress with no run.
 				if err := it.TransitionState(iss.number, forge.InProgress, forge.Failed); err != nil {
-					fmt.Fprintf(stderr, "    ?? #%s: restore %s: %v\n", issueNum, c.failedLabel, err)
+					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, err)
 				}
 				return waves.ErrSignalledStop
 			}
