@@ -1,0 +1,236 @@
+package main
+
+import (
+	"embed"
+	"fmt"
+	"html/template"
+	"io/fs"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+)
+
+//go:embed web
+var webFS embed.FS
+
+type server struct {
+	statusPath string
+	now        func() time.Time
+	alive      func(pid int, host string) bool
+	tmpl       *template.Template
+	static     http.Handler
+}
+
+func newServer(statusPath string) *server {
+	staticFS, err := fs.Sub(webFS, "web/static")
+	if err != nil {
+		panic(err)
+	}
+	return &server{
+		statusPath: statusPath,
+		now:        time.Now,
+		alive:      processAlive,
+		tmpl:       template.Must(template.ParseFS(webFS, "web/index.html.tmpl")),
+		static:     http.StripPrefix("/static/", http.FileServerFS(staticFS)),
+	}
+}
+
+func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	switch {
+	case r.URL.Path == "/":
+		s.page(w)
+	case strings.HasPrefix(r.URL.Path, "/static/"):
+		s.static.ServeHTTP(w, r)
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *server) page(w http.ResponseWriter) {
+	v := s.buildView()
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	if err := s.tmpl.Execute(w, v); err != nil {
+		// Headers are gone; all that is left is to cut the page short.
+		fmt.Fprintf(w, "<!-- render error: %v -->", err)
+	}
+}
+
+type viewMode int
+
+const (
+	// modeNone: no live Daemon. State, Reason and Written then carry its last
+	// record, if any.
+	modeNone  viewMode = iota
+	modeError          // unreadable status file
+	modeLive
+)
+
+// revisionLen is how much of a commit hash a slot card shows.
+const revisionLen = 12
+
+type view struct {
+	mode viewMode
+	Note string // why the mode is none
+	Err  string
+	Raw  string
+
+	State    string
+	Reason   string // shown live and, as the last record, for a dead pid
+	Halted   bool
+	Host     string
+	Pid      int
+	Uptime   string
+	Written  string
+	Busy     int
+	Total    int
+	Kinds    []kindView
+	Trackers []TrackerCheck
+	Slots    []slotView
+}
+
+// The template branches on these rather than on mode literals.
+func (v view) Live() bool    { return v.mode == modeLive }
+func (v view) Errored() bool { return v.mode == modeError }
+func (v view) None() bool    { return v.mode == modeNone }
+
+type kindView struct {
+	Kind        string
+	NextCheck   string
+	Jammed      bool
+	JamUntil    string
+	ReadyAtJam  string
+	Ready       string
+	ProbedAt    string
+	NextProbe   string
+	NextDue     string
+	OnTipMove   bool
+	AlsoTipMove bool
+}
+
+type slotView struct {
+	Slot    int
+	Phase   string
+	Busy    bool
+	Kind    string
+	Subject []string
+	Rev     string
+	Elapsed string
+}
+
+func (s *server) buildView() view {
+	st, raw, err := readStatus(s.statusPath)
+	switch {
+	case err != nil:
+		return view{mode: modeError, Err: err.Error(), Raw: string(raw)}
+	case st == nil:
+		return view{mode: modeNone}
+	case !s.alive(st.Pid, st.Host):
+		// The Daemon publishes its last state, a halt included, then exits and
+		// leaves the file as a record of how the run ended, so show it.
+		return view{mode: modeNone, Note: fmt.Sprintf(
+			"pid %d on %s is no longer running; the last state it published is below.", st.Pid, st.Host),
+			State: st.State, Reason: st.Reason, Halted: st.halted(), Written: st.Time}
+	}
+
+	now := s.now()
+	v := view{
+		mode:     modeLive,
+		State:    st.State,
+		Reason:   st.Reason,
+		Halted:   st.halted(),
+		Host:     st.Host,
+		Pid:      st.Pid,
+		Written:  st.Time,
+		Total:    len(st.Slots),
+		Trackers: st.Trackers,
+	}
+	if started, err := time.Parse(time.RFC3339, st.Started); err == nil {
+		d := now.Sub(started)
+		v.Uptime = formatDuration(d)
+	} else {
+		v.Uptime = "unknown"
+	}
+	for _, c := range st.Checks {
+		k := kindView{
+			Kind:       c.Kind,
+			NextCheck:  c.NextCheck,
+			Jammed:     c.Jammed,
+			JamUntil:   c.JamUntil,
+			ReadyAtJam: optInt(c.ReadyAtJam),
+			Ready:      optInt(c.Ready),
+			ProbedAt:   c.ProbedAt,
+			NextProbe:  c.NextProbe,
+			NextDue:    c.NextDue,
+			OnTipMove:  c.NextDue == nextDueOnTipMove,
+		}
+		k.AlsoTipMove = c.NextDueOnTipMove && !k.OnTipMove
+		v.Kinds = append(v.Kinds, k)
+	}
+	for _, sl := range st.Slots {
+		if sl.Busy {
+			v.Busy++
+		}
+		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Elapsed: "unknown"}
+		if len(sl.Revision) > revisionLen {
+			sv.Rev = sl.Revision[:revisionLen]
+		} else {
+			sv.Rev = sl.Revision
+		}
+		for _, is := range sl.Issues {
+			sv.Subject = append(sv.Subject, issueLabel(is))
+		}
+		if sl.Chore != "" {
+			sv.Subject = append(sv.Subject, sl.Chore)
+		}
+		if since, err := time.Parse(time.RFC3339, sl.Since); err == nil {
+			d := now.Sub(since)
+			sv.Elapsed = formatDuration(d)
+		}
+		v.Slots = append(v.Slots, sv)
+	}
+	return v
+}
+
+func optInt(p *int) string {
+	if p == nil {
+		return ""
+	}
+	return strconv.Itoa(*p)
+}
+
+func issueLabel(s string) string {
+	if s != "" && strings.Trim(s, "0123456789") == "" {
+		return "#" + s
+	}
+	return s
+}
+
+func seconds(d time.Duration) int64 {
+	if d < 0 {
+		return 0
+	}
+	return int64(d / time.Second)
+}
+
+// formatDuration renders d as "2d 2h 1m", "2h 0m 0s", "12m 3s" or "5s"; the
+// largest unit drops a trailing seconds field once days appear.
+func formatDuration(d time.Duration) string {
+	n := seconds(d)
+	days, h, m, sec := n/86400, n%86400/3600, n%3600/60, n%60
+	switch {
+	case days > 0:
+		return fmt.Sprintf("%dd %dh %dm", days, h, m)
+	case h > 0:
+		return fmt.Sprintf("%dh %dm %ds", h, m, sec)
+	case m > 0:
+		return fmt.Sprintf("%dm %ds", m, sec)
+	}
+	return fmt.Sprintf("%ds", sec)
+}

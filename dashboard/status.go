@@ -1,0 +1,103 @@
+package main
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"syscall"
+)
+
+// statusFileName is the daemon's status file inside the checkout's git dir.
+// The Dashboard mirrors the daemon's published JSON with its own types rather
+// than importing the launcher module (ADR 0060).
+const statusFileName = "spindrift-daemon.status"
+
+// Status is the Daemon's published status file (see Status file under Daemon
+// in docs/reference.md).
+type Status struct {
+	Pid      int            `json:"pid"`
+	Host     string         `json:"host"`
+	Started  string         `json:"started"`
+	Time     string         `json:"time"`
+	Kinds    []string       `json:"kinds"`
+	State    string         `json:"state"`
+	Reason   string         `json:"reason,omitempty"`
+	Slots    []SlotStatus   `json:"slots"`
+	Checks   []KindCheck    `json:"checks"`
+	Trackers []TrackerCheck `json:"trackers,omitempty"`
+}
+
+// TrackerCheck is one issue tracker's rate-limit state.
+type TrackerCheck struct {
+	Tracker          string `json:"tracker"`
+	RateLimitedUntil string `json:"rate_limited_until,omitempty"`
+}
+
+// SlotStatus is one slot of the Daemon's pool; Since is when it entered Phase.
+type SlotStatus struct {
+	Slot     int      `json:"slot"`
+	Phase    string   `json:"phase"`
+	Busy     bool     `json:"busy"`
+	Since    string   `json:"since"`
+	Kind     string   `json:"kind,omitempty"`
+	Revision string   `json:"revision,omitempty"`
+	Issues   []string `json:"issues,omitempty"`
+	Chore    string   `json:"chore,omitempty"`
+}
+
+// KindCheck is the Daemon's per-kind next-check, jam and Demand state.
+type KindCheck struct {
+	Kind             string `json:"kind"`
+	NextCheck        string `json:"nextCheck,omitempty"`
+	Jammed           bool   `json:"jammed,omitempty"`
+	Ready            *int   `json:"ready,omitempty"`
+	ProbedAt         string `json:"probed_at,omitempty"`
+	NextProbe        string `json:"next_probe,omitempty"`
+	JamUntil         string `json:"jam_until,omitempty"`
+	ReadyAtJam       *int   `json:"ready_at_jam,omitempty"`
+	NextDue          string `json:"next_due,omitempty"`
+	NextDueOnTipMove bool   `json:"next_due_on_tip_move,omitempty"`
+}
+
+// stateHalted is the State the Daemon publishes when the pool has halted.
+const stateHalted = "halted"
+
+func (s *Status) halted() bool { return s.State == stateHalted }
+
+// nextDueOnTipMove is the literal the daemon publishes in NextDue when only a
+// moved tip lifts a child-reported kind's wait.
+const nextDueOnTipMove = "on_tip_move"
+
+// readStatus reads path. A missing file is (nil, nil, nil); an unparseable
+// one returns the raw bytes beside the error so the page can show them.
+func readStatus(path string) (*Status, []byte, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	var s Status
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil, data, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return &s, data, nil
+}
+
+// processAlive reports whether the daemon at pid on host is still running.
+// The checkout lock would be the truth, but probing it with a flock could
+// race the daemon's own acquire, so liveness is by pid. A pid on another host
+// cannot be probed and is taken as live.
+func processAlive(pid int, host string) bool {
+	if pid <= 0 {
+		return false
+	}
+	self, err := os.Hostname()
+	if err != nil || self != host {
+		return true
+	}
+	// EPERM means the process exists under another user.
+	return !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+}
