@@ -13,6 +13,18 @@ import (
 // than importing the launcher module (ADR 0060).
 const statusFileName = "spindrift-daemon.status"
 
+// statusSchema is the status-file schema this Dashboard understands. It
+// mirrors the daemon's statusSchema and must bump with it.
+const statusSchema = 1
+
+// schemaError is readStatus's report of a status file written at a schema the
+// Dashboard does not understand.
+type schemaError struct{ got int }
+
+func (e *schemaError) Error() string {
+	return fmt.Sprintf("Daemon schema %d, Dashboard understands %d: restart the Dashboard", e.got, statusSchema)
+}
+
 // Status is the Daemon's published status file (see Status file under Daemon
 // in docs/reference.md).
 type Status struct {
@@ -70,7 +82,9 @@ func (s *Status) halted() bool { return s.State == stateHalted }
 const nextDueOnTipMove = "on_tip_move"
 
 // readStatus reads path. A missing file is (nil, nil, nil); an unparseable
-// one returns the raw bytes beside the error so the page can show them.
+// one returns the raw bytes beside the error so the page can show them. A
+// schema the Dashboard does not understand returns a *schemaError and the raw
+// bytes, undecoded.
 func readStatus(path string) (*Status, []byte, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -78,6 +92,22 @@ func readStatus(path string) (*Status, []byte, error) {
 	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	// Peek at the schema alone: a breaking change may retype a field, so the
+	// full decode below could fail or misread under a schema this Dashboard
+	// does not know.
+	var head struct {
+		Schema int `json:"schema"`
+	}
+	if err := json.Unmarshal(data, &head); err != nil {
+		return nil, data, fmt.Errorf("parse %s: %w", path, err)
+	}
+	got := head.Schema
+	if got == 0 { // a daemon predating the field wrote the schema-1 shape
+		got = 1
+	}
+	if got != statusSchema {
+		return nil, data, &schemaError{got: got}
 	}
 	var s Status
 	if err := json.Unmarshal(data, &s); err != nil {
