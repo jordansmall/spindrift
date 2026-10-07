@@ -70,6 +70,7 @@ type schemaConfig struct {
 	maxJobs                      int
 	maxParallel                  int
 	maxRebaseAttempts            int
+	maxRecoverAttempts           int
 	memoryLimit                  string
 	mergeGuardPaths              string
 	mergeMethod                  string
@@ -161,6 +162,7 @@ func loadSchemaConfig() schemaConfig {
 		maxJobs:                   atoiNonnegSchema("MAX_JOBS"),
 		maxParallel:               atoiSchema("MAX_PARALLEL"),
 		maxRebaseAttempts:         atoiNonnegSchema("MAX_REBASE_ATTEMPTS"),
+		maxRecoverAttempts:        atoiSchema("MAX_RECOVER_ATTEMPTS"),
 		memoryLimit:               getenvSchema("MEMORY_LIMIT"),
 		mergeGuardPaths:           getenvSchema("MERGE_GUARD_PATHS"),
 		mergeMethod:               getenvSchema("MERGE_METHOD"),

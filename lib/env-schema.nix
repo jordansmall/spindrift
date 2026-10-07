@@ -709,6 +709,17 @@ in
     nixSubPath = "retry.maxFix";
     boxEnv = false;
   };
+  maxRecoverAttempts = {
+    env = "MAX_RECOVER_ATTEMPTS";
+    group = "dispatch";
+    default = 3;
+    doc = "queue-mode `spindrift recover` (no issue number) attempts per agent-failed issue and outbox bundle before it gives up with one comment; between attempts the issue waits TRANSIENT_BACKOFF_SECS times its attempt count; a hand-run `spindrift recover <n>` ignores the bound";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "retry.maxRecover";
+    boxEnv = false;
+  };
   signalCarrier = {
     env = "BOX_SIGNAL_CARRIER";
     group = "dispatch";

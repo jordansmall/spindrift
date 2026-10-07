@@ -180,6 +180,8 @@
             #     maxFix = 3;
             #     # rebase-and-retry passes when a green PR conflicts with the base after a sibling merge; 0 disables rebase retries
             #     maxRebase = 3;
+            #     # queue-mode `spindrift recover` (no issue number) attempts per agent-failed issue and outbox bundle before it gives up with one comment; between attempts the issue waits TRANSIENT_BACKOFF_SECS times its attempt count; a hand-run `spindrift recover <n>` ignores the bound
+            #     maxRecover = 3;
             #     # base backoff seconds per retry for 529/overloaded and network transients
             #     transientBackoff = 30;
             #     # max retries for transient exits (529/network backoff; consecutive 429 holds)
