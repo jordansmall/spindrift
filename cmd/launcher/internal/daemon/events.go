@@ -41,6 +41,9 @@ type Event struct {
 	// (issue #3627); no other event sets it.
 	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`
+	// ChildLog is child_start's own field: the Child log file the child's
+	// output is teed to, relative to the checkout.
+	ChildLog string `json:"child_log,omitempty"`
 	Slot     *int   `json:"slot,omitempty"`
 	Exit     *int   `json:"exit,omitempty"`
 	Outcome  string `json:"outcome,omitempty"`

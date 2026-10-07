@@ -95,6 +95,10 @@ type ChildRequest struct {
 	Stop     <-chan struct{}
 	Abort    <-chan struct{}
 
+	// ChildLog is the Child log file, relative to the checkout, that the
+	// Runner tees the child's output into; child_start names the same path.
+	ChildLog string
+
 	// OnRecord, when non-nil, is called with each Record the child reports
 	// over its private pipe (internal/report), live as each line arrives
 	// rather than after the child exits — the channel the status file needs
@@ -574,7 +578,7 @@ slotLoop:
 			continue
 		}
 
-		kind, started := p.startChild(slot, kind, revision)
+		kind, childLog, started := p.startChild(slot, kind, revision)
 		if !started {
 			// Outpaced while parked on the baton, or a Chore-keyed non-holder
 			// refused an issue-keyed kind: nothing is startable now, so
@@ -594,6 +598,7 @@ slotLoop:
 			Revision: revision,
 			Stop:     cfg.Stop,
 			Abort:    cfg.Abort,
+			ChildLog: childLog,
 			OnRecord: func(rec Record) {
 				switch rec.Event {
 				case report.EventBox:

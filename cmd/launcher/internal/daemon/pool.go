@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/report"
 )
 
@@ -552,7 +554,7 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 // from the stream for its whole queue scan, or emit nothing at all for a
 // child that never claims — the "box" event is where the slot↔key binding
 // first appears (see noteBox).
-func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, ok bool) {
+func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, childLog string, ok bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
 		// A slot not holding the baton, deciding on a Chore-keyed
@@ -568,10 +570,24 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 		}
 		ok = true
 		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind], gateGen: s.sched.gateGenOf(kind)}}
-		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot)}}
+		childLog = childLogPath(now, slot, kind)
+		return []Event{{Event: "child_start", Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
 	})
-	return kind, ok
+	return kind, childLog, ok
 }
+
+// childLogPath names a child's Child log, relative to the checkout. The
+// timestamp carries milliseconds because a fast-exiting child frees its slot
+// to start the next one within the same second, and the two must not share a
+// file.
+func childLogPath(start time.Time, slot int, kind Kind) string {
+	name := fmt.Sprintf("%s-slot%d-%s.log", start.UTC().Format(childLogTimeLayout), slot, kind)
+	return filepath.Join(hostpaths.LogDir(""), "daemon", name)
+}
+
+// childLogTimeLayout is the start-time stamp in a Child log's name, to the
+// millisecond.
+const childLogTimeLayout = "20060102T150405.000Z"
 
 // finishChild moves slot back to idle and zeroes its flight. A slot calls this
 // immediately after RunChild returns, before the result is interpreted: it
