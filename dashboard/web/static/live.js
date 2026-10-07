@@ -4,6 +4,8 @@
   var history = document.getElementById("history");
   if (!status || !history || !window.EventSource) return;
 
+  var localize = window.localizeTimes || function () {};
+
   var limit = parseInt(history.dataset.limit, 10);
 
   // Matches the phase-pulse duration in style.css.
@@ -25,6 +27,7 @@
   es.addEventListener("status", function (e) {
     var before = phases();
     status.innerHTML = e.data;
+    localize(status);
     var now = Date.now();
     status.querySelectorAll("[data-slot]").forEach(function (c) {
       var slot = c.dataset.slot;
@@ -43,6 +46,7 @@
   // Sent once per connection, so an EventSource auto-reconnect resyncs the list.
   es.addEventListener("history", function (e) {
     history.innerHTML = e.data;
+    localize(history);
   });
 
   es.addEventListener("entry", function (e) {
@@ -52,6 +56,7 @@
     if (!row) return;
     var empty = history.querySelector(".empty");
     if (empty) empty.remove();
+    localize(row);
     row.classList.add("fresh");
     history.insertBefore(row, history.querySelector(".entry"));
     var rows = history.querySelectorAll(".entry");

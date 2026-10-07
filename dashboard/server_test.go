@@ -304,7 +304,7 @@ func TestUnknownPath404(t *testing.T) {
 }
 
 func TestAssetsServed(t *testing.T) {
-	for _, p := range []string{"/static/style.css"} {
+	for _, p := range []string{"/static/style.css", "/static/time.js"} {
 		if code, body := get(t, nil, p); code != 200 || body == "" {
 			t.Errorf("%s: code=%d len=%d", p, code, len(body))
 		}
