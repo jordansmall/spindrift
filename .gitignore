@@ -20,3 +20,6 @@ ab-results/
 
 # OS
 .DS_Store
+
+# go build output in the launcher module
+/cmd/launcher/launcher
