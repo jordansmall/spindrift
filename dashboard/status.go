@@ -39,6 +39,9 @@ type Status struct {
 	Slots    []SlotStatus   `json:"slots"`
 	Checks   []KindCheck    `json:"checks"`
 	Trackers []TrackerCheck `json:"trackers,omitempty"`
+	// RepoURL is the Target repo's web URL; absent when the tracker has none
+	// (local, jira), in which case nothing links out to an issue.
+	RepoURL string `json:"repo_url,omitempty"`
 }
 
 // TrackerCheck is one issue tracker's rate-limit state.

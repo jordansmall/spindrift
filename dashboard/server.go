@@ -69,8 +69,10 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) page(w http.ResponseWriter) {
-	v := s.buildView()
+	st, raw, err := readStatus(s.statusPath)
+	v := s.viewFrom(st, raw, err)
 	v.History, v.HistoryErr = readHistory(s.eventsPath)
+	linkEntries(v.History, repoURLOf(st))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	if err := s.tmpl.Execute(w, v); err != nil {
@@ -141,20 +143,15 @@ type slotView struct {
 	Phase       string
 	Busy        bool
 	Kind        string
-	Subject     []string
+	Subject     []subject
 	Rev         string
 	Elapsed     string
 	ChildStart  string
 	ChildStartN int
 }
 
-// buildView reads the status file afresh; viewFrom is the part a stream can
-// run on its own cached read.
-func (s *server) buildView() view {
-	st, raw, err := readStatus(s.statusPath)
-	return s.viewFrom(st, raw, err)
-}
-
+// viewFrom builds the view from one read of the status file, which a stream
+// can run on its own cached read.
 func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 	var skew *schemaError
 	switch {
@@ -207,16 +204,17 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		k.AlsoTipMove = c.NextDueOnTipMove && !k.OnTipMove
 		v.Kinds = append(v.Kinds, k)
 	}
+	repo := repoURLOf(st)
 	for _, sl := range st.Slots {
 		if sl.Busy {
 			v.Busy++
 		}
 		sv := slotView{Slot: sl.Slot, Phase: sl.Phase, Busy: sl.Busy, Kind: sl.Kind, Rev: shortRev(sl.Revision), Elapsed: "unknown", ChildStart: sl.ChildStart, ChildStartN: sl.ChildStartN}
 		for _, is := range sl.Issues {
-			sv.Subject = append(sv.Subject, issueLabel(is))
+			sv.Subject = append(sv.Subject, issueSubject(is).linked(repo))
 		}
 		if sl.Chore != "" {
-			sv.Subject = append(sv.Subject, sl.Chore)
+			sv.Subject = append(sv.Subject, subject{Label: sl.Chore})
 		}
 		if since, err := time.Parse(time.RFC3339, sl.Since); err == nil {
 			d := now.Sub(since)
@@ -234,11 +232,51 @@ func optInt(p *int) string {
 	return strconv.Itoa(*p)
 }
 
-func issueLabel(s string) string {
-	if s != "" && strings.Trim(s, "0123456789") == "" {
-		return "#" + s
+func isIssueNumber(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
+// subject is what a Dispatch works on, shown as a chip. URL is set only for an
+// issue the Target repo's web URL can reach; a Chore, whose Ledger lives in
+// git, and a non-numeric tracker key stay plain.
+type subject struct {
+	Label string
+	URL   string
+	issue string // the issue number a URL is built from; empty for a Chore
+}
+
+func issueSubject(key string) subject {
+	s := subject{Label: key}
+	if isIssueNumber(key) {
+		s.Label = "#" + key
+		s.issue = key
 	}
 	return s
+}
+
+// subjectOf is an event's subject: its issue when it names one, else its Chore.
+func subjectOf(issue, chore string) subject {
+	if issue != "" {
+		return issueSubject(issue)
+	}
+	return subject{Label: chore}
+}
+
+// linked returns s with its issue URL set; a Chore subject or a status that
+// publishes no repo URL stays unlinked rather than getting a broken href.
+func (s subject) linked(repoURL string) subject {
+	if s.issue != "" && repoURL != "" {
+		s.URL = strings.TrimRight(repoURL, "/") + "/issues/" + s.issue
+	}
+	return s
+}
+
+// repoURLOf is the web URL a status publishes, empty when there is none.
+func repoURLOf(st *Status) string {
+	if st == nil {
+		return ""
+	}
+	return st.RepoURL
 }
 
 func seconds(d time.Duration) int64 {

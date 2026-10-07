@@ -45,13 +45,24 @@ func get(t *testing.T, content *string, path string) (int, string) {
 
 func statusJSON(t *testing.T, state, reason string, slots string) string {
 	t.Helper()
+	return statusJSONRepo(t, state, reason, slots, "")
+}
+
+// statusJSONRepo is statusJSON with the Daemon's repo_url published, or
+// omitted when repoURL is empty as for a tracker with no web repo.
+func statusJSONRepo(t *testing.T, state, reason, slots, repoURL string) string {
+	t.Helper()
+	repo := ""
+	if repoURL != "" {
+		repo = `"repo_url":"` + repoURL + `",`
+	}
 	r := ""
 	if reason != "" {
 		r = `"reason":"` + reason + `",`
 	}
 	return `{"schema":1,"pid":` + itoa(os.Getpid()) + `,"host":"` + hostname(t) + `",` +
 		`"started":"2026-10-07T10:00:00Z","time":"2026-10-07T11:59:58Z",` +
-		`"kinds":["work","research"],"state":"` + state + `",` + r +
+		`"kinds":["work","research"],"state":"` + state + `",` + r + repo +
 		`"slots":` + slots + `,"checks":[],"trackers":[]}`
 }
 

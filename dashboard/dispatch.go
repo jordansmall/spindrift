@@ -19,11 +19,12 @@ type dispatchView struct {
 	Started  string
 	ChildLog string
 	Rev      string
-	Subject  []string // box events' issue/chore, deduplicated
-	Phase    string   // the latest box phase
-	Outcome  string   // settled's state
+	Subject  []subject // box events' issue/chore, deduplicated
+	Phase    string    // the latest box phase
+	Outcome  string    // settled's state
 	Note     string
-	Exit     *int // child_finish's exit; nil until the child finishes
+	PRURL    string // settled's PR, when it opened one
+	Exit     *int   // child_finish's exit; nil until the child finishes
 	PassLogs []passLog
 }
 
@@ -50,21 +51,18 @@ func (v *dispatchView) absorb(ev Event) {
 	case "box":
 		v.Phase = ev.Phase
 		v.addPassLog(ev)
-		subject := ev.Chore
-		if ev.Issue != "" {
-			subject = issueLabel(ev.Issue)
-		}
-		if subject == "" {
+		s := subjectOf(ev.Issue, ev.Chore)
+		if s.Label == "" {
 			return
 		}
-		for _, s := range v.Subject {
-			if s == subject {
+		for _, have := range v.Subject {
+			if have.Label == s.Label {
 				return
 			}
 		}
-		v.Subject = append(v.Subject, subject)
+		v.Subject = append(v.Subject, s)
 	case "settled":
-		v.Outcome, v.Note = ev.State, ev.Note
+		v.Outcome, v.Note, v.PRURL = ev.State, ev.Note, ev.PRURL
 	case "child_finish":
 		v.Exit = ev.Exit
 		if v.Rev == "" {
@@ -171,6 +169,12 @@ func (s *server) dispatch(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.NotFound(w, r)
 		return
+	}
+	// A missing, unreadable or skewed status only costs the issue links.
+	st, _, _ := readStatus(s.statusPath)
+	repo := repoURLOf(st)
+	for i := range d.Subject {
+		d.Subject[i] = d.Subject[i].linked(repo)
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
