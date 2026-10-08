@@ -2141,6 +2141,15 @@ func TestBwrapRun_CgroupAnchoredAboveSelfWritesLimitsAndCleansUp(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("Run: %v", runErr)
 	}
+	// A tmpdir stand-in for the cgroup is refused by the kernel's
+	// CLONE_INTO_CGROUP, which logs a retry line that is not a containment failure.
+	var contained []string
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "inside cgroup") {
+			contained = append(contained, line)
+		}
+	}
+	out = strings.Join(contained, "\n")
 	if strings.Contains(strings.ToLower(out), "warning") && strings.Contains(strings.ToLower(out), "cgroup") {
 		t.Errorf("Run printed a cgroup containment warning despite a qualifying anchor: %q", out)
 	}

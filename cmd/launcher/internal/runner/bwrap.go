@@ -980,8 +980,9 @@ func (a *bwrapAdapter) Run(box Box) error {
 	defer releaseProvisioning()
 
 	// Provisioned before Start so the dir and its limits exist by the time bwrap
-	// is exec'd; moving the process in waits for the real PID. An empty
-	// cgroupDir means provisionCgroup could not create the dir at all.
+	// is exec'd; the child is cloned straight into it (CLONE_INTO_CGROUP) at
+	// Start. An empty cgroupDir means provisionCgroup could not create the dir
+	// at all.
 	cgroupDir := a.provisionCgroup(box)
 
 	// Opened before cmd is built: a failed open must also drop the "--seccomp"
@@ -1007,27 +1008,32 @@ func (a *bwrapAdapter) Run(box Box) error {
 		// vet's copylocks flags and Run's concurrency makes a real hazard.
 		execArgs = removeSeccompFlag(execArgs)
 	}
-	cmd := execCommand(program, execArgs...)
-	// Pdeathsig kills this direct child (bwrap or pasta) the moment the launcher
-	// dies, so a crashed launcher never leaves an orphaned Box. Separate from
-	// bwrap's own --die-with-parent, which only protects bwrap against ITS
-	// immediate parent: pasta, in the fork case, not the launcher two hops up.
-	// setDeathSignal is a platform split, since Pdeathsig is Linux-only.
-	setDeathSignal(cmd)
-	cmd.Env = resolvedRunEnv(box.Env)
-	if childExecsByName {
-		// pasta execs "bwrap" by bare name via execvp, using its own process
-		// environment's PATH rather than Go's LookPath, which resolved only the
-		// top-level program. Without this the env carries no PATH at all and the
-		// child exec fails with ENOENT. PATH is not an offArgvKeys value, so
-		// forwarding it does not widen resolvedRunEnv's no-ambient-leak guarantee.
-		cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
+	// A func, not a value: exec.Cmd.Start is one-shot, and the CLONE_INTO_CGROUP
+	// attempt below may need a fresh Cmd for its fallback.
+	newCmd := func() *exec.Cmd {
+		cmd := execCommand(program, execArgs...)
+		// Pdeathsig kills this direct child (bwrap or pasta) the moment the launcher
+		// dies, so a crashed launcher never leaves an orphaned Box. Separate from
+		// bwrap's own --die-with-parent, which only protects bwrap against ITS
+		// immediate parent: pasta, in the fork case, not the launcher two hops up.
+		// setDeathSignal is a platform split, since Pdeathsig is Linux-only.
+		setDeathSignal(cmd)
+		cmd.Env = resolvedRunEnv(box.Env)
+		if childExecsByName {
+			// pasta execs "bwrap" by bare name via execvp, using its own process
+			// environment's PATH rather than Go's LookPath, which resolved only the
+			// top-level program. Without this the env carries no PATH at all and the
+			// child exec fails with ENOENT. PATH is not an offArgvKeys value, so
+			// forwarding it does not widen resolvedRunEnv's no-ambient-leak guarantee.
+			cmd.Env = append(cmd.Env, "PATH="+os.Getenv("PATH"))
+		}
+		if syscallFilterFile != nil {
+			cmd.ExtraFiles = []*os.File{syscallFilterFile}
+		}
+		cmd.Stdout = out
+		cmd.Stderr = out
+		return cmd
 	}
-	if syscallFilterFile != nil {
-		cmd.ExtraFiles = []*os.File{syscallFilterFile}
-	}
-	cmd.Stdout = out
-	cmd.Stderr = out
 
 	// A shared flock held for the life of the sandboxed process is how
 	// reclaimStaleSnapshots detects a live Box still reading this generation.
@@ -1052,7 +1058,34 @@ func (a *bwrapAdapter) Run(box Box) error {
 			nixVarSnapshotLock = lf
 		}
 	}
-	if err := cmd.Start(); err != nil {
+	// Cloned straight into the cgroup where the kernel supports it, so pasta's
+	// and bwrap's own forks never run outside the limits (issue #4815). The fd
+	// only needs to outlive Start.
+	var cgroupFile *os.File
+	if cgroupDir != "" {
+		if f, err := os.Open(cgroupDir); err == nil {
+			cgroupFile = f
+		} else {
+			fmt.Printf("==> bwrap runner: warning: could not open cgroup %s (%v); box %q starts outside it and is moved in after Start\n", cgroupDir, err, box.Name)
+		}
+	}
+	cmd := newCmd()
+	intoCgroup := cgroupFile != nil && cgroupCloneSupported
+	if intoCgroup {
+		setCgroupClone(cmd, int(cgroupFile.Fd()))
+	}
+	err = cmd.Start()
+	if err != nil && intoCgroup {
+		// Start is one-shot and the kernel may refuse CLONE_INTO_CGROUP, so retry
+		// on a fresh cmd without it.
+		fmt.Printf("==> bwrap runner: warning: could not start box %q inside cgroup %s (%v); retrying and moving it in after Start\n", box.Name, cgroupDir, err)
+		cmd = newCmd()
+		err = cmd.Start()
+	}
+	if cgroupFile != nil {
+		cgroupFile.Close()
+	}
+	if err != nil {
 		if cgroupDir != "" {
 			_ = os.Remove(cgroupDir)
 		}
@@ -1060,8 +1093,10 @@ func (a *bwrapAdapter) Run(box Box) error {
 		return err
 	}
 	if cgroupDir != "" {
-		// Best-effort: the box is already running, so failing to move it in
-		// means this Box runs unenforced, never that Run fails.
+		// A same-cgroup no-op after CLONE_INTO_CGROUP. Where that was skipped or
+		// refused, descendants forked before this write escape the limits (issue
+		// #4815). Best-effort: the box is already running, so failing to move it
+		// in means this Box runs unenforced, never that Run fails.
 		pid := strconv.Itoa(cmd.Process.Pid)
 		if err := os.WriteFile(filepath.Join(cgroupDir, "cgroup.procs"), []byte(pid), 0o644); err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not move box %q into cgroup %s: %v\n", box.Name, cgroupDir, err)
