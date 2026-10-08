@@ -131,8 +131,9 @@ var migrations = []string{
 // inferred from (ADR 0061), so deleting a log never removes its Record. The
 // only Records the store discards are ones its own still-present log has since
 // replaced with a different ID: a provisional (mtime-derived) one, one whose
-// stat-identical log re-parses differently under Reingest, or one whose
-// timestamped log re-parses to the same start under a new ID. Accepted
+// stat-identical log re-parses differently under Reingest, one whose
+// timestamped log re-parses to the same start under a new ID, or an orphan
+// satellite's own Record once a Dispatch of its key starts before it. Accepted
 // residual: deleting a provisional log and reusing its path with no Ingest in
 // between reads as the same Dispatch growing, so that earlier Record, which has
 // no real claim time, is replaced.
@@ -245,12 +246,12 @@ func (s *Store) Close() error { return s.db.Close() }
 // Ingest parses every pass log under the root's log directory that is new or
 // changed since it was last ingested and upserts its Record: a chain log's
 // inferred one, or any stamped log's own (issue #4783). It returns how
-// many files it parsed; a file whose path, size, and mtime match its
-// ingested_files row is skipped without being opened. Primary logs go first,
-// so an unstamped satellite log (fix pass, conflict resolve) finds the
-// Dispatch it started under. Rows for logs no longer on disk, including every
-// row when the whole log directory is gone, are forgotten (their Records are
-// kept), so a reused path starts fresh.
+// many distinct files it parsed, counting satellites re-parsed to re-window;
+// a file whose path, size, and mtime match its ingested_files row is skipped
+// without being opened. Primary logs go first, so an unstamped satellite log
+// (fix pass, conflict resolve) finds the Dispatch it started under. Rows for
+// logs no longer on disk, including every row when the whole log directory is
+// gone, are forgotten (their Records are kept), so a reused path starts fresh.
 func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false) }
 
 // Reingest is Ingest without the skip: it re-parses every pass log still on
@@ -265,7 +266,9 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		return 0, err
 	}
 	seen := []string{}
-	var primaries, satellites []string
+	type satelliteLog struct{ path, key string }
+	var primaries []string
+	var satellites []satelliteLog
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -275,48 +278,83 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		}
 		path := filepath.Join(dir, e.Name())
 		seen = append(seen, path)
-		if _, satellite, _ := ChainKey(e.Name()); satellite {
-			satellites = append(satellites, path)
+		if key, satellite, _ := ChainKey(e.Name()); satellite {
+			satellites = append(satellites, satelliteLog{path, key})
 		} else {
 			primaries = append(primaries, path)
 		}
 	}
-	// Primaries first, so a satellite always finds the Dispatch it joins.
+	// Forget first so a deleted log's row never reads as a live satellite to
+	// detachSatellites.
+	if err := s.forgetMissing(seen); err != nil {
+		return 0, err
+	}
+	parsedPaths := map[string]bool{}
+	visit := func(path string, satellite, reparse bool) (string, error) {
+		did, shifted, err := s.ingestFile(path, satellite, reparse)
+		if did {
+			parsedPaths[path] = true
+		}
+		return shifted, err
+	}
+	// Primaries first, so a satellite finds the Dispatch it joins.
+	// shifted key -> the path of its last shifter, which already saw the key's
+	// final Record set.
+	pending := map[string]string{}
 	for _, path := range primaries {
-		did, err := s.ingestFile(path, false, force)
+		shifted, err := visit(path, false, force)
 		if err != nil {
-			return parsed, err
+			return len(parsedPaths), err
 		}
-		if did {
-			parsed++
+		if shifted != "" {
+			pending[shifted] = path
 		}
 	}
-	for _, path := range satellites {
-		did, err := s.ingestFile(path, true, force)
-		if err != nil {
-			return parsed, err
+	// A new or dropped Record moves the window of every satellite of its key, so
+	// those re-window until a round shifts nothing; a key's last shifter already
+	// saw its final Record set, so it is not revisited.
+	// Rounds settle well within this bound; it only guards against a shift
+	// cycle looping forever.
+	maxRounds := 2*len(satellites) + 2
+	for round := 0; round == 0 || len(pending) > 0; round++ {
+		if round >= maxRounds {
+			return len(parsedPaths), fmt.Errorf("dispatchrecord: satellite re-windowing did not settle after %d rounds", maxRounds)
 		}
-		if did {
-			parsed++
+		first := round == 0
+		next := map[string]string{}
+		for _, sat := range satellites {
+			last, shifting := pending[sat.key]
+			if !first && (!shifting || last == sat.path) {
+				continue
+			}
+			shifted, err := visit(sat.path, true, force || shifting)
+			if err != nil {
+				return len(parsedPaths), err
+			}
+			if shifted != "" {
+				next[shifted] = sat.path
+			}
 		}
+		pending = next
 	}
-	return parsed, s.forgetMissing(seen)
+	return len(parsedPaths), nil
 }
 
 // ingestFile parses and upserts one log unless it is unchanged, and reports
-// whether it parsed it.
-func (s *Store) ingestFile(path string, satellite, force bool) (bool, error) {
+// whether it parsed it and the dispatch key whose satellite windows it shifted
+// (see upsert).
+func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
+			return false, "", nil
 		}
-		return false, err
+		return false, "", err
 	}
-	if !force {
+	if !reparse {
 		fresh, err := s.isIngested(path, info)
 		if err != nil || fresh {
-			return false, err
+			return false, "", err
 		}
 	}
 	var recp *Record
@@ -327,12 +365,13 @@ func (s *Store) ingestFile(path string, satellite, force bool) (bool, error) {
 	case errors.Is(err, ErrEmptyLog), errors.Is(err, ErrUnstamped):
 		// Remember the file so it is not reopened until it changes.
 	default:
-		return false, fmt.Errorf("dispatchrecord: %s: %w", path, err)
+		return false, "", fmt.Errorf("dispatchrecord: %s: %w", path, err)
 	}
-	if err := s.upsert(path, info, recp, segment, provisional, satellite); err != nil {
-		return false, err
+	shifted, err := s.upsert(path, info, recp, segment, provisional, satellite)
+	if err != nil {
+		return false, "", err
 	}
-	return true, nil
+	return true, shifted, nil
 }
 
 // forgetMissing drops the ingested_files rows for paths not in seen, leaving
@@ -344,6 +383,15 @@ func (s *Store) forgetMissing(seen []string) error {
 	}
 	_, err = s.db.Exec("DELETE FROM ingested_files WHERE path NOT IN (SELECT value FROM json_each(?))", string(keep))
 	return err
+}
+
+// The window rule placing a satellite log on a Dispatch: the latest claim at or
+// before the log's start, ties by record_id. Shared by the join and the
+// deleted-peer re-window so they cannot drift. start and exclude are SQL
+// expressions; the dispatch key binds first.
+func windowQuery(start, exclude string) string {
+	return `SELECT record_id FROM records WHERE dispatch_key = ? AND claim_time <= ` + start +
+		` AND ` + exclude + ` ORDER BY claim_time DESC, record_id LIMIT 1`
 }
 
 // passColumns is shared by the passes INSERT and SELECT so they cannot drift.
@@ -366,12 +414,14 @@ func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 // upsert records one parsed log. A nil rec is an event-free log: only its
 // ingested_files row is written, with an empty record_id. An unstamped
 // satellite joins the Record of its key with the greatest claim time not after
-// its own start, and only becomes a Record of its own when no Dispatch of that
-// key started by then.
-func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional, satellite bool) error {
+// its own start, other than a Record it owns, and only becomes a Record of its
+// own when no other Dispatch of that key started by then. It returns the
+// Record's dispatch key when it inserted a Record or replaced a stale one,
+// which moves the window of every satellite of that key; otherwise "".
+func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional, satellite bool) (shifted string, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback()
 	var oldID string
@@ -379,7 +429,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	var oldSize, oldStart, oldMtime int64
 	err = tx.QueryRow("SELECT record_id, provisional, size, log_start, mtime_ns FROM ingested_files WHERE path = ?", path).Scan(&oldID, &oldProvisional, &oldSize, &oldStart, &oldMtime)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
+		return "", err
 	}
 	newID := ""
 	var logStart int64
@@ -391,56 +441,87 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		// The stored row describes this same file's earlier read: a provisional
 		// start moves as the log grows, a timestamped one never does.
 		sameFile = oldID != "" && (oldProvisional || statSame || oldStart == logStart)
+		if satellite && rec.Attribution == AttributionInferred && !sameFile {
+			// The stored row, if any, is another file's that held this path, so its
+			// segment stays put. Adopt any same-key segment starting in the same
+			// millisecond as this file's earlier read (a renamed log's), the
+			// coincident-start collision class accepted elsewhere.
+			oldID, oldStart, oldProvisional = "", 0, false
+			for _, table := range segmentTables {
+				err := tx.QueryRow(
+					`SELECT record_id FROM `+table+` WHERE log_start = ? AND record_id IN (SELECT record_id FROM records WHERE dispatch_key = ?)
+						 ORDER BY record_id LIMIT 1`, logStart, rec.DispatchKey).Scan(&oldID)
+				if err == nil {
+					oldStart, sameFile = logStart, true
+					break
+				}
+				if !errors.Is(err, sql.ErrNoRows) {
+					return "", err
+				}
+			}
+		}
 		// A satellite that joined a Record does not own it; an orphan
 		// satellite's own Record starts at the file's start.
 		if satellite && rec.Attribution == AttributionInferred && oldID != "" {
 			var oldClaim int64
 			err := tx.QueryRow("SELECT claim_time FROM records WHERE record_id = ?", oldID).Scan(&oldClaim)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return err
+				return "", err
 			}
 			joined = err == nil && oldClaim != oldStart
 		}
 		writesRecord := true
 		if satellite && rec.Attribution == AttributionInferred {
+			// Never its own Record: an orphan re-parsed would otherwise capture itself
+			// and never move onto a Dispatch that has since appeared.
+			owned := rec.ID
+			if oldID != "" && !joined {
+				owned = oldID
+			}
 			err := tx.QueryRow(
-				`SELECT record_id FROM records WHERE dispatch_key = ? AND claim_time <= ?
-				 ORDER BY claim_time DESC, record_id LIMIT 1`,
-				rec.DispatchKey, logStart).Scan(&newID)
+				windowQuery("?", "record_id NOT IN (?, ?)"),
+				rec.DispatchKey, logStart, rec.ID, owned).Scan(&newID)
 			switch {
 			case err == nil:
 				writesRecord = false
 			case errors.Is(err, sql.ErrNoRows):
 				newID = rec.ID
 			default:
-				return err
+				return "", err
 			}
 		}
 		for _, table := range segmentTables {
 			if oldID == newID || sameFile {
 				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", oldID, oldStart); err != nil {
-					return err
+					return "", err
 				}
 			}
 			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", newID, logStart); err != nil {
-				return err
+				return "", err
 			}
 		}
 		for role, hash := range rec.PromptHashes {
 			if _, err := tx.Exec(
 				`INSERT INTO prompt_hashes (record_id, log_start, role, hash) VALUES (?, ?, ?, ?)`,
 				newID, logStart, role, hash); err != nil {
-				return err
+				return "", err
 			}
 		}
 		if writesRecord {
+			var count int
+			if err := tx.QueryRow("SELECT COUNT(*) FROM records WHERE record_id = ?", rec.ID).Scan(&count); err != nil {
+				return "", err
+			}
+			if count == 0 {
+				shifted = rec.DispatchKey
+			}
 			roleModels, err := marshalMap(rec.RoleModels)
 			if err != nil {
-				return err
+				return "", err
 			}
 			knobs, err := marshalMap(rec.Knobs)
 			if err != nil {
-				return err
+				return "", err
 			}
 			// The outcome group is kept unless this log carries the settled outcome:
 			// the Record's other logs (fix, conflict-resolve) never see it.
@@ -462,7 +543,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 				rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
 				rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
 				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus); err != nil {
-				return err
+				return "", err
 			}
 		}
 		for _, p := range rec.Passes {
@@ -472,14 +553,14 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 				newID, logStart, p.Log, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
 				p.CacheReadInputTokens, p.CacheCreationInputTokens, p.APICalls, p.Turns, p.DurationMs,
 				p.APIDurationMs, p.Verdict, p.VerdictText, p.Dispositions); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
 	if _, err := tx.Exec(
 		`INSERT OR REPLACE INTO ingested_files (path, size, mtime_ns, record_id, provisional, log_start) VALUES (?, ?, ?, ?, ?, ?)`,
 		path, info.Size(), info.ModTime().UnixNano(), newID, provisional, logStart); err != nil {
-		return err
+		return "", err
 	}
 	// A provisional ID is the same Dispatch under a stale mtime-derived ID; a
 	// changed timestamp-derived ID is a new Dispatch reusing the path. A nil rec
@@ -490,29 +571,36 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	// is stale.
 	if rec != nil && oldID != newID && sameFile && !joined {
 		// A satellite joined to the stale Record would keep it alive and, on a
-		// claim-time tie, win the window against the replacement. A satellite
-		// replacing its own Record leaves its peers be: they have already run.
-		if !satellite {
-			if err := detachSatellites(tx, oldID, path); err != nil {
-				return err
-			}
+		// claim-time tie, win the window against the replacement. An orphan
+		// satellite leaving its own Record unlinks its peers too: they re-window.
+		shifted = rec.DispatchKey
+		if err := detachSatellites(tx, oldID, path); err != nil {
+			return "", err
 		}
 		var refs int
 		if err := tx.QueryRow("SELECT COUNT(*) FROM ingested_files WHERE record_id = ?", oldID).Scan(&refs); err != nil {
-			return err
+			return "", err
 		}
 		if refs == 0 {
+			// Rows still on oldID belong to logs no longer on disk; deleting a
+			// log never removes its pass, so each re-windows by its own start
+			// like a live satellite, falling back to the replacement.
+			// Only a coincident-start key collision is left to the DELETE.
 			for _, table := range segmentTables {
+				if _, err := tx.Exec("UPDATE OR IGNORE "+table+` SET record_id = COALESCE((`+windowQuery(table+".log_start", "record_id <> ?")+`), ?) WHERE record_id = ?`,
+					rec.DispatchKey, oldID, newID, oldID); err != nil {
+					return "", err
+				}
 				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ?", oldID); err != nil {
-					return err
+					return "", err
 				}
 			}
 			if _, err := tx.Exec("DELETE FROM records WHERE record_id = ?", oldID); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
-	return tx.Commit()
+	return shifted, tx.Commit()
 }
 
 // Records returns every stored Record with its passes, ordered by claim time

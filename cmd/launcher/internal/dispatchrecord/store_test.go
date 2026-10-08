@@ -1148,3 +1148,472 @@ func TestStoreIngestKindChangeKeepsJoinedSatelliteOnReplacement(t *testing.T) {
 		t.Fatalf("%d rows left under stale ID %s", stale, before[0].ID)
 	}
 }
+
+// requireRecordLogs fails unless the store holds Records, in order, each
+// carrying exactly the named logs.
+func requireRecordLogs(t *testing.T, s *Store, want ...[]string) {
+	t.Helper()
+	got := records(t, s)
+	var gotLogs [][]string
+	for _, r := range got {
+		gotLogs = append(gotLogs, passLogs(r))
+	}
+	if !reflect.DeepEqual(gotLogs, want) {
+		t.Fatalf("record logs = %v (ids %v), want %v", gotLogs, ids(got), want)
+	}
+}
+
+// A satellite orphaned for want of a primary Dispatch rejoins the primary's
+// Record once the primary's log gains output.
+func TestStoreSatelliteRejoinsPrimaryThatGainsOutput(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log")
+	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9-fix-1.log"})
+	putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9.log", "issue-9-fix-1.log"})
+}
+
+// requirePassUSD fails unless the store's passes, in Record then pass order,
+// cost exactly want.
+func requirePassUSD(t *testing.T, s *Store, want ...float64) {
+	t.Helper()
+	var got []float64
+	for _, r := range records(t, s) {
+		for _, p := range r.Passes {
+			got = append(got, p.USD)
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pass USD = %v, want %v", got, want)
+	}
+}
+
+// A renamed orphan satellite has no ingested_files row left under its new
+// name; when an earlier Dispatch appears in the same Ingest it moves onto that
+// Dispatch and must not leave its old segment or Record behind.
+func TestStoreRenamedOrphanSatelliteMovesOntoEarlierDispatch(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log")
+	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9-fix-1.log"})
+	putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	if err := os.Rename(fix, fix+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9.log", "issue-9-fix-1.log.prior-run.1"})
+	requirePassUSD(t, s, 1, 2)
+}
+
+// A renamed satellite that had joined a Dispatch moves to a newer one in the
+// same Ingest; its pass must leave the old Record.
+func TestStoreRenamedJoinedSatelliteMovesOntoNewerDispatch(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9.log", "issue-9-fix-1.log"})
+	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T10:30:00.000Z", 4)...)
+	if err := os.Rename(fix, fix+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, s)
+	requireRecordLogs(t, s,
+		[]string{"issue-9.log"},
+		[]string{"issue-9.log.prior-run.1", "issue-9-fix-1.log.prior-run.1"})
+	requirePassUSD(t, s, 1, 4, 2)
+}
+
+// Quarantine reuses the first free .prior-run.N slot, so a renamed satellite can
+// land on a path whose ingested_files row belongs to a deleted file: the row
+// must not stand in for the moved file, whose old segment still has to leave,
+// and the deleted file's pass stays where it was (a fresh store cannot know it).
+func TestStoreRenamedSatelliteIntoReusedSlot(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	gone := putLog(t, root, "issue-9-fix-1.log.prior-run.1", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	putLog(t, root, "issue-9.log")
+	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T12:00:00.000Z", 3)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	putLog(t, root, "issue-9.log", workLog("2026-03-01T11:30:00.000Z", 4)...)
+	// Coarse filesystem timestamps would otherwise make the two files stat-identical.
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(fix, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(fix, gone); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, s)
+	want := [][]string{
+		{"issue-9.log.prior-run.1", "issue-9-fix-1.log.prior-run.1"},
+		{"issue-9.log", "issue-9-fix-1.log.prior-run.1"},
+	}
+	requireRecordLogs(t, s, want...)
+	requirePassUSD(t, s, 1, 2, 4, 3)
+	if _, err := s.Reingest(); err != nil {
+		t.Fatal(err)
+	}
+	requireRecordLogs(t, s, want...)
+	requirePassUSD(t, s, 1, 2, 4, 3)
+
+	freshRoot := t.TempDir()
+	putLog(t, freshRoot, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, freshRoot, "issue-9.log", workLog("2026-03-01T11:30:00.000Z", 4)...)
+	putLog(t, freshRoot, "issue-9-fix-1.log.prior-run.1", workLog("2026-03-01T12:00:00.000Z", 3)...)
+	fresh := openStore(t, freshRoot)
+	ingest(t, fresh)
+	requireRecordLogs(t, fresh,
+		[]string{"issue-9.log.prior-run.1"},
+		[]string{"issue-9.log", "issue-9-fix-1.log.prior-run.1"})
+	requirePassUSD(t, fresh, 1, 4, 3)
+}
+
+// Deleting a satellite's log never removes its pass; when the orphan Record it
+// joined is then abandoned, that pass moves to the primary's Record, whether
+// the deletion and the primary's arrival are seen by separate Ingests or one.
+func TestStoreOrphanLeavingKeepsDeletedPeerPasses(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		separate bool
+	}{
+		{"separate ingests", true},
+		{"one ingest", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			putLog(t, root, "issue-9.log")
+			putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+			peer := putLog(t, root, "issue-9-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 4)...)
+			s := openStore(t, root)
+			ingest(t, s)
+			if err := os.Remove(peer); err != nil {
+				t.Fatal(err)
+			}
+			if tc.separate {
+				ingest(t, s)
+			}
+			putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+			ingest(t, s)
+			got := records(t, s)
+			if len(got) != 1 {
+				t.Fatalf("records = %v, want one", ids(got))
+			}
+			logs := passLogs(got[0])
+			want := []string{"issue-9.log", "issue-9-fix-1.log", "issue-9-conflict-resolve.log"}
+			if !reflect.DeepEqual(logs, want) {
+				t.Fatalf("logs = %v, want %v", logs, want)
+			}
+			requirePassUSD(t, s, 1, 2, 4)
+		})
+	}
+}
+
+// A deleted peer's pass re-windows by its own start when its orphan Record is
+// abandoned, landing on the later Dispatch that precedes it rather than the
+// replacement.
+func TestStoreOrphanLeavingRewindowsDeletedPeerPasses(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log")
+	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	peer := putLog(t, root, "issue-9-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 4)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	if err := os.Remove(peer); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, s)
+	putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T11:30:00.000Z", 8)...)
+	ingest(t, s)
+	got := records(t, s)
+	if len(got) != 2 {
+		t.Fatalf("records = %v, want two", ids(got))
+	}
+	want := [][]string{
+		{"issue-9.log", "issue-9-fix-1.log"},
+		{"issue-9.log.prior-run.1", "issue-9-conflict-resolve.log"},
+	}
+	for i, r := range got {
+		if logs := passLogs(r); !reflect.DeepEqual(logs, want[i]) {
+			t.Fatalf("record %d logs = %v, want %v", i, logs, want[i])
+		}
+	}
+}
+
+// A satellite ingested before its primary's log exists rejoins it when the
+// primary appears.
+func TestStoreSatelliteRejoinsPrimaryAddedLater(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9.log", "issue-9-fix-1.log"})
+}
+
+// Both orphans precede every Dispatch; the later-starting one sorts first by
+// name, yet they still end up on the earlier one's Record.
+func TestStoreOrphanPeersShareTheEarliestOrphan(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 4)...)
+	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9-fix-1.log", "issue-9-conflict-resolve.log"})
+}
+
+type shape struct {
+	ID   string
+	Logs []string
+	USD  []float64
+}
+
+func shapes(t *testing.T, s *Store) []shape {
+	t.Helper()
+	var out []shape
+	for _, r := range records(t, s) {
+		sh := shape{ID: r.ID, Logs: passLogs(r)}
+		for _, p := range r.Passes {
+			sh.USD = append(sh.USD, p.USD)
+		}
+		out = append(out, sh)
+	}
+	return out
+}
+
+type timedLog struct {
+	name, ts string
+	cost     float64
+}
+
+// The Records a log set yields must not depend on the order logs arrive in.
+func TestStoreAssignmentIsOrderIndependent(t *testing.T) {
+	logs := []timedLog{
+		{"issue-9.log.prior-run.1", "2026-03-01T10:00:00.000Z", 1},
+		{"issue-9.log", "2026-03-05T10:00:00.000Z", 2},
+		{"issue-9-fix-1.log.prior-run.1", "2026-03-02T11:00:00.000Z", 3},
+		{"issue-9-fix-1.log", "2026-03-05T11:00:00.000Z", 4},
+		{"issue-9-conflict-resolve.log", "2026-02-28T10:00:00.000Z", 5},
+		{"issue-9-fix-2.log", "2026-02-28T12:00:00.000Z", 6},
+	}
+	run := func(t *testing.T, batches ...[]timedLog) []shape {
+		root := t.TempDir()
+		s := openStore(t, root)
+		for _, batch := range batches {
+			for _, l := range batch {
+				putLog(t, root, l.name, workLog(l.ts, l.cost)...)
+			}
+			ingest(t, s)
+		}
+		return shapes(t, s)
+	}
+	one := func(ls []timedLog) [][]timedLog {
+		var out [][]timedLog
+		for _, l := range ls {
+			out = append(out, []timedLog{l})
+		}
+		return out
+	}
+	byStart := append([]timedLog(nil), logs...)
+	sort.Slice(byStart, func(i, j int) bool { return byStart[i].ts < byStart[j].ts })
+	reversed := make([]timedLog, len(byStart))
+	for i, l := range byStart {
+		reversed[len(byStart)-1-i] = l
+	}
+	var primaries, satellites []timedLog
+	for _, l := range logs {
+		if _, sat, _ := ChainKey(l.name); sat {
+			satellites = append(satellites, l)
+		} else {
+			primaries = append(primaries, l)
+		}
+	}
+	want := run(t, logs)
+	var wantUSD float64
+	for _, l := range logs {
+		wantUSD += l.cost
+	}
+	var gotPasses int
+	var gotUSD float64
+	for _, sh := range want {
+		gotPasses += len(sh.USD)
+		for _, u := range sh.USD {
+			gotUSD += u
+		}
+	}
+	if len(want) != 3 || gotPasses != len(logs) || gotUSD != wantUSD {
+		t.Fatalf("fresh ingest shapes = %+v, want 3 Records with %d passes costing %v", want, len(logs), wantUSD)
+	}
+	for name, batches := range map[string][][]timedLog{
+		"satellites then primaries": {satellites, primaries},
+		"reverse chronological":     one(reversed),
+		"chronological":             one(byStart),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := run(t, batches...); !reflect.DeepEqual(got, want) {
+				t.Errorf("shapes = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// logWrite is one write of a log file; a non-empty mtime sets its modified
+// time, the only start a log without a result timestamp has.
+type logWrite struct {
+	name, mtime string
+	lines       []string
+}
+
+func writeLogs(t *testing.T, root string, ws ...logWrite) {
+	t.Helper()
+	for _, w := range ws {
+		p := putLog(t, root, w.name, w.lines...)
+		if w.mtime == "" {
+			continue
+		}
+		mt, err := time.Parse(time.RFC3339, w.mtime)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// Provisional (mtime-derived) logs growing, and empty logs gaining output,
+// land on the same Records however the files and their growth interleave
+// across Ingest calls.
+func TestStoreAssignmentIsOrderIndependentForGrowingLogs(t *testing.T) {
+	pass1 := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})
+	prior := logWrite{name: "issue-9.log.prior-run.1", lines: workLog("2026-03-01T10:00:00.000Z", 1)}
+	priorFix := logWrite{name: "issue-9-fix-1.log.prior-run.1", lines: workLog("2026-03-02T11:00:00.000Z", 2)}
+
+	provFix := logWrite{name: "issue-9-fix-1.log", mtime: "2026-03-02T12:00:00Z", lines: []string{pass1}}
+	grownFix := logWrite{name: "issue-9-fix-1.log", mtime: "2026-03-06T12:00:00Z", lines: []string{pass1, assistant("f1")}}
+	primary := logWrite{name: "issue-9.log", lines: workLog("2026-03-05T10:00:00.000Z", 3)}
+
+	provPrimary := logWrite{name: "issue-9.log", mtime: "2026-03-05T11:00:00Z",
+		lines: []string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}}
+	donePrimary := logWrite{name: "issue-9.log", mtime: "2026-03-05T12:00:00Z", lines: workLog("2026-03-05T12:00:00.000Z", 3)}
+	laterFix := logWrite{name: "issue-9-fix-1.log", lines: workLog("2026-03-05T13:00:00.000Z", 4)}
+
+	emptyPrimary := logWrite{name: "issue-9.log"}
+	outPrimary := logWrite{name: "issue-9.log", lines: workLog("2026-03-05T10:00:00.000Z", 3)}
+	outFix := logWrite{name: "issue-9-fix-1.log", lines: workLog("2026-03-05T11:00:00.000Z", 4)}
+
+	type batches [][]logWrite
+	for _, sc := range []struct {
+		name       string
+		final      []logWrite
+		wantRecs   int
+		wantPasses int
+		wantUSD    float64
+		seqs       map[string]batches
+	}{
+		{
+			name:       "provisional satellite grows past a later Dispatch",
+			final:      []logWrite{prior, primary, grownFix},
+			wantRecs:   2,
+			wantPasses: 3,
+			wantUSD:    4,
+			seqs: map[string]batches{
+				"satellite first":  {{provFix}, {prior, primary}, {grownFix}},
+				"primary first":    {{prior, primary}, {provFix}, {grownFix}},
+				"grown before all": {{provFix}, {grownFix}, {prior, primary}},
+				"together":         {{prior, primary, provFix}, {grownFix}},
+			},
+		},
+		{
+			name:       "provisional primary gains a timestamped result",
+			final:      []logWrite{prior, priorFix, donePrimary, laterFix},
+			wantRecs:   2,
+			wantPasses: 4,
+			wantUSD:    10,
+			seqs: map[string]batches{
+				"satellite first": {{prior, priorFix, laterFix}, {provPrimary}, {donePrimary}},
+				"primary first":   {{prior, priorFix, provPrimary}, {laterFix}, {donePrimary}},
+				"together":        {{prior, priorFix, provPrimary, laterFix}, {donePrimary}},
+			},
+		},
+		{
+			name:       "empty primary gains output",
+			final:      []logWrite{prior, outPrimary, outFix},
+			wantRecs:   2,
+			wantPasses: 3,
+			wantUSD:    8,
+			seqs: map[string]batches{
+				"satellite first": {{prior, outFix}, {emptyPrimary}, {outPrimary}},
+				"primary first":   {{prior, emptyPrimary}, {outFix}, {outPrimary}},
+				"together":        {{prior, emptyPrimary, outFix}, {outPrimary}},
+			},
+		},
+	} {
+		t.Run(sc.name, func(t *testing.T) {
+			fresh := t.TempDir()
+			writeLogs(t, fresh, sc.final...)
+			fs := openStore(t, fresh)
+			ingest(t, fs)
+			want := shapes(t, fs)
+			passes := 0
+			var usd float64
+			for _, sh := range want {
+				passes += len(sh.Logs)
+				for _, u := range sh.USD {
+					usd += u
+				}
+			}
+			if len(want) != sc.wantRecs || passes != sc.wantPasses || usd != sc.wantUSD {
+				t.Fatalf("fresh ingest = %+v, want %d Records, %d passes, USD %v", want, sc.wantRecs, sc.wantPasses, sc.wantUSD)
+			}
+			for name, seq := range sc.seqs {
+				t.Run(name, func(t *testing.T) {
+					root := t.TempDir()
+					s := openStore(t, root)
+					for _, b := range seq {
+						writeLogs(t, root, b...)
+						ingest(t, s)
+					}
+					if got := shapes(t, s); !reflect.DeepEqual(got, want) {
+						t.Errorf("shapes = %+v, want %+v", got, want)
+					}
+				})
+			}
+		})
+	}
+}
+
+// A provisional primary's ID moves when its log gains a timestamped result;
+// the satellite joined to it must follow, with no pass counted twice.
+func TestStoreProvisionalPrimaryResultRekeysJoinedSatellite(t *testing.T) {
+	root := t.TempDir()
+	writeLogs(t, root,
+		logWrite{name: "issue-9.log", mtime: "2026-03-01T11:00:00Z",
+			lines: []string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}},
+		logWrite{name: "issue-9-fix-1.log", lines: workLog("2026-03-01T13:00:00.000Z", 2)})
+	s := openStore(t, root)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9.log", "issue-9-fix-1.log"})
+
+	writeLogs(t, root, logWrite{name: "issue-9.log", mtime: "2026-03-01T12:00:00Z",
+		lines: workLog("2026-03-01T12:00:00.000Z", 1)})
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9.log", "issue-9-fix-1.log"})
+	got := records(t, s)
+	if want := "work:9@2026-03-01T12:00:00.000Z"; got[0].ID != want || len(got[0].Passes) != 2 {
+		t.Fatalf("record = %s with %d passes, want %s with 2", got[0].ID, len(got[0].Passes), want)
+	}
+}
