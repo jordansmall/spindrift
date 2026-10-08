@@ -53,10 +53,9 @@ in
         # Blank out full-line `//` comments before grepping (preserving line
         # numbers), rather than dropping them: registry.go/env.go/gates.go
         # legitimately *describe* specific fragment/var names in doc comments
-        # (e.g. registry.go's ExtraSubstVars doc citing skill-preamble.md/
-        # ci-failure.md as the two rows that set it) without creating any
-        # functional coupling a new fragment-on-an-existing-gate would need
-        # to touch -- only a literal used by actual code (string comparison,
+        # (e.g. env.go's SkillsFound doc naming skill-preamble.md) without
+        # creating any functional coupling a new fragment-on-an-existing-gate
+        # would need to touch -- only a literal used by actual code (string comparison,
         # a switch case, and so on) is the guard's real target. `-w` matches
         # whole identifiers only, so removed_vars.go's CAVEMAN_STEP_WORKER row
         # does not read as the live CAVEMAN_STEP (issue #4562).
