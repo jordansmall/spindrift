@@ -170,6 +170,12 @@ func HostLogDirFor(pwd string) string {
 	return hostpaths.LogDir(pwd)
 }
 
+// LogPathFor returns the host path of number's primary Pass log, the file
+// settle appends the dispatch_settled op to.
+func LogPathFor(pwd, number string) string {
+	return logPathFor(pwd, number)
+}
+
 // logPathFor, fixLogPathFor, and conflictLogPathFor are the single source of
 // truth for a Dispatch's log naming, shared with LogPaths (logs.go) so a
 // drill-in's pass discovery cannot drift from the paths a Dispatch writes.
@@ -310,6 +316,17 @@ func (d *Dispatch) ensureRecordID() {
 	}
 	d.claimTime = d.clock.Now()
 	d.recordID = dispatchrecord.RecordID(d.cfg.kindName(), d.number, d.claimTime)
+}
+
+// RecordID returns the Dispatch's Record ID, "" until Run, Fix, or
+// ResolveConflict mints it.
+func (d *Dispatch) RecordID() string {
+	return d.recordID
+}
+
+// LogPath returns the Dispatch's primary Pass log.
+func (d *Dispatch) LogPath() string {
+	return d.logPath()
 }
 
 // dispatchStart builds the stamp heading a fresh Pass log: the launcher's

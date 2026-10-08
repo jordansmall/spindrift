@@ -724,7 +724,7 @@ func (p *pool) noteNotDue(slot int, rec Record) {
 // it would lose the one event that answers "what happened to #123".
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
 	p.mutate(func(*state) []Event {
-		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, RecordID: rec.RecordID, Slot: intPtr(slot)}}
 	})
 }
 

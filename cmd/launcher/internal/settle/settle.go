@@ -61,6 +61,11 @@ type Config struct {
 	// read happens only when the Code Forge implements forge.BundleRelay.
 	OutboxDir func(num string) string
 
+	// LogPath resolves an issue number to its Dispatch's primary Pass log,
+	// which flushSettled appends the dispatch_settled op to. Nil disables the
+	// append.
+	LogPath func(num string) string
+
 	// CodeForgeForIssue resolves num's own CodeForge for the parent-sensitive
 	// landing calls (ADR 0033, issue #1734): under CODE_FORGE=local each issue
 	// may key its Integration branch off a different parent, so RelayBundle,

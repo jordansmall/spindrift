@@ -29,6 +29,12 @@ type Fake struct {
 
 	FixResult Disposition
 
+	// RecordIDResult answers RecordID.
+	RecordIDResult string
+
+	// LogPathResult answers LogPath.
+	LogPathResult string
+
 	// FixResults is indexed like RunResults.
 	FixResults []Disposition
 
@@ -120,4 +126,18 @@ func (f *Fake) Close() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.CloseCalls++
+}
+
+// LogPath returns LogPathResult.
+func (f *Fake) LogPath() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.LogPathResult
+}
+
+// RecordID returns RecordIDResult.
+func (f *Fake) RecordID() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.RecordIDResult
 }

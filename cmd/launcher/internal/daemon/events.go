@@ -47,8 +47,8 @@ type Event struct {
 	// PassLog is the box event's own field: the Pass log that phase writes,
 	// relative to the checkout, carried unchanged from the child's record.
 	PassLog string `json:"pass_log,omitempty"`
-	// RecordID is the box event's Dispatch Record ID, carried unchanged from the
-	// child's record.
+	// RecordID is the box and settled events' Dispatch Record ID, carried
+	// unchanged from the child's record.
 	RecordID string `json:"record_id,omitempty"`
 	// Model and ModelRole are the model event's own fields: the exact model
 	// id and optional role, carried unchanged from the child's report.Record.

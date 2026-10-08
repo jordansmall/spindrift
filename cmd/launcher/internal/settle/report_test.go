@@ -1,12 +1,17 @@
 package settle
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
@@ -22,7 +27,7 @@ func TestSettle_TransitionState_Terminal_LatchesWithoutEmittingUntilFlush(t *tes
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "")
+	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
 
 	if recs := readRecords(); len(recs) != 0 {
 		t.Fatalf("records: got %+v, want none before flushSettled pops the latch", recs)
@@ -39,10 +44,10 @@ func TestSettle_FlushSettled_EmitsLatchedRecordOnce(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "some reason")
-	s.flushSettled("9")
+	s.transitionState("9", forge.InProgress, forge.Failed, "some reason", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 	// A second flush must not re-emit: the pop already drained the latch.
-	s.flushSettled("9")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 {
@@ -63,9 +68,9 @@ func TestSettle_TransitionState_SecondTerminalCallOverwritesLatch(t *testing.T) 
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Complete, "")
-	s.transitionState("9", forge.InProgress, forge.Failed, "demoted")
-	s.flushSettled("9")
+	s.transitionState("9", forge.InProgress, forge.Complete, "", "failed")
+	s.transitionState("9", forge.InProgress, forge.Failed, "demoted", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 {
@@ -86,8 +91,8 @@ func TestSettle_TransitionState_NonTerminal_EmitsNoRecord(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9"})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.Untriaged, forge.Dispatchable, "")
-	s.flushSettled("9")
+	s.transitionState("9", forge.Untriaged, forge.Dispatchable, "", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	if recs := readRecords(); len(recs) != 0 {
 		t.Fatalf("records: got %+v, want none", recs)
@@ -105,8 +110,8 @@ func TestSettle_TransitionState_Terminal_EmitsRecordEvenOnTrackerError(t *testin
 	fc.TransitionStateErr = fmt.Errorf("boom")
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "")
-	s.flushSettled("9")
+	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].State != "failed" {
@@ -229,8 +234,8 @@ func TestSettle_FlushSettled_CarriesLatchedPR(t *testing.T) {
 
 	s.latchPR("9", testPR)
 	// The transition after the latch must not drop the PR.
-	s.transitionState("9", forge.InProgress, forge.Failed, "red")
-	s.flushSettled("9")
+	s.transitionState("9", forge.InProgress, forge.Failed, "red", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].PRURL != testPR || recs[0].State != "failed" {
@@ -246,8 +251,8 @@ func TestSettle_FlushSettled_NoPRWhenNoneLatched(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	s := New(Config{}, fc, fc)
 
-	s.transitionState("9", forge.InProgress, forge.Failed, "")
-	s.flushSettled("9")
+	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].PRURL != "" {
@@ -265,9 +270,9 @@ func TestSettle_FlushSettled_UnsettledLatchedPRDoesNotLeak(t *testing.T) {
 	s := New(Config{}, fc, fc)
 
 	s.latchPR("9", testPR)
-	s.flushSettled("9")
-	s.transitionState("9", forge.InProgress, forge.Failed, "")
-	s.flushSettled("9")
+	s.flushSettled(&dispatch.Fake{}, "9")
+	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
 
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].PRURL != "" {
@@ -494,5 +499,72 @@ func TestSettleAdopted_SettledRecordCarriesPR(t *testing.T) {
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].Event != report.EventSettled || recs[0].PRURL != testPR {
 		t.Fatalf("records = %+v, want one settled record with PRURL=%s", recs, testPR)
+	}
+}
+
+// flushSettled appends exactly one dispatch_settled op to the Dispatch's
+// primary Pass log and stamps the same Record ID on the settled record.
+func TestSettle_FlushSettled_AppendsDispatchSettledToPrimaryLog(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	logPath := filepath.Join(t.TempDir(), "issue-9.log")
+	if err := os.WriteFile(logPath, []byte("existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
+	s := New(Config{LogPath: func(num string) string { return logPath }}, fc, fc)
+	d := &dispatch.Fake{RecordIDResult: "work:9@t"}
+
+	s.latchPR("9", testPR)
+	s.transitionState("9", forge.InProgress, forge.Failed, "red", "ci-red")
+	s.flushSettled(d, "9")
+	s.flushSettled(d, "9")
+
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) != 2 || lines[0] != "existing" {
+		t.Fatalf("log = %q, want the prior line plus exactly one appended op", raw)
+	}
+	var ev claude.Event
+	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil || ev.SpindriftOp == nil {
+		t.Fatalf("appended line %q is not a spindrift_op: %v", lines[1], err)
+	}
+	want := claude.DispatchSettled{RecordID: "work:9@t", State: "failed", Reason: "ci-red", Note: "red", PRURL: testPR}
+	if ev.SpindriftOp.Op != claude.OpDispatchSettled || ev.SpindriftOp.Settled == nil || *ev.SpindriftOp.Settled != want {
+		t.Errorf("op = %+v, want dispatch_settled %+v", ev.SpindriftOp, want)
+	}
+	recs := readRecords()
+	if len(recs) != 1 || recs[0].RecordID != "work:9@t" {
+		t.Errorf("records = %+v, want one settled record with record_id", recs)
+	}
+}
+
+// A Dispatch that never minted a Record, or a log that does not exist, has
+// nothing to settle: no op is appended and no log is created.
+func TestSettle_FlushSettled_SkipsAppendWithoutRecordOrLog(t *testing.T) {
+	testutil.InstallPipeReporter(t)
+	logPath := filepath.Join(t.TempDir(), "issue-9.log")
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
+	s := New(Config{LogPath: func(num string) string { return logPath }}, fc, fc)
+
+	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.flushSettled(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9")
+	if _, err := os.Stat(logPath); !os.IsNotExist(err) {
+		t.Errorf("missing log was created (stat err = %v)", err)
+	}
+
+	if err := os.WriteFile(logPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.transitionState("9", forge.InProgress, forge.Failed, "", "failed")
+	s.flushSettled(&dispatch.Fake{}, "9")
+	if b, _ := os.ReadFile(logPath); len(b) != 0 {
+		t.Errorf("log = %q, want untouched without a Record ID", b)
 	}
 }

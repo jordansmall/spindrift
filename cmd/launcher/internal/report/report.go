@@ -44,7 +44,7 @@ type Record struct {
 	// to the checkout. Empty on every other event, and on a recover box, which
 	// runs no Box.
 	PassLog string
-	// RecordID is a box record's Dispatch Record ID, minted once at claim and
+	// RecordID is a box or settled record's Dispatch Record ID, minted once at claim and
 	// shared by every Pass log of the Dispatch. Empty on every other event, and
 	// on a recover box, which runs no Box.
 	RecordID string
@@ -233,9 +233,10 @@ func (r *Reporter) Box(key dispatchkey.Key, phase, passLog, recordID string) {
 
 // Settled records key's terminal state, once, using the host-decided
 // vocabulary from the existing outcome/settle machinery. prURL is the PR the
-// Dispatch opened or adopted, "" when none.
-func (r *Reporter) Settled(key dispatchkey.Key, state, note, prURL string) {
-	r.emit(Record{Event: EventSettled, Key: key, State: state, Note: note, PRURL: prURL})
+// Dispatch opened or adopted, "" when none; recordID is the Dispatch Record the
+// state settles, "" when none was minted.
+func (r *Reporter) Settled(key dispatchkey.Key, state, note, prURL, recordID string) {
+	r.emit(Record{Event: EventSettled, Key: key, State: state, Note: note, PRURL: prURL, RecordID: recordID})
 }
 
 // NotDue records that key's Chore is not due, and when it will be. A zero
