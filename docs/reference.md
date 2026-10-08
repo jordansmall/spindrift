@@ -5586,8 +5586,12 @@ beside the substitution variables: `ISSUE_NUMBER`, `ISSUE_TITLE`,
 the Chore's sweep scope and budget (`CHORE_HEAD`, `CHORE_DIFF_RANGE`,
 `CHORE_SLICE`, `CHORE_CLASSES`, `CHORE_PATCH_CLASSES`, `CHORE_MAX_FINDINGS`).
 A new variable carrying a Dispatch fact must be added there, or its value
-splits cohorts per issue. The Chore's identity (`CHORE_NAME`, its prompt,
-`CHORE_CLASS_LIST`) is setup and stays in the hash. Masking replaces values
+splits cohorts per issue; every other substitution variable is declared setup
+in `setupVars` beside it. A test fails on any substitution variable in neither
+list or in both, and on a listed name that is no longer one; a registry row's
+rendered fragment variable is in neither list on purpose. The Chore's
+identity (`CHORE_NAME`, its prompt, `CHORE_CLASS_LIST`) is setup and stays in
+the hash. Masking replaces values
 only; gates still see the real values, so a presence-gated section (for
 example the CI failure section, or the patch section on a non-empty
 `CHORE_PATCH_CLASSES`) still counts toward the hash. Two known cohort splits
