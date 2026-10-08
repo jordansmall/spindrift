@@ -5757,16 +5757,20 @@ log is gone: a re-run rebuilds only from the logs still on disk.
 
 **Ingest at settle.** The host keeps the store current without a `stats`
 run. Right after appending `dispatch_settled` to a Dispatch's primary Pass
-log, it runs the same incremental ingest over that checkout's
-`.spindrift/logs`, so the settled Record, its fix and conflict-resolve passes
-included, is in the store as soon as the Dispatch settles. This holds for
+log, it runs the same incremental ingest over that Dispatch's own logs in that
+checkout's `.spindrift/logs` (the primary log, its rotated prior attempts, and
+its fix and conflict-resolve logs), so the settled Record, its fix and
+conflict-resolve passes included, is in the store as soon as the Dispatch
+settles. Other Dispatches' logs, such as those of in-flight Daemon slots in
+the same checkout, are left alone rather than re-parsed. This holds for
 every Dispatch kind, under the Daemon and a manual `spindrift dispatch`
 alike. Several Daemon slots settling at once each ingest through their own
 connection; WAL journaling and immediate write transactions make them wait on
 each other rather than fail, so every Record lands. The ingest is
-best-effort: a failure (an unwritable store, say) prints a `could not ingest`
-warning on stderr and the Dispatch settles, reports, and exits exactly as it
-would have. The next settle or `stats` run picks up whatever it missed. A
+best-effort: a failure (an unwritable store, or one of the Dispatch's logs
+being unreadable, say) prints a `could not ingest` warning on stderr and the
+Dispatch settles, reports, and exits exactly as it would have. A later settle
+of the same Dispatch key or any `stats` run picks up whatever it missed. A
 settle that appends no `dispatch_settled` op ingests nothing.
 
 **Pruning logs.** Ingest before you delete. A Record keeps only what was
@@ -5819,6 +5823,12 @@ Upgrading a store built by an older `stats` re-parses the logs still on disk
 under the current rules. A Record whose log was already deleted keeps the kind
 it was ingested with (for example `unknown`), with no fix or conflict-resolve
 cost folded in.
+
+A log ingest cannot read (a permissions or I/O error) is skipped with a
+`warning: skipping unreadable log` line on stderr naming it. `stats` still
+reports every other Record and exits 0. The skipped log is not recorded as
+ingested, so the next run tries it again. A store failure, unlike an
+unreadable log, still aborts with exit 1.
 
 **Filters and roots.** `--root <dir>` is repeatable and names a checkout whose
 `.spindrift` store to read; it defaults to the current directory. Each root
