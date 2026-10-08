@@ -22,7 +22,7 @@ type GhConfig struct {
 	// from them.
 	Issues []GhIssue `json:"issues"`
 	// PRs are the forge's pull requests; `pr list`, `pr view` and the GraphQL
-	// check/mergeable probes answer from them.
+	// check, failure-detail and mergeable probes answer from them.
 	PRs []GhPR `json:"prs"`
 	// Replies are tried in order before the typed state; the first whose Args
 	// match answers. An invocation nothing answers succeeds silently, like
@@ -53,7 +53,8 @@ type GhComment struct {
 // GhPR is one pull request. State defaults to OPEN and flips to MERGED once
 // a `pr merge` of its URL (not --auto) is recorded. Checks is the head
 // commit's statusCheckRollup state (SUCCESS, FAILURE, PENDING, or empty for
-// none); Mergeable is the GraphQL mergeable value.
+// none); Mergeable is the GraphQL mergeable value. Contexts is the raw JSON
+// array of check nodes the failure-detail query returns (empty means none).
 type GhPR struct {
 	Number      int    `json:"number"`
 	URL         string `json:"url"`
@@ -63,6 +64,7 @@ type GhPR struct {
 	State       string `json:"state"`
 	Checks      string `json:"checks"`
 	Mergeable   string `json:"mergeable"`
+	Contexts    string `json:"contexts"`
 }
 
 // GhReply scripts the answer to the invocations it matches.
@@ -349,7 +351,7 @@ func (c GhConfig) prView(args []string, prior [][]string) (string, error) {
 	return marshalLine(obj)
 }
 
-// graphql answers the three GraphQL probes the launcher makes, telling them
+// graphql answers the four GraphQL probes the launcher makes, telling them
 // apart by the query text; gh applies each call's --jq, so the fake emits the
 // extracted value.
 func (c GhConfig) graphql(args []string, prior [][]string) (string, error) {
@@ -367,6 +369,12 @@ func (c GhConfig) graphql(args []string, prior [][]string) (string, error) {
 		return "", err
 	}
 	switch {
+	// The failure-detail query also names statusCheckRollup, so it must match first.
+	case strings.Contains(query, "contexts("):
+		if p.Contexts == "" {
+			return "[]\n", nil
+		}
+		return p.Contexts + "\n", nil
 	case strings.Contains(query, "statusCheckRollup"):
 		return p.Checks + "\n", nil
 	case strings.Contains(query, "mergeable"):
