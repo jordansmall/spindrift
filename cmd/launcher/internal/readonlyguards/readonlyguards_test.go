@@ -143,8 +143,9 @@ func TestInstall_CommandShimPassesThroughUnguardedSubcommand(t *testing.T) {
 }
 
 // The "gh-api-mutation" kind must reject a mutating method in any case and in
-// either flag spelling, so the cases cover -X and --method, joined and
-// separated, upper, lower and mixed case.
+// either flag spelling, so the cases cover -X and --method, joined, attached
+// and separated, upper, lower and mixed case, plus the implicit POST gh sends
+// when a field or input flag is given with no explicit method.
 func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 	realTrue := requireExecutable(t, "true")
 
@@ -179,6 +180,14 @@ func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 		{"api", "--method=PATCH", "repos/foo/bar/issues/1"},
 		{"api", "--method", "put", "repos/foo/bar/issues/1"},
 		{"api", "-X", "DeLeTe", "repos/foo/bar/issues/1"},
+		{"api", "repos/foo/bar/issues", "-f", "title=x"},
+		{"api", "repos/foo/bar/issues", "-ftitle=x"},
+		{"api", "repos/foo/bar/issues", "-F", "n=1"},
+		{"api", "repos/foo/bar/issues", "--raw-field=k=v"},
+		{"api", "repos/foo/bar/issues", "--input", "f.json"},
+		{"api", "-XPOST", "repos/foo/bar/issues/1/comments"},
+		{"api", "-Xdelete", "repos/foo/bar/issues/1"},
+		{"api", "-X=PATCH", "repos/foo/bar/issues/1"},
 	}
 	for _, args := range rejectCases {
 		got, code := runShim(t, shimDir, "gh", args...)
@@ -194,6 +203,9 @@ func TestInstall_GhAPIMutationRejectsMutatingMethod(t *testing.T) {
 		{"api", "repos/foo/bar/issues/1"},
 		{"api", "-X", "GET", "repos/foo/bar/issues/1"},
 		{"api", "--method=get", "repos/foo/bar/issues/1"},
+		{"api", "-X", "GET", "search/issues", "-f", "q=x"},
+		{"api", "--method=GET", "repos/foo/bar/issues", "-F", "per_page=100"},
+		{"api", "graphql", "-f", "query={ viewer { login } }"},
 	}
 	for _, args := range allowCases {
 		got, code := runShim(t, shimDir, "gh", args...)
@@ -812,6 +824,7 @@ func TestInstall_FullRegistryRejectionNamesTheRelay(t *testing.T) {
 		{"gh", []string{"api", "-X", "POST", "repos/o/r/issues/1/comments"}, []string{"gh api"}},
 		{"gh", []string{"api", "-X", "post", "repos/o/r/issues/1/comments"}, []string{"gh api"}},
 		{"gh", []string{"api", "--method", "PATCH", "repos/o/r/issues/1"}, []string{"gh api"}},
+		{"gh", []string{"api", "repos/o/r/issues", "-f", "title=x"}, []string{"gh api"}},
 		{"fj", []string{"pr", "create", "--title", "x", "--body", "y"}, []string{"fj pr create"}},
 		{"fj", []string{"pr", "ready", "1"}, []string{"fj pr ready"}},
 		{"fj", []string{"pr", "merge", "1"}, []string{"fj pr merge"}},
