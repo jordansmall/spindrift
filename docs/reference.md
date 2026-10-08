@@ -5227,6 +5227,24 @@ budget still has room left (never while the patch rung is off or the
 day's patches are spent). The butler prompt's patch instructions (issue
 #4073) render only when `CHORE_PATCH_CLASSES` is non-empty, so a run with
 no patch room carries no patch prose at all.
+Each built-in Chore also carries a closed **class list** in
+`lib/chore-catalog.nix` (issue #4766; that file is the source of the lists),
+and the Box classifies each finding into
+exactly one of them rather than inventing a slug. The host hands the list
+over read-only as `CHORE_CLASS_LIST`: the catalog's list plus any extra
+classes you configured for that Chore in `BUTLER_CHORE_CLASSES`, so a
+promotion class you add can still be chosen. Unlike `CHORE_CLASSES`, it is
+sent whether or not promotion has budget left, and `CHORE_CLASSES` keeps
+meaning only the promotion subset the prompt shows as candidates. A
+Consumer-declared Chore has no catalog entry, gets no `CHORE_CLASS_LIST`,
+and keeps free-form slug classes. While `CHORE_CLASS_LIST` is set,
+`driver-exec signal issue-intent -class` on the socket carrier rejects a
+missing or off-list class, naming the valid ones, so the Box picks again; the
+log carrier has no such check. The check is Box-side help only —
+`BUTLER_CHORE_CLASSES` stays the sole trust gate, and the host never
+checks or coerces a finding's class against the list. The catalog's default
+promotion and patch classes must sit on the Chore's list, or flake
+evaluation fails.
 Every class, configured or Box-reported, shares one grammar (issue #3986):
 a lowercase slug of letters, digits, and `-`, not starting with `-`, at most
 40 characters; a configured class that isn't one fails `spindrift butler`
