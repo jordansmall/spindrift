@@ -506,3 +506,24 @@ func TestCommitSubjects_IgnoresGitStderrNoise(t *testing.T) {
 		t.Errorf("CommitSubjects = %v, want %v (git log stderr noise must not leak into parsed subjects)", got, want)
 	}
 }
+
+func TestCloneScratch_GitInDisablesAutoMaintenance(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	_, gitIn, cleanup, err := cloneScratch("test", "relay bundle", func(dir string) error {
+		return exec.Command("git", "init", dir).Run()
+	})
+	if err != nil {
+		t.Fatalf("cloneScratch: %v", err)
+	}
+	defer cleanup()
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		out, err := gitIn("config", "--get", key).Output()
+		if err != nil {
+			t.Fatalf("git config --get %s: %v", key, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
