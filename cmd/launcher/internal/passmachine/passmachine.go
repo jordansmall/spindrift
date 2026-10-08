@@ -37,6 +37,10 @@ const (
 	KindDeltaReview
 )
 
+// Kinds lists every PassKind, in declaration order; TestKindsListsEveryPassKind
+// fails if it drifts from the const block.
+var Kinds = []PassKind{KindLegacy, KindImplement, KindFix, KindLand, KindReview, KindDeltaReview}
+
 // Role is the string form of a pass's role, as sent in the pass_start op's
 // Role field.
 type Role string

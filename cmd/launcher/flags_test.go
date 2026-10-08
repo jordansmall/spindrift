@@ -617,17 +617,17 @@ func TestParseFlags_ContinuousDispatchBareAlias(t *testing.T) {
 // a hand-picked width once did (issue #1575 review).
 func TestPrintSubcommands_ExactOutput(t *testing.T) {
 	want := "Subcommands:\n" +
-		"  console                                                                                                    browse the open backlog interactively (read-only)\n" +
-		"  dispatch [--no-build] [--yes] [--continuous] [issue...]                                                    dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
-		"  research [--no-build] [--yes] [--continuous] [--self-contained] [issue...]                                 advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
-		"  butler [--chore <name>] [--no-build]                                                                       one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)\n" +
-		"  preview [issue...]                                                                                         dry-run: show what dispatch would pick up, in order\n" +
-		"  build                                                                                                      realize the agent image without running any agent\n" +
-		"  recover [issue]                                                                                            run the merge gate for one issue; with none, recover one eligible agent-failed issue\n" +
-		"  doctor [--verbose|-v] [--butler] [--research]                                                              check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
-		"  reconcile                                                                                                  local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n" +
-		"  stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false]  summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line\n" +
-		"  registry discover <repo-dir> <routes-file> [--force]                                                       discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
+		"  console                                                                                                                       browse the open backlog interactively (read-only)\n" +
+		"  dispatch [--no-build] [--yes] [--continuous] [issue...]                                                                       dispatch agents in waves; an issue list dispatches exactly those (bypasses label/barrier gates)\n" +
+		"  research [--no-build] [--yes] [--continuous] [--self-contained] [issue...]                                                    advise-only research dispatch: drains agent-research (or an issue list) and posts a verdict comment; never merges, never promotes\n" +
+		"  butler [--chore <name>] [--no-build]                                                                                          one-shot butler sweep of the first due opted-in Chore (BUTLER_CHORES order), or only the one named by --chore, else no work: claims its Ledger, runs one read-only Box, and files findings; promotes a finding or opens a patch PR for it only through opt-in host-side gates (both off by default)\n" +
+		"  preview [issue...]                                                                                                            dry-run: show what dispatch would pick up, in order\n" +
+		"  build                                                                                                                         realize the agent image without running any agent\n" +
+		"  recover [issue]                                                                                                               run the merge gate for one issue; with none, recover one eligible agent-failed issue\n" +
+		"  doctor [--verbose|-v] [--butler] [--research]                                                                                 check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
+		"  reconcile                                                                                                                     local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n" +
+		"  stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]  summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line\n" +
+		"  registry discover <repo-dir> <routes-file> [--force]                                                                          discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
 
 	var buf bytes.Buffer
 	printSubcommands(&buf)

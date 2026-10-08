@@ -27,7 +27,11 @@ var statsRolePipeline = []passmachine.Role{
 	passmachine.RoleLand, passmachine.RoleDeltaReview,
 }
 
-const statsNoRole = "(none)"
+const statsNone = "(none)"
+
+// statsEmpty groups a stamped Record whose knob value is genuinely empty,
+// apart from a Record with no snapshot of that knob (statsNone).
+const statsEmpty = "(empty)"
 
 type statsRoleRow struct {
 	role       string
@@ -57,6 +61,7 @@ type statsOptions struct {
 	since           time.Time
 	kind            string
 	includeInferred bool
+	by              statsBy
 }
 
 // parseStatsSince reads --since as RFC 3339 or a bare UTC date.
@@ -103,7 +108,7 @@ func parseStatsArgs(args []string) (statsOptions, error) {
 				}
 				opts.includeInferred = b
 			}
-		case "--root", "--since", "--kind":
+		case "--root", "--since", "--kind", "--by":
 			if !hasValue {
 				if i+1 >= len(args) {
 					return opts, fmt.Errorf("flag %s requires a value", name)
@@ -122,6 +127,12 @@ func parseStatsArgs(args []string) (statsOptions, error) {
 					return opts, fmt.Errorf("invalid --kind %q: want one of %s", value, strings.Join(statsKinds(), ", "))
 				}
 				opts.kind = value
+			case "--by":
+				by, err := parseStatsBy(value)
+				if err != nil {
+					return opts, err
+				}
+				opts.by = by
 			case "--since":
 				t, err := parseStatsSince(value)
 				if err != nil {
@@ -221,21 +232,48 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 	slices.SortStableFunc(records, func(a, b dispatchrecord.Record) int {
 		return cmp.Or(a.ClaimTime.Compare(b.ClaimTime), strings.Compare(a.Root, b.Root), strings.Compare(a.ID, b.ID))
 	})
+	var groups []statsGroup
+	if opts.by.dim != "" {
+		groups = groupStats(records, opts.by)
+	}
 	if opts.asJSON {
-		enc := json.NewEncoder(stdout)
-		for _, r := range records {
-			if err := enc.Encode(r); err != nil {
-				fmt.Fprintf(stderr, "%s\n", err)
-				return 1
-			}
+		if err := encodeStatsJSON(json.NewEncoder(stdout), records, groups, opts.by); err != nil {
+			fmt.Fprintf(stderr, "%s\n", err)
+			return 1
 		}
 		return 0
 	}
-	if err := renderStats(stdout, records); err != nil {
+	if opts.by.dim == "" || opts.by.dim == statsByRole {
+		err = renderStats(stdout, records)
+	} else {
+		err = renderStatsGroups(stdout, groups, opts.by)
+	}
+	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
 	return 0
+}
+
+// encodeStatsJSON writes one line per Record, tagged with its group when --by
+// is set.
+func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups []statsGroup, by statsBy) error {
+	if by.dim == "" {
+		for _, r := range records {
+			if err := enc.Encode(r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for _, g := range groups {
+		for _, r := range g.records {
+			if err := enc.Encode(statsGroupedRecord{Group: g.key, Record: r}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func statsRoleRank(role string) int {
@@ -251,7 +289,7 @@ func aggregateStatsRoles(records []dispatchrecord.Record) (rows []statsRoleRow, 
 		for _, p := range r.Passes {
 			role := p.Role
 			if role == "" {
-				role = statsNoRole
+				role = statsNone
 			}
 			row := byRole[role]
 			if row == nil {

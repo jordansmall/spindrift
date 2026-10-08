@@ -64,7 +64,7 @@
   }
   {
     name = "stats";
-    usage = "[--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false]";
+    usage = "[--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]";
     doc = "summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line";
   }
   {

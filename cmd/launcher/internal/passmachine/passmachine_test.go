@@ -621,7 +621,6 @@ func TestTransition(t *testing.T) {
 // a replay can only fail when TestTransition already fails; the sweep also
 // catches a new fallthrough case that nobody has added a table entry for yet.
 func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
-	passKinds := []PassKind{KindLegacy, KindImplement, KindFix, KindLand, KindReview, KindDeltaReview}
 	verdicts := []Verdict{VerdictNone, VerdictBlock, VerdictApprove}
 	hasOutcomes := []bool{true, false}
 	landPhases := []LandPhase{LandPhaseActive, LandPhaseTerminalCommitted}
@@ -651,7 +650,7 @@ func TestTransitionNeverReturnsEmptyReason(t *testing.T) {
 	}
 
 	count := 0
-	for _, pk := range passKinds {
+	for _, pk := range Kinds {
 		for _, v := range verdicts {
 			for _, ho := range hasOutcomes {
 				for _, lp := range landPhases {
@@ -910,5 +909,19 @@ func TestExtraPassAllowed(t *testing.T) {
 					tt.caps, tt.pass, tt.cumulativeTokens, tt.cumulativeUSD, gotOK, gotReason, tt.wantOK, tt.wantReason)
 			}
 		})
+	}
+}
+
+// TestKindsListsEveryPassKind catches a PassKind added to the const block but
+// not to Kinds: the iota values are dense, so Kinds must be 0..n-1 and the next
+// value must be one ManifestKind has never heard of.
+func TestKindsListsEveryPassKind(t *testing.T) {
+	for i, k := range Kinds {
+		if k != PassKind(i) {
+			t.Errorf("Kinds[%d] = %d, want %d", i, k, i)
+		}
+	}
+	if next := PassKind(len(Kinds)); next.ManifestKind() != "" {
+		t.Errorf("PassKind %d has ManifestKind %q but is missing from Kinds", next, next.ManifestKind())
 	}
 }
