@@ -73,7 +73,10 @@ type Pass struct {
 
 // Record is one Dispatch reconstructed from its log.
 type Record struct {
-	ID          string    `json:"record_id"`
+	ID string `json:"record_id"`
+	// Root is the checkout whose store holds the Record, filled when it is read
+	// back: a stored path would go stale if the checkout moved.
+	Root        string    `json:"root"`
 	Kind        string    `json:"kind"`
 	DispatchKey string    `json:"dispatch_key"`
 	ClaimTime   time.Time `json:"claim_time"`

@@ -84,6 +84,30 @@
     arg = null;
   }
   {
+    flag = "root";
+    doc = "read Records from this checkout's .spindrift store; repeat for several roots (default: the current directory)";
+    verb = "stats";
+    arg = "dir";
+  }
+  {
+    flag = "since";
+    doc = "keep only Records claimed at or after this time (RFC 3339 or YYYY-MM-DD, UTC)";
+    verb = "stats";
+    arg = "time";
+  }
+  {
+    flag = "kind";
+    doc = "keep only Records of this dispatch kind, or unknown for logs the backfill could not classify";
+    verb = "stats";
+    arg = "kind";
+  }
+  {
+    flag = "include-inferred";
+    doc = "include Records whose attribution is inferred from logs (default true; --include-inferred=false drops them)";
+    verb = "stats";
+    arg = null;
+  }
+  {
     flag = "help";
     doc = "show usage and exit";
     verb = null;

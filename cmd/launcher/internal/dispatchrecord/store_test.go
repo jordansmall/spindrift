@@ -96,6 +96,8 @@ func TestStoreIngestRoundTripsParsedRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Root is filled from the store at read time, not parsed from the log.
+	want.Root = root
 	s := openStore(t, root)
 	if n := ingest(t, s); n != 1 {
 		t.Fatalf("parsed = %d, want 1", n)
@@ -373,7 +375,7 @@ func TestStoreMigratesV1Database(t *testing.T) {
 		t.Fatalf("user_version = %d, err %v; want %d", v, err, len(migrations))
 	}
 	want := Record{
-		ID: "work:7@2026-03-01T10:00:00.000Z", Kind: "work", DispatchKey: "7", ClaimTime: claim,
+		ID: "work:7@2026-03-01T10:00:00.000Z", Root: root, Kind: "work", DispatchKey: "7", ClaimTime: claim,
 		Attribution: AttributionInferred, Outcome: OutcomeUnknown, OutcomeSource: OutcomeSourceNone,
 		Passes: []Pass{{
 			Ordinal: 1, Role: "implement", Models: []string{"opus", "haiku"}, USD: 1.5, InputTokens: 1,

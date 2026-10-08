@@ -529,6 +529,7 @@ func (s *Store) Records() ([]Record, error) {
 			rows.Close()
 			return nil, err
 		}
+		r.Root = s.root
 		r.ClaimTime = time.UnixMilli(ms).UTC()
 		r.Passes = []Pass{}
 		byID[r.ID] = len(out)
