@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
-| `spindrift stats [--json]`        | per-role Dispatch cost summary inferred from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line |
+| `spindrift stats [--json]`        | per-role Dispatch cost summary inferred from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -5530,6 +5530,81 @@ the patch's Ledger reservation still counts it against the day's budget.
 The Ledger's `LastSwept` and `Cursor` do not advance either, so the next
 sweep re-reports the same finding, and only host dedup on the filed issue's
 `spindrift-dedup` marker keeps it from landing a second patch PR.
+
+## Stats
+
+`spindrift stats [--json]` (ADR 0061) reports what past Dispatches cost, read
+entirely from the Pass logs already on disk. It runs against the current
+directory, which must be the checkout the Dispatches ran from, and it never
+contacts the tracker, the forge, or a container.
+
+**What it ingests.** Each `.spindrift/logs/issue-<key>.log`, and each of its
+`issue-<key>.log.prior-run.N` quarantines (a later Dispatch of the same key
+moves the earlier log aside, so these are earlier runs, not copies). Every
+such file becomes one Record. Fix-pass (`issue-<key>-fix-N.log`) and
+conflict-resolve (`issue-<key>-conflict-resolve.log`) logs are not attributed
+to their Dispatch yet and are skipped, so their spend is not counted. So are
+`issue-<key>.log.N` retry-attempt logs (an earlier attempt rotated aside
+within one Dispatch), for now. Because an attempt is only read while it is
+still `issue-<key>.log`, whether an earlier attempt within one Dispatch is
+counted depends on whether a `stats` run happened before the retry rotated it
+aside: if one did, it stays as its own Record; otherwise its spend is not
+counted.
+
+**Records.** A Record is one Dispatch reconstructed from its log: a Dispatch
+key, a claim time (the first timestamped event in the log, or the file's
+mtime when it carries none, which makes the Record provisional), and its
+passes with their role, models, USD, token counts, API calls, turns,
+durations, and, for review passes, the verdict. Its ID is
+`<kind>:<Dispatch key>@<claim time>`, the claim time in UTC to the
+millisecond (`work:42@2026-05-01T09:30:00.123Z`). Today every Record is
+`attribution: inferred` and `outcome: unknown`: the log does not say how the
+Dispatch ended. The kind is inferred from the log: a `butler-*` key is
+`butler`; otherwise a log whose first `pass_start` event names a role is
+`work`; anything else is `unknown`. An `unknown` Record is still stored and
+still counted.
+
+**The store.** Records are cached in `.spindrift/dispatch-records.db`, a
+SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
+committed. The schema version lives in `PRAGMA user_version`; migrations only
+move forward, and a binary refuses a database whose version is newer than its
+own. It uses WAL journaling, so another process can read it while `stats`
+writes. Because Records are kept in the database, they survive deleting the
+logs they came from. Deleting the database instead loses every Record whose
+log is gone: a re-run rebuilds only from the logs still on disk.
+
+**Incremental ingest.** Each run first parses only the logs that are new or
+changed. A log is skipped, unopened, when its path, size, and mtime match what
+was recorded at its last ingest. A re-parsed log replaces its Record's passes
+(an upsert by Record ID). Only a provisional Record is ever replaced by a
+different ID: when its still-present log re-parses to one (a timestamped
+event appeared, or its mtime moved while it was still provisional), the
+mtime-derived Record previously ingested from that path is dropped rather
+than kept beside it. A timestamped Record stays in place when its path is
+reused by a new Dispatch, so the new Dispatch gets its own Record. Any Record
+stays in place when its log is deleted, and the next run forgets the deleted
+path, so a later reuse starts a new Record. The one gap: a provisional log
+deleted and its path reused with no run in between reads as the same Dispatch
+growing, so its earlier Record is replaced. A log with no events yet (an empty
+file) yields no Record until it gains one. A log emptied in place keeps its
+earlier Record, and whatever it later grows into is a new Record.
+
+**Output.** The default text output is a summary line (Records, passes, and
+total notional USD) followed by a table with one row per pass role, in
+pipeline order (`implement`, `review`, `fix`, `land`, `delta-review`, then any
+other role alphabetically, and `(none)` for a pass logged without a role):
+`PASSES`, `USD`, `AVG_USD`, `AVG_MIN`, `API_CALLS`, and `BLOCK_RATE`. The block
+rate, the share of verdict-bearing passes that ended in `BLOCK`, is shown only
+for `review` and `delta-review`; other roles show `-`. USD is the
+API-equivalent list price of the tokens used, not money spent: on a
+subscription plan you are not billed per token.
+
+`--json` skips the table and prints one Record per line, ordered by claim time
+then ID, with the fields `record_id`, `kind`, `dispatch_key`, `claim_time`,
+`attribution`, `outcome`, and `passes`. Each pass carries `ordinal`, `role`,
+`models`, `usd`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
+`cache_creation_input_tokens`, `api_calls`, `turns`, `duration_ms`,
+`api_duration_ms`, and (when present) `verdict`.
 
 ## Registry route discovery
 
