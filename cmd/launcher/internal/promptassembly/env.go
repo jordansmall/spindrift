@@ -203,12 +203,8 @@ type Env struct {
 
 	// ChorePatchClasses is the Chore's patch-eligible class allow-list
 	// (issue #4072, ADR 0057), the patch-rung sibling of ChoreClasses:
-	// space-joined, empty whenever the patch rung is off or today's patch
-	// room is spent (dispatch.Chore.PatchClasses, set by internal/butler's
-	// Runner only while room.Patches > 0). Informational for the Box's
-	// prompt only -- settle will re-check a finding's class against the
-	// host's own allow-list once the patch rung applies patches (ADR 0057);
-	// on this branch settle carries Finding.Patch unexamined.
+	// dispatch.Chore.PatchClasses space-joined. That field's comment owns
+	// when it is empty and why the Box's copy is informational only.
 	ChorePatchClasses string // dispatch.go: $CHORE_PATCH_CLASSES
 
 	// ChoreMaxFindings is the run's decimal cap on relayed findings (issue
