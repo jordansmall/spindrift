@@ -5695,11 +5695,20 @@ is inferred from the log by the first rule that matches:
 2. a log whose last agent-written `SPINDRIFT_OUTCOME` line (a host
    `synthetic=true` line does not count) carries a status only research emits
    (`recommend`, `reject`, `unclear`) is `research`;
-3. a log whose first `pass_start` event names a role is `work`;
-4. a log with no `pass_start` whose outcome status is a work status (`ready`,
+3. a log whose first Box start line (`==> claude <verb> ...`) carries a
+   kind's announce verb (in practice work's `implementing` or research's
+   `researching`) is that kind, whatever its outcome status, so a research
+   run that ends `blocked` or with no outcome line is `research`;
+4. a log whose first `pass_start` event names a role is `work`;
+5. a log with no `pass_start` whose outcome status is a work status (`ready`,
    `blocked`, `ambiguous`, `already-resolved`) is a pre-orchestrator
    single-pass run, so `work`;
-5. anything else is `unknown`.
+6. anything else is `unknown`.
+
+Logs written before issue #734 announce a research run as `implementing`
+too. Rule 2 still files such a log under `research` when it carries a
+research-only status, but one that ended `blocked` or with no outcome
+line cannot be told apart from work and counts as `work`.
 
 An `unknown` Record is still stored and still counted. A Record is
 `outcome: unknown` when no log carried a `dispatch_settled` op, as an
