@@ -1060,13 +1060,17 @@ comment — only the operator gesture described above is a Terminate.
 _Avoid_: kill, cancel, abort.
 
 **Reconcile**:
-The `local`-tracker bookkeeping sweep that makes a local issue's native
-open/closed axis match Code Forge reality — the sole authority that closes a
-landed local issue (ADR 0029); settle closes an already-resolved one
-directly (issue #4017). Observational: it never lands code. Per open issue it
-closes the issue when its recorded landing PR is merged, discovers a PR by
-agent branch when no landing was recorded (a box that died before its outcome
-line), flags one whose PR was closed unmerged, and — only behind a composite
+The bookkeeping sweep that, on the `local` tracker, makes a local issue's
+native open/closed axis match Code Forge reality — the sole authority that
+closes a landed local issue (ADR 0029); settle closes an already-resolved one
+directly (issue #4017). On any PR-capable Code Forge, whatever the tracker, it
+also records late merges: a Dispatch Record settled `complete` with its PR
+left open whose PR has since merged gets a second `dispatch_settled` (reason
+`merged`), so `spindrift stats` counts the landing. Observational: it never
+lands code. Per open issue it closes the issue when its recorded landing PR
+is merged, discovers a PR by agent branch when no landing was recorded (a box
+that died before its outcome line), flags one whose PR was closed unmerged,
+and — only behind a composite
 death signal (no PR/branch, a stale Box log, and an absent container when the
 runtime is reachable) — resets an orphaned `InProgress` to `Dispatchable`,
 supplying the liveness signal #600 required before any such reset. Against a

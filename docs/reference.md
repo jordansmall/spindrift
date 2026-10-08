@@ -27,7 +27,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover <issue>`      | re-run the merge gate for one issue (adopt a stranded `agent-in-progress`, or land a parked relay) |
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
-| `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
+| `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
 | `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
@@ -4031,16 +4031,42 @@ landing: "https://github.com/owner/repo/pull/123"
   order — bypassing the label/barrier gates and dispatching exactly the
   issues named.
 
-#### `reconcile`: closing a local issue
+#### `reconcile`: late merges and closing a local issue
 
-`spindrift reconcile` is the local-tracker bookkeeping sweep (ADR 0029): the
-authority that closes a local issue once it has landed. (Settle closes an
+`spindrift reconcile` is the bookkeeping sweep. On every tracker it records
+late merges (below); on a local tracker it is also the authority that closes
+a local issue once it has landed (ADR 0029). (Settle closes an
 already-resolved local issue directly, since that outcome has nothing landed
 for reconcile to observe — issue #4017.) It is observational — it never lands
-code. On `github`/`jira` it prints a plain "nothing to do" line instead
+code. On `github`/`jira` it prints a plain "no issues to close" line instead
 of acting; `dispatch` also auto-invokes it as a final step whenever
 `ISSUE_TRACKER=local`, so the common loop (dispatch → immediate-merge → issue
 closes) needs no extra command.
+
+On every tracker, reconcile first records late merges when the Code Forge
+has PRs (`github`, `forgejo`): for each Dispatch Record claimed in the last
+14 days and settled `complete` with its PR left open (`manual`,
+`auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,
+`merge-blocked`) whose PR has merged since, it appends a second
+`dispatch_settled` with reason `merged` and the note `merged after settling
+<reason>` to the Record's primary log, then prints `reconcile: recorded N
+late merge(s): <record ids>`. The 14-day window bounds the Code Forge calls
+each sweep makes: a Record claimed more than 14 days before a sweep runs, or
+with no claim time (an older log without a claim stamp), is not checked, so a
+merge no sweep observed within 14 days of the claim stays uncounted. A PR
+closed unmerged, a Record whose primary log is gone, and a PR URL that is not an
+absolute `http(s)` URL are left as stored. A butler patch PR (ADR 0057)
+settles without a Dispatch Record, so its later merge is never recorded. A
+late-merge failure never skips the issue bookkeeping below: `spindrift
+reconcile` still runs it, then exits non-zero. A `dispatch` run that names
+no issues on the command line (one-shot, continuous, or a single
+`ISSUE_NUMBER`) records late merges as its final step too, silently unless
+it recorded one, and only warns if that fails. The daemon's children are such
+runs (each is a `dispatch` naming no issues), so every pool slot's exit runs
+the sweep and asks the Code Forge about every candidate Record in the 14-day
+window.
+`spindrift dispatch <n>...`, `recover`, and research or butler runs do not,
+so run `spindrift reconcile` after those.
 
 Per open local issue carrying a recorded `landing`, reconcile asks the Code
 Forge whether that PR merged and, if so, sets `closed: true`; an issue whose
@@ -5618,7 +5644,12 @@ prior work Dispatch's Record: a Dispatcher that never ran takes the Record ID
 from the primary log's `dispatch_start` stamp, and one whose adopted PR needed
 a fix or conflict pass continues that Record, its fix and conflict logs
 carrying the prior stamp rather than a fresh ID. The last `dispatch_settled`
-in the log wins, so a recover that lands turns a failed Record complete. A
+in the log wins, so a recover that lands turns a failed Record complete, and
+`reconcile`'s late-merge sweep turns a PR left open into `merged` once it
+merges (see [`reconcile`](#reconcile-late-merges-and-closing-a-local-issue)).
+The upgrade overwrites the Record's structured reason with `merged`; the
+original settle reason survives only in the note (`merged after settling
+<reason>`), so counting late merges by original cause means reading the note. A
 recover that adopts an orphan PR, or one from a log directory predating the
 lineage marker, has its primary log quarantined; a fix pass then mints a fresh
 Record that lives only in the fix logs. Settle never creates the missing primary log, so
@@ -5892,11 +5923,16 @@ subscription plan you are not billed per token.
 
 A landed key is a distinct (kind, Dispatch key) pair with at least one
 Record settled `complete` with reason `merged`: a PR left open (`manual`,
-`auto-merge-enqueued`, `merge-blocked`, a merge-guard hit), `already-resolved`,
-a research verdict, and filed butler findings are not landings. A PR settled
-`auto-merge-enqueued` under `MERGE_MODE=auto`, or left for a human to merge, is
-never re-settled when it later merges, so landed keys and `USD per landed key`
-undercount landings on such deployments. `USD per landed key` is the total
+`auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,
+`merge-blocked`), `already-resolved`, a research verdict, and filed butler
+findings are not landings. A PR settled `auto-merge-enqueued` under
+`MERGE_MODE=auto`, or left for a human to merge, counts once `reconcile` (run
+at the end of a `dispatch` that names no issues, or as `spindrift reconcile`)
+observes the merge, within 14 days of the claim,
+and re-settles its Record `merged`; a butler patch PR has no Record to
+re-settle. `stats` itself never asks the Code Forge, so a merge
+since the last reconcile is not yet counted, and a Record whose primary log
+is gone is never upgraded. `USD per landed key` is the total
 notional USD across all Records, failures included, divided by the landed
 keys, so it reads as the headline cost of landing an issue; it is `-` when
 nothing landed. `Outcome source` counts Records per `outcome_source`
