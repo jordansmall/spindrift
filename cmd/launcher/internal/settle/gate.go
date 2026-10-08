@@ -9,6 +9,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -19,7 +21,7 @@ import (
 // parsed "ready" outcome to the self-heal merge gate. Called immediately after
 // a Box exits so each issue settles independently of its wave siblings.
 func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
-	defer s.flushSettled(num)
+	defer s.flushSettled(d, num)
 	RecordSettleWarnings(d, num, "", result)
 	if result.ParseErr != nil {
 		// A malformed outcome line gets the same PR-adoption safety net as no
@@ -102,7 +104,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			return
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  !! %s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Failed, o.Note)
+		s.transitionState(num, forge.InProgress, forge.Failed, o.Note, ReasonBlocked)
 		// A read-only Box never pushes or opens a PR in-box (issue #1933), so a
 		// bundle it wrote to the outbox and a PR-intent line it printed would
 		// be stranded once the container exits. Applies to PR-shaped and
@@ -177,7 +179,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			if err != nil || !ok {
 				const reason = "no PR found on branch to verify merge"
 				fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
-				s.transitionState(num, forge.InProgress, forge.Failed, reason)
+				s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonFailed)
 			} else {
 				s.verifyMerged(num, pr)
 			}
@@ -200,7 +202,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			}
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Ambiguous, o.Note)
+		s.transitionState(num, forge.InProgress, forge.Ambiguous, o.Note, ReasonAmbiguous)
 		s.postUsageComment(num, d)
 	case outcome.StatusAlreadyResolved:
 		// The Box found the change already on the default branch: zero
@@ -214,7 +216,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved comment: %v\n", num, err)
 		}
 		fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
-		s.transitionState(num, forge.InProgress, forge.Complete, o.Note)
+		s.transitionState(num, forge.InProgress, forge.Complete, o.Note, ReasonAlreadyResolved)
 		s.closeResolvedIssue(num)
 		s.postUsageComment(num, d)
 	default:
@@ -284,7 +286,7 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 		// #3627) so a settled record is diagnosable on disk without the
 		// daemon's terminal.
 		note := missingNote + clsNote
-		s.transitionState(num, forge.InProgress, forge.Failed, note)
+		s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonMissing)
 		return
 	}
 	// No transitionState here, on purpose, regardless of draft-ness (issue
@@ -299,14 +301,17 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 // awaiting flushSettled (issue #3627).
 type settledLatch struct {
 	state string
-	note  string
+	// reason is the status= class of the path that latched, the vocabulary the
+	// path already prints (fix-exhausted, ci-red, merge-guard-hit, ...).
+	reason string
+	note   string
 }
 
 // transitionState is a best-effort dispatch-state transition that logs but
 // does not propagate errors. note is the most specific reason live at the
-// call site, "" where none exists — see flushSettled for why this only
-// latches rather than emits.
-func (s *Settle) transitionState(num string, from, to forge.DispatchState, note string) {
+// call site, "" where none exists; reason is that site's status= class — see
+// flushSettled for why this only latches rather than emits.
+func (s *Settle) transitionState(num string, from, to forge.DispatchState, note, reason string) {
 	// An unclaimed issue (issue #4076) never went agent-in-progress, so there
 	// is nothing to leave and no agent-failed to apply here — only a real
 	// merge (Complete, below) commits tracker state.
@@ -331,24 +336,78 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState, note 
 	if s.settledLatch == nil {
 		s.settledLatch = make(map[string]settledLatch)
 	}
-	s.settledLatch[num] = settledLatch{state: to.String(), note: note}
+	s.settledLatch[num] = settledLatch{state: to.String(), reason: reason, note: note}
 	s.settledMu.Unlock()
+}
+
+// relatchReason replaces the reason of num's already-latched terminal decision.
+// landPushOnly commits Complete before its merge runs, so a merge that then
+// fails corrects the class here. A no-op when nothing is latched.
+func (s *Settle) relatchReason(num, reason string) {
+	s.settledMu.Lock()
+	defer s.settledMu.Unlock()
+	if rec, ok := s.settledLatch[num]; ok {
+		rec.reason = reason
+		s.settledLatch[num] = rec
+	}
 }
 
 // flushSettled emits num's latched terminal decision, if any, exactly once
 // (issue #3627). Call it via defer at every entry point that can drive one
 // issue to a terminal transitionState call, so an issue that never reaches a
 // terminal state still produces no record, as before this latch existed.
-func (s *Settle) flushSettled(num string) {
+// Emitting here, not in transitionState, means a path that latches twice
+// (Complete demoted to Failed) still appends one dispatch_settled op.
+func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	s.settledMu.Lock()
 	rec, ok := s.settledLatch[num]
 	pr := s.prLatch[num]
 	delete(s.settledLatch, num)
 	delete(s.prLatch, num)
 	s.settledMu.Unlock()
-	if ok {
-		report.Settled(dispatchkey.Issue(num), rec.state, rec.note, pr)
+	if !ok {
+		return
 	}
+	// A nil Dispatcher (some callers hold none) has no Record.
+	var recordID string
+	if d != nil {
+		recordID = d.RecordID()
+	}
+	var path string
+	if s.cfg.LogPath != nil {
+		path = s.cfg.LogPath(num)
+	}
+	Settled(dispatchkey.Issue(num), path, claude.DispatchSettled{RecordID: recordID, State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr})
+}
+
+// Settled is the single terminal-record emitter for every settle path: it
+// appends ds as a dispatch_settled op to the Dispatch's primary Pass log, then
+// reports the settled record. A ds with no RecordID takes the one stamped at
+// the head of logPath, which covers a Dispatch that never Ran (recover's) and
+// so minted none of its own.
+//
+// The append is best-effort: it warns and never changes the settle outcome.
+// The log is opened without O_CREATE: a Dispatch that wrote no primary log has
+// no Record to settle, and a stub file would only fake one. With no log path or
+// no Record ID nothing is appended.
+func Settled(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
+	if ds.RecordID == "" && logPath != "" {
+		ds.RecordID = dispatchrecord.StampRecordID(logPath)
+	}
+	if logPath != "" && ds.RecordID != "" {
+		line := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &ds})
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+		if err == nil {
+			_, err = f.WriteString(line)
+			if closeErr := f.Close(); err == nil {
+				err = closeErr
+			}
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "    ?? %s: could not append %s to %s: %v\n", key, claude.OpDispatchSettled, logPath, err)
+		}
+	}
+	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
 }
 
 // latchPR records the PR num's gate is working, for flushSettled to name on

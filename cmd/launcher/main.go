@@ -917,6 +917,7 @@ func settleConfig(c config, lw *localloop.Wired, cf forge.CodeForge, caps forge.
 		MaxBudgetUSD:       c.maxBudgetUSD,
 		PreflightStaleBase: c.preflightStaleBase,
 		OutboxDir:          lw.OutboxDir,
+		LogPath:            primaryLogPath,
 		CodeForgeForIssue: func(num string) forge.CodeForge {
 			if !caps.ForgeDescriptor.HostMediatedRemote {
 				return cf
@@ -1500,7 +1501,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// the issue is not stranded agent-in-progress with no run.
 				restoreErr := it.TransitionState(iss.number, forge.InProgress, forge.Failed)
 				// Reported even if the restore failed, as transitionState does.
-				report.Settled(dispatchkey.Issue(iss.number), forge.Failed.String(), "stopped before the bundle relay", "")
+				report.Settled(dispatchkey.Issue(iss.number), forge.Failed.String(), "stopped before the bundle relay", "", "")
 				if restoreErr != nil {
 					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
 				}
@@ -1605,7 +1606,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// caller settles that failure itself. Inline rather than through
 	// settle/gate.go's latch, which exists for a path that can reach a second,
 	// contradicting terminal transition; this one reaches at most one.
-	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note, "")
+	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note, "", "")
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}
@@ -2388,4 +2389,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 func main() {
 	os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// primaryLogPath resolves num to its Dispatch's primary Pass log, reading
+// os.Getwd at call time like localloop.Wired.OutboxDir. A Getwd failure
+// degrades to "", which settle treats as no log to append to.
+func primaryLogPath(num string) string {
+	pwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "==> primary log path: os.Getwd failed: %v\n", err)
+		return ""
+	}
+	return dispatch.LogPathFor(pwd, num)
 }

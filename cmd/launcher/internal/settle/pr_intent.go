@@ -151,7 +151,7 @@ func (s *Settle) blockHandoff(num, branch string, err error) {
 func (s *Settle) parkRelayFailure(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=relay-failed  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("bundle relay failed: %v. The Box's bundle is preserved in the outbox; run `spindrift recover %s` to retry relaying and landing it.", err, num))
-	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox")
+	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox", ReasonRelayFailed)
 }
 
 // closingKeywordPattern matches GitHub's closing keywords (close, fix, resolve

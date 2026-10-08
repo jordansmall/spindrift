@@ -1052,9 +1052,12 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode immediate: unexpected error: %v", err)
+	}
+	if reason != ReasonMerged {
+		t.Errorf("reason = %q, want %q", reason, ReasonMerged)
 	}
 	if fc.Merged != testPR {
 		t.Errorf("immediate mode must call Merge; fc.Merged=%q", fc.Merged)
@@ -1068,9 +1071,12 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode manual: unexpected error: %v", err)
+	}
+	if reason != ReasonManual {
+		t.Errorf("reason = %q, want %q", reason, ReasonManual)
 	}
 	if fc.Merged != "" {
 		t.Errorf("manual mode must not call Merge; fc.Merged=%q", fc.Merged)
@@ -1084,9 +1090,12 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc)
 
-	err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("applyMergeMode auto: unexpected error: %v", err)
+	}
+	if reason != ReasonAutoMergeEnqueued {
+		t.Errorf("reason = %q, want %q", reason, ReasonAutoMergeEnqueued)
 	}
 	if fc.Merged != "" {
 		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)
@@ -1107,7 +1116,7 @@ func TestApplyMergeMode_Auto_PushOnlyForgeReturnsError(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-complete"}})
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 
-	err := s.applyMergeMode("1", 0, testPR, nil)
+	_, err := s.applyMergeMode("1", 0, testPR, nil)
 	if err == nil {
 		t.Fatal("applyMergeMode auto on a push-only forge: want error, got nil")
 	}
@@ -1123,9 +1132,12 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	fc.EnqueueAutoMergeErr = fmt.Errorf("gh pr merge --auto: permission denied")
 	s := newTestSettle(c, fc, fc)
 
-	err := s.applyMergeMode("1", 0, testPR, nil)
+	reason, err := s.applyMergeMode("1", 0, testPR, nil)
 	if err != nil {
 		t.Errorf("auto mode enqueue failure must not propagate error; got: %v", err)
+	}
+	if reason != ReasonMergeBlocked {
+		t.Errorf("reason = %q, want %q", reason, ReasonMergeBlocked)
 	}
 	if fc.Merged != "" {
 		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)

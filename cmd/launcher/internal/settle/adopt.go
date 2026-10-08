@@ -14,7 +14,7 @@ import (
 // SHA may not come from this process, so the gate waits for evidence the
 // rollup registered (issue #1652), bounded by registrationWindowPolls (#2475).
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
-	defer s.flushSettled(num)
+	defer s.flushSettled(d, num)
 	// Host-discovered, so it names the record even if the gate never gets a
 	// CheckState answer.
 	s.latchPR(num, prURL)
@@ -62,7 +62,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
 	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
-	s.transitionState(num, forge.InProgress, forge.Failed, reason)
+	s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonFailed)
 }
 
 // postUsageComment posts d's aggregate usage-statistics comment to the issue.

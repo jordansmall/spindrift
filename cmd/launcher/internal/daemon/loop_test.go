@@ -2152,7 +2152,7 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 			// neither an event nor an error — never crash the slot
 			// goroutine mid-run.
 			req.OnRecord(Record{Event: "heartbeat", Key: dispatchkey.Issue("99")})
-			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged clean", PRURL: "https://github.com/o/r/pull/7"})
+			req.OnRecord(Record{Event: reportpkg.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged clean", PRURL: "https://github.com/o/r/pull/7", RecordID: "work:42@2026-05-01T08:00:00.000Z"})
 			return nil
 		},
 	}
@@ -2188,8 +2188,8 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 		t.Errorf("box event = %+v, want issue 42 phase initial pass_log .spindrift/logs/issue-42.log record_id work:42@2026-05-01T08:00:00.000Z", box)
 	}
 	settled := events[2]
-	if settled.Key != dispatchkey.Issue("42") || settled.State != "complete" || settled.Note != "merged clean" || settled.PRURL != "https://github.com/o/r/pull/7" {
-		t.Errorf("settled event = %+v, want issue 42 state complete note %q pr_url https://github.com/o/r/pull/7", settled, "merged clean")
+	if settled.Key != dispatchkey.Issue("42") || settled.State != "complete" || settled.Note != "merged clean" || settled.PRURL != "https://github.com/o/r/pull/7" || settled.RecordID != "work:42@2026-05-01T08:00:00.000Z" {
+		t.Errorf("settled event = %+v, want issue 42 state complete note %q pr_url https://github.com/o/r/pull/7 record_id work:42@2026-05-01T08:00:00.000Z", settled, "merged clean")
 	}
 	finish := events[3]
 	if finish.Key != dispatchkey.Issue("42") {

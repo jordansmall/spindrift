@@ -209,6 +209,13 @@ type Dispatcher interface {
 	// budget gate (issue #2001) reads it before dispatching another fix pass.
 	CumulativeUsage() usage.Usage
 
+	// RecordID returns the Dispatch's Record ID, "" until one is minted.
+	RecordID() string
+
+	// LogPath returns the Dispatch's primary Pass log, the file its
+	// dispatch_settled op is appended to.
+	LogPath() string
+
 	// RecordWarnings adds a batch of scan warnings to this Dispatch's sidecar
 	// (issue #3744): the first call replaces an earlier run's file, later
 	// calls (fix passes) append; no warnings at all clears it. Best-effort:

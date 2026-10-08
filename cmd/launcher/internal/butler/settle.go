@@ -273,7 +273,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
-		report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err), "")
+		report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err), "", "")
 		// Still gate the already-open draft PRs, or they orphan (issue
 		// #4118). #4076's ordering has nothing left to protect: a lost CAS
 		// means a rival owns the Chore, and any other error leaves this
@@ -292,7 +292,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if filing.Dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, filing.Dropped)
 	}
-	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note, "")
+	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note, "", "")
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 
 	// On the success path, hand each patch to the work merge gate only after
@@ -463,6 +463,6 @@ func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string
 // lastSwept/cursor stay at the prior run's values for the next run to resume
 // from.
 func (s *settleRun) fail(num, note string) {
-	report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), note, "")
+	report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), note, "", "")
 	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
 }

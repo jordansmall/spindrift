@@ -39,7 +39,7 @@ func TestFromEnv_RoundTrip(t *testing.T) {
 	}
 
 	rep.Box(dispatchkey.Issue("3627"), "initial", ".spindrift/logs/issue-3627.log", "work:3627@2026-05-01T08:00:00.000Z")
-	rep.Settled(dispatchkey.Issue("3627"), "merged", "landed clean", "")
+	rep.Settled(dispatchkey.Issue("3627"), "merged", "landed clean", "", "")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -87,7 +87,7 @@ func TestFromEnv_ChoreRoundTrip(t *testing.T) {
 	}
 
 	rep.Box(dispatchkey.Chore("bugs"), "initial", "", "")
-	rep.Settled(dispatchkey.Chore("bugs"), "complete", "2 filed", "")
+	rep.Settled(dispatchkey.Chore("bugs"), "complete", "2 filed", "", "")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -133,7 +133,7 @@ func TestFromEnv_Unset(t *testing.T) {
 	}
 	// Nil-receiver methods must be no-ops, not panics.
 	rep.Box(dispatchkey.Issue("1"), "initial", "", "")
-	rep.Settled(dispatchkey.Issue("1"), "merged", "", "")
+	rep.Settled(dispatchkey.Issue("1"), "merged", "", "", "")
 }
 
 func TestFromEnv_RegularFileRefused(t *testing.T) {
@@ -309,7 +309,7 @@ func TestSettled_LongNoteIsClippedToFitMaxLine(t *testing.T) {
 
 	rep := &Reporter{fd: int(w.Fd())}
 	note := strings.Repeat("a", 5000)
-	rep.Settled(dispatchkey.Issue("123"), "blocked", note, "")
+	rep.Settled(dispatchkey.Issue("123"), "blocked", note, "", "")
 	w.Close()
 
 	scanner := bufio.NewScanner(r)
@@ -432,7 +432,7 @@ func TestEmit_ShortRecordUnchanged(t *testing.T) {
 	t.Cleanup(func() { w.Close() })
 
 	rep := &Reporter{fd: int(w.Fd())}
-	rep.Settled(dispatchkey.Issue("123"), "merged", "landed clean", "")
+	rep.Settled(dispatchkey.Issue("123"), "merged", "landed clean", "", "")
 	w.Close()
 
 	got, err := io.ReadAll(r)

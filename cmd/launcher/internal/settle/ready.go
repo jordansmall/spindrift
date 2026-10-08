@@ -77,31 +77,32 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			if guardErr != nil {
 				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  !! %v\n", num, pr, guardErr)
 				s.it.Comment(num, fmt.Sprintf("merge guard: could not list changed files (%v) — downgrading to manual as a precaution; review and merge by hand", guardErr))
-				return s.completeLanding(num, gen, landingManual), ""
+				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardCheckError), ""
 			}
 			if len(matched) > 0 {
 				fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
 				s.it.Comment(num, mergeGuardComment(matched))
-				return s.completeLanding(num, gen, landingManual), ""
+				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardHit), ""
 			}
-			if err := s.applyMergeMode(num, gen, pr, d); err != nil {
+			mergeReason, err := s.applyMergeMode(num, gen, pr, d)
+			if err != nil {
 				if errors.Is(err, errAbandoned) {
 					return landingAbandoned, ""
 				}
 				if errors.Is(err, errLandingNeverGreen) {
 					fmt.Printf("    #%s  landing=%s  status=landing-failed  !! %v\n", num, pr, err)
 					s.it.Comment(num, fmt.Sprintf("landing failed: %v — no green PR exists at the current head", err))
-					s.transitionState(num, forge.InProgress, forge.Failed, err.Error())
+					s.transitionState(num, forge.InProgress, forge.Failed, err.Error(), ReasonLandingFailed)
 					return landingFailed, err.Error()
 				}
 				fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, pr, err)
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
-				return s.completeLanding(num, gen, landingManual), ""
+				return s.completeLanding(num, gen, landingManual, ReasonMergeBlocked), ""
 			}
-			if s.cfg.MergeMode == "immediate" {
-				return s.completeLanding(num, gen, landingMerged), ""
+			if mergeReason == ReasonMerged {
+				return s.completeLanding(num, gen, landingMerged, mergeReason), ""
 			}
-			return s.completeLanding(num, gen, landingManual), ""
+			return s.completeLanding(num, gen, landingManual, mergeReason), ""
 		case gateTerminal:
 			// Catches a mark landing mid-poll, before the Failed commit and
 			// comment below.
@@ -110,7 +111,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 			}
 			fmt.Printf("    #%s  landing=%s  status=gate-terminal  !! %s\n", num, pr, gateReason)
 			s.it.Comment(num, fmt.Sprintf("landing failed: %s", gateReason))
-			s.transitionState(num, forge.InProgress, forge.Failed, gateReason)
+			s.transitionState(num, forge.InProgress, forge.Failed, gateReason, ReasonGateTerminal)
 			return landingFailed, gateReason
 		case gateRedRetry:
 			// Catches a mark landing mid-poll, before the fix-exhausted and
@@ -124,6 +125,12 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						num, pr, s.cfg.MaxFixAttempts)
 				}
 				reason := fmt.Sprintf("ci-red: still red after exhausting %d fix pass(es)", s.cfg.MaxFixAttempts)
+				// With no fix pass allowed none ran, so the note's own ci-red is the
+				// accurate class, not fix-exhausted.
+				exhaustedReason := ReasonCIRed
+				if s.cfg.MaxFixAttempts > 0 {
+					exhaustedReason = ReasonFixExhausted
+				}
 				if s.cfg.Unclaimed {
 					// No label records this failure (transitionState is a
 					// no-op for an unclaimed issue, issue #4076), unlike the
@@ -132,7 +139,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						fmt.Fprintf(os.Stderr, "    ?? #%s: post unclaimed-failure comment: %v\n", num, commentErr)
 					}
 				}
-				s.transitionState(num, forge.InProgress, forge.Failed, reason)
+				s.transitionState(num, forge.InProgress, forge.Failed, reason, exhaustedReason)
 				return landingFailed, reason
 			}
 			// The budget caps (issue #2001) stop a runaway token or cost run
@@ -144,7 +151,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					fmt.Printf("    #%s  landing=%s  status=budget-exhausted  !! %s\n", num, pr, reason)
 					s.it.Comment(num, fmt.Sprintf("budget exhausted (%s) — stopping self-heal before another fix pass", reason))
 					note := fmt.Sprintf("budget-exhausted: %s", reason)
-					s.transitionState(num, forge.InProgress, forge.Failed, note)
+					s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonBudgetExhausted)
 					return landingFailed, note
 				}
 			}
@@ -186,7 +193,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 					result.ReportFailureReason(num)
 					s.it.Comment(num, fmt.Sprintf("fix pass %d exited non-zero — aborting self-heal", attempt+1))
 					note := fmt.Sprintf("fix-failed: fix pass %d exited non-zero", attempt+1)
-					s.transitionState(num, forge.InProgress, forge.Failed, note)
+					s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonFixFailed)
 					return fixStop{landing: landingFailed, note: note, stop: true}
 				},
 				func(result dispatch.Result) fixStop {
@@ -227,7 +234,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 						fmt.Printf("    #%s  landing=%s  status=fix-no-op  !! fix pass %d produced no new commit — aborting self-heal\n", num, pr, attempt+1)
 						s.it.Comment(num, fmt.Sprintf("fix pass %d produced no new commit — aborting self-heal", attempt+1))
 						note := fmt.Sprintf("fix-no-op: fix pass %d produced no new commit", attempt+1)
-						s.transitionState(num, forge.InProgress, forge.Failed, note)
+						s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonFixNoOp)
 						return landingFailed, note
 					}
 				}
@@ -243,7 +250,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 // round-trip: Reclaim already moved num to Dispatchable by then, and a
 // Complete commit here would leave the issue wearing agent-complete on top,
 // which Reconcile's InProgress-only sweep never clears (issue #3523).
-func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) landingResult {
+func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, reason string) landingResult {
 	if s.terminated(num, gen) {
 		return landingAbandoned
 	}
@@ -253,7 +260,7 @@ func (s *Settle) completeLanding(num string, gen uint64, landed landingResult) l
 	if s.cfg.Unclaimed && landed != landingMerged {
 		return landed
 	}
-	s.transitionState(num, forge.InProgress, forge.Complete, "")
+	s.transitionState(num, forge.InProgress, forge.Complete, "", reason)
 	return landed
 }
 
@@ -288,17 +295,21 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 		s.parkRelayFailure(num, branch, relayErr)
 		return landingFailed
 	}
-	s.transitionState(num, forge.InProgress, forge.Complete, "")
+	// Complete commits before the merge runs, so the class starts at the worst
+	// case and is relatched to what applyMergeMode actually did.
+	s.transitionState(num, forge.InProgress, forge.Complete, "", ReasonMergeBlocked)
 	err := relayErr
+	mergeReason := ReasonMergeBlocked
 	if err == nil {
-		err = s.applyMergeMode(num, gen, branch, nil)
+		mergeReason, err = s.applyMergeMode(num, gen, branch, nil)
 	}
 	if err != nil {
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
 		return landingManual
 	}
-	if s.cfg.MergeMode == "immediate" {
+	s.relatchReason(num, mergeReason)
+	if mergeReason == ReasonMerged {
 		// CODE_FORGE=local needs the resolved Integration ref and commit sha
 		// (ADR 0029/0033), not the raw branch name recordLanding wrote from the
 		// outcome line, so overwrite it now that Merge has landed. Best-effort:
@@ -376,14 +387,18 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 // applyMergeMode performs the mode-specific action after CI reaches green.
 // agent-complete is already set, and a returned merge failure does not revert
 // it. A nil d makes a rebase conflict immediately non-retriable, since nothing
-// can dispatch a conflict resolution.
-func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Dispatcher) error {
+// can dispatch a conflict resolution. On a nil error the returned string is the
+// reason class of the landing, decided here so the mode switch is the only one.
+func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Dispatcher) (string, error) {
 	switch s.cfg.MergeMode {
 	case "immediate":
-		return s.mergeImmediate(num, gen, pr, d)
+		if err := s.mergeImmediate(num, gen, pr, d); err != nil {
+			return "", err
+		}
+		return ReasonMerged, nil
 	case "auto":
 		if s.pr == nil {
-			return fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
+			return "", fmt.Errorf("MERGE_MODE=auto requires a Code Forge with PR support (got a push-only forge)")
 		}
 		if err := s.pr.EnqueueAutoMerge(pr); err != nil {
 			// Audited (issues #1233, #831): execClient.EnqueueAutoMerge captures
@@ -392,18 +407,18 @@ func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Di
 			// never gh's stderr. Safe to surface verbatim in the comment below.
 			fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueue-failed  !! %v\n", num, pr, err)
 			s.it.Comment(num, fmt.Sprintf("auto-merge enqueue failed: %v — PR is green; approve and merge manually", err))
-			return nil
+			return ReasonMergeBlocked, nil
 		}
 		fmt.Printf("    #%s  landing=%s  status=auto-merge-enqueued\n", num, pr)
-		return nil
+		return ReasonAutoMergeEnqueued, nil
 	case "manual":
 		// CODE_FORGE=local requires MERGE_MODE=immediate (validated at launcher
 		// startup, issue #1725), so a forge.BundleRelay hook never reaches
 		// manual mode here.
 		fmt.Printf("    #%s  landing=%s  status=agent-complete  merge-mode=%s\n", num, pr, s.cfg.MergeMode)
-		return nil
+		return ReasonManual, nil
 	default:
-		return fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
+		return "", fmt.Errorf("unrecognised MERGE_MODE: %q", s.cfg.MergeMode)
 	}
 }
 
