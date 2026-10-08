@@ -253,6 +253,8 @@ func (s *Store) Close() error { return s.db.Close() }
 // (fix pass, conflict resolve) finds the Dispatch it started under. Rows for
 // logs no longer on disk, including every row when the whole log directory is
 // gone, are forgotten (their Records are kept), so a reused path starts fresh.
+// A log it cannot read is skipped and reported in the returned error, and
+// retried next ingest.
 func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false) }
 
 // Reingest is Ingest without the skip: it re-parses every pass log still on
@@ -291,10 +293,22 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		return 0, err
 	}
 	parsedPaths := map[string]bool{}
+	// Per-file read failures are collected so one bad log never starves the
+	// logs after it; a satellite revisited in a later round reports once.
+	var unreadable []error
+	failed := map[string]bool{}
 	visit := func(path string, satellite, reparse bool) (string, error) {
 		did, shifted, err := s.ingestFile(path, satellite, reparse)
 		if did {
 			parsedPaths[path] = true
+		}
+		var re *readError
+		if errors.As(err, &re) {
+			if !failed[path] {
+				failed[path] = true
+				unreadable = append(unreadable, re.err)
+			}
+			return "", nil
 		}
 		return shifted, err
 	}
@@ -338,8 +352,15 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		}
 		pending = next
 	}
-	return len(parsedPaths), nil
+	return len(parsedPaths), errors.Join(unreadable...)
 }
+
+// readError marks a failure to read one log, which ingest skips past; any other
+// ingestFile error is a store failure and aborts.
+type readError struct{ err error }
+
+func (e *readError) Error() string { return e.err.Error() }
+func (e *readError) Unwrap() error { return e.err }
 
 // ingestFile parses and upserts one log unless it is unchanged, and reports
 // whether it parsed it and the dispatch key whose satellite windows it shifted
@@ -350,7 +371,7 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, "", nil
 		}
-		return false, "", err
+		return false, "", &readError{err}
 	}
 	if !reparse {
 		fresh, err := s.isIngested(path, info)
@@ -366,7 +387,7 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 	case errors.Is(err, ErrEmptyLog), errors.Is(err, ErrUnstamped):
 		// Remember the file so it is not reopened until it changes.
 	default:
-		return false, "", fmt.Errorf("dispatchrecord: %s: %w", path, err)
+		return false, "", &readError{fmt.Errorf("dispatchrecord: %s: %w", path, err)}
 	}
 	shifted, err := s.upsert(path, info, recp, segment, provisional, satellite)
 	if err != nil {

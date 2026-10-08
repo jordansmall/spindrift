@@ -1617,3 +1617,60 @@ func TestStoreProvisionalPrimaryResultRekeysJoinedSatellite(t *testing.T) {
 		t.Fatalf("record = %s with %d passes, want %s with 2", got[0].ID, len(got[0].Passes), want)
 	}
 }
+
+// One unreadable log must not stop the logs sorted after it from landing, and
+// it is retried once it becomes readable. The retry covers logs never ingested:
+// a log ingested earlier, then made unreadable, then fixed keeps its row and is
+// skipped as unchanged (chmod moves only ctime).
+func TestStoreIngestSkipsUnreadableLog(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads past file modes")
+	}
+	root := t.TempDir()
+	bad := putLog(t, root, "issue-10.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-12.log", workLog("2026-03-02T10:00:00.000Z", 2)...)
+	badSat := putLog(t, root, "issue-12-fix-1.log", workLog("2026-03-02T11:00:00.000Z", 3)...)
+	putLog(t, root, "issue-14.log", workLog("2026-03-03T10:00:00.000Z", 4)...)
+	for _, p := range []string{bad, badSat} {
+		if err := os.Chmod(p, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	s := openStore(t, root)
+	// A row for a deleted log proves forgetMissing still ran.
+	if _, err := s.db.Exec(`INSERT INTO ingested_files (path, size, mtime_ns, record_id, provisional) VALUES ('/gone/issue-7.log', 10, 20, '', 0)`); err != nil {
+		t.Fatal(err)
+	}
+	n, err := s.Ingest()
+	if err == nil {
+		t.Fatal("Ingest returned nil error for unreadable logs")
+	}
+	for _, p := range []string{bad, badSat} {
+		if got := strings.Count(err.Error(), "dispatchrecord: "+p+":"); got != 1 {
+			t.Errorf("error names %s %d times, want once: %v", p, got, err)
+		}
+	}
+	if n != 2 {
+		t.Errorf("parsed = %d, want 2", n)
+	}
+	if got := records(t, s); len(got) != 2 || got[0].DispatchKey != "12" || got[1].DispatchKey != "14" {
+		t.Fatalf("records = %+v, want issues 12 and 14", got)
+	}
+	var rows int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ingested_files WHERE path = '/gone/issue-7.log' OR path IN (?, ?)`, bad, badSat).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("stale or unreadable ingested_files rows = %d, err %v; want 0", rows, err)
+	}
+
+	for _, p := range []string{bad, badSat} {
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Ingest(); err != nil {
+		t.Fatalf("Ingest after chmod back: %v", err)
+	}
+	if got := records(t, s); len(got) != 3 || got[0].DispatchKey != "10" {
+		t.Fatalf("records after retry = %+v, want issue 10 added", got)
+	}
+}
