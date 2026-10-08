@@ -1,0 +1,20 @@
+revision = rev-a
+Records: 2  Passes: 3  Notional USD: $4.50 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 2
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  2       $3.00  $1.50    1.0      0          -
+review     1       $1.50  $1.50    1.0      0          -
+
+revision = rev-b
+Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 1
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  1       $1.50  $1.50    1.0      0          -
+review     1       $1.50  $1.50    1.0      0          -
+
+revision = (none)
+Records: 2  Passes: 2  Notional USD: $1.60 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 2
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  1       $1.50  $1.50    1.0      0          -
+(none)     1       $0.10  $0.10    0.1      0          -

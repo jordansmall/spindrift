@@ -18,6 +18,7 @@ var cliFlags = []cliFlag{
 	{flag: "since", verb: "stats", arg: "time", short: "", doc: "keep only Records claimed at or after this time (RFC 3339 or YYYY-MM-DD, UTC)", intercepted: false},
 	{flag: "kind", verb: "stats", arg: "kind", short: "", doc: "keep only Records of this dispatch kind, or unknown for logs the backfill could not classify", intercepted: false},
 	{flag: "include-inferred", verb: "stats", arg: "", short: "", doc: "include Records whose attribution is inferred from logs (default true; --include-inferred=false drops them)", intercepted: false},
+	{flag: "by", verb: "stats", arg: "dimension", short: "", doc: "group the summary and --json by a dimension, merged across every --root: role, revision, model, prompt:<role>, or knob:<NAME>; the default table groups by role, and any explicit --by adds a group field to --json; Records lacking it fall in a (none) group", intercepted: false},
 	{flag: "help", verb: "", arg: "", short: "h", doc: "show usage and exit", intercepted: true},
 	{flag: "all", verb: "", arg: "", short: "", doc: "with --help, show the full reference: every subcommand, flag, and knob", intercepted: true},
 	{flag: "version", verb: "", arg: "", short: "", doc: "show version and exit", intercepted: true},

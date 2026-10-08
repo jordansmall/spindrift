@@ -57,6 +57,6 @@ pkgs.writeShellApplication {
 
     cd "$scratch/src/cmd/launcher"
     go test -count=1 -tags integration -run '^TestPromptAssemblyGoldens$' ./internal/promptassembly
-    go test -count=1 -run '^TestStats_Golden$' .
+    go test -count=1 -run '^TestStats_(Golden|By.*)$' .
   '';
 }
