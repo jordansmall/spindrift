@@ -220,7 +220,7 @@ func (d *Dispatch) Run() Disposition {
 				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
-		env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
+		env, err := d.boxEnv(0, "")
 		if err != nil {
 			return err
 		}
@@ -239,7 +239,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		d.announce(report.PhaseFixPass(pass), logPath)
-		env, err := buildBoxEnv(d.cfg, d.subject, pass, ciFailureSummary, d.nonce)
+		env, err := d.boxEnv(pass, ciFailureSummary)
 		if err != nil {
 			return err
 		}
@@ -256,12 +256,26 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 	d.ensureRecordID()
 	logPath := d.conflictLogPath()
 	d.announce(report.PhaseConflictResolve, logPath)
-	env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
+	env, err := d.boxEnv(0, "")
 	if err != nil {
 		return err
 	}
 	env["CONFLICT_RESOLVE_PR_URL"] = pr
 	return d.runOnce(logPath, env, "")
+}
+
+// boxEnv is buildBoxEnv plus the Dispatch's own facts. It forwards the Record
+// ID (issue #4786) so the Box can key the prompt_hashes op it emits to this
+// Dispatch's Record; callers run it after ensureRecordID.
+func (d *Dispatch) boxEnv(fixPass int, ciFailureSummary string) (map[string]string, error) {
+	env, err := buildBoxEnv(d.cfg, d.subject, fixPass, ciFailureSummary, d.nonce)
+	if err != nil {
+		return nil, err
+	}
+	if d.recordID != "" {
+		env["RECORD_ID"] = d.recordID
+	}
+	return env, nil
 }
 
 // announce prints the human announce line for phase and emits the matching

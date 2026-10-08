@@ -397,6 +397,9 @@ func TestFix_PopulatesBoxDriverCacheDirWithSameKeyAsRun(t *testing.T) {
 	if runDir == "" || fixDir != runDir {
 		t.Errorf("Box.DriverCacheDir: run=%q fix=%q, want equal and non-empty", runDir, fixDir)
 	}
+	if got := fr.RunCalls[1].Env["RECORD_ID"]; got == "" || got != d.recordID {
+		t.Errorf("fix Box.Env[RECORD_ID]: got %q, want the Dispatch's record ID %q", got, d.recordID)
+	}
 }
 
 // ResolveConflict's box never runs the main agent prompt, so there is no
@@ -425,5 +428,32 @@ func TestResolveConflict_DoesNotMountDriverCache(t *testing.T) {
 	}
 	if box.Env["CONFLICT_RESOLVE_PR_URL"] != "https://github.com/owner/repo/pull/1" {
 		t.Errorf("Box.Env[CONFLICT_RESOLVE_PR_URL]: got %q", box.Env["CONFLICT_RESOLVE_PR_URL"])
+	}
+	if got := box.Env["RECORD_ID"]; got == "" || got != d.recordID {
+		t.Errorf("Box.Env[RECORD_ID]: got %q, want the Dispatch's record ID %q", got, d.recordID)
+	}
+}
+
+// The Box keys its prompt_hashes op to the Dispatch's Record (issue #4786), so
+// the Record ID reaches the Box env. Run is covered here; Fix and
+// ResolveConflict are asserted in their own tests above.
+func TestRun_ForwardsRecordIDIntoBoxEnv(t *testing.T) {
+	dir := tempLogDir(t)
+
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, dir, fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.New("42", "My issue")
+	d.Run()
+
+	if len(fr.RunCalls) != 1 {
+		t.Fatalf("RunCalls: got %d, want 1", len(fr.RunCalls))
+	}
+	if got := fr.RunCalls[0].Env["RECORD_ID"]; got == "" || got != d.recordID {
+		t.Errorf("Box.Env[RECORD_ID]: got %q, want the Dispatch's record ID %q", got, d.recordID)
 	}
 }
