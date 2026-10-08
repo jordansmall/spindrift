@@ -865,6 +865,85 @@ func TestStoreReingestReplacesRecordWhoseIDChanged(t *testing.T) {
 	}
 }
 
+// restampRecordID renames every row of the lone stored Record to id, as if an
+// older parser had derived that ID from the same logs.
+func restampRecordID(t *testing.T, s *Store, id string) {
+	t.Helper()
+	for _, q := range []string{
+		"UPDATE records SET record_id = ?",
+		"UPDATE passes SET record_id = ?",
+		"UPDATE prompt_hashes SET record_id = ?",
+		"UPDATE ingested_files SET record_id = ?",
+	} {
+		if _, err := s.db.Exec(q, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func requireJoinedRecord(t *testing.T, got, want []Record) {
+	t.Helper()
+	if !reflect.DeepEqual(ids(got), ids(want)) {
+		t.Fatalf("records = %v, want only %v", ids(got), ids(want))
+	}
+	if !reflect.DeepEqual(passLogs(got[0]), passLogs(want[0])) {
+		t.Fatalf("pass logs = %v, want %v", passLogs(got[0]), passLogs(want[0]))
+	}
+	var total float64
+	for _, p := range got[0].Passes {
+		total += p.USD
+	}
+	if total != 3 {
+		t.Fatalf("total usd = %v, want 3", total)
+	}
+}
+
+// A satellite joined under a stale ID must not keep that Record alive and win
+// the claim-time tie against the primary's replacement, whether the stale ID
+// sorts below or above the new one.
+func TestStoreReingestMovesJoinedSatelliteToReplacementRecord(t *testing.T) {
+	for _, stale := range []string{"unknown:7@old", "zzz:7@old"} {
+		t.Run(stale, func(t *testing.T) {
+			root := t.TempDir()
+			putLog(t, root, "issue-7.log", workLog("2026-10-07T12:00:00Z", 1)...)
+			putLog(t, root, "issue-7-fix-1.log", workLog("2026-10-07T13:00:00Z", 2)...)
+			s := openStore(t, root)
+			ingest(t, s)
+			want := records(t, s)
+			if len(want) != 1 || len(want[0].Passes) != 2 {
+				t.Fatalf("setup records = %+v", want)
+			}
+			restampRecordID(t, s, stale)
+			if _, err := s.Reingest(); err != nil {
+				t.Fatal(err)
+			}
+			requireJoinedRecord(t, records(t, s), want)
+		})
+	}
+}
+
+// The same split without a forced re-parse: a provisional primary's ID moves
+// as its log grows while a satellite is joined to it.
+func TestStoreProvisionalIDChangeCarriesJoinedSatellite(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-7.log", workLog("2026-10-07T12:00:00Z", 1)...)
+	putLog(t, root, "issue-7-fix-1.log", workLog("2026-10-07T13:00:00Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	want := records(t, s)
+	if len(want) != 1 || len(want[0].Passes) != 2 {
+		t.Fatalf("setup records = %+v", want)
+	}
+	restampRecordID(t, s, "unknown:7@old")
+	if _, err := s.db.Exec("UPDATE ingested_files SET provisional = 1 WHERE path = ?", p); err != nil {
+		t.Fatal(err)
+	}
+	// Only the primary changed on disk; the satellite's stat is untouched.
+	appendLog(t, p, "\n")
+	ingest(t, s)
+	requireJoinedRecord(t, records(t, s), want)
+}
+
 func TestStoreMigratesV1DatabaseKeepsVerdictEvidenceColumns(t *testing.T) {
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)

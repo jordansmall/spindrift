@@ -56,7 +56,7 @@ var migrations = []string{
 	ALTER TABLE passes ADD COLUMN dispositions TEXT NOT NULL DEFAULT '';
 	-- Forces one re-parse so pre-v2 Records gain their evidence; record_id and
 	-- provisional stay, so the re-parse still replaces a provisional Record.
-	-- The sentinel makes statSame false on that re-parse, so do not ship this
+	-- The sentinel (forceReparseSize in Go) makes statSame false on that re-parse, so do not ship this
 	-- alongside a change to Record ID derivation: the stale Record would stay.
 	UPDATE ingested_files SET size = -1;`,
 	// v3: stamped Records (issue #4783). A Record can now draw passes from
@@ -122,8 +122,8 @@ var migrations = []string{
 	ALTER TABLE ingested_files ADD COLUMN log_start INTEGER NOT NULL DEFAULT 0;
 	UPDATE ingested_files SET log_start = COALESCE((SELECT claim_time FROM records
 		WHERE records.record_id = ingested_files.record_id AND records.attribution = 'inferred'), 0);
-	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1 never matches a real file,
-	-- and marks the row as migrated for upsert).
+	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1, migratedMtime in Go, never
+	-- matches a real file and marks the row as migrated for upsert).
 	UPDATE ingested_files SET mtime_ns = -1;`,
 }
 
@@ -140,6 +140,15 @@ type Store struct {
 	db   *sql.DB
 	root string
 }
+
+// migratedMtime marks an ingested_files row carried over from an older schema:
+// it never matches a real file's mtime, so the log re-parses, and upsert reads
+// it as migrated.
+const migratedMtime int64 = -1
+
+// forceReparseSize never matches a real file's size, so the row's stat check
+// fails and the log re-parses without marking the row migrated.
+const forceReparseSize int64 = -1
 
 // segmentTables are the per-segment child tables upsert clears alongside a Record.
 var segmentTables = []string{"passes", "prompt_hashes"}
@@ -475,10 +484,18 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	// Dispatch too, so an ID change means the parser changed and the old Record
 	// is stale.
 	statSame := oldSize == info.Size() && oldMtime == info.ModTime().UnixNano()
-	// A migrated row (mtime -1) is the same Dispatch only when the re-parse keeps
+	// A migrated row (migratedMtime) is the same Dispatch only when the re-parse keeps
 	// its claim time: the path fixes the key, so the ID then differs in kind alone.
-	migrated := oldMtime == -1
+	migrated := oldMtime == migratedMtime
 	if rec != nil && oldID != "" && oldID != newID && (oldProvisional || statSame || (migrated && !satellite && oldStart == logStart)) {
+		// A satellite joined to the stale Record would keep it alive and, on a
+		// claim-time tie, win the window against the replacement. A satellite
+		// replacing its own Record leaves its peers be: they have already run.
+		if !satellite {
+			if err := detachSatellites(tx, oldID, path); err != nil {
+				return err
+			}
+		}
 		var refs int
 		if err := tx.QueryRow("SELECT COUNT(*) FROM ingested_files WHERE record_id = ?", oldID).Scan(&refs); err != nil {
 			return err
@@ -616,4 +633,47 @@ func (s *Store) loadPromptHashes(recs []Record, byID map[string]int) error {
 		recs[i].PromptHashes[role] = hash
 	}
 	return rows.Err()
+}
+
+// detachSatellites unlinks the satellite logs joined to recordID other than
+// except: their segments go and their ingested_files rows lose the Record and
+// the stat match, so each re-parses later this ingest and rejoins by time
+// window. forceReparseSize breaks the match; migratedMtime would mark the row migrated.
+func detachSatellites(tx *sql.Tx, recordID, except string) error {
+	rows, err := tx.Query("SELECT path, log_start FROM ingested_files WHERE record_id = ? AND path <> ?", recordID, except)
+	if err != nil {
+		return err
+	}
+	type joined struct {
+		path  string
+		start int64
+	}
+	var sats []joined
+	for rows.Next() {
+		var j joined
+		if err := rows.Scan(&j.path, &j.start); err != nil {
+			rows.Close()
+			return err
+		}
+		if _, satellite, _ := ChainKey(filepath.Base(j.path)); satellite {
+			sats = append(sats, j)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, j := range sats {
+		for _, table := range segmentTables {
+			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", recordID, j.start); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec("UPDATE ingested_files SET record_id = '', size = ? WHERE path = ?", forceReparseSize, j.path); err != nil {
+			return err
+		}
+	}
+	return nil
 }
