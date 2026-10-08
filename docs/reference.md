@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
-| `spindrift stats [--json] [--reingest]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -5536,10 +5536,12 @@ sweep re-reports the same finding, and only host dedup on the filed issue's
 
 ## Stats
 
-`spindrift stats [--json] [--reingest]` (ADR 0061) reports what past
-Dispatches cost, read entirely from the Pass logs already on disk. It runs
-against the current directory, which must be the checkout the Dispatches ran
-from, and it never contacts the tracker, the forge, or a container.
+`spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>]
+[--kind <kind>] [--include-inferred=false]` (ADR 0061) reports what past
+Dispatches cost, read entirely from the Pass logs already on disk. It reads the
+checkout the Dispatches ran from: the current directory, unless `--root` names
+others (see Filters and roots below). It never contacts the tracker, the forge,
+or a container.
 
 **The stamp.** The host writes a `dispatch_start` `spindrift_op` as the first
 line of every Pass log a Dispatch creates: each attempt's fresh log (a retry
@@ -5649,17 +5651,27 @@ and never standing in for the outcome: a Box that said `ready` whose CI stayed
 red is `outcome: failed`, `box_status: ready`.
 
 **What it ingests.** Each Pass log under `.spindrift/logs` (a name matching
-`issue-<key>.log...`) that opens with a stamp: `issue-<key>.log`, its fix-pass,
-conflict-resolve, and rotated `issue-<key>.log.N` attempt logs, and the
-`.prior-run.N` quarantines of each (a later Dispatch of the same key moves the
-earlier log aside, so these are earlier runs, not copies). Logs of one
-Dispatch join into one Record by Record ID, so a fix pass's spend counts
-toward its Dispatch. A log without a stamp predates it and is read by
-inference: only `issue-<key>.log` and its `.prior-run.N` quarantines become a
-Record each; unstamped fix-pass, conflict-resolve, and rotated attempt logs
-are skipped, so their spend is not counted. Because an unstamped attempt is
-only read while it is still `issue-<key>.log`, whether it is counted depends
-on whether a `stats` run happened before the retry rotated it aside.
+`issue-<key>.log...`). One that opens with a stamp joins its Record by Record
+ID: `issue-<key>.log`, its fix-pass, conflict-resolve, and rotated
+`issue-<key>.log.N` attempt logs, and the `.prior-run.N` quarantines of each
+(a later Dispatch of the same key moves the earlier log aside, so these are
+earlier runs, not copies), so a fix pass's spend counts toward its Dispatch.
+A log without a stamp predates it and is read by inference: each
+`issue-<key>.log` and each of its `.prior-run.N` quarantines starts one
+Record. A research Dispatch and the work Dispatch that followed it on the same
+issue are two such files, so they become two Records. Unstamped fix-pass
+(`issue-<key>-fix-N.log`) and conflict-resolve
+(`issue-<key>-conflict-resolve.log`) logs, with their `.N` retry siblings and
+`.prior-run.N` quarantines, are folded into a Dispatch by time window: each
+joins the Record of the same key with the latest claim time at or before its
+own first timestamp, so a Dispatch's cost includes them. One with no such
+Record (its primary log was deleted) becomes a Record of its own, so the
+totals still match what was spent. Unstamped `issue-<key>.log.N`
+retry-attempt logs (an earlier attempt rotated aside within one Dispatch) are
+skipped. Because an unstamped attempt is only read while it is still
+`issue-<key>.log`, whether an earlier attempt within one Dispatch is counted
+depends on whether a `stats` run happened before the retry rotated it aside:
+if one did, it stays as its own Record; otherwise its spend is not counted.
 
 **Records.** A Record is one Dispatch: a Dispatch key, a claim time (the
 stamp's; for an inferred Record the first timestamped event in the log, or the
@@ -5676,25 +5688,41 @@ and it carries the stamp's `revision`, `driver`, `driver_version`,
 when the Dispatch's Boxes reported them. Only a `prompt_hashes` op whose
 `record_id` matches its log's stamp counts, and the Record holds the union
 across its logs (the attempt log's roles plus a fix pass's `legacy`). Any
-other Record is `attribution: inferred`,
-carries none of those, and its kind is inferred from the log: a `butler-*`
-key is `butler`; otherwise a log whose first `pass_start` event names a role
-is `work`; anything else is `unknown`. An `unknown` Record is still stored
-and still counted. A Record is `outcome: unknown` when no log carried a
-`dispatch_settled` op, as an inferred Record's never does.
+other Record is `attribution: inferred`, carries none of those, and its kind
+is inferred from the log by the first rule that matches:
+
+1. a `butler-*` key is `butler`;
+2. a log whose last agent-written `SPINDRIFT_OUTCOME` line (a host
+   `synthetic=true` line does not count) carries a status only research emits
+   (`recommend`, `reject`, `unclear`) is `research`;
+3. a log whose first `pass_start` event names a role is `work`;
+4. a log with no `pass_start` whose outcome status is a work status (`ready`,
+   `blocked`, `ambiguous`, `already-resolved`) is a pre-orchestrator
+   single-pass run, so `work`;
+5. anything else is `unknown`.
+
+An `unknown` Record is still stored and still counted. A Record is
+`outcome: unknown` when no log carried a `dispatch_settled` op, as an
+inferred Record's never does. A log that died before the agent's first turn
+(no `result` event, or only plain startup output) is still a Record, with
+zero cost, so crash frequency stays visible; only an empty file yields no
+Record until it gains output.
 
 **The store.** Records are cached in `.spindrift/dispatch-records.db`, a
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 4. Version 2 added the `verdict_text` and
-`dispositions` columns to passes. A version 1 store opens, migrates, and keeps
-its rows; the migration also marks every ingested log as changed, so the first
+own. The current schema is version 6. Version 2 added the `verdict_text` and
+`dispositions` columns to passes. An older store opens, migrates, and keeps
+its rows; the migrations also mark every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
 its Record's evidence. A Record whose log is gone keeps empty evidence.
 Version 3 keys passes per source log as well, so re-ingesting a renamed
 (quarantined) log does not double-count. Version 4 adds the `prompt_hashes`
-table, keyed per source log like passes. The store uses WAL journaling, so
+table, keyed per source log like passes. Version 5 adds the settled-outcome
+columns. Version 6 records each pass's source log name and each ingested
+log's start, so an unstamped fix or conflict-resolve log can join its
+Dispatch. The store uses WAL journaling, so
 another process can read it while `stats` writes. Because Records are kept in
 the database, they survive deleting the logs they came from. Deleting the
 database instead loses every Record whose
@@ -5723,19 +5751,46 @@ from it.
 **Incremental ingest.** Each run first parses only the logs that are new or
 changed. A log is skipped, unopened, when its path, size, and mtime match what
 was recorded at its last ingest. A re-parsed log replaces its Record's passes
-(an upsert by Record ID). A Record is replaced by a different ID in only two
-cases, both when its still-present log re-parses to one: it was provisional
+(an upsert by Record ID). A Record is replaced by a different ID in only three
+cases, all when its still-present log re-parses to one: it was provisional
 (a timestamped event appeared, or its mtime moved while it was still
-provisional), or `--reingest` found the log's size and mtime unchanged (a
-parser change). The Record previously ingested from that path is then
-dropped rather than kept beside it. A timestamped Record stays in place when its path is
-reused by a new Dispatch, so the new Dispatch gets its own Record. Any Record
+provisional), `--reingest` found the log's size and mtime unchanged (a
+parser change), or the log was ingested under an older store schema and
+re-parses to the same claim time (only its kind changed). The Record previously
+ingested from that path is then dropped rather than kept beside it. A
+timestamped Record stays in place when its path is reused by a new Dispatch, so
+the new Dispatch gets its own Record. Any Record
 stays in place when its log is deleted, and the next run forgets the deleted
 path, so a later reuse starts a new Record. The one gap: a provisional log
 deleted and its path reused with no run in between reads as the same Dispatch
-growing, so its earlier Record is replaced. A log with no events yet (an empty
-file) yields no Record until it gains one. A log emptied in place keeps its
-earlier Record, and whatever it later grows into is a new Record.
+growing, so its earlier Record is replaced. A log emptied in place keeps its
+earlier Record, and whatever it later grows into is a new Record. Each run
+reads every changed primary log before any fix or conflict-resolve log, so a
+fix log always finds the Dispatch it started under. A fix log's passes are
+keyed by the file's own start, so one renamed to `.prior-run.N` by the next
+Dispatch re-parses into the same passes rather than doubling them. A log
+from an older launcher (unstamped) that is ingested while still being
+written, and whose inferred kind later changes with the same key and claim time
+(`unknown` to `work`, or `work` to `research` once its final
+`SPINDRIFT_OUTCOME` appears), matches none of these cases: its stale Record,
+and any fix or conflict-resolve log joined to it, stays until `spindrift stats
+--reingest`. Logs the current launcher writes are stamped and unaffected.
+
+Upgrading a store built by an older `stats` re-parses the logs still on disk
+under the current rules. A Record whose log was already deleted keeps the kind
+it was ingested with (for example `unknown`), with no fix or conflict-resolve
+cost folded in.
+
+**Filters and roots.** `--root <dir>` is repeatable and names a checkout whose
+`.spindrift` store to read; it defaults to the current directory. Each root
+keeps its own store, and one query merges them: every Record carries its
+`root` (the absolute path), and the merged Records are ordered by claim time,
+then root, then ID. A root named twice, even through a symlink, is read once.
+`--since <time>` (RFC 3339, or `YYYY-MM-DD` as UTC midnight) keeps Records
+claimed at or after it, `--kind <kind>` keeps Records of exactly that kind (a
+Dispatch kind or `unknown`; any other value is an error), and `--include-inferred=false` drops Records whose
+attribution is `inferred` (default `true`). The
+filters apply after the merge, to the table and to `--json` alike.
 
 **Re-ingest.** `--reingest` re-parses every log still on disk, including those
 whose path, size, and mtime match their last ingest, and upserts the result.
@@ -5769,17 +5824,20 @@ nothing landed. `Outcome source` counts Records per `outcome_source`
 (`dispatch_settled`, then `none`), so it shows how much of the cohort has a
 host-recorded outcome rather than `unknown`.
 
-`--json` skips the table and prints one Record per line, ordered by claim time
-then ID, with the fields `record_id`, `kind`, `dispatch_key`, `claim_time`,
-`attribution`, `outcome`, `outcome_source`, `passes`, and, on Records with a
-settled outcome (omitted when empty), `reason`, `note`, `pr_url`, and
-`box_status`, and, on stamped Records only (omitted when inferred),
-`revision`, `driver`, `driver_version`, `role_models`, `knobs`, and
-`prompt_hashes` (omitted when no Box reported any). Each pass carries `ordinal`, `role`,
-`models`, `usd`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
-`cache_creation_input_tokens`, `api_calls`, `turns`, `duration_ms`,
-`api_duration_ms`, and (when present) `verdict`; review and delta-review
-passes also carry `verdict_text`, and fix passes `dispositions`, when present. The
+`--json` skips the table and prints one Record per line, ordered by claim
+time, then root, then ID, with the fields `record_id`, `root`, `kind`,
+`dispatch_key`, `claim_time`, `attribution`, `outcome`, `outcome_source`,
+`passes`, and, on Records with a settled outcome (omitted when empty),
+`reason`, `note`, `pr_url`, and `box_status`, and, on stamped Records only
+(omitted when inferred), `revision`, `driver`, `driver_version`,
+`role_models`, `knobs`, and `prompt_hashes` (omitted when no Box reported
+any). Each pass carries `ordinal`, `role`, `models`, `usd`, `input_tokens`,
+`output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`,
+`api_calls`, `turns`, `duration_ms`, `api_duration_ms`, (when present)
+`verdict`, and `log`, the base name of the log file it was read from. Review
+and delta-review passes also carry `verdict_text`, and fix passes
+`dispositions`, when present. Passes run in the order their log files began,
+and `ordinal` numbers them 1..n across the whole Record. The
 `verdict_text` of a pass is its final result text, verbatim. The
 `dispositions` are the content of the fix agent's last successful `Write` to
 `/tmp/dispositions.md`, recovered from the transcript and verbatim. A `Write`
