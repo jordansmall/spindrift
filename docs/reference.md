@@ -5665,13 +5665,15 @@ issue are two such files, so they become two Records. Unstamped fix-pass
 `.prior-run.N` quarantines, are folded into a Dispatch by time window: each
 joins the Record of the same key with the latest claim time at or before its
 own first timestamp, so a Dispatch's cost includes them. One with no such
-Record (its primary log was deleted) becomes a Record of its own, so the
-totals still match what was spent. Unstamped `issue-<key>.log.N`
-retry-attempt logs (an earlier attempt rotated aside within one Dispatch) are
-skipped. Because an unstamped attempt is only read while it is still
-`issue-<key>.log`, whether an earlier attempt within one Dispatch is counted
-depends on whether a `stats` run happened before the retry rotated it aside:
-if one did, it stays as its own Record; otherwise its spend is not counted.
+Record (its primary log was deleted, or has not been ingested yet) becomes a
+Record of its own, so the totals still match what was spent; it moves onto a
+Dispatch of its key that turns up later and started before it. Unstamped
+`issue-<key>.log.N` retry-attempt logs (an earlier attempt rotated aside within
+one Dispatch) are skipped. Because an unstamped attempt is only read while it
+is still `issue-<key>.log`, whether an earlier attempt within one Dispatch is
+counted depends on whether a `stats` run happened before the retry rotated it
+aside: if one did, it stays as its own Record; otherwise its spend is not
+counted.
 
 **Records.** A Record is one Dispatch: a Dispatch key, a claim time (the
 stamp's; for an inferred Record the first timestamped event in the log, or the
@@ -5764,8 +5766,9 @@ was recorded at its last ingest. A re-parsed log replaces its Record's passes
 cases, all when its still-present log re-parses to one: it was provisional
 (a timestamped event appeared, or its mtime moved while it was still
 provisional), `--reingest` found the log's size and mtime unchanged (a
-parser change), or the log was ingested under an older store schema and
-re-parses to the same claim time (only its kind changed). The Record previously
+parser change), or the log re-parses to the same start under a new ID (only
+its inferred kind changed, as when it was ingested under an older store
+schema or while still being written). The Record previously
 ingested from that path is then dropped rather than kept beside it. A
 timestamped Record stays in place when its path is reused by a new Dispatch, so
 the new Dispatch gets its own Record. Any Record
@@ -5775,15 +5778,26 @@ deleted and its path reused with no run in between reads as the same Dispatch
 growing, so its earlier Record is replaced. A log emptied in place keeps its
 earlier Record, and whatever it later grows into is a new Record. Each run
 reads every changed primary log before any fix or conflict-resolve log, so a
-fix log always finds the Dispatch it started under. A fix log's passes are
+fix log finds the Dispatch it started under, and whenever a Record appears or
+is dropped, every fix or conflict-resolve log of its key re-windows in the same
+run, so the result does not depend on the order the logs were ingested in (a
+primary that shows up later, or an empty one that gains output, picks up a
+fix log first ingested as a Record of its own). A fix log's passes are
 keyed by the file's own start, so one renamed to `.prior-run.N` by the next
-Dispatch re-parses into the same passes rather than doubling them. A log
-from an older launcher (unstamped) that is ingested while still being
-written, and whose inferred kind later changes with the same key and claim time
-(`unknown` to `work`, or `work` to `research` once its final
-`SPINDRIFT_OUTCOME` appears), matches none of these cases: its stale Record,
-and any fix or conflict-resolve log joined to it, stays until `spindrift stats
---reingest`. Logs the current launcher writes are stamped and unaffected.
+Dispatch re-parses into the same passes rather than doubling them, and an
+unstamped fix log whose mtime-derived start slides past a later Dispatch's
+start moves there whole, leaving no passes behind. A log from an older launcher
+(unstamped) that is ingested while still being written, and whose inferred kind
+later changes with the same key and claim time (`unknown` to `work`, or `work`
+to `research` once its final `SPINDRIFT_OUTCOME` appears), replaces its stale
+Record, and the fix or conflict-resolve logs joined to it re-window onto the
+replacement. Logs the current launcher writes are stamped and unaffected. One
+residual remains: if an orphan's owning log is deleted, a live peer that joined
+it stays on the orphan Record after a primary that starts earlier appears (a
+fix log at 11:00 and a conflict-resolve log at 12:00 ingested, the fix log
+deleted, then a primary at 10:00 arrives, leaves the primary alone on its
+Record and the conflict-resolve log on the orphan's), so the Dispatch stays
+split, though each pass is still counted once.
 
 Upgrading a store built by an older `stats` re-parses the logs still on disk
 under the current rules. A Record whose log was already deleted keeps the kind
