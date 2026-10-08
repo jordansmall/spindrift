@@ -1,0 +1,283 @@
+package dispatchrecord
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/driver/claude"
+)
+
+func opLine(op claude.SpindriftOp) string { return claude.EncodeSpindriftOp(op) }
+
+func assistant(id string) string {
+	return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"m","content":[]}}`+"\n", id)
+}
+
+func result(ts string, cost float64, turns int, dur, apiDur int64, models ...string) string {
+	mu := make([]string, 0, len(models))
+	for _, m := range models {
+		mu = append(mu, fmt.Sprintf("%q:{}", m))
+	}
+	return fmt.Sprintf(`{"type":"result","timestamp":%q,"num_turns":%d,"total_cost_usd":%g,"duration_ms":%d,"duration_api_ms":%d,`+
+		`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},`+
+		`"modelUsage":{%s}}`+"\n", ts, turns, cost, dur, apiDur, strings.Join(mu, ","))
+}
+
+func writeLog(t *testing.T, name string, lines ...string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(p, []byte(strings.Join(lines, "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestParseLog(t *testing.T) {
+	tests := []struct {
+		name     string
+		file     string
+		lines    []string
+		wantID   string
+		wantKind string
+		wantKey  string
+		passes   []Pass
+	}{
+		{
+			name: "multi-pass work with review BLOCK then APPROVE",
+			file: "issue-42.log",
+			lines: []string{
+				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+				`{"type":"system","timestamp":"2026-10-07T12:34:56.789123Z"}` + "\n",
+				assistant("a"), assistant("a"), assistant("b"),
+				result("2026-10-07T12:35:00Z", 1.5, 7, 4000, 3000, "claude-opus", "claude-haiku"),
+				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+				assistant("c"),
+				result("2026-10-07T12:36:00Z", 0.5, 2, 1000, 900, "claude-sonnet"),
+				opLine(claude.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}),
+				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
+				result("2026-10-07T12:37:00Z", 1, 3, 2000, 1500, "claude-opus"),
+				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 4, Role: "review"}),
+				assistant("d"),
+				opLine(claude.SpindriftOp{Op: "pass_usage", Pass: 4, Usage: &claude.PassUsage{APICalls: 9}}),
+				result("2026-10-07T12:38:00Z", 0.25, 1, 500, 400, "claude-sonnet"),
+				opLine(claude.SpindriftOp{Op: "verdict", Pass: 4, Verdict: "APPROVE"}),
+			},
+			wantID:   "work:42@2026-10-07T12:34:56.789Z",
+			wantKind: "work",
+			wantKey:  "42",
+			passes: []Pass{
+				{Ordinal: 1, Role: "implement", Models: []string{"claude-haiku", "claude-opus"}, USD: 1.5,
+					InputTokens: 10, OutputTokens: 20, CacheReadInputTokens: 30, CacheCreationInputTokens: 40,
+					APICalls: 2, Turns: 7, DurationMs: 4000, APIDurationMs: 3000},
+				{Ordinal: 2, Role: "review", Models: []string{"claude-sonnet"}, USD: 0.5,
+					InputTokens: 10, OutputTokens: 20, CacheReadInputTokens: 30, CacheCreationInputTokens: 40,
+					APICalls: 1, Turns: 2, DurationMs: 1000, APIDurationMs: 900, Verdict: "BLOCK"},
+				{Ordinal: 3, Role: "fix", Models: []string{"claude-opus"}, USD: 1,
+					InputTokens: 10, OutputTokens: 20, CacheReadInputTokens: 30, CacheCreationInputTokens: 40,
+					Turns: 3, DurationMs: 2000, APIDurationMs: 1500},
+				{Ordinal: 4, Role: "review", Models: []string{"claude-sonnet"}, USD: 0.25,
+					InputTokens: 10, OutputTokens: 20, CacheReadInputTokens: 30, CacheCreationInputTokens: 40,
+					APICalls: 9, Turns: 1, DurationMs: 500, APIDurationMs: 400, Verdict: "APPROVE"},
+			},
+		},
+		{
+			name: "butler key",
+			file: "issue-butler-deps.log",
+			lines: []string{
+				result("2026-10-07T01:00:00.5Z", 2, 4, 100, 90, "claude-opus"),
+			},
+			wantID:   "butler:butler-deps@2026-10-07T01:00:00.500Z",
+			wantKind: "butler",
+			wantKey:  "butler-deps",
+			passes: []Pass{
+				{Ordinal: 1, Models: []string{"claude-opus"}, USD: 2,
+					InputTokens: 10, OutputTokens: 20, CacheReadInputTokens: 30, CacheCreationInputTokens: 40,
+					Turns: 4, DurationMs: 100, APIDurationMs: 90},
+			},
+		},
+		{
+			name: "unknown kind, legacy log sums several results, claim is the first timestamp not the earliest",
+			file: "issue-7.log",
+			lines: []string{
+				assistant("x"),
+				result("2026-10-07T02:00:00Z", 1, 1, 10, 5, "m1"),
+				result("2026-10-07T01:59:00Z", 1, 2, 20, 6, "m2"),
+			},
+			wantID:   "unknown:7@2026-10-07T02:00:00.000Z",
+			wantKind: "unknown",
+			wantKey:  "7",
+			passes: []Pass{
+				{Ordinal: 1, Models: []string{"m1", "m2"}, USD: 2,
+					InputTokens: 20, OutputTokens: 40, CacheReadInputTokens: 60, CacheCreationInputTokens: 80,
+					APICalls: 1, Turns: 3, DurationMs: 30, APIDurationMs: 11},
+			},
+		},
+		{
+			name:     "prior-run file key",
+			file:     "issue-9.log.prior-run.2",
+			lines:    []string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})},
+			wantKind: "work",
+			wantKey:  "9",
+			passes:   []Pass{{Ordinal: 1, Role: "implement", Models: []string{}}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p := writeLog(t, tc.file, tc.lines...)
+			mtime := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+			if err := os.Chtimes(p, mtime, mtime); err != nil {
+				t.Fatal(err)
+			}
+			rec, _, err := ParseLog(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantID != "" && rec.ID != tc.wantID {
+				t.Errorf("ID = %q, want %q", rec.ID, tc.wantID)
+			}
+			if rec.Kind != tc.wantKind || rec.DispatchKey != tc.wantKey {
+				t.Errorf("kind/key = %q/%q, want %q/%q", rec.Kind, rec.DispatchKey, tc.wantKind, tc.wantKey)
+			}
+			if rec.Attribution != "inferred" || rec.Outcome != "unknown" {
+				t.Errorf("attribution/outcome = %q/%q", rec.Attribution, rec.Outcome)
+			}
+			if !reflect.DeepEqual(rec.Passes, tc.passes) {
+				t.Errorf("passes =\n%+v\nwant\n%+v", rec.Passes, tc.passes)
+			}
+		})
+	}
+}
+
+func TestParseLogCrashFallsBackToMtime(t *testing.T) {
+	p := writeLog(t, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	mtime := time.Date(2026, 10, 7, 9, 8, 7, 654_000_000, time.FixedZone("x", 3600))
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	rec, provisional, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "work:5@2026-10-07T08:08:07.654Z"; rec.ID != want {
+		t.Errorf("ID = %q, want %q", rec.ID, want)
+	}
+	if !provisional || len(rec.Passes) != 1 {
+		t.Errorf("provisional=%v passes=%+v, want provisional with the one pass", provisional, rec.Passes)
+	}
+	if !rec.ClaimTime.Equal(mtime) || rec.ClaimTime.Location() != time.UTC {
+		t.Errorf("ClaimTime = %v", rec.ClaimTime)
+	}
+}
+
+func TestParseLogDeterministicID(t *testing.T) {
+	p := writeLog(t, "issue-3.log", result("2026-10-07T12:00:00.123Z", 1, 1, 1, 1, "m"))
+	a, _, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID != b.ID || a.ID != "unknown:3@2026-10-07T12:00:00.123Z" {
+		t.Errorf("IDs = %q, %q", a.ID, b.ID)
+	}
+}
+
+func TestParseLogMissingFile(t *testing.T) {
+	if _, _, err := ParseLog(filepath.Join(t.TempDir(), "issue-1.log")); err == nil {
+		t.Fatal("want error for missing file")
+	}
+}
+
+func TestParseLogRejectsNonChainName(t *testing.T) {
+	if _, _, err := ParseLog(writeLog(t, "issue-1-fix-2.log")); err == nil {
+		t.Fatal("want error for fix log name")
+	}
+}
+
+func TestChainKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		ok   bool
+	}{
+		{"issue-42.log", "42", true},
+		{"issue-42.log.prior-run.1", "42", true},
+		{"issue-42.log.prior-run.12", "42", true},
+		{"issue-butler-deps.log", "butler-deps", true},
+		{"issue-42-fix-1.log", "", false},
+		{"issue-42-conflict-resolve.log", "", false},
+		{"issue-42.log.1", "", false},
+		{"issue-42.log.prior-run.x", "", false},
+		{"issue-.log", "", false},
+		{"other-42.log", "", false},
+		{"issue-42.txt", "", false},
+		{"issue-42-fix-1.log.prior-run.1", "", false},
+	}
+	for _, tc := range tests {
+		key, ok := ChainKey(tc.name)
+		if key != tc.key || ok != tc.ok {
+			t.Errorf("ChainKey(%q) = %q,%v want %q,%v", tc.name, key, ok, tc.key, tc.ok)
+		}
+	}
+}
+
+func TestParseLogPassOrdinalsStrictlyIncrease(t *testing.T) {
+	p := writeLog(t, "issue-7.log",
+		result("2026-10-07T12:00:00Z", 1, 1, 10, 5, "opus"),
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		result("2026-10-07T12:01:00Z", 1, 1, 10, 5, "opus"),
+	)
+	rec, _, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []int
+	for _, ps := range rec.Passes {
+		got = append(got, ps.Ordinal)
+	}
+	if want := []int{1, 2}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ordinals = %v, want %v", got, want)
+	}
+}
+
+func TestParseLogTimestampedClaimIsNotProvisional(t *testing.T) {
+	p := writeLog(t, "issue-3.log", result("2026-10-07T12:00:00.123Z", 1, 1, 1, 1, "m"))
+	_, provisional, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provisional {
+		t.Error("timestamp-derived ID must not be provisional")
+	}
+}
+
+func TestParseLogEventFreeLog(t *testing.T) {
+	for name, lines := range map[string][]string{
+		"empty":   nil,
+		"garbage": {"not json\n", "{\"type\":\"\"}\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, err := ParseLog(writeLog(t, "issue-5.log", lines...)); !errors.Is(err, ErrNoEvents) {
+				t.Fatalf("err = %v, want ErrNoEvents", err)
+			}
+		})
+	}
+}
+
+func TestChoreKeyedKindFollowsDescriptor(t *testing.T) {
+	if got := choreKeyedKind(); got != dispatchkind.Butler.Name {
+		t.Fatalf("choreKeyedKind = %q, want %q", got, dispatchkind.Butler.Name)
+	}
+}
