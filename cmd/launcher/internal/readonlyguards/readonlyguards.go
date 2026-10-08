@@ -17,9 +17,10 @@ import (
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
-// The Enforce values Install switches on, an allowlist mirroring
-// promptassembly.Validate's forbiddenRows loop: a row with any other value
-// is skipped rather than silently mis-rendered.
+// The Enforce values Install filters rows by, an allowlist mirroring the
+// vocabulary on promptassembly.ForbiddenMarkerRow.Enforce: a row with any
+// other value is skipped rather than silently mis-rendered. Install never
+// filters on enforcePromptOnly; it only completes the mirrored vocabulary.
 const (
 	enforceCommandShim = "command-shim"
 	enforceGitHook     = "git-hook"
