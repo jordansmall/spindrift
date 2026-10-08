@@ -130,17 +130,20 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	c := baseConfig()
 	c.MergeMode = "immediate"
 	c.MaxRebaseAttempts = 0
+	logPath := filepath.Join(t.TempDir(), "issue-9.log")
+	if err := os.WriteFile(logPath, []byte("existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.LogPath = func(string) string { return logPath }
 	fc := forge.NewFake(testDispatchLabels)
 	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
 	// The leading PENDING proves this run's own checks registered (issue
-	// #1652). PRStateErr models the transient PRState error adopt.go:37
-	// describes: verifyMerged swallows it into prState == "" and demotes,
-	// even though the Merge call just above it succeeded.
+	// #1652). openAfterMerge reports the PR still OPEN after a successful
+	// Merge, so verifyMerged's successful reads genuinely contradict it.
 	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
-	s := newTestSettle(c, fc, fc)
-	fc.PRStateErr = errors.New("transient: PR lookup failed")
+	s := newTestSettle(c, fc, openAfterMerge{fc})
 
-	s.SettleAdopted(dispatch.NewFake(), "9", 0, testPR)
+	s.SettleAdopted(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9", 0, testPR)
 
 	recs := readRecords()
 	if len(recs) != 1 {
@@ -148,6 +151,18 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 	}
 	if recs[0].Event != "settled" || recs[0].Key != dispatchkey.Issue("9") || recs[0].State != "failed" {
 		t.Errorf("record = %+v, want event=settled issue=9 state=failed (verifyMerged's demotion, not completeLanding's earlier Complete)", recs[0])
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	var ev claude.Event
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
+		t.Fatalf("last log line %q is not a dispatch_settled op: %v", lines[len(lines)-1], err)
+	}
+	if got := ev.SpindriftOp.Settled; got.Reason != ReasonMergeUnverified || !strings.Contains(got.Note, "PR state is 'OPEN'") {
+		t.Errorf("settled op = %+v, want reason=%s and a note naming the PR state 'OPEN'", got, ReasonMergeUnverified)
 	}
 }
 

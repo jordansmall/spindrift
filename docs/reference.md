@@ -5683,10 +5683,11 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
 - `failed`: `landing-failed`, `gate-terminal`, `ci-red` (CI red with no fix pass
   budget), `fix-exhausted`, `budget-exhausted`, `fix-failed`, `fix-no-op`,
   `relay-failed` (also recover's park), `blocked`, `no-outcome` (the Box printed
-  no outcome line), `merge-unverified` (a merge `verifyMerged` could not
-  confirm), `no-pr` (`status=merged` named a branch with no PR to verify),
-  `box-failed` (the Box failed before settle), `research-failed`,
-  `chore-failed`, `ledger-finish-failed`, and `stopped`;
+  no outcome line), `merge-unverified` (a merge `verifyMerged`'s reads
+  contradicted; a read that keeps failing never produces it), `no-pr`
+  (`status=merged` named a branch with no PR to verify), `box-failed` (the Box
+  failed before settle), `research-failed`, `chore-failed`,
+  `ledger-finish-failed`, and `stopped`;
 - `ambiguous` and `recoverable` each name their own state.
 
 A Record's `outcome` comes only from that op, and `outcome_source` says so:
