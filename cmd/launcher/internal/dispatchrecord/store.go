@@ -652,44 +652,46 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		sameFile = oldID != "" && (oldProvisional || statSame || oldStart == logStart)
 		if inferredSatellite && !sameFile {
 			// The stored row, if any, is another file's that held this path, so its
-			// segment stays put. Adopt any same-key segment starting in the same
-			// millisecond as this file's earlier read (a renamed log's), the
-			// coincident-start collision class accepted elsewhere.
-			oldID, oldStart, oldProvisional, oldLog = "", 0, false, base
+			// segment stays put. Adopt the segment of a renamed log: same key, same
+			// start, same stem, and the file under its name no longer holds the
+			// segment. Anything else at this start is a coincident primary's or
+			// peer's.
+			oldID, oldStart, oldProvisional = "", 0, false
 			for _, table := range segmentTables {
-				err := tx.QueryRow(
-					`SELECT record_id, log FROM `+table+` WHERE log_start = ? AND record_id IN (SELECT record_id FROM records WHERE dispatch_key = ?)
-						 ORDER BY record_id, log LIMIT 1`, logStart, rec.DispatchKey).Scan(&oldID, &oldLog)
-				if err == nil {
-					oldStart, sameFile = logStart, true
-					break
-				}
-				if !errors.Is(err, sql.ErrNoRows) {
+				id, name, err := renamedSegment(tx, table, filepath.Dir(path), base, rec.DispatchKey, logStart)
+				if err != nil {
 					return "", err
+				}
+				if id != "" {
+					oldID, oldStart, oldLog, sameFile = id, logStart, name, true
+					break
 				}
 			}
 		}
-		// A satellite that joined a Record does not own it; an orphan
-		// satellite's own Record starts at the file's start.
+		// A satellite owns only the orphan Record it minted, recorded in
+		// orphan_log; any other stored Record it sits on, even one with its own
+		// ID, it merely joined.
+		owned := ""
 		if inferredSatellite && oldID != "" {
-			var oldClaim int64
-			err := tx.QueryRow("SELECT claim_time FROM records WHERE record_id = ?", oldID).Scan(&oldClaim)
+			var orphanLog string
+			err := tx.QueryRow("SELECT orphan_log FROM records WHERE record_id = ?", oldID).Scan(&orphanLog)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return "", err
 			}
-			joined = err == nil && oldClaim != oldStart
+			if err == nil {
+				joined = true
+				if orphanLog != "" && orphanLog == oldLog {
+					owned, joined = oldID, false
+				}
+			}
 		}
 		writesRecord := true
 		if inferredSatellite {
 			// Never its own Record: an orphan re-parsed would otherwise capture itself
 			// and never move onto a Dispatch that has since appeared.
-			owned := rec.ID
-			if oldID != "" && !joined {
-				owned = oldID
-			}
 			err := tx.QueryRow(
-				windowQuery("?", "record_id NOT IN (?, ?)"),
-				rec.DispatchKey, logStart, rec.ID, owned).Scan(&newID)
+				windowQuery("?", "record_id <> ?"),
+				rec.DispatchKey, logStart, owned).Scan(&newID)
 			switch {
 			case err == nil:
 				writesRecord = false
@@ -733,25 +735,31 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 				return "", err
 			}
 			// The outcome group is kept unless this log carries the settled outcome:
-			// the Record's other logs (fix, conflict-resolve) never see it.
+			// the Record's other logs (fix, conflict-resolve) never see it. An
+			// orphan's row holds no outcome of a primary's, so a log taking the row
+			// over starts from its own.
 			keep := func(col string) string {
 				return col + ` = CASE WHEN excluded.outcome_source = '` + OutcomeSourceSettled +
-					`' THEN excluded.` + col + ` ELSE records.` + col + ` END`
+					`' OR records.orphan_log <> '' THEN excluded.` + col + ` ELSE records.` + col + ` END`
+			}
+			orphanLog := ""
+			if inferredSatellite {
+				orphanLog = base
 			}
 			if _, err := tx.Exec(
 				`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
 					revision, driver, driver_version, role_models, knobs,
-					outcome_source, reason, note, pr_url, box_status)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					outcome_source, reason, note, pr_url, box_status, orphan_log)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(record_id) DO UPDATE SET
 					kind = excluded.kind, dispatch_key = excluded.dispatch_key, claim_time = excluded.claim_time,
 					attribution = excluded.attribution, revision = excluded.revision, driver = excluded.driver,
 					driver_version = excluded.driver_version, role_models = excluded.role_models, knobs = excluded.knobs,
 					`+strings.Join([]string{keep("outcome"), keep("outcome_source"), keep("reason"), keep("note"),
-					keep("pr_url"), keep("box_status")}, ", "),
+					keep("pr_url"), keep("box_status"), "orphan_log = excluded.orphan_log"}, ", "),
 				rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
 				rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
-				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus); err != nil {
+				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus, orphanLog); err != nil {
 				return "", err
 			}
 		}
@@ -1030,4 +1038,77 @@ func deleteSegment(tx *sql.Tx, table, recordID string, start int64, name string)
 		}
 	}
 	return nil
+}
+
+// renamedSegment finds, in one segment table, the segment of a renamed log of
+// the same stem as base: the key's segment at start whose name's current file
+// no longer holds it (gone, renamed, or replaced), so it cannot belong to a
+// coincident primary or peer. A legacy segment (log empty) names no file and is
+// taken as renamed.
+func renamedSegment(tx *sql.Tx, table, dir, base, key string, start int64) (recordID, logName string, err error) {
+	rows, err := tx.Query(
+		`SELECT record_id, log FROM `+table+` WHERE log_start = ? AND record_id IN (SELECT record_id FROM records WHERE dispatch_key = ?)
+		 ORDER BY record_id, log`, start, key)
+	if err != nil {
+		return "", "", err
+	}
+	type seg struct{ id, log string }
+	var segs []seg
+	for rows.Next() {
+		var g seg
+		if err := rows.Scan(&g.id, &g.log); err != nil {
+			rows.Close()
+			return "", "", err
+		}
+		segs = append(segs, g)
+	}
+	if err := rows.Close(); err != nil {
+		return "", "", err
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	for _, g := range segs {
+		if g.log != "" {
+			if stemOf(g.log) != stemOf(base) {
+				continue
+			}
+			held, err := nameHoldsSegment(tx, filepath.Join(dir, g.log), g.id, start)
+			if err != nil {
+				return "", "", err
+			}
+			if held {
+				continue
+			}
+		}
+		return g.id, g.log, nil
+	}
+	return "", "", nil
+}
+
+// nameHoldsSegment reports whether the file now at path is still the one that
+// holds recordID's segment at start: its ingested_files row names that segment
+// and still matches the file's stat. A reused name whose new file is not yet
+// re-parsed fails the stat test, leaving the old segment free to be adopted.
+func nameHoldsSegment(tx *sql.Tx, path, recordID string, start int64) (bool, error) {
+	var id string
+	var size, mtime, rowStart int64
+	err := tx.QueryRow("SELECT record_id, size, mtime_ns, log_start FROM ingested_files WHERE path = ?", path).Scan(&id, &size, &mtime, &rowStart)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if id != recordID || rowStart != start {
+		return false, nil
+	}
+	info, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, &readError{err}
+	}
+	return sameStat(size, mtime, info), nil
 }
