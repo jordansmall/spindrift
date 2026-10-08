@@ -11,7 +11,8 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"spindrift.dev/launcher/internal/hostpaths"
 )
@@ -135,13 +136,24 @@ var segmentTables = []string{"passes", "prompt_hashes"}
 // before failing.
 const busyTimeoutMs = 5000
 
+// walRetryInterval paces enableWAL's retries while another connection holds the
+// database during creation.
+const walRetryInterval = 5 * time.Millisecond
+
+// primaryCodeMask reduces an extended SQLite result code to its primary code
+// (SQLITE_BUSY_RECOVERY and friends all carry SQLITE_BUSY in the low byte).
+const primaryCodeMask = 0xff
+
 // Open opens (creating and migrating if needed) the store under root.
 func Open(root string) (*Store, error) {
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", fmt.Sprintf("%s?_pragma=busy_timeout(%d)", path, busyTimeoutMs))
+	// _txlock=immediate takes the write lock at BEGIN, where busy_timeout
+	// applies. A deferred transaction that reads and then upgrades fails at once
+	// with SQLITE_BUSY when another process committed in between (WAL).
+	db, err := sql.Open("sqlite", fmt.Sprintf("%s?_pragma=busy_timeout(%d)&_txlock=immediate", path, busyTimeoutMs))
 	if err != nil {
 		return nil, err
 	}
@@ -157,31 +169,58 @@ func Open(root string) (*Store, error) {
 }
 
 func (s *Store) migrate() error {
-	if _, err := s.db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+	if err := s.enableWAL(); err != nil {
 		return err
 	}
+	for {
+		done, err := s.migrateOnce()
+		if err != nil || done {
+			return err
+		}
+	}
+}
+
+// enableWAL switches a fresh database to WAL. SQLite reports SQLITE_BUSY from
+// that switch without consulting busy_timeout when another connection is
+// creating the same database, so retry until busyTimeoutMs elapses. Once any
+// connection has won, the mode persists and the pragma is a no-op.
+func (s *Store) enableWAL() error {
+	deadline := time.Now().Add(busyTimeoutMs * time.Millisecond)
+	for {
+		var mode string
+		err := s.db.QueryRow("PRAGMA journal_mode=WAL").Scan(&mode)
+		var se *sqlite.Error
+		if err == nil || !errors.As(err, &se) || se.Code()&primaryCodeMask != sqlite3.SQLITE_BUSY || time.Now().After(deadline) {
+			return err
+		}
+		time.Sleep(walRetryInterval)
+	}
+}
+
+// migrateOnce applies the next pending migration, reporting done when none is
+// left. The version is read inside the write transaction, so a concurrent Open
+// that already applied it is seen rather than re-run.
+func (s *Store) migrateOnce() (done bool, err error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
-		return err
+	if err := tx.QueryRow("PRAGMA user_version").Scan(&v); err != nil {
+		return false, err
 	}
 	if v > len(migrations) {
-		return fmt.Errorf("dispatchrecord: database schema v%d is newer than this binary (v%d)", v, len(migrations))
+		return false, fmt.Errorf("dispatchrecord: database schema v%d is newer than this binary (v%d)", v, len(migrations))
 	}
-	for ; v < len(migrations); v++ {
-		tx, err := s.db.Begin()
-		if err != nil {
-			return err
-		}
-		// user_version cannot be bound as a parameter.
-		if _, err := tx.Exec(migrations[v] + fmt.Sprintf("; PRAGMA user_version = %d", v+1)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("dispatchrecord: migrate to v%d: %w", v+1, err)
-		}
-		if err := tx.Commit(); err != nil {
-			return err
-		}
+	if v == len(migrations) {
+		return true, nil
 	}
-	return nil
+	// user_version cannot be bound as a parameter.
+	if _, err := tx.Exec(migrations[v] + fmt.Sprintf("; PRAGMA user_version = %d", v+1)); err != nil {
+		return false, fmt.Errorf("dispatchrecord: migrate to v%d: %w", v+1, err)
+	}
+	return false, tx.Commit()
 }
 
 // Close releases the database handle.
