@@ -460,7 +460,9 @@ func appendSettled(logPath string, ds claude.DispatchSettled) error {
 // logPath. Use it only where that prior Record is genuinely the target.
 func SettledPrior(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
 	if ds.RecordID == "" && logPath != "" {
-		ds.RecordID = dispatchrecord.StampRecordID(logPath)
+		if s, ok := dispatchrecord.ReadStamp(logPath); ok {
+			ds.RecordID = s.RecordID
+		}
 	}
 	Settled(key, logPath, ds)
 }

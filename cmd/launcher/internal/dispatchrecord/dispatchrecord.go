@@ -213,13 +213,13 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 	return rec, provisional, err
 }
 
-// StampRecordID returns the Record ID of the log's leading dispatch_start
-// stamp, "" when the log is missing, empty, or does not open with one. It
-// decodes only the first event, by the same rule parseLog applies.
-func StampRecordID(path string) string {
+// ReadStamp returns the log's leading dispatch_start stamp, false when the log is
+// missing, empty, or does not open with one. It decodes only the first event,
+// by the same rule parseLog applies.
+func ReadStamp(path string) (claude.DispatchStart, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return ""
+		return claude.DispatchStart{}, false
 	}
 	defer f.Close()
 	br := bufio.NewReader(f)
@@ -227,16 +227,19 @@ func StampRecordID(path string) string {
 		line, isPrefix, err := br.ReadLine()
 		if err != nil || isPrefix {
 			// A stamp is a short line; an oversized one is Box output.
-			return ""
+			return claude.DispatchStart{}, false
 		}
 		var ev logLine
 		if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type == "" {
 			continue
 		}
 		if op := ev.SpindriftOp; ev.Type == "spindrift_op" && op != nil && op.Op == claude.OpDispatchStart && op.Start != nil {
-			return op.Start.RecordID
+			if op.Start.RecordID == "" {
+				return claude.DispatchStart{}, false
+			}
+			return *op.Start, true
 		}
-		return ""
+		return claude.DispatchStart{}, false
 	}
 }
 
@@ -344,8 +347,13 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 				}
 			case claude.OpDispatchSettled:
 				// An op naming another Record is not this log's to claim, and
-				// must not displace one that is.
-				if op.Settled != nil && stamp != nil && op.Settled.RecordID == stamp.RecordID {
+				// must not displace one that is. The Box shares this log and
+				// knows the Record ID, so a tokened stamp also demands the host
+				// token, which the Box never learns: it cannot read its pass log
+				// (runner mounts never bind .spindrift/logs). A legacy token-less
+				// stamp falls back to the ordering rule above alone.
+				if op.Settled != nil && stamp != nil && op.Settled.RecordID == stamp.RecordID &&
+					(stamp.HostToken == "" || op.Settled.HostToken == stamp.HostToken) {
 					settled = op.Settled
 				}
 			case "pass_start":

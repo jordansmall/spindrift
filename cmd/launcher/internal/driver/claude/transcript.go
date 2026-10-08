@@ -156,6 +156,8 @@ type DispatchSettled struct {
 	Reason string `json:"reason,omitempty"`
 	Note   string `json:"note,omitempty"`
 	PRURL  string `json:"pr_url,omitempty"`
+	// HostToken echoes the log's DispatchStart.HostToken.
+	HostToken string `json:"host_token,omitempty"`
 }
 
 // DispatchStart is the payload of a "dispatch_start" SpindriftOp (issue
@@ -163,7 +165,11 @@ type DispatchSettled struct {
 // Started is when this particular log was created, so it tells the logs of
 // one Dispatch apart.
 type DispatchStart struct {
-	RecordID      string            `json:"record_id"`
+	RecordID string `json:"record_id"`
+	// HostToken is a random value the host mints per log and never gives the
+	// Box; a dispatch_settled op counts only when it echoes it (see
+	// dispatchrecord parseLog).
+	HostToken     string            `json:"host_token,omitempty"`
 	Kind          string            `json:"kind"`
 	DispatchKey   string            `json:"dispatch_key"`
 	ClaimTime     time.Time         `json:"claim_time"`
