@@ -1,7 +1,11 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
@@ -72,4 +76,28 @@ func (f *EventsFile) append(line []byte) error {
 		return err
 	}
 	return file.Close()
+}
+
+// ReadEvents returns the events in gitDirPath's Events file, oldest first: the
+// rotated generation, then the live file. A missing file is not an error, and
+// a line that fails to decode (a torn write, a corrupt key) is skipped.
+func ReadEvents(gitDirPath string) ([]Event, error) {
+	live := filepath.Join(gitDirPath, eventsFileName)
+	var events []Event
+	for _, path := range []string{live + rotatedSuffix, live} {
+		data, err := os.ReadFile(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, line := range bytes.Split(data, []byte{'\n'}) {
+			var ev Event
+			if json.Unmarshal(line, &ev) == nil {
+				events = append(events, ev)
+			}
+		}
+	}
+	return events, nil
 }

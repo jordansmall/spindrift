@@ -3,10 +3,14 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 func eventsLoopRun(t *testing.T, em *Emitter) {
@@ -158,5 +162,44 @@ func TestEventsFileAppendsAcrossRestart(t *testing.T) {
 
 	if got := readEventsFileT(t, cur); got != "first\nsecond\n" {
 		t.Errorf("events file = %q, want both runs' lines", got)
+	}
+}
+
+func TestReadEvents(t *testing.T) {
+	dir := t.TempDir()
+	line := func(rev string) string {
+		b, err := json.Marshal(Event{V: eventVersion, Time: "2026-10-07T12:00:00Z", Event: "box", Revision: rev, Key: dispatchkey.Issue("42")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b) + "\n"
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if evs, err := ReadEvents(dir); err != nil || len(evs) != 0 {
+		t.Fatalf("ReadEvents on a missing file = %v, %v; want none, nil", evs, err)
+	}
+
+	write(eventsFileName+rotatedSuffix, line("old")+"not json\n")
+	write(eventsFileName, line("mid")+"\n"+`{"issue":"1","chore":"x"}`+"\n"+line("new"))
+
+	evs, err := ReadEvents(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, ev := range evs {
+		got = append(got, ev.Revision)
+	}
+	if want := []string{"old", "mid", "new"}; !slices.Equal(got, want) {
+		t.Errorf("revisions = %v, want %v (oldest first, undecodable lines skipped)", got, want)
+	}
+	if evs[0].Key != dispatchkey.Issue("42") {
+		t.Errorf("Key = %v, want issue 42", evs[0].Key)
 	}
 }
