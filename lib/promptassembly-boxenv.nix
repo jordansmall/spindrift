@@ -170,6 +170,11 @@
     kind = "string";
   }
   {
+    field = "RecordID";
+    env = "RECORD_ID";
+    kind = "string";
+  }
+  {
     field = "ResearchVerdicts";
     env = "RESEARCH_VERDICTS";
     kind = "string";

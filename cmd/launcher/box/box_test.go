@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/readonlyguards"
@@ -2108,5 +2109,56 @@ func TestParseFlagsModelOmitEmpty(t *testing.T) {
 	}
 	if _, err := parseFlags(append(allFlags(), "--argv-model-omit-empty=maybe"), io.Discard); err == nil {
 		t.Error("garbage accepted")
+	}
+}
+
+// promptHashesOp returns the prompt_hashes op assemblePrompt wrote onto the
+// Pass log, or nil when it wrote none.
+func promptHashesOp(t *testing.T, log string) *claude.PromptHashes {
+	t.Helper()
+	for _, line := range strings.Split(log, "\n") {
+		var ev claude.Event
+		if json.Unmarshal([]byte(line), &ev) == nil && ev.SpindriftOp != nil && ev.SpindriftOp.Op == "prompt_hashes" {
+			return ev.SpindriftOp.PromptHashes
+		}
+	}
+	return nil
+}
+
+// The hashes cover the templates, not the Dispatch: two Dispatches of the same
+// build report the same per-role hashes under their own Record ID.
+func TestAssemblePrompt_EmitsPromptHashesStableAcrossDispatchFacts(t *testing.T) {
+	var got [2]*claude.PromptHashes
+	for i := range got {
+		env := coveredWorkEnv()
+		env.RecordID = "rec-1"
+		if i == 1 {
+			env.IssueNumber, env.IssueTitle, env.IssueText = "7", "Another", "other body"
+			env.Branch, env.DispatchKey, env.RunNonce = "agent/issue-7", "7", "other-nonce"
+		}
+		var w bytes.Buffer
+		if _, err := assemblePrompt(assemblyFixture(t), env, &w); err != nil {
+			t.Fatal(err)
+		}
+		got[i] = promptHashesOp(t, w.String())
+		if got[i] == nil {
+			t.Fatalf("dispatch %d: no prompt_hashes op in:\n%s", i, w.String())
+		}
+	}
+	if got[0].RecordID != "rec-1" || len(got[0].Roles) == 0 {
+		t.Errorf("op = %+v; want record_id rec-1 and a non-empty role map", got[0])
+	}
+	if !reflect.DeepEqual(got[0].Roles, got[1].Roles) {
+		t.Errorf("hashes moved with Dispatch facts:\n%v\n%v", got[0].Roles, got[1].Roles)
+	}
+}
+
+func TestAssemblePrompt_NoPromptHashesWithoutRecordID(t *testing.T) {
+	var w bytes.Buffer
+	if _, err := assemblePrompt(assemblyFixture(t), coveredWorkEnv(), &w); err != nil {
+		t.Fatal(err)
+	}
+	if op := promptHashesOp(t, w.String()); op != nil {
+		t.Errorf("emitted %+v with no Record ID", op)
 	}
 }

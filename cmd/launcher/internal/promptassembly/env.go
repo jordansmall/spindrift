@@ -150,6 +150,10 @@ type Env struct {
 	CompleteLabel   string // entrypoint.sh: $COMPLETE_LABEL
 	RunNonce        string // entrypoint.sh: $RUN_NONCE
 
+	// RecordID is the host's Record ID for this Dispatch (issue #4786). It keys
+	// the Box's prompt_hashes op and is not a prompt var.
+	RecordID string // dispatch/box.go: $RECORD_ID
+
 	// IssueText is the subject issue's body plus recent comments
 	// (forge.IssueText, issue #3445). Deliberately not one of the seven fixed
 	// names above: assemblePromptBodies registers a fenced, sectioned

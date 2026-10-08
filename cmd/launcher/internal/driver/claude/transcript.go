@@ -72,7 +72,7 @@ type CacheCreation struct {
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", "run_state_error", "pass_usage", "land_delta",
-	// "delta_review_trigger", "signal", or "dispatch_start".
+	// "delta_review_trigger", "signal", "dispatch_start", or "prompt_hashes".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -116,6 +116,20 @@ type SpindriftOp struct {
 	// Start carries a Dispatch's identity on a "dispatch_start" op; nil on
 	// every other op kind.
 	Start *DispatchStart `json:"dispatch_start,omitempty"`
+	// PromptHashes carries the Box's per-role prompt template hashes on a
+	// "prompt_hashes" op; nil on every other op kind.
+	PromptHashes *PromptHashes `json:"prompt_hashes,omitempty"`
+}
+
+// PromptHashes is the payload of a "prompt_hashes" SpindriftOp (issue #4786),
+// written by the Box once after prompt assembly. Unlike the host-written
+// DispatchStart it is Box-reported, so a consumer must treat it as untrusted;
+// RecordID is the one the host forwarded, which keys it to its Dispatch's
+// Record. Roles maps pass name to the template hash from
+// promptassembly.TemplateHashes.
+type PromptHashes struct {
+	RecordID string            `json:"record_id"`
+	Roles    map[string]string `json:"roles"`
 }
 
 // DispatchStart is the payload of a "dispatch_start" SpindriftOp (issue
