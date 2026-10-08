@@ -1,17 +1,22 @@
 package settle
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
@@ -77,7 +82,7 @@ func TestSettle_DispatchRecordSeam(t *testing.T) {
 				s.Settle(d, num, 0, res)
 			})
 
-			recs := ingestRecords(t, root)
+			recs := storedRecords(t, root)
 			if len(recs) != 1 {
 				t.Fatalf("records = %+v, want exactly one", recs)
 			}
@@ -246,5 +251,156 @@ func TestSettleAdopted_FixPassContinuesPriorRecord(t *testing.T) {
 		if rec.Event == report.EventSettled && rec.RecordID != prior {
 			t.Errorf("settled report record_id = %q, want %q", rec.RecordID, prior)
 		}
+	}
+}
+
+// storedRecords reads the Records already in root's store, without ingesting:
+// settle itself must have put them there.
+func storedRecords(t *testing.T, root string) []dispatchrecord.Record {
+	t.Helper()
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	recs, err := store.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return recs
+}
+
+// settleSeamComplete drives a green work Dispatch for num through the real
+// settle path and returns its one settled report and the stderr it wrote.
+func settleSeamComplete(t *testing.T, root, num string) (report.Record, string) {
+	t.Helper()
+	readRecords := testutil.InstallPipeReporter(t)
+	fr := runner.NewFake()
+	fr.RunFunc = seamBoxRun(num, "implement", "a1", "2026-05-01T09:00:00Z", "ready", "box-said-so")
+	d := seamDispatch(t, root, num, fr)
+	fc := seamForge(num)
+	fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	cfg := baseConfig()
+	cfg.LogPath = func(n string) string { return dispatch.LogPathFor(root, n) }
+	s := newTestSettle(cfg, fc, fc)
+
+	var stderr string
+	testutil.CaptureStdout(t, func() {
+		stderr = testutil.CaptureStderr(t, func() {
+			disp := d.Run()
+			res := dispatch.Route(disp,
+				func() dispatch.Result { t.Fatal("dispatch skipped"); return dispatch.Result{} },
+				func(r dispatch.Result) dispatch.Result { return r },
+				func(r dispatch.Result) dispatch.Result { return r })
+			s.Settle(d, num, 0, res)
+		})
+	})
+	var settled []report.Record
+	for _, rec := range readRecords() {
+		if rec.Event == report.EventSettled {
+			settled = append(settled, rec)
+		}
+	}
+	if len(settled) != 1 {
+		t.Fatalf("settled reports = %+v, want exactly one", settled)
+	}
+	return settled[0], stderr
+}
+
+// A store that cannot be written costs the Dispatch nothing: the failure is
+// logged and the settle reports and appends exactly what it would have.
+func TestSettle_IngestFailureIsLoggedNotFatal(t *testing.T) {
+	const num = "77"
+	good, goodErr := settleSeamComplete(t, t.TempDir(), num)
+	if strings.Contains(goodErr, "could not ingest") {
+		t.Fatalf("healthy store warned: %q", goodErr)
+	}
+
+	root := t.TempDir()
+	if err := os.MkdirAll(hostpaths.DispatchRecordsDB(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	got, stderr := settleSeamComplete(t, root, num)
+
+	if !strings.Contains(stderr, "could not ingest") {
+		t.Errorf("stderr = %q, want the ingest warning", stderr)
+	}
+	if got.State != good.State || got.Note != good.Note || got.PRURL != good.PRURL || (got.RecordID == "") != (good.RecordID == "") {
+		t.Errorf("settled report = %+v, want the healthy run's %+v", got, good)
+	}
+	log, err := os.ReadFile(dispatch.LogPathFor(root, num))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(log), claude.OpDispatchSettled) {
+		t.Errorf("log lacks the %s op", claude.OpDispatchSettled)
+	}
+}
+
+// Slots settle at once on one root; every Dispatch's Record must land.
+func TestSettled_ConcurrentSettlesAllLand(t *testing.T) {
+	testutil.InstallPipeReporter(t)
+	root := t.TempDir()
+	const n = 8
+	type slot struct {
+		d   *dispatch.Dispatch
+		num string
+	}
+	slots := make([]slot, n)
+	for i := range slots {
+		num := fmt.Sprintf("%d", 100+i)
+		fr := runner.NewFake()
+		fr.RunFunc = seamBoxRun(num, "implement", "a"+num, "2026-05-01T09:00:00Z", "ready", "box-said-so")
+		d := seamDispatch(t, root, num, fr)
+		testutil.CaptureStdout(t, func() { d.Run() })
+		slots[i] = slot{d, num}
+	}
+
+	var wg, ready sync.WaitGroup
+	start := make(chan struct{})
+	for _, sl := range slots {
+		wg.Add(1)
+		ready.Add(1)
+		go func() {
+			defer wg.Done()
+			ready.Done()
+			<-start
+			SettledBy(sl.d, dispatchkey.Issue(sl.num), "complete", "merged", "")
+		}()
+	}
+	ready.Wait()
+	stderr := testutil.CaptureStderr(t, func() {
+		close(start)
+		wg.Wait()
+	})
+	if strings.Contains(stderr, "could not ingest") {
+		t.Errorf("a concurrent ingest failed: %q", stderr)
+	}
+
+	recs := storedRecords(t, root)
+	if len(recs) != n {
+		t.Fatalf("stored %d records, want %d", len(recs), n)
+	}
+	for _, r := range recs {
+		if r.Outcome != "complete" || r.OutcomeSource != dispatchrecord.OutcomeSourceSettled {
+			t.Errorf("record %s outcome/source = %q/%q, want complete/dispatch_settled", r.ID, r.Outcome, r.OutcomeSource)
+		}
+		if len(r.Passes) != 1 || r.Passes[0].Role != "implement" {
+			t.Errorf("record %s passes = %+v, want one implement pass", r.ID, r.Passes)
+		}
+	}
+
+	db, err := sql.Open("sqlite", hostpaths.DispatchRecordsDB(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var integrity string
+	if err := db.QueryRow("PRAGMA integrity_check").Scan(&integrity); err != nil {
+		t.Fatal(err)
+	}
+	if integrity != "ok" {
+		t.Errorf("integrity_check = %q, want ok", integrity)
 	}
 }
