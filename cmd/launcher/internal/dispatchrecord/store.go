@@ -292,13 +292,13 @@ func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 		if !PassLogName(e.Name()) {
 			continue
 		}
-		key, satellite := logKey(e.Name())
+		key, role := logKey(e.Name())
 		if chainKey != "" && key != chainKey {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
 		seen = append(seen, path)
-		if satellite {
+		if role == satelliteRole {
 			satellites = append(satellites, satelliteLog{path, key})
 		} else {
 			primaries = append(primaries, path)
@@ -314,8 +314,8 @@ func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 	// logs after it; a satellite revisited in a later round reports once.
 	var unreadable []error
 	failed := map[string]bool{}
-	visit := func(path string, satellite, reparse bool) (string, error) {
-		did, shifted, err := s.ingestFile(path, satellite, reparse)
+	visit := func(path string, role logRole, reparse bool) (string, error) {
+		did, shifted, err := s.ingestFile(path, role, reparse)
 		if did {
 			parsedPaths[path] = true
 		}
@@ -334,7 +334,7 @@ func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 	// final Record set.
 	pending := map[string]string{}
 	for _, path := range primaries {
-		shifted, err := visit(path, false, force)
+		shifted, err := visit(path, primaryRole, force)
 		if err != nil {
 			return len(parsedPaths), err
 		}
@@ -359,7 +359,7 @@ func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 			if !first && (!shifting || last == sat.path) {
 				continue
 			}
-			shifted, err := visit(sat.path, true, force || shifting)
+			shifted, err := visit(sat.path, satelliteRole, force || shifting)
 			if err != nil {
 				return len(parsedPaths), err
 			}
@@ -399,7 +399,7 @@ func sameStat(size, mtimeNs int64, info fs.FileInfo) bool {
 // ingestFile parses and upserts one log unless it is unchanged, and reports
 // whether it recorded it (a parse that upsert discards as stale does not count) and
 // the dispatch key whose satellite windows it shifted (see upsert).
-func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, error) {
+func (s *Store) ingestFile(path string, role logRole, reparse bool) (bool, string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -423,7 +423,7 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 	default:
 		return false, "", &readError{fmt.Errorf("dispatchrecord: %s: %w", path, err)}
 	}
-	shifted, err := s.upsert(path, info, recp, segment, provisional, satellite)
+	shifted, err := s.upsert(path, info, recp, segment, provisional, role)
 	if err != nil {
 		if errors.Is(err, errStaleParse) {
 			return false, "", nil
@@ -437,14 +437,27 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 // does not classify.
 var rotatedPrimary = regexp.MustCompile(`^(issue-.+\.log)\.\d+((?:\.prior-run\.\d+)?)$`)
 
+// logRole is a pass log's place in its chain: a primary log (or a rotation of
+// one) or a satellite that joins a Dispatch by time window.
+type logRole int
+
+const (
+	primaryRole logRole = iota
+	satelliteRole
+)
+
 // logKey is ChainKey extended to a primary's rotated attempts, which belong to
-// the key of the log they rotated from.
-func logKey(name string) (key string, satellite bool) {
+// the key of the log they rotated from, and returns the log's role; a rotated
+// primary is always primaryRole.
+func logKey(name string) (key string, role logRole) {
 	key, satellite, ok := ChainKey(name)
 	if !ok {
 		key, satellite, _ = ChainKey(rotatedPrimary.ReplaceAllString(name, "$1$2"))
 	}
-	return key, satellite
+	if satellite {
+		return key, satelliteRole
+	}
+	return key, primaryRole
 }
 
 // forgetMissing drops the ingested_files rows for paths not in seen, leaving
@@ -538,7 +551,7 @@ func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 // log still being appended can lose its parse this way and lags one ingest; a
 // live primary's discarded first-sighting parse can leave a stable satellite of
 // its key standing as its own Record until the next ingest replaces it.
-func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional, satellite bool) (shifted string, err error) {
+func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional bool, role logRole) (shifted string, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return "", err
@@ -565,13 +578,14 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	var logStart int64
 	var sameFile, joined bool
 	if rec != nil {
+		inferredSatellite := role == satelliteRole && rec.Attribution == AttributionInferred
 		newID = rec.ID
 		logStart = segment.UnixMilli()
 		statSame := sameStat(oldSize, oldMtime, info)
 		// The stored row describes this same file's earlier read: a provisional
 		// start moves as the log grows, a timestamped one never does.
 		sameFile = oldID != "" && (oldProvisional || statSame || oldStart == logStart)
-		if satellite && rec.Attribution == AttributionInferred && !sameFile {
+		if inferredSatellite && !sameFile {
 			// The stored row, if any, is another file's that held this path, so its
 			// segment stays put. Adopt any same-key segment starting in the same
 			// millisecond as this file's earlier read (a renamed log's), the
@@ -592,7 +606,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		}
 		// A satellite that joined a Record does not own it; an orphan
 		// satellite's own Record starts at the file's start.
-		if satellite && rec.Attribution == AttributionInferred && oldID != "" {
+		if inferredSatellite && oldID != "" {
 			var oldClaim int64
 			err := tx.QueryRow("SELECT claim_time FROM records WHERE record_id = ?", oldID).Scan(&oldClaim)
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -601,7 +615,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			joined = err == nil && oldClaim != oldStart
 		}
 		writesRecord := true
-		if satellite && rec.Attribution == AttributionInferred {
+		if inferredSatellite {
 			// Never its own Record: an orphan re-parsed would otherwise capture itself
 			// and never move onto a Dispatch that has since appeared.
 			owned := rec.ID
@@ -881,7 +895,7 @@ func detachSatellites(tx *sql.Tx, recordID, except string) error {
 			rows.Close()
 			return err
 		}
-		if _, satellite, _ := ChainKey(filepath.Base(j.path)); satellite {
+		if _, role := logKey(filepath.Base(j.path)); role == satelliteRole {
 			sats = append(sats, j)
 		}
 	}
