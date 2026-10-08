@@ -3,6 +3,7 @@ package main
 import (
 	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -160,7 +161,18 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 		ingest = store.Reingest
 	}
 	if _, err := ingest(); err != nil {
-		return nil, err
+		if !errors.Is(err, dispatchrecord.ErrUnreadableLog) {
+			return nil, err
+		}
+		// Skipped logs are retried next run; the Records from everything
+		// else are still good.
+		errs := []error{err}
+		if joined, ok := err.(interface{ Unwrap() []error }); ok {
+			errs = joined.Unwrap()
+		}
+		for _, e := range errs {
+			fmt.Fprintf(stderr, "warning: skipping unreadable log: %v\n", e)
+		}
 	}
 	records, err := store.Records()
 	if err != nil {

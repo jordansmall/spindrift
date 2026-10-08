@@ -2,6 +2,7 @@ package dispatchrecord
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1645,6 +1646,9 @@ func TestStoreIngestSkipsUnreadableLog(t *testing.T) {
 	n, err := s.Ingest()
 	if err == nil {
 		t.Fatal("Ingest returned nil error for unreadable logs")
+	}
+	if !errors.Is(err, ErrUnreadableLog) {
+		t.Errorf("Ingest error does not match ErrUnreadableLog: %v", err)
 	}
 	for _, p := range []string{bad, badSat} {
 		if got := strings.Count(err.Error(), "dispatchrecord: "+p+":"); got != 1 {

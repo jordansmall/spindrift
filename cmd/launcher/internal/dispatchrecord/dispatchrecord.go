@@ -565,3 +565,8 @@ func announcedKind(s string) string {
 	}
 	return ""
 }
+
+// ErrUnreadableLog matches the error Ingest returns for logs it could not read
+// (permissions, I/O) and skipped; the rest of the root was still ingested, so
+// it is a warning, unlike a store failure.
+var ErrUnreadableLog = errors.New("dispatchrecord: unreadable log")
