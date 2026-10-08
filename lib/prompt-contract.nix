@@ -263,8 +263,10 @@ rec {
       runtimeMessage = "read-only Box: gh api does not accept a mutating method (explicit, or implied POST from field/input flags) under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally.";
     }
     # The fj rows below mirror the gh rows one-for-one and are shimmed the
-    # same way (issue #2509). agent/entrypoint.sh installs the command-shim
-    # guards unconditionally, while the git-hook guard stays gated on
+    # same way (issue #2509). box's installReadonlyGuards
+    # (cmd/launcher/box/readonlyguards.go) installs the command-shim guards,
+    # via the readonlyguards package, on every read-only Box with a forge to
+    # guard, while the git-hook guard stays gated on
     # BOX_HOST_MEDIATED_REMOTE/BOX_OUTBOX_RELAY_CAPABLE. No backend leaves
     # both false today (issue #2927), but the gate stays for one that might.
     {
