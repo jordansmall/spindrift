@@ -2789,10 +2789,11 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   `immediate` rebase-merges the PR (retrying rebase conflicts, dispatching an
   agent conflict-resolve box, and re-waiting for CI on the new head as needed
   — the issue stays `agent-in-progress` throughout), then verifies it really is
-  merged; `auto` enqueues GitHub's native auto-merge; `manual` (the default)
-  leaves the green PR open for a human. Only once that settles does the merge
-  gate swap `agent-in-progress` → `agent-complete` — the agent's work is done.
-  `Closes #N` in the PR body closes the issue whenever the PR merges.
+  merged; `auto` enqueues the forge's native auto-merge (`github` or
+  `forgejo`); `manual` (the default) leaves the green PR open for a human.
+  Only once that settles does the merge gate swap `agent-in-progress` →
+  `agent-complete` — the agent's work is done. `Closes #N` in the PR body
+  closes the issue whenever the PR merges.
   (Dependency ordering keys off the PR actually being merged, not this label —
   see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
 - **A relay that exhausts its retries parks the issue.** When a read-only Box
