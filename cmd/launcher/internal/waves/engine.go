@@ -14,7 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/panicguard"
-	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/terminate"
@@ -22,9 +21,10 @@ import (
 
 // transitionState logs a failed dispatch-state transition rather than
 // propagating the error. note carries the most specific reason live at the
-// call site, "" where none exists -- mirrors settle.Settle's own
-// transitionState(num, from, to, note) shape so both spellings agree.
-func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchState, note string) {
+// call site, "" where none exists; reason is that site's status= class.
+// Unlike settle.Settle's method of the same name it takes d first and settles
+// d's Record directly rather than latching.
+func transitionState(d dispatch.Dispatcher, it forge.IssueTracker, num string, from, to forge.DispatchState, note, reason string) {
 	if err := it.TransitionState(num, from, to); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to state %s\n", num, to)
 	}
@@ -32,7 +32,7 @@ func transitionState(it forge.IssueTracker, num string, from, to forge.DispatchS
 	// (issue #3627): the record is what the host decided, not whether the
 	// tracker write landed.
 	if to.Terminal() {
-		report.Settled(dispatchkey.Issue(num), to.String(), note, "", "")
+		settle.SettledBy(d, dispatchkey.Issue(num), to.String(), reason, note)
 	}
 }
 
@@ -144,7 +144,7 @@ func dispatchWave(cfg Config, it forge.IssueTracker, cf forge.CodeForge, f *disp
 					func(result dispatch.Result) struct{} {
 						fmt.Printf("    !! #%s FAILED (.spindrift/logs/issue-%s.log)\n", iss.Number, iss.Number)
 						result.ReportFailureReason(iss.Number)
-						transitionState(it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote())
+						transitionState(d, it, iss.Number, forge.InProgress, forge.Failed, result.FailureNote(), settle.ReasonBoxFailed)
 						return struct{}{}
 					},
 					func(result dispatch.Result) struct{} {

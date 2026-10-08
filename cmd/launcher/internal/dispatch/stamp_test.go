@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
@@ -168,4 +169,90 @@ func TestDispatchStart_ReadOnlyBoxKindStampsEffectiveAccess(t *testing.T) {
 	if cfg.Stamp.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"] != "read-write" {
 		t.Errorf("Config.Stamp.Knobs mutated: %v", cfg.Stamp.Knobs)
 	}
+}
+
+// TestDispatchStamp_AdoptedFixContinuesPriorRecord pins that a Dispatch which
+// never Ran (recover adopting an open PR) continues the Record stamped at the
+// head of the primary log, so its fix and conflict logs and a later
+// dispatch_settled op land on that Record, not a fresh one.
+func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
+	cfg := retryConfig(1, 0, 0)
+	cfg.Kind = "work"
+	claim := time.Date(2026, 5, 1, 7, 0, 0, 0, time.UTC)
+	prior := dispatchrecord.RecordID("work", "1", claim)
+
+	fr := runner.NewFake()
+	fr.RunFunc = func(box runner.Box) error {
+		box.Output.Write(stampBoxOutput(1)) //nolint:errcheck
+		return nil
+	}
+	clock := Clock{Now: func() time.Time { return time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC) }, Sleep: func(time.Duration) {}}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+		RecordID: prior, Kind: "work", DispatchKey: "1", ClaimTime: claim, Started: claim,
+	}})
+	if err := writeFile(d.logPath(), stamp+string(stampBoxOutput(0))); err != nil {
+		t.Fatal(err)
+	}
+
+	testutil.CaptureStdout(t, func() { d.Fix(1, "") })
+
+	if got := d.RecordID(); got != prior {
+		t.Fatalf("RecordID() = %q, want the primary log's %q", got, prior)
+	}
+	if got := dispatchrecord.StampRecordID(d.fixLogPath(1)); got != prior {
+		t.Errorf("fix log stamp = %q, want %q", got, prior)
+	}
+	rec, _, err := dispatchrecord.ParseLog(d.fixLogPath(1))
+	if err != nil || !rec.ClaimTime.Equal(claim) {
+		t.Errorf("fix log claim time = %v (err %v), want %v", rec.ClaimTime, err, claim)
+	}
+}
+
+// TestDispatchStamp_FixWithoutPrimaryLogMintsFresh covers the orphan PR: no
+// stamped primary log survives, so Fix mints a Record of its own.
+func TestDispatchStamp_FixWithoutPrimaryLogMintsFresh(t *testing.T) {
+	cfg := retryConfig(1, 0, 0)
+	cfg.Kind = "work"
+	fr := runner.NewFake()
+	now := time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC)
+	clock := Clock{Now: func() time.Time { return now }, Sleep: func(time.Duration) {}}
+	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
+
+	testutil.CaptureStdout(t, func() { d.Fix(1, "") })
+
+	if want := dispatchrecord.RecordID("work", "1", now); d.RecordID() != want {
+		t.Errorf("RecordID() = %q, want freshly minted %q", d.RecordID(), want)
+	}
+}
+
+// TestEnsureRecordID_WarnsOnUnreadablePrimaryLog: a primary log that exists but
+// cannot be read may belong to a Record the fix pass is about to split, so
+// minting fresh must not be silent. A missing or unstamped log is the
+// ordinary orphan case and stays quiet.
+func TestEnsureRecordID_WarnsOnUnreadablePrimaryLog(t *testing.T) {
+	cfg := retryConfig(1, 0, 0)
+	cfg.Kind = "work"
+	now := time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC)
+	clock := Clock{Now: func() time.Time { return now }, Sleep: func(time.Duration) {}}
+
+	t.Run("unreadable", func(t *testing.T) {
+		d := newTestDispatch(t, cfg, runner.NewFake(), fakeDriver{}, clock)
+		if err := os.MkdirAll(d.logPath(), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		stderr := captureStderr(t, d.ensureRecordID)
+		if !strings.Contains(stderr, "#"+d.number+": primary log") {
+			t.Errorf("stderr = %q, want a primary-log warning", stderr)
+		}
+		if d.RecordID() == "" {
+			t.Error("RecordID() empty, want a fresh mint")
+		}
+	})
+	t.Run("missing", func(t *testing.T) {
+		d := newTestDispatch(t, cfg, runner.NewFake(), fakeDriver{}, clock)
+		if stderr := captureStderr(t, d.ensureRecordID); stderr != "" {
+			t.Errorf("stderr = %q, want none", stderr)
+		}
+	})
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"maps"
 	"net"
 	"net/url"
@@ -91,10 +92,13 @@ type Dispatch struct {
 	// claims, and again after Close.
 	releaseClaim func()
 
-	// recordID and claimTime identify this Dispatch's Record (issue #4783):
-	// minted once by ensureRecordID, then stamped into every Pass log and
-	// every box report so a retry's rotated log, a fix pass and a conflict
-	// resolve all land on one Record.
+	// recordID and claimTime identify this Dispatch's Record (issue #4783),
+	// stamped into every Pass log and every box report so a retry's rotated
+	// log, a fix pass and a conflict resolve all land on one Record. Run mints
+	// them fresh, before quarantinePriorRunLogs moves aside the primary log of
+	// the Record being replaced. A Dispatch that never Ran (recover adopting an
+	// open PR) has Fix and ResolveConflict continue the prior Record from the
+	// primary log's stamp, minting fresh only when no stamped log survives.
 	recordID  string
 	claimTime time.Time
 
@@ -208,7 +212,7 @@ func (d *Dispatch) Run() Disposition {
 		return Failed(Result{})
 	}
 	d.releaseClaim = release
-	d.ensureRecordID()
+	d.mintRecordID()
 
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
@@ -272,7 +276,7 @@ func (d *Dispatch) ResolveConflict(pr string) error {
 
 // boxEnv is buildBoxEnv plus the Dispatch's own facts. It forwards the Record
 // ID (issue #4786) so the Box can key the prompt_hashes op it emits to this
-// Dispatch's Record; callers run it after ensureRecordID.
+// Dispatch's Record; callers run it after the Record ID is set.
 func (d *Dispatch) boxEnv(fixPass int, ciFailureSummary string) (map[string]string, error) {
 	env, err := buildBoxEnv(d.cfg, d.subject, fixPass, ciFailureSummary, d.nonce)
 	if err != nil {
@@ -307,10 +311,8 @@ func (d *Dispatch) announce(phase, logPath string) {
 	report.Box(d.subject.key, phase, rel, d.recordID)
 }
 
-// ensureRecordID mints the Record ID on first use. Run calls it right after
-// the claim; Fix and ResolveConflict mint lazily for a Dispatch that never ran
-// Run (recover adopting an open PR).
-func (d *Dispatch) ensureRecordID() {
+// mintRecordID mints a fresh Record ID unless the Dispatch already has one.
+func (d *Dispatch) mintRecordID() {
 	if d.recordID != "" {
 		return
 	}
@@ -318,8 +320,26 @@ func (d *Dispatch) ensureRecordID() {
 	d.recordID = dispatchrecord.RecordID(d.cfg.kindName(), d.number, d.claimTime)
 }
 
+// ensureRecordID gives Fix and ResolveConflict a Record ID, continuing the
+// primary log's stamp when there is one. An unreadable log warns: minting
+// fresh there would split the Record the stamp names.
+func (d *Dispatch) ensureRecordID() {
+	if d.recordID != "" {
+		return
+	}
+	rec, _, err := dispatchrecord.ParseLog(d.logPath())
+	if err == nil && rec.Attribution == dispatchrecord.AttributionStamped {
+		d.recordID, d.claimTime = rec.ID, rec.ClaimTime
+		return
+	}
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, dispatchrecord.ErrNoEvents) && !errors.Is(err, dispatchrecord.ErrUnstamped) {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: primary log %s unreadable, minting a fresh Record ID: %v\n", d.number, d.logPath(), err)
+	}
+	d.mintRecordID()
+}
+
 // RecordID returns the Dispatch's Record ID, "" until Run, Fix, or
-// ResolveConflict mints it.
+// ResolveConflict gives it one.
 func (d *Dispatch) RecordID() string {
 	return d.recordID
 }

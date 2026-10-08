@@ -14,7 +14,6 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 )
 
@@ -109,7 +108,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	settle.RecordSettleWarnings(d, num, "", result)
 
 	if !result.Resolved.Found {
-		s.fail(num, "no ready outcome line")
+		s.fail(d, num, "no ready outcome line")
 		return settled{}
 	}
 	o := result.Resolved.Outcome
@@ -118,7 +117,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		if note == "" {
 			note = "status=" + o.Status
 		}
-		s.fail(num, note)
+		s.fail(d, num, note)
 		return settled{}
 	}
 
@@ -254,7 +253,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// stays put so the findings are re-found next run, and the non-zero exit
 	// feeds the daemon breaker instead of spending a Box per sweep forever.
 	if len(filing.Filed) == 0 && filing.Failed > 0 {
-		s.fail(num, fmt.Sprintf("all %d finding(s) failed to file -- see the logged issue-intent filing errors; a missing provenance label is one cause (spindrift doctor --butler)", filing.Failed))
+		s.fail(d, num, fmt.Sprintf("all %d finding(s) failed to file -- see the logged issue-intent filing errors; a missing provenance label is one cause (spindrift doctor --butler)", filing.Failed))
 		return settled{}
 	}
 
@@ -273,7 +272,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)
-		report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), fmt.Sprintf("ledger finish failed: %v", err), "", "")
+		s.settled(d, forge.Failed, settle.ReasonLedgerFinishFailed, fmt.Sprintf("ledger finish failed: %v", err))
 		// Still gate the already-open draft PRs, or they orphan (issue
 		// #4118). #4076's ordering has nothing left to protect: a lost CAS
 		// means a rival owns the Chore, and any other error leaves this
@@ -292,7 +291,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if filing.Dropped > 0 {
 		note = fmt.Sprintf("%s, %d dropped", note, filing.Dropped)
 	}
-	report.Settled(dispatchkey.Chore(s.chore), forge.Complete.String(), note, "", "")
+	s.settled(d, forge.Complete, settle.ReasonFindingsFiled, note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
 
 	// On the success path, hand each patch to the work merge gate only after
@@ -306,6 +305,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 // adoptLandings hands each landed patch's draft PR to the work merge gate.
 func (s *settleRun) adoptLandings(landings []patchLanding) {
 	for _, l := range landings {
+		// nil Dispatcher on purpose: the patch PR settles the finding issue, which
+		// has no Record of its own, and the Chore's Record already settled once.
 		s.patch.gate.SettleAdopted(nil, l.issueNum, 0, l.prURL)
 	}
 }
@@ -462,7 +463,13 @@ func patchPRBody(choreName string, f settle.Finding, findingURL, issueNum string
 // findings nor writes a Ledger commit, so the claim stands and
 // lastSwept/cursor stay at the prior run's values for the next run to resume
 // from.
-func (s *settleRun) fail(num, note string) {
-	report.Settled(dispatchkey.Chore(s.chore), forge.Failed.String(), note, "", "")
+func (s *settleRun) fail(d dispatch.Dispatcher, num, note string) {
+	s.settled(d, forge.Failed, settle.ReasonChoreFailed, note)
 	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
+}
+
+// settled is the Chore Dispatch's one terminal settle: it appends
+// dispatch_settled to the Dispatch's primary Pass log and reports it.
+func (s *settleRun) settled(d dispatch.Dispatcher, state forge.DispatchState, reason, note string) {
+	settle.SettledBy(d, dispatchkey.Chore(s.chore), state.String(), reason, note)
 }
