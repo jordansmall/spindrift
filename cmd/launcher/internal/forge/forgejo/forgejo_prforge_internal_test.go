@@ -81,7 +81,7 @@ func TestStripWIPPrefix_StripsStackedMarkers(t *testing.T) {
 
 // An unset or unrecognized method falls back to "rebase", matching the github
 // adapter's mergeMethodFlag default.
-func TestForgejoMergeDo(t *testing.T) {
+func TestMergeStyle(t *testing.T) {
 	tests := []struct {
 		method string
 		want   string
@@ -93,8 +93,8 @@ func TestForgejoMergeDo(t *testing.T) {
 		{"bogus", "rebase"},
 	}
 	for _, tt := range tests {
-		if got := forgejoMergeDo(tt.method); got != tt.want {
-			t.Errorf("forgejoMergeDo(%q) = %q, want %q", tt.method, got, tt.want)
+		if got := MergeStyle(tt.method); got != tt.want {
+			t.Errorf("MergeStyle(%q) = %q, want %q", tt.method, got, tt.want)
 		}
 	}
 }

@@ -16,6 +16,11 @@ import (
 
 func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) forge.PRForge {
 	t.Helper()
+	return newPRForgeTestForgeWithMethod(t, "", handler)
+}
+
+func newPRForgeTestForgeWithMethod(t *testing.T, mergeMethod string, handler http.HandlerFunc) forge.PRForge {
+	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
 	cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
@@ -23,6 +28,7 @@ func newPRForgeTestForge(t *testing.T, handler http.HandlerFunc) forge.PRForge {
 		Repo:         "owner/repo",
 		Token:        "tok",
 		BranchPrefix: "agent/issue-",
+		MergeMethod:  mergeMethod,
 	}, nil, "unused")
 	pr, ok := cf.(forge.PRForge)
 	if !ok {
@@ -688,33 +694,42 @@ func TestNeedsUpdate_False(t *testing.T) {
 	}
 }
 
-func TestCanAutoMerge_True(t *testing.T) {
-	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/repos/owner/repo" {
-			http.NotFound(w, r)
-			return
+// CanAutoMerge must report only the style EnqueueAutoMerge will post, so a repo
+// allowing some other style cannot pass preflight and then fail the enqueue,
+// whatever the other styles allow.
+func TestCanAutoMerge_MatchesConfiguredStyle(t *testing.T) {
+	for _, method := range []string{"merge", "squash", "rebase", ""} {
+		for mask := 0; mask < 8; mask++ {
+			allow := map[string]bool{
+				"merge":  mask&1 != 0,
+				"squash": mask&2 != 0,
+				"rebase": mask&4 != 0,
+			}
+			t.Run(fmt.Sprintf("%q/%03b", method, mask), func(t *testing.T) {
+				body, err := json.Marshal(map[string]bool{
+					"allow_merge_commits": allow["merge"],
+					"allow_squash_merge":  allow["squash"],
+					"allow_rebase":        allow["rebase"],
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+				pr := newPRForgeTestForgeWithMethod(t, method, func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/api/v1/repos/owner/repo" {
+						http.NotFound(w, r)
+						return
+					}
+					w.Write(body)
+				})
+				got, err := pr.CanAutoMerge()
+				if err != nil {
+					t.Fatalf("CanAutoMerge() unexpected error: %v", err)
+				}
+				if want := allow[forgejo.MergeStyle(method)]; got != want {
+					t.Fatalf("CanAutoMerge() = %v, want %v", got, want)
+				}
+			})
 		}
-		w.Write([]byte(`{"allow_merge_commits":false,"allow_rebase":true,"allow_squash_merge":false}`))
-	})
-	got, err := pr.CanAutoMerge()
-	if err != nil {
-		t.Fatalf("CanAutoMerge() unexpected error: %v", err)
-	}
-	if !got {
-		t.Fatal("CanAutoMerge() = false, want true")
-	}
-}
-
-func TestCanAutoMerge_False(t *testing.T) {
-	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"allow_merge_commits":false,"allow_rebase":false,"allow_squash_merge":false}`))
-	})
-	got, err := pr.CanAutoMerge()
-	if err != nil {
-		t.Fatalf("CanAutoMerge() unexpected error: %v", err)
-	}
-	if got {
-		t.Fatal("CanAutoMerge() = true, want false")
 	}
 }
 
