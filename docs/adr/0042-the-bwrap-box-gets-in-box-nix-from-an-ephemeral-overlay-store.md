@@ -386,3 +386,25 @@ With the reclaim local to `provisionCgroup`, nothing called `Runner.Reap`
 through the interface, so the method is removed. The OCI adapter keeps its
 exited-container removal as a private helper called from `ociAdapter.Run`,
 and the bwrap and bwrap-build implementations are deleted.
+
+## Amendment (issue #4815): the Box is cloned straight into its cgroup
+
+`Run` used to write the Box's PID into `cgroup.procs` only after
+`cmd.Start()` returned. By then pasta and bwrap may already have forked
+their own children (the netns command and the sandbox's PID 1), and a
+migration moves one process, never its existing descendants. A launcher
+that lost that race left the whole sandbox in its own cgroup with no
+`pids.max` or `memory.max`. The write still succeeded, so nothing warned.
+
+`Run` now opens the per-Box cgroup directory before `Start` and starts the
+child with `SysProcAttr.UseCgroupFD` (`CLONE_INTO_CGROUP`, Linux 5.7+), so
+the Box is created inside its cgroup and every fork inherits the limits.
+The setting merges into the `Pdeathsig` attribute rather than replacing it.
+Where the kernel refuses the clone, `Start` fails, and because an
+`exec.Cmd` starts only once, `Run` builds a fresh command without the flag
+and starts that. The post-`Start` `cgroup.procs` write stays. It is a
+same-cgroup no-op after a successful clone, and on the fallback path it is
+the old best-effort migration, race included. A failed open of the
+directory also degrades straight to that path. Both ways onto the
+fallback print a warning, so a host that always refuses the clone is
+visible rather than silently racy.
