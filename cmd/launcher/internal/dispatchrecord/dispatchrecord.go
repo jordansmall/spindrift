@@ -483,19 +483,26 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	claim = claim.UTC()
 
 	kind := KindUnknown
+	sk := statusKind(status)
 	switch {
 	case dispatchkey.IsChoreKey(key):
 		kind = choreKeyedKind()
-	case slices.Contains(researchOnlyStatuses, status):
-		kind = dispatchkind.Research.Name
+	case announced != "" && announced != dispatchkind.Work.Name:
+		// Only work's verb is ambiguous: logs before #734 announce research as
+		// "implementing" too, so a kind-unique status must outrank that verb.
+		// A frozen quirk of old logs, not a kind fact, so it stays off the
+		// descriptor.
+		kind = announced
+	case sk != KindUnknown:
+		kind = sk
 	case announced != "":
-		// After the research-only case: logs before #734 announce research as
-		// "implementing", so a research-only status must outrank the verb.
 		kind = announced
 	case firstRole != "":
 		kind = dispatchkind.Work.Name
-	case slices.Contains(outcome.WorkStatuses, status):
-		// A pre-orchestrator single-pass run has no pass_start to name a role.
+	case status == outcome.StatusBlocked:
+		// Pre-orchestrator single-pass run: no pass_start names a role. Of the
+		// compiled-default statuses only the shared blocked is still unsettled
+		// here; any other status falls through to KindUnknown.
 		kind = dispatchkind.Work.Name
 	}
 
@@ -511,12 +518,12 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	}, !haveTS, claim, nil
 }
 
-// choreKeyedKind is the name of the one kind keyed by Ledger Chore, or
-// KindUnknown if the descriptors do not single one out.
-func choreKeyedKind() string {
+// soleKind is the name of the one kind whose descriptor satisfies match, or
+// KindUnknown if none or several do.
+func soleKind(match func(*dispatchkind.Descriptor) bool) string {
 	name := KindUnknown
 	for _, d := range dispatchkind.All {
-		if d.Keying != dispatchkind.ByChore {
+		if !match(d) {
 			continue
 		}
 		if name != KindUnknown {
@@ -527,17 +534,17 @@ func choreKeyedKind() string {
 	return name
 }
 
-// researchOnlyStatuses are the statuses only the research kind emits; blocked
-// is shared with work, so it says nothing about the kind.
-var researchOnlyStatuses = func() []string {
-	var out []string
-	for _, s := range outcome.ResearchStatuses {
-		if !slices.Contains(outcome.WorkStatuses, s) {
-			out = append(out, s)
-		}
-	}
-	return out
-}()
+// choreKeyedKind is the name of the one kind keyed by Ledger Chore, or
+// KindUnknown if the descriptors do not single one out.
+func choreKeyedKind() string {
+	return soleKind(func(d *dispatchkind.Descriptor) bool { return d.Keying == dispatchkind.ByChore })
+}
+
+// statusKind is the name of the one kind whose descriptor lists status, or
+// KindUnknown if none or several do (blocked is shared, so it names no kind).
+func statusKind(status string) string {
+	return soleKind(func(d *dispatchkind.Descriptor) bool { return slices.Contains(d.Statuses, status) })
+}
 
 // announcedKind is the kind whose Box start line ("==> claude <verb> ...") s
 // is, or "" when s is not one. Verbs come from the descriptors, so a new kind
