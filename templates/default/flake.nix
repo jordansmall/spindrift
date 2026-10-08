@@ -212,7 +212,7 @@
             #     guardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
             #     # how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method on github and to the Forgejo merge API's Do field on forgejo (github and forgejo Code Forge merge paths only)
             #     method = "rebase";
-            #     # post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo at least one merge style), manual (leave PR open for human approval)
+            #     # post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo needs the MERGE_METHOD merge style allowed), manual (leave PR open for human approval)
             #     policy = "manual";
             #     # seconds between merge-gate poll iterations; not a rate-limit lever — the gate is one strictly-serialized single-point GraphQL query at a time, only while a PR is actively landing (the cadence-sensitive pollers are the continuous refill ticker and the console backlog poll), and the interval is reused as four fixed-call-count delays (SUCCESS confirm, check-registration window, merge-blocked retry, fix-pass confirm) that stretch with it for zero rate-limit benefit — see docs/reference.md before bumping (issue #3249)
             #     pollInterval = 30;
