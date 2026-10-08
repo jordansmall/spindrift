@@ -1060,6 +1060,65 @@ func TestStoreMigratesV3DatabaseWithOutcomeDefaults(t *testing.T) {
 	}
 }
 
+// v7 (issue #4833) gives each segment its log's identity and backfills the
+// orphan marker from the old claim-time inference.
+func TestStoreMigratesV6DatabaseBackfillsSegmentIdentity(t *testing.T) {
+	root := t.TempDir()
+	path := hostpaths.DispatchRecordsDB(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "work:7@fix"
+	const passInsert = `INSERT INTO passes (record_id, log_start, log, ordinal, role, models, usd, input_tokens, output_tokens,
+		cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms, api_duration_ms, verdict) VALUES `
+	stmts := append([]string{}, migrations[:6]...)
+	stmts = append(stmts, "PRAGMA user_version = 6",
+		`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome) VALUES ('`+id+`', 'work', '7', 1000, 'inferred', 'unknown')`,
+		`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome) VALUES ('work:8@p', 'work', '8', 2000, 'inferred', 'unknown')`,
+		`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome) VALUES ('work:9@c', 'work', '9', 3000, 'inferred', 'unknown')`,
+		passInsert+`('`+id+`', 1000, 'issue-7-fix-1.log', 1, 'fix', 'opus', 1.5, 1, 2, 3, 4, 5, 6, 7, 8, 'ready')`,
+		passInsert+`('work:8@p', 2000, 'issue-8.log', 1, 'implement', 'opus', 1, 1, 2, 3, 4, 5, 6, 7, 8, 'ready')`,
+		passInsert+`('work:9@c', 3000, 'issue-9.log', 1, 'implement', 'opus', 1, 1, 2, 3, 4, 5, 6, 7, 8, 'ready')`,
+		passInsert+`('work:9@c', 3000, 'issue-9-fix-1.log', 2, 'fix', 'opus', 1, 1, 2, 3, 4, 5, 6, 7, 8, 'ready')`,
+		`INSERT INTO prompt_hashes (record_id, log_start, role, hash) VALUES ('`+id+`', 1000, 'fix', 'abc')`,
+		`INSERT INTO ingested_files (path, size, mtime_ns, record_id, provisional, log_start) VALUES ('/gone/issue-7-fix-1.log', 10, 20, '`+id+`', 0, 1000)`)
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	s := openStore(t, root)
+	var orphan, primary, hashLog string
+	if err := s.db.QueryRow("SELECT orphan_log FROM records WHERE record_id = ?", id).Scan(&orphan); err != nil || orphan != "issue-7-fix-1.log" {
+		t.Fatalf("orphan_log = %q, err %v", orphan, err)
+	}
+	if err := s.db.QueryRow("SELECT orphan_log FROM records WHERE record_id = 'work:8@p'").Scan(&primary); err != nil || primary != "" {
+		t.Fatalf("primary orphan_log = %q, err %v", primary, err)
+	}
+	// A coincident fix pass beside a primary's pass at the claim time is not an
+	// orphan marker, even with the primary's log gone.
+	var coincident string
+	if err := s.db.QueryRow("SELECT orphan_log FROM records WHERE record_id = 'work:9@c'").Scan(&coincident); err != nil || coincident != "" {
+		t.Fatalf("coincident orphan_log = %q, err %v", coincident, err)
+	}
+	if err := s.db.QueryRow("SELECT log FROM prompt_hashes WHERE record_id = ?", id).Scan(&hashLog); err != nil || hashLog != "issue-7-fix-1.log" {
+		t.Fatalf("prompt_hashes.log = %q, err %v", hashLog, err)
+	}
+	var passes, mtime int64
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM passes").Scan(&passes); err != nil || passes != 4 {
+		t.Fatalf("passes = %d, err %v", passes, err)
+	}
+	if err := s.db.QueryRow("SELECT mtime_ns FROM ingested_files").Scan(&mtime); err != nil || mtime != -1 {
+		t.Fatalf("mtime_ns = %d, err %v; want -1", mtime, err)
+	}
+}
+
 // A provisional satellite that joined an earlier Record and then grows past a
 // later Dispatch's start moves there whole: its earlier passes must not stay
 // behind on the first Record.

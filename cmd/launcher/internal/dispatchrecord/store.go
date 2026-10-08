@@ -128,6 +128,69 @@ var migrations = []string{
 	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1 never matches a real
 	-- file, so each row re-parses).
 	UPDATE ingested_files SET mtime_ns = -1;`,
+	// v7: explicit segment identity (issue #4833). An unstamped satellite whose
+	// start equals a primary's claim to the millisecond shared that primary's
+	// (record_id, log_start) key, so the log column joins the passes and
+	// prompt_hashes primary keys and orphan_log names the satellite that
+	// minted an orphan Record (empty for every other Record). The orphan
+	// backfill replays the old inference once (a satellite pass at the claim
+	// time) but skips a Record holding a primary log's pass, since a primary
+	// always writes its own Record ID. Only a Record whose primary passes
+	// predate v6 (log empty) and whose primary log is gone can still be
+	// mis-marked.
+	`ALTER TABLE records ADD COLUMN orphan_log TEXT NOT NULL DEFAULT '';
+	UPDATE records SET orphan_log = COALESCE((SELECT MIN(p.log) FROM passes p
+		WHERE p.record_id = records.record_id AND p.log_start = records.claim_time
+		AND (p.log GLOB 'issue-*-fix-[0-9]*.log*' OR p.log GLOB 'issue-*-conflict-resolve.log*')), '')
+		WHERE attribution = 'inferred' AND NOT EXISTS (SELECT 1 FROM passes q
+				WHERE q.record_id = records.record_id AND q.log <> ''
+				AND NOT (q.log GLOB 'issue-*-fix-[0-9]*.log*' OR q.log GLOB 'issue-*-conflict-resolve.log*'));
+	CREATE TABLE passes_v3 (
+		record_id                   TEXT NOT NULL,
+		log_start                   INTEGER NOT NULL, -- unix ms, UTC
+		log                         TEXT NOT NULL DEFAULT '', -- source log base name; empty when migrated
+		ordinal                     INTEGER NOT NULL,
+		role                        TEXT NOT NULL,
+		models                      TEXT NOT NULL,
+		usd                         REAL NOT NULL,
+		input_tokens                INTEGER NOT NULL,
+		output_tokens               INTEGER NOT NULL,
+		cache_read_input_tokens     INTEGER NOT NULL,
+		cache_creation_input_tokens INTEGER NOT NULL,
+		api_calls                   INTEGER NOT NULL,
+		turns                       INTEGER NOT NULL,
+		duration_ms                 INTEGER NOT NULL,
+		api_duration_ms             INTEGER NOT NULL,
+		verdict                     TEXT NOT NULL,
+		verdict_text                TEXT NOT NULL DEFAULT '',
+		dispositions                TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (record_id, log_start, log, ordinal)
+	);
+	INSERT INTO passes_v3 (record_id, log_start, log, ordinal, role, models, usd, input_tokens, output_tokens,
+		cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms, api_duration_ms, verdict,
+		verdict_text, dispositions)
+	SELECT record_id, log_start, log, ordinal, role, models, usd, input_tokens, output_tokens,
+		cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms, api_duration_ms, verdict,
+		verdict_text, dispositions
+	FROM passes;
+	CREATE TABLE prompt_hashes_v2 (
+		record_id TEXT NOT NULL,
+		log_start INTEGER NOT NULL, -- unix ms, UTC
+		log       TEXT NOT NULL DEFAULT '', -- source log base name; empty when migrated
+		role      TEXT NOT NULL,
+		hash      TEXT NOT NULL,
+		PRIMARY KEY (record_id, log_start, log, role)
+	);
+	INSERT INTO prompt_hashes_v2 (record_id, log_start, log, role, hash)
+	SELECT h.record_id, h.log_start,
+		COALESCE((SELECT MIN(p.log) FROM passes p WHERE p.record_id = h.record_id AND p.log_start = h.log_start), ''),
+		h.role, h.hash
+	FROM prompt_hashes h;
+	DROP TABLE passes;
+	ALTER TABLE passes_v3 RENAME TO passes;
+	DROP TABLE prompt_hashes;
+	ALTER TABLE prompt_hashes_v2 RENAME TO prompt_hashes;
+	UPDATE ingested_files SET mtime_ns = -1;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -574,6 +637,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
+	base := filepath.Base(path)
+	oldLog := base
 	newID := ""
 	var logStart int64
 	var sameFile, joined bool
@@ -590,11 +655,11 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			// segment stays put. Adopt any same-key segment starting in the same
 			// millisecond as this file's earlier read (a renamed log's), the
 			// coincident-start collision class accepted elsewhere.
-			oldID, oldStart, oldProvisional = "", 0, false
+			oldID, oldStart, oldProvisional, oldLog = "", 0, false, base
 			for _, table := range segmentTables {
 				err := tx.QueryRow(
-					`SELECT record_id FROM `+table+` WHERE log_start = ? AND record_id IN (SELECT record_id FROM records WHERE dispatch_key = ?)
-						 ORDER BY record_id LIMIT 1`, logStart, rec.DispatchKey).Scan(&oldID)
+					`SELECT record_id, log FROM `+table+` WHERE log_start = ? AND record_id IN (SELECT record_id FROM records WHERE dispatch_key = ?)
+						 ORDER BY record_id, log LIMIT 1`, logStart, rec.DispatchKey).Scan(&oldID, &oldLog)
 				if err == nil {
 					oldStart, sameFile = logStart, true
 					break
@@ -636,18 +701,18 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		}
 		for _, table := range segmentTables {
 			if oldID == newID || sameFile {
-				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", oldID, oldStart); err != nil {
+				if err := deleteSegment(tx, table, oldID, oldStart, oldLog); err != nil {
 					return "", err
 				}
 			}
-			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", newID, logStart); err != nil {
+			if err := deleteSegment(tx, table, newID, logStart, base); err != nil {
 				return "", err
 			}
 		}
 		for role, hash := range rec.PromptHashes {
 			if _, err := tx.Exec(
-				`INSERT INTO prompt_hashes (record_id, log_start, role, hash) VALUES (?, ?, ?, ?)`,
-				newID, logStart, role, hash); err != nil {
+				`INSERT INTO prompt_hashes (record_id, log_start, log, role, hash) VALUES (?, ?, ?, ?, ?)`,
+				newID, logStart, base, role, hash); err != nil {
 				return "", err
 			}
 		}
@@ -729,7 +794,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			// Rows still on oldID belong to logs no longer on disk; deleting a
 			// log never removes its pass, so each re-windows by its own start
 			// like a live satellite, falling back to the replacement.
-			// Only a coincident-start key collision is left to the DELETE.
+			// A legacy segment (log empty) or a same-named one already on the target
+			// can still collide on the key; the DELETE takes it.
 			for _, table := range segmentTables {
 				if _, err := tx.Exec("UPDATE OR IGNORE "+table+` SET record_id = COALESCE((`+windowQuery(table+".log_start", "record_id <> ?")+`), ?) WHERE record_id = ?`,
 					rec.DispatchKey, oldID, newID, oldID); err != nil {
@@ -801,7 +867,7 @@ func (s *Store) Records() ([]Record, error) {
 
 	prows, err := tx.Query(
 		`SELECT ` + passColumns + `
-		 FROM passes ORDER BY record_id, log_start, ordinal`)
+		 FROM passes ORDER BY record_id, log_start, log, ordinal`)
 	if err != nil {
 		return nil, err
 	}
@@ -853,7 +919,7 @@ func unmarshalMap(s string) (map[string]string, error) {
 // loadPromptHashes fills each Record's PromptHashes with the union across its
 // logs; ordering by segment lets a later log's hash for a role win.
 func loadPromptHashes(tx *sql.Tx, recs []Record, byID map[string]int) error {
-	rows, err := tx.Query(`SELECT record_id, role, hash FROM prompt_hashes ORDER BY record_id, log_start`)
+	rows, err := tx.Query(`SELECT record_id, role, hash FROM prompt_hashes ORDER BY record_id, log_start, log`)
 	if err != nil {
 		return err
 	}
@@ -907,11 +973,59 @@ func detachSatellites(tx *sql.Tx, recordID, except string) error {
 	}
 	for _, j := range sats {
 		for _, table := range segmentTables {
-			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", recordID, j.start); err != nil {
+			if err := deleteSegment(tx, table, recordID, j.start, filepath.Base(j.path)); err != nil {
 				return err
 			}
 		}
 		if _, err := tx.Exec("UPDATE ingested_files SET record_id = '', size = ? WHERE path = ?", forceReparseSize, j.path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// logStem is a log's base name without its rotation (.N) or quarantine
+// (.prior-run.N) suffix, so a renamed log keeps its stem.
+var logStem = regexp.MustCompile(`^(.*\.log)(?:\.\d+)?(?:\.prior-run\.\d+)?$`)
+
+func stemOf(name string) string {
+	if m := logStem.FindStringSubmatch(name); m != nil {
+		return m[1]
+	}
+	return name
+}
+
+// deleteSegment clears the segment of the log named name under (recordID,
+// start), plus any legacy row that predates the log column. A renamed log
+// (rotated or quarantined) is the same log moving, so rows at the key under
+// another name of the same stem go too. Any other stem at the key, a coincident
+// primary's or peer's, is another log and stays. Two distinct same-stem logs at
+// one millisecond (a quarantined fix log and a fresh one after an mtime
+// collapse) are indistinguishable from a rename and still overwrite each other.
+func deleteSegment(tx *sql.Tx, table, recordID string, start int64, name string) error {
+	rows, err := tx.Query("SELECT DISTINCT log FROM "+table+" WHERE record_id = ? AND log_start = ?", recordID, start)
+	if err != nil {
+		return err
+	}
+	logs := []string{""}
+	for rows.Next() {
+		var l string
+		if err := rows.Scan(&l); err != nil {
+			rows.Close()
+			return err
+		}
+		if l != "" && stemOf(l) == stemOf(name) {
+			logs = append(logs, l)
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, l := range logs {
+		if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ? AND log = ?", recordID, start, l); err != nil {
 			return err
 		}
 	}
