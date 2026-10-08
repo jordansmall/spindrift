@@ -1793,3 +1793,102 @@ func TestStoreIngestChainForgetsOnlyItsOwnDeletedLogs(t *testing.T) {
 		t.Fatalf("ingested = %v, want %v", got, want)
 	}
 }
+
+// statAndParse stats and parses the log at p, as ingestFile does before upsert.
+func statAndParse(t *testing.T, p string) (os.FileInfo, Record, bool, time.Time) {
+	t.Helper()
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, prov, seg, err := parseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info, rec, prov, seg
+}
+
+func TestStoreUpsertDiscardsParseOfSupersededLog(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-42.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
+	s := openStore(t, root)
+	staleInfo, staleRec, prov, seg := statAndParse(t, p)
+
+	appendLog(t, p, append(workLog("2026-05-01T09:30:00Z", 2),
+		settledLine(RecordID("work", "42", stampClaim), "complete", "merged"))...)
+	ingest(t, s)
+	settled := records(t, s)
+	if len(settled) != 1 {
+		t.Fatalf("records = %v, want one", ids(settled))
+	}
+	want := settled[0]
+	if want.Outcome != "complete" || len(want.Passes) != 2 {
+		t.Fatalf("settled record = outcome %q, %d passes", want.Outcome, len(want.Passes))
+	}
+
+	if _, err := s.upsert(p, staleInfo, &staleRec, seg, prov, false); !errors.Is(err, errStaleParse) {
+		t.Fatalf("upsert of a superseded parse = %v, want errStaleParse", err)
+	}
+	kept := records(t, s)
+	if len(kept) != 1 || !reflect.DeepEqual(kept[0], want) {
+		t.Fatalf("records = %+v, want the settled ingest kept: %+v", kept, want)
+	}
+	disk, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var size int64
+	if err := s.db.QueryRow("SELECT size FROM ingested_files WHERE path = ?", p).Scan(&size); err != nil {
+		t.Fatal(err)
+	}
+	if size != disk.Size() {
+		t.Fatalf("ingested size = %d, want %d", size, disk.Size())
+	}
+}
+
+func TestStoreUpsertDiscardsParseOfRemovedLog(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-42.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
+	s := openStore(t, root)
+	info, rec, prov, seg := statAndParse(t, p)
+	if err := os.Remove(p); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.upsert(p, info, &rec, seg, prov, false); !errors.Is(err, errStaleParse) {
+		t.Fatalf("upsert of a removed log = %v, want errStaleParse", err)
+	}
+	if got := records(t, s); len(got) != 0 {
+		t.Fatalf("records = %v, want none", ids(got))
+	}
+}
+
+func TestStoreIngestDiscardsParseOfLogChangedMidParse(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-42.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...)
+	s := openStore(t, root)
+	calls := 0
+	parseLogFile = func(path string) (Record, bool, time.Time, error) {
+		rec, prov, seg, err := parseLog(path)
+		if calls++; calls == 1 {
+			appendLog(t, p, workLog("2026-05-01T09:30:00Z", 2)...)
+		}
+		return rec, prov, seg, err
+	}
+	t.Cleanup(func() { parseLogFile = parseLog })
+
+	parsed, err := s.Ingest()
+	if err != nil || parsed != 0 {
+		t.Fatalf("Ingest = %d, %v, want 0 parsed and no error", parsed, err)
+	}
+	if got := records(t, s); len(got) != 0 {
+		t.Fatalf("records = %v, want none after the discarded first sighting", ids(got))
+	}
+
+	if n := ingest(t, s); n != 1 {
+		t.Fatalf("second Ingest parsed %d, want 1", n)
+	}
+	got := records(t, s)
+	if len(got) != 1 || len(got[0].Passes) != 2 {
+		t.Fatalf("records = %+v, want one with 2 passes", got)
+	}
+}

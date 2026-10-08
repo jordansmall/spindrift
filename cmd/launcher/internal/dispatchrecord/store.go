@@ -383,9 +383,22 @@ func (e *readError) Unwrap() error { return e.err }
 // errors.Join ingest returns.
 func (e *readError) Is(target error) bool { return target == ErrUnreadableLog }
 
+// errStaleParse marks an upsert discarded because its log changed or vanished
+// since it was stat'd for the parse.
+var errStaleParse = errors.New("dispatchrecord: log changed since it was read")
+
+// parseLogFile is parseLog, swapped by tests to change a log mid-parse; a test
+// that swaps it must not run in parallel.
+var parseLogFile = parseLog
+
+// sameStat reports whether a stored or earlier size and mtime still describe info.
+func sameStat(size, mtimeNs int64, info fs.FileInfo) bool {
+	return size == info.Size() && mtimeNs == info.ModTime().UnixNano()
+}
+
 // ingestFile parses and upserts one log unless it is unchanged, and reports
-// whether it parsed it and the dispatch key whose satellite windows it shifted
-// (see upsert).
+// whether it recorded it (a parse that upsert discards as stale does not count) and
+// the dispatch key whose satellite windows it shifted (see upsert).
 func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -401,7 +414,7 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 		}
 	}
 	var recp *Record
-	rec, provisional, segment, err := parseLog(path)
+	rec, provisional, segment, err := parseLogFile(path)
 	switch {
 	case err == nil:
 		recp = &rec
@@ -412,6 +425,9 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 	}
 	shifted, err := s.upsert(path, info, recp, segment, provisional, satellite)
 	if err != nil {
+		if errors.Is(err, errStaleParse) {
+			return false, "", nil
+		}
 		return false, "", err
 	}
 	return true, shifted, nil
@@ -505,7 +521,7 @@ func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return size == info.Size() && mtime == info.ModTime().UnixNano(), nil
+	return sameStat(size, mtime, info), nil
 }
 
 // upsert records one parsed log. A nil rec is an event-free log: only its
@@ -515,12 +531,29 @@ func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 // own when no other Dispatch of that key started by then. It returns the
 // Record's dispatch key when it inserted a Record or replaced a stale one,
 // which moves the window of every satellite of that key; otherwise "".
+//
+// It re-stats the log under the write lock and returns errStaleParse when it no
+// longer matches info: the log changed after this parse, so a fresher ingest
+// has written it or the next one will, and this parse must not overwrite it. A
+// log still being appended can lose its parse this way and lags one ingest; a
+// live primary's discarded first-sighting parse can leave a stable satellite of
+// its key standing as its own Record until the next ingest replaces it.
 func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional, satellite bool) (shifted string, err error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
+	cur, err := os.Stat(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", errStaleParse
+	}
+	if err != nil {
+		return "", &readError{err}
+	}
+	if !sameStat(info.Size(), info.ModTime().UnixNano(), cur) {
+		return "", errStaleParse
+	}
 	var oldID string
 	var oldProvisional bool
 	var oldSize, oldStart, oldMtime int64
@@ -534,7 +567,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	if rec != nil {
 		newID = rec.ID
 		logStart = segment.UnixMilli()
-		statSame := oldSize == info.Size() && oldMtime == info.ModTime().UnixNano()
+		statSame := sameStat(oldSize, oldMtime, info)
 		// The stored row describes this same file's earlier read: a provisional
 		// start moves as the log grows, a timestamped one never does.
 		sameFile = oldID != "" && (oldProvisional || statSame || oldStart == logStart)
