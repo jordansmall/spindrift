@@ -208,9 +208,9 @@
             #   # prefix for agent-cut branches
             #   branchPrefix = "agent/issue-";
             #   merge = {
-            #     # comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github Code Forge merge path only)
+            #     # comma-separated globs matched against every changed path (added, modified, deleted); a hit downgrades the merge to manual regardless of MERGE_MODE and posts a PR comment naming the match; empty disables the guard (github and forgejo Code Forge merge paths only)
             #     guardPaths = ".github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**";
-            #     # how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method (github Code Forge merge path only)
+            #     # how the final integration commits land on green: merge (merge commit), squash, or rebase; maps to GitHub's native merge_method on github and to the Forgejo merge API's Do field on forgejo (github and forgejo Code Forge merge paths only)
             #     method = "rebase";
             #     # post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)
             #     policy = "manual";
