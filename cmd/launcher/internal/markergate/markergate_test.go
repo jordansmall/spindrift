@@ -236,6 +236,19 @@ func TestShouldNudgeOutcome_NearMissLine(t *testing.T) {
 	}
 }
 
+// A status= that appears only inside the note is prose, so the line is unfielded
+// and the outcome still needs a nudge.
+func TestShouldNudgeOutcome_StatusOnlyInNote(t *testing.T) {
+	logPath := writeLog(t, outcome.Token+" issue=7 landing=x note=I set status=ready earlier\n")
+	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: logPath})
+	if err != nil {
+		t.Fatalf("ShouldNudgeOutcome() error = %v, want nil", err)
+	}
+	if !got {
+		t.Fatalf("ShouldNudgeOutcome() = false, want true (status= appears only inside note)")
+	}
+}
+
 func TestShouldNudgeOutcome_FullyValidLine(t *testing.T) {
 	logPath := writeLog(t, outcome.Token+" issue=7 landing=agent/issue-7 status=ready note=done\n")
 	got, err := ShouldNudgeOutcome(NudgeConfig{LogPath: logPath})
@@ -367,8 +380,6 @@ func TestShouldNudgePRIntent_ReadyEmptyLanding(t *testing.T) {
 
 // Pins review finding B: a line with no real status= field, only a
 // "status=ready" mention inside free-text note, must not nudge.
-// outcome.Parse's field extraction scans the whole line including note text
-// and would wrongly nudge here.
 func TestShouldNudgePRIntent_StatusMentionOnlyInNote(t *testing.T) {
 	logPath := writeLog(t, "")
 	got, err := ShouldNudgePRIntent(NudgeConfig{

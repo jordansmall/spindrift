@@ -85,11 +85,12 @@ func Parse(line string) (Outcome, error) {
 		}
 		return Outcome{}, fmt.Errorf("outcome: line missing %q prefix", Token+" ")
 	}
+	fields := fieldsPart(rest)
 	o := Outcome{
-		Issue:     tokenField(rest, "issue"),
-		Landing:   tokenField(rest, "landing"),
-		Status:    tokenField(rest, "status"),
-		Synthetic: tokenField(rest, "synthetic") == "true",
+		Issue:     tokenField(fields, "issue"),
+		Landing:   tokenField(fields, "landing"),
+		Status:    tokenField(fields, "status"),
+		Synthetic: tokenField(fields, "synthetic") == "true",
 		Note:      noteField(rest),
 	}
 	if o.Landing == "" {
@@ -99,6 +100,16 @@ func Parse(line string) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("%w: missing or empty status field", ErrNearMiss)
 	}
 	return o, nil
+}
+
+// fieldsPart returns the part of rest (a line's remainder after stripToken)
+// before the first " note=": the free-text note is the grammar's greedy tail,
+// so a key=value mention inside it must never count as a field. rest is
+// space-prefixed before the cut so a note at the very start of rest is still
+// recognised as the note; a non-empty result therefore starts with a space.
+func fieldsPart(rest string) string {
+	before, _, _ := strings.Cut(" "+rest, " note=")
+	return before
 }
 
 // ReadyBeforeNote reports whether line leads with the SPINDRIFT_OUTCOME token
@@ -112,8 +123,7 @@ func ReadyBeforeNote(line string) bool {
 	if !ok {
 		return false
 	}
-	before, _, _ := strings.Cut(rest, " note=")
-	for _, tok := range strings.Fields(before) {
+	for _, tok := range strings.Fields(fieldsPart(rest)) {
 		if tok == "status=ready" {
 			return true
 		}
@@ -140,7 +150,8 @@ func hasField(line, key string) bool {
 // value included. This is looser than Parse's full-grammar validity, which
 // rejects an empty landing as ErrNearMiss. See LastFieldedOutcomeLine.
 func hasOutcomeFields(rest string) bool {
-	return hasField(rest, "landing") && hasField(rest, "status")
+	fields := fieldsPart(rest)
+	return hasField(fields, "landing") && hasField(fields, "status")
 }
 
 // LastFieldedOutcomeLine returns the last SPINDRIFT_OUTCOME-token-leading line
@@ -275,10 +286,11 @@ func lastSelfReportInLog(path string) (report SelfReport, found bool, err error)
 	var last string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
 		trimmed := strings.TrimSpace(line)
-		if _, ok := stripToken(trimmed, Token); !ok {
+		rest, ok := stripToken(trimmed, Token)
+		if !ok {
 			return
 		}
-		if tokenField(trimmed, "synthetic") == "true" {
+		if tokenField(fieldsPart(rest), "synthetic") == "true" {
 			return
 		}
 		last = trimmed
@@ -796,11 +808,13 @@ func tokenField(line, key string) string {
 }
 
 // tailField returns everything after the first " key=" in line, allowing the
-// value to contain spaces and '=' (used for the note field).
+// value to contain spaces and '=' (used for the note field). line is
+// space-prefixed first, matching fieldsPart, so a key opening line still counts.
 func tailField(line, key string) string {
 	marker := " " + key + "="
-	if idx := strings.Index(line, marker); idx >= 0 {
-		return line[idx+len(marker):]
+	padded := " " + line
+	if idx := strings.Index(padded, marker); idx >= 0 {
+		return padded[idx+len(marker):]
 	}
 	return ""
 }

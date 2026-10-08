@@ -1119,8 +1119,10 @@ Dispatch kind (`ready`/`blocked`/`ambiguous`/`already-resolved` for work, the
 verdicts plus `blocked` for research; `already-resolved` settles
 `agent-complete` and closes the issue as completed, but only with no commits
 or outbox bundle behind it — otherwise it is demoted to `blocked`, by a
-synthetic line in-box or by settle host-side). An optional trailing
-`synthetic=true` field marks the line as the ADR 0036 backstop the Launcher stitches in host-side when a
+synthetic line in-box or by settle host-side). An optional
+`synthetic=true` field, placed before the free-text greedy `note=` tail
+(only a ` nonce=` suffix may follow the note), marks the line as the ADR
+0036 backstop the Launcher stitches in host-side when a
 Box never printed a real outcome line — the synthetic `blocked` mentioned
 below is one such line. Unlike the mid-run signal channels below, this line carries no
 per-run control nonce (`RUN_NONCE`, issues #1937/#1939): `SPINDRIFT_OUTCOME`

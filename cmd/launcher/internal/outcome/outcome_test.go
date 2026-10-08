@@ -155,6 +155,11 @@ func TestReadyBeforeNote(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "note opening the line hides a later status=ready",
+			line: "SPINDRIFT_OUTCOME note=I set status=ready landing=x",
+			want: false,
+		},
+		{
 			name: "normal valid ready line",
 			line: "SPINDRIFT_OUTCOME issue=7 landing=y status=ready note=fine",
 			want: true,
@@ -180,6 +185,28 @@ func TestReadyBeforeNote(t *testing.T) {
 			got := outcome.ReadyBeforeNote(tt.line)
 			if got != tt.want {
 				t.Errorf("ReadyBeforeNote(%q) = %v, want %v", tt.line, got, tt.want)
+			}
+		})
+	}
+}
+
+// Both gates must read the same line the same way: a status= that appears only
+// inside the greedy note tail is prose, so Parse rejects the line as a near
+// miss and ReadyBeforeNote does not call it ready. The note-first row pins that
+// a note opening the remainder is still recognised as the note.
+func TestParseAndReadyBeforeNote_FieldMentionInNote(t *testing.T) {
+	tests := []struct{ name, line string }{
+		{"after fields", outcome.Token + " issue=7 landing=x note=I set status=ready earlier"},
+		{"note first", outcome.Token + " note=I set status=ready landing=x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := outcome.Parse(tt.line)
+			if !outcome.IsNearMiss(err) {
+				t.Errorf("Parse(%q) error = %v, want near miss", tt.line, err)
+			}
+			if outcome.ReadyBeforeNote(tt.line) {
+				t.Errorf("ReadyBeforeNote(%q) = true, want false", tt.line)
 			}
 		})
 	}
@@ -322,6 +349,21 @@ func TestParse_Synthetic(t *testing.T) {
 	}
 	if o.Note != "some note here" {
 		t.Errorf("Note: got %q, want %q (synthetic field leaked into Note)", o.Note, "some note here")
+	}
+}
+
+const noteMentionsSynthetic = outcome.Token + " issue=7 landing=x status=blocked note=backstop wrote synthetic=true here"
+
+func TestParse_SyntheticMentionInNoteIsNotSynthetic(t *testing.T) {
+	o, err := outcome.Parse(noteMentionsSynthetic)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if o.Synthetic {
+		t.Error("Synthetic: got true, want false (synthetic=true appears only inside note)")
+	}
+	if want := "backstop wrote synthetic=true here"; o.Note != want {
+		t.Errorf("Note: got %q, want %q", o.Note, want)
 	}
 }
 
@@ -748,6 +790,31 @@ func TestLastNearMissOutcomeLine_PicksUpNonFieldedLine(t *testing.T) {
 	}
 	if got != nearMiss {
 		t.Fatalf("line = %q, want %q", got, nearMiss)
+	}
+}
+
+// A status= that appears only inside note text leaves the line unfielded, so it
+// is the near-miss candidate rather than a fielded line. The note-first form
+// pins that a note opening the remainder is still the note.
+func TestLastFieldedAndNearMissOutcomeLine_StatusOnlyInNote(t *testing.T) {
+	tests := []struct{ name, line string }{
+		{"after fields", outcome.Token + " issue=7 landing=x note=I set status=ready earlier"},
+		{"note first", outcome.Token + " note=I set status=ready landing=x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeLog(t, tt.line)
+			if got, found, err := outcome.LastFieldedOutcomeLine(path); err != nil || found {
+				t.Fatalf("LastFieldedOutcomeLine = (%q, %v, %v), want not found", got, found, err)
+			}
+			got, found, err := outcome.LastNearMissOutcomeLine(path)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !found || got != tt.line {
+				t.Fatalf("LastNearMissOutcomeLine = (%q, %v), want (%q, true)", got, found, tt.line)
+			}
+		})
 	}
 }
 
@@ -1585,6 +1652,33 @@ func TestResolve_BareWordLeadingLineIsNearMiss(t *testing.T) {
 	}
 	if got.Found {
 		t.Error("Found: got true, want false on a near-miss")
+	}
+}
+
+func TestResolve_SyntheticMentionInNoteIsGenuine(t *testing.T) {
+	path := writeLog(t, noteMentionsSynthetic)
+	got, err := outcome.Resolve([]outcome.PassLog{{Label: "p", Path: path}}, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Found {
+		t.Fatal("Found: got false, want true")
+	}
+	if got.Provenance != outcome.ProvenanceGenuine {
+		t.Errorf("Provenance: got %q, want %q", got.Provenance, outcome.ProvenanceGenuine)
+	}
+}
+
+func TestLastSelfReport_SyntheticMentionInNoteIsNotSkipped(t *testing.T) {
+	report, found, err := outcome.LastSelfReport(writeLog(t, noteMentionsSynthetic))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true: synthetic=true appears only inside note")
+	}
+	if report.Raw != noteMentionsSynthetic {
+		t.Errorf("Raw: got %q, want %q", report.Raw, noteMentionsSynthetic)
 	}
 }
 
