@@ -4330,8 +4330,11 @@ shim rather than a push hook (issue #2465): for a read-only `github` Box (the
 same `_is_readonly_github` gate the push guard above uses), the Box installs a
 `gh` shim ahead of the real `gh` binary on `PATH` that rejects `gh pr create`,
 `gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue create`, and `gh
-api` calls with a mutating method (`POST`/`PATCH`/`PUT`/`DELETE`), each
-rejection naming the relay that replaces it — the PR-intent line, the
+api` calls with a mutating method (`POST`/`PATCH`/`PUT`/`DELETE`, including
+gh's implied `POST` when `-f`/`-F`/`--field`/`--raw-field`/`--input` is
+passed with no explicit method; `gh api graphql` is exempt, so its mutations
+fail at the forge),
+each rejection naming the relay that replaces it — the PR-intent line, the
 Launcher's own ready/merge once CI is green, the outcome `note=` field, or the
 issue-intent line, as appropriate. Reads (`gh issue view`, `gh pr view`, `gh
 run view`, `gh run list`, a plain `gh api` `GET`, and so on) pass through to

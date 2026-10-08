@@ -160,8 +160,8 @@ func testForbiddenMarkerRows() []ForbiddenMarkerRow {
 			When:           "boxAccessReadOnly",
 			Kind:           "gh-api-mutation",
 			Enforce:        "command-shim",
-			Message:        "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh api' with a mutating method (-X/--method POST/PATCH/PUT/DELETE) -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use. Refusing to invoke the Driver.",
-			RuntimeMessage: "read-only Box: gh api does not accept a mutating method under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally.",
+			Message:        "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh api' with a mutating method (-X/--method POST/PATCH/PUT/DELETE, or an implied POST from -f/-F/--field/--raw-field/--input) -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use. Refusing to invoke the Driver.",
+			RuntimeMessage: "read-only Box: gh api does not accept a mutating method (explicit, or implied POST from field/input flags) under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally.",
 		},
 		{
 			ID:             "forbidden-fj-pr-create",
