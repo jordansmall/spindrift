@@ -5552,7 +5552,9 @@ without a claim (recover adopting an open PR) mints it on first use. The line
 is `{"type":"spindrift_op","spindrift_op":{"op":"dispatch_start","dispatch_start":{...}}}`
 with `record_id`, `kind`, `dispatch_key`, `claim_time`, `started` (this log's
 creation time), `revision`, `role_models` (role to model), `driver`,
-`driver_version`, and `knobs`. The host writes it, so a Box cannot forge it.
+`driver_version`, `knobs`, and `host_token`, a random value minted fresh for
+each log and never handed to the Box (see the settled outcome below). The host
+writes it, so a Box cannot forge it.
 `knobs` is the effective value of every env-schema knob not marked `secret`;
 secret knobs never appear, URL userinfo is stripped, and
 `BOX_FORGE_AND_ISSUE_ACCESS` reads `read-only` for a kind that always runs
@@ -5604,18 +5606,18 @@ appends one `dispatch_settled` `spindrift_op` to the Dispatch's primary Pass
 log (`issue-<key>.log`), as
 `{"type":"spindrift_op","spindrift_op":{"op":"dispatch_settled","dispatch_settled":{...}}}`
 with `record_id`, `state` (`complete`, `failed`, `recoverable`, or
-`ambiguous`), `reason`, `note`, and `pr_url`. Every terminal settle path
-writes it: the work settle path, a Box that failed before settle, research, the
-butler Chore, and recover. The write is best-effort and never creates a missing
-log. A path with no Dispatch that ran (recover) settles the prior work
-Dispatch's Record: a Dispatcher that never ran takes the Record ID from the
-primary log's `dispatch_start` stamp, and one whose adopted PR needed a fix or
-conflict pass continues that Record, its fix and conflict logs carrying the
-prior stamp rather than a fresh ID. The last `dispatch_settled` in the log
-wins, so a recover that lands turns a failed Record complete. A recover that
-adopts an orphan PR, or one from a log directory predating the lineage marker,
-has its primary log quarantined; a fix pass then mints a fresh Record that
-lives only in the fix logs. Settle never creates the missing primary log, so
+`ambiguous`), `reason`, `note`, `pr_url`, and `host_token`. Every terminal
+settle path writes it: the work settle path, a Box that failed before settle,
+research, the butler Chore, and recover. The write is best-effort and never
+creates a missing log. A path with no Dispatch that ran (recover) settles the
+prior work Dispatch's Record: a Dispatcher that never ran takes the Record ID
+from the primary log's `dispatch_start` stamp, and one whose adopted PR needed
+a fix or conflict pass continues that Record, its fix and conflict logs
+carrying the prior stamp rather than a fresh ID. The last `dispatch_settled`
+in the log wins, so a recover that lands turns a failed Record complete. A
+recover that adopts an orphan PR, or one from a log directory predating the
+lineage marker, has its primary log quarantined; a fix pass then mints a fresh
+Record that lives only in the fix logs. Settle never creates the missing primary log, so
 that Record receives no `dispatch_settled` and stays `outcome: unknown`. A
 Dispatch that failed before minting its Record ID (a claim error, for one)
 appends nothing and warns: the stamp in its log names an earlier Dispatch's
@@ -5624,11 +5626,19 @@ issue's patch PR appends nothing either: the finding issue has no Record of its
 own, and the Chore's Record already settled. Research's `comment-post-failed`
 and `verdict-apply-failed` stops are not terminal settles: the issue stays
 `agent-research-in-progress`, no op is appended, and the Record stays
-`outcome: unknown`. The ingester accepts an op only when its `record_id`
-equals the log's stamp, ignoring one that names another Record, and only when
-nothing but further `dispatch_settled` ops follows it: the host appends only
-after the Box exits, so an op followed by any other event, a `spindrift_op`
-included, is ignored as forged. `reason` is the class of the decision:
+`outcome: unknown`. The Box's stdout shares the log and the Box knows its
+Record ID, so it can print a well-formed op of its own. The host copies the
+stamp's `host_token` into every op it appends, and the ingester accepts an op
+only when its `record_id` and `host_token` both equal the stamp's, ignoring one
+that names another Record. A Box-printed op lacks the token and is ignored as
+forged, even as the log's last line. That rests on the Box never reading its
+own Pass log: no runner mounts `.spindrift/logs` into it. The ingester also
+ignores an op that anything but further `dispatch_settled` ops follows, since
+the host appends only after the Box exits. A log stamped before `host_token`
+existed has only that ordering rule, so a forged op as its last line still
+counts. A launcher built before `host_token` existed appends ops without it,
+so a tokened log it settles (an older `spindrift recover`, say) reads
+`outcome: unknown` too. `reason` is the class of the decision:
 
 - `complete`: `merged`, `manual` (a green PR left open for a human),
   `auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,

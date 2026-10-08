@@ -92,10 +92,20 @@ The driver is `modernc.org/sqlite`, the pure-Go one, since every build
 runs with `CGO_ENABLED=0`. The Dashboard stays dependency-free (ADR 0060)
 and reads `stats --json` if it shows stats at all.
 
-Host-written fields (the stamps, the outcome) are trusted. Usage, template
-hashes, verdict text and dispositions are Box-reported, as cost is today,
-and verdict text and dispositions are untrusted prose written by a Box that
-read the issue thread.
+Host-written fields (the stamps, the outcome) are trusted. The Box's
+stdout shares the Pass log, though, and the Box knows its Record ID, so
+it can print a `dispatch_settled` op of its own. Each stamp therefore
+carries a `host_token` the Box never sees, and the ingester takes an op
+as the outcome only when it echoes that token (amended by issue #4812).
+A host-side sidecar holding the outcome was the alternative, but the
+store is rebuilt from Pass logs, so a sidecar would be a second source
+`--reingest` must also read; the token keeps the log the one source.
+This holds only while the Box cannot read its Pass log. A log stamped
+before the token existed falls back to ordering: an op counts only when
+no other event follows it. Usage, template hashes, verdict text and
+dispositions are Box-reported, as cost is today, and verdict text and
+dispositions are untrusted prose written by a Box that read the issue
+thread.
 
 ## Considered Options
 
