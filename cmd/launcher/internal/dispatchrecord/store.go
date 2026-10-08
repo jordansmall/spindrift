@@ -122,8 +122,8 @@ var migrations = []string{
 	ALTER TABLE ingested_files ADD COLUMN log_start INTEGER NOT NULL DEFAULT 0;
 	UPDATE ingested_files SET log_start = COALESCE((SELECT claim_time FROM records
 		WHERE records.record_id = ingested_files.record_id AND records.attribution = 'inferred'), 0);
-	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1, migratedMtime in Go, never
-	-- matches a real file and marks the row as migrated for upsert).
+	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1 never matches a real
+	-- file, so each row re-parses).
 	UPDATE ingested_files SET mtime_ns = -1;`,
 }
 
@@ -131,8 +131,8 @@ var migrations = []string{
 // inferred from (ADR 0061), so deleting a log never removes its Record. The
 // only Records the store discards are ones its own still-present log has since
 // replaced with a different ID: a provisional (mtime-derived) one, one whose
-// stat-identical log re-parses differently under Reingest, or one from a
-// migrated row whose re-parse keeps its claim time. Accepted
+// stat-identical log re-parses differently under Reingest, or one whose
+// timestamped log re-parses to the same start under a new ID. Accepted
 // residual: deleting a provisional log and reusing its path with no Ingest in
 // between reads as the same Dispatch growing, so that earlier Record, which has
 // no real claim time, is replaced.
@@ -141,13 +141,8 @@ type Store struct {
 	root string
 }
 
-// migratedMtime marks an ingested_files row carried over from an older schema:
-// it never matches a real file's mtime, so the log re-parses, and upsert reads
-// it as migrated.
-const migratedMtime int64 = -1
-
 // forceReparseSize never matches a real file's size, so the row's stat check
-// fails and the log re-parses without marking the row migrated.
+// fails and the log re-parses.
 const forceReparseSize int64 = -1
 
 // segmentTables are the per-segment child tables upsert clears alongside a Record.
@@ -387,11 +382,25 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		return err
 	}
 	newID := ""
-	storedProvisional := provisional
 	var logStart int64
+	var sameFile, joined bool
 	if rec != nil {
 		newID = rec.ID
 		logStart = segment.UnixMilli()
+		statSame := oldSize == info.Size() && oldMtime == info.ModTime().UnixNano()
+		// The stored row describes this same file's earlier read: a provisional
+		// start moves as the log grows, a timestamped one never does.
+		sameFile = oldID != "" && (oldProvisional || statSame || oldStart == logStart)
+		// A satellite that joined a Record does not own it; an orphan
+		// satellite's own Record starts at the file's start.
+		if satellite && rec.Attribution == AttributionInferred && oldID != "" {
+			var oldClaim int64
+			err := tx.QueryRow("SELECT claim_time FROM records WHERE record_id = ?", oldID).Scan(&oldClaim)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
+			joined = err == nil && oldClaim != oldStart
+		}
 		writesRecord := true
 		if satellite && rec.Attribution == AttributionInferred {
 			err := tx.QueryRow(
@@ -401,8 +410,6 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			switch {
 			case err == nil:
 				writesRecord = false
-				// The joined Record's claim time is not this log's mtime.
-				storedProvisional = false
 			case errors.Is(err, sql.ErrNoRows):
 				newID = rec.ID
 			default:
@@ -410,10 +417,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			}
 		}
 		for _, table := range segmentTables {
-			// The file's own earlier segment: a provisional start moves as the
-			// log grows.
-			if oldID == newID {
-				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", newID, oldStart); err != nil {
+			if oldID == newID || sameFile {
+				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", oldID, oldStart); err != nil {
 					return err
 				}
 			}
@@ -473,7 +478,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	}
 	if _, err := tx.Exec(
 		`INSERT OR REPLACE INTO ingested_files (path, size, mtime_ns, record_id, provisional, log_start) VALUES (?, ?, ?, ?, ?, ?)`,
-		path, info.Size(), info.ModTime().UnixNano(), newID, storedProvisional, logStart); err != nil {
+		path, info.Size(), info.ModTime().UnixNano(), newID, provisional, logStart); err != nil {
 		return err
 	}
 	// A provisional ID is the same Dispatch under a stale mtime-derived ID; a
@@ -483,11 +488,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	// A stat-identical re-parse (only a forced one reaches here) is the same
 	// Dispatch too, so an ID change means the parser changed and the old Record
 	// is stale.
-	statSame := oldSize == info.Size() && oldMtime == info.ModTime().UnixNano()
-	// A migrated row (migratedMtime) is the same Dispatch only when the re-parse keeps
-	// its claim time: the path fixes the key, so the ID then differs in kind alone.
-	migrated := oldMtime == migratedMtime
-	if rec != nil && oldID != "" && oldID != newID && (oldProvisional || statSame || (migrated && !satellite && oldStart == logStart)) {
+	if rec != nil && oldID != newID && sameFile && !joined {
 		// A satellite joined to the stale Record would keep it alive and, on a
 		// claim-time tie, win the window against the replacement. A satellite
 		// replacing its own Record leaves its peers be: they have already run.
@@ -638,7 +639,7 @@ func (s *Store) loadPromptHashes(recs []Record, byID map[string]int) error {
 // detachSatellites unlinks the satellite logs joined to recordID other than
 // except: their segments go and their ingested_files rows lose the Record and
 // the stat match, so each re-parses later this ingest and rejoins by time
-// window. forceReparseSize breaks the match; migratedMtime would mark the row migrated.
+// window. forceReparseSize breaks the match.
 func detachSatellites(tx *sql.Tx, recordID, except string) error {
 	rows, err := tx.Query("SELECT path, log_start FROM ingested_files WHERE record_id = ? AND path <> ?", recordID, except)
 	if err != nil {

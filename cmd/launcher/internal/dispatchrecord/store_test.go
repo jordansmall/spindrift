@@ -1058,3 +1058,93 @@ func TestStoreMigratesV3DatabaseWithOutcomeDefaults(t *testing.T) {
 		t.Fatalf("records = %+v", recs)
 	}
 }
+
+// A provisional satellite that joined an earlier Record and then grows past a
+// later Dispatch's start moves there whole: its earlier passes must not stay
+// behind on the first Record.
+func TestStoreGrowingProvisionalSatelliteLeavesNoPassesBehind(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-9.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
+	fix := putLog(t, root, "issue-9-fix-1.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"}))
+	chtimes := func(ts string) {
+		t.Helper()
+		mt, err := time.Parse(time.RFC3339, ts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(fix, mt, mt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chtimes("2026-03-02T12:00:00Z")
+	s := openStore(t, root)
+	ingest(t, s)
+	recs := records(t, s)
+	if len(recs) != 2 || len(recs[0].Passes) != 2 {
+		t.Fatalf("setup records = %+v", recs)
+	}
+	appendLog(t, fix, assistant("f1"))
+	chtimes("2026-03-06T12:00:00Z")
+	ingest(t, s)
+	recs = records(t, s)
+	if len(recs) != 2 {
+		t.Fatalf("records = %d, want 2: %+v", len(recs), recs)
+	}
+	onFix, total := 0, 0
+	for _, r := range recs {
+		total += len(r.Passes)
+		for _, l := range passLogs(r) {
+			if l == "issue-9-fix-1.log" {
+				onFix++
+			}
+		}
+	}
+	if onFix != 1 || total != 3 {
+		t.Fatalf("fix log on %d Records, %d passes in total; want 1 and 3: %+v", onFix, total, recs)
+	}
+	last := recs[len(recs)-1]
+	if !last.ClaimTime.Equal(time.Date(2026, 3, 5, 10, 0, 0, 0, time.UTC)) ||
+		!reflect.DeepEqual(passLogs(last), []string{"issue-9.log", "issue-9-fix-1.log"}) {
+		t.Fatalf("later Record = %s with logs %v, want the 03-05 Record carrying the fix log", last.ID, passLogs(last))
+	}
+}
+
+// A primary whose inferred kind changes as it grows keeps its claim time, so
+// the stale-ID Record is replaced by plain Ingest and its joined satellite
+// moves to the replacement rather than keeping the stale Record alive.
+func TestStoreIngestKindChangeKeepsJoinedSatelliteOnReplacement(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-7.log", result("2026-10-07T12:00:00Z", 1, 1, 10, 5, "opus"))
+	putLog(t, root, "issue-7-fix-1.log", workLog("2026-10-07T13:00:00Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	before := records(t, s)
+	if len(before) != 1 || before[0].Kind != KindUnknown {
+		t.Fatalf("setup records = %+v, want one %s Record", before, KindUnknown)
+	}
+
+	appendLog(t, p, outcomeLine("recommend"))
+	ingest(t, s)
+
+	got := records(t, s)
+	if len(got) != 1 {
+		t.Fatalf("records = %v, want exactly one", ids(got))
+	}
+	if got[0].Kind != "research" || got[0].ID == before[0].ID {
+		t.Fatalf("record = %s (%s), want a research Record replacing %s", got[0].ID, got[0].Kind, before[0].ID)
+	}
+	if want := []string{"issue-7.log", "issue-7-fix-1.log"}; !reflect.DeepEqual(passLogs(got[0]), want) {
+		t.Fatalf("pass logs = %v, want %v", passLogs(got[0]), want)
+	}
+	var stale int
+	if err := s.db.QueryRow(`SELECT (SELECT COUNT(*) FROM records WHERE record_id = ?)
+		+ (SELECT COUNT(*) FROM passes WHERE record_id = ?)
+		+ (SELECT COUNT(*) FROM ingested_files WHERE record_id = ?)`,
+		before[0].ID, before[0].ID, before[0].ID).Scan(&stale); err != nil {
+		t.Fatal(err)
+	}
+	if stale != 0 {
+		t.Fatalf("%d rows left under stale ID %s", stale, before[0].ID)
+	}
+}
