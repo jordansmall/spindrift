@@ -618,6 +618,23 @@ outcome line's `issue=` field. `internal/dispatchkey` holds it; the report recor
 [[Daemon]] event, slot flight, and Box env builder all carry it.
 _Avoid_: issue number (for a butler run), Dispatch ID, subject.
 
+**Dispatch Record**:
+The durable stored row for one [[Dispatch]] (ADR 0061): who claimed what
+and when, what ran (revision, model per role, template hashes, knob
+snapshot), what each pass cost and said, and how the host settled it.
+Ingested from Pass logs into a per-root SQLite store and read by `spindrift
+stats`; it outlives the logs it came from. Inferred when backfilled from
+logs that predate the `dispatch_start` stamp.
+_Avoid_: run, run record, trace.
+
+**Record ID**:
+The name of one [[Dispatch Record]]: `<kind>:<Dispatch key>@<claim time,
+UTC>`, stamped by the host in `dispatch_start` and derived the same way
+from the first timestamp of an inferred Record's log. Distinct from the
+[[Dispatch key]], which names what a Dispatch works and repeats across
+attempts.
+_Avoid_: Dispatch ID, run ID.
+
 **Stop signal**:
 The first operator signal to a Launcher or a Daemon: launch nothing further,
 let in-flight work drain to its own conclusion.
