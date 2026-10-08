@@ -78,6 +78,12 @@
     arg = null;
   }
   {
+    flag = "reingest";
+    doc = "re-parse every log still on disk, even unchanged ones, so a parser fix repairs the history that remains";
+    verb = "stats";
+    arg = null;
+  }
+  {
     flag = "help";
     doc = "show usage and exit";
     verb = null;

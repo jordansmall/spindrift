@@ -34,14 +34,18 @@ type statsRoleRow struct {
 }
 
 func cmdStats(args []string, stdout, stderr io.Writer) int {
-	asJSON := false
+	var asJSON, reingest bool
 	for _, a := range args {
-		if a != "--json" {
+		switch a {
+		case "--json":
+			asJSON = true
+		case "--reingest":
+			reingest = true
+		default:
 			fmt.Fprintf(stderr, "unrecognized argument: %s\n", a)
-			fmt.Fprintln(stderr, "usage: spindrift stats [--json]")
+			fmt.Fprintln(stderr, "usage: spindrift stats [--json] [--reingest]")
 			return 1
 		}
-		asJSON = true
 	}
 	root, err := os.Getwd()
 	if err != nil {
@@ -54,7 +58,11 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	defer store.Close()
-	if _, err := store.Ingest(); err != nil {
+	ingest := store.Ingest
+	if reingest {
+		ingest = store.Reingest
+	}
+	if _, err := ingest(); err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}

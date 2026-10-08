@@ -64,7 +64,7 @@
   }
   {
     name = "stats";
-    usage = "[--json]";
+    usage = "[--json] [--reingest]";
     doc = "summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD); --json emits one Dispatch Record per line";
   }
   {
