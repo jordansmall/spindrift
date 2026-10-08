@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reads Claude Code stream-json (NDJSON) from stdin and renders it on the host:
 #   format-transcript.sh < .spindrift/logs/issue-<n>.log
-# Keep it out of the entrypoint's live pipe: outcome.Classify scans that log for
+# Keep it out of the entrypoint's live pipe: claude.Classify scans that log for
 # transient-failure markers (#123), so it must stay byte-exact raw stream-json.
 set -euo pipefail
 
