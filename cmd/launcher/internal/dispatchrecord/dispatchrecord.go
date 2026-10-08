@@ -18,6 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
+	"spindrift.dev/launcher/internal/passmachine"
 )
 
 const (
@@ -48,6 +49,10 @@ type Pass struct {
 	DurationMs               int64    `json:"duration_ms"`
 	APIDurationMs            int64    `json:"api_duration_ms"`
 	Verdict                  string   `json:"verdict,omitempty"`
+	// VerdictText and Dispositions are Box-written, untrusted prose stored
+	// verbatim.
+	VerdictText  string `json:"verdict_text,omitempty"`
+	Dispositions string `json:"dispositions,omitempty"`
 }
 
 // Record is one Dispatch reconstructed from its log.
@@ -87,6 +92,7 @@ func ChainKey(name string) (key string, ok bool) {
 type logLine struct {
 	claude.Event
 	Timestamp     string  `json:"timestamp"`
+	Result        string  `json:"result"`
 	TotalCostUSD  float64 `json:"total_cost_usd"`
 	DurationMs    int64   `json:"duration_ms"`
 	DurationApiMs int64   `json:"duration_api_ms"`
@@ -154,6 +160,9 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 		firstTS   time.Time
 		haveTS    bool
 		sawEvent  bool
+		// pendingDispositions holds a fix pass's Write to the dispositions file,
+		// by tool_use ID, until its tool_result shows the Write took effect.
+		pendingDispositions = map[string]string{}
 	)
 	closeCur := func() {
 		// A stray implicit pass is real only if it produced a result; an
@@ -166,7 +175,8 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 	err = driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
 		if !strings.Contains(s, `"timestamp"`) && !strings.Contains(s, `"type":"result"`) &&
-			!strings.Contains(s, `"type":"assistant"`) && !strings.Contains(s, `"spindrift_op"`) {
+			!strings.Contains(s, `"type":"assistant"`) && !strings.Contains(s, `"spindrift_op"`) &&
+			!strings.Contains(s, `"tool_result"`) {
 			return
 		}
 		var ev logLine
@@ -192,6 +202,7 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 				}
 				sawStart = true
 				closeCur()
+				clear(pendingDispositions)
 				// Strictly increasing: an implicit pass 1 before a pass_start
 				// that also says pass 1 must not collide in the store.
 				last := 0
@@ -214,6 +225,22 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 			if ev.Message == nil {
 				return
 			}
+			// Stream-json repeats one message ID across events that each
+			// carry different blocks, so scan blocks before deduping.
+			if cur.Role == string(passmachine.RoleFix) {
+				for _, b := range ev.Message.Content {
+					if b.Type != "tool_use" || b.Name != "Write" {
+						continue
+					}
+					var in struct {
+						FilePath string `json:"file_path"`
+						Content  string `json:"content"`
+					}
+					if json.Unmarshal(b.Input, &in) == nil && in.FilePath == passmachine.DispositionsPath {
+						pendingDispositions[b.ID] = in.Content
+					}
+				}
+			}
 			if id := ev.Message.ID; id != "" {
 				if cur.seenIDs[id] {
 					return
@@ -221,8 +248,23 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 				cur.seenIDs[id] = true
 			}
 			cur.APICalls++
+		case "user":
+			if ev.Message == nil {
+				return
+			}
+			for _, b := range ev.Message.Content {
+				if content, ok := pendingDispositions[b.ToolUseID]; ok && b.Type == "tool_result" {
+					delete(pendingDispositions, b.ToolUseID)
+					if !b.IsError {
+						cur.Dispositions = content
+					}
+				}
+			}
 		case "result":
 			cur.results++
+			if passmachine.Role(cur.Role).IsReview() {
+				cur.VerdictText = ev.Result
+			}
 			cur.USD += ev.TotalCostUSD
 			cur.InputTokens += ev.Usage.InputTokens
 			cur.OutputTokens += ev.Usage.OutputTokens

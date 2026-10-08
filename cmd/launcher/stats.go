@@ -21,9 +21,6 @@ var statsRolePipeline = []passmachine.Role{
 	passmachine.RoleLand, passmachine.RoleDeltaReview,
 }
 
-// statsBlockRoles are the roles whose passes end in an APPROVE/BLOCK verdict.
-var statsBlockRoles = []passmachine.Role{passmachine.RoleReview, passmachine.RoleDeltaReview}
-
 const statsNoRole = "(none)"
 
 type statsRoleRow struct {
@@ -140,7 +137,7 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 	fmt.Fprintln(tw, "ROLE\tPASSES\tUSD\tAVG_USD\tAVG_MIN\tAPI_CALLS\tBLOCK_RATE")
 	for _, row := range rows {
 		blockRate := "-"
-		if slices.Contains(statsBlockRoles, passmachine.Role(row.role)) && row.verdicts > 0 {
+		if passmachine.Role(row.role).IsReview() && row.verdicts > 0 {
 			blockRate = fmt.Sprintf("%.0f%%", 100*float64(row.blocks)/float64(row.verdicts))
 		}
 		n := float64(row.passes)
