@@ -1826,7 +1826,7 @@ func TestStoreUpsertDiscardsParseOfSupersededLog(t *testing.T) {
 		t.Fatalf("settled record = outcome %q, %d passes", want.Outcome, len(want.Passes))
 	}
 
-	if _, err := s.upsert(p, staleInfo, &staleRec, seg, prov, false); !errors.Is(err, errStaleParse) {
+	if _, err := s.upsert(p, staleInfo, &staleRec, seg, prov, primaryRole); !errors.Is(err, errStaleParse) {
 		t.Fatalf("upsert of a superseded parse = %v, want errStaleParse", err)
 	}
 	kept := records(t, s)
@@ -1854,7 +1854,7 @@ func TestStoreUpsertDiscardsParseOfRemovedLog(t *testing.T) {
 	if err := os.Remove(p); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.upsert(p, info, &rec, seg, prov, false); !errors.Is(err, errStaleParse) {
+	if _, err := s.upsert(p, info, &rec, seg, prov, primaryRole); !errors.Is(err, errStaleParse) {
 		t.Fatalf("upsert of a removed log = %v, want errStaleParse", err)
 	}
 	if got := records(t, s); len(got) != 0 {
