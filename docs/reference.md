@@ -5558,6 +5558,42 @@ artifact. `role_models` is the baked roster (run artifact
 dispatch-time `REVIEW_MODEL`; `driver_version` is run artifact
 `DRIVER_VERSION`, the Driver CLI package version.
 
+**Prompt template hashes.** The host forwards the Record ID into every Box it
+starts for the Dispatch as `RECORD_ID`. After assembling the prompt, the Box
+writes one `prompt_hashes` `spindrift_op` onto its Pass log:
+`{"type":"spindrift_op","spindrift_op":{"op":"prompt_hashes","prompt_hashes":{"record_id":"...","roles":{...}}}}`.
+`roles` maps each pass role the Box can run to the SHA-256 (lowercase hex) of
+that role's template: `implement`, `fix`, `land`, `review`, and
+`delta-review` for a fresh work Box; `legacy` for a host fix-pass Box, which
+runs one fix-prompt pass; the kind name (`research`, `butler`) for a kind with
+its own prompt. A Box started without a Record ID (an older host) writes none,
+and neither does a conflict-resolve Box, which renders its own fixed prompt
+rather than assembling one.
+The template hash is the role's prompt assembled a second time with every
+per-Dispatch variable replaced by a fixed placeholder (`${NAME}`), so two
+Dispatches with the same harness setup hash equal whatever issue they worked,
+while a template, fragment, gate, or knob change that alters the prompt moves
+the hash. A substitution variable is per-Dispatch when its value is a fact of
+the Dispatch rather than of the harness setup. The set is declared once, as
+`perDispatchVars` in `cmd/launcher/internal/promptassembly/assemble.go`,
+beside the substitution variables: `ISSUE_NUMBER`, `ISSUE_TITLE`,
+`ISSUE_TEXT`, `BRANCH`, `DISPATCH_KEY`, `RUN_NONCE`, `CI_FAILURE_SUMMARY`, and
+the Chore's sweep scope and budget (`CHORE_HEAD`, `CHORE_DIFF_RANGE`,
+`CHORE_SLICE`, `CHORE_CLASSES`, `CHORE_PATCH_CLASSES`, `CHORE_MAX_FINDINGS`).
+A new variable carrying a Dispatch fact must be added there, or its value
+splits cohorts per issue. The Chore's identity (`CHORE_NAME`, its prompt,
+`CHORE_CLASS_LIST`) is setup and stays in the hash. Masking replaces values
+only; gates still see the real values, so a presence-gated section (for
+example the CI failure section, or the patch section on a non-empty
+`CHORE_PATCH_CLASSES`) still counts toward the hash. Two known cohort splits
+follow: a fix pass whose CI failure detail could not be fetched hashes apart
+from one that has it, and a butler run whose day's patch budget is spent
+hashes apart from one with patch room left. Subagent prompts in the
+`--agents` roster and run-time carried text (run-state handoff, review
+findings) are not part of a role's template hash. Unlike the stamp, the hashes
+are Box-reported, so an adversarial Box could forge them; treat them as a
+cohort hint, not an attestation.
+
 **What it ingests.** Each Pass log under `.spindrift/logs` (a name matching
 `issue-<key>.log...`) that opens with a stamp: `issue-<key>.log`, its fix-pass,
 conflict-resolve, and rotated `issue-<key>.log.N` attempt logs, and the
@@ -5582,7 +5618,11 @@ wrote (`dispositions`). Its ID is
 millisecond (`work:42@2026-05-01T09:30:00.123Z`). A Record from a stamped
 log is `attribution: stamped`: its ID, kind, and claim time are the stamp's,
 and it carries the stamp's `revision`, `driver`, `driver_version`,
-`role_models`, and `knobs`. Any other Record is `attribution: inferred`,
+`role_models`, and `knobs`, and also `prompt_hashes` (role to template hash)
+when the Dispatch's Boxes reported them. Only a `prompt_hashes` op whose
+`record_id` matches its log's stamp counts, and the Record holds the union
+across its logs (the attempt log's roles plus a fix pass's `legacy`). Any
+other Record is `attribution: inferred`,
 carries none of those, and its kind is inferred from the log: a `butler-*`
 key is `butler`; otherwise a log whose first `pass_start` event names a role
 is `work`; anything else is `unknown`. An `unknown` Record is still stored
@@ -5593,13 +5633,14 @@ not say how the Dispatch ended.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 3. Version 2 added the `verdict_text` and
+own. The current schema is version 4. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. A version 1 store opens, migrates, and keeps
 its rows; the migration also marks every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
 its Record's evidence. A Record whose log is gone keeps empty evidence.
 Version 3 keys passes per source log as well, so re-ingesting a renamed
-(quarantined) log does not double-count. The store uses WAL journaling, so
+(quarantined) log does not double-count. Version 4 adds the `prompt_hashes`
+table, keyed per source log like passes. The store uses WAL journaling, so
 another process can read it while `stats` writes. Because Records are kept in
 the database, they survive deleting the logs they came from. Deleting the
 database instead loses every Record whose
@@ -5648,8 +5689,8 @@ subscription plan you are not billed per token.
 `--json` skips the table and prints one Record per line, ordered by claim time
 then ID, with the fields `record_id`, `kind`, `dispatch_key`, `claim_time`,
 `attribution`, `outcome`, `passes`, and, on stamped Records only (omitted
-when inferred), `revision`, `driver`, `driver_version`, `role_models`, and
-`knobs`. Each pass carries `ordinal`, `role`,
+when inferred), `revision`, `driver`, `driver_version`, `role_models`, `knobs`, and
+`prompt_hashes` (omitted when no Box reported any). Each pass carries `ordinal`, `role`,
 `models`, `usd`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
 `cache_creation_input_tokens`, `api_calls`, `turns`, `duration_ms`,
 `api_duration_ms`, and (when present) `verdict`; review and delta-review
