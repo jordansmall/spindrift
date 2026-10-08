@@ -51,7 +51,7 @@ func registryProxyRoutesCheck(c config, peekCredentials bool) doctor.Check {
 	return doctor.Check{
 		Name:   registryProxyRoutesCheckName,
 		Tier:   doctor.Required,
-		Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045) -- run `spindrift registry discover <repo-dir> <routes-file>` to generate one from the Target repo's own committed registry config. If the failure instead names a retired scalar REGISTRY_PROXY_* knob (issue #3145), unset it and paste the printed [[routes]] stanza into the routes file (see MIGRATING.md)",
+		Remedy: "set REGISTRY_PROXY_ROUTES_FILE to a TOML routes file declaring registry routes (ADR 0045) -- run `" + subcommandSynopsis("registry") + "` to generate one from the Target repo's own committed registry config. If the failure instead names a retired scalar REGISTRY_PROXY_* knob (issue #3145), unset it and paste the printed [[routes]] stanza into the routes file (see MIGRATING.md)",
 		Probe: func() (any, error) {
 			// This gate runs before the early return below and reads the retired
 			// knobs from the environment rather than from c, so a stale operator

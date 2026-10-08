@@ -374,3 +374,13 @@ func mustLoadRoutes(t *testing.T, file string) []registryroutes.Route {
 	}
 	return routes
 }
+
+// The remedy takes its synopsis from the registry, so a placeholder rename in
+// lib/subcommands.nix reaches it.
+func TestRegistryProxyRoutesCheck_RemedyDerivesDiscoverSynopsis(t *testing.T) {
+	synopsis := subcommandSynopsis("registry")
+	routes := registryProxyRoutesCheck(config{}, false)
+	if !strings.Contains(routes.Remedy, synopsis) {
+		t.Errorf("routes Remedy %q must contain the registry synopsis %q", routes.Remedy, synopsis)
+	}
+}

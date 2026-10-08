@@ -715,3 +715,17 @@ func TestCheckoutIsTargetRepo_LocalCodeForgeNeverMatches(t *testing.T) {
 		t.Errorf("checkoutIsTargetRepo(%q, c) = true, want false for codeForge=local", dir)
 	}
 }
+
+// The remedy takes its synopsis from the registry, so a placeholder rename in
+// lib/subcommands.nix reaches it, yet it still says --force is mandatory even
+// though the synopsis brackets it as optional.
+func TestRegistryRouteDriftRow_RemedyDerivesDiscoverSynopsis(t *testing.T) {
+	synopsis := subcommandSynopsis("registry")
+	drift := registryRouteDriftRow(nil, nil)
+	if !strings.Contains(drift.Remedy, synopsis) {
+		t.Errorf("drift Remedy %q must contain the registry synopsis %q", drift.Remedy, synopsis)
+	}
+	if !strings.Contains(drift.Remedy, "with --force (required") {
+		t.Errorf("drift Remedy %q must say --force is required", drift.Remedy)
+	}
+}

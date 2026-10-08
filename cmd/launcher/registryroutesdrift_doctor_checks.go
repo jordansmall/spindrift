@@ -168,7 +168,7 @@ func registryRouteDriftRow(routes []registryroutes.Route, probeUncovered func(co
 	return doctor.Check{
 		Name:   registryRouteDriftCheckName,
 		Tier:   doctor.Advisory,
-		Remedy: "add a route for each listed host to the routes file by hand, or regenerate the whole file with `spindrift registry discover <repo-dir> <routes-file> --force` -- discarding hand edits (ADR 0045)",
+		Remedy: "add a route for each listed host to the routes file by hand, or regenerate the whole file by running `" + subcommandSynopsis("registry") + "` with --force (required to overwrite the existing file) -- discarding hand edits (ADR 0045)",
 		Probe: func() (any, error) {
 			hosts, err := probeUncovered(covered)
 			if err != nil {
