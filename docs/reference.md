@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
-| `spindrift stats [--json]`        | per-role Dispatch cost summary inferred from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift stats [--json] [--reingest]` | per-role Dispatch cost summary inferred from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -5533,7 +5533,7 @@ sweep re-reports the same finding, and only host dedup on the filed issue's
 
 ## Stats
 
-`spindrift stats [--json]` (ADR 0061) reports what past Dispatches cost, read
+`spindrift stats [--json] [--reingest]` (ADR 0061) reports what past Dispatches cost, read
 entirely from the Pass logs already on disk. It runs against the current
 directory, which must be the checkout the Dispatches ran from, and it never
 contacts the tracker, the forge, or a container.
