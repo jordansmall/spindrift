@@ -840,6 +840,7 @@ func retryPolicy(c config) retry.Policy {
 func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.CodeForge, caps forge.Capabilities) dispatch.Config {
 	trackerAxisRead, trackerAxisWrite, trackerAxisFiler, forgeBackend := resolveTrackerAndForgeSignals(c.codeForge, c.issueTracker)
 	presence := resolveAgentPresenceSignals(c.driver)
+	reviewModel := os.Getenv("REVIEW_MODEL")
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
 		ResolveEnv: boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
@@ -847,7 +848,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		// what the operator set at dispatch time. The document/schema-default
 		// chain must stay out, since those values already reached the baked
 		// roster at eval time and re-forwarding them would override it.
-		ReviewModelOverride:    os.Getenv("REVIEW_MODEL"),
+		ReviewModelOverride:    reviewModel,
 		ReviewEffortOverride:   os.Getenv("REVIEW_EFFORT"),
 		Kind:                   c.kind().Name,
 		SelfContained:          c.selfContained,
@@ -862,6 +863,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 		WorkerProvisioned:      presence.workerProvisioned,
 		ScoutProvisioned:       presence.scoutProvisioned,
 		Policy:                 retryPolicy(c),
+		Stamp:                  dispatchStamp(reviewModel),
 		DriverSessionCacheDir:  c.driverSessionCacheDir,
 		RegistryProxyRoutes:    c.registryProxyRoutes,
 		SignalCarrier:          c.signalCarrier,

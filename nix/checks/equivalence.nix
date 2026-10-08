@@ -87,6 +87,10 @@ in
     # The default template's chores/*.md stems (issue #3905).
     grep -q '"CHORE_CATALOG":"bugs docs-drift refactor"' "$runDoc"
 
+    # The Pass log stamp inputs (issue #4783): roster models and Driver CLI version.
+    grep -qE '"ROLE_MODELS":"\{\\"[a-z-]+\\":\\"[^"\\]+\\"' "$runDoc"
+    grep -qE '"DRIVER_VERSION":"[0-9]' "$runDoc"
+
     case '${harness.internals.imagePath}' in
       /nix/store/*spindrift*) : ;;
       *) echo "unexpected image path: ${harness.internals.imagePath}" >&2; exit 1 ;;

@@ -452,6 +452,15 @@ let
   # opencode box that does carry scout.
   scoutProvisioned = lib.any (e: e.name == "scout") finalRoster;
 
+  # Stamped onto every Pass log's dispatch_start (issue #4783). The Launcher
+  # overlays the runtime-switchable "main" and reviewer models itself.
+  roleModels = builtins.toJSON (
+    builtins.listToAttrs (
+      map (e: lib.nameValuePair e.name e.model) (lib.filter (e: (e.model or "") != "") finalRoster)
+    )
+  );
+  driverVersion = (driverEntry.package pkgs).version or "";
+
   # On-disk subagent files, rendered by the selected Driver. A Driver with no
   # on-disk agent-config mechanism (claude.nix) returns { } here; its
   # subagents ride agentsJsonTemplate's --agents JSON flag instead.
@@ -1290,6 +1299,8 @@ let
       workerProvisioned
       scoutProvisioned
       choreCatalog
+      roleModels
+      driverVersion
       # Always renders the Consumer's raw knob value (issue #2665), unlike
       # nixConfigPath below. The AND-gate with NixConfigFile lives in
       # bwrap.go, not here.
