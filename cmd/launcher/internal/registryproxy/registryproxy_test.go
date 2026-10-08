@@ -1016,6 +1016,34 @@ func TestNew_MethodGatePrecedes403(t *testing.T) {
 	}
 }
 
+// Issue #4807: servlet-container upstreams strip ";params" per segment before
+// normalizing, so "..;" must not pass path-set enforcement as a plain segment.
+func TestNew_SemicolonDotDotSegmentRefused(t *testing.T) {
+	for _, target := range []string{
+		"/r0/index/..;/security/token",
+		"/r0/index/..%3b/security/token",
+	} {
+		t.Run(target, func(t *testing.T) {
+			var hits int32
+			upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&hits, 1)
+				w.WriteHeader(http.StatusOK)
+			})
+
+			p, _ := newPlainProxy(t, Route{EnforcedPaths: []string{"/index"}, Upstream: upstream.URL, Credential: "s3kr1t"})
+
+			rr := serve(p, httptest.NewRequest(http.MethodGet, target, nil))
+
+			if rr.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", rr.Code, http.StatusForbidden)
+			}
+			if got := atomic.LoadInt32(&hits); got != 0 {
+				t.Errorf("upstream hits = %d, want 0 for a refused path", got)
+			}
+		})
+	}
+}
+
 // Refusal ordering is load-bearing (issue #3177): a missing or wrong secret
 // on a path outside the enforced set answers 401, not 403.
 func TestListenAndServeTCP_SecretGatePrecedes403(t *testing.T) {
