@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | local-tracker bookkeeping sweep: close issues whose recorded `landing` PR merged (ADR 0029) — a clear no-op on `github`/`jira`; also auto-invoked at the end of a `dispatch` run when `ISSUE_TRACKER=local` — see [`reconcile`: closing a local issue](#reconcile-closing-a-local-issue) |
-| `spindrift stats [--json] [--reingest]` | per-role Dispatch cost summary inferred from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift stats [--json] [--reingest]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD); `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -5538,46 +5538,71 @@ Dispatches cost, read entirely from the Pass logs already on disk. It runs
 against the current directory, which must be the checkout the Dispatches ran
 from, and it never contacts the tracker, the forge, or a container.
 
-**What it ingests.** Each `.spindrift/logs/issue-<key>.log`, and each of its
-`issue-<key>.log.prior-run.N` quarantines (a later Dispatch of the same key
-moves the earlier log aside, so these are earlier runs, not copies). Every
-such file becomes one Record. Fix-pass (`issue-<key>-fix-N.log`) and
-conflict-resolve (`issue-<key>-conflict-resolve.log`) logs are not attributed
-to their Dispatch yet and are skipped, so their spend is not counted. So are
-`issue-<key>.log.N` retry-attempt logs (an earlier attempt rotated aside
-within one Dispatch), for now. Because an attempt is only read while it is
-still `issue-<key>.log`, whether an earlier attempt within one Dispatch is
-counted depends on whether a `stats` run happened before the retry rotated it
-aside: if one did, it stays as its own Record; otherwise its spend is not
-counted.
+**The stamp.** The host writes a `dispatch_start` `spindrift_op` as the first
+line of every Pass log a Dispatch creates: each attempt's fresh log (a retry
+rotates the previous one to `<path>.N`), each host fix pass
+(`issue-<key>-fix-N.log`), and conflict-resolve. All carry the same Record ID,
+minted at claim; a Dispatch that reaches a fix or conflict-resolve pass
+without a claim (recover adopting an open PR) mints it on first use. The line
+is `{"type":"spindrift_op","spindrift_op":{"op":"dispatch_start","dispatch_start":{...}}}`
+with `record_id`, `kind`, `dispatch_key`, `claim_time`, `started` (this log's
+creation time), `revision`, `role_models` (role to model), `driver`,
+`driver_version`, and `knobs`. The host writes it, so a Box cannot forge it.
+`knobs` is the effective value of every env-schema knob not marked `secret`;
+secret knobs never appear, URL userinfo is stripped, and
+`BOX_FORGE_AND_ISSUE_ACCESS` reads `read-only` for a kind that always runs
+read-only (the butler). Other non-secret values, such as `GIT_USER_EMAIL` or
+`JIRA_EMAIL`, appear as set, and CI uploads `.spindrift/logs/` as an Actions
+artifact. `role_models` is the baked roster (run artifact
+`ROLE_MODELS`) plus `main` from the effective `MODEL` and `reviewer` from a
+dispatch-time `REVIEW_MODEL`; `driver_version` is run artifact
+`DRIVER_VERSION`, the Driver CLI package version.
 
-**Records.** A Record is one Dispatch reconstructed from its log: a Dispatch
-key, a claim time (the first timestamped event in the log, or the file's
-mtime when it carries none, which makes the Record provisional), and its
+**What it ingests.** Each Pass log under `.spindrift/logs` (a name matching
+`issue-<key>.log...`) that opens with a stamp: `issue-<key>.log`, its fix-pass,
+conflict-resolve, and rotated `issue-<key>.log.N` attempt logs, and the
+`.prior-run.N` quarantines of each (a later Dispatch of the same key moves the
+earlier log aside, so these are earlier runs, not copies). Logs of one
+Dispatch join into one Record by Record ID, so a fix pass's spend counts
+toward its Dispatch. A log without a stamp predates it and is read by
+inference: only `issue-<key>.log` and its `.prior-run.N` quarantines become a
+Record each; unstamped fix-pass, conflict-resolve, and rotated attempt logs
+are skipped, so their spend is not counted. Because an unstamped attempt is
+only read while it is still `issue-<key>.log`, whether it is counted depends
+on whether a `stats` run happened before the retry rotated it aside.
+
+**Records.** A Record is one Dispatch: a Dispatch key, a claim time (the
+stamp's; for an inferred Record the first timestamped event in the log, or the
+file's mtime when it carries none, which makes the Record provisional), and its
 passes with their role, models, USD, token counts, API calls, turns,
 durations, and, for review passes, the verdict and the pass's final result
 text (`verdict_text`), and, for fix passes, the dispositions the fix agent
 wrote (`dispositions`). Its ID is
 `<kind>:<Dispatch key>@<claim time>`, the claim time in UTC to the
-millisecond (`work:42@2026-05-01T09:30:00.123Z`). Today every Record is
-`attribution: inferred` and `outcome: unknown`: the log does not say how the
-Dispatch ended. The kind is inferred from the log: a `butler-*` key is
-`butler`; otherwise a log whose first `pass_start` event names a role is
-`work`; anything else is `unknown`. An `unknown` Record is still stored and
-still counted.
+millisecond (`work:42@2026-05-01T09:30:00.123Z`). A Record from a stamped
+log is `attribution: stamped`: its ID, kind, and claim time are the stamp's,
+and it carries the stamp's `revision`, `driver`, `driver_version`,
+`role_models`, and `knobs`. Any other Record is `attribution: inferred`,
+carries none of those, and its kind is inferred from the log: a `butler-*`
+key is `butler`; otherwise a log whose first `pass_start` event names a role
+is `work`; anything else is `unknown`. An `unknown` Record is still stored
+and still counted. Every Record is `outcome: unknown` for now: the log does
+not say how the Dispatch ended.
 
 **The store.** Records are cached in `.spindrift/dispatch-records.db`, a
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 2, which added the `verdict_text` and
+own. The current schema is version 3. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. A version 1 store opens, migrates, and keeps
 its rows; the migration also marks every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
-its Record's evidence. A Record whose log is gone keeps empty evidence. The
-store uses WAL journaling, so another process can read it while `stats`
-writes. Because Records are kept in the database, they survive deleting the
-logs they came from. Deleting the database instead loses every Record whose
+its Record's evidence. A Record whose log is gone keeps empty evidence.
+Version 3 keys passes per source log as well, so re-ingesting a renamed
+(quarantined) log does not double-count. The store uses WAL journaling, so
+another process can read it while `stats` writes. Because Records are kept in
+the database, they survive deleting the logs they came from. Deleting the
+database instead loses every Record whose
 log is gone: a re-run rebuilds only from the logs still on disk.
 
 **Pruning logs.** Ingest before you delete. A Record keeps only what was
@@ -5622,7 +5647,9 @@ subscription plan you are not billed per token.
 
 `--json` skips the table and prints one Record per line, ordered by claim time
 then ID, with the fields `record_id`, `kind`, `dispatch_key`, `claim_time`,
-`attribution`, `outcome`, and `passes`. Each pass carries `ordinal`, `role`,
+`attribution`, `outcome`, `passes`, and, on stamped Records only (omitted
+when inferred), `revision`, `driver`, `driver_version`, `role_models`, and
+`knobs`. Each pass carries `ordinal`, `role`,
 `models`, `usd`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
 `cache_creation_input_tokens`, `api_calls`, `turns`, `duration_ms`,
 `api_duration_ms`, and (when present) `verdict`; review and delta-review
@@ -7726,7 +7753,7 @@ slot.
 | `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error, so long as that exit does not halt the pool (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs —, the holder re-deciding at `startChild` and finding a sibling's result (an exit 2 zeroing a probed kind's count) took away the Start it decided on before blocking on the baton (`batonPassOutpaced`, `"a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"`), or the holder starting a Chore-keyed child, which discovers no tracker issue, so the baton passes at the start rather than at a `box` record (`batonPassChoreKeyed`, `"the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"`), or the holder returning for any reason at all before its round otherwise resolved, including a child exit that halts the pool or trips the breaker, whose pass waits until after the `halt` event so no sibling starts a child on a halting pool (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, a gone feature branch, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal (doctor's verdict or a gone feature branch), a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the three the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-feature-branch-gone` for a `--feature-branch` naming a branch origin does not have, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot`, `child_log` | just before a child is launched. `child_log` names the child's **Child log** (below), relative to the checkout; a daemon that predates Child logs omits it. Carries no `issue` or `chore` — the daemon cannot know which issue or chore a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
-| `box` | `time`, `kind`, `issue` or `chore`, `phase`, `pass_log`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later. A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set. `pass_log` names the Pass log that phase writes, relative to the checkout (the un-suffixed path, even when a stale log was rotated aside), carried unchanged from the child's record (a later Dispatch of the same issue or Chore reuses the path once the earlier run's copy is moved to `<pass_log>.prior-run.N`, so the path alone does not identify a run); absent for `recover`, which runs no Box |
+| `box` | `time`, `kind`, `issue` or `chore`, `phase`, `pass_log`, `record_id`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later. A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set. `pass_log` names the Pass log that phase writes, relative to the checkout (the un-suffixed path, even when a stale log was rotated aside), carried unchanged from the child's record (a later Dispatch of the same issue or Chore reuses the path once the earlier run's copy is moved to `<pass_log>.prior-run.N`, so the path alone does not identify a run); absent for `recover`, which runs no Box. `record_id` is the Dispatch's [Record ID](#stats), the same for every phase of one Dispatch, so unlike `pass_log` it does identify a run; added without a `v` bump, and absent for `recover` |
 | `model` | `time`, `kind`, `issue` or `chore`, `model`, `model_role`, `revision`, `slot` | each time the child reported that the Box's active model changed (the exact model id, plus the optional role, such as a reviewer, that is running it); the record is emitted as it arrives, so the Events file keeps the history a slot's status entry drops. `model_role` is absent when the model has no role |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
 | `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `pr_url`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle. `pr_url` is the PR the Dispatch opened or adopted, carried from the child's record: a PR the host opened, adopted, or recovered (named as soon as the host resolves it), the open PR on the agent branch of a read-write Box (resolved host-side at settle, never from the Box's `landing=`), and a butler patch PR once it merges cleanly (a red, timed-out, or unmerged patch PR emits no `settled` record at all). It is present even when the landing went red or failed, and absent when there is no PR (push-only forges, research, a butler Chore's own settle, a failure before any PR, no open PR on the agent branch at settle) (issue #4718) |
@@ -7845,7 +7872,9 @@ later Dispatch of the same issue reuses it once the launcher moves the
 earlier run's log to `<pass_log>.prior-run.N`. Per-Dispatch unique names
 were rejected: the launcher's log lookups, outcome resolution, recover,
 usage accounting and the transcript formatter all find these logs by the
-fixed name. A `recover` record runs no Box and carries none. The
+fixed name. A `recover` record runs no Box and carries none. A `box`
+record also carries `record_id`, the Dispatch's Record ID (see
+[Stats](#stats)), which `recover` omits too. The
 daemon copies it onto the `box` event unchanged. A `settled` record likewise
 carries `pr_url`, the PR the Dispatch opened or adopted, when there is one;
 the daemon copies it onto the `settled` event unchanged (issue #4718).
