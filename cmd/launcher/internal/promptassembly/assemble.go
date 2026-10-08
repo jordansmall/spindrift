@@ -267,6 +267,26 @@ type promptBodies struct {
 // substitute through the same attributed vars and their fragment sources
 // reach Result.Fragments.
 func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
+	return assemblePromptBodiesMasked(e, reg, false)
+}
+
+// perDispatchVars are the substitution vars whose value is a fact that
+// differs per Dispatch, not per harness setup. TemplateHashes masks exactly
+// these, so a hash moves only when the template or its setup does.
+var perDispatchVars = []string{
+	"ISSUE_NUMBER", "ISSUE_TITLE", "ISSUE_TEXT", "BRANCH", "DISPATCH_KEY", "RUN_NONCE",
+	"CI_FAILURE_SUMMARY",
+	"CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES", "CHORE_PATCH_CLASSES", "CHORE_MAX_FINDINGS",
+}
+
+// maskPlaceholder is the fixed stand-in for a masked per-Dispatch var.
+func maskPlaceholder(name string) string { return "${" + name + "}" }
+
+// assemblePromptBodiesMasked is assemblePromptBodies with an optional mask:
+// when mask is set every perDispatchVars value is replaced by its placeholder
+// before any fragment renders. Masking acts on vars, never on Env, because
+// Env drives the gates and ChoreName is a lookup key.
+func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, error) {
 	gates := Gates(e)
 	// SKILLS_FOUND is a filesystem-derived presence gate Gates never computes,
 	// because I/O is out of its scope.
@@ -298,6 +318,15 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 	// Go-derived (issueTextSection's fenced text, never e.IssueText raw),
 	// while scalars mirrors the raw-env substitution list byte for byte.
 	issueSection := issueTextSection(e)
+	if mask && e.descriptor().Keying != dispatchkind.ByChore {
+		// Unconditional, so the hash does not depend on whether this
+		// Dispatch happened to carry issue text. The fixed section prose
+		// stays; only the interpolated facts are masked.
+		me := e
+		me.IssueNumber = maskPlaceholder("ISSUE_NUMBER")
+		me.IssueText = maskPlaceholder("ISSUE_TEXT")
+		issueSection = issueTextSection(me)
+	}
 	vars["ISSUE_TEXT"] = varBody("ISSUE_TEXT", issueSection)
 
 	// CHORE_PROMPT (ADR 0056, issue #3875) is the butler's ${CHORE_PROMPT}
@@ -342,6 +371,16 @@ func assemblePromptBodies(e Env, reg Registry) (promptBodies, error) {
 			seenExtra[extra] = true
 			v := extraRaw[extra]
 			vars[extra] = varBody(extra, v)
+		}
+	}
+
+	if mask {
+		for _, k := range perDispatchVars {
+			// ISSUE_TEXT already holds the masked section from above.
+			if _, ok := vars[k]; !ok || k == "ISSUE_TEXT" {
+				continue
+			}
+			vars[k] = varBody(k, maskPlaceholder(k))
 		}
 	}
 
