@@ -1,5 +1,16 @@
 # Migration Guide
 
+## Settle tokened logs with a current launcher (issue #4812)
+
+Each Pass log's `dispatch_start` stamp now carries a `host_token`, and the
+Dispatch Record ingester accepts a `dispatch_settled` op only when it echoes
+that token. A launcher built before this change appends ops without it, so
+an older binary settling a newer log, for example a `spindrift recover` from
+a pre-#4812 build, leaves that Record at `outcome: unknown`. Run every
+launcher, daemon, and `spindrift recover` on one root from the same build.
+Logs stamped before the token existed keep the old ordering rule and need
+nothing.
+
 ## Worker and scout prompts drop the caveman anchor (issue #4562)
 
 `worker-prompt.md` no longer opens with a `/caveman` anchor. A custom
