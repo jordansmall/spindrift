@@ -1,6 +1,7 @@
 package dispatchrecord
 
 import (
+	"database/sql"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/passmachine"
 )
 
 func putLog(t *testing.T, root, name string, lines ...string) string {
@@ -234,8 +236,8 @@ func TestStoreSchemaVersionAndWAL(t *testing.T) {
 	root := t.TempDir()
 	s := openStore(t, root)
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
-		t.Fatalf("user_version = %d, err %v; want 1", v, err)
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
+		t.Fatalf("user_version = %d, err %v; want %d", v, err, len(migrations))
 	}
 	var mode string
 	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil || mode != "wal" {
@@ -246,7 +248,7 @@ func TestStoreSchemaVersionAndWAL(t *testing.T) {
 	}
 	s.Close()
 	s2 := openStore(t, root)
-	if err := s2.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
+	if err := s2.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
 		t.Fatalf("reopened user_version = %d, err %v", v, err)
 	}
 }
@@ -308,6 +310,25 @@ func TestStoreKeepsRecordWhenDeletedLogPathIsReused(t *testing.T) {
 	putLog(t, root, "issue-12.log", workLog("2026-03-05T10:00:00.000Z", 3)...)
 	if n := ingest(t, s); n != 1 {
 		t.Fatalf("parsed = %d, want 1", n)
+	}
+	want := []string{"work:12@2026-03-01T10:00:00.000Z", "work:12@2026-03-05T10:00:00.000Z"}
+	if got := ids(records(t, s)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("records = %v, want %v", got, want)
+	}
+}
+
+func TestStoreReingestKeepsRecordWhenReusedPathChangedStatAndID(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	putLog(t, root, "issue-12.log", workLog("2026-03-05T10:00:00.000Z", 3)...)
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(p, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Reingest(); err != nil {
+		t.Fatal(err)
 	}
 	want := []string{"work:12@2026-03-01T10:00:00.000Z", "work:12@2026-03-05T10:00:00.000Z"}
 	if got := ids(records(t, s)); !reflect.DeepEqual(got, want) {
@@ -461,5 +482,206 @@ func TestStoreEventFreeLogYieldsNoRecordUntilItGrows(t *testing.T) {
 	}
 	if got, want := ids(records(t, s)), []string{"work:5@2026-03-01T10:00:00.000Z"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("records = %v, want %v", got, want)
+	}
+}
+
+func reviewEvidenceLog(verdict string) []string {
+	return []string{
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "review"}),
+		resultText("2026-10-07T12:00:00Z", verdict),
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "fix"}),
+		assistantTool("f1", "Write", map[string]string{"file_path": passmachine.DispositionsPath, "content": "fixed: all"}),
+		toolResult("f1", false),
+		resultText("2026-10-07T12:01:00Z", "done"),
+	}
+}
+
+func TestStoreRoundTripsReviewEvidence(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-7.log", reviewEvidenceLog("VERDICT: BLOCK")...)
+	s := openStore(t, root)
+	ingest(t, s)
+	recs := records(t, s)
+	if len(recs) != 1 || len(recs[0].Passes) != 2 {
+		t.Fatalf("records = %+v", recs)
+	}
+	if got := recs[0].Passes[0].VerdictText; got != "VERDICT: BLOCK" {
+		t.Fatalf("VerdictText = %q", got)
+	}
+	if got := recs[0].Passes[1].Dispositions; got != "fixed: all" {
+		t.Fatalf("Dispositions = %q", got)
+	}
+}
+
+func TestStoreReingestRepairsUnchangedStatLog(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-7.log", reviewEvidenceLog("VERDICT: BLOCK")...)
+	gone := putLog(t, root, "issue-8.log", workLog("2026-10-07T13:00:00Z", 1)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	before := records(t, s)
+
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Same size and mtime, different content: only a forced re-parse sees it.
+	if err := os.WriteFile(p, []byte(strings.Join(reviewEvidenceLog("VERDICT: PASS!"), "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(p, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(gone); err != nil {
+		t.Fatal(err)
+	}
+	if n := ingest(t, s); n != 0 {
+		t.Fatalf("Ingest parsed %d, want 0 for a stat-identical log", n)
+	}
+	n, err := s.Reingest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("Reingest parsed %d, want 1", n)
+	}
+	after := records(t, s)
+	if len(after) != 2 {
+		t.Fatalf("records = %v, want both kept", ids(after))
+	}
+	for i := range after {
+		switch after[i].DispatchKey {
+		case "7":
+			if got := after[i].Passes[0].VerdictText; got != "VERDICT: PASS!" {
+				t.Fatalf("VerdictText = %q, want repaired", got)
+			}
+		case "8":
+			if !reflect.DeepEqual(after[i], before[i]) {
+				t.Fatalf("record with deleted log changed: %+v vs %+v", after[i], before[i])
+			}
+		}
+	}
+}
+
+func TestStoreReingestReplacesRecordWhoseIDChanged(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-7.log", workLog("2026-10-07T12:00:00Z", 1)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	want := ids(records(t, s))
+
+	// Simulate an older parser that derived a different ID from the same file.
+	const stale = "unknown:7@old"
+	for _, q := range []string{
+		"UPDATE records SET record_id = ?",
+		"UPDATE passes SET record_id = ?",
+		"UPDATE ingested_files SET record_id = ?",
+	} {
+		if _, err := s.db.Exec(q, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := ingest(t, s); n != 0 {
+		t.Fatalf("Ingest parsed %d, want 0 for a stat-identical log", n)
+	}
+	if _, err := s.Reingest(); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(records(t, s)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("records = %v, want only %v", got, want)
+	}
+	var passes int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM passes WHERE record_id = ?", stale).Scan(&passes); err != nil {
+		t.Fatal(err)
+	}
+	if passes != 0 {
+		t.Fatalf("%d passes left under the stale ID", passes)
+	}
+}
+
+func TestStoreMigratesV1Database(t *testing.T) {
+	root := t.TempDir()
+	path := hostpaths.DispatchRecordsDB(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		migrations[0],
+		"PRAGMA user_version = 1",
+		`INSERT INTO records VALUES ('work:1@x', 'work', '1', 1000, 'inferred', 'unknown')`,
+		`INSERT INTO passes VALUES ('work:1@x', 1, 'review', 'm', 1.5, 1, 2, 3, 4, 5, 6, 7, 8, 'BLOCK')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	s := openStore(t, root)
+	var v int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 2 {
+		t.Fatalf("user_version = %d, err %v; want 2", v, err)
+	}
+	recs := records(t, s)
+	if len(recs) != 1 || len(recs[0].Passes) != 1 {
+		t.Fatalf("records = %+v", recs)
+	}
+	want := Pass{Ordinal: 1, Role: "review", Models: []string{"m"}, USD: 1.5, InputTokens: 1, OutputTokens: 2,
+		CacheReadInputTokens: 3, CacheCreationInputTokens: 4, APICalls: 5, Turns: 6, DurationMs: 7, APIDurationMs: 8, Verdict: "BLOCK"}
+	if !reflect.DeepEqual(recs[0].Passes[0], want) {
+		t.Fatalf("pass = %+v, want %+v", recs[0].Passes[0], want)
+	}
+}
+
+// A v1 database already holds an ingested_files row for each log, so the
+// migration must make the next plain Ingest re-parse them for their evidence.
+func TestStoreReparsesV1IngestedLogAfterMigration(t *testing.T) {
+	root := t.TempDir()
+	p := putLog(t, root, "issue-7.log", reviewEvidenceLog("VERDICT: BLOCK")...)
+	info, err := os.Stat(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := hostpaths.DispatchRecordsDB(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "work:7@2026-10-07T12:00:00.000Z"
+	for _, q := range []string{
+		migrations[0],
+		"PRAGMA user_version = 1",
+		`INSERT INTO records VALUES ('` + id + `', 'work', '7', 1791374400000, 'inferred', 'unknown')`,
+		`INSERT INTO passes VALUES ('` + id + `', 1, 'review', 'm', 1, 1, 1, 1, 1, 1, 1, 1, 1, 'BLOCK')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO ingested_files VALUES (?, ?, ?, ?, 0)`, p, info.Size(), info.ModTime().UnixNano(), id); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s := openStore(t, root)
+	if n := ingest(t, s); n != 1 {
+		t.Fatalf("parsed = %d, want the v1-ingested log re-parsed once", n)
+	}
+	recs := records(t, s)
+	if len(recs) != 1 || recs[0].ID != id || len(recs[0].Passes) != 2 {
+		t.Fatalf("records = %+v", recs)
+	}
+	if got := recs[0].Passes[0].VerdictText; got != "VERDICT: BLOCK" {
+		t.Fatalf("VerdictText = %q after upgrade", got)
+	}
+	if n := ingest(t, s); n != 0 {
+		t.Fatalf("second ingest parsed = %d, want 0", n)
 	}
 }

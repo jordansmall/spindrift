@@ -55,6 +55,17 @@ const (
 	RoleDeltaReview Role = "delta-review"
 )
 
+// IsReview reports whether r's passes end in an APPROVE/BLOCK verdict.
+func (r Role) IsReview() bool {
+	return r == RoleReview || r == RoleDeltaReview
+}
+
+// DispositionsPath is where the review-loop prompt (review-loop-orchestrator.md)
+// tells the fix agent to write its per-finding dispositions. dispatchrecord
+// recovers dispositions only from a Write to this path, so a run using the
+// orchestrator's --dispositions-path override records none.
+const DispositionsPath = "/tmp/dispositions.md"
+
 // String returns the pass_start op's Role field value for k, and "" for
 // KindLegacy, which never sets Role at all.
 func (k PassKind) String() string {

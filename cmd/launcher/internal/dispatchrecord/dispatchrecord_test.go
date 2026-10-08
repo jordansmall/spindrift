@@ -1,6 +1,7 @@
 package dispatchrecord
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/passmachine"
 )
 
 func opLine(op claude.SpindriftOp) string { return claude.EncodeSpindriftOp(op) }
@@ -279,5 +281,100 @@ func TestParseLogEventFreeLog(t *testing.T) {
 func TestChoreKeyedKindFollowsDescriptor(t *testing.T) {
 	if got := choreKeyedKind(); got != dispatchkind.Butler.Name {
 		t.Fatalf("choreKeyedKind = %q, want %q", got, dispatchkind.Butler.Name)
+	}
+}
+
+func resultText(ts, text string) string {
+	b, _ := json.Marshal(text)
+	return fmt.Sprintf(`{"type":"result","timestamp":%q,"num_turns":1,"result":%s}`+"\n", ts, b)
+}
+
+// assistantTool is one assistant event carrying a single tool_use block whose
+// tool_use ID is the message ID.
+func assistantTool(id, name string, input map[string]string) string {
+	return assistantToolUse(id, id, name, input)
+}
+
+func assistantToolUse(msgID, toolID, name string, input map[string]string) string {
+	in, _ := json.Marshal(input)
+	return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"m","content":[{"type":"tool_use","id":%q,"name":%q,"input":%s}]}}`+"\n", msgID, toolID, name, in)
+}
+
+// toolResult is the user event that answers the tool_use with the given ID.
+func toolResult(toolID string, isError bool) string {
+	return fmt.Sprintf(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":%q,"content":"x","is_error":%t}]}}`+"\n", toolID, isError)
+}
+
+func TestParseLogReviewEvidence(t *testing.T) {
+	const ts = "2026-10-07T12:00:00Z"
+	write := func(id, path, content string) string {
+		return assistantTool(id, "Write", map[string]string{"file_path": path, "content": content}) + toolResult(id, false)
+	}
+	p := writeLog(t, "issue-9.log",
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		write("i1", "/tmp/dispositions.md", "implement must not keep this"),
+		resultText(ts, "implement result"),
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+		resultText(ts, "first draft"),
+		resultText(ts, "VERDICT: BLOCK\nfix the thing"),
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
+		write("f1", "/tmp/dispositions.md", "early"),
+		write("f2", "/tmp/other.md", "ignored"),
+		assistantToolUse("f3", "f3a", "Write", map[string]string{"file_path": "/tmp/dispositions.md", "content": "first of shared id"})+toolResult("f3a", false),
+		assistantToolUse("f3", "f3b", "Write", map[string]string{"file_path": "/tmp/dispositions.md", "content": "second of shared id"})+toolResult("f3b", false),
+		assistantTool("f4", "Read", map[string]string{"file_path": "/tmp/dispositions.md", "content": "not a write"}),
+		resultText(ts, "fix result"),
+		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 4, Role: "delta-review"}),
+		resultText(ts, "VERDICT: APPROVE"),
+	)
+	rec, _, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type ev struct{ verdictText, dispositions string }
+	var got []ev
+	for _, ps := range rec.Passes {
+		got = append(got, ev{ps.VerdictText, ps.Dispositions})
+	}
+	want := []ev{
+		{"", ""},
+		{"VERDICT: BLOCK\nfix the thing", ""},
+		{"", "second of shared id"},
+		{"VERDICT: APPROVE", ""},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence = %q, want %q", got, want)
+	}
+}
+
+func TestParseLogDispositionsNeedASuccessfulWrite(t *testing.T) {
+	w := func(id, content string) string {
+		return assistantTool(id, "Write", map[string]string{"file_path": passmachine.DispositionsPath, "content": content})
+	}
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"rejected write then edit keeps the earlier write", []string{
+			w("w1", "round one"), toolResult("w1", false),
+			w("w2", "rejected"), toolResult("w2", true),
+			assistantTool("e1", "Edit", map[string]string{"file_path": passmachine.DispositionsPath, "new_string": "edited"}), toolResult("e1", false),
+		}, "round one"},
+		{"rejected write alone records nothing", []string{w("w1", "rejected"), toolResult("w1", true)}, ""},
+		{"write with no tool_result is not recorded", []string{w("w1", "unanswered")}, ""},
+		{"successful write is recorded", []string{w("w1", "kept"), toolResult("w1", false)}, "kept"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := append([]string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})}, tt.lines...)
+			rec, _, err := ParseLog(writeLog(t, "issue-9.log", append(lines, resultText("2026-10-07T12:00:00Z", "done"))...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := rec.Passes[0].Dispositions; got != tt.want {
+				t.Fatalf("Dispositions = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

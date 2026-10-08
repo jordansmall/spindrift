@@ -51,12 +51,20 @@ var migrations = []string{
 		record_id TEXT NOT NULL, -- empty for a log with no events yet
 		provisional INTEGER NOT NULL -- 1 when record_id's claim time fell back to mtime
 	);`,
+	`ALTER TABLE passes ADD COLUMN verdict_text TEXT NOT NULL DEFAULT '';
+	ALTER TABLE passes ADD COLUMN dispositions TEXT NOT NULL DEFAULT '';
+	-- Forces one re-parse so pre-v2 Records gain their evidence; record_id and
+	-- provisional stay, so the re-parse still replaces a provisional Record.
+	-- The sentinel makes statSame false on that re-parse, so do not ship this
+	-- alongside a change to Record ID derivation: the stale Record would stay.
+	UPDATE ingested_files SET size = -1;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
 // inferred from (ADR 0061), so deleting a log never removes its Record. The
-// only Record the store discards is a provisional (mtime-derived) one that its
-// own still-present log has since replaced with a different ID. Accepted
+// only Records the store discards are ones its own still-present log has since
+// replaced with a different ID: a provisional (mtime-derived) one, or, under
+// Reingest, one whose stat-identical log re-parses differently. Accepted
 // residual: deleting a provisional log and reusing its path with no Ingest in
 // between reads as the same Dispatch growing, so that earlier Record, which has
 // no real claim time, is replaced.
@@ -127,7 +135,14 @@ func (s *Store) Close() error { return s.db.Close() }
 // ingested_files row is skipped without being opened. Rows for logs no longer
 // on disk, including every row when the whole log directory is gone, are
 // forgotten (their Records are kept), so a reused path starts fresh.
-func (s *Store) Ingest() (parsed int, err error) {
+func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false) }
+
+// Reingest is Ingest without the skip: it re-parses every chain log still on
+// disk, so a parser fix repairs whatever history remains. Records whose logs
+// are gone are untouched.
+func (s *Store) Reingest() (parsed int, err error) { return s.ingest(true) }
+
+func (s *Store) ingest(force bool) (parsed int, err error) {
 	dir := hostpaths.LogDir(s.root)
 	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -150,12 +165,14 @@ func (s *Store) Ingest() (parsed int, err error) {
 			}
 			return parsed, err
 		}
-		fresh, err := s.isIngested(path, info)
-		if err != nil {
-			return parsed, err
-		}
-		if fresh {
-			continue
+		if !force {
+			fresh, err := s.isIngested(path, info)
+			if err != nil {
+				return parsed, err
+			}
+			if fresh {
+				continue
+			}
 		}
 		var recp *Record
 		rec, provisional, err := ParseLog(path)
@@ -189,7 +206,7 @@ func (s *Store) forgetMissing(seen []string) error {
 // passColumns is shared by the passes INSERT and SELECT so they cannot drift.
 const passColumns = `record_id, ordinal, role, models, usd, input_tokens, output_tokens,
 	cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms,
-	api_duration_ms, verdict`
+	api_duration_ms, verdict, verdict_text, dispositions`
 
 func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 	var size, mtime int64
@@ -213,7 +230,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, provisional b
 	defer tx.Rollback()
 	var oldID string
 	var oldProvisional bool
-	err = tx.QueryRow("SELECT record_id, provisional FROM ingested_files WHERE path = ?", path).Scan(&oldID, &oldProvisional)
+	var oldSize, oldMtime int64
+	err = tx.QueryRow("SELECT record_id, provisional, size, mtime_ns FROM ingested_files WHERE path = ?", path).Scan(&oldID, &oldProvisional, &oldSize, &oldMtime)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
@@ -232,10 +250,10 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, provisional b
 		for _, p := range rec.Passes {
 			if _, err := tx.Exec(
 				`INSERT INTO passes (`+passColumns+`)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				rec.ID, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
 				p.CacheReadInputTokens, p.CacheCreationInputTokens, p.APICalls, p.Turns, p.DurationMs,
-				p.APIDurationMs, p.Verdict); err != nil {
+				p.APIDurationMs, p.Verdict, p.VerdictText, p.Dispositions); err != nil {
 				return err
 			}
 		}
@@ -249,7 +267,11 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, provisional b
 	// changed timestamp-derived ID is a new Dispatch reusing the path. A nil rec
 	// (a log emptied in place) overwrote oldID with "" above, so whatever that
 	// log regrows into is a new Dispatch and the old provisional Record stays.
-	if rec != nil && oldID != "" && oldID != newID && oldProvisional {
+	// A stat-identical re-parse (only a forced one reaches here) is the same
+	// Dispatch too, so an ID change means the parser changed and the old Record
+	// is stale.
+	statSame := oldSize == info.Size() && oldMtime == info.ModTime().UnixNano()
+	if rec != nil && oldID != "" && oldID != newID && (oldProvisional || statSame) {
 		var refs int
 		if err := tx.QueryRow("SELECT COUNT(*) FROM ingested_files WHERE record_id = ?", oldID).Scan(&refs); err != nil {
 			return err
@@ -308,7 +330,7 @@ func (s *Store) Records() ([]Record, error) {
 		var p Pass
 		if err := prows.Scan(&id, &p.Ordinal, &p.Role, &models, &p.USD, &p.InputTokens, &p.OutputTokens,
 			&p.CacheReadInputTokens, &p.CacheCreationInputTokens, &p.APICalls, &p.Turns, &p.DurationMs,
-			&p.APIDurationMs, &p.Verdict); err != nil {
+			&p.APIDurationMs, &p.Verdict, &p.VerdictText, &p.Dispositions); err != nil {
 			return nil, err
 		}
 		p.Models = []string{}

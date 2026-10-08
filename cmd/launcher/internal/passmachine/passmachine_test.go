@@ -5,6 +5,17 @@ import (
 	"testing"
 )
 
+func TestRoleIsReview(t *testing.T) {
+	for r, want := range map[Role]bool{
+		RoleReview: true, RoleDeltaReview: true,
+		RoleImplement: false, RoleFix: false, RoleLand: false, "": false,
+	} {
+		if got := r.IsReview(); got != want {
+			t.Errorf("Role(%q).IsReview() = %v, want %v", r, got, want)
+		}
+	}
+}
+
 // transitionTestCases is TestTransition's table, covering every decision point
 // the orchestrator's two loops make (issue #2548). Each case names the exact
 // Reason and CapFired strings the source switches emit, because other tests
