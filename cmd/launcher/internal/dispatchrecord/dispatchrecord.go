@@ -66,6 +66,9 @@ type Pass struct {
 	// verbatim.
 	VerdictText  string `json:"verdict_text,omitempty"`
 	Dispositions string `json:"dispositions,omitempty"`
+	// Log is the base name of the log file the pass was read from; empty for a
+	// pass migrated from a store that did not record it.
+	Log string `json:"log"`
 }
 
 // Record is one Dispatch reconstructed from its log.
@@ -99,14 +102,14 @@ type Record struct {
 	PromptHashes map[string]string `json:"prompt_hashes,omitempty"`
 }
 
-// ErrNoEvents is returned by ParseLog for a log with no non-blank line at all
+// ErrEmptyLog is returned by ParseLog for a log with no non-blank line at all
 // (empty or whitespace-only): nothing was written, so there is no Dispatch to
 // record yet. Any output, even a bare startup error, yields a zero-cost Record.
-var ErrNoEvents = errors.New("dispatchrecord: log has no events")
+var ErrEmptyLog = errors.New("dispatchrecord: log has no non-blank line")
 
 // ErrUnstamped is returned by ParseLog for a log that is not named like a
 // ChainKey file and does not open with a dispatch_start stamp: only a stamp can
-// attribute such a log (fix, conflict-resolve, rotated attempt) to a Dispatch.
+// attribute such a log (a primary's rotated attempt) to a Dispatch.
 var ErrUnstamped = errors.New("dispatchrecord: log is not stamped and not a chain log")
 
 // PassLogName reports whether name is a pass log of any kind: an attempt,
@@ -117,20 +120,29 @@ func PassLogName(name string) bool { return passLogName.MatchString(name) }
 var passLogName = regexp.MustCompile(`^issue-.+\.log(?:\.\d+)?(?:\.prior-run\.\d+)?$`)
 
 // chainName matches a Dispatch's first-attempt log and its quarantined
-// earlier runs; fix, conflict-resolve, and "<path>.N" rotated attempt logs
-// are other files of the chain and do not match.
+// earlier runs. A primary's "<path>.N" rotations are not chain files; only
+// satellites' rotations are accepted (see satelliteName).
 var chainName = regexp.MustCompile(`^issue-(.+)\.log(?:\.prior-run\.\d+)?$`)
 
-var chainSuffix = regexp.MustCompile(`-fix-\d+$|-conflict-resolve$`)
+// satelliteName matches the host's fix-pass and conflict-resolve logs, their
+// "<path>.N" rotated attempts, and their quarantined earlier runs. Such a log
+// belongs to whichever Dispatch of its key was running when it began.
+var satelliteName = regexp.MustCompile(`^issue-(.+?)(?:-fix-\d+|-conflict-resolve)\.log(?:\.\d+)?(?:\.prior-run\.\d+)?$`)
 
-// ChainKey extracts the Dispatch key from the base name of a bare
-// issue-<key>.log file or its issue-<key>.log.prior-run.N quarantine.
-func ChainKey(name string) (key string, ok bool) {
-	m := chainName.FindStringSubmatch(name)
-	if m == nil || chainSuffix.MatchString(m[1]) {
-		return "", false
+// ChainKey classifies the base name of a log file. ok is false for names that
+// are no Dispatch log. A primary log, issue-<key>.log or its
+// issue-<key>.log.prior-run.N quarantine, is a Dispatch of its own; a
+// satellite (issue-<key>-fix-P.log, issue-<key>-conflict-resolve.log, with an
+// optional .N or .prior-run.N suffix) carries more passes of a Dispatch that
+// a primary log names.
+func ChainKey(name string) (key string, satellite, ok bool) {
+	if m := satelliteName.FindStringSubmatch(name); m != nil {
+		return m[1], true, true
 	}
-	return m[1], true
+	if m := chainName.FindStringSubmatch(name); m != nil {
+		return m[1], false, true
+	}
+	return "", false, false
 }
 
 // logLine is the union of the stream-json fields this package reads. The
@@ -186,11 +198,13 @@ func RecordID(kind, key string, claim time.Time) string {
 // ParseLog infers a Record from the pass log at path. A log whose first event
 // is a dispatch_start stamp yields a stamped Record, whatever its name; any
 // other log must be named like a ChainKey file (else ErrUnstamped) and yields an
-// inferred one. A log with no non-blank line yields ErrNoEvents. The claim time
-// of an inferred Record is the first timestamped event in file order, which
-// later appends cannot move. provisional reports that no event carried a
-// timestamp, so the claim time fell back to the file mtime and appended output
-// can still move the ID.
+// inferred one. An unstamped satellite log parses like a primary one; its
+// Record's claim time is the log's own start, which the store uses to window it
+// into the Dispatch it belongs to. A log with no non-blank line yields
+// ErrEmptyLog. The claim time of an inferred Record is the first timestamped
+// event in file order, which later appends cannot move. provisional reports
+// that no event carried a timestamp, so the claim time fell back to the file
+// mtime and appended output can still move the ID.
 func ParseLog(path string) (rec Record, provisional bool, err error) {
 	rec, provisional, _, err = parseLog(path)
 	return rec, provisional, err
@@ -227,7 +241,8 @@ func StampRecordID(path string) string {
 // the claim time of an inferred Record. It keys the log's passes within a
 // Record that several logs contribute to.
 func parseLog(path string) (rec Record, provisional bool, segment time.Time, err error) {
-	key, chain := ChainKey(filepath.Base(path))
+	base := filepath.Base(path)
+	key, _, chain := ChainKey(base)
 	info, err := os.Stat(path)
 	if err != nil {
 		return Record{}, false, time.Time{}, err
@@ -411,9 +426,12 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		return Record{}, false, time.Time{}, err
 	}
 	if !sawLine {
-		return Record{}, false, time.Time{}, ErrNoEvents
+		return Record{}, false, time.Time{}, ErrEmptyLog
 	}
 	closeCur()
+	for i := range passes {
+		passes[i].Log = base
+	}
 
 	if stamp != nil {
 		claim := stamp.ClaimTime.UTC()
@@ -455,7 +473,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	switch {
 	case dispatchkey.IsChoreKey(key):
 		kind = choreKeyedKind()
-	case slices.Contains(researchOnlyStatuses(), status):
+	case slices.Contains(researchOnlyStatuses, status):
 		kind = dispatchkind.Research.Name
 	case firstRole != "":
 		kind = dispatchkind.Work.Name
@@ -494,7 +512,7 @@ func choreKeyedKind() string {
 
 // researchOnlyStatuses are the statuses only the research kind emits; blocked
 // is shared with work, so it says nothing about the kind.
-func researchOnlyStatuses() []string {
+var researchOnlyStatuses = func() []string {
 	var out []string
 	for _, s := range outcome.ResearchStatuses {
 		if !slices.Contains(outcome.WorkStatuses, s) {
@@ -502,4 +520,4 @@ func researchOnlyStatuses() []string {
 		}
 	}
 	return out
-}
+}()

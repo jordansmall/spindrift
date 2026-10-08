@@ -91,7 +91,15 @@ func TestStampedRenameToPriorRunDoesNotDuplicatePasses(t *testing.T) {
 		}
 	}
 	ingest(t, s)
-	if got := records(t, s); !reflect.DeepEqual(first, got) {
+	got := records(t, s)
+	for _, recs := range [][]Record{first, got} {
+		for i := range recs {
+			for j := range recs[i].Passes {
+				recs[i].Passes[j].Log = ""
+			}
+		}
+	}
+	if !reflect.DeepEqual(first, got) {
 		t.Fatalf("rename changed records: %+v vs %+v", first, got)
 	}
 }
@@ -113,7 +121,7 @@ func TestUnstampedNonChainLogIsIgnoredAndNotReopened(t *testing.T) {
 }
 
 func TestParseLogUnstampedNonChainName(t *testing.T) {
-	_, _, err := ParseLog(writeLog(t, "issue-1-fix-2.log", workLog("2026-03-01T11:00:00Z", 1)...))
+	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", workLog("2026-03-01T11:00:00Z", 1)...))
 	if !errors.Is(err, ErrUnstamped) {
 		t.Fatalf("err = %v, want ErrUnstamped", err)
 	}
@@ -121,7 +129,7 @@ func TestParseLogUnstampedNonChainName(t *testing.T) {
 
 func TestParseLogStampMustBeFirstEvent(t *testing.T) {
 	lines := append(workLog("2026-03-01T11:00:00Z", 1), stampLine(stampClaim))
-	_, _, err := ParseLog(writeLog(t, "issue-1-fix-2.log", lines...))
+	_, _, err := ParseLog(writeLog(t, "issue-1.log.1", lines...))
 	if !errors.Is(err, ErrUnstamped) {
 		t.Fatalf("err = %v, want ErrUnstamped", err)
 	}
