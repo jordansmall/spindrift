@@ -159,7 +159,7 @@ func TestPodmanMachineMemoryCheck_AtOrAboveThresholdSucceeds(t *testing.T) {
 	}
 }
 
-func TestPodmanMachineMemoryCheck_UnparseableMemoryLimitWrapsErrDegraded(t *testing.T) {
+func TestPodmanMachineMemoryCheck_InvalidMemoryLimitWrapsErrDegraded(t *testing.T) {
 	// "-1g" and "0" parse as integers but are not usable limits.
 	for _, limit := range []string{"not-a-limit", "-1g", "0"} {
 		t.Run(limit, func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestPodmanMachineMemoryCheck_UnparseableMemoryLimitWrapsErrDegraded(t *test
 				t.Errorf("Probe() = %v, want it to wrap doctor.ErrDegraded", err)
 			}
 
-			assertUnparseableRemedy(t, ch.Remedy)
+			assertInvalidRemedy(t, ch.Remedy)
 		})
 	}
 }
@@ -197,23 +197,26 @@ func TestPodmanMachineMemoryCheck_UnparseableMemoryLimitNoFormatValidation(t *te
 		t.Errorf("Probe() = %v, want it to wrap doctor.ErrDegraded", err)
 	}
 
-	assertUnparseableRemedy(t, ch.Remedy)
+	assertInvalidRemedy(t, ch.Remedy)
 }
 
-// assertUnparseableRemedy asserts the fallback an unparseable memoryLimit
-// must produce. It asserts the absence of "podman machine set --memory"
+// assertInvalidRemedy asserts the fallback an invalid (unparseable or
+// non-positive) memoryLimit must produce: the fix is MEMORY_LIMIT itself, so
+// "lower MEMORY_LIMIT" (wrong advice for "0") must not appear. It
+// asserts the absence of "podman machine set --memory"
 // rather than the presence of some placeholder: that phrase is a strict
 // prefix of the parsed branch's own command, so only the negative form
 // actually discriminates the two branches.
-func assertUnparseableRemedy(t *testing.T, remedy string) {
+func assertInvalidRemedy(t *testing.T, remedy string) {
 	t.Helper()
 	if strings.Contains(remedy, "podman machine set --memory") {
-		t.Errorf("Remedy = %q, want no podman machine set --memory command when the limit is unparseable (no figure to size it with)", remedy)
+		t.Errorf("Remedy = %q, want no podman machine set --memory command when the limit is invalid (no figure to size it with)", remedy)
 	}
-	for _, want := range []string{"MAX_PARALLEL", "MEMORY_LIMIT", "RAM"} {
-		if !strings.Contains(remedy, want) {
-			t.Errorf("Remedy = %q, want it to contain %q", remedy, want)
-		}
+	if !strings.Contains(remedy, "MEMORY_LIMIT") {
+		t.Errorf("Remedy = %q, want it to contain %q", remedy, "MEMORY_LIMIT")
+	}
+	if strings.Contains(remedy, "lower MEMORY_LIMIT") {
+		t.Errorf("Remedy = %q, want no %q advice: the value itself is invalid", remedy, "lower MEMORY_LIMIT")
 	}
 }
 
