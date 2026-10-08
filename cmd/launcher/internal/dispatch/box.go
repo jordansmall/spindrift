@@ -365,6 +365,9 @@ func (d *Dispatch) dispatchStart() claude.DispatchStart {
 	s.ClaimTime = d.claimTime
 	s.Started = d.clock.Now()
 	s.Driver = d.driver.Name()
+	// Host-only: the Box can write its log, so a dispatch_settled op counts
+	// only when it echoes this token (issue #4812).
+	s.HostToken = newNonce()
 	return s
 }
 

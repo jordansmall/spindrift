@@ -162,3 +162,51 @@ func TestSettled_UnstampedLogAppendsNothing(t *testing.T) {
 		t.Fatalf("settled ops = %+v, want none", ops)
 	}
 }
+
+// A tokened stamp only honours a settled op that echoes its host token
+// (issue #4812); the host append copies it from the log's own stamp, so the
+// settled outcome survives ParseLog. A token-less legacy stamp still settles.
+// The explicit rows are the adopt path: a fix or conflict log is stamped with
+// the prior Record's ID under a fresh token, and the caller already holds that
+// ID, so SettledPrior's fill-in is bypassed and the token must still be echoed.
+func TestSettled_EchoesStampHostToken(t *testing.T) {
+	tests := []struct {
+		name       string
+		token      string
+		explicitID bool
+	}{
+		{"prior fill-in", "tok", false},
+		{"prior fill-in legacy", "", false},
+		{"explicit record id", "fresh-tok", true},
+		{"explicit record id legacy", "", true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			testutil.InstallPipeReporter(t)
+			path := filepath.Join(t.TempDir(), "issue-7.log")
+			stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:7@x", Kind: "work", DispatchKey: "7", HostToken: tc.token}})
+			if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			ds := claude.DispatchSettled{State: "complete", Reason: "merged"}
+			if tc.explicitID {
+				ds.RecordID = "work:7@x"
+				Settled(dispatchkey.Issue("7"), path, ds)
+			} else {
+				SettledPrior(dispatchkey.Issue("7"), path, ds)
+			}
+
+			if ops := settledOps(t, path); len(ops) != 1 || ops[0].HostToken != tc.token {
+				t.Fatalf("settled ops = %+v, want one echoing host token %q", ops, tc.token)
+			}
+			rec, _, err := dispatchrecord.ParseLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.OutcomeSource != dispatchrecord.OutcomeSourceSettled {
+				t.Errorf("OutcomeSource = %q, want %q", rec.OutcomeSource, dispatchrecord.OutcomeSourceSettled)
+			}
+		})
+	}
+}
