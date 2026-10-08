@@ -153,8 +153,8 @@ func Validate(e Env, result Result, rows []ValidateMarkerRow) (warnings []string
 	return warnings, nil
 }
 
-// filerPromptFrom mirrors _validate_prompt_contract's `jq -r '.filer.prompt //
-// empty'` (entrypoint.sh: 583). Empty or malformed agentsJSON yields "".
+// filerPromptFrom returns agentsJSON's .filer.prompt. Empty, malformed, or
+// non-string input yields "".
 func filerPromptFrom(agentsJSON string) string {
 	var parsed struct {
 		Filer struct {
