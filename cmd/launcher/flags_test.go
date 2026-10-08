@@ -2355,6 +2355,13 @@ func TestSubcommandUsage(t *testing.T) {
 	}
 }
 
+func TestSubcommandSynopsis(t *testing.T) {
+	want := "spindrift registry discover <repo-dir> <routes-file> [--force]"
+	if got := subcommandSynopsis("registry"); got != want {
+		t.Errorf("subcommandSynopsis(%q) = %q, want %q", "registry", got, want)
+	}
+}
+
 // An unregistered verb is a programmer error, so subcommandUsage panics
 // rather than falling back to a bare usage line.
 func TestSubcommandUsage_UnknownNamePanics(t *testing.T) {

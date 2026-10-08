@@ -586,21 +586,27 @@ func printSubcommands(w io.Writer) {
 	}
 }
 
-// subcommandUsage renders a verb's error-path usage line from
+// subcommandSynopsis renders a verb's invocation synopsis from
 // subcommandRegistry (lib/subcommands.nix), the single source of every
 // per-verb synopsis. It panics on a name the registry lacks.
-func subcommandUsage(name string) string {
+func subcommandSynopsis(name string) string {
 	for _, e := range subcommandRegistry {
 		if e.name != name {
 			continue
 		}
-		line := "usage: spindrift " + name
+		line := "spindrift " + name
 		if e.usage != "" {
 			line += " " + e.usage
 		}
 		return line
 	}
-	panic("subcommandUsage: unregistered verb " + name)
+	panic("subcommandSynopsis: unregistered verb " + name)
+}
+
+// subcommandUsage renders a verb's error-path usage line. It panics on an
+// unregistered verb, as subcommandSynopsis does.
+func subcommandUsage(name string) string {
+	return "usage: " + subcommandSynopsis(name)
 }
 
 // printHelp writes the concise usage summary. The exhaustive knob list lives
