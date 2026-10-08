@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/golden"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/seamtest"
 	"spindrift.dev/launcher/internal/testutil/repopath"
@@ -466,14 +467,14 @@ func mustRead(t *testing.T, path string) []byte {
 
 func TestPromptAssemblyGoldens(t *testing.T) {
 	goldenDir := repopath.PromptAssemblyGoldenDir()
-	update := updateGoldens()
+	update := golden.Update()
 
 	for _, cell := range goldenCells() {
 		t.Run(cell.name, func(t *testing.T) {
 			c := defaultCell()
 			cell.setup(c)
 			result, out := assembleCell(t, c, t.TempDir())
-			golden := func(ext string) string { return filepath.Join(goldenDir, cell.name+"."+ext) }
+			goldenFile := func(ext string) string { return filepath.Join(goldenDir, cell.name+"."+ext) }
 			report := func(err error) {
 				t.Helper()
 				if err != nil {
@@ -481,13 +482,13 @@ func TestPromptAssemblyGoldens(t *testing.T) {
 				}
 			}
 
-			report(compareOrUpdateText(golden("prompt.txt"), mustRead(t, out.Prompt), update))
-			report(compareOrUpdateText(golden("fragments.txt"), mustRead(t, out.Fragments), update))
+			report(golden.CompareOrUpdateText(goldenFile("prompt.txt"), mustRead(t, out.Prompt), update))
+			report(golden.CompareOrUpdateText(goldenFile("fragments.txt"), mustRead(t, out.Fragments), update))
 
 			if agents := mustRead(t, out.AgentsJSON); len(agents) > 0 {
-				report(compareOrUpdateJSON(golden("agents.json"), agents, update))
+				report(golden.CompareOrUpdateJSON(goldenFile("agents.json"), agents, update))
 			} else {
-				report(removeGoldenIfUpdate(golden("agents.json"), update))
+				report(golden.RemoveIfUpdate(goldenFile("agents.json"), update))
 			}
 
 			if result.Handoff.SessionMode != cell.mode {
@@ -498,14 +499,14 @@ func TestPromptAssemblyGoldens(t *testing.T) {
 				// Since issue #2975 the Handoff also carries per-run paths no golden
 				// can pin byte for byte, so diff only the review facts and require
 				// ReviewPromptFile to name a file that was actually written.
-				report(compareOrUpdateJSON(golden("handoff.json"), mustRead(t, out.Handoff), update, "ReviewModel", "ReviewEffort"))
+				report(golden.CompareOrUpdateJSON(goldenFile("handoff.json"), mustRead(t, out.Handoff), update, "ReviewModel", "ReviewEffort"))
 				if result.Handoff.ReviewPromptFile == "" {
 					t.Fatal("Handoff.ReviewPromptFile is empty, want the written review prompt")
 				}
 				// Result.Fragments counts fragments reaching the review prompt, so
 				// its text is pinned or the fragments sidecar would claim coverage
 				// no golden backs.
-				report(compareOrUpdateText(golden("review-prompt.txt"), mustRead(t, result.Handoff.ReviewPromptFile), update))
+				report(golden.CompareOrUpdateText(goldenFile("review-prompt.txt"), mustRead(t, result.Handoff.ReviewPromptFile), update))
 			}
 
 			if cell.check != nil {
