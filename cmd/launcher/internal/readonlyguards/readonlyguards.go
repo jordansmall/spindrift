@@ -250,9 +250,15 @@ func renderSubstringGuard(cond, message string) string {
 }
 
 // renderMutationGuard renders the gh-api-mutation scan: entered only when
-// cond matches, it scans "$@" for a mutating -X or --method flag
-// (case-insensitive POST, PATCH, PUT, DELETE) and rejects only then, so a
-// plain read with no method flag falls through untouched.
+// cond matches, it scans "$@" for a mutating -X or --method flag (separate,
+// attached as -XPOST/-X=PATCH, or --method=; case-insensitive POST, PATCH,
+// PUT, DELETE) and rejects only then, so a plain read falls through untouched.
+// With no explicit method, a field or input flag (-f, -F, --field,
+// --raw-field, --input) is rejected as gh's own implicit POST. Any argument
+// exactly equal to graphql (meant as the endpoint) exempts the call from that
+// implied-POST rule, since gh api graphql always POSTs, even for queries; a
+// GraphQL mutation falls through and fails at the forge under the read-only
+// token.
 func renderMutationGuard(cond, message string) string {
 	var b strings.Builder
 	open := "if true; then\n"
@@ -260,17 +266,25 @@ func renderMutationGuard(cond, message string) string {
 		open = fmt.Sprintf("if %s; then\n", cond)
 	}
 	b.WriteString(open)
-	b.WriteString("  method=\"GET\"\n")
+	b.WriteString("  method=\"\"\n")
+	b.WriteString("  fields=false\n")
+	b.WriteString("  graphql=false\n")
 	b.WriteString("  prev=\"\"\n")
 	b.WriteString("  for arg in \"$@\"; do\n")
-	b.WriteString("    if [ \"$prev\" = \"-X\" ] || [ \"$prev\" = \"--method\" ]; then\n")
-	b.WriteString("      method=\"$arg\"\n")
-	b.WriteString("    fi\n")
+	b.WriteString("    case \"$prev\" in\n")
+	b.WriteString("      -X | --method) method=\"$arg\" ;;\n")
+	b.WriteString("    esac\n")
 	b.WriteString("    case \"$arg\" in\n")
 	b.WriteString("      --method=*) method=\"${arg#--method=}\" ;;\n")
+	b.WriteString("      -X?*) method=\"${arg#-X}\"; method=\"${method#=}\" ;;\n")
+	b.WriteString("      -f | -F | --field | --raw-field | --input | -f?* | -F?* | --field=* | --raw-field=* | --input=*) fields=true ;;\n")
+	b.WriteString("      graphql) graphql=true ;;\n")
 	b.WriteString("    esac\n")
 	b.WriteString("    prev=\"$arg\"\n")
 	b.WriteString("  done\n")
+	b.WriteString("  if [ -z \"$method\" ] && [ \"$fields\" = true ] && [ \"$graphql\" = false ]; then\n")
+	b.WriteString("    method=\"POST\"\n")
+	b.WriteString("  fi\n")
 	b.WriteString("  case \"$method\" in\n")
 	b.WriteString("    [Pp][Oo][Ss][Tt] | [Pp][Aa][Tt][Cc][Hh] | [Pp][Uu][Tt] | [Dd][Ee][Ll][Ee][Tt][Ee])\n")
 	fmt.Fprintf(&b, "      printf '%%s\\n' %s >&2\n", shQuote(message))
