@@ -160,20 +160,25 @@ func TestPodmanMachineMemoryCheck_AtOrAboveThresholdSucceeds(t *testing.T) {
 }
 
 func TestPodmanMachineMemoryCheck_UnparseableMemoryLimitWrapsErrDegraded(t *testing.T) {
-	stubPodmanMachineMemory(t, 4096, true)
+	// "-1g" and "0" parse as integers but are not usable limits.
+	for _, limit := range []string{"not-a-limit", "-1g", "0"} {
+		t.Run(limit, func(t *testing.T) {
+			stubPodmanMachineMemory(t, 4096, true)
 
-	c := minimalValidConfig()
-	c.runtime = "podman"
-	c.memoryLimit = "not-a-limit"
-	c.maxParallel = 1
+			c := minimalValidConfig()
+			c.runtime = "podman"
+			c.memoryLimit = limit
+			c.maxParallel = 1
 
-	ch := checkByName(t, podmanMachineMemoryCheck(c), podmanMachineMemoryCheckName)
-	_, err := ch.Probe()
-	if !errors.Is(err, doctor.ErrDegraded) {
-		t.Errorf("Probe() = %v, want it to wrap doctor.ErrDegraded", err)
+			ch := checkByName(t, podmanMachineMemoryCheck(c), podmanMachineMemoryCheckName)
+			_, err := ch.Probe()
+			if !errors.Is(err, doctor.ErrDegraded) {
+				t.Errorf("Probe() = %v, want it to wrap doctor.ErrDegraded", err)
+			}
+
+			assertUnparseableRemedy(t, ch.Remedy)
+		})
 	}
-
-	assertUnparseableRemedy(t, ch.Remedy)
 }
 
 // The config schema applies no format validation to MEMORY_LIMIT, so a
