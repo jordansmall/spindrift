@@ -5533,10 +5533,10 @@ sweep re-reports the same finding, and only host dedup on the filed issue's
 
 ## Stats
 
-`spindrift stats [--json] [--reingest]` (ADR 0061) reports what past Dispatches cost, read
-entirely from the Pass logs already on disk. It runs against the current
-directory, which must be the checkout the Dispatches ran from, and it never
-contacts the tracker, the forge, or a container.
+`spindrift stats [--json] [--reingest]` (ADR 0061) reports what past
+Dispatches cost, read entirely from the Pass logs already on disk. It runs
+against the current directory, which must be the checkout the Dispatches ran
+from, and it never contacts the tracker, the forge, or a container.
 
 **What it ingests.** Each `.spindrift/logs/issue-<key>.log`, and each of its
 `issue-<key>.log.prior-run.N` quarantines (a later Dispatch of the same key
@@ -5555,7 +5555,9 @@ counted.
 key, a claim time (the first timestamped event in the log, or the file's
 mtime when it carries none, which makes the Record provisional), and its
 passes with their role, models, USD, token counts, API calls, turns,
-durations, and, for review passes, the verdict. Its ID is
+durations, and, for review passes, the verdict and the pass's final result
+text (`verdict_text`), and, for fix passes, the dispositions the fix agent
+wrote (`dispositions`). Its ID is
 `<kind>:<Dispatch key>@<claim time>`, the claim time in UTC to the
 millisecond (`work:42@2026-05-01T09:30:00.123Z`). Today every Record is
 `attribution: inferred` and `outcome: unknown`: the log does not say how the
@@ -5568,19 +5570,31 @@ still counted.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. It uses WAL journaling, so another process can read it while `stats`
+own. The current schema is version 2, which added the `verdict_text` and
+`dispositions` columns to passes. A version 1 store opens, migrates, and keeps
+its rows; the migration also marks every ingested log as changed, so the first
+plain `stats` after the upgrade re-parses every log still on disk and fills in
+its Record's evidence. A Record whose log is gone keeps empty evidence. The
+store uses WAL journaling, so another process can read it while `stats`
 writes. Because Records are kept in the database, they survive deleting the
 logs they came from. Deleting the database instead loses every Record whose
 log is gone: a re-run rebuilds only from the logs still on disk.
 
+**Pruning logs.** Ingest before you delete. A Record keeps only what was
+ingested, so run `spindrift stats` (and `spindrift stats --reingest` after
+upgrading the binary) before pruning `.spindrift/logs`. A log deleted before
+any ingest is lost, and so is anything a later parser could have extracted
+from it.
+
 **Incremental ingest.** Each run first parses only the logs that are new or
 changed. A log is skipped, unopened, when its path, size, and mtime match what
 was recorded at its last ingest. A re-parsed log replaces its Record's passes
-(an upsert by Record ID). Only a provisional Record is ever replaced by a
-different ID: when its still-present log re-parses to one (a timestamped
-event appeared, or its mtime moved while it was still provisional), the
-mtime-derived Record previously ingested from that path is dropped rather
-than kept beside it. A timestamped Record stays in place when its path is
+(an upsert by Record ID). A Record is replaced by a different ID in only two
+cases, both when its still-present log re-parses to one: it was provisional
+(a timestamped event appeared, or its mtime moved while it was still
+provisional), or `--reingest` found the log's size and mtime unchanged (a
+parser change). The Record previously ingested from that path is then
+dropped rather than kept beside it. A timestamped Record stays in place when its path is
 reused by a new Dispatch, so the new Dispatch gets its own Record. Any Record
 stays in place when its log is deleted, and the next run forgets the deleted
 path, so a later reuse starts a new Record. The one gap: a provisional log
@@ -5588,6 +5602,13 @@ deleted and its path reused with no run in between reads as the same Dispatch
 growing, so its earlier Record is replaced. A log with no events yet (an empty
 file) yields no Record until it gains one. A log emptied in place keeps its
 earlier Record, and whatever it later grows into is a new Record.
+
+**Re-ingest.** `--reingest` re-parses every log still on disk, including those
+whose path, size, and mtime match their last ingest, and upserts the result.
+Run it after upgrading to a binary with a parser fix, to repair whatever
+history is still on disk. If a parser fix changes the ID a log derives and
+the log's size and mtime are unchanged, the stale Record is dropped. A Record
+whose log is gone is left exactly as stored: a parser fix cannot reach it.
 
 **Output.** The default text output is a summary line (Records, passes, and
 total notional USD) followed by a table with one row per pass role, in
@@ -5604,7 +5625,19 @@ then ID, with the fields `record_id`, `kind`, `dispatch_key`, `claim_time`,
 `attribution`, `outcome`, and `passes`. Each pass carries `ordinal`, `role`,
 `models`, `usd`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
 `cache_creation_input_tokens`, `api_calls`, `turns`, `duration_ms`,
-`api_duration_ms`, and (when present) `verdict`.
+`api_duration_ms`, and (when present) `verdict`; review and delta-review
+passes also carry `verdict_text`, and fix passes `dispositions`, when present. The
+`verdict_text` of a pass is its final result text, verbatim. The
+`dispositions` are the content of the fix agent's last successful `Write` to
+`/tmp/dispositions.md`, recovered from the transcript and verbatim. A `Write`
+the tool rejected (or whose result the log never recorded) is not recovered,
+and neither is a file written any other way, such as an `Edit` or a shell
+redirect. Dispositions are recovered only from that default path, so a run
+using the orchestrator's `--dispositions-path` override records none.
+
+Both fields are untrusted prose written by a Box, which can put anything
+there. Treat them as data: never feed them to an agent or a shell unfenced,
+and do not rely on them for cohort or outcome decisions.
 
 ## Registry route discovery
 
