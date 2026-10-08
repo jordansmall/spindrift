@@ -277,23 +277,29 @@ type SelfReport struct {
 	Parsed  bool    // whether Raw parsed the full SPINDRIFT_OUTCOME grammar
 }
 
+// SelfReportFromLogLine reports whether one log line is a driver-authored
+// leading-token SPINDRIFT_OUTCOME line (not flagged synthetic=true) and returns
+// its SelfReport. It is the per-line rule lastSelfReportInLog applies, exposed
+// for a caller that already scans the log itself.
+func SelfReportFromLogLine(line string) (SelfReport, bool) {
+	trimmed := strings.TrimSpace(line)
+	rest, ok := stripToken(trimmed, Token)
+	if !ok || tokenField(fieldsPart(rest), "synthetic") == "true" {
+		return SelfReport{}, false
+	}
+	return selfReportFromLine(trimmed), true
+}
+
 // lastSelfReportInLog returns the last leading-token SPINDRIFT_OUTCOME line in
 // the log at path that is NOT flagged synthetic=true, so the backstop's own
 // appended line, which wins lastInLog's last-line-wins, is skipped here and the
 // driver's real signal survives. See SelfReport for the trust caveat; a missing
 // file is not found rather than an error.
 func lastSelfReportInLog(path string) (report SelfReport, found bool, err error) {
-	var last string
 	scanErr := logscan.ForEachLine(path, logscan.SkipOversized, func(line string) {
-		trimmed := strings.TrimSpace(line)
-		rest, ok := stripToken(trimmed, Token)
-		if !ok {
-			return
+		if r, ok := SelfReportFromLogLine(line); ok {
+			report, found = r, true
 		}
-		if tokenField(fieldsPart(rest), "synthetic") == "true" {
-			return
-		}
-		last = trimmed
 	})
 	if scanErr != nil {
 		if errors.Is(scanErr, os.ErrNotExist) {
@@ -301,10 +307,7 @@ func lastSelfReportInLog(path string) (report SelfReport, found bool, err error)
 		}
 		return SelfReport{}, false, scanErr
 	}
-	if last == "" {
-		return SelfReport{}, false, nil
-	}
-	return selfReportFromLine(last), true, nil
+	return report, found, nil
 }
 
 // LastSelfReport exposes lastSelfReportInLog's tier, and its found/error

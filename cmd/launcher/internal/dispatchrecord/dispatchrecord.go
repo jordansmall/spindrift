@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -98,8 +99,9 @@ type Record struct {
 	PromptHashes map[string]string `json:"prompt_hashes,omitempty"`
 }
 
-// ErrNoEvents is returned by ParseLog for a log with no parsed event at all
-// (empty, or only unparseable lines): there is no Dispatch to record yet.
+// ErrNoEvents is returned by ParseLog for a log with no non-blank line at all
+// (empty or whitespace-only): nothing was written, so there is no Dispatch to
+// record yet. Any output, even a bare startup error, yields a zero-cost Record.
 var ErrNoEvents = errors.New("dispatchrecord: log has no events")
 
 // ErrUnstamped is returned by ParseLog for a log that is not named like a
@@ -184,11 +186,11 @@ func RecordID(kind, key string, claim time.Time) string {
 // ParseLog infers a Record from the pass log at path. A log whose first event
 // is a dispatch_start stamp yields a stamped Record, whatever its name; any
 // other log must be named like a ChainKey file (else ErrUnstamped) and yields an
-// inferred one. A log with no events yields ErrNoEvents. The claim time of an
-// inferred Record is the first timestamped event in file order, which later
-// appends cannot move. provisional reports that no event carried a timestamp, so
-// the claim time fell back to the file mtime and appended output can still move
-// the ID.
+// inferred one. A log with no non-blank line yields ErrNoEvents. The claim time
+// of an inferred Record is the first timestamped event in file order, which
+// later appends cannot move. provisional reports that no event carried a
+// timestamp, so the claim time fell back to the file mtime and appended output
+// can still move the ID.
 func ParseLog(path string) (rec Record, provisional bool, err error) {
 	rec, provisional, _, err = parseLog(path)
 	return rec, provisional, err
@@ -238,6 +240,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		sawStart  bool
 		firstTS   time.Time
 		haveTS    bool
+		sawLine   bool
 		sawEvent  bool
 		stamp     *claude.DispatchStart
 		// hashes holds reported prompt hashes by the record_id they claim, since
@@ -246,6 +249,8 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		settled *claude.DispatchSettled
 		// boxStatus is the status of the last SPINDRIFT_OUTCOME line in any result.
 		boxStatus string
+		// status is the last plain-text SPINDRIFT_OUTCOME line's status.
+		status string
 		// pendingDispositions holds a fix pass's Write to the dispositions file,
 		// by tool_use ID, until its tool_result shows the Write took effect.
 		pendingDispositions = map[string]string{}
@@ -260,6 +265,16 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 
 	err = driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
+		if s == "" {
+			return
+		}
+		sawLine = true
+		// The agent's outcome line is plain text, not a stream-json event, so
+		// it must be read before the JSON prefilter below drops it.
+		if r, ok := outcome.SelfReportFromLogLine(s); ok {
+			status = r.Status
+			return
+		}
 		if !strings.Contains(s, `"timestamp"`) && !strings.Contains(s, `"type":"result"`) &&
 			!strings.Contains(s, `"type":"assistant"`) && !strings.Contains(s, `"spindrift_op"`) &&
 			!strings.Contains(s, `"tool_result"`) {
@@ -395,7 +410,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	if err != nil {
 		return Record{}, false, time.Time{}, err
 	}
-	if !sawEvent {
+	if !sawLine {
 		return Record{}, false, time.Time{}, ErrNoEvents
 	}
 	closeCur()
@@ -440,7 +455,12 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	switch {
 	case dispatchkey.IsChoreKey(key):
 		kind = choreKeyedKind()
+	case slices.Contains(researchOnlyStatuses(), status):
+		kind = dispatchkind.Research.Name
 	case firstRole != "":
+		kind = dispatchkind.Work.Name
+	case slices.Contains(outcome.WorkStatuses, status):
+		// A pre-orchestrator single-pass run has no pass_start to name a role.
 		kind = dispatchkind.Work.Name
 	}
 
@@ -470,4 +490,16 @@ func choreKeyedKind() string {
 		name = d.Name
 	}
 	return name
+}
+
+// researchOnlyStatuses are the statuses only the research kind emits; blocked
+// is shared with work, so it says nothing about the kind.
+func researchOnlyStatuses() []string {
+	var out []string
+	for _, s := range outcome.ResearchStatuses {
+		if !slices.Contains(outcome.WorkStatuses, s) {
+			out = append(out, s)
+		}
+	}
+	return out
 }
