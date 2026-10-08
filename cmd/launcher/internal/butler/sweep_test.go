@@ -91,7 +91,7 @@ func TestSweep_EmptyChoresErrors(t *testing.T) {
 }
 
 // TestSweep_UnconfiguredChoreErrors rejects a candidate absent from
-// Policy.Chores rather than sweeping it with a zero Every and no Classes.
+// Policy.Chores rather than sweeping it with a zero Every and no PromotionClasses.
 func TestSweep_UnconfiguredChoreErrors(t *testing.T) {
 	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
 	r := New(backend, fakeTree{}, forge.NewFake().AsIssueFiler(), func(dispatch.Chore) dispatch.Dispatcher { return dispatch.NewFake() }, testPolicy(), time.Now)
