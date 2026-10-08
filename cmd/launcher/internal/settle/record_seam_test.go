@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -402,5 +403,112 @@ func TestSettled_ConcurrentSettlesAllLand(t *testing.T) {
 	}
 	if integrity != "ok" {
 		t.Errorf("integrity_check = %q, want ok", integrity)
+	}
+}
+
+// Settle ingests only its own Dispatch's logs, so another slot's log it cannot
+// read neither blocks its Record nor raises the ingest warning.
+func TestSettle_UnreadableUnrelatedLogDoesNotBlockIngest(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads past file modes")
+	}
+	const num = "77"
+	root := t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "issue-1.log")
+	line := `{"type":"result","timestamp":"2026-03-01T10:00:00.000Z","total_cost_usd":1}` + "\n"
+	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(bad, 0o644); err != nil {
+			t.Error(err)
+		}
+	})
+
+	_, stderr := settleSeamComplete(t, root, num)
+
+	if strings.Contains(stderr, "could not ingest") {
+		t.Errorf("stderr = %q, want no ingest warning", stderr)
+	}
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	recs, err := store.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range recs {
+		if strings.Contains(r.ID, num) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("records = %+v, want one for %s", recs, num)
+	}
+}
+
+// A log of the settled Dispatch's own that cannot be read is reported, but the
+// Record from its readable primary still lands.
+func TestSettle_UnreadableOwnLogWarnsButRecordLands(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads past file modes")
+	}
+	const num = "77"
+	root := t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bad := filepath.Join(dir, "issue-"+num+"-fix-1.log")
+	line := `{"type":"result","timestamp":"2026-03-01T10:00:00.000Z","total_cost_usd":1}` + "\n"
+	if err := os.WriteFile(bad, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		// The Dispatch's start quarantines the file to <bad>.prior-run.N, which
+		// keeps the mode and still belongs to this key.
+		moved, _ := filepath.Glob(bad + "*")
+		for _, p := range moved {
+			if err := os.Chmod(p, 0o644); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+
+	_, stderr := settleSeamComplete(t, root, num)
+
+	if !strings.Contains(stderr, "could not ingest") {
+		t.Errorf("stderr = %q, want the ingest warning", stderr)
+	}
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	recs, err := store.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, r := range recs {
+		if strings.Contains(r.ID, num) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("records = %+v, want one for %s", recs, num)
 	}
 }

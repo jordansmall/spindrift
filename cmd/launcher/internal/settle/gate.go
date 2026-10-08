@@ -415,8 +415,8 @@ func Settled(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
 }
 
-// ingestSettled ingests the root's logs so the settled Record is in the store
-// with no `stats` run. The root is derived from logPath: a log outside a
+// ingestSettled ingests the settled Dispatch's own logs so its Record is in the
+// store with no `stats` run. The root is derived from logPath: a log outside a
 // root's .spindrift/logs has no store.
 func ingestSettled(key dispatchkey.Key, logPath string) {
 	root, ok := hostpaths.RootOfLogDir(filepath.Dir(logPath))
@@ -433,7 +433,7 @@ func ingestSettled(key dispatchkey.Key, logPath string) {
 				err = closeErr
 			}
 		}()
-		_, err = store.Ingest()
+		_, err = store.IngestChain(filepath.Base(logPath))
 		return err
 	}()
 	if err != nil {

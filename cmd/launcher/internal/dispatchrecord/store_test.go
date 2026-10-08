@@ -1674,3 +1674,118 @@ func TestStoreIngestSkipsUnreadableLog(t *testing.T) {
 		t.Fatalf("records after retry = %+v, want issue 10 added", got)
 	}
 }
+
+func ingestedBases(t *testing.T, s *Store) []string {
+	t.Helper()
+	rows, err := s.db.Query("SELECT path FROM ingested_files ORDER BY path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, filepath.Base(p))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestStoreIngestChainTouchesOnlyItsKey(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-12.log.1", workLog("2026-03-01T09:00:00.000Z", 3)...)
+	putLog(t, root, "issue-12-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	putLog(t, root, "issue-123.log", workLog("2026-03-01T10:00:00.000Z", 5)...)
+	putLog(t, root, "issue-12x-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 6)...)
+	putLog(t, root, "issue-1.log", workLog("2026-03-01T10:00:00.000Z", 7)...)
+	s := openStore(t, root)
+	n, err := s.IngestChain("issue-12.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 3 {
+		t.Fatalf("parsed = %d, want 3", n)
+	}
+	want := []string{"issue-12-fix-1.log", "issue-12.log", "issue-12.log.1"}
+	if got := ingestedBases(t, s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ingested = %v, want %v", got, want)
+	}
+	for _, r := range records(t, s) {
+		for _, p := range r.Passes {
+			if p.USD > 3 {
+				t.Errorf("record %s holds another key's pass (usd %v)", r.ID, p.USD)
+			}
+		}
+	}
+}
+
+// A hyphenated key (the butler's) ends at the lazy capture before its
+// satellite suffix, so a key that merely extends it stays out.
+func TestStoreIngestChainHyphenatedKey(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-butler-deps.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-butler-deps-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	putLog(t, root, "issue-butler-deps-extra.log", workLog("2026-03-01T10:00:00.000Z", 3)...)
+	putLog(t, root, "issue-butler.log", workLog("2026-03-01T10:00:00.000Z", 4)...)
+	s := openStore(t, root)
+	n, err := s.IngestChain("issue-butler-deps.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("parsed = %d, want 2", n)
+	}
+	want := []string{"issue-butler-deps-fix-1.log", "issue-butler-deps.log"}
+	if got := ingestedBases(t, s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("ingested = %v, want %v", got, want)
+	}
+}
+
+func TestStoreIngestChainSkipsUnreadableUnrelatedLog(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads past file modes")
+	}
+	root := t.TempDir()
+	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	bad := putLog(t, root, "issue-1.log", workLog("2026-03-01T10:00:00.000Z", 2)...)
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(bad, 0o644); err != nil {
+			t.Error(err)
+		}
+	})
+	s := openStore(t, root)
+	if _, err := s.IngestChain("issue-12.log"); err != nil {
+		t.Fatalf("IngestChain = %v, want nil", err)
+	}
+	if got := len(records(t, s)); got != 1 {
+		t.Fatalf("records = %d, want 1", got)
+	}
+}
+
+func TestStoreIngestChainForgetsOnlyItsOwnDeletedLogs(t *testing.T) {
+	root := t.TempDir()
+	mine := putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	other := putLog(t, root, "issue-13.log", workLog("2026-03-01T10:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	for _, p := range []string{mine, other} {
+		if err := os.Remove(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.IngestChain("issue-12.log"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := ingestedBases(t, s), []string{"issue-13.log"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("ingested = %v, want %v", got, want)
+	}
+}
