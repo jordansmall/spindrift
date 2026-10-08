@@ -52,11 +52,11 @@ type Chore struct {
 	ClassList []string
 	// PatchClasses is the patch-eligible class allow-list forwarded as
 	// CHORE_PATCH_CLASSES (issue #4072, ADR 0057), the patch-rung sibling of
-	// PromotionClasses: informational only for now -- settle will re-check a
-	// finding's class against the host's own allow-list once the patch rung
-	// applies patches (ADR 0057); on this branch settle carries
-	// Finding.Patch unexamined. The butler leaves this empty whenever
-	// today's patch room is spent or the rung is off.
+	// PromotionClasses: informational for the Box's prompt only. At settle,
+	// internal/butler's patchBlocker re-checks a finding's class against the
+	// host's own patch allow-list whatever the Box was told (ADR 0057). Empty
+	// whenever the rung is off or today's patch room is spent, among the
+	// conditions the butler's Runner.run checks before forwarding it.
 	PatchClasses []string
 	// MaxFindings is this sweep's findings room (chore.Room.Findings): the
 	// most findings the Box may relay this run. Zero means no host limit.

@@ -15,8 +15,9 @@ import (
 // input reaches the Box as-is: BUTLER_CHORE_CLASSES itself never crosses
 // (schema key butlerChoreClasses has boxEnv = false), while
 // BUTLER_PATCH_CLASSES's parsed result is re-rendered and forwarded as
-// CHORE_PATCH_CLASSES once the patch room allows it (internal/butler). ""
-// parses to an empty map. Load cross-checks the result against BUTLER_CHORES.
+// CHORE_PATCH_CLASSES only under the conditions internal/butler's
+// Runner.run checks. "" parses to an empty map. Load cross-checks the result
+// against BUTLER_CHORES.
 func parseClasses(s string) (map[string][]string, error) {
 	out := map[string][]string{}
 	for _, entry := range strings.Fields(s) {
