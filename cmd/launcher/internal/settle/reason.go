@@ -39,3 +39,15 @@ const (
 	ReasonAmbiguous   = "ambiguous"
 	ReasonRecoverable = "recoverable"
 )
+
+// ReasonLeavesPROpen reports whether reason names a Complete settle that left
+// its PR open: nothing re-settles such a PR when it merges later, so
+// LateMerges watches for it.
+func ReasonLeavesPROpen(reason string) bool {
+	switch reason {
+	case ReasonManual, ReasonAutoMergeEnqueued, ReasonMergeGuardHit,
+		ReasonMergeGuardCheckError, ReasonMergeBlocked:
+		return true
+	}
+	return false
+}
