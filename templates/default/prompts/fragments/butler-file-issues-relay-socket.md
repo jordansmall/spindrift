@@ -21,7 +21,7 @@ The filer sends each in one call, the body on stdin through a quoted
 `SPINDRIFT_SIGNAL_EOF` heredoc (`-body-file` only as a fallback for a body
 already in a file). The flags are exactly `-title`, `-type`, `-dedup`
 (repeatable), `-body-file`, `-class`, `-concurrence`, and `-patch-file` (the
-last three only when the finding has one) — there is no `-body` flag. `-type`
+last two only when the finding has one) — there is no `-body` flag. `-type`
 is exactly one of `bug`, `enhancement`, `chore`. A title with backticks
 needs single quotes, not double. A title containing a single quote needs
 `'\''` in its place. The filer runs the command bare — never through
@@ -31,5 +31,9 @@ Best-effort: filing must never block the sweep.
 
 - On success (the filer reports `QUEUED`), just count it toward this run's
   OUTCOME note — never fabricate an issue URL.
-- On failure (the filer errors, times out, or returns nothing usable), drop
-  the finding: the butler posts no comment anywhere to fall back into.
+- If the filer reports its class was rejected as off the class list,
+  re-delegate the finding with a class from the valid ones the rejection
+  names (see FINDING CLASSES above) — never drop it for that.
+- On any other failure (the filer errors, times out, or returns nothing
+  usable), drop the finding: the butler posts no comment anywhere to fall
+  back into.

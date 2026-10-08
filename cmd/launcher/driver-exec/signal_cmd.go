@@ -87,7 +87,7 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		bodyFile := fs.String("body-file", "", "file holding the body; empty or - reads stdin")
 		var dedup stringSliceFlag
 		fs.Var(&dedup, "dedup", "site key for dedup, e.g. path/to/file.go:Symbol; repeat for more than one")
-		class := fs.String("class", "", "promotion-candidate class (issue #3880); omit unless the finding is on CHORE_CLASSES")
+		class := fs.String("class", "", "the finding's class (every butler finding carries one); must be on CHORE_CLASS_LIST when that is set")
 		concurrence := fs.String("concurrence", "", "the reviewer subagent's one-line agreement (issue #3880); omit on dissent or if it never ran")
 		patchFile := fs.String("patch-file", "", "file holding a unified diff (ADR 0057, issue #4072); omit unless the finding's class is on the host's CHORE_PATCH_CLASSES")
 		if !parseSignalFlags(fs, rest, kind, stdout) {
@@ -98,6 +98,14 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		}
 		if *issueType == "" {
 			return signalUsageFailure(stdout, kind, "-type is required")
+		}
+		// Box-side only: the host never checks a finding's class against this
+		// list at settle (its promotion/patch allow-lists stay the trust
+		// gate), so this check exists to let the Box pick again in the same run.
+		if classes := strings.Fields(os.Getenv("CHORE_CLASS_LIST")); len(classes) > 0 {
+			if msg := classListViolation(*class, classes); msg != "" {
+				return signalUsageFailure(stdout, kind, msg)
+			}
 		}
 		client, base, secret, err := signalclient.Target()
 		if err != nil {
@@ -139,6 +147,21 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 	}
 
 	return signalUsageFailure(stdout, "", "unknown signal kind; want one of comment, pr-intent, issue-intent, status")
+}
+
+// classListViolation returns why class is not acceptable against the Chore's
+// closed class list, or "" when it is on the list.
+func classListViolation(class string, classes []string) string {
+	valid := strings.Join(classes, " ")
+	if class == "" {
+		return "-class is required; pick one of: " + valid
+	}
+	for _, c := range classes {
+		if c == class {
+			return ""
+		}
+	}
+	return fmt.Sprintf("-class %q is not on this Chore's class list; pick one of: %s", class, valid)
 }
 
 // parseSignalFlags parses rest with fs and routes a parse failure through the

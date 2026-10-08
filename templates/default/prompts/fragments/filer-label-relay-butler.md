@@ -8,7 +8,11 @@
    `SPINDRIFT_ISSUE_INTENT` JSON payload; on the socket carrier, add
    `-class '<class>'` and (when present) `-concurrence '<text>'` to the
    `driver-exec signal issue-intent` call. Omit the concurrence entirely
-   when you were not handed one.
+   when you were not handed one. On the socket carrier, if `driver-exec
+   signal issue-intent` rejects the class as off the class list, do not
+   pick a class yourself — this overrides the base step's "fix it and send
+   again": report the rejection, with the valid classes it names, back as
+   your result.
 
    When you were handed a patch alongside the finding, carry it verbatim
    into the filing call — never invent or edit one. On the log carrier,

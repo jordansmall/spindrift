@@ -20,5 +20,9 @@ Best-effort: filing must never block the sweep.
 
 - On success (the filer reports `QUEUED`), just count it toward this run's
   OUTCOME note — never fabricate an issue URL.
-- On failure (the filer errors, times out, or returns nothing usable), drop
-  the finding: the butler posts no comment anywhere to fall back into.
+- If the filer reports its class was rejected as off the class list,
+  re-delegate the finding with a class from the valid ones the rejection
+  names (see FINDING CLASSES above) — never drop it for that.
+- On any other failure (the filer errors, times out, or returns nothing
+  usable), drop the finding: the butler posts no comment anywhere to fall
+  back into.
