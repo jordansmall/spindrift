@@ -28,9 +28,14 @@ type PRForgeFake struct {
 	// FailureDetailErr, if non-nil, is returned by every FailureDetail call.
 	FailureDetailErr error
 
-	// PRStateErr, if non-nil, is returned by every PRState call. It models a
-	// push-only Code Forge, where PR state has no meaning.
+	// PRStateErr, if non-nil, is returned by every PRState call once PRStateErrs
+	// is drained. It models a push-only Code Forge, where PR state has no
+	// meaning, or a persistent read failure.
 	PRStateErr error
+
+	// PRStateErrs is a per-call queue drained before PRStateErr is checked. A
+	// nil entry falls through to the normal state lookup.
+	PRStateErrs []error
 
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
@@ -207,7 +212,13 @@ func (pf *PRForgeFake) PRForBranch(branch string) (string, bool, error) {
 func (pf *PRForgeFake) PRState(url string) (PRState, error) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
-	if pf.PRStateErr != nil {
+	if len(pf.PRStateErrs) > 0 {
+		err := pf.PRStateErrs[0]
+		pf.PRStateErrs = pf.PRStateErrs[1:]
+		if err != nil {
+			return "", err
+		}
+	} else if pf.PRStateErr != nil {
 		return "", pf.PRStateErr
 	}
 	s, ok := pf.prStates[url]
