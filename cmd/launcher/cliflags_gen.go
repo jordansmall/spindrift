@@ -12,6 +12,7 @@ var cliFlags = []cliFlag{
 	{flag: "butler", verb: "doctor", arg: "", short: "", doc: "make doctor also validate the butler config (exit 2 on failure) and require the butler labels (exit 4 if missing)", intercepted: false},
 	{flag: "research", verb: "doctor", arg: "", short: "", doc: "make doctor also require the research labels (exit 4 if missing); the daemon preflight passes it when the research kind runs", intercepted: false},
 	{flag: "chore", verb: "butler", arg: "name", short: "", doc: "sweep only the named butler Chore instead of the first due one", intercepted: false},
+	{flag: "json", verb: "stats", arg: "", short: "", doc: "emit one Dispatch Record per line as JSON instead of the summary table", intercepted: false},
 	{flag: "help", verb: "", arg: "", short: "h", doc: "show usage and exit", intercepted: true},
 	{flag: "all", verb: "", arg: "", short: "", doc: "with --help, show the full reference: every subcommand, flag, and knob", intercepted: true},
 	{flag: "version", verb: "", arg: "", short: "", doc: "show version and exit", intercepted: true},

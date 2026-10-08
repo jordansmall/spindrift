@@ -1,0 +1,7 @@
+Records: 5  Passes: 8  Notional USD: $6.10 (API-equivalent)
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  3       $2.25  $0.75    3.0      3          -
+review     2       $0.75  $0.38    0.8      2          50%
+fix        1       $1.00  $1.00    2.0      0          -
+(none)     2       $2.10  $1.05    0.8      2          -

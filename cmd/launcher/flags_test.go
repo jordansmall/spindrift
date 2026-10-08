@@ -626,6 +626,7 @@ func TestPrintSubcommands_ExactOutput(t *testing.T) {
 		"  recover [issue]                                                             run the merge gate for one issue; with none, recover one eligible agent-failed issue\n" +
 		"  doctor [--verbose|-v] [--butler] [--research]                               check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)\n" +
 		"  reconcile                                                                   local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)\n" +
+		"  stats [--json]                                                              summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD); --json emits one Dispatch Record per line\n" +
 		"  registry discover <repo-dir> <routes-file> [--force]                        discover registry routes from a Target repo checkout and write the routes file (ADR 0045)\n"
 
 	var buf bytes.Buffer

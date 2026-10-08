@@ -1,9 +1,10 @@
-# Update-mode regenerator for the prompt-assembly goldens (issue #2951). It runs
-# the Go golden test (cmd/launcher/internal/promptassembly/
-# golden_integration_test.go) with UPDATE_GOLDENS=1, which flips its compare
-# helpers from fail to overwrite. Separate from nix/regen.nix's regen verb
-# because these goldens are the output of running the test, not a pure render
-# of a Nix value.
+# Update-mode regenerator for the Go-test goldens (issue #2951): prompt
+# assembly and `spindrift stats`. It runs the Go golden tests
+# (cmd/launcher/internal/promptassembly/golden_integration_test.go,
+# cmd/launcher/stats_test.go) with UPDATE_GOLDENS=1, which flips their
+# compare helpers from fail to overwrite. Separate from nix/regen.nix's regen
+# verb because these goldens are the output of running the test, not a pure
+# render of a Nix value.
 { pkgs, fixtures }:
 let
   buildConstants = import ../lib/build-constants.nix;
@@ -38,14 +39,17 @@ pkgs.writeShellApplication {
     # The vendor tree has to sit inside the module, and the invoking checkout
     # has none, so run the test from a copy of the module. The test finds the
     # goldens and the raw prompt templates at ../../tests and ../../templates
-    # relative to the module, so those two are symlinks back into the checkout:
-    # goldens written through them land in the repo.
+    # relative to the module, so those two are symlinks back into the checkout,
+    # as is the module's own testdata/golden: goldens written through them land
+    # in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
     chmod -R +w "$scratch/src"
     cp -r ${launcherGoModules} "$scratch/src/cmd/launcher/vendor"
     ln -s "$root/tests" "$scratch/src/tests"
     ln -s "$root/templates" "$scratch/src/templates"
+    rm -rf "$scratch/src/cmd/launcher/testdata/golden"
+    ln -s "$root/cmd/launcher/testdata/golden" "$scratch/src/cmd/launcher/testdata/golden"
 
     ${import ./checks/go-check-env.nix}
     export SPINDRIFT_SEAM_FIXTURES_DIR=${fixtures.seamFixtures}
@@ -53,5 +57,6 @@ pkgs.writeShellApplication {
 
     cd "$scratch/src/cmd/launcher"
     go test -count=1 -tags integration -run '^TestPromptAssemblyGoldens$' ./internal/promptassembly
+    go test -count=1 -run '^TestStats_Golden$' .
   '';
 }

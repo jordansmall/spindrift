@@ -2273,6 +2273,7 @@ var verbHandlers = map[string]verbHandler{
 		return cmdDispatch(lc, stdout, stderr)
 	},
 	"butler": butlerVerbHandler,
+	"stats":  cmdStats,
 	"registry": func(args []string, stdout, stderr io.Writer) int {
 		if len(args) == 0 || args[0] != "discover" {
 			fmt.Fprintln(stderr, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]")
