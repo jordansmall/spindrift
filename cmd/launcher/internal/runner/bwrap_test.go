@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2929,6 +2930,17 @@ func TestMemoryLimitToBytes(t *testing.T) {
 		{in: "", wantErr: true},
 		{in: "not-a-number", wantErr: true},
 		{in: "5x", wantErr: true},
+		{in: "1", want: 1},
+		{in: "+5g", want: 5 * 1024 * 1024 * 1024},
+		{in: "0", wantErr: true},
+		{in: "0g", wantErr: true},
+		{in: "-1", wantErr: true},
+		{in: "-1g", wantErr: true},
+		{in: "9000000000g", wantErr: true},
+		{in: "8589934591g", want: 8589934591 * 1024 * 1024 * 1024},
+		{in: "8589934592g", wantErr: true},
+		{in: "9223372036854775807", want: math.MaxInt64},
+		{in: "9223372036854775808", wantErr: true},
 	}
 	for _, c := range cases {
 		got, err := MemoryLimitToBytes(c.in)

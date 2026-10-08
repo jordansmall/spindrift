@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -682,7 +683,8 @@ func resolvedRunEnv(boxEnv map[string]string) []string {
 // unlike podman's --memory -- so it is the output side that must be bytes;
 // "max" is not an input shape this parses. The doctor-side podman-machine
 // sizing check needs the same conversion, so this is the one parse both
-// share.
+// share. It errors on a non-positive value or one whose byte count overflows
+// int64, so "0" is an error, not "no limit".
 func MemoryLimitToBytes(limit string) (int64, error) {
 	if limit == "" {
 		return 0, fmt.Errorf("empty memory limit")
@@ -703,6 +705,12 @@ func MemoryLimitToBytes(limit string) (int64, error) {
 	n, err := strconv.ParseInt(numPart, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("invalid memory limit %q: %w", limit, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("invalid memory limit %q: must be positive (set MEMORY_LIMIT to empty to disable the limit)", limit)
+	}
+	if n > math.MaxInt64/mult {
+		return 0, fmt.Errorf("invalid memory limit %q: overflows int64 bytes", limit)
 	}
 	return n * mult, nil
 }
@@ -931,7 +939,7 @@ func (a *bwrapAdapter) provisionCgroup(box Box) (dir string) {
 	if a.memoryLimit != "" {
 		bytesLimit, err := MemoryLimitToBytes(a.memoryLimit)
 		if err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not parse MEMORY_LIMIT %q (%v); box %q keeps cgroup tracking but runs without a memory limit\n", a.memoryLimit, err, box.Name)
+			fmt.Printf("==> bwrap runner: warning: invalid MEMORY_LIMIT %q (%v); box %q keeps cgroup tracking but runs without a memory limit\n", a.memoryLimit, err, box.Name)
 		} else if err := writeCgroupLimit(filepath.Join(dir, "memory.max"), []byte(strconv.FormatInt(bytesLimit, 10)), 0o644); err != nil {
 			fmt.Printf("==> bwrap runner: warning: could not write cgroup memory.max (%v); box %q keeps cgroup tracking but runs without a memory limit\n", err, box.Name)
 		}
