@@ -713,6 +713,24 @@ that stops two runs working the same chore at once. It holds state only:
 the checkout a Butler scans is not part of it.
 _Avoid_: state file, log (the Box log), report.
 
+**Tuning**:
+The [[Chore]] that scans history instead of code (ADR 0062): it reads a
+[[Tuning digest]] of recent [[Dispatch Record]]s and files findings about
+the prompts, models, and knobs behind them. Its cursor is a [[Record ID]],
+not a commit. It only proposes tuning, never applies it: it never
+promotes or patches, and a PR closing one of its findings always merges
+by hand.
+_Avoid_: retro, retrospective, self-improvement loop, tuner.
+
+**Tuning digest**:
+The fixed, size-capped summary of Dispatch Records the host renders for
+one [[Tuning]] sweep: the new window against a trailing baseline, with the
+per-role cost and outcome table, splits, outliers, prior tuning findings,
+and fenced verdict evidence. Every row carries its sample size and an
+anchor that findings cite. Stored host-side, it is never pushed with the
+[[Ledger]].
+_Avoid_: snapshot (alone), report, stats dump.
+
 **Dispatch lifecycle**:
 The canonical dispatch states the launcher reasons in, independent of how any
 one Issue Tracker stores them: `Dispatchable` (a human marked the issue ready —
