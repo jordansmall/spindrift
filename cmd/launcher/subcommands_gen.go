@@ -12,7 +12,7 @@ var subcommandRegistry = []subcommandEntry{
 	{name: "build", usage: "", doc: "realize the agent image without running any agent"},
 	{name: "recover", usage: "[issue]", doc: "run the merge gate for one issue; with none, recover one eligible agent-failed issue"},
 	{name: "doctor", usage: "[--verbose|-v] [--butler] [--research]", doc: "check configuration validity, forge credentials, repository connectivity, and label presence; distinct exit code per failure class (see docs/reference.md)"},
-	{name: "reconcile", usage: "", doc: "local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)"},
+	{name: "reconcile", usage: "", doc: "bookkeeping sweep: record PRs merged after settle for stats; on a local tracker, also close issues whose recorded landing PR merged"},
 	{name: "stats", usage: "[--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]", doc: "summarise Dispatch cost per pass role from the logs under .spindrift (notional API-equivalent USD), across one or more --root checkouts; --json emits one Dispatch Record per line"},
 	{name: "registry", usage: "discover <repo-dir> <routes-file> [--force]", doc: "discover registry routes from a Target repo checkout and write the routes file (ADR 0045)"},
 }
