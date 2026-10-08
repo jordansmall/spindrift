@@ -96,6 +96,16 @@ var migrations = []string{
 	FROM passes p JOIN records r ON r.record_id = p.record_id;
 	DROP TABLE passes;
 	ALTER TABLE passes_v2 RENAME TO passes;`,
+	// v4: Box-reported prompt template hashes (issue #4786). Keyed by log
+	// segment like passes, so re-ingesting one changed log replaces only what it
+	// reported and a Record reads back the union across its logs.
+	`CREATE TABLE prompt_hashes (
+		record_id TEXT NOT NULL,
+		log_start INTEGER NOT NULL, -- unix ms, UTC
+		role      TEXT NOT NULL,
+		hash      TEXT NOT NULL,
+		PRIMARY KEY (record_id, log_start, role)
+	);`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -110,6 +120,9 @@ type Store struct {
 	db   *sql.DB
 	root string
 }
+
+// segmentTables are the per-segment child tables upsert clears alongside a Record.
+var segmentTables = []string{"passes", "prompt_hashes"}
 
 // busyTimeoutMs is how long a connection waits on another process's write lock
 // before failing.
@@ -278,8 +291,17 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	if rec != nil {
 		newID = rec.ID
 		logStart := segment.UnixMilli()
-		if _, err := tx.Exec("DELETE FROM passes WHERE record_id = ? AND log_start = ?", rec.ID, logStart); err != nil {
-			return err
+		for _, table := range segmentTables {
+			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", rec.ID, logStart); err != nil {
+				return err
+			}
+		}
+		for role, hash := range rec.PromptHashes {
+			if _, err := tx.Exec(
+				`INSERT INTO prompt_hashes (record_id, log_start, role, hash) VALUES (?, ?, ?, ?)`,
+				rec.ID, logStart, role, hash); err != nil {
+				return err
+			}
 		}
 		roleModels, err := marshalMap(rec.RoleModels)
 		if err != nil {
@@ -327,8 +349,10 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			return err
 		}
 		if refs == 0 {
-			if _, err := tx.Exec("DELETE FROM passes WHERE record_id = ?", oldID); err != nil {
-				return err
+			for _, table := range segmentTables {
+				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ?", oldID); err != nil {
+					return err
+				}
 			}
 			if _, err := tx.Exec("DELETE FROM records WHERE record_id = ?", oldID); err != nil {
 				return err
@@ -405,7 +429,10 @@ func (s *Store) Records() ([]Record, error) {
 		}
 		out[i].Passes = append(out[i].Passes, p)
 	}
-	return out, prows.Err()
+	if err := prows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.loadPromptHashes(out, byID)
 }
 
 // marshalMap stores a nil or empty map as "", the column default.
@@ -424,4 +451,29 @@ func unmarshalMap(s string) (map[string]string, error) {
 	var m map[string]string
 	err := json.Unmarshal([]byte(s), &m)
 	return m, err
+}
+
+// loadPromptHashes fills each Record's PromptHashes with the union across its
+// logs; ordering by segment lets a later log's hash for a role win.
+func (s *Store) loadPromptHashes(recs []Record, byID map[string]int) error {
+	rows, err := s.db.Query(`SELECT record_id, role, hash FROM prompt_hashes ORDER BY record_id, log_start`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, role, hash string
+		if err := rows.Scan(&id, &role, &hash); err != nil {
+			return err
+		}
+		i, ok := byID[id]
+		if !ok {
+			return fmt.Errorf("dispatchrecord: prompt_hashes row for unknown record %q", id)
+		}
+		if recs[i].PromptHashes == nil {
+			recs[i].PromptHashes = map[string]string{}
+		}
+		recs[i].PromptHashes[role] = hash
+	}
+	return rows.Err()
 }

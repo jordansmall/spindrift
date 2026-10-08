@@ -623,8 +623,8 @@ func TestStoreMigratesV1Database(t *testing.T) {
 
 	s := openStore(t, root)
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 3 {
-		t.Fatalf("user_version = %d, err %v; want 3", v, err)
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 4 {
+		t.Fatalf("user_version = %d, err %v; want 4", v, err)
 	}
 	recs := records(t, s)
 	if len(recs) != 1 || len(recs[0].Passes) != 1 {

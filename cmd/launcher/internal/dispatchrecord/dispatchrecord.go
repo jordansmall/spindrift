@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -74,6 +75,10 @@ type Record struct {
 	DriverVersion string            `json:"driver_version,omitempty"`
 	RoleModels    map[string]string `json:"role_models,omitempty"`
 	Knobs         map[string]string `json:"knobs,omitempty"`
+
+	// PromptHashes maps a pass role to the hash of its prompt template. Unlike
+	// the fields above it is Box-reported, so untrusted.
+	PromptHashes map[string]string `json:"prompt_hashes,omitempty"`
 }
 
 // ErrNoEvents is returned by ParseLog for a log with no parsed event at all
@@ -191,6 +196,9 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		haveTS    bool
 		sawEvent  bool
 		stamp     *claude.DispatchStart
+		// hashes holds reported prompt hashes by the record_id they claim, since
+		// the op need not follow the stamp it must match.
+		hashes = map[string]map[string]string{}
 		// pendingDispositions holds a fix pass's Write to the dispositions file,
 		// by tool_use ID, until its tool_result shows the Write took effect.
 		pendingDispositions = map[string]string{}
@@ -231,6 +239,13 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			case "dispatch_start":
 				if first && op.Start != nil && op.Start.RecordID != "" {
 					stamp = op.Start
+				}
+			case "prompt_hashes":
+				if h := op.PromptHashes; h != nil {
+					if hashes[h.RecordID] == nil {
+						hashes[h.RecordID] = map[string]string{}
+					}
+					maps.Copy(hashes[h.RecordID], h.Roles)
 				}
 			case "pass_start":
 				if !sawStart {
@@ -337,6 +352,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			DriverVersion: stamp.DriverVersion,
 			RoleModels:    stamp.RoleModels,
 			Knobs:         stamp.Knobs,
+			PromptHashes:  hashes[stamp.RecordID],
 		}, false, stamp.Started.UTC(), nil
 	}
 	if !chain {

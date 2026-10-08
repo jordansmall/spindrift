@@ -165,3 +165,50 @@ func TestStoreMigratesV1DatabaseKeepingRows(t *testing.T) {
 		t.Fatalf("migrated record gained stamp fields: %+v", recs[0])
 	}
 }
+
+func hashesLine(recordID string, roles map[string]string) string {
+	return opLine(claude.SpindriftOp{Op: "prompt_hashes", PromptHashes: &claude.PromptHashes{RecordID: recordID, Roles: roles}})
+}
+
+func TestPromptHashesUnionAcrossLogsOfOneDispatch(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	put := func(root, name string, offset time.Duration, hashLines ...string) {
+		lines := append([]string{stampLine(stampClaim.Add(offset))}, hashLines...)
+		putLog(t, root, name, append(lines, workLog("2026-05-01T09:00:00Z", 1)...)...)
+	}
+	root := t.TempDir()
+	put(root, "issue-42.log", 0, hashesLine(id, map[string]string{"implement": "aa", "review": "bb"}))
+	put(root, "issue-42-fix-1.log", time.Minute, hashesLine(id, map[string]string{"legacy": "cc"}),
+		hashesLine(id, map[string]string{"legacy": "dd"}), hashesLine("work:other@x", map[string]string{"review": "zz"}))
+	s := openStore(t, root)
+	ingest(t, s)
+	recs := records(t, s)
+	if len(recs) != 1 {
+		t.Fatalf("records = %v, want 1", ids(recs))
+	}
+	want := map[string]string{"implement": "aa", "review": "bb", "legacy": "dd"}
+	if !reflect.DeepEqual(recs[0].PromptHashes, want) {
+		t.Fatalf("prompt hashes = %v, want %v", recs[0].PromptHashes, want)
+	}
+
+	// Re-ingesting a changed log replaces what it reported earlier.
+	put(root, "issue-42.log", 0, hashesLine(id, map[string]string{"implement": "ee"}))
+	ingest(t, s)
+	want = map[string]string{"implement": "ee", "legacy": "dd"}
+	if got := records(t, s)[0].PromptHashes; !reflect.DeepEqual(got, want) {
+		t.Fatalf("after re-ingest prompt hashes = %v, want %v", got, want)
+	}
+}
+
+func TestPromptHashesIgnoredWithoutMatchingStamp(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	h := hashesLine(id, map[string]string{"implement": "aa"})
+	rec, _, err := ParseLog(writeLog(t, "issue-1.log", append([]string{h}, workLog("2026-03-01T11:00:00Z", 1)...)...))
+	if err != nil || rec.Attribution != AttributionInferred || rec.PromptHashes != nil {
+		t.Fatalf("rec = %+v, err = %v", rec, err)
+	}
+	rec, _, err = ParseLog(writeLog(t, "issue-42.log", stampLine(stampClaim), hashesLine("work:other@x", map[string]string{"review": "zz"})))
+	if err != nil || rec.PromptHashes != nil {
+		t.Fatalf("rec = %+v, err = %v", rec, err)
+	}
+}
