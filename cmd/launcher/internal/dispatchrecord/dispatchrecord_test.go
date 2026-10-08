@@ -434,6 +434,31 @@ func TestParseLogKindFromOutcomeStatus(t *testing.T) {
 	}
 }
 
+// A custom RESEARCH_VERDICTS set can reuse a work-unique status; the research
+// announce must still win.
+func TestParseLogAnnounceBeatsWorkUniqueStatus(t *testing.T) {
+	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
+	researching := "==> claude researching issue #42\n"
+	tests := []struct {
+		name  string
+		lines []string
+	}{
+		{"researching announce, ambiguous verdict", []string{researching, res, outcomeLine("ambiguous")}},
+		{"researching announce, ready verdict", []string{researching, res, outcomeLine("ready")}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Kind != dispatchkind.Research.Name {
+				t.Errorf("kind = %q, want %q", rec.Kind, dispatchkind.Research.Name)
+			}
+		})
+	}
+}
+
 func TestParseLogChoreKeyBeatsOutcomeStatus(t *testing.T) {
 	p := writeLog(t, "issue-"+dispatchkey.ChorePrefix+"x.log", result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m"), outcomeLine("recommend"))
 	rec, _, err := ParseLog(p)
@@ -457,5 +482,21 @@ func TestParseLogPlainTextLogYieldsZeroCostRecord(t *testing.T) {
 	}
 	if !provisional || !rec.ClaimTime.Equal(mtime) || rec.Kind != KindUnknown || len(rec.Passes) != 0 {
 		t.Errorf("rec=%+v provisional=%v, want provisional unknown-kind Record at mtime with no passes", rec, provisional)
+	}
+}
+
+func TestStatusKind(t *testing.T) {
+	for status, want := range map[string]string{
+		"ready":            dispatchkind.Work.Name,
+		"already-resolved": dispatchkind.Work.Name,
+		"recommend":        dispatchkind.Research.Name,
+		"reject":           dispatchkind.Research.Name,
+		"blocked":          KindUnknown, // on both the work and research rows
+		"":                 KindUnknown,
+		"bogus":            KindUnknown,
+	} {
+		if got := statusKind(status); got != want {
+			t.Errorf("statusKind(%q) = %q, want %q", status, got, want)
+		}
 	}
 }
