@@ -114,13 +114,25 @@ var migrations = []string{
 	ALTER TABLE records ADD COLUMN note TEXT NOT NULL DEFAULT '';
 	ALTER TABLE records ADD COLUMN pr_url TEXT NOT NULL DEFAULT '';
 	ALTER TABLE records ADD COLUMN box_status TEXT NOT NULL DEFAULT '';`,
+	// v6: unstamped fix and conflict-resolve logs join an inferred Record by
+	// time (issue #4782), so a pass names the log it was read from, and a file
+	// remembers its segment so a moved provisional one can be cleared. Only an
+	// inferred Record's segment is its claim time; a stamped row gets 0.
+	`ALTER TABLE passes ADD COLUMN log TEXT NOT NULL DEFAULT ''; -- source log base name; empty when migrated
+	ALTER TABLE ingested_files ADD COLUMN log_start INTEGER NOT NULL DEFAULT 0;
+	UPDATE ingested_files SET log_start = COALESCE((SELECT claim_time FROM records
+		WHERE records.record_id = ingested_files.record_id AND records.attribution = 'inferred'), 0);
+	-- Rows from the older schema were parsed under older rules, so re-read them (mtime -1 never matches a real file,
+	-- and marks the row as migrated for upsert).
+	UPDATE ingested_files SET mtime_ns = -1;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
 // inferred from (ADR 0061), so deleting a log never removes its Record. The
 // only Records the store discards are ones its own still-present log has since
-// replaced with a different ID: a provisional (mtime-derived) one, or, under
-// Reingest, one whose stat-identical log re-parses differently. Accepted
+// replaced with a different ID: a provisional (mtime-derived) one, one whose
+// stat-identical log re-parses differently under Reingest, or one from a
+// migrated row whose re-parse keeps its claim time. Accepted
 // residual: deleting a provisional log and reusing its path with no Ingest in
 // between reads as the same Dispatch growing, so that earlier Record, which has
 // no real claim time, is replaced.
@@ -230,9 +242,11 @@ func (s *Store) Close() error { return s.db.Close() }
 // changed since it was last ingested and upserts its Record: a chain log's
 // inferred one, or any stamped log's own (issue #4783). It returns how
 // many files it parsed; a file whose path, size, and mtime match its
-// ingested_files row is skipped without being opened. Rows for logs no longer
-// on disk, including every row when the whole log directory is gone, are
-// forgotten (their Records are kept), so a reused path starts fresh.
+// ingested_files row is skipped without being opened. Primary logs go first,
+// so an unstamped satellite log (fix pass, conflict resolve) finds the
+// Dispatch it started under. Rows for logs no longer on disk, including every
+// row when the whole log directory is gone, are forgotten (their Records are
+// kept), so a reused path starts fresh.
 func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false) }
 
 // Reingest is Ingest without the skip: it re-parses every pass log still on
@@ -247,6 +261,7 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		return 0, err
 	}
 	seen := []string{}
+	var primaries, satellites []string
 	for _, e := range entries {
 		if e.IsDir() {
 			continue
@@ -256,38 +271,64 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		}
 		path := filepath.Join(dir, e.Name())
 		seen = append(seen, path)
-		info, err := os.Stat(path)
+		if _, satellite, _ := ChainKey(e.Name()); satellite {
+			satellites = append(satellites, path)
+		} else {
+			primaries = append(primaries, path)
+		}
+	}
+	// Primaries first, so a satellite always finds the Dispatch it joins.
+	for _, path := range primaries {
+		did, err := s.ingestFile(path, false, force)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
 			return parsed, err
 		}
-		if !force {
-			fresh, err := s.isIngested(path, info)
-			if err != nil {
-				return parsed, err
-			}
-			if fresh {
-				continue
-			}
+		if did {
+			parsed++
 		}
-		var recp *Record
-		rec, provisional, segment, err := parseLog(path)
-		switch {
-		case err == nil:
-			recp = &rec
-		case errors.Is(err, ErrNoEvents), errors.Is(err, ErrUnstamped):
-			// Remember the file so it is not reopened until it changes.
-		default:
-			return parsed, fmt.Errorf("dispatchrecord: %s: %w", path, err)
-		}
-		if err := s.upsert(path, info, recp, segment, provisional); err != nil {
+	}
+	for _, path := range satellites {
+		did, err := s.ingestFile(path, true, force)
+		if err != nil {
 			return parsed, err
 		}
-		parsed++
+		if did {
+			parsed++
+		}
 	}
 	return parsed, s.forgetMissing(seen)
+}
+
+// ingestFile parses and upserts one log unless it is unchanged, and reports
+// whether it parsed it.
+func (s *Store) ingestFile(path string, satellite, force bool) (bool, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !force {
+		fresh, err := s.isIngested(path, info)
+		if err != nil || fresh {
+			return false, err
+		}
+	}
+	var recp *Record
+	rec, provisional, segment, err := parseLog(path)
+	switch {
+	case err == nil:
+		recp = &rec
+	case errors.Is(err, ErrEmptyLog), errors.Is(err, ErrUnstamped):
+		// Remember the file so it is not reopened until it changes.
+	default:
+		return false, fmt.Errorf("dispatchrecord: %s: %w", path, err)
+	}
+	if err := s.upsert(path, info, recp, segment, provisional, satellite); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // forgetMissing drops the ingested_files rows for paths not in seen, leaving
@@ -302,7 +343,7 @@ func (s *Store) forgetMissing(seen []string) error {
 }
 
 // passColumns is shared by the passes INSERT and SELECT so they cannot drift.
-const passColumns = `record_id, log_start, ordinal, role, models, usd, input_tokens, output_tokens,
+const passColumns = `record_id, log_start, log, ordinal, role, models, usd, input_tokens, output_tokens,
 	cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms,
 	api_duration_ms, verdict, verdict_text, dispositions`
 
@@ -319,8 +360,11 @@ func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 }
 
 // upsert records one parsed log. A nil rec is an event-free log: only its
-// ingested_files row is written, with an empty record_id.
-func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional bool) error {
+// ingested_files row is written, with an empty record_id. An unstamped
+// satellite joins the Record of its key with the greatest claim time not after
+// its own start, and only becomes a Record of its own when no Dispatch of that
+// key started by then.
+func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional, satellite bool) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -328,62 +372,90 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	defer tx.Rollback()
 	var oldID string
 	var oldProvisional bool
-	var oldSize, oldMtime int64
-	err = tx.QueryRow("SELECT record_id, provisional, size, mtime_ns FROM ingested_files WHERE path = ?", path).Scan(&oldID, &oldProvisional, &oldSize, &oldMtime)
+	var oldSize, oldStart, oldMtime int64
+	err = tx.QueryRow("SELECT record_id, provisional, size, log_start, mtime_ns FROM ingested_files WHERE path = ?", path).Scan(&oldID, &oldProvisional, &oldSize, &oldStart, &oldMtime)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
 	newID := ""
+	storedProvisional := provisional
+	var logStart int64
 	if rec != nil {
 		newID = rec.ID
-		logStart := segment.UnixMilli()
+		logStart = segment.UnixMilli()
+		writesRecord := true
+		if satellite && rec.Attribution == AttributionInferred {
+			err := tx.QueryRow(
+				`SELECT record_id FROM records WHERE dispatch_key = ? AND claim_time <= ?
+				 ORDER BY claim_time DESC, record_id LIMIT 1`,
+				rec.DispatchKey, logStart).Scan(&newID)
+			switch {
+			case err == nil:
+				writesRecord = false
+				// The joined Record's claim time is not this log's mtime.
+				storedProvisional = false
+			case errors.Is(err, sql.ErrNoRows):
+				newID = rec.ID
+			default:
+				return err
+			}
+		}
 		for _, table := range segmentTables {
-			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", rec.ID, logStart); err != nil {
+			// The file's own earlier segment: a provisional start moves as the
+			// log grows.
+			if oldID == newID {
+				if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", newID, oldStart); err != nil {
+					return err
+				}
+			}
+			if _, err := tx.Exec("DELETE FROM "+table+" WHERE record_id = ? AND log_start = ?", newID, logStart); err != nil {
 				return err
 			}
 		}
 		for role, hash := range rec.PromptHashes {
 			if _, err := tx.Exec(
 				`INSERT INTO prompt_hashes (record_id, log_start, role, hash) VALUES (?, ?, ?, ?)`,
-				rec.ID, logStart, role, hash); err != nil {
+				newID, logStart, role, hash); err != nil {
 				return err
 			}
 		}
-		roleModels, err := marshalMap(rec.RoleModels)
-		if err != nil {
-			return err
-		}
-		knobs, err := marshalMap(rec.Knobs)
-		if err != nil {
-			return err
-		}
-		// The outcome group is kept unless this log carries the settled outcome:
-		// the Record's other logs (fix, conflict-resolve) never see it.
-		keep := func(col string) string {
-			return col + ` = CASE WHEN excluded.outcome_source = '` + OutcomeSourceSettled +
-				`' THEN excluded.` + col + ` ELSE records.` + col + ` END`
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
-				revision, driver, driver_version, role_models, knobs,
-				outcome_source, reason, note, pr_url, box_status)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(record_id) DO UPDATE SET
-				kind = excluded.kind, dispatch_key = excluded.dispatch_key, claim_time = excluded.claim_time,
-				attribution = excluded.attribution, revision = excluded.revision, driver = excluded.driver,
-				driver_version = excluded.driver_version, role_models = excluded.role_models, knobs = excluded.knobs,
-				`+strings.Join([]string{keep("outcome"), keep("outcome_source"), keep("reason"), keep("note"),
-				keep("pr_url"), keep("box_status")}, ", "),
-			rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
-			rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
-			rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus); err != nil {
-			return err
+		if writesRecord {
+			roleModels, err := marshalMap(rec.RoleModels)
+			if err != nil {
+				return err
+			}
+			knobs, err := marshalMap(rec.Knobs)
+			if err != nil {
+				return err
+			}
+			// The outcome group is kept unless this log carries the settled outcome:
+			// the Record's other logs (fix, conflict-resolve) never see it.
+			keep := func(col string) string {
+				return col + ` = CASE WHEN excluded.outcome_source = '` + OutcomeSourceSettled +
+					`' THEN excluded.` + col + ` ELSE records.` + col + ` END`
+			}
+			if _, err := tx.Exec(
+				`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
+					revision, driver, driver_version, role_models, knobs,
+					outcome_source, reason, note, pr_url, box_status)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+				 ON CONFLICT(record_id) DO UPDATE SET
+					kind = excluded.kind, dispatch_key = excluded.dispatch_key, claim_time = excluded.claim_time,
+					attribution = excluded.attribution, revision = excluded.revision, driver = excluded.driver,
+					driver_version = excluded.driver_version, role_models = excluded.role_models, knobs = excluded.knobs,
+					`+strings.Join([]string{keep("outcome"), keep("outcome_source"), keep("reason"), keep("note"),
+					keep("pr_url"), keep("box_status")}, ", "),
+				rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
+				rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
+				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus); err != nil {
+				return err
+			}
 		}
 		for _, p := range rec.Passes {
 			if _, err := tx.Exec(
 				`INSERT INTO passes (`+passColumns+`)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				rec.ID, logStart, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				newID, logStart, p.Log, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
 				p.CacheReadInputTokens, p.CacheCreationInputTokens, p.APICalls, p.Turns, p.DurationMs,
 				p.APIDurationMs, p.Verdict, p.VerdictText, p.Dispositions); err != nil {
 				return err
@@ -391,8 +463,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		}
 	}
 	if _, err := tx.Exec(
-		`INSERT OR REPLACE INTO ingested_files (path, size, mtime_ns, record_id, provisional) VALUES (?, ?, ?, ?, ?)`,
-		path, info.Size(), info.ModTime().UnixNano(), newID, provisional); err != nil {
+		`INSERT OR REPLACE INTO ingested_files (path, size, mtime_ns, record_id, provisional, log_start) VALUES (?, ?, ?, ?, ?, ?)`,
+		path, info.Size(), info.ModTime().UnixNano(), newID, storedProvisional, logStart); err != nil {
 		return err
 	}
 	// A provisional ID is the same Dispatch under a stale mtime-derived ID; a
@@ -403,7 +475,10 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 	// Dispatch too, so an ID change means the parser changed and the old Record
 	// is stale.
 	statSame := oldSize == info.Size() && oldMtime == info.ModTime().UnixNano()
-	if rec != nil && oldID != "" && oldID != newID && (oldProvisional || statSame) {
+	// A migrated row (mtime -1) is the same Dispatch only when the re-parse keeps
+	// its claim time: the path fixes the key, so the ID then differs in kind alone.
+	migrated := oldMtime == -1
+	if rec != nil && oldID != "" && oldID != newID && (oldProvisional || statSame || (migrated && !satellite && oldStart == logStart)) {
 		var refs int
 		if err := tx.QueryRow("SELECT COUNT(*) FROM ingested_files WHERE record_id = ?", oldID).Scan(&refs); err != nil {
 			return err
@@ -423,7 +498,8 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 }
 
 // Records returns every stored Record with its passes, ordered by claim time
-// then ID (passes by log segment, then ordinal).
+// then ID. A Record's passes run in the order their log segments began, then
+// by position within a segment, renumbered 1..n across the segments.
 func (s *Store) Records() ([]Record, error) {
 	rows, err := s.db.Query(
 		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
@@ -476,7 +552,7 @@ func (s *Store) Records() ([]Record, error) {
 		var id, models string
 		var logStart int64
 		var p Pass
-		if err := prows.Scan(&id, &logStart, &p.Ordinal, &p.Role, &models, &p.USD, &p.InputTokens, &p.OutputTokens,
+		if err := prows.Scan(&id, &logStart, &p.Log, &p.Ordinal, &p.Role, &models, &p.USD, &p.InputTokens, &p.OutputTokens,
 			&p.CacheReadInputTokens, &p.CacheCreationInputTokens, &p.APICalls, &p.Turns, &p.DurationMs,
 			&p.APIDurationMs, &p.Verdict, &p.VerdictText, &p.Dispositions); err != nil {
 			return nil, err
@@ -489,6 +565,7 @@ func (s *Store) Records() ([]Record, error) {
 		if !ok {
 			return nil, fmt.Errorf("dispatchrecord: passes row for unknown record %q", id)
 		}
+		p.Ordinal = len(out[i].Passes) + 1
 		out[i].Passes = append(out[i].Passes, p)
 	}
 	if err := prows.Err(); err != nil {

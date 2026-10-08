@@ -99,8 +99,8 @@ func statsFixtureRoot(t *testing.T) string {
 	if err := os.Chtimes(crash, mtime, mtime); err != nil {
 		t.Fatal(err)
 	}
-	// Fix and conflict-resolve logs belong to another file of a chain and must
-	// not become Records of their own.
+	// Fix and conflict-resolve logs are satellites of a Dispatch: this one starts
+	// after work:42 and joins it rather than becoming a Record of its own.
 	write("issue-42-fix-1.log", statsResult("2026-10-07T13:00:00Z", 9, 1, 1, 1, "claude-opus"))
 	return root
 }

@@ -2,6 +2,7 @@ package dispatchrecord
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -163,8 +164,12 @@ func TestStoreRenamedPriorRunStaysOneRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	ingest(t, s)
-	if got := records(t, s); !reflect.DeepEqual(first, got) {
-		t.Fatalf("rename changed records: %v", ids(got))
+	got := records(t, s)
+	if len(got) != 1 || got[0].ID != first[0].ID || len(got[0].Passes) != len(first[0].Passes) {
+		t.Fatalf("rename changed records: %+v", got)
+	}
+	if want := "issue-12.log.prior-run.1"; got[0].Passes[0].Log != want {
+		t.Fatalf("pass log = %q, want %q", got[0].Passes[0].Log, want)
 	}
 
 	putLog(t, root, "issue-12.log", workLog("2026-03-05T10:00:00.000Z", 3)...)
@@ -191,18 +196,277 @@ func TestStoreKeepsRecordWhenLogDeleted(t *testing.T) {
 	}
 }
 
-func TestStoreIgnoresFixAndConflictLogs(t *testing.T) {
+func passLogs(r Record) []string {
+	out := []string{}
+	for _, p := range r.Passes {
+		out = append(out, p.Log)
+	}
+	return out
+}
+
+func TestStoreSatellitesJoinTheirDispatch(t *testing.T) {
 	root := t.TempDir()
 	putLog(t, root, "issue-12.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
-	putLog(t, root, "issue-12-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 1)...)
-	putLog(t, root, "issue-12-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 1)...)
+	putLog(t, root, "issue-12-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	putLog(t, root, "issue-12-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 4)...)
 	putLog(t, root, "notes.txt", "x")
 	s := openStore(t, root)
 	if n := ingest(t, s); n != 3 {
-		t.Fatalf("parsed = %d, want 3 (the three .log files; notes.txt is skipped)", n)
+		t.Fatalf("parsed = %d, want 3", n)
 	}
-	if got := records(t, s); len(got) != 1 {
+	got := records(t, s)
+	if len(got) != 1 {
 		t.Fatalf("records = %v, want 1", ids(got))
+	}
+	wantLogs := []string{"issue-12.log", "issue-12-fix-1.log", "issue-12-conflict-resolve.log"}
+	if !reflect.DeepEqual(passLogs(got[0]), wantLogs) {
+		t.Fatalf("pass logs = %v, want %v", passLogs(got[0]), wantLogs)
+	}
+	var usd []float64
+	for i, p := range got[0].Passes {
+		if p.Ordinal != i+1 {
+			t.Errorf("pass %d ordinal = %d", i, p.Ordinal)
+		}
+		usd = append(usd, p.USD)
+	}
+	if want := []float64{1, 2, 4}; !reflect.DeepEqual(usd, want) {
+		t.Fatalf("usd = %v, want %v", usd, want)
+	}
+}
+
+func TestStoreSatelliteWindowedByStartTime(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-42.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-05T11:00:00.000Z", 2)...)
+	putLog(t, root, "issue-42-fix-1.log.prior-run.1", workLog("2026-03-02T11:00:00.000Z", 4)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	got := records(t, s)
+	if len(got) != 2 {
+		t.Fatalf("records = %v, want 2", ids(got))
+	}
+	want := [][]string{
+		{"issue-42.log.prior-run.1", "issue-42-fix-1.log.prior-run.1"},
+		{"issue-42.log", "issue-42-fix-1.log"},
+	}
+	for i := range got {
+		if !reflect.DeepEqual(passLogs(got[i]), want[i]) {
+			t.Errorf("record %d logs = %v, want %v", i, passLogs(got[i]), want[i])
+		}
+	}
+}
+
+func TestStoreRenamedSatelliteDoesNotDuplicatePasses(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	fix := putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	if err := os.Rename(fix, fix+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	if n := ingest(t, s); n != 1 {
+		t.Fatalf("parsed = %d, want 1", n)
+	}
+	got := records(t, s)
+	if len(got) != 1 {
+		t.Fatalf("records = %v, want 1", ids(got))
+	}
+	want := []string{"issue-42.log", "issue-42-fix-1.log.prior-run.1"}
+	if !reflect.DeepEqual(passLogs(got[0]), want) {
+		t.Fatalf("pass logs = %v, want %v", passLogs(got[0]), want)
+	}
+}
+
+func TestStoreGrownSatelliteReplacesItsOwnPasses(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	fix := putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	appendLog(t, fix, result("2026-03-01T11:30:00.000Z", 3, 1, 1, 1, "opus"))
+	ingest(t, s)
+	got := records(t, s)
+	if len(got) != 1 || len(got[0].Passes) != 2 || got[0].Passes[1].USD != 5 {
+		t.Fatalf("records after growth = %+v", got)
+	}
+}
+
+func TestStoreOrphanSatelliteIsItsOwnRecord(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	got := records(t, s)
+	if len(got) != 1 || got[0].DispatchKey != "42" || got[0].Kind != "work" ||
+		!reflect.DeepEqual(passLogs(got[0]), []string{"issue-42-fix-1.log"}) {
+		t.Fatalf("records = %+v", got)
+	}
+	// A later satellite of the same key joins the orphan's window.
+	putLog(t, root, "issue-42-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 4)...)
+	ingest(t, s)
+	if got := records(t, s); len(got) != 1 || len(got[0].Passes) != 2 {
+		t.Fatalf("records = %+v, want one with 2 passes", got)
+	}
+}
+
+func TestStoreSatelliteBeforeEveryDispatchIsOrphan(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-42-fix-1.log.prior-run.1", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	if got := records(t, s); len(got) != 2 {
+		t.Fatalf("records = %v, want 2", ids(got))
+	}
+}
+
+func TestStoreUnchangedSatellitesAreNotReparsed(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, root, "issue-42-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	first := records(t, s)
+	if n := ingest(t, s); n != 0 {
+		t.Fatalf("second ingest parsed = %d, want 0", n)
+	}
+	if !reflect.DeepEqual(first, records(t, s)) {
+		t.Fatal("records changed on an idle ingest")
+	}
+}
+
+// seedV1DB creates a schema-v1 database under root and runs stmts against it.
+func seedV1DB(t *testing.T, root string, stmts ...string) {
+	t.Helper()
+	path := hostpaths.DispatchRecordsDB(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range append([]string{migrations[0], `PRAGMA user_version = 1`}, stmts...) {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStoreMigratesV1Database(t *testing.T) {
+	root := t.TempDir()
+	claim := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	seedV1DB(t, root,
+		`INSERT INTO records VALUES ('work:7@2026-03-01T10:00:00.000Z', 'work', '7', `+fmt.Sprint(claim.UnixMilli())+`, 'inferred', 'unknown')`,
+		`INSERT INTO passes VALUES ('work:7@2026-03-01T10:00:00.000Z', 1, 'implement', 'opus,haiku', 1.5, 1, 2, 3, 4, 5, 6, 7, 8, 'ready')`,
+		`INSERT INTO ingested_files VALUES ('/gone/issue-7.log', 10, 20, 'work:7@2026-03-01T10:00:00.000Z', 0)`,
+	)
+
+	s := openStore(t, root)
+	var v int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
+		t.Fatalf("user_version = %d, err %v; want %d", v, err, len(migrations))
+	}
+	want := Record{
+		ID: "work:7@2026-03-01T10:00:00.000Z", Kind: "work", DispatchKey: "7", ClaimTime: claim,
+		Attribution: AttributionInferred, Outcome: OutcomeUnknown, OutcomeSource: OutcomeSourceNone,
+		Passes: []Pass{{
+			Ordinal: 1, Role: "implement", Models: []string{"opus", "haiku"}, USD: 1.5, InputTokens: 1,
+			OutputTokens: 2, CacheReadInputTokens: 3, CacheCreationInputTokens: 4, APICalls: 5, Turns: 6,
+			DurationMs: 7, APIDurationMs: 8, Verdict: "ready",
+		}},
+	}
+	if got := records(t, s); !reflect.DeepEqual(got, []Record{want}) {
+		t.Fatalf("migrated records = %+v\nwant %+v", got, []Record{want})
+	}
+	// The migrated file row is forgotten (its log is gone) without touching the Record.
+	ingest(t, s)
+	if got := records(t, s); len(got) != 1 || len(got[0].Passes) != 1 {
+		t.Fatalf("records after ingest = %+v", got)
+	}
+}
+
+func TestStoreMigratedV1RowsReparseStillPresentLogs(t *testing.T) {
+	researchLines := []string{result("2026-03-01T10:00:00.000Z", 1, 1, 1, 1, "m"), outcomeLine("recommend")}
+	crashLines := []string{"box: starting\n", "error: image pull failed\n"}
+	mtime := time.Date(2026, 3, 2, 9, 8, 7, 0, time.UTC)
+	writeLogs := func(root string) (research, crash string) {
+		research = putLog(t, root, "issue-55.log.prior-run.1", researchLines...)
+		crash = putLog(t, root, "issue-9.log", crashLines...)
+		for _, p := range []string{research, crash} {
+			if err := os.Chtimes(p, mtime, mtime); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return research, crash
+	}
+	noRoot := func(recs []Record) []Record {
+		out := append([]Record(nil), recs...)
+		for i := range out {
+			out[i].Root = ""
+		}
+		return out
+	}
+
+	freshRoot := t.TempDir()
+	writeLogs(freshRoot)
+	fresh := openStore(t, freshRoot)
+	ingest(t, fresh)
+	want := records(t, fresh)
+	oldID := RecordID("unknown", "55", time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC))
+	if oldID == "" || len(want) != 2 {
+		t.Fatalf("fresh records = %+v, want a research Record and a crash Record", want)
+	}
+
+	root := t.TempDir()
+	research, crash := writeLogs(root)
+	claim := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	stat := func(p string) (int64, int64) {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.Size(), info.ModTime().UnixNano()
+	}
+	rsize, rmtime := stat(research)
+	csize, cmtime := stat(crash)
+	seedV1DB(t, root,
+		fmt.Sprintf(`INSERT INTO records VALUES ('%s', 'unknown', '55', %d, 'inferred', 'unknown')`, oldID, claim.UnixMilli()),
+		fmt.Sprintf(`INSERT INTO passes VALUES ('%s', 1, 'implement', 'm', 1, 1, 1, 1, 1, 1, 1, 1, 1, '')`, oldID),
+		fmt.Sprintf(`INSERT INTO ingested_files VALUES ('%s', %d, %d, '%s', 0)`, research, rsize, rmtime, oldID),
+		fmt.Sprintf(`INSERT INTO ingested_files VALUES ('%s', %d, %d, '', 1)`, crash, csize, cmtime),
+	)
+
+	s := openStore(t, root)
+	if n := ingest(t, s); n != 2 {
+		t.Fatalf("parsed = %d, want 2: carried-over rows must be re-read", n)
+	}
+	if got := noRoot(records(t, s)); !reflect.DeepEqual(got, noRoot(want)) {
+		t.Fatalf("records = %+v\nwant (fresh store) %+v", got, noRoot(want))
+	}
+}
+
+func TestStoreMigratedV1RowKeepsRecordWhenPathReused(t *testing.T) {
+	root := t.TempDir()
+	march := "work:9@2026-03-01T10:00:00.000Z"
+	claim := time.Date(2026, 3, 1, 10, 0, 0, 0, time.UTC)
+	log := putLog(t, root, "issue-9.log", workLog("2026-04-01T10:00:00.000Z", 2)...)
+	seedV1DB(t, root,
+		fmt.Sprintf(`INSERT INTO records VALUES ('%s', 'work', '9', %d, 'inferred', 'unknown')`, march, claim.UnixMilli()),
+		fmt.Sprintf(`INSERT INTO passes VALUES ('%s', 1, 'implement', 'opus', 1.5, 1, 2, 3, 4, 5, 6, 7, 8, 'ready')`, march),
+		fmt.Sprintf(`INSERT INTO ingested_files VALUES ('%s', 10, 20, '%s', 0)`, log, march),
+	)
+
+	s := openStore(t, root)
+	ingest(t, s)
+	got := records(t, s)
+	if len(got) != 2 || got[0].ID != march || len(got[0].Passes) != 1 {
+		t.Fatalf("records = %v, want the March Record with its pass kept beside the April one", ids(got))
 	}
 }
 
@@ -599,7 +863,7 @@ func TestStoreReingestReplacesRecordWhoseIDChanged(t *testing.T) {
 	}
 }
 
-func TestStoreMigratesV1Database(t *testing.T) {
+func TestStoreMigratesV1DatabaseKeepsVerdictEvidenceColumns(t *testing.T) {
 	root := t.TempDir()
 	path := hostpaths.DispatchRecordsDB(root)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -623,8 +887,8 @@ func TestStoreMigratesV1Database(t *testing.T) {
 
 	s := openStore(t, root)
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 5 {
-		t.Fatalf("user_version = %d, err %v; want 5", v, err)
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) {
+		t.Fatalf("user_version = %d, err %v; want %d", v, err, len(migrations))
 	}
 	recs := records(t, s)
 	if len(recs) != 1 || len(recs[0].Passes) != 1 {

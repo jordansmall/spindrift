@@ -332,7 +332,7 @@ func (d *Dispatch) ensureRecordID() {
 		d.recordID, d.claimTime = rec.ID, rec.ClaimTime
 		return
 	}
-	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, dispatchrecord.ErrNoEvents) && !errors.Is(err, dispatchrecord.ErrUnstamped) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, dispatchrecord.ErrEmptyLog) && !errors.Is(err, dispatchrecord.ErrUnstamped) {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: primary log %s unreadable, minting a fresh Record ID: %v\n", d.number, d.logPath(), err)
 	}
 	d.mintRecordID()

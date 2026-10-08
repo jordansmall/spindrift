@@ -151,6 +151,9 @@ func TestParseLog(t *testing.T) {
 			if rec.Attribution != "inferred" || rec.Outcome != "unknown" {
 				t.Errorf("attribution/outcome = %q/%q", rec.Attribution, rec.Outcome)
 			}
+			for i := range tc.passes {
+				tc.passes[i].Log = tc.file
+			}
 			if !reflect.DeepEqual(rec.Passes, tc.passes) {
 				t.Errorf("passes =\n%+v\nwant\n%+v", rec.Passes, tc.passes)
 			}
@@ -211,27 +214,31 @@ func TestParseLogRejectsNonChainName(t *testing.T) {
 
 func TestChainKey(t *testing.T) {
 	tests := []struct {
-		name string
-		key  string
-		ok   bool
+		name      string
+		key       string
+		satellite bool
+		ok        bool
 	}{
-		{"issue-42.log", "42", true},
-		{"issue-42.log.prior-run.1", "42", true},
-		{"issue-42.log.prior-run.12", "42", true},
-		{"issue-butler-deps.log", "butler-deps", true},
-		{"issue-42-fix-1.log", "", false},
-		{"issue-42-conflict-resolve.log", "", false},
-		{"issue-42.log.1", "", false},
-		{"issue-42.log.prior-run.x", "", false},
-		{"issue-.log", "", false},
-		{"other-42.log", "", false},
-		{"issue-42.txt", "", false},
-		{"issue-42-fix-1.log.prior-run.1", "", false},
+		{"issue-42.log", "42", false, true},
+		{"issue-42.log.prior-run.1", "42", false, true},
+		{"issue-42.log.prior-run.12", "42", false, true},
+		{"issue-butler-deps.log", "butler-deps", false, true},
+		{"issue-42-fix-1.log", "42", true, true},
+		{"issue-42-conflict-resolve.log", "42", true, true},
+		{"issue-42-fix-1.log.prior-run.1", "42", true, true},
+		{"issue-42-fix-2.log.1", "42", true, true},
+		{"issue-42-conflict-resolve.log.2.prior-run.1", "42", true, true},
+		{"issue-a-fix-1-fix-2.log", "a-fix-1", true, true},
+		{"issue-42.log.1", "", false, false},
+		{"issue-42.log.prior-run.x", "", false, false},
+		{"issue-.log", "", false, false},
+		{"other-42.log", "", false, false},
+		{"issue-42.txt", "", false, false},
 	}
 	for _, tc := range tests {
-		key, ok := ChainKey(tc.name)
-		if key != tc.key || ok != tc.ok {
-			t.Errorf("ChainKey(%q) = %q,%v want %q,%v", tc.name, key, ok, tc.key, tc.ok)
+		key, sat, ok := ChainKey(tc.name)
+		if key != tc.key || sat != tc.satellite || ok != tc.ok {
+			t.Errorf("ChainKey(%q) = %q,%v,%v want %q,%v,%v", tc.name, key, sat, ok, tc.key, tc.satellite, tc.ok)
 		}
 	}
 }
@@ -272,8 +279,8 @@ func TestParseLogEventFreeLog(t *testing.T) {
 		"whitespace": {" \n", "\n", "\t\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := ParseLog(writeLog(t, "issue-5.log", lines...)); !errors.Is(err, ErrNoEvents) {
-				t.Fatalf("err = %v, want ErrNoEvents", err)
+			if _, _, err := ParseLog(writeLog(t, "issue-5.log", lines...)); !errors.Is(err, ErrEmptyLog) {
+				t.Fatalf("err = %v, want ErrEmptyLog", err)
 			}
 		})
 	}
