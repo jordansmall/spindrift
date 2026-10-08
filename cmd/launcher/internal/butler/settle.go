@@ -228,7 +228,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				}
 			}
 			if dec.kind != promote {
-				return settle.Decoration{Backlink: backlink}
+				// Logged from OnFiled so only a finding that actually filed
+				// reports why it was not promoted.
+				return settle.Decoration{Backlink: backlink, OnFiled: func(string) { s.logPromoteSkip(num, dec) }}
 			}
 			note := promotionNote(s.chore, f, s.policy, dec.files)
 			// Spend the slot only in OnFiled, after PostIssue succeeds, so a
@@ -239,6 +241,13 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			}}
 		}
 	})
+
+	// One line per sweep, not per finding: with promotion off every finding
+	// would otherwise repeat the same reason. Gated on a finding actually
+	// filing, so a sweep whose findings were all deduped or failed stays quiet.
+	if !s.policy.enabled && len(filing.Filed) > 0 {
+		fmt.Printf("    #%s  status=promotion-off  note=%s\n", num, promotionOffNote)
+	}
 
 	// Every finding failing to file (a missing provenance label, a network or
 	// rate-limit error) leaves the claim standing like a crash: the cursor
@@ -353,6 +362,7 @@ func (s *settleRun) landPatch(chorenum string, pc PatchCommit, subject, head str
 func (s *settleRun) fallBackToPromote(chorenum, issueNum string, f settle.Finding, remaining int) bool {
 	fb := s.policy.decide(f, promoteOnlyRoom(remaining))
 	if fb.kind != promote {
+		s.logPromoteSkip(chorenum, fb)
 		return false
 	}
 	if err := s.patch.forge.AddLabels(issueNum, fb.labels); err != nil {
@@ -363,6 +373,16 @@ func (s *settleRun) fallBackToPromote(chorenum, issueNum string, f settle.Findin
 		fmt.Printf("    #%s  status=patch-fallback-comment-failed  !! %v\n", chorenum, err)
 	}
 	return true
+}
+
+// logPromoteSkip prints the first gate that kept a filed finding from being
+// promoted. Promotion being off is reported once per sweep instead, so it is
+// never repeated per finding.
+func (s *settleRun) logPromoteSkip(num string, dec decision) {
+	if !s.policy.enabled {
+		return
+	}
+	fmt.Printf("    #%s  status=promote-skipped  note=%s\n", num, dec.reason)
 }
 
 // promoteOnlyRoom zeroes the patch half of a chore.Room so a re-decide call

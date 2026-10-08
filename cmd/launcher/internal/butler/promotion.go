@@ -69,6 +69,10 @@ type patchPolicy struct {
 	maxLines int
 }
 
+// promotionOffNote is the sweep-level reason settle logs when a promotion is
+// not enabled; keep it in step with the enabled predicate in newPromotion.
+const promotionOffNote = "promotion off for this Chore (needs a daily budget, a label, and a class allow-list)"
+
 // newPromotion builds a promotion from a Chore's allow-listed classes, the
 // host's per-finding file limit, its per-day promotion budget, the
 // Consumer's work dispatch label, and the patch rung's own patchPolicy.
@@ -129,7 +133,7 @@ const (
 type decision struct {
 	kind   decisionKind
 	labels []string // only set when kind is promote
-	reason string   // short; read only by test failure messages
+	reason string   // short; settle logs a skip's reason, except "promotion off", which it reports once per sweep
 	files  int      // file count off the finding's dedup terms; only set when kind is promote
 	// patchSkip is the first patch gate patchBlocker found failing, only set
 	// when the rung was on and f.Patch was non-blank (so a finding that was
