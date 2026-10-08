@@ -294,11 +294,11 @@ func promptsDirMissingFragment(t *testing.T, omit string) string {
 	return dir
 }
 
-// Assemble's fragment loop must reproduce old bash's swallow
-// (entrypoint.sh: 1001-1009): the failed command substitution sat as a
-// printf argument, so `set -e` never saw a non-zero exit and a missing
-// fragment resolved to an empty string. CAVEMAN_BAKED is on in coveredEnv
-// while its fragment file is absent here, so the swallow is observable.
+// Assemble's fragment loop must reproduce old bash's swallow: the failed
+// command substitution sat as a printf argument, so `set -e` never saw a
+// non-zero exit and a missing fragment resolved to an empty string.
+// CAVEMAN_BAKED is on in coveredEnv while its fragment file is absent here, so
+// the swallow is observable.
 func TestAssembleMissingGatedFragmentFileIsSwallowed(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -408,10 +408,10 @@ func TestAssembleKeepsBareShellVariablesLiteral(t *testing.T) {
 	}
 }
 
-// The fragment loop's "\n\n" separator (entrypoint.sh: 1001-1009). A
-// fragment ending with a blank line on disk (skill-preamble.md does) must
-// not leak it into the prompt: bash stripped the fragment's own trailing
-// newlines through $(...) before appending exactly two.
+// The fragment loop's "\n\n" separator. A fragment ending with a blank line
+// on disk (skill-preamble.md does) must not leak it into the prompt: bash
+// stripped the fragment's own trailing newlines through $(...) before
+// appending exactly two.
 func TestAssembleFragmentSeparatorIsExactlyTwoNewlines(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -481,7 +481,7 @@ func TestAssembleHandoff(t *testing.T) {
 	}
 }
 
-// The --agents JSON injection loop (entrypoint.sh: 1105-1116).
+// The --agents JSON injection loop (renderAgentsJSON).
 func TestAssembleAgentsJSON(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -1312,8 +1312,9 @@ func landGitForgeSection(t *testing.T, prompt string) string {
 }
 
 // The research cell always sets SessionMode to "initial", even with
-// ResumeAfterHold set: entrypoint.sh's research branch (1031-1063) never
-// inspected RESUME_AFTER_HOLD, so this fixture sets it to pin that.
+// ResumeAfterHold set: assemblePromptBodiesMasked's base-template switch
+// checks the kind's own base prompt first and never inspects it there, so
+// this fixture sets it to pin that.
 func TestAssembleResearchKindRendersResearchPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -1969,8 +1970,8 @@ func TestAssembleResearchPromptCarrierSelectsLogOrSocketIssueIntentFragment(t *t
 }
 
 // The fix-pass cell always sets SessionMode to "resume", whatever
-// ResumeAfterHold says: entrypoint.sh's fix-pass branch (1031-1063) never
-// inspected it either.
+// ResumeAfterHold says: the fix-pass case of assemblePromptBodiesMasked's
+// base-template switch never inspects it either.
 func TestAssembleFixPassRendersFixPrompt(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -2006,9 +2007,9 @@ func TestAssembleFixPassRendersFixPrompt(t *testing.T) {
 	}
 }
 
-// entrypoint.sh's if/elif precedence (1031-1063) checked DispatchKind
-// first, so a research Env with FixPass > 0 still renders the research
-// prompt, never fix-prompt.md.
+// assemblePromptBodiesMasked's base-template switch checks the kind's own
+// base prompt first, so a research Env with FixPass > 0 still renders the
+// research prompt, never fix-prompt.md.
 func TestAssembleResearchTakesPrecedenceOverFixPass(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -2032,8 +2033,8 @@ func TestAssembleResearchTakesPrecedenceOverFixPass(t *testing.T) {
 }
 
 // Builds a shared-block contract-file fixture. Unlike the real nix-baked
-// contract files (lib/mkHarness.nix: 622-631), these are plain files whose
-// content the tests here fully control.
+// contract files (outcomeContractFile and its siblings in lib/mkHarness.nix),
+// these are plain files whose content the tests here fully control.
 func writeContractFile(t *testing.T, dir, name, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -2043,11 +2044,11 @@ func writeContractFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-// Shared-block injection (entrypoint.sh: 632-643, 1064-1074), run on the
-// fix-pass cell because issue-prompt.md already contains each marker in its
-// own sections while fix-prompt.md does not, so all three blocks append
-// here and stay observable. CODE COMMENTS is no longer one of them (issue
-// #3221): fix-prompt.md carries that anchor in its own FIX section.
+// Shared-block injection, run on the fix-pass cell because issue-prompt.md
+// already contains each marker in its own sections while fix-prompt.md
+// does not, so all three blocks append here and stay observable. CODE COMMENTS
+// is no longer one of them (issue #3221): fix-prompt.md carries that anchor in
+// its own FIX section.
 func TestAssembleInjectsSharedBlocks(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -2082,9 +2083,9 @@ func TestAssembleInjectsSharedBlocks(t *testing.T) {
 	}
 }
 
-// injectSharedBlock's idempotent guard (entrypoint.sh: 632-643): a base
-// template that already contains a block's marker does not get that block
-// appended again, so the contract file's body text must appear zero times.
+// injectSharedBlockSegments's idempotent guard: a base template that already
+// contains a block's marker does not get that block appended again, so the
+// contract file's body text must appear zero times.
 func TestAssembleSharedBlockAlreadyPresentIsNoOp(t *testing.T) {
 	reg := loadTestRegistry(t)
 	promptsFixtureDir := t.TempDir()
@@ -2266,11 +2267,10 @@ func TestAssembleMissingOutcomeContractFileFails(t *testing.T) {
 	}
 }
 
-// The research branch of the injection step (entrypoint.sh: 1064-1074) only
-// ever attempts research-verdict injection, never comms/check/outcome, even
-// with every contract-file field populated. The fixture omits the
-// "# POST THE VERDICT" marker the real research-prompt.md already carries,
-// so the injected block is observable.
+// The research branch of the injection step only ever attempts research-verdict
+// injection, never comms/check/outcome, even with every contract-file field
+// populated. The fixture omits the "# POST THE VERDICT" marker the real
+// research-prompt.md already carries, so the injected block is observable.
 func TestAssembleResearchCellOnlyInjectsResearchVerdict(t *testing.T) {
 	reg := loadTestRegistry(t)
 	promptsFixtureDir := t.TempDir()
@@ -2383,7 +2383,7 @@ func TestAssembleMissingResearchOutcomeContractFileFails(t *testing.T) {
 }
 
 // A contract file's own ${...} tokens resolve through the same allowlist as
-// every other file Assemble renders (entrypoint.sh: 638).
+// every other file Assemble renders.
 func TestAssembleInjectedBlockSubstitutesTokens(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -2537,10 +2537,10 @@ func TestAssembleUnsupportedCellDefaultsCovered(t *testing.T) {
 	}
 }
 
-// entrypoint.sh's orchestrator-on reviewer drop (1029-1062, 1086-1107): the
+// Assemble's reviewer drop, for a kind with no reviewer prompt of its own: the
 // model and effort are extracted from the reviewer entry before the key is
 // deleted from the agents JSON, and the generic per-agent injection loop
-// still runs for every other agent.
+// (renderAgentsJSON) still runs for every other agent.
 func TestAssembleOrchestratorReviewerDrop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	env := coveredEnv()
@@ -3009,9 +3009,9 @@ func agentFileBody(t *testing.T, path string) string {
 	return ""
 }
 
-// The DRIVER_AGENT_FILES_DIR file-rewrite twin of the --agents JSON
-// injection loop (entrypoint.sh: 1128-1187): a baked agent file keeps its
-// frontmatter and has its body overwritten with the substituted prompt.
+// The DRIVER_AGENT_FILES_DIR file-rewrite twin (rewriteAgentFiles) of the
+// --agents JSON injection loop: a baked agent file keeps its frontmatter and
+// has its body overwritten with the substituted prompt.
 func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -3039,8 +3039,7 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 }
 
 // Issue #2706's second, independent render path: rewriteAgentFiles' on-disk
-// worker.md rewrite (entrypoint.sh: 1128-1187) must reach the same result
-// for worker-prompt.md as
+// worker.md rewrite must reach the same result for worker-prompt.md as
 // TestAssembleWorkerPromptNoCavemanWithSkillPreamble's renderAgentsJSON path.
 func TestAssembleDriverAgentFilesWorkerNoCavemanWithSkillPreamble(t *testing.T) {
 	reg := loadTestRegistry(t)
@@ -3175,9 +3174,9 @@ func TestAssembleDriverAgentFilesScoutNoCavemanWithSkillPreamble(t *testing.T) {
 	})
 }
 
-// The file-based reviewer drop (entrypoint.sh: 1141-1156): reviewer.md's
-// `model:` scalar populates Handoff.ReviewModel and the file is removed, while
-// a non-reviewer roster file still gets its body rewritten.
+// The file-based reviewer drop: reviewer.md's `model:` scalar populates
+// Handoff.ReviewModel and the file is removed, while a non-reviewer roster file
+// still gets its body rewritten.
 func TestAssembleDriverAgentFilesReviewerDrop(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
@@ -3205,10 +3204,10 @@ func TestAssembleDriverAgentFilesReviewerDrop(t *testing.T) {
 	}
 }
 
-// Precedence between the two reviewer-model extraction paths
-// (entrypoint.sh: 1096 JSON, then 1152-1153 file). The file path runs
-// second and overwrites unconditionally, so reviewer.md's frontmatter model
-// wins over whatever AgentsJSONTemplate already set.
+// Precedence between the two reviewer-model extraction paths (Assemble's
+// inline read of the --agents JSON reviewer entry, then rewriteAgentFiles).
+// The file path runs second and overwrites unconditionally, so reviewer.md's
+// frontmatter model wins over whatever AgentsJSONTemplate already set.
 func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 	reg := loadTestRegistry(t)
 
