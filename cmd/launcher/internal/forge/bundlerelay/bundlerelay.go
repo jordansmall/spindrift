@@ -182,8 +182,12 @@ func cloneScratch(backend, op string, clone func(dir string) error) (dir string,
 		return "", nil, nil, err
 	}
 
+	// A fetch in the scratch clone can fork a detached `git maintenance
+	// --auto` that is still writing .git/objects/pack when cleanup's
+	// os.RemoveAll (or a caller's t.TempDir cleanup) runs, so disable auto
+	// maintenance and gc.
 	gitIn = func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+		return exec.Command("git", append([]string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
 	}
 	return dir, gitIn, cleanup, nil
 }
