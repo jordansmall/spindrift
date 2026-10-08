@@ -47,14 +47,14 @@ func podmanMachineRequiredMiB(memoryLimit string, maxParallel int) (int, error) 
 }
 
 // podmanMachineMemoryRemedy names all three fixes an operator can reach for.
-// An unparseable memoryLimit (the schema applies no format validation, so
-// garbage like "5x" reaches here) leaves no figure to size the `podman
-// machine set` command against, so that branch drops the command rather than
-// printing one nobody can copy.
+// An invalid memoryLimit (the schema applies no format validation, so
+// unparseable garbage like "5x" or a non-positive "0" reaches here) leaves no
+// figure to size the `podman machine set` command against, and lowering the
+// limit would not help, so that branch points at MEMORY_LIMIT itself instead.
 func podmanMachineMemoryRemedy(memoryLimit string, maxParallel int) string {
 	required, err := podmanMachineRequiredMiB(memoryLimit, maxParallel)
 	if err != nil {
-		return "lower MAX_PARALLEL, raise the podman machine's RAM (then restart the machine), or lower MEMORY_LIMIT"
+		return "set MEMORY_LIMIT to a positive size such as 5g, or to empty to disable the limit, then re-run doctor"
 	}
 	return fmt.Sprintf(
 		"lower MAX_PARALLEL, raise the podman machine's RAM (podman machine set --memory %d; then restart the machine), or lower MEMORY_LIMIT",
