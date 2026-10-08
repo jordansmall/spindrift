@@ -15,7 +15,7 @@ import (
 // Config carries the subset of launcher config a Settle needs.
 type Config struct {
 	// MergeMode is "immediate" (merge the PR), "manual" (leave it open), or
-	// "auto" (enqueue GitHub's native auto-merge).
+	// "auto" (enqueue the forge's native auto-merge).
 	MergeMode string
 
 	// MergeGuardPaths is a comma-separated list of globs. A hit on any changed
