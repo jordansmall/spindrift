@@ -251,14 +251,16 @@ rec {
       carrier = "fragment-body";
       severity = "reject";
       when = "boxAccessReadOnly";
-      # kind "gh-api-mutation", not "substring": agent/entrypoint.sh's
-      # install_readonly_gh_shim rejects only `gh api` calls carrying a
-      # mutating method (-X/--method POST/PATCH/PUT/DELETE), since read-only
-      # `gh api` calls are legitimate, so `marker` here is display-only.
+      # kind "gh-api-mutation", not "substring": the readonlyguards package
+      # (cmd/launcher/internal/readonlyguards) rejects only `gh api` calls
+      # with a mutating method, explicit (-X/--method POST/PATCH/PUT/DELETE)
+      # or gh's implicit POST from -f/-F/--field/--raw-field/--input (`gh api
+      # graphql` is exempt from the implied POST), since read-only `gh api`
+      # calls are legitimate, so `marker` here is display-only.
       kind = "gh-api-mutation";
       enforce = "command-shim";
-      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh api' with a mutating method (-X/--method POST/PATCH/PUT/DELETE) -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use. Refusing to invoke the Driver.";
-      runtimeMessage = "read-only Box: gh api does not accept a mutating method under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally.";
+      message = "_validate_prompt_contract: read-only dispatch's rendered prompt orders a read-only Box to run 'gh api' with a mutating method (-X/--method POST/PATCH/PUT/DELETE, or an implied POST from -f/-F/--field/--raw-field/--input) -- gated under boxAccessReadOnly, a read-only Box holds no write-capable token for this operation; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use. Refusing to invoke the Driver.";
+      runtimeMessage = "read-only Box: gh api does not accept a mutating method (explicit, or implied POST from field/input flags) under read-only; make this change through the same relay a `gh pr create`/`gh issue create`/`gh issue comment` write would use -- this call has been blocked locally.";
     }
     # The fj rows below mirror the gh rows one-for-one and are shimmed the
     # same way (issue #2509). agent/entrypoint.sh installs the command-shim
