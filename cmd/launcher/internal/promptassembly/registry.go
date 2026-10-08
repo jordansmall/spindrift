@@ -22,8 +22,8 @@ type FragmentRow struct {
 	// still happens when the gate is off, with empty text.
 	Var string `json:"var"`
 	// ExtraSubstVars lists substitution-allowlist entries the fragment body
-	// references beyond Var itself. Empty for all but skill-preamble.md and
-	// ci-failure.md as of issue #2462.
+	// references beyond Var itself. Empty for most rows; lib/fragments.nix is
+	// the authority for which rows set it.
 	ExtraSubstVars []string `json:"extraSubstVars,omitempty"`
 	// SignalChannel names the markerChannels id ("comment", "pr-intent",
 	// "issue-intent") the fragment instructs, set only on the paired
