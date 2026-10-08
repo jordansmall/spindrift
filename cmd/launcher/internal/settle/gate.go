@@ -443,6 +443,9 @@ func ingestSettled(key dispatchkey.Key, logPath string) {
 
 // appendSettled appends ds to the existing log at logPath, never creating it.
 func appendSettled(logPath string, ds claude.DispatchSettled) error {
+	if s, ok := dispatchrecord.ReadStamp(logPath); ok && s.RecordID == ds.RecordID {
+		ds.HostToken = s.HostToken
+	}
 	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		return err

@@ -256,3 +256,38 @@ func TestEnsureRecordID_WarnsOnUnreadablePrimaryLog(t *testing.T) {
 		}
 	})
 }
+
+// The host token is the provenance a dispatch_settled op must echo (issue
+// #4812): fresh per stamp, and never part of the env a Box can read.
+func TestDispatchStart_MintsFreshHostTokenKeptOutOfBoxEnv(t *testing.T) {
+	cfg := retryConfig(1, 0, 0)
+	cfg.Kind = "work"
+	d := newTestDispatch(t, cfg, runner.NewFake(), fakeDriver{}, Clock{Now: time.Now, Sleep: func(time.Duration) {}})
+
+	a, b := d.dispatchStart(), d.dispatchStart()
+	if a.HostToken == "" || b.HostToken == "" {
+		t.Fatalf("stamps carry no host token: %q, %q", a.HostToken, b.HostToken)
+	}
+	if a.HostToken == b.HostToken {
+		t.Errorf("two stamps share host token %q", a.HostToken)
+	}
+
+	// The token a real run stamps into its log is the one no Box env may hold.
+	fr := runner.NewFake()
+	run := newTestDispatch(t, cfg, fr, fakeDriver{}, Clock{Now: time.Now, Sleep: func(time.Duration) {}})
+	testutil.CaptureStdout(t, func() { run.Run() })
+	stamp, ok := dispatchrecord.ReadStamp(run.logPath())
+	if !ok || stamp.HostToken == "" {
+		t.Fatalf("run log stamp = %+v ok %v, want a host token", stamp, ok)
+	}
+	if len(fr.RunCalls) == 0 {
+		t.Fatal("fake runner saw no Box")
+	}
+	for _, box := range fr.RunCalls {
+		for k, v := range box.Env {
+			if strings.Contains(v, stamp.HostToken) {
+				t.Errorf("Box env %s leaks the host token", k)
+			}
+		}
+	}
+}
