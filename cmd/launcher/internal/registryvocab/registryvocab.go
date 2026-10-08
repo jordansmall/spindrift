@@ -40,12 +40,21 @@ type Subtree struct {
 // PathSet is a set of subtree roots, in the membership sense Admits defines.
 type PathSet []string
 
-// Admits reports whether requestPath falls inside any root in s. A root matches
-// itself or a path prefixed by the root plus "/", so "/index" admits
-// "/index/config.json" but not "/indexfoo"; "/" admits everything and an empty
-// set admits nothing. requestPath is cleaned first, and must be the decoded path
-// (URL.Path, not EscapedPath), since path.Clean leaves an escaped "%2e%2e" intact.
+// Admits reports whether requestPath falls inside any root in s. A path
+// containing ";" is refused whatever s holds: servlet containers (Tomcat, older
+// Jetty) strip ";" path parameters per segment before normalizing, so
+// "/index/..;/x" would resolve outside the root after path.Clean admitted it.
+// The trade-off is that Artifactory ";prop=value" matrix params are refused
+// too, which package-manager clients are not expected to send. Otherwise a root
+// matches itself or a path prefixed by the root plus "/", so "/index" admits
+// "/index/config.json" but not "/indexfoo"; "/" admits every other path and an
+// empty set admits nothing. requestPath is cleaned first, and must be the
+// decoded path (URL.Path, not EscapedPath), since path.Clean leaves an escaped
+// "%2e%2e" intact.
 func (s PathSet) Admits(requestPath string) bool {
+	if strings.Contains(requestPath, ";") {
+		return false
+	}
 	cleaned := path.Clean(requestPath)
 	if !strings.HasPrefix(cleaned, "/") {
 		return false
