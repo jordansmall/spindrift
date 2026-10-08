@@ -1,6 +1,8 @@
 package promptassembly
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 
@@ -115,12 +117,13 @@ func passDefs(bodies promptBodies) []passDef {
 }
 
 // defsFor is the shared preamble of Passes and Compose: the cell check, the
-// bodies Assemble renders, and the pass list read off them.
-func defsFor(e Env, reg Registry) ([]passDef, error) {
+// bodies Assemble renders (per-Dispatch vars masked when mask is set), and the
+// pass list read off them.
+func defsFor(e Env, reg Registry, mask bool) ([]passDef, error) {
 	if err := checkCoveredCell(e); err != nil {
 		return nil, err
 	}
-	bodies, err := assemblePromptBodies(e, reg)
+	bodies, err := assemblePromptBodiesMasked(e, reg, mask)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +132,7 @@ func defsFor(e Env, reg Registry) ([]passDef, error) {
 
 // Passes names the passes Compose reports for the cell, in report order.
 func Passes(e Env, reg Registry) ([]string, error) {
-	defs, err := defsFor(e, reg)
+	defs, err := defsFor(e, reg, false)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +148,7 @@ func Passes(e Env, reg Registry) ([]string, error) {
 // through assemblePromptBodies, the same helper Assemble uses, so the report
 // cannot drift from what Assemble produces.
 func Compose(e Env, reg Registry, carried []CarriedText) (Composition, error) {
-	defs, err := defsFor(e, reg)
+	defs, err := defsFor(e, reg, false)
 	if err != nil {
 		return Composition{}, err
 	}
@@ -242,4 +245,21 @@ func DiffPasses(a, b PassComposition) PassDiff {
 	}
 
 	return diff
+}
+
+// TemplateHashes returns, per pass the cell renders (the names Passes
+// reports), the lowercase hex SHA-256 of that pass's prompt with every
+// per-Dispatch var masked. Two Dispatches of the same harness setup hash
+// equal; a template, fragment, or gate change moves the hash.
+func TemplateHashes(e Env, reg Registry) (map[string]string, error) {
+	defs, err := defsFor(e, reg, true)
+	if err != nil {
+		return nil, err
+	}
+	hashes := make(map[string]string, len(defs))
+	for _, d := range defs {
+		sum := sha256.Sum256([]byte(d.body.text()))
+		hashes[d.name] = hex.EncodeToString(sum[:])
+	}
+	return hashes, nil
 }
