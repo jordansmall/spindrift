@@ -42,6 +42,9 @@ func TestExtractOutcomeLine(t *testing.T) {
 		{"tab separator is not a field boundary", "SPINDRIFT_OUTCOME\tlanding=a\tstatus=b\n", ""},
 		{"last wins", "SPINDRIFT_OUTCOME issue=1 landing=a status=ready\nprose\nSPINDRIFT_OUTCOME issue=2 landing=b status=blocked\n", "SPINDRIFT_OUTCOME issue=2 landing=b status=blocked"},
 		{"last matching wins over later near miss", canonicalLine + "\nSPINDRIFT_OUTCOME: oops\n", canonicalLine},
+		{"landing only inside note", "SPINDRIFT_OUTCOME issue=7 status=ready note=see landing=x\n", ""},
+		{"status only inside note", "SPINDRIFT_OUTCOME issue=7 landing=x note=I set status=ready earlier\n", ""},
+		{"status only inside note, note first", "SPINDRIFT_OUTCOME note=I set status=ready landing=x\n", ""},
 		{"empty", "", ""},
 	}
 	for _, tc := range cases {
