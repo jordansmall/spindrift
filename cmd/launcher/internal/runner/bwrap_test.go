@@ -558,6 +558,73 @@ func TestVacuumStoreDBInto_SweepLeavesLiveVacuumJournal(t *testing.T) {
 	}
 }
 
+// installVacuumTempSweepHook installs a vacuumTempRaceWindowHook that unlinks every
+// vacuum temp in dir, as a concurrent sweepStaleVacuumTemps would inside the
+// CreateTemp-to-Flock window. onlyFirst limits it to the first call. It returns
+// the call counter; t.Cleanup restores the hook.
+func installVacuumTempSweepHook(t *testing.T, dir string, onlyFirst bool) *int {
+	t.Helper()
+	orig := vacuumTempRaceWindowHook
+	t.Cleanup(func() { vacuumTempRaceWindowHook = orig })
+	calls := 0
+	vacuumTempRaceWindowHook = func() {
+		calls++
+		if onlyFirst && calls > 1 {
+			return
+		}
+		matches := tempSiblings(t, dir)
+		for _, m := range matches {
+			if err := os.Remove(m); err != nil {
+				t.Fatalf("Remove(%q): %v", m, err)
+			}
+		}
+	}
+	return &calls
+}
+
+func TestCreateLockedVacuumTemp_RetriesAfterSweep(t *testing.T) {
+	dir := t.TempDir()
+	calls := installVacuumTempSweepHook(t, dir, true)
+
+	f, err := createLockedVacuumTemp(dir)
+	if err != nil {
+		t.Fatalf("createLockedVacuumTemp: %v", err)
+	}
+	defer f.Close()
+
+	if *calls != 2 {
+		t.Errorf("hook fired %d times, want 2 (one swept attempt, one retry)", *calls)
+	}
+	if !lockedFDMatchesPath(f, f.Name()) {
+		t.Errorf("returned fd does not identify %s", f.Name())
+	}
+	matches := tempSiblings(t, dir)
+	if len(matches) != 1 || matches[0] != f.Name() {
+		t.Errorf("temps in dir = %v, want only %s", matches, f.Name())
+	}
+}
+
+func TestCreateLockedVacuumTemp_GivesUpWhenEveryAttemptSwept(t *testing.T) {
+	dir := t.TempDir()
+	calls := installVacuumTempSweepHook(t, dir, false)
+
+	f, err := createLockedVacuumTemp(dir)
+	if err == nil {
+		f.Close()
+		t.Fatal("createLockedVacuumTemp succeeded, want error after every attempt was swept")
+	}
+	if want := fmt.Sprintf("%d attempts", maxVacuumTempAttempts); !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q does not mention %q", err, want)
+	}
+	if *calls != maxVacuumTempAttempts {
+		t.Errorf("hook fired %d times, want %d", *calls, maxVacuumTempAttempts)
+	}
+	matches := tempSiblings(t, dir)
+	if len(matches) != 0 {
+		t.Errorf("temps left in dir = %v, want none", matches)
+	}
+}
+
 // dest must only ever name a complete snapshot (issue #4817): VACUUM INTO writes
 // a temp sibling and renames over dest after success, so a pre-existing
 // snapshot stays untouched while sqlite3 runs and is replaced atomically after.

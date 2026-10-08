@@ -43,6 +43,10 @@ var statHostNixDB = func() error {
 // production.
 var lockRaceWindowHook = func() {}
 
+// vacuumTempRaceWindowHook runs in createLockedVacuumTemp's CreateTemp-to-Flock
+// window so a test can sweep the fresh temp. No-op in production.
+var vacuumTempRaceWindowHook = func() {}
+
 // readSelfCgroup returns the launcher's own cgroup v2 path from
 // /proc/self/cgroup's unified-hierarchy line ("0::<path>"). Tests swap this seam
 // because /proc/self/cgroup is not writable in a test sandbox.
@@ -1448,7 +1452,10 @@ const maxVacuumTempAttempts = 3
 // the exclusive flock that marks it owned. A concurrent sweep can lock and
 // unlink the fresh temp between CreateTemp and Flock, leaving this fd locked on
 // an orphaned inode; lockedFDMatchesPath catches that and retries with a new
-// temp. Once the locked fd matches the path, no sweep can remove it.
+// temp. Once the locked fd matches the path, no sweep can remove it. A stat
+// failure other than a sweep also reads as a mismatch, so the retry may leave
+// that temp behind; it is unlocked once f closes, and the next
+// sweepStaleVacuumTemps reclaims it.
 func createLockedVacuumTemp(dir string) (*os.File, error) {
 	for range maxVacuumTempAttempts {
 		f, err := os.CreateTemp(dir, vacuumTempPrefix+"*")
@@ -1456,6 +1463,7 @@ func createLockedVacuumTemp(dir string) (*os.File, error) {
 			return nil, fmt.Errorf("create temp nix store db snapshot: %w", err)
 		}
 		tmp := f.Name()
+		vacuumTempRaceWindowHook()
 		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 			f.Close()
 			removeVacuumTemp(tmp)
