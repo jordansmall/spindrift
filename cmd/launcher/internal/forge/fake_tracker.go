@@ -48,10 +48,15 @@ type IssueTrackerFake struct {
 	// IssueCalls records each call's issue number so a test can assert the
 	// call count directly instead of inferring it (#1098).
 	IssueCalls []string
-	// IssueErr, if non-nil, is returned by every Issue call. ListOpenIssues
-	// and ListIssues read the same issues map but never consult it, so a
-	// body-fetch failure can be simulated independently (issue #1632).
+	// IssueErr, if non-nil, is returned by every Issue call once IssueErrs is
+	// drained. ListOpenIssues and ListIssues read the same issues map but never
+	// consult it, so a body-fetch failure can be simulated independently (issue
+	// #1632).
 	IssueErr error
+
+	// IssueErrs is a per-call queue drained before IssueErr is checked. A nil
+	// entry falls through to the normal issue lookup.
+	IssueErrs []error
 
 	// DepsOfCalls records each call's issue number so a test can assert a
 	// dependency-graph build's exact call count (issue #1632).
@@ -243,7 +248,13 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 	tf.mu.Lock()
 	defer tf.mu.Unlock()
 	tf.IssueCalls = append(tf.IssueCalls, num)
-	if tf.IssueErr != nil {
+	if len(tf.IssueErrs) > 0 {
+		err := tf.IssueErrs[0]
+		tf.IssueErrs = tf.IssueErrs[1:]
+		if err != nil {
+			return Issue{}, err
+		}
+	} else if tf.IssueErr != nil {
 		return Issue{}, tf.IssueErr
 	}
 	iss, ok := tf.issues[num]
