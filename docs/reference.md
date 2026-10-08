@@ -5697,6 +5697,20 @@ the database, they survive deleting the logs they came from. Deleting the
 database instead loses every Record whose
 log is gone: a re-run rebuilds only from the logs still on disk.
 
+**Ingest at settle.** The host keeps the store current without a `stats`
+run. Right after appending `dispatch_settled` to a Dispatch's primary Pass
+log, it runs the same incremental ingest over that checkout's
+`.spindrift/logs`, so the settled Record, its fix and conflict-resolve passes
+included, is in the store as soon as the Dispatch settles. This holds for
+every Dispatch kind, under the Daemon and a manual `spindrift dispatch`
+alike. Several Daemon slots settling at once each ingest through their own
+connection; WAL journaling and immediate write transactions make them wait on
+each other rather than fail, so every Record lands. The ingest is
+best-effort: a failure (an unwritable store, say) prints a `could not ingest`
+warning on stderr and the Dispatch settles, reports, and exits exactly as it
+would have. The next settle or `stats` run picks up whatever it missed. A
+settle that appends no `dispatch_settled` op ingests nothing.
+
 **Pruning logs.** Ingest before you delete. A Record keeps only what was
 ingested, so run `spindrift stats` (and `spindrift stats --reingest` after
 upgrading the binary) before pruning `.spindrift/logs`. A log deleted before
