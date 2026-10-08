@@ -43,17 +43,6 @@ type statsRoleRow struct {
 	blocks     int
 }
 
-// statsUsage derives the usage line from the generated subcommandRegistry so
-// the two cannot drift.
-func statsUsage() string {
-	for _, e := range subcommandRegistry {
-		if e.name == "stats" {
-			return "usage: spindrift stats " + e.usage
-		}
-	}
-	return "usage: spindrift stats"
-}
-
 type statsOptions struct {
 	asJSON          bool
 	reingest        bool
@@ -190,7 +179,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 	opts, err := parseStatsArgs(args)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s\n", err)
-		fmt.Fprintln(stderr, statsUsage())
+		fmt.Fprintln(stderr, subcommandUsage("stats"))
 		return 1
 	}
 	roots := opts.roots
