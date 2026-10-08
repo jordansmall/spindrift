@@ -105,7 +105,8 @@ type PRForge interface {
 	FailureDetail(url string) (string, error)
 	// ListPRFiles returns every path changed by the PR (added, modified, deleted).
 	ListPRFiles(url string) ([]string, error)
-	// CanAutoMerge reports whether the repository allows GitHub's native auto-merge.
+	// CanAutoMerge reports whether the repository allows the forge's native
+	// auto-merge.
 	CanAutoMerge() (bool, error)
 	// EnqueueAutoMerge enqueues native auto-merge for the PR.
 	EnqueueAutoMerge(prURL string) error
