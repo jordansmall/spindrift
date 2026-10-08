@@ -488,11 +488,11 @@ _Avoid_: local-loop glue, launcher wiring (both too vague — `localloop` is
 the package name).
 
 **SeedScope**:
-`waves.SeedScope` (issue #2150, spec #2144 D2) — the opaque seed-branch
+`forge.SeedScope` (issue #2150, spec #2144 D2) — the opaque seed-branch
 scope a dependent's blocker gate is resolved against under CODE_FORGE=local.
-The wave engine holds it via `Config.SeedScopeOf` and hands the whole value to
-the local Code Forge's containment query, but never constructs or parses the
-`integration/<parent>` ref grammar itself — the local adapter's
+The wave engine holds it via `waves.Config.SeedScopeOf` and hands the whole
+value to the local Code Forge's containment query, but never constructs or
+parses the `integration/<parent>` ref grammar itself — the local adapter's
 `local.IntegrationBranch` renders the branch label the scope prints, so the
 operator-facing hold diagnostic names the Integration branch while the wave
 engine stays adapter-neutral. `localloop.SeedScopeOf` is the single seam that
