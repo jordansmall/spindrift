@@ -9,6 +9,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -255,14 +257,25 @@ func (s *Store) Close() error { return s.db.Close() }
 // gone, are forgotten (their Records are kept), so a reused path starts fresh.
 // A log it cannot read is skipped and reported in the returned error, and
 // retried next ingest.
-func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false) }
+func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false, "") }
+
+// IngestChain is Ingest restricted to the chain key of the log named logName:
+// that key's primary log, rotations, and satellites. Other keys' logs are never
+// opened and their ingested_files rows are left alone. A name logKey cannot
+// classify ingests everything.
+func (s *Store) IngestChain(logName string) (parsed int, err error) {
+	key, _ := logKey(logName)
+	return s.ingest(false, key)
+}
 
 // Reingest is Ingest without the skip: it re-parses every pass log still on
 // disk, so a parser fix repairs whatever history remains. Records whose logs
 // are gone are untouched.
-func (s *Store) Reingest() (parsed int, err error) { return s.ingest(true) }
+func (s *Store) Reingest() (parsed int, err error) { return s.ingest(true, "") }
 
-func (s *Store) ingest(force bool) (parsed int, err error) {
+// ingest walks the log directory; a non-empty chainKey restricts it to the logs
+// classified under that chain key.
+func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 	dir := hostpaths.LogDir(s.root)
 	entries, err := os.ReadDir(dir)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -279,9 +292,13 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		if !PassLogName(e.Name()) {
 			continue
 		}
+		key, satellite := logKey(e.Name())
+		if chainKey != "" && key != chainKey {
+			continue
+		}
 		path := filepath.Join(dir, e.Name())
 		seen = append(seen, path)
-		if key, satellite, _ := ChainKey(e.Name()); satellite {
+		if satellite {
 			satellites = append(satellites, satelliteLog{path, key})
 		} else {
 			primaries = append(primaries, path)
@@ -289,7 +306,7 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 	}
 	// Forget first so a deleted log's row never reads as a live satellite to
 	// detachSatellites.
-	if err := s.forgetMissing(seen); err != nil {
+	if err := s.forgetMissing(dir, chainKey, seen); err != nil {
 		return 0, err
 	}
 	parsedPaths := map[string]bool{}
@@ -396,14 +413,68 @@ func (s *Store) ingestFile(path string, satellite, reparse bool) (bool, string, 
 	return true, shifted, nil
 }
 
+// rotatedPrimary matches a primary log's "<path>.N" rotation, which ChainKey
+// does not classify.
+var rotatedPrimary = regexp.MustCompile(`^(issue-.+\.log)\.\d+((?:\.prior-run\.\d+)?)$`)
+
+// logKey is ChainKey extended to a primary's rotated attempts, which belong to
+// the key of the log they rotated from.
+func logKey(name string) (key string, satellite bool) {
+	key, satellite, ok := ChainKey(name)
+	if !ok {
+		key, satellite, _ = ChainKey(rotatedPrimary.ReplaceAllString(name, "$1$2"))
+	}
+	return key, satellite
+}
+
 // forgetMissing drops the ingested_files rows for paths not in seen, leaving
-// Records and passes alone.
-func (s *Store) forgetMissing(seen []string) error {
+// Records and passes alone. A non-empty chainKey limits it to the rows of
+// dir's logs under that chain key.
+func (s *Store) forgetMissing(dir, chainKey string, seen []string) error {
+	if chainKey != "" {
+		return s.forgetMissingChain(dir, chainKey, seen)
+	}
 	keep, err := json.Marshal(seen)
 	if err != nil {
 		return err
 	}
 	_, err = s.db.Exec("DELETE FROM ingested_files WHERE path NOT IN (SELECT value FROM json_each(?))", string(keep))
+	return err
+}
+
+// forgetMissingChain is forgetMissing for one chain key: it drops the rows of
+// dir's logs under chainKey that are not in seen.
+func (s *Store) forgetMissingChain(dir, chainKey string, seen []string) error {
+	rows, err := s.db.Query("SELECT path FROM ingested_files")
+	if err != nil {
+		return err
+	}
+	var stale []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			rows.Close()
+			return err
+		}
+		if key, _ := logKey(filepath.Base(path)); filepath.Dir(path) == dir && key == chainKey && !slices.Contains(seen, path) {
+			stale = append(stale, path)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(stale) == 0 {
+		return nil
+	}
+	drop, err := json.Marshal(stale)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("DELETE FROM ingested_files WHERE path IN (SELECT value FROM json_each(?))", string(drop))
 	return err
 }
 
