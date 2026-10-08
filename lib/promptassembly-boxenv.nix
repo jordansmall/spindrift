@@ -210,6 +210,11 @@
     kind = "string";
   }
   {
+    field = "ChoreClassList";
+    env = "CHORE_CLASS_LIST";
+    kind = "string";
+  }
+  {
     field = "ChorePatchClasses";
     env = "CHORE_PATCH_CLASSES";
     kind = "string";

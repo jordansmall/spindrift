@@ -3509,6 +3509,7 @@ func butlerEnv() Env {
 	env.ChoreDiffRange = "cafef00d..deadbeef"
 	env.ChoreSlice = "cmd/launcher/main.go\ncmd/launcher/internal/dispatch/dispatch.go"
 	env.ChoreClasses = "flaky-test dead-code"
+	env.ChoreClassList = "flaky-test dead-code typo"
 	env.ChoreMaxFindings = "5"
 	return env
 }
@@ -3533,6 +3534,7 @@ func TestAssembleButlerKindRendersButlerPrompt(t *testing.T) {
 		"cmd/launcher/main.go",
 		"Look for latent bugs",
 		"flaky-test dead-code",
+		"flaky-test dead-code typo",
 		"Relay at most 5 findings",
 	} {
 		if !strings.Contains(result.Prompt, want) {

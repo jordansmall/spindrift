@@ -191,6 +191,12 @@ type Env struct {
 	// allow-list regardless of what this string says.
 	ChoreClasses string // dispatch.go: $CHORE_CLASSES
 
+	// ChoreClassList is the Chore's closed finding-class list (issue
+	// #4766), space-joined; empty when the Chore declares none. Unlike
+	// ChoreClasses it is set whatever the promotion budget
+	// (dispatch.Chore.ClassList).
+	ChoreClassList string // dispatch.go: $CHORE_CLASS_LIST
+
 	// ChorePatchClasses is the Chore's patch-eligible class allow-list
 	// (issue #4072, ADR 0057), the patch-rung sibling of ChoreClasses:
 	// space-joined, empty whenever the patch rung is off or today's patch

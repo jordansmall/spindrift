@@ -345,6 +345,7 @@ func goldenCells() []goldenCell {
 			// A promotion/patch class pair and a filer roster, so the cell also
 			// captures the reviewer's rendered prompt in .agents.json.
 			c.butler("docs-drift")
+			c.export("CHORE_CLASS_LIST", "docs-drift typo stale-comment")
 			c.export("CHORE_CLASSES", "docs-drift typo")
 			c.export("CHORE_PATCH_CLASSES", "docs-drift")
 			c.export("AGENTS_JSON_TEMPLATE", rosterWithFiler)

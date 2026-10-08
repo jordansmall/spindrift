@@ -45,6 +45,10 @@ type Chore struct {
 	// promotion room is spent or off, so the Box never spends reviewer
 	// turns on candidates nothing can promote.
 	Classes []string
+	// ClassList is the Chore's closed finding-class list (issue #4766),
+	// forwarded as CHORE_CLASS_LIST. Unlike Classes it is not a promotion
+	// fact, so the butler forwards it whatever the promotion budget.
+	ClassList []string
 	// PatchClasses is the patch-eligible class allow-list forwarded as
 	// CHORE_PATCH_CLASSES (issue #4072, ADR 0057), the patch-rung sibling of
 	// Classes: informational only for now -- settle will re-check a
@@ -265,6 +269,9 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		if len(subj.chore.Classes) > 0 {
 			env["CHORE_CLASSES"] = strings.Join(subj.chore.Classes, " ")
+		}
+		if len(subj.chore.ClassList) > 0 {
+			env["CHORE_CLASS_LIST"] = strings.Join(subj.chore.ClassList, " ")
 		}
 		if len(subj.chore.PatchClasses) > 0 {
 			env["CHORE_PATCH_CLASSES"] = strings.Join(subj.chore.PatchClasses, " ")

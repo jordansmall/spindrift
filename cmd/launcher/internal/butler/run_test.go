@@ -66,6 +66,17 @@ func withClasses(chores []chore.Chore, name string, classes ...string) []chore.C
 	return chores
 }
 
+// withClassList sets the Chore's closed finding-class list, which (unlike
+// Classes) reaches the Box whatever the promotion budget.
+func withClassList(chores []chore.Chore, name string, classes ...string) []chore.Chore {
+	for i, c := range chores {
+		if c.Name == name {
+			chores[i].ClassList = classes
+		}
+	}
+	return chores
+}
+
 // withPatchClasses is withClasses' patch-rung sibling (issue #4072, ADR
 // 0057).
 func withPatchClasses(chores []chore.Chore, name string, classes ...string) []chore.Chore {
@@ -1000,6 +1011,7 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 
 	policy := testRunPolicy(noRunEvery, "bugs")
 	policy.Chores = withClasses(policy.Chores, "bugs", "error-handling")
+	policy.Chores = withClassList(policy.Chores, "bugs", "error-handling", "resource-leak")
 	policy.PromotionMaxFiles = 3
 	// MaxPromotionsPerDay left at its zero value -- the default -- on purpose.
 
@@ -1021,6 +1033,11 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 	// hand back would ever promote (issue #3880).
 	if len(gotChore.Classes) != 0 {
 		t.Errorf("dispatch.Chore.Classes = %v, want none with promotion off", gotChore.Classes)
+	}
+	// The closed class list is not a promotion fact: it reaches the Box
+	// even with promotion off.
+	if want := []string{"error-handling", "resource-leak"}; !slices.Equal(gotChore.ClassList, want) {
+		t.Errorf("dispatch.Chore.ClassList = %v, want %v", gotChore.ClassList, want)
 	}
 	tip, err := backend.Read("bugs")
 	if err != nil {

@@ -54,6 +54,7 @@ var boxEnvRows = []boxEnvRow{
 	{"ChoreDiffRange", "CHORE_DIFF_RANGE", "string"},
 	{"ChoreSlice", "CHORE_SLICE", "string"},
 	{"ChoreClasses", "CHORE_CLASSES", "string"},
+	{"ChoreClassList", "CHORE_CLASS_LIST", "string"},
 	{"ChorePatchClasses", "CHORE_PATCH_CLASSES", "string"},
 	{"ChoreMaxFindings", "CHORE_MAX_FINDINGS", "string"},
 	{"HostMediatedRemote", "BOX_HOST_MEDIATED_REMOTE", "presence"},

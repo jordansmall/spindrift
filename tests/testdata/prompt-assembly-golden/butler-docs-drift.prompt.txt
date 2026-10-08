@@ -64,15 +64,27 @@ filing nothing over a speculative finding — this is not a style or
 completeness sweep, and a doc that is merely thin rather than wrong is
 out of scope.
 
+# FINDING CLASSES
+
+Class list for this Chore (blank when the Chore declares none):
+
+
+
+Tag every finding with exactly one class naming its kind. When the class
+list above is non-empty, the class must be one of its entries — a class
+off the list is rejected, naming the valid ones, so pick again from it
+rather than drop the finding. When the list is blank, name the class
+yourself: a lowercase slug of letters, digits, and `-`, not starting with
+`-`, at most 40 characters. A class outside that shape is rejected, and
+the finding with it.
+
 # PROMOTION CANDIDATES
 
-Promotion classes for this run (blank when promotion is off):
+Promotion classes for this run, the candidate subset of the class list
+(blank when promotion is off):
 
 
 
-Tag every finding with a class naming its kind: a lowercase slug of
-letters, digits, and `-`, not starting with `-`, at most 40 characters. A
-class outside that shape is rejected, and the finding with it.
 Prefer a promotion class when one genuinely fits; never stretch a finding
 to fit one just to make it a candidate.
 
