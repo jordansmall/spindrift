@@ -160,7 +160,7 @@ func (o statsOptions) keep(r dispatchrecord.Record) bool {
 }
 
 // statsRootRecords ingests one root's logs and returns its Records.
-func statsRootRecords(root string, reingest bool) ([]dispatchrecord.Record, error) {
+func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Writer) ([]dispatchrecord.Record, error) {
 	store, err := dispatchrecord.Open(root)
 	if err != nil {
 		return nil, err
@@ -173,7 +173,17 @@ func statsRootRecords(root string, reingest bool) ([]dispatchrecord.Record, erro
 	if _, err := ingest(); err != nil {
 		return nil, err
 	}
-	return store.Records()
+	records, err := store.Records()
+	if err != nil {
+		return nil, err
+	}
+	// The Events fallback only feeds the revision grouping: elsewhere it would
+	// stamp a field on inferred Records that every other view omits, and cost
+	// two git subprocesses per root.
+	if fillRevisions {
+		fillInferredRevisions(records, checkoutEvents(root, stderr))
+	}
+	return records, nil
 }
 
 func cmdStats(args []string, stdout, stderr io.Writer) int {
@@ -218,7 +228,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		seen[resolved] = true
-		recs, err := statsRootRecords(abs, opts.reingest)
+		recs, err := statsRootRecords(abs, opts.reingest, opts.by.dim == statsByRevision, stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1

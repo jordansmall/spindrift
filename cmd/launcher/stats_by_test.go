@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -171,3 +174,184 @@ func TestStats_ByRejectsBadDimension(t *testing.T) {
 // Daemon's Events file: issue 10 has its own box event, issue 20 has two
 // Dispatches of which only the first has one (the second was a manual
 // dispatch), and issue 30 has none.
+func statsEventsRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	gitRun(t, root, "init")
+	inferred := func(ts string) string {
+		return statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+			`{"type":"system","timestamp":"` + ts + `"}` + "\n" +
+			statsResult(ts, 1, 1, 1000, 900, "claude-opus")
+	}
+	statsWriteLogs(t, root, map[string]string{
+		"issue-10.log":             inferred("2026-10-07T09:00:30Z"),
+		"issue-20.log.prior-run.1": inferred("2026-10-07T10:00:30Z"),
+		"issue-20.log":             inferred("2026-10-07T13:00:30Z"),
+		"issue-30.log":             inferred("2026-10-07T14:00:30Z"),
+	})
+	box := func(at, key, phase, rev string) string {
+		b, err := json.Marshal(daemon.Event{V: 1, Time: at, Event: "box", Kind: "dispatch", Key: dispatchkey.Issue(key), Phase: phase, Revision: rev})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b) + "\n"
+	}
+	events := box("2026-10-07T09:00:00Z", "10", "initial", "rev-ten") +
+		box("2026-10-07T09:30:00Z", "10", "fix-pass-1", "rev-fix") +
+		box("2026-10-07T10:00:00Z", "20", "initial", "rev-twenty")
+	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "spindrift-daemon.events"), []byte(events), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestStats_ByRevisionUsesEventsForInferredRecords(t *testing.T) {
+	root := statsEventsRoot(t)
+	roots := map[string]string{"$ROOT": root}
+
+	text, _ := runStats(t, root, "--include-inferred", "--by", "revision")
+	statsGolden(t, "stats-by-revision-events.txt", statsNormalize(text, roots))
+	jsonl, _ := runStats(t, root, "--include-inferred", "--by", "revision", "--json")
+	statsGolden(t, "stats-by-revision-events.jsonl", statsNormalize(jsonl, roots))
+
+	got := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(jsonl, "\n"), "\n") {
+		var rec struct {
+			Group       string `json:"group"`
+			DispatchKey string `json:"dispatch_key"`
+			ClaimTime   string `json:"claim_time"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatal(err)
+		}
+		got[rec.DispatchKey+"@"+rec.ClaimTime] = rec.Group
+	}
+	want := map[string]string{
+		"10@2026-10-07T09:00:30Z": "rev-ten",
+		"20@2026-10-07T10:00:30Z": "rev-twenty",
+		"20@2026-10-07T13:00:30Z": "(none)",
+		"30@2026-10-07T14:00:30Z": "(none)",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
+
+func TestStats_ByRevisionIgnoresAnEnclosingRepoEvents(t *testing.T) {
+	outer := statsEventsRoot(t)
+	root := filepath.Join(outer, "nested")
+	statsWriteLogs(t, root, map[string]string{
+		"issue-10.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+			`{"type":"system","timestamp":"2026-10-07T09:00:30Z"}` + "\n" +
+			statsResult("2026-10-07T09:00:30Z", 1, 1, 1000, 900, "claude-opus"),
+	})
+	text, _ := runStats(t, root, "--include-inferred", "--by", "revision")
+	if strings.Contains(text, "rev-ten") {
+		t.Errorf("a root inside another checkout borrowed its events:\n%s", text)
+	}
+}
+
+func statsWriteEvents(t *testing.T, root, content string) {
+	t.Helper()
+	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "spindrift-daemon.events"), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStats_EventsRevisionAppearsOnlyUnderByRevision(t *testing.T) {
+	root := statsEventsRoot(t)
+	for _, args := range [][]string{
+		{"--include-inferred", "--json"},
+		{"--include-inferred", "--by", "role", "--json"},
+		{"--include-inferred", "--by", "model", "--json"},
+	} {
+		out, _ := runStats(t, root, args...)
+		if strings.Contains(out, `"revision"`) || strings.Contains(out, "rev-ten") {
+			t.Errorf("stats %v leaked an Events revision:\n%s", args, out)
+		}
+	}
+}
+
+func TestStats_ByRevisionUsesEventsForButlerChoreKey(t *testing.T) {
+	root := t.TempDir()
+	gitRun(t, root, "init")
+	statsWriteLogs(t, root, map[string]string{
+		"issue-butler-deps.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "butler"}) +
+			`{"type":"system","timestamp":"2026-10-07T09:00:30Z"}` + "\n" +
+			statsResult("2026-10-07T09:00:30Z", 1, 1, 1000, 900, "claude-opus"),
+	})
+	b, err := json.Marshal(daemon.Event{V: 1, Time: "2026-10-07T09:00:00Z", Event: "box", Kind: "butler", Key: dispatchkey.Chore("deps"), Phase: "initial", Revision: "rev-butler"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	statsWriteEvents(t, root, string(b)+"\n")
+
+	out, _ := runStats(t, root, "--include-inferred", "--by", "revision", "--json")
+	var rec struct {
+		Kind, Group string
+		DispatchKey string `json:"dispatch_key"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &rec); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if rec.DispatchKey != "butler-deps" || rec.Group != "rev-butler" {
+		t.Errorf("record = %+v, want key butler-deps in group rev-butler", rec)
+	}
+}
+
+func TestStats_UnreadableEventsWarnsAndContinues(t *testing.T) {
+	root := statsEventsRoot(t)
+	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := filepath.Join(gitDir, "spindrift-daemon.events")
+	if err := os.Remove(events); err != nil {
+		t.Fatal(err)
+	}
+	// A directory where the file belongs makes ReadFile fail with something
+	// other than not-exist, whoever runs the test.
+	if err := os.Mkdir(events, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr := runStats(t, root, "--include-inferred", "--by", "revision")
+	if !strings.Contains(stderr, "warning: ") || !strings.Contains(stderr, "spindrift-daemon.events") {
+		t.Errorf("stderr = %q, want a warning naming the events file", stderr)
+	}
+	if !strings.Contains(out, "(none)") || strings.Contains(out, "rev-ten") {
+		t.Errorf("stdout = %q, want every inferred Record in (none)", out)
+	}
+	_, quiet := runStats(t, root, "--include-inferred")
+	if strings.Contains(quiet, "spindrift-daemon.events") {
+		t.Errorf("stderr without --by revision = %q, want no events warning", quiet)
+	}
+}
+
+func TestStats_MissingGitWarnsButNonCheckoutStaysQuiet(t *testing.T) {
+	root := statsEventsRoot(t)
+	plain := t.TempDir()
+	statsWriteLogs(t, plain, map[string]string{
+		"issue-7.log": `{"type":"system","timestamp":"2026-10-07T12:00:00Z"}` + "\n" +
+			statsResult("2026-10-07T12:01:00Z", 0.1, 1, 6000, 5000, "claude-haiku"),
+	})
+	if _, stderr := runStats(t, plain, "--include-inferred", "--by", "revision"); strings.Contains(stderr, "daemon events") {
+		t.Errorf("stderr for a non-checkout root = %q, want no events warning", stderr)
+	}
+
+	t.Setenv("PATH", t.TempDir())
+	out, stderr := runStats(t, root, "--include-inferred", "--by", "revision")
+	if !strings.Contains(stderr, "warning: not reading daemon events") {
+		t.Errorf("stderr = %q, want a warning that git could not run", stderr)
+	}
+	if !strings.Contains(out, "(none)") {
+		t.Errorf("stdout = %q, want every inferred Record in (none)", out)
+	}
+}
