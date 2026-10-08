@@ -198,8 +198,8 @@ func TestStoreIgnoresFixAndConflictLogs(t *testing.T) {
 	putLog(t, root, "issue-12-conflict-resolve.log", workLog("2026-03-01T12:00:00.000Z", 1)...)
 	putLog(t, root, "notes.txt", "x")
 	s := openStore(t, root)
-	if n := ingest(t, s); n != 1 {
-		t.Fatalf("parsed = %d, want 1", n)
+	if n := ingest(t, s); n != 3 {
+		t.Fatalf("parsed = %d, want 3 (the three .log files; notes.txt is skipped)", n)
 	}
 	if got := records(t, s); len(got) != 1 {
 		t.Fatalf("records = %v, want 1", ids(got))
@@ -623,8 +623,8 @@ func TestStoreMigratesV1Database(t *testing.T) {
 
 	s := openStore(t, root)
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 2 {
-		t.Fatalf("user_version = %d, err %v; want 2", v, err)
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 3 {
+		t.Fatalf("user_version = %d, err %v; want 3", v, err)
 	}
 	recs := records(t, s)
 	if len(recs) != 1 || len(recs[0].Passes) != 1 {
