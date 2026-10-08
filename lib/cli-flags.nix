@@ -72,6 +72,12 @@
     arg = "name";
   }
   {
+    flag = "json";
+    doc = "emit one Dispatch Record per line as JSON instead of the summary table";
+    verb = "stats";
+    arg = null;
+  }
+  {
     flag = "help";
     doc = "show usage and exit";
     verb = null;
