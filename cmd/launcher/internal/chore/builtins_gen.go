@@ -4,3 +4,11 @@ package chore
 // builtinChores is the name list of the built-in Chore catalog (lib/chore-catalog.nix).
 // Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
 var builtinChores = []string{"bugs", "docs-drift", "refactor"}
+
+// builtinClassLists is each built-in Chore's closed finding-class list.
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
+var builtinClassLists = map[string][]string{
+	"bugs":       {"error-handling", "resource-leak", "correctness", "input-validation", "concurrency", "other"},
+	"docs-drift": {"stale-reference", "wrong-behaviour", "wrong-example", "wrong-code-comment", "other"},
+	"refactor":   {"dead-code", "duplication", "other"},
+}

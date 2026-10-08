@@ -520,7 +520,7 @@ checkedMerge {
     let
       choreCatalog = import ../../lib/chore-catalog.nix;
       generated = pkgs.writeText "builtins_gen.go.generated" (
-        renderers.renderChoreBuiltinsGo choreCatalog.names
+        renderers.renderChoreBuiltinsGo choreCatalog
       );
     in
     pkgs.runCommand "chore-builtins-gen"

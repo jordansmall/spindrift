@@ -31,7 +31,7 @@ let
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
   choreCatalog = import ../lib/chore-catalog.nix;
-  choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog.names;
+  choreBuiltinsFile = renderers.renderChoreBuiltinsGo choreCatalog;
   agentPaths = import ../lib/agent-paths.nix;
   agentPathsFile = renderers.renderAgentPathsGo agentPaths;
   runtimeValues = import ../lib/runtime-values.nix;

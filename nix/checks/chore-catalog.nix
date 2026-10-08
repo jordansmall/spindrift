@@ -95,4 +95,52 @@ in
     assert assertMsg ok.success
       "mkHarness.nix must not throw when BUTLER_CHORES names a Consumer-declared chore with a matching <name>.md in a custom choresDir";
     pkgs.runCommand "butler-chores-prompt-ok-with-custom-chores-dir" { } "touch $out";
+
+  # The closed class list (issue #4766): every promotion and patch default
+  # must sit on its chore's classList, or a Box could never classify into it.
+  chore-catalog-promotion-class-off-list-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          {
+            name = "demo";
+            classList = [ "a" ];
+            promotionClasses = [
+              "a"
+              "b"
+            ];
+            patchClasses = [ ];
+          }
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (!broken.success)
+      "checkClassLists must throw when a chore's promotionClasses names a class missing from its classList";
+    pkgs.runCommand "chore-catalog-promotion-class-off-list-throws" { } "touch $out";
+
+  chore-catalog-patch-class-off-list-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          {
+            name = "demo";
+            classList = [ "a" ];
+            promotionClasses = [ "a" ];
+            patchClasses = [ "c" ];
+          }
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when a chore's patchClasses names a class missing from its classList";
+    pkgs.runCommand "chore-catalog-patch-class-off-list-throws" { } "touch $out";
+
+  chore-catalog-built-ins-class-lists-ok =
+    let
+      ok = builtins.tryEval (builtins.deepSeq catalog.classLists "reached");
+    in
+    assert assertMsg ok.success
+      "the built-in catalog's promotionClasses and patchClasses must all sit on their classList";
+    pkgs.runCommand "chore-catalog-built-ins-class-lists-ok" { } "touch $out";
 }

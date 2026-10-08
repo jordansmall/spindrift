@@ -22,6 +22,7 @@ type Chore struct {
 	Every        time.Duration // BUTLER_EVERY override, else its bare default, else DefaultEvery.
 	Classes      []string      // BUTLER_CHORE_CLASSES allow-list; nil when the Chore has no entry.
 	PatchClasses []string      // BUTLER_PATCH_CLASSES allow-list; nil unless MaxPatchesPerDay > 0 and the Chore has an entry (ADR 0057).
+	ClassList    []string      // Closed class list the Box classifies from (issue #4766): the catalog's plus any extra Classes; nil for a Consumer-declared Chore.
 }
 
 // Knobs is the raw butler settings (ADR 0056, ADR 0057): BUTLER_CHORES,
@@ -147,6 +148,7 @@ func Load(k Knobs) ([]Chore, error) {
 			Every:        everyCfg.For(name),
 			Classes:      classesMap[name],
 			PatchClasses: patchClassesMap[name],
+			ClassList:    classList(name, classesMap[name]),
 		}
 	}
 	return result, nil
@@ -223,4 +225,21 @@ func parseNonNegativeDuration(s string) (time.Duration, error) {
 		return 0, fmt.Errorf("negative duration %q", s)
 	}
 	return d, nil
+}
+
+// classList is name's catalog list with any configured class missing from it
+// appended in configured order, so a Consumer-added promotion class stays
+// choosable. nil when name has no catalog entry. Always a fresh slice.
+func classList(name string, configured []string) []string {
+	base, ok := builtinClassLists[name]
+	if !ok {
+		return nil
+	}
+	out := slices.Clone(base)
+	for _, c := range configured {
+		if !slices.Contains(out, c) {
+			out = append(out, c)
+		}
+	}
+	return out
 }
