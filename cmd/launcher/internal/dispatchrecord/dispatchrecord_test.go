@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/passmachine"
@@ -267,8 +268,8 @@ func TestParseLogTimestampedClaimIsNotProvisional(t *testing.T) {
 
 func TestParseLogEventFreeLog(t *testing.T) {
 	for name, lines := range map[string][]string{
-		"empty":   nil,
-		"garbage": {"not json\n", "{\"type\":\"\"}\n"},
+		"empty":      nil,
+		"whitespace": {" \n", "\n", "\t\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, _, err := ParseLog(writeLog(t, "issue-5.log", lines...)); !errors.Is(err, ErrNoEvents) {
@@ -376,5 +377,68 @@ func TestParseLogDispositionsNeedASuccessfulWrite(t *testing.T) {
 				t.Fatalf("Dispositions = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func outcomeLine(status string, extra ...string) string {
+	return strings.Join(append([]string{"SPINDRIFT_OUTCOME issue=42 landing=x status=" + status}, extra...), " ") + "\n"
+}
+
+func TestParseLogKindFromOutcomeStatus(t *testing.T) {
+	start := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
+	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
+	tests := []struct {
+		name     string
+		lines    []string
+		wantKind string
+	}{
+		{"research status without pass_start", []string{res, outcomeLine("recommend")}, "research"},
+		{"research status with pass_start", []string{start, res, outcomeLine("unclear")}, "research"},
+		{"research status overrides pass_start role", []string{start, res, outcomeLine("reject")}, "research"},
+		{"shared blocked status keeps pass_start work", []string{start, res, outcomeLine("blocked")}, "work"},
+		{"shared blocked status alone is work", []string{res, outcomeLine("blocked")}, "work"},
+		{"work status without pass_start", []string{res, outcomeLine("ready")}, "work"},
+		{"synthetic line ignored", []string{start, res, outcomeLine("recommend", "synthetic=true")}, "work"},
+		{"synthetic line does not shadow the driver's", []string{res, outcomeLine("ready"), outcomeLine("reject", "synthetic=true")}, "work"},
+		{"last self-report wins", []string{res, outcomeLine("recommend"), outcomeLine("ready")}, "work"},
+		{"no pass_start and no status", []string{res}, KindUnknown},
+		{"no pass_start and synthetic-only status", []string{res, outcomeLine("ready", "synthetic=true")}, KindUnknown},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec, _, err := ParseLog(writeLog(t, "issue-42.log", tc.lines...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Kind != tc.wantKind {
+				t.Errorf("kind = %q, want %q", rec.Kind, tc.wantKind)
+			}
+		})
+	}
+}
+
+func TestParseLogChoreKeyBeatsOutcomeStatus(t *testing.T) {
+	p := writeLog(t, "issue-"+dispatchkey.ChorePrefix+"x.log", result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m"), outcomeLine("recommend"))
+	rec, _, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Kind != choreKeyedKind() {
+		t.Errorf("kind = %q, want %q", rec.Kind, choreKeyedKind())
+	}
+}
+
+func TestParseLogPlainTextLogYieldsZeroCostRecord(t *testing.T) {
+	p := writeLog(t, "issue-9.log", "box: starting\n", "\n", "error: image pull failed\n")
+	mtime := time.Date(2026, 10, 7, 9, 8, 7, 0, time.UTC)
+	if err := os.Chtimes(p, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	rec, provisional, err := ParseLog(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !provisional || !rec.ClaimTime.Equal(mtime) || rec.Kind != KindUnknown || len(rec.Passes) != 0 {
+		t.Errorf("rec=%+v provisional=%v, want provisional unknown-kind Record at mtime with no passes", rec, provisional)
 	}
 }

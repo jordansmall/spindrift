@@ -389,3 +389,26 @@ func TestLastSelfReportInLog_SkipsSyntheticOnlyLog(t *testing.T) {
 		t.Fatal("expected found=false: the only leading-token line is synthetic")
 	}
 }
+
+func TestSelfReportFromLogLine(t *testing.T) {
+	tests := []struct {
+		name       string
+		line       string
+		wantOK     bool
+		wantStatus string
+	}{
+		{"leading token", "SPINDRIFT_OUTCOME issue=42 landing=x status=recommend note=hi", true, "recommend"},
+		{"surrounding whitespace", "  SPINDRIFT_OUTCOME issue=42 landing=x status=ready  ", true, "ready"},
+		{"synthetic backstop line", "SPINDRIFT_OUTCOME issue=42 landing=x status=blocked synthetic=true", false, ""},
+		{"token not leading", "echo SPINDRIFT_OUTCOME issue=42 status=ready", false, ""},
+		{"prose", "nothing outcome-shaped here", false, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r, ok := SelfReportFromLogLine(tc.line)
+			if ok != tc.wantOK || r.Status != tc.wantStatus {
+				t.Fatalf("SelfReportFromLogLine = (%q, %v), want (%q, %v)", r.Status, ok, tc.wantStatus, tc.wantOK)
+			}
+		})
+	}
+}
