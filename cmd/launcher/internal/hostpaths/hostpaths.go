@@ -20,6 +20,13 @@ func LogDir(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "logs")
 }
 
+// LateMergeSweepLock is the lock-and-stamp file throttling the late-merge
+// sweep. It sits beside, not inside, the log directory so log quarantine and
+// rotation never touch it.
+func LateMergeSweepLock(pwd string) string {
+	return filepath.Join(pwd, ".spindrift", "late-merge-sweep.lock")
+}
+
 // RootOfLogDir is the inverse of LogDir: the pwd whose LogDir is dir, with ok
 // false when dir is no root's log directory.
 func RootOfLogDir(dir string) (root string, ok bool) {

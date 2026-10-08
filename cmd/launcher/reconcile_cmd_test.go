@@ -742,6 +742,48 @@ func TestReconcileAfterDispatch_RecordsLateMergeInStats(t *testing.T) {
 	}
 }
 
+// askedPRForge counts PRState calls reaching the wrapped forge.
+type askedPRForge struct {
+	forge.PRForge
+	calls int
+}
+
+func (a *askedPRForge) PRState(u string) (forge.PRState, error) {
+	a.calls++
+	return a.PRForge.PRState(u)
+}
+
+// Daemon pool children each run reconcileAfterDispatch; the throttle keeps all
+// but the first inside the interval off the forge, while the standalone verb
+// still sweeps every time.
+func TestReconcileAfterDispatch_ThrottlesSweepButReconcileVerbDoesNot(t *testing.T) {
+	root, _, f, c := lateMergeFixture(t)
+	caps := testCapabilities(t, c, f, f)
+	counter := &askedPRForge{PRForge: f}
+	caps.PRForge = counter
+
+	var buf bytes.Buffer
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, caps, root, &buf); err != nil {
+		t.Fatalf("reconcileAfterDispatch: %v", err)
+	}
+	if counter.calls == 0 {
+		t.Fatal("first reconcileAfterDispatch asked the forge nothing, want a sweep")
+	}
+	swept := counter.calls
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, caps, root, &buf); err != nil {
+		t.Fatalf("second reconcileAfterDispatch: %v", err)
+	}
+	if counter.calls != swept {
+		t.Fatalf("second reconcileAfterDispatch made %d PRState call(s), want 0", counter.calls-swept)
+	}
+	if err := runReconcile(c, f, f, fakeLiveness{}, caps, root, &buf); err != nil {
+		t.Fatalf("runReconcile: %v", err)
+	}
+	if counter.calls == swept {
+		t.Fatal("runReconcile made no PRState call after a dispatch sweep, want it unthrottled")
+	}
+}
+
 func TestRunReconcile_RecordsLateMergeForGithubTracker(t *testing.T) {
 	root, idA, f, c := lateMergeFixture(t)
 
