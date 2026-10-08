@@ -680,14 +680,24 @@ rec {
       items = names;
     };
 
-  # cmd/launcher/internal/chore/builtins_gen.go content (issue #3991).
-  # choreNames is the built-in Chore catalog's `names` list (lib/chore-catalog.nix),
-  # sorted so a catalog reorder (which is load-bearing for classesDefault's byte
-  # layout) doesn't also perturb this unrelated file.
+  # cmd/launcher/internal/chore/builtins_gen.go content (issues #3991, #4766).
+  # choreCatalog is lib/chore-catalog.nix's export. Names are sorted so a
+  # catalog reorder (which is load-bearing for classesDefault's byte layout)
+  # doesn't also perturb this unrelated file; each classList keeps its
+  # declared order. Map values are padded to gofmt's key-value alignment.
   renderChoreBuiltinsGo =
-    choreNames:
+    choreCatalog:
     let
-      names = builtins.sort builtins.lessThan choreNames;
+      names = builtins.sort builtins.lessThan choreCatalog.names;
+      keyWidth = builtins.foldl' (
+        a: n: if builtins.stringLength n > a then builtins.stringLength n else a
+      ) 0 names;
+      classListLines = map (
+        n:
+        "\t\"${n}\":${padRight (keyWidth - builtins.stringLength n + 1) ""}{${
+          renderGoStringSlice choreCatalog.classLists.${n}
+        }},\n"
+      ) names;
     in
     renderGoStringSliceFile {
       generator = "nix/regen.nix";
@@ -698,7 +708,12 @@ rec {
         "builtinChores is the name list of the built-in Chore catalog (lib/chore-catalog.nix)."
       ];
       items = names;
-    };
+    }
+    + "\n// builtinClassLists is each built-in Chore's closed finding-class list.\n"
+    + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
+    + "var builtinClassLists = map[string][]string{\n"
+    + concatStrings classListLines
+    + "}\n";
 
   # cmd/launcher/internal/promptassembly/skillprobe.go's generated skill-baked
   # probe block (issues #2532, #4294): one Env field assignment per

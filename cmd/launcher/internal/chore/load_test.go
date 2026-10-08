@@ -265,7 +265,7 @@ func TestLoad(t *testing.T) {
 				if err != nil {
 					t.Fatalf("Load(%q, %q, %q): %v", tc.chores, tc.every, tc.classes, err)
 				}
-				if !reflect.DeepEqual(got, tc.want) {
+				if !reflect.DeepEqual(withoutClassList(got), tc.want) {
 					t.Errorf("Load(%q, %q, %q) = %#v, want %#v", tc.chores, tc.every, tc.classes, got, tc.want)
 				}
 				return
@@ -282,4 +282,74 @@ func TestLoad(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestLoadClassList(t *testing.T) {
+	cases := []struct {
+		name    string
+		chores  string
+		classes string
+		want    map[string][]string
+	}{
+		{
+			name:   "built-in gets the catalog list",
+			chores: "bugs refactor",
+			want: map[string][]string{
+				"bugs":     builtinClassLists["bugs"],
+				"refactor": builtinClassLists["refactor"],
+			},
+		},
+		{
+			name:    "configured extra class is appended in configured order, skipping catalog classes",
+			chores:  "refactor",
+			classes: "refactor=dead-code,naming,duplication,layering",
+			want: map[string][]string{
+				"refactor": append(append([]string{}, builtinClassLists["refactor"]...), "naming", "layering"),
+			},
+		},
+		{
+			name:    "Consumer-declared chore stays free-form",
+			chores:  "custom-chore",
+			classes: "custom-chore=a,b",
+			want:    map[string][]string{"custom-chore": nil},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := Load(Knobs{Chores: tc.chores, Classes: tc.classes})
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			for _, c := range got {
+				if !reflect.DeepEqual(c.ClassList, tc.want[c.Name]) {
+					t.Errorf("%s ClassList = %#v, want %#v", c.Name, c.ClassList, tc.want[c.Name])
+				}
+			}
+		})
+	}
+}
+
+func TestLoadClassListDoesNotAliasCatalog(t *testing.T) {
+	got, err := Load(Knobs{Chores: "refactor", Classes: "refactor=extra"})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got[0].ClassList[0] = "mutated"
+	if builtinClassLists["refactor"][0] == "mutated" {
+		t.Error("Load aliased builtinClassLists")
+	}
+}
+
+// withoutClassList blanks ClassList so TestLoad's table keeps pinning the
+// knob-derived fields; TestLoadClassList pins the catalog-derived one.
+func withoutClassList(cs []Chore) []Chore {
+	if cs == nil {
+		return nil
+	}
+	out := make([]Chore, len(cs))
+	for i, c := range cs {
+		c.ClassList = nil
+		out[i] = c
+	}
+	return out
 }

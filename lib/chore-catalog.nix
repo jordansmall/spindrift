@@ -1,37 +1,87 @@
 # Single declaration of the built-in butler Chores (ADR 0056, issue #3991).
 # lib/env-schema.nix's butlerChoreClasses default, the generated Go builtins
-# list (cmd/launcher/internal/chore/builtins_gen.go), and docs all derive from
+# (cmd/launcher/internal/chore/builtins_gen.go), and docs all derive from
 # this one list. List order is load-bearing: it fixes classesDefault's byte
 # layout, which the generated docs and flag table render verbatim. This list
-# declares names and default classes only -- prompt files resolve by name
-# from mkHarness's choresDir (read by, e.g., the BUTLER_CHORES eval assertion
-# and the image copy), which a Consumer may replace.
+# declares names, each Chore's closed classList (the classes its Box
+# classifies a finding into, issue #4766), and default promotion/patch
+# classes -- prompt files resolve by name from mkHarness's choresDir (read
+# by, e.g., the BUTLER_CHORES eval assertion and the image copy), which a
+# Consumer may replace.
 let
-  chores = [
+  # Throws unless every chore's promotionClasses and patchClasses sit on its
+  # classList; exported so nix/checks/chore-catalog.nix can feed it broken
+  # catalogs.
+  checkClassLists =
+    cs:
+    let
+      missing =
+        c: builtins.filter (k: !builtins.elem k c.classList) (c.promotionClasses ++ c.patchClasses);
+      bad = builtins.filter (c: missing c != [ ]) cs;
+    in
+    if bad == [ ] then
+      cs
+    else
+      throw (
+        "lib/chore-catalog.nix: classes not on the chore's classList: "
+        + builtins.concatStringsSep "; " (
+          map (c: "${c.name}: ${builtins.concatStringsSep ", " (missing c)}") bad
+        )
+      );
+
+  chores = checkClassLists [
     {
       name = "bugs";
-      classes = [
+      classList = [
+        "error-handling"
+        "resource-leak"
+        "correctness"
+        "input-validation"
+        "concurrency"
+        "other"
+      ];
+      # Default promotion allow-list (BUTLER_CHORE_CLASSES), a subset of
+      # classList.
+      promotionClasses = [
         "error-handling"
         "resource-leak"
       ];
       # Patch rung (ADR 0057): a chore's patch-eligible subset of its
-      # classes above, [] until a class earns patch trust.
+      # classList, [] until a class earns patch trust.
       patchClasses = [ ];
     }
     {
       name = "refactor";
-      classes = [ "dead-code" ];
+      classList = [
+        "dead-code"
+        "duplication"
+        "other"
+      ];
+      promotionClasses = [ "dead-code" ];
       patchClasses = [ ];
     }
     {
       name = "docs-drift";
-      classes = [ "stale-reference" ];
+      classList = [
+        "stale-reference"
+        "wrong-behaviour"
+        "wrong-example"
+        "wrong-code-comment"
+        "other"
+      ];
+      promotionClasses = [ "stale-reference" ];
       patchClasses = [ "stale-reference" ];
     }
   ];
   names = map (c: c.name) chores;
+  classLists = builtins.listToAttrs (
+    map (c: {
+      inherit (c) name;
+      value = c.classList;
+    }) chores
+  );
   classesDefault = builtins.concatStringsSep " " (
-    map (c: "${c.name}=${builtins.concatStringsSep "," c.classes}") chores
+    map (c: "${c.name}=${builtins.concatStringsSep "," c.promotionClasses}") chores
   );
   # Same rendering as classesDefault, but only for a chore with a non-empty
   # patchClasses -- an entry naming a chore with [] would fail
@@ -43,5 +93,11 @@ let
   );
 in
 {
-  inherit names classesDefault patchClassesDefault;
+  inherit
+    names
+    classLists
+    classesDefault
+    patchClassesDefault
+    checkClassLists
+    ;
 }
