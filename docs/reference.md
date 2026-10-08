@@ -4061,10 +4061,14 @@ late-merge failure never skips the issue bookkeeping below: `spindrift
 reconcile` still runs it, then exits non-zero. A `dispatch` run that names
 no issues on the command line (one-shot, continuous, or a single
 `ISSUE_NUMBER`) records late merges as its final step too, silently unless
-it recorded one, and only warns if that fails. The daemon's children are such
-runs (each is a `dispatch` naming no issues), so every pool slot's exit runs
-the sweep and asks the Code Forge about every candidate Record in the 14-day
-window.
+it recorded one, and only warns if that fails. Such a run sweeps at most once
+per 15 minutes per working directory, gated by the lock-and-stamp file
+`.spindrift/late-merge-sweep.lock`, so the daemon's pool children (each a
+`dispatch` naming no issues) share one sweep instead of each asking the Code
+Forge about every candidate Record in the 14-day window; `spindrift
+reconcile` always sweeps. On GitHub, a rate-limited Code Forge ends the sweep
+at the first rate-limit error: the `reconcile` verb then exits non-zero, a
+`dispatch` run only warns.
 `spindrift dispatch <n>...`, `recover`, and research or butler runs do not,
 so run `spindrift reconcile` after those.
 
