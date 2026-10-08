@@ -539,3 +539,40 @@ func TestStats_SymlinkedRootCountsOnce(t *testing.T) {
 		t.Errorf("a symlinked second root changed the output:\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestStats_UnreadableLogWarnsAndExitsZero(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads a chmod 0 file")
+	}
+	root := t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logs := map[string]string{
+		"issue-7.log":  statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T12:35:00Z", 1.5, 7, 240000, 3000, "claude-opus"),
+		"issue-12.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T13:35:00Z", 2.5, 7, 240000, 3000, "claude-opus"),
+	}
+	for name, body := range logs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bad := filepath.Join(dir, "issue-12.log")
+	if err := os.Chmod(bad, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(bad, 0o644) })
+
+	t.Chdir(root)
+	var stdout, stderr bytes.Buffer
+	if code := mainRun([]string{"stats"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("stats code = %d, want 0; stderr:\n%s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Records: 1 ") {
+		t.Errorf("stdout = %q, want the one readable Record", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: skipping unreadable log") || !strings.Contains(stderr.String(), bad) {
+		t.Errorf("stderr = %q, want a warning naming %s", stderr.String(), bad)
+	}
+}

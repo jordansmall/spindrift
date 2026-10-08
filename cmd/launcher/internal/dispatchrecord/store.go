@@ -323,7 +323,7 @@ func (s *Store) ingest(force bool, chainKey string) (parsed int, err error) {
 		if errors.As(err, &re) {
 			if !failed[path] {
 				failed[path] = true
-				unreadable = append(unreadable, re.err)
+				unreadable = append(unreadable, re)
 			}
 			return "", nil
 		}
@@ -378,6 +378,10 @@ type readError struct{ err error }
 
 func (e *readError) Error() string { return e.err.Error() }
 func (e *readError) Unwrap() error { return e.err }
+
+// Is lets callers tell a skipped log from a store failure through the
+// errors.Join ingest returns.
+func (e *readError) Is(target error) bool { return target == ErrUnreadableLog }
 
 // ingestFile parses and upserts one log unless it is unchanged, and reports
 // whether it parsed it and the dispatch key whose satellite windows it shifted
