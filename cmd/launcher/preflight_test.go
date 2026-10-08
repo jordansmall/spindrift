@@ -16,6 +16,7 @@ func TestAutoMergePreflight(t *testing.T) {
 		name             string
 		mergeMode        string
 		codeForge        string
+		mergeMethod      string
 		autoMergeAllowed bool
 		autoMergeErr     error
 		wantErr          bool
@@ -42,7 +43,27 @@ func TestAutoMergePreflight(t *testing.T) {
 			codeForge:        "forgejo",
 			autoMergeAllowed: false,
 			wantErr:          true,
-			wantErrContains:  "enable at least one merge style",
+			wantErrContains:  `enable the "rebase" merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`,
+			wantErrOmits:     "Allow auto-merge",
+		},
+		{
+			name:             "auto mode on forgejo with MERGE_METHOD=merge — remedy names merge",
+			mergeMode:        "auto",
+			codeForge:        "forgejo",
+			mergeMethod:      "merge",
+			autoMergeAllowed: false,
+			wantErr:          true,
+			wantErrContains:  `enable the "merge" merge style (MERGE_METHOD)`,
+			wantErrOmits:     "Allow auto-merge",
+		},
+		{
+			name:             "auto mode on forgejo with MERGE_METHOD=squash — remedy names squash",
+			mergeMode:        "auto",
+			codeForge:        "forgejo",
+			mergeMethod:      "squash",
+			autoMergeAllowed: false,
+			wantErr:          true,
+			wantErrContains:  `enable the "squash" merge style (MERGE_METHOD)`,
 			wantErrOmits:     "Allow auto-merge",
 		},
 		{
@@ -77,6 +98,7 @@ func TestAutoMergePreflight(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := baseConfig()
 			c.mergeMode = tc.mergeMode
+			c.mergeMethod = tc.mergeMethod
 			if tc.codeForge != "" {
 				c.codeForge = tc.codeForge
 			}

@@ -25,6 +25,7 @@ import (
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/inputdoc"
@@ -1022,7 +1023,7 @@ func checkAutoMergePreflight(c config, caps forge.Capabilities) error {
 	if !canAuto {
 		remedy := `enable "Allow auto-merge" in repo Settings → General`
 		if c.codeForge == "forgejo" {
-			remedy = "enable at least one merge style in the repo's settings"
+			remedy = fmt.Sprintf(`enable the %q merge style (MERGE_METHOD) in the repo's settings, or change MERGE_METHOD`, forgejo.MergeStyle(c.mergeMethod))
 		}
 		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge — %s; or switch to MERGE_MODE=manual", remedy)
 	}
