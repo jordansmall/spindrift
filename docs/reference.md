@@ -5594,6 +5594,57 @@ findings) are not part of a role's template hash. Unlike the stamp, the hashes
 are Box-reported, so an adversarial Box could forge them; treat them as a
 cohort hint, not an attestation.
 
+**The settled outcome.** When settle flushes its terminal decision, the host
+appends one `dispatch_settled` `spindrift_op` to the Dispatch's primary Pass
+log (`issue-<key>.log`), as
+`{"type":"spindrift_op","spindrift_op":{"op":"dispatch_settled","dispatch_settled":{...}}}`
+with `record_id`, `state` (`complete`, `failed`, `recoverable`, or
+`ambiguous`), `reason`, `note`, and `pr_url`. Every terminal settle path
+writes it: the work settle path, a Box that failed before settle, research, the
+butler Chore, and recover. The write is best-effort and never creates a missing
+log. A path with no Dispatch that ran (recover) settles the prior work
+Dispatch's Record: a Dispatcher that never ran takes the Record ID from the
+primary log's `dispatch_start` stamp, and one whose adopted PR needed a fix or
+conflict pass continues that Record, its fix and conflict logs carrying the
+prior stamp rather than a fresh ID. The last `dispatch_settled` in the log
+wins, so a recover that lands turns a failed Record complete. A recover that
+adopts an orphan PR, or one from a log directory predating the lineage marker,
+has its primary log quarantined; a fix pass then mints a fresh Record that
+lives only in the fix logs. Settle never creates the missing primary log, so
+that Record receives no `dispatch_settled` and stays `outcome: unknown`. A
+Dispatch that failed before minting its Record ID (a claim error, for one)
+appends nothing and warns: the stamp in its log names an earlier Dispatch's
+Record, which it must not rewrite. The butler patch gate's settle of a finding
+issue's patch PR appends nothing either: the finding issue has no Record of its
+own, and the Chore's Record already settled. Research's `comment-post-failed`
+and `verdict-apply-failed` stops are not terminal settles: the issue stays
+`agent-research-in-progress`, no op is appended, and the Record stays
+`outcome: unknown`. The ingester accepts an op only when its `record_id`
+equals the log's stamp, ignoring one that names another Record, and only when
+nothing but further `dispatch_settled` ops follows it: the host appends only
+after the Box exits, so an op followed by any other event, a `spindrift_op`
+included, is ignored as forged. `reason` is the class of the decision:
+
+- `complete`: `merged`, `manual` (a green PR left open for a human),
+  `auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,
+  `merge-blocked` (the merge or the auto-merge enqueue failed after green; the PR stays open),
+  `already-resolved`, `verdict` (research posted its verdict), `findings-filed`
+  (a butler Chore filed its findings), and `recover-declined`;
+- `failed`: `landing-failed`, `gate-terminal`, `ci-red` (CI red with no fix pass
+  budget), `fix-exhausted`, `budget-exhausted`, `fix-failed`, `fix-no-op`,
+  `relay-failed` (also recover's park), `blocked`, `no-outcome` (the Box printed
+  no outcome line), `merge-unverified` (a merge `verifyMerged` could not
+  confirm), `no-pr` (`status=merged` named a branch with no PR to verify),
+  `box-failed` (the Box failed before settle), `research-failed`,
+  `chore-failed`, `ledger-finish-failed`, and `stopped`;
+- `ambiguous` and `recoverable` each name their own state.
+
+A Record's `outcome` comes only from that op, and `outcome_source` says so:
+`dispatch_settled`, or `none` when no log carried one. `box_status` is the
+Box's own last `SPINDRIFT_OUTCOME` status in the primary log, kept separately
+and never standing in for the outcome: a Box that said `ready` whose CI stayed
+red is `outcome: failed`, `box_status: ready`.
+
 **What it ingests.** Each Pass log under `.spindrift/logs` (a name matching
 `issue-<key>.log...`) that opens with a stamp: `issue-<key>.log`, its fix-pass,
 conflict-resolve, and rotated `issue-<key>.log.N` attempt logs, and the
@@ -5626,8 +5677,8 @@ other Record is `attribution: inferred`,
 carries none of those, and its kind is inferred from the log: a `butler-*`
 key is `butler`; otherwise a log whose first `pass_start` event names a role
 is `work`; anything else is `unknown`. An `unknown` Record is still stored
-and still counted. Every Record is `outcome: unknown` for now: the log does
-not say how the Dispatch ended.
+and still counted. A Record is `outcome: unknown` when no log carried a
+`dispatch_settled` op, as an inferred Record's never does.
 
 **The store.** Records are cached in `.spindrift/dispatch-records.db`, a
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
@@ -5676,8 +5727,10 @@ history is still on disk. If a parser fix changes the ID a log derives and
 the log's size and mtime are unchanged, the stale Record is dropped. A Record
 whose log is gone is left exactly as stored: a parser fix cannot reach it.
 
-**Output.** The default text output is a summary line (Records, passes, and
-total notional USD) followed by a table with one row per pass role, in
+**Output.** The default text output is a summary line (Records, passes, total
+notional USD, the landed Dispatch keys, notional USD per landed key, and the
+outcome-source mix), followed by a
+table with one row per pass role, in
 pipeline order (`implement`, `review`, `fix`, `land`, `delta-review`, then any
 other role alphabetically, and `(none)` for a pass logged without a role):
 `PASSES`, `USD`, `AVG_USD`, `AVG_MIN`, `API_CALLS`, and `BLOCK_RATE`. The block
@@ -5686,10 +5739,25 @@ for `review` and `delta-review`; other roles show `-`. USD is the
 API-equivalent list price of the tokens used, not money spent: on a
 subscription plan you are not billed per token.
 
+A landed key is a distinct (kind, Dispatch key) pair with at least one
+Record settled `complete` with reason `merged`: a PR left open (`manual`,
+`auto-merge-enqueued`, `merge-blocked`, a merge-guard hit), `already-resolved`,
+a research verdict, and filed butler findings are not landings. A PR settled
+`auto-merge-enqueued` under `MERGE_MODE=auto`, or left for a human to merge, is
+never re-settled when it later merges, so landed keys and `USD per landed key`
+undercount landings on such deployments. `USD per landed key` is the total
+notional USD across all Records, failures included, divided by the landed
+keys, so it reads as the headline cost of landing an issue; it is `-` when
+nothing landed. `Outcome source` counts Records per `outcome_source`
+(`dispatch_settled`, then `none`), so it shows how much of the cohort has a
+host-recorded outcome rather than `unknown`.
+
 `--json` skips the table and prints one Record per line, ordered by claim time
 then ID, with the fields `record_id`, `kind`, `dispatch_key`, `claim_time`,
-`attribution`, `outcome`, `passes`, and, on stamped Records only (omitted
-when inferred), `revision`, `driver`, `driver_version`, `role_models`, `knobs`, and
+`attribution`, `outcome`, `outcome_source`, `passes`, and, on Records with a
+settled outcome (omitted when empty), `reason`, `note`, `pr_url`, and
+`box_status`, and, on stamped Records only (omitted when inferred),
+`revision`, `driver`, `driver_version`, `role_models`, `knobs`, and
 `prompt_hashes` (omitted when no Box reported any). Each pass carries `ordinal`, `role`,
 `models`, `usd`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`,
 `cache_creation_input_tokens`, `api_calls`, `turns`, `duration_ms`,
@@ -7797,7 +7865,7 @@ slot.
 | `box` | `time`, `kind`, `issue` or `chore`, `phase`, `pass_log`, `record_id`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later. A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set. `pass_log` names the Pass log that phase writes, relative to the checkout (the un-suffixed path, even when a stale log was rotated aside), carried unchanged from the child's record (a later Dispatch of the same issue or Chore reuses the path once the earlier run's copy is moved to `<pass_log>.prior-run.N`, so the path alone does not identify a run); absent for `recover`, which runs no Box. `record_id` is the Dispatch's [Record ID](#stats), the same for every phase of one Dispatch, so unlike `pass_log` it does identify a run; added without a `v` bump, and absent for `recover` |
 | `model` | `time`, `kind`, `issue` or `chore`, `model`, `model_role`, `revision`, `slot` | each time the child reported that the Box's active model changed (the exact model id, plus the optional role, such as a reviewer, that is running it); the record is emitted as it arrives, so the Events file keeps the history a slot's status entry drops. `model_role` is absent when the model has no role |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
-| `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `pr_url`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle. `pr_url` is the PR the Dispatch opened or adopted, carried from the child's record: a PR the host opened, adopted, or recovered (named as soon as the host resolves it), the open PR on the agent branch of a read-write Box (resolved host-side at settle, never from the Box's `landing=`), and a butler patch PR once it merges cleanly (a red, timed-out, or unmerged patch PR emits no `settled` record at all). It is present even when the landing went red or failed, and absent when there is no PR (push-only forges, research, a butler Chore's own settle, a failure before any PR, no open PR on the agent branch at settle) (issue #4718) |
+| `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `pr_url`, `record_id`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle. `pr_url` is the PR the Dispatch opened or adopted, carried from the child's record: a PR the host opened, adopted, or recovered (named as soon as the host resolves it), the open PR on the agent branch of a read-write Box (resolved host-side at settle, never from the Box's `landing=`), and a butler patch PR once it merges cleanly (a red, timed-out, or unmerged patch PR emits no `settled` record at all). It is present even when the landing went red or failed, and absent when there is no PR (push-only forges, research, a butler Chore's own settle, a failure before any PR, no open PR on the agent branch at settle) (issue #4718). `record_id` is the Dispatch's [Record ID](#stats), matching its `box` events and its `dispatch_settled` op; added without a `v` bump, and absent on the butler patch gate's settle of a finding issue's patch PR, which writes no op and has no Record of its own, and on a Dispatch that failed before minting a Record ID |
 | `demand_appeared` | `time`, `kind`, `slot`, `ready` | a Demand probe of a probed kind found startable items (`ready` above 0) where the previous count was 0, or the kind had never been probed; emitted on the zero crossing only, so a count that merely changes between two positive values emits nothing |
 | `demand_drained` | `time`, `kind`, `slot`, `ready` | a Demand probe found none (`ready` is 0) where the previous count was above 0 — the opposite zero crossing to `demand_appeared`, and a kind probed empty again emits nothing. Neither event is emitted for an exit-driven kind, which has no probe |
 | `demand_rose` | `time`, `kind`, `slot`, `ready` | a Demand probe of a jammed probed kind counted `ready` strictly above the kind's `ready_at_jam` (the count the jam froze), or, for `recover`, named a bundle the backoff's baseline lacks at any count, which lifts the jam — resetting its gate to `IdleFloor`, as a moved tip does — and wakes parked slots if the kind is now startable. The wait policy above lists the probes that lift nothing. Probed kinds only; it can accompany `demand_appeared` on the same probe |
@@ -7918,7 +7986,9 @@ record also carries `record_id`, the Dispatch's Record ID (see
 [Stats](#stats)), which `recover` omits too. The
 daemon copies it onto the `box` event unchanged. A `settled` record likewise
 carries `pr_url`, the PR the Dispatch opened or adopted, when there is one;
-the daemon copies it onto the `settled` event unchanged (issue #4718).
+the daemon copies it onto the `settled` event unchanged (issue #4718). It
+also carries `record_id`, which the daemon copies unchanged and which the
+research, butler, recover, and failed-Box paths omit.
 A `model` record is
 `{"event":"model","issue":"<N>","model":"<id>","model_role":"<role>"}`, with
 `chore` in place of `issue` for a butler child. `model` is the exact model id
