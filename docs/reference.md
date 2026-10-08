@@ -5694,21 +5694,23 @@ other Record is `attribution: inferred`, carries none of those, and its kind
 is inferred from the log by the first rule that matches:
 
 1. a `butler-*` key is `butler`;
-2. a log whose last agent-written `SPINDRIFT_OUTCOME` line (a host
-   `synthetic=true` line does not count) carries a status only research emits
-   (`recommend`, `reject`, `unclear`) is `research`;
-3. a log whose first Box start line (`==> claude <verb> ...`) carries a
-   kind's announce verb (in practice work's `implementing` or research's
-   `researching`) is that kind, whatever its outcome status, so a research
-   run that ends `blocked` or with no outcome line is `research`;
-4. a log whose first `pass_start` event names a role is `work`;
-5. a log with no `pass_start` whose outcome status is a work status (`ready`,
-   `blocked`, `ambiguous`, `already-resolved`) is a pre-orchestrator
-   single-pass run, so `work`;
+2. a log whose first Box start line (`==> claude <verb> ...`) carries a
+   kind's announce verb other than work's `implementing` (in practice
+   research's `researching`) is that kind, whatever its outcome status, so
+   a research run that ends `blocked`, with no outcome line, or with a
+   custom `RESEARCH_VERDICTS` verdict is `research`;
+3. a log whose last agent-written `SPINDRIFT_OUTCOME` line (a host
+   `synthetic=true` line does not count) carries a status only one kind
+   emits is that kind: research's `recommend`, `reject`, `unclear`, or
+   work's `ready`, `ambiguous`, `already-resolved` (`blocked` is both);
+4. a log announcing `implementing`, or whose first `pass_start` event
+   names a role, is `work`;
+5. a log with no role-naming `pass_start` whose outcome status is
+   `blocked` is a pre-orchestrator single-pass run, so `work`;
 6. anything else is `unknown`.
 
 Logs written before issue #734 announce a research run as `implementing`
-too. Rule 2 still files such a log under `research` when it carries a
+too. Rule 3 still files such a log under `research` when it carries a
 research-only status, but one that ended `blocked` or with no outcome
 line cannot be told apart from work and counts as `work`.
 
