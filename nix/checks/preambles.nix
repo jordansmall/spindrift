@@ -50,6 +50,8 @@ let
     workerProvisioned = true;
     scoutProvisioned = true;
     choreCatalog = "chore-a chore-b";
+    roleModels = ''{"reviewer":"claude-opus-4"}'';
+    driverVersion = "1.2.3";
     nixStoreWritable = true;
     syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
   };
@@ -399,6 +401,9 @@ in
       "runArtifacts (bwrap) must render SCOUT_PROVISIONED as the literal string \"true\", got: ${builtins.toJSON out}";
     assert assertMsg (out.CHORE_CATALOG == "chore-a chore-b")
       "runArtifacts (bwrap) must render CHORE_CATALOG from its choreCatalog input, got: ${builtins.toJSON out}";
+    assert assertMsg
+      (out.ROLE_MODELS == ''{"reviewer":"claude-opus-4"}'' && out.DRIVER_VERSION == "1.2.3")
+      "runArtifacts (bwrap) must render ROLE_MODELS and DRIVER_VERSION from its inputs, got: ${builtins.toJSON out}";
     assert assertMsg (
       !(out ? IMAGE_ARCHIVE) && !(out ? IMAGE_DRV)
     ) "runArtifacts (bwrap) must not set OCI-only keys, got: ${builtins.toJSON out}";
@@ -500,6 +505,8 @@ in
         workerProvisioned = false;
         scoutProvisioned = false;
         choreCatalog = "chore-a chore-b";
+        roleModels = ''{"reviewer":"claude-opus-4"}'';
+        driverVersion = "1.2.3";
         # OCI's writable-store mechanism (lib/image.nix) never reads this
         # artifact, so false is a placeholder, required only because
         # nixStoreWritable has no default (issue #2665).
@@ -632,6 +639,8 @@ in
         workerProvisioned = false;
         scoutProvisioned = false;
         choreCatalog = "chore-a chore-b";
+        roleModels = ''{"reviewer":"claude-opus-4"}'';
+        driverVersion = "1.2.3";
         nixStoreWritable = false;
         syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
         syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
@@ -685,6 +694,7 @@ in
         "DRIVER"
         "DRIVER_SESSION_CACHE_DIR"
         "DRIVER_SKILLS_DIR"
+        "DRIVER_VERSION"
         "FILER_ENABLED"
         "FLAKE_IMAGE_ATTR"
         "FLAKE_LAUNCHER_ATTR"
@@ -708,6 +718,7 @@ in
         "OUTBOX_RELAY_CAPABLE"
         "PASSWD_FILE"
         "PASSWD_FILE_DRV"
+        "ROLE_MODELS"
         "RUNNER_KIND"
         "RUNTIME"
         "SCOUT_PROVISIONED"

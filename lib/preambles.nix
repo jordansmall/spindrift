@@ -131,6 +131,10 @@ rec {
       # Space-joined stems of the image's chores/*.md (issue #3905), so
       # butlerPreflight rejects a Chore with no prompt before claiming it.
       choreCatalog,
+      # JSON {roster entry name: model} and the Driver CLI package version
+      # (issue #4783), stamped onto each Pass log's dispatch_start.
+      roleModels,
+      driverVersion,
       # The bwrap-only nix.conf artifact (issue #2664), from the same
       # nixConfigFile derivation the OCI image bakes in directly. Defaults to
       # "" so a non-nixInBox Consumer renders the key present-but-empty rather
@@ -220,6 +224,8 @@ rec {
       WORKER_PROVISIONED = if workerProvisioned then "true" else "false";
       SCOUT_PROVISIONED = if scoutProvisioned then "true" else "false";
       CHORE_CATALOG = choreCatalog;
+      ROLE_MODELS = roleModels;
+      DRIVER_VERSION = driverVersion;
     };
 
   # Lets nix/checks/schema-drift.nix derive the allowed artifact keys from
@@ -273,6 +279,8 @@ rec {
           workerProvisioned = false;
           scoutProvisioned = false;
           choreCatalog = "dummy";
+          roleModels = "dummy";
+          driverVersion = "dummy";
           nixConfigPath = "dummy";
           nixConfigDrv = "dummy";
           nixStoreWritable = false;
