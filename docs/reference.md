@@ -5417,7 +5417,18 @@ gate, and the finding is then judged exactly as if it carried no patch. A
 diff that clears every gate but that `git apply` reads differently from
 the gates' own parse, or that fails to apply to the scanned commit or the
 current base head, logs `status=patch-apply-failed` instead, and the finding
-falls through to the same promote/skip decision.
+falls through to the same promote/skip decision. A filed finding that
+promotion then skips — including one whose patch failed to apply or land
+and fell back to promotion — logs `status=promote-skipped`, naming the
+first promotion gate that failed: `class not allow-listed`, `file count
+outside host limit`, `no reviewer concurrence`, or `no room` (the day's
+promotion budget is spent). With promotion off for the Chore (no
+`BUTLER_MAX_PROMOTIONS_PER_DAY` budget, no `LABEL`, or an empty
+`BUTLER_CHORE_CLASSES`), settle instead logs one `status=promotion-off`
+line per sweep, when at least one finding filed, rather than
+one per finding. A promoted or patched finding logs no `promote-skipped`
+line (the sweep-level `promotion-off` line can still appear with promotion
+off).
 
 For a finding the patch rung accepts, settle apply-checks the finding's
 own diff against the commit the run scanned, then re-fetches the base
