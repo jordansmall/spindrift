@@ -413,7 +413,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// every fresh log carries one: a retry rotates the previous log aside, so
 	// a claim-time write alone would be lost.
 	start := d.dispatchStart()
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "dispatch_start", Start: &start})
+	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &start})
 	if _, err := logFile.WriteString(stamp); err != nil {
 		return fmt.Errorf("write dispatch_start: %w", err)
 	}
