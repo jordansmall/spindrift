@@ -19,3 +19,8 @@ func OutboxDir(pwd, key string) string {
 func LogDir(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "logs")
 }
+
+// DispatchRecordsDB is the host-side SQLite store of Dispatch Records.
+func DispatchRecordsDB(pwd string) string {
+	return filepath.Join(pwd, ".spindrift", "dispatch-records.db")
+}
