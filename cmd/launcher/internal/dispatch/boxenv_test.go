@@ -461,6 +461,7 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 			Slice:     []string{"a.go", "b.go"},
 		},
 		Classes:      []string{"flaky-test", "dead-code"},
+		ClassList:    []string{"flaky-test", "dead-code", "typo"},
 		PatchClasses: []string{"docs-drift"},
 	}
 	env, err := buildBoxEnv(cfg, choreSubject(c), 0, "", "the-nonce")
@@ -482,6 +483,9 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 	}
 	if got := env["CHORE_CLASSES"]; got != "flaky-test dead-code" {
 		t.Errorf("CHORE_CLASSES: got %q, want %q", got, "flaky-test dead-code")
+	}
+	if got := env["CHORE_CLASS_LIST"]; got != "flaky-test dead-code typo" {
+		t.Errorf("CHORE_CLASS_LIST: got %q, want %q", got, "flaky-test dead-code typo")
 	}
 	if got := env["CHORE_PATCH_CLASSES"]; got != "docs-drift" {
 		t.Errorf("CHORE_PATCH_CLASSES: got %q, want %q", got, "docs-drift")
@@ -536,6 +540,9 @@ func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 	}
 	if v, ok := env["CHORE_CLASSES"]; ok {
 		t.Errorf("CHORE_CLASSES should be absent when Classes is empty, got %q", v)
+	}
+	if v, ok := env["CHORE_CLASS_LIST"]; ok {
+		t.Errorf("CHORE_CLASS_LIST should be absent when ClassList is empty, got %q", v)
 	}
 }
 

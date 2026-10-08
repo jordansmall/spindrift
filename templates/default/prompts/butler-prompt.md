@@ -24,15 +24,27 @@ ${CHORE_SLICE}
 
 ${CHORE_PROMPT}
 
+# FINDING CLASSES
+
+Class list for this Chore (blank when the Chore declares none):
+
+${CHORE_CLASS_LIST}
+
+Tag every finding with exactly one class naming its kind. When the class
+list above is non-empty, the class must be one of its entries — a class
+off the list is rejected, naming the valid ones, so pick again from it
+rather than drop the finding. When the list is blank, name the class
+yourself: a lowercase slug of letters, digits, and `-`, not starting with
+`-`, at most 40 characters. A class outside that shape is rejected, and
+the finding with it.
+
 # PROMOTION CANDIDATES
 
-Promotion classes for this run (blank when promotion is off):
+Promotion classes for this run, the candidate subset of the class list
+(blank when promotion is off):
 
 ${CHORE_CLASSES}
 
-Tag every finding with a class naming its kind: a lowercase slug of
-letters, digits, and `-`, not starting with `-`, at most 40 characters. A
-class outside that shape is rejected, and the finding with it.
 Prefer a promotion class when one genuinely fits; never stretch a finding
 to fit one just to make it a candidate.
 

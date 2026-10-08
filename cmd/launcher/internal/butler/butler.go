@@ -314,7 +314,7 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if promo.patchEnabled && len(classes) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, PatchClasses: patchClasses, MaxFindings: room.Findings})
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings})
 	defer d.Close()
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
 	settle := func(result dispatch.Result) settled { return step.settle(d, result) }
