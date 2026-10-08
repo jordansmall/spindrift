@@ -10,10 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/golden"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 func statsOp(op claude.SpindriftOp) string { return claude.EncodeSpindriftOp(op) }
@@ -224,7 +226,7 @@ func TestStats_ReingestRepairsChangedLogKeepsDeletedRecord(t *testing.T) {
 
 func TestStats_EmptyRoot(t *testing.T) {
 	out, _ := runStats(t, t.TempDir())
-	if want := "Records: 0  Passes: 0  Notional USD: $0.00 (API-equivalent)\n"; out != want {
+	if want := "Records: 0  Passes: 0  Notional USD: $0.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 0\n"; out != want {
 		t.Errorf("stats on an empty root = %q, want %q", out, want)
 	}
 }
@@ -234,5 +236,51 @@ func TestStats_RejectsUnknownArgument(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	if code := mainRun([]string{"stats", "--bogus"}, &stdout, &stderr); code == 0 {
 		t.Errorf("exit = 0, want non-zero; stderr=%q", stderr.String())
+	}
+}
+
+func TestRenderStats_LandedKeysAndSourceMix(t *testing.T) {
+	const settled = dispatchrecord.OutcomeSourceSettled
+	rec := func(kind, key, outcome, reason, source string, usd float64) dispatchrecord.Record {
+		return dispatchrecord.Record{
+			Kind: kind, DispatchKey: key, Outcome: outcome, Reason: reason, OutcomeSource: source,
+			Passes: []dispatchrecord.Pass{{Role: "implement", USD: usd}},
+		}
+	}
+	records := []dispatchrecord.Record{
+		rec("work", "1", "complete", settle.ReasonMerged, settled, 1),
+		rec("work", "1", "complete", settle.ReasonMerged, settled, 1), // a re-run of the same key
+		rec("work", "2", "failed", settle.ReasonCIRed, settled, 2),
+		rec("work", "3", "unknown", "", dispatchrecord.OutcomeSourceNone, 4),
+		rec("research", "1", "complete", settle.ReasonVerdict, settled, 2), // a verdict, not a landing
+		rec("work", "4", "complete", settle.ReasonMerged, settled, 2),
+		rec("work", "5", "complete", settle.ReasonAlreadyResolved, settled, 0),
+		rec("work", "6", "complete", settle.ReasonManual, settled, 0),
+		rec("work", "7", "complete", settle.ReasonAutoMergeEnqueued, settled, 0),
+		rec("work", "8", "complete", settle.ReasonMergeBlocked, settled, 0),
+		rec("butler", "chore", "complete", settle.ReasonFindingsFiled, settled, 0),
+	}
+	summary := func(records []dispatchrecord.Record) string {
+		var buf bytes.Buffer
+		if err := renderStats(&buf, records); err != nil {
+			t.Fatal(err)
+		}
+		first, _, _ := strings.Cut(buf.String(), "\n")
+		_, tail, _ := strings.Cut(first, "(API-equivalent)  ")
+		return tail
+	}
+	// Only a merged Record counts as landed; $12 over 2 merged keys.
+	if got, want := summary(records), "Landed keys: 2  USD per landed key: $6.00  Outcome source: dispatch_settled 10, none 1"; got != want {
+		t.Errorf("summary = %q, want %q", got, want)
+	}
+	if got, want := summary(records[2:4]), "Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 1, none 1"; got != want {
+		t.Errorf("no-landing summary = %q, want %q", got, want)
+	}
+	var buf bytes.Buffer
+	if err := renderStats(&buf, records[:1]); err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(strings.Split(buf.String(), "\n")[1], "Landed") {
+		t.Errorf("landed keys must ride the summary line, not a second line:\n%s", buf.String())
 	}
 }

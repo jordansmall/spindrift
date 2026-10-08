@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // statsRolePipeline orders the known pass roles as a Dispatch runs them; any
@@ -134,9 +136,46 @@ func aggregateStatsRoles(records []dispatchrecord.Record) (rows []statsRoleRow, 
 	return rows, passes, usd
 }
 
+// landedKeys counts distinct (kind, Dispatch key) pairs with a Record the host
+// settled merged. Other complete reasons (a PR left open, already-resolved, a
+// verdict, filed findings) did not put code on the default branch.
+func landedKeys(records []dispatchrecord.Record) int {
+	type key struct{ kind, key string }
+	seen := map[key]bool{}
+	for _, r := range records {
+		if r.Outcome == forge.Complete.String() && r.Reason == settle.ReasonMerged {
+			seen[key{r.Kind, r.DispatchKey}] = true
+		}
+	}
+	return len(seen)
+}
+
+// outcomeSources counts Records whose outcome is the host's dispatch_settled
+// op and the rest, which have none.
+func outcomeSources(records []dispatchrecord.Record) (settled, none int) {
+	for _, r := range records {
+		if r.OutcomeSource == dispatchrecord.OutcomeSourceSettled {
+			settled++
+		} else {
+			none++
+		}
+	}
+	return settled, none
+}
+
 func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 	rows, passes, usd := aggregateStatsRoles(records)
-	fmt.Fprintf(w, "Records: %d  Passes: %d  Notional USD: $%.2f (API-equivalent)\n", len(records), passes, usd)
+	landed := landedKeys(records)
+	perLanded := "-"
+	if landed > 0 {
+		perLanded = fmt.Sprintf("$%.2f", usd/float64(landed))
+	}
+	settled, none := outcomeSources(records)
+	if _, err := fmt.Fprintf(w, "Records: %d  Passes: %d  Notional USD: $%.2f (API-equivalent)  Landed keys: %d  USD per landed key: %s  Outcome source: %s %d, %s %d\n",
+		len(records), passes, usd, landed, perLanded,
+		dispatchrecord.OutcomeSourceSettled, settled, dispatchrecord.OutcomeSourceNone, none); err != nil {
+		return err
+	}
 	if len(rows) == 0 {
 		return nil
 	}
