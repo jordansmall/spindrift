@@ -1,6 +1,7 @@
 package dispatchrecord
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -607,7 +608,14 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 // then ID. A Record's passes run in the order their log segments began, then
 // by position within a segment, renumbered 1..n across the segments.
 func (s *Store) Records() ([]Record, error) {
-	rows, err := s.db.Query(
+	// ReadOnly issues a plain deferred BEGIN: one snapshot across the three
+	// queries without the write lock _txlock=immediate gives Begin().
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(
 		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
 			 outcome_source, reason, note, pr_url, box_status,
 			 revision, driver, driver_version, role_models, knobs
@@ -648,7 +656,7 @@ func (s *Store) Records() ([]Record, error) {
 		return nil, err
 	}
 
-	prows, err := s.db.Query(
+	prows, err := tx.Query(
 		`SELECT ` + passColumns + `
 		 FROM passes ORDER BY record_id, log_start, ordinal`)
 	if err != nil {
@@ -678,7 +686,7 @@ func (s *Store) Records() ([]Record, error) {
 	if err := prows.Err(); err != nil {
 		return nil, err
 	}
-	return out, s.loadPromptHashes(out, byID)
+	return out, loadPromptHashes(tx, out, byID)
 }
 
 // marshalMap stores a nil or empty map as "", the column default.
@@ -701,8 +709,8 @@ func unmarshalMap(s string) (map[string]string, error) {
 
 // loadPromptHashes fills each Record's PromptHashes with the union across its
 // logs; ordering by segment lets a later log's hash for a role win.
-func (s *Store) loadPromptHashes(recs []Record, byID map[string]int) error {
-	rows, err := s.db.Query(`SELECT record_id, role, hash FROM prompt_hashes ORDER BY record_id, log_start`)
+func loadPromptHashes(tx *sql.Tx, recs []Record, byID map[string]int) error {
+	rows, err := tx.Query(`SELECT record_id, role, hash FROM prompt_hashes ORDER BY record_id, log_start`)
 	if err != nil {
 		return err
 	}
