@@ -1,4 +1,6 @@
-package promptassembly_test
+// Package golden holds the compare-or-update helpers for golden-file tests, so
+// every golden suite regenerates through the same UPDATE_GOLDENS switch.
+package golden
 
 import (
 	"bytes"
@@ -9,13 +11,13 @@ import (
 	"strings"
 )
 
-// updateGoldens flips the golden helpers from comparing to overwriting. The
+// Update flips the golden helpers from comparing to overwriting. The
 // name is the one `nix run .#regen-goldens` exports.
-func updateGoldens() bool { return os.Getenv("UPDATE_GOLDENS") != "" }
+func Update() bool { return os.Getenv("UPDATE_GOLDENS") != "" }
 
-// compareOrUpdateText diffs produced against the golden byte for byte, or
+// CompareOrUpdateText diffs produced against the golden byte for byte, or
 // overwrites the golden with it in update mode.
-func compareOrUpdateText(goldenPath string, produced []byte, update bool) error {
+func CompareOrUpdateText(goldenPath string, produced []byte, update bool) error {
 	if update {
 		return os.WriteFile(goldenPath, produced, 0o644)
 	}
@@ -29,11 +31,11 @@ func compareOrUpdateText(goldenPath string, produced []byte, update bool) error 
 	return nil
 }
 
-// compareOrUpdateJSON is compareOrUpdateText over canonical JSON: both sides
+// CompareOrUpdateJSON is CompareOrUpdateText over canonical JSON: both sides
 // are projected onto project's keys (every key when empty) and canonicalised,
 // so key order never causes a spurious diff and a golden written in update
 // mode is always canonical.
-func compareOrUpdateJSON(goldenPath string, produced []byte, update bool, project ...string) error {
+func CompareOrUpdateJSON(goldenPath string, produced []byte, update bool, project ...string) error {
 	got, err := canonicalJSON(produced, project)
 	if err != nil {
 		return fmt.Errorf("produced output for %s: %w", goldenPath, err)
@@ -55,9 +57,9 @@ func compareOrUpdateJSON(goldenPath string, produced []byte, update bool, projec
 	return nil
 }
 
-// removeGoldenIfUpdate deletes a golden the cell no longer produces, in update
+// RemoveIfUpdate deletes a golden the cell no longer produces, in update
 // mode only. In compare mode it reports a golden that is still on disk.
-func removeGoldenIfUpdate(goldenPath string, update bool) error {
+func RemoveIfUpdate(goldenPath string, update bool) error {
 	if update {
 		if err := os.Remove(goldenPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
