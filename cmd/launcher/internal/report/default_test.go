@@ -26,7 +26,7 @@ func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
 		t.Fatalf("Default() after Install = %v, want %v", Default(), rep)
 	}
 
-	Box(dispatchkey.Issue("42"), "fix-pass-1", "")
+	Box(dispatchkey.Issue("42"), "fix-pass-1", "", "")
 	restore()
 	if Default() != nil {
 		t.Fatalf("Default() after restore = %v, want nil", Default())
@@ -48,6 +48,6 @@ func TestInstallDefault_ForwardsAndRestores(t *testing.T) {
 
 	// Package-level Settled/Box on a nil default must not panic.
 	Settled(dispatchkey.Issue("1"), "merged", "", "")
-	Box(dispatchkey.Chore("bugs"), "initial", "")
+	Box(dispatchkey.Chore("bugs"), "initial", "", "")
 	Settled(dispatchkey.Chore("bugs"), "complete", "", "")
 }

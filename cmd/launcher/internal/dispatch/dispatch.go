@@ -15,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
@@ -130,6 +131,12 @@ type Config struct {
 	// #3901). Empty defaults to "work".
 	Kind string
 
+	// Stamp carries the deployment facts the launcher records in every Pass
+	// log's dispatch_start stamp (issue #4783): only Revision, RoleModels,
+	// DriverVersion and Knobs are read. The Dispatch fills in the rest (Record
+	// ID, kind, key, claim and log-start times, driver name).
+	Stamp claude.DispatchStart
+
 	// SelfContained forwards the research kind's no-repo sub-mode as
 	// SELF_CONTAINED=1 (issue #2202), so box skips the clone and
 	// repo exploration. Meaningful only when Kind == "research".
@@ -211,6 +218,14 @@ func (c Config) signalCarrierSocket() bool {
 	return c.SignalCarrier == "socket"
 }
 
+// kindName is Config.Kind, defaulting to work.
+func (c Config) kindName() string {
+	if c.Kind == "" {
+		return dispatchkind.Work.Name
+	}
+	return c.Kind
+}
+
 // boxAccessForKind re-applies main.go's ReadOnlyBox forcing (issue #3906) so
 // buildBoxEnv and needsOutbox fail closed, and agree, even for a Config built
 // from the raw knob.
@@ -290,10 +305,7 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 			}
 		}
 	}
-	kind := cfg.Kind
-	if kind == "" {
-		kind = dispatchkind.Work.Name
-	}
+	kind := cfg.kindName()
 	env["DISPATCH_KIND"] = kind
 	// The Box reads DISPATCH_KEY/DISPATCH_KEYING/DISPATCH_ANNOUNCE_VERB, never
 	// DISPATCH_KIND (display-only there); an unrecognized kind falls back to
