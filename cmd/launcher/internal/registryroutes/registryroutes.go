@@ -772,12 +772,11 @@ func validateAllowPatterns(label string, patterns []string) error {
 	return nil
 }
 
-// validateDeclaredPath validates one non-empty operator-declared path field,
-// shared so gradle-path (issue #3259) and go-path (issue #3260) cannot drift.
-// Both ban "$", "`", and "\": gradle's value lands in a Groovy double-quoted
-// literal where "$" interpolates at load time, go's in a shell-sourced export
-// line. Both also ban "?" and "#" (rejectURLDelimiters). It strips every
-// trailing "/", so "//" cannot pass the bare-root check.
+// validateDeclaredPath validates the path key of one [routes.ecosystems.<name>]
+// block. It bans "$", "`", and "\" because a declared path can land in a
+// Groovy double-quoted literal, where "$" interpolates at load time, or in a
+// shell-sourced export line; it also bans whitespace, "?", and "#".
+// It strips every trailing "/", so "//" cannot pass the bare-root check.
 func validateDeclaredPath(label, field, value string) (string, error) {
 	if err := rejectURLDelimiters(label, field, value); err != nil {
 		return "", err
