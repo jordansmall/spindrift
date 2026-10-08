@@ -60,7 +60,7 @@
   {
     name = "reconcile";
     usage = "";
-    doc = "local-tracker bookkeeping sweep: close issues whose recorded landing PR merged (no-op on github/jira)";
+    doc = "bookkeeping sweep: record PRs merged after settle for stats; on a local tracker, also close issues whose recorded landing PR merged";
   }
   {
     name = "stats";

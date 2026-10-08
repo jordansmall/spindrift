@@ -6,15 +6,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // testCapabilities resolves capabilities the same way newReadContext does in
@@ -111,7 +116,7 @@ func TestRunReconcile_NonLocalTrackerIsClearNoOp(t *testing.T) {
 	if err := runReconcile(c, f, f, fakeLiveness{}, testCapabilities(t, c, f, f), "", &buf); err != nil {
 		t.Fatalf("runReconcile: %v", err)
 	}
-	if !strings.Contains(buf.String(), "nothing to do") {
+	if !strings.Contains(buf.String(), "no issues to close") {
 		t.Errorf("want a clear no-op message, got %q", buf.String())
 	}
 	if len(f.CloseIssueCalls) != 0 {
@@ -644,4 +649,200 @@ func revParseTest(t *testing.T, dir, ref string) string {
 		t.Fatalf("rev-parse %s in %s: %v: %s", ref, dir, err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// lateMergeFixture writes two stamped work logs settled complete with their PR
+// left open (A auto-merge-enqueued at $1.50, B manual at $2.50) and a fake
+// forge where only A's PR has since merged.
+func lateMergeFixture(t *testing.T) (root, idA string, f *forge.Fake, c config) {
+	t.Helper()
+	root = t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const prA, prB = "https://github.com/o/r/pull/1", "https://github.com/o/r/pull/2"
+	write := func(key, reason, pr string, cost float64) string {
+		id := "work:" + key + "@x"
+		ts := time.Now().Add(-time.Hour).UTC() // inside settle.LateMergeWindow
+		body := statsOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+			RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: ts, Started: ts,
+		}}) +
+			statsAssistant("m-"+key) +
+			statsResult("2026-05-01T09:00:00Z", cost, 1, 1000, 900, "m") +
+			statsOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &claude.DispatchSettled{
+				RecordID: id, State: "complete", Reason: reason, PRURL: pr,
+			}})
+		if err := os.WriteFile(filepath.Join(dir, "issue-"+key+".log"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	idA = write("1", settle.ReasonAutoMergeEnqueued, prA, 1.5)
+	write("2", settle.ReasonManual, prB, 2.5)
+
+	f = forge.NewFake()
+	f.SetPR("a", forge.PR{URL: prA})
+	f.SetPR("b", forge.PR{URL: prB})
+	f.SetPRState(prA, forge.PRMerged)
+	f.SetPRState(prB, forge.PRClosed)
+	c = baseConfig()
+	c.issueTracker = "github"
+	return root, idA, f, c
+}
+
+func logSizes(t *testing.T, root string) map[string]int64 {
+	t.Helper()
+	entries, err := os.ReadDir(hostpaths.LogDir(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int64{}
+	for _, e := range entries {
+		fi, err := e.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[e.Name()] = fi.Size()
+	}
+	return out
+}
+
+// A PR left open at settle and merged later counts as a landing in `stats`
+// once the end-of-dispatch sweep records it, and only once.
+func TestReconcileAfterDispatch_RecordsLateMergeInStats(t *testing.T) {
+	root, idA, f, c := lateMergeFixture(t)
+	caps := testCapabilities(t, c, f, f)
+
+	before, _ := runStats(t, root)
+	if !strings.Contains(before, "Landed keys: 0  USD per landed key: -") {
+		t.Fatalf("before: want no landed keys, got:\n%s", before)
+	}
+
+	var buf bytes.Buffer
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, caps, root, &buf); err != nil {
+		t.Fatalf("reconcileAfterDispatch: %v", err)
+	}
+	if !strings.Contains(buf.String(), "recorded 1 late merge(s): "+idA) {
+		t.Fatalf("output = %q, want one late merge naming %s", buf.String(), idA)
+	}
+	after, _ := runStats(t, root)
+	if !strings.Contains(after, "Landed keys: 1  USD per landed key: $4.00") {
+		t.Fatalf("after: want 1 landed key at $4.00, got:\n%s", after)
+	}
+
+	sizes := logSizes(t, root)
+	buf.Reset()
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, caps, root, &buf); err != nil {
+		t.Fatalf("second reconcileAfterDispatch: %v", err)
+	}
+	again, _ := runStats(t, root)
+	if buf.Len() != 0 || again != after || !reflect.DeepEqual(logSizes(t, root), sizes) {
+		t.Fatalf("second sweep not a no-op: output %q, logs %v -> %v", buf.String(), sizes, logSizes(t, root))
+	}
+}
+
+func TestRunReconcile_RecordsLateMergeForGithubTracker(t *testing.T) {
+	root, idA, f, c := lateMergeFixture(t)
+
+	var buf bytes.Buffer
+	if err := runReconcile(c, f, f, fakeLiveness{}, testCapabilities(t, c, f, f), root, &buf); err != nil {
+		t.Fatalf("runReconcile: %v", err)
+	}
+	if !strings.Contains(buf.String(), "recorded 1 late merge(s): "+idA) {
+		t.Fatalf("output = %q, want one late merge naming %s", buf.String(), idA)
+	}
+	if out, _ := runStats(t, root); !strings.Contains(out, "Landed keys: 1") {
+		t.Fatalf("stats after runReconcile:\n%s", out)
+	}
+}
+
+// brokenStatsFixture is a local tracker with a PR-capable forge holding an
+// open issue whose landing PR merged, and a pwd whose dispatch-record store
+// cannot open (a directory sits where the database file belongs), so
+// settle.LateMerges fails.
+func brokenStatsFixture(t *testing.T) (root string, f *forge.Fake, c config) {
+	t.Helper()
+	root = t.TempDir()
+	if err := os.MkdirAll(hostpaths.LogDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(hostpaths.DispatchRecordsDB(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f = forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
+	c = baseConfig()
+	c.issueTracker = "local"
+	return root, f, c
+}
+
+func assertIssueClosed(t *testing.T, f *forge.Fake, num string) {
+	t.Helper()
+	iss, err := f.Issue(num)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.State != forge.IssueClosed {
+		t.Errorf("issue %s State = %v, want IssueClosed", num, iss.State)
+	}
+}
+
+// A late-merge failure never fails a dispatch run nor skips closing local
+// issues whose landing PR merged.
+func TestReconcileAfterDispatch_LocalTracker_LateMergeFailureWarnsAndStillCloses(t *testing.T) {
+	root, f, c := brokenStatsFixture(t)
+
+	var buf bytes.Buffer
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, testCapabilities(t, c, f, f), root, &buf); err != nil {
+		t.Fatalf("reconcileAfterDispatch: %v, want nil", err)
+	}
+	if !strings.Contains(buf.String(), "?? late merges:") {
+		t.Errorf("want a late-merges warning, got %q", buf.String())
+	}
+	assertIssueClosed(t, f, "42")
+}
+
+func TestReconcileAfterDispatch_NonLocalTracker_LateMergeFailureWarnsOnly(t *testing.T) {
+	root, f, c := brokenStatsFixture(t)
+	c.issueTracker = "github"
+
+	var buf bytes.Buffer
+	if err := reconcileAfterDispatch(c, f, f, fakeLiveness{}, testCapabilities(t, c, f, f), root, &buf); err != nil {
+		t.Fatalf("reconcileAfterDispatch: %v, want nil", err)
+	}
+	if !strings.Contains(buf.String(), "?? late merges:") {
+		t.Errorf("want a late-merges warning, got %q", buf.String())
+	}
+}
+
+// The standalone verb still exits non-zero on a late-merge failure, but only
+// after the issue bookkeeping ran.
+func TestRunReconcile_LocalTracker_LateMergeFailureErrorsAfterClosing(t *testing.T) {
+	root, f, c := brokenStatsFixture(t)
+
+	var buf bytes.Buffer
+	err := runReconcile(c, f, f, fakeLiveness{}, testCapabilities(t, c, f, f), root, &buf)
+	if err == nil {
+		t.Fatal("runReconcile: nil, want the late-merge error")
+	}
+	assertIssueClosed(t, f, "42")
+}
+
+// A PR-less code forge has no PR state to read, so recording late merges is a
+// silent no-op even when the pwd holds logs.
+func TestRecordLateMerges_PRLessForgeIsNoOp(t *testing.T) {
+	root, _, _, _ := lateMergeFixture(t)
+
+	var buf bytes.Buffer
+	if err := recordLateMerges(nil, root, &buf); err != nil {
+		t.Fatalf("recordLateMerges: %v", err)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("want no output, got %q", buf.String())
+	}
+	if _, err := os.Stat(hostpaths.DispatchRecordsDB(root)); err == nil {
+		t.Error("dispatch-record store was opened for a PR-less forge")
+	}
 }
