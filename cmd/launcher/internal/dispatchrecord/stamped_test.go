@@ -16,9 +16,12 @@ import (
 
 var stampClaim = time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
 
-func stampLine(started time.Time) string {
+func stampLine(started time.Time) string { return tokenStampLine(started, "") }
+
+func tokenStampLine(started time.Time, token string) string {
 	return opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
 		RecordID:      RecordID("work", "42", stampClaim),
+		HostToken:     token,
 		Kind:          "work",
 		DispatchKey:   "42",
 		ClaimTime:     stampClaim,
@@ -223,8 +226,12 @@ func TestPromptHashesIgnoredWithoutMatchingStamp(t *testing.T) {
 }
 
 func settledLine(recordID, state, reason string) string {
+	return tokenSettledLine(recordID, state, reason, "")
+}
+
+func tokenSettledLine(recordID, state, reason, token string) string {
 	return opLine(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
-		RecordID: recordID, State: state, Reason: reason, Note: "n", PRURL: "https://x/pr/1",
+		RecordID: recordID, State: state, Reason: reason, Note: "n", PRURL: "https://x/pr/1", HostToken: token,
 	}})
 }
 
@@ -391,7 +398,7 @@ func TestSettledOpFollowedByOrchestratorOpIsIgnored(t *testing.T) {
 	}
 }
 
-func TestStampRecordID(t *testing.T) {
+func TestReadStamp(t *testing.T) {
 	id := RecordID("work", "42", stampClaim)
 	dir := t.TempDir()
 	write := func(name string, lines ...string) string {
@@ -402,21 +409,92 @@ func TestStampRecordID(t *testing.T) {
 		return p
 	}
 	tests := []struct {
-		name string
-		path string
-		want string
+		name   string
+		path   string
+		want   string
+		token  string
+		wantOK bool
 	}{
-		{"stamped", write("stamped.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...), id},
-		{"unstamped", write("unstamped.log", workLog("2026-05-01T09:00:00Z", 1)...), ""},
-		{"stamp not first", write("late.log", append(workLog("2026-05-01T09:00:00Z", 1), stampLine(stampClaim))...), ""},
-		{"empty", write("empty.log"), ""},
-		{"missing", filepath.Join(dir, "missing.log"), ""},
+		{"stamped", write("stamped.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...), id, "", true},
+		{"tokened", write("tokened.log", append([]string{tokenStampLine(stampClaim, "tok")}, workLog("2026-05-01T09:00:00Z", 1)...)...), id, "tok", true},
+		{"empty record_id", write("noid.log", opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{HostToken: "tok"}})), "", "", false},
+		{"unstamped", write("unstamped.log", workLog("2026-05-01T09:00:00Z", 1)...), "", "", false},
+		{"stamp not first", write("late.log", append(workLog("2026-05-01T09:00:00Z", 1), stampLine(stampClaim))...), "", "", false},
+		{"empty", write("empty.log"), "", "", false},
+		{"missing", filepath.Join(dir, "missing.log"), "", "", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := StampRecordID(tc.path); got != tc.want {
-				t.Errorf("StampRecordID = %q, want %q", got, tc.want)
+			s, ok := ReadStamp(tc.path)
+			if ok != tc.wantOK || s.RecordID != tc.want || s.HostToken != tc.token {
+				t.Errorf("ReadStamp = %q token %q ok %v, want %q token %q ok %v", s.RecordID, s.HostToken, ok, tc.want, tc.token, tc.wantOK)
 			}
 		})
+	}
+}
+
+const hostTok = "host-secret"
+
+func tokenedLog(lines ...string) []string {
+	return append([]string{tokenStampLine(stampClaim, hostTok)}, append(workLog("2026-05-01T09:00:00Z", 1), lines...)...)
+}
+
+func parseOutcome(t *testing.T, lines []string) Record {
+	t.Helper()
+	rec, _, err := ParseLog(writeLog(t, "issue-42.log", lines...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rec
+}
+
+// The Box shares the primary log and knows the Record ID, so a trailing settled
+// op it forged must not pass for the host's unless it echoes the host token.
+func TestTokenedStampRejectsForgedTrailingSettledOp(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	for name, forged := range map[string]string{
+		"no token":    settledLine(id, "complete", "merged"),
+		"wrong token": tokenSettledLine(id, "complete", "merged", "guess"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := parseOutcome(t, tokenedLog(forged))
+			if rec.Outcome != OutcomeUnknown || rec.OutcomeSource != OutcomeSourceNone {
+				t.Fatalf("record = %+v, want unknown outcome", rec)
+			}
+		})
+	}
+}
+
+func TestTokenedStampAcceptsSettledOpEchoingToken(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	rec := parseOutcome(t, tokenedLog(tokenSettledLine(id, "failed", "ci-red", hostTok)))
+	if rec.Outcome != "failed" || rec.Reason != "ci-red" || rec.OutcomeSource != OutcomeSourceSettled {
+		t.Fatalf("record = %+v", rec)
+	}
+}
+
+func TestTokenedStampLastGenuineSettledOpWins(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	rec := parseOutcome(t, tokenedLog(
+		tokenSettledLine(id, "failed", "ci-red", hostTok),
+		tokenSettledLine(id, "complete", "merged", hostTok)))
+	if rec.Outcome != "complete" || rec.Reason != "merged" {
+		t.Fatalf("record = %+v", rec)
+	}
+	rec = parseOutcome(t, tokenedLog(
+		tokenSettledLine(id, "failed", "ci-red", hostTok),
+		settledLine(id, "complete", "merged")))
+	if rec.Outcome != "failed" || rec.Reason != "ci-red" || rec.OutcomeSource != OutcomeSourceSettled {
+		t.Fatalf("forged op displaced the genuine one: %+v", rec)
+	}
+}
+
+// Logs stamped before the host token existed carry none, so only the ordering
+// rule guards them.
+func TestTokenlessStampStillAcceptsTrailingSettledOp(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	rec := parseOutcome(t, append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), settledLine(id, "complete", "merged")))
+	if rec.Outcome != "complete" || rec.OutcomeSource != OutcomeSourceSettled {
+		t.Fatalf("record = %+v", rec)
 	}
 }

@@ -52,8 +52,8 @@ func TestSettledPrior_FillsRecordIDFromLogStamp(t *testing.T) {
 	if len(ops) != 1 || ops[0].RecordID != "work:7@x" || ops[0].State != "complete" || ops[0].PRURL != "https://x/pr/1" {
 		t.Fatalf("settled ops = %+v", ops)
 	}
-	if got := dispatchrecord.StampRecordID(path); got != "work:7@x" {
-		t.Errorf("stamp = %q, log no longer opens with it", got)
+	if got, _ := dispatchrecord.ReadStamp(path); got.RecordID != "work:7@x" {
+		t.Errorf("stamp = %q, log no longer opens with it", got.RecordID)
 	}
 	recs := readRecords()
 	if len(recs) != 1 || recs[0].Event != report.EventSettled || recs[0].RecordID != "work:7@x" {

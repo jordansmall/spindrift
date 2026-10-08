@@ -200,8 +200,8 @@ func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
 	if got := d.RecordID(); got != prior {
 		t.Fatalf("RecordID() = %q, want the primary log's %q", got, prior)
 	}
-	if got := dispatchrecord.StampRecordID(d.fixLogPath(1)); got != prior {
-		t.Errorf("fix log stamp = %q, want %q", got, prior)
+	if got, _ := dispatchrecord.ReadStamp(d.fixLogPath(1)); got.RecordID != prior {
+		t.Errorf("fix log stamp = %q, want %q", got.RecordID, prior)
 	}
 	rec, _, err := dispatchrecord.ParseLog(d.fixLogPath(1))
 	if err != nil || !rec.ClaimTime.Equal(claim) {
