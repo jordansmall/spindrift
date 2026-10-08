@@ -5837,11 +5837,21 @@ fix log finds the Dispatch it started under, and whenever a Record appears or
 is dropped, every fix or conflict-resolve log of its key re-windows in the same
 run, so the result does not depend on the order the logs were ingested in (a
 primary that shows up later, or an empty one that gains output, picks up a
-fix log first ingested as a Record of its own). A fix log's passes are
-keyed by the file's own start, so one renamed to `.prior-run.N` by the next
-Dispatch re-parses into the same passes rather than doubling them, and an
-unstamped fix log whose mtime-derived start slides past a later Dispatch's
-start moves there whole, leaving no passes behind. A log from an older launcher
+fix log first ingested as a Record of its own). A fix log that starts in the
+same millisecond as its Dispatch's claim joins that Dispatch, and both logs
+keep their passes. A fix log's passes are keyed by the file's own start and
+name, so one renamed to `.prior-run.N` by the next Dispatch re-parses into the
+same passes rather than doubling them, and an unstamped fix log whose
+mtime-derived start slides past a later Dispatch's start moves there whole,
+leaving no passes behind. The store records which fix or conflict-resolve log
+minted an orphan Record, by that log's name. Such a log owns only a Record it
+minted, and that is the only Record it leaves when it re-windows; a Record that
+merely shares its ID, because a Dispatch claimed in the same millisecond, is
+not its own. A renamed log carries its segment and that ownership with it, even
+when a new log reuses its old name. Two different logs of one name stem (such
+as `issue-42-fix-1.log.prior-run.1` and a fresh `issue-42-fix-1.log`) that
+start in the same millisecond on one Record look like a rename, so whichever
+is read last replaces the other's passes. A log from an older launcher
 (unstamped) that is ingested while still being written, and whose inferred kind
 later changes with the same key and claim time (`unknown` to `work`, or `work`
 to `research` once its final `SPINDRIFT_OUTCOME` appears), replaces its stale
@@ -5857,7 +5867,10 @@ split, though each pass is still counted once.
 Upgrading a store built by an older `stats` re-parses the logs still on disk
 under the current rules. A Record whose log was already deleted keeps the kind
 it was ingested with (for example `unknown`), with no fix or conflict-resolve
-cost folded in.
+cost folded in. The upgrade infers which fix or conflict-resolve log minted
+each orphan Record by the old rule (the log starts at the Record's claim
+time), so a Record whose primary log was already deleted, and whose passes
+predate per-log tracking, can be taken for an orphan.
 
 A log ingest cannot read (a permissions or I/O error) is skipped with a
 `warning: skipping unreadable log` line on stderr naming it. `stats` still
