@@ -124,3 +124,49 @@ func TestStoreConcurrentSettlesEachIngestOwnLog(t *testing.T) {
 	}
 	wantRecordIDs(t, root, n)
 }
+
+// Records reads records, passes and prompt_hashes from one snapshot, so an
+// Ingest committing between them never shows a passes row without its record
+// (issue #4808).
+func TestStoreRecordsConsistentUnderConcurrentIngest(t *testing.T) {
+	const logs = 300
+	root := t.TempDir()
+	reader, writer := openStore(t, root), openStore(t, root)
+
+	var writeErr error
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		for i := 0; i < logs; i++ {
+			if writeErr = writeConcurrentLog(root, i); writeErr != nil {
+				return
+			}
+			if _, writeErr = writer.Ingest(); writeErr != nil {
+				return
+			}
+		}
+	}()
+	reads, failed := 0, 0
+	var firstErr error
+	for done := false; !done; {
+		select {
+		case <-finished:
+			done = true
+		default:
+		}
+		reads++
+		if _, err := reader.Records(); err != nil {
+			failed++
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	if writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if failed > 0 {
+		t.Errorf("Records failed %d of %d calls, first: %v", failed, reads, firstErr)
+	}
+	wantRecordIDs(t, root, logs)
+}
