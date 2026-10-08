@@ -2,6 +2,7 @@ package seamtest
 
 import (
 	"bytes"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -180,6 +181,18 @@ func TestGhGraphQLProbes(t *testing.T) {
 	}
 	if got := gql("{pullRequest{mergeable}}"); got != "MERGEABLE\n" {
 		t.Errorf("mergeable = %q", got)
+	}
+	const contextsQuery = "{pullRequest{commits{nodes{commit{statusCheckRollup{contexts(first:50){nodes{__typename}}}}}}}}"
+	if got := gql(contextsQuery); got != "[]\n" {
+		t.Errorf("default contexts = %q; want an empty JSON array", got)
+	}
+	cfg.PRs[0].Contexts = `[{"__typename":"CheckRun","name":"build","conclusion":"FAILURE","summary":"boom"}]`
+	var nodes []map[string]any
+	if err := json.Unmarshal([]byte(gql(contextsQuery)), &nodes); err != nil || len(nodes) != 1 || nodes[0]["name"] != "build" {
+		t.Errorf("scripted contexts = %v, err %v", nodes, err)
+	}
+	if got := gql("{pullRequest{commits{nodes{commit{statusCheckRollup{state}}}}}}"); got != "SUCCESS\n" {
+		t.Errorf("checks after scripting contexts = %q", got)
 	}
 	if _, out := runGh(t, cfg, "api", "graphql", "-f", "query={repository{autoMergeAllowed}}", "-f", "owner=o"); out != "false\n" {
 		t.Errorf("autoMergeAllowed = %q", out)
