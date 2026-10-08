@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -78,17 +79,41 @@ func (f *EventsFile) append(line []byte) error {
 	return file.Close()
 }
 
+// rotateBetweenOpensHook runs between ReadEvents' two opens, so a test can
+// deterministically rotate the files in the window the open order guards
+// (issue #4853). No-op in production.
+var rotateBetweenOpensHook = func() {}
+
 // ReadEvents returns the events in gitDirPath's Events file, oldest first: the
 // rotated generation, then the live file. A missing file is not an error, and
 // a line that fails to decode (a torn write, a corrupt key) is skipped.
+//
+// It opens the live file before `.1`: a rotation between the two opens renames
+// the file already held, so `.1` then aliases it and is dropped, rather than the
+// rotated generation going unread. Two rotations between the opens (~64 MB in
+// microseconds) would still misorder or miss a generation, a gap the Dashboard
+// shares.
 func ReadEvents(gitDirPath string) ([]Event, error) {
-	live := filepath.Join(gitDirPath, eventsFileName)
+	livePath := filepath.Join(gitDirPath, eventsFileName)
+	live, err := openIfExists(livePath)
+	if err != nil {
+		return nil, err
+	}
+	defer closeIfOpen(live)
+	rotateBetweenOpensHook()
+	older, err := openIfExists(livePath + rotatedSuffix)
+	if err != nil {
+		return nil, err
+	}
+	older = dropRotatedAlias(older, live)
+	defer closeIfOpen(older)
+
 	var events []Event
-	for _, path := range []string{live + rotatedSuffix, live} {
-		data, err := os.ReadFile(path)
-		if errors.Is(err, fs.ErrNotExist) {
+	for _, f := range []*os.File{older, live} {
+		if f == nil {
 			continue
 		}
+		data, err := io.ReadAll(f)
 		if err != nil {
 			return nil, err
 		}
@@ -100,4 +125,37 @@ func ReadEvents(gitDirPath string) ([]Event, error) {
 		}
 	}
 	return events, nil
+}
+
+// openIfExists returns a nil file, not an error, for a missing path.
+func openIfExists(path string) (*os.File, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	return f, err
+}
+
+// closeIfOpen and dropRotatedAlias mirror their dashboard/tail.go namesakes (a
+// separate module, so copied).
+func closeIfOpen(f *os.File) {
+	if f != nil {
+		_ = f.Close()
+	}
+}
+
+// dropRotatedAlias closes and returns nil for older when it is the same file
+// as live: a rotation between the two opens renamed the file live already
+// holds.
+func dropRotatedAlias(older, live *os.File) *os.File {
+	if older == nil || live == nil {
+		return older
+	}
+	oi, oerr := older.Stat()
+	ci, cerr := live.Stat()
+	if oerr == nil && cerr == nil && os.SameFile(oi, ci) {
+		closeIfOpen(older)
+		return nil
+	}
+	return older
 }

@@ -165,28 +165,32 @@ func TestEventsFileAppendsAcrossRestart(t *testing.T) {
 	}
 }
 
+func boxEventLine(t *testing.T, rev string) string {
+	t.Helper()
+	b, err := json.Marshal(Event{V: eventVersion, Time: "2026-10-07T12:00:00Z", Event: "box", Revision: rev, Key: dispatchkey.Issue("42")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b) + "\n"
+}
+
+func writeFileT(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestReadEvents(t *testing.T) {
 	dir := t.TempDir()
-	line := func(rev string) string {
-		b, err := json.Marshal(Event{V: eventVersion, Time: "2026-10-07T12:00:00Z", Event: "box", Revision: rev, Key: dispatchkey.Issue("42")})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(b) + "\n"
-	}
-	write := func(name, content string) {
-		t.Helper()
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	live := filepath.Join(dir, eventsFileName)
 
 	if evs, err := ReadEvents(dir); err != nil || len(evs) != 0 {
 		t.Fatalf("ReadEvents on a missing file = %v, %v; want none, nil", evs, err)
 	}
 
-	write(eventsFileName+rotatedSuffix, line("old")+"not json\n")
-	write(eventsFileName, line("mid")+"\n"+`{"issue":"1","chore":"x"}`+"\n"+line("new"))
+	writeFileT(t, live+rotatedSuffix, boxEventLine(t, "old")+"not json\n")
+	writeFileT(t, live, boxEventLine(t, "mid")+"\n"+`{"issue":"1","chore":"x"}`+"\n"+boxEventLine(t, "new"))
 
 	evs, err := ReadEvents(dir)
 	if err != nil {
@@ -201,5 +205,41 @@ func TestReadEvents(t *testing.T) {
 	}
 	if evs[0].Key != dispatchkey.Issue("42") {
 		t.Errorf("Key = %v, want issue 42", evs[0].Key)
+	}
+}
+
+// The hook rotates the way EventsFile.append does between the two opens. Live
+// must be opened first: opening .1 first would read the pre-rotation "old"
+// generation and then the fresh live file, losing a and b.
+func TestReadEventsRotationBetweenOpens(t *testing.T) {
+	dir := t.TempDir()
+	live := filepath.Join(dir, eventsFileName)
+	writeFileT(t, live+rotatedSuffix, boxEventLine(t, "old"))
+	writeFileT(t, live, boxEventLine(t, "a")+boxEventLine(t, "b"))
+
+	fired := false
+	orig := rotateBetweenOpensHook
+	t.Cleanup(func() { rotateBetweenOpensHook = orig })
+	rotateBetweenOpensHook = func() {
+		fired = true
+		if err := os.Rename(live, live+rotatedSuffix); err != nil {
+			t.Error(err)
+		}
+		writeFileT(t, live, boxEventLine(t, "c"))
+	}
+
+	evs, err := ReadEvents(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fired {
+		t.Fatal("rotateBetweenOpensHook never ran")
+	}
+	var got []string
+	for _, ev := range evs {
+		got = append(got, ev.Revision)
+	}
+	if want := []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Errorf("revisions = %v, want %v (the rotated generation once, no stale .1)", got, want)
 	}
 }
