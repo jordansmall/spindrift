@@ -1059,6 +1059,9 @@ func TestApplyMergeMode_Immediate(t *testing.T) {
 	if reason != ReasonMerged {
 		t.Errorf("reason = %q, want %q", reason, ReasonMerged)
 	}
+	if ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must not be ReasonLeavesPROpen: the PR merged", reason)
+	}
 	if fc.Merged != testPR {
 		t.Errorf("immediate mode must call Merge; fc.Merged=%q", fc.Merged)
 	}
@@ -1078,6 +1081,9 @@ func TestApplyMergeMode_Manual(t *testing.T) {
 	if reason != ReasonManual {
 		t.Errorf("reason = %q, want %q", reason, ReasonManual)
 	}
+	if !ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must be ReasonLeavesPROpen: the PR stays open", reason)
+	}
 	if fc.Merged != "" {
 		t.Errorf("manual mode must not call Merge; fc.Merged=%q", fc.Merged)
 	}
@@ -1096,6 +1102,9 @@ func TestApplyMergeMode_Auto_EnqueuesAutoMerge(t *testing.T) {
 	}
 	if reason != ReasonAutoMergeEnqueued {
 		t.Errorf("reason = %q, want %q", reason, ReasonAutoMergeEnqueued)
+	}
+	if !ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must be ReasonLeavesPROpen: the PR stays open", reason)
 	}
 	if fc.Merged != "" {
 		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)
@@ -1138,6 +1147,9 @@ func TestApplyMergeMode_Auto_EnqueueFailureFallsBack(t *testing.T) {
 	}
 	if reason != ReasonMergeBlocked {
 		t.Errorf("reason = %q, want %q", reason, ReasonMergeBlocked)
+	}
+	if !ReasonLeavesPROpen(reason) {
+		t.Errorf("reason %q must be ReasonLeavesPROpen: the PR stays open", reason)
 	}
 	if fc.Merged != "" {
 		t.Errorf("auto mode must not call Merge; fc.Merged=%q", fc.Merged)

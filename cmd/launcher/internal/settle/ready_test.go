@@ -28,6 +28,7 @@ func TestSelfHeal_MergeFailureAfterGreenKeepsComplete(t *testing.T) {
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (CI green, merge failed)", landing)
 	}
+	assertLatchedLeftOpen(t, s, "1")
 	iss, _ := fc.Issue("1")
 	if !containsLabel(iss.Labels, "agent-complete") {
 		t.Errorf("issue must carry agent-complete after green+merge-failure; labels=%v", iss.Labels)
@@ -54,6 +55,7 @@ func TestSelfHeal_MergeGuardHit_DowngradesToManual(t *testing.T) {
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (merge guard hit)", landing)
 	}
+	assertLatchedLeftOpen(t, s, "1")
 	if fc.Merged != "" {
 		t.Errorf("merge guard must prevent Merge from being called; fc.Merged=%q", fc.Merged)
 	}
@@ -123,6 +125,7 @@ func TestSelfHeal_MergeGuardHit_AutoMode(t *testing.T) {
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual for a guard-hit auto-mode PR", landing)
 	}
+	assertLatchedLeftOpen(t, s, "1")
 	if len(fc.EnqueueAutoMergeCalls) != 0 {
 		t.Errorf("guard hit must prevent EnqueueAutoMerge; calls=%v", fc.EnqueueAutoMergeCalls)
 	}
@@ -172,6 +175,7 @@ func TestSelfHeal_MergeGuardCheckError_FailsSafe(t *testing.T) {
 	if landing != landingManual {
 		t.Errorf("selfHeal = %v, want landingManual (guard check errored)", landing)
 	}
+	assertLatchedLeftOpen(t, s, "1")
 	if fc.Merged != "" {
 		t.Errorf("a guard-check error must prevent Merge from being called; fc.Merged=%q", fc.Merged)
 	}
@@ -672,5 +676,16 @@ func TestSelfHeal_GitForge_PushFailureStaysCompleteNotFailed(t *testing.T) {
 	}
 	if len(fc.CommentCalls) != 1 {
 		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(fc.CommentCalls), fc.CommentCalls)
+	}
+}
+
+// assertLatchedLeftOpen ties landingManual's reasons to ReasonLeavesPROpen: a green PR
+// handed off unmerged must latch a reason LateMerges will watch.
+func assertLatchedLeftOpen(t *testing.T, s *Settle, num string) {
+	t.Helper()
+	s.settledMu.Lock()
+	defer s.settledMu.Unlock()
+	if r := s.settledLatch[num].reason; !ReasonLeavesPROpen(r) {
+		t.Errorf("latched reason %q for a landingManual settle is not ReasonLeavesPROpen", r)
 	}
 }

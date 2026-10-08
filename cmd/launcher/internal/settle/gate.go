@@ -387,10 +387,10 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	SettledPrior(dispatchkey.Issue(num), path, ds)
 }
 
-// Settled is the single terminal-record emitter for every settle path: it
-// appends ds as a dispatch_settled op to the Dispatch's primary Pass log,
-// ingests the Dispatch into the root's Record store, then reports the settled
-// record.
+// Settled is the single terminal-record emitter for every settle path (only
+// LateMerges' reconcile upgrade appends one outside it): it appends ds as a
+// dispatch_settled op to the Dispatch's primary Pass log, ingests the Dispatch
+// into the root's Record store, then reports the settled record.
 //
 // The append and the ingest are best-effort: each warns and never changes the
 // settle outcome. The ingest runs only after a successful append, so every

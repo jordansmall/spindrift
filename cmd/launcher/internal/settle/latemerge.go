@@ -1,0 +1,131 @@
+package settle
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"net/url"
+	"os"
+	"path/filepath"
+	"time"
+
+	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostpaths"
+)
+
+// LateMergeWindow bounds how far back LateMerges looks, by Record claim time.
+// Without it every run asks the forge about every historical Record whose PR
+// never merged, so the cost grows with history. A PR merged after the window
+// stays un-upgraded.
+const LateMergeWindow = 14 * 24 * time.Hour
+
+// LateMerges upgrades each Record settled with its PR left open
+// (ReasonLeavesPROpen) whose PR has since merged and whose claim falls within
+// LateMergeWindow of now. The host never re-settles such a PR, so without this
+// a landed change keeps the open-PR reason forever. The upgrade is a second
+// dispatch_settled op (reason merged) appended to the Record's primary log,
+// where the parser's last-wins rule picks it up; each appended log's chain is
+// re-ingested so the Record reads back upgraded. It returns the IDs it
+// upgraded.
+//
+// A Record whose primary log is gone, or with no claim time (an older log
+// without a claim stamp), is skipped and stays as stored, and a PR
+// closed unmerged is not a landing. A PR URL that is not an absolute http(s)
+// URL is skipped unqueried, since the forge client takes it as a command-line
+// argument. A forge or append failure on one Record warns to warn and moves
+// on.
+// A sequential re-run is a no-op: an upgraded Record's reason is merged, so it
+// is no longer a candidate. Two sweeps running at once can both append the op,
+// which is harmless since the parser keeps the last.
+func LateMerges(root string, pr forge.PRForge, now time.Time, warn io.Writer) (merged []string, err error) {
+	// No log directory means nothing to upgrade; opening the store would
+	// create an empty one.
+	if _, err := os.Stat(hostpaths.LogDir(root)); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := store.Close(); err == nil {
+			err = closeErr
+		}
+	}()
+	if _, err := store.Ingest(); err != nil {
+		return nil, err
+	}
+	recs, err := store.Records()
+	if err != nil {
+		return nil, err
+	}
+	var appended []string
+	for _, r := range recs {
+		if r.OutcomeSource != dispatchrecord.OutcomeSourceSettled || r.Outcome != forge.Complete.String() ||
+			!ReasonLeavesPROpen(r.Reason) || !queryablePRURL(r.PRURL) {
+			continue
+		}
+		if r.ClaimTime.IsZero() || r.ClaimTime.Before(now.Add(-LateMergeWindow)) {
+			continue
+		}
+		path := primaryLog(root, r)
+		if path == "" {
+			continue
+		}
+		state, err := pr.PRState(r.PRURL)
+		if err != nil {
+			fmt.Fprintf(warn, "    ?? %s: could not read state of %s: %v\n", r.ID, r.PRURL, err)
+			continue
+		}
+		if state != forge.PRMerged {
+			continue
+		}
+		ds := claude.DispatchSettled{
+			RecordID: r.ID,
+			State:    forge.Complete.String(),
+			Reason:   ReasonMerged,
+			Note:     "merged after settling " + r.Reason,
+			PRURL:    r.PRURL,
+		}
+		if err := appendSettled(path, ds); err != nil {
+			fmt.Fprintf(warn, "    ?? %s: could not append %s to %s: %v\n", r.ID, claude.OpDispatchSettled, path, err)
+			continue
+		}
+		merged = append(merged, r.ID)
+		appended = append(appended, path)
+	}
+	var ingestErr error
+	for _, path := range appended {
+		if _, err := store.IngestChain(filepath.Base(path)); err != nil {
+			ingestErr = errors.Join(ingestErr, err)
+		}
+	}
+	return merged, ingestErr
+}
+
+// primaryLog returns the path of the log the Record's dispatch_start stamp
+// opens, "" when no pass names one that still exists. Satellite logs carry no
+// stamp, so the stamp match picks the primary even after it was rotated.
+func primaryLog(root string, r dispatchrecord.Record) string {
+	for _, p := range r.Passes {
+		if p.Log == "" {
+			continue
+		}
+		path := filepath.Join(hostpaths.LogDir(root), p.Log)
+		if s, ok := dispatchrecord.ReadStamp(path); ok && s.RecordID == r.ID {
+			return path
+		}
+	}
+	return ""
+}
+
+// queryablePRURL reports whether u is an absolute http(s) URL with a host. The
+// Record's PR URL can come from text the Box printed, and the forge client
+// passes it as an argument, so anything that could read as a flag is refused.
+func queryablePRURL(u string) bool {
+	p, err := url.Parse(u)
+	return err == nil && (p.Scheme == "http" || p.Scheme == "https") && p.Host != ""
+}
