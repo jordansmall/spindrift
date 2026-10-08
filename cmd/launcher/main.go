@@ -2205,7 +2205,7 @@ var verbHandlers = map[string]verbHandler{
 		opts, bad, ok := doctorFlagArgs(args)
 		if !ok {
 			fmt.Fprintf(stderr, "unrecognized argument: %s\n", bad)
-			fmt.Fprintln(stderr, "usage: spindrift doctor [--verbose|-v] [--butler] [--research]")
+			fmt.Fprintln(stderr, subcommandUsage("doctor"))
 			return 1
 		}
 		return cmdDoctor(opts, stdout, stderr)
@@ -2280,7 +2280,7 @@ var verbHandlers = map[string]verbHandler{
 	"stats":  cmdStats,
 	"registry": func(args []string, stdout, stderr io.Writer) int {
 		if len(args) == 0 || args[0] != "discover" {
-			fmt.Fprintln(stderr, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]")
+			fmt.Fprintln(stderr, subcommandUsage("registry"))
 			return 1
 		}
 		return cmdRegistryDiscover(args[1:], stdout, stderr)

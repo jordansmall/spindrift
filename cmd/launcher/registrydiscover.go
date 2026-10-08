@@ -115,7 +115,7 @@ func cmdRegistryDiscover(args []string, stdout, stderr io.Writer) int {
 		positional = append(positional, a)
 	}
 	if len(positional) != 2 {
-		fmt.Fprintln(stderr, "usage: spindrift registry discover <repo-dir> <routes-file> [--force]")
+		fmt.Fprintln(stderr, subcommandUsage("registry"))
 		return 1
 	}
 

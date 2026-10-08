@@ -2340,3 +2340,28 @@ func TestParseFlags_VerbFlagEqualsFormPassesThrough(t *testing.T) {
 		t.Error("--root=/a after dispatch: want unknown flag error")
 	}
 }
+
+// subcommandUsage covers an empty registry usage (no trailing space after
+// the verb) and a non-empty one.
+func TestSubcommandUsage(t *testing.T) {
+	cases := map[string]string{
+		"build":    "usage: spindrift build",
+		"registry": "usage: spindrift registry discover <repo-dir> <routes-file> [--force]",
+	}
+	for name, want := range cases {
+		if got := subcommandUsage(name); got != want {
+			t.Errorf("subcommandUsage(%q) = %q, want %q", name, got, want)
+		}
+	}
+}
+
+// An unregistered verb is a programmer error, so subcommandUsage panics
+// rather than falling back to a bare usage line.
+func TestSubcommandUsage_UnknownNamePanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("subcommandUsage of an unregistered verb did not panic")
+		}
+	}()
+	subcommandUsage("no-such-verb")
+}
