@@ -394,16 +394,26 @@ func outcomeLine(status string, extra ...string) string {
 func TestParseLogKindFromOutcomeStatus(t *testing.T) {
 	start := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
 	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
+	roleless := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1})
+	researching := "==> claude researching issue #42\n"
+	implementing := "==> claude implementing issue #42 on agent/issue-42\n"
 	tests := []struct {
 		name     string
 		lines    []string
 		wantKind string
 	}{
+		{"blocked research log is research by its announce", []string{researching, res, outcomeLine("blocked")}, "research"},
+		{"blocked research log with role-less pass_start", []string{researching, roleless, res, outcomeLine("blocked")}, "research"},
+		{"announce alone infers research (no outcome, no pass_start)", []string{researching, res}, "research"},
+		{"announce alone infers work (no outcome, no pass_start)", []string{implementing, res}, "work"},
+		{"blocked work log is work by its announce", []string{implementing, start, res, outcomeLine("blocked")}, "work"},
+		{"pre-#734 research log announces implementing; its status still wins", []string{implementing, res, outcomeLine("recommend")}, "research"},
+		{"first announce wins", []string{researching, implementing, res, outcomeLine("blocked")}, "research"},
 		{"research status without pass_start", []string{res, outcomeLine("recommend")}, "research"},
 		{"research status with pass_start", []string{start, res, outcomeLine("unclear")}, "research"},
 		{"research status overrides pass_start role", []string{start, res, outcomeLine("reject")}, "research"},
 		{"shared blocked status keeps pass_start work", []string{start, res, outcomeLine("blocked")}, "work"},
-		{"shared blocked status alone is work", []string{res, outcomeLine("blocked")}, "work"},
+		{"pre-#734 fallback: blocked with no announce is work", []string{res, outcomeLine("blocked")}, "work"},
 		{"work status without pass_start", []string{res, outcomeLine("ready")}, "work"},
 		{"synthetic line ignored", []string{start, res, outcomeLine("recommend", "synthetic=true")}, "work"},
 		{"synthetic line does not shadow the driver's", []string{res, outcomeLine("ready"), outcomeLine("reject", "synthetic=true")}, "work"},

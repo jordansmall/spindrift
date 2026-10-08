@@ -381,6 +381,42 @@ func TestStats_FilterGolden(t *testing.T) {
 	statsGolden(t, "stats-kind-research.jsonl", statsNormalize(kindJSON, roots))
 }
 
+// A blocked research run's legacy log shares its status with work; the Box's
+// announce line is what files it under research.
+func TestStats_BlockedResearchLegacyLogIsResearch(t *testing.T) {
+	root := t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := "==> claude researching issue #88\n" +
+		statsResult("2026-10-07T10:03:00Z", 0.4, 2, 180000, 1200, "claude-sonnet") +
+		"SPINDRIFT_OUTCOME issue=88 landing=none status=blocked note=x\n"
+	if err := os.WriteFile(filepath.Join(dir, "issue-88.log"), []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workLog := "==> claude implementing issue #89 on agent/issue-89\n" +
+		statsResult("2026-10-07T10:13:00Z", 0.4, 2, 180000, 1200, "claude-sonnet") +
+		"SPINDRIFT_OUTCOME issue=89 landing=none status=blocked note=x\n"
+	if err := os.WriteFile(filepath.Join(dir, "issue-89.log"), []byte(workLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	research, _ := runStats(t, root, "--kind", "research", "--json")
+	if !strings.Contains(research, `"dispatch_key":"88"`) || !strings.Contains(research, `"kind":"research"`) {
+		t.Errorf("--kind research dropped the blocked research log:\n%s", research)
+	}
+	if strings.Contains(research, `"dispatch_key":"89"`) {
+		t.Errorf("--kind research counted the work log:\n%s", research)
+	}
+	work, _ := runStats(t, root, "--kind", "work", "--json")
+	if !strings.Contains(work, `"dispatch_key":"89"`) {
+		t.Errorf("--kind work dropped the work log:\n%s", work)
+	}
+	if strings.Contains(work, `"dispatch_key":"88"`) {
+		t.Errorf("--kind work counted the blocked research log:\n%s", work)
+	}
+}
+
 func TestStats_SinceTakesADate(t *testing.T) {
 	root := statsFixtureRoot(t)
 	day, _ := runStats(t, root, "--since", "2026-10-07", "--json")

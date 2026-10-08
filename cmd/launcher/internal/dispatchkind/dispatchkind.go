@@ -6,6 +6,9 @@
 // forge back would cycle.
 package dispatchkind
 
+// AnnouncePrefix begins the Box start line that stats inference reads back.
+const AnnouncePrefix = "==> claude "
+
 // Keying is how a Dispatch of this kind is identified against the tracker.
 type Keying int
 
