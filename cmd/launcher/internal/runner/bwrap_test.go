@@ -332,7 +332,8 @@ func TestBwrapBuildEnsureReady_GroupFileFailureWrapsError(t *testing.T) {
 // snapshots the host nix store DB with one "sqlite3 ... VACUUM INTO" call
 // through the same seam, so 6 execCommand invocations in all. The argv
 // assertion pins the quoted destination, so a dest containing a space would
-// round-trip correctly.
+// round-trip correctly. VACUUM INTO targets a temp sibling of dest, never dest
+// itself (issue #4817).
 func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *testing.T) {
 	script, dir := newFakeCLI(t,
 		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
@@ -389,8 +390,12 @@ func TestBwrapBuildEnsureReady_GeneratesStoreDBSnapshotWhenNixConfigDrvSet(t *te
 	if !strings.Contains(call[1], "VACUUM INTO") {
 		t.Errorf("sqlite3 statement = %q, want it to contain %q", call[1], "VACUUM INTO")
 	}
-	if !strings.Contains(call[1], wantDest) {
-		t.Errorf("sqlite3 statement = %q, want it to reference dest %q", call[1], wantDest)
+	wantTempPrefix := filepath.Join(snapshotDir, "nix", "db", vacuumTempPrefix)
+	if !strings.Contains(call[1], wantTempPrefix) {
+		t.Errorf("sqlite3 statement = %q, want it to reference a temp sibling %q*", call[1], wantTempPrefix)
+	}
+	if strings.Contains(call[1], "'"+wantDest+"'") {
+		t.Errorf("sqlite3 statement = %q, must not VACUUM INTO dest %q directly (issue #4817)", call[1], wantDest)
 	}
 }
 
@@ -449,21 +454,118 @@ func TestBwrapBuildEnsureReady_HoldsSnapshotLockDuringVacuumInto(t *testing.T) {
 	}
 }
 
-// "VACUUM INTO" refuses to run against a dest that already exists, so
-// EnsureReady must move a pre-existing snapshot aside first. The execCommand
-// stub asserts dest is gone at the sqlite3 call, pinning the ordering rather
-// than an end state a "remove after" implementation would also satisfy.
-func TestBwrapBuildEnsureReady_RemovesStaleSnapshotBeforeVacuumInto(t *testing.T) {
-	script, _ := newFakeCLI(t,
-		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 0},
-	)
+// fakeVacuumInto stubs execCommand so a sqlite3 call writes content to the temp
+// path named in its VACUUM INTO statement and exits with code; every other
+// command is the scripted fake. onVacuum, if non-nil, runs before the write
+// with the parsed temp path.
+func fakeVacuumInto(t *testing.T, script, content string, code int, onVacuum func(tmp string)) {
+	t.Helper()
 	orig := execCommand
 	t.Cleanup(func() { execCommand = orig })
 	origStat := statHostNixDB
 	t.Cleanup(func() { statHostNixDB = origStat })
 	statHostNixDB = func() error { return nil }
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name != "sqlite3" {
+			return exec.Command(script, args...)
+		}
+		stmt := args[len(args)-1]
+		tmp := strings.ReplaceAll(strings.TrimSuffix(strings.TrimPrefix(stmt, "VACUUM INTO '"), "';"), "''", "'")
+		if onVacuum != nil {
+			onVacuum(tmp)
+		}
+		return exec.Command("sh", "-c", `printf %s "$1" > "$2"; exit "$3"`, "sh", content, tmp, fmt.Sprint(code))
+	}
+}
 
+// snapshotDest is the db.sqlite SnapshotGeneration writes for closure's generation.
+func snapshotDest(pwd, closure string) string {
+	return filepath.Join(nixVarSnapshotDir(pwd, closureGeneration(closure)), "nix", "db", "db.sqlite")
+}
+
+// tempSiblings lists leftover vacuum temp files next to db.sqlite.
+func tempSiblings(t *testing.T, dir string) []string {
+	t.Helper()
+	m, err := filepath.Glob(filepath.Join(dir, vacuumTempPrefix+"*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return m
+}
+
+// A launcher killed along with sqlite3 leaves its temp behind (issue #4817), so
+// the next vacuum removes temps no live launcher holds the flock on, and leaves
+// one a concurrent launcher is still writing.
+func TestVacuumStoreDBInto_SweepsOnlyUnlockedTemps(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	fakeVacuumInto(t, script, "fresh", 0, nil)
+	dir := t.TempDir()
+	dbDir := filepath.Join(dir, "nix", "db")
+	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stale := filepath.Join(dbDir, vacuumTempPrefix+"111")
+	staleJournal := stale + "-journal"
+	live := filepath.Join(dbDir, vacuumTempPrefix+"222")
+	for _, p := range []string{stale, staleJournal, live} {
+		if err := os.WriteFile(p, []byte("partial"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lf, err := os.Open(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := vacuumStoreDBInto(dir, installReplace); err != nil {
+		t.Fatalf("vacuumStoreDBInto = %v, want nil", err)
+	}
+
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale temp stat err = %v, want not-exist (unlocked temp swept)", err)
+	}
+	if _, err := os.Stat(staleJournal); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale journal stat err = %v, want not-exist (leaked with its temp)", err)
+	}
+	if _, err := os.Stat(live); err != nil {
+		t.Errorf("live temp stat err = %v, want it left alone (flock held)", err)
+	}
+}
+
+// sqlite3 writes <tmp>-journal beside a live vacuum target and no process
+// flocks it, so a sweep from a concurrent launcher must not mistake it for a
+// stale temp: unlinking it fails the running VACUUM with "disk I/O error".
+func TestVacuumStoreDBInto_SweepLeavesLiveVacuumJournal(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	dir := t.TempDir()
+	fakeVacuumInto(t, script, "fresh", 0, func(tmp string) {
+		journal := tmp + "-journal"
+		if err := os.WriteFile(journal, []byte("journal"), 0o600); err != nil {
+			t.Errorf("write journal: %v", err)
+		}
+		sweepStaleVacuumTemps(filepath.Dir(tmp))
+		if _, err := os.Stat(journal); err != nil {
+			t.Errorf("journal stat err = %v, want it left alone during a live vacuum", err)
+		}
+	})
+
+	if err := vacuumStoreDBInto(dir, installReplace); err != nil {
+		t.Fatalf("vacuumStoreDBInto = %v, want nil", err)
+	}
+}
+
+// dest must only ever name a complete snapshot (issue #4817): VACUUM INTO writes
+// a temp sibling and renames over dest after success, so a pre-existing
+// snapshot stays untouched while sqlite3 runs and is replaced atomically after.
+func TestBwrapBuildEnsureReady_ReplacesSnapshotAtomicallyAfterVacuumInto(t *testing.T) {
+	script, _ := newFakeCLI(t,
+		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
+		fakeCall{exit: 0}, fakeCall{exit: 0},
+	)
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
 	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
@@ -473,14 +575,14 @@ func TestBwrapBuildEnsureReady_RemovesStaleSnapshotBeforeVacuumInto(t *testing.T
 		t.Fatalf("WriteFile(%q) = %v, want nil", dest, err)
 	}
 
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		if name == "sqlite3" {
-			if _, err := os.Stat(dest); err == nil {
-				t.Fatal("dest still exists when sqlite3 invoked — rename-aside must happen before VACUUM INTO")
-			}
+	fakeVacuumInto(t, script, "fresh snapshot", 0, func(tmp string) {
+		if tmp == dest {
+			t.Errorf("VACUUM INTO targets dest %q directly, want a temp sibling", dest)
 		}
-		return exec.Command(script, args...)
-	}
+		if got, err := os.ReadFile(dest); err != nil || string(got) != "stale" {
+			t.Errorf("dest during sqlite3 = %q, %v; want the previous snapshot untouched", got, err)
+		}
+	})
 
 	a := &bwrapBuildAdapter{
 		agentFilesDrv:     "/fake/files.drv",
@@ -490,36 +592,53 @@ func TestBwrapBuildEnsureReady_RemovesStaleSnapshotBeforeVacuumInto(t *testing.T
 		nixConfigFileDrv:  "/fake/nix-config.drv",
 		nixVarSnapshotDir: snapshotDir,
 	}
-	err := a.EnsureReady()
-
-	if err != nil {
+	if err := a.EnsureReady(); err != nil {
 		t.Fatalf("EnsureReady() = %v, want nil", err)
 	}
-	// With the rename-aside design, a successful EnsureReady leaves dest
-	// absent: production moves the pre-existing file to dest+".bak" before
-	// VACUUM INTO, and the fake sqlite3 script (a no-op stub) never itself
-	// creates dest, so nothing recreates it after the rename.
-	if _, statErr := os.Stat(dest); !os.IsNotExist(statErr) {
-		t.Errorf("os.Stat(%q) after EnsureReady = %v, want IsNotExist (fake sqlite3 never creates dest)", dest, statErr)
+	got, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("os.ReadFile(%q) = %v, want the fresh snapshot", dest, err)
+	}
+	if string(got) != "fresh snapshot" {
+		t.Errorf("dest content = %q, want %q", got, "fresh snapshot")
+	}
+	if info, err := os.Stat(dest); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("os.Stat(%q) = %v, %v; want mode 0644, not CreateTemp's 0600", dest, info, err)
+	}
+	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
+		t.Errorf("leftover siblings after success: %v, want none", left)
+	}
+}
+
+// sqlite3 killed alone (SIGKILL, OOM) leaves <tmp>-journal behind while the
+// launcher survives; the sweep skips that name, so the failure path must clear it.
+func TestVacuumStoreDBInto_RemovesJournalOnSqliteFailure(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	dir := t.TempDir()
+	fakeVacuumInto(t, script, "partial", 1, func(tmp string) {
+		if err := os.WriteFile(tmp+"-journal", []byte("journal"), 0o644); err != nil {
+			t.Fatalf("WriteFile journal: %v", err)
+		}
+	})
+
+	if err := vacuumStoreDBInto(dir, installReplace); err == nil {
+		t.Fatal("vacuumStoreDBInto = nil, want the sqlite3 failure")
+	}
+	if left := tempSiblings(t, filepath.Join(dir, "nix", "db")); len(left) != 0 {
+		t.Errorf("leftover temp or journal after failure: %v, want none", left)
 	}
 }
 
 // A failed VACUUM INTO must not destroy a previously-working snapshot. dest
-// is seeded with known content, and the scripted sqlite3 failure must leave
-// that exact content restored, not merely some file present.
-func TestBwrapBuildEnsureReady_RestoresStaleSnapshotOnVacuumIntoFailure(t *testing.T) {
+// is seeded with known content, and the scripted sqlite3 failure (which also
+// leaves partial bytes in the temp) must leave that exact content in place and
+// no temp sibling behind.
+func TestBwrapBuildEnsureReady_KeepsStaleSnapshotOnVacuumIntoFailure(t *testing.T) {
 	script, dir := newFakeCLI(t,
 		fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0}, fakeCall{exit: 0},
-		fakeCall{exit: 0}, fakeCall{exit: 1},
+		fakeCall{exit: 0},
 	)
-	orig := execCommand
-	t.Cleanup(func() { execCommand = orig })
-	origStat := statHostNixDB
-	t.Cleanup(func() { statHostNixDB = origStat })
-	statHostNixDB = func() error { return nil }
-	execCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command(script, args...)
-	}
+	fakeVacuumInto(t, script, "partial", 1, nil)
 
 	snapshotDir := t.TempDir() + "/nix-var-snapshot"
 	dest := filepath.Join(snapshotDir, "nix", "db", "db.sqlite")
@@ -544,15 +663,103 @@ func TestBwrapBuildEnsureReady_RestoresStaleSnapshotOnVacuumIntoFailure(t *testi
 	if err == nil {
 		t.Fatal("EnsureReady() = nil, want error from scripted sqlite3 failure")
 	}
-	if got := callCount(t, dir); got != 6 {
-		t.Errorf("callCount = %d, want 6", got)
+	if got := callCount(t, dir); got != 5 {
+		t.Errorf("callCount = %d, want 5 (the sqlite3 call goes through the stub)", got)
 	}
 	gotContent, readErr := os.ReadFile(dest)
 	if readErr != nil {
-		t.Fatalf("os.ReadFile(%q) after failed EnsureReady = %v, want the previous snapshot restored", dest, readErr)
+		t.Fatalf("os.ReadFile(%q) after failed EnsureReady = %v, want the previous snapshot kept", dest, readErr)
 	}
 	if string(gotContent) != string(wantContent) {
-		t.Errorf("dest content after failed EnsureReady = %q, want original %q (restore must recover the previously-working snapshot)", gotContent, wantContent)
+		t.Errorf("dest content after failed EnsureReady = %q, want original %q", gotContent, wantContent)
+	}
+	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
+		t.Errorf("leftover siblings after failure: %v, want none", left)
+	}
+}
+
+// With no prior snapshot, a failed VACUUM INTO that left partial bytes must
+// leave dest absent (issue #4817): SnapshotGeneration's existence check would
+// otherwise trust the partial file forever, and a second call must re-run
+// sqlite3 rather than skip.
+func TestSnapshotGeneration_FailedVacuumLeavesNoDestAndRetries(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	fakeVacuumInto(t, script, "partial", 1, nil)
+	vacuums := 0
+	inner := execCommand
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		if name == "sqlite3" {
+			vacuums++
+		}
+		return inner(name, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+
+	if err := SnapshotGeneration(pwd, closure); err == nil {
+		t.Fatal("SnapshotGeneration [1st] = nil, want error from scripted sqlite3 failure")
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Errorf("os.Stat(%q) after failed vacuum = %v, want IsNotExist", dest, err)
+	}
+	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
+		t.Errorf("leftover siblings after failure: %v, want none", left)
+	}
+
+	if err := SnapshotGeneration(pwd, closure); err == nil {
+		t.Fatal("SnapshotGeneration [2nd] = nil, want the scripted failure again")
+	}
+	if vacuums != 2 {
+		t.Errorf("sqlite3 invoked %d times, want 2 (2nd call must re-vacuum, not skip on a partial file)", vacuums)
+	}
+}
+
+// Two launchers hot-swapping one closure both see dest missing under the shared
+// lock; the loser must not replace a db.sqlite the winner's live Box already
+// reads (ADR 0043). The stub installs the winner's dest mid-vacuum.
+func TestSnapshotGeneration_DoesNotReplaceConcurrentlyInstalledSnapshot(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+	fakeVacuumInto(t, script, "loser snapshot", 0, func(string) {
+		if err := os.WriteFile(dest, []byte("winner snapshot"), 0o644); err != nil {
+			t.Errorf("WriteFile(%q) = %v, want nil", dest, err)
+		}
+	})
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	got, err := os.ReadFile(dest)
+	if err != nil || string(got) != "winner snapshot" {
+		t.Errorf("dest = %q, %v; want the winner's snapshot left in place", got, err)
+	}
+	if left := tempSiblings(t, filepath.Dir(dest)); len(left) != 0 {
+		t.Errorf("leftover siblings: %v, want none", left)
+	}
+}
+
+// IsReady only stats dest, so after a failed first-time vacuum it must report
+// not-ready rather than trust a partial snapshot (issue #4817).
+func TestBwrapIsReady_FailedVacuumIsNotReady(t *testing.T) {
+	script, _ := newFakeCLI(t, fakeCall{exit: 0})
+	fakeVacuumInto(t, script, "partial", 1, nil)
+
+	snapshotDir := t.TempDir() + "/nix-var-snapshot"
+	if err := vacuumStoreDBInto(snapshotDir, installReplace); err == nil {
+		t.Fatal("vacuumStoreDBInto = nil, want error from scripted sqlite3 failure")
+	}
+
+	a := &bwrapAdapter{nixConfigFile: "/fake/nix.conf", nixVarSnapshotDir: snapshotDir}
+	err := a.IsReady()
+	if err == nil {
+		t.Fatal("IsReady after failed vacuum = nil, want not-ready error")
+	}
+	if !strings.Contains(err.Error(), "launcher build") {
+		t.Errorf("IsReady error %q: want it to hint at running `launcher build`", err.Error())
 	}
 }
 
@@ -1087,9 +1294,9 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 		t.Errorf("callCount = %d, want 1", got)
 	}
 
-	// The fake sqlite3 stub writes nothing, so the file never lands on disk; the
-	// directory MkdirAll'd for real and the argv naming the destination are what
-	// pin SnapshotGeneration onto the derived-generation dir.
+	// The fake sqlite3 stub writes nothing to the temp, so dest is an empty file;
+	// the dir and the argv naming a temp sibling of dest are what pin
+	// SnapshotGeneration onto the derived-generation dir.
 	wantDest := filepath.Join(pwd, ".spindrift", "nix-var-snapshot", "abc-agent-closure", "nix", "db", "db.sqlite")
 	if _, err := os.Stat(filepath.Dir(wantDest)); err != nil {
 		t.Errorf("os.Stat(%q) = %v, want the destination dir created at the derived generation dir", filepath.Dir(wantDest), err)
@@ -1098,8 +1305,8 @@ func TestSnapshotGeneration_WritesDBAtDerivedGenerationDir(t *testing.T) {
 	if len(call) != 2 {
 		t.Fatalf("sqlite3 call argv = %v, want 2 elements (host db path, statement)", call)
 	}
-	if !strings.Contains(call[1], wantDest) {
-		t.Errorf("sqlite3 statement = %q, want it to reference dest %q", call[1], wantDest)
+	if !strings.Contains(call[1], filepath.Join(filepath.Dir(wantDest), vacuumTempPrefix)) {
+		t.Errorf("sqlite3 statement = %q, want it to reference a temp sibling of dest %q", call[1], wantDest)
 	}
 }
 
@@ -1185,7 +1392,7 @@ func TestSnapshotGeneration_NeverReclaimsSiblingGenerations(t *testing.T) {
 // Issue #2682 review Finding B: generations are immutable once created, and a
 // generation already snapshotted by an earlier swap to the same closure (a
 // revert, say) may be --overlay-src-mounted by a live Box. vacuumStoreDBInto
-// would rename the existing db.sqlite aside and write a fresh one, which ADR
+// would replace the existing db.sqlite with a fresh one, which ADR
 // 0043 forbids, so a repeat call must skip the vacuum entirely.
 func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: 0})
@@ -1205,22 +1412,48 @@ func TestSnapshotGeneration_SkipsVacuumWhenAlreadySnapshotted(t *testing.T) {
 		t.Fatalf("SnapshotGeneration(%q, %q) [1st] = %v, want nil", pwd, closure, err)
 	}
 
-	// The fake sqlite3 stub writes nothing, so simulate the first call having
-	// actually produced the snapshot before the second call runs.
-	dest := filepath.Join(nixVarSnapshotDir(pwd, closureGeneration(closure)), "nix", "db", "db.sqlite")
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		t.Fatalf("MkdirAll dest: %v", err)
-	}
-	if err := os.WriteFile(dest, []byte("already snapshotted"), 0o644); err != nil {
-		t.Fatalf("WriteFile dest: %v", err)
-	}
-
+	// The first call installs the (empty) temp as dest, so the second call
+	// finds an existing snapshot without any setup here.
 	if err := SnapshotGeneration(pwd, closure); err != nil {
 		t.Fatalf("SnapshotGeneration(%q, %q) [2nd] = %v, want nil", pwd, closure, err)
 	}
 
 	if got := callCount(t, dir); got != 1 {
 		t.Errorf("callCount = %d, want 1 (2nd call must skip vacuum, dest already exists)", got)
+	}
+}
+
+// A temp leaked by a killed launcher must be swept even when a concurrent
+// launcher already installed dest, which makes SnapshotGeneration skip the vacuum.
+func TestSnapshotGeneration_SweepsStaleTempWhenDestExists(t *testing.T) {
+	script, dir := newFakeCLI(t, fakeCall{exit: 0})
+	orig := execCommand
+	t.Cleanup(func() { execCommand = orig })
+	execCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command(script, args...)
+	}
+
+	pwd := t.TempDir()
+	closure := "/nix/store/abc-agent-closure"
+	dest := snapshotDest(pwd, closure)
+	stale := filepath.Join(filepath.Dir(dest), vacuumTempPrefix+"111")
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{dest, stale} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := SnapshotGeneration(pwd, closure); err != nil {
+		t.Fatalf("SnapshotGeneration = %v, want nil", err)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stale temp stat err = %v, want not-exist (swept)", err)
+	}
+	if got := callCount(t, dir); got != 0 {
+		t.Errorf("callCount = %d, want 0 (dest exists, vacuum skipped)", got)
 	}
 }
 

@@ -355,7 +355,7 @@ func (a *bwrapAdapter) IsReady() error {
 	// MkdirAlls <nixVarSnapshotDir>/nix/db before it writes db.sqlite, so a
 	// dir-only check would report ready on a dir left behind by a failed
 	// snapshot (issue #2664).
-	dbPath := filepath.Join(a.nixVarSnapshotDir, "nix", "db", "db.sqlite")
+	dbPath := filepath.Join(a.nixVarSnapshotDir, "nix", "db", storeDBName)
 	info, err := os.Stat(dbPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1315,7 +1315,10 @@ func SnapshotGeneration(pwd, closurePath string) error {
 	dir := nixVarSnapshotDir(pwd, generation)
 	root := nixVarSnapshotRoot(pwd)
 
-	dest := filepath.Join(dir, "nix", "db", "db.sqlite")
+	dest := filepath.Join(dir, "nix", "db", storeDBName)
+	// Sweep before the existence check: a temp leaked by a killed launcher would
+	// otherwise stay forever once a concurrent launcher has installed dest.
+	sweepStaleVacuumTemps(filepath.Dir(dest))
 	if _, err := os.Stat(dest); err == nil {
 		fmt.Printf("==> bwrap runner: nix-var snapshot for generation %s already exists; skipping vacuum\n", generation)
 		return nil
@@ -1330,7 +1333,7 @@ func SnapshotGeneration(pwd, closurePath string) error {
 	if lockErr != nil {
 		fmt.Printf("==> bwrap runner: warning: could not acquire nix-var snapshot lock %s (%v); a concurrent build cannot detect this generation is mid-write\n", snapshotLockPath(dir), lockErr)
 	}
-	err := vacuumStoreDBInto(dir)
+	err := vacuumStoreDBInto(dir, installIfAbsent)
 	unlockSnapshot(lf)
 	return err
 }
@@ -1344,70 +1347,197 @@ const hostNixDBPath = "/nix/var/nix/db/db.sqlite"
 // a.nixVarSnapshotDir, compacting it in the same step (ADR 0042: ~302MB raw vs
 // ~104MB compacted, and an overlay copy-up rewrites a file whole, so the
 // compacted size is what lands in the Box's tmpfs upper on first touch). VACUUM
-// INTO creates a file owned by the invoking uid, so no explicit chown is needed.
+// INTO fills a temp the launcher itself created, so the snapshot is owned by the
+// invoking uid and no explicit chown is needed.
 func (a *bwrapBuildAdapter) snapshotStoreDB() error {
 	fmt.Println("==> bwrap runner: snapshotting host nix store DB (VACUUMed)")
-	return vacuumStoreDBInto(a.nixVarSnapshotDir)
+	return vacuumStoreDBInto(a.nixVarSnapshotDir, installReplace)
 }
 
-// vacuumStoreDBInto does the VACUUM INTO and backup-rename work against an
-// explicit dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it
-// rather than reaching it only through a bwrapBuildAdapter's baked field (issue
-// #2682). Writes dir/nix/db/db.sqlite, the layout every nixVarSnapshotDir caller
-// expects.
-func vacuumStoreDBInto(dir string) error {
+// snapshotInstall is how vacuumStoreDBInto lands the finished temp on db.sqlite.
+type snapshotInstall int
+
+const (
+	// installReplace renames over an existing db.sqlite: the build path, which
+	// owns the generation.
+	installReplace snapshotInstall = iota
+	// installIfAbsent links only if db.sqlite is absent, never disturbing one a
+	// running Box may be reading (SnapshotGeneration, ADR 0043).
+	installIfAbsent
+)
+
+// vacuumStoreDBInto does the VACUUM INTO and install work against an explicit
+// dir, so the run-time hot-swap caller (SnapshotGeneration) reuses it rather
+// than reaching it only through a bwrapBuildAdapter's baked field (issue
+// #2682). Writes dir/nix/db/db.sqlite, the layout every nixVarSnapshotDir
+// caller expects. mode picks how the finished temp lands on db.sqlite.
+func vacuumStoreDBInto(dir string, mode snapshotInstall) error {
 	if err := statHostNixDB(); err != nil {
 		return fmt.Errorf("host nix store db not found at %s: %w", hostNixDBPath, err)
 	}
 
-	dest := filepath.Join(dir, "nix", "db", "db.sqlite")
+	dest := filepath.Join(dir, "nix", "db", storeDBName)
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("mkdir nix-var-snapshot: %w", err)
 	}
 
-	// "VACUUM INTO" refuses to run when dest already exists, so move an existing
-	// snapshot aside rather than deleting it outright: if the vacuum then fails
-	// (disk full, host db locked), the rename below restores the previously
-	// working snapshot instead of leaving `launcher run` with nothing (#2664).
-	backup := dest + ".bak"
-	hadBackup := false
-	if _, err := os.Stat(dest); err == nil {
-		if err := os.Rename(dest, backup); err != nil {
-			return fmt.Errorf("move aside stale nix store db snapshot %s: %w", dest, err)
-		}
-		hadBackup = true
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("stat nix store db snapshot %s: %w", dest, err)
+	// Vacuum into a temp sibling and install over dest only on success, so dest
+	// only ever names a complete snapshot: SnapshotGeneration's existence check
+	// and IsReady trust it, and a failed vacuum (disk full, host db locked) must
+	// neither leave a partial dest nor destroy a previous one (#2664, #4817).
+	// The name must be unique: concurrent launchers hold only a shared lock.
+	// createLockedVacuumTemp and sweepStaleVacuumTemps cover ownership and the
+	// reclaim of temps a killed launcher leaks.
+	sweepStaleVacuumTemps(filepath.Dir(dest))
+	tmpFile, err := createLockedVacuumTemp(filepath.Dir(dest))
+	if err != nil {
+		return err
+	}
+	defer tmpFile.Close()
+	tmp := tmpFile.Name()
+	// "VACUUM INTO" accepts the empty file CreateTemp leaves and keeps its mode,
+	// so without this chmod CreateTemp's 0600 would carry into the snapshot.
+	if err := tmpFile.Chmod(0o644); err != nil {
+		removeVacuumTemp(tmp)
+		return fmt.Errorf("prepare temp nix store db snapshot %s: %w", tmp, err)
 	}
 
 	// "VACUUM INTO" uses sqlite's online-backup mechanism, so it handles a
 	// concurrent nix-daemon write (WAL not yet checkpointed) that a plain file
 	// copy could snapshot mid-write, and it compacts into the destination in the
-	// same step. dest is escaped for a single-quoted SQL literal; sqlite3's
+	// same step. tmp is escaped for a single-quoted SQL literal; sqlite3's
 	// dot-commands are whitespace-tokenized, but a SQL statement on argv is not.
-	escapedDest := strings.ReplaceAll(dest, "'", "''")
-	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedDest)
+	escapedTmp := strings.ReplaceAll(tmp, "'", "''")
+	stmt := fmt.Sprintf("VACUUM INTO '%s';", escapedTmp)
 	vacuumInto := execCommand("sqlite3", hostNixDBPath, stmt)
 	vacuumInto.Stdout = os.Stdout
 	vacuumInto.Stderr = os.Stderr
 	if err := vacuumInto.Run(); err != nil {
-		wrapped := fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
-		if hadBackup {
-			if restoreErr := os.Rename(backup, dest); restoreErr != nil {
-				return fmt.Errorf("%w (additionally failed to restore previous snapshot from %s to %s: %v)", wrapped, backup, dest, restoreErr)
-			}
-		}
-		return wrapped
+		removeVacuumTemp(tmp)
+		return fmt.Errorf("sqlite3 vacuum-into nix store db snapshot: %w", err)
 	}
 
-	if hadBackup {
-		// Best-effort: a leftover .bak wastes disk but does not break the
-		// snapshot just written to dest.
-		if err := os.Remove(backup); err != nil {
-			fmt.Printf("==> bwrap runner: warning: could not remove backup snapshot %s: %v\n", backup, err)
+	if mode == installReplace {
+		if err := os.Rename(tmp, dest); err != nil {
+			removeVacuumTemp(tmp)
+			return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
 		}
+		return nil
+	}
+
+	// Link, never rename: a concurrent launcher may have installed dest and
+	// started a Box on it, and a swap must not replace a file a running Box is
+	// reading (ADR 0043).
+	err = os.Link(tmp, dest)
+	removeVacuumTemp(tmp)
+	if errors.Is(err, fs.ErrExist) {
+		fmt.Printf("==> bwrap runner: nix-var snapshot %s was installed concurrently; keeping it\n", dest)
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("install nix store db snapshot %s: %w", dest, err)
 	}
 	return nil
+}
+
+// maxVacuumTempAttempts bounds createLockedVacuumTemp's retries against a
+// concurrent sweep.
+const maxVacuumTempAttempts = 3
+
+// createLockedVacuumTemp creates a vacuum temp in dir and returns it holding
+// the exclusive flock that marks it owned. A concurrent sweep can lock and
+// unlink the fresh temp between CreateTemp and Flock, leaving this fd locked on
+// an orphaned inode; lockedFDMatchesPath catches that and retries with a new
+// temp. Once the locked fd matches the path, no sweep can remove it.
+func createLockedVacuumTemp(dir string) (*os.File, error) {
+	for range maxVacuumTempAttempts {
+		f, err := os.CreateTemp(dir, vacuumTempPrefix+"*")
+		if err != nil {
+			return nil, fmt.Errorf("create temp nix store db snapshot: %w", err)
+		}
+		tmp := f.Name()
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			f.Close()
+			removeVacuumTemp(tmp)
+			return nil, fmt.Errorf("lock temp nix store db snapshot %s: %w", tmp, err)
+		}
+		if lockedFDMatchesPath(f, tmp) {
+			return f, nil
+		}
+		f.Close()
+	}
+	return nil, fmt.Errorf("create temp nix store db snapshot in %s: swept by a concurrent launcher across %d attempts", dir, maxVacuumTempAttempts)
+}
+
+// storeDBName is the snapshot file name under <dir>/nix/db; vacuumTempPrefix
+// derives from it.
+const storeDBName = "db.sqlite"
+
+// vacuumTempPrefix names the temp siblings vacuumStoreDBInto writes before
+// installing them over db.sqlite.
+const vacuumTempPrefix = storeDBName + ".tmp-"
+
+// removeVacuumTemp deletes a vacuum temp and its sqlite3 journal, warning on
+// any failure but a file already gone: a leaked temp is ~100MB until the next
+// sweep, and a journal outliving its temp is never swept (see isVacuumTempName).
+func removeVacuumTemp(path string) {
+	for _, p := range []string{path, path + "-journal"} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			fmt.Printf("==> bwrap runner: warning: could not remove temp nix store db snapshot %s: %v\n", p, err)
+		}
+	}
+}
+
+// sweepStaleVacuumTemps removes vacuum temps in dir that no live launcher owns.
+// Ownership is the exclusive flock vacuumStoreDBInto holds on its temp, so a
+// non-blocking exclusive Flock that succeeds means the owner is gone or has not
+// locked yet (it re-checks the path after locking and retries if swept), and
+// EWOULDBLOCK leaves a concurrent launcher's temp alone. Only names CreateTemp
+// can produce (digits after the prefix) count: sqlite3's side files, such as
+// <tmp>-journal, share the prefix but hold no flock, so a live vacuum's journal
+// would otherwise look stale. A stale temp's journal, leaked when sqlite3 died
+// with its launcher, goes with it. Best-effort: errors warn and never fail the
+// vacuum.
+func sweepStaleVacuumTemps(dir string) {
+	matches, err := filepath.Glob(filepath.Join(dir, vacuumTempPrefix+"*"))
+	if err != nil {
+		fmt.Printf("==> bwrap runner: warning: could not list stale temp nix store db snapshots in %s: %v\n", dir, err)
+		return
+	}
+	for _, path := range matches {
+		if !isVacuumTempName(filepath.Base(path)) {
+			continue
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				fmt.Printf("==> bwrap runner: warning: could not open temp nix store db snapshot %s: %v\n", path, err)
+			}
+			continue
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+			removeVacuumTemp(path)
+		} else if !errors.Is(err, syscall.EWOULDBLOCK) {
+			fmt.Printf("==> bwrap runner: warning: could not probe temp nix store db snapshot %s: %v\n", path, err)
+		}
+		f.Close()
+	}
+}
+
+// isVacuumTempName reports whether name has the shape os.CreateTemp gives a
+// vacuum temp: vacuumTempPrefix followed only by decimal digits. It says
+// nothing about ownership, which is the flock.
+func isVacuumTempName(name string) bool {
+	suffix, ok := strings.CutPrefix(name, vacuumTempPrefix)
+	if !ok || suffix == "" {
+		return false
+	}
+	for _, r := range suffix {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // reclaimStaleSnapshots removes generation directories under root that are
