@@ -115,7 +115,7 @@ in
     group = "git";
     flag = "merge-policy";
     default = "manual";
-    doc = "post-green merge policy: immediate (merge on green), auto (enqueue GitHub native auto-merge; repo must have Allow auto-merge enabled), manual (leave PR open for human approval)";
+    doc = "post-green merge policy: immediate (merge on green), auto (enqueue the forge's native auto-merge on github or forgejo; github needs Allow auto-merge enabled, forgejo at least one merge style), manual (leave PR open for human approval)";
     choices = [
       "immediate"
       "auto"
