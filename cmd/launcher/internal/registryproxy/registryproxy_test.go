@@ -904,6 +904,26 @@ func TestNew_EmptyCredentialAttachesNoAuthorizationHeader(t *testing.T) {
 	}
 }
 
+// The TCP gate secret is the inbound listener's own credential; Rewrite strips
+// it itself so no New caller can forward it to a possibly third-party upstream.
+func TestNew_StripsTCPSecretHeaderUpstream(t *testing.T) {
+	var gotSecret string
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		gotSecret = r.Header.Get(registrymanifest.TCPSecretHeader)
+		w.WriteHeader(http.StatusOK)
+	})
+	handler, routes := newPlainProxy(t, plainRoute(upstream.URL))
+
+	req := httptest.NewRequest(http.MethodGet, "/"+routes[0].Prefix+"/crates/foo", nil)
+	req.Header.Set(registrymanifest.TCPSecretHeader, "s3kr1t-tcp-secret")
+	if rr := serve(handler, req); rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if gotSecret != "" {
+		t.Errorf("upstream got %s %q, want none", registrymanifest.TCPSecretHeader, gotSecret)
+	}
+}
+
 // The proxy relays a 3xx rather than following it, so the credential never
 // crosses to the redirect target (ADR 0044). The hit count pins the single
 // hop.
@@ -1290,9 +1310,10 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	const secret = "s3kr1t-tcp-secret"
 	const credential = "real-upstream-registry-credential"
 
-	var gotAuth string
+	var gotAuth, gotSecret string
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
+		gotSecret = r.Header.Get(registrymanifest.TCPSecretHeader)
 		w.Header().Set("X-Test", "yes")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("via tcp"))
@@ -1323,6 +1344,9 @@ func TestListenAndServeTCP_AttachesCredentialUpstreamNeverLeaksToClient(t *testi
 	}
 	if want := "Bearer " + credential; gotAuth != want {
 		t.Errorf("upstream got Authorization %q, want %q (credential must still reach upstream over TCP)", gotAuth, want)
+	}
+	if gotSecret != "" {
+		t.Errorf("upstream got %s %q, want none (TCP gate secret leaked upstream)", registrymanifest.TCPSecretHeader, gotSecret)
 	}
 
 	// Every header is swept, not just Authorization, in case a future change

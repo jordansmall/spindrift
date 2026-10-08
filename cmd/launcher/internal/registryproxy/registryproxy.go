@@ -333,6 +333,13 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 		// own Connection header would have the just-set credential stripped
 		// right back out. Rewrite runs after that stripping.
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			// Deleted first, ahead of any early return, whatever the
+			// credential scheme: the inbound client's own Authorization must
+			// never reach upstream, an unauthenticated pass-through included
+			// (issue #3256 AC 3, ADR 0047), nor the TCP listener's inbound
+			// gate secret, since upstream may be a third party (issue #4806).
+			pr.Out.Header.Del("Authorization")
+			pr.Out.Header.Del(registrymanifest.TCPSecretHeader)
 			// routeLogHandler.ServeHTTP computed the route and stripped
 			// remainder before calling in, so a 404 for an unmatched prefix
 			// never reaches here and the enforcement check and this join
@@ -368,11 +375,6 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 			} else {
 				pr.Out.URL.RawQuery = sel.rs.upstreamQuery + "&" + inboundQuery
 			}
-			// Deleted unconditionally, whatever the scheme: the inbound
-			// client's own Authorization must never reach upstream, an
-			// unauthenticated pass-through included (issue #3256 AC 3, ADR
-			// 0047).
-			pr.Out.Header.Del("Authorization")
 			if sel.rs.headerValue != "" {
 				pr.Out.Header.Set(sel.rs.headerName, sel.rs.headerValue)
 			}
@@ -822,8 +824,9 @@ func (p *Proxy) ListenAndServe(socketPath string) error {
 // because a Box on a docker bridge reaches the host at the bridge IP, not at
 // loopback. A TCP port has no filesystem permissions of its own, so every
 // request must present secret via registrymanifest.TCPSecretHeader before it
-// reaches Handler at all. An empty secret would match an absent header, so it
-// fails closed. Call Addr to learn an ephemeral port's bound address.
+// reaches Handler at all; New's Rewrite strips that header before forwarding
+// upstream. An empty secret would match an absent header, so it fails closed.
+// Call Addr to learn an ephemeral port's bound address.
 func (p *Proxy) ListenAndServeTCP(addr, secret string) error {
 	if secret == "" {
 		return errors.New("registryproxy: refusing to listen on TCP with an empty secret")
