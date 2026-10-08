@@ -315,11 +315,18 @@ type cliFlag struct {
 }
 
 // lookupCliFlag returns the cliFlags row matching arg that is valid after the
-// verb accumulated in remaining, or nil.
+// verb accumulated in remaining, or nil. A verb-scoped row also matches its
+// --flag=value spelling; the verb's own parser validates the value.
 func lookupCliFlag(arg string, remaining []string) *cliFlag {
 	for i := range cliFlags {
 		f := &cliFlags[i]
-		if !f.intercepted && arg == "--"+f.flag && (f.verb == "" || verbSoFar(remaining) == f.verb) {
+		if f.intercepted {
+			continue
+		}
+		if arg == "--"+f.flag && (f.verb == "" || verbSoFar(remaining) == f.verb) {
+			return f
+		}
+		if f.verb != "" && strings.HasPrefix(arg, "--"+f.flag+"=") && verbSoFar(remaining) == f.verb {
 			return f
 		}
 	}
@@ -403,7 +410,7 @@ func parseFlags(args []string) ([]string, error) {
 			}
 			remaining = append(remaining, arg)
 			// A missing value is left for the verb's own parser to report.
-			if f.arg != "" && i < len(args) {
+			if f.arg != "" && !strings.Contains(arg, "=") && i < len(args) {
 				remaining = append(remaining, args[i])
 				i++
 			}
@@ -563,15 +570,19 @@ func secretRequiredThisRun(env string) bool {
 // completions and man page rendered off the same registry.
 func printSubcommands(w io.Writer) {
 	fmt.Fprintln(w, "Subcommands:")
-	for _, e := range subcommandRegistry {
-		left := e.name
+	lefts := make([]string, len(subcommandRegistry))
+	width := 0
+	for i, e := range subcommandRegistry {
+		lefts[i] = e.name
 		if e.usage != "" {
-			left += " " + e.usage
+			lefts[i] += " " + e.usage
 		}
-		// 76 = the 74-char widest name+usage in subcommandRegistry plus a
-		// 2-space gap. TestPrintSubcommands_ExactOutput pins the result;
-		// widen this if a later entry runs longer.
-		fmt.Fprintf(w, "  %-76s%s\n", left, e.doc)
+		width = max(width, len(lefts[i]))
+	}
+	for i, e := range subcommandRegistry {
+		// Two spaces separate the widest name+usage from its doc;
+		// TestPrintSubcommands_ExactOutput pins the result.
+		fmt.Fprintf(w, "  %-*s%s\n", width+2, lefts[i], e.doc)
 	}
 }
 

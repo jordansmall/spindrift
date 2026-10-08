@@ -1,7 +1,7 @@
-Records: 5  Passes: 9  Notional USD: $15.10 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 5
+Records: 8  Passes: 13  Notional USD: $18.65 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 8
 
 ROLE       PASSES  USD     AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
-implement  3       $2.25   $0.75    3.0      3          -
+implement  4       $4.50   $1.12    3.5      3          -
 review     2       $0.75   $0.38    0.8      2          50%
 fix        1       $1.00   $1.00    2.0      1          -
-(none)     3       $11.10  $3.70    0.5      2          -
+(none)     6       $12.40  $2.07    1.3      3          -

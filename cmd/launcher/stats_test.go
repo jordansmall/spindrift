@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -102,7 +103,77 @@ func statsFixtureRoot(t *testing.T) string {
 	// Fix and conflict-resolve logs are satellites of a Dispatch: this one starts
 	// after work:42 and joins it rather than becoming a Record of its own.
 	write("issue-42-fix-1.log", statsResult("2026-10-07T13:00:00Z", 9, 1, 1, 1, "claude-opus"))
+	// The acceptance chain for one key: an earlier research run, quarantined,
+	// then a work run with a fix pass and a conflict-resolve pass that began
+	// after it. Two Records, the satellites joining the work one.
+	write("issue-55.log.prior-run.1",
+		`{"type":"system","timestamp":"2026-10-07T10:00:00Z"}`+"\n",
+		statsAssistant("r"),
+		statsResult("2026-10-07T10:03:00Z", 0.4, 2, 180000, 1200, "claude-sonnet"),
+		"SPINDRIFT_OUTCOME issue=55 landing=none status=recommend note=x\n",
+	)
+	write("issue-55.log",
+		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		`{"type":"system","timestamp":"2026-10-07T14:00:00Z"}`+"\n",
+		statsResult("2026-10-07T14:05:00Z", 2.25, 9, 300000, 4000, "claude-opus"),
+	)
+	write("issue-55-fix-1.log",
+		`{"type":"system","timestamp":"2026-10-07T14:10:00Z"}`+"\n",
+		statsResult("2026-10-07T14:12:00Z", 0.6, 3, 120000, 1500, "claude-opus"),
+	)
+	write("issue-55-conflict-resolve.log",
+		`{"type":"system","timestamp":"2026-10-07T14:20:00Z"}`+"\n",
+		statsResult("2026-10-07T14:21:00Z", 0.3, 2, 60000, 700, "claude-sonnet"),
+	)
+	// No result event: a Record that cost nothing.
+	write("issue-60.log", `{"type":"system","timestamp":"2026-10-07T15:00:00Z"}`+"\n")
 	return root
+}
+
+// statsSecondRoot is a small root of its own, as a Daemon checkout would be:
+// one research Dispatch and one work Dispatch.
+func statsSecondRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := hostpaths.LogDir(root)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	logs := map[string]string{
+		"issue-8.log": `{"type":"system","timestamp":"2026-10-07T12:35:30Z"}` + "\n" +
+			statsResult("2026-10-07T12:36:30Z", 0.2, 1, 60000, 800, "claude-sonnet") +
+			"SPINDRIFT_OUTCOME issue=8 landing=none status=reject note=y\n",
+		"issue-9.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+			`{"type":"system","timestamp":"2026-10-08T08:00:00Z"}` + "\n" +
+			statsResult("2026-10-08T08:10:00Z", 1.1, 5, 600000, 2500, "claude-opus"),
+	}
+	for name, content := range logs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+// statsNormalize swaps each temp root's absolute path for a stable
+// placeholder so goldens do not embed a per-run directory.
+func statsNormalize(out string, roots map[string]string) string {
+	for placeholder, root := range roots {
+		out = strings.ReplaceAll(out, root, placeholder)
+	}
+	return out
+}
+
+// statsGolden compares got with the named golden under testdata/golden.
+func statsGolden(t *testing.T, name, got string) {
+	t.Helper()
+	// runStats changes directory, so resolve the golden directory from the
+	// test's source location.
+	_, file, _, _ := runtime.Caller(0)
+	path := filepath.Join(filepath.Dir(file), "testdata", "golden", name)
+	if err := golden.CompareOrUpdateText(path, []byte(got), golden.Update()); err != nil {
+		t.Error(err)
+	}
 }
 
 func runStats(t *testing.T, root string, args ...string) (string, string) {
@@ -117,21 +188,12 @@ func runStats(t *testing.T, root string, args ...string) (string, string) {
 
 func TestStats_Golden(t *testing.T) {
 	root := statsFixtureRoot(t)
-	update := golden.Update()
-	// runStats changes directory, so pin the golden directory first.
-	goldenDir, err := filepath.Abs("testdata/golden")
-	if err != nil {
-		t.Fatal(err)
-	}
+	roots := map[string]string{"$ROOT": root}
 
 	text, _ := runStats(t, root)
-	if err := golden.CompareOrUpdateText(filepath.Join(goldenDir, "stats.txt"), []byte(text), update); err != nil {
-		t.Error(err)
-	}
+	statsGolden(t, "stats.txt", statsNormalize(text, roots))
 	jsonl, _ := runStats(t, root, "--json")
-	if err := golden.CompareOrUpdateText(filepath.Join(goldenDir, "stats.jsonl"), []byte(jsonl), update); err != nil {
-		t.Error(err)
-	}
+	statsGolden(t, "stats.jsonl", statsNormalize(jsonl, roots))
 
 	// A second run must neither duplicate nor re-parse: rewrite a log's
 	// content with its size and mtime preserved, so only a re-parse could
@@ -282,5 +344,162 @@ func TestRenderStats_LandedKeysAndSourceMix(t *testing.T) {
 	}
 	if strings.HasPrefix(strings.Split(buf.String(), "\n")[1], "Landed") {
 		t.Errorf("landed keys must ride the summary line, not a second line:\n%s", buf.String())
+	}
+}
+
+func TestStats_MultiRootGolden(t *testing.T) {
+	a, b := statsFixtureRoot(t), statsSecondRoot(t)
+	roots := map[string]string{"$ROOT_A": a, "$ROOT_B": b}
+
+	text, _ := runStats(t, a, "--root", a, "--root", b)
+	statsGolden(t, "stats-multiroot.txt", statsNormalize(text, roots))
+	jsonl, _ := runStats(t, a, "--root", a, "--root="+b, "--json")
+	statsGolden(t, "stats-multiroot.jsonl", statsNormalize(jsonl, roots))
+
+	if !strings.Contains(jsonl, `"root":`+fmt.Sprintf("%q", a)) || !strings.Contains(jsonl, `"root":`+fmt.Sprintf("%q", b)) {
+		t.Errorf("--json output does not tag Records with both roots:\n%s", jsonl)
+	}
+	// Naming a root twice must not double its Records.
+	if again, _ := runStats(t, a, "--root", a, "--root", b, "--root", a, "--json"); again != jsonl {
+		t.Errorf("duplicate --root changed the output:\n%s\nwant\n%s", again, jsonl)
+	}
+}
+
+func TestStats_FilterGolden(t *testing.T) {
+	a, b := statsFixtureRoot(t), statsSecondRoot(t)
+	roots := map[string]string{"$ROOT_A": a, "$ROOT_B": b}
+
+	since, _ := runStats(t, a, "--root", a, "--root", b, "--since", "2026-10-07T14:00:00Z", "--json")
+	statsGolden(t, "stats-since.jsonl", statsNormalize(since, roots))
+	if eq, _ := runStats(t, a, "--root", a, "--root", b, "--since=2026-10-07T14:00:00Z", "--json"); eq != since {
+		t.Errorf("--since=value differs from --since value")
+	}
+
+	kind, _ := runStats(t, a, "--root", a, "--root", b, "--kind", "research")
+	statsGolden(t, "stats-kind-research.txt", statsNormalize(kind, roots))
+	kindJSON, _ := runStats(t, a, "--root", a, "--root", b, "--kind", "research", "--json")
+	statsGolden(t, "stats-kind-research.jsonl", statsNormalize(kindJSON, roots))
+}
+
+func TestStats_SinceTakesADate(t *testing.T) {
+	root := statsFixtureRoot(t)
+	day, _ := runStats(t, root, "--since", "2026-10-07", "--json")
+	exact, _ := runStats(t, root, "--since", "2026-10-07T00:00:00Z", "--json")
+	if day != exact {
+		t.Errorf("--since 2026-10-07 differs from midnight UTC:\n%s\nwant\n%s", day, exact)
+	}
+	if strings.Contains(day, "2026-10-06") || strings.Contains(day, "2026-10-05") {
+		t.Errorf("--since 2026-10-07 kept an earlier Record:\n%s", day)
+	}
+	if !strings.Contains(day, "2026-10-07T12:34:56.789Z") {
+		t.Errorf("--since 2026-10-07 dropped a Record on that day:\n%s", day)
+	}
+}
+
+func TestStats_ExcludingInferredKeepsStamped(t *testing.T) {
+	root := statsFixtureRoot(t)
+	claim := time.Date(2026, 10, 7, 16, 0, 0, 0, time.UTC)
+	id := dispatchrecord.RecordID("work", "70", claim)
+	stamped := statsOp(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
+		RecordID: id, Kind: "work", DispatchKey: "70", ClaimTime: claim, Started: claim,
+	}}) + `{"type":"system","timestamp":"2026-10-07T16:00:01Z"}` + "\n" +
+		statsResult("2026-10-07T16:05:00Z", 0.5, 2, 60000, 900, "claude-opus")
+	logPath := filepath.Join(hostpaths.LogDir(root), "issue-70.log")
+	if err := os.WriteFile(logPath, []byte(stamped), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, _ := runStats(t, root, "--include-inferred=false", "--json")
+	lines := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(lines) != 1 {
+		t.Fatalf("--include-inferred=false --json emitted %d lines, want the one stamped Record:\n%s", len(lines), out)
+	}
+	var rec struct {
+		ID          string `json:"record_id"`
+		Attribution string `json:"attribution"`
+	}
+	if err := json.Unmarshal([]byte(lines[0]), &rec); err != nil {
+		t.Fatalf("decoding %q: %v", lines[0], err)
+	}
+	if rec.ID != id || rec.Attribution != dispatchrecord.AttributionStamped {
+		t.Errorf("kept Record = %+v, want id %q attribution %q", rec, id, dispatchrecord.AttributionStamped)
+	}
+	text, _ := runStats(t, root, "--include-inferred=false")
+	if !strings.Contains(text, "Records: 1  ") {
+		t.Errorf("--include-inferred=false summary lacks Records: 1:\n%s", text)
+	}
+
+	def, _ := runStats(t, root, "--json")
+	for _, want := range []string{id, `"attribution":"inferred"`, `"attribution":"stamped"`} {
+		if !strings.Contains(def, want) {
+			t.Errorf("default output lacks %s:\n%s", want, def)
+		}
+	}
+	if withAll, _ := runStats(t, root, "--include-inferred=true", "--json"); withAll != def {
+		t.Errorf("--include-inferred=true = %q, want the default output %q", withAll, def)
+	}
+}
+
+func TestStats_RejectsBadArguments(t *testing.T) {
+	t.Chdir(t.TempDir())
+	for _, args := range [][]string{
+		{"--since", "yesterday"},
+		{"--since"},
+		{"--root"},
+		{"--kind", ""},
+		{"--kind", "wrok"},
+		{"--include-inferred=maybe"},
+		{"--json=1"},
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := mainRun(append([]string{"stats"}, args...), &stdout, &stderr); code != 1 {
+			t.Errorf("stats %v exit = %d, want 1; stderr=%q", args, code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "usage: spindrift stats") {
+			t.Errorf("stats %v stderr lacks usage: %q", args, stderr.String())
+		}
+	}
+}
+
+func TestStats_RejectsMissingRoot(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-checkout")
+	t.Chdir(t.TempDir())
+	var stdout, stderr bytes.Buffer
+	if code := mainRun([]string{"stats", "--root", missing}, &stdout, &stderr); code != 1 {
+		t.Errorf("exit = %d, want 1; stderr=%q", code, stderr.String())
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Errorf("stats created the missing root %s (stat err %v)", missing, err)
+	}
+}
+
+func TestStats_RejectsNonDirectoryRootWithRealError(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "plain-file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "no-such-checkout")
+	t.Chdir(t.TempDir())
+	for root, want := range map[string]string{file: "not a directory", missing: "no such file"} {
+		var stdout, stderr bytes.Buffer
+		if code := mainRun([]string{"stats", "--root", root}, &stdout, &stderr); code != 1 {
+			t.Errorf("root %s exit = %d, want 1", root, code)
+		}
+		if !strings.Contains(stderr.String(), want) {
+			t.Errorf("root %s stderr = %q, want it to contain %q", root, stderr.String(), want)
+		}
+	}
+}
+
+func TestStats_SymlinkedRootCountsOnce(t *testing.T) {
+	a := statsFixtureRoot(t)
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(a, link); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := runStats(t, a, "--root", a, "--json")
+	got, _ := runStats(t, a, "--root", a, "--root", link, "--json")
+	if got != want {
+		t.Errorf("a symlinked second root changed the output:\n%s\nwant\n%s", got, want)
 	}
 }
