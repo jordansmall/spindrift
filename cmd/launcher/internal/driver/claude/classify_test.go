@@ -538,6 +538,23 @@ func TestClassify_DispatchStartStampIsNotScanned(t *testing.T) {
 	}
 }
 
+// dispatch_settled carries Box-authored note text, so it is skipped too.
+func TestClassify_DispatchSettledIsNotScanned(t *testing.T) {
+	settled := claude.EncodeSpindriftOp(claude.SpindriftOp{
+		Op:      "dispatch_settled",
+		Settled: &claude.DispatchSettled{State: "failed", Note: "Overloaded; connection refused"},
+	})
+	logPath := claude.WriteLog(t, strings.TrimSuffix(settled, "\n"))
+
+	c, err := claude.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != driverkit.Terminal || c.Reason != driverkit.TaskFailed {
+		t.Errorf("Classify() = %+v, want Terminal/TaskFailed", c)
+	}
+}
+
 func TestClassify(t *testing.T) {
 	for _, tc := range classifyTests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -623,8 +623,8 @@ func TestStoreMigratesV1Database(t *testing.T) {
 
 	s := openStore(t, root)
 	var v int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 4 {
-		t.Fatalf("user_version = %d, err %v; want 4", v, err)
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != len(migrations) || v != 5 {
+		t.Fatalf("user_version = %d, err %v; want 5", v, err)
 	}
 	recs := records(t, s)
 	if len(recs) != 1 || len(recs[0].Passes) != 1 {
@@ -683,5 +683,33 @@ func TestStoreReparsesV1IngestedLogAfterMigration(t *testing.T) {
 	}
 	if n := ingest(t, s); n != 0 {
 		t.Fatalf("second ingest parsed = %d, want 0", n)
+	}
+}
+
+func TestStoreMigratesV3DatabaseWithOutcomeDefaults(t *testing.T) {
+	root := t.TempDir()
+	path := hostpaths.DispatchRecordsDB(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := append([]string{}, migrations[:3]...)
+	stmts = append(stmts, "PRAGMA user_version = 3",
+		`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome) VALUES ('work:1@x', 'work', '1', 1000, 'inferred', 'unknown')`)
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	s := openStore(t, root)
+	recs := records(t, s)
+	if len(recs) != 1 || recs[0].Outcome != OutcomeUnknown || recs[0].OutcomeSource != OutcomeSourceNone ||
+		recs[0].Reason != "" || recs[0].BoxStatus != "" {
+		t.Fatalf("records = %+v", recs)
 	}
 }

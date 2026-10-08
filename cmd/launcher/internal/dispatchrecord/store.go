@@ -106,6 +106,13 @@ var migrations = []string{
 		hash      TEXT NOT NULL,
 		PRIMARY KEY (record_id, log_start, role)
 	);`,
+	// v5: the host's dispatch_settled outcome (issue #4785). outcome_source
+	// 'none' is OutcomeSourceNone, the value for every pre-v5 row.
+	`ALTER TABLE records ADD COLUMN outcome_source TEXT NOT NULL DEFAULT 'none';
+	ALTER TABLE records ADD COLUMN reason TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN note TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN pr_url TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN box_status TEXT NOT NULL DEFAULT '';`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -311,12 +318,26 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 		if err != nil {
 			return err
 		}
+		// The outcome group is kept unless this log carries the settled outcome:
+		// the Record's other logs (fix, conflict-resolve) never see it.
+		keep := func(col string) string {
+			return col + ` = CASE WHEN excluded.outcome_source = '` + OutcomeSourceSettled +
+				`' THEN excluded.` + col + ` ELSE records.` + col + ` END`
+		}
 		if _, err := tx.Exec(
-			`INSERT OR REPLACE INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
-				revision, driver, driver_version, role_models, knobs)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
+				revision, driver, driver_version, role_models, knobs,
+				outcome_source, reason, note, pr_url, box_status)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(record_id) DO UPDATE SET
+				kind = excluded.kind, dispatch_key = excluded.dispatch_key, claim_time = excluded.claim_time,
+				attribution = excluded.attribution, revision = excluded.revision, driver = excluded.driver,
+				driver_version = excluded.driver_version, role_models = excluded.role_models, knobs = excluded.knobs,
+				`+strings.Join([]string{keep("outcome"), keep("outcome_source"), keep("reason"), keep("note"),
+				keep("pr_url"), keep("box_status")}, ", "),
 			rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
-			rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs); err != nil {
+			rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
+			rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus); err != nil {
 			return err
 		}
 		for _, p := range rec.Passes {
@@ -367,6 +388,7 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 func (s *Store) Records() ([]Record, error) {
 	rows, err := s.db.Query(
 		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
+			 outcome_source, reason, note, pr_url, box_status,
 			 revision, driver, driver_version, role_models, knobs
 		 FROM records ORDER BY claim_time, record_id`)
 	if err != nil {
@@ -379,6 +401,7 @@ func (s *Store) Records() ([]Record, error) {
 		var ms int64
 		var roleModels, knobs string
 		if err := rows.Scan(&r.ID, &r.Kind, &r.DispatchKey, &ms, &r.Attribution, &r.Outcome,
+			&r.OutcomeSource, &r.Reason, &r.Note, &r.PRURL, &r.BoxStatus,
 			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs); err != nil {
 			rows.Close()
 			return nil, err

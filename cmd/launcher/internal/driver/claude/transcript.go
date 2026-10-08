@@ -72,7 +72,8 @@ type CacheCreation struct {
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", "run_state_error", "pass_usage", "land_delta",
-	// "delta_review_trigger", "signal", "dispatch_start", or "prompt_hashes".
+	// "delta_review_trigger", "signal", "dispatch_start", "prompt_hashes", or
+	// OpDispatchSettled (Settled carries its payload).
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -119,6 +120,9 @@ type SpindriftOp struct {
 	// PromptHashes carries the Box's per-role prompt template hashes on a
 	// "prompt_hashes" op; nil on every other op kind.
 	PromptHashes *PromptHashes `json:"prompt_hashes,omitempty"`
+	// Settled carries a Dispatch's terminal state on a "dispatch_settled" op;
+	// nil on every other op kind.
+	Settled *DispatchSettled `json:"dispatch_settled,omitempty"`
 }
 
 // PromptHashes is the payload of a "prompt_hashes" SpindriftOp (issue #4786),
@@ -130,6 +134,28 @@ type SpindriftOp struct {
 type PromptHashes struct {
 	RecordID string            `json:"record_id"`
 	Roles    map[string]string `json:"roles"`
+}
+
+// OpDispatchSettled is the SpindriftOp.Op of the host's terminal-state record.
+const OpDispatchSettled = "dispatch_settled"
+
+// OpDispatchStart is the SpindriftOp.Op of the Dispatch identity stamp.
+const OpDispatchStart = "dispatch_start"
+
+// DispatchSettled is the payload of a "dispatch_settled" SpindriftOp (issue
+// #4785), appended by the host to the primary Pass log when settle flushes the
+// Dispatch's terminal state. It is the only source a Dispatch Record takes its
+// outcome from; RecordID ties it to the dispatch_start stamp of that log.
+type DispatchSettled struct {
+	RecordID string `json:"record_id"`
+	// State is forge.DispatchState.String(): complete, failed, recoverable, or
+	// ambiguous.
+	State string `json:"state"`
+	// Reason is settle's status vocabulary, e.g. fix-exhausted, ci-red,
+	// merge-guard-hit, budget-exhausted, merged.
+	Reason string `json:"reason,omitempty"`
+	Note   string `json:"note,omitempty"`
+	PRURL  string `json:"pr_url,omitempty"`
 }
 
 // DispatchStart is the payload of a "dispatch_start" SpindriftOp (issue

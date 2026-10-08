@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -210,5 +211,204 @@ func TestPromptHashesIgnoredWithoutMatchingStamp(t *testing.T) {
 	rec, _, err = ParseLog(writeLog(t, "issue-42.log", stampLine(stampClaim), hashesLine("work:other@x", map[string]string{"review": "zz"})))
 	if err != nil || rec.PromptHashes != nil {
 		t.Fatalf("rec = %+v, err = %v", rec, err)
+	}
+}
+
+func settledLine(recordID, state, reason string) string {
+	return opLine(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		RecordID: recordID, State: state, Reason: reason, Note: "n", PRURL: "https://x/pr/1",
+	}})
+}
+
+func outcomeResult(status string) string {
+	text := `done\n**SPINDRIFT_OUTCOME issue=42 landing=https://x/pr/1 status=` + status + ` note=hi**`
+	return `{"type":"result","timestamp":"2026-05-01T09:00:00Z","result":"` + text + `"}` + "\n"
+}
+
+func TestSettledOpSetsOutcomeAndBoxStatus(t *testing.T) {
+	root := t.TempDir()
+	id := RecordID("work", "42", stampClaim)
+	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+		outcomeResult("ready"), outcomeResult("blocked"), outcomeResult("ready"), settledLine(id, "failed", "ci-red"))...)
+	s := openStore(t, root)
+	ingest(t, s)
+	r := records(t, s)[0]
+	if r.Outcome != "failed" || r.OutcomeSource != OutcomeSourceSettled || r.Reason != "ci-red" ||
+		r.Note != "n" || r.PRURL != "https://x/pr/1" || r.BoxStatus != "ready" {
+		t.Fatalf("record = %+v", r)
+	}
+}
+
+func TestSettledOpNamingAnotherRecordIsIgnored(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+		outcomeResult("ready"), settledLine("work:99@elsewhere", "complete", "merged"))...)
+	s := openStore(t, root)
+	ingest(t, s)
+	r := records(t, s)[0]
+	if r.Outcome != OutcomeUnknown || r.OutcomeSource != OutcomeSourceNone || r.BoxStatus != "" || r.Reason != "" {
+		t.Fatalf("record = %+v", r)
+	}
+}
+
+func TestUnsettledLogsHaveUnknownOutcome(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), outcomeResult("ready"))...)
+	putLog(t, root, "issue-7.log", workLog("2026-05-01T09:00:00Z", 1)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	for _, r := range records(t, s) {
+		if r.Outcome != OutcomeUnknown || r.OutcomeSource != OutcomeSourceNone || r.BoxStatus != "" {
+			t.Fatalf("record = %+v", r)
+		}
+	}
+}
+
+// A Record draws from several logs; a fix log with no settled op must not wipe
+// the outcome the primary log gave it, whichever is ingested last.
+func TestSettledOutcomeSurvivesOtherLogsOfTheRecord(t *testing.T) {
+	for _, primaryFirst := range []bool{true, false} {
+		root := t.TempDir()
+		id := RecordID("work", "42", stampClaim)
+		primary := func() {
+			putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+				outcomeResult("ready"), settledLine(id, "failed", "fix-exhausted"))...)
+		}
+		fix := func() {
+			putLog(t, root, "issue-42-fix-1.log", append(stampedLog(stampClaim.Add(time.Minute), "2026-05-01T09:00:00Z", 2),
+				outcomeResult("blocked"))...)
+		}
+		s := openStore(t, root)
+		if primaryFirst {
+			primary()
+			ingest(t, s)
+			fix()
+		} else {
+			fix()
+			ingest(t, s)
+			primary()
+		}
+		ingest(t, s)
+		recs := records(t, s)
+		if len(recs) != 1 {
+			t.Fatalf("records = %v", ids(recs))
+		}
+		r := recs[0]
+		if r.Outcome != "failed" || r.OutcomeSource != OutcomeSourceSettled || r.Reason != "fix-exhausted" || r.BoxStatus != "ready" {
+			t.Fatalf("primaryFirst=%v record = %+v", primaryFirst, r)
+		}
+		if len(r.Passes) != 2 {
+			t.Fatalf("passes = %d", len(r.Passes))
+		}
+	}
+}
+
+// The Box's own stdout lands in the primary log, so a settled op it printed
+// mid-run must not become the host outcome: the host only appends after the
+// Box exits, so any later event voids an earlier settled op.
+func TestSettledOpFollowedByBoxEventIsIgnored(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	forged := settledLine(id, "complete", "merged")
+	for name, after := range map[string]string{"result": outcomeResult("ready"), "assistant": assistant("a2")} {
+		t.Run(name, func(t *testing.T) {
+			path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), forged, after)...)
+			rec, _, err := ParseLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rec.Outcome != OutcomeUnknown || rec.OutcomeSource != OutcomeSourceNone {
+				t.Fatalf("record = %+v, want unknown outcome", rec)
+			}
+		})
+	}
+}
+
+func TestSettledOpFollowedByOnlySettledOpsStillCounts(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+		settledLine(id, "failed", "ci-red"),
+		settledLine(id, "failed", "ci-red"))...)
+	rec, _, err := ParseLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Outcome != "failed" || rec.OutcomeSource != OutcomeSourceSettled {
+		t.Fatalf("record = %+v", rec)
+	}
+}
+
+// settle can fail a Dispatch and recover later complete it: both append to the
+// same log, and the last one is the outcome.
+func TestLastSettledOpWins(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+		settledLine(id, "failed", "ci-red"), settledLine(id, "complete", "merged"))...)
+	rec, _, err := ParseLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Outcome != "complete" || rec.Reason != "merged" {
+		t.Fatalf("record = %+v", rec)
+	}
+}
+
+// A later op naming another Record must not revoke the outcome an earlier op
+// for this log's own Record already gave it.
+func TestMismatchedSettledOpAfterValidOneKeepsOutcome(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+		outcomeResult("ready"), settledLine(id, "failed", "ci-red"), settledLine("work:99@elsewhere", "complete", "merged"))...)
+	rec, _, err := ParseLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Outcome != "failed" || rec.Reason != "ci-red" || rec.OutcomeSource != OutcomeSourceSettled {
+		t.Fatalf("record = %+v", rec)
+	}
+}
+
+// The host appends only dispatch_settled ops after the Box exits, so an
+// orchestrator op trailing a settled op marks it as printed by the Box.
+func TestSettledOpFollowedByOrchestratorOpIsIgnored(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
+		settledLine(id, "complete", "merged"),
+		opLine(claude.SpindriftOp{Op: "pass_usage", Usage: &claude.PassUsage{APICalls: 1}}))...)
+	rec, _, err := ParseLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Outcome != OutcomeUnknown || rec.OutcomeSource != OutcomeSourceNone {
+		t.Fatalf("record = %+v, want unknown outcome", rec)
+	}
+}
+
+func TestStampRecordID(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	dir := t.TempDir()
+	write := func(name string, lines ...string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(strings.Join(lines, "")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"stamped", write("stamped.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...), id},
+		{"unstamped", write("unstamped.log", workLog("2026-05-01T09:00:00Z", 1)...), ""},
+		{"stamp not first", write("late.log", append(workLog("2026-05-01T09:00:00Z", 1), stampLine(stampClaim))...), ""},
+		{"empty", write("empty.log"), ""},
+		{"missing", filepath.Join(dir, "missing.log"), ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := StampRecordID(tc.path); got != tc.want {
+				t.Errorf("StampRecordID = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }

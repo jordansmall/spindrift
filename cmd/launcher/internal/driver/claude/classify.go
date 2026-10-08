@@ -128,9 +128,9 @@ func scanLog(logPath string, now time.Time) (scanResult, error) {
 	var echoReason driverkit.Reason
 	var echoPending bool
 	extract := func(chunk string) driverkit.ScanDecision {
-		if isDispatchStartOp(chunk) {
-			// Host-written, and its knob values are operator text: scanning
-			// it could turn a terminal failure into retries.
+		if isHostOp(chunk) {
+			// Host-written; knob values and the settle note are operator or Box
+			// text: scanning them could turn a terminal failure into retries.
 			return driverkit.ScanDecision{Skip: true}
 		}
 		if isAgentContentEvent(chunk) {
@@ -173,13 +173,14 @@ func scanLog(logPath string, now time.Time) (scanResult, error) {
 	return scanResult{cl: cl, found: found, resetsAt: resetsAt}, nil
 }
 
-// isDispatchStartOp reports whether chunk is the host's dispatch_start stamp.
-func isDispatchStartOp(chunk string) bool {
+// isHostOp reports whether chunk is the host's dispatch_start stamp or
+// dispatch_settled record.
+func isHostOp(chunk string) bool {
 	var ev Event
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
 		return false
 	}
-	return ev.Type == "spindrift_op" && ev.SpindriftOp != nil && ev.SpindriftOp.Op == "dispatch_start"
+	return ev.Type == "spindrift_op" && ev.SpindriftOp != nil && (ev.SpindriftOp.Op == OpDispatchStart || ev.SpindriftOp.Op == OpDispatchSettled)
 }
 
 // agentContentEvent is the minimal stream-json envelope for telling

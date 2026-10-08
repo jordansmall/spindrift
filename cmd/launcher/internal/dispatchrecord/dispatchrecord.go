@@ -3,6 +3,8 @@
 package dispatchrecord
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 )
 
@@ -36,6 +39,11 @@ const (
 	// OutcomeUnknown is the value of a Record's outcome field when the log
 	// does not say how the Dispatch ended; unrelated to KindUnknown.
 	OutcomeUnknown = "unknown"
+	// OutcomeSourceSettled marks an Outcome taken from the host's dispatch_settled
+	// op (issue #4785), the only source an Outcome has.
+	OutcomeSourceSettled = "dispatch_settled"
+	// OutcomeSourceNone marks a Record no log gave an Outcome.
+	OutcomeSourceNone = "none"
 )
 
 // Pass is the spend of one pass within a Dispatch.
@@ -67,7 +75,16 @@ type Record struct {
 	ClaimTime   time.Time `json:"claim_time"`
 	Attribution string    `json:"attribution"`
 	Outcome     string    `json:"outcome"`
-	Passes      []Pass    `json:"passes"`
+	// OutcomeSource names where Outcome came from: OutcomeSourceSettled for the
+	// host's dispatch_settled op, OutcomeSourceNone when no log said.
+	OutcomeSource string `json:"outcome_source"`
+	Reason        string `json:"reason,omitempty"`
+	Note          string `json:"note,omitempty"`
+	PRURL         string `json:"pr_url,omitempty"`
+	// BoxStatus is the Box's own SPINDRIFT_OUTCOME status= self-report; it never
+	// stands in for Outcome.
+	BoxStatus string `json:"box_status,omitempty"`
+	Passes    []Pass `json:"passes"`
 
 	// Stamped Records only: what the host recorded about the Dispatch.
 	Revision      string            `json:"revision,omitempty"`
@@ -177,6 +194,33 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 	return rec, provisional, err
 }
 
+// StampRecordID returns the Record ID of the log's leading dispatch_start
+// stamp, "" when the log is missing, empty, or does not open with one. It
+// decodes only the first event, by the same rule parseLog applies.
+func StampRecordID(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	br := bufio.NewReader(f)
+	for {
+		line, isPrefix, err := br.ReadLine()
+		if err != nil || isPrefix {
+			// A stamp is a short line; an oversized one is Box output.
+			return ""
+		}
+		var ev logLine
+		if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type == "" {
+			continue
+		}
+		if op := ev.SpindriftOp; ev.Type == "spindrift_op" && op != nil && op.Op == claude.OpDispatchStart && op.Start != nil {
+			return op.Start.RecordID
+		}
+		return ""
+	}
+}
+
 // parseLog is ParseLog plus the log's segment identity: the stamp's Started, or
 // the claim time of an inferred Record. It keys the log's passes within a
 // Record that several logs contribute to.
@@ -198,7 +242,10 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		stamp     *claude.DispatchStart
 		// hashes holds reported prompt hashes by the record_id they claim, since
 		// the op need not follow the stamp it must match.
-		hashes = map[string]map[string]string{}
+		hashes  = map[string]map[string]string{}
+		settled *claude.DispatchSettled
+		// boxStatus is the status of the last SPINDRIFT_OUTCOME line in any result.
+		boxStatus string
 		// pendingDispositions holds a fix pass's Write to the dispositions file,
 		// by tool_use ID, until its tool_result shows the Write took effect.
 		pendingDispositions = map[string]string{}
@@ -224,6 +271,11 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		}
 		first := !sawEvent
 		sawEvent = true
+		// The host appends only dispatch_settled ops after the Box exits, so
+		// anything else after a settled op means the Box printed it.
+		if ev.Type != "spindrift_op" || ev.SpindriftOp == nil || ev.SpindriftOp.Op != claude.OpDispatchSettled {
+			settled = nil
+		}
 		if ev.Timestamp != "" && !haveTS {
 			if t, perr := time.Parse(time.RFC3339Nano, ev.Timestamp); perr == nil {
 				firstTS, haveTS = t, true
@@ -236,7 +288,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 				return
 			}
 			switch op.Op {
-			case "dispatch_start":
+			case claude.OpDispatchStart:
 				if first && op.Start != nil && op.Start.RecordID != "" {
 					stamp = op.Start
 				}
@@ -246,6 +298,12 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 						hashes[h.RecordID] = map[string]string{}
 					}
 					maps.Copy(hashes[h.RecordID], h.Roles)
+				}
+			case claude.OpDispatchSettled:
+				// An op naming another Record is not this log's to claim, and
+				// must not displace one that is.
+				if op.Settled != nil && stamp != nil && op.Settled.RecordID == stamp.RecordID {
+					settled = op.Settled
 				}
 			case "pass_start":
 				if !sawStart {
@@ -313,6 +371,11 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			}
 		case "result":
 			cur.results++
+			if line := outcome.ExtractOutcomeLine(outcome.StripResultText(ev.Result)); line != "" {
+				if o, perr := outcome.Parse(line); perr == nil {
+					boxStatus = o.Status
+				}
+			}
 			if passmachine.Role(cur.Role).IsReview() {
 				cur.VerdictText = ev.Result
 			}
@@ -339,13 +402,14 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 
 	if stamp != nil {
 		claim := stamp.ClaimTime.UTC()
-		return Record{
+		rec := Record{
 			ID:            stamp.RecordID,
 			Kind:          stamp.Kind,
 			DispatchKey:   stamp.DispatchKey,
 			ClaimTime:     claim,
 			Attribution:   AttributionStamped,
 			Outcome:       OutcomeUnknown,
+			OutcomeSource: OutcomeSourceNone,
 			Passes:        passes,
 			Revision:      stamp.Revision,
 			Driver:        stamp.Driver,
@@ -353,7 +417,14 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			RoleModels:    stamp.RoleModels,
 			Knobs:         stamp.Knobs,
 			PromptHashes:  hashes[stamp.RecordID],
-		}, false, stamp.Started.UTC(), nil
+		}
+		// Only the log settle read (the one carrying it) speaks for BoxStatus.
+		if settled != nil {
+			rec.Outcome, rec.OutcomeSource = settled.State, OutcomeSourceSettled
+			rec.Reason, rec.Note, rec.PRURL = settled.Reason, settled.Note, settled.PRURL
+			rec.BoxStatus = boxStatus
+		}
+		return rec, false, stamp.Started.UTC(), nil
 	}
 	if !chain {
 		return Record{}, false, time.Time{}, ErrUnstamped
@@ -374,13 +445,14 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	}
 
 	return Record{
-		ID:          RecordID(kind, key, claim),
-		Kind:        kind,
-		DispatchKey: key,
-		ClaimTime:   claim,
-		Attribution: AttributionInferred,
-		Outcome:     OutcomeUnknown,
-		Passes:      passes,
+		ID:            RecordID(kind, key, claim),
+		Kind:          kind,
+		DispatchKey:   key,
+		ClaimTime:     claim,
+		Attribution:   AttributionInferred,
+		Outcome:       OutcomeUnknown,
+		OutcomeSource: OutcomeSourceNone,
+		Passes:        passes,
 	}, !haveTS, claim, nil
 }
 
