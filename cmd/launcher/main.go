@@ -1486,7 +1486,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				}
 				return fmt.Errorf("recover: claim #%s: %w", issueNum, err)
 			}
-			report.Box(dispatchkey.Issue(iss.number), report.PhaseRecover, "")
+			report.Box(dispatchkey.Issue(iss.number), report.PhaseRecover, "", "")
 		}
 		// New arms this issue's kill latch, so it must run under Gate's own
 		// lock and before the in-flight registration, or a concurrent abort

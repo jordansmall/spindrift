@@ -44,6 +44,10 @@ type Record struct {
 	// to the checkout. Empty on every other event, and on a recover box, which
 	// runs no Box.
 	PassLog string
+	// RecordID is a box record's Dispatch Record ID, minted once at claim and
+	// shared by every Pass log of the Dispatch. Empty on every other event, and
+	// on a recover box, which runs no Box.
+	RecordID string
 	// PRURL is a settled record's PR: the one the Dispatch opened or adopted,
 	// empty when none (and on every other event).
 	PRURL string
@@ -101,9 +105,10 @@ type recordWire struct {
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
 
-	PassLog string `json:"pass_log,omitempty"`
-	PRURL   string `json:"pr_url,omitempty"`
-	NextDue string `json:"next_due,omitempty"`
+	PassLog  string `json:"pass_log,omitempty"`
+	RecordID string `json:"record_id,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	NextDue  string `json:"next_due,omitempty"`
 
 	Model     string `json:"model,omitempty"`
 	ModelRole string `json:"model_role,omitempty"`
@@ -111,7 +116,7 @@ type recordWire struct {
 
 func (r Record) MarshalJSON() ([]byte, error) {
 	issue, chore := r.Key.Fields()
-	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, PRURL: r.PRURL, NextDue: r.NextDue.wire(), Model: r.Model, ModelRole: r.ModelRole})
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, RecordID: r.RecordID, PRURL: r.PRURL, NextDue: r.NextDue.wire(), Model: r.Model, ModelRole: r.ModelRole})
 }
 
 // UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
@@ -138,7 +143,7 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, PRURL: w.PRURL, NextDue: nd, Model: w.Model, ModelRole: w.ModelRole}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, RecordID: w.RecordID, PRURL: w.PRURL, NextDue: nd, Model: w.Model, ModelRole: w.ModelRole}
 	return nil
 }
 
@@ -220,9 +225,10 @@ type Reporter struct {
 // "fix-pass-N", "conflict-resolve"). key is issue-keyed for an ordinary
 // dispatch or Chore-keyed for a butler run (ADR 0056) — same method, either
 // key shape. passLog is the Pass log the phase writes, relative to the
-// checkout; "" when the phase runs no Box (PhaseRecover).
-func (r *Reporter) Box(key dispatchkey.Key, phase, passLog string) {
-	r.emit(Record{Event: EventBox, Key: key, Phase: phase, PassLog: passLog})
+// checkout; "" when the phase runs no Box (PhaseRecover). recordID is the
+// Dispatch Record the phase belongs to, "" when none was minted.
+func (r *Reporter) Box(key dispatchkey.Key, phase, passLog, recordID string) {
+	r.emit(Record{Event: EventBox, Key: key, Phase: phase, PassLog: passLog, RecordID: recordID})
 }
 
 // Settled records key's terminal state, once, using the host-decided

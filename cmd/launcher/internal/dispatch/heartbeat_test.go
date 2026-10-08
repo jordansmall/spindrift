@@ -43,8 +43,8 @@ func TestRun_HeartbeatRawLogExact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if string(got) != streamJSON {
-		t.Errorf("log file not byte-exact:\ngot:  %q\nwant: %q", string(got), streamJSON)
+	if rest := afterStamp(t, got); rest != streamJSON {
+		t.Errorf("log file not byte-exact after the stamp:\ngot:  %q\nwant: %q", rest, streamJSON)
 	}
 }
 
@@ -152,8 +152,8 @@ func TestRun_HeartbeatSuppressedWhenDiscardConfigured(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read log: %v", err)
 	}
-	if string(got) != streamJSON {
-		t.Errorf("log file not byte-exact:\ngot:  %q\nwant: %q", string(got), streamJSON)
+	if rest := afterStamp(t, got); rest != streamJSON {
+		t.Errorf("log file not byte-exact after the stamp:\ngot:  %q\nwant: %q", rest, streamJSON)
 	}
 }
 

@@ -1,0 +1,171 @@
+package dispatch
+
+import (
+	"fmt"
+	"reflect"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/runner"
+	"spindrift.dev/launcher/internal/testutil"
+)
+
+// stampBoxOutput is what each fake Box writes: one pass with a turn and a
+// result, enough for the ingester to count a pass in that log.
+func stampBoxOutput(n int) []byte {
+	return []byte(claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+		`{"type":"assistant","message":{"id":"a` + fmt.Sprint(n) + `","model":"m","content":[]}}` + "\n" +
+		`{"type":"result","timestamp":"2026-05-01T09:00:00Z","num_turns":1,"total_cost_usd":1,` +
+		`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}}}` + "\n")
+}
+
+// TestDispatchStamp_EveryPassLogCarriesOneRecordID drives a real Factory
+// through a retried attempt, a fix pass and a conflict resolve and reads the
+// logs back through the ingester: all four are one stamped Record whose ID
+// matches the record_id every box report carried.
+func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+
+	cfg := retryConfig(3, 0, 0)
+	cfg.Kind = "work"
+	cfg.Stamp = claude.DispatchStart{
+		Revision:      "abc123",
+		RoleModels:    map[string]string{"main": "opus"},
+		DriverVersion: "9.9.9",
+		Knobs:         map[string]string{"MAX_PASSES": "4"},
+	}
+
+	fr := runner.NewFake()
+	var mu sync.Mutex
+	calls := 0
+	fr.RunFunc = func(box runner.Box) error {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		box.Output.Write(stampBoxOutput(n)) //nolint:errcheck
+		if n == 1 {
+			return boxErr
+		}
+		return nil
+	}
+	// Only the first attempt's failure is transient; a later classification
+	// is terminal so the retry loop ends after the one rotated attempt.
+	classified := false
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		if !classified {
+			classified = true
+			return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
+		}
+		return driver.Classification{Class: driver.Terminal, Reason: driver.TaskFailed}, nil
+	}}
+	// Each Now() moves forward so every log's Started stamp differs, as the
+	// ingester keys a log's passes on it.
+	base := time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
+	var tick int
+	clock := Clock{
+		Now: func() time.Time {
+			mu.Lock()
+			defer mu.Unlock()
+			tick++
+			return base.Add(time.Duration(tick) * time.Minute)
+		},
+		Sleep: func(time.Duration) {},
+	}
+	d := newTestDispatch(t, cfg, fr, drv, clock)
+
+	testutil.CaptureStdout(t, func() {
+		d.Run()
+		d.Fix(1, "")
+		if err := d.ResolveConflict("https://example.test/pr/1"); err != nil {
+			t.Errorf("ResolveConflict: %v", err)
+		}
+	})
+
+	recs := readRecords()
+	if len(recs) != 4 {
+		t.Fatalf("box records = %d, want 4 (two attempts, fix, conflict): %+v", len(recs), recs)
+	}
+	id := recs[0].RecordID
+	if id == "" {
+		t.Fatalf("first box record has no record_id: %+v", recs[0])
+	}
+	for _, r := range recs {
+		if r.Event != "box" || r.RecordID != id {
+			t.Errorf("record %+v: want a box record with record_id %q", r, id)
+		}
+	}
+
+	s, err := dispatchrecord.Open(d.pwd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if _, err := s.Ingest(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("records = %+v, want exactly one", got)
+	}
+	r := got[0]
+	if r.ID != id || r.Attribution != dispatchrecord.AttributionStamped {
+		t.Errorf("record id/attribution = %q/%q, want %q/stamped", r.ID, r.Attribution, id)
+	}
+	if r.Kind != "work" || r.DispatchKey != "1" {
+		t.Errorf("kind/key = %q/%q, want work/1", r.Kind, r.DispatchKey)
+	}
+	if r.Revision != "abc123" || r.Driver != "fake" || r.DriverVersion != "9.9.9" ||
+		!reflect.DeepEqual(r.RoleModels, cfg.Stamp.RoleModels) || !reflect.DeepEqual(r.Knobs, cfg.Stamp.Knobs) {
+		t.Errorf("stamp facts lost: %+v", r)
+	}
+	if len(r.Passes) != 4 {
+		t.Errorf("passes = %d, want 4 (one per log)", len(r.Passes))
+	}
+	if want := dispatchrecord.RecordID("work", "1", r.ClaimTime); r.ID != want {
+		t.Errorf("id %q does not derive from kind/key/claim: want %q", r.ID, want)
+	}
+	if recs[0].Key != dispatchkey.Issue("1") {
+		t.Errorf("key = %v", recs[0].Key)
+	}
+}
+
+// afterStamp checks that a log opens with the dispatch_start stamp and returns
+// everything after it, so byte-exactness tests keep pinning the Box's output.
+func afterStamp(t *testing.T, log []byte) string {
+	t.Helper()
+	line, rest, ok := strings.Cut(string(log), "\n")
+	if !ok || !strings.Contains(line, `"op":"dispatch_start"`) {
+		t.Fatalf("log does not open with a dispatch_start stamp: %q", log)
+	}
+	return rest
+}
+
+// A ReadOnlyBox kind runs read-only whatever the raw knob says, so its stamp
+// must record the effective value without touching the Stamp every Dispatch
+// shares.
+func TestDispatchStart_ReadOnlyBoxKindStampsEffectiveAccess(t *testing.T) {
+	cfg := retryConfig(1, 0, 0)
+	cfg.Kind = "butler"
+	cfg.BoxForgeAndIssueAccess = "read-write"
+	cfg.Stamp = claude.DispatchStart{Knobs: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write", "MAX_PASSES": "4"}}
+	d := newTestDispatch(t, cfg, runner.NewFake(), fakeDriver{}, Clock{Now: time.Now, Sleep: func(time.Duration) {}})
+
+	got := d.dispatchStart().Knobs
+	want := map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-only", "MAX_PASSES": "4"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("stamped knobs = %v, want %v", got, want)
+	}
+	if cfg.Stamp.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"] != "read-write" {
+		t.Errorf("Config.Stamp.Knobs mutated: %v", cfg.Stamp.Knobs)
+	}
+}

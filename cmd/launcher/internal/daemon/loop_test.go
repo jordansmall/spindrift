@@ -2144,7 +2144,7 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 5}}, // host-tainted: Loop halts promptly after this call
 		onStart: func(ctx context.Context, req ChildRequest) error {
-			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial", PassLog: ".spindrift/logs/issue-42.log"})
+			req.OnRecord(Record{Event: reportpkg.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial", PassLog: ".spindrift/logs/issue-42.log", RecordID: "work:42@2026-05-01T08:00:00.000Z"})
 			// A live status read here is genuinely about the in-flight
 			// file, not the one left behind after the child returns.
 			report, probeErr = ReadStatus(dir)
@@ -2184,8 +2184,8 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 	}
 
 	box := events[1]
-	if box.Key != dispatchkey.Issue("42") || box.Phase != "initial" || box.PassLog != ".spindrift/logs/issue-42.log" {
-		t.Errorf("box event = %+v, want issue 42 phase initial pass_log .spindrift/logs/issue-42.log", box)
+	if box.Key != dispatchkey.Issue("42") || box.Phase != "initial" || box.PassLog != ".spindrift/logs/issue-42.log" || box.RecordID != "work:42@2026-05-01T08:00:00.000Z" {
+		t.Errorf("box event = %+v, want issue 42 phase initial pass_log .spindrift/logs/issue-42.log record_id work:42@2026-05-01T08:00:00.000Z", box)
 	}
 	settled := events[2]
 	if settled.Key != dispatchkey.Issue("42") || settled.State != "complete" || settled.Note != "merged clean" || settled.PRURL != "https://github.com/o/r/pull/7" {

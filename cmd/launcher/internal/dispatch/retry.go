@@ -99,7 +99,7 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 
 			if cls.Class == driver.Terminal {
 				result := Result{KilledBySignal: runner.KilledBySignal(err)}
-				if logIsEmpty(attemptLogPath) {
+				if logIsEmpty(attemptLogPath, d.attemptStampLen) {
 					// A box that ran and failed left something in its log, so an
 					// empty log means it never launched (a pre-Box registry-proxy
 					// or outbox-setup error, issue #3119). Report that error
@@ -149,15 +149,16 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 	}
 }
 
-// logIsEmpty reports whether logPath is missing or zero bytes, the "box never
-// launched" signal behind Result.Err (issue #3119). A stat error other than
-// not-exist counts as non-empty: no evidence the box never launched.
-func logIsEmpty(logPath string) bool {
+// logIsEmpty reports whether logPath is missing or holds nothing past the
+// stampLen bytes of dispatch_start stamp runOnce wrote at its head, the "box
+// never launched" signal behind Result.Err (issue #3119). A stat error other
+// than not-exist counts as non-empty: no evidence the box never launched.
+func logIsEmpty(logPath string, stampLen int64) bool {
 	info, err := os.Stat(logPath)
 	if err != nil {
 		return os.IsNotExist(err)
 	}
-	return info.Size() == 0
+	return info.Size() <= stampLen
 }
 
 // successResult parses logPath's outcome line after a zero-exit dispatch,

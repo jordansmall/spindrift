@@ -680,7 +680,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 				flight.issues = append(flight.issues, issue)
 			}
 		}
-		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Key: rec.Key, Phase: rec.Phase, PassLog: rec.PassLog, Slot: intPtr(slot)}}
+		return []Event{{Event: report.EventBox, Kind: kind, Revision: revision, Key: rec.Key, Phase: rec.Phase, PassLog: rec.PassLog, RecordID: rec.RecordID, Slot: intPtr(slot)}}
 	})
 }
 

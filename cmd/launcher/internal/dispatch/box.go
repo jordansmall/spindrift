@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/url"
 	"os"
@@ -15,7 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
 	"spindrift.dev/launcher/internal/hostpaths"
@@ -87,6 +90,18 @@ type Dispatch struct {
 	// claim spans the caller's settle too (issue #4364). Nil until Run
 	// claims, and again after Close.
 	releaseClaim func()
+
+	// recordID and claimTime identify this Dispatch's Record (issue #4783):
+	// minted once by ensureRecordID, then stamped into every Pass log and
+	// every box report so a retry's rotated log, a fix pass and a conflict
+	// resolve all land on one Record.
+	recordID  string
+	claimTime time.Time
+
+	// attemptStampLen is the byte length of the dispatch_start stamp the
+	// current attempt wrote at the head of its log, so logIsEmpty can still
+	// tell a Box that never produced output from one that ran.
+	attemptStampLen int64
 }
 
 var _ Dispatcher = (*Dispatch)(nil)
@@ -187,6 +202,7 @@ func (d *Dispatch) Run() Disposition {
 		return Failed(Result{})
 	}
 	d.releaseClaim = release
+	d.ensureRecordID()
 
 	logPath := d.logPath()
 	return d.dispatchWithRetry(logPath, func(resumeAfterHold bool) error {
@@ -219,6 +235,7 @@ func (d *Dispatch) Run() Disposition {
 // is ignored: FIX_PASS>0 already resumes the session, so a transient-backoff
 // re-dispatch mid-fix needs no extra signal.
 func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
+	d.ensureRecordID()
 	logPath := d.fixLogPath(pass)
 	return d.dispatchWithRetry(logPath, func(_ bool) error {
 		d.announce(report.PhaseFixPass(pass), logPath)
@@ -236,6 +253,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
 // bundled to the outbox for the launcher to relay, issue #1979), and exits
 // without the main agent prompt, so it needs neither retry nor driver cache.
 func (d *Dispatch) ResolveConflict(pr string) error {
+	d.ensureRecordID()
 	logPath := d.conflictLogPath()
 	d.announce(report.PhaseConflictResolve, logPath)
 	env, err := buildBoxEnv(d.cfg, d.subject, 0, "", d.nonce)
@@ -266,7 +284,37 @@ func (d *Dispatch) announce(phase, logPath string) {
 		// rel is "": the record then names no Pass log.
 		fmt.Fprintf(os.Stderr, "    ?? #%s: pass log path: %v\n", d.number, err)
 	}
-	report.Box(d.subject.key, phase, rel)
+	report.Box(d.subject.key, phase, rel, d.recordID)
+}
+
+// ensureRecordID mints the Record ID on first use. Run calls it right after
+// the claim; Fix and ResolveConflict mint lazily for a Dispatch that never ran
+// Run (recover adopting an open PR).
+func (d *Dispatch) ensureRecordID() {
+	if d.recordID != "" {
+		return
+	}
+	d.claimTime = d.clock.Now()
+	d.recordID = dispatchrecord.RecordID(d.cfg.kindName(), d.number, d.claimTime)
+}
+
+// dispatchStart builds the stamp heading a fresh Pass log: the launcher's
+// deployment facts from Config.Stamp plus this Dispatch's identity.
+func (d *Dispatch) dispatchStart() claude.DispatchStart {
+	s := d.cfg.Stamp
+	s.RecordID = d.recordID
+	s.Kind = d.cfg.kindName()
+	if _, ok := s.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"]; ok {
+		// A ReadOnlyBox kind always runs read-only whatever the raw knob says.
+		// Knobs is shared across Dispatches, so clone before overriding.
+		s.Knobs = maps.Clone(s.Knobs)
+		s.Knobs["BOX_FORGE_AND_ISSUE_ACCESS"] = d.cfg.boxAccessForKind()
+	}
+	s.DispatchKey = d.number
+	s.ClaimTime = d.claimTime
+	s.Started = d.clock.Now()
+	s.Driver = d.driver.Name()
+	return s
 }
 
 // humanPhase maps report's phase vocabulary onto announceLine's
@@ -347,6 +395,15 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 		return fmt.Errorf("create log: %w", err)
 	}
 	defer logFile.Close()
+	// The stamp is the log's very first line, ahead of any Box output, and
+	// every fresh log carries one: a retry rotates the previous log aside, so
+	// a claim-time write alone would be lost.
+	start := d.dispatchStart()
+	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "dispatch_start", Start: &start})
+	if _, err := logFile.WriteString(stamp); err != nil {
+		return fmt.Errorf("write dispatch_start: %w", err)
+	}
+	d.attemptStampLen = int64(len(stamp))
 	if info, statErr := logFile.Stat(); statErr == nil {
 		d.attemptLog = info
 	}

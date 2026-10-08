@@ -3,6 +3,7 @@ package claude_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -516,6 +517,24 @@ func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
 	}
 	if c.Reason != driverkit.RateLimit {
 		t.Errorf("Reason: got %q, want %q", c.Reason, driverkit.RateLimit)
+	}
+}
+
+// The host-written dispatch_start stamp carries operator knob values, so a
+// transient marker inside one must not read as the Box's failure.
+func TestClassify_DispatchStartStampIsNotScanned(t *testing.T) {
+	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{
+		Op:    "dispatch_start",
+		Start: &claude.DispatchStart{Knobs: map[string]string{"BOX_NOTE": "Overloaded; connection refused"}},
+	})
+	logPath := claude.WriteLog(t, strings.TrimSuffix(stamp, "\n"))
+
+	c, err := claude.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != driverkit.Terminal || c.Reason != driverkit.TaskFailed {
+		t.Errorf("Classify() = %+v, want Terminal/TaskFailed", c)
 	}
 }
 
