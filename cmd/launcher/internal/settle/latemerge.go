@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
@@ -21,6 +23,55 @@ import (
 // never merged, so the cost grows with history. A PR merged after the window
 // stays un-upgraded.
 const LateMergeWindow = 14 * 24 * time.Hour
+
+// LateMergeSweepInterval is the least gap between throttled sweeps. Each
+// issue-less dispatch exit, every daemon pool child included, would otherwise
+// sweep, one forge call per candidate Record.
+const LateMergeSweepInterval = 15 * time.Minute
+
+// ClaimLateMergeSweep reports whether a throttled sweep may run now, and if so
+// stamps now as the last sweep. It is refused when the previous claim is
+// within LateMergeSweepInterval of now, or when another process holds the
+// flock on hostpaths.LateMergeSweepLock mid-claim; the stamp is written under
+// that lock before any sweep starts, so concurrent claimants never both win.
+// A sweep that crashes or fails after claiming still blocks others for the
+// full interval, which is acceptable as rate-limit back-off. A stamp in the
+// future (clock stepped back) counts as stale so the throttle heals itself.
+// With no log directory there is nothing to sweep and nothing is created.
+func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
+	if _, err := os.Stat(hostpaths.LogDir(root)); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	path := hostpaths.LateMergeSweepLock(root)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return false, fmt.Errorf("open late-merge sweep lock %s: %w", path, err)
+	}
+	// Closing the fd drops the lock; the file stays to hold the stamp.
+	defer file.Close()
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return false, nil
+		}
+		return false, fmt.Errorf("flock late-merge sweep lock %s: %w", path, err)
+	}
+	stamp, err := io.ReadAll(file)
+	if err != nil {
+		return false, fmt.Errorf("read late-merge sweep lock %s: %w", path, err)
+	}
+	// An empty file, just created, parses as no stamp: never swept.
+	last, perr := time.Parse(time.RFC3339, strings.TrimSpace(string(stamp)))
+	if perr == nil && !last.After(now) && now.Sub(last) < LateMergeSweepInterval {
+		return false, nil
+	}
+	if err := file.Truncate(0); err != nil {
+		return false, fmt.Errorf("truncate late-merge sweep lock %s: %w", path, err)
+	}
+	if _, err := file.WriteAt([]byte(now.UTC().Format(time.RFC3339)), 0); err != nil {
+		return false, fmt.Errorf("write late-merge sweep lock %s: %w", path, err)
+	}
+	return true, nil
+}
 
 // LateMerges upgrades each Record settled with its PR left open
 // (ReasonLeavesPROpen) whose PR has since merged and whose claim falls within

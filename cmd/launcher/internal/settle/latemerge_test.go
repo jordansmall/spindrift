@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -260,5 +261,75 @@ func TestLateMerges_RateLimitKeepsEarlierMerges(t *testing.T) {
 	}
 	if got := storedRecordsByID(t, root)[merged[0]].Reason; got != ReasonMerged {
 		t.Fatalf("reason = %q, want merged (re-ingested before returning)", got)
+	}
+}
+
+func TestClaimLateMergeSweep_Throttles(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(hostpaths.LogDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	claim := func(at time.Time) bool {
+		t.Helper()
+		ok, err := ClaimLateMergeSweep(root, at)
+		if err != nil {
+			t.Fatalf("ClaimLateMergeSweep(%v): %v", at, err)
+		}
+		return ok
+	}
+	if !claim(lateMergeNow) {
+		t.Fatal("first claim refused, want ok")
+	}
+	if claim(lateMergeNow.Add(time.Minute)) {
+		t.Fatal("claim inside LateMergeSweepInterval ok, want refused")
+	}
+	if !claim(lateMergeNow.Add(LateMergeSweepInterval)) {
+		t.Fatal("claim at LateMergeSweepInterval refused, want ok")
+	}
+}
+
+// A stamp ahead of now (clock stepped back, or a hand-edited file) must not
+// refuse claims until the clock catches up.
+func TestClaimLateMergeSweep_FutureStampIsStale(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(hostpaths.LogDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := ClaimLateMergeSweep(root, lateMergeNow.Add(24*time.Hour)); err != nil || !ok {
+		t.Fatalf("seed claim = ok %v, err %v, want ok", ok, err)
+	}
+	if ok, err := ClaimLateMergeSweep(root, lateMergeNow); err != nil || !ok {
+		t.Fatalf("claim behind a future stamp = ok %v, err %v, want ok", ok, err)
+	}
+}
+
+func TestClaimLateMergeSweep_RefusedWhileAnotherClaimantHoldsTheLock(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(hostpaths.LogDir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(hostpaths.LateMergeSweepLock(root), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := ClaimLateMergeSweep(root, lateMergeNow); err != nil || ok {
+		t.Fatalf("claim while locked = ok %v, err %v, want refused", ok, err)
+	}
+	_ = f.Close()
+	if ok, err := ClaimLateMergeSweep(root, lateMergeNow); err != nil || !ok {
+		t.Fatalf("claim after unlock = ok %v, err %v, want ok", ok, err)
+	}
+}
+
+func TestClaimLateMergeSweep_NoLogDirCreatesNothing(t *testing.T) {
+	root := t.TempDir()
+	if ok, err := ClaimLateMergeSweep(root, lateMergeNow); err != nil || ok {
+		t.Fatalf("claim = ok %v, err %v, want refused", ok, err)
+	}
+	if entries, _ := os.ReadDir(root); len(entries) != 0 {
+		t.Fatalf("root has %d entries, want none", len(entries))
 	}
 }

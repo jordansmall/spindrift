@@ -87,10 +87,18 @@ func reconcileIssues(c config, it forge.IssueTracker, cf forge.CodeForge, lp rec
 // any other tracker unless a late merge was recorded, since a routine
 // github/jira run has nothing else to report. Late-merge recording is
 // best-effort on every tracker: a stats bookkeeping failure only warns, never
-// failing the dispatch run nor skipping the issue bookkeeping.
+// failing the dispatch run nor skipping the issue bookkeeping. The sweep is
+// throttled to one per settle.LateMergeSweepInterval across processes sharing
+// pwd, since every daemon pool child ends here; the verb is not.
 func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	if err := recordLateMerges(caps.PRForge, pwd, w); err != nil {
-		fmt.Fprintf(w, "    ?? late merges: %v\n", err)
+	if caps.PRForge != nil {
+		ok, err := settle.ClaimLateMergeSweep(pwd, time.Now())
+		if ok {
+			err = recordLateMerges(caps.PRForge, pwd, w)
+		}
+		if err != nil {
+			fmt.Fprintf(w, "    ?? late merges: %v\n", err)
+		}
 	}
 	if caps.TrackerDescriptor.InBoxUnreachableTracker {
 		return reconcileIssues(c, it, cf, lp, caps, pwd, w)
