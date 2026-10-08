@@ -187,6 +187,7 @@ type Descriptor struct {
 	Enablement     Enablement      // when the daemon draws this kind; see Enablement
 	Preflight      DoctorPreflight // how the daemon's startup preflight passes this kind's doctor flag; see DoctorPreflight
 	UnclaimedGate  bool            // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
+	Statuses       []string        // SPINDRIFT_OUTCOME status values the kind's Box can emit: hand-copied from lib/prompt-contract.nix outcomeStatusSets, kept in step by outcome/status_kind_parity_test.go (RESEARCH_VERDICTS can override research's at runtime, unseen here); empty for a kind with no outcomeStatusSets row (butler hand-writes its own, recover runs no Box)
 }
 
 var (
@@ -205,6 +206,7 @@ var (
 		Tracker:        TrackerWork,
 		AnnounceVerb:   "implementing",
 		Preflight:      NoPreflight(),
+		Statuses:       []string{"ready", "blocked", "ambiguous", "already-resolved"},
 	}
 	Research = &Descriptor{
 		Name:   "research",
@@ -226,6 +228,7 @@ var (
 		Tracker:        TrackerResearch,
 		AnnounceVerb:   "researching",
 		Preflight:      PreflightWhenNamed("--research"),
+		Statuses:       []string{"recommend", "reject", "unclear", "blocked"},
 	}
 	// Butler is the one-shot butler run (ADR 0056, #3870): it carries one
 	// Ledger Chore (ByChore), never a tracker issue, and files findings the
