@@ -20,6 +20,7 @@ func TestAutoMergePreflight(t *testing.T) {
 		autoMergeErr     error
 		wantErr          bool
 		wantErrContains  string
+		wantErrOmits     string
 	}{
 		{
 			name:             "auto mode and repo allows auto-merge — ok",
@@ -32,7 +33,17 @@ func TestAutoMergePreflight(t *testing.T) {
 			mergeMode:        "auto",
 			autoMergeAllowed: false,
 			wantErr:          true,
-			wantErrContains:  "auto-merge",
+			wantErrContains:  `enable "Allow auto-merge" in repo Settings`,
+			wantErrOmits:     "merge style",
+		},
+		{
+			name:             "auto mode on forgejo and repo disallows auto-merge — merge-style remedy",
+			mergeMode:        "auto",
+			codeForge:        "forgejo",
+			autoMergeAllowed: false,
+			wantErr:          true,
+			wantErrContains:  "enable at least one merge style",
+			wantErrOmits:     "Allow auto-merge",
 		},
 		{
 			name:            "auto mode and CanAutoMerge API error — abort",
@@ -58,7 +69,7 @@ func TestAutoMergePreflight(t *testing.T) {
 			mergeMode:       "auto",
 			codeForge:       "git",
 			wantErr:         true,
-			wantErrContains: "CODE_FORGE=github",
+			wantErrContains: "CODE_FORGE=github or forgejo",
 		},
 	}
 	for _, tc := range cases {
@@ -84,6 +95,9 @@ func TestAutoMergePreflight(t *testing.T) {
 			}
 			if tc.wantErrContains != "" && err != nil && !strings.Contains(err.Error(), tc.wantErrContains) {
 				t.Errorf("error %q does not contain %q", err.Error(), tc.wantErrContains)
+			}
+			if tc.wantErrOmits != "" && err != nil && strings.Contains(err.Error(), tc.wantErrOmits) {
+				t.Errorf("error %q must not contain %q", err.Error(), tc.wantErrOmits)
 			}
 		})
 	}

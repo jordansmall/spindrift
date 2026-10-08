@@ -1006,21 +1006,25 @@ func build() error {
 	return r.EnsureReady()
 }
 
-// checkAutoMergePreflight verifies that the repo allows GitHub's native
+// checkAutoMergePreflight verifies that the repo allows the forge's native
 // auto-merge when MERGE_MODE=auto. It is a no-op for other modes.
 func checkAutoMergePreflight(c config, caps forge.Capabilities) error {
 	if c.mergeMode != "auto" {
 		return nil
 	}
 	if caps.PRForge == nil {
-		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github (got %q) — auto-merge is a GitHub-native feature with no meaning off github; switch to MERGE_MODE=manual or immediate", c.codeForge)
+		return fmt.Errorf("MERGE_MODE=auto requires CODE_FORGE=github or forgejo (got %q) — auto-merge is a native PR-forge feature with no meaning off a PR forge; switch to MERGE_MODE=manual or immediate", c.codeForge)
 	}
 	canAuto, err := caps.PRForge.CanAutoMerge()
 	if err != nil {
 		return fmt.Errorf("MERGE_MODE=auto: auto-merge capability check failed: %w", err)
 	}
 	if !canAuto {
-		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge — enable \"Allow auto-merge\" in repo Settings → General, or switch to MERGE_MODE=manual")
+		remedy := `enable "Allow auto-merge" in repo Settings → General`
+		if c.codeForge == "forgejo" {
+			remedy = "enable at least one merge style in the repo's settings"
+		}
+		return fmt.Errorf("MERGE_MODE=auto: the repo does not allow auto-merge — %s; or switch to MERGE_MODE=manual", remedy)
 	}
 	return nil
 }
