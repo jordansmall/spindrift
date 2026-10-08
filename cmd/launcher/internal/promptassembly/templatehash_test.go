@@ -133,7 +133,73 @@ func TestTemplateHashesTrackSetup(t *testing.T) {
 	}
 }
 
-func TestPerDispatchVarsAreDefined(t *testing.T) {
+// classificationProblems reports every way perDispatch and setup fail to
+// partition defined, the substitution var names (fragment Vars excluded).
+func classificationProblems(defined map[string]bool, perDispatch, setup []string) []string {
+	inList := map[string]int{}
+	for _, name := range perDispatch {
+		inList[name]++
+	}
+	for _, name := range setup {
+		inList[name]++
+	}
+
+	var problems []string
+	for name := range defined {
+		if inList[name] == 0 {
+			problems = append(problems, name+" is in neither perDispatchVars nor setupVars (assemble.go): classify it as a Dispatch fact or harness setup")
+		}
+	}
+	for name, n := range inList {
+		if n > 1 {
+			problems = append(problems, name+" is listed more than once in perDispatchVars and setupVars combined")
+		}
+		if !defined[name] {
+			problems = append(problems, name+" is listed in perDispatchVars or setupVars but is not a substitution var assemblePromptBodies defines")
+		}
+	}
+	sort.Strings(problems)
+	return problems
+}
+
+func TestClassificationProblems(t *testing.T) {
+	cases := []struct {
+		name        string
+		defined     []string
+		perDispatch []string
+		setup       []string
+		want        string // var a problem must name; empty means no problems
+	}{
+		{"clean", []string{"A", "B"}, []string{"A"}, []string{"B"}, ""},
+		{"unclassified", []string{"A", "B"}, []string{"A"}, nil, "B"},
+		{"in both lists", []string{"A"}, []string{"A"}, []string{"A"}, "A"},
+		{"repeated within one list", []string{"A"}, []string{"A", "A"}, nil, "A"},
+		{"stale listed name", []string{"A"}, []string{"A"}, []string{"GONE"}, "GONE"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			defined := map[string]bool{}
+			for _, n := range tc.defined {
+				defined[n] = true
+			}
+			problems := classificationProblems(defined, tc.perDispatch, tc.setup)
+			if tc.want == "" {
+				if len(problems) != 0 {
+					t.Fatalf("problems = %v, want none", problems)
+				}
+				return
+			}
+			for _, p := range problems {
+				if strings.HasPrefix(p, tc.want+" ") {
+					return
+				}
+			}
+			t.Fatalf("problems = %v, want one naming %q", problems, tc.want)
+		})
+	}
+}
+
+func TestSubstitutionVarsAreClassified(t *testing.T) {
 	reg := loadTestRegistry(t)
 	e := butlerEnv()
 	e.CIFailureSummary = "x"
@@ -141,9 +207,24 @@ func TestPerDispatchVarsAreDefined(t *testing.T) {
 	if err != nil {
 		t.Fatalf("assemblePromptBodies: %v", err)
 	}
-	for _, name := range perDispatchVars {
-		if _, ok := bodies.vars[name]; !ok {
-			t.Errorf("perDispatchVars names %q, which assemblePromptBodies does not define", name)
+
+	// A registry row's Var is a rendered fragment, not a substitution input.
+	fragments := map[string]bool{}
+	for _, row := range reg.Rows {
+		fragments[row.Var] = true
+	}
+	defined := map[string]bool{}
+	for name := range bodies.vars {
+		if !fragments[name] {
+			defined[name] = true
 		}
+	}
+	// extraSubstRaw keys count even when no row names them in extraSubstVars.
+	for name := range extraSubstRaw(e) {
+		defined[name] = true
+	}
+
+	for _, p := range classificationProblems(defined, perDispatchVars, setupVars) {
+		t.Error(p)
 	}
 }

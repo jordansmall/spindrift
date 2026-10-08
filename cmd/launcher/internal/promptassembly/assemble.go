@@ -279,6 +279,28 @@ var perDispatchVars = []string{
 	"CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES", "CHORE_PATCH_CLASSES", "CHORE_MAX_FINDINGS",
 }
 
+// setupVars are the complement of perDispatchVars: substitution vars whose
+// value is a fact of the harness setup. Declared explicitly so a new var's
+// author must pick a list; only TestSubstitutionVarsAreClassified reads it,
+// and it enforces that every substitution var is in exactly one list.
+var setupVars = []string{
+	"BASE_BRANCH", "IN_PROGRESS_LABEL", "COMPLETE_LABEL",
+	"CHORE_NAME", "CHORE_CLASS_LIST", chorePromptVar,
+	"SKILLS_FOUND", "REVIEW_FANOUT_AGENT",
+}
+
+// extraSubstRaw is the raw source of each extraSubstVars substitution var.
+// CI_FAILURE_SUMMARY's field also drives its own gate, since its presence is
+// the gate (issue #2354). REVIEW_FANOUT_AGENT is resolved from the run's
+// provisioned agents (issue #3447).
+func extraSubstRaw(e Env) map[string]string {
+	return map[string]string{
+		"SKILLS_FOUND":        e.SkillsFound,
+		"CI_FAILURE_SUMMARY":  e.CIFailureSummary,
+		"REVIEW_FANOUT_AGENT": reviewFanoutAgentFor(e),
+	}
+}
+
 // maskPlaceholder is the fixed stand-in for a masked per-Dispatch var.
 func maskPlaceholder(name string) string { return "${" + name + "}" }
 
@@ -353,15 +375,7 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 		vars[k] = varBody(k, scalars[k])
 	}
 
-	// extraSubstVars raw sources. CI_FAILURE_SUMMARY's field also drives its
-	// own gate, since its presence is the gate (issue #2354).
-	// REVIEW_FANOUT_AGENT is resolved from the run's provisioned agents
-	// (issue #3447).
-	extraRaw := map[string]string{
-		"SKILLS_FOUND":        e.SkillsFound,
-		"CI_FAILURE_SUMMARY":  e.CIFailureSummary,
-		"REVIEW_FANOUT_AGENT": reviewFanoutAgentFor(e),
-	}
+	extraRaw := extraSubstRaw(e)
 	seenExtra := map[string]bool{}
 	for _, row := range reg.Rows {
 		for _, extra := range row.ExtraSubstVars {
