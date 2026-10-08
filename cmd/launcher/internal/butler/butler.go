@@ -29,7 +29,7 @@ type Policy struct {
 	// Chores is every BUTLER_CHORES entry resolved by chore.Load, not just
 	// this Sweep's candidates: budgets are summed across all of them, even
 	// under a single --chore, and each Chore carries its own Every and
-	// Classes.
+	// PromotionClasses.
 	Chores []chore.Chore
 	// ClaimTimeout is the age past which a live claim is treated as stale.
 	ClaimTimeout time.Duration
@@ -156,7 +156,7 @@ func (r *Runner) WithPatchForge(f PatchForge, gate PatchGate) *Runner {
 // reports why none is due (ADR 0056). chores is either the single name given
 // on --chore, or every Policy.Chores entry in configured order when none was
 // given; a name absent from Policy.Chores is an error, since its Every and
-// Classes would otherwise silently read as zero. tree.Head is read once up
+// PromotionClasses would otherwise silently read as zero. tree.Head is read once up
 // front, and the due check (internal/chore.Check) shares a single now()
 // reading across every candidate, so the picture of "what's due" is
 // consistent across the whole pass rather than drifting chore to chore. The
@@ -283,7 +283,7 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if r.patchForge == nil {
 		patchesPerDay = 0
 	}
-	promo := newPromotion(c.Classes, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, patchPolicy{
+	promo := newPromotion(c.PromotionClasses, r.policy.PromotionMaxFiles, r.policy.Budgets.MaxPromotionsPerDay, r.policy.PromotionLabel, patchPolicy{
 		classes:  c.PatchClasses,
 		perDay:   patchesPerDay,
 		paths:    r.policy.PatchPaths,
@@ -295,26 +295,26 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	// promotion room is actually > 0: with nothing left to spend this run,
 	// there is nothing useful to tell the Box, and settle re-checks a
 	// finding's class against promo itself regardless.
-	var classes []string
+	var promotionClasses []string
 	if promo.enabled && room.Promotions > 0 {
-		classes = c.Classes
+		promotionClasses = c.PromotionClasses
 	}
 	// promo.patchEnabled is required here, not just room.Patches > 0: room.Patches
 	// derives from the Consumer's BUTLER_MAX_PATCHES_PER_DAY budget and today's
 	// ledger alone (chore.Budgets.Room), so it stays positive even when this
 	// Runner has no patchForge (issue #4074) -- patchesPerDay above is what
 	// actually folds that in, and patchEnabled is the only place that reads
-	// patchesPerDay. It also requires len(classes) > 0 -- the promotion class
+	// patchesPerDay. It also requires len(promotionClasses) > 0 -- the promotion class
 	// list just above -- because the relay fragment only ever honours
 	// CHORE_PATCH_CLASSES for a class also present on CHORE_CLASSES: with
-	// promotion off or its room spent, classes is empty and a patch-class
+	// promotion off or its room spent, promotionClasses is empty and a patch-class
 	// list alone would tell the Box about candidates the relay fragment says
 	// to omit -class for.
 	var patchClasses []string
-	if promo.patchEnabled && len(classes) > 0 && room.Patches > 0 {
+	if promo.patchEnabled && len(promotionClasses) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, Classes: classes, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings})
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings})
 	defer d.Close()
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
 	settle := func(result dispatch.Result) settled { return step.settle(d, result) }

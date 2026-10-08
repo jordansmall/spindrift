@@ -37,21 +37,21 @@ type Chore struct {
 	// DiffRange, and Slice forward as CHORE_HEAD, CHORE_DIFF_RANGE, and
 	// CHORE_SLICE.
 	Scope chore.Scope
-	// Classes is the promotion-candidate class allow-list forwarded as
+	// PromotionClasses is the promotion-candidate class allow-list forwarded as
 	// CHORE_CLASSES (issue #3880), informational only: the Box never reads
 	// it back into a promotion decision, since the host re-checks a
 	// finding's class against its own allow-list at settle regardless of
 	// what the Box was told. The butler leaves this empty whenever today's
 	// promotion room is spent or off, so the Box never spends reviewer
 	// turns on candidates nothing can promote.
-	Classes []string
+	PromotionClasses []string
 	// ClassList is the Chore's closed finding-class list (issue #4766),
-	// forwarded as CHORE_CLASS_LIST. Unlike Classes it is not a promotion
+	// forwarded as CHORE_CLASS_LIST. Unlike PromotionClasses it is not a promotion
 	// fact, so the butler forwards it whatever the promotion budget.
 	ClassList []string
 	// PatchClasses is the patch-eligible class allow-list forwarded as
 	// CHORE_PATCH_CLASSES (issue #4072, ADR 0057), the patch-rung sibling of
-	// Classes: informational only for now -- settle will re-check a
+	// PromotionClasses: informational only for now -- settle will re-check a
 	// finding's class against the host's own allow-list once the patch rung
 	// applies patches (ADR 0057); on this branch settle carries
 	// Finding.Patch unexamined. The butler leaves this empty whenever
@@ -267,8 +267,8 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		if len(subj.chore.Scope.Slice) > 0 {
 			env["CHORE_SLICE"] = strings.Join(subj.chore.Scope.Slice, "\n")
 		}
-		if len(subj.chore.Classes) > 0 {
-			env["CHORE_CLASSES"] = strings.Join(subj.chore.Classes, " ")
+		if len(subj.chore.PromotionClasses) > 0 {
+			env["CHORE_CLASSES"] = strings.Join(subj.chore.PromotionClasses, " ")
 		}
 		if len(subj.chore.ClassList) > 0 {
 			env["CHORE_CLASS_LIST"] = strings.Join(subj.chore.ClassList, " ")

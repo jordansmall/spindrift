@@ -18,11 +18,11 @@ const DefaultEvery = 6 * time.Hour
 // BUTLER_CHORE_CLASSES and (when the patch rung is on) BUTLER_PATCH_CLASSES
 // (ADR 0056, ADR 0057).
 type Chore struct {
-	Name         string
-	Every        time.Duration // BUTLER_EVERY override, else its bare default, else DefaultEvery.
-	Classes      []string      // BUTLER_CHORE_CLASSES allow-list; nil when the Chore has no entry.
-	PatchClasses []string      // BUTLER_PATCH_CLASSES allow-list; nil unless MaxPatchesPerDay > 0 and the Chore has an entry (ADR 0057).
-	ClassList    []string      // Closed class list the Box classifies from (issue #4766): the catalog's plus any extra Classes; nil for a Consumer-declared Chore.
+	Name             string
+	Every            time.Duration // BUTLER_EVERY override, else its bare default, else DefaultEvery.
+	PromotionClasses []string      // BUTLER_CHORE_CLASSES allow-list; nil when the Chore has no entry.
+	PatchClasses     []string      // BUTLER_PATCH_CLASSES allow-list; nil unless MaxPatchesPerDay > 0 and the Chore has an entry (ADR 0057).
+	ClassList        []string      // Closed class list the Box classifies from (issue #4766): the catalog's plus any extra PromotionClasses; nil for a Consumer-declared Chore.
 }
 
 // Knobs is the raw butler settings (ADR 0056, ADR 0057): BUTLER_CHORES,
@@ -91,7 +91,7 @@ func Load(k Knobs) ([]Chore, error) {
 		}
 	}
 
-	classesMap, classesErr := parseClasses(k.Classes)
+	promotionClassesMap, classesErr := parseClasses(k.Classes)
 	if classesErr != nil {
 		errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: %w", classesErr))
 	} else {
@@ -129,7 +129,7 @@ func Load(k Knobs) ([]Chore, error) {
 					continue
 				}
 				for _, class := range strings.Split(classesPart, ",") {
-					if !slices.Contains(classesMap[name], class) {
+					if !slices.Contains(promotionClassesMap[name], class) {
 						errs = append(errs, fmt.Errorf("BUTLER_PATCH_CLASSES: chore %q: class %q is not on its BUTLER_CHORE_CLASSES allow-list", name, class))
 					}
 				}
@@ -144,11 +144,11 @@ func Load(k Knobs) ([]Chore, error) {
 	result := make([]Chore, len(names))
 	for i, name := range names {
 		result[i] = Chore{
-			Name:         name,
-			Every:        everyCfg.For(name),
-			Classes:      classesMap[name],
-			PatchClasses: patchClassesMap[name],
-			ClassList:    classList(name, classesMap[name]),
+			Name:             name,
+			Every:            everyCfg.For(name),
+			PromotionClasses: promotionClassesMap[name],
+			PatchClasses:     patchClassesMap[name],
+			ClassList:        classList(name, promotionClassesMap[name]),
 		}
 	}
 	return result, nil

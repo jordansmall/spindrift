@@ -28,8 +28,8 @@ func TestLoad(t *testing.T) {
 			every:   "6h docs-drift=168h",
 			classes: "bugs=error-handling,resource-leak refactor=dead-code docs-drift=stale-reference",
 			want: []Chore{
-				{Name: "bugs", Every: 6 * time.Hour, Classes: []string{"error-handling", "resource-leak"}},
-				{Name: "docs-drift", Every: 168 * time.Hour, Classes: []string{"stale-reference"}},
+				{Name: "bugs", Every: 6 * time.Hour, PromotionClasses: []string{"error-handling", "resource-leak"}},
+				{Name: "docs-drift", Every: 168 * time.Hour, PromotionClasses: []string{"stale-reference"}},
 			},
 		},
 		{
@@ -197,8 +197,8 @@ func TestLoad(t *testing.T) {
 			patchClasses:     "bugs=error-handling docs-drift=stale-reference",
 			maxPatchesPerDay: 1,
 			want: []Chore{
-				{Name: "bugs", Every: DefaultEvery, Classes: []string{"error-handling", "resource-leak"}, PatchClasses: []string{"error-handling"}},
-				{Name: "docs-drift", Every: DefaultEvery, Classes: []string{"stale-reference"}, PatchClasses: []string{"stale-reference"}},
+				{Name: "bugs", Every: DefaultEvery, PromotionClasses: []string{"error-handling", "resource-leak"}, PatchClasses: []string{"error-handling"}},
+				{Name: "docs-drift", Every: DefaultEvery, PromotionClasses: []string{"stale-reference"}, PatchClasses: []string{"stale-reference"}},
 			},
 		},
 		{
@@ -206,7 +206,7 @@ func TestLoad(t *testing.T) {
 			chores:           "bugs",
 			classes:          "bugs=error-handling",
 			maxPatchesPerDay: 1,
-			want:             []Chore{{Name: "bugs", Every: DefaultEvery, Classes: []string{"error-handling"}}},
+			want:             []Chore{{Name: "bugs", Every: DefaultEvery, PromotionClasses: []string{"error-handling"}}},
 		},
 		{
 			name:             "rung on: patch class outside the promotion classes rejected",

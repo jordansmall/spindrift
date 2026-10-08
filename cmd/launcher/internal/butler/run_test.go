@@ -38,7 +38,7 @@ const noRunEvery time.Duration = 0
 
 // testRunPolicy builds a Policy for the tests below: testRunClaimTimeout, an
 // unlimited (zero) Budgets, UTC, ready-for-agent as the promotion label, and
-// Chores built from chores, each with the same Every and no Classes --
+// Chores built from chores, each with the same Every and no PromotionClasses --
 // migrated from cmd/launcher's retired testButlerPolicy.
 func testRunPolicy(every time.Duration, chores ...string) Policy {
 	cs := make([]chore.Chore, len(chores))
@@ -60,14 +60,14 @@ func testRunPolicy(every time.Duration, chores ...string) Policy {
 func withClasses(chores []chore.Chore, name string, classes ...string) []chore.Chore {
 	for i, c := range chores {
 		if c.Name == name {
-			chores[i].Classes = classes
+			chores[i].PromotionClasses = classes
 		}
 	}
 	return chores
 }
 
 // withClassList sets the Chore's closed finding-class list, which (unlike
-// Classes) reaches the Box whatever the promotion budget.
+// PromotionClasses) reaches the Box whatever the promotion budget.
 func withClassList(chores []chore.Chore, name string, classes ...string) []chore.Chore {
 	for i, c := range chores {
 		if c.Name == name {
@@ -994,7 +994,7 @@ func TestSweep_ZeroPerSweepCapStillBoundedByDayHeadroom(t *testing.T) {
 }
 
 // (m) BUTLER_MAX_PROMOTIONS_PER_DAY (Policy.Budgets.MaxPromotionsPerDay) defaults to
-// 0, so wiring the class allow-list alone (Chore.Classes) never promotes
+// 0, so wiring the class allow-list alone (Chore.PromotionClasses) never promotes
 // anything -- a Consumer has to opt in to promotion itself, not just to a
 // Chore (issue #3880).
 func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
@@ -1029,10 +1029,10 @@ func TestSweep_PromotionDisabledByDefaultFilesUnlabelled(t *testing.T) {
 		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label", fc.PostIssueCalls)
 	}
 	// Promotion off (MaxPromotionsPerDay is 0): the Box must not be told a
-	// class list even though the Chore has Classes, since nothing it could
+	// class list even though the Chore has PromotionClasses, since nothing it could
 	// hand back would ever promote (issue #3880).
-	if len(gotChore.Classes) != 0 {
-		t.Errorf("dispatch.Chore.Classes = %v, want none with promotion off", gotChore.Classes)
+	if len(gotChore.PromotionClasses) != 0 {
+		t.Errorf("dispatch.Chore.PromotionClasses = %v, want none with promotion off", gotChore.PromotionClasses)
 	}
 	// The closed class list is not a promotion fact: it reaches the Box
 	// even with promotion off.
@@ -1083,8 +1083,8 @@ func TestSweep_PromotionEnabledPromotesAllowedFinding(t *testing.T) {
 	}
 	// Promotion on: the Box is told its own Chore's host allow-list, so it
 	// knows which findings are worth a reviewer's turn (issue #3880).
-	if want := []string{"error-handling"}; !slices.Equal(gotChore.Classes, want) {
-		t.Errorf("dispatch.Chore.Classes = %v, want %v", gotChore.Classes, want)
+	if want := []string{"error-handling"}; !slices.Equal(gotChore.PromotionClasses, want) {
+		t.Errorf("dispatch.Chore.PromotionClasses = %v, want %v", gotChore.PromotionClasses, want)
 	}
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -1174,11 +1174,11 @@ func TestSweep_PromotionBudgetSpentFilesUnlabelled(t *testing.T) {
 		t.Fatalf("PostIssueCalls = %+v, want one call with no ready-for-agent label (budget spent)", fc.PostIssueCalls)
 	}
 	// Room already spent (today.Promoted >= MaxPromotionsPerDay): the Box
-	// must not be told a class list even though the Chore has Classes and
+	// must not be told a class list even though the Chore has PromotionClasses and
 	// promotion is on, mirroring the promotion-off case above (issue #3994
 	// review finding, butler.go's room.Promotions > 0 gate).
-	if len(gotChore.Classes) != 0 {
-		t.Errorf("dispatch.Chore.Classes = %v, want none with today's promotion room spent", gotChore.Classes)
+	if len(gotChore.PromotionClasses) != 0 {
+		t.Errorf("dispatch.Chore.PromotionClasses = %v, want none with today's promotion room spent", gotChore.PromotionClasses)
 	}
 	tip, err := backend.Read("bugs")
 	if err != nil {
@@ -1655,8 +1655,8 @@ func TestSweep_NoPatchForgeOmitsPatchClassesFromBox(t *testing.T) {
 	if len(got.PatchClasses) != 0 {
 		t.Errorf("PatchClasses = %v, want none: a nil patchForge must keep the rung off for the Box too", got.PatchClasses)
 	}
-	if len(got.Classes) == 0 {
-		t.Fatalf("Classes = %v, want the promotion class list still on", got.Classes)
+	if len(got.PromotionClasses) == 0 {
+		t.Fatalf("PromotionClasses = %v, want the promotion class list still on", got.PromotionClasses)
 	}
 }
 

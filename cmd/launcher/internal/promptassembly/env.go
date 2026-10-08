@@ -184,7 +184,7 @@ type Env struct {
 
 	// ChoreClasses is the Chore's promotion-candidate class allow-list
 	// (issue #3880), space-joined; empty whenever the host has promotion
-	// off (dispatch.Chore.Classes, set by internal/butler's Runner only
+	// off (dispatch.Chore.PromotionClasses, set by internal/butler's Runner only
 	// while today's promotion room is > 0 -- off, or spent for the day,
 	// leaves it empty). It is informational for the Box's prompt only --
 	// settle re-checks a finding's class against the host's own

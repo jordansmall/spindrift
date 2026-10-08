@@ -460,9 +460,9 @@ func TestBuildBoxEnv_ChoreForwardsChoreVarsNotIssueVars(t *testing.T) {
 			DiffRange: "cafe..deadbeef",
 			Slice:     []string{"a.go", "b.go"},
 		},
-		Classes:      []string{"flaky-test", "dead-code"},
-		ClassList:    []string{"flaky-test", "dead-code", "typo"},
-		PatchClasses: []string{"docs-drift"},
+		PromotionClasses: []string{"flaky-test", "dead-code"},
+		ClassList:        []string{"flaky-test", "dead-code", "typo"},
+		PatchClasses:     []string{"docs-drift"},
 	}
 	env, err := buildBoxEnv(cfg, choreSubject(c), 0, "", "the-nonce")
 	if err != nil {
@@ -529,7 +529,7 @@ func TestBuildBoxEnv_ChoreOmitsEmptyScopeFields(t *testing.T) {
 	}
 }
 
-// A chore whose Classes is nil/empty (promotion off, or no allow-list --
+// A chore whose PromotionClasses is nil/empty (promotion off, or no allow-list --
 // butler.go's job to decide, this package just forwards whatever it is
 // given) omits CHORE_CLASSES entirely, the same absent-when-empty shape as
 // every other optional Chore field.
@@ -539,7 +539,7 @@ func TestBuildBoxEnv_ChoreOmitsEmptyClasses(t *testing.T) {
 		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
 	}
 	if v, ok := env["CHORE_CLASSES"]; ok {
-		t.Errorf("CHORE_CLASSES should be absent when Classes is empty, got %q", v)
+		t.Errorf("CHORE_CLASSES should be absent when PromotionClasses is empty, got %q", v)
 	}
 	if v, ok := env["CHORE_CLASS_LIST"]; ok {
 		t.Errorf("CHORE_CLASS_LIST should be absent when ClassList is empty, got %q", v)
