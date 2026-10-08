@@ -45,10 +45,21 @@ var smokeRuntimeSettings = map[string]string{
 // on a runner argv.
 var smokeSecrets = map[string]string{"GH_TOKEN": "fake-token", "CLAUDE_CODE_OAUTH_TOKEN": "fake-oauth"}
 
+// tmpOverlay is argvEnv's mount source for a bwrap --tmp-overlay target.
+const tmpOverlay = "<tmp-overlay>"
+
+// bwrapStoreOverlay mirrors the launcher's AND-gate for a bwrap document: a
+// writable store with a nix.conf swaps the store's ro-bind for a tmpfs
+// overlay, and the launcher probes overlayfs before the Box run.
+func bwrapStoreOverlay(doc *inputdoc.Document) bool {
+	return doc.Artifacts["NIX_STORE_WRITABLE"] == "true" && doc.Artifacts["NIX_CONFIG_FILE"] != ""
+}
+
 // argvEnv scans a runner argv for the env it hands the Box. flag is "-e"
 // (OCI: NAME=value, or a bare NAME for a secret taken from the launcher's own
 // environment, recorded as nil) or "--setenv" (bwrap: NAME VALUE pairs).
-// mounts maps each bind target to its source.
+// mounts maps each bind target to its source, and a bwrap --tmp-overlay
+// target to tmpOverlay.
 func argvEnv(argv []string, flag string) (env map[string]*string, mounts map[string]string) {
 	env, mounts = map[string]*string{}, map[string]string{}
 	for i := 0; i < len(argv); i++ {
@@ -72,6 +83,9 @@ func argvEnv(argv []string, flag string) (env map[string]*string, mounts map[str
 		case (a == "--bind" || a == "--ro-bind") && i+2 < len(argv):
 			mounts[argv[i+2]] = argv[i+1]
 			i += 2
+		case a == "--tmp-overlay" && i+1 < len(argv):
+			mounts[argv[i+1]] = tmpOverlay
+			i++
 		}
 	}
 	return env, mounts
@@ -97,8 +111,14 @@ func checkRuntimeArgv(doc *inputdoc.Document, kind string, argv []string) []stri
 	if cache := doc.Artifacts["DRIVER_SESSION_CACHE_DIR"]; mounts[cache] == "" {
 		bad = append(bad, fmt.Sprintf("no mount targets the driver session cache %q", cache))
 	}
-	if bwrap && mounts["/nix/store"] != "/nix/store" {
-		bad = append(bad, "bwrap does not ro-bind /nix/store")
+	if bwrap {
+		if bwrapStoreOverlay(doc) {
+			if mounts["/nix/store"] != tmpOverlay {
+				bad = append(bad, "bwrap does not overlay the writable /nix/store")
+			}
+		} else if mounts["/nix/store"] != "/nix/store" {
+			bad = append(bad, "bwrap does not ro-bind /nix/store")
+		}
 	}
 	secretNames := []string{"GH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"}
 	for _, name := range strings.Fields(doc.Artifacts["BOX_ENV_VARS"]) {
@@ -257,6 +277,28 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 	fakeDir := seamtest.InstallFakes(t, "podman", "docker", "bwrap", "gh")
 	recDir := t.TempDir()
 	workDir := t.TempDir()
+	doc, err := inputdoc.Load(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overlay := c.runtime == "bwrap" && bwrapStoreOverlay(doc)
+	if overlay {
+		// The nix-var snapshot a `launcher build` leaves behind, which --no-build
+		// requires; the generation mirrors runner.closureGeneration's
+		// safePathComponent (an unusable tag yields the flat legacy path).
+		tag := doc.Artifacts["IMAGE_TAG"]
+		gen := filepath.Base(tag)
+		if tag == "" || gen == "." || gen == ".." || gen == string(filepath.Separator) {
+			gen = ""
+		}
+		db := filepath.Join(workDir, ".spindrift", "nix-var-snapshot", gen, "nix", "db", "db.sqlite")
+		if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(db, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	issue := seamtest.GhIssue{Number: 7, Title: "T", Body: "B", Labels: []string{"ready-for-agent"}}
 	outcome := "SPINDRIFT_OUTCOME issue=7 landing=" + smokePR + " status=ready note=seam\n"
@@ -333,13 +375,32 @@ func runSmoke(t *testing.T, c smokeCase, docPath string) (boxRun []string, gh []
 			}
 			continue
 		}
+		probes, boxes := 0, 0
 		for _, r := range recs {
-			if tool == "bwrap" || len(r) > 0 && r[0] == "run" {
+			switch {
+			case tool == "bwrap" && seamtest.IsBwrapOverlayProbe(r):
+				probes++
+				if boxes > 0 {
+					t.Errorf("bwrap overlay probe ran after the Box run: %q", r)
+				}
+			case tool == "bwrap":
+				boxes++
+				boxRun = r
+			case len(r) > 0 && r[0] == "run":
 				boxRun = r
 			}
 		}
-		if tool == "bwrap" && len(recs) != 1 {
-			t.Errorf("bwrap ran %d times; want one Box per issue", len(recs))
+		if tool == "bwrap" {
+			wantProbes := 0
+			if overlay {
+				wantProbes = 1
+			}
+			if boxes != 1 {
+				t.Errorf("bwrap ran %d Boxes; want one Box per issue", boxes)
+			}
+			if probes != wantProbes {
+				t.Errorf("bwrap ran %d overlay probes; want %d", probes, wantProbes)
+			}
 		}
 	}
 	if bareLedger != "" {
@@ -402,6 +463,26 @@ func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
 		t.Fatalf("fixture %s does not forward %s; pick another knob", c.fixture, dropped)
 	}
 
+	scratch := scratchDoc(t, docPath, func(artifacts map[string]string) {
+		names := slices.DeleteFunc(strings.Fields(artifacts["BOX_ENV_VARS"]), func(n string) bool { return n == dropped })
+		artifacts["BOX_ENV_VARS"] = strings.Join(names, " ")
+	})
+
+	boxRun, gh, _ := runSmoke(t, c, scratch)
+	if boxRun == nil {
+		t.Fatalf("%s never ran a Box", c.runtime)
+	}
+	problems := append(checkRuntimeArgv(doc, c.kind, boxRun), checkForgeCalls(doc, c.kind, gh)...)
+	if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, dropped) }) {
+		t.Fatalf("dropping %s from the document went unnoticed by every smoke check; problems: %q", dropped, problems)
+	}
+	t.Logf("caught: %q", problems)
+}
+
+// scratchDoc writes a copy of the input document at docPath, with edit applied
+// to its artifacts, and returns the copy's path.
+func scratchDoc(t *testing.T, docPath string, edit func(artifacts map[string]string)) string {
+	t.Helper()
 	var raw struct {
 		Settings  map[string]string `json:"settings"`
 		Artifacts map[string]string `json:"artifacts"`
@@ -413,8 +494,7 @@ func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
 	if err := json.Unmarshal(data, &raw); err != nil {
 		t.Fatal(err)
 	}
-	names := slices.DeleteFunc(strings.Fields(raw.Artifacts["BOX_ENV_VARS"]), func(n string) bool { return n == dropped })
-	raw.Artifacts["BOX_ENV_VARS"] = strings.Join(names, " ")
+	edit(raw.Artifacts)
 	scratch := filepath.Join(t.TempDir(), "scratch-input.json")
 	if data, err = json.Marshal(raw); err != nil {
 		t.Fatal(err)
@@ -422,14 +502,39 @@ func TestSeamSmokeCatchesDroppedKnob(t *testing.T) {
 	if err := os.WriteFile(scratch, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return scratch
+}
+
+// TestSeamSmokeBwrapOverlayProbe runs the launcher on a bwrap document with
+// nixStoreWritable and a nix.conf, the pair that makes checkBwrapOverlayGate
+// probe overlayfs before the Box run. The shipped fixture leaves nixInBox off
+// (issue #2664), so the knobs are set on a scratch copy.
+func TestSeamSmokeBwrapOverlayProbe(t *testing.T) {
+	c := smokeCase{"work-bwrap-overlay", "launcher-run-input-bwrap.json", "bwrap", "work"}
+	nixConf := filepath.Join(t.TempDir(), "nix.conf")
+	if err := os.WriteFile(nixConf, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scratch := scratchDoc(t, seamtest.Path(t, c.fixture), func(artifacts map[string]string) {
+		artifacts["NIX_STORE_WRITABLE"] = "true"
+		artifacts["NIX_CONFIG_FILE"] = nixConf
+	})
+	doc, err := inputdoc.Load(scratch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bwrapStoreOverlay(doc) {
+		t.Fatalf("scratch document does not enable the store overlay: %q", doc.Artifacts)
+	}
 
 	boxRun, gh, _ := runSmoke(t, c, scratch)
 	if boxRun == nil {
-		t.Fatalf("%s never ran a Box", c.runtime)
+		t.Fatal("bwrap never ran a Box")
 	}
-	problems := append(checkRuntimeArgv(doc, c.kind, boxRun), checkForgeCalls(doc, c.kind, gh)...)
-	if !slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, dropped) }) {
-		t.Fatalf("dropping %s from the document went unnoticed by every smoke check; problems: %q", dropped, problems)
+	for _, p := range checkRuntimeArgv(doc, c.kind, boxRun) {
+		t.Errorf("runtime: %s", p)
 	}
-	t.Logf("caught: %q", problems)
+	for _, p := range checkForgeCalls(doc, c.kind, gh) {
+		t.Errorf("forge: %s", p)
+	}
 }
