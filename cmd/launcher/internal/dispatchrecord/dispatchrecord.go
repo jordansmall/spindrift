@@ -269,6 +269,9 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		boxStatus string
 		// status is the last plain-text SPINDRIFT_OUTCOME line's status.
 		status string
+		// announced is the kind named by the Box's first plain-text announce
+		// line ("==> claude <verb> ..."); empty when the log has none.
+		announced string
 		// pendingDispositions holds a fix pass's Write to the dispositions file,
 		// by tool_use ID, until its tool_result shows the Write took effect.
 		pendingDispositions = map[string]string{}
@@ -287,10 +290,17 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			return
 		}
 		sawLine = true
-		// The agent's outcome line is plain text, not a stream-json event, so
-		// it must be read before the JSON prefilter below drops it.
+		// The agent's outcome line and the Box's announce line are plain text,
+		// not stream-json events, so they must be read before the JSON
+		// prefilter below drops them.
 		if r, ok := outcome.SelfReportFromLogLine(s); ok {
 			status = r.Status
+			return
+		}
+		if k := announcedKind(s); k != "" {
+			if announced == "" {
+				announced = k
+			}
 			return
 		}
 		if !strings.Contains(s, `"timestamp"`) && !strings.Contains(s, `"type":"result"`) &&
@@ -478,6 +488,10 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		kind = choreKeyedKind()
 	case slices.Contains(researchOnlyStatuses, status):
 		kind = dispatchkind.Research.Name
+	case announced != "":
+		// After the research-only case: logs before #734 announce research as
+		// "implementing", so a research-only status must outrank the verb.
+		kind = announced
 	case firstRole != "":
 		kind = dispatchkind.Work.Name
 	case slices.Contains(outcome.WorkStatuses, status):
@@ -524,3 +538,15 @@ var researchOnlyStatuses = func() []string {
 	}
 	return out
 }()
+
+// announcedKind is the kind whose Box start line ("==> claude <verb> ...") s
+// is, or "" when s is not one. Verbs come from the descriptors, so a new kind
+// is inferable without touching this.
+func announcedKind(s string) string {
+	for _, d := range dispatchkind.All {
+		if strings.HasPrefix(s, dispatchkind.AnnouncePrefix+d.AnnounceVerb+" ") {
+			return d.Name
+		}
+	}
+	return ""
+}

@@ -530,7 +530,7 @@ func (r *boxRun) firstRun() error {
 	if r.adviseOnly {
 		suffix = ""
 	}
-	r.say("==> claude %s %s%s", r.env.DispatchAnnounceVerb, subject, suffix)
+	r.say(dispatchkind.AnnouncePrefix+"%s %s%s", r.env.DispatchAnnounceVerb, subject, suffix)
 	rc, err := r.pass(r.handoffFile, h.Driver, string(prompt), h.SessionMode)
 	r.st.rc = rc
 	return err
