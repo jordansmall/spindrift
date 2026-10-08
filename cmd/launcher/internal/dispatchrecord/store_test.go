@@ -1340,6 +1340,54 @@ func TestStoreRenamedSatelliteIntoReusedSlot(t *testing.T) {
 	requirePassUSD(t, fresh, 1, 4, 3)
 }
 
+// An orphan satellite is renamed away and a new file takes its name in the same
+// Ingest as the earlier Dispatch it belongs to: the moved log must still
+// adopt its old segment, so the orphan Record goes and nothing is left phantom.
+func TestStoreRenamedOrphanSatelliteWhoseNameIsReused(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-9.log")
+	fix := putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	requireRecordLogs(t, s, []string{"issue-9-fix-1.log"})
+	prim := putLog(t, root, "issue-9.log", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	if err := os.Rename(prim, prim+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(fix, fix+".prior-run.1"); err != nil {
+		t.Fatal(err)
+	}
+	putLog(t, root, "issue-9-fix-1.log", workLog("2026-03-01T12:30:00.000Z", 3)...)
+	// Coarse filesystem timestamps would otherwise make the new file stat-identical to the old row.
+	later := time.Now().Add(time.Hour)
+	if err := os.Chtimes(fix, later, later); err != nil {
+		t.Fatal(err)
+	}
+	ingest(t, s)
+	want := []string{"issue-9.log.prior-run.1", "issue-9-fix-1.log.prior-run.1", "issue-9-fix-1.log"}
+	requireRecordLogs(t, s, want)
+	requirePassUSD(t, s, 1, 2, 3)
+	got := rootless(records(t, s))
+	if _, err := s.Reingest(); err != nil {
+		t.Fatal(err)
+	}
+	requireRecordLogs(t, s, want)
+	requirePassUSD(t, s, 1, 2, 3)
+	if again := rootless(records(t, s)); !reflect.DeepEqual(again, got) {
+		t.Fatalf("Reingest changed the records:\n got %+v\nwant %+v", again, got)
+	}
+
+	freshRoot := t.TempDir()
+	putLog(t, freshRoot, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
+	putLog(t, freshRoot, "issue-9-fix-1.log.prior-run.1", workLog("2026-03-01T11:00:00.000Z", 2)...)
+	putLog(t, freshRoot, "issue-9-fix-1.log", workLog("2026-03-01T12:30:00.000Z", 3)...)
+	fresh := openStore(t, freshRoot)
+	ingest(t, fresh)
+	if want := rootless(records(t, fresh)); !reflect.DeepEqual(got, want) {
+		t.Fatalf("incremental records differ from a fresh store:\n got %+v\nwant %+v", got, want)
+	}
+}
+
 // Deleting a satellite's log never removes its pass; when the orphan Record it
 // joined is then abandoned, that pass moves to the primary's Record, whether
 // the deletion and the primary's arrival are seen by separate Ingests or one.
@@ -1949,5 +1997,197 @@ func TestStoreIngestDiscardsParseOfLogChangedMidParse(t *testing.T) {
 	got := records(t, s)
 	if len(got) != 1 || len(got[0].Passes) != 2 {
 		t.Fatalf("records = %+v, want one with 2 passes", got)
+	}
+}
+
+const (
+	coincidentTS      = "2026-03-05T10:00:00.000Z"
+	coincidentPriorTS = "2026-03-01T10:00:00.000Z"
+)
+
+func putCoincidentPrior(t *testing.T, root string) {
+	t.Helper()
+	putLog(t, root, "issue-42.log.prior-run.1", workLog(coincidentPriorTS, 4)...)
+}
+
+func coincidentLogs(t *testing.T, root string, withPrior bool) {
+	t.Helper()
+	putLog(t, root, "issue-42.log", workLog(coincidentTS, 1)...)
+	putLog(t, root, "issue-42-fix-1.log", workLog(coincidentTS, 2)...)
+	if withPrior {
+		putCoincidentPrior(t, root)
+	}
+}
+
+func requireCoincident(t *testing.T, s *Store, withPrior bool) {
+	t.Helper()
+	want := []shape{{
+		ID:   "work:42@" + coincidentTS,
+		Logs: []string{"issue-42-fix-1.log", "issue-42.log"},
+		USD:  []float64{2, 1},
+	}}
+	if withPrior {
+		want = append([]shape{{
+			ID:   "work:42@2026-03-01T10:00:00.000Z",
+			Logs: []string{"issue-42.log.prior-run.1"},
+			USD:  []float64{4},
+		}}, want...)
+	}
+	if got := shapes(t, s); !reflect.DeepEqual(got, want) {
+		t.Fatalf("shapes = %+v, want %+v", got, want)
+	}
+}
+
+// An unstamped satellite starting in the same millisecond as a primary's claim
+// gets the primary's Record ID by coincidence; it must still join the primary
+// rather than overwrite it or join an earlier Dispatch (issue #4833).
+func TestStoreCoincidentSatelliteJoinsItsCoincidentPrimary(t *testing.T) {
+	for _, withPrior := range []bool{false, true} {
+		t.Run(fmt.Sprintf("prior=%v", withPrior), func(t *testing.T) {
+			root := t.TempDir()
+			coincidentLogs(t, root, withPrior)
+			s := openStore(t, root)
+			ingest(t, s)
+			requireCoincident(t, s, withPrior)
+			ingested := records(t, s)
+			if _, err := s.Reingest(); err != nil {
+				t.Fatal(err)
+			}
+			requireCoincident(t, s, withPrior)
+			if !reflect.DeepEqual(ingested, records(t, s)) {
+				t.Fatal("Reingest changed the records")
+			}
+		})
+	}
+}
+
+// The same coincidence, with the satellite ingested before its primary exists.
+func TestStoreCoincidentSatelliteIngestedBeforeItsPrimary(t *testing.T) {
+	for _, withPrior := range []bool{false, true} {
+		t.Run(fmt.Sprintf("prior=%v", withPrior), func(t *testing.T) {
+			together := t.TempDir()
+			coincidentLogs(t, together, withPrior)
+			st := openStore(t, together)
+			ingest(t, st)
+
+			root := t.TempDir()
+			if withPrior {
+				putCoincidentPrior(t, root)
+			}
+			putLog(t, root, "issue-42-fix-1.log", workLog(coincidentTS, 2)...)
+			s := openStore(t, root)
+			ingest(t, s)
+			putLog(t, root, "issue-42.log", workLog(coincidentTS, 1)...)
+			ingest(t, s)
+			requireCoincident(t, s, withPrior)
+			if _, err := s.Reingest(); err != nil {
+				t.Fatal(err)
+			}
+			requireCoincident(t, s, withPrior)
+			if a, b := rootless(records(t, st)), rootless(records(t, s)); !reflect.DeepEqual(a, b) {
+				t.Fatalf("records depend on ingest order:\n%+v\n%+v", a, b)
+			}
+		})
+	}
+}
+
+func rootless(recs []Record) []Record {
+	out := append([]Record(nil), recs...)
+	for i := range out {
+		out[i].Root = ""
+	}
+	return out
+}
+
+// A stamped, settled primary and an unstamped fix log that starts at the
+// stamp's claim millisecond mint the same Record ID; the fix log joins the
+// primary and never rewrites its row (issue #4833).
+func TestStoreCoincidentSatelliteLeavesStampedPrimaryRow(t *testing.T) {
+	id := RecordID("work", "42", stampClaim)
+	primary := append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1), settledLine(id, "failed", "ci-red"))
+	fix := workLog(stampClaim.Format("2006-01-02T15:04:05.000Z"), 2)
+	putPrimary := func(t *testing.T, root string) { putLog(t, root, "issue-42.log", primary...) }
+	putFix := func(t *testing.T, root string) { putLog(t, root, "issue-42-fix-1.log", fix...) }
+	fixPath := putLog(t, t.TempDir(), "issue-42-fix-1.log", fix...)
+	if frec, _, fseg, err := parseLog(fixPath); err != nil || frec.ID != id || !fseg.Equal(stampClaim) {
+		t.Fatalf("fix parse = %q at %v, err %v, want id %q at the claim", frec.ID, fseg, err, id)
+	}
+
+	check := func(t *testing.T, s *Store) []Record {
+		t.Helper()
+		recs := records(t, s)
+		if len(recs) != 1 {
+			t.Fatalf("records = %v, want 1", ids(recs))
+		}
+		r := recs[0]
+		if r.ID != id || r.Attribution != AttributionStamped || r.Revision != "abc123" ||
+			r.Outcome != "failed" || r.OutcomeSource != OutcomeSourceSettled || r.Reason != "ci-red" {
+			t.Fatalf("record = %+v, want the stamped primary's row intact", r)
+		}
+		var usd []float64
+		for _, p := range r.Passes {
+			usd = append(usd, p.USD)
+		}
+		if !reflect.DeepEqual(usd, []float64{2, 1}) {
+			t.Fatalf("pass USD = %v, want [2 1]", usd)
+		}
+		var orphan string
+		if err := s.db.QueryRow("SELECT orphan_log FROM records WHERE record_id = ?", id).Scan(&orphan); err != nil || orphan != "" {
+			t.Fatalf("orphan_log = %q, err %v, want empty", orphan, err)
+		}
+		return rootless(recs)
+	}
+
+	var results [][]Record
+	for _, c := range []struct {
+		name  string
+		order []func(*testing.T, string)
+	}{
+		{"primary first", []func(*testing.T, string){putPrimary, putFix}},
+		{"fix first", []func(*testing.T, string){putFix, putPrimary}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			s := openStore(t, root)
+			for _, put := range c.order {
+				put(t, root)
+				ingest(t, s)
+			}
+			got := check(t, s)
+			if _, err := s.Reingest(); err != nil {
+				t.Fatal(err)
+			}
+			if again := check(t, s); !reflect.DeepEqual(got, again) {
+				t.Fatalf("Reingest changed the records:\n%+v\n%+v", got, again)
+			}
+			results = append(results, got)
+		})
+	}
+	if len(results) == 2 && !reflect.DeepEqual(results[0], results[1]) {
+		t.Fatalf("records depend on ingest order:\n%+v\n%+v", results[0], results[1])
+	}
+}
+
+// A primary taking over the row of a coincident orphan satellite clears its
+// ownership mark.
+func TestStoreOrphanLogMarksOnlyOrphanRecords(t *testing.T) {
+	root := t.TempDir()
+	putLog(t, root, "issue-42-fix-1.log", workLog(coincidentTS, 2)...)
+	s := openStore(t, root)
+	ingest(t, s)
+	orphanLog := func() string {
+		var l string
+		if err := s.db.QueryRow("SELECT orphan_log FROM records").Scan(&l); err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	if got := orphanLog(); got != "issue-42-fix-1.log" {
+		t.Fatalf("orphan_log = %q, want the satellite's name", got)
+	}
+	putLog(t, root, "issue-42.log", workLog(coincidentTS, 1)...)
+	ingest(t, s)
+	if got := orphanLog(); got != "" {
+		t.Fatalf("orphan_log = %q after the primary took the row, want empty", got)
 	}
 }
