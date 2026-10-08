@@ -29,18 +29,29 @@ type forgejoPullPayload struct {
 	Base      forgejoPullRef `json:"base"`
 }
 
-// parsePRIndex extracts the pull index from the last path segment of a
-// Forgejo PR html_url, rejecting an empty or non-numeric segment.
-func parsePRIndex(prURL string) (string, error) {
-	trimmed := strings.TrimRight(prURL, "/")
-	idx := strings.LastIndex(trimmed, "/")
-	if idx < 0 || idx == len(trimmed)-1 {
-		return "", fmt.Errorf("forgejo: invalid PR URL %q: no trailing path segment", prURL)
+// prIndex binds parsePRIndex to the configured repo.
+func (f *forgejoCodeForge) prIndex(prURL string) (string, error) {
+	return parsePRIndex(prURL, f.repo)
+}
+
+// parsePRIndex extracts the pull index from a Forgejo PR html_url, rejecting a
+// non-numeric index and a URL whose last four path segments are not
+// <owner>/<repo>/pulls/<n> for the configured repo (compared case-insensitively;
+// any base-path prefix is ignored). The host is ignored too: the API base URL
+// can differ from the html_url host.
+func parsePRIndex(prURL, repo string) (string, error) {
+	u, err := url.Parse(prURL)
+	if err != nil {
+		return "", fmt.Errorf("forgejo: invalid PR URL %q: %w", prURL, err)
 	}
-	seg := trimmed[idx+1:]
-	if seg == "" {
-		return "", fmt.Errorf("forgejo: invalid PR URL %q: empty PR index", prURL)
+	segs := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(segs) < 4 || segs[len(segs)-2] != "pulls" {
+		return "", fmt.Errorf("forgejo: invalid PR URL %q: want .../<owner>/<repo>/pulls/<n>", prURL)
 	}
+	if named := segs[len(segs)-4] + "/" + segs[len(segs)-3]; !strings.EqualFold(named, repo) {
+		return "", fmt.Errorf("forgejo: PR URL %q names repo %q, not the configured %q", prURL, named, repo)
+	}
+	seg := segs[len(segs)-1]
 	if _, err := strconv.Atoi(seg); err != nil {
 		return "", fmt.Errorf("forgejo: invalid PR URL %q: PR index %q is not numeric: %w", prURL, seg, err)
 	}
@@ -99,10 +110,10 @@ func isDraftPull(p forgejoPullPayload) bool {
 }
 
 // getPull fetches the pull identified by prURL from the configured repo. The
-// adapter is single-repo: only the trailing index is parsed out of prURL, never
-// owner/repo.
+// adapter is single-repo: a URL naming another owner/repo is refused rather
+// than resolved by index against the configured repo.
 func (f *forgejoCodeForge) getPull(prURL string) (forgejoPullPayload, error) {
-	index, err := parsePRIndex(prURL)
+	index, err := f.prIndex(prURL)
 	if err != nil {
 		return forgejoPullPayload{}, err
 	}
@@ -302,7 +313,7 @@ type forgejoPRFile struct {
 // guarded path past the first page. A deleted file is reported under its old
 // path.
 func (f *forgejoCodeForge) ListPRFiles(prURL string) ([]string, error) {
-	index, err := parsePRIndex(prURL)
+	index, err := f.prIndex(prURL)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +382,7 @@ func (f *forgejoCodeForge) CanAutoMerge() (bool, error) {
 // merge_when_checks_succeed=true makes the merge endpoint queue rather than
 // merge immediately. The style comes from f.mergeMethod, as in Merge.
 func (f *forgejoCodeForge) EnqueueAutoMerge(prURL string) error {
-	index, err := parsePRIndex(prURL)
+	index, err := f.prIndex(prURL)
 	if err != nil {
 		return err
 	}
@@ -392,7 +403,7 @@ func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	if !isDraftPull(p) {
 		return nil
 	}
-	index, err := parsePRIndex(prURL)
+	index, err := f.prIndex(prURL)
 	if err != nil {
 		return err
 	}
@@ -416,7 +427,7 @@ func (f *forgejoCodeForge) MarkDraft(prURL string) error {
 	if isDraftPull(p) {
 		return nil
 	}
-	index, err := parsePRIndex(prURL)
+	index, err := f.prIndex(prURL)
 	if err != nil {
 		return err
 	}
