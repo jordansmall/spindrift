@@ -146,6 +146,7 @@ func closeIfOpen(f *os.File) {
 
 // dropRotatedAlias closes older and returns nil when it is the same file as
 // cur, so a rotation between the two opens does not read one file twice.
+// cmd/launcher/internal/daemon/events_file.go carries a copy.
 func dropRotatedAlias(older, cur *os.File) *os.File {
 	if older == nil || cur == nil {
 		return older
