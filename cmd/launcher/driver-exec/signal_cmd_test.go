@@ -540,6 +540,64 @@ func TestRunSignal_IssueIntentClassAndConcurrence(t *testing.T) {
 	})
 }
 
+// TestRunSignal_IssueIntentClassList pins the Box-side guard (issue #4766):
+// with CHORE_CLASS_LIST set, -class is required and must be on it, and a
+// failure sends nothing so the Box can pick again in the same run. With it
+// unset the flag stays free-form and optional.
+func TestRunSignal_IssueIntentClassList(t *testing.T) {
+	const list = "error-handling resource-leak flaky-test"
+	base := []string{"issue-intent", "-title", "t", "-type", "bug"}
+
+	forEachTransport(t, func(t *testing.T, transport string) {
+		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
+
+		t.Run("off-list class", func(t *testing.T) {
+			t.Setenv("CHORE_CLASS_LIST", list)
+			rc, out := runVerb(t, "b", append(base, "-class", "correctness-bug")...)
+			if rc == 0 {
+				t.Fatalf("exit = 0, want non-zero (out=%q)", out)
+			}
+			for _, want := range []string{`"correctness-bug"`, "error-handling resource-leak flaky-test"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("out = %q, want it to contain %q", out, want)
+				}
+			}
+		})
+		t.Run("missing class", func(t *testing.T) {
+			t.Setenv("CHORE_CLASS_LIST", list)
+			rc, out := runVerb(t, "b", base...)
+			if rc == 0 {
+				t.Fatalf("exit = 0, want non-zero (out=%q)", out)
+			}
+			if !strings.Contains(out, "-class is required") || !strings.Contains(out, "resource-leak") {
+				t.Errorf("out = %q, want a missing-class message listing the classes", out)
+			}
+		})
+		if n := len(srv.buf.IssueIntents()); n != 0 {
+			t.Fatalf("a rejected class sent %d intents, want 0", n)
+		}
+
+		t.Run("on-list class", func(t *testing.T) {
+			t.Setenv("CHORE_CLASS_LIST", list)
+			if rc, out := runVerb(t, "b", append(base, "-class", "resource-leak")...); rc != 0 {
+				t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+			}
+		})
+		t.Run("no list leaves class free-form and optional", func(t *testing.T) {
+			t.Setenv("CHORE_CLASS_LIST", "")
+			if rc, out := runVerb(t, "b", append(base, "-class", "anything")...); rc != 0 {
+				t.Fatalf("with class: exit = %d, want 0 (out=%q)", rc, out)
+			}
+			if rc, out := runVerb(t, "b", base...); rc != 0 {
+				t.Fatalf("without class: exit = %d, want 0 (out=%q)", rc, out)
+			}
+		})
+		if n := len(srv.buf.IssueIntents()); n != 3 {
+			t.Fatalf("intents = %d, want 3", n)
+		}
+	})
+}
+
 // TestRunSignal_IssueIntentPatchFile pins -patch-file (ADR 0057, issue
 // #4072): its absence carries no Patch, and it reads the named file's
 // content verbatim into the buffered intent's Patch field.

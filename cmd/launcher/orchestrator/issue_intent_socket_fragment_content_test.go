@@ -99,7 +99,7 @@ func TestIssueIntentRelaySummariesSharedSendParagraph(t *testing.T) {
 		t.Errorf("file-issues-relay-socket.md and research-file-issues-relay-socket.md diverge in their shared send paragraph (from %q):\nfile-issues-relay-socket.md:\n%s\n\nresearch-file-issues-relay-socket.md:\n%s", marker, fileIssues, researchFileIssues)
 	}
 
-	const butlerOnlyClause = "`-body-file`, `-class`, `-concurrence`, and `-patch-file` (the\nlast three only when the finding has one)"
+	const butlerOnlyClause = "`-body-file`, `-class`, `-concurrence`, and `-patch-file` (the\nlast two only when the finding has one)"
 	if strings.Count(butlerFileIssues, butlerOnlyClause) != 1 {
 		t.Fatalf("butler-file-issues-relay-socket.md send paragraph does not contain the butler-only flag clause exactly once (from %q; re-wrapping that clause also trips this):\n%s", marker, butlerFileIssues)
 	}
@@ -183,6 +183,25 @@ func TestButlerFileIssuesRelayFragmentKeysOnEnclosingSymbol(t *testing.T) {
 		{
 			name:   "keys on the nearest enclosing symbol",
 			clause: "(`path/to/file.go:Symbol`, where Symbol is the symbol it names or else the nearest enclosing one, or `path/to/file.go:<line>` only when no symbol encloses the site)",
+		},
+	})
+}
+
+// TestButlerFileIssuesRelayFragmentRedelegatesRejectedClass pins the relay's
+// exemption from its drop-on-failure rule (issue #4766): a filer reporting an
+// off-list class must be re-delegated with a valid one, never dropped. Only
+// the socket twin is pinned, since the log carrier has no class check that
+// can reject; TestIssueIntentFileIssuesRelayTwinsShareProse keeps the log
+// twin in step.
+func TestButlerFileIssuesRelayFragmentRedelegatesRejectedClass(t *testing.T) {
+	assertPromptClauses(t, "fragments/butler-file-issues-relay-socket.md", []promptClause{
+		{
+			name:   "re-delegates a class-rejected finding",
+			clause: "If the filer reports its class was rejected as off the class list, re-delegate the finding with a class from the valid ones the rejection names (see FINDING CLASSES above) — never drop it for that.",
+		},
+		{
+			name:   "other failures still drop",
+			clause: "On any other failure (the filer errors, times out, or returns nothing usable), drop the finding",
 		},
 	})
 }

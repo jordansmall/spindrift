@@ -71,17 +71,17 @@ Class list for this Chore (blank when the Chore declares none):
 docs-drift typo stale-comment
 
 Tag every finding with exactly one class naming its kind. When the class
-list above is non-empty, the class must be one of its entries — a class
-off the list is rejected, naming the valid ones, so pick again from it
-rather than drop the finding. When the list is blank, name the class
-yourself: a lowercase slug of letters, digits, and `-`, not starting with
-`-`, at most 40 characters. A class outside that shape is rejected, and
-the finding with it.
+list above is non-empty, the class must be one of its entries; if the
+filer reports a class rejected as off the list, pick again from the valid
+ones it names rather than drop the finding. When the list is blank, name
+the class yourself: a lowercase slug of letters, digits, and `-`, not
+starting with `-`, at most 40 characters. A class outside that shape is
+rejected, and the finding with it.
 
 # PROMOTION CANDIDATES
 
-Promotion classes for this run, the candidate subset of the class list
-(blank when promotion is off):
+Promotion classes for this run, the candidate subset, drawn from the class
+list when there is one (blank when promotion is off):
 
 docs-drift typo
 
@@ -161,8 +161,12 @@ Best-effort: filing must never block the sweep.
 
 - On success (the filer reports `QUEUED`), just count it toward this run's
   OUTCOME note — never fabricate an issue URL.
-- On failure (the filer errors, times out, or returns nothing usable), drop
-  the finding: the butler posts no comment anywhere to fall back into.
+- If the filer reports its class was rejected as off the class list,
+  re-delegate the finding with a class from the valid ones the rejection
+  names (see FINDING CLASSES above) — never drop it for that.
+- On any other failure (the filer errors, times out, or returns nothing
+  usable), drop the finding: the butler posts no comment anywhere to fall
+  back into.
 
 Never push, never open a PR, never commit, never edit an issue, add or
 remove a label, or file an issue yourself, and never write to the Ledger —
