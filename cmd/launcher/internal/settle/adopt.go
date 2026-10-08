@@ -40,11 +40,29 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 
 // verifyMerged confirms a PR reported merged carries both a MERGED state and
 // the CompleteLabel, and demotes the issue to Failed otherwise, since a gap
-// there means something merged outside the gate. A verified merge also drops
-// the landed bundle; a demoted settle keeps it.
+// there means something merged outside the gate. A read that still fails after
+// its retries proves nothing, so it leaves the issue as it stands rather than
+// demote it. A verified merge also drops the landed bundle; a demoted settle
+// keeps it.
 func (s *Settle) verifyMerged(num, pr string) {
-	prState, _ := s.pr.PRState(pr)
-	iss, _ := s.it.Issue(num)
+	var prState forge.PRState
+	var iss forge.Issue
+	err := s.retryVerifyRead(num, pr, func() error {
+		var err error
+		prState, err = s.pr.PRState(pr)
+		return err
+	})
+	if err == nil {
+		err = s.retryVerifyRead(num, pr, func() error {
+			var err error
+			iss, err = s.it.Issue(num)
+			return err
+		})
+	}
+	if err != nil {
+		fmt.Printf("    #%s  landing=%s  status=merge-unverified-read-error  !! %v\n", num, pr, err)
+		return
+	}
 	if prState == forge.PRMerged && containsLabel(iss.Labels, s.cfg.CompleteLabel) {
 		fmt.Printf("    #%s  landing=%s  status=verified-merged\n", num, pr)
 		s.removeLandedBundle(num)
@@ -53,16 +71,31 @@ func (s *Settle) verifyMerged(num, pr string) {
 	}
 	var reason string
 	if prState != forge.PRMerged {
-		if prState == "" {
-			reason = "PR state is 'unknown', expected MERGED"
-		} else {
-			reason = fmt.Sprintf("PR state is '%s', expected MERGED", prState)
-		}
+		reason = fmt.Sprintf("PR state is '%s', expected MERGED", prState)
 	} else {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
 	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
 	s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonMergeUnverified)
+}
+
+// retryVerifyRead runs read, retrying a failure up to Policy.Max times with
+// backoff.
+func (s *Settle) retryVerifyRead(num, pr string, read func() error) error {
+	attempts := 0
+	for {
+		err := read()
+		if err == nil {
+			return nil
+		}
+		if attempts >= s.cfg.Policy.Max {
+			return err
+		}
+		attempts++
+		fmt.Printf("    #%s  landing=%s  status=merge-unverified-read-retry  attempt=%d/%d  !! %v\n",
+			num, pr, attempts, s.cfg.Policy.Max, err)
+		s.transientBackoff().Do(attempts)
+	}
 }
 
 // postUsageComment posts d's aggregate usage-statistics comment to the issue.

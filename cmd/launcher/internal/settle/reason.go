@@ -27,7 +27,7 @@ const (
 	ReasonRelayFailed        = "relay-failed"
 	ReasonBlocked            = "blocked"
 	ReasonNoOutcome          = "no-outcome"       // the Box printed no outcome line
-	ReasonMergeUnverified    = "merge-unverified" // a merge verifyMerged could not confirm
+	ReasonMergeUnverified    = "merge-unverified" // verifyMerged's successful reads contradicted the merge
 	ReasonNoPR               = "no-pr"            // status=merged named a branch with no PR to verify
 	ReasonBoxFailed          = "box-failed"
 	ReasonResearchFailed     = "research-failed"

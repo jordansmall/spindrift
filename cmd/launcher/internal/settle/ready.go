@@ -536,8 +536,8 @@ func (s *Settle) mergeImmediate(num string, gen uint64, pr string, d dispatch.Di
 }
 
 // transientBackoff builds the jittered linear backoff the rebase-push, merge
-// transient, and bundle-relay retry loops share, so the call sites cannot drift
-// apart (issue #2095, issue #4649).
+// transient, bundle-relay, and verifyMerged read retry loops share, so the call
+// sites cannot drift apart (issue #2095, issue #4649).
 func (s *Settle) transientBackoff() retry.LinearBackoff {
 	b := s.cfg.Policy.Backoff(s.clock)
 	b.Jitter = s.cfg.Policy.Jitter

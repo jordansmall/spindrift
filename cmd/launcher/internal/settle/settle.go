@@ -33,8 +33,8 @@ type Config struct {
 
 	// Policy tunes transient retries (issue #2928); the rebase-push loops reuse
 	// dispatch's exit-retry policy (issue #2095). Policy.Max caps
-	// merge-transient retries (issue #2325); MaxRebaseAttempts is a separate
-	// merge-conflict budget.
+	// merge-transient and verifyMerged read retries (issue #2325);
+	// MaxRebaseAttempts is a separate merge-conflict budget.
 	Policy retry.Policy
 
 	// Clock is the sleep seam the rebase-push backoff sleeps through (issue
