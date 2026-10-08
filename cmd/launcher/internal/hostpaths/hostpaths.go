@@ -20,6 +20,14 @@ func LogDir(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "logs")
 }
 
+// RootOfLogDir is the inverse of LogDir: the pwd whose LogDir is dir, with ok
+// false when dir is no root's log directory.
+func RootOfLogDir(dir string) (root string, ok bool) {
+	dir = filepath.Clean(dir)
+	root = filepath.Dir(filepath.Dir(dir))
+	return root, LogDir(root) == dir
+}
+
 // DispatchRecordsDB is the host-side SQLite store of Dispatch Records.
 func DispatchRecordsDB(pwd string) string {
 	return filepath.Join(pwd, ".spindrift", "dispatch-records.db")

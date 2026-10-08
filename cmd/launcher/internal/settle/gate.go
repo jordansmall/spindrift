@@ -3,6 +3,7 @@ package settle
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/report"
@@ -386,10 +388,13 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 }
 
 // Settled is the single terminal-record emitter for every settle path: it
-// appends ds as a dispatch_settled op to the Dispatch's primary Pass log, then
-// reports the settled record.
+// appends ds as a dispatch_settled op to the Dispatch's primary Pass log,
+// ingests the Dispatch into the root's Record store, then reports the settled
+// record.
 //
-// The append is best-effort: it warns and never changes the settle outcome.
+// The append and the ingest are best-effort: each warns and never changes the
+// settle outcome. The ingest runs only after a successful append, so every
+// case below that appends nothing skips it too.
 // The log is opened without O_CREATE: a Dispatch that wrote no primary log has
 // no Record to settle, and a stub file would only fake one. With no log path
 // nothing is appended; with no Record ID nothing is appended either, and the
@@ -403,9 +408,37 @@ func Settled(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
 	default:
 		if err := appendSettled(logPath, ds); err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? %s: could not append %s to %s: %v\n", key, claude.OpDispatchSettled, logPath, err)
+		} else {
+			ingestSettled(key, logPath)
 		}
 	}
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
+}
+
+// ingestSettled ingests the root's logs so the settled Record is in the store
+// with no `stats` run. The root is derived from logPath: a log outside a
+// root's .spindrift/logs has no store.
+func ingestSettled(key dispatchkey.Key, logPath string) {
+	root, ok := hostpaths.RootOfLogDir(filepath.Dir(logPath))
+	if !ok {
+		return
+	}
+	err := func() (err error) {
+		store, err := dispatchrecord.Open(root)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if closeErr := store.Close(); err == nil {
+				err = closeErr
+			}
+		}()
+		_, err = store.Ingest()
+		return err
+	}()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? %s: could not ingest into %s: %v\n", key, hostpaths.DispatchRecordsDB(root), err)
+	}
 }
 
 // appendSettled appends ds to the existing log at logPath, never creating it.
