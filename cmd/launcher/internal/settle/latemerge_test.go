@@ -2,6 +2,8 @@ package settle
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -209,5 +211,54 @@ func TestLateMerges_UpgradesClaimJustInsideTheWindow(t *testing.T) {
 	merged, err := LateMerges(root, fc, lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 1 || merged[0] != id {
 		t.Fatalf("merged = %v, %v; want [%s]", merged, err, id)
+	}
+}
+
+// A rate-limited forge ends the sweep: one PRState call, no per-Record warning
+// flood, and the error names the rate limit.
+func TestLateMerges_StopsAtFirstRateLimit(t *testing.T) {
+	root := t.TempDir()
+	fake := forge.NewFake()
+	const prA, prB, prC = "https://x/pull/1", "https://x/pull/2", "https://x/pull/3"
+	for i, u := range []string{prA, prB, prC} {
+		writeSettledLog(t, root, fmt.Sprint(i+1), ReasonManual, u)
+		fake.SetPRState(u, forge.PRMerged)
+	}
+	fake.PRStateErr = &forge.RateLimitError{Err: errors.New("HTTP 403")}
+	fc := &askedPR{PRForge: fake}
+
+	var w bytes.Buffer
+	merged, err := LateMerges(root, fc, lateMergeNow, &w)
+	if !errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("err = %v, want one wrapping forge.ErrRateLimit", err)
+	}
+	if len(fc.asked) != 1 || len(merged) != 0 {
+		t.Fatalf("asked %v, merged %v; want exactly one PRState call and no merges", fc.asked, merged)
+	}
+	if n := strings.Count(w.String(), "??"); n != 0 {
+		t.Fatalf("warnings = %q, want none", w.String())
+	}
+}
+
+// Merges appended before the rate limit hits are kept and returned.
+func TestLateMerges_RateLimitKeepsEarlierMerges(t *testing.T) {
+	root := t.TempDir()
+	fake := forge.NewFake()
+	for _, k := range []string{"1", "2", "3"} {
+		writeSettledLog(t, root, k, ReasonManual, "https://x/pull/"+k)
+		fake.SetPRState("https://x/pull/"+k, forge.PRMerged)
+	}
+	fake.PRStateErrs = []error{nil, &forge.RateLimitError{Err: errors.New("HTTP 403")}}
+	fc := &askedPR{PRForge: fake}
+
+	merged, err := LateMerges(root, fc, lateMergeNow, &bytes.Buffer{})
+	if !errors.Is(err, forge.ErrRateLimit) {
+		t.Fatalf("err = %v, want one wrapping forge.ErrRateLimit", err)
+	}
+	if len(fc.asked) != 2 || len(merged) != 1 {
+		t.Fatalf("asked %v, merged %v; want two calls and one merge", fc.asked, merged)
+	}
+	if got := storedRecordsByID(t, root)[merged[0]].Reason; got != ReasonMerged {
+		t.Fatalf("reason = %q, want merged (re-ingested before returning)", got)
 	}
 }

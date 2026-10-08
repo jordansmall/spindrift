@@ -36,7 +36,7 @@ const LateMergeWindow = 14 * 24 * time.Hour
 // closed unmerged is not a landing. A PR URL that is not an absolute http(s)
 // URL is skipped unqueried, since the forge client takes it as a command-line
 // argument. A forge or append failure on one Record warns to warn and moves
-// on.
+// on, except a rate limit, which ends the sweep with an error wrapping it.
 // A sequential re-run is a no-op: an upgraded Record's reason is merged, so it
 // is no longer a candidate. Two sweeps running at once can both append the op,
 // which is harmless since the parser keeps the last.
@@ -63,6 +63,7 @@ func LateMerges(root string, pr forge.PRForge, now time.Time, warn io.Writer) (m
 		return nil, err
 	}
 	var appended []string
+	var stopErr error
 	for _, r := range recs {
 		if r.OutcomeSource != dispatchrecord.OutcomeSourceSettled || r.Outcome != forge.Complete.String() ||
 			!ReasonLeavesPROpen(r.Reason) || !queryablePRURL(r.PRURL) {
@@ -76,6 +77,10 @@ func LateMerges(root string, pr forge.PRForge, now time.Time, warn io.Writer) (m
 			continue
 		}
 		state, err := pr.PRState(r.PRURL)
+		if errors.Is(err, forge.ErrRateLimit) {
+			stopErr = fmt.Errorf("late-merge sweep stopped: %w", err)
+			break
+		}
 		if err != nil {
 			fmt.Fprintf(warn, "    ?? %s: could not read state of %s: %v\n", r.ID, r.PRURL, err)
 			continue
@@ -97,7 +102,7 @@ func LateMerges(root string, pr forge.PRForge, now time.Time, warn io.Writer) (m
 		merged = append(merged, r.ID)
 		appended = append(appended, path)
 	}
-	var ingestErr error
+	ingestErr := stopErr
 	for _, path := range appended {
 		if _, err := store.IngestChain(filepath.Base(path)); err != nil {
 			ingestErr = errors.Join(ingestErr, err)
