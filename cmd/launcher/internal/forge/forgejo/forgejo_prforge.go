@@ -349,15 +349,22 @@ type forgejoAutoMergeStylesPayload struct {
 	AllowSquashMerge  bool `json:"allow_squash_merge"`
 }
 
-// CanAutoMerge reports whether the repo permits at least one merge style.
-// Forgejo has no autoMergeAllowed flag like GitHub's; its scheduled merge works
-// whenever any merge style is permitted, so that is the signal read here.
+// CanAutoMerge reports whether the repo allows the configured merge style
+// (MERGE_METHOD), the style EnqueueAutoMerge posts. Forgejo has no
+// autoMergeAllowed flag like GitHub's.
 func (f *forgejoCodeForge) CanAutoMerge() (bool, error) {
 	var repo forgejoAutoMergeStylesPayload
 	if err := f.rest.Do(http.MethodGet, f.repoPath(), nil, &repo); err != nil {
 		return false, err
 	}
-	return repo.AllowMergeCommits || repo.AllowRebase || repo.AllowSquashMerge, nil
+	switch MergeStyle(f.mergeMethod) {
+	case "merge":
+		return repo.AllowMergeCommits, nil
+	case "squash":
+		return repo.AllowSquashMerge, nil
+	default:
+		return repo.AllowRebase, nil
+	}
 }
 
 // EnqueueAutoMerge queues Forgejo's scheduled merge for the PR.

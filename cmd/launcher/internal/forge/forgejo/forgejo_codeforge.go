@@ -149,9 +149,10 @@ func (f *forgejoCodeForge) BranchExists(branch string) (bool, error) {
 	return f.git.BranchExists(branch)
 }
 
-// forgejoMergeDo maps MergeMethod onto the merge endpoint's "Do" value. An
-// unset method resolves to "rebase", matching the github adapter's default.
-func forgejoMergeDo(method string) string {
+// MergeStyle maps MergeMethod onto the merge endpoint's "Do" value, which is also
+// the repo merge style CanAutoMerge checks. An unset method resolves to
+// "rebase", matching the github adapter's default.
+func MergeStyle(method string) string {
 	switch method {
 	case "merge":
 		return "merge"
@@ -167,7 +168,7 @@ func forgejoMergeDo(method string) string {
 // disambiguates and EnqueueAutoMerge propagates raw.
 func (f *forgejoCodeForge) postMerge(index string, extra map[string]any) error {
 	body := map[string]any{
-		"Do":                        forgejoMergeDo(f.mergeMethod),
+		"Do":                        MergeStyle(f.mergeMethod),
 		"delete_branch_after_merge": true,
 	}
 	for k, v := range extra {
