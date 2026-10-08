@@ -10,7 +10,6 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/report"
 )
 
 // ResearchSettle is the research dispatch kind's one-shot settle adapter
@@ -65,13 +64,13 @@ func NewResearchSettleReadOnly(it forge.IssueTracker, verdicts forge.VerdictLabe
 func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result) {
 	RecordSettleWarnings(d, num, "", result)
 	if !result.Resolved.Found {
-		r.fail(num, "no verdict outcome line")
+		r.fail(d, num, "no verdict outcome line")
 		return
 	}
 	o := result.Resolved.Outcome
 	verdict, ok := r.verdicts.Parse(o.Status)
 	if !ok {
-		r.fail(num, o.Note)
+		r.fail(d, num, o.Note)
 		return
 	}
 	backlink := fmt.Sprintf("Filed from research on #%s", num)
@@ -94,7 +93,7 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 			return
 		}
 	} else if r.landing != nil || r.readOnly || r.filerEnabled {
-		r.fail(num, commentFailureNote(result.CommentRejected))
+		r.fail(d, num, commentFailureNote(result.CommentRejected))
 		return
 	}
 	if err := r.it.CompleteVerdict(num, verdict); err != nil {
@@ -105,12 +104,12 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	// (recommend/reject/unclear, ADR 0022) rides in the note, since the report
 	// protocol's state field is not research-verdict vocabulary.
 	//
-	// Emitted inline rather than through gate.go's transitionState/flushSettled
+	// Settled inline rather than through gate.go's transitionState/flushSettled
 	// latch: that latch arbitrates a dispatch settle that reaches a terminal
 	// state twice for one issue (completeLanding's Complete, then
 	// verifyMerged's demotion). Every ResearchSettle path reaches exactly one,
 	// so inline is already "once".
-	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), "verdict "+string(verdict), "", "")
+	SettledBy(d, dispatchkey.Issue(num), forge.Complete.String(), ReasonVerdict, "verdict "+string(verdict))
 	fmt.Printf("    #%s  landing=%s  status=%s  note=%s\n", num, o.Landing, o.Status, o.Note)
 }
 
@@ -127,7 +126,7 @@ func commentFailureNote(rejected outcome.Rejections) string {
 }
 
 // fail transitions num from InProgress to Failed (agent-research-failed).
-func (r *ResearchSettle) fail(num, note string) {
+func (r *ResearchSettle) fail(d dispatch.Dispatcher, num, note string) {
 	if err := r.it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not transition to failed: %v\n", num, err)
 	}
@@ -138,7 +137,7 @@ func (r *ResearchSettle) fail(num, note string) {
 	// Inline, not through the transitionState/flushSettled latch (see the
 	// comment at ResearchSettle's other Settled call above): this path also
 	// reaches exactly one terminal state per issue.
-	report.Settled(dispatchkey.Issue(num), forge.Failed.String(), note, "", "")
+	SettledBy(d, dispatchkey.Issue(num), forge.Failed.String(), ReasonResearchFailed, note)
 	fmt.Printf("    #%s  status=failed  note=%s\n", num, note)
 }
 

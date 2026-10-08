@@ -24,6 +24,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -1501,7 +1502,7 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 				// the issue is not stranded agent-in-progress with no run.
 				restoreErr := it.TransitionState(iss.number, forge.InProgress, forge.Failed)
 				// Reported even if the restore failed, as transitionState does.
-				report.Settled(dispatchkey.Issue(iss.number), forge.Failed.String(), "stopped before the bundle relay", "", "")
+				recoverSettled(iss.number, forge.Failed, settle.ReasonStopped, "stopped before the bundle relay")
 				if restoreErr != nil {
 					return fmt.Errorf("recover: restore #%s to %s: %w", issueNum, c.failedLabel, restoreErr)
 				}
@@ -1606,7 +1607,7 @@ func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, o
 	// caller settles that failure itself. Inline rather than through
 	// settle/gate.go's latch, which exists for a path that can reach a second,
 	// contradicting terminal transition; this one reaches at most one.
-	report.Settled(dispatchkey.Issue(num), forge.Complete.String(), note, "", "")
+	recoverSettled(num, forge.Complete, settle.ReasonRecoverDeclined, note)
 	if commentErr := it.Comment(num, note); commentErr != nil {
 		fmt.Fprintf(stderr, "    ?? #%s: could not post recover-declined comment: %v\n", num, commentErr)
 	}
@@ -2401,4 +2402,11 @@ func primaryLogPath(num string) string {
 		return ""
 	}
 	return dispatch.LogPathFor(pwd, num)
+}
+
+// recoverSettled is a recover terminal settle that holds no Dispatcher: it
+// settles the prior work Dispatch's Record, so the empty RecordID makes
+// settle.SettledPrior read the ID from the primary log's dispatch_start stamp.
+func recoverSettled(num string, state forge.DispatchState, reason, note string) {
+	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), claude.DispatchSettled{State: state.String(), Reason: reason, Note: note})
 }

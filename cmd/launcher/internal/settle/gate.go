@@ -179,7 +179,7 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			if err != nil || !ok {
 				const reason = "no PR found on branch to verify merge"
 				fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)
-				s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonFailed)
+				s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonNoPR)
 			} else {
 				s.verifyMerged(num, pr)
 			}
@@ -286,7 +286,7 @@ func (s *Settle) settleUnresolved(num, clsNote, missingNote string) {
 		// #3627) so a settled record is diagnosable on disk without the
 		// daemon's terminal.
 		note := missingNote + clsNote
-		s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonMissing)
+		s.transitionState(num, forge.InProgress, forge.Failed, note, ReasonNoOutcome)
 		return
 	}
 	// No transitionState here, on purpose, regardless of draft-ness (issue
@@ -368,46 +368,75 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	if !ok {
 		return
 	}
-	// A nil Dispatcher (some callers hold none) has no Record.
-	var recordID string
-	if d != nil {
-		recordID = d.RecordID()
+	ds := claude.DispatchSettled{State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr}
+	if d == nil {
+		// A nil Dispatcher (the butler patch gate) has no Record, so nothing
+		// is appended: the primary log's stamp may name an unrelated one.
+		Settled(dispatchkey.Issue(num), "", ds)
+		return
 	}
+	ds.RecordID = d.RecordID()
 	var path string
 	if s.cfg.LogPath != nil {
 		path = s.cfg.LogPath(num)
 	}
-	Settled(dispatchkey.Issue(num), path, claude.DispatchSettled{RecordID: recordID, State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr})
+	// An adopt's Dispatcher never Ran: it carries the prior Record's ID when a
+	// fix or conflict pass adopted it, else none and the stamp supplies it.
+	SettledPrior(dispatchkey.Issue(num), path, ds)
 }
 
 // Settled is the single terminal-record emitter for every settle path: it
 // appends ds as a dispatch_settled op to the Dispatch's primary Pass log, then
-// reports the settled record. A ds with no RecordID takes the one stamped at
-// the head of logPath, which covers a Dispatch that never Ran (recover's) and
-// so minted none of its own.
+// reports the settled record.
 //
 // The append is best-effort: it warns and never changes the settle outcome.
 // The log is opened without O_CREATE: a Dispatch that wrote no primary log has
-// no Record to settle, and a stub file would only fake one. With no log path or
-// no Record ID nothing is appended.
+// no Record to settle, and a stub file would only fake one. With no log path
+// nothing is appended; with no Record ID nothing is appended either, and the
+// log's stamp is deliberately not consulted — it may name an earlier
+// Dispatch's Record that this one must not rewrite (see SettledPrior).
 func Settled(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
-	if ds.RecordID == "" && logPath != "" {
-		ds.RecordID = dispatchrecord.StampRecordID(logPath)
-	}
-	if logPath != "" && ds.RecordID != "" {
-		line := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &ds})
-		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
-		if err == nil {
-			_, err = f.WriteString(line)
-			if closeErr := f.Close(); err == nil {
-				err = closeErr
-			}
-		}
-		if err != nil {
+	switch {
+	case logPath == "":
+	case ds.RecordID == "":
+		fmt.Fprintf(os.Stderr, "    ?? %s: no record id, not appending %s to %s\n", key, claude.OpDispatchSettled, logPath)
+	default:
+		if err := appendSettled(logPath, ds); err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? %s: could not append %s to %s: %v\n", key, claude.OpDispatchSettled, logPath, err)
 		}
 	}
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
+}
+
+// appendSettled appends ds to the existing log at logPath, never creating it.
+func appendSettled(logPath string, ds claude.DispatchSettled) error {
+	f, err := os.OpenFile(logPath, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		return err
+	}
+	_, err = f.WriteString(claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &ds}))
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	return err
+}
+
+// SettledPrior is Settled for a Dispatch that never Ran and so minted no
+// Record ID (recover's, an adopt's): the Record it settles is the prior
+// Dispatch's, so a ds with no RecordID takes the one stamped at the head of
+// logPath. Use it only where that prior Record is genuinely the target.
+func SettledPrior(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
+	if ds.RecordID == "" && logPath != "" {
+		ds.RecordID = dispatchrecord.StampRecordID(logPath)
+	}
+	Settled(key, logPath, ds)
+}
+
+// SettledBy settles d's own Record: the terminal state of a Dispatch that was
+// Run (or failed trying), keyed by what d minted. A Dispatch that failed before
+// minting a Record ID appends nothing rather than touching an earlier one.
+func SettledBy(d dispatch.Dispatcher, key dispatchkey.Key, state, reason, note string) {
+	Settled(key, d.LogPath(), claude.DispatchSettled{RecordID: d.RecordID(), State: state, Reason: reason, Note: note})
 }
 
 // latchPR records the PR num's gate is working, for flushSettled to name on

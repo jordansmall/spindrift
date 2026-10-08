@@ -8,10 +8,8 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/recoverrecord"
-	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/waves"
 )
@@ -110,6 +108,6 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	// Emitted here, not through the settler's latch: a landing that returns
 	// false never reaches a terminal transition there, so nothing else reports
 	// this attempt's end.
-	report.Settled(dispatchkey.Issue(num), forge.Failed.String(), note, "", "")
+	recoverSettled(num, forge.Failed, settle.ReasonRelayFailed, note)
 	return errors.Join(saveErr, parkErr)
 }

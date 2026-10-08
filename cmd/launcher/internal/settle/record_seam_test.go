@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchrecord"
@@ -53,42 +54,11 @@ func TestSettle_DispatchRecordSeam(t *testing.T) {
 			readRecords := testutil.InstallPipeReporter(t)
 
 			root := t.TempDir()
-			if err := dispatchMkLogDir(root); err != nil {
-				t.Fatal(err)
-			}
-			drv, err := driver.New("claude")
-			if err != nil {
-				t.Fatal(err)
-			}
 			fr := runner.NewFake()
-			fr.RunFunc = func(box runner.Box) error {
-				line := fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=box-said-so nonce=%s",
-					num, testPR, tc.boxStatus, box.Env["RUN_NONCE"])
-				result, _ := json.Marshal(line)
-				box.Output.Write([]byte(claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + //nolint:errcheck
-					`{"type":"assistant","message":{"id":"a1","model":"m","content":[]}}` + "\n" +
-					`{"type":"result","timestamp":"2026-05-01T09:00:00Z","num_turns":1,"total_cost_usd":1,` +
-					`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}},"result":` + string(result) + "}\n" +
-					// The in-box extractor also leads a raw line with the outcome,
-					// which is what the host's outcome.Resolve reads.
-					line + "\n"))
-				return nil
-			}
-			dcfg := dispatch.Config{
-				Kind:           "work",
-				OpenPRForIssue: func(string) (bool, error) { return false, nil },
-			}
-			f, err := dispatch.NewFactory(dcfg, root, fr, drv, dispatch.RealClock())
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(f.Cleanup)
-			f.SetHeartbeatOut(nopWriter{})
-			d := f.New(num, "t")
+			fr.RunFunc = seamBoxRun(num, "implement", "a1", "2026-05-01T09:00:00Z", tc.boxStatus, "box-said-so")
+			d := seamDispatch(t, root, num, fr)
 
-			fc := forge.NewFake(ambiguousDispatchLabels)
-			fc.BranchPrefix = "agent/issue-"
-			fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
+			fc := seamForge(num)
 			if tc.checkStates != nil {
 				fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
 				fc.SetCheckStates(testPR, tc.checkStates)
@@ -107,18 +77,7 @@ func TestSettle_DispatchRecordSeam(t *testing.T) {
 				s.Settle(d, num, 0, res)
 			})
 
-			store, err := dispatchrecord.Open(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { store.Close() })
-			if _, err := store.Ingest(); err != nil {
-				t.Fatal(err)
-			}
-			recs, err := store.Records()
-			if err != nil {
-				t.Fatal(err)
-			}
+			recs := ingestRecords(t, root)
 			if len(recs) != 1 {
 				t.Fatalf("records = %+v, want exactly one", recs)
 			}
@@ -165,6 +124,127 @@ type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-func dispatchMkLogDir(root string) error {
-	return os.MkdirAll(dispatch.HostLogDirFor(root), 0o755)
+// seamTranscript is one Pass's stream-json: pass_start, an assistant turn and a
+// result. A non-empty outcomeLine rides in the result and also leads a raw line
+// after it, which is what the host's outcome.Resolve reads.
+func seamTranscript(role, msgID, ts, outcomeLine string) string {
+	resultField := ""
+	tail := ""
+	if outcomeLine != "" {
+		result, _ := json.Marshal(outcomeLine)
+		resultField = `,"result":` + string(result)
+		tail = outcomeLine + "\n"
+	}
+	return claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: role}) +
+		`{"type":"assistant","message":{"id":"` + msgID + `","model":"m","content":[]}}` + "\n" +
+		`{"type":"result","timestamp":"` + ts + `","num_turns":1,"total_cost_usd":1,` +
+		`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}}` + resultField + "}\n" +
+		tail
+}
+
+// seamBoxRun is a fake Box that writes one Pass reporting status.
+func seamBoxRun(num, role, msgID, ts, status, note string) func(runner.Box) error {
+	return func(box runner.Box) error {
+		line := fmt.Sprintf("SPINDRIFT_OUTCOME issue=%s landing=%s status=%s note=%s nonce=%s",
+			num, testPR, status, note, box.Env["RUN_NONCE"])
+		box.Output.Write([]byte(seamTranscript(role, msgID, ts, line))) //nolint:errcheck
+		return nil
+	}
+}
+
+// seamDispatch builds a real Dispatch for num over fr, with the host log dir
+// made.
+func seamDispatch(t *testing.T, root, num string, fr *runner.Fake) *dispatch.Dispatch {
+	t.Helper()
+	if err := os.MkdirAll(dispatch.HostLogDirFor(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := dispatch.NewFactory(dispatch.Config{Kind: "work", OpenPRForIssue: func(string) (bool, error) { return false, nil }}, root, fr, drv, dispatch.RealClock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(f.Cleanup)
+	f.SetHeartbeatOut(nopWriter{})
+	return f.New(num, "t")
+}
+
+// seamForge is a forge with issue num in progress.
+func seamForge(num string) *forge.Fake {
+	fc := forge.NewFake(ambiguousDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
+	return fc
+}
+
+// ingestRecords ingests the logs under root and returns the Records.
+func ingestRecords(t *testing.T, root string) []dispatchrecord.Record {
+	t.Helper()
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { store.Close() })
+	if _, err := store.Ingest(); err != nil {
+		t.Fatal(err)
+	}
+	recs, err := store.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return recs
+}
+
+// An adopt whose CI is red runs a fix pass on a Dispatch that never Ran. The
+// fix log must continue the prior Record, so the dispatch_settled op the adopt
+// appends to the primary log lands on it and the ingester takes the host's
+// outcome from it, rather than leaving the prior run's stale outcome standing.
+func TestSettleAdopted_FixPassContinuesPriorRecord(t *testing.T) {
+	const num = "77"
+	claim := time.Date(2026, 5, 1, 7, 0, 0, 0, time.UTC)
+	prior := dispatchrecord.RecordID("work", num, claim)
+	readRecords := testutil.InstallPipeReporter(t)
+
+	root := t.TempDir()
+	fr := runner.NewFake()
+	fr.RunFunc = seamBoxRun(num, "fix", "f1", "2026-05-02T09:00:00Z", "ready", "fixed")
+	d := seamDispatch(t, root, num, fr)
+
+	// The prior run's primary log: its stamp, one pass, and a stale failed verdict.
+	primary := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+		RecordID: prior, Kind: "work", DispatchKey: num, ClaimTime: claim, Started: claim,
+	}}) + seamTranscript("implement", "a1", "2026-05-01T09:00:00Z", "") +
+		claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &claude.DispatchSettled{RecordID: prior, State: "failed", Reason: "box-failed"}})
+	if err := os.WriteFile(dispatch.LogPathFor(root, num), []byte(primary), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fc := seamForge(num)
+	fc.SetPR(fc.AgentBranch(num), forge.PR{URL: testPR})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateFailure, forge.StateSuccess, forge.StateSuccess})
+	cfg := baseConfig()
+	cfg.MaxFixAttempts = 1
+	cfg.LogPath = func(n string) string { return dispatch.LogPathFor(root, n) }
+	s := newTestSettle(cfg, fc, fc)
+
+	testutil.CaptureStdout(t, func() { s.SettleAdopted(d, num, 0, testPR) })
+
+	if d.RecordID() != prior {
+		t.Fatalf("Dispatch RecordID = %q, want the prior Record %q", d.RecordID(), prior)
+	}
+	recs := ingestRecords(t, root)
+	if len(recs) != 1 || recs[0].ID != prior {
+		t.Fatalf("records = %+v, want exactly the prior Record %q", recs, prior)
+	}
+	if r := recs[0]; r.Outcome != "complete" || r.OutcomeSource != dispatchrecord.OutcomeSourceSettled {
+		t.Errorf("outcome/source = %q/%q, want complete/dispatch_settled (the stale failed verdict must not stand)", r.Outcome, r.OutcomeSource)
+	}
+	for _, rec := range readRecords() {
+		if rec.Event == report.EventSettled && rec.RecordID != prior {
+			t.Errorf("settled report record_id = %q, want %q", rec.RecordID, prior)
+		}
+	}
 }

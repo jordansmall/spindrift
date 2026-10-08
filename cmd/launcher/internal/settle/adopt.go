@@ -62,7 +62,7 @@ func (s *Settle) verifyMerged(num, pr string) {
 		reason = fmt.Sprintf("issue does not carry '%s'", s.cfg.CompleteLabel)
 	}
 	fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, pr, reason)
-	s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonFailed)
+	s.transitionState(num, forge.InProgress, forge.Failed, reason, ReasonMergeUnverified)
 }
 
 // postUsageComment posts d's aggregate usage-statistics comment to the issue.
