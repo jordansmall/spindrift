@@ -1,28 +1,9 @@
 package forgejo
 
-import "testing"
-
-func TestParsePRIndex_HappyPath(t *testing.T) {
-	got, err := parsePRIndex("https://forge.test/owner/repo/pulls/206")
-	if err != nil {
-		t.Fatalf("parsePRIndex(...) unexpected error: %v", err)
-	}
-	if got != "206" {
-		t.Fatalf("parsePRIndex(...) = %q, want %q", got, "206")
-	}
-}
-
-func TestParsePRIndex_RejectsEmpty(t *testing.T) {
-	if _, err := parsePRIndex("https://forge.test/owner/repo/pulls/"); err == nil {
-		t.Fatal("parsePRIndex(...) with empty trailing segment: want error, got nil")
-	}
-}
-
-func TestParsePRIndex_RejectsNonNumeric(t *testing.T) {
-	if _, err := parsePRIndex("https://forge.test/owner/repo/pulls/abc"); err == nil {
-		t.Fatal("parsePRIndex(...) with non-numeric trailing segment: want error, got nil")
-	}
-}
+import (
+	"strings"
+	"testing"
+)
 
 // Forgejo's defaults are "WIP:" and "[WIP]" (no colon); "[WIP]:" is the bracket
 // form followed by a colon, which a title may also carry.
@@ -96,5 +77,43 @@ func TestMergeStyle(t *testing.T) {
 		if got := MergeStyle(tt.method); got != tt.want {
 			t.Errorf("MergeStyle(%q) = %q, want %q", tt.method, got, tt.want)
 		}
+	}
+}
+
+func TestParsePRIndex(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		url     string
+		want    string
+		wantErr []string
+	}{
+		{name: "same repo", url: "https://forge.test/owner/repo/pulls/206", want: "206"},
+		{name: "case differs", url: "https://forge.test/Owner/Repo/pulls/7", want: "7"},
+		{name: "host and base path differ", url: "https://other.example/git/owner/repo/pulls/7", want: "7"},
+		{name: "trailing slash", url: "https://forge.test/owner/repo/pulls/7/", want: "7"},
+		{name: "empty index", url: "https://forge.test/owner/repo/pulls/", wantErr: []string{"invalid PR URL"}},
+		{name: "non-numeric index", url: "https://forge.test/owner/repo/pulls/abc", wantErr: []string{"not numeric"}},
+		{name: "other owner and repo", url: "https://forge.test/other/thing/pulls/7", wantErr: []string{"other/thing", "owner/repo"}},
+		{name: "other repo only", url: "https://forge.test/owner/thing/pulls/7", wantErr: []string{"owner/thing", "owner/repo"}},
+		{name: "too short", url: "https://forge.test/7", wantErr: []string{"invalid PR URL"}},
+		{name: "not a pulls path", url: "https://forge.test/owner/repo/issues/7", wantErr: []string{"invalid PR URL"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parsePRIndex(tc.url, "owner/repo")
+			if tc.wantErr == nil {
+				if err != nil || got != tc.want {
+					t.Fatalf("parsePRIndex(%q) = %q, %v; want %q, nil", tc.url, got, err, tc.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("parsePRIndex(%q) = %q, nil; want error", tc.url, got)
+			}
+			for _, w := range tc.wantErr {
+				if !strings.Contains(err.Error(), w) {
+					t.Fatalf("parsePRIndex(%q) error = %v; want mention of %q", tc.url, err, w)
+				}
+			}
+		})
 	}
 }

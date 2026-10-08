@@ -179,7 +179,7 @@ func (f *forgejoCodeForge) postMerge(index string, extra map[string]any) error {
 
 // Merge merges the pull request at prURL through Forgejo's REST merge endpoint.
 func (f *forgejoCodeForge) Merge(prURL string) error {
-	index, err := parsePRIndex(prURL)
+	index, err := f.prIndex(prURL)
 	if err != nil {
 		return err
 	}

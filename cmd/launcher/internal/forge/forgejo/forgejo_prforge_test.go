@@ -53,6 +53,73 @@ func pullJSON(number int, state string, merged, mergeable, draft bool, title, he
 	return string(b)
 }
 
+func TestPRState_RefusesForeignRepoURL(t *testing.T) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected request %s %s for a foreign-repo PR URL", r.Method, r.URL.Path)
+	})
+	_, err := pr.PRState("https://forge.test/other/thing/pulls/206")
+	if err == nil {
+		t.Fatal("PRState for a PR URL naming another repo: want error, got nil")
+	}
+	for _, w := range []string{"other/thing", "owner/repo"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("PRState error = %v; want mention of %q", err, w)
+		}
+	}
+}
+
+func TestPRState_ResolvesURLWithDifferentCasing(t *testing.T) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(pullJSON(206, "open", false, true, false, "add feature", "agent/issue-206", "abc123", "main")))
+	})
+	got, err := pr.PRState("https://forge.test/Owner/Repo/pulls/206")
+	if err != nil {
+		t.Fatalf("PRState(...) unexpected error: %v", err)
+	}
+	if got != forge.PROpen {
+		t.Fatalf("PRState(...) = %q, want %q", got, forge.PROpen)
+	}
+}
+
+func TestPRMethods_RefuseForeignRepoURLWithoutRequest(t *testing.T) {
+	const foreign = "https://forge.test/other/thing/pulls/206"
+	type prAndMerge interface {
+		forge.CodeForge
+		forge.PRForge
+	}
+	for _, tc := range []struct {
+		name string
+		call func(f prAndMerge) error
+	}{
+		{"Merge", func(f prAndMerge) error { return f.Merge(foreign) }},
+		{"EnqueueAutoMerge", func(f prAndMerge) error { return f.EnqueueAutoMerge(foreign) }},
+		{"ListPRFiles", func(f prAndMerge) error { _, err := f.ListPRFiles(foreign); return err }},
+		{"MarkReady", func(f prAndMerge) error { return f.MarkReady(foreign) }},
+		{"MarkDraft", func(f prAndMerge) error { return f.MarkDraft(foreign) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				t.Errorf("unexpected request %s %s for a foreign-repo PR URL", r.Method, r.URL.Path)
+			}))
+			t.Cleanup(srv.Close)
+			cf := forgejo.NewForgejoCodeForgeForTest(forgejo.ForgejoCodeForgeConfig{
+				BaseURL: srv.URL, Repo: "owner/repo", Token: "tok", BranchPrefix: "agent/issue-",
+			}, nil, "unused")
+			f, ok := cf.(prAndMerge)
+			if !ok {
+				t.Fatalf("forgejoCodeForge does not satisfy forge.CodeForge and forge.PRForge")
+			}
+			if err := tc.call(f); err == nil {
+				t.Fatalf("%s for a PR URL naming another repo: want error, got nil", tc.name)
+			}
+		})
+	}
+}
+
 func TestPRState_Open(t *testing.T) {
 	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206" {

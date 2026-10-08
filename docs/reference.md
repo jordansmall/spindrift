@@ -3021,6 +3021,11 @@ generated `flake.nix`.
   `agent-ambiguous-spec` or `agent-research-unclear` question by editing the
   issue body, not in a comment.
 
+  The Forgejo adapter refuses a PR URL whose owner/repo differs from the
+  configured repo (compared case-insensitively; the host is ignored), so a
+  Record or in-flight run holding a pre-rename/transfer `html_url` errors
+  instead of resolving by index; settle's late-merge sweep warns and skips it.
+
 #### In-Box forgejo tooling (`fj`)
 
 When either backend knob selects forgejo — `ISSUE_TRACKER=forgejo` or
