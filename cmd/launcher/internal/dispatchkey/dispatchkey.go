@@ -38,8 +38,8 @@ const ChorePrefix = "butler-"
 func IsChoreKey(s string) bool { return strings.HasPrefix(s, ChorePrefix) }
 
 // String renders the key: the bare issue number, or ChorePrefix + chore name.
-// buildBoxEnv forwards it to the Box as DISPATCH_KEY, which
-// agent/entrypoint.sh and butler-prompt.md's OUTCOME line both read.
+// buildBoxEnv forwards it to the Box as DISPATCH_KEY, which the box program
+// (cmd/launcher/box) and butler-prompt.md's OUTCOME line both read.
 func (k Key) String() string {
 	if k.chore != "" {
 		return ChorePrefix + k.chore

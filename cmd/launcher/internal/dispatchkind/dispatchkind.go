@@ -183,7 +183,7 @@ type Descriptor struct {
 	Contract       PromptContract  // which shared contract block prompt assembly injects
 	FilerRelayGate string          // lib/fragments.nix gate selecting the kind's filer-label-relay*.md fragment
 	Tracker        Tracker         // which IssueTracker instance this kind's issues live on
-	AnnounceVerb   string          // verb of the Box start line (agent/entrypoint.sh); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
+	AnnounceVerb   string          // verb of the Box start line (printed by cmd/launcher/box/box.go); exported to the Box as DISPATCH_ANNOUNCE_VERB (issue #3996)
 	Enablement     Enablement      // when the daemon draws this kind; see Enablement
 	Preflight      DoctorPreflight // how the daemon's startup preflight passes this kind's doctor flag; see DoctorPreflight
 	UnclaimedGate  bool            // merge gate settles a PR on an issue the kind never claimed: no fix passes, and a merge completes it through the configured work Complete label (ADR 0057, issue #4076); butler-only
