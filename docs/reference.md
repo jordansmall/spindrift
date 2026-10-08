@@ -5796,7 +5796,9 @@ filters apply after the merge, to the table and to `--json` alike.
 whose path, size, and mtime match their last ingest, and upserts the result.
 Run it after upgrading to a binary with a parser fix, to repair whatever
 history is still on disk. If a parser fix changes the ID a log derives and
-the log's size and mtime are unchanged, the stale Record is dropped. A Record
+the log's size and mtime are unchanged, the stale Record is dropped, and any
+fix or conflict-resolve logs that had joined it re-parse and rejoin the
+replacement Record, so no pass is counted twice. A Record
 whose log is gone is left exactly as stored: a parser fix cannot reach it.
 
 **Output.** The default text output is a summary line (Records, passes, total
