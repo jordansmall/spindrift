@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -49,5 +50,24 @@ func assemblePrompt(in assemblyInputs, env promptassembly.Env, w io.Writer) (str
 	if _, err := promptassembly.WriteAssembly(env, reg, markers, in.Passthrough, out, w); err != nil {
 		return "", err
 	}
+	emitPromptHashes(env, reg, w)
 	return out.Handoff, nil
+}
+
+// emitPromptHashes writes the prompt_hashes op (issue #4786) onto the Pass log.
+// An older host forwards no Record ID, so there is nothing to key the op to.
+// Hashing is telemetry: a failure warns and never fails the Box.
+func emitPromptHashes(env promptassembly.Env, reg promptassembly.Registry, w io.Writer) {
+	if env.RecordID == "" {
+		return
+	}
+	hashes, err := promptassembly.TemplateHashes(env, reg)
+	if err != nil {
+		fmt.Fprintf(w, "box: prompt template hashes skipped: %v\n", err)
+		return
+	}
+	fmt.Fprint(w, claude.EncodeSpindriftOp(claude.SpindriftOp{
+		Op:           "prompt_hashes",
+		PromptHashes: &claude.PromptHashes{RecordID: env.RecordID, Roles: hashes},
+	}))
 }

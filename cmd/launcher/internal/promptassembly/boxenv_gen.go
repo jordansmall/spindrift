@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// EnvFromEnviron reads Env's 44 Box-env-sourced fields directly from the
+// EnvFromEnviron reads Env's 45 Box-env-sourced fields directly from the
 // process environment (lib/promptassembly-boxenv.nix, issue #2979): fields
 // driver-exec/assembleprompt_cmd.go previously populated from a
 // hand-declared CLI flag that agent/entrypoint.sh forwarded 1:1 from the
@@ -51,6 +51,7 @@ func EnvFromEnviron() Env {
 		InProgressLabel:      os.Getenv("IN_PROGRESS_LABEL"),
 		CompleteLabel:        os.Getenv("COMPLETE_LABEL"),
 		RunNonce:             os.Getenv("RUN_NONCE"),
+		RecordID:             os.Getenv("RECORD_ID"),
 		ResearchVerdicts:     os.Getenv("RESEARCH_VERDICTS"),
 		ReviewModelOverride:  os.Getenv("BOX_REVIEW_MODEL_OVERRIDE"),
 		ReviewEffortOverride: os.Getenv("BOX_REVIEW_EFFORT_OVERRIDE"),
@@ -102,6 +103,7 @@ var BoxEnvVarNames = []string{
 	"IN_PROGRESS_LABEL",
 	"COMPLETE_LABEL",
 	"RUN_NONCE",
+	"RECORD_ID",
 	"RESEARCH_VERDICTS",
 	"BOX_REVIEW_MODEL_OVERRIDE",
 	"BOX_REVIEW_EFFORT_OVERRIDE",
@@ -119,7 +121,7 @@ var BoxEnvVarNames = []string{
 
 // boxenvAtoi parses an int-kind Box env var, degrading to 0 on empty or
 // malformed input. Unlike cmd/launcher/main.go's atoiSchema, which falls
-// back to a per-key schema default (intSchemaDefault), these 44 rows are
+// back to a per-key schema default (intSchemaDefault), these 45 rows are
 // deliberately outside lib/env-schema.nix (see
 // lib/promptassembly-boxenv.nix's header) and so have no schema default
 // to degrade to.
