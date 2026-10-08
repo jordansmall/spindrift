@@ -5797,12 +5797,16 @@ the same checkout, are left alone rather than re-parsed. This holds for
 every Dispatch kind, under the Daemon and a manual `spindrift dispatch`
 alike. Several Daemon slots settling at once each ingest through their own
 connection; WAL journaling and immediate write transactions make them wait on
-each other rather than fail, so every Record lands. The ingest is
-best-effort: a failure (an unwritable store, or one of the Dispatch's logs
-being unreadable, say) prints a `could not ingest` warning on stderr and the
-Dispatch settles, reports, and exits exactly as it would have. A later settle
-of the same Dispatch key or any `stats` run picks up whatever it missed. A
-settle that appends no `dispatch_settled` op ingests nothing.
+each other rather than fail, so every Record lands. Each ingest re-checks a
+log's size and mtime under the write lock and discards its parse if the log
+changed since it was read, so a slower ingest (a concurrent `stats` run, say)
+never overwrites a fresher one; a log still being written can lag one ingest
+behind. The ingest is best-effort: a failure (an unwritable store, or one of
+the Dispatch's logs being unreadable, say) prints a `could not ingest` warning
+on stderr and the Dispatch settles, reports, and exits exactly as it would
+have. A later settle of the same Dispatch key or any `stats` run picks up
+whatever it missed. A settle that appends no `dispatch_settled` op ingests
+nothing.
 
 **Pruning logs.** Ingest before you delete. A Record keeps only what was
 ingested, so run `spindrift stats` (and `spindrift stats --reingest` after
