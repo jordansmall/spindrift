@@ -2,10 +2,10 @@ package promptassembly
 
 import "testing"
 
-// TestGatesIssueTrackerReadAxis covers the issue-read step gate
-// (entrypoint.sh: 801-814, 891-904): exactly one of ISSUE_TRACKER_GITHUB/
-// ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is ever on, selected by the
-// pre-resolved TrackerAxisRead rather than re-derived by Gates (issue #2533).
+// TestGatesIssueTrackerReadAxis covers the issue-read step gate: exactly one of
+// ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is ever on,
+// selected by the pre-resolved TrackerAxisRead rather than re-derived by Gates
+// (issue #2533).
 // Jira uses the github arm because it has the same in-box reachability.
 func TestGatesIssueTrackerReadAxis(t *testing.T) {
 	cases := []struct {
@@ -113,8 +113,8 @@ func TestGatesIssueTrackerReadAxis(t *testing.T) {
 }
 
 // TestGatesIssueTrackerWriteAxis covers the issue-blocked-comment and
-// research-verdict write-step gates (entrypoint.sh: 906-938): github and
-// forgejo fork on BOX_WRITE_ENABLED, local has no direct write path at all.
+// research-verdict write-step gates: github and forgejo fork on
+// BOX_WRITE_ENABLED, local has no direct write path at all.
 // Every case sets a non-empty TrackerAxisRead so the itRead=="" version-skew
 // fallback (issue #2533), covered in TestGatesIssueTrackerReadAxis, stays off.
 func TestGatesIssueTrackerWriteAxis(t *testing.T) {
@@ -299,10 +299,9 @@ func TestGatesIssueTrackerWriteAxisResearch(t *testing.T) {
 	}
 }
 
-// TestGatesFilerWriteMechanism covers the filer's write-mechanism gates
-// (entrypoint.sh: 816-860): relay only activates on read-only access, and
-// a writable Box keeps the direct gh/fj
-// path, which forks on TrackerAxisFiler. Every case sets a non-empty
+// TestGatesFilerWriteMechanism covers the filer's write-mechanism gates: relay
+// only activates on read-only access, and a writable Box keeps the direct
+// gh/fj path, which forks on TrackerAxisFiler. Every case sets a non-empty
 // TrackerAxisRead so the itRead=="" version-skew fallback (issue #2533) stays off.
 func TestGatesFilerWriteMechanism(t *testing.T) {
 	cases := []struct {
@@ -497,10 +496,10 @@ func TestGatesFilerWriteMechanismResearch(t *testing.T) {
 	}
 }
 
-// TestGatesPRBodyReference covers the PR-body ticket-reference gates
-// (entrypoint.sh: 862-889): exactly one of PR_BODY_CLOSES/PR_BODY_LOCAL_REF/
-// PR_BODY_LOCAL_NOREF is ever on, picked from ISSUE_TRACKER x
-// LOCAL_ISSUE_REFERENCE. Jira falls into github's else branch.
+// TestGatesPRBodyReference covers the PR-body ticket-reference gates: exactly
+// one of PR_BODY_CLOSES/PR_BODY_LOCAL_REF/PR_BODY_LOCAL_NOREF is ever on,
+// picked from ISSUE_TRACKER x LOCAL_ISSUE_REFERENCE. Jira falls into github's
+// else branch.
 func TestGatesPRBodyReference(t *testing.T) {
 	cases := []struct {
 		name                string

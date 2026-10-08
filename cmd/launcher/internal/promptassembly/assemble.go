@@ -79,7 +79,8 @@ type Caps struct {
 // CLI wrapper populates every other field from flags and static config
 // (issue #2975).
 type Handoff struct {
-	// SessionMode is "resume" or "initial" (entrypoint.sh: 1037-1052).
+	// SessionMode is "resume" or "initial", chosen by
+	// assemblePromptBodiesMasked's base-template switch.
 	SessionMode string
 	// PromptFile is the path the CLI wrapper writes Result.Prompt to. Assemble
 	// never sets it: it renders the text, the wrapper picks the path.

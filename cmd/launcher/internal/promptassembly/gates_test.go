@@ -129,10 +129,9 @@ func TestGatesSkillsBaking(t *testing.T) {
 	}
 }
 
-// FILER_ENABLED and WORKER_PROVISIONED (entrypoint.sh: 761-799) are
-// passthroughs of nix-precomputed Env fields rather than derived in-box
-// (issue #2533), so each case sets those fields explicitly instead of relying
-// on Gates to re-derive them.
+// FILER_ENABLED and WORKER_PROVISIONED are passthroughs of nix-precomputed Env
+// fields rather than derived in-box (issue #2533), so each case sets those
+// fields explicitly instead of relying on Gates to re-derive them.
 func TestGatesRosterPassthrough(t *testing.T) {
 	cases := []struct {
 		name string
@@ -370,8 +369,8 @@ func TestGatesWorkerScoutBrief(t *testing.T) {
 }
 
 // Exactly one of BOX_ACCESS_READ_WRITE and BOX_ACCESS_READ_ONLY is ever on for
-// the OPEN A PULL REQUEST push step (entrypoint.sh: 940-957), selected solely
-// by BOX_WRITE_ENABLED, independent of ISSUE_TRACKER and CODE_FORGE.
+// the OPEN A PULL REQUEST push step, selected solely by BOX_WRITE_ENABLED,
+// independent of ISSUE_TRACKER and CODE_FORGE.
 func TestGatesBoxAccess(t *testing.T) {
 	cases := []struct {
 		name            string
@@ -408,8 +407,8 @@ func TestGatesBoxAccess(t *testing.T) {
 	}
 }
 
-// ForgeBackend is nix's precomputed equivalent of CODE_FORGE (entrypoint.sh:
-// 958-989), resolved upstream rather than re-derived by Gates (issue #2533).
+// ForgeBackend is nix's precomputed equivalent of CODE_FORGE, resolved
+// upstream rather than re-derived by Gates (issue #2533).
 // Only forgejo diverges from the shared gh-flavored path.
 // OPEN_PR_CREATE_RW_<suffix> forks further on BOX_ACCESS_READ_WRITE, while
 // FIX_CI_READ_<suffix> fires on the resolved backend regardless of box access.
@@ -494,10 +493,10 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 		},
 		{
 			// Same version-skew shape, but CodeForge says "forgejo" (it is
-			// still forwarded on Env for exactly this fallback, env.go:
-			// 133-138). The fallback must re-derive from CodeForge: a
-			// hardcoded GH arm would tell the agent to drive `gh` against a
-			// Forgejo forge (issue #2533 review).
+			// still forwarded on Env for exactly this fallback). The
+			// fallback must re-derive from CodeForge: a hardcoded GH arm
+			// would tell the agent to drive `gh` against a Forgejo forge
+			// (issue #2533 review).
 			name:            "empty ForgeBackend with CodeForge=forgejo falls open to FORGEJO",
 			forgeBackend:    "",
 			codeForge:       "forgejo",
