@@ -29,6 +29,9 @@ const (
 	// AttributionInferred marks a Record reconstructed from its log rather
 	// than one a Dispatch wrote itself.
 	AttributionInferred = "inferred"
+	// AttributionStamped marks a Record whose logs carry the host's own
+	// dispatch_start stamp (issue #4783), so nothing about it is inferred.
+	AttributionStamped = "stamped"
 	// OutcomeUnknown is the value of a Record's outcome field when the log
 	// does not say how the Dispatch ended; unrelated to KindUnknown.
 	OutcomeUnknown = "unknown"
@@ -64,11 +67,30 @@ type Record struct {
 	Attribution string    `json:"attribution"`
 	Outcome     string    `json:"outcome"`
 	Passes      []Pass    `json:"passes"`
+
+	// Stamped Records only: what the host recorded about the Dispatch.
+	Revision      string            `json:"revision,omitempty"`
+	Driver        string            `json:"driver,omitempty"`
+	DriverVersion string            `json:"driver_version,omitempty"`
+	RoleModels    map[string]string `json:"role_models,omitempty"`
+	Knobs         map[string]string `json:"knobs,omitempty"`
 }
 
 // ErrNoEvents is returned by ParseLog for a log with no parsed event at all
 // (empty, or only unparseable lines): there is no Dispatch to record yet.
 var ErrNoEvents = errors.New("dispatchrecord: log has no events")
+
+// ErrUnstamped is returned by ParseLog for a log that is not named like a
+// ChainKey file and does not open with a dispatch_start stamp: only a stamp can
+// attribute such a log (fix, conflict-resolve, rotated attempt) to a Dispatch.
+var ErrUnstamped = errors.New("dispatchrecord: log is not stamped and not a chain log")
+
+// PassLogName reports whether name is a pass log of any kind: an attempt,
+// fix, or conflict-resolve log, optionally rotated ("<path>.N") and/or
+// quarantined ("<path>.prior-run.N"). It excludes .warnings and .run-lineage.
+func PassLogName(name string) bool { return passLogName.MatchString(name) }
+
+var passLogName = regexp.MustCompile(`^issue-.+\.log(?:\.\d+)?(?:\.prior-run\.\d+)?$`)
 
 // chainName matches a Dispatch's first-attempt log and its quarantined
 // earlier runs; fix, conflict-resolve, and "<path>.N" rotated attempt logs
@@ -137,19 +159,27 @@ func RecordID(kind, key string, claim time.Time) string {
 	return fmt.Sprintf("%s:%s@%s", kind, key, claim.UTC().Format("2006-01-02T15:04:05.000Z"))
 }
 
-// ParseLog infers a Record from the pass log at path, which must be named like
-// a ChainKey file. A log with no events yields ErrNoEvents. The claim time is
-// the first timestamped event in file order, which later appends cannot move.
-// provisional reports that no event carried a timestamp, so the claim time fell
-// back to the file mtime and appended output can still move the ID.
+// ParseLog infers a Record from the pass log at path. A log whose first event
+// is a dispatch_start stamp yields a stamped Record, whatever its name; any
+// other log must be named like a ChainKey file (else ErrUnstamped) and yields an
+// inferred one. A log with no events yields ErrNoEvents. The claim time of an
+// inferred Record is the first timestamped event in file order, which later
+// appends cannot move. provisional reports that no event carried a timestamp, so
+// the claim time fell back to the file mtime and appended output can still move
+// the ID.
 func ParseLog(path string) (rec Record, provisional bool, err error) {
-	key, ok := ChainKey(filepath.Base(path))
-	if !ok {
-		return Record{}, false, fmt.Errorf("dispatchrecord: %q is not an issue-<key>.log file", filepath.Base(path))
-	}
+	rec, provisional, _, err = parseLog(path)
+	return rec, provisional, err
+}
+
+// parseLog is ParseLog plus the log's segment identity: the stamp's Started, or
+// the claim time of an inferred Record. It keys the log's passes within a
+// Record that several logs contribute to.
+func parseLog(path string) (rec Record, provisional bool, segment time.Time, err error) {
+	key, chain := ChainKey(filepath.Base(path))
 	info, err := os.Stat(path)
 	if err != nil {
-		return Record{}, false, err
+		return Record{}, false, time.Time{}, err
 	}
 
 	var (
@@ -160,6 +190,7 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 		firstTS   time.Time
 		haveTS    bool
 		sawEvent  bool
+		stamp     *claude.DispatchStart
 		// pendingDispositions holds a fix pass's Write to the dispositions file,
 		// by tool_use ID, until its tool_result shows the Write took effect.
 		pendingDispositions = map[string]string{}
@@ -183,6 +214,7 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 		if json.Unmarshal([]byte(s), &ev) != nil || ev.Type == "" {
 			return
 		}
+		first := !sawEvent
 		sawEvent = true
 		if ev.Timestamp != "" && !haveTS {
 			if t, perr := time.Parse(time.RFC3339Nano, ev.Timestamp); perr == nil {
@@ -196,6 +228,10 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 				return
 			}
 			switch op.Op {
+			case "dispatch_start":
+				if first && op.Start != nil && op.Start.RecordID != "" {
+					stamp = op.Start
+				}
 			case "pass_start":
 				if !sawStart {
 					firstRole = op.Role
@@ -279,12 +315,33 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 		}
 	})
 	if err != nil {
-		return Record{}, false, err
+		return Record{}, false, time.Time{}, err
 	}
 	if !sawEvent {
-		return Record{}, false, ErrNoEvents
+		return Record{}, false, time.Time{}, ErrNoEvents
 	}
 	closeCur()
+
+	if stamp != nil {
+		claim := stamp.ClaimTime.UTC()
+		return Record{
+			ID:            stamp.RecordID,
+			Kind:          stamp.Kind,
+			DispatchKey:   stamp.DispatchKey,
+			ClaimTime:     claim,
+			Attribution:   AttributionStamped,
+			Outcome:       OutcomeUnknown,
+			Passes:        passes,
+			Revision:      stamp.Revision,
+			Driver:        stamp.Driver,
+			DriverVersion: stamp.DriverVersion,
+			RoleModels:    stamp.RoleModels,
+			Knobs:         stamp.Knobs,
+		}, false, stamp.Started.UTC(), nil
+	}
+	if !chain {
+		return Record{}, false, time.Time{}, ErrUnstamped
+	}
 
 	claim := info.ModTime()
 	if haveTS {
@@ -308,7 +365,7 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 		Attribution: AttributionInferred,
 		Outcome:     OutcomeUnknown,
 		Passes:      passes,
-	}, !haveTS, nil
+	}, !haveTS, claim, nil
 }
 
 // choreKeyedKind is the name of the one kind keyed by Ledger Chore, or

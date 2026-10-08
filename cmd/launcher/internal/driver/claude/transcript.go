@@ -2,6 +2,7 @@ package claude
 
 import (
 	"encoding/json"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/landdelta"
@@ -71,7 +72,7 @@ type CacheCreation struct {
 type SpindriftOp struct {
 	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
 	// "decision", "run_state_error", "pass_usage", "land_delta",
-	// "delta_review_trigger", or "signal".
+	// "delta_review_trigger", "signal", or "dispatch_start".
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -112,6 +113,26 @@ type SpindriftOp struct {
 	// emission and settle's PR body agree on Summary()'s wording and on the
 	// counted/zero/unknown split.
 	Delta *landdelta.Delta `json:"delta,omitempty"`
+	// Start carries a Dispatch's identity on a "dispatch_start" op; nil on
+	// every other op kind.
+	Start *DispatchStart `json:"dispatch_start,omitempty"`
+}
+
+// DispatchStart is the payload of a "dispatch_start" SpindriftOp (issue
+// #4783), written by the host at the top of every Pass log of a Dispatch.
+// Started is when this particular log was created, so it tells the logs of
+// one Dispatch apart.
+type DispatchStart struct {
+	RecordID      string            `json:"record_id"`
+	Kind          string            `json:"kind"`
+	DispatchKey   string            `json:"dispatch_key"`
+	ClaimTime     time.Time         `json:"claim_time"`
+	Started       time.Time         `json:"started"`
+	Revision      string            `json:"revision,omitempty"`
+	RoleModels    map[string]string `json:"role_models,omitempty"`
+	Driver        string            `json:"driver,omitempty"`
+	DriverVersion string            `json:"driver_version,omitempty"`
+	Knobs         map[string]string `json:"knobs,omitempty"`
 }
 
 // PassUsage is the orchestrator's end-of-pass token accounting, the payload of
@@ -137,8 +158,8 @@ type PassUsage struct {
 func EncodeSpindriftOp(op SpindriftOp) string {
 	b, err := json.Marshal(Event{Type: "spindrift_op", SpindriftOp: &op})
 	if err != nil {
-		// Every field is a string, an int, or a struct of those, so
-		// json.Marshal cannot practically fail. This is an observability
+		// Every field is a string, number, time, or a map/struct of those,
+		// so json.Marshal cannot practically fail. This is an observability
 		// path, so a failure degrades to "no marker emitted" rather than
 		// crashing the orchestrator's loop.
 		return ""

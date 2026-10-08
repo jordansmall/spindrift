@@ -58,6 +58,44 @@ var migrations = []string{
 	-- The sentinel makes statSame false on that re-parse, so do not ship this
 	-- alongside a change to Record ID derivation: the stale Record would stay.
 	UPDATE ingested_files SET size = -1;`,
+	// v3: stamped Records (issue #4783). A Record can now draw passes from
+	// several logs, so passes are keyed by the log's segment identity too;
+	// existing rows get their Record's claim time, the segment of an inferred
+	// log.
+	`ALTER TABLE records ADD COLUMN revision TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN driver TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN driver_version TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN role_models TEXT NOT NULL DEFAULT ''; -- JSON object, empty for none
+	ALTER TABLE records ADD COLUMN knobs TEXT NOT NULL DEFAULT ''; -- JSON object, empty for none
+	CREATE TABLE passes_v2 (
+		record_id                   TEXT NOT NULL,
+		log_start                   INTEGER NOT NULL, -- unix ms, UTC
+		ordinal                     INTEGER NOT NULL,
+		role                        TEXT NOT NULL,
+		models                      TEXT NOT NULL,
+		usd                         REAL NOT NULL,
+		input_tokens                INTEGER NOT NULL,
+		output_tokens               INTEGER NOT NULL,
+		cache_read_input_tokens     INTEGER NOT NULL,
+		cache_creation_input_tokens INTEGER NOT NULL,
+		api_calls                   INTEGER NOT NULL,
+		turns                       INTEGER NOT NULL,
+		duration_ms                 INTEGER NOT NULL,
+		api_duration_ms             INTEGER NOT NULL,
+		verdict                     TEXT NOT NULL,
+		verdict_text                TEXT NOT NULL DEFAULT '',
+		dispositions                TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (record_id, log_start, ordinal)
+	);
+	INSERT INTO passes_v2 (record_id, log_start, ordinal, role, models, usd, input_tokens, output_tokens,
+		cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms, api_duration_ms, verdict,
+		verdict_text, dispositions)
+	SELECT p.record_id, r.claim_time, p.ordinal, p.role, p.models, p.usd, p.input_tokens, p.output_tokens,
+		p.cache_read_input_tokens, p.cache_creation_input_tokens, p.api_calls, p.turns, p.duration_ms, p.api_duration_ms, p.verdict,
+		p.verdict_text, p.dispositions
+	FROM passes p JOIN records r ON r.record_id = p.record_id;
+	DROP TABLE passes;
+	ALTER TABLE passes_v2 RENAME TO passes;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -129,15 +167,16 @@ func (s *Store) migrate() error {
 // Close releases the database handle.
 func (s *Store) Close() error { return s.db.Close() }
 
-// Ingest parses every chain log under the root's log directory that is new or
-// changed since it was last ingested and upserts its Record. It returns how
+// Ingest parses every pass log under the root's log directory that is new or
+// changed since it was last ingested and upserts its Record: a chain log's
+// inferred one, or any stamped log's own (issue #4783). It returns how
 // many files it parsed; a file whose path, size, and mtime match its
 // ingested_files row is skipped without being opened. Rows for logs no longer
 // on disk, including every row when the whole log directory is gone, are
 // forgotten (their Records are kept), so a reused path starts fresh.
 func (s *Store) Ingest() (parsed int, err error) { return s.ingest(false) }
 
-// Reingest is Ingest without the skip: it re-parses every chain log still on
+// Reingest is Ingest without the skip: it re-parses every pass log still on
 // disk, so a parser fix repairs whatever history remains. Records whose logs
 // are gone are untouched.
 func (s *Store) Reingest() (parsed int, err error) { return s.ingest(true) }
@@ -153,7 +192,7 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 		if e.IsDir() {
 			continue
 		}
-		if _, ok := ChainKey(e.Name()); !ok {
+		if !PassLogName(e.Name()) {
 			continue
 		}
 		path := filepath.Join(dir, e.Name())
@@ -175,16 +214,16 @@ func (s *Store) ingest(force bool) (parsed int, err error) {
 			}
 		}
 		var recp *Record
-		rec, provisional, err := ParseLog(path)
+		rec, provisional, segment, err := parseLog(path)
 		switch {
 		case err == nil:
 			recp = &rec
-		case errors.Is(err, ErrNoEvents):
+		case errors.Is(err, ErrNoEvents), errors.Is(err, ErrUnstamped):
 			// Remember the file so it is not reopened until it changes.
 		default:
 			return parsed, fmt.Errorf("dispatchrecord: %s: %w", path, err)
 		}
-		if err := s.upsert(path, info, recp, provisional); err != nil {
+		if err := s.upsert(path, info, recp, segment, provisional); err != nil {
 			return parsed, err
 		}
 		parsed++
@@ -204,7 +243,7 @@ func (s *Store) forgetMissing(seen []string) error {
 }
 
 // passColumns is shared by the passes INSERT and SELECT so they cannot drift.
-const passColumns = `record_id, ordinal, role, models, usd, input_tokens, output_tokens,
+const passColumns = `record_id, log_start, ordinal, role, models, usd, input_tokens, output_tokens,
 	cache_read_input_tokens, cache_creation_input_tokens, api_calls, turns, duration_ms,
 	api_duration_ms, verdict, verdict_text, dispositions`
 
@@ -222,7 +261,7 @@ func (s *Store) isIngested(path string, info fs.FileInfo) (bool, error) {
 
 // upsert records one parsed log. A nil rec is an event-free log: only its
 // ingested_files row is written, with an empty record_id.
-func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, provisional bool) error {
+func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.Time, provisional bool) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
@@ -238,20 +277,31 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, provisional b
 	newID := ""
 	if rec != nil {
 		newID = rec.ID
-		if _, err := tx.Exec("DELETE FROM passes WHERE record_id = ?", rec.ID); err != nil {
+		logStart := segment.UnixMilli()
+		if _, err := tx.Exec("DELETE FROM passes WHERE record_id = ? AND log_start = ?", rec.ID, logStart); err != nil {
+			return err
+		}
+		roleModels, err := marshalMap(rec.RoleModels)
+		if err != nil {
+			return err
+		}
+		knobs, err := marshalMap(rec.Knobs)
+		if err != nil {
 			return err
 		}
 		if _, err := tx.Exec(
-			`INSERT OR REPLACE INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome); err != nil {
+			`INSERT OR REPLACE INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
+				revision, driver, driver_version, role_models, knobs)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
+			rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs); err != nil {
 			return err
 		}
 		for _, p := range rec.Passes {
 			if _, err := tx.Exec(
 				`INSERT INTO passes (`+passColumns+`)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				rec.ID, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				rec.ID, logStart, p.Ordinal, p.Role, strings.Join(p.Models, ","), p.USD, p.InputTokens, p.OutputTokens,
 				p.CacheReadInputTokens, p.CacheCreationInputTokens, p.APICalls, p.Turns, p.DurationMs,
 				p.APIDurationMs, p.Verdict, p.VerdictText, p.Dispositions); err != nil {
 				return err
@@ -289,10 +339,11 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, provisional b
 }
 
 // Records returns every stored Record with its passes, ordered by claim time
-// then ID (passes by ordinal).
+// then ID (passes by log segment, then ordinal).
 func (s *Store) Records() ([]Record, error) {
 	rows, err := s.db.Query(
-		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome
+		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
+			 revision, driver, driver_version, role_models, knobs
 		 FROM records ORDER BY claim_time, record_id`)
 	if err != nil {
 		return nil, err
@@ -302,7 +353,17 @@ func (s *Store) Records() ([]Record, error) {
 	for rows.Next() {
 		var r Record
 		var ms int64
-		if err := rows.Scan(&r.ID, &r.Kind, &r.DispatchKey, &ms, &r.Attribution, &r.Outcome); err != nil {
+		var roleModels, knobs string
+		if err := rows.Scan(&r.ID, &r.Kind, &r.DispatchKey, &ms, &r.Attribution, &r.Outcome,
+			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if r.RoleModels, err = unmarshalMap(roleModels); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if r.Knobs, err = unmarshalMap(knobs); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -320,15 +381,16 @@ func (s *Store) Records() ([]Record, error) {
 
 	prows, err := s.db.Query(
 		`SELECT ` + passColumns + `
-		 FROM passes ORDER BY record_id, ordinal`)
+		 FROM passes ORDER BY record_id, log_start, ordinal`)
 	if err != nil {
 		return nil, err
 	}
 	defer prows.Close()
 	for prows.Next() {
 		var id, models string
+		var logStart int64
 		var p Pass
-		if err := prows.Scan(&id, &p.Ordinal, &p.Role, &models, &p.USD, &p.InputTokens, &p.OutputTokens,
+		if err := prows.Scan(&id, &logStart, &p.Ordinal, &p.Role, &models, &p.USD, &p.InputTokens, &p.OutputTokens,
 			&p.CacheReadInputTokens, &p.CacheCreationInputTokens, &p.APICalls, &p.Turns, &p.DurationMs,
 			&p.APIDurationMs, &p.Verdict, &p.VerdictText, &p.Dispositions); err != nil {
 			return nil, err
@@ -344,4 +406,22 @@ func (s *Store) Records() ([]Record, error) {
 		out[i].Passes = append(out[i].Passes, p)
 	}
 	return out, prows.Err()
+}
+
+// marshalMap stores a nil or empty map as "", the column default.
+func marshalMap(m map[string]string) (string, error) {
+	if len(m) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(m)
+	return string(b), err
+}
+
+func unmarshalMap(s string) (map[string]string, error) {
+	if s == "" {
+		return nil, nil
+	}
+	var m map[string]string
+	err := json.Unmarshal([]byte(s), &m)
+	return m, err
 }
