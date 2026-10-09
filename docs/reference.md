@@ -5648,7 +5648,9 @@ appends one `dispatch_settled` `spindrift_op` to the Dispatch's primary Pass
 log (`issue-<key>.log`), as
 `{"type":"spindrift_op","spindrift_op":{"op":"dispatch_settled","dispatch_settled":{...}}}`
 with `record_id`, `state` (`complete`, `failed`, `recoverable`, or
-`ambiguous`), `reason`, `note`, `pr_url`, and `host_token`. Every terminal
+`ambiguous`), `reason`, `note`, `pr_url`, `merge_commit` (the forge's merge
+commit for a PR settled `merged`, on `github` and `forgejo` when the forge
+reports it; empty otherwise), and `host_token`. Every terminal
 settle path writes it: the work settle path, a Box that failed before settle,
 research, the butler Chore, and recover. The write is best-effort and never
 creates a missing log. A path with no Dispatch that ran (recover) settles the
@@ -5783,7 +5785,7 @@ Record until it gains output.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 6. Version 2 added the `verdict_text` and
+own. The current schema is version 8. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. An older store opens, migrates, and keeps
 its rows; the migrations also mark every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
@@ -5793,7 +5795,10 @@ Version 3 keys passes per source log as well, so re-ingesting a renamed
 table, keyed per source log like passes. Version 5 adds the settled-outcome
 columns. Version 6 records each pass's source log name and each ingested
 log's start, so an unstamped fix or conflict-resolve log can join its
-Dispatch. The store uses WAL journaling, so
+Dispatch. Version 7 adds each pass's source log to its key and names the
+satellite log that minted an orphan Record. Version 8 adds `merge_commit` and
+the post-merge `reverted` and `matured_at` columns (see Reverts below),
+upgrading a store in place with them empty. The store uses WAL journaling, so
 another process can read it while `stats` writes. Because Records are kept in
 the database, they survive deleting the logs they came from. Deleting the
 database instead loses every Record whose
@@ -5941,7 +5946,8 @@ whose log is gone is left exactly as stored: a parser fix cannot reach it.
 
 **Output.** The default text output is a summary line (Records, passes, total
 notional USD, the landed Dispatch keys, notional USD per landed key, and the
-outcome-source mix), followed by a
+share of matured merges that were reverted, `Reverted: 67% of 3`, or `Reverted: —`
+when none has matured, and the outcome-source mix), followed by a
 table with one row per pass role, in
 pipeline order (`implement`, `review`, `fix`, `land`, `delta-review`, then any
 other role alphabetically, and `(none)` for a pass logged without a role):
@@ -5969,11 +5975,34 @@ nothing landed. `Outcome source` counts Records per `outcome_source`
 (`dispatch_settled`, then `none`), so it shows how much of the cohort has a
 host-recorded outcome rather than `unknown`.
 
+**Reverts.** A Record settled `merged` with a `merge_commit` is judged for
+whether the change stuck. During ingest, when the root is itself the top of a
+git checkout (a Target clone), `stats` fills the Record's `reverted` and
+`matured_at` once 14 days have passed since the merge commit's committer time
+and the clone's base tip (`origin/HEAD`, else `HEAD`) has itself reached that
+point. `reverted` is true when a commit on the base branch within that window
+carries `git revert`'s `This reverts commit <sha>` trailer or is the exact
+inverse of the merge's diff, whitespace included. For a rebase merge the
+recorded merge commit is the last rebased commit, so a trailer-less revert of a
+whole multi-commit PR is not caught. `stats` never fetches, so keep the clone
+current: a stale clone leaves Records unfilled rather than recording a false
+"not reverted". The `Reverted` field of the summary line, in every `--by` group
+too, is the share of filled Records whose `reverted` is true, out of the filled
+ones; an unfilled Record (not yet matured, no `merge_commit`, merge commit not
+in the clone or off the base branch, or its parent cut off by a shallow clone)
+is never counted as zero, and the field is `—` when none is filled. A root that
+is not a checkout leaves every Record unfilled and is not an error; git failing
+to run or an unusable clone prints a `warning:` line on stderr and leaves the
+affected Records unfilled (a Record whose own check fails stays unfilled, the
+rest are still filled).
+
 `--json` skips the table and prints one Record per line, ordered by claim
 time, then root, then ID, with the fields `record_id`, `root`, `kind`,
 `dispatch_key`, `claim_time`, `attribution`, `outcome`, `outcome_source`,
 `passes`, and, on Records with a settled outcome (omitted when empty),
-`reason`, `note`, `pr_url`, and `box_status`, and, on stamped Records only
+`reason`, `note`, `pr_url`, `merge_commit` (merged Records where the forge
+reported it), and `box_status`, and, once filled, `reverted` and `matured_at`,
+and, on stamped Records only
 (omitted when inferred), `revision`, `driver`, `driver_version`,
 `role_models`, `knobs`, and `prompt_hashes` (omitted when no Box reported
 any). Each pass carries `ordinal`, `role`, `models`, `usd`, `input_tokens`,
