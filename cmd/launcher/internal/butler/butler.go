@@ -14,9 +14,11 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 // Policy is a Runner's resolved butler knobs (ADR 0056).
@@ -55,6 +57,16 @@ type Policy struct {
 	// PatchMaxLines is BUTLER_PATCH_MAX_LINES, the host limit on changed
 	// lines (added plus removed) across a patch candidate's whole diff.
 	PatchMaxLines int
+	// RecordsRoot is the checkout root whose Dispatch Records store a
+	// records-scoped Chore reads (ADR 0062); empty means no store, so such a
+	// Chore is never due.
+	RecordsRoot string
+	// TuningMinRecords is BUTLER_TUNING_MIN_RECORDS, the fewest new settled
+	// Records that make a records-scoped Chore due (ADR 0062).
+	TuningMinRecords int
+	// TuningMinSample is BUTLER_TUNING_MIN_SAMPLE, the per-row sample size
+	// under which the digest marks a row thin.
+	TuningMinSample int
 }
 
 // DefaultPatchPaths is BUTLER_PATCH_PATHS' schema default (lib/env-schema.nix
@@ -207,12 +219,32 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 			return Outcome{}, fmt.Errorf("butler: read %s ledger history: %w", c.Name, err)
 		}
 		cfg := chore.DueConfig{Every: c.Every, ClaimTimeout: r.policy.ClaimTimeout}
-		verdict := chore.Check(tip, recent, head, whenNow, room, cfg)
+		// A records-scoped Chore reads the Dispatch Records store once here and
+		// hands it to run, so the digest renders the very Records it was
+		// judged due on.
+		var records []dispatchrecord.Record
+		newSettled := 0
+		var verdict chore.NotDue
+		if c.Records {
+			if records, err = r.policy.loadRecords(); err != nil {
+				return Outcome{}, fmt.Errorf("butler: %s: %w", c.Name, err)
+			}
+			newSettled = len(chore.NewSettledRecords(records, tip.State.Cursor))
+			verdict = chore.CheckRecords(tip, recent, newSettled, r.policy.TuningMinRecords, whenNow, room, cfg)
+		} else {
+			verdict = chore.Check(tip, recent, head, whenNow, room, cfg)
+		}
 		if verdict != chore.Due {
 			reasons = append(reasons, fmt.Sprintf("chore %q not due: %s", c.Name, verdict))
 			// NextDue reads the budget day from now's Location, so it gets the
 			// policy zone, as the day totals above did.
-			at, onTipMove := chore.NextDue(tip, recent, head, whenNow.In(r.policy.Zone), room, cfg)
+			var at time.Time
+			var onTipMove bool
+			if c.Records {
+				at, onTipMove = chore.NextDueRecords(tip, recent, newSettled, r.policy.TuningMinRecords, whenNow.In(r.policy.Zone), room, cfg)
+			} else {
+				at, onTipMove = chore.NextDue(tip, recent, head, whenNow.In(r.policy.Zone), room, cfg)
+			}
 			// (zero, false): nothing time- or head-based lifts it, so there is
 			// nothing to tell the daemon.
 			if !at.IsZero() || onTipMove {
@@ -220,7 +252,7 @@ func (r *Runner) Sweep(chores []string) (Outcome, error) {
 			}
 			continue
 		}
-		return r.run(c, tip, head, whenNow, room)
+		return r.run(c, tip, head, records, whenNow, room)
 	}
 
 	// Reported only on this exit: the daemon reads not_due records when the
@@ -255,11 +287,14 @@ func (p Policy) choreNames() []string {
 // 0056) is read off the settle step's own return, never by re-reading the
 // Ledger -- a crashed run's settle writes nothing at all, so there would be
 // nothing new there to read back anyway.
-func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.Time, room chore.Room) (Outcome, error) {
+func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispatchrecord.Record, claimedAt time.Time, room chore.Room) (Outcome, error) {
 	choreName := c.Name
-	files, err := r.tree.TrackedFiles(head)
-	if err != nil {
-		return Outcome{}, err
+	var files []string
+	if !c.Records {
+		var err error
+		if files, err = r.tree.TrackedFiles(head); err != nil {
+			return Outcome{}, err
+		}
 	}
 
 	claim, err := ledger.Claim(r.backend, choreName, tip, ledger.ClaimedBy{Host: r.policy.Host, Slot: 0, Start: claimedAt})
@@ -273,7 +308,19 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 		return Outcome{}, fmt.Errorf("butler: claim %s: %w", choreName, err)
 	}
 
-	scope := chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
+	// A records-scoped Chore has no file slice: its input is the digest of the
+	// Records past the cursor, and the next cursor is the latest Record ID it
+	// covered, carried in Scope.NextCursor so settle's Done commit is
+	// unchanged.
+	var scope chore.Scope
+	var input string
+	if c.Records {
+		dg := tuning.Render(records, claim.State.Cursor, claimedAt, r.policy.TuningMinSample)
+		scope = chore.Scope{Head: head, NextCursor: dg.Latest}
+		input = dg.Text
+	} else {
+		scope = chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
+	}
 	// A nil patchForge means this Runner never opted into the patch rung
 	// (WithPatchForge), so patchesPerDay reads as 0 regardless of the
 	// Consumer's own BUTLER_MAX_PATCHES_PER_DAY -- newPromotion's patchEnabled
@@ -314,9 +361,12 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, claimedAt time.
 	if promo.patchEnabled && len(promotionClasses) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings})
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: input})
 	defer d.Close()
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
+	if c.FindingLabel != "" {
+		step.labels = []string{c.FindingLabel}
+	}
 	settle := func(result dispatch.Result) settled { return step.settle(d, result) }
 	s := dispatch.Route(d.Run(),
 		func() settled {

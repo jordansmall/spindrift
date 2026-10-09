@@ -251,7 +251,15 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		// On a partial overlap the marker deliberately carries the
 		// already-covered term too: both issues are then valid "already
 		// tracked" answers, and the next run sees full coverage and skips.
-		marker := buildDedupMarker(in.DedupTerms)
+		//
+		// A finding wearing the tuning label also carries tuningChoreTerm, so
+		// a tracker with no label registry (local, jira) can still recognise
+		// it; deriving the term from the label keeps the two from diverging.
+		markerTerms := in.DedupTerms
+		if slices.Contains(extraLabels, doctor.TuningFindingLabel) {
+			markerTerms = append(slices.Clone(in.DedupTerms), tuningChoreTerm)
+		}
+		marker := buildDedupMarker(markerTerms)
 		if marker == "" {
 			marker = dedupMarkerPrefix + dedupMarkerSuffix
 		}
