@@ -97,7 +97,12 @@ func (f *Factory) newDispatch(subj subject) *Dispatch {
 // dispatchkey.Chore(c.Name) rather than a tracker issue number (ADR 0056);
 // buildBoxEnv reads subj.key.IsChore() to skip the issue-keyed env entirely.
 func (f *Factory) NewChore(c Chore) *Dispatch {
-	return f.newDispatch(choreSubject(c))
+	d := f.newDispatch(choreSubject(c))
+	if !c.ClaimTime.IsZero() {
+		d.claimTime = c.ClaimTime
+		d.mintRecordID()
+	}
+	return d
 }
 
 // newNonce mints an unpredictable per-run nonce (issue #1937) that lets the
