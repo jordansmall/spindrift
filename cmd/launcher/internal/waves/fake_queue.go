@@ -18,6 +18,11 @@ type FakeQueue struct {
 	// Repeats appear here but collapse into one entry in Claimed.
 	ClaimCalls []string
 	ClaimErr   error
+	// ClaimFunc scripts per-issue results: when set, its return replaces
+	// ClaimErr, and a nil return marks num Claimed. ClaimFunc runs outside f.mu
+	// so it may call back into other FakeQueue methods without deadlocking on
+	// the non-reentrant mutex.
+	ClaimFunc func(num string) error
 	// Claimed holds only the issue numbers Claim accepted: a non-nil ClaimErr
 	// leaves the number unset here.
 	Claimed map[string]bool
@@ -58,19 +63,26 @@ func (f *FakeQueue) Discover() (Batch, error) {
 	return discoverReturn, discoverErr
 }
 
-// Claim records num, marks it Claimed on success, and returns ClaimErr.
-// Repeat claims of the same num are idempotent.
+// Claim records num, marks it Claimed on success, and returns ClaimFunc(num)
+// when set, else ClaimErr. Repeat claims of the same num are idempotent.
 func (f *FakeQueue) Claim(num string) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.ClaimCalls = append(f.ClaimCalls, num)
-	if f.ClaimErr == nil {
+	claimFunc, claimErr := f.ClaimFunc, f.ClaimErr
+	f.mu.Unlock()
+
+	if claimFunc != nil {
+		claimErr = claimFunc(num)
+	}
+	if claimErr == nil {
+		f.mu.Lock()
 		if f.Claimed == nil {
 			f.Claimed = make(map[string]bool)
 		}
 		f.Claimed[num] = true
+		f.mu.Unlock()
 	}
-	return f.ClaimErr
+	return claimErr
 }
 
 // Pending records the call and returns PendingFunc(claimed) when set, else
