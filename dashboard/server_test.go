@@ -178,6 +178,28 @@ func TestRunningSlotShowsModel(t *testing.T) {
 	}
 }
 
+func TestRunningSlotShowsCIWait(t *testing.T) {
+	running := func(fields string) string {
+		return statusJSON(t, "working", "", `[{"slot":0,"phase":"running","busy":true,"since":"2026-10-07T11:00:00Z","kind":"work","issues":["7"]`+fields+`}]`)
+	}
+	waiting := running(`,"ci_wait":true,"pr_url":"https://github.com/o/r/pull/12"`)
+	_, body := get(t, &waiting, "/")
+	want := `<a class="pill ci-wait" href="https://github.com/o/r/pull/12" target="_blank" rel="noopener noreferrer">waiting on CI</a>`
+	if !strings.Contains(body, want) {
+		t.Errorf("want %q in card:\n%s", want, body)
+	}
+	for name, fields := range map[string]string{
+		"not waiting": "",
+		"pr only":     `,"pr_url":"https://github.com/o/r/pull/12"`,
+	} {
+		st := running(fields)
+		_, body := get(t, &st, "/")
+		if strings.Contains(body, "waiting on CI") {
+			t.Errorf("%s: CI wait pill rendered:\n%s", name, body)
+		}
+	}
+}
+
 func TestKindAndTrackerRows(t *testing.T) {
 	c := `{"pid":` + itoa(os.Getpid()) + `,"host":"` + hostname(t) + `","started":"2026-10-07T10:00:00Z",
 	"time":"2026-10-07T11:59:58Z","kinds":["work","butler"],"state":"jammed","slots":[],

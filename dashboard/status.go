@@ -63,6 +63,10 @@ type SlotStatus struct {
 	Pass      string   `json:"pass,omitempty"`
 	Model     string   `json:"model,omitempty"`
 	ModelRole string   `json:"model_role,omitempty"`
+	// CIWait is set while the running child waits on its PR's CI, and PRURL
+	// names that PR.
+	CIWait bool   `json:"ci_wait,omitempty"`
+	PRURL  string `json:"pr_url,omitempty"`
 	// ChildStart is the exact time string of a running slot's child_start event;
 	// ChildStartN counts earlier child_starts on the slot sharing that string.
 	ChildStart  string `json:"child_start,omitempty"`

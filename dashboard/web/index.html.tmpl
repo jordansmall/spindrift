@@ -93,6 +93,7 @@
       {{- if .Kind}}<div class="kindname">{{.Kind}}</div>{{end}}
       {{- if .Pass}}<div class="pass">pass {{.Pass}}</div>{{end}}
       {{- if .Model}}<div class="model">{{with .ModelRole}}{{.}} · {{end}}{{.Model}}</div>{{end}}
+      {{- if and .CIWait .PRURL}}<div class="ciwait"><a class="pill ci-wait" href="{{.PRURL}}" target="_blank" rel="noopener noreferrer">waiting on CI</a></div>{{end}}
       {{- if .Subject}}<div class="subject">{{range $i, $s := .Subject}}{{if $i}} {{end}}{{template "chip" $s}}{{end}}</div>{{end}}
       {{- if .Rev}}<div class="rev"><code>{{.Rev}}</code></div>{{end}}
       <div class="inphase"><span class="label">in phase</span> <span>{{.Elapsed}}</span></div>
