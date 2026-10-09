@@ -296,6 +296,24 @@ let
           if builtins.match "[a-z0-9-]+" value != null then [ value ] else [ ];
     in
     concatMap labelFromSegment (builtins.tail (splitString marker src));
+  # Like labelLiteralAfterMarker, but for a Go `[]string{"a", "b"}` literal:
+  # every quoted item up to the closing brace, not just the first. The segment
+  # starts just after the marker's opening quote, so splitting the span on `"`
+  # puts the items at the even indices and the `, ` separators at the odd ones.
+  labelLiteralsInSpanAfterMarker =
+    marker: src:
+    let
+      labelsFromSegment =
+        segment:
+        let
+          quoteParts = splitString "\"" (builtins.head (splitString "}" segment));
+          items = builtins.genList (i: builtins.elemAt quoteParts (2 * i)) (
+            (builtins.length quoteParts + 1) / 2
+          );
+        in
+        filter (value: builtins.match "[a-z0-9-]+" value != null) items;
+    in
+    concatMap labelsFromSegment (builtins.tail (splitString marker src));
   # doctor.go's ResearchLabelNames() literal (ADR 0041). The marker is unique in
   # that file: its other append(names, ...) calls have no quote after the comma.
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
@@ -304,10 +322,10 @@ let
   # This marker matches every `return []string{"..."}` span in doctor.go —
   # AmbiguousLabelNames() and ButlerLabelNames() (ADR 0056) both share the
   # shape — so it cannot cross-match ResearchLabelNames()'s different
-  # `append(names, "...")` shape, but does pick up both single-item literals;
-  # both are registered (labels.ambiguous, labels.butlerFinding), so the extra
-  # match is harmless.
-  extractAmbiguousLabelNamesLiteral = labelLiteralAfterMarker ''return []string{"'';
+  # `append(names, "...")` shape. Every literal in each span is extracted
+  # (ButlerLabelNames() lists two); all are registered (labels.ambiguous,
+  # labels.butlerFinding, labels.butlerPatch).
+  extractAmbiguousLabelNamesLiteral = labelLiteralsInSpanAfterMarker ''return []string{"'';
   # extractLabelCreateTokens and extractNameFieldTokens scan line by line, so a
   # shell `\`-continued `gh label create` would leave the marker and its
   # literal on different lines and match neither. Folding backslash-newline
@@ -740,19 +758,53 @@ mapAttrs (
       });
     in
     # The shared `return []string{"` marker also matches ButlerLabelNames()'s
-    # untouched "agent-butler-finding" literal (ADR 0056), so the doctored
-    # source yields both, in file order.
+    # untouched "agent-butler-finding" and "agent-butler-patch" literals (ADRs
+    # 0056, 0057), so the doctored source yields all three, in file order.
     assert assertMsg
       (
         extractedLabels == [
           "agent-unregistered-label"
           "agent-butler-finding"
+          "agent-butler-patch"
         ]
       )
-      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" \"agent-butler-finding\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" \"agent-butler-finding\" \"agent-butler-patch\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { }
+      "touch $out";
+
+  # ButlerLabelNames() returns two literals in one span; the extractor must
+  # see the second ("agent-butler-patch"), not just the first (issue #4897).
+  label-registry-covers-harness-writes-butler-patch-drift-regression =
+    let
+      originalDoctorSrc = harnessSurfaces."cmd/launcher/internal/doctor/doctor.go".src;
+      doctoredDoctorSrc =
+        replaceStrings [ ''"agent-butler-patch"'' ] [ ''"agent-unregistered-label"'' ]
+          originalDoctorSrc;
+      doctoredHarnessSurfaces = harnessSurfaces // {
+        "cmd/launcher/internal/doctor/doctor.go" =
+          harnessSurfaces."cmd/launcher/internal/doctor/doctor.go"
+          // {
+            src = doctoredDoctorSrc;
+          };
+      };
+      extractedLabels = labelsWrittenBy {
+        src = doctoredDoctorSrc;
+        extract = extractAmbiguousLabelNamesLiteral;
+      };
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = doctoredHarnessSurfaces;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (doctoredDoctorSrc != originalDoctorSrc)
+      "label-registry-covers-harness-writes-butler-patch-drift-regression: the \"agent-butler-patch\" needle no longer matches doctor.go, so the doctoring is a no-op";
+    assert assertMsg (builtins.elem "agent-unregistered-label" extractedLabels)
+      "label-registry-covers-harness-writes-butler-patch-drift-regression: expected extractAmbiguousLabelNamesLiteral to find agent-unregistered-label in ButlerLabelNames()'s second literal, but got: ${concatStringsSep ", " extractedLabels}";
+    assert assertMsg (!result.success)
+      "label-registry-covers-harness-writes-butler-patch-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ButlerLabelNames()'s agent-butler-patch literal renamed to agent-unregistered-label, but it evaluated successfully";
+    pkgs.runCommand "label-registry-covers-harness-writes-butler-patch-drift-regression" { }
       "touch $out";
 
   # Proves the span-scanned extraction survives a gofmt reformat that moves
