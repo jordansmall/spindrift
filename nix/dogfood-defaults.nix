@@ -77,5 +77,8 @@ in
     # A cold checks-inbox gate outruns the 10-minute stock Bash cap; 30 minutes
     # lets it finish in one blocking call (issue #4409).
     driverBashTimeoutMs = 1800000;
+    # A four-slot Daemon pool. The daemon reads MAX_PARALLEL from the baked
+    # settings only, so harness.env cannot raise it.
+    maxParallel = 4;
   };
 }

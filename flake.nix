@@ -144,6 +144,7 @@
               agents.models.default = dogfoodDefaults.defaults.model;
               agents.models.effort = dogfoodDefaults.defaults.effort;
               agents.bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
+              dispatch.maxParallel = dogfoodDefaults.defaults.maxParallel;
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
               dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;
               dispatch.butler.maxPatchesPerDay = dogfoodDefaults.defaults.butlerMaxPatchesPerDay;
