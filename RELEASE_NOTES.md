@@ -9,6 +9,56 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.24.0 — 2026-10-09
+
+Dispatch Records and `spindrift stats`: spindrift now keeps a durable
+SQLite record of every Dispatch and can tell you what your runs cost.
+
+No breaking changes.
+
+- **New: `spindrift stats`.** Ask what past Dispatches cost without
+  touching the tracker, the forge or a container. You get a summary
+  (Records, passes, notional USD, which issues landed and USD per landed
+  issue) plus a per-role table of passes, cost, average minutes, API calls
+  and the reviewer's block rate. Filter with `--since`, `--kind` and
+  `--include-inferred=false`, merge several checkouts with repeated
+  `--root`, and pass `--json` for scripting. USD is list-price equivalent,
+  not what a subscription actually bills.
+- **Slice stats by what changed.** `--by` groups the numbers by spindrift
+  `revision`, `model`, a role's prompt template (`prompt:<role>`) or any
+  non-secret knob (`knob:<NAME>`). That makes it easy to compare cost and
+  block rate before and after a model swap, a prompt edit or a config
+  tweak.
+- **New: a SQLite Dispatch Records store.** Each Dispatch becomes a Record
+  in `.spindrift/dispatch-records.db`, which stays out of version control
+  with the rest of `.spindrift/`. The host stamps every Pass log with the
+  Record ID, revision, models and effective knob values (never secrets),
+  the Box reports its prompt template hashes, and settle appends the final
+  outcome. The store is updated as each Dispatch settles, under the daemon
+  and a manual `spindrift dispatch` alike. Older logs with no stamp are
+  still read and counted as inferred Records.
+- **Records outlive your logs.** Once ingested, a Record survives deleting
+  the Pass logs it came from, so run `spindrift stats` before pruning
+  `.spindrift/logs`. After upgrading to a binary with a parser fix,
+  `spindrift stats --reingest` re-reads whatever logs are still on disk.
+  A PR that merges after its Dispatch settled (auto or manual merge mode)
+  is picked up by `spindrift reconcile` and counted as landed.
+- **Butler findings stick to a known class list.** Each built-in Chore now
+  has a fixed list of finding classes, and the Box has to pick a class
+  from it rather than making up a near-synonym that could never be
+  promoted. When settle skips promoting a finding, the log now says why.
+- **Security fixes.** The registry proxy no longer forwards its per-run
+  secret to the upstream registry. A read-only Box's `gh api` guard now
+  also catches `-XPOST` shorthand and the implicit POST `gh` makes when
+  you pass `-f`/`--input`.
+- **Steadier runs.** Under bwrap, the Box now starts inside its own cgroup,
+  so `PIDS_LIMIT` and `MEMORY_LIMIT` reliably apply. A ready issue whose
+  claim fails no longer blocks every issue queued behind it. Aborting the
+  daemon no longer re-queues a run that had already settled as failed or
+  ambiguous. Forgejo checks the repo's configured merge style, and
+  `quickstart` keeps an existing ignore file and `.envrc` instead of
+  overwriting them.
+
 ## 0.23.3 — 2026-10-07
 
 A read-only web Dashboard for the daemon, so you can watch slots, history
