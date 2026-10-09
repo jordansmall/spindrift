@@ -3798,11 +3798,11 @@ func TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion(t *testi
 	waitOn(t, as.started, "settle was never invoked for issue #1")
 	close(stop)
 
-	// RunContinuous joins on outstanding dropping to 0 before it can return
-	// (continuous.go's `for outstanding > 0 { idle.Wait() }`), and outstanding
-	// only drops once Settle returns, so it still being outstanding here,
-	// well after Stop closed, is itself proof the drain did not cut the
-	// settle short.
+	// RunContinuous joins on inflight emptying before it can return
+	// (continuous.go's `for len(inflight) > 0 || aborting { idle.Wait() }`),
+	// and #1 only leaves inflight once Settle returns, so its still being in
+	// flight here, well after Stop closed, is itself proof the drain did not
+	// cut the settle short.
 	select {
 	case got := <-resultCh:
 		t.Fatalf("RunContinuous returned (%v) while the settle was still in flight after Stop alone", got)
