@@ -31,21 +31,41 @@ type ClaimedBy struct {
 	Start time.Time `json:"start"`
 }
 
+// Snapshot names the digest a tuning sweep was served: the sweep's Record ID
+// and the digest's SHA-256, never the digest (ADR 0062).
+type Snapshot struct {
+	Sweep  string `json:"sweep"`
+	SHA256 string `json:"sha256"`
+}
+
+// Drop is one finding settle refused to file, with the reason.
+type Drop struct {
+	Title  string `json:"title"`
+	Reason string `json:"reason"`
+}
+
 // State is one commit's state.json: the full state of a Chore's Ledger at
 // that point in the chain.
 type State struct {
 	// LastSwept and Cursor carry a sweep's position forward across claims, so
 	// a takeover of a crashed claim resumes rather than restarts (Claim
 	// copies both from the prior tip).
-	LastSwept string      `json:"lastSwept,omitempty"`
-	Cursor    string      `json:"cursor,omitempty"`
-	Phase     Phase       `json:"phase"`
-	ClaimedBy *ClaimedBy  `json:"claimedBy,omitempty"`
-	Filed     []string    `json:"filed,omitempty"`
-	Promoted  []string    `json:"promoted,omitempty"`
-	Dropped   int         `json:"dropped,omitempty"`
-	Patched   []string    `json:"patched,omitempty"` // PR URLs the run opened (ADR 0057).
-	Usage     usage.Usage `json:"usage"`
+	LastSwept string     `json:"lastSwept,omitempty"`
+	Cursor    string     `json:"cursor,omitempty"`
+	Phase     Phase      `json:"phase"`
+	ClaimedBy *ClaimedBy `json:"claimedBy,omitempty"`
+	Filed     []string   `json:"filed,omitempty"`
+	Promoted  []string   `json:"promoted,omitempty"`
+	Dropped   int        `json:"dropped,omitempty"`
+	Patched   []string   `json:"patched,omitempty"` // PR URLs the run opened (ADR 0057).
+	// Snapshot references the tuning Chore's digest snapshot (ADR 0062); the
+	// digest itself stays in the host's Dispatch Records store, since a hosted
+	// forge's Ledger ref is readable by anyone who can read the repo.
+	Snapshot *Snapshot `json:"snapshot,omitempty"`
+	// Drops are the findings settle refused to file, and why (issue #4952);
+	// each is also counted in Dropped.
+	Drops []Drop      `json:"drops,omitempty"`
+	Usage usage.Usage `json:"usage"`
 	// Reserved and ReservedPatches are set only on a reservation commit (see
 	// Reserve): promotion and patch (ADR 0057) slots a Claimed-phase entry
 	// holds against the day's budget before its Done lands.

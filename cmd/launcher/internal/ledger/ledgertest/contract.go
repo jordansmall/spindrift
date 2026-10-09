@@ -293,9 +293,11 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 	}
 
 	finishState := ledger.State{
-		Filed:   []string{"issue-1", "issue-2"},
-		Patched: []string{"https://example.com/pull/1"},
-		Usage:   usage.Usage{InputTokens: 100},
+		Filed:    []string{"issue-1", "issue-2"},
+		Patched:  []string{"https://example.com/pull/1"},
+		Snapshot: &ledger.Snapshot{Sweep: "butler:butler-tuning@1", SHA256: "abc123"},
+		Drops:    []ledger.Drop{{Title: "cites a missing anchor", Reason: "unknown-cite"}},
+		Usage:    usage.Usage{InputTokens: 100},
 	}
 	done, err := ledger.Finish(backend, chore, claim, finishState, start.Add(time.Minute))
 	if err != nil {
@@ -313,6 +315,12 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 	if len(done.State.Patched) != 1 {
 		t.Fatalf("Finish: got Patched %v, want the 1 given entry", done.State.Patched)
 	}
+	if !reflect.DeepEqual(done.State.Snapshot, finishState.Snapshot) {
+		t.Fatalf("Finish: got Snapshot %+v, want %+v", done.State.Snapshot, finishState.Snapshot)
+	}
+	if !reflect.DeepEqual(done.State.Drops, finishState.Drops) {
+		t.Fatalf("Finish: got Drops %+v, want %+v", done.State.Drops, finishState.Drops)
+	}
 
 	got, err := backend.Read(chore)
 	if err != nil {
@@ -320,6 +328,12 @@ func testDoneOverClaim(t *testing.T, h Harness) {
 	}
 	if !reflect.DeepEqual(got, done) {
 		t.Fatalf("Read after Finish: got %+v, want %+v", got, done)
+	}
+	if !reflect.DeepEqual(got.State.Snapshot, finishState.Snapshot) {
+		t.Fatalf("Read after Finish: got Snapshot %+v, want %+v", got.State.Snapshot, finishState.Snapshot)
+	}
+	if !reflect.DeepEqual(got.State.Drops, finishState.Drops) {
+		t.Fatalf("Read after Finish: got Drops %+v, want %+v", got.State.Drops, finishState.Drops)
 	}
 
 	// A Finish against a stale claim tip (someone else already re-claimed
