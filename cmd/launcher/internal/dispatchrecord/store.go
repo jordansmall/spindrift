@@ -217,6 +217,14 @@ var migrations = []string{
 		AND (r2.claim_time < records.claim_time
 			OR (r2.claim_time = records.claim_time AND r2.record_id <= records.record_id)))
 	WHERE outcome_source = 'dispatch_settled';`,
+	// v11: the tuning Chore's digest snapshot (ADR 0062, issue #4952), keyed by
+	// the sweep's Record ID. Host-private: never pushed anywhere.
+	`CREATE TABLE tuning_snapshots (
+		record_id  TEXT PRIMARY KEY,
+		sha256     TEXT NOT NULL,
+		rendered   TEXT NOT NULL,
+		created_at INTEGER NOT NULL -- unix ms, UTC
+	);`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
