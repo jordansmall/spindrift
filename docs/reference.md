@@ -7105,11 +7105,14 @@ wait after each fix pass, and a merge-gate re-wait after a force-push. A
 merge retry blocked by checks stays inside the wait the green gate already
 reported, so it sends no record of its own: the earlier `ci_wait` is never
 cleared before that point.
-`pr_url` names that PR. The next `box` record or the `settled` record
-clears both, and they never carry to the next child. Only a Code Forge with
-PRs (`github`, `forgejo`) enters a CI wait, so a `git` or `local` slot never
-shows them. They are additive and omitted when empty, so `schema` does not
-bump.
+`pr_url` names that PR. `ci_run_url` names the CI run (the GitHub Actions run
+of the PR's head commit) and is set from the same record's `run_url`, so it
+appears only on a `github` Code Forge and only once the PR's checks register;
+each new wait starts without it, and a `forgejo` slot never shows it. The
+next `box` record or the `settled` record clears all three, and they never
+carry to the next child. Only a Code Forge with PRs (`github`, `forgejo`)
+enters a CI wait, so a `git` or `local` slot never shows them. They are
+additive and omitted when empty, so `schema` does not bump.
 `phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
@@ -8248,9 +8251,13 @@ driver the launcher sends one whenever the Box's active (role, model) pair
 changes, never once per message. Under the opencode driver it sends one,
 with no `model_role`, whenever a `step_finish` event names a different model
 id from the last one sent.
-A `ci_wait` record is `{"event":"ci_wait","issue":"<N>","pr_url":"<url>"}`,
-sent each time settle enters a CI wait. The daemon publishes it on the slot's
-status entry (`ci_wait`, `pr_url`) and emits no pool event for it. A
+A `ci_wait` record is `{"event":"ci_wait","issue":"<N>","pr_url":"<url>"}`
+plus an optional `"run_url":"<url>"`, the CI run once the host has found it.
+Settle sends one each time it enters a CI wait, with no `run_url`, and sends
+another with the same `pr_url` when the run URL first appears, changes or
+disappears, not once per poll. The run is the PR repository's first Actions
+run still in progress, else its first finished one. The daemon publishes the latest on the slot's status
+entry (`ci_wait`, `pr_url`, `ci_run_url`) and emits no pool event for it. A
 butler patch PR's CI wait shows no pill: settle keys the record by the
 finding issue while the butler child is chore-keyed, so the daemon drops it
 as a kind mismatch, as it already does that PR's `settled` record.
@@ -8344,8 +8351,9 @@ subagents spoke last. Under opencode the card shows the model alone, with no
 role, and only updates when a step finishes, so it can lag the running model
 by up to one step. A slot carrying no `model` shows nothing extra.
 A slot whose child waits on its PR's CI also shows a `waiting on CI` pill
-with its own phase colour, linking to the PR in a new tab, from the slot's
-`ci_wait` and `pr_url`; a slot carrying no `pr_url` shows no pill. The
+with its own phase colour, linking in a new tab to the CI run when the slot
+carries a `ci_run_url` and to the PR otherwise, from the slot's `ci_wait`,
+`pr_url` and `ci_run_url`; a slot carrying no `pr_url` shows no pill. The
 live re-render picks it up like any other status field.
 
 Below them is a history timeline, newest first, of the last 200 child
