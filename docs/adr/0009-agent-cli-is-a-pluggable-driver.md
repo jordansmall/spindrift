@@ -4,6 +4,10 @@
 > a Consumer flake may declare several Drivers side by side, still one Driver
 > per image, each with its own apps and Driver-suffixed image outputs.
 >
+> **Amended by [ADR 0065](0065-drivers-decode-pass-logs-into-canonical-events.md):**
+> on the host side a Driver's parsing is a decoder into canonical events; the
+> five Pass-log readers are shared in driverkit.
+>
 > Note (issue #3490): `claude` and `opencode` are both implemented Drivers
 > today — a `lib/drivers/` registry entry plus a matching Go strategy for
 > each, and both names in the generated driver-name list (issue #262
