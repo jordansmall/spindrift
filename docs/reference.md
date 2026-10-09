@@ -5798,11 +5798,14 @@ log's start, so an unstamped fix or conflict-resolve log can join its
 Dispatch. Version 7 adds each pass's source log to its key and names the
 satellite log that minted an orphan Record. Version 8 adds `merge_commit` and
 the post-merge `reverted` and `matured_at` columns (see Reverts below),
-upgrading a store in place with them empty. The store uses WAL journaling, so
-another process can read it while `stats` writes. Because Records are kept in
-the database, they survive deleting the logs they came from. Deleting the
-database instead loses every Record whose
-log is gone: a re-run rebuilds only from the logs still on disk.
+upgrading a store in place with them empty. Version 9 adds the post-merge
+`churn_14d` column (see Churn below) and clears every earlier `matured_at`
+but keeps the `reverted` verdict, so the next pass judges churn and
+re-judges it where it can. The store uses WAL journaling, so another process
+can read it while `stats` writes. Because Records are kept in the database,
+they survive deleting the logs they came from. Deleting the database instead
+loses every Record whose log is gone: a re-run rebuilds only from the logs
+still on disk.
 
 **Ingest at settle.** The host keeps the store current without a `stats`
 run. Right after appending `dispatch_settled` to a Dispatch's primary Pass
@@ -5947,7 +5950,8 @@ whose log is gone is left exactly as stored: a parser fix cannot reach it.
 **Output.** The default text output is a summary line (Records, passes, total
 notional USD, the landed Dispatch keys, notional USD per landed key, and the
 share of matured merges that were reverted, `Reverted: 67% of 3`, or `Reverted: —`
-when none has matured, and the outcome-source mix), followed by a
+when none has matured, the mean 14-day churn, `Churn: 8% of 3`, or `Churn: —`,
+and the outcome-source mix), followed by a
 table with one row per pass role, in
 pipeline order (`implement`, `review`, `fix`, `land`, `delta-review`, then any
 other role alphabetically, and `(none)` for a pass logged without a role):
@@ -5989,19 +5993,42 @@ current: a stale clone leaves Records unfilled rather than recording a false
 "not reverted". The `Reverted` field of the summary line, in every `--by` group
 too, is the share of filled Records whose `reverted` is true, out of the filled
 ones; an unfilled Record (not yet matured, no `merge_commit`, merge commit not
-in the clone or off the base branch, or its parent cut off by a shallow clone)
+in the clone or off the base branch, or, when a later commit might be a revert,
+its parent cut off by a shallow clone)
 is never counted as zero, and the field is `—` when none is filled. A root that
 is not a checkout leaves every Record unfilled and is not an error; git failing
 to run or an unusable clone prints a `warning:` line on stderr and leaves the
 affected Records unfilled (a Record whose own check fails stays unfilled, the
 rest are still filled).
 
+**Churn.** The same pass fills `churn_14d`, the share of the lines a merge
+added that other commits rewrote or removed within its 14-day window, as a
+fraction from 0 to 1. Added lines are the merge's net diff against its first
+parent, so lines a multi-commit PR rewrote among its own commits never count.
+`stats` blames each file the merge added lines to along the first-parent line
+of the base branch as it stood at the window's end (the last first-parent
+commit no later than it), and a line survives while blame still credits it to
+the merge; a rewrite after the window does not count. A file the PR itself
+renamed counts only its changed lines as added, so a pure rename adds nothing.
+A file a later commit deleted, renamed, or replaced with a directory or
+submodule inside the window counts as wholly rewritten, and for a rebase merge
+only the last rebased commit's lines are judged. `reverted`, `churn_14d`, and
+`matured_at` fill together or not at all, and a merge that added no lines, or
+only submodule pointers or binary files, whose parent a shallow clone cut off,
+or that is not on the base branch's first-parent line at the window's end (it
+arrived as a later merge's second parent, or nothing on that line predates the
+window's end) matures with no `churn_14d`. The `Churn` field of the summary line, in every `--by`
+group too, is the mean `churn_14d` of the Records that carry one, out of that
+count, and is `—` when none does: before 14 days, without a Target clone, or
+when every matured merge has no `churn_14d`.
+
 `--json` skips the table and prints one Record per line, ordered by claim
 time, then root, then ID, with the fields `record_id`, `root`, `kind`,
 `dispatch_key`, `claim_time`, `attribution`, `outcome`, `outcome_source`,
 `passes`, and, on Records with a settled outcome (omitted when empty),
 `reason`, `note`, `pr_url`, `merge_commit` (merged Records where the forge
-reported it), and `box_status`, and, once filled, `reverted` and `matured_at`,
+reported it), and `box_status`, and, once filled, `reverted`, `churn_14d`
+(omitted when the merge matured with none; see Churn), and `matured_at`,
 and, on stamped Records only
 (omitted when inferred), `revision`, `driver`, `driver_version`,
 `role_models`, `knobs`, and `prompt_hashes` (omitted when no Box reported
