@@ -208,10 +208,10 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		// Reclaim's Mark is what stops a surviving Box goroutine from Failing or
 		// Settling an issue the abort path already released back to
 		// Dispatchable (#3521): the abort watcher below always calls Reclaim
-		// against terminated, and headless dispatch never has a Session to
-		// supply one. A fresh Registry with nothing marked yet behaves exactly
-		// like the nil one it replaces (Marked reports false until something
-		// marks it), so no non-abort path changes.
+		// against terminated, and only tests reach this fallback (see
+		// Session.Terminated). A fresh Registry with nothing marked yet
+		// behaves exactly like the nil one it replaces (Marked reports false
+		// until something marks it), so no non-abort path changes.
 		terminated = terminate.NewRegistry()
 	}
 	reaper := f.AsReaper()

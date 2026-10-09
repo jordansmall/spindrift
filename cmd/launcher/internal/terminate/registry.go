@@ -11,8 +11,12 @@ package terminate
 import "sync"
 
 // Registry tracks, per issue number, which dispatch generation the operator
-// has terminated this session. A nil *Registry is inert and Marked always
-// reports false, so headless dispatch paths can pass nil through unchanged.
+// has terminated this session. A nil *Registry stays safe to call (Begin
+// returns 0, Mark is a no-op, Marked reports false), but every production
+// dispatch path builds or substitutes a non-nil one, so only tests reach the
+// nil receivers. A fresh NewRegistry's Marked likewise reports false until
+// something calls Mark -- e.g. Reclaim on a signalled abort, which on a
+// headless path marks generation 0 because no Begin bumped it.
 type Registry struct {
 	mu sync.Mutex
 	// gen keys marks by generation instead of a plain per-number bool (the
