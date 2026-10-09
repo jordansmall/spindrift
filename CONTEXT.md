@@ -949,6 +949,16 @@ already paid for saves nothing.
 _Avoid_: schedule, cron window, uptime, business hours, quiet hours (it names
 when the Daemon is permitted to act, not when the repository is quiet).
 
+**In-place restart**:
+The [[Daemon]] replacing its own build with a newer one without giving up its
+running children: it becomes the successor in the same process, so every
+child it started stays its child and keeps its Slot. Opt-in; the default
+answer to the Daemon's build moving is still to drain and exit. Either way the
+successor is built and proven to start before the old build lets go, so a
+successor that cannot run leaves the old one running (ADR 0063).
+_Avoid_: hot reload, self-update (names the outcome, not which mechanism),
+adoption (no child is ever orphaned to adopt), detach.
+
 **Events file**:
 The [[Daemon]]'s event stream persisted beside its status file, capped and
 rotated, so the history survives however the Daemon is supervised — under
