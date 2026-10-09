@@ -8,9 +8,11 @@ import (
 )
 
 // TestRunContinuous_NilSession_FallsBackToFixedLimiter verifies that a nil
-// *Session — every headless dispatch call site — still runs with a fixed
-// limiter built from cfg.MaxParallel, matching the pre-#1547 behaviour of a
-// zero-value Config.Limiter.
+// *Session still runs with a fixed limiter built from cfg.MaxParallel,
+// matching the pre-#1547 behaviour of a zero-value Config.Limiter. A non-nil
+// Session with a nil Limiter (what headless RunContinuous callers pass) takes
+// the same fallback (see Session.Limiter); this test pins only the nil-Session
+// case.
 func TestRunContinuous_NilSession_FallsBackToFixedLimiter(t *testing.T) {
 	c := baseConfig()
 	label := "agent-trigger"
