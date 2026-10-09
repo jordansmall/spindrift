@@ -9,8 +9,8 @@ import (
 
 // operatorSkillsDir is the staging path SPINDRIFT_SKILLS_DIR mounts onto
 // (issue #2489). Mounting over the Driver's own DRIVER_SKILLS_DIR would erase
-// the harness-owned skills baked there, so agent/entrypoint.sh instead copies
-// both paths into DRIVER_SKILLS_DIR at box startup, which merges.
+// the harness-owned skills baked there, so the box program (cmd/launcher/box)
+// instead copies both paths into DRIVER_SKILLS_DIR at startup, which merges.
 const operatorSkillsDir = "/operator-skills"
 
 // RegistryProxySocketTarget is the in-box path the registry proxy's unix

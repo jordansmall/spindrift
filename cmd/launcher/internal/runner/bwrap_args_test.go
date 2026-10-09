@@ -99,8 +99,9 @@ func TestBwrapArgs_DieWithParent(t *testing.T) {
 }
 
 // The operator-override skills mount lands at the fixed /operator-skills
-// staging path (issue #2489); entrypoint.sh merges it into the Driver's real
-// skills dir at box startup, so bwrap.go never binds onto that dir directly.
+// staging path (issue #2489); the box program (cmd/launcher/box) merges it into
+// the Driver's real skills dir at startup, so bwrap.go never binds onto that
+// dir directly.
 func TestBwrapArgs_SkillsDirMounted(t *testing.T) {
 	dir := t.TempDir()
 	a := &bwrapAdapter{
@@ -191,8 +192,8 @@ func TestBwrapArgs_MultipleSockets_TwoBindPairs(t *testing.T) {
 // Issue #2843: the staged /home/agent subtree must land at a fixed top-level
 // path, not under /agent, because /agent is already bound read-only by then
 // and bwrap cannot create a mountpoint inside a read-only bind. The real
-// /home/agent stays a fresh writable tmpfs that entrypoint.sh copies this
-// staged content into at startup.
+// /home/agent stays a fresh writable tmpfs that the box program
+// (cmd/launcher/box) copies this staged content into at startup.
 func TestBwrapArgs_HomeAgentStagingMounted(t *testing.T) {
 	a := &bwrapAdapter{
 		agentFiles:    "/fake/agent",
@@ -760,7 +761,8 @@ func TestBwrapArgs_SkillsDirUnset_NoMount(t *testing.T) {
 // TestBwrapArgs_RuntimeSkillsTakePrecedence and
 // TestBwrapArgs_SkillsDirInvalid_NoFallback along with bwrap.go's
 // baked-skills-fallback bind. Baked skills now reach the box through the
-// /agent ro-bind and entrypoint.sh's own copy step at startup.
+// /agent ro-bind and the box program's (cmd/launcher/box) own copy step at
+// startup.
 
 // A non-empty nixConfigFile means the nixInBox knob is on (ADR 0042), which
 // renders both the nix.conf ro-bind and the store-DB snapshot overlay onto
