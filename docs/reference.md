@@ -6111,17 +6111,21 @@ of the base branch as it stood at the window's end (the last first-parent
 commit no later than it), and a line survives while blame still credits it to
 the merge; a rewrite after the window does not count. A file the PR itself
 renamed counts only its changed lines as added, so a pure rename adds nothing.
-A file a later commit deleted, renamed, or replaced with a directory or
-submodule inside the window counts as wholly rewritten, and for a rebase merge
-only the last rebased commit's lines are judged. `reverted`, `churn_14d`, and
-`matured_at` fill together or not at all, and a merge that added no lines, or
-only submodule pointers or binary files, whose parent a shallow clone cut off,
-or that is not on the base branch's first-parent line at the window's end (it
-arrived as a later merge's second parent, or nothing on that line predates the
-window's end) matures with no `churn_14d`. The `Churn` field of the summary line, in every `--by`
-group too, is the mean `churn_14d` of the Records that carry one, out of that
-count, and is `—` when none does: before 14 days, without a Target clone, or
-when every matured merge has no `churn_14d`.
+A later rename inside the window is followed to the file's new path, so a move
+rewrites nothing; content split or copied across files, a rename below git's
+default 50% similarity, or a move where a new file takes the old path still
+counts as rewritten. A file a later commit deleted or replaced with a
+directory or submodule inside the window counts as wholly rewritten, and for a
+rebase merge only the last rebased commit's lines are judged. `reverted`,
+`churn_14d`, and `matured_at` fill together or not at all, and a merge that
+added no lines, or only submodule pointers or binary files, whose parent a
+shallow clone cut off, or that is not on the base branch's first-parent line
+at the window's end (it arrived as a later merge's second parent, or nothing
+on that line predates the window's end) matures with no `churn_14d`. The
+`Churn` field of the summary line, in every `--by` group too, is the mean
+`churn_14d` of the Records that carry one, out of that count, and is `—` when
+none does: before 14 days, without a Target clone, or when every matured
+merge has no `churn_14d`.
 
 `--json` skips the table and prints one Record per line, ordered by claim
 time, then root, then ID, with the fields `record_id`, `root`, `kind`,
