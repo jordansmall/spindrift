@@ -472,6 +472,155 @@ func TestJiraClient_TransitionState_MappedStatus(t *testing.T) {
 	}
 }
 
+// A native claim must strip settled labels BEFORE the transition and fail
+// cleanly if that strip fails: shutdown.unsettled reads a surviving settled
+// label as this run's own settle and would spare the live Box on abort.
+func TestJiraClient_TransitionState_NativeClaimStripsSettledFirst(t *testing.T) {
+	cases := []struct {
+		name         string
+		labels       forge.DispatchLabels
+		verdicts     forge.VerdictLabels
+		issueLabels  string
+		failPuts     bool
+		noTransition bool
+		wantErr      bool
+		wantSeq      []string
+	}{
+		{
+			name:        "work stale failed, pre-strip fails",
+			labels:      testLabels,
+			issueLabels: `["agent-failed"]`,
+			failPuts:    true,
+			wantErr:     true,
+			wantSeq: []string{
+				"GET issue",
+				`PUT [{"remove":"agent-failed"}]`,
+			},
+		},
+		{
+			name:        "research stale verdict, pre-strip fails",
+			labels:      researchLabels,
+			verdicts:    researchVerdictLabels,
+			issueLabels: `["agent-research-unclear"]`,
+			failPuts:    true,
+			wantErr:     true,
+			wantSeq: []string{
+				"GET issue",
+				`PUT [{"remove":"agent-research-unclear"}]`,
+			},
+		},
+		{
+			name:        "no settled label, no pre-strip",
+			labels:      testLabels,
+			issueLabels: `[]`,
+			wantSeq: []string{
+				"GET issue",
+				"GET transitions",
+				"POST transition 11",
+				`PUT [{"remove":"ready-for-agent"},{"remove":"agent-complete"},{"remove":"agent-failed"}]`,
+			},
+		},
+		{
+			name:        "pre-strip succeeds then transition then cleanup",
+			labels:      testLabels,
+			issueLabels: `["agent-failed","unrelated"]`,
+			wantSeq: []string{
+				"GET issue",
+				`PUT [{"remove":"agent-failed"}]`,
+				"GET transitions",
+				"POST transition 11",
+				`PUT [{"remove":"ready-for-agent"},{"remove":"agent-complete"},{"remove":"agent-failed"}]`,
+			},
+		},
+		{
+			name:         "pre-strip succeeds then transition unavailable falls back to label",
+			labels:       testLabels,
+			issueLabels:  `["agent-failed"]`,
+			noTransition: true,
+			wantSeq: []string{
+				"GET issue",
+				`PUT [{"remove":"agent-failed"}]`,
+				"GET transitions",
+				`PUT [{"remove":"ready-for-agent"},{"remove":"agent-complete"},{"remove":"agent-failed"},{"add":"agent-in-progress"}]`,
+			},
+		},
+		{
+			name:        "post-transition cleanup fails, claim still succeeds",
+			labels:      testLabels,
+			issueLabels: `[]`,
+			failPuts:    true,
+			wantSeq: []string{
+				"GET issue",
+				"GET transitions",
+				"POST transition 11",
+				`PUT [{"remove":"ready-for-agent"},{"remove":"agent-complete"},{"remove":"agent-failed"}]`,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var seq []string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1":
+					seq = append(seq, "GET issue")
+					fmt.Fprintf(w, `{"fields":{"status":{"name":"To Do"},"labels":%s}}`, tc.issueLabels)
+				case r.Method == http.MethodGet && r.URL.Path == "/rest/api/2/issue/PROJ-1/transitions":
+					seq = append(seq, "GET transitions")
+					if tc.noTransition {
+						fmt.Fprint(w, `{"transitions":[]}`)
+						return
+					}
+					fmt.Fprint(w, `{"transitions":[{"id":"11","name":"Start","to":{"name":"In Progress"}}]}`)
+				case r.Method == http.MethodPost && r.URL.Path == "/rest/api/2/issue/PROJ-1/transitions":
+					var body map[string]map[string]string
+					json.NewDecoder(r.Body).Decode(&body)
+					seq = append(seq, "POST transition "+body["transition"]["id"])
+					w.WriteHeader(http.StatusNoContent)
+				case r.Method == http.MethodPut && r.URL.Path == "/rest/api/2/issue/PROJ-1":
+					var body struct {
+						Update struct {
+							Labels json.RawMessage `json:"labels"`
+						} `json:"update"`
+					}
+					json.NewDecoder(r.Body).Decode(&body)
+					seq = append(seq, "PUT "+string(body.Update.Labels))
+					if tc.failPuts {
+						w.WriteHeader(http.StatusInternalServerError)
+						return
+					}
+					w.WriteHeader(http.StatusOK)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer srv.Close()
+
+			jc := jira.NewJiraClient(jira.JiraConfig{
+				BaseURL:       srv.URL,
+				Token:         "tok",
+				StatusMapping: map[forge.DispatchState]string{forge.InProgress: "In Progress"},
+				Labels:        tc.labels,
+				VerdictLabels: tc.verdicts,
+			})
+
+			err := jc.TransitionState("PROJ-1", forge.Dispatchable, forge.InProgress)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("TransitionState err = %v, wantErr %v", err, tc.wantErr)
+			}
+			// The REST client retries a 5xx (real backoff, ~600ms per failing
+			// case), so collapse repeats of a failing PUT. Only then: on the
+			// success path a doubled PUT is a regression to catch.
+			if tc.failPuts {
+				seq = slices.Compact(seq)
+			}
+			if !reflect.DeepEqual(seq, tc.wantSeq) {
+				t.Errorf("request sequence:\n got %q\nwant %q", seq, tc.wantSeq)
+			}
+		})
+	}
+}
+
 // With no status mapping for the target state, the label swap keeps the
 // lifecycle moving.
 func TestJiraClient_TransitionState_UnmappedFallsBackToLabel(t *testing.T) {
