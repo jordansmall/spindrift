@@ -70,8 +70,9 @@ scopes, and asks for agent auth. Then it does the following:
 - builds the agent image, which is slow the first time
 
 The wizard won't overwrite an existing `flake.nix` or `harness.env` unless you
-pass `--force`. If the remote is on `codeberg.org`, it selects the Forgejo
-backend.
+pass `--force`. It never replaces an existing `.gitignore` or `.envrc`: it
+appends only the missing spindrift entries to `.gitignore` and leaves `.envrc`
+as it is. If the remote is on `codeberg.org`, it selects the Forgejo backend.
 
 <details>
 <summary>Prefer to start from a commented template and edit it by hand?</summary>
