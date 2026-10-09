@@ -76,11 +76,11 @@ exit 0
 func TestMainRunReviewPassEnabledUsesReviewPassFormula(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
-	// The implement/fix decision switch in run.go has no "no verdict" fallback
-	// like the legacy loop's, so it stops only on hasOutcome. The outcome must
-	// land in $DRIVER_LOG_PATH as a real stream-json line, not just on stdout,
-	// or pass 1 falls through to a review pass and then a land pass that needs a
-	// real prompt.txt on disk.
+	// passmachine.implementFixTransition has no "no verdict" fallback like the
+	// legacy loop's, so before an APPROVE it stops only on Input.HasOutcome.
+	// The outcome must land in $DRIVER_LOG_PATH as a real stream-json line, not
+	// just on stdout, or pass 1 falls through to a review pass and then a land
+	// pass that needs a real prompt.txt on disk.
 	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc")+`' | tee -a "$DRIVER_LOG_PATH"
 exit 0
 `)
