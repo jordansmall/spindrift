@@ -330,6 +330,9 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		PatchPaths:        lc.config.butlerPatchPaths,
 		PatchMaxFiles:     lc.config.butlerPatchMaxFiles,
 		PatchMaxLines:     lc.config.butlerPatchMaxLines,
+		RecordsRoot:       lc.pwd,
+		TuningMinRecords:  lc.config.butlerTuningMinRecords,
+		TuningMinSample:   lc.config.butlerTuningMinSample,
 	}
 
 	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.patchGate())

@@ -931,3 +931,16 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		t.Errorf("labels = %v, want agent-butler-finding", got)
 	}
 }
+
+func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
+	cfg := loadSchemaConfig()
+	if cfg.butlerTuningMinRecords != 20 || cfg.butlerTuningMinSample != 15 {
+		t.Errorf("tuning defaults = %d/%d, want 20/15", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample)
+	}
+	t.Setenv("BUTLER_TUNING_MIN_RECORDS", "7")
+	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "3")
+	cfg = loadSchemaConfig()
+	if cfg.butlerTuningMinRecords != 7 || cfg.butlerTuningMinSample != 3 {
+		t.Errorf("tuning knobs = %d/%d, want 7/3", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample)
+	}
+}
