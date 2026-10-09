@@ -514,6 +514,17 @@ in
     nixSubPath = "butler.tuningMinSample";
     boxEnv = false;
   };
+  butlerTuningDigestBytes = {
+    env = "BUTLER_TUNING_DIGEST_BYTES";
+    group = "dispatch";
+    default = 49152;
+    doc = "byte cap on the tuning Chore's digest (ADR 0062): over it, evidence is trimmed first and outliers second, never the aggregate tables; host-only -- the Box never sees this value";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "butler.tuningDigestBytes";
+    boxEnv = false;
+  };
   butlerPatchClasses = {
     env = "BUTLER_PATCH_CLASSES";
     group = "dispatch";

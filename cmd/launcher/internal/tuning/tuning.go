@@ -34,6 +34,7 @@ package tuning
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -74,11 +75,20 @@ type row struct {
 	delta         func(float64) string
 }
 
+// Limits are the knobs a digest is rendered under.
+type Limits struct {
+	// MinSample marks a row thin when fewer window Records back it.
+	MinSample int
+	// MaxBytes caps the digest's size; zero or less means uncapped. Evidence
+	// is trimmed first and Outliers second, always from the tail; the
+	// aggregate tables are never trimmed, so a cap below them is exceeded.
+	MaxBytes int
+}
+
 // Render builds the digest for the settled Records of records after cursor,
 // against a baseline of the settled Records before them claimed within
-// BaselineWindow of now. Rows with fewer than minSample window samples are
-// marked thin.
-func Render(records []dispatchrecord.Record, cursor string, now time.Time, minSample int) Digest {
+// BaselineWindow of now.
+func Render(records []dispatchrecord.Record, cursor string, now time.Time, lim Limits) Digest {
 	window := chore.NewSettledRecords(records, cursor)
 	inWindow := make(map[string]bool, len(window))
 	for _, r := range window {
@@ -106,11 +116,11 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, minSa
 	var b strings.Builder
 	b.WriteString("# Tuning digest\n\n")
 	fmt.Fprintf(&b, "Window: after %s through %s — %d settled Records, %d passes, notional cost $%.2f (API-equivalent).\n",
-		start, orNone(d.Latest), len(window), wPasses, wUSD)
+		start, recordstats.NoneIfEmpty(d.Latest), len(window), wPasses, wUSD)
 	fmt.Fprintf(&b, "Baseline: %d settled Records claimed %s to %s, %d passes.\n",
 		len(baseline), from.UTC().Format("2006-01-02"), now.UTC().Format("2006-01-02"), bPasses)
 	fmt.Fprintf(&b, "Rows with n < %d are marked thin. Δ is window minus baseline; %s means the baseline has no data.\n",
-		minSample, absent)
+		lim.MinSample, absent)
 	if len(window) == 0 {
 		b.WriteString("\nNo new settled Records.\n")
 		d.Text = b.String()
@@ -118,34 +128,81 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, minSa
 	}
 
 	b.WriteString("\n## Summary\n\n")
-	writeTable(&b, groupRows("summary:", "", window, baseline), minSample)
+	writeTable(&b, groupRows("summary:", "", window, baseline), lim.MinSample)
 
 	b.WriteString("\n## Roles\n\n")
-	writeTable(&b, roleRows(wRoles, bRoles, window, baseline), minSample)
+	writeTable(&b, roleRows(wRoles, bRoles, window, baseline), lim.MinSample)
 
 	if splits := splitSections(window, baseline); len(splits) > 0 {
 		b.WriteString("\n## Splits\n")
 		for _, s := range splits {
 			fmt.Fprintf(&b, "\n### %s\n\n", s.name)
-			writeTable(&b, s.rows, minSample)
+			writeTable(&b, s.rows, lim.MinSample)
 		}
 	}
-	outliers(window).write(&b)
-	evidence(window).write(&b)
-	d.Text = b.String()
+	d.Text = trim(b.String(), outliers(window), evidence(window), lim.MaxBytes)
 	return d
 }
 
-func orNone(s string) string {
-	if s == "" {
-		return recordstats.None
+// trim appends the Outliers and Evidence sections to the aggregate text,
+// dropping items from the tail (Evidence, then Outliers) until the result plus
+// its trailer fits maxBytes. Sizes are sums of item lengths, so it never
+// re-renders. The aggregates are kept whole, so a cap below them is exceeded.
+// The trailer is written only when it fits beside what is kept.
+func trim(aggregates string, out, ev section, maxBytes int) string {
+	total := len(aggregates)
+	for _, s := range []section{out, ev} {
+		if len(s.items) > 0 {
+			total += len(s.head)
+		}
+		for _, it := range s.items {
+			total += len(it)
+		}
 	}
-	return s
+	nOut, nEv := len(out.items), len(ev.items)
+	keptOut, keptEv := nOut, nEv
+	trailer := func() string {
+		return fmt.Sprintf("\n_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): %d evidence items and %d outliers omitted._\n",
+			maxBytes, nEv-keptEv, nOut-keptOut)
+	}
+	drop := func(s section, kept *int) {
+		*kept--
+		total -= len(s.items[*kept])
+		if *kept == 0 {
+			total -= len(s.head)
+		}
+	}
+	trimmed := false
+	for maxBytes > 0 && (keptOut > 0 || keptEv > 0) {
+		need := total
+		if trimmed {
+			need += len(trailer())
+		}
+		if need <= maxBytes {
+			break
+		}
+		trimmed = true
+		if keptEv > 0 {
+			drop(ev, &keptEv)
+		} else {
+			drop(out, &keptOut)
+		}
+	}
+	out.items, ev.items = out.items[:keptOut], ev.items[:keptEv]
+	var b strings.Builder
+	b.WriteString(aggregates)
+	out.write(&b)
+	ev.write(&b)
+	if trimmed && total+len(trailer()) <= maxBytes {
+		b.WriteString(trailer())
+	}
+	return b.String()
 }
 
 // groupRows builds the per-group figures for the Records of one group (the
 // whole window, or one value of a split) beside the same group's baseline
-// Records. tag distinguishes the group in each Metric cell.
+// Records. prefix is the anchor stem (e.g. "revision:<value>:"), part of the
+// stable cite contract; tag distinguishes the group in each Metric cell.
 func groupRows(prefix, tag string, window, baseline []dispatchrecord.Record) []row {
 	_, wPasses, wUSD := recordstats.AggregateRoles(window)
 	_, bPasses, bUSD := recordstats.AggregateRoles(baseline)
@@ -269,15 +326,16 @@ func splitSections(window, baseline []dispatchrecord.Record) []splitSection {
 	byRecord := func(key func(dispatchrecord.Record) string) func([]dispatchrecord.Record) []recordstats.Group {
 		return func(rs []dispatchrecord.Record) []recordstats.Group { return recordstats.GroupRecords(rs, key) }
 	}
+	byPass := func(key func(dispatchrecord.Pass) string) func([]dispatchrecord.Record) []recordstats.Group {
+		return func(rs []dispatchrecord.Record) []recordstats.Group { return recordstats.GroupPasses(rs, key) }
+	}
 	type dimension struct {
 		name  string
 		group func([]dispatchrecord.Record) []recordstats.Group
 	}
 	dims := []dimension{
 		{"revision", byRecord(recordstats.RevisionKey)},
-		{"model", func(rs []dispatchrecord.Record) []recordstats.Group {
-			return recordstats.GroupPasses(rs, recordstats.ModelKey)
-		}},
+		{"model", byPass(recordstats.ModelKey)},
 	}
 	for _, role := range recordstats.PromptRoles() {
 		dims = append(dims, dimension{"prompt:" + role, byRecord(recordstats.PromptKey(role))})
@@ -298,12 +356,18 @@ func splitSections(window, baseline []dispatchrecord.Record) []splitSection {
 		if len(values) < 2 {
 			continue
 		}
+		// Suffixes are assigned in sorted order, not display order, so which of
+		// two colliding values gets _2 does not change as the window moves.
+		names := map[string]string{}
 		taken := map[string]bool{}
+		for _, v := range slices.Sorted(slices.Values(values)) {
+			names[v] = unique(safe(v), taken)
+		}
 		var rows []row
 		for _, v := range values {
 			wr, _ := wg.find(v)
 			br, _ := bg.find(v)
-			sv := unique(safe(v), taken)
+			sv := names[v]
 			rows = append(rows, groupRows(dim.name+":"+sv+":", " ("+sv+")", wr, br)...)
 		}
 		out = append(out, splitSection{dim.name, rows})

@@ -20,7 +20,9 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/promptfence"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 var tuningNow = time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -511,6 +513,42 @@ func TestSweep_Tuning_InputCarriesOutliersAndFencedEvidence(t *testing.T) {
 	}
 }
 
+// Every failed, blocked, or ambiguous Record is listed even when the top-K
+// cost list is already full of dearer successes.
+func TestSweep_Tuning_InputListsEveryFailureWhenTopKIsFull(t *testing.T) {
+	root := t.TempDir()
+	claim := tuningNow.Add(-48 * time.Hour)
+	ts := claim.Add(time.Minute).Format(time.RFC3339)
+	pass := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
+
+	var failures []string
+	for i, f := range []struct{ state, reason string }{
+		{"failed", settle.ReasonBlocked}, {"failed", "ci_red"}, {"ambiguous", ""},
+	} {
+		failures = append(failures, writeRecordLog(t, root, fmt.Sprint(1+i), claim.Add(time.Duration(i)*time.Hour),
+			f.state, f.reason, pass, resultLine(t, ts, 1, "x")))
+	}
+	for i := range tuning.OutlierTopK + 2 {
+		writeRecordLog(t, root, fmt.Sprint(10+i), claim.Add(time.Duration(10+i)*time.Hour),
+			"complete", "merged", pass, resultLine(t, ts, 5, "done"))
+	}
+	ingestRecords(t, root)
+
+	in := sweepTuningInput(t, root, 1<<20)
+	if strings.Contains(in, "BUTLER_TUNING_DIGEST_BYTES") {
+		t.Fatalf("digest was trimmed, so the test proves nothing:\n%s", in)
+	}
+	outliers := in[strings.Index(in, "## Outliers"):]
+	for _, id := range failures {
+		if !strings.Contains(outliers, "| record:"+safeID(id)+" |") {
+			t.Errorf("Outliers lacks failure record:%s:\n%s", safeID(id), outliers)
+		}
+	}
+	if n := strings.Count(outliers, "| cost |\n"); n != tuning.OutlierTopK {
+		t.Errorf("%d cost outliers, want %d:\n%s", n, tuning.OutlierTopK, outliers)
+	}
+}
+
 func TestSweep_Tuning_NoEvidenceSectionWithoutBlockedVerdicts(t *testing.T) {
 	root := t.TempDir()
 	seedRecords(t, root, 1, 3, tuningNow.Add(-24*time.Hour))
@@ -525,3 +563,102 @@ func TestSweep_Tuning_NoEvidenceSectionWithoutBlockedVerdicts(t *testing.T) {
 
 // safeID is how the digest writes a Record ID into an anchor.
 func safeID(id string) string { return strings.NewReplacer(":", "_", "@", "_").Replace(id) }
+
+// seedBlockedReviews settles n work Records, each with a review that blocked
+// with about textLen bytes of verdict text, so the Evidence section outgrows a
+// small digest cap.
+func seedBlockedReviews(t *testing.T, root string, n, textLen int) {
+	t.Helper()
+	claim := tuningNow.Add(-24 * time.Hour)
+	ts := claim.Add(time.Minute).Format(time.RFC3339)
+	op := func(o claude.SpindriftOp) string { return claude.EncodeSpindriftOp(o) }
+	text := strings.Repeat("v", textLen)
+	for i := range n {
+		writeRecordLog(t, root, fmt.Sprint(i+1), claim.Add(time.Duration(i)*time.Hour), "complete", "merged",
+			op(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}), resultLine(t, ts, 1, "done"),
+			op(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+			op(claude.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}), resultLine(t, ts, 1, text))
+	}
+	ingestRecords(t, root)
+}
+
+func sweepTuningInput(t *testing.T, root string, digestBytes int) string {
+	t.Helper()
+	tr := newTuningRun(t)
+	policy := tuningPolicy(root, 1)
+	policy.TuningDigestBytes = digestBytes
+	if out, err := tr.sweepTuning(t, policy, tuningNow); err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	if len(tr.input) != 1 {
+		t.Fatalf("Box dispatched %d times, want 1", len(tr.input))
+	}
+	return tr.input[0]
+}
+
+// An over-cap store reaches the Box trimmed: evidence first, outliers second,
+// the aggregate tables whole.
+func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
+	root := t.TempDir()
+	const records = 8
+	seedBlockedReviews(t, root, records, 2000)
+	full := sweepTuningInput(t, root, 0)
+	if n := strings.Count(full, "**evidence:"); n != records {
+		t.Fatalf("uncapped input has %d evidence items, want %d", n, records)
+	}
+	tables := full[:strings.Index(full, "\n## Outliers")]
+
+	t.Run("evidence trimmed", func(t *testing.T) {
+		const capBytes = 6000
+		in := sweepTuningInput(t, root, capBytes)
+		if len(in) > capBytes {
+			t.Fatalf("len = %d, want <= %d", len(in), capBytes)
+		}
+		if n := strings.Count(in, "**evidence:"); n >= records {
+			t.Errorf("%d evidence items survived, want fewer than %d", n, records)
+		}
+		if !strings.HasPrefix(in, tables) || !strings.Contains(in, "## Outliers") {
+			t.Errorf("tables or outliers lost:\n%s", in)
+		}
+		if !strings.Contains(in, fmt.Sprintf("BUTLER_TUNING_DIGEST_BYTES (%d bytes)", capBytes)) {
+			t.Errorf("input does not say it was trimmed:\n%s", in)
+		}
+	})
+
+	t.Run("outliers trimmed too", func(t *testing.T) {
+		in := sweepTuningInput(t, root, len(tables)+400)
+		if len(in) > len(tables)+400 {
+			t.Fatalf("len = %d, want <= %d", len(in), len(tables)+400)
+		}
+		if strings.Contains(in, "**evidence:") || strings.Count(in, "| record:") >= strings.Count(full, "| record:") {
+			t.Errorf("evidence or outliers not trimmed:\n%s", in)
+		}
+		if !strings.HasPrefix(in, tables) {
+			t.Errorf("tables changed:\n%s", in)
+		}
+	})
+
+	t.Run("cap between the tables and the trailer", func(t *testing.T) {
+		capBytes := len(tables) + 20
+		in := sweepTuningInput(t, root, capBytes)
+		if len(in) > capBytes {
+			t.Fatalf("len = %d, want <= %d", len(in), capBytes)
+		}
+		if !strings.HasPrefix(in, tables) || strings.Contains(in, "## Outliers") || strings.Contains(in, "## Evidence") {
+			t.Errorf("want the tables alone:\n%s", in)
+		}
+	})
+
+	t.Run("cap below the tables", func(t *testing.T) {
+		in := sweepTuningInput(t, root, 1)
+		if !strings.HasPrefix(in, tables) || strings.Contains(in, "## Outliers") || strings.Contains(in, "## Evidence") {
+			t.Errorf("want the tables alone:\n%s", in)
+		}
+	})
+
+	t.Run("roomy cap leaves the digest alone", func(t *testing.T) {
+		if in := sweepTuningInput(t, root, len(full)); in != full {
+			t.Errorf("a cap the digest fits changed it")
+		}
+	})
+}

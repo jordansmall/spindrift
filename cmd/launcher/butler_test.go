@@ -934,13 +934,14 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 
 func TestLoadSchemaConfig_ButlerTuningKnobs(t *testing.T) {
 	cfg := loadSchemaConfig()
-	if cfg.butlerTuningMinRecords != 20 || cfg.butlerTuningMinSample != 15 {
-		t.Errorf("tuning defaults = %d/%d, want 20/15", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample)
+	if cfg.butlerTuningMinRecords != 20 || cfg.butlerTuningMinSample != 15 || cfg.butlerTuningDigestBytes != 49152 {
+		t.Errorf("tuning defaults = %d/%d/%d, want 20/15/49152", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample, cfg.butlerTuningDigestBytes)
 	}
 	t.Setenv("BUTLER_TUNING_MIN_RECORDS", "7")
 	t.Setenv("BUTLER_TUNING_MIN_SAMPLE", "3")
+	t.Setenv("BUTLER_TUNING_DIGEST_BYTES", "1000")
 	cfg = loadSchemaConfig()
-	if cfg.butlerTuningMinRecords != 7 || cfg.butlerTuningMinSample != 3 {
-		t.Errorf("tuning knobs = %d/%d, want 7/3", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample)
+	if cfg.butlerTuningMinRecords != 7 || cfg.butlerTuningMinSample != 3 || cfg.butlerTuningDigestBytes != 1000 {
+		t.Errorf("tuning knobs = %d/%d/%d, want 7/3/1000", cfg.butlerTuningMinRecords, cfg.butlerTuningMinSample, cfg.butlerTuningDigestBytes)
 	}
 }
