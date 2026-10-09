@@ -2,6 +2,7 @@ package chore
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -397,4 +398,31 @@ func withoutClassList(cs []Chore) []Chore {
 		out[i] = c
 	}
 	return out
+}
+
+func TestFindingLabels(t *testing.T) {
+	for _, tc := range []struct {
+		chores string
+		want   []string
+	}{
+		{"", nil},
+		{"bugs", nil},
+		{"bugs tuning", []string{"agent-tuning-finding"}},
+		{" tuning\ttuning nonesuch ", []string{"agent-tuning-finding"}},
+	} {
+		if got := FindingLabels(tc.chores); !slices.Equal(got, tc.want) {
+			t.Errorf("FindingLabels(%q) = %v, want %v", tc.chores, got, tc.want)
+		}
+	}
+}
+
+func TestFindingLabel(t *testing.T) {
+	if got := FindingLabel("tuning"); got != "agent-tuning-finding" {
+		t.Errorf("FindingLabel(tuning) = %q, want agent-tuning-finding", got)
+	}
+	for _, name := range []string{"bugs", "nonesuch", ""} {
+		if got := FindingLabel(name); got != "" {
+			t.Errorf("FindingLabel(%q) = %q, want empty", name, got)
+		}
+	}
 }

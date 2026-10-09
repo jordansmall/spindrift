@@ -88,13 +88,15 @@ func AmbiguousLabelNames() []string {
 // A test pins it to a ButlerLabelNames entry.
 const TuningFindingLabel = "agent-tuning-finding"
 
-// ButlerLabelNames returns the three fixed butler-tier label names, checked
-// advisory the same way agent-research-finding is: the butler kind carries no
-// lifecycle labels of its own (claims live in the Ledger), so these are its
-// only doctor-visible labels. agent-butler-finding (ADR 0056) marks every
-// Chore finding the host files; agent-butler-patch (ADR 0057) joins it on a
-// finding the host lands as a patch PR; agent-tuning-finding (ADR 0062)
-// marks a tuning Chore finding, whose closing PR merges by hand.
+// ButlerLabelNames returns the three fixed butler-tier label names, advisory
+// unless --butler promotes them (agent-butler-patch only while the patch rung
+// is on, agent-tuning-finding only while the tuning Chore is enabled): the
+// butler kind carries no lifecycle labels of its own (claims live in the
+// Ledger), so these are its only doctor-visible labels. agent-butler-finding
+// (ADR 0056) marks every Chore finding the host files; agent-butler-patch
+// (ADR 0057) joins it on a finding the host lands as a patch PR;
+// agent-tuning-finding (ADR 0062) marks a tuning Chore finding, whose closing
+// PR merges by hand.
 func ButlerLabelNames() []string {
 	return []string{"agent-butler-finding", "agent-butler-patch", "agent-tuning-finding"}
 }

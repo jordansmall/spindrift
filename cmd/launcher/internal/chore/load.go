@@ -58,7 +58,7 @@ type Knobs struct {
 // classes must be on that Chore's resolved BUTLER_CHORE_CLASSES allow-list
 // (skipped when BUTLER_CHORE_CLASSES itself failed to parse).
 func Load(k Knobs) ([]Chore, error) {
-	names := strings.Fields(k.Chores)
+	names := choreNames(k.Chores)
 	if len(names) == 0 {
 		return nil, nil
 	}
@@ -159,12 +159,31 @@ func Load(k Knobs) ([]Chore, error) {
 			PromotionClasses: promotionClassesMap[name],
 			PatchClasses:     patchClassesMap[name],
 			Records:          slices.Contains(builtinRecordsScoped, name),
-			FindingLabel:     builtinFindingLabels[name],
+			FindingLabel:     FindingLabel(name),
 			ClassList:        classList(name, promotionClassesMap[name]),
 		}
 	}
 	return result, nil
 }
+
+// FindingLabel is the provenance label a built-in Chore's findings wear, or ""
+// for a Chore with none or an unknown name. Unlike Load it cannot fail, so a
+// caller that must not lose the label to an unrelated knob fault can use it.
+func FindingLabel(name string) string { return builtinFindingLabels[name] }
+
+// FindingLabels is the deduplicated FindingLabel of each BUTLER_CHORES entry,
+// tokenised the way Load tokenises it, so a caller never re-parses the list.
+func FindingLabels(chores string) []string {
+	var labels []string
+	for _, name := range choreNames(chores) {
+		if l := FindingLabel(name); l != "" && !slices.Contains(labels, l) {
+			labels = append(labels, l)
+		}
+	}
+	return labels
+}
+
+func choreNames(chores string) []string { return strings.Fields(chores) }
 
 // everyConfig is BUTLER_EVERY parsed: a bare default interval plus
 // per-Chore overrides. With no bare token, the default is DefaultEvery; a

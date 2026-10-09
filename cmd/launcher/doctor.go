@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -40,7 +41,8 @@ type doctorOptions struct {
 // requiredLabels names the labels, beyond the four work-tier ones, that the
 // selected kinds need the repo to carry, so a daemon preflight fails before a
 // kind that cannot file its labels starts. Research and butler labels stay
-// advisory without their flag.
+// advisory without their flag; a Chore's own finding label joins the butler
+// tier only while that Chore is in BUTLER_CHORES.
 func requiredLabels(opts doctorOptions, rc readContext) []string {
 	c := rc.config
 	// local and jira have no label registry to list or create from: a Required
@@ -60,6 +62,9 @@ func requiredLabels(opts doctorOptions, rc readContext) []string {
 		if c.butlerMaxPatchesPerDay > 0 && butlerPatchForge(rc.codeForge, rc.capabilities) != nil {
 			labels = append(labels, dispatchkind.Butler.PatchLabel)
 		}
+		// Read from the catalog, not chore.Load: Load errors on unrelated knob
+		// faults and would silently drop the requirement.
+		labels = append(labels, chore.FindingLabels(c.butlerChores)...)
 	}
 	// A read-only work Box relays review findings for the host to file, so the
 	// label is part of what the work kind needs whichever flags are set.
