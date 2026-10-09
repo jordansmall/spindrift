@@ -366,8 +366,8 @@ func TestDispatchWave_GatesEachIssueAfterBoxCompletes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(%q): %v", "1", err)
 	}
-	if !containsLabel(iss.Labels, c.CompleteLabel) {
-		t.Errorf("issue 1 must have %q after dispatchWave; got labels=%v", c.CompleteLabel, iss.Labels)
+	if !containsLabel(iss.Labels, testCompleteLabel) {
+		t.Errorf("issue 1 must have %q after dispatchWave; got labels=%v", testCompleteLabel, iss.Labels)
 	}
 }
 
@@ -408,8 +408,8 @@ func TestDispatchWave_GitForge_ImmediateLandsWithoutVerifyingAPR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue(%q): %v", "1", err)
 	}
-	if !containsLabel(iss.Labels, c.CompleteLabel) {
-		t.Errorf("issue 1 must have %q after dispatchWave; got labels=%v", c.CompleteLabel, iss.Labels)
+	if !containsLabel(iss.Labels, testCompleteLabel) {
+		t.Errorf("issue 1 must have %q after dispatchWave; got labels=%v", testCompleteLabel, iss.Labels)
 	}
 	if containsLabel(iss.Labels, c.FailedLabel) {
 		t.Errorf("issue 1 must NOT have %q; got labels=%v", c.FailedLabel, iss.Labels)
@@ -486,7 +486,7 @@ func TestDispatchWave_MalformedOutcomeOnOneIssueDoesNotMaskAnothersVerification(
 		case "2":
 			// Claiming strips pre-set labels, so the merge's complete label lands
 			// while the box runs.
-			if err := fc.AddLabels("2", []string{c.CompleteLabel}); err != nil {
+			if err := fc.AddLabels("2", []string{testCompleteLabel}); err != nil {
 				return err
 			}
 			fmt.Fprintf(box.Output, "SPINDRIFT_OUTCOME issue=2 landing=%s status=merged note=ok nonce=%s\n", prURL, box.Env["RUN_NONCE"])

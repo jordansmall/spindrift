@@ -3768,8 +3768,8 @@ func TestRunContinuous_AbortWhileSettleInFlight_StopsPromptlyAndReleasesIssue(t 
 	}
 	assertReclaimedToDispatchable(t, fc, "1")
 	iss, _ := fc.Issue("1")
-	if containsLabel(iss.Labels, c.CompleteLabel) {
-		t.Fatalf("labels: got %v, want no %s label (settle was abandoned, not completed)", iss.Labels, c.CompleteLabel)
+	if containsLabel(iss.Labels, testCompleteLabel) {
+		t.Fatalf("labels: got %v, want no %s label (settle was abandoned, not completed)", iss.Labels, testCompleteLabel)
 	}
 	if containsLabel(iss.Labels, c.FailedLabel) {
 		t.Fatalf("labels: got %v, want no %s label (abort never fails an issue)", iss.Labels, c.FailedLabel)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,7 +23,7 @@ import (
 )
 
 // TestCmdRecover_SignalledStop_NoFailedLabel pins the first checkpoint: a
-// stop closed before recoverByNumber ever calls it.Issue must exit
+// stop closed before recoverByNumber acts on it.Issue must exit
 // exitSignalledStop, write no recover-reason output, leave the issue off the
 // failed label, and still run cleanup -- a requested stop is not a recover
 // failure (issue #3522).
@@ -184,6 +185,58 @@ func TestRecoverByNumber_MidFlightAbort_ReclaimsToDispatchable(t *testing.T) {
 		if containsLabel(iss.Labels, terminal) {
 			t.Errorf("issue #42 labels = %v, want no terminal label %q", iss.Labels, terminal)
 		}
+	}
+}
+
+// TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped pins that a
+// hand-run recover, which never claims the issue, keeps the agent-failed it
+// was parked with; the Gate must not read that as this run's own settle and
+// spare the in-flight adopt (issue #4888).
+func TestRecoverByNumber_MidFlightAbort_ParkedFailedLabelStillReaped(t *testing.T) {
+	orig := installStopSignal
+	stopCh := make(chan struct{})
+	abortCh := make(chan struct{})
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		return stopCh, abortCh, func() {}
+	}
+	t.Cleanup(func() { installStopSignal = orig })
+
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.failedLabel}})
+	fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+
+	dir := tempLogDir(t)
+	killSignal := make(chan string, 1)
+	rf := &killHook{Fake: runner.NewFake(), killed: killSignal}
+	s := &abortDuringSettle{Fake: settle.NewFake(), abortCh: abortCh, killSignal: killSignal}
+
+	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
+
+	if !errors.Is(err, waves.ErrSignalledStop) {
+		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
+	}
+	if len(s.SettleAdoptedCalls) != 1 {
+		t.Fatalf("SettleAdoptedCalls = %d, want 1", len(s.SettleAdoptedCalls))
+	}
+	var reclaimed bool
+	for _, call := range fc.TransitionStateCalls {
+		if call.Num == "42" && call.From == forge.InProgress && call.To == forge.Dispatchable {
+			reclaimed = true
+		}
+	}
+	if !reclaimed {
+		t.Errorf("TransitionStateCalls = %+v, want #42 InProgress->Dispatchable (parked failed label is not a settle)", fc.TransitionStateCalls)
+	}
+	var commented bool
+	for _, call := range fc.CommentCalls {
+		if call.Num == "42" && strings.Contains(call.Body, terminate.CommentSuffix) {
+			commented = true
+		}
+	}
+	if !commented {
+		t.Errorf("CommentCalls = %+v, want a reclaim comment on #42", fc.CommentCalls)
 	}
 }
 
@@ -475,5 +528,81 @@ func TestRecoverByNumber_IssueClaimedElsewhere_Skips(t *testing.T) {
 	}
 	if !containsLabel(iss.Labels, c.inProgressLabel) {
 		t.Errorf("issue #42 labels = %v, want still in-progress (unsettled)", iss.Labels)
+	}
+}
+
+// issueReadCounter counts tracker Issue reads. The Gate's abort pass reads the
+// issue to see whether its settle already wrote a terminal label, so a new read
+// is the proof the watcher examined it.
+type issueReadCounter struct {
+	forge.IssueTracker
+	reads atomic.Int64
+}
+
+func (r *issueReadCounter) Issue(num string) (forge.Issue, error) {
+	r.reads.Add(1)
+	return r.IssueTracker.Issue(num)
+}
+
+// failThenAbort stands in for a settle that writes InProgress->Failed itself
+// (settle/ready.go: red CI after the fix passes), then aborts before
+// gate.Leave and waits until the watcher's abort pass has read the issue.
+func failThenAbort(it *issueReadCounter, num string, abort func()) {
+	before := it.reads.Load()
+	if err := it.TransitionState(num, forge.InProgress, forge.Failed); err != nil {
+		panic(err)
+	}
+	abort()
+	for deadline := time.Now().Add(5 * time.Second); it.reads.Load() == before; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			panic("timed out waiting for the watcher to examine " + num)
+		}
+	}
+}
+
+type failThenAbortAdopted struct {
+	*settle.Fake
+	it    *issueReadCounter
+	abort func()
+}
+
+func (a *failThenAbortAdopted) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+	failThenAbort(a.it, num, a.abort)
+	a.Fake.SettleAdopted(d, num, gen, prURL)
+}
+
+// A hand-run recover the workflow claimed (issue wears only in-progress) whose
+// own settle wrote agent-failed must not have that terminal label reclaimed
+// when an abort lands before gate.Leave (issue #4888).
+func TestRecoverByNumber_MidFlightAbort_OwnFailedSettleSpared(t *testing.T) {
+	_, abort := withControlledSignals(t)
+
+	c := reconcileConfig()
+	fc := forge.NewFake(dispatchLabels(c))
+	fc.BranchPrefix = c.branchPrefix
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
+	fc.SetPR(fc.AgentBranch("42"), forge.PR{URL: testReconcilePR})
+
+	dir := tempLogDir(t)
+	rf := newKillHook(runner.NewFake())
+	it := &issueReadCounter{IssueTracker: fc}
+	s := &failThenAbortAdopted{Fake: settle.NewFake(), it: it, abort: abort}
+
+	err := recoverByNumber(c, it, fc, capsFor(fc, fc), dir, testFactory(t, dir, rf), s, "42", io.Discard, io.Discard)
+
+	if !errors.Is(err, waves.ErrSignalledStop) {
+		t.Fatalf("recoverByNumber: got %v, want ErrSignalledStop", err)
+	}
+	iss, ierr := fc.Issue("42")
+	if ierr != nil {
+		t.Fatalf("fc.Issue(42): %v", ierr)
+	}
+	if !containsLabel(iss.Labels, c.failedLabel) || containsLabel(iss.Labels, c.label) {
+		t.Errorf("issue #42 labels = %v, want %q kept and no dispatchable %q", iss.Labels, c.failedLabel, c.label)
+	}
+	select {
+	case name := <-rf.killed:
+		t.Errorf("reaper killed %q, want the settled issue spared", name)
+	default:
 	}
 }

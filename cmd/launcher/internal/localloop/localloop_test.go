@@ -1414,7 +1414,7 @@ func TestWire_ComposedLoop_SameParentBlockerChainLandsInOneRun(t *testing.T) {
 	cf02 := lw.CodeForgeForIssue(dependentNum)
 	wcfg := waves.Config{
 		FailedLabel:   testLabels.Failed,
-		CompleteLabel: testLabels.Complete,
+		SettledLabels: testLabels.SettledLabels(),
 		SeedScopeOf:   func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
 	var ready bool
@@ -1624,7 +1624,7 @@ func TestWire_ComposedLoop_CrossParentBlockerHoldsLoudly(t *testing.T) {
 	cf12 := lw.CodeForgeForIssue(dependentNum)
 	wcfg := waves.Config{
 		FailedLabel:   testLabels.Failed,
-		CompleteLabel: testLabels.Complete,
+		SettledLabels: testLabels.SettledLabels(),
 		SeedScopeOf:   func(num string) forge.SeedScope { return localloop.SeedScopeOf(it, num) },
 	}
 
