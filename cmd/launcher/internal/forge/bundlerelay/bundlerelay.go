@@ -17,6 +17,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
@@ -187,7 +188,7 @@ func cloneScratch(backend, op string, clone func(dir string) error) (dir string,
 	// os.RemoveAll (or a caller's t.TempDir cleanup) runs, so disable auto
 	// maintenance and gc.
 	gitIn = func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir, "-c", "gc.auto=0", "-c", "maintenance.auto=false"}, args...)...)
+		return exec.Command("git", gitexec.GuardedArgs(dir, args...)...)
 	}
 	return dir, gitIn, cleanup, nil
 }

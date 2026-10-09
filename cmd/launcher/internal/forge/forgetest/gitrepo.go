@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // GitRepoFixture backs CodeForgeHarness implementations with a real bare git
@@ -55,7 +57,7 @@ func NewGitRepoFixture(t *testing.T, base string) *GitRepoFixture {
 // not cover, does.
 func (g *GitRepoFixture) clone(work string) {
 	g.t.Helper()
-	g.run("", "clone", "--config", "gc.auto=0", "--config", "maintenance.auto=false", g.Bare, work)
+	g.run("", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), g.Bare, work)...)
 }
 
 func (g *GitRepoFixture) run(dir string, args ...string) {
