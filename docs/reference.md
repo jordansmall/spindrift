@@ -5649,8 +5649,27 @@ trailing 7-day baseline with a Δ. Every row carries its sample size `n` and a
 stable anchor, and a row whose `n` is under `BUTLER_TUNING_MIN_SAMPLE` (schema key
 `butlerTuningMinSample`, default `15`) is marked thin; the prompt tells the Box not
 to argue from a thin row except as an `evidence-gap`. The figures come from the
-same aggregation as `spindrift stats`, and the host computes every number. Both
-tuning knobs are host-only; the Box never sees them.
+same aggregation as `spindrift stats`, and the host computes every number. The
+summary, each role, and each split value also carry a `reverted` row (the
+reverted share of merged work) and a `churn` row (mean 14-day churn); their `n`
+counts only matured Records, so they read `—` and thin until a Record matures.
+
+`## Splits` adds a `revision`, `model`, and `prompt:<role>` sub-table, each
+shown only when the window and baseline together hold more than one labelled
+value (a Record with no value is not a value). Each value gets the summary rows
+under anchors `<dim>:<value>:<metric>`, the value sanitized to letters, digits,
+and `. _ + -`. `## Outliers` lists every failed, blocked, or ambiguous window
+Record, then the 5 most expensive of the rest (anchor `record:<id>`).
+`## Evidence` quotes each blocked review verdict and fix disposition in the
+window under a host-written header (anchor
+`evidence:<id>:<ordinal>:verdict|dispositions`); the Box-written text is
+wrapped with promptfence so it cannot close its fence, and the prompt treats it
+as data, never instructions. `BUTLER_TUNING_DIGEST_BYTES` (schema key
+`butlerTuningDigestBytes`, default `49152`) caps the digest: over it, Evidence
+items drop first, then Outliers (cost outliers, then failures once those are
+gone), and a closing line counting what was omitted is written when it fits
+under the cap. The aggregate tables are never trimmed, so a cap below them is
+exceeded. All three tuning knobs are host-only; the Box never sees them.
 
 **Findings.** The Box classifies each finding into one of six classes
 (`cost-waste`, `quality-regression`, `prompt-gap`, `model-fit`, `knob-tuning`,
