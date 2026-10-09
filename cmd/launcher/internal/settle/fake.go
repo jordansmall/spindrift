@@ -4,6 +4,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
 // SettleCall records one Settle invocation.
@@ -17,6 +18,12 @@ type SettleCall struct {
 type SettleAdoptedCall struct {
 	Num, PRURL string
 	Gen        uint64
+}
+
+// SettlePatchCall records one SettlePatch invocation.
+type SettlePatchCall struct {
+	Owner      dispatchkey.Key
+	Num, PRURL string
 }
 
 // FailCall records one Fail invocation.
@@ -48,6 +55,7 @@ type Fake struct {
 
 	SettleCalls               []SettleCall
 	SettleAdoptedCalls        []SettleAdoptedCall
+	SettlePatchCalls          []SettlePatchCall
 	FailCalls                 []FailCall
 	SettleRelayedBranchCalls  []SettleRelayedBranchCall
 	SettleRelayedBranchReturn bool
@@ -76,6 +84,13 @@ func (f *Fake) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prUR
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.SettleAdoptedCalls = append(f.SettleAdoptedCalls, SettleAdoptedCall{Num: num, PRURL: prURL, Gen: gen})
+}
+
+// SettlePatch records the call.
+func (f *Fake) SettlePatch(owner dispatchkey.Key, num, prURL string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.SettlePatchCalls = append(f.SettlePatchCalls, SettlePatchCall{Owner: owner, Num: num, PRURL: prURL})
 }
 
 // Fail records the call.
