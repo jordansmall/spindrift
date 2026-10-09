@@ -162,3 +162,55 @@ func TestDispatchLabels_TransitionRemoveLabels_CompleteStripsStaleFailed(t *test
 		t.Errorf("TransitionRemoveLabels = %v, want %v", got, want)
 	}
 }
+
+func TestDispatchLabels_SettledLabels(t *testing.T) {
+	cases := []struct {
+		name string
+		d    DispatchLabels
+		want []string
+	}{
+		{
+			name: "default-like family",
+			d: DispatchLabels{
+				Dispatchable: "ready-for-agent",
+				InProgress:   "agent-in-progress",
+				Complete:     "agent-complete",
+				Failed:       "agent-failed",
+				Ambiguous:    "agent-ambiguous-spec",
+			},
+			want: []string{"agent-complete", "agent-failed", "agent-ambiguous-spec"},
+		},
+		{
+			name: "recoverable is excluded",
+			d: DispatchLabels{
+				Complete:    "agent-complete",
+				Failed:      "agent-failed",
+				Ambiguous:   "agent-ambiguous-spec",
+				Recoverable: "agent-recoverable",
+			},
+			want: []string{"agent-complete", "agent-failed", "agent-ambiguous-spec"},
+		},
+		{
+			name: "research-like family with no complete label",
+			d: DispatchLabels{
+				Failed:    "agent-research-failed",
+				Ambiguous: "agent-ambiguous-spec",
+			},
+			want: []string{"agent-research-failed", "agent-ambiguous-spec"},
+		},
+		{
+			name: "duplicates collapse",
+			d:    DispatchLabels{Complete: "x", Failed: "x", Ambiguous: "y"},
+			want: []string{"x", "y"},
+		},
+		{name: "zero value", d: DispatchLabels{}, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := tc.d.SettledLabels()
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("SettledLabels = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
