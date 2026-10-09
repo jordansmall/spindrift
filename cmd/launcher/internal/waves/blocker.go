@@ -80,9 +80,9 @@ func NewReadiness(it forge.IssueTracker, issues []Issue) (Readiness, error) {
 
 // Status reports num's blocker readiness against r.Edges without transitioning
 // tracker state: the Console (#650) and the engine hold a pick rather than
-// cascade the dependent to Failed (#1984). failed scans every r.Edges[num]
-// entry, since a closed blocker counts as satisfied yet can still carry
-// cfg.FailedLabel; failed drives Reason, unready drives BlockedBy (#755).
+// cascade the dependent to Failed (#1984). A satisfied blocker never holds,
+// whatever its labels (#4911), so failed lists only unready blockers wearing
+// cfg.FailedLabel; it drives Reason, unready drives BlockedBy (#755).
 func (r Readiness) Status(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string) (ready bool, failed, unready []string) {
 	return blockerStatus(cfg, it, cf, caps, num, r.Edges)
 }
@@ -232,9 +232,7 @@ func unreadyBlockers(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capab
 	return out
 }
 
-// blockerStatus is Readiness.Status's logic against an arbitrary edges map, so
-// the engine's internal callers (drainMaxJobs, nextReady) can reuse it against
-// a Plan's edges without a Readiness value.
+// blockerStatus is Readiness.Status's logic against an arbitrary edges map.
 func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, num string, edges map[string][]string) (ready bool, failed, unready []string) {
 	var scope forge.SeedScope
 	if cfg.SeedScopeOf != nil {
@@ -242,9 +240,10 @@ func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps f
 	}
 	for _, dep := range edges[num] {
 		depReady, fi := blockerReady(it, cf, caps, dep, scope)
-		if !depReady {
-			unready = append(unready, dep)
+		if depReady {
+			continue
 		}
+		unready = append(unready, dep)
 		if fi == nil {
 			issue, err := it.Issue(dep)
 			if err != nil {
@@ -257,5 +256,5 @@ func blockerStatus(cfg Config, it forge.IssueTracker, cf forge.CodeForge, caps f
 			failed = append(failed, dep)
 		}
 	}
-	return len(unready) == 0 && len(failed) == 0, failed, unready
+	return len(unready) == 0, failed, unready
 }
