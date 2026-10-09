@@ -11,38 +11,29 @@ import (
 // must never be escalated again in a later round. Once the Filer runs, its
 // intents are only filed host-side after the run ends, so a later round's
 // `gh issue list` dedup search can never see an earlier round's own
+// in-flight intents — re-escalating files the same finding twice under
 // different keys. The guard sentence must live in item 3 (Escalate) of the
 // review-loop fragment.
-// item-list parity the non-blocking-triage test already enforces).
 func TestNonBlockingTriageItem3NeverReescalates(t *testing.T) {
 	repoRoot := filepath.Join("..", "..", "..")
-	orchestrator := readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator.md")
-	orchestratorParagraph := nonBlockingTriageParagraph(t, orchestrator)
+	fragment := readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator.md")
+	paragraph := nonBlockingTriageParagraph(t, fragment)
 
-	item3Marker := "3. Escalate"
-
-	for _, tc := range []struct {
-		name      string
-		paragraph string
-	}{
-		{"orchestrator", orchestratorParagraph},
+	item3Idx := strings.Index(paragraph, "3. Escalate")
+	if item3Idx == -1 {
+		t.Fatal("non-blocking triage paragraph missing item 3 (Escalate)")
+	}
+	item3Span := paragraph[item3Idx:]
+	for _, want := range []string{
+		"already escalated",
+		"earlier round of this run",
+		"must never be escalated again",
+		"a relayed filer's intents file only once the run ends",
+		"its own duplicate search",
+		"a reworded copy can slip past any search",
 	} {
-		item3Idx := strings.Index(tc.paragraph, item3Marker)
-		if item3Idx == -1 {
-			t.Fatalf("%s: non-blocking triage paragraph missing item 3 (Escalate)", tc.name)
-		}
-		item3Span := tc.paragraph[item3Idx:]
-		for _, want := range []string{
-			"already escalated",
-			"earlier round of this run",
-			"must never be escalated again",
-			"a relayed filer's intents file only once the run ends",
-			"its own duplicate search",
-			"a reworded copy can slip past any search",
-		} {
-			if !strings.Contains(normalizeWhitespace(item3Span), normalizeWhitespace(want)) {
-				t.Errorf("%s: item 3's span missing %q for the no-reescalate guard: %q", tc.name, want, item3Span)
-			}
+		if !strings.Contains(normalizeWhitespace(item3Span), normalizeWhitespace(want)) {
+			t.Errorf("item 3's span missing %q for the no-reescalate guard: %q", want, item3Span)
 		}
 	}
 }
