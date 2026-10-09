@@ -2941,3 +2941,66 @@ func TestLiveKeysCollectsOnlyRunningSlotsKeys(t *testing.T) {
 		t.Fatalf("liveKeys = %v, want %v: only a running slot's non-zero key", got, want)
 	}
 }
+
+// TestPoolSnapshotPublishesCIWait pins that a ci_wait record marks the
+// running slot as waiting on its PR's CI, and that the next box record, a
+// settled record, or the child finishing clears it.
+func TestPoolSnapshotPublishesCIWait(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	work := KindOf(dispatchkind.Work)
+	key := dispatchkey.Issue("123")
+	const pr = "https://example.test/pr/7"
+	wait := func() {
+		p.noteCIWait(0, Record{Event: report.EventCIWait, Key: key, PRURL: pr})
+	}
+	want := func(step string, ciWait bool, url string) {
+		t.Helper()
+		s := p.snapshot().Slots[0]
+		if s.CIWait != ciWait || s.PRURL != url {
+			t.Fatalf("%s: CIWait, PRURL = %v, %q; want %v, %q", step, s.CIWait, s.PRURL, ciWait, url)
+		}
+	}
+	start := func() {
+		t.Helper()
+		if _, _, ok := p.startChild(0, work, "rev1"); !ok {
+			t.Fatal("startChild refused the slot")
+		}
+	}
+
+	start()
+	want("before any ci_wait record", false, "")
+	wait()
+	want("after ci_wait record", true, pr)
+	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
+	want("after box record", false, "")
+	wait()
+	want("after second ci_wait record", true, pr)
+	p.noteSettled(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
+	want("after settled record", false, "")
+	wait()
+	p.finishChild(0)
+	want("after finishChild", false, "")
+	start()
+	want("new child before its first ci_wait record", false, "")
+}
+
+// TestPoolNoteCIWaitDroppedWhenSlotNotRunning pins noteBox's race guard for
+// ci_wait records: one reported after the slot cleared changes nothing.
+func TestPoolNoteCIWaitDroppedWhenSlotNotRunning(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	p.noteCIWait(0, Record{Event: report.EventCIWait, Key: dispatchkey.Issue("1"), PRURL: "https://example.test/pr/1"})
+	if s := p.snapshot().Slots[0]; s.CIWait || s.PRURL != "" {
+		t.Errorf("CI wait on idle slot = %v, %q, want none", s.CIWait, s.PRURL)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("events = %q, want none", buf.String())
+	}
+}

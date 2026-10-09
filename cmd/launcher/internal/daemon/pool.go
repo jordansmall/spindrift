@@ -315,6 +315,10 @@ type slotFlight struct {
 	// starts on a model of its own.
 	model     string
 	modelRole string
+	// ciWaitPR is the PR URL of the child's latest ci_wait record; non-empty
+	// means the child is waiting on that PR's CI. noteBox and noteSettled
+	// clear it.
+	ciWaitPR string
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -668,6 +672,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 		flight.key = rec.Key
 		flight.pass = rec.Phase
 		flight.model, flight.modelRole = "", ""
+		flight.ciWaitPR = ""
 		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
 			for _, existing := range flight.issues {
@@ -698,6 +703,18 @@ func (p *pool) noteModel(slot int, kind Kind, revision string, rec Record) {
 	})
 }
 
+// noteCIWait folds a ci_wait record into slot's flight. It emits nothing and
+// is dropped like noteBox's race when slot is no longer running.
+func (p *pool) noteCIWait(slot int, rec Record) {
+	p.mutate(func(s *state) []Event {
+		if s.slots[slot].phase != PhaseRunning {
+			return nil
+		}
+		s.slots[slot].flight.ciWaitPR = rec.PRURL
+		return nil
+	})
+}
+
 // noteNotDue folds a not_due record into slot's flight, for runSlot to hand
 // the schedule when the child exits empty (flightReport). It touches neither
 // the claim key nor the baton — a not_due Chore was never claimed — and emits
@@ -715,15 +732,19 @@ func (p *pool) noteNotDue(slot int, rec Record) {
 
 // noteSettled emits the settled event through the same mutate-ordered path
 // as noteBox, so a settled record is never reordered against the status
-// snapshot or another pool event. Unlike noteBox it touches no state: a
-// settled record names a terminal outcome, not a fact the in-flight
-// SlotStatus.Issues list needs to grow by.
-// It carries no `phase != PhaseRunning` guard either, though noteBox's race
-// applies here too: a settled record names the issue's (or Chore's)
-// terminal outcome, true whether or not the slot still runs, and dropping
-// it would lose the one event that answers "what happened to #123".
+// snapshot or another pool event. Unlike noteBox it grows no in-flight
+// SlotStatus.Issues list: a settled record names a terminal outcome. It only
+// ends a running slot's CI wait.
+// The `phase == PhaseRunning` check covers only that clear, never the emitted
+// event: though noteBox's race applies here too, a settled record names the
+// issue's (or Chore's) terminal outcome, true whether or not the slot still
+// runs, and dropping it would lose the one event that answers "what happened
+// to #123".
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
-	p.mutate(func(*state) []Event {
+	p.mutate(func(s *state) []Event {
+		if s.slots[slot].phase == PhaseRunning {
+			s.slots[slot].flight.ciWaitPR = ""
+		}
 		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, RecordID: rec.RecordID, Slot: intPtr(slot)}}
 	})
 }
@@ -1319,6 +1340,8 @@ func (p *pool) snapshotLocked() Status {
 		slots[i].Pass = ss.flight.pass
 		slots[i].Model = ss.flight.model
 		slots[i].ModelRole = ss.flight.modelRole
+		slots[i].CIWait = ss.flight.ciWaitPR != ""
+		slots[i].PRURL = ss.flight.ciWaitPR
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.
