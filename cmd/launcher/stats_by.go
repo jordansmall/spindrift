@@ -9,6 +9,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/passmachine"
+	"spindrift.dev/launcher/internal/recordstats"
 )
 
 type statsDim string
@@ -120,7 +121,7 @@ func statsPassKey(by statsBy, p dispatchrecord.Pass) string {
 
 func noneIfEmpty(s string) string {
 	if s == "" {
-		return statsNone
+		return recordstats.None
 	}
 	return s
 }
@@ -136,7 +137,7 @@ func statsRecordKey(by statsBy, r dispatchrecord.Record) string {
 		v, ok := r.Knobs[by.arg]
 		switch {
 		case !ok:
-			return statsNone
+			return recordstats.None
 		case v == "":
 			return statsEmpty
 		}
@@ -168,7 +169,7 @@ func groupStats(records []dispatchrecord.Record, by statsBy) []statsGroup {
 		case !passLevel:
 			add(statsRecordKey(by, r), r)
 		case len(r.Passes) == 0:
-			add(statsNone, r)
+			add(recordstats.None, r)
 		default:
 			var keys []string
 			byKey := map[string][]dispatchrecord.Pass{}
@@ -187,14 +188,14 @@ func groupStats(records []dispatchrecord.Record, by statsBy) []statsGroup {
 		}
 	}
 	slices.SortStableFunc(groups, func(a, b statsGroup) int {
-		if an, bn := a.key == statsNone, b.key == statsNone; an != bn {
+		if an, bn := a.key == recordstats.None, b.key == recordstats.None; an != bn {
 			if an {
 				return 1
 			}
 			return -1
 		}
 		if by.dim == statsByRole {
-			if ra, rb := statsRoleRank(a.key), statsRoleRank(b.key); ra != rb {
+			if ra, rb := recordstats.RoleRank(a.key), recordstats.RoleRank(b.key); ra != rb {
 				return ra - rb
 			}
 			return strings.Compare(a.key, b.key)
