@@ -88,7 +88,7 @@ func trackerSettings(c config) trackerbuild.Settings {
 		JiraProjectKey:    c.jiraProjectKey,
 		JiraEmail:         c.jiraEmail,
 		JiraToken:         c.jiraToken,
-		JiraStatusMapping: c.jiraStatusMapping,
+		JiraStatusMapping: trackerbuild.JiraStatusMappingFor(c.kind().Tracker, c.jiraStatusMapping),
 		Labels:            dispatchLabels(c),
 		VerdictLabels:     researchVerdictLabels(c),
 	}

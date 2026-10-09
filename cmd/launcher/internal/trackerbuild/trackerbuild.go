@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/github"
@@ -137,4 +138,15 @@ func requireSlug(s Settings, name string) error {
 		return fmt.Errorf("set REPO_SLUG when ISSUE_TRACKER=%s", name)
 	}
 	return nil
+}
+
+// JiraStatusMappingFor is the JIRA_STATUS_MAPPING the tracker instance t is
+// built with. The mapping covers the work lifecycle only;
+// research states always ride the label fallback (ADR 0022, issue #4919), so
+// the research tracker gets none.
+func JiraStatusMappingFor(t dispatchkind.Tracker, mapping string) string {
+	if t == dispatchkind.TrackerResearch {
+		return ""
+	}
+	return mapping
 }

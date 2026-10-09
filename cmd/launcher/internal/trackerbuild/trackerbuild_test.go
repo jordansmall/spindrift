@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -88,5 +89,15 @@ func TestNew(t *testing.T) {
 				t.Errorf("%T does not implement forge.DemandCounter", it)
 			}
 		})
+	}
+}
+
+func TestJiraStatusMappingFor(t *testing.T) {
+	const mapping = `{"dispatchable":"To Do"}`
+	if got := JiraStatusMappingFor(dispatchkind.TrackerWork, mapping); got != mapping {
+		t.Errorf("work = %q, want the mapping", got)
+	}
+	if got := JiraStatusMappingFor(dispatchkind.TrackerResearch, mapping); got != "" {
+		t.Errorf("research = %q, want empty", got)
 	}
 }
