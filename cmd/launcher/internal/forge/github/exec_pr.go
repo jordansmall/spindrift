@@ -152,6 +152,17 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 	return forge.PRState(strings.TrimSpace(string(out))), nil
 }
 
+// MergeCommit returns the oid of the commit the merged PR at url landed as, ""
+// when GitHub reports none (an unmerged PR).
+func (e *execClient) MergeCommit(url string) (string, error) {
+	cmd := exec.Command("gh", "pr", "view", url, "--json", "mergeCommit", "--jq", `.mergeCommit.oid // ""`)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", ghCommandErr(fmt.Sprintf("gh pr view %s mergeCommit", url), err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
 // commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
@@ -670,3 +681,4 @@ var _ forge.BranchPusher = (*execClient)(nil)
 var _ forge.BranchDeleter = (*execClient)(nil)
 var _ forge.DraftPRCreator = (*execClient)(nil)
 var _ forge.CIRunReporter = (*execClient)(nil)
+var _ forge.MergeCommitReader = (*execClient)(nil)

@@ -1,8 +1,10 @@
 package settle
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -76,5 +78,57 @@ func TestSettleAdopted_NilDispatcherAppendsNothing(t *testing.T) {
 
 	if ops := settledOps(t, path); len(ops) != 0 {
 		t.Errorf("settled ops = %+v, want none for a nil Dispatcher", ops)
+	}
+}
+
+func flushLatched(t *testing.T, fc *forge.Fake, reason string) []claude.DispatchSettled {
+	t.Helper()
+	c := baseConfig()
+	d, path := stampedFake(t, "work:9@x")
+	c.LogPath = func(string) string { return path }
+	fc.SetIssue(forge.Issue{Number: "9", Labels: []string{"agent-in-progress"}})
+	s := newTestSettle(c, fc, fc)
+	s.latchPR("9", testPR)
+	state := forge.Complete
+	if reason != ReasonMerged {
+		state = forge.Failed
+	}
+	testutil.CaptureStdout(t, func() {
+		s.transitionState("9", forge.InProgress, state, "", reason)
+		s.flushSettled(d, "9")
+	})
+	return settledOps(t, path)
+}
+
+func TestFlushSettled_MergedCarriesMergeCommit(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetMergeCommit(testPR, "deadbeef")
+	ops := flushLatched(t, fc, ReasonMerged)
+	if len(ops) != 1 || ops[0].MergeCommit != "deadbeef" {
+		t.Fatalf("ops = %+v, want one carrying merge_commit deadbeef", ops)
+	}
+}
+
+func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetMergeCommit(testPR, "deadbeef")
+	ops := flushLatched(t, fc, "ci-red")
+	if len(ops) != 1 || ops[0].MergeCommit != "" {
+		t.Fatalf("ops = %+v, want one without a merge commit", ops)
+	}
+}
+
+// A failed merge-commit read warns and leaves the field empty, but the settled
+// op still lands with the unchanged outcome.
+func TestFlushSettled_MergeCommitReadErrorKeepsOutcome(t *testing.T) {
+	fc := forge.NewFake()
+	fc.MergeCommitErr = errors.New("boom")
+	var ops []claude.DispatchSettled
+	stderr := testutil.CaptureStderr(t, func() { ops = flushLatched(t, fc, ReasonMerged) })
+	if len(ops) != 1 || ops[0].State != "complete" || ops[0].Reason != ReasonMerged || ops[0].MergeCommit != "" {
+		t.Fatalf("ops = %+v, want one complete/merged without a merge commit", ops)
+	}
+	if !strings.Contains(stderr, "read merge commit of "+testPR) || !strings.Contains(stderr, "boom") {
+		t.Fatalf("stderr = %q, want the read-merge-commit warning", stderr)
 	}
 }

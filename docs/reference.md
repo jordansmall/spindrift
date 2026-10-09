@@ -5650,7 +5650,7 @@ log (`issue-<key>.log`), as
 with `record_id`, `state` (`complete`, `failed`, `recoverable`, or
 `ambiguous`), `reason`, `note`, `pr_url`, `merge_commit` (the forge's merge
 commit for a PR settled `merged`, on `github` and `forgejo` when the forge
-reports it; empty otherwise), and `host_token`. Every terminal
+reports it, including a late-merge re-settle; empty otherwise), and `host_token`. Every terminal
 settle path writes it: the work settle path, a Box that failed before settle,
 research, the butler Chore, and recover. The write is best-effort and never
 creates a missing log. A path with no Dispatch that ran (recover) settles the

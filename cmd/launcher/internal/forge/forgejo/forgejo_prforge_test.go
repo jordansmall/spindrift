@@ -1052,3 +1052,35 @@ func TestMarkDraft_AlreadyDraftFieldNoOpWithoutWIPTitle(t *testing.T) {
 		t.Fatal("MarkDraft(...) issued a PATCH for a pull already draft by field, want no-op")
 	}
 }
+
+func TestMergeCommit_ReadsMergeCommitSHA(t *testing.T) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/owner/repo/pulls/206" {
+			http.NotFound(w, r)
+			return
+		}
+		body := map[string]any{}
+		_ = json.Unmarshal([]byte(pullJSON(206, "closed", true, false, false, "add feature", "agent/issue-206", "abc123", "main")), &body)
+		body["merge_commit_sha"] = "feedface"
+		b, _ := json.Marshal(body)
+		w.Write(b)
+	})
+	mc, ok := pr.(forge.MergeCommitReader)
+	if !ok {
+		t.Fatal("forgejo adapter does not implement forge.MergeCommitReader")
+	}
+	got, err := mc.MergeCommit("https://forge.test/owner/repo/pulls/206")
+	if err != nil || got != "feedface" {
+		t.Fatalf("MergeCommit = %q, %v; want feedface", got, err)
+	}
+}
+
+func TestMergeCommit_UnmergedPullHasNone(t *testing.T) {
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"number":206,"state":"open","merged":false,"merge_commit_sha":null}`))
+	})
+	got, err := pr.(forge.MergeCommitReader).MergeCommit("https://forge.test/owner/repo/pulls/206")
+	if err != nil || got != "" {
+		t.Fatalf("MergeCommit = %q, %v; want empty", got, err)
+	}
+}

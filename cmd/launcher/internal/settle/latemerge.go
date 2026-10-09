@@ -91,7 +91,9 @@ func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
 // A sequential re-run is a no-op: an upgraded Record's reason is merged, so it
 // is no longer a candidate. Two sweeps running at once can both append the op,
 // which is harmless since the parser keeps the last.
-func LateMerges(root string, pr forge.PRForge, now time.Time, warn io.Writer) (merged []string, err error) {
+// mc, when non-nil, fills the upgraded Record's merge commit; a failed read
+// warns and leaves it empty.
+func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now time.Time, warn io.Writer) (merged []string, err error) {
 	// No log directory means nothing to upgrade; opening the store would
 	// create an empty one.
 	if _, err := os.Stat(hostpaths.LogDir(root)); errors.Is(err, fs.ErrNotExist) {
@@ -146,6 +148,7 @@ func LateMerges(root string, pr forge.PRForge, now time.Time, warn io.Writer) (m
 			Note:     "merged after settling " + r.Reason,
 			PRURL:    r.PRURL,
 		}
+		ds.MergeCommit = readMergeCommit(mc, r.ID, r.PRURL, warn)
 		if err := appendSettled(path, ds); err != nil {
 			fmt.Fprintf(warn, "    ?? %s: could not append %s to %s: %v\n", r.ID, claude.OpDispatchSettled, path, err)
 			continue
@@ -184,4 +187,20 @@ func primaryLog(root string, r dispatchrecord.Record) string {
 func queryablePRURL(u string) bool {
 	p, err := url.Parse(u)
 	return err == nil && (p.Scheme == "http" || p.Scheme == "https") && p.Host != ""
+}
+
+// readMergeCommit reads the commit the merged pr landed as, for the Record's
+// revert judgement (issue #4950). Best-effort: a nil reader (a forge that
+// cannot report one) or a failed read yields "" and never changes the settle
+// outcome.
+func readMergeCommit(r forge.MergeCommitReader, who, pr string, warn io.Writer) string {
+	if r == nil {
+		return ""
+	}
+	sha, err := r.MergeCommit(pr)
+	if err != nil {
+		fmt.Fprintf(warn, "    ?? %s: could not read merge commit of %s: %v\n", who, pr, err)
+		return ""
+	}
+	return sha
 }

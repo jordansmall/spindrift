@@ -2,6 +2,7 @@ package github
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -531,5 +532,42 @@ func TestExecClient_CheckRun_ViaPRForgeFake(t *testing.T) {
 	}
 	if want := "https://github.com/owner/repo/actions/runs/6"; runURL != want {
 		t.Errorf("runURL = %q, want %q", runURL, want)
+	}
+}
+
+func TestMergeCommit_ReadsOidViaGhPrView(t *testing.T) {
+	dir := prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  printf 'abc123\n'
+  exit 0
+fi
+exit 1
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	got, err := c.MergeCommit("https://github.com/owner/repo/pull/7")
+	if err != nil {
+		t.Fatalf("MergeCommit: %v", err)
+	}
+	if got != "abc123" {
+		t.Fatalf("MergeCommit = %q, want abc123", got)
+	}
+	args, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(args), "mergeCommit") {
+		t.Fatalf("gh args = %q, want a mergeCommit query", args)
+	}
+}
+
+func TestMergeCommit_FailureSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `printf 'HTTP 502: Bad Gateway\n' >&2
+exit 1
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, err := c.MergeCommit("https://github.com/owner/repo/pull/7")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 502: Bad Gateway") {
+		t.Fatalf("MergeCommit error = %v, want gh's stderr", err)
 	}
 }

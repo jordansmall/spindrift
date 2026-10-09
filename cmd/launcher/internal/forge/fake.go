@@ -53,6 +53,7 @@ func NewFake(labels ...DispatchLabels) *Fake {
 			checkQ:          map[string][]RollupState{},
 			checkErrQ:       map[string][]error{},
 			prFiles:         map[string][]string{},
+			mergeCommits:    map[string]string{},
 			headSHAQ:        map[string][]string{},
 			failureDetail:   map[string]string{},
 		},

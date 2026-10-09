@@ -95,7 +95,7 @@ func TestLateMerges(t *testing.T) {
 	}
 
 	var w bytes.Buffer
-	merged, err := LateMerges(root, fc, lateMergeNow, &w)
+	merged, err := LateMerges(root, fc, fc, lateMergeNow, &w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func TestLateMerges(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.Reset()
-	merged, err = LateMerges(root, fc, lateMergeNow, &w)
+	merged, err = LateMerges(root, fc, fc, lateMergeNow, &w)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestLateMerges(t *testing.T) {
 
 func TestLateMerges_NoLogDirLeavesNothingBehind(t *testing.T) {
 	root := t.TempDir()
-	merged, err := LateMerges(root, forge.NewFake(), lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, forge.NewFake(), forge.NewFake(), lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 0 {
 		t.Fatalf("LateMerges = %v, %v; want no-op", merged, err)
 	}
@@ -185,7 +185,7 @@ func TestLateMerges_SkipsRecordsOutsideTheCandidateSet(t *testing.T) {
 			before, _ := os.Stat(path)
 
 			var w bytes.Buffer
-			merged, err := LateMerges(root, fc, lateMergeNow, &w)
+			merged, err := LateMerges(root, fc, nil, lateMergeNow, &w)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -209,7 +209,7 @@ func TestLateMerges_UpgradesClaimJustInsideTheWindow(t *testing.T) {
 	const pr = "https://x/pull/9"
 	fc.SetPRState(pr, forge.PRMerged)
 	id, _ := writeLogAt(t, root, "9", lateMergeNow.Add(-LateMergeWindow+time.Hour), "complete", ReasonManual, pr)
-	merged, err := LateMerges(root, fc, lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, fc, fc, lateMergeNow, &bytes.Buffer{})
 	if err != nil || len(merged) != 1 || merged[0] != id {
 		t.Fatalf("merged = %v, %v; want [%s]", merged, err, id)
 	}
@@ -229,7 +229,7 @@ func TestLateMerges_StopsAtFirstRateLimit(t *testing.T) {
 	fc := &askedPR{PRForge: fake}
 
 	var w bytes.Buffer
-	merged, err := LateMerges(root, fc, lateMergeNow, &w)
+	merged, err := LateMerges(root, fc, nil, lateMergeNow, &w)
 	if !errors.Is(err, forge.ErrRateLimit) {
 		t.Fatalf("err = %v, want one wrapping forge.ErrRateLimit", err)
 	}
@@ -252,7 +252,7 @@ func TestLateMerges_RateLimitKeepsEarlierMerges(t *testing.T) {
 	fake.PRStateErrs = []error{nil, &forge.RateLimitError{Err: errors.New("HTTP 403")}}
 	fc := &askedPR{PRForge: fake}
 
-	merged, err := LateMerges(root, fc, lateMergeNow, &bytes.Buffer{})
+	merged, err := LateMerges(root, fc, nil, lateMergeNow, &bytes.Buffer{})
 	if !errors.Is(err, forge.ErrRateLimit) {
 		t.Fatalf("err = %v, want one wrapping forge.ErrRateLimit", err)
 	}
@@ -331,5 +331,42 @@ func TestClaimLateMergeSweep_NoLogDirCreatesNothing(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(root); len(entries) != 0 {
 		t.Fatalf("root has %d entries, want none", len(entries))
+	}
+}
+
+// A late merge's re-settle carries the forge's merge commit onto the Record;
+// a failed read still upgrades the Record, warns, and leaves it empty.
+func TestLateMerges_FillsMergeCommit(t *testing.T) {
+	root := t.TempDir()
+	fc := forge.NewFake()
+	const prA, prB = "https://x/pull/1", "https://x/pull/2"
+	idA, _ := writeSettledLog(t, root, "1", ReasonManual, prA)
+	fc.SetPR("a", forge.PR{URL: prA})
+	fc.SetPRState(prA, forge.PRMerged)
+	fc.SetMergeCommit(prA, "abc123")
+
+	merged, err := LateMerges(root, fc, fc, lateMergeNow, &bytes.Buffer{})
+	if err != nil || len(merged) != 1 {
+		t.Fatalf("LateMerges = %v, %v; want one merged", merged, err)
+	}
+	if got := storedRecordsByID(t, root)[idA].MergeCommit; got != "abc123" {
+		t.Fatalf("MergeCommit = %q, want abc123", got)
+	}
+
+	idB, _ := writeSettledLog(t, root, "2", ReasonManual, prB)
+	fc.SetPR("b", forge.PR{URL: prB})
+	fc.SetPRState(prB, forge.PRMerged)
+	fc.MergeCommitErr = errors.New("boom")
+	var w bytes.Buffer
+	merged, err = LateMerges(root, fc, fc, lateMergeNow, &w)
+	if err != nil || len(merged) != 1 || merged[0] != idB {
+		t.Fatalf("LateMerges = %v, %v; want %s merged despite the failed read", merged, err, idB)
+	}
+	b := storedRecordsByID(t, root)[idB]
+	if b.Reason != ReasonMerged || b.MergeCommit != "" {
+		t.Fatalf("B = reason %q merge commit %q, want merged with none", b.Reason, b.MergeCommit)
+	}
+	if !strings.Contains(w.String(), "boom") || strings.Count(w.String(), "??") != 1 {
+		t.Fatalf("warnings = %q, want one naming the read failure", w.String())
 	}
 }

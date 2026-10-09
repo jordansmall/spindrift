@@ -18,15 +18,17 @@ type forgejoPullRef struct {
 // forgejoPullPayload is the subset of Forgejo's pull-request REST shape this
 // adapter reads.
 type forgejoPullPayload struct {
-	Number    int            `json:"number"`
-	HTMLURL   string         `json:"html_url"`
-	State     string         `json:"state"`
-	Merged    bool           `json:"merged"`
-	Mergeable bool           `json:"mergeable"`
-	Draft     bool           `json:"draft"`
-	Title     string         `json:"title"`
-	Head      forgejoPullRef `json:"head"`
-	Base      forgejoPullRef `json:"base"`
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	State   string `json:"state"`
+	Merged  bool   `json:"merged"`
+	// MergeCommitSHA is null until the pull merges.
+	MergeCommitSHA string         `json:"merge_commit_sha"`
+	Mergeable      bool           `json:"mergeable"`
+	Draft          bool           `json:"draft"`
+	Title          string         `json:"title"`
+	Head           forgejoPullRef `json:"head"`
+	Base           forgejoPullRef `json:"base"`
 }
 
 // prIndex binds parsePRIndex to the configured repo.
@@ -140,6 +142,16 @@ func (f *forgejoCodeForge) PRState(prURL string) (forge.PRState, error) {
 	default:
 		return forge.PROpen, nil
 	}
+}
+
+// MergeCommit returns the commit Forgejo reports the merged pull landed as, ""
+// while it is unmerged.
+func (f *forgejoCodeForge) MergeCommit(prURL string) (string, error) {
+	p, err := f.getPull(prURL)
+	if err != nil {
+		return "", err
+	}
+	return p.MergeCommitSHA, nil
 }
 
 // HeadCommitSHA returns the pull's current head commit SHA.
