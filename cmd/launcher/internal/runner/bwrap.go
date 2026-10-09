@@ -534,7 +534,8 @@ func (a *bwrapAdapter) buildArgs(etcDir string, box Box) []string {
 	// hooks, settings.json, opencode agent files) cannot be ro-bound there.
 	// Stage it at a fresh top-level path instead: bwrap processes --ro-bind in
 	// argv order and cannot fabricate a mountpoint inside the /agent bind made
-	// read-only above (issue #2843). entrypoint.sh copies it in at startup.
+	// read-only above (issue #2843). The box program (cmd/launcher/box) copies
+	// it in at startup.
 	args = append(args, "--ro-bind", agentFiles+"/home/agent", homeAgentStagingDir)
 	// buildMountSpecs computes the mount decisions (gates, existence guards,
 	// operator messages) once and shares them with the OCI adapter; bwrap only
