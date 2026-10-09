@@ -1934,3 +1934,30 @@ func TestSettleRun_NoFindings_StillDone(t *testing.T) {
 		t.Errorf("settled = %+v, want done=true", got)
 	}
 }
+
+// A run's provenance labels ride on a promoted finding too, so "files with
+// every label" holds whichever branch the finding takes.
+func TestSettleRun_Promotion_KeepsRunLabels(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	claim := claimButlerChore(t, backend, "bugs", start)
+
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/701"
+
+	scope := chore.Scope{Head: "headsha", NextCursor: "cursor2"}
+	now := start.Add(time.Minute)
+	policy := promotion{enabled: true, classes: []string{"error-handling"}, maxFiles: 2, label: "ready-for-agent"}
+	s := newSettleRun(fc.AsIssueFiler(), backend, "bugs", claim, scope, func() time.Time { return now }, chore.Room{Promotions: 1}, policy, patchRung{})
+	s.labels = []string{"run-provenance"}
+
+	got := s.settle(dispatch.NewFake(), readyResult(`{"title":"promotable bug","body":"repro","dedupTerms":["a.go:Foo"],"class":"error-handling","concurrence":"agreed"}`))
+	if got.promoted != 1 || len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("settled = %+v, PostIssue calls = %d, want one promoted filing", got, len(fc.PostIssueCalls))
+	}
+	for _, l := range []string{"agent-butler-finding", "ready-for-agent", "run-provenance"} {
+		if !slices.Contains(fc.PostIssueCalls[0].Labels, l) {
+			t.Errorf("labels = %v, want %q", fc.PostIssueCalls[0].Labels, l)
+		}
+	}
+}

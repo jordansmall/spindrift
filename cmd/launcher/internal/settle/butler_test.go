@@ -1,9 +1,11 @@
 package settle
 
 import (
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -73,5 +75,38 @@ func TestFileButlerFindings_ReportsFailedCount(t *testing.T) {
 
 	if len(filing.Filed) != 1 || filing.Failed != 1 {
 		t.Errorf("filed=%v failed=%d, want 1 filed and 1 failed", filing.Filed, filing.Failed)
+	}
+}
+
+// A finding filed with the tuning label carries tuningChoreTerm in its hidden
+// marker, beside the Box's own terms and also when the Box gave none -- the
+// term is derived from the label, so the two cannot diverge.
+func TestFileButlerFindings_TuningLabelWritesMarkerTerm(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		intent string
+		want   []string
+	}{
+		{"with box terms", `{"title":"t","body":"b","dedupTerms":["Role:Implement"]}`, []string{"role:implement", tuningChoreTerm}},
+		{"no box terms", `{"title":"t","body":"b"}`, []string{tuningChoreTerm}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := forge.NewFake()
+			result := dispatch.Result{IssueIntentsFound: true, IssueIntents: []string{tc.intent}}
+			plan := func([]Finding) func(Finding) Decoration {
+				return func(Finding) Decoration { return Decoration{ExtraLabels: []string{doctor.TuningFindingLabel}} }
+			}
+			FileButlerFindings(fc.AsIssueFiler(), "1", result, 0, plan)
+			if len(fc.PostIssueCalls) != 1 {
+				t.Fatalf("PostIssueCalls = %+v, want 1", fc.PostIssueCalls)
+			}
+			call := fc.PostIssueCalls[0]
+			if got := parseDedupMarker(call.Body); !slices.Equal(got, tc.want) {
+				t.Errorf("marker terms = %v, want %v", got, tc.want)
+			}
+			if !slices.Contains(call.Labels, doctor.TuningFindingLabel) {
+				t.Errorf("labels = %v, want %q", call.Labels, doctor.TuningFindingLabel)
+			}
+		})
 	}
 }

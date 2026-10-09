@@ -3,6 +3,7 @@ package butler
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,11 @@ type settleRun struct {
 	now    func() time.Time
 	room   chore.Room
 	policy promotion
+
+	// labels are extra provenance labels every finding of this Chore wears
+	// beside agent-butler-finding; settle's filing derives the matching
+	// hidden-marker term from them.
+	labels []string
 
 	// patch backs the patch rung (ADR 0057, issue #4074) -- see Runner.run
 	// for how patch.forge's presence gates it.
@@ -197,7 +203,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				} else {
 					return settle.Decoration{
 						Backlink:    backlink,
-						ExtraLabels: []string{dispatchkind.Butler.PatchLabel},
+						ExtraLabels: s.extraLabels(dispatchkind.Butler.PatchLabel),
 						// Spend the slot, push, and open the PR only in
 						// OnFiled, after PostIssue succeeds -- a failed post
 						// must not push a branch or open a PR for an issue
@@ -229,12 +235,12 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			if dec.kind != promote {
 				// Logged from OnFiled so only a finding that actually filed
 				// reports why it was not promoted.
-				return settle.Decoration{Backlink: backlink, OnFiled: func(string) { s.logPromoteSkip(num, dec) }}
+				return settle.Decoration{Backlink: backlink, ExtraLabels: s.extraLabels(), OnFiled: func(string) { s.logPromoteSkip(num, dec) }}
 			}
 			note := promotionNote(s.chore, f, s.policy, dec.files)
 			// Spend the slot only in OnFiled, after PostIssue succeeds, so a
 			// failed post frees it back to the rest of the sweep.
-			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: dec.labels, OnFiled: func(url string) {
+			return settle.Decoration{Backlink: backlink + "\n\n" + note, ExtraLabels: s.extraLabels(dec.labels...), OnFiled: func(url string) {
 				remaining--
 				promoted = append(promoted, url)
 			}}
@@ -470,4 +476,10 @@ func (s *settleRun) fail(d dispatch.Dispatcher, num, note string) {
 // dispatch_settled to the Dispatch's primary Pass log and reports it.
 func (s *settleRun) settled(d dispatch.Dispatcher, state forge.DispatchState, reason, note string) {
 	settle.SettledBy(d, dispatchkey.Chore(s.chore), state.String(), reason, note)
+}
+
+// extraLabels is the Decoration label set for a finding: the Chore's own
+// provenance labels plus whatever this finding's landing path adds.
+func (s *settleRun) extraLabels(more ...string) []string {
+	return append(slices.Clone(s.labels), more...)
 }
