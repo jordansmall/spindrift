@@ -206,6 +206,16 @@ type BundleCommitSubjects interface {
 	CommitSubjects(outboxDir, base, ref string) ([]string, error)
 }
 
+// MergeCommitReader reads the commit a merged PR landed as on the base branch,
+// for the Dispatch Record's revert judgement (issue #4950). Only a forge whose
+// API reports it (github, forgejo) implements it.
+type MergeCommitReader interface {
+	// MergeCommit returns the commit the forge reports for the merged PR at
+	// url: for a rebase merge, the last rebased commit. "" means the forge
+	// reports none, for instance because the PR is not merged.
+	MergeCommit(url string) (string, error)
+}
+
 // AgentBranchName is the one place the agent branch name is built from its
 // prefix (issue #444): every adapter's AgentBranch returns it, and the in-Box
 // main, which holds no CodeForge, calls it directly.

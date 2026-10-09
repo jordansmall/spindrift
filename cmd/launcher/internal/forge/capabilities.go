@@ -21,6 +21,7 @@ type Capabilities struct {
 	BranchDeleter           BranchDeleter
 	BranchProtectionForge   BranchProtectionForge
 	BundleCommitSubjects    BundleCommitSubjects
+	MergeCommitReader       MergeCommitReader
 
 	// One field per optional IssueTracker-side interface. The same directory
 	// scan covers these fields.
@@ -65,6 +66,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.BranchDeleter, _ = cf.(BranchDeleter)
 	c.BranchProtectionForge, _ = cf.(BranchProtectionForge)
 	c.BundleCommitSubjects, _ = cf.(BundleCommitSubjects)
+	c.MergeCommitReader, _ = cf.(MergeCommitReader)
 
 	c.BlockersLister, _ = it.(BlockersLister)
 	c.HostPostedCommenter, _ = it.(HostPostedCommenter)

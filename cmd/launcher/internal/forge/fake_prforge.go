@@ -19,6 +19,7 @@ type PRForgeFake struct {
 	checkErrQ       map[string][]error // a nil entry falls through to checkQ
 	prFiles         map[string][]string
 	headSHAQ        map[string][]string
+	mergeCommits    map[string]string
 	headSHACounter  int // HeadCommitSHA counts it up to synthesize a SHA once headSHAQ[url] is exhausted
 
 	// HeadCommitSHAErr, if non-nil, is returned by every HeadCommitSHA call.
@@ -36,6 +37,9 @@ type PRForgeFake struct {
 	// PRStateErrs is a per-call queue drained before PRStateErr is checked. A
 	// nil entry falls through to the normal state lookup.
 	PRStateErrs []error
+
+	// MergeCommitErr, if non-nil, is returned by every MergeCommit call.
+	MergeCommitErr error
 
 	// PRFilesErr, if non-nil, is returned by every ListPRFiles call.
 	PRFilesErr error
@@ -88,6 +92,24 @@ func (pf *PRForgeFake) SetPRState(url string, state PRState) {
 	pf.mu.Lock()
 	defer pf.mu.Unlock()
 	pf.prStates[url] = state
+}
+
+// SetMergeCommit scripts the commit MergeCommit reports for url; unset, it
+// reports "" like a forge that names none.
+func (pf *PRForgeFake) SetMergeCommit(url, sha string) {
+	pf.mu.Lock()
+	defer pf.mu.Unlock()
+	pf.mergeCommits[url] = sha
+}
+
+// MergeCommit returns the scripted merge commit for url, or MergeCommitErr.
+func (pf *PRForgeFake) MergeCommit(url string) (string, error) {
+	pf.mu.Lock()
+	defer pf.mu.Unlock()
+	if pf.MergeCommitErr != nil {
+		return "", pf.MergeCommitErr
+	}
+	return pf.mergeCommits[url], nil
 }
 
 // SetMergeableState scripts the MergeableState Mergeable returns for url.

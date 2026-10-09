@@ -18,11 +18,11 @@ import (
 // merged since, printing a line only when it upgraded any. A nil pr (a
 // PR-less code forge: git, local) has no PR state to read, so it does
 // nothing. Per-Record warnings go to stderr, like the settle gate's.
-func recordLateMerges(pr forge.PRForge, pwd string, w io.Writer) error {
-	if pr == nil {
+func recordLateMerges(caps forge.Capabilities, pwd string, w io.Writer) error {
+	if caps.PRForge == nil {
 		return nil
 	}
-	merged, err := settle.LateMerges(pwd, pr, time.Now(), os.Stderr)
+	merged, err := settle.LateMerges(pwd, caps.PRForge, caps.MergeCommitReader, time.Now(), os.Stderr)
 	if len(merged) > 0 {
 		fmt.Fprintf(w, "reconcile: recorded %d late merge(s): %s\n", len(merged), strings.Join(merged, ", "))
 	}
@@ -36,7 +36,7 @@ func recordLateMerges(pr forge.PRForge, pwd string, w io.Writer) error {
 // failure still exits non-zero (joined into the result) but never skips the
 // issue bookkeeping, which does not depend on it.
 func runReconcile(c config, it forge.IssueTracker, cf forge.CodeForge, lp reconcile.LivenessProbe, caps forge.Capabilities, pwd string, w io.Writer) error {
-	lateErr := recordLateMerges(caps.PRForge, pwd, w)
+	lateErr := recordLateMerges(caps, pwd, w)
 	return errors.Join(reconcileIssues(c, it, cf, lp, caps, pwd, w), lateErr)
 }
 
@@ -94,7 +94,7 @@ func reconcileAfterDispatch(c config, it forge.IssueTracker, cf forge.CodeForge,
 	if caps.PRForge != nil {
 		ok, err := settle.ClaimLateMergeSweep(pwd, time.Now())
 		if ok {
-			err = recordLateMerges(caps.PRForge, pwd, w)
+			err = recordLateMerges(caps, pwd, w)
 		}
 		if err != nil {
 			fmt.Fprintf(w, "    ?? late merges: %v\n", err)

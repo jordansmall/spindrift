@@ -878,7 +878,7 @@ func TestRecordLateMerges_PRLessForgeIsNoOp(t *testing.T) {
 	root, _, _, _ := lateMergeFixture(t)
 
 	var buf bytes.Buffer
-	if err := recordLateMerges(nil, root, &buf); err != nil {
+	if err := recordLateMerges(forge.Capabilities{}, root, &buf); err != nil {
 		t.Fatalf("recordLateMerges: %v", err)
 	}
 	if buf.Len() != 0 {

@@ -359,6 +359,9 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 		return
 	}
 	ds := claude.DispatchSettled{State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr}
+	if d != nil && rec.reason == ReasonMerged && pr != "" {
+		ds.MergeCommit = readMergeCommit(s.cfg.Capabilities.MergeCommitReader, "#"+num, pr, os.Stderr)
+	}
 	if d == nil {
 		// A nil Dispatcher (the butler patch gate) has no Record, so nothing
 		// is appended: the primary log's stamp may name an unrelated one.
