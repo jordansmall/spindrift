@@ -796,7 +796,7 @@ in
       '';
 
   # NIX_STORE_WRITABLE is baked into the image Env by mkHarness's
-  # nixStoreWritable knob (ADR 0018, issue #469) so the entrypoint's warning
+  # nixStoreWritable knob (ADR 0018, issue #469) so the box program's warning
   # comes from the image, not a runtime-only setting. Each harness's image is
   # extracted only once: repeat compressed-image reads exhaust the runner's
   # disk burst credits and stall CI for minutes.

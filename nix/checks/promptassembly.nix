@@ -1,8 +1,8 @@
 # Registry-ownership guard (issue #2349): a `fragment` or `var` identifier
 # from lib/fragments.nix must never be hardcoded in the Go assemble-prompt
 # module, so adding a fragment on an existing gate stays nix-only. `gate`
-# names are exempt because gates.go mirrors agent/entrypoint.sh's gate
-# computation, and `extraSubstVars` too, since SKILLS_FOUND is also a gate.
+# names are exempt because gates.go is the gate computation, and
+# `extraSubstVars` too, since SKILLS_FOUND is also a gate.
 {
   pkgs,
   fixtures,

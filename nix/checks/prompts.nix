@@ -722,7 +722,7 @@ in
   # reconcile-into-Blocking/Non-blocking obligation must render on every run,
   # baked or unbaked; the baked arm defers to a pinned upstream skill
   # spindrift cannot edit. Pinned on the raw template, since mkHarness leaves
-  # CODE_REVIEW_BAKED/UNBAKED for entrypoint.sh to resolve at runtime.
+  # CODE_REVIEW_BAKED/UNBAKED for promptassembly to resolve at runtime.
   review-prompt-hunt-dimensions-inline = pkgs.runCommand "review-prompt-hunt-dimensions-inline" { } ''
     p=${../../templates/default/prompts/review-prompt.md}
     grep -qi 'hunt every dimension' "$p"
@@ -1671,7 +1671,7 @@ in
 
   # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE (issue
   # #1963, OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
-  # entrypoint.sh): the github fragment keeps `gh pr create` and never
+  # promptassembly): the github fragment keeps `gh pr create` and never
   # invokes `fj pr create`, and the forgejo fragment the reverse.
   open-pr-create-fragments-fork-forge-on-read-write =
     pkgs.runCommand "open-pr-create-fragments-fork-forge-on-read-write" { }
@@ -1684,7 +1684,7 @@ in
       '';
 
   # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963,
-  # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in entrypoint.sh): the github
+  # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in promptassembly): the github
   # fragment keeps `gh pr view` and never invokes `fj pr status`, and the
   # forgejo fragment the reverse.
   fix-ci-read-fragments-fork-forge = pkgs.runCommand "fix-ci-read-fragments-fork-forge" { } ''
