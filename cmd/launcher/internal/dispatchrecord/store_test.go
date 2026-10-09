@@ -2191,3 +2191,98 @@ func TestStoreOrphanLogMarksOnlyOrphanRecords(t *testing.T) {
 		t.Fatalf("orphan_log = %q after the primary took the row, want empty", got)
 	}
 }
+
+func settleSeqs(t *testing.T, s *Store) map[string]int64 {
+	t.Helper()
+	out := map[string]int64{}
+	for _, r := range records(t, s) {
+		out[r.DispatchKey] = r.SettledSeq
+	}
+	return out
+}
+
+// A Record's settle sequence follows when it settled, not when it was
+// claimed, so a long-running Dispatch claimed first sorts after one that
+// settled earlier.
+func TestStoreSettledSeqFollowsSettleOrderNotClaimOrder(t *testing.T) {
+	root := t.TempDir()
+	early, late := stampClaim, stampClaim.Add(time.Hour)
+	idA, idB := RecordID("work", "1", early), RecordID("work", "2", late)
+	logA := putLog(t, root, "issue-1.log", keyedLog("1", early, "2026-05-01T09:00:00Z")...)
+	putLog(t, root, "issue-2.log", append(keyedLog("2", late, "2026-05-01T10:00:00Z"), settledLine(idB, "complete", "merged"))...)
+	s := openStore(t, root)
+	ingest(t, s)
+	if got := settleSeqs(t, s); got["1"] != 0 || got["2"] != 1 {
+		t.Fatalf("seqs after B settles = %v", got)
+	}
+
+	appendLog(t, logA, settledLine(idA, "complete", "merged"))
+	ingest(t, s)
+	if got := settleSeqs(t, s); got["1"] != 2 || got["2"] != 1 {
+		t.Fatalf("seqs after A settles = %v", got)
+	}
+
+	if _, err := s.Reingest(); err != nil {
+		t.Fatal(err)
+	}
+	if got := settleSeqs(t, s); got["1"] != 2 || got["2"] != 1 {
+		t.Fatalf("seqs after reingest = %v", got)
+	}
+}
+
+// A later log of the same Record that carries no settled outcome (a fix pass)
+// must not clear the sequence the settled one earned.
+func TestStoreSettledSeqSurvivesUnsettledLogOfSameRecord(t *testing.T) {
+	root := t.TempDir()
+	id := RecordID("work", "1", stampClaim)
+	putLog(t, root, "issue-1.log", append(keyedLog("1", stampClaim, "2026-05-01T09:00:00Z"), settledLine(id, "complete", "merged"))...)
+	s := openStore(t, root)
+	ingest(t, s)
+	if _, err := s.db.Exec(`UPDATE records SET outcome_source = 'log'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Reingest(); err != nil {
+		t.Fatal(err)
+	}
+	if got := settleSeqs(t, s); got["1"] != 1 {
+		t.Fatalf("seqs = %v", got)
+	}
+}
+
+func TestStoreMigratesV9DatabaseBackfillingSettleOrderFromClaimOrder(t *testing.T) {
+	root := t.TempDir()
+	path := hostpaths.DispatchRecordsDB(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := append([]string{}, migrations[:9]...)
+	stmts = append(stmts, "PRAGMA user_version = 9",
+		`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome, outcome_source) VALUES
+			('work:b@x', 'work', 'b', 2000, 'inferred', 'unknown', 'dispatch_settled'),
+			('work:a@x', 'work', 'a', 1000, 'inferred', 'unknown', 'dispatch_settled'),
+			('work:c@x', 'work', 'c', 1500, 'inferred', 'unknown', 'log')`)
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+
+	got := settleSeqs(t, openStore(t, root))
+	if got["a"] != 1 || got["b"] != 2 || got["c"] != 0 {
+		t.Fatalf("seqs = %v", got)
+	}
+}
+
+// keyedLog is a stamped work log for Dispatch key, unlike stampedLog whose
+// stamp always names key 42.
+func keyedLog(key string, claim time.Time, ts string) []string {
+	stamp := opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
+		RecordID: RecordID("work", key, claim), Kind: "work", DispatchKey: key, ClaimTime: claim, Started: claim,
+	}})
+	return append([]string{stamp}, workLog(ts, 1)...)
+}

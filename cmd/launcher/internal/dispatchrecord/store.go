@@ -204,6 +204,19 @@ var migrations = []string{
 	// would otherwise lose its v8 verdict for good.
 	`ALTER TABLE records ADD COLUMN churn_14d REAL;
 	UPDATE records SET matured_at = NULL;`,
+	// v10: settle order (issue #4951). The upsert assigns settled_seq the first
+	// time a row is written as settled and never changes it, so it orders
+	// Records by when the host settled them, which claim_time cannot (a
+	// long-running Dispatch claims early and settles late). Rows settled before
+	// this migration have no recorded settle time; claim order is the best
+	// stand-in for them.
+	`ALTER TABLE records ADD COLUMN settled_seq INTEGER;
+	UPDATE records SET settled_seq = (
+		SELECT COUNT(*) FROM records r2
+		WHERE r2.outcome_source = 'dispatch_settled'
+		AND (r2.claim_time < records.claim_time
+			OR (r2.claim_time = records.claim_time AND r2.record_id <= records.record_id)))
+	WHERE outcome_source = 'dispatch_settled';`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -762,17 +775,19 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			if _, err := tx.Exec(
 				`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
 					revision, driver, driver_version, role_models, knobs,
-					outcome_source, reason, note, pr_url, merge_commit, box_status, orphan_log)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					outcome_source, reason, note, pr_url, merge_commit, box_status, orphan_log, settled_seq)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+					CASE WHEN ? = '`+OutcomeSourceSettled+`' THEN (SELECT COALESCE(MAX(settled_seq), 0) + 1 FROM records) END)
 				 ON CONFLICT(record_id) DO UPDATE SET
 					kind = excluded.kind, dispatch_key = excluded.dispatch_key, claim_time = excluded.claim_time,
 					attribution = excluded.attribution, revision = excluded.revision, driver = excluded.driver,
 					driver_version = excluded.driver_version, role_models = excluded.role_models, knobs = excluded.knobs,
 					`+strings.Join([]string{keep("outcome"), keep("outcome_source"), keep("reason"), keep("note"),
-					keep("pr_url"), keep("merge_commit"), keep("box_status"), "orphan_log = excluded.orphan_log"}, ", "),
+					keep("pr_url"), keep("merge_commit"), keep("box_status"), "orphan_log = excluded.orphan_log",
+					"settled_seq = COALESCE(records.settled_seq, excluded.settled_seq)"}, ", "),
 				rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
 				rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
-				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.MergeCommit, rec.BoxStatus, orphanLog); err != nil {
+				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.MergeCommit, rec.BoxStatus, orphanLog, rec.OutcomeSource); err != nil {
 				return "", err
 			}
 		}
@@ -848,7 +863,7 @@ func (s *Store) Records() ([]Record, error) {
 	rows, err := tx.Query(
 		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
 			 outcome_source, reason, note, pr_url, merge_commit, box_status,
-			 revision, driver, driver_version, role_models, knobs, reverted, matured_at, churn_14d
+			 revision, driver, driver_version, role_models, knobs, reverted, matured_at, churn_14d, settled_seq
 		 FROM records ORDER BY claim_time, record_id`)
 	if err != nil {
 		return nil, err
@@ -859,14 +874,15 @@ func (s *Store) Records() ([]Record, error) {
 		var r Record
 		var ms int64
 		var roleModels, knobs string
-		var reverted, maturedMs sql.NullInt64
+		var reverted, maturedMs, settledSeq sql.NullInt64
 		var churn sql.NullFloat64
 		if err := rows.Scan(&r.ID, &r.Kind, &r.DispatchKey, &ms, &r.Attribution, &r.Outcome,
 			&r.OutcomeSource, &r.Reason, &r.Note, &r.PRURL, &r.MergeCommit, &r.BoxStatus,
-			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs, &reverted, &maturedMs, &churn); err != nil {
+			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs, &reverted, &maturedMs, &churn, &settledSeq); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		r.SettledSeq = settledSeq.Int64
 		if reverted.Valid {
 			v := reverted.Int64 != 0
 			r.Reverted = &v

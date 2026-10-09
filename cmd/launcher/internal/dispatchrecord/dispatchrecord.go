@@ -88,6 +88,8 @@ type Record struct {
 	Reason        string `json:"reason,omitempty"`
 	Note          string `json:"note,omitempty"`
 	PRURL         string `json:"pr_url,omitempty"`
+	// SettledSeq is the store's monotonic settle order, 0 until settled.
+	SettledSeq int64 `json:"settled_seq,omitempty"`
 	// MergeCommit is the forge's merge commit for a merged PR, when the host
 	// recorded one.
 	MergeCommit string `json:"merge_commit,omitempty"`
