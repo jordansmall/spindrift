@@ -2,9 +2,9 @@ package waves
 
 import "spindrift.dev/launcher/internal/terminate"
 
-// Session carries the Console-only state one live operator session shares
-// across every RunContinuous call it makes (#1547). A nil Session gives the
-// pre-#1547 behaviour: a fixed limiter from cfg.MaxParallel, no registry.
+// Session carries the state a caller shares with Dispatch and RunContinuous
+// (#1547). Only the Console sets Limiter; every production caller sets
+// Terminated. A nil Session is tests-only; see the field docs.
 type Session struct {
 	// Limiter is the concurrency bound RunContinuous takes a slot from before
 	// claiming an issue. Nil means a fixed cap built fresh from cfg.MaxParallel
