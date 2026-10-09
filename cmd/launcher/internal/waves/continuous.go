@@ -70,17 +70,7 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 	// Drop dedup entries for issues no longer in the batch: keeps logged bounded
 	// across a long Console session, and lets an issue that leaves and returns
 	// re-log its state afresh.
-	if logged != nil {
-		present := make(map[string]bool, len(issues))
-		for _, iss := range issues {
-			present[iss.Number] = true
-		}
-		for num := range logged {
-			if !present[num] {
-				delete(logged, num)
-			}
-		}
-	}
+	pruneAbsent(logged, issues)
 	// skip logs a non-dispatch outcome at most once per distinct line: refill
 	// re-walks this list on every completion and the poll re-walks it every ~3m
 	// (#1637), so an unchanged blocked or deferred reason would otherwise
@@ -103,6 +93,23 @@ func nextReady(cfg Config, it forge.IssueTracker, cf forge.CodeForge, checkOverl
 		return iss, true
 	}
 	return Issue{}, false
+}
+
+// pruneAbsent deletes entries of m whose issue is not in issues. A nil m is a
+// no-op.
+func pruneAbsent(m map[string]string, issues []Issue) {
+	if m == nil {
+		return
+	}
+	present := make(map[string]bool, len(issues))
+	for _, iss := range issues {
+		present[iss.Number] = true
+	}
+	for num := range m {
+		if !present[num] {
+			delete(m, num)
+		}
+	}
 }
 
 // issueReadiness classifies iss the same way nextReady's selection loop does,
@@ -255,6 +262,8 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 	// re-walks on every completion, grow, and ~3m poll tick (#1637) do not
 	// reprint an unchanged blocked or deferred reason.
 	logged := make(map[string]string)
+	// claimSkips is logged's counterpart for claim-failure skip lines (#4892).
+	claimSkips := make(map[string]string)
 	closed := false
 	// staleDrain consolidates the stale-drain report state (#2678, #2774).
 	var staleDrain staleDrainTracker
@@ -439,13 +448,29 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 		checkOverlap := waveOverlapCheck(cfg, it, cf)
 		unclaimed := dropClaimed(batch.Issues, claimed)
-		iss, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, batch.Edges, batch.Sources, batch.Failed, logged)
-		if !ok {
-			return false
-		}
-		if err := queue.Claim(iss.Number); err != nil {
-			fmt.Print(claimSkipLine(iss.Number, err))
-			return false
+		pruneAbsent(claimSkips, batch.Issues)
+		// A failed claim must not strand the free slot behind it (#4892): walk on
+		// to the next ready candidate within this same refill. The failed issue is
+		// retried on the next trigger, not remembered across refills.
+		var iss Issue
+		for {
+			next, ok := nextReady(cfg, it, cf, checkOverlap, unclaimed, batch.Edges, batch.Sources, batch.Failed, logged)
+			if !ok {
+				return false
+			}
+			err := queue.Claim(next.Number)
+			if err == nil {
+				iss = next
+				break
+			}
+			// Kept apart from logged: nextReady prunes logged against the shrunken
+			// slice it gets on the retry, which would drop this entry and reprint
+			// the line on every trigger.
+			if line := claimSkipLine(next.Number, err); claimSkips[next.Number] != line {
+				fmt.Print(line)
+				claimSkips[next.Number] = line
+			}
+			unclaimed = dropClaimed(unclaimed, map[string]bool{next.Number: true})
 		}
 		dispatchedAny = true
 		claimed[iss.Number] = true
