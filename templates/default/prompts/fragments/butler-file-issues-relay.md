@@ -9,7 +9,8 @@ concerns, so the launcher can derive that from the filed issue-intent. Also
 give the filer the finding's class, and, only when the `reviewer` agreed on
 it (see PROMOTION CANDIDATES above), the reviewer's one-line concurrence,
 and, when the finding is a patch candidate the reviewer approved, its diff
-as the finding's patch.
+as the finding's patch. When the Chore input is a Tuning digest, also give
+the filer the finding's cited digest anchors and its metric slug.
 
 The butler never writes to the Issue Tracker itself — the filer is
 relay-only here. It emits `SPINDRIFT_ISSUE_INTENT` lines instead of filing
@@ -23,6 +24,9 @@ Best-effort: filing must never block the sweep.
 - If the filer reports its class was rejected as off the class list,
   re-delegate the finding with a class from the valid ones the rejection
   names (see FINDING CLASSES above) — never drop it for that.
+- If the filer reports a rejection for a missing cite or metric,
+  re-delegate the finding with its cited anchors and metric slug — never
+  drop it for that.
 - On any other failure (the filer errors, times out, or returns nothing
   usable), drop the finding: the butler posts no comment anywhere to fall
   back into.

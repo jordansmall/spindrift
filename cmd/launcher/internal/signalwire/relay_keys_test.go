@@ -27,11 +27,6 @@ var relayFragments = []string{
 // the wire struct itself.
 var extraTaughtAllowed = map[string]bool{"labels": true}
 
-// untaughtAllowed is wire keys that legitimately appear in no relay fragment:
-// cites and metric (issue #4952) are required only of a tuning finding, whose
-// own Chore prompt teaches them over the signal socket, never the log carrier.
-var untaughtAllowed = map[string]bool{"cites": true, "metric": true}
-
 // relayKeyPattern matches a key taught in prose: a quoted bare word followed
 // by a colon ("title":) or a closing backtick (`"class"`). Values such as
 // "bug" or "path/to/file.go:Symbol" never match.
@@ -66,7 +61,7 @@ func TestRelayKeysMatchIssueIntentTags(t *testing.T) {
 		}
 	}
 	for k := range structKeys {
-		if !taught[k] && !untaughtAllowed[k] {
+		if !taught[k] {
 			missingTaught = append(missingTaught, k)
 		}
 	}
