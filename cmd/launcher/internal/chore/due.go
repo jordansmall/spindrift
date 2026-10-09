@@ -93,6 +93,9 @@ const (
 	// TokenCeilingReached means today's total token usage already reached
 	// Budgets.DailyTokenCeiling.
 	TokenCeilingReached
+	// TooFewRecords means a records-scoped Chore (ADR 0062) has fewer new
+	// settled Dispatch Records than its minimum, or none at all.
+	TooFewRecords
 )
 
 // String gives the short human text the cmd layer prints as
@@ -116,6 +119,8 @@ func (r NotDue) String() string {
 		return "a full sweep's findings would exceed today's finding budget"
 	case TokenCeilingReached:
 		return "daily token ceiling reached"
+	case TooFewRecords:
+		return "too few new settled records"
 	default:
 		return "unknown"
 	}
@@ -134,6 +139,38 @@ func (r NotDue) String() string {
 // trusting the caller's window precisely, so a caller that over-fetches
 // doesn't change the result.
 func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, room Room, cfg DueConfig) NotDue {
+	if r := checkGates(tip, recent, now, room, cfg); r != Due {
+		return r
+	}
+
+	// Fully rotated (cursor back at the top) with no new commits since the
+	// last sweep: nothing new to scan.
+	if tip.State.LastSwept == head && tip.State.Cursor == "" {
+		return NothingToScan
+	}
+
+	return Due
+}
+
+// CheckRecords is Check for a records-scoped Chore (ADR 0062): the same claim,
+// interval and budget gates, but the something-to-scan test counts new settled
+// Dispatch Records (NewSettledRecords) instead of comparing the tree head. It
+// returns TooFewRecords when newSettled is under minRecords. newSettled == 0 is
+// never due, whatever minRecords is: a missing or empty store is the caller
+// passing 0, and a Chore with nothing to read must not run.
+func CheckRecords(tip ledger.Tip, recent []ledger.Entry, newSettled, minRecords int, now time.Time, room Room, cfg DueConfig) NotDue {
+	if r := checkGates(tip, recent, now, room, cfg); r != Due {
+		return r
+	}
+	if newSettled <= 0 || newSettled < minRecords {
+		return TooFewRecords
+	}
+	return Due
+}
+
+// checkGates is the claim, interval and budget prefix Check and CheckRecords
+// share: Due when none blocks.
+func checkGates(tip ledger.Tip, recent []ledger.Entry, now time.Time, room Room, cfg DueConfig) NotDue {
 	// A live (non-stale) claim blocks the run outright; a stale one is
 	// taken over, so it falls through to the checks below rather than
 	// blocking. Claim carries LastSwept/Cursor forward from the tip it was
@@ -146,17 +183,7 @@ func Check(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, ro
 		return IntervalNotElapsed
 	}
 
-	if room.Reason != Due {
-		return room.Reason
-	}
-
-	// Fully rotated (cursor back at the top) with no new commits since the
-	// last sweep: nothing new to scan.
-	if tip.State.LastSwept == head && tip.State.Cursor == "" {
-		return NothingToScan
-	}
-
-	return Due
+	return room.Reason
 }
 
 // newestDoneWithin is the interval rule Check and NextDue share: the time of
@@ -188,6 +215,21 @@ func newestDoneWithin(recent []ledger.Entry, now time.Time, every time.Duration)
 // NothingToScan lifts only on a head move: (zero, true). A Claimed tip with no
 // ClaimedBy is never stale, so no time lifts it: (zero, false).
 func NextDue(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, room Room, cfg DueConfig) (at time.Time, onTipMove bool) {
+	return nextDue(Check(tip, recent, head, now, room, cfg), tip, recent, now, room, cfg)
+}
+
+// RecordsRecheck is how often a records-scoped Chore short of Records polls the
+// store. Records settle on no event the daemon watches (a failed or unmerged
+// Dispatch moves no tip), so a tip move cannot lift TooFewRecords.
+const RecordsRecheck = time.Hour
+
+// NextDueRecords is NextDue for CheckRecords. TooFewRecords lifts at a dated
+// re-check RecordsRecheck from now, never on a tip move.
+func NextDueRecords(tip ledger.Tip, recent []ledger.Entry, newSettled, minRecords int, now time.Time, room Room, cfg DueConfig) (at time.Time, onTipMove bool) {
+	return nextDue(CheckRecords(tip, recent, newSettled, minRecords, now, room, cfg), tip, recent, now, room, cfg)
+}
+
+func nextDue(reason NotDue, tip ledger.Tip, recent []ledger.Entry, now time.Time, room Room, cfg DueConfig) (at time.Time, onTipMove bool) {
 	// laterOfBudget holds a lift back to the next midnight when the budget is
 	// spent too, since a re-check any earlier would only meet that budget.
 	laterOfBudget := func(lift time.Time) time.Time {
@@ -199,7 +241,7 @@ func NextDue(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, 
 		}
 		return lift
 	}
-	switch Check(tip, recent, head, now, room, cfg) {
+	switch reason {
 	case LiveClaim:
 		if tip.State.ClaimedBy == nil {
 			return time.Time{}, false
@@ -210,6 +252,8 @@ func NextDue(tip ledger.Tip, recent []ledger.Entry, head string, now time.Time, 
 		return laterOfBudget(newest.Add(cfg.Every)), false
 	case NothingToScan:
 		return time.Time{}, true
+	case TooFewRecords:
+		return laterOfBudget(now.Add(RecordsRecheck)), false
 	case SweepBudgetSpent, FindingBudgetSpent, SweepFindingsExceedHeadroom, TokenCeilingReached:
 		_, next := ledger.DayBounds(now)
 		return next, false

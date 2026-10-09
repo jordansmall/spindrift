@@ -24,6 +24,7 @@ let
     )
   );
   catalogNamesSorted = sort lessThan catalog.names;
+  tuningRow = builtins.head (builtins.filter (c: c.name == "tuning") catalog.chores);
 
   # Mirrors nix/checks/network-mode.nix's mkHarnessWith: forces only
   # `.spindrift.drvPath`, which walks mkHarness's assert chain without paying
@@ -137,18 +138,13 @@ in
     pkgs.runCommand "chore-catalog-patch-class-off-list-throws" { } "touch $out";
 
   # A records-scoped Chore (ADR 0062) never promotes or patches; the catalog
-  # rejects a row that declares either.
+  # rejects a row that declares either. These override the real tuning row,
+  # so the rule is pinned against the shipped scopeSource, not a stand-in.
   chore-catalog-records-scoped-promotion-throws =
     let
       broken = builtins.tryEval (
         builtins.deepSeq (catalog.checkClassLists [
-          {
-            name = "demo";
-            classList = [ "a" ];
-            promotionClasses = [ "a" ];
-            patchClasses = [ ];
-            scopeSource = "records";
-          }
+          (tuningRow // { promotionClasses = [ (builtins.head tuningRow.classList) ]; })
         ]) "unreached"
       );
     in
@@ -161,13 +157,7 @@ in
     let
       broken = builtins.tryEval (
         builtins.deepSeq (catalog.checkClassLists [
-          {
-            name = "demo";
-            classList = [ "a" ];
-            promotionClasses = [ ];
-            patchClasses = [ "a" ];
-            scopeSource = "records";
-          }
+          (tuningRow // { patchClasses = [ (builtins.head tuningRow.classList) ]; })
         ]) "unreached"
       );
     in
@@ -175,6 +165,28 @@ in
       !broken.success
     ) "checkClassLists must throw when a records-scoped chore declares patchClasses";
     pkgs.runCommand "chore-catalog-records-scoped-patch-throws" { } "touch $out";
+
+  # scopeSource is a closed vocabulary: a typo must not silently make a
+  # records-scoped Chore tree-scoped.
+  chore-catalog-unknown-scope-source-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          (tuningRow // { scopeSource = "record"; })
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when a chore's scopeSource is neither \"tree\" nor \"records\"";
+    pkgs.runCommand "chore-catalog-unknown-scope-source-throws" { } "touch $out";
+
+  # The rules above key on scopeSource, so pin tuning itself to "records".
+  chore-catalog-tuning-is-records-scoped =
+    assert assertMsg (
+      (tuningRow.scopeSource or "tree") == "records"
+    ) "lib/chore-catalog.nix's tuning row must declare scopeSource = \"records\" (ADR 0062)";
+    pkgs.runCommand "chore-catalog-tuning-is-records-scoped" { } "touch $out";
 
   chore-catalog-built-ins-class-lists-ok =
     let

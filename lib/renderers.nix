@@ -708,6 +708,16 @@ rec {
           choreCatalog.everyDefaults.${n}
         }\",\n"
       ) everyNames;
+      labelNames = builtins.sort builtins.lessThan (builtins.attrNames choreCatalog.findingLabels);
+      labelWidth = builtins.foldl' (
+        a: n: if builtins.stringLength n > a then builtins.stringLength n else a
+      ) 0 labelNames;
+      labelLines = map (
+        n:
+        "\t\"${n}\":${padRight (labelWidth - builtins.stringLength n + 1) ""}\"${
+          choreCatalog.findingLabels.${n}
+        }\",\n"
+      ) labelNames;
     in
     renderGoStringSliceFile {
       generator = "nix/regen.nix";
@@ -726,11 +736,19 @@ rec {
     + "}\n"
     + "\n// builtinRecordsScoped names the built-in Chores that sweep the dispatch record store\n"
     + "// instead of the Target repo's tree (ADR 0062).\n"
+    + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
     + "var builtinRecordsScoped = []string{${renderGoStringSlice choreCatalog.recordsScoped}}\n"
     + "\n// builtinEvery is each built-in Chore's catalog default sweep interval, a Go\n"
     + "// time.ParseDuration string; a Chore absent here has none.\n"
+    + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
     + "var builtinEvery = map[string]string{\n"
     + concatStrings everyLines
+    + "}\n"
+    + "\n// builtinFindingLabels is each built-in Chore's provenance label on its findings;\n"
+    + "// a Chore absent here has none.\n"
+    + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
+    + "var builtinFindingLabels = map[string]string{\n"
+    + concatStrings labelLines
     + "}\n";
 
   # cmd/launcher/internal/promptassembly/skillprobe.go's generated skill-baked

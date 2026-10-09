@@ -19,9 +19,11 @@ const DefaultEvery = 6 * time.Hour
 // (ADR 0056, ADR 0057).
 type Chore struct {
 	Name             string
-	Every            time.Duration // BUTLER_EVERY override, else its bare default, else DefaultEvery.
+	Every            time.Duration // BUTLER_EVERY override, else the catalog default (builtinEvery), else the bare default, else DefaultEvery.
 	PromotionClasses []string      // BUTLER_CHORE_CLASSES allow-list; nil when the Chore has no entry.
 	PatchClasses     []string      // BUTLER_PATCH_CLASSES allow-list; nil unless MaxPatchesPerDay > 0 and the Chore has an entry (ADR 0057).
+	Records          bool          // Swept from the Dispatch Records store, not the tree; never promotes or patches (ADR 0062).
+	FindingLabel     string        // Provenance label every finding of this Chore wears (the catalog's findingLabel); empty for a Chore with none.
 	ClassList        []string      // Closed class list the Box classifies from (issue #4766): the catalog's plus any extra PromotionClasses; nil for a Consumer-declared Chore.
 }
 
@@ -100,6 +102,10 @@ func Load(k Knobs) ([]Chore, error) {
 		// can't fail.
 		for _, entry := range strings.Fields(k.Classes) {
 			name, _, _ := strings.Cut(entry, "=")
+			if slices.Contains(builtinRecordsScoped, name) {
+				errs = append(errs, fmt.Errorf("BUTLER_CHORE_CLASSES: chore %q is records-scoped and never promotes (ADR 0062)", name))
+				continue
+			}
 			if enabled[name] > 0 || slices.Contains(builtinChores, name) {
 				continue
 			}
@@ -119,6 +125,10 @@ func Load(k Knobs) ([]Chore, error) {
 			// fail.
 			for _, entry := range strings.Fields(k.PatchClasses) {
 				name, classesPart, _ := strings.Cut(entry, "=")
+				if slices.Contains(builtinRecordsScoped, name) {
+					errs = append(errs, fmt.Errorf("BUTLER_PATCH_CLASSES: chore %q is records-scoped and never patches (ADR 0062)", name))
+					continue
+				}
 				if enabled[name] == 0 {
 					errs = append(errs, fmt.Errorf("BUTLER_PATCH_CLASSES: chore %q is not enabled (BUTLER_CHORES=%q)", name, k.Chores))
 					continue
@@ -148,6 +158,8 @@ func Load(k Knobs) ([]Chore, error) {
 			Every:            everyCfg.For(name),
 			PromotionClasses: promotionClassesMap[name],
 			PatchClasses:     patchClassesMap[name],
+			Records:          slices.Contains(builtinRecordsScoped, name),
+			FindingLabel:     builtinFindingLabels[name],
 			ClassList:        classList(name, promotionClassesMap[name]),
 		}
 	}
@@ -162,13 +174,33 @@ type everyConfig struct {
 	overrides map[string]time.Duration
 }
 
-// For returns name's interval: its override, else the bare default.
+// For returns name's interval: its override, else its catalog default
+// (builtinEvery), else the bare default. The catalog default outranks the bare
+// token: a Chore the catalog gives its own cadence must not be dragged onto
+// the sweep-wide one.
 func (c everyConfig) For(name string) time.Duration {
 	if d, ok := c.overrides[name]; ok {
 		return d
 	}
+	if d, ok := catalogEvery[name]; ok {
+		return d
+	}
 	return c.dflt
 }
+
+// catalogEvery is builtinEvery parsed. A malformed generated string is a
+// programming error, so it panics at init.
+var catalogEvery = func() map[string]time.Duration {
+	out := make(map[string]time.Duration, len(builtinEvery))
+	for name, s := range builtinEvery {
+		d, err := parseNonNegativeDuration(s)
+		if err != nil {
+			panic(fmt.Sprintf("chore: builtinEvery[%q]: %v", name, err))
+		}
+		out[name] = d
+	}
+	return out
+}()
 
 // parseEvery parses BUTLER_EVERY's grammar (ADR 0056): space-separated
 // tokens, each either a bare Go time.ParseDuration string (the default

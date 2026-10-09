@@ -10,10 +10,13 @@
 # Consumer may replace.
 #
 # Optional row fields: scopeSource ("tree", the default, sweeps the Target
-# repo's tree; "records" sweeps the dispatch record store, ADR 0062) and
-# every (a catalog default sweep interval, Go duration string).
+# repo's tree; "records" sweeps the dispatch record store, ADR 0062),
+# every (a catalog default sweep interval, Go duration string), and
+# findingLabel (a provenance label every finding of the Chore wears, e.g.
+# the tuning Chore's agent-tuning-finding, ADR 0062).
 let
-  # Throws unless every chore's promotionClasses and patchClasses sit on its
+  # Throws unless every chore's scopeSource is "tree" or "records" (absent
+  # means tree), every chore's promotionClasses and patchClasses sit on its
   # classList, and a records-scoped chore declares neither (it files
   # findings for a human and never promotes or patches, ADR 0062); exported
   # so nix/checks/chore-catalog.nix can feed it broken catalogs.
@@ -23,10 +26,22 @@ let
       missing =
         c: builtins.filter (k: !builtins.elem k c.classList) (c.promotionClasses ++ c.patchClasses);
       isRecords = c: (c.scopeSource or "tree") == "records";
+      badScope = builtins.filter (
+        c:
+        !builtins.elem (c.scopeSource or "tree") [
+          "tree"
+          "records"
+        ]
+      ) cs;
       recordsBad = builtins.filter (c: isRecords c && (c.promotionClasses ++ c.patchClasses) != [ ]) cs;
       bad = builtins.filter (c: missing c != [ ]) cs;
     in
-    if recordsBad != [ ] then
+    if badScope != [ ] then
+      throw (
+        "lib/chore-catalog.nix: scopeSource must be \"tree\" or \"records\": "
+        + builtins.concatStringsSep ", " (map (c: "${c.name}=${c.scopeSource}") badScope)
+      )
+    else if recordsBad != [ ] then
       throw (
         "lib/chore-catalog.nix: records-scoped chores must declare no promotionClasses or patchClasses: "
         + builtins.concatStringsSep ", " (map (c: c.name) recordsBad)
@@ -98,6 +113,7 @@ let
       patchClasses = [ ];
       scopeSource = "records";
       every = "24h";
+      findingLabel = "agent-tuning-finding";
     }
   ];
   names = map (c: c.name) chores;
@@ -109,6 +125,12 @@ let
       inherit (c) name;
       value = c.every;
     }) (builtins.filter (c: c ? every) chores)
+  );
+  findingLabels = builtins.listToAttrs (
+    map (c: {
+      inherit (c) name;
+      value = c.findingLabel;
+    }) (builtins.filter (c: c ? findingLabel) chores)
   );
   classLists = builtins.listToAttrs (
     map (c: {
@@ -134,10 +156,12 @@ let
 in
 {
   inherit
+    chores
     names
     classLists
     recordsScoped
     everyDefaults
+    findingLabels
     classesDefault
     patchClassesDefault
     checkClassLists

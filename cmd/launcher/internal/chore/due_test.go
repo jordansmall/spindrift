@@ -267,6 +267,7 @@ func TestNotDueString(t *testing.T) {
 		{chore.FindingBudgetSpent, "daily finding budget spent"},
 		{chore.SweepFindingsExceedHeadroom, "a full sweep's findings would exceed today's finding budget"},
 		{chore.TokenCeilingReached, "daily token ceiling reached"},
+		{chore.TooFewRecords, "too few new settled records"},
 		{chore.NotDue(99), "unknown"},
 	}
 	for _, tt := range tests {
@@ -494,4 +495,84 @@ func TestNextDue(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCheckRecords(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	cfg := chore.DueConfig{Every: 24 * time.Hour, ClaimTimeout: time.Hour}
+	spent := chore.Budgets{MaxSweepsPerDay: 1}.Room(ledger.Totals{Claims: 1})
+	justDone := []ledger.Entry{{At: now.Add(-time.Hour), State: ledger.State{Phase: ledger.Done}}}
+
+	tests := []struct {
+		name       string
+		tip        ledger.Tip
+		recent     []ledger.Entry
+		newSettled int
+		min        int
+		room       chore.Room
+		want       chore.NotDue
+	}{
+		{name: "enough new records is due", newSettled: 20, min: 20, want: chore.Due},
+		{name: "one short is too few", newSettled: 19, min: 20, want: chore.TooFewRecords},
+		{name: "empty store is never due even with a zero minimum", newSettled: 0, min: 0, want: chore.TooFewRecords},
+		{name: "negative minimum still never makes an empty store due", newSettled: 0, min: -1, want: chore.TooFewRecords},
+		{name: "zero minimum with a record is due", newSettled: 1, min: 0, want: chore.Due},
+		{
+			name:       "a fully rotated tip is still due: head is irrelevant",
+			tip:        ledger.Tip{Commit: "c1", State: ledger.State{Phase: ledger.Done}},
+			newSettled: 5, min: 5, want: chore.Due,
+		},
+		{
+			name: "live claim blocks",
+			tip: ledger.Tip{State: ledger.State{
+				Phase: ledger.Claimed, ClaimedBy: &ledger.ClaimedBy{Start: now.Add(-time.Minute)},
+			}},
+			newSettled: 50, min: 5, want: chore.LiveClaim,
+		},
+		{name: "interval not elapsed blocks", recent: justDone, newSettled: 50, min: 5, want: chore.IntervalNotElapsed},
+		{name: "spent budget blocks", newSettled: 50, min: 5, room: spent, want: chore.SweepBudgetSpent},
+		{name: "interval outranks too few records", recent: justDone, newSettled: 1, min: 5, want: chore.IntervalNotElapsed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := chore.CheckRecords(tt.tip, tt.recent, tt.newSettled, tt.min, now, tt.room, cfg)
+			if got != tt.want {
+				t.Errorf("CheckRecords() = %d (%s), want %d (%s)", got, got, tt.want, tt.want)
+			}
+		})
+	}
+}
+
+func TestNextDueRecords(t *testing.T) {
+	now := time.Date(2026, 9, 27, 12, 0, 0, 0, time.UTC)
+	cfg := chore.DueConfig{Every: time.Hour, ClaimTimeout: 2 * time.Hour}
+	newestDone := now.Add(-10 * time.Minute)
+
+	t.Run("due returns now", func(t *testing.T) {
+		at, onMove := chore.NextDueRecords(ledger.Tip{}, nil, 9, 5, now, chore.Room{}, cfg)
+		if !at.Equal(now) || onMove {
+			t.Errorf("= (%v, %v), want (%v, false)", at, onMove, now)
+		}
+	})
+	t.Run("too few records lifts at a dated re-check, not a tip move", func(t *testing.T) {
+		at, onMove := chore.NextDueRecords(ledger.Tip{}, nil, 1, 5, now, chore.Room{}, cfg)
+		if want := now.Add(chore.RecordsRecheck); !at.Equal(want) || onMove {
+			t.Errorf("= (%v, %v), want (%v, false)", at, onMove, want)
+		}
+	})
+	t.Run("too few records with a spent budget lifts at the later midnight", func(t *testing.T) {
+		room := chore.Room{Reason: chore.SweepBudgetSpent}
+		at, onMove := chore.NextDueRecords(ledger.Tip{}, nil, 1, 5, now, room, cfg)
+		_, midnight := ledger.DayBounds(now)
+		if !at.Equal(midnight) || onMove {
+			t.Errorf("= (%v, %v), want (%v, false)", at, onMove, midnight)
+		}
+	})
+	t.Run("interval not elapsed lifts at newest done plus Every", func(t *testing.T) {
+		recent := []ledger.Entry{{At: newestDone, State: ledger.State{Phase: ledger.Done}}}
+		at, onMove := chore.NextDueRecords(ledger.Tip{}, recent, 9, 5, now, chore.Room{}, cfg)
+		if want := newestDone.Add(cfg.Every); !at.Equal(want) || onMove {
+			t.Errorf("= (%v, %v), want (%v, false)", at, onMove, want)
+		}
+	})
 }
