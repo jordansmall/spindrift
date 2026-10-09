@@ -156,6 +156,10 @@ type DispatchSettled struct {
 	Reason string `json:"reason,omitempty"`
 	Note   string `json:"note,omitempty"`
 	PRURL  string `json:"pr_url,omitempty"`
+	// MergeCommit is the commit the forge reports for the merged PR (GitHub
+	// mergeCommit, Forgejo merge_commit_sha); set only when Reason is merged and
+	// the forge could say.
+	MergeCommit string `json:"merge_commit,omitempty"`
 	// HostToken echoes the log's DispatchStart.HostToken.
 	HostToken string `json:"host_token,omitempty"`
 }

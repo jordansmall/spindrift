@@ -88,6 +88,14 @@ type Record struct {
 	Reason        string `json:"reason,omitempty"`
 	Note          string `json:"note,omitempty"`
 	PRURL         string `json:"pr_url,omitempty"`
+	// MergeCommit is the forge's merge commit for a merged PR, when the host
+	// recorded one.
+	MergeCommit string `json:"merge_commit,omitempty"`
+	// Reverted and MaturedAt are filled by FillReverts, never by a log: nil
+	// until the revert window after MergeCommit has been checked against a
+	// clone that covers it.
+	Reverted  *bool      `json:"reverted,omitempty"`
+	MaturedAt *time.Time `json:"matured_at,omitempty"`
 	// BoxStatus is the Box's own SPINDRIFT_OUTCOME status= self-report; it never
 	// stands in for Outcome.
 	BoxStatus string `json:"box_status,omitempty"`
@@ -476,6 +484,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		if settled != nil {
 			rec.Outcome, rec.OutcomeSource = settled.State, OutcomeSourceSettled
 			rec.Reason, rec.Note, rec.PRURL = settled.Reason, settled.Note, settled.PRURL
+			rec.MergeCommit = settled.MergeCommit
 			rec.BoxStatus = boxStatus
 		}
 		return rec, false, stamp.Started.UTC(), nil
