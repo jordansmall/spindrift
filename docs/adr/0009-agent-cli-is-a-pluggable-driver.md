@@ -325,3 +325,56 @@ Driver/Provider selection (see `docs/reference.md`'s network-knob rows).
 Full sources (opencode's provider docs at https://opencode.ai/docs/providers/,
 the `@ai-sdk/openai-compatible` loader, and this repo's runner code) and the
 reasoning live on issue #269.
+
+## Amendment (issue #4945): pi joins as a third Driver
+
+`pi` (nixpkgs `pi-coding-agent`, binary `pi`) becomes a third Driver beside
+`claude` and `opencode`. It is selected through ADR 0064's Driver map and
+parsed by an ADR 0065 decoder. Its choices, each checked against the locked
+package (0.99.2):
+
+- **Invocation.** `--print --mode json --no-approve`, `--model` for the
+  model, `--thinking` as the effort flag, positional prompt. Effort values
+  pass through: pi's `off`…`max` is a superset of `claude`'s.
+- **Roster.** pi has no built-in subagents. Its official subagent extension,
+  shipped in the same package, is linked from the store into pi's agent
+  directory, not vendored and not loaded with `-e`, so child `pi` processes
+  load it too. Roles render as Markdown agent files, like `opencode`'s.
+  Per-role effort rides as a `<model>:<level>` suffix, because the extension
+  forwards the parent's thinking level only to model-less agents. An
+  evaluation assert therefore requires a model on any role that sets an
+  effort.
+- **Usage by role.** The decoder unwraps each child's messages from the
+  subagent tool's result details and tags them with the agent's name as the
+  role. Usage comes from those messages, never from the extension's summed
+  totals. A captured Pass log from the locked version pins that shape, so a
+  nixpkgs bump that reshapes it fails CI.
+- **Credentials.** Provider API keys arrive through the environment. pi has
+  no env-native auth store (unlike `OPENCODE_AUTH_CONTENT`), so a new secret
+  knob `PI_AUTH_CONTENT` is written into pi's `auth.json` inside the Box. It
+  uses a new env-value-to-in-Box-file primitive, the one the #267 amendment
+  found missing for Vertex. Only non-rotating OAuth entries are accepted,
+  which today means GitHub Copilot, whose refresh token is a stable GitHub
+  token. pi may refresh inside the Box without invalidating the host's copy.
+  Preflight rejects OAuth entries for Providers that rotate refresh tokens;
+  host-side refresh for those is a later decision.
+- **Hooks.** A spindrift-owned pi extension bridges pi's `tool_call` and
+  `tool_result` events to the existing `claude` hook scripts, which it runs
+  unchanged. A deny becomes a block, a rewritten input feeds the next script,
+  and a replaced output replaces the result. A script failure blocks the
+  tool. The script list is generated from the same data as `claude`'s hook
+  settings. Unlike `opencode`, pi therefore keeps credential deny, the
+  environment credential scrub, background-Bash rejection and the Bash
+  output tee.
+- **Project trust.** `--no-approve` ignores the Target repo's `.pi/`
+  settings, extensions, MCP servers, skills and prompts, so nothing from the
+  repository runs beside the hook bridge. pi still reads `CLAUDE.md` and
+  `AGENTS.md`, which need no trust.
+- **Session resume.** Both pin and resume render `--session-id <id>`, which
+  pi opens or creates. The deterministic id derivation moves into driverkit,
+  shared with `claude`.
+- **Subagent capability.** The `opencode`-only branch that disables the Filer
+  and worker becomes a Driver capability, "hosts subagents". `pi` declares
+  it; `opencode` does not.
+
+Full findings and the testing plan live on issue #4945.
