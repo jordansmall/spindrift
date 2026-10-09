@@ -133,8 +133,9 @@ type WorkSettler interface {
 	SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit Situation, result dispatch.Result) (bool, error)
 
 	// SituationFor computes num's adoption-evidence Situation (issue #2501) so
-	// main.go's recoverByNumber can thread the same value into
-	// SettleRelayedBranch. openPRFound is the caller's own resolved fact.
+	// main.go's package-level recoverIssue (shared by `recover <n>` and queue
+	// mode) can thread the same value into SettleRelayedBranch. openPRFound is
+	// the caller's own resolved fact.
 	SituationFor(num string, openPRFound bool, result dispatch.Result) Situation
 }
 

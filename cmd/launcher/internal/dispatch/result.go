@@ -121,8 +121,8 @@ type Result struct {
 //  2. ResolveConflict's error return, which can be runner.ErrAlreadyRunning;
 //     callers must errors.Is it ahead of their generic error arm (settle's
 //     ready.go does).
-//  3. ErrIssueClaimed from a direct ClaimIssue caller, such as recoverByNumber
-//     in cmd/launcher/main.go (issue #4364).
+//  3. ErrIssueClaimed from a direct ClaimIssue caller, such as the
+//     package-level recoverIssue in cmd/launcher/main.go (issue #4364).
 type Disposition struct {
 	kind   dispositionKind
 	result Result
