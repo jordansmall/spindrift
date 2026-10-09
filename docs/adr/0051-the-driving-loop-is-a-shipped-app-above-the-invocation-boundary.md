@@ -171,7 +171,11 @@ Exit 4 is vestigial here. It reports that a long-lived invocation's image drifte
 from the base tip, and a rev-pinned single-Box child is fresh by construction.
 
 Halting means the same thing everywhere: stop filling slots, let running
-children drain, exit. It never kills work already paid for.
+children drain, exit. It never kills work already paid for. (Amended by
+[ADR 0063](0063-the-daemon-prebuilds-its-successor-and-can-restart-in-place-keeping-its-children.md):
+under `--restart-in-place` a self-change hands its running children to a
+successor `exec`ed in the same process instead of draining them, and every
+mode builds and smoke-tests the successor before halting.)
 
 A single child's failure must not stop the others — one malformed issue should
 not end the night — but an unclassified failure repeating across the pool is a

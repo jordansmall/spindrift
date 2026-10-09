@@ -45,7 +45,10 @@ is a compile error rather than a silent parse miss.
 operator sets it, and it does not appear in `harness.env.example`. The
 child's own stdout is unaffected by any of this — it is relayed to the
 daemon's stderr byte-for-byte, with no userspace parsing standing between
-the two.
+the two. (Amended by
+[ADR 0063](0063-the-daemon-prebuilds-its-successor-and-can-restart-in-place-keeping-its-children.md):
+a child's stdout and stderr now go straight to its Child log file, so no
+daemon-side pipe can stall or kill it.)
 
 ## Consequences
 
@@ -56,6 +59,10 @@ the parity test that pinned the line's format against the regex. The
 contract between the two sides changes atomically rather than needing a
 compatibility window, because the daemon and the child it spawns are built
 from the same source tree — a child is never newer than the daemon that
-started it. A `settled` record now gives an issue's terminal state and
+started it. (Amended by
+[ADR 0063](0063-the-daemon-prebuilds-its-successor-and-can-restart-in-place-keeping-its-children.md):
+an in-place restart carries the pipe's read end across `exec` to a newer
+image, so an inherited child can be *older* than the daemon reading it, and
+record decoding must stay readable across that gap.) A `settled` record now gives an issue's terminal state and
 settling note a place to live past the run that produced them, closing the
 gap that motivated this change in the first place.
