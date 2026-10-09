@@ -1054,17 +1054,18 @@ func checkAutoMergePreflight(c config, caps forge.Capabilities) error {
 	return nil
 }
 
-// errLaunchGateConfigInvalid is the sentinel the launch gates below wrap
-// their misconfiguration errors with. Kept distinct from bootstrap.go's
-// errConfigInvalid because bootstrap, preview and recover also call these
-// gates, and reusing it would silently move their exit code to 6. doctor.go
-// checks it and classifies a gate failure as exit 2 (issue #2942).
+// errLaunchGateConfigInvalid is the sentinel the config-only launch gates (the
+// gateRegistry entries without Network set) wrap their misconfiguration
+// errors with. Kept distinct from bootstrap.go's errConfigInvalid because
+// bootstrap, preview and recover also call these gates, and reusing it would
+// silently move their exit code to 6. doctor.go checks it and classifies a
+// gate failure as exit 2 (issue #2942).
 var errLaunchGateConfigInvalid = errors.New("launch gate config invalid")
 
-// launchGateConfigError is what the two launch gates return. Error() returns
-// only the operator-facing text, never the sentinel's, so dispatch, recover
-// and preview print it verbatim; Unwrap() still exposes the sentinel for
-// doctorExitCodeFor's errors.Is check.
+// launchGateConfigError is what the config-only launch gates return. Error()
+// returns only the operator-facing text, never the sentinel's, so dispatch,
+// recover and preview print it verbatim; Unwrap() still exposes the sentinel
+// for doctorExitCodeFor's errors.Is check.
 type launchGateConfigError struct {
 	msg string
 }
