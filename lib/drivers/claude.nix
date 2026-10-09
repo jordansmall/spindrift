@@ -11,7 +11,7 @@
 
   bin = "claude";
 
-  # Space-separated so agent/entrypoint.sh can splice these in unquoted.
+  # Space-separated so driver-exec can word-split these (strings.Fields).
   # --disallowedTools removes the tools that promise a later re-invocation the
   # headless runner never makes (issue #1609; #1542 lost a run when the Driver
   # backgrounded its test gate behind ScheduleWakeup). Keep the tool names one
@@ -47,7 +47,8 @@
   # never reach bash as interpolated strings. Takes the whole roster (issue
   # #264); lib/mkHarness.nix already dropped empty-model entries through
   # rosterLib.dropOptedOut, so e.model is non-empty. `prompt` stays "" because
-  # entrypoint.sh injects it at runtime; claude's schema has no `mode` key.
+  # cmd/launcher/internal/promptassembly injects it at runtime; claude's schema
+  # has no `mode` key.
   agentsJsonTemplate =
     { roster }:
     let

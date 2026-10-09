@@ -28,8 +28,9 @@ let
       missing = lib.filter (attr: !(entry ? ${attr})) requiredAttrs;
       # isString is checked first so a non-string value short-circuits the
       # segment check rather than throwing a type error out of splitString.
-      # A "." segment ("./x", "x/.") defeats agent/entrypoint.sh's
-      # string-equality chmod-skip guard just as a stray slash does.
+      # Keep the path canonical: homelayout.PopulateHome cleans it before its
+      # chmod-skip comparison, but a "." segment ("./x", "x/.") is still a
+      # redundant spelling, refused here like a stray slash.
       sessionCacheDirRelativeBad =
         entry ? sessionCacheDirRelative
         && !(
@@ -160,9 +161,10 @@ let
     );
 
   # bashTimeoutEnv (issue #4409) is plain data, not an export: the Consumer's
-  # timeout value is only known at run time, so entrypoint.sh exports it under
-  # each name listed here. Absent renders no line, so a Driver with no such
-  # env vars (opencode) ignores the knob without any branch on its name.
+  # timeout value is only known at run time, so the box program
+  # (cmd/launcher/box) exports it under each name listed here. Absent renders
+  # no line, so a Driver with no such env vars (opencode) ignores the knob
+  # without any branch on its name.
   renderBashTimeoutEnv =
     driverEntry:
     lib.optionalString (driverEntry ? bashTimeoutEnv) (
@@ -220,8 +222,8 @@ let
     + "\n"
     # renderPreamble emits this var only when the entry declares
     # agentFilesDirRelative (opencode only), leaving it unset rather than empty
-    # so entrypoint.sh's file-rewrite loop (issue #2153) is a true no-op for
-    # claude, whose subagents use no on-disk files.
+    # so promptassembly's file-rewrite loop (issue #2153) is a true no-op
+    # for claude, whose subagents use no on-disk files.
     + lib.optionalString (driverEntry ? agentFilesDirRelative) (
       "DRIVER_AGENT_FILES_DIR="
       + lib.escapeShellArg "/home/agent/${driverEntry.agentFilesDirRelative}"
