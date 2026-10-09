@@ -5824,7 +5824,7 @@ Record until it gains output.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 8. Version 2 added the `verdict_text` and
+own. The current schema is version 10. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. An older store opens, migrates, and keeps
 its rows; the migrations also mark every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
@@ -5840,7 +5840,13 @@ the post-merge `reverted` and `matured_at` columns (see Reverts below),
 upgrading a store in place with them empty. Version 9 adds the post-merge
 `churn_14d` column (see Churn below) and clears every earlier `matured_at`
 but keeps the `reverted` verdict, so the next pass judges churn and
-re-judges it where it can. The store uses WAL journaling, so another process
+re-judges it where it can. Version 10 adds the `settled_seq` column, the
+store's monotonic settle order: the upsert assigns it the first time a row is
+written as settled and never changes it, so it orders Records by when the host
+settled them, which claim time cannot (a long-running Dispatch claims early and
+settles late). Rows settled before the migration have no recorded settle time,
+so the migration backfills them in claim order. `spindrift stats` JSONL carries
+it as `settled_seq` (omitted until the Record is settled). The store uses WAL journaling, so another process
 can read it while `stats` writes. Because Records are kept in the database,
 they survive deleting the logs they came from. Deleting the database instead
 loses every Record whose log is gone: a re-run rebuilds only from the logs
