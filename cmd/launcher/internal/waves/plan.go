@@ -49,9 +49,10 @@ type Issue struct {
 	Title  string
 
 	// Generation is the terminate.Registry generation this issue's claim was
-	// launched under (#743). Every headless dispatch path leaves it zero, which
-	// Registry.Marked never matches. Console sets it so the eventual Settle
-	// checks this incarnation, not whichever one last held the issue number.
+	// launched under (#743). Headless dispatch paths leave it zero, which
+	// matches the Mark any Reclaim takes on that never-Begun issue. Console
+	// sets it via Begin so the eventual Settle checks this incarnation only,
+	// not whichever one last held the issue number.
 	Generation uint64
 
 	// Priority is the issue's agent-priority-{critical,high,low} tier (ADR

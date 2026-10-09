@@ -104,7 +104,8 @@ type Settler interface {
 	// Settle interprets result and drives num to its terminal label. gen is the
 	// terminate.Registry generation (issue #743) this call's own dispatch was
 	// launched under, so a re-pick's later generation is never mistaken for it.
-	// Callers with no Registry pass the zero value, which matches no real mark.
+	// Generation 0 is that of an issue no Begin has bumped, so a caller that
+	// never calls Begin (recover, headless waves) still matches a Mark on it.
 	Settle(d dispatch.Dispatcher, num string, gen uint64, result dispatch.Result)
 
 	// Fail records a Box that ran and exited non-zero. The caller already
