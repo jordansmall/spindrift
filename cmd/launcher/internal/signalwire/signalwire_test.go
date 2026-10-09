@@ -63,6 +63,12 @@ func TestIssueIntentValidate(t *testing.T) {
 		{"bad class leading hyphen", IssueIntent{Title: "t", Body: "b", Class: "-x"}, "invalid_class", 400},
 		{"bad class over max length", IssueIntent{Title: "t", Body: "b", Class: strings.Repeat("a", MaxClassLen+1)}, "invalid_class", 400},
 		{"bad class embedded space", IssueIntent{Title: "t", Body: "b", Class: "a b"}, "invalid_class", 400},
+		{"cites and metric ok", IssueIntent{Title: "t", Body: "b", Cites: []string{"summary:usd-per-record", "role:implement:avg-usd"}, Metric: "usd-per-record"}, "", 0},
+		{"blank cite", IssueIntent{Title: "t", Body: "b", Cites: []string{" "}}, "empty", 400},
+		{"invalid utf-8 in cite", IssueIntent{Title: "t", Body: "b", Cites: []string{bad}}, "invalid_utf8", 400},
+		{"oversize cite", IssueIntent{Title: "t", Body: "b", Cites: []string{big}}, "oversize", 413},
+		{"invalid utf-8 in metric", IssueIntent{Title: "t", Body: "b", Metric: bad}, "invalid_utf8", 400},
+		{"bad metric uppercase", IssueIntent{Title: "t", Body: "b", Metric: "Block_Rate"}, "invalid_metric", 400},
 	}
 
 	for _, tc := range cases {
