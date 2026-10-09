@@ -16,10 +16,19 @@ var builtinClassLists = map[string][]string{
 
 // builtinRecordsScoped names the built-in Chores that sweep the dispatch record store
 // instead of the Target repo's tree (ADR 0062).
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
 var builtinRecordsScoped = []string{"tuning"}
 
 // builtinEvery is each built-in Chore's catalog default sweep interval, a Go
 // time.ParseDuration string; a Chore absent here has none.
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
 var builtinEvery = map[string]string{
 	"tuning": "24h",
+}
+
+// builtinFindingLabels is each built-in Chore's provenance label on its findings;
+// a Chore absent here has none.
+// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
+var builtinFindingLabels = map[string]string{
+	"tuning": "agent-tuning-finding",
 }

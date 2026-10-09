@@ -48,6 +48,51 @@ func TestLoad(t *testing.T) {
 			want:   []Chore{{Name: "bugs", Every: 0}},
 		},
 		{
+			name:   "records-scoped chore takes its catalog interval over the bare token",
+			chores: "bugs tuning",
+			every:  "3h",
+			want: []Chore{
+				{Name: "bugs", Every: 3 * time.Hour},
+				{Name: "tuning", Every: 24 * time.Hour, Records: true, FindingLabel: "agent-tuning-finding"},
+			},
+		},
+		{
+			name:   "records-scoped chore takes its catalog interval over DefaultEvery",
+			chores: "tuning",
+			want:   []Chore{{Name: "tuning", Every: 24 * time.Hour, Records: true, FindingLabel: "agent-tuning-finding"}},
+		},
+		{
+			name:   "BUTLER_EVERY override beats the catalog interval",
+			chores: "tuning",
+			every:  "3h tuning=48h",
+			want:   []Chore{{Name: "tuning", Every: 48 * time.Hour, Records: true, FindingLabel: "agent-tuning-finding"}},
+		},
+		{
+			name:   "override of 0 beats the catalog interval",
+			chores: "tuning",
+			every:  "tuning=0",
+			want:   []Chore{{Name: "tuning", Every: 0, Records: true, FindingLabel: "agent-tuning-finding"}},
+		},
+		{
+			name:    "BUTLER_CHORE_CLASSES entry for a records-scoped chore is rejected",
+			chores:  "tuning",
+			classes: "tuning=cost-waste",
+			wantErr: `BUTLER_CHORE_CLASSES: chore "tuning" is records-scoped and never promotes (ADR 0062)`,
+		},
+		{
+			name:    "BUTLER_CHORE_CLASSES entry for a records-scoped chore is rejected though not enabled",
+			chores:  "bugs",
+			classes: "tuning=cost-waste",
+			wantErr: `BUTLER_CHORE_CLASSES: chore "tuning" is records-scoped`,
+		},
+		{
+			name:             "BUTLER_PATCH_CLASSES entry for a records-scoped chore is rejected",
+			chores:           "tuning",
+			patchClasses:     "tuning=cost-waste",
+			maxPatchesPerDay: 1,
+			wantErr:          `BUTLER_PATCH_CLASSES: chore "tuning" is records-scoped and never patches (ADR 0062)`,
+		},
+		{
 			name:   "empty BUTLER_CHORES",
 			chores: "",
 			want:   nil,
