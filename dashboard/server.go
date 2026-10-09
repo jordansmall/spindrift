@@ -155,6 +155,7 @@ type slotView struct {
 	ModelRole   string
 	CIWait      bool
 	PRURL       string
+	CIRunURL    string
 }
 
 // viewFrom builds the view from one read of the status file, which a stream
@@ -230,6 +231,7 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 			ModelRole:   sl.ModelRole,
 			CIWait:      sl.CIWait,
 			PRURL:       sl.PRURL,
+			CIRunURL:    sl.CIRunURL,
 		}
 		for _, is := range sl.Issues {
 			sv.Subject = append(sv.Subject, issueSubject(is).linked(repo))
