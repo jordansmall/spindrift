@@ -79,8 +79,9 @@ func (r *ResearchSettle) Settle(d dispatch.Dispatcher, num string, gen uint64, r
 	// and verdict-apply branches below both return early, and filing has already
 	// happened by then, so the tally must still print (issue #3608).
 	reportFiled(num, filed)
-	// Comment != "" is redundant now that parseSignalLine rejects a
-	// zero-length payload (issue #3668); kept because the failure it guards is
+	// Comment != "" is redundant now that both carriers reject a zero-length
+	// payload -- outcome's classifySignalLine on the log (issue #3668) and
+	// signalwire.CheckFields on the socket; kept because the failure it guards is
 	// user-visible -- an empty verdict comment on a human's tracker issue --
 	// and the else branch is the safer fallback if that invariant regresses.
 	if result.CommentFound && result.Comment != "" {
