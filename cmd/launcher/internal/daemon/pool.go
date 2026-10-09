@@ -315,10 +315,18 @@ type slotFlight struct {
 	// starts on a model of its own.
 	model     string
 	modelRole string
-	// ciWaitPR is the PR URL of the child's latest ci_wait record; non-empty
-	// means the child is waiting on that PR's CI. noteBox and noteSettled
+	// ciWait is the child's latest ci_wait record; noteBox and noteSettled
 	// clear it.
-	ciWaitPR string
+	ciWait ciWait
+}
+
+// ciWait is the state of a child's latest ci_wait record. A run_url-less
+// record (a new wait) resets runURL.
+type ciWait struct {
+	// pr is the PR URL; non-empty means the child is waiting on that PR's CI.
+	pr string
+	// runURL is the CI run URL, empty until the host finds the run.
+	runURL string
 }
 
 // newPool derives ctx into a context pool.cancel can stop independently of
@@ -672,7 +680,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 		flight.key = rec.Key
 		flight.pass = rec.Phase
 		flight.model, flight.modelRole = "", ""
-		flight.ciWaitPR = ""
+		flight.ciWait = ciWait{}
 		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
 			for _, existing := range flight.issues {
@@ -710,7 +718,7 @@ func (p *pool) noteCIWait(slot int, rec Record) {
 		if s.slots[slot].phase != PhaseRunning {
 			return nil
 		}
-		s.slots[slot].flight.ciWaitPR = rec.PRURL
+		s.slots[slot].flight.ciWait = ciWait{pr: rec.PRURL, runURL: rec.RunURL}
 		return nil
 	})
 }
@@ -743,7 +751,7 @@ func (p *pool) noteNotDue(slot int, rec Record) {
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase == PhaseRunning {
-			s.slots[slot].flight.ciWaitPR = ""
+			s.slots[slot].flight.ciWait = ciWait{}
 		}
 		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, RecordID: rec.RecordID, Slot: intPtr(slot)}}
 	})
@@ -1340,8 +1348,9 @@ func (p *pool) snapshotLocked() Status {
 		slots[i].Pass = ss.flight.pass
 		slots[i].Model = ss.flight.model
 		slots[i].ModelRole = ss.flight.modelRole
-		slots[i].CIWait = ss.flight.ciWaitPR != ""
-		slots[i].PRURL = ss.flight.ciWaitPR
+		slots[i].CIWait = ss.flight.ciWait.pr != ""
+		slots[i].PRURL = ss.flight.ciWait.pr
+		slots[i].CIRunURL = ss.flight.ciWait.runURL
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.

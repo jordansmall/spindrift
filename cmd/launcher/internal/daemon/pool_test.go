@@ -3004,3 +3004,52 @@ func TestPoolNoteCIWaitDroppedWhenSlotNotRunning(t *testing.T) {
 		t.Errorf("events = %q, want none", buf.String())
 	}
 }
+
+// TestPoolSnapshotPublishesCIRunURL pins that a ci_wait record's run_url rides
+// on the slot, that a run_url-less ci_wait record (a new wait) resets it, and
+// that the next box record, a settled record, or the child finishing clears it.
+func TestPoolSnapshotPublishesCIRunURL(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	work := KindOf(dispatchkind.Work)
+	key := dispatchkey.Issue("123")
+	const pr = "https://example.test/pr/7"
+	const run = "https://example.test/runs/9"
+	wait := func(runURL string) {
+		p.noteCIWait(0, Record{Event: report.EventCIWait, Key: key, PRURL: pr, RunURL: runURL})
+	}
+	want := func(step, url string) {
+		t.Helper()
+		if got := p.snapshot().Slots[0].CIRunURL; got != url {
+			t.Fatalf("%s: CIRunURL = %q, want %q", step, got, url)
+		}
+	}
+	start := func() {
+		t.Helper()
+		if _, _, ok := p.startChild(0, work, "rev1"); !ok {
+			t.Fatal("startChild refused the slot")
+		}
+	}
+
+	start()
+	wait("")
+	want("wait start, no run yet", "")
+	wait(run)
+	want("after run url appears", run)
+	wait("")
+	want("new wait resets", "")
+	wait(run)
+	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "fix-pass-1"})
+	want("after box record", "")
+	wait(run)
+	p.noteSettled(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
+	want("after settled record", "")
+	wait(run)
+	p.finishChild(0)
+	want("after finishChild", "")
+	start()
+	want("new child", "")
+}
