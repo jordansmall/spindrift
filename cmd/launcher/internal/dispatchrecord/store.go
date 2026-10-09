@@ -191,6 +191,12 @@ var migrations = []string{
 	DROP TABLE prompt_hashes;
 	ALTER TABLE prompt_hashes_v2 RENAME TO prompt_hashes;
 	UPDATE ingested_files SET mtime_ns = -1;`,
+	// v8: revert tracking (issue #4950). merge_commit is log-derived like
+	// pr_url; reverted (0/1) and matured_at (unix ms, UTC) are filled by
+	// FillReverts and NULL until then, so no upsert touches them.
+	`ALTER TABLE records ADD COLUMN merge_commit TEXT NOT NULL DEFAULT '';
+	ALTER TABLE records ADD COLUMN reverted INTEGER;
+	ALTER TABLE records ADD COLUMN matured_at INTEGER;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -749,17 +755,17 @@ func (s *Store) upsert(path string, info fs.FileInfo, rec *Record, segment time.
 			if _, err := tx.Exec(
 				`INSERT INTO records (record_id, kind, dispatch_key, claim_time, attribution, outcome,
 					revision, driver, driver_version, role_models, knobs,
-					outcome_source, reason, note, pr_url, box_status, orphan_log)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					outcome_source, reason, note, pr_url, merge_commit, box_status, orphan_log)
+				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(record_id) DO UPDATE SET
 					kind = excluded.kind, dispatch_key = excluded.dispatch_key, claim_time = excluded.claim_time,
 					attribution = excluded.attribution, revision = excluded.revision, driver = excluded.driver,
 					driver_version = excluded.driver_version, role_models = excluded.role_models, knobs = excluded.knobs,
 					`+strings.Join([]string{keep("outcome"), keep("outcome_source"), keep("reason"), keep("note"),
-					keep("pr_url"), keep("box_status"), "orphan_log = excluded.orphan_log"}, ", "),
+					keep("pr_url"), keep("merge_commit"), keep("box_status"), "orphan_log = excluded.orphan_log"}, ", "),
 				rec.ID, rec.Kind, rec.DispatchKey, rec.ClaimTime.UnixMilli(), rec.Attribution, rec.Outcome,
 				rec.Revision, rec.Driver, rec.DriverVersion, roleModels, knobs,
-				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.BoxStatus, orphanLog); err != nil {
+				rec.OutcomeSource, rec.Reason, rec.Note, rec.PRURL, rec.MergeCommit, rec.BoxStatus, orphanLog); err != nil {
 				return "", err
 			}
 		}
@@ -834,8 +840,8 @@ func (s *Store) Records() ([]Record, error) {
 	defer tx.Rollback()
 	rows, err := tx.Query(
 		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
-			 outcome_source, reason, note, pr_url, box_status,
-			 revision, driver, driver_version, role_models, knobs
+			 outcome_source, reason, note, pr_url, merge_commit, box_status,
+			 revision, driver, driver_version, role_models, knobs, reverted, matured_at
 		 FROM records ORDER BY claim_time, record_id`)
 	if err != nil {
 		return nil, err
@@ -846,11 +852,20 @@ func (s *Store) Records() ([]Record, error) {
 		var r Record
 		var ms int64
 		var roleModels, knobs string
+		var reverted, maturedMs sql.NullInt64
 		if err := rows.Scan(&r.ID, &r.Kind, &r.DispatchKey, &ms, &r.Attribution, &r.Outcome,
-			&r.OutcomeSource, &r.Reason, &r.Note, &r.PRURL, &r.BoxStatus,
-			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs); err != nil {
+			&r.OutcomeSource, &r.Reason, &r.Note, &r.PRURL, &r.MergeCommit, &r.BoxStatus,
+			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs, &reverted, &maturedMs); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if reverted.Valid {
+			v := reverted.Int64 != 0
+			r.Reverted = &v
+		}
+		if maturedMs.Valid {
+			at := time.UnixMilli(maturedMs.Int64).UTC()
+			r.MaturedAt = &at
 		}
 		if r.RoleModels, err = unmarshalMap(roleModels); err != nil {
 			rows.Close()
