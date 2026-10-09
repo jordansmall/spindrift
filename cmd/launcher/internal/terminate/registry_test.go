@@ -15,6 +15,17 @@ func TestRegistry_MarkThenMarked(t *testing.T) {
 	}
 }
 
+// Recover and the headless wave engine never call Begin, so their abort check
+// Marked(num, 0) must match a Mark taken on a never-Begun issue.
+func TestRegistry_MarkBeforeBeginIsMarkedAtGenerationZero(t *testing.T) {
+	r := NewRegistry()
+	r.Mark("42")
+
+	if !r.Marked("42", 0) {
+		t.Error("Marked(42, 0) = false, want true after Mark(42) with no Begin")
+	}
+}
+
 // A re-pick (ADR 0024, issue #649) must dispatch a fresh Box that settle
 // treats normally, not one still flagged abandoned from the prior run.
 func TestRegistry_BeginThenMarkedIsFalse(t *testing.T) {
