@@ -382,7 +382,7 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 		if err := r.policy.storeSnapshot(dispatchrecord.TuningSnapshot{RecordID: id, SHA256: ref.SHA256, Rendered: input, CreatedAt: claimedAt}); err != nil {
 			return Outcome{}, fmt.Errorf("butler: %s: %w", choreName, err)
 		}
-		step.tuning = &tuningSnapshot{ref: ref, digest: input}
+		step.tuning = newTuningSnapshot(ref, input, r.policy.TuningMinSample, r.tree)
 	}
 	if c.FindingLabel != "" {
 		step.labels = []string{c.FindingLabel}

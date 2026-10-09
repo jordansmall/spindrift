@@ -2587,13 +2587,21 @@ func captureStdout(t *testing.T, fn func()) string {
 	os.Stdout = w
 	defer func() { os.Stdout = orig }()
 
+	// Drained concurrently: a write past the pipe buffer would otherwise block
+	// fn forever, hanging a regression until the go test timeout.
+	var buf bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		_, err := io.Copy(&buf, r)
+		done <- err
+	}()
+
 	fn()
 
 	if err := w.Close(); err != nil {
 		t.Fatalf("close stdout pipe writer: %v", err)
 	}
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, r); err != nil {
+	if err := <-done; err != nil {
 		t.Fatalf("read stdout pipe: %v", err)
 	}
 	return buf.String()

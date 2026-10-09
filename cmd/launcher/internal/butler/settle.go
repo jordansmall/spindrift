@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 // conventionalSubjectRE matches a Conventional Commits subject line
@@ -131,6 +132,15 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		return settled{}
 	}
 
+	var drops []ledger.Drop
+	if s.tuning != nil {
+		var err error
+		if result.IssueIntents, drops, err = s.validateTuning(num, result.IssueIntents); err != nil {
+			s.fail(d, num, err.Error())
+			return settled{}
+		}
+	}
+
 	finishParent := s.claim
 	var promoted []string
 	// landings pairs each landed patch's issue number with its PR URL for the
@@ -189,7 +199,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 			}
 		}
 
-		return func(f settle.Finding) settle.Decoration {
+		decorate := func(f settle.Finding) settle.Decoration {
 			backlink := butlerBacklink(s.chore, f)
 			dec := s.policy.decide(f, chore.Room{Promotions: remaining, Patches: patchesLeft})
 			if dec.patchSkip != "" {
@@ -249,6 +259,16 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 				promoted = append(promoted, url)
 			}}
 		}
+		if s.tuning == nil {
+			return decorate
+		}
+		// Appended last, after any promotion note, so the visible body ends
+		// with the host-rendered rows rather than the model's transcription.
+		return func(f settle.Finding) settle.Decoration {
+			dec := decorate(f)
+			dec.Backlink += "\n\n" + strings.TrimRight(tuning.Evidence(s.tuning.rows, f.Cites), "\n")
+			return dec
+		}
 	})
 
 	// One line per sweep, not per finding: with promotion off every finding
@@ -267,6 +287,10 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		return settled{}
 	}
 
+	// Validation drops count with the per-sweep cap's so the Ledger's Dropped
+	// total matches the note and Drops lists only the validation drops.
+	dropped := filing.Dropped + len(drops)
+
 	patched := make([]string, len(landings))
 	for i, l := range landings {
 		patched[i] = l.prURL
@@ -278,7 +302,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		Promoted:  promoted,
 		Patched:   patched,
 		Usage:     d.CumulativeUsage(),
-		Dropped:   filing.Dropped,
+		Dropped:   dropped,
+		Drops:     drops,
 	}
 	if s.tuning != nil {
 		state.Snapshot = &s.tuning.ref
@@ -301,8 +326,8 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	if len(patched) > 0 {
 		note = fmt.Sprintf("%s, %d patched", note, len(patched))
 	}
-	if filing.Dropped > 0 {
-		note = fmt.Sprintf("%s, %d dropped", note, filing.Dropped)
+	if dropped > 0 {
+		note = fmt.Sprintf("%s, %d dropped", note, dropped)
 	}
 	s.settled(d, forge.Complete, settle.ReasonFindingsFiled, note)
 	fmt.Printf("    #%s  status=%s  note=%s\n", num, o.Status, note)
@@ -312,7 +337,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// must never leave the Chore's claim standing (issue #4076).
 	s.adoptLandings(landings)
 
-	return settled{done: true, filed: len(filing.Filed), promoted: len(promoted), dropped: filing.Dropped, patched: len(patched)}
+	return settled{done: true, filed: len(filing.Filed), promoted: len(promoted), dropped: dropped, patched: len(patched)}
 }
 
 // adoptLandings hands each landed patch's draft PR to the work merge gate.
@@ -489,4 +514,48 @@ func (s *settleRun) settled(d dispatch.Dispatcher, state forge.DispatchState, re
 // provenance labels plus whatever this finding's landing path adds.
 func (s *settleRun) extraLabels(more ...string) []string {
 	return append(slices.Clone(s.labels), more...)
+}
+
+// validateTuning drops every tuning finding in raw that fails
+// tuningSnapshot.validate, returning the rest and a Drop for each. A payload
+// that filing would reject (settle.ParseIssueIntent) passes through for it to
+// skip, so its unvetted fields never reach a Drop. A tracked-files
+// error fails the settle rather than dropping anything: the claim stands and
+// the next sweep retries.
+func (s *settleRun) validateTuning(num string, raw []string) ([]string, []ledger.Drop, error) {
+	var tracked map[string]bool
+	trackedFiles := func() (map[string]bool, error) {
+		if tracked != nil {
+			return tracked, nil
+		}
+		files, err := s.tuning.tree.TrackedFiles(s.scope.Head)
+		if err != nil {
+			return nil, fmt.Errorf("list tracked files at %s: %w", s.scope.Head, err)
+		}
+		tracked = make(map[string]bool, len(files))
+		for _, f := range files {
+			tracked[f] = true
+		}
+		return tracked, nil
+	}
+	var kept []string
+	var drops []ledger.Drop
+	for _, r := range raw {
+		in, ok := settle.ParseIssueIntent(r)
+		if !ok {
+			kept = append(kept, r)
+			continue
+		}
+		reason, err := s.tuning.validate(in, trackedFiles)
+		if err != nil {
+			return nil, nil, err
+		}
+		if reason == "" {
+			kept = append(kept, r)
+			continue
+		}
+		fmt.Printf("    #%s  dropped tuning finding %q: %s\n", num, in.Title, reason)
+		drops = append(drops, ledger.Drop{Title: in.Title, Reason: reason})
+	}
+	return kept, drops, nil
 }

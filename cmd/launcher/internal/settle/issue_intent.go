@@ -126,6 +126,14 @@ func parseIssueIntent(raw string) (issueIntent, *signalwire.Reject) {
 	return in, nil
 }
 
+// ParseIssueIntent reports raw's wire intent when filing would accept it,
+// sharing parseIssueIntent's gate so a caller vetting an intent ahead of
+// filing cannot diverge from what filing skips.
+func ParseIssueIntent(raw string) (signalwire.IssueIntent, bool) {
+	in, rej := parseIssueIntent(raw)
+	return in.IssueIntent, rej == nil
+}
+
 // filedIntent is the outcome of filing one issue-intent: a URL on success,
 // Failed with the intent's own body so a caller can degrade it into inline
 // comment text rather than dropping it silently, or Skipped when a dedup key
