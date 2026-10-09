@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -673,8 +674,9 @@ func TestRequiredLabels(t *testing.T) {
 		PRForge: cf.PRForgeFake, BranchDeleter: fakeBranchDeleter{},
 		ForgeDescriptor: githubDesc, TrackerDescriptor: githubDesc,
 	}
-	mk := func(tracker, access, driver string, patches int, caps forge.Capabilities) readContext {
+	mk := func(tracker, access, driver string, patches int, caps forge.Capabilities, chores ...string) readContext {
 		var c config
+		c.butlerChores = strings.Join(chores, " ")
 		c.issueTracker = tracker
 		c.boxForgeAndIssueAccess = access
 		c.driver = driver
@@ -696,14 +698,28 @@ func TestRequiredLabels(t *testing.T) {
 		{"research", doctorOptions{research: true}, mk("github", "read-write", "", 0, patchCaps), doctor.ResearchLabelNames()},
 		{"butler patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
 		{"forgejo keeps butler label", doctorOptions{butler: true}, mk("forgejo", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
-		{"local, butler and research and read-only", doctorOptions{butler: true, research: true}, mk("local", "read-only", "claude", 2, patchCaps), nil},
-		{"jira, butler and research and read-only", doctorOptions{butler: true, research: true}, mk("jira", "read-only", "claude", 2, patchCaps), nil},
+		{"local, butler with tuning and research and read-only", doctorOptions{butler: true, research: true}, mk("local", "read-only", "claude", 2, patchCaps, "tuning"), nil},
+		{"jira, butler with tuning and research and read-only", doctorOptions{butler: true, research: true}, mk("jira", "read-only", "claude", 2, patchCaps, "tuning"), nil},
+		{"butler, tuning enabled", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps, "bugs", "tuning"), []string{"agent-butler-finding", "agent-tuning-finding"}},
+		{"butler, tuning enabled on forgejo", doctorOptions{butler: true}, mk("forgejo", "read-write", "", 0, patchCaps, "tuning"), []string{"agent-butler-finding", "agent-tuning-finding"}},
+		{"butler, tuning listed twice", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps, "tuning", "tuning"), []string{"agent-butler-finding", "agent-tuning-finding"}},
+		{"butler, tuning not enabled", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps, "bugs"), []string{"agent-butler-finding"}},
+		{"butler, tuning enabled, patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps, "tuning"), []string{"agent-butler-finding", "agent-butler-patch", "agent-tuning-finding", "agent-review-finding"}},
+		{"tuning enabled without --butler", doctorOptions{}, mk("github", "read-write", "", 0, patchCaps, "tuning"), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := requiredLabels(tc.opts, tc.rc); !slices.Equal(got, tc.want) {
 				t.Errorf("requiredLabels() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// doctor requires the catalog's label while settle holds merges on the
+// doctor constant, so the two must name the same label.
+func TestTuningFindingLabel_MatchesChoreCatalog(t *testing.T) {
+	if got := chore.FindingLabel("tuning"); got != doctor.TuningFindingLabel {
+		t.Errorf("chore.FindingLabel(tuning) = %q, doctor.TuningFindingLabel = %q", got, doctor.TuningFindingLabel)
 	}
 }
 
