@@ -259,8 +259,8 @@ func TestRun_Discovered_DependencyEdge_DispatchesDependentOnNextInvocation(t *te
 	if err != nil {
 		t.Fatalf("Issue(1): %v", err)
 	}
-	if !containsLabel(iss1.Labels, c.CompleteLabel) {
-		t.Errorf("blocker must reach %q through settle; labels=%v", c.CompleteLabel, iss1.Labels)
+	if !containsLabel(iss1.Labels, testCompleteLabel) {
+		t.Errorf("blocker must reach %q through settle; labels=%v", testCompleteLabel, iss1.Labels)
 	}
 	iss2, err := fc.Issue("2")
 	if err != nil {

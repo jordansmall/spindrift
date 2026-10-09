@@ -1276,3 +1276,43 @@ func TestParkQueueFailure_NormalizesCause(t *testing.T) {
 		t.Errorf("stored cause = %q (%d bytes), want a single capped UTF-8 line", saved, len(saved))
 	}
 }
+
+// failThenAbortRelayed is a queue-mode settle that writes agent-failed itself
+// (as settle/ready.go does after red CI), then aborts before gate.Leave.
+type failThenAbortRelayed struct {
+	settle.WorkSettler
+	it    *issueReadCounter
+	abort func()
+}
+
+func (w failThenAbortRelayed) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint64, sit settle.Situation, result dispatch.Result) (bool, error) {
+	failThenAbort(w.it, num, w.abort)
+	return false, nil
+}
+
+// The queue claim strips agent-failed, so an agent-failed the issue wears at
+// abort is this run's own settle and must be spared, not reclaimed to
+// dispatchable beside it (issue #4888).
+func TestRecoverQueueOne_AbortAfterOwnFailedSettleSpared(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	_, abort := withControlledSignals(t)
+	rf := newKillHook(runner.NewFake())
+	it := &issueReadCounter{IssueTracker: x.fc}
+	s := failThenAbortRelayed{WorkSettler: newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), it: it, abort: abort}
+
+	err := recoverQueueOne(x.c, it, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, rf), s, io.Discard, io.Discard)
+
+	if code := exitCodeFor(err); code != exitSignalledStop {
+		t.Errorf("exit = %d, want %d", code, exitSignalledStop)
+	}
+	got := x.labels(t, "42")
+	if !slices.Contains(got, x.c.failedLabel) || slices.Contains(got, x.c.label) {
+		t.Errorf("labels = %v, want %q kept and no dispatchable %q", got, x.c.failedLabel, x.c.label)
+	}
+	select {
+	case name := <-rf.killed:
+		t.Errorf("reaper killed %q, want the settled issue spared", name)
+	default:
+	}
+}

@@ -31,6 +31,7 @@ import (
 	"spindrift.dev/launcher/internal/freshness"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/reconcile"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/registryproxy"
@@ -607,6 +608,22 @@ func dispatchLabels(c config) forge.DispatchLabels {
 	}
 }
 
+// settledLabels is the set of labels this run's own settle writes, for the
+// shutdown gate. Ambiguous counts only for a kind whose Box can emit that
+// status: dispatchLabels names it for every kind, but research reports unclear
+// as a verdict label, and its CI claim does not strip work-family labels, so
+// a leftover agent-ambiguous-spec on a research issue is not this run's
+// settle. The recover CLI bootstraps as Work, so it keeps Ambiguous; the
+// daemon's recover kind has no Statuses row and drops it, which is harmless
+// because its queue path needs SelfReportSuccess and never settles Ambiguous.
+func settledLabels(c config) []string {
+	dl := dispatchLabels(c)
+	if !slices.Contains(c.kind().Statuses, outcome.StatusAmbiguous) {
+		dl.Ambiguous = ""
+	}
+	return dl.SettledLabels()
+}
+
 // researchVerdictLabels returns the configured verdict-label mapping
 // (RESEARCH_VERDICTS) for the research kind, or the zero value for work. Only
 // ResearchSettle calls CompleteVerdict, so a zero value is inert for work.
@@ -968,7 +985,7 @@ func wavesConfig(c config) waves.Config {
 		MaxParallel:    c.maxParallel,
 		MaxJobs:        c.maxJobs,
 		OverlapGate:    c.overlapGate,
-		CompleteLabel:  c.completeLabel,
+		SettledLabels:  settledLabels(c),
 		FailedLabel:    c.failedLabel,
 		IgnoreBlockers: c.kind().AdviseOnly,
 		Verb:           c.kind().Verb,
@@ -1363,7 +1380,19 @@ func recoverByNumber(c config, it forge.IssueTracker, cf forge.CodeForge, caps f
 func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.WorkSettler, issueNum string, stdout, stderr io.Writer) error {
 	terminated := registryFor(s)
 	reaper := f.AsReaper()
-	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated, c.completeLabel)
+	// Read before the gate is built, but a fetch failure is only acted on after
+	// the first checkpoint below, so a pending stop still wins over it.
+	fi, fetchErr := it.Issue(issueNum)
+	// Queue mode's Failed->InProgress claim strips every settled label, so any
+	// it wears afterwards is this run's own settle. A hand-run claims nothing:
+	// a settled label the issue already wore (parked locally) is not this
+	// run's settle, while one the workflow's claim stripped first and this
+	// run's settle rewrote is.
+	gateSettled := settledLabels(c)
+	if !queue {
+		gateSettled = slices.DeleteFunc(gateSettled, func(l string) bool { return slices.Contains(fi.Labels, l) })
+	}
+	gate := shutdown.NewGate(stopCh, abortCh, it, cf, reaper, terminated, gateSettled)
 	gate.Watch()
 	// Settle is idempotent (gate.go), so deferring it here reaches every one
 	// of this function's early returns, not just the two happy-path arms that
@@ -1390,9 +1419,8 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 		return recoverFailed(it, caps, issueNum, err, stdout, stderr)
 	}
 
-	fi, err := it.Issue(issueNum)
-	if err != nil {
-		return failBeforeLabelClaim(fmt.Errorf("issue %s: %w", issueNum, err))
+	if fetchErr != nil {
+		return failBeforeLabelClaim(fmt.Errorf("issue %s: %w", issueNum, fetchErr))
 	}
 	iss := newIssue(fi)
 	// A live Dispatch for this issue, in any process sharing pwd, holds this

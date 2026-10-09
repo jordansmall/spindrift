@@ -35,11 +35,18 @@ func capsFor(it forge.IssueTracker, cf forge.CodeForge) forge.Capabilities {
 	return forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{})
 }
 
+// testCompleteLabel is the complete label every waves test forge and settle
+// is configured with.
+const testCompleteLabel = "agent-complete"
+
 func baseConfig() Config {
-	return Config{
-		FailedLabel:   "agent-failed",
-		CompleteLabel: "agent-complete",
-	}
+	cfg := Config{FailedLabel: "agent-failed"}
+	cfg.SettledLabels = forge.DispatchLabels{
+		Complete:  testCompleteLabel,
+		Failed:    cfg.FailedLabel,
+		Ambiguous: "agent-ambiguous-spec",
+	}.SettledLabels()
+	return cfg
 }
 
 // dispatchLabels builds the DispatchLabels a fake forge adapter needs. The
@@ -49,7 +56,7 @@ func dispatchLabels(cfg Config, label string) forge.DispatchLabels {
 	return forge.DispatchLabels{
 		Dispatchable: label,
 		InProgress:   testInProgressLabel,
-		Complete:     cfg.CompleteLabel,
+		Complete:     testCompleteLabel,
 		Failed:       cfg.FailedLabel,
 	}
 }
@@ -109,7 +116,7 @@ func testFactory(t *testing.T, dir string, r runner.Runner) *dispatch.Factory {
 func newSettle(it forge.IssueTracker, cf forge.CodeForge) *settle.Settle {
 	return settle.New(settle.Config{
 		MergeMode:         "immediate",
-		CompleteLabel:     "agent-complete",
+		CompleteLabel:     testCompleteLabel,
 		MergePollInterval: 0,
 		MergePollTimeout:  100,
 		Capabilities:      forge.ResolveCapabilities(cf, it, backend.Descriptor{}, backend.Descriptor{}),

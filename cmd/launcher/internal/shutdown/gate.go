@@ -35,9 +35,10 @@ type Gate struct {
 	cf     forge.CodeForge
 	reaper terminate.Reaper
 	reg    *terminate.Registry
-	// completeLabel is the label a settle writes once it has merged and
-	// landed, the one unsettled below reads. Empty disables that check.
-	completeLabel string
+	// settled holds the labels a settle writes on reaching a terminal state
+	// (Complete, Failed, Ambiguous), the ones unsettled below reads. Empty
+	// disables that check.
+	settled []string
 
 	// mu also guards signalled, aborted, aborting, inflight, and claimed
 	// below.
@@ -74,9 +75,9 @@ type Gate struct {
 
 // NewGate returns a Gate reading stop/abort. Either channel may be nil,
 // meaning the caller offers no such request (the Gate is then inert).
-// completeLabel is the caller's configured complete label, which unsettled
-// reads; pass "" to leave that check off.
-func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, completeLabel string) *Gate {
+// settled is the caller's terminal labels (forge.DispatchLabels.SettledLabels),
+// which unsettled reads; pass nil to leave that check off.
+func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, settled []string) *Gate {
 	if reg == nil {
 		// A fresh Registry behaves exactly like the nil one it replaces
 		// (Marked reports false until something marks it), mirroring
@@ -84,15 +85,15 @@ func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeFo
 		reg = terminate.NewRegistry()
 	}
 	g := &Gate{
-		stop:          stop,
-		abort:         abort,
-		it:            it,
-		cf:            cf,
-		reaper:        reaper,
-		reg:           reg,
-		completeLabel: completeLabel,
-		inflight:      map[string]bool{},
-		claimed:       map[string]bool{},
+		stop:     stop,
+		abort:    abort,
+		it:       it,
+		cf:       cf,
+		reaper:   reaper,
+		reg:      reg,
+		settled:  settled,
+		inflight: map[string]bool{},
+		claimed:  map[string]bool{},
 	}
 	g.idle = sync.NewCond(&g.mu)
 	return g
@@ -149,7 +150,7 @@ func (g *Gate) reclaimInFlight() {
 	}
 	g.aborting = true
 	g.mu.Unlock()
-	AbortInFlight(g.it, g.cf, g.reaper, g.reg, g.completeLabel, nums)
+	AbortInFlight(g.it, g.cf, g.reaper, g.reg, g.settled, nums)
 	g.mu.Lock()
 	g.aborting = false
 	g.idle.Broadcast()
@@ -322,10 +323,10 @@ func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reap
 // AbortInFlight announces the abort, then calls terminate.Reclaim for each
 // num in sorted order, logging each failure to stderr rather than returning
 // it. Exported so RunContinuous's own abort path runs the same loop (#3522).
-// completeLabel is the caller's configured complete label, which unsettled
-// reads; pass "" to leave that check off.
-func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, completeLabel string, nums []string) {
-	nums = unsettled(it, completeLabel, nums)
+// settled is the caller's terminal labels (forge.DispatchLabels.SettledLabels),
+// which unsettled reads; pass nil to leave that check off.
+func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, settled []string, nums []string) {
+	nums = unsettled(it, settled, nums)
 	if len(nums) == 0 {
 		fmt.Println("==> abort requested; nothing in flight")
 		return
@@ -338,27 +339,29 @@ func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.R
 	}
 }
 
-// unsettled drops the issues whose settle already wrote completeLabel. Both
-// abort paths forget an issue only once its settler has returned, so an abort
-// landing in the window between that settler's own terminal write and the
-// forgetting still finds a finished issue in the in-flight snapshot -- and
-// reclaiming one undoes a merge that already landed (#3522). Deciding it from
-// the tracker is what closes the race: the write is the settler's, not the
-// caller's, so the tracker holds the answer before the abort is even
-// observable. It fails open, keeping an issue in the reap when the lookup
-// errors or when the tracker does not carry dispatch state as a label at all
-// (Jira's statuses), since a missed reap strands a live Box while a redundant
-// one only repeats what Reclaim already does idempotently.
-func unsettled(it forge.IssueTracker, completeLabel string, nums []string) []string {
-	if completeLabel == "" {
+// unsettled drops the issues whose settle already wrote a terminal label.
+// Both abort paths forget an issue only once its settler has returned, so an
+// abort landing between the settler's terminal write and that forgetting
+// would otherwise reclaim a finished issue (#3522, #4888). The terminal write
+// is the settler's, not the caller's, so the tracker holds the answer before
+// the abort is observable. It fails open, keeping an issue
+// in the reap when the lookup errors or the tracker carries no dispatch label
+// (Jira's statuses): a missed reap strands a live Box, while a redundant one
+// only repeats what Reclaim already does idempotently.
+func unsettled(it forge.IssueTracker, settled []string, nums []string) []string {
+	if len(settled) == 0 {
 		return nums
 	}
 	var live []string
 	for _, num := range nums {
-		if iss, err := it.Issue(num); err == nil && slices.Contains(iss.Labels, completeLabel) {
+		if iss, err := it.Issue(num); err == nil && wearsAny(iss.Labels, settled) {
 			continue
 		}
 		live = append(live, num)
 	}
 	return live
+}
+
+func wearsAny(labels, want []string) bool {
+	return slices.ContainsFunc(labels, func(l string) bool { return slices.Contains(want, l) })
 }

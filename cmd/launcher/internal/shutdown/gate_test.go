@@ -1,6 +1,7 @@
 package shutdown_test
 
 import (
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
@@ -11,6 +12,14 @@ import (
 	"spindrift.dev/launcher/internal/shutdown"
 	"spindrift.dev/launcher/internal/terminate"
 )
+
+// settledLabels is the terminal set a dispatch settle can write, as callers
+// pass it: Complete, Failed and Ambiguous (never Recoverable).
+var settledLabels = forge.DispatchLabels{
+	Complete:  "agent-complete",
+	Failed:    "agent-failed",
+	Ambiguous: "agent-ambiguous-spec",
+}.SettledLabels()
 
 // stubReaper is a minimal terminate.Reaper: it counts Kill calls per issue
 // and, when killSignal is non-nil, signals it after each Kill so a watcher
@@ -89,7 +98,7 @@ func TestAllowed_StopClosed_DeniesAndSignalsWithoutReclaim(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, settledLabels)
 
 	if g.Allowed("1") {
 		t.Fatal("Allowed: want false once stop is closed")
@@ -111,7 +120,7 @@ func TestAbort_ReclaimsEveryInFlightIssueExactlyOnce(t *testing.T) {
 	reaper := &stubReaper{}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
 
 	if !g.Launch("1", func() {}) {
 		t.Fatal("Launch #1: want true before abort")
@@ -147,7 +156,7 @@ func TestAborted_DistinguishesDrainStopFromAbort(t *testing.T) {
 	fc := newFakeForge(t, "1")
 	stop := make(chan struct{})
 	abort := make(chan struct{})
-	g := shutdown.NewGate(stop, abort, fc, fc, &stubReaper{}, nil, "agent-complete")
+	g := shutdown.NewGate(stop, abort, fc, fc, &stubReaper{}, nil, settledLabels)
 
 	close(stop)
 	g.Allowed("1")
@@ -169,7 +178,7 @@ func TestLeave_BeforeAbort_IssueNotReclaimed(t *testing.T) {
 	reaper := &stubReaper{}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
 
 	if !g.Launch("1", func() {}) {
 		t.Fatal("Launch #1: want true")
@@ -195,39 +204,92 @@ func TestLeave_BeforeAbort_IssueNotReclaimed(t *testing.T) {
 }
 
 // TestAbort_SettledIssueNotReclaimed pins the window Leave alone cannot
-// close: a settler writes its complete label and returns, and the abort lands
+// close: a settler writes its terminal label and returns, and the abort lands
 // before the caller's next statement (Leave) runs, so the issue is still in
-// the in-flight snapshot. Reclaiming it would drag a merged issue back to
-// dispatchable, which is what the recover path saw flake (#3522).
+// the in-flight snapshot. Reclaiming a completed one drags a merged issue back
+// to dispatchable (#3522); reclaiming a failed or ambiguous one re-queues a
+// failure meant for human triage (#4888).
 func TestAbort_SettledIssueNotReclaimed(t *testing.T) {
-	fc := newFakeForge(t, "1", "2")
-	fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: []string{"agent-complete"}})
-	reaper := &stubReaper{}
-	abort := make(chan struct{})
+	for _, label := range settledLabels {
+		t.Run(label, func(t *testing.T) {
+			fc := newFakeForge(t, "1", "2")
+			fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: []string{label}})
+			reaper := &stubReaper{}
+			abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+			g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
 
-	if !g.Launch("1", func() {}) {
-		t.Fatal("Launch #1: want true")
-	}
-	if !g.Launch("2", func() {}) {
-		t.Fatal("Launch #2: want true")
-	}
+			if !g.Launch("1", func() {}) {
+				t.Fatal("Launch #1: want true")
+			}
+			if !g.Launch("2", func() {}) {
+				t.Fatal("Launch #2: want true")
+			}
 
-	close(abort)
-	g.Settle()
+			close(abort)
+			g.Settle()
 
-	if got := inProgressToDispatchableCount(fc, "1"); got != 0 {
-		t.Errorf("#1 (already settled): InProgress->Dispatchable transitions = %d, want 0", got)
+			if got := inProgressToDispatchableCount(fc, "1"); got != 0 {
+				t.Errorf("#1 (already settled): InProgress->Dispatchable transitions = %d, want 0", got)
+			}
+			if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 0 {
+				t.Errorf("#1 (already settled): reclaim comments = %d, want 0", got)
+			}
+			if got := reaper.killCount("1"); got != 0 {
+				t.Errorf("#1 (already settled): kill count = %d, want 0", got)
+			}
+			if got := inProgressToDispatchableCount(fc, "2"); got != 1 {
+				t.Errorf("#2 (still in flight): InProgress->Dispatchable transitions = %d, want 1", got)
+			}
+			if got := reaper.killCount("2"); got != 1 {
+				t.Errorf("#2 (still in flight): kill count = %d, want 1", got)
+			}
+			if got := reclaimCommentCount(fc, "2", terminate.CommentSuffix); got != 1 {
+				t.Errorf("#2 (still in flight): reclaim comments = %d, want 1", got)
+			}
+		})
 	}
-	if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 0 {
-		t.Errorf("#1 (already settled): reclaim comments = %d, want 0", got)
+}
+
+// TestAbort_UnreadableOrUnsetSettledStillReaped pins the fail-open contract:
+// a lookup error or an empty settled set must never spare an in-flight issue.
+func TestAbort_UnreadableOrUnsetSettledStillReaped(t *testing.T) {
+	cases := []struct {
+		name    string
+		settled []string
+		lookup  error
+		labels  []string
+	}{
+		{"lookup errors", settledLabels, errors.New("tracker down"), []string{"agent-complete"}},
+		{"settled nil", nil, nil, []string{"agent-complete"}},
+		// Jira shape: the tracker carries no dispatch label at all.
+		{"no dispatch label", settledLabels, nil, nil},
 	}
-	if got := reaper.killCount("1"); got != 0 {
-		t.Errorf("#1 (already settled): kill count = %d, want 0", got)
-	}
-	if got := inProgressToDispatchableCount(fc, "2"); got != 1 {
-		t.Errorf("#2 (still in flight): InProgress->Dispatchable transitions = %d, want 1", got)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := newFakeForge(t, "1")
+			fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: tc.labels})
+			fc.IssueErr = tc.lookup
+			reaper := &stubReaper{}
+			abort := make(chan struct{})
+
+			g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, tc.settled)
+			if !g.Launch("1", func() {}) {
+				t.Fatal("Launch #1: want true")
+			}
+			close(abort)
+			g.Settle()
+
+			if got := reaper.killCount("1"); got != 1 {
+				t.Errorf("#1: kill count = %d, want 1", got)
+			}
+			if got := inProgressToDispatchableCount(fc, "1"); got != 1 {
+				t.Errorf("#1: InProgress->Dispatchable transitions = %d, want 1", got)
+			}
+			if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 1 {
+				t.Errorf("#1: reclaim comments = %d, want 1", got)
+			}
+		})
 	}
 }
 
@@ -237,7 +299,7 @@ func TestLaunch_DecliningAfterSignal_ReclaimsHeldClaimAndSkipsArm(t *testing.T) 
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, settledLabels)
 	g.Hold("1")
 
 	armed := false
@@ -263,7 +325,7 @@ func TestGate_BothChannelsNil_IsInert(t *testing.T) {
 	fc := newFakeForge(t)
 	reaper := &stubReaper{}
 
-	g := shutdown.NewGate(nil, nil, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(nil, nil, fc, fc, reaper, nil, settledLabels)
 
 	if !g.Allowed("1") {
 		t.Fatal("Allowed: want true when both channels are nil")
@@ -284,7 +346,7 @@ func TestWatch_AbortAfterStart_ReclaimsPromptly(t *testing.T) {
 	reaper := &stubReaper{killSignal: killed}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
 	if !g.Launch("1", func() {}) {
 		t.Fatal("Launch #1: want true before abort")
 	}
@@ -319,7 +381,7 @@ func TestSettle_CalledTwice_DoesNotPanic(t *testing.T) {
 	reaper := &stubReaper{}
 	abort := make(chan struct{})
 
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
 	g.Watch()
 
 	g.Settle()
@@ -337,7 +399,7 @@ func TestLaunch_DecliningUnheldIssue_TouchesNothing(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, settledLabels)
 
 	if g.Launch("1", func() { t.Error("arm: must not be called when Launch declines") }) {
 		t.Fatal("Launch: want false once stop is closed")
@@ -361,7 +423,7 @@ func TestAllowed_DecliningHeldIssue_ReleasesClaim(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, settledLabels)
 	g.Hold("1")
 
 	if g.Allowed("1") {
@@ -391,7 +453,7 @@ func TestAllowed_DecliningUnheldIssue_TouchesNothing(t *testing.T) {
 	stop := make(chan struct{})
 	close(stop)
 
-	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(stop, nil, fc, fc, reaper, nil, settledLabels)
 
 	if g.Allowed("1") {
 		t.Fatal("Allowed: want false once stop is closed")
@@ -415,7 +477,7 @@ func TestWatch_CalledTwice_LeavesNoWatcherBehind(t *testing.T) {
 	abort := make(chan struct{})
 
 	before := runtime.NumGoroutine()
-	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, "agent-complete")
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
 	g.Watch()
 	g.Watch()
 

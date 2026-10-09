@@ -314,7 +314,7 @@ func RunContinuous(cfg Config, session *Session, it forge.IssueTracker, cf forge
 		}
 		aborting = true
 		mu.Unlock()
-		shutdown.AbortInFlight(it, cf, reaper, terminated, cfg.CompleteLabel, nums)
+		shutdown.AbortInFlight(it, cf, reaper, terminated, cfg.SettledLabels, nums)
 		mu.Lock()
 		aborting = false
 		idle.Broadcast()

@@ -104,10 +104,12 @@ type Plan struct {
 
 // Config carries the subset of launcher config the wave engine needs.
 type Config struct {
-	MaxParallel   int
-	MaxJobs       int
-	OverlapGate   string
-	CompleteLabel string
+	MaxParallel int
+	MaxJobs     int
+	OverlapGate string
+	// SettledLabels are the labels a settle writes on reaching a terminal
+	// state; the abort spares an issue wearing one.
+	SettledLabels []string
 	FailedLabel   string
 
 	// IgnoreBlockers skips blocker-edge gating for the research dispatch kind

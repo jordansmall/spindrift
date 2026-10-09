@@ -349,11 +349,9 @@ func TestReadinessReady_MergedPR(t *testing.T) {
 }
 
 func TestReadinessReady_OpenPRWithCompleteLabel(t *testing.T) {
-	c := baseConfig()
-
 	fc := forge.NewFake()
 	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{c.CompleteLabel}})
+	fc.SetIssue(forge.Issue{Number: "99", State: "OPEN", Labels: []string{testCompleteLabel}})
 	fc.SetPR("agent/issue-99", forge.PR{URL: "https://github.com/owner/repo/pull/99"})
 	// SetPR without a SetPRState override leaves the PR state OPEN.
 

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -6540,5 +6541,20 @@ func TestGetenvSchema_EmptyStringKnobStillFallsBack(t *testing.T) {
 	}
 	if got := resolveBoxEnvVar("LABEL"); got != "ready-for-agent" {
 		t.Errorf("resolveBoxEnvVar(LABEL) = %q, want ready-for-agent", got)
+	}
+}
+
+// Ambiguous is a work-family label only: the research kind's unclear outcome
+// is a verdict label, so a research issue wearing agent-ambiguous-spec from an
+// earlier work halt must not read as settled (issue #4888).
+func TestSettledLabels_ByKind(t *testing.T) {
+	work := minimalValidConfig()
+	work.completeLabel, work.failedLabel = "agent-complete", "agent-failed"
+	if got, want := settledLabels(work), []string{work.completeLabel, work.failedLabel, "agent-ambiguous-spec"}; !slices.Equal(got, want) {
+		t.Errorf("work settledLabels = %v, want %v", got, want)
+	}
+	research := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
+	if got, want := settledLabels(research), []string{research.failedLabel}; !slices.Equal(got, want) {
+		t.Errorf("research settledLabels = %v, want %v", got, want)
 	}
 }
