@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
@@ -84,6 +85,17 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				fmt.Printf("    #%s  landing=%s  status=merge-guard-hit  paths=%v\n", num, pr, matched)
 				s.it.Comment(num, mergeGuardComment(matched))
 				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardHit), ""
+			}
+			held, tuningErr := s.tuningHold(num)
+			if tuningErr != nil {
+				fmt.Printf("    #%s  landing=%s  status=merge-guard-check-error  check=tuning  !! %v\n", num, pr, tuningErr)
+				s.commentTuningPR(num, pr, tuningCheckErrorComment(tuningErr))
+				return s.completeLanding(num, gen, landingManual, ReasonMergeGuardCheckError), ""
+			}
+			if held {
+				fmt.Printf("    #%s  landing=%s  status=tuning-provenance\n", num, pr)
+				s.commentTuningPR(num, pr, tuningHoldComment())
+				return s.completeLanding(num, gen, landingManual, ReasonTuningProvenance), ""
 			}
 			mergeReason, err := s.applyMergeMode(num, gen, pr, d)
 			if err != nil {
@@ -417,6 +429,31 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 		return nil, err
 	}
 	return matchedGuardPaths(s.cfg.MergeGuardPaths, files), nil
+}
+
+// commentTuningPR posts a tuning-hold comment on the PR, where a reviewer of
+// the held PR will look. A failed post is logged only: the hold stands anyway.
+func (s *Settle) commentTuningPR(num, pr, body string) {
+	if err := s.pr.CommentPR(pr, body); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: post tuning-hold PR comment: %v\n", num, err)
+	}
+}
+
+// tuningHold reports whether num's issue is a tuning finding, whose PR the
+// host never merges. A tracker with a label registry is judged by the
+// agent-tuning-finding label alone, so removing it is the override; one
+// without may never have applied the label, so the body's chore=tuning marker
+// counts there too. An unreadable issue is an error: the caller holds as a
+// precaution.
+func (s *Settle) tuningHold(num string) (bool, error) {
+	iss, err := s.it.Issue(num)
+	if err != nil {
+		return false, err
+	}
+	if containsLabel(iss.Labels, doctor.TuningFindingLabel) {
+		return true, nil
+	}
+	return !s.cfg.Capabilities.TrackerDescriptor.LabelRegistry && carriesTuningMarker(iss.Body), nil
 }
 
 // applyMergeMode performs the mode-specific action once a landing is ready to

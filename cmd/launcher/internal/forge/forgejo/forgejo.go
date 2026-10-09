@@ -583,7 +583,14 @@ func (c *forgejoClient) CloseMergedIssue(num string) error {
 
 // Comment posts a comment on the Forgejo issue.
 func (c *forgejoClient) Comment(num, body string) error {
-	return c.rest.Do(http.MethodPost, c.repoPath()+"/issues/"+num+"/comments",
+	return postIssueComment(c.rest, c.repoPath(), num, body)
+}
+
+// postIssueComment POSTs body to repoPath's issue comment endpoint for index
+// num. Forgejo serves PR comments from the same endpoint, keyed by the PR's
+// index, so the issue and PR paths share it.
+func postIssueComment(rc *rest.Client, repoPath, num, body string) error {
+	return rc.Do(http.MethodPost, repoPath+"/issues/"+num+"/comments",
 		map[string]string{"body": body}, nil)
 }
 

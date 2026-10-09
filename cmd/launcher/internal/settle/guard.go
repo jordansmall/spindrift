@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/glob"
 )
 
@@ -51,4 +52,19 @@ func matchedGuardPaths(guardPaths string, files []string) []string {
 		}
 	}
 	return matched
+}
+
+// tuningHoldComment is the comment posted when a PR closing a tuning finding
+// is held from merge. It names the label because removing it is the override.
+func tuningHoldComment() string {
+	return fmt.Sprintf(
+		"merge held for tuning provenance: this PR closes a tuning finding (%s) — not merging regardless of MERGE_MODE; review and merge by hand. Removing the %s label from the issue is the override and lets a PR merge normally",
+		doctor.TuningFindingLabel, doctor.TuningFindingLabel,
+	)
+}
+
+// tuningCheckErrorComment is the fail-safe comment for a closing issue the
+// host could not read to decide the tuning hold.
+func tuningCheckErrorComment(err error) string {
+	return fmt.Sprintf("tuning provenance: could not read the closing issue (%v) — downgrading to manual as a precaution; review and merge by hand", err)
 }

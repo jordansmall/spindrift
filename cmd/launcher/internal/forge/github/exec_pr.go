@@ -430,6 +430,15 @@ func (e *execClient) MarkReady(prURL string) error {
 	return runGHReadyToggle(prURL, "pr", "ready", prURL)
 }
 
+// CommentPR posts a comment on the PR itself.
+func (e *execClient) CommentPR(prURL, body string) error {
+	cmd := exec.Command("gh", "pr", "comment", prURL, "--body", body)
+	if _, err := cmd.Output(); err != nil {
+		return ghCommandErr(fmt.Sprintf("gh pr comment %s", prURL), err)
+	}
+	return nil
+}
+
 // MarkDraft flips the PR back to draft. Idempotent the same way MarkReady is:
 // gh pr ready --undo on a PR that is already a draft exits 0.
 func (e *execClient) MarkDraft(prURL string) error {

@@ -1084,3 +1084,27 @@ func TestMergeCommit_UnmergedPullHasNone(t *testing.T) {
 		t.Fatalf("MergeCommit = %q, %v; want empty", got, err)
 	}
 }
+
+func TestCommentPR_PostsToIssueCommentEndpoint(t *testing.T) {
+	var gotPath, gotMethod string
+	var gotBody map[string]string
+	pr := newPRForgeTestForge(t, func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotMethod = r.URL.Path, r.Method
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		if _, err := w.Write([]byte("{}")); err != nil {
+			t.Errorf("write response: %v", err)
+		}
+	})
+	if err := pr.CommentPR("https://forge.test/owner/repo/pulls/206", "held for review"); err != nil {
+		t.Fatalf("CommentPR unexpected error: %v", err)
+	}
+	if gotMethod != http.MethodPost || gotPath != "/api/v1/repos/owner/repo/issues/206/comments" {
+		t.Fatalf("request = %s %s, want POST /api/v1/repos/owner/repo/issues/206/comments", gotMethod, gotPath)
+	}
+	if gotBody["body"] != "held for review" {
+		t.Fatalf("body = %v", gotBody)
+	}
+}

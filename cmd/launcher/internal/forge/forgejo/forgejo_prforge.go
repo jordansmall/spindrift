@@ -427,6 +427,16 @@ func (f *forgejoCodeForge) MarkReady(prURL string) error {
 	return f.rest.Do(http.MethodPatch, f.repoPath()+"/pulls/"+index, body, nil)
 }
 
+// CommentPR posts a comment on the PR. Forgejo serves PR comments from the
+// issue comment endpoint, keyed by the PR's index.
+func (f *forgejoCodeForge) CommentPR(prURL, body string) error {
+	index, err := f.prIndex(prURL)
+	if err != nil {
+		return err
+	}
+	return postIssueComment(f.rest, f.repoPath(), index, body)
+}
+
 // MarkDraft flips the PR back to draft by PATCHing a WIP prefix onto its title.
 // A PR that is already draft is a no-op issuing no request. The gate is
 // isDraftPull, not isDraftTitle, because a pull whose draft field is true but

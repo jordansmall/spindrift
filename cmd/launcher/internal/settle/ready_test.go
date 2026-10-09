@@ -689,3 +689,182 @@ func assertLatchedLeftOpen(t *testing.T, s *Settle, num string) {
 		t.Errorf("latched reason %q for a landingManual settle is not ReasonLeavesPROpen", r)
 	}
 }
+
+// tuningTestSettle builds a green-PR Settle whose settled issue carries
+// labels and body, on a tracker with or without a label registry.
+func tuningTestSettle(mode string, labelRegistry bool, labels []string, body string) (*Settle, *forge.Fake) {
+	c := baseConfig()
+	c.MergeMode = mode
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: labels, Body: body})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	fc.SetPRFiles(testPR, []string{"src/main.go"})
+	s := newTestSettle(c, fc, fc)
+	s.cfg.Capabilities.TrackerDescriptor.LabelRegistry = labelRegistry
+	return s, fc
+}
+
+const tuningBody = "finding text\n<!-- spindrift-dedup: foo, chore=tuning -->"
+
+func assertTuningHeld(t *testing.T, s *Settle, fc *forge.Fake, landing landingResult) {
+	t.Helper()
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (tuning provenance hold)", landing)
+	}
+	s.settledMu.Lock()
+	reason := s.settledLatch["1"].reason
+	s.settledMu.Unlock()
+	if reason != ReasonTuningProvenance {
+		t.Errorf("latched reason = %q, want %q", reason, ReasonTuningProvenance)
+	}
+	assertLatchedLeftOpen(t, s, "1")
+	if fc.Merged != "" {
+		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.EnqueueAutoMergeCalls) != 0 {
+		t.Errorf("a held PR must not enqueue auto-merge; calls=%v", fc.EnqueueAutoMergeCalls)
+	}
+	if len(fc.MarkReadyCalls) == 0 {
+		t.Errorf("a held PR must still be flipped out of draft")
+	}
+	assertTuningPRComment(t, fc, "hold comment")
+	body := fc.CommentPRCalls[0].Body
+	for _, want := range []string{"agent-tuning-finding", "Removing"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("hold comment must mention %q; body=%q", want, body)
+		}
+	}
+}
+
+// assertTuningPRComment pins that the one tuning comment landed on the PR,
+// where a reviewer looking at the held PR will see it, and not on the issue.
+func assertTuningPRComment(t *testing.T, fc *forge.Fake, what string) {
+	t.Helper()
+	if len(fc.CommentPRCalls) != 1 {
+		t.Fatalf("expected exactly one %s on the PR, got %d: %+v", what, len(fc.CommentPRCalls), fc.CommentPRCalls)
+	}
+	if fc.CommentPRCalls[0].PR != testPR {
+		t.Errorf("%s PR = %q, want %q", what, fc.CommentPRCalls[0].PR, testPR)
+	}
+	if len(fc.CommentCalls) != 0 {
+		t.Errorf("%s must not be posted on the issue; got %+v", what, fc.CommentCalls)
+	}
+}
+
+// A PR closing an issue wearing agent-tuning-finding is never merged by the
+// host, whatever MERGE_MODE says and whichever paths it touches.
+func TestSelfHeal_TuningLabel_HoldsImmediateMerge(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	assertTuningHeld(t, s, fc, landing)
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("held issue must be agent-complete, not agent-failed; labels=%v", iss.Labels)
+	}
+}
+
+func TestSelfHeal_TuningLabel_HoldsAutoMerge(t *testing.T) {
+	s, fc := tuningTestSettle("auto", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	assertTuningHeld(t, s, fc, landing)
+}
+
+// A tracker with no label registry cannot carry the label, so the body's
+// chore=tuning marker is the provenance.
+func TestSelfHeal_TuningMarker_HoldsOnLabelessTracker(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress"}, tuningBody)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	assertTuningHeld(t, s, fc, landing)
+}
+
+// A label-less tracker that still reports the label (jira applies labels
+// without registering them) holds on the label alone, marker or not.
+func TestSelfHeal_TuningLabel_HoldsOnLabelessTracker(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	assertTuningHeld(t, s, fc, landing)
+}
+
+// Removing the label is the override: with a label registry the body marker
+// alone must not hold, so the PR merges normally.
+func TestSelfHeal_TuningLabelRemoved_MarkerAloneDoesNotHold(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress"}, tuningBody)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged after the label was removed", landing)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
+	}
+	if len(fc.CommentPRCalls) != 0 {
+		t.Errorf("no hold comment expected; got %+v", fc.CommentPRCalls)
+	}
+}
+
+func TestSelfHeal_NoTuningProvenance_LabelessTrackerMergesNormally(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", false, []string{"agent-in-progress"}, "plain body\n<!-- spindrift-dedup: foo, chore=docs -->")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	if landing != landingMerged {
+		t.Errorf("selfHeal = %v, want landingMerged", landing)
+	}
+	if fc.Merged != testPR {
+		t.Errorf("expected Merge to be called; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// An unreadable issue fails safe like an unreadable file list: held, with a
+// precautionary comment, still agent-complete.
+func TestSelfHeal_TuningCheckError_FailsSafe(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress"}, "")
+	fc.IssueErr = errors.New("gh issue view: 502")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual (issue unreadable)", landing)
+	}
+	assertLatchedLeftOpen(t, s, "1")
+	if fc.Merged != "" {
+		t.Errorf("an unreadable issue must prevent Merge; fc.Merged=%q", fc.Merged)
+	}
+	fc.IssueErr = nil
+	iss, _ := fc.Issue("1")
+	if !containsLabel(iss.Labels, "agent-complete") || containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("issue must be agent-complete, not agent-failed; labels=%v", iss.Labels)
+	}
+	assertTuningPRComment(t, fc, "precautionary comment")
+	s.settledMu.Lock()
+	reason := s.settledLatch["1"].reason
+	s.settledMu.Unlock()
+	if reason != ReasonMergeGuardCheckError {
+		t.Errorf("latched reason = %q, want %q", reason, ReasonMergeGuardCheckError)
+	}
+}
+
+// MERGE_MODE=manual would already leave the PR to a human, but the latched
+// reason must still name tuning provenance, not plain manual.
+func TestSelfHeal_TuningLabel_HoldsManualMerge(t *testing.T) {
+	s, fc := tuningTestSettle("manual", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	assertTuningHeld(t, s, fc, landing)
+}
+
+// A configured merge guard the PR's files miss must not pre-empt the tuning
+// hold: the guard check passes and the provenance check still runs after it.
+func TestSelfHeal_TuningLabel_HoldsWithMergeGuardMiss(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	s.cfg.MergeGuardPaths = ".github/**"
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	assertTuningHeld(t, s, fc, landing)
+}
+
+// A failed PR comment must not lift the hold.
+func TestSelfHeal_TuningHold_CommentPRErrorStillHolds(t *testing.T) {
+	s, fc := tuningTestSettle("immediate", true, []string{"agent-in-progress", "agent-tuning-finding"}, "")
+	fc.CommentPRErr = errors.New("gh pr comment: 502")
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	if landing != landingManual {
+		t.Errorf("selfHeal = %v, want landingManual", landing)
+	}
+	if fc.Merged != "" {
+		t.Errorf("a held PR must not merge; fc.Merged=%q", fc.Merged)
+	}
+}
