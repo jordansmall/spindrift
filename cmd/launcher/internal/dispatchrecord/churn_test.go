@@ -82,6 +82,46 @@ func TestChurnCountsAFileDeletedInsideTheWindow(t *testing.T) {
 	wantChurn(t, fillAfterWindow(t, g, merge), 1)
 }
 
+// mvAt moves from to to at the given time and commits it, rewriting its content
+// when content is non-empty.
+func mvAt(g gitRepo, at time.Time, from, to, content string) {
+	g.t.Helper()
+	g.git(at, "mv", from, to)
+	if content != "" {
+		if err := os.WriteFile(filepath.Join(g.dir, to), []byte(content), 0o644); err != nil {
+			g.t.Fatal(err)
+		}
+		g.git(at, "add", to)
+	}
+	g.git(at, "commit", "-q", "-m", "move "+from)
+}
+
+// A later move rewrote no line, so blame follows the lines to their new path.
+func TestChurnFollowsAFileRenamedInsideTheWindow(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "")
+	wantChurn(t, fillAfterWindow(t, g, merge), 0)
+}
+
+func TestChurnCountsOnlyTheEditedLinesOfAFileRenamedInsideTheWindow(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "one\nTWO\nthree\nfour\n")
+	wantChurn(t, fillAfterWindow(t, g, merge), 0.25)
+}
+
+func TestChurnFollowsAChainOfRenamesInsideTheWindow(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "")
+	mvAt(g, mergedAt.Add(48*time.Hour), "g.txt", "h.txt", "")
+	wantChurn(t, fillAfterWindow(t, g, merge), 0)
+}
+
+func TestChurnIgnoresARenameAfterTheWindow(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	mvAt(g, mergedAt.Add(RevertWindow+time.Hour), "f.txt", "g.txt", "")
+	wantChurn(t, fillAfterWindow(t, g, merge), 0)
+}
+
 // A PR commit that rewrites another PR commit's lines is the merge's own work.
 func TestChurnIgnoresTheMergesOwnRewrites(t *testing.T) {
 	g := newBaseRepo(t)

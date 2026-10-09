@@ -22,9 +22,11 @@ import (
 // multi-commit PR rewrote among its own commits never count, and a file the PR
 // itself renamed counts only its changed lines. A line survives when git blame
 // --first-parent at the base branch as it stood at end still credits it to the
-// merge. A file renamed by a later commit inside the window counts as
-// rewritten; for a rebase merge only the last rebased commit is the recorded
-// merge, as for reverts.
+// merge. A file a later commit renamed inside the window is blamed at its new
+// path, so a move rewrites nothing, though content split or copied to another
+// file, a rename below git's 50% similarity, and a new file taking over the old
+// path still count as rewritten; for a rebase merge only the last rebased
+// commit is the recorded merge, as for reverts.
 func churnWithinWindow(clone, merge, tip string, end time.Time) (churn *float64, matured bool, err error) {
 	hasParent, err := hasFirstParent(clone, merge)
 	if err != nil {
@@ -57,9 +59,17 @@ func churnWithinWindow(clone, merge, tip string, end time.Time) (churn *float64,
 		return nil, true, nil
 	}
 
+	renames, err := laterRenames(clone, merge, state)
+	if err != nil {
+		return nil, false, err
+	}
 	surviving := 0
 	for path, n := range added {
-		kept, err := survivingLines(clone, state, path, merge)
+		blamed := path
+		if moved, ok := renames[path]; ok {
+			blamed = moved
+		}
+		kept, err := survivingLines(clone, state, blamed, merge)
 		if err != nil {
 			return nil, false, err
 		}
@@ -116,6 +126,26 @@ func addedLines(clone, merge string) (map[string]int, int, error) {
 		}
 	}
 	return added, total, nil
+}
+
+// laterRenames maps each path merge..state renamed away to where it went, so a
+// moved file's lines are blamed at their new path. A single diff reports a chain
+// (f to g to h) as f to h. Without copy detection a rename source is always a
+// path deleted at state, so it is never also a live file there.
+func laterRenames(clone, merge, state string) (map[string]string, error) {
+	out, err := runGit(clone, "", "diff", "-M", "-l0", "-z", "--name-status", "--diff-filter=R", merge, state)
+	if err != nil {
+		return nil, err
+	}
+	renames := map[string]string{}
+	tokens := strings.Split(out, "\x00")
+	for i := 0; i+2 < len(tokens); i += 3 {
+		if !strings.HasPrefix(tokens[i], "R") {
+			return nil, fmt.Errorf("dispatchrecord: name-status entry %q", tokens[i])
+		}
+		renames[tokens[i+1]] = tokens[i+2]
+	}
+	return renames, nil
 }
 
 // survivingLines counts the lines of path at state that first-parent blame
