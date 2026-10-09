@@ -420,6 +420,29 @@ func TestQueue_Discover_FailedBlockerSurfacedPickStaysHeld(t *testing.T) {
 	}
 }
 
+// A closed blocker still wearing the Failed label is satisfied, so its
+// dependent launches instead of holding until someone strips the label (#4911).
+func TestQueue_Discover_ClosedFailedBlockerLaunches(t *testing.T) {
+	q := NewQueue()
+	q.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
+	f := forge.NewFake(forge.DispatchLabels{Dispatchable: "ready-for-agent", InProgress: "agent-in-progress", Failed: "agent-failed"})
+	f.SetIssue(forge.Issue{Number: "42", Labels: []string{"ready-for-agent"}})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueClosed, Labels: []string{"agent-failed"}})
+	f.NativeDeps = map[string][]string{"42": {"41"}}
+
+	batch, err := q.Discover(f, f, "agent-failed", KindWork)
+
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	if len(batch.Issues) != 1 || batch.Issues[0].Number != "42" {
+		t.Errorf("issues = %+v, want #42 launched", batch.Issues)
+	}
+	if snap := q.Snapshot()[0]; snap.State == PickHeld {
+		t.Errorf("state = held (BlockedBy %q, Reason %q), want launched", snap.BlockedBy, snap.Reason)
+	}
+}
+
 // setHeld builds the failed-blocker Reason from the same blockerFailedPrefix
 // constant View's dedup guard checks against, so a later format change cannot
 // drift the two apart silently (#1111).
