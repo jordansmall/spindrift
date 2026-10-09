@@ -118,7 +118,7 @@ type Settler interface {
 // adopt path. Research never touches the Code Forge, so it never needs this.
 type WorkSettler interface {
 	// SettleAdopted runs the same merge gate as Settle for an already-open PR
-	// (draft or not) with no outcome line, the reconcile/recover entry point.
+	// (draft or not) with no outcome line, the recover entry point.
 	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
 
 	// SettleRelayedBranch adopts a relayed branch (issue #2225). It returns
