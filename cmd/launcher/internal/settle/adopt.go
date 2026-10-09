@@ -9,10 +9,11 @@ import (
 )
 
 // SettleAdopted runs the merge gate on an already-discovered open PR for num,
-// draft or not (issue #2408). Only reconcile/recover call it, never Settle's
-// own no-outcome path, which reports status=blocked (issue #1654). The head
-// SHA may not come from this process, so the gate waits for evidence the
-// rollup registered (issue #1652), bounded by registrationWindowPolls (#2475).
+// draft or not (issue #2408). Only recover's adopt path and the butler patch
+// gate (a Settle built with Unclaimed, ADR 0057) call it, never Settle's own
+// no-outcome path, which reports status=blocked (issue #1654). The head SHA
+// may not come from this process, so the gate waits for evidence the rollup
+// registered (issue #1652), bounded by registrationWindowPolls (#2475).
 func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
 	defer s.flushSettled(d, num)
 	// Host-discovered, so it names the record even if the gate never gets a
