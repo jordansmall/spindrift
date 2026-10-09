@@ -87,6 +87,15 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   relabel `ready-for-agent` or close — `agent-failed` never applies to
   this path. [Butler](docs/reference.md#butler) is the full record;
   change it and this summary together.
+- `agent-tuning-finding` — provenance label on a finding a tuning Chore files
+  (ADR 0062). Never carries a dispatch label — a human promotes it to
+  `ready-for-agent` like any other issue before an agent picks it up. Any PR
+  closing an issue wearing it merges only by hand, regardless of `MERGE_MODE`
+  and `MERGE_GUARD_PATHS`: the host flips the PR ready, marks the issue
+  `agent-complete`, and comments on the PR naming the label. On
+  `local`/`jira`, which have no label registry, the `chore=tuning` term in
+  the issue body's dedup marker stands in for it. Removing the label is the
+  deliberate override. See [Merge guard](docs/reference.md#merge-guard).
 
 ### Dispatch authentication
 
