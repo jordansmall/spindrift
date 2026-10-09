@@ -311,12 +311,15 @@ func (d *Dispatch) announce(phase, logPath string) {
 	report.Box(d.subject.key, phase, rel, d.recordID)
 }
 
-// mintRecordID mints a fresh Record ID unless the Dispatch already has one.
+// mintRecordID mints a fresh Record ID unless the Dispatch already has one,
+// stamping the claim time from the clock unless NewChore preset it.
 func (d *Dispatch) mintRecordID() {
 	if d.recordID != "" {
 		return
 	}
-	d.claimTime = d.clock.Now()
+	if d.claimTime.IsZero() {
+		d.claimTime = d.clock.Now()
+	}
 	d.recordID = dispatchrecord.RecordID(d.cfg.kindName(), d.number, d.claimTime)
 }
 

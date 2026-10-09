@@ -3,9 +3,11 @@ package dispatch
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/runner"
 )
 
@@ -337,5 +339,42 @@ func TestFactory_New_IssueTextStableAcrossRunAndFix(t *testing.T) {
 		if got := c.Env["ISSUE_TEXT"]; got != "first body" {
 			t.Errorf("RunCalls[%d] ISSUE_TEXT = %q, want %q", i, got, "first body")
 		}
+	}
+}
+
+// Issue #4952: a Chore's pinned ClaimTime mints its Record ID at construction,
+// so the butler can key a tuning snapshot before launch, and Run keeps it.
+func TestFactory_NewChore_ClaimTimePinsRecordIDBeforeRun(t *testing.T) {
+	fr := runner.NewFake()
+	f, err := NewFactory(Config{}, tempLogDir(t), fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	claim := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	d := f.NewChore(Chore{Name: "tuning", Branch: "main", ClaimTime: claim})
+	want := dispatchrecord.RecordID(Config{}.kindName(), "butler-tuning", claim)
+	if got := d.RecordID(); got != want {
+		t.Fatalf("RecordID before Run = %q, want %q", got, want)
+	}
+	if result := d.Run(); !result.ok() {
+		t.Fatalf("Run: %+v", result)
+	}
+	if got := d.RecordID(); got != want {
+		t.Errorf("RecordID after Run = %q, want %q", got, want)
+	}
+}
+
+func TestFactory_NewChore_ZeroClaimTimeMintsAtRun(t *testing.T) {
+	f, err := NewFactory(Config{}, tempLogDir(t), runner.NewFake(), fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	defer f.Cleanup()
+
+	d := f.NewChore(Chore{Name: "tuning", Branch: "main"})
+	if got := d.RecordID(); got != "" {
+		t.Fatalf("RecordID before Run = %q, want empty", got)
 	}
 }
