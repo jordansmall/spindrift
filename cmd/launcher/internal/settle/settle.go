@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/terminate"
@@ -187,6 +188,9 @@ type Settle struct {
 	// settledLatch because transitionState overwrites that entry and the PR
 	// must survive it. Guarded by settledMu.
 	prLatch map[string]string
+	// reportKey is the key num's report records go out under when it is not
+	// dispatchkey.Issue(num). Guarded by settledMu.
+	reportKey map[string]dispatchkey.Key
 }
 
 // Registrar is the "settler that owns a termination registry" seam: a caller

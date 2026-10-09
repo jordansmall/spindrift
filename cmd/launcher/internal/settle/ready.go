@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
@@ -353,7 +352,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 // SUCCESS inherited from an earlier attempt until a non-terminal state proves
 // this run's checks are alive (#1652), bounded by registrationWindow (#2475).
 func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
-	key := dispatchkey.Issue(num)
+	key := s.keyFor(num)
 	report.CIWait(key, pr, "")
 	deadline := s.cfg.MergePollTimeout
 	w := watch{

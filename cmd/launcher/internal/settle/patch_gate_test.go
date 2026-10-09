@@ -5,7 +5,10 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 // butlerPatchLabels is the label set a butler patch finding's issue actually
@@ -188,4 +191,65 @@ func equalLabels(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// The daemon parses a butler child's records as chore-keyed (issue #4966), so a
+// patch gate's ci_wait must carry the owning Chore's key, and the gate must add
+// no settled record: the Chore already sent its one terminal record.
+func TestSettlePatch_ReportsUnderOwnerAndEmitsNoSettled(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.MaxRebaseAttempts = 0
+	c.Unclaimed = true
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "5", Labels: append([]string{}, butlerPatchLabels...)})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StatePending, forge.StateSuccess, forge.StateSuccess})
+	s := newTestSettle(c, fc, fc)
+	owner := dispatchkey.Chore("dead-code")
+
+	testutil.CaptureStdout(t, func() { s.SettlePatch(owner, "5", testPR) })
+
+	if fc.Merged != testPR {
+		t.Errorf("expected PR to be merged; fc.Merged=%q", fc.Merged)
+	}
+	recs := readRecords()
+	waits := 0
+	for _, r := range recs {
+		if r.Key != owner {
+			t.Errorf("record = %+v, want key %v", r, owner)
+		}
+		if r.Event != report.EventCIWait {
+			t.Errorf("unexpected %q record %+v from the patch gate", r.Event, r)
+			continue
+		}
+		waits++
+	}
+	if waits == 0 {
+		t.Errorf("want a ci_wait record keyed by the owner; got %+v", recs)
+	}
+	if len(s.reportKey) != 0 || len(s.prLatch) != 0 {
+		t.Errorf("latches not flushed: reportKey=%v prLatch=%v", s.reportKey, s.prLatch)
+	}
+}
+
+// A nil-Dispatcher settle that no Chore owns (no SettlePatch) still reports its
+// terminal record under the issue key: only an owned issue suppresses it.
+func TestSettleAdopted_NilDispatcherUnownedEmitsIssueKeyedSettled(t *testing.T) {
+	readRecords := testutil.InstallPipeReporter(t)
+	c := baseConfig()
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.SetCheckStates(testPR, []forge.RollupState{forge.StateFailure})
+	s := newTestSettle(c, fc, fc)
+
+	testutil.CaptureStdout(t, func() { s.SettleAdopted(nil, "1", 0, testPR) })
+
+	want := dispatchkey.Issue("1")
+	for _, r := range readRecords() {
+		if r.Event == report.EventSettled && r.Key == want {
+			return
+		}
+	}
+	t.Errorf("want a settled record keyed %v from an unowned nil-Dispatcher settle", want)
 }
