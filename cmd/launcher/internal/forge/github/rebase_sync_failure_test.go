@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // seedModifyDeleteConflict registers PR num whose branch modifies base.txt
@@ -18,7 +19,7 @@ func seedModifyDeleteConflict(t *testing.T, h *codeforgeHarness, num string) str
 	t.Helper()
 	branch := h.branchName(num)
 	work := t.TempDir()
-	forgetest.Run(t, "", "clone", "--config", "gc.auto=0", "--config", "maintenance.auto=false", h.repo.Bare, work)
+	forgetest.Run(t, "", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), h.repo.Bare, work)...)
 	forgetest.Run(t, work, "checkout", h.base)
 	forgetest.Run(t, work, "checkout", "-b", branch)
 	writeFile(t, filepath.Join(work, "base.txt"), "modified by pr\n")
