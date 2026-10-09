@@ -136,6 +136,46 @@ in
     ) "checkClassLists must throw when a chore's patchClasses names a class missing from its classList";
     pkgs.runCommand "chore-catalog-patch-class-off-list-throws" { } "touch $out";
 
+  # A records-scoped Chore (ADR 0062) never promotes or patches; the catalog
+  # rejects a row that declares either.
+  chore-catalog-records-scoped-promotion-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          {
+            name = "demo";
+            classList = [ "a" ];
+            promotionClasses = [ "a" ];
+            patchClasses = [ ];
+            scopeSource = "records";
+          }
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when a records-scoped chore declares promotionClasses";
+    pkgs.runCommand "chore-catalog-records-scoped-promotion-throws" { } "touch $out";
+
+  chore-catalog-records-scoped-patch-throws =
+    let
+      broken = builtins.tryEval (
+        builtins.deepSeq (catalog.checkClassLists [
+          {
+            name = "demo";
+            classList = [ "a" ];
+            promotionClasses = [ ];
+            patchClasses = [ "a" ];
+            scopeSource = "records";
+          }
+        ]) "unreached"
+      );
+    in
+    assert assertMsg (
+      !broken.success
+    ) "checkClassLists must throw when a records-scoped chore declares patchClasses";
+    pkgs.runCommand "chore-catalog-records-scoped-patch-throws" { } "touch $out";
+
   chore-catalog-built-ins-class-lists-ok =
     let
       ok = builtins.tryEval (builtins.deepSeq catalog.classLists "reached");

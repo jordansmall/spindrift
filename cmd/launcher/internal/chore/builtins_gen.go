@@ -3,7 +3,7 @@ package chore
 
 // builtinChores is the name list of the built-in Chore catalog (lib/chore-catalog.nix).
 // Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
-var builtinChores = []string{"bugs", "docs-drift", "refactor"}
+var builtinChores = []string{"bugs", "docs-drift", "refactor", "tuning"}
 
 // builtinClassLists is each built-in Chore's closed finding-class list.
 // Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.
@@ -11,4 +11,15 @@ var builtinClassLists = map[string][]string{
 	"bugs":       {"error-handling", "resource-leak", "correctness", "input-validation", "concurrency", "other"},
 	"docs-drift": {"stale-reference", "wrong-behaviour", "wrong-example", "wrong-code-comment", "other"},
 	"refactor":   {"dead-code", "duplication", "other"},
+	"tuning":     {"cost-waste", "quality-regression", "prompt-gap", "model-fit", "knob-tuning", "evidence-gap"},
+}
+
+// builtinRecordsScoped names the built-in Chores that sweep the dispatch record store
+// instead of the Target repo's tree (ADR 0062).
+var builtinRecordsScoped = []string{"tuning"}
+
+// builtinEvery is each built-in Chore's catalog default sweep interval, a Go
+// time.ParseDuration string; a Chore absent here has none.
+var builtinEvery = map[string]string{
+	"tuning": "24h",
 }
