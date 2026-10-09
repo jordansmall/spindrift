@@ -172,11 +172,8 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 // spend, and record which URL it was spent on, until the filing it was for
 // is real: a failed PostIssue must not burn the day's promotion room.
 // fileIssueIntentsDetailed delegates to this with a constant closure,
-// rather than the other way around, so gate.go's call keeps its existing
-// (it, num, result, provenanceLabel, bodyBacklink string) shape --
-// nix/checks/dispatch-labels.nix's
-// extractFileIssueIntentsProvenanceLabel extracts the provenance label from
-// that exact call site as source text.
+// rather than the other way around, so callers with a fixed backlink keep the
+// plain (it, num, result, provenanceLabel, bodyBacklink string) shape.
 func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
