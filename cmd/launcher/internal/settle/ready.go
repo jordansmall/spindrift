@@ -402,11 +402,17 @@ func (s *Settle) mergeGuardHit(pr string) ([]string, error) {
 	return matchedGuardPaths(s.cfg.MergeGuardPaths, files), nil
 }
 
-// applyMergeMode performs the mode-specific action after CI reaches green.
-// agent-complete is already set, and a returned merge failure does not revert
-// it. A nil d makes a rebase conflict immediately non-retriable, since nothing
-// can dispatch a conflict resolution. On a nil error the returned string is the
-// reason class of the landing, decided here so the mode switch is the only one.
+// applyMergeMode performs the mode-specific action once a landing is ready to
+// merge: CI green on a PR, or straight away on a push-only forge. It runs
+// before the Complete commit, which both callers make through completeLanding
+// after it returns; see completeLanding for why that order matters (issues
+// #3523, #4879) and for the Unclaimed case. A returned merge failure settles
+// Complete with ReasonMergeBlocked (ADR 0012), except errAbandoned, which
+// commits nothing, and selfHealGate's errLandingNeverGreen, which settles
+// Failed. A nil d makes a rebase conflict immediately non-retriable, since
+// nothing can dispatch a conflict resolution. On a nil error the returned
+// string is the reason class of the landing, decided here so the mode switch
+// is the only one.
 func (s *Settle) applyMergeMode(num string, gen uint64, pr string, d dispatch.Dispatcher) (string, error) {
 	switch s.cfg.MergeMode {
 	case "immediate":
