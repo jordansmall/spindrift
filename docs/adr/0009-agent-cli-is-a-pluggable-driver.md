@@ -1,5 +1,9 @@
 # The agent CLI is a pluggable Driver; opencode joins claude behind it
 
+> **Amended by [ADR 0064](0064-a-consumer-flake-declares-its-drivers-side-by-side.md):**
+> a Consumer flake may declare several Drivers side by side, still one Driver
+> per image, each with its own apps and Driver-suffixed image outputs.
+>
 > Note (issue #3490): `claude` and `opencode` are both implemented Drivers
 > today — a `lib/drivers/` registry entry plus a matching Go strategy for
 > each, and both names in the generated driver-name list (issue #262
