@@ -104,8 +104,8 @@ in
     pkgs.runCommand "drivers-render-preamble-shape" { } "touch $out";
 
   # Issue #2011: renderPreamble exports a Driver entry's envCommon into
-  # entrypoint.sh's own shell process, so a child it execs
-  # (driver-exec/orchestrator, and beyond that claude itself) inherits them.
+  # entrypoint.sh's own shell process, so the box program it execs (and
+  # beyond that driver-exec/orchestrator and claude itself) inherits them.
   # envCommon is optional, so a Driver with no env vars of its own needn't
   # declare it.
   drivers-render-preamble-env-common =
@@ -176,8 +176,8 @@ in
       "renderPreamble must omit DRIVER_BASH_TIMEOUT_ENV entirely for a Driver entry with no bashTimeoutEnv, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-omits-bash-timeout-env-when-absent" { } "touch $out";
 
-  # Names end up as env var names in entrypoint.sh, so a
-  # non-identifier must fail at eval like an envCommon key does.
+  # Names end up as env var names the box program (cmd/launcher/box) exports,
+  # so a non-identifier must fail at eval like an envCommon key does.
   drivers-render-preamble-bash-timeout-env-rejects-bad-name =
     let
       result = builtins.tryEval (
@@ -237,9 +237,9 @@ in
         "RemoteTrigger"
         "Monitor"
       ];
-      # entrypoint.sh's DRIVER_FLAGS_COMMON splice is unquoted (whitespace
-      # word-split, matching driver-exec/args.go's strings.Fields), so the
-      # --disallowedTools value is the single word right after the flag.
+      # driver-exec word-splits DRIVER_FLAGS_COMMON on whitespace
+      # (driver-exec/args.go's strings.Fields), so the --disallowedTools
+      # value is the single word right after the flag.
       # Match tokens exactly rather than by substring, so a typo'd sibling
       # like "ScheduleWakeupX" can't slip a false pass by.
       words = splitString " " claudeEntry.flagsCommon;
