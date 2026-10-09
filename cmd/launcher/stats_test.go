@@ -288,7 +288,7 @@ func TestStats_ReingestRepairsChangedLogKeepsDeletedRecord(t *testing.T) {
 
 func TestStats_EmptyRoot(t *testing.T) {
 	out, _ := runStats(t, t.TempDir())
-	if want := "Records: 0  Passes: 0  Notional USD: $0.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 0\n"; out != want {
+	if want := "Records: 0  Passes: 0  Notional USD: $0.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 0\n"; out != want {
 		t.Errorf("stats on an empty root = %q, want %q", out, want)
 	}
 }
@@ -332,10 +332,10 @@ func TestRenderStats_LandedKeysAndSourceMix(t *testing.T) {
 		return tail
 	}
 	// Only a merged Record counts as landed; $12 over 2 merged keys.
-	if got, want := summary(records), "Landed keys: 2  USD per landed key: $6.00  Outcome source: dispatch_settled 10, none 1"; got != want {
+	if got, want := summary(records), "Landed keys: 2  USD per landed key: $6.00  Reverted: —  Outcome source: dispatch_settled 10, none 1"; got != want {
 		t.Errorf("summary = %q, want %q", got, want)
 	}
-	if got, want := summary(records[2:4]), "Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 1, none 1"; got != want {
+	if got, want := summary(records[2:4]), "Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 1, none 1"; got != want {
 		t.Errorf("no-landing summary = %q, want %q", got, want)
 	}
 	var buf bytes.Buffer

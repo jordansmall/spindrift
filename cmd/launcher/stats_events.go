@@ -19,14 +19,12 @@ import (
 // keeps a scratch directory inside some other repo from borrowing that repo's
 // events.
 func checkoutEvents(root string, stderr io.Writer) []daemon.Event {
-	top, err := gitOutput(root, "rev-parse", "--show-toplevel")
-	if errors.Is(err, exec.ErrNotFound) {
-		// A root that is merely not a checkout is ordinary; a missing git is
-		// not, and would otherwise pass for "no events" on every root.
+	top, err := isCheckoutTop(root)
+	if err != nil {
 		fmt.Fprintf(stderr, "warning: not reading daemon events: %v\n", err)
 		return nil
 	}
-	if err != nil || !sameDir(top, root) {
+	if !top {
 		return nil
 	}
 	gitDir, err := gitOutput(root, "rev-parse", "--absolute-git-dir")
@@ -41,6 +39,17 @@ func checkoutEvents(root string, stderr io.Writer) []daemon.Event {
 		return nil
 	}
 	return events
+}
+
+// isCheckoutTop reports whether root is the top of its own git checkout. A
+// root that is merely not a checkout is ordinary; a missing git is not, and
+// would otherwise pass for "not a checkout" on every root, so it is an error.
+func isCheckoutTop(root string) (bool, error) {
+	top, err := gitOutput(root, "rev-parse", "--show-toplevel")
+	if errors.Is(err, exec.ErrNotFound) {
+		return false, err
+	}
+	return err == nil && sameDir(top, root), nil
 }
 
 func sameDir(a, b string) bool {

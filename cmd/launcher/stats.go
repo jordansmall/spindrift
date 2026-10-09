@@ -149,6 +149,9 @@ func (o statsOptions) keep(r dispatchrecord.Record) bool {
 	return o.includeInferred || r.Attribution != dispatchrecord.AttributionInferred
 }
 
+// statsNow is the clock revert maturity is judged against.
+var statsNow = time.Now
+
 // statsRootRecords ingests one root's logs and returns its Records.
 func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Writer) ([]dispatchrecord.Record, error) {
 	store, err := dispatchrecord.Open(root)
@@ -166,12 +169,17 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 		}
 		// Skipped logs are retried next run; the Records from everything
 		// else are still good.
-		errs := []error{err}
-		if joined, ok := err.(interface{ Unwrap() []error }); ok {
-			errs = joined.Unwrap()
-		}
-		for _, e := range errs {
-			fmt.Fprintf(stderr, "warning: skipping unreadable log: %v\n", e)
+		warnEach(stderr, "skipping unreadable log", err)
+	}
+	// Only a root that is itself a Target clone can answer for its merge
+	// commits; any other root leaves them unfilled.
+	if top, err := isCheckoutTop(root); err != nil {
+		fmt.Fprintf(stderr, "warning: not filling reverts: %v\n", err)
+	} else if top {
+		if err := store.FillReverts(root, statsNow()); err != nil {
+			// FillReverts fills what it can; the error lists only the
+			// Records it had to leave behind.
+			warnEach(stderr, "reverts left unfilled", err)
 		}
 	}
 	records, err := store.Records()
@@ -185,6 +193,18 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 		fillInferredRevisions(records, checkoutEvents(root, stderr))
 	}
 	return records, nil
+}
+
+// warnEach prints one prefixed warning line per error an errors.Join value
+// carries, since its own message is newline-separated.
+func warnEach(stderr io.Writer, prefix string, err error) {
+	errs := []error{err}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		errs = joined.Unwrap()
+	}
+	for _, e := range errs {
+		fmt.Fprintf(stderr, "warning: %s: %v\n", prefix, e)
+	}
 }
 
 func cmdStats(args []string, stdout, stderr io.Writer) int {
@@ -347,6 +367,26 @@ func landedKeys(records []dispatchrecord.Record) int {
 	return len(seen)
 }
 
+// revertedShare renders the share of filled Records whose merge was reverted,
+// or an em dash when none is filled. An unfilled Record is not yet known to
+// stand, so it never counts as zero.
+func revertedShare(records []dispatchrecord.Record) string {
+	filled, reverted := 0, 0
+	for _, r := range records {
+		if r.Reverted == nil {
+			continue
+		}
+		filled++
+		if *r.Reverted {
+			reverted++
+		}
+	}
+	if filled == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f%% of %d", 100*float64(reverted)/float64(filled), filled)
+}
+
 // outcomeSources counts Records whose outcome is the host's dispatch_settled
 // op and the rest, which have none.
 func outcomeSources(records []dispatchrecord.Record) (settled, none int) {
@@ -368,8 +408,8 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 		perLanded = fmt.Sprintf("$%.2f", usd/float64(landed))
 	}
 	settled, none := outcomeSources(records)
-	if _, err := fmt.Fprintf(w, "Records: %d  Passes: %d  Notional USD: $%.2f (API-equivalent)  Landed keys: %d  USD per landed key: %s  Outcome source: %s %d, %s %d\n",
-		len(records), passes, usd, landed, perLanded,
+	if _, err := fmt.Fprintf(w, "Records: %d  Passes: %d  Notional USD: $%.2f (API-equivalent)  Landed keys: %d  USD per landed key: %s  Reverted: %s  Outcome source: %s %d, %s %d\n",
+		len(records), passes, usd, landed, perLanded, revertedShare(records),
 		dispatchrecord.OutcomeSourceSettled, settled, dispatchrecord.OutcomeSourceNone, none); err != nil {
 		return err
 	}

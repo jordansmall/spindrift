@@ -1,25 +1,25 @@
 knob:MERGE_MODE = auto
-Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 1
+Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 implement  1       $1.50  $1.50    1.0      0          -
 review     1       $1.50  $1.50    1.0      0          -
 
 knob:MERGE_MODE = manual
-Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 1
+Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 implement  1       $1.50  $1.50    1.0      0          -
 review     1       $1.50  $1.50    1.0      0          -
 
 knob:MERGE_MODE = (empty)
-Records: 1  Passes: 1  Notional USD: $1.50 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 1
+Records: 1  Passes: 1  Notional USD: $1.50 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 implement  1       $1.50  $1.50    1.0      0          -
 
 knob:MERGE_MODE = (none)
-Records: 1  Passes: 1  Notional USD: $0.10 (API-equivalent)  Landed keys: 0  USD per landed key: -  Outcome source: dispatch_settled 0, none 1
+Records: 1  Passes: 1  Notional USD: $0.10 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE    PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 (none)  1       $0.10  $0.10    0.1      0          -
