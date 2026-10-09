@@ -665,3 +665,24 @@ func TestBuildBoxEnvForwardsGHTokenOptional(t *testing.T) {
 		}
 	}
 }
+
+// A Chore's host-rendered Input (the tuning digest, ADR 0062) forwards as
+// CHORE_INPUT verbatim, and a code Chore with none forwards no variable.
+func TestBuildBoxEnv_ChoreForwardsInputOnlyWhenSet(t *testing.T) {
+	const digest = "# Tuning digest\n\n| Anchor | n |\n|---|---|\n| a1 | 20 |"
+	env, err := buildBoxEnv(Config{}, choreSubject(Chore{Name: "tuning", Branch: "b", Input: digest}), 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if got := env["CHORE_INPUT"]; got != digest {
+		t.Errorf("CHORE_INPUT: got %q, want %q", got, digest)
+	}
+
+	env, err = buildBoxEnv(Config{}, choreSubject(Chore{Name: "bugs", Branch: "b"}), 0, "", "")
+	if err != nil {
+		t.Fatalf("buildBoxEnv: unexpected error: %v", err)
+	}
+	if v, ok := env["CHORE_INPUT"]; ok {
+		t.Errorf("CHORE_INPUT should be absent when Input is empty, got %q", v)
+	}
+}

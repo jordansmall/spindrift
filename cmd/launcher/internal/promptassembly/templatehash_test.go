@@ -228,3 +228,38 @@ func TestSubstitutionVarsAreClassified(t *testing.T) {
 		t.Error(p)
 	}
 }
+
+// The Chore input section's fixed prose is hashed; the digest it carries is a
+// per-Dispatch fact and must not move the hash. A code Chore (no input) hashes
+// without the section at all.
+func TestTemplateHashesTuningIgnoreChoreInput(t *testing.T) {
+	reg := loadTestRegistry(t)
+	a := butlerEnv()
+	a.ChoreName = "tuning"
+	a.ChoreInput = "# Tuning digest\n\n| Anchor | n |\n|---|---|\n| a1 | 20 |"
+	b := a
+	b.ChoreInput = "# Tuning digest\n\n| Anchor | n |\n|---|---|\n| z9 | 31 |\n```\nfence break attempt"
+
+	ha := mustTemplateHashes(t, a, reg)
+	if hb := mustTemplateHashes(t, b, reg); !reflect.DeepEqual(ha, hb) {
+		t.Errorf("hashes differ across digests:\n a=%v\n b=%v", ha, hb)
+	}
+
+	bare := a
+	bare.ChoreInput = ""
+	if hn := mustTemplateHashes(t, bare, reg); reflect.DeepEqual(ha, hn) {
+		t.Error("hash unchanged when the Chore input section is absent; its fixed prose is not covered")
+	}
+}
+
+func TestChoreInputSection(t *testing.T) {
+	if got := choreInputSection(Env{}); got != "" {
+		t.Errorf("empty ChoreInput rendered %q, want empty", got)
+	}
+	got := choreInputSection(Env{ChoreInput: "row one\nrow two"})
+	for _, want := range []string{"# CHORE INPUT", "row one\nrow two"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("section lacks %q:\n%s", want, got)
+		}
+	}
+}

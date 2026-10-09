@@ -204,6 +204,12 @@ type Env struct {
 	// (dispatch.Chore.ClassList).
 	ChoreClassList string // dispatch.go: $CHORE_CLASS_LIST
 
+	// ChoreInput is the host-rendered input a Chore reasons from instead of
+	// the repo tree (the tuning digest, ADR 0062), unfenced markdown;
+	// dispatch.Chore.Input. Empty for a code Chore, whose prompt then renders
+	// without the section. choreInputSection renders it fenced.
+	ChoreInput string // dispatch.go: $CHORE_INPUT
+
 	// ChorePatchClasses is the Chore's patch-eligible class allow-list
 	// (issue #4072, ADR 0057), the patch-rung sibling of ChoreClasses:
 	// dispatch.Chore.PatchClasses space-joined. That field's comment owns

@@ -29,6 +29,9 @@ var removedFragmentVars = []struct {
 // prompt; operatorAuthored must trust exactly the var assemble.go sets.
 const chorePromptVar = "CHORE_PROMPT"
 
+// choreInputVar names the var carrying the host-rendered Chore input section.
+const choreInputVar = "CHORE_INPUT"
+
 // operatorAuthored reports whether a segment's bytes come from text an
 // operator controls: a template, fragment, or contract file, or the
 // Consumer-overridable chore prompt. Every other var value (issue title and

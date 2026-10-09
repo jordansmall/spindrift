@@ -50,6 +50,10 @@ type Chore struct {
 	// forwarded as CHORE_CLASS_LIST. Unlike PromotionClasses it is not a promotion
 	// fact, so the butler forwards it whatever the promotion budget.
 	ClassList []string
+	// Input is the host-rendered Chore input forwarded as CHORE_INPUT: the
+	// tuning digest (ADR 0062), which a records-scoped Chore reasons from in
+	// place of the repo tree. Empty for a code Chore, which forwards nothing.
+	Input string
 	// PatchClasses is the patch-eligible class allow-list forwarded as
 	// CHORE_PATCH_CLASSES (issue #4072, ADR 0057), the patch-rung sibling of
 	// PromotionClasses: informational for the Box's prompt only. At settle,
@@ -287,6 +291,9 @@ func buildBoxEnv(cfg Config, subj subject, fixPass int, ciFailureSummary string,
 		}
 		if len(subj.chore.ClassList) > 0 {
 			env["CHORE_CLASS_LIST"] = strings.Join(subj.chore.ClassList, " ")
+		}
+		if subj.chore.Input != "" {
+			env["CHORE_INPUT"] = subj.chore.Input
 		}
 		if len(subj.chore.PatchClasses) > 0 {
 			env["CHORE_PATCH_CLASSES"] = strings.Join(subj.chore.PatchClasses, " ")
