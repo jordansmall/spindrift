@@ -245,6 +245,9 @@ func TestIsTransientRegistryError(t *testing.T) {
 		{"Error: initializing source docker://busybox:stable: dial tcp: lookup registry-1.docker.io: no such host", true},
 		{"Error: pulling image: connection refused", true},
 		{"Error: pulling image: TLS handshake timeout", true},
+		{"Error: initializing source docker://busybox:stable: reading manifest stable in docker.io/library/busybox: toomanyrequests: You have reached your unauthenticated pull rate limit.", true},
+		{"Error: initializing source docker://busybox:stable: Requesting bearer token: invalid status code from registry 504 (Gateway Timeout)", true},
+		{"Error: initializing source docker://busybox:stable: invalid status code from registry 404 (Not Found)", false},
 		{"Error: creating build container: no such image", false},
 		{"", false},
 	}
