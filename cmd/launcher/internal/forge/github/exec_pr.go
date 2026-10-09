@@ -16,6 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/bundlerelay"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // rebaseForcePushTimeout bounds Rebase's trailing force-push so a remote that
@@ -474,7 +475,7 @@ func (e *execClient) Rebase(prURL string) error {
 	}
 
 	gitIn := func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir}, args...)...)
+		return exec.Command("git", gitexec.GuardedArgs(dir, args...)...)
 	}
 
 	if err := e.setCommitIdentity(gitIn); err != nil {
@@ -540,11 +541,13 @@ func hasUnmergedPaths(gitIn func(args ...string) *exec.Cmd) bool {
 // git_protocol and so can pick a personal SSH key (issues #4647, #4650). The -c
 // pairs after `clone` are clone's own --config: they land in the new repo's
 // config, so the plain `git push` the callers run later authenticates through
-// the same gh credential helper.
+// the same gh credential helper. The auto-maintenance guard persists the same
+// way, covering commands that run bare `git -C dir`.
 func (e *execClient) httpsClone(op string) func(dir string) error {
 	return func(dir string) error {
 		url, gitArgs := GitRemote(e.repo)
-		args := append([]string{"clone"}, gitArgs...)
+		args := append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...)
+		args = append(args, gitArgs...)
 		args = append(args, "--no-single-branch", url, dir)
 		if _, err := exec.Command("git", args...).Output(); err != nil {
 			return ghCommandErr("github: "+op+": git clone", err)
