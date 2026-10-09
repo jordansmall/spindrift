@@ -239,10 +239,9 @@ func launcherRow(t *testing.T, a answers, codeForge, name string) doctor.Check {
 }
 
 // Forgejo is the one backend whose validator inputs the wizard already holds
-// (FORGEJO_BASE_URL as a prompted tracker setting, FORGEJO_TOKEN as the
-// acquired credential), so it binds forgejo.ValidateForgejoEnv and its rows
-// must reach the same verdict `spindrift doctor` reaches, not the weaker
-// axis-membership check.
+// (see quickstartCheckDeps), so it binds forgejo.ValidateForgejoEnv and its
+// rows must reach the same verdict `spindrift doctor` reaches, not the
+// weaker axis-membership check.
 func TestQuickstartCheckDeps_ForgejoBindsValidator(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

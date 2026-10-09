@@ -385,6 +385,10 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	backendName := "github"
 	forgejoBaseURL := ""
 	repoSlugDefault := env.GitRemoteRepoSlug()
+	// The backend is github for a github.com remote or none, forgejo for
+	// codeberg.org, and asked directly for any other host. There are no Jira
+	// or local sub-prompts: those adapters stay in place for an operator who
+	// hand-edits the generated flake.
 	switch {
 	case host == "codeberg.org":
 		backendName, forgejoBaseURL, repoSlugDefault = "forgejo", codebergBaseURL, remoteSlug
@@ -417,9 +421,6 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	gitUserName := promptDefault("Git user name", env.GitConfig("user.name"))
 	gitUserEmail := promptDefault("Git user email", env.GitConfig("user.email"))
 
-	// backendName comes from the git remote host, never a direct prompt, and
-	// there are no Jira or local sub-prompts. Those adapters stay in place
-	// for an operator who hand-edits the generated flake.
 	tracker := trackerSettings{issueTracker: backendName, forgejoBaseURL: forgejoBaseURL}
 
 	desc, ok := backend.ByName(backendName)
