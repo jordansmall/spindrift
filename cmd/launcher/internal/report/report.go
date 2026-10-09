@@ -275,9 +275,12 @@ func (r *Reporter) emit(rec Record) {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	// Records are well under PIPE_BUF, so a single successful write is
-	// atomic against a sibling writer on the same pipe; the loop below is
-	// only for the short-write/EINTR cases syscall.Write can still return.
+	// A line may be up to MaxLine bytes, which can exceed PIPE_BUF (512
+	// on darwin; Linux's 4096 equals MaxLine), so one write(2) is not
+	// portably atomic. What keeps records from interleaving is r.mu
+	// serializing writers here and FromEnv's close-on-exec leaving this
+	// process the pipe's only writer; the loop resumes after a short
+	// write or EINTR.
 	for len(line) > 0 {
 		n, err := syscall.Write(r.fd, line)
 		if err == syscall.EINTR {
