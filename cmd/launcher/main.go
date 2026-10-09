@@ -613,9 +613,8 @@ func dispatchLabels(c config) forge.DispatchLabels {
 // status: dispatchLabels names it for every kind, but research reports unclear
 // as a verdict label, and its CI claim does not strip work-family labels, so
 // a leftover agent-ambiguous-spec on a research issue is not this run's
-// settle. The recover CLI bootstraps as Work, so it keeps Ambiguous; the
-// daemon's recover kind has no Statuses row and drops it, which is harmless
-// because its queue path needs SelfReportSuccess and never settles Ambiguous.
+// settle. The recover CLI and the daemon's recover child both bootstrap as
+// Work, so both keep Ambiguous.
 // Research settles its terminal through CompleteVerdict, so its configured
 // verdict labels count as settled too; forge.TransitionRemoveLabels strips them
 // on a claim, so one on an in-flight issue is this run's own settle.
