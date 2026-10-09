@@ -1,6 +1,7 @@
 package settle
 
 import (
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -91,4 +92,63 @@ func withoutCIWait(recs []report.Record) []report.Record {
 		}
 	}
 	return out
+}
+
+// TestSettle_CIWait_ReemitsWhenRunURLAppearsOrChanges: checks may not exist
+// when the wait starts, so a run URL-capable forge re-announces the wait when
+// the run URL first appears, changes or disappears, never on every poll tick.
+func TestSettle_CIWait_ReemitsWhenRunURLAppearsOrChanges(t *testing.T) {
+	const runA, runB = "https://example.test/actions/runs/1", "https://example.test/actions/runs/2"
+	cases := []struct {
+		name   string
+		states []forge.RollupState
+		urls   []string
+		want   []string // RunURL of each ci_wait record, in order
+	}{
+		{
+			name:   "appears then changes",
+			states: []forge.RollupState{forge.StatePending, forge.StatePending, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			urls:   []string{"", runA, runA, runB, runB},
+			want:   []string{"", runA, runB},
+		},
+		{
+			name:   "appears then disappears",
+			states: []forge.RollupState{forge.StatePending, forge.StatePending, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			urls:   []string{"", runA, "", "", ""},
+			want:   []string{"", runA, ""},
+		},
+		{
+			name:   "never appears",
+			states: []forge.RollupState{forge.StatePending, forge.StatePending, forge.StateSuccess, forge.StateSuccess},
+			urls:   []string{"", "", "", ""},
+			want:   []string{""},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			readRecords := testutil.InstallPipeReporter(t)
+			c := fixConfig(3)
+			c.MergeMode = "immediate"
+			fc := forge.NewRunURLFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+			fc.SetCheckStates(testPR, tc.states)
+			fc.SetRunURLs(testPR, tc.urls)
+			s := newTestSettle(c, fc, fc)
+
+			s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+
+			var got []string
+			for _, r := range readRecords() {
+				if r.Event == report.EventCIWait {
+					if r.Key != dispatchkey.Issue("1") || r.PRURL != testPR {
+						t.Errorf("record = %+v, want issue=1 PRURL=%s", r, testPR)
+					}
+					got = append(got, r.RunURL)
+				}
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("ci_wait run URLs = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }

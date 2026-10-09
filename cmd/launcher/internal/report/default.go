@@ -48,6 +48,6 @@ func Model(key dispatchkey.Key, model, role string) {
 }
 
 // CIWait forwards to Default().CIWait.
-func CIWait(key dispatchkey.Key, prURL string) {
-	Default().CIWait(key, prURL)
+func CIWait(key dispatchkey.Key, prURL, runURL string) {
+	Default().CIWait(key, prURL, runURL)
 }

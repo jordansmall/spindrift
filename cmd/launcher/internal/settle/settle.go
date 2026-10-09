@@ -153,6 +153,8 @@ type Settle struct {
 	landing forge.LandingRecorder
 	// landingPass is nil for every tracker but local (issue #2983).
 	landingPass forge.LandingPassRecorder
+	// ciRun is nil for forges that cannot report a CI run URL.
+	ciRun forge.CIRunReporter
 	// readOnly mirrors Config.ReadOnly (issue #1917). See postBlockedNoteComment.
 	readOnly bool
 	// Every CI-watch, fix-pass, and merge-gate checkpoint checks term, so a
@@ -226,6 +228,7 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	pr := cfg.Capabilities.PRForge
 	landing := cfg.Capabilities.LandingRecorder
 	landingPass := cfg.Capabilities.LandingPassRecorder
+	ciRun := cfg.Capabilities.CIRunReporter
 	cfForNum := cfg.CodeForgeForIssue
 	if cfForNum == nil {
 		cfForNum = func(string) forge.CodeForge { return cf }
@@ -234,5 +237,5 @@ func New(cfg Config, it forge.IssueTracker, cf forge.CodeForge) *Settle {
 	if clock.Sleep == nil {
 		clock = dispatch.RealClock()
 	}
-	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
+	return &Settle{cfg: cfg, it: it, cf: cf, pr: pr, landing: landing, landingPass: landingPass, ciRun: ciRun, readOnly: cfg.ReadOnly, cfForNum: cfForNum, clock: clock, term: terminate.NewRegistry()}
 }
