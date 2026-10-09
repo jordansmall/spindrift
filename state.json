@@ -1,20 +1,18 @@
 {
-  "lastSwept": "a1f6f124bcfc11d67310bac8bd26b64c678ba404",
-  "cursor": "cmd/launcher/orchestrator/marker_fragment_parity_test.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-09T08:10:13.432705567-04:00"
-  },
+  "lastSwept": "483ef2d3cf34cac2184752d92a2b1ba57aa1bbc1",
+  "cursor": "cmd/launcher/readcontext.go",
+  "phase": "done",
+  "filed": [
+    "https://github.com/jordansmall/spindrift/issues/4929"
+  ],
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 42,
+    "output_tokens": 11655,
+    "cache_read_input_tokens": 1257775,
+    "cache_creation_input_tokens": 96409,
+    "total_cost_usd": 1.3222704000000003,
+    "duration_ms": 158569,
+    "duration_api_ms": 174662,
+    "num_turns": 25
   }
 }
