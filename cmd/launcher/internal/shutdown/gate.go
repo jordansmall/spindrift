@@ -45,7 +45,7 @@ type Gate struct {
 	// below.
 	mu sync.Mutex
 	// idle lets Settle block until an in-progress reclaim (aborting) clears,
-	// mirroring waves/continuous.go's idle/outstanding wait.
+	// mirroring waves/continuous.go's idle/inflight wait.
 	idle *sync.Cond
 
 	signalled bool
@@ -286,7 +286,7 @@ func (g *Gate) Settle() {
 	// The watcher's own select can race a concurrent Allowed/Launch call that
 	// notices abort first and is still mid-reclaim when Settle is called; wait
 	// it out before the final re-check below, the same invariant as
-	// continuous.go's `for outstanding > 0 || aborting { idle.Wait() }`.
+	// continuous.go's `for len(inflight) > 0 || aborting { idle.Wait() }`.
 	for g.aborting {
 		g.idle.Wait()
 	}
