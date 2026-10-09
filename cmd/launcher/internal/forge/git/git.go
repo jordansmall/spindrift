@@ -12,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/gitplumbing"
+	"spindrift.dev/launcher/internal/gitexec"
 )
 
 // defaultCloneTimeout bounds cloneToTemp's clone. A hung remote that accepts
@@ -108,7 +109,7 @@ func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, g
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "git", "clone", remoteURL, dir).Run(); err != nil {
+	if err := exec.CommandContext(ctx, "git", append(append([]string{"clone"}, gitexec.NoAutoMaintenance("--config")...), remoteURL, dir)...).Run(); err != nil {
 		cleanup()
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", nil, nil, fmt.Errorf("git clone %s: timed out after %s: %w", forge.RedactURLCredentials(remoteURL), timeout, ctx.Err())
@@ -116,7 +117,7 @@ func cloneToTemp(remoteURL, prefix string, timeout time.Duration) (dir string, g
 		return "", nil, nil, fmt.Errorf("git clone %s: %w", forge.RedactURLCredentials(remoteURL), err)
 	}
 	gitIn = func(ctx context.Context, args ...string) *exec.Cmd {
-		return exec.CommandContext(ctx, "git", append([]string{"-C", dir}, args...)...)
+		return exec.CommandContext(ctx, "git", gitexec.GuardedArgs(dir, args...)...)
 	}
 	return dir, gitIn, cleanup, nil
 }
