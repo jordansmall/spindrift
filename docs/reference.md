@@ -6082,14 +6082,15 @@ with `spindrift registry discover --force`, which discards hand edits.
 
 ## Registry transport probe cache
 
-Deciding how a proxied dispatch reaches a Box's registry proxy — over a unix
-socket, or falling back to TCP on every interface — takes a live probe against
+Deciding how a dispatch reaches a Box's registry proxy or Signal socket —
+over a unix socket, or falling back to TCP on every interface — takes a live
+probe against
 the configured container runtime (ADR 0045, issue #3111): a throwaway container
 mounts the socket and reports whether it can see it, and on a
 socket-incapable host (the macOS case, where the runtime runs inside a VM)
 a second live sub-probe confirms the TCP fallback's own `--add-host`
 host-gateway route actually works before it's trusted, at up to **three**
-throwaway containers per proxied dispatch — **four** when the socket probe
+throwaway containers per probing dispatch — **four** when the socket probe
 comes back with no verdict and the control probe below runs. The verdict
 changes only when the operator's runtime configuration changes, not on
 every dispatch, so `RegistryProxyTransport` now measures it once and
@@ -6128,13 +6129,16 @@ reads as an unrecoverable failure and aborts the dispatch; with it,
 the dispatch falls through cleanly to the TCP transport instead.
 
 The remembered decision lives in one file,
-`<working-dir>/.spindrift/registry-probe-cache.json`, written only when a
-registry proxy is actually configured — a dispatch with no
-`REGISTRY_PROXY_ROUTES_FILE` routes leaves no trace. It remembers the whole
-transport decision, not just the socket-vs-TCP verdict: the transport kind,
-the TCP host, and whether the TCP arm needs `--add-host` all travel
-together, since a cache that replayed only the socket verdict would leave
-the `--add-host` mode to guess.
+`<working-dir>/.spindrift/registry-probe-cache.json`, written whenever an
+OCI-runtime (docker/podman) dispatch needs the transport probe — registry
+proxy routes are configured (`REGISTRY_PROXY_ROUTES_FILE`), or
+`BOX_SIGNAL_CARRIER=socket` (the default). `spindrift doctor`'s
+`registry-proxy-transport` and `signal-socket-transport` rows mirror the
+same gates; a dispatch with neither leaves no trace. It
+remembers the whole transport decision, not just the socket-vs-TCP
+verdict: the transport kind, the TCP host, and whether the TCP arm needs
+`--add-host` all travel together, since a cache that replayed only the
+socket verdict would leave the `--add-host` mode to guess.
 
 A stored verdict is keyed on the container runtime (`RUNTIME` /
 `perSystem.spindrift.infra.runtime`), the image reference, and
@@ -6162,9 +6166,9 @@ whether the socket can cross into the Box without touching the runtime
 binary, the image, or `NETWORK_MODE`, so the cache has no way to notice on
 its own. For that case, and any other change the key can't see, the
 operator's escape hatch is one command: `rm
-.spindrift/registry-probe-cache.json`. The next proxied dispatch finds no
-file, probes live, and writes a fresh verdict — there is no flag or env var
-for this, deleting the file is the whole mechanism.
+.spindrift/registry-probe-cache.json`. The next dispatch that needs the
+probe finds no file, probes live, and writes a fresh verdict — there is no
+flag or env var for this, deleting the file is the whole mechanism.
 
 The cache degrades safely on its own. A missing, truncated, corrupt, or
 otherwise unreadable cache file is treated as a miss, not an error — the
