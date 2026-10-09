@@ -512,8 +512,8 @@ func TestComposeUnknownCarriedPassErrors(t *testing.T) {
 }
 
 // Extends TestComposeReconcilesAgainstAssemble's reconciliation shape to issue
-// #3445: an Env carrying IssueText, so the base and (orchestrator-on) review
-// body's ISSUE_TEXT segment reconcile too, with Remainder staying 0.
+// #3445: an Env carrying IssueText, so the base and review body's ISSUE_TEXT
+// segment reconcile too, with Remainder staying 0.
 func TestComposeReconcilesWithIssueTextSection(t *testing.T) {
 	reg := loadTestRegistry(t)
 
