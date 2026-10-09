@@ -74,7 +74,7 @@ func TestSettleAdopted_TransientReadErrorAfterMergeRetriesThenVerifies(t *testin
 			if bundleExists(t, outbox) {
 				t.Errorf("a verified merge must drop the bundle")
 			}
-			if recs := readRecords(); len(recs) != 1 || recs[0].State != "complete" {
+			if recs := withoutCIWait(readRecords()); len(recs) != 1 || recs[0].State != "complete" {
 				t.Errorf("records = %+v, want exactly one state=complete", recs)
 			}
 		})
@@ -116,7 +116,7 @@ func TestSettleAdopted_PersistentReadErrorAfterMergeKeepsComplete(t *testing.T) 
 			if !bundleExists(t, outbox) {
 				t.Errorf("an unverified merge must keep the bundle")
 			}
-			recs := readRecords()
+			recs := withoutCIWait(readRecords())
 			if len(recs) != 1 {
 				t.Fatalf("records: got %d, want exactly 1: %+v", len(recs), recs)
 			}
