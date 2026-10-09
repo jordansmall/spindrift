@@ -335,6 +335,13 @@ func (j *jiraClient) swapLabel(num, add string, removes ...string) error {
 		map[string]any{"update": map[string]any{"labels": ops}}, nil)
 }
 
+// nativeStatus returns the Jira status StatusMapping maps s to, and whether s
+// is natively mapped at all (an empty mapping counts as unmapped).
+func (j *jiraClient) nativeStatus(s forge.DispatchState) (string, bool) {
+	target := j.cfg.StatusMapping[s]
+	return target, target != ""
+}
+
 // alreadyClaimedNative reports whether num's current native status already
 // equals the InProgress mapping, the native-mode half of the already-claimed
 // check TransitionState runs before a claim. StatusMapping[from] == the
@@ -342,8 +349,8 @@ func (j *jiraClient) swapLabel(num, add string, removes ...string) error {
 // exempts Label(from) == InProgress, mirroring the dispatch-workflow re-entry
 // case (#3887).
 func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.DispatchState) bool {
-	target, ok := j.cfg.StatusMapping[forge.InProgress]
-	if !ok || target == "" || j.cfg.StatusMapping[from] == target {
+	target, ok := j.nativeStatus(forge.InProgress)
+	if !ok || j.cfg.StatusMapping[from] == target {
 		return false
 	}
 	return strings.EqualFold(payload.Fields.Status.Name, target)
@@ -361,8 +368,13 @@ func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.D
 // or the fallback label already reads InProgress (#3887), since either mode
 // may be the one that actually landed a prior claim. The check is
 // read-then-write, not atomic: another claimer can still land between the
-// two.
+// two. On a native claim it then strips any settled labels that GET showed
+// before transitioning, and fails the claim if that strip fails: nothing has
+// moved yet, whereas a surviving settled label makes shutdown.unsettled read
+// the live Box as already settled (#4917). The post-transition
+// TransitionRemoveLabels strip stays best-effort.
 func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) error {
+	target, native := j.nativeStatus(to)
 	if to == forge.InProgress {
 		var payload jiraIssuePayload
 		if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
@@ -371,8 +383,19 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 		if j.cfg.Labels.AlreadyClaimed(from, to, payload.Fields.Labels) || j.alreadyClaimedNative(payload, from) {
 			return fmt.Errorf("jira: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, payload.Fields.Status.Name)
 		}
+		if native {
+			var stale []string
+			for _, l := range forge.SettledLabels(j.cfg.Labels, j.cfg.VerdictLabels) {
+				if slices.Contains(payload.Fields.Labels, l) {
+					stale = append(stale, l)
+				}
+			}
+			if err := j.swapLabel(num, "", stale...); err != nil {
+				return fmt.Errorf("jira: issue %s: strip settled labels before claim: %w", num, err)
+			}
+		}
 	}
-	if target, ok := j.cfg.StatusMapping[to]; ok && target != "" {
+	if native {
 		err := j.transitionByStatus(num, target)
 		if err == nil {
 			// ListIssues matches a state by status OR its fallback label, so a
