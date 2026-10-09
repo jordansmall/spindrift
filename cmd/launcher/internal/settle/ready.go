@@ -99,10 +99,7 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 				s.it.Comment(num, fmt.Sprintf("merge blocked after green CI: %v", err))
 				return s.completeLanding(num, gen, landingManual, ReasonMergeBlocked), ""
 			}
-			if mergeReason == ReasonMerged {
-				return s.completeLanding(num, gen, landingMerged, mergeReason), ""
-			}
-			return s.completeLanding(num, gen, landingManual, mergeReason), ""
+			return s.completeLanding(num, gen, mergedLanding(mergeReason), mergeReason), ""
 		case gateTerminal:
 			// Catches a mark landing mid-poll, before the Failed commit and
 			// comment below.
@@ -243,13 +240,14 @@ func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr 
 	}
 }
 
-// completeLanding is the gateGreen arm's single Complete-commit gate. The
-// arm's top-of-switch check catches a mark that lands before MarkReady, but
-// the Registry mark is sticky (terminate/registry.go), so re-checking here
-// also catches one that lands during MarkReady's or applyMergeMode's own
-// round-trip: Reclaim already moved num to Dispatchable by then, and a
-// Complete commit here would leave the issue wearing agent-complete on top,
-// which Reconcile's InProgress-only sweep never clears (issue #3523).
+// completeLanding is the single Complete-commit gate for the gateGreen arm and
+// landPushOnly. The arm's top-of-switch check catches a mark that lands before
+// MarkReady, but the Registry mark is sticky (terminate/registry.go), so
+// re-checking here also catches one that lands during MarkReady's or
+// applyMergeMode's own round-trip: Reclaim already moved num to Dispatchable
+// by then, and a Complete commit here would leave the issue wearing
+// agent-complete on top, which Reconcile's InProgress-only sweep never clears
+// (issue #3523).
 func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, reason string) landingResult {
 	if s.terminated(num, gen) {
 		return landingAbandoned
@@ -264,14 +262,26 @@ func (s *Settle) completeLanding(num string, gen uint64, landed landingResult, r
 	return landed
 }
 
+// mergedLanding classifies an applyMergeMode reason: only ReasonMerged is a
+// merge that actually landed.
+func mergedLanding(reason string) landingResult {
+	if reason == ReasonMerged {
+		return landingMerged
+	}
+	return landingManual
+}
+
 // landPushOnly lands a push-only forge, where there is no PR or CI to watch, so
-// the issue goes Complete immediately and MERGE_MODE applies straight against
-// the forge's Merge and Rebase. A merge failure leaves the issue Complete with
-// a merge-blocked note, never demoted to Failed (ADR 0012). A relay that fails
-// with its bundle still in the outbox parks the issue Failed instead (issue
-// #4651) and returns landingFailed, the transition and comment already done.
-// An immediate merge drops the landed bundle here, since verifyMerged never
-// runs without a PR.
+// the issue goes Complete once MERGE_MODE has applied straight against the
+// forge's Merge and Rebase. Complete commits after the merge, through
+// completeLanding, so a mark landing during the merge's retry backoff abandons
+// instead of committing tracker state (issue #4879). A merge failure leaves
+// the issue Complete with a merge-blocked note (unless Unclaimed, which has no
+// state to move), never demoted to Failed (ADR 0012). A relay that fails with
+// its bundle still in the outbox parks the issue Failed instead (issue #4651)
+// and returns landingFailed, the transition and comment already done. An
+// immediate merge drops the landed bundle here, since verifyMerged never runs
+// without a PR.
 func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
 	// No CI watch here, so this is the only checkpoint before landing —
 	// an aborted run must not merge or commit Complete (issue #3523).
@@ -295,36 +305,44 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 		s.parkRelayFailure(num, branch, relayErr)
 		return landingFailed
 	}
-	// Complete commits before the merge runs, so the class starts at the worst
-	// case and is relatched to what applyMergeMode actually did.
-	s.transitionState(num, forge.InProgress, forge.Complete, "", ReasonMergeBlocked)
 	err := relayErr
 	mergeReason := ReasonMergeBlocked
 	if err == nil {
 		mergeReason, err = s.applyMergeMode(num, gen, branch, nil)
 	}
+	if errors.Is(err, errAbandoned) {
+		return landingAbandoned
+	}
 	if err != nil {
+		if s.completeLanding(num, gen, landingManual, ReasonMergeBlocked) == landingAbandoned {
+			return landingAbandoned
+		}
 		fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 		s.it.Comment(num, fmt.Sprintf("landing blocked: %v", err))
 		return landingManual
 	}
-	s.relatchReason(num, mergeReason)
-	if mergeReason == ReasonMerged {
-		// CODE_FORGE=local needs the resolved Integration ref and commit sha
-		// (ADR 0029/0033), not the raw branch name recordLanding wrote from the
-		// outcome line, so overwrite it now that Merge has landed. Best-effort:
-		// a resolution failure must never turn a successful land into a failure.
-		if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
-			if landing, err := lr.LandingRef(); err == nil {
-				s.recordLanding(num, landing)
-			} else {
-				fmt.Printf("    #%s  landing=%s  status=landing-ref-unresolved  !! %v\n", num, branch, err)
-			}
-		}
-		s.removeLandedBundle(num)
-		return landingMerged
+	landed := mergedLanding(mergeReason)
+	if landed != landingMerged {
+		return s.completeLanding(num, gen, landed, mergeReason)
 	}
-	return landingManual
+	// Ahead of the re-check: the merge happened and the outbox bundle is
+	// not tracker state, so an abandoned landing must still drop it.
+	s.removeLandedBundle(num)
+	if s.completeLanding(num, gen, landed, mergeReason) == landingAbandoned {
+		return landingAbandoned
+	}
+	// CODE_FORGE=local needs the resolved Integration ref and commit sha
+	// (ADR 0029/0033), not the raw branch name recordLanding wrote from the
+	// outcome line, so overwrite it now that Merge has landed. Best-effort:
+	// a resolution failure must never turn a successful land into a failure.
+	if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
+		if landing, err := lr.LandingRef(); err == nil {
+			s.recordLanding(num, landing)
+		} else {
+			fmt.Printf("    #%s  landing=%s  status=landing-ref-unresolved  !! %v\n", num, branch, err)
+		}
+	}
+	return landed
 }
 
 // gateToGreen polls CheckState until confirmed SUCCESS, terminal failure, or

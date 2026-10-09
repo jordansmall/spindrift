@@ -836,3 +836,149 @@ func TestSelfHeal_LandPushOnly_TerminatedSkipsCompleteAndMerge(t *testing.T) {
 		t.Errorf("Merge must not be called after termination; fc.Merged=%q", fc.Merged)
 	}
 }
+
+// A mark landing during the merge's transient-retry backoff makes
+// mergeImmediate return errAbandoned; landPushOnly must report
+// landingAbandoned without committing Complete or posting a "landing
+// blocked" comment (issue #4879, #3523). Policy.Max = 1 grants the single
+// transient retry (the zero value would return the transient error at once),
+// so the backoff sleep that marks is actually reached.
+func TestSelfHeal_LandPushOnly_TerminatedDuringMergeBackoff_ReportsAbandoned(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.Policy.Max = 1
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.MergeErrs = []error{forge.ErrMergeTransient, nil}
+	var s *Settle
+	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
+	s = newTestSettle(c, fc, fc.AsPushOnly())
+
+	got := s.landPushOnly("1", 0, "agent/issue-1")
+
+	if got != landingAbandoned {
+		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+	}
+	assertNoTransitionOrComment(t, fc)
+	if fc.Merged != "" {
+		t.Errorf("Merge must not succeed after termination; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// markDuringMerge marks "1" inside the forge's Merge call, the window between
+// applyMergeMode's last termination check and landPushOnly's Complete commit.
+// Embedding the CodeForge interface keeps the wrapped forge push-only.
+type markDuringMerge struct {
+	forge.CodeForge
+	s *Settle
+}
+
+func (m *markDuringMerge) Merge(url string) error {
+	m.s.Registry().Mark("1")
+	return m.CodeForge.Merge(url)
+}
+
+// A mark landing inside Merge itself is past every checkpoint ahead of the
+// merge, so only completeLanding's re-check stops landPushOnly committing
+// Complete (issue #4879). The merge already happened, so its bundle is
+// dropped even though the landing is abandoned; a failed merge keeps it.
+func TestSelfHeal_LandPushOnly_TerminatedDuringMerge_ReportsAbandoned(t *testing.T) {
+	cases := []struct {
+		name       string
+		mergeErr   error
+		wantMerged bool
+	}{
+		{name: "merge succeeds", wantMerged: true},
+		{name: "merge fails", mergeErr: errors.New("required review missing")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			outbox := t.TempDir()
+			writeBundle(t, outbox)
+			c := baseConfig()
+			c.MergeMode = "immediate"
+			c.OutboxDir = func(string) string { return outbox }
+			fc := forge.NewFake(testDispatchLabels)
+			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+			fc.MergeErr = tc.mergeErr
+			wrapper := &markDuringMerge{CodeForge: fc.AsPushOnly()}
+			s := newTestSettle(c, fc, wrapper)
+			wrapper.s = s
+
+			got := s.landPushOnly("1", 0, "agent/issue-1")
+
+			if got != landingAbandoned {
+				t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+			}
+			assertNoTransitionOrComment(t, fc)
+			if gone := !bundleExists(t, outbox); gone != tc.wantMerged {
+				t.Errorf("bundle removed = %v, want %v", gone, tc.wantMerged)
+			}
+		})
+	}
+}
+
+// markDuringRelay marks "1" inside the forge's RelayBundle call and then
+// relays for real, so the mark lands after the relay's own stop checks but
+// before applyMergeMode runs. It re-exposes RelayBundle, which embedding the
+// CodeForge interface would otherwise hide.
+type markDuringRelay struct {
+	forge.CodeForge
+	s *Settle
+}
+
+func (m *markDuringRelay) RelayBundle(outboxDir, ref string) error {
+	m.s.Registry().Mark("1")
+	return m.CodeForge.(forge.BundleRelay).RelayBundle(outboxDir, ref)
+}
+
+// A mark landing inside a relay that then succeeds must abandon before Merge,
+// not merge and commit Complete for an issue Terminate already released
+// (issue #4879, #3523).
+func TestSelfHeal_LandPushOnly_TerminatedDuringRelay_ReportsAbandoned(t *testing.T) {
+	outbox := t.TempDir()
+	writeBundle(t, outbox)
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.OutboxDir = func(string) string { return outbox }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	wrapper := &markDuringRelay{CodeForge: fc.AsLocal()}
+	s := newTestSettle(c, fc, wrapper)
+	wrapper.s = s
+
+	got := s.landPushOnly("1", 0, "agent/issue-1")
+
+	if got != landingAbandoned {
+		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
+	}
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundleCalls = %+v, want exactly one (the marking relay)", fc.RelayBundleCalls)
+	}
+	assertNoTransitionOrComment(t, fc)
+	if fc.Merged != "" {
+		t.Errorf("Merge must not run after termination; fc.Merged=%q", fc.Merged)
+	}
+}
+
+// The end-to-end push-only twin of TestSettle_AbandonedSkipsUsageComment: a
+// mark landing inside Merge makes landPushOnly report landingAbandoned, so
+// Settle's ready branch posts neither a "landing blocked" nor a usage comment.
+func TestSettle_PushOnlyAbandonedSkipsUsageComment(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	wrapper := &markDuringMerge{CodeForge: fc.AsPushOnly()}
+	s := newTestSettle(c, fc, wrapper)
+	wrapper.s = s
+
+	s.Settle(dispatch.NewFake(), "1", 0, dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "1", Landing: "agent/issue-1", Status: "ready", Note: "ok"},
+		},
+	})
+
+	assertNoTransitionOrComment(t, fc)
+}
