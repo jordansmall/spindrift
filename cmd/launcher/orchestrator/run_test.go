@@ -186,7 +186,7 @@ exit 0
 
 // TestRunInvokesDriverExecOnceForwardingFlags verifies the orchestrator's S1
 // tracer-bullet behaviour (issue #1996): exactly one driver-exec invocation,
-// carrying every flag entrypoint.sh's own direct call passes today, and the
+// carrying every flag the box binary hands the orchestrator today, and the
 // scripted outcome line driver-exec would emit reaches the orchestrator's own
 // stdout unchanged.
 func TestRunInvokesDriverExecOnceForwardingFlags(t *testing.T) {
@@ -305,9 +305,8 @@ func TestBuildDriverExecCmdForwardsHandoffFileAndPerPassPaths(t *testing.T) {
 
 // TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile pins the real
 // mechanism behind AC4 and AC6: buildDriverExecCmd's argv assembly never reads
-// cfg.stateFile or cfg.reviewPromptFile into a flag for ANY cfg, not just a
-// worker's passCfg. workers.go clearing those two fields is defense in depth on
-// top of this, not the enforcement itself (issue #2059 review finding).
+// cfg.stateFile or cfg.reviewPromptFile into a flag for ANY cfg (issue #2059
+// review finding).
 func TestBuildDriverExecCmdNeverForwardsStateOrReviewPromptFile(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -507,7 +506,7 @@ exit 0
 // TestRunPropagatesDriverExecExitCode verifies the orchestrator returns
 // driver-exec's own exit code unchanged (issue #1996's "run still terminates
 // on the unchanged SPINDRIFT_OUTCOME... status=ready|blocked" requirement
-// depends on entrypoint.sh seeing the real Driver outcome, not a masked one).
+// depends on the box binary seeing the real Driver outcome, not a masked one).
 func TestRunPropagatesDriverExecExitCode(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -1259,10 +1258,10 @@ func TestRunClearsPassSummaryPathWhenPassLeavesSeededFileUntouched(t *testing.T)
 }
 
 // TestRunWithReviewPassRecordsPassSummaryPathIntoRunState verifies
-// runWithReviewPass, the loop production runs once entrypoint.sh sets
-// cfg.reviewPromptFile (ADR 0035), records cfg.passSummaryPath the same way the
-// legacy loop does (issue #2549). The land pass writes the file itself: a
-// configured path alone is not evidence a pass wrote anything.
+// runWithReviewPass, the loop production runs once the box binary's handoff
+// file sets cfg.reviewPromptFile (ADR 0035), records cfg.passSummaryPath the
+// same way the legacy loop does (issue #2549). The land pass writes the file
+// itself: a configured path alone is not evidence a pass wrote anything.
 func TestRunWithReviewPassRecordsPassSummaryPathIntoRunState(t *testing.T) {
 	dir := t.TempDir()
 	callLog := filepath.Join(dir, "calls.log")
@@ -2219,7 +2218,7 @@ func TestRunNudgeResumePreservesExistingManifest(t *testing.T) {
 	callLog := filepath.Join(dir, "calls.log")
 	// No verdict and no outcome line: legacyTransition stops after this one
 	// pass, matching a nudge resume, which runs one pass at a time. The result
-	// event gives passUsage something real to extract.
+	// event gives passReport something real to extract.
 	writeFakeDriverExec(t, dir, callLog, `printf '%s' '`+streamJSONResultLine(70, 30, 0.01)+`' >> "$DRIVER_LOG_PATH"
 exit 0
 `)
@@ -2281,7 +2280,7 @@ exit 0
 	}
 	wantUsage := usage.Usage{InputTokens: 70, OutputTokens: 30, TotalCostUSD: 0.01}
 	if manifest[2].Usage != wantUsage {
-		t.Errorf("manifest[2].Usage = %+v, want %+v (the legacy loop must thread passUsage's return value into the manifest entry, not leave it at the zero value)", manifest[2].Usage, wantUsage)
+		t.Errorf("manifest[2].Usage = %+v, want %+v (the legacy loop must thread passReport's return value into the manifest entry, not leave it at the zero value)", manifest[2].Usage, wantUsage)
 	}
 
 	// Issue #3091: the op stream must report the pass number the manifest just
@@ -5899,7 +5898,7 @@ exit 0
 		t.Fatalf("run: %v", err)
 	}
 	if rc != 0 {
-		t.Errorf("rc = %d, want 0 so entrypoint.sh's resume-nudge/backstop can still salvage committed work", rc)
+		t.Errorf("rc = %d, want 0 so the box binary's resume nudge and backstop can still salvage committed work", rc)
 	}
 
 	out := stdout.String()
@@ -6016,7 +6015,7 @@ exit 0
 // scanPassLog against a realistic claude stream-json log (issue #1998 review):
 // a bare-line scan of the raw JSONL would see neither marker, since both live
 // inside JSON string fields. It also covers claude wrapping its final message
-// in backticks (issue #1611), which claude.nix's bash extraction already strips.
+// in backticks (issue #1611), which outcome.StripResultText already strips.
 func TestScanPassLogDetectsOutcomeThroughStreamJSONAndMarkdownWrap(t *testing.T) {
 	dir := t.TempDir()
 	logPath := filepath.Join(dir, "stream.log")

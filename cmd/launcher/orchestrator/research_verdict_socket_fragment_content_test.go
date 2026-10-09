@@ -10,7 +10,7 @@ import (
 // TestResearchVerdictSocketFragmentContract pins the prose of the three
 // research-verdict socket fragments (issue #3726, fixing a blocking review
 // finding): the socket has a hard signalwire.MaxBodyBytes-per-field ceiling
-// (enforced by signalsocket.validate), and an oversize body is refused
+// (enforced by signalwire.CheckFields), and an oversize body is refused
 // outright, never truncated. It also pins the #3866 clauses shared with the
 // other socket fragments: a one-call stdin heredoc send, the `-body-file`
 // flag set, a bare/unpiped send, and the exit code as the acceptance.

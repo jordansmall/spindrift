@@ -34,15 +34,15 @@ func TestPromptMarkersMatchScanner(t *testing.T) {
 
 	// The read-only PR-intent hand-off (issue #2045, the #2036 fix): unlike
 	// outcome.Token above, this marker never appears in issue-prompt.md
-	// itself. The two Conditional fragments the BOX_ACCESS_READ_ONLY gate
-	// selects (lib/fragments.nix) write it, so check each one directly.
+	// itself. The two Conditional fragments the BOX_ACCESS_READ_ONLY_LOG
+	// gate selects (lib/fragments.nix) write it, so check each one directly.
 	for _, fragment := range []string{
 		filepath.Join("fragments", "open-pr-create-outbox.md"),
 		filepath.Join("fragments", "if-blocked-pr-outbox.md"),
 	} {
 		rendered := readPromptFile(t, repoRoot, fragment)
 		if !strings.Contains(rendered, outcome.PRIntentToken) {
-			t.Errorf("%s no longer emits %q, the exact literal outcome.LastPRIntentInLog and entrypoint.sh's PR-intent gate both scan for", fragment, outcome.PRIntentToken)
+			t.Errorf("%s no longer emits %q, the exact literal the box binary's markergate PR-intent gate scans for via outcome.LastPRIntentInLog", fragment, outcome.PRIntentToken)
 		}
 	}
 
