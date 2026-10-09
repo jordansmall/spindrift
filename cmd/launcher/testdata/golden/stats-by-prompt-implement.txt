@@ -1,19 +1,19 @@
 prompt:implement = hash-i1
-Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 1
+Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 implement  1       $1.50  $1.50    1.0      0          -
 review     1       $1.50  $1.50    1.0      0          -
 
 prompt:implement = hash-i2
-Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 1
+Records: 1  Passes: 2  Notional USD: $3.00 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 1
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 implement  1       $1.50  $1.50    1.0      0          -
 review     1       $1.50  $1.50    1.0      0          -
 
 prompt:implement = (none)
-Records: 2  Passes: 2  Notional USD: $1.60 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Outcome source: dispatch_settled 0, none 2
+Records: 2  Passes: 2  Notional USD: $1.60 (API-equivalent)  Landed keys: 0  USD per landed key: -  Reverted: —  Churn: —  Outcome source: dispatch_settled 0, none 2
 
 ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
 implement  1       $1.50  $1.50    1.0      0          -

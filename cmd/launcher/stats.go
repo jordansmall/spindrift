@@ -367,6 +367,15 @@ func landedKeys(records []dispatchrecord.Record) int {
 	return len(seen)
 }
 
+// shareOf renders sum/n as a whole percentage "P% of N", or an em dash when n
+// is zero.
+func shareOf(sum float64, n int) string {
+	if n == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f%% of %d", 100*sum/float64(n), n)
+}
+
 // revertedShare renders the share of filled Records whose merge was reverted,
 // or an em dash when none is filled. An unfilled Record is not yet known to
 // stand, so it never counts as zero.
@@ -381,10 +390,22 @@ func revertedShare(records []dispatchrecord.Record) string {
 			reverted++
 		}
 	}
-	if filled == 0 {
-		return "—"
+	return shareOf(float64(reverted), filled)
+}
+
+// meanChurn renders the mean 14-day churn of the Records that carry one, or
+// an em dash when none does. A Record without one is unfilled or its lines
+// cannot be told, so it is skipped rather than averaged in as zero.
+func meanChurn(records []dispatchrecord.Record) string {
+	filled, sum := 0, 0.0
+	for _, r := range records {
+		if r.Churn14d == nil {
+			continue
+		}
+		filled++
+		sum += *r.Churn14d
 	}
-	return fmt.Sprintf("%.0f%% of %d", 100*float64(reverted)/float64(filled), filled)
+	return shareOf(sum, filled)
 }
 
 // outcomeSources counts Records whose outcome is the host's dispatch_settled
@@ -408,8 +429,8 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 		perLanded = fmt.Sprintf("$%.2f", usd/float64(landed))
 	}
 	settled, none := outcomeSources(records)
-	if _, err := fmt.Fprintf(w, "Records: %d  Passes: %d  Notional USD: $%.2f (API-equivalent)  Landed keys: %d  USD per landed key: %s  Reverted: %s  Outcome source: %s %d, %s %d\n",
-		len(records), passes, usd, landed, perLanded, revertedShare(records),
+	if _, err := fmt.Fprintf(w, "Records: %d  Passes: %d  Notional USD: $%.2f (API-equivalent)  Landed keys: %d  USD per landed key: %s  Reverted: %s  Churn: %s  Outcome source: %s %d, %s %d\n",
+		len(records), passes, usd, landed, perLanded, revertedShare(records), meanChurn(records),
 		dispatchrecord.OutcomeSourceSettled, settled, dispatchrecord.OutcomeSourceNone, none); err != nil {
 		return err
 	}

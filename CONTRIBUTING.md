@@ -199,7 +199,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `cmd/launcher/internal/promptassembly/golden_integration_test.go` with
   `UPDATE_GOLDENS=1` to overwrite `tests/testdata/prompt-assembly-golden/`,
   and also reruns the golden tests in `cmd/launcher/stats_test.go`,
-  `cmd/launcher/stats_by_test.go`, and `cmd/launcher/stats_reverts_test.go`
+  `cmd/launcher/stats_by_test.go`, `cmd/launcher/stats_reverts_test.go`, and
+  `cmd/launcher/stats_churn_test.go`
   to overwrite
   `cmd/launcher/testdata/golden/stats*.{txt,jsonl}` —
   the update-mode counterpart to the `launcher-go-seam-test` check). Add a

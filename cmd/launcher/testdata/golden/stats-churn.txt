@@ -1,0 +1,4 @@
+Records: 4  Passes: 4  Notional USD: $6.00 (API-equivalent)  Landed keys: 4  USD per landed key: $1.50  Reverted: 0% of 4  Churn: 8% of 3  Outcome source: dispatch_settled 4, none 0
+
+ROLE       PASSES  USD    AVG_USD  AVG_MIN  API_CALLS  BLOCK_RATE
+implement  4       $6.00  $1.50    1.0      0          -
