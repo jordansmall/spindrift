@@ -91,10 +91,13 @@ type Record struct {
 	// MergeCommit is the forge's merge commit for a merged PR, when the host
 	// recorded one.
 	MergeCommit string `json:"merge_commit,omitempty"`
-	// Reverted and MaturedAt are filled by FillReverts, never by a log: nil
-	// until the revert window after MergeCommit has been checked against a
-	// clone that covers it.
+	// Reverted, Churn14d and MaturedAt are filled by FillMaturity, never by a
+	// log: nil until the window after MergeCommit has been checked against a
+	// clone that covers it. Churn14d is the fraction (0 to 1) of the merge's
+	// added lines that other commits rewrote within the window; it stays nil
+	// on a matured Record whose lines cannot be told (see churnWithinWindow).
 	Reverted  *bool      `json:"reverted,omitempty"`
+	Churn14d  *float64   `json:"churn_14d,omitempty"`
 	MaturedAt *time.Time `json:"matured_at,omitempty"`
 	// BoxStatus is the Box's own SPINDRIFT_OUTCOME status= self-report; it never
 	// stands in for Outcome.

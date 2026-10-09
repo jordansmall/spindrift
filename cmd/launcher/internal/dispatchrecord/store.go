@@ -193,10 +193,17 @@ var migrations = []string{
 	UPDATE ingested_files SET mtime_ns = -1;`,
 	// v8: revert tracking (issue #4950). merge_commit is log-derived like
 	// pr_url; reverted (0/1) and matured_at (unix ms, UTC) are filled by
-	// FillReverts and NULL until then, so no upsert touches them.
+	// FillMaturity and NULL until then, so no upsert touches them.
 	`ALTER TABLE records ADD COLUMN merge_commit TEXT NOT NULL DEFAULT '';
 	ALTER TABLE records ADD COLUMN reverted INTEGER;
 	ALTER TABLE records ADD COLUMN matured_at INTEGER;`,
+	// v9: 14-day churn (issue #4955), filled with reverted by FillMaturity.
+	// Records matured under v8 never had churn judged, so clearing matured_at
+	// sends them through the next pass again. reverted is kept: the pass
+	// overwrites it when it can answer, but a merge since gone from the clone
+	// would otherwise lose its v8 verdict for good.
+	`ALTER TABLE records ADD COLUMN churn_14d REAL;
+	UPDATE records SET matured_at = NULL;`,
 }
 
 // Store holds the per-root Dispatch Records. A Record outlives the logs it was
@@ -841,7 +848,7 @@ func (s *Store) Records() ([]Record, error) {
 	rows, err := tx.Query(
 		`SELECT record_id, kind, dispatch_key, claim_time, attribution, outcome,
 			 outcome_source, reason, note, pr_url, merge_commit, box_status,
-			 revision, driver, driver_version, role_models, knobs, reverted, matured_at
+			 revision, driver, driver_version, role_models, knobs, reverted, matured_at, churn_14d
 		 FROM records ORDER BY claim_time, record_id`)
 	if err != nil {
 		return nil, err
@@ -853,9 +860,10 @@ func (s *Store) Records() ([]Record, error) {
 		var ms int64
 		var roleModels, knobs string
 		var reverted, maturedMs sql.NullInt64
+		var churn sql.NullFloat64
 		if err := rows.Scan(&r.ID, &r.Kind, &r.DispatchKey, &ms, &r.Attribution, &r.Outcome,
 			&r.OutcomeSource, &r.Reason, &r.Note, &r.PRURL, &r.MergeCommit, &r.BoxStatus,
-			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs, &reverted, &maturedMs); err != nil {
+			&r.Revision, &r.Driver, &r.DriverVersion, &roleModels, &knobs, &reverted, &maturedMs, &churn); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -866,6 +874,9 @@ func (s *Store) Records() ([]Record, error) {
 		if maturedMs.Valid {
 			at := time.UnixMilli(maturedMs.Int64).UTC()
 			r.MaturedAt = &at
+		}
+		if churn.Valid {
+			r.Churn14d = &churn.Float64
 		}
 		if r.RoleModels, err = unmarshalMap(roleModels); err != nil {
 			rows.Close()

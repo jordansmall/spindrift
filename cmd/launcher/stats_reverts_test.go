@@ -174,7 +174,7 @@ func TestStats_RevertsWarnWhenTheCloneIsUnusable(t *testing.T) {
 	}
 }
 
-// Each Record FillReverts has to leave behind earns its own prefixed line,
+// Each Record FillMaturity has to leave behind earns its own prefixed line,
 // not one warning with the rest of the joined errors trailing unprefixed.
 func TestStats_RevertsWarnOncePerUnfilledRecord(t *testing.T) {
 	root := t.TempDir()
@@ -206,7 +206,7 @@ func TestStats_RevertsWarnOncePerUnfilledRecord(t *testing.T) {
 	statsWriteLogs(t, root, logs)
 
 	_, stderr := runStats(t, root)
-	if got := strings.Count(stderr, "warning: reverts left unfilled:"); got != 2 {
+	if got := strings.Count(stderr, "warning: reverts and churn left unfilled:"); got != 2 {
 		t.Errorf("stderr has %d unfilled warnings, want 2:\n%s", got, stderr)
 	}
 }
