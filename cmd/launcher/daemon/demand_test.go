@@ -151,9 +151,10 @@ func TestBuildDemandSources_GitHubReadsAmbientRepoSlug(t *testing.T) {
 }
 
 // jira builds a source per probed kind that counts through a zero-row search
-// whose JQL is the one ListIssues would run: the project, the status mapping
-// and the kind's own dispatchable label.
-func TestBuildDemandSources_JiraCountsWithStatusMappingAndPerKindLabel(t *testing.T) {
+// whose JQL is the one ListIssues would run: the project and the kind's own
+// dispatchable label, plus the work lifecycle's status mapping for work only
+// (research states ride the label fallback, issue #4919).
+func TestBuildDemandSources_JiraCountsWithPerKindLabelAndWorkOnlyStatusMapping(t *testing.T) {
 	clearKnobEnvT(t)
 	var mu sync.Mutex
 	var jqls []string
@@ -204,10 +205,14 @@ func TestBuildDemandSources_JiraCountsWithStatusMappingAndPerKindLabel(t *testin
 		if len(seen) != 1 {
 			t.Fatalf("%s: %d searches, want 1", kind, len(seen))
 		}
-		for _, want := range []string{`project = "PROJ"`, `status = "To Do"`, `labels = "` + label + `"`} {
+		for _, want := range []string{`project = "PROJ"`, `labels = "` + label + `"`} {
 			if !strings.Contains(seen[0], want) {
 				t.Errorf("%s JQL %q lacks %s", kind, seen[0], want)
 			}
+		}
+		hasStatus := strings.Contains(seen[0], `status = "To Do"`)
+		if isWork := kind == daemon.KindOf(dispatchkind.Work); hasStatus != isWork {
+			t.Errorf("%s JQL %q: status clause present = %v, want %v", kind, seen[0], hasStatus, isWork)
 		}
 	}
 }
