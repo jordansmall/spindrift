@@ -137,6 +137,7 @@
               agents.skills = dogfoodSkills;
               forge.repoSlug = dogfoodDefaults.defaults.repoSlug;
               git.merge.policy = dogfoodDefaults.defaults.mergeMode;
+              git.merge.guardPaths = dogfoodDefaults.defaults.mergeGuardPaths;
               forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
               agents.format.enable = dogfoodDefaults.defaults.autoFormat;
               agents.lint.enable = dogfoodDefaults.defaults.autoLint;

@@ -50,6 +50,20 @@ in
     model = "claude-opus-5-5";
     effort = "high";
     mergeMode = "immediate";
+    # Behaviour-changing files merge by hand whatever their origin (ADR 0062,
+    # issue #4949). Setting the knob replaces the shipped default, so it is
+    # restated here; the shipped default itself stays unchanged.
+    mergeGuardPaths = lib.concatStringsSep "," [
+      (import ../lib/env-schema.nix).mergeGuardPaths.default
+      "templates/**"
+      "skills/**"
+      # Matches no root directory today (prompt fragments sit under
+      # templates/**); kept because ADR 0062 lists it.
+      "fragments/**"
+      "lib/chore-catalog.nix"
+      "lib/env-schema.nix"
+      "flake.nix"
+    ];
     autoFormat = true;
     autoLint = true;
     # Dogfood the host-mediated read-only path (ADR 0034, #1916-#1919): the Box
