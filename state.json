@@ -1,22 +1,20 @@
 {
   "lastSwept": "16ee637c98fa4001bd8eaa5aabfaa9b044d204e3",
   "cursor": "cmd/launcher/internal/runner/vocabulary.go",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/4880",
-    "https://github.com/jordansmall/spindrift/issues/4881"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/4880"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-08T22:24:19.900867174-04:00"
+  },
   "usage": {
-    "input_tokens": 38,
-    "output_tokens": 12497,
-    "cache_read_input_tokens": 949011,
-    "cache_creation_input_tokens": 67332,
-    "total_cost_usd": 4.820438400000001,
-    "duration_ms": 512707,
-    "duration_api_ms": 597279,
-    "num_turns": 25
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
