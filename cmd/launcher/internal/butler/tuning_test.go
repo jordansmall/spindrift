@@ -1,6 +1,9 @@
 package butler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -90,6 +93,25 @@ type tuningRun struct {
 	fc      *forge.Fake
 	input   []string
 	boxes   int
+
+	// recordIDs holds the Record ID each fake Box answered, derived from the
+	// Chore's pinned ClaimTime the way the real Dispatch mints it.
+	recordIDs []string
+	// onRun, when set, runs as each fake Box's Run begins.
+	onRun func(recordID string)
+}
+
+// hookedBox lets a test observe the instant its fake Box launches.
+type hookedBox struct {
+	*dispatch.Fake
+	onRun func()
+}
+
+func (h hookedBox) Run() dispatch.Disposition {
+	if h.onRun != nil {
+		h.onRun()
+	}
+	return h.Fake.Run()
 }
 
 // sweepTuning runs one tuning Sweep at now against r's backend and forge
@@ -99,7 +121,14 @@ func (tr *tuningRun) sweepTuning(t *testing.T, policy Policy, now time.Time) (Ou
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
 		tr.boxes++
 		tr.input = append(tr.input, c.Input)
-		return readyDispatcher()
+		d := readyDispatcher()
+		d.RecordIDResult = dispatchrecord.RecordID("tuning", c.Name, c.ClaimTime)
+		tr.recordIDs = append(tr.recordIDs, d.RecordIDResult)
+		return hookedBox{Fake: d, onRun: func() {
+			if tr.onRun != nil {
+				tr.onRun(d.RecordIDResult)
+			}
+		}}
 	}
 	tree := fakeTree{head: "headsha", filesErr: fmt.Errorf("a records-scoped Chore must not list tracked files")}
 	r := New(tr.backend, tree, tr.fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
@@ -124,6 +153,82 @@ func seedTuningDone(t *testing.T, tr *tuningRun, at time.Time, cursor string) {
 	}
 	if _, err := ledger.Finish(tr.backend, "tuning", claim, ledger.State{LastSwept: "headsha", Cursor: cursor}, at); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	var storedAtLaunch bool
+	tr.onRun = func(id string) {
+		s, err := dispatchrecord.Open(root)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer s.Close()
+		_, storedAtLaunch, _ = s.TuningSnapshot(id)
+	}
+
+	out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Kind != Swept || len(tr.input) != 1 {
+		t.Fatalf("Outcome = %+v, boxes = %d, want one Swept Box", out, tr.boxes)
+	}
+	id := tr.recordIDs[0]
+	sum := sha256.Sum256([]byte(tr.input[0]))
+	want := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
+
+	if !storedAtLaunch {
+		t.Error("the snapshot was not in the store when the Box launched")
+	}
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	snap, ok, err := store.TuningSnapshot(id)
+	if err != nil || !ok {
+		t.Fatalf("TuningSnapshot(%q) = ok %v, err %v", id, ok, err)
+	}
+	if snap.Rendered != tr.input[0] || snap.SHA256 != want.SHA256 || !snap.CreatedAt.Equal(tuningNow) {
+		t.Errorf("snapshot = %+v, want the Box's input, sha %s, created %v", snap, want.SHA256, tuningNow)
+	}
+
+	tip, err := tr.backend.Read("tuning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip.State.Snapshot == nil || *tip.State.Snapshot != want {
+		t.Errorf("Ledger Snapshot = %+v, want %+v", tip.State.Snapshot, want)
+	}
+	raw, err := json.Marshal(tip.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "| Anchor |") || strings.Contains(string(raw), snap.Rendered[:20]) {
+		t.Errorf("the digest text leaked into the Ledger state: %s", raw)
+	}
+}
+
+func TestSweep_Tuning_NoRecordIDLeavesClaim(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	// A Box that answers no Record ID cannot have its snapshot keyed.
+	newBox := func(dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
+	r := New(tr.backend, fakeTree{head: "headsha"}, tr.fc.AsIssueFiler(), newBox, tuningPolicy(root, 1), func() time.Time { return tuningNow })
+	var err error
+	captureStdout(t, func() { _, err = r.Sweep([]string{"tuning"}) })
+	if err == nil {
+		t.Fatal("Sweep succeeded without a Record ID to key the snapshot")
+	}
+	tip, rerr := tr.backend.Read("tuning")
+	if rerr != nil || tip.State.ClaimedBy == nil || tip.State.Snapshot != nil {
+		t.Errorf("tip = %+v, err %v, want the claim left standing", tip.State, rerr)
 	}
 }
 

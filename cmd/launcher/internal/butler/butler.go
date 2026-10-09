@@ -6,6 +6,8 @@
 package butler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"slices"
@@ -314,10 +316,14 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 	// unchanged.
 	var scope chore.Scope
 	var input string
+	var claimTime time.Time
 	if c.Records {
 		dg := tuning.Render(records, claim.State.Cursor, claimedAt, r.policy.TuningMinSample)
 		scope = chore.Scope{Head: head, NextCursor: dg.Latest}
 		input = dg.Text
+		// The sweep's Record ID keys the stored digest, so it is pinned to the
+		// claim instant to be known before the Box runs.
+		claimTime = claimedAt
 	} else {
 		scope = chore.NextScope(claim.State, head, files, chore.DefaultSliceSize)
 	}
@@ -361,9 +367,23 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 	if promo.patchEnabled && len(promotionClasses) > 0 && room.Patches > 0 {
 		patchClasses = c.PatchClasses
 	}
-	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: input})
+	d := r.newBox(dispatch.Chore{Name: choreName, Branch: r.policy.Branch, Scope: scope, PromotionClasses: promotionClasses, ClassList: c.ClassList, PatchClasses: patchClasses, MaxFindings: room.Findings, Input: input, ClaimTime: claimTime})
 	defer d.Close()
 	step := newSettleRun(r.it, r.backend, choreName, claim, scope, r.now, room, promo, patchRung{tree: r.tree, forge: r.patchForge, base: r.policy.Branch, gate: r.patchGate})
+	if c.Records {
+		// Fail closed: a Box launched without a stored digest could report
+		// findings nothing can validate. The claim stands until stale takeover.
+		id := d.RecordID()
+		if id == "" {
+			return Outcome{}, fmt.Errorf("butler: %s: dispatch has no record ID to key the tuning snapshot", choreName)
+		}
+		sum := sha256.Sum256([]byte(input))
+		ref := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
+		if err := r.policy.storeSnapshot(dispatchrecord.TuningSnapshot{RecordID: id, SHA256: ref.SHA256, Rendered: input, CreatedAt: claimedAt}); err != nil {
+			return Outcome{}, fmt.Errorf("butler: %s: %w", choreName, err)
+		}
+		step.tuning = &tuningSnapshot{ref: ref, digest: input}
+	}
 	if c.FindingLabel != "" {
 		step.labels = []string{c.FindingLabel}
 	}
