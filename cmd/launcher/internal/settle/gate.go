@@ -342,18 +342,6 @@ func (s *Settle) transitionState(num string, from, to forge.DispatchState, note,
 	s.settledMu.Unlock()
 }
 
-// relatchReason replaces the reason of num's already-latched terminal decision.
-// landPushOnly commits Complete before its merge runs, so a merge that then
-// fails corrects the class here. A no-op when nothing is latched.
-func (s *Settle) relatchReason(num, reason string) {
-	s.settledMu.Lock()
-	defer s.settledMu.Unlock()
-	if rec, ok := s.settledLatch[num]; ok {
-		rec.reason = reason
-		s.settledLatch[num] = rec
-	}
-}
-
 // flushSettled emits num's latched terminal decision, if any, exactly once
 // (issue #3627). Call it via defer at every entry point that can drive one
 // issue to a terminal transitionState call, so an issue that never reaches a
