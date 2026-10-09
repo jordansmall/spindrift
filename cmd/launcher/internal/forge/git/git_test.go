@@ -583,7 +583,13 @@ func installGitShim(t *testing.T, subcommand, action string) {
 	}
 	shimDir := t.TempDir()
 	script := "#!/bin/sh\n" +
-		"if [ \"$3\" = \"" + subcommand + "\" ] && [ \"$4\" != \"--abort\" ]; then\n" +
+		"sub=; skip=0\n" +
+		"for a; do\n" +
+		"  if [ $skip = 1 ]; then skip=0; continue; fi\n" +
+		"  case $a in -C|-c) skip=1;; *) sub=$a; break;; esac\n" +
+		"done\n" +
+		"case \" $*\" in *\" --abort\"*) sub=;; esac\n" +
+		"if [ \"$sub\" = \"" + subcommand + "\" ]; then\n" +
 		"  " + action + "\n" +
 		"fi\n" +
 		"exec " + realGit + " \"$@\"\n"
@@ -828,5 +834,49 @@ func TestGitClient_Rebase_HookOutputDoesNotLeakCredentials(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unable to access") {
 		t.Fatalf("Rebase error should carry the redacted hook output: %v", err)
+	}
+}
+
+func TestCloneToTemp_GitInDisablesAutoMaintenance(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	src := t.TempDir()
+	gitRun(t, src, "init", "-q")
+	gitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+	_, gitIn, cleanup, err := cloneToTemp(src, "spindrift-git-forge-test-*", time.Minute)
+	if err != nil {
+		t.Fatalf("cloneToTemp: %v", err)
+	}
+	defer cleanup()
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		out, err := gitIn(context.Background(), "config", "--get", key).Output()
+		if err != nil {
+			t.Fatalf("git config --get %s: %v", key, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+func TestCloneToTemp_PersistsAutoMaintenanceGuard(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	src := t.TempDir()
+	gitRun(t, src, "init", "-q")
+	gitRun(t, src, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "init")
+	dir, _, cleanup, err := cloneToTemp(src, "spindrift-git-forge-test-*", time.Minute)
+	if err != nil {
+		t.Fatalf("cloneToTemp: %v", err)
+	}
+	defer cleanup()
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		out, err := exec.Command("git", "-C", dir, "config", "--get", key).Output()
+		if err != nil {
+			t.Fatalf("bare git config --get %s: %v", key, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
 	}
 }
