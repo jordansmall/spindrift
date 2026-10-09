@@ -2027,7 +2027,7 @@ func cmdConsole(lc *launchContext, stdin io.Reader, stdout, stderr io.Writer) in
 		Fresh:           fresh,
 		RebuildFn:       rebuild,
 		RecoverFn: func(issueNum string) error {
-			return lc.recoverIssue(issueNum, stdout, stderr)
+			return lc.runRecover(issueNum, stdout, stderr)
 		},
 	}
 	if err := console.Run(lc.issueTracker, lc.pwd, stdin, stdout, launch); err != nil {
@@ -2056,9 +2056,9 @@ func writeGithubOutput(key, value string) error {
 	return err
 }
 
-// recoverIssue runs recoverByNumber against the launch context's wiring; the
+// runRecover runs recoverByNumber against the launch context's wiring; the
 // recover verb and console's recover action share it.
-func (lc *launchContext) recoverIssue(issueNum string, stdout, stderr io.Writer) error {
+func (lc *launchContext) runRecover(issueNum string, stdout, stderr io.Writer) error {
 	return recoverByNumber(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.workSettle(), issueNum, stdout, stderr)
 }
 
@@ -2071,7 +2071,7 @@ func (lc *launchContext) recoverIssue(issueNum string, stdout, stderr io.Writer)
 // a spy cleanup to exercise the cleanup-on-every-exit contract.
 func cmdRecover(lc *launchContext, issueNum string, stdout, stderr io.Writer) int {
 	defer lc.cleanup()
-	err := lc.recoverIssue(issueNum, stdout, stderr)
+	err := lc.runRecover(issueNum, stdout, stderr)
 	if err == nil {
 		return 0
 	}
