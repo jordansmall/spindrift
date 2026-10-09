@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"syscall"
+
+	"spindrift.dev/launcher/internal/flock"
 )
 
 // ErrIssueClaimed reports that another Dispatch, in this process or another
@@ -35,9 +36,9 @@ func ClaimIssue(pwd, number string) (release func(), err error) {
 		return nil, fmt.Errorf("open claim file %s: %w", path, err)
 	}
 
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flock.TryExclusive(file); err != nil {
 		_ = file.Close()
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+		if errors.Is(err, flock.ErrHeld) {
 			return nil, ErrIssueClaimed
 		}
 		return nil, fmt.Errorf("flock claim file %s: %w", path, err)

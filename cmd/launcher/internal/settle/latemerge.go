@@ -9,11 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/flock"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
@@ -49,8 +49,8 @@ func ClaimLateMergeSweep(root string, now time.Time) (ok bool, err error) {
 	}
 	// Closing the fd drops the lock; the file stays to hold the stamp.
 	defer file.Close()
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		if errors.Is(err, syscall.EWOULDBLOCK) {
+	if err := flock.TryExclusive(file); err != nil {
+		if errors.Is(err, flock.ErrHeld) {
 			return false, nil
 		}
 		return false, fmt.Errorf("flock late-merge sweep lock %s: %w", path, err)

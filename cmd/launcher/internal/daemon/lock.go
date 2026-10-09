@@ -8,6 +8,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"spindrift.dev/launcher/internal/flock"
 )
 
 // checkoutLockFileName is the well-known lock file name within a checkout's
@@ -28,8 +30,8 @@ type CheckoutLock struct {
 }
 
 // acquireGraceTotal bounds how long AcquireCheckoutLock retries a
-// LOCK_EX|LOCK_NB attempt that failed with EWOULDBLOCK before it gives up
-// and reports the lock held. It exists to tell a status reader's momentary
+// LOCK_EX|LOCK_NB attempt that found the lock held (flock.ErrHeld) before
+// it gives up and reports it. It exists to tell a status reader's momentary
 // LOCK_SH probe (held for a few syscalls, then released — see
 // probeCheckoutLock) from a genuine daemon, which holds LOCK_EX for its
 // whole life and so still exhausts the full grace period and gets
@@ -52,7 +54,7 @@ var acquireSleep = time.Sleep
 //
 // Every attempt uses LOCK_NB, so it never blocks the kernel-level way; an
 // operator running a second daemon by mistake still sees "already running"
-// within acquireGraceTotal, not a hang. But a lone EWOULDBLOCK is retried
+// within acquireGraceTotal, not a hang. But a lone flock.ErrHeld is retried
 // for up to acquireGraceTotal before being reported, because a status
 // reader's LOCK_SH probe can transiently hold the lock across a few
 // syscalls — without the retry, that window would make a starting daemon
@@ -68,21 +70,18 @@ func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 	deadline := time.Now().Add(acquireGraceTotal)
 	var flockErr error
 	for {
-		flockErr = syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if flockErr == nil || !errors.Is(flockErr, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
+		flockErr = flock.TryExclusive(file)
+		if flockErr == nil || !errors.Is(flockErr, flock.ErrHeld) || time.Now().After(deadline) {
 			break
 		}
 		acquireSleep(acquireGraceStep)
 	}
 
 	if flockErr != nil {
-		// Only EWOULDBLOCK means "someone else holds it". Anything else —
-		// ENOLCK on a filesystem without locking, say — would be reported
-		// as a phantom second daemon if it shared that message, sending an
-		// operator hunting for a process that does not exist. Check the
-		// errno before reading: the 4 KiB identity read is only worth
-		// paying for when the result will actually be used.
-		if !errors.Is(flockErr, syscall.EWOULDBLOCK) {
+		// Check before reading: a non-held errno (e.g. ENOLCK) is a real
+		// failure, not a second daemon (see package flock), and the 4 KiB
+		// identity read is only worth paying for when it will be used.
+		if !errors.Is(flockErr, flock.ErrHeld) {
 			_ = file.Close()
 			return nil, fmt.Errorf("lock checkout lock file %s: %w", lockPath, flockErr)
 		}
