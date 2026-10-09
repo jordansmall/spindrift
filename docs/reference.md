@@ -81,6 +81,7 @@ The checks `spindrift doctor` runs, grouped by what it probes.
   (ADR 0057), advisory unless `--butler` promotes them (`agent-butler-patch`
   only while the patch rung is on: `BUTLER_MAX_PATCHES_PER_DAY` above 0 and a
   `github`/`forgejo` tracker naming the same backend as `CODE_FORGE`).
+- `agent-tuning-finding` (ADR 0062), advisory.
 - When run interactively (TTY attached) and labels are missing, doctor
   offers to create them, with the prompt itself stating the
   required/advisory tier counts and what declining each means; in CI (no
@@ -3146,6 +3147,23 @@ input on its next fresh clone, so the default set is deliberately broad.
 Setting `MERGE_GUARD_PATHS=""` disables the guard entirely — an explicit
 opt-out; the operator owns the consequences.
 
+**Tuning-provenance hold.** A second, independent check runs after the path
+guard: the launcher reads the issue the PR closes, and if it wears
+`agent-tuning-finding` (ADR 0062), the merge downgrades to manual
+regardless of `MERGE_MODE`, `MERGE_GUARD_PATHS`, and the paths touched,
+immediate and auto alike. The outcome matches a guard hit: the PR is flipped
+ready, the issue lands at `agent-complete`, and a comment on the PR names the
+label and says that removing it is the override. The Record settles with
+reason `tuning-provenance`. On a tracker with no label registry (`local`,
+`jira`) the same fact is the `chore=tuning` term in the issue body's last
+`<!-- spindrift-dedup: ... -->` marker line. Where a registry exists,
+removing the label is the deliberate override: the PR then merges normally
+even if the body still carries the marker. If the closing issue cannot be
+read, the merge is held as a precaution (with a comment on the PR) and
+settles `merge-guard-check-error`. Either check alone holds the merge. See
+[Create the tuning-finding
+label](#create-the-tuning-finding-label-on-the-target-repo).
+
 The changed-path list is read **host-side**, the same way the merge gate
 reads CI state — never from anything the Box produced — so an injected
 Agent following its normal flow cannot make the guard see a clean diff. It
@@ -3835,8 +3853,8 @@ closing an issue wearing it merges by hand. Trackers with no label registry
 (`local`, `jira`) carry the same fact as a `chore=tuning` term in the issue
 body's dedup marker. `spindrift doctor` checks and, in interactive mode,
 offers to create it, but treats it as advisory: a missing
-`agent-tuning-finding` label never fails the check unless `--butler`
-promotes the butler tier. To create it manually:
+`agent-tuning-finding` label never fails the check, even under `--butler`.
+To create it manually:
 
 ```sh
 gh label create agent-tuning-finding --repo owner/repo --color 1d76db --description "Filed from a tuning Chore finding; a PR closing it merges by hand (ADR 0062)"
@@ -4069,10 +4087,10 @@ closes) needs no extra command.
 On every tracker, reconcile first records late merges when the Code Forge
 has PRs (`github`, `forgejo`): for each Dispatch Record claimed in the last
 14 days and settled `complete` with its PR left open (`manual`,
-`auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,
-`merge-blocked`) whose PR has merged since, it appends a second
-`dispatch_settled` with reason `merged` and the note `merged after settling
-<reason>` to the Record's primary log, then prints `reconcile: recorded N
+`auto-merge-enqueued`, `merge-guard-hit`, `tuning-provenance`,
+`merge-guard-check-error`, `merge-blocked`) whose PR has merged since, it
+appends a second `dispatch_settled` with reason `merged` and the note
+`merged after settling <reason>` to the Record's primary log, then prints `reconcile: recorded N
 late merge(s): <record ids>`. The 14-day window bounds the Code Forge calls
 each sweep makes: a Record claimed more than 14 days before a sweep runs, or
 with no claim time (an older log without a claim stamp), is not checked, so a
@@ -5705,8 +5723,10 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
 `outcome: unknown` too. `reason` is the class of the decision:
 
 - `complete`: `merged`, `manual` (a green PR left open for a human),
-  `auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,
-  `merge-blocked` (the merge or the auto-merge enqueue failed after green; the PR stays open),
+  `auto-merge-enqueued`, `merge-guard-hit`, `tuning-provenance` (the PR
+  closes an `agent-tuning-finding` issue, so a human merges it),
+  `merge-guard-check-error` (the changed paths or the closing issue could not
+  be read), `merge-blocked` (the merge or the auto-merge enqueue failed after green; the PR stays open),
   `already-resolved`, `verdict` (research posted its verdict), `findings-filed`
   (a butler Chore filed its findings), and `recover-declined`;
 - `failed`: `landing-failed`, `gate-terminal`, `ci-red` (CI red with no fix pass
@@ -5974,10 +5994,10 @@ subscription plan you are not billed per token.
 
 A landed key is a distinct (kind, Dispatch key) pair with at least one
 Record settled `complete` with reason `merged`: a PR left open (`manual`,
-`auto-merge-enqueued`, `merge-guard-hit`, `merge-guard-check-error`,
-`merge-blocked`), `already-resolved`, a research verdict, and filed butler
-findings are not landings. A PR settled `auto-merge-enqueued` under
-`MERGE_MODE=auto`, or left for a human to merge, counts once `reconcile` (run
+`auto-merge-enqueued`, `merge-guard-hit`, `tuning-provenance`,
+`merge-guard-check-error`, `merge-blocked`), `already-resolved`, a research
+verdict, and filed butler findings are not landings. A PR settled
+`auto-merge-enqueued` under `MERGE_MODE=auto`, or left for a human to merge, counts once `reconcile` (run
 at the end of a `dispatch` that names no issues, or as `spindrift reconcile`)
 observes the merge, within 14 days of the claim,
 and re-settles its Record `merged`; a butler patch PR has no Record to
