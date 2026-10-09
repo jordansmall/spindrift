@@ -18,7 +18,9 @@ type queueSettler struct {
 	// and Settle completing; the wrapped Settler then abandons internally
 	// but still returns normally, so checking the registry Terminate marked
 	// is the only way to keep this wrapper from overwriting PickTerminated
-	// with PickSettled. A nil registry means nothing was ever terminated.
+	// with PickSettled. Production always sets this field from
+	// Launcher.registry(), which never returns nil; only tests leave it
+	// nil, and Marked's nil-receiver guard then reports nothing terminated.
 	terminated *terminate.Registry
 	// kind scopes the queue marks to this stack's own rows: a work and a
 	// research row can share a number (issue #4230). Nil means KindWork.
