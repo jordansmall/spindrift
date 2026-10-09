@@ -318,8 +318,8 @@ type SeamLister interface {
 // PriorClaimStateReader is the optional IssueTracker capability for reading
 // the terminal dispatch state an issue held just before its latest claim onto
 // InProgress, which the claim's TransitionRemoveLabels strip destroys. Since
-// agent-recover.yml claims ahead of the launcher, this is recoverByNumber's one
-// route back to agent-complete instead of a downgrade (issue #2477).
+// agent-recover.yml claims ahead of the launcher, this is the recover path's
+// one route back to agent-complete instead of a downgrade (issue #2477).
 type PriorClaimStateReader interface {
 	// PriorClaimState returns the terminal DispatchState (Complete or
 	// Failed) the issue carried before its most recent claim onto
