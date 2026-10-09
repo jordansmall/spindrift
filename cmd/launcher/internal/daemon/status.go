@@ -407,7 +407,7 @@ func probeCheckoutLock(path string) (held bool, holder string, holderPid int, ho
 	defer file.Close()
 
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
-		// Mirrors AcquireCheckoutLock's own errno discrimination: only
+		// Mirrors flock.TryExclusive's errno discrimination: only
 		// EWOULDBLOCK means "held"; anything else is a real error, not a
 		// phantom holder.
 		if !errors.Is(err, syscall.EWOULDBLOCK) {
