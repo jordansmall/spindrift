@@ -5661,7 +5661,10 @@ the Dispatch rather than of the harness setup. The set is declared once, as
 beside the substitution variables: `ISSUE_NUMBER`, `ISSUE_TITLE`,
 `ISSUE_TEXT`, `BRANCH`, `DISPATCH_KEY`, `RUN_NONCE`, `CI_FAILURE_SUMMARY`, and
 the Chore's sweep scope and budget (`CHORE_HEAD`, `CHORE_DIFF_RANGE`,
-`CHORE_SLICE`, `CHORE_CLASSES`, `CHORE_PATCH_CLASSES`, `CHORE_MAX_FINDINGS`).
+`CHORE_SLICE`, `CHORE_CLASSES`, `CHORE_PATCH_CLASSES`, `CHORE_MAX_FINDINGS`) and
+the Chore input (`CHORE_INPUT`, the tuning digest): the fenced "# CHORE INPUT"
+section's fixed prose is hashed, the digest inside it masked, and a Chore
+with no input renders no section.
 A new variable carrying a Dispatch fact must be added there, or its value
 splits cohorts per issue; every other substitution variable is declared setup
 in `setupVars` beside it. A test fails on any substitution variable in neither

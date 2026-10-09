@@ -221,6 +221,11 @@
     kind = "string";
   }
   {
+    field = "ChoreInput";
+    env = "CHORE_INPUT";
+    kind = "string";
+  }
+  {
     field = "ChorePatchClasses";
     env = "CHORE_PATCH_CLASSES";
     kind = "string";

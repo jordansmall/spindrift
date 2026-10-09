@@ -278,6 +278,7 @@ var perDispatchVars = []string{
 	"ISSUE_NUMBER", "ISSUE_TITLE", "ISSUE_TEXT", "BRANCH", "DISPATCH_KEY", "RUN_NONCE",
 	"CI_FAILURE_SUMMARY",
 	"CHORE_HEAD", "CHORE_DIFF_RANGE", "CHORE_SLICE", "CHORE_CLASSES", "CHORE_PATCH_CLASSES", "CHORE_MAX_FINDINGS",
+	choreInputVar,
 }
 
 // setupVars are the complement of perDispatchVars: substitution vars whose
@@ -364,6 +365,21 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 	}
 	vars[chorePromptVar] = varBody(chorePromptVar, chorePrompt)
 
+	// CHORE_INPUT is the host-rendered Chore input (the tuning digest), the
+	// fenced section butler-prompt.md splices in right after ${CHORE_PROMPT}.
+	// choreInputSection carries its own leading separator, so a code Chore
+	// (empty input) renders byte-identically to a template without the token.
+	inputSection := choreInputSection(e)
+	if mask && e.ChoreInput != "" {
+		// Only when this Dispatch carries an input: a code Chore never does,
+		// and masking unconditionally would add the section's fixed prose to
+		// its hash. The prose stays; only the digest is masked.
+		me := e
+		me.ChoreInput = maskPlaceholder(choreInputVar)
+		inputSection = choreInputSection(me)
+	}
+	vars[choreInputVar] = varBody(choreInputVar, inputSection)
+
 	scalars["CHORE_NAME"] = e.ChoreName
 	scalars["CHORE_HEAD"] = e.ChoreHead
 	scalars["CHORE_DIFF_RANGE"] = e.ChoreDiffRange
@@ -391,8 +407,8 @@ func assemblePromptBodiesMasked(e Env, reg Registry, mask bool) (promptBodies, e
 
 	if mask {
 		for _, k := range perDispatchVars {
-			// ISSUE_TEXT already holds the masked section from above.
-			if _, ok := vars[k]; !ok || k == "ISSUE_TEXT" {
+			// ISSUE_TEXT and CHORE_INPUT already hold their masked sections.
+			if _, ok := vars[k]; !ok || k == "ISSUE_TEXT" || k == choreInputVar {
 				continue
 			}
 			vars[k] = varBody(k, maskPlaceholder(k))

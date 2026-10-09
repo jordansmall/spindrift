@@ -339,6 +339,16 @@ func goldenCells() []goldenCell {
 		{name: "butler-refactor", mode: modeInitial, setup: func(c *cellInputs) {
 			c.butler("refactor")
 		}},
+		{name: "butler-tuning", mode: modeInitial, setup: func(c *cellInputs) {
+			// A records-scoped Chore: no diff range or slice (Scope carries only
+			// Head), the closed tuning class list, and the host-rendered digest
+			// as the fenced Chore input section.
+			c.butler("tuning")
+			c.unset("CHORE_DIFF_RANGE")
+			c.unset("CHORE_SLICE")
+			c.export("CHORE_CLASS_LIST", "cost-waste quality-regression prompt-gap model-fit knob-tuning evidence-gap")
+			c.export("CHORE_INPUT", tuningDigestSample)
+		}},
 		{name: "butler-docs-drift", mode: modeInitial, setup: func(c *cellInputs) {
 			c.butler("docs-drift")
 		}},
@@ -578,3 +588,31 @@ func TestResearchVerdictRenderingMatchesNix(t *testing.T) {
 		})
 	}
 }
+
+// tuningDigestSample is a small fixed stand-in for internal/tuning's output,
+// shaped like it (header, summary and role tables, one thin row, one absent
+// baseline marked "—") so the butler-tuning cell shows the fenced Chore input
+// section as the Box sees it.
+const tuningDigestSample = `# Tuning digest
+
+Window: after rec-0041 through rec-0063 — 23 settled Records, 31 passes, notional cost $18.40 (API-equivalent).
+Baseline: 88 settled Records claimed 2025-01-02 to 2025-01-09, 112 passes.
+Rows with n < 15 are marked thin. Δ is window minus baseline; — means the baseline has no data.
+
+## Summary
+
+| Anchor | Metric | n | Window | Baseline | Δ | Flag |
+|---|---|---|---|---|---|---|
+| summary:usd-per-record | USD per Record | 23 | $0.80 | $0.55 | +0.25 | |
+| summary:passes-per-record | Passes per Record | 23 | 1.3 | 1.3 | +0.1 | |
+| summary:landed-share | Landed share of work Records | 20 | 87% | 91% | -4pp | |
+
+## Roles
+
+| Anchor | Metric | n | Window | Baseline | Δ | Flag |
+|---|---|---|---|---|---|---|
+| role:implement:passes-per-record | implement passes per Record | 23 | 1.0 | 1.0 | +0.0 | |
+| role:implement:avg-usd | implement avg USD per pass | 23 | $0.52 | $0.31 | +0.21 | |
+| role:review:passes-per-record | review passes per Record | 23 | 0.3 | 0.2 | +0.1 | |
+| role:review:avg-usd | review avg USD per pass | 8 | $0.12 | $0.14 | -0.02 | thin |
+`
