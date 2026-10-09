@@ -3825,3 +3825,119 @@ func TestRunContinuous_DrainDuringSettle_NotInterruptedRunsToCompletion(t *testi
 		}
 	}
 }
+
+// claimFailsFor scripts FakeQueue.ClaimFunc so every issue in failing is
+// refused as already claimed and the rest succeed.
+func claimFailsFor(failing ...string) func(string) error {
+	return func(num string) error {
+		if slices.Contains(failing, num) {
+			return fmt.Errorf("queue: claim #%s: %w", num, forge.ErrAlreadyClaimed)
+		}
+		return nil
+	}
+}
+
+// TestRunContinuous_RefillSkipsFailedClaimToNextReady pins #4892: when the
+// first ready issue's claim fails, the same refill moves on to the next ready
+// candidate instead of leaving the free slot empty.
+func TestRunContinuous_RefillSkipsFailedClaimToNextReady(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fake.ClaimFunc = claimFailsFor("1")
+
+	fr := runner.NewFake()
+	f := testFactory(t, tempLogDir(t), fr)
+	s := settle.NewFake()
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	})
+
+	if err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+	if len(fr.RunCalls) != 1 || fr.RunCalls[0].Issue != "2" {
+		t.Fatalf("RunCalls: got %+v, want exactly #2", fr.RunCalls)
+	}
+	if !strings.Contains(out, "#1 skipped: already claimed") {
+		t.Fatalf("stdout: got %q, want a 'skipped: already claimed' line naming #1", out)
+	}
+}
+
+// TestRunContinuous_EveryClaimFailsReportsNoneDispatchable pins that the
+// in-refill retry (#4892) walks each candidate once and terminates.
+func TestRunContinuous_EveryClaimFailsReportsNoneDispatchable(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 2
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{label}})
+	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{label}})
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}}}
+	fake.ClaimFunc = claimFailsFor("1", "2")
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, nil, nil, fake, fresh)
+	})
+
+	if !errors.Is(err, ErrOpenNoneDispatchable) {
+		t.Fatalf("RunContinuous: got %v, want ErrOpenNoneDispatchable", err)
+	}
+	if want := []string{"1", "2"}; !slices.Equal(fake.ClaimCalls, want) {
+		t.Fatalf("ClaimCalls: got %v, want %v", fake.ClaimCalls, want)
+	}
+}
+
+// TestRunContinuous_FailedClaimRetriedEachTriggerButLoggedOnce pins #4892's
+// two halves together: an issue whose claim keeps failing is re-attempted on
+// every refill trigger (so a fixed label gets dispatched), yet its skip line
+// prints once per run.
+func TestRunContinuous_FailedClaimRetriedEachTriggerButLoggedOnce(t *testing.T) {
+	c := baseConfig()
+	label := "agent-trigger"
+	c.MaxParallel = 1
+
+	fc := forge.NewFake(dispatchLabels(c, label))
+	for _, n := range []string{"1", "2", "3"} {
+		fc.SetIssue(forge.Issue{Number: n, Labels: []string{label}})
+	}
+
+	fake := NewFakeQueue()
+	fake.DiscoverReturn = Batch{Issues: []Issue{{Number: "1"}, {Number: "2"}, {Number: "3"}}}
+	fake.ClaimFunc = claimFailsFor("1")
+
+	fr := runner.NewFake()
+	f := testFactory(t, tempLogDir(t), fr)
+	s := settle.NewFake()
+	fresh := func() (bool, bool, string) { return true, true, "fresh" }
+
+	var err error
+	out := testutil.CaptureStdout(t, func() {
+		err = RunContinuous(c, nil, fc, fc, f, s, fake, fresh)
+	})
+
+	if err != nil {
+		t.Fatalf("RunContinuous: got %v, want nil", err)
+	}
+	if want := []string{"1", "2", "1", "3", "1"}; !slices.Equal(fake.ClaimCalls, want) {
+		t.Fatalf("ClaimCalls: got %v, want %v", fake.ClaimCalls, want)
+	}
+	if n := strings.Count(out, "#1 skipped: already claimed"); n != 1 {
+		t.Fatalf("skip line for #1 printed %d times, want 1; stdout: %q", n, out)
+	}
+}
