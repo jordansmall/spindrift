@@ -5220,8 +5220,9 @@ of one standing Chore, keyed by chore name rather than by issue. Unlike
 `dispatch`/`research`, nothing labels a Chore into being — each invocation
 runs at most one Chore, and only one named in `BUTLER_CHORES` (schema key
 `butlerChores`), a space-separated allowlist that defaults to none; the
-built-in catalog ships three Chores, `bugs`, `refactor`, and `docs-drift`
-(`templates/default/prompts/chores/`). Naming a Chore in `BUTLER_CHORES`
+built-in catalog ships four Chores, `bugs`, `refactor`, `docs-drift`,
+and `tuning` (`templates/default/prompts/chores/`; `tuning` is
+[records-scoped](#the-tuning-chore)). Naming a Chore in `BUTLER_CHORES`
 with no matching `<name>.md` prompt in the chores directory fails the
 Consumer's flake evaluation (`nix flake check`, or any build of the
 harness), naming the Chore. Butler runs under
@@ -5232,7 +5233,8 @@ The command evaluates every `BUTLER_CHORES` entry in order, or only the one
 named by `--chore <name>`, and runs the first one **due** (issue #3877): its
 interval (`BUTLER_EVERY`/`butlerEvery`, a bare default plus optional
 `<chore>=<duration>` overrides; with no bare default the interval is `6h`,
-and an override naming a Chore not in `BUTLER_CHORES` is rejected) has
+and an override naming a Chore not in `BUTLER_CHORES` is rejected; `tuning`
+carries its own `24h` default that only a `tuning=` override changes) has
 elapsed since its last done commit, there is something new to scan, and no
 other run holds a live claim on it. If none is due, or another run wins the race to claim it, the command
 exits "no work" (exit code 2, the same signal `dispatch` gives an empty
@@ -5295,8 +5297,9 @@ host still ensure-creates them when it files a finding. See the
 
 `BUTLER_CHORE_CLASSES` (schema key `butlerChoreClasses`) holds each Chore's
 host-side allow-list of finding classes — the trust gate for auto-promotion
-(issue #3880, below); the default covers the three built-ins, and a Chore
-with no entry never promotes. The Box never controls this list: it only
+(issue #3880, below); the default covers the three code-scanning
+built-ins (`tuning` never promotes), and a Chore with no entry never
+promotes. The Box never controls this list: it only
 ever sees it read-only, as `CHORE_CLASSES`, and only while today's
 promotion budget still has room left (never while promotion is off or
 the day's promotions are spent), so a Box whose findings can never
@@ -5350,8 +5353,8 @@ error. `git log refs/spindrift/butler/<chore>` (after `git fetch origin
 '+refs/spindrift/butler/*:refs/spindrift/butler/*'` on a hosted forge) is
 the Chore's full run history: every claim, every done commit's `lastSwept`
 (the base branch revision), `cursor` (where in the tree the next run picks
-up), `filed` (issues opened), and `usage`. The claim itself guards against
-two runs working the same Chore at once — a live claim makes the next
+up; a Record ID for `tuning`), `filed` (issues opened), and `usage`. The
+claim itself guards against two runs working the same Chore at once — a live claim makes the next
 invocation exit as "no work"; a claim older than `BUTLER_CLAIM_TIMEOUT`
 (schema key `butlerClaimTimeout`, default `6h`) is treated as a crashed
 worker's leftover and taken over, carrying `lastSwept` and `cursor` forward
@@ -5395,7 +5398,8 @@ under way is never stopped. The totals are walked from today's Ledger
 commits once per run, with no second store, and "today" runs midnight to
 midnight in `DAEMON_AWAKE_WINDOW`'s zone (UTC when that knob is unset).
 
-Each run scans two things: `lastSwept..HEAD` of the base branch (what changed
+Each run of a code Chore scans two things (`tuning` scans Records instead; see
+[below](#the-tuning-chore)): `lastSwept..HEAD` of the base branch (what changed
 since the last sweep) and the next slice of the tracked tree starting at
 `cursor` (40 paths per run, so a large repo is swept incrementally across
 many runs rather than all at once). It then runs exactly one advise-only Box
@@ -5608,6 +5612,55 @@ the patch's Ledger reservation still counts it against the day's budget.
 The Ledger's `LastSwept` and `Cursor` do not advance either, so the next
 sweep re-reports the same finding, and only host dedup on the filed issue's
 `spindrift-dedup` marker keeps it from landing a second patch PR.
+
+### The tuning Chore
+
+The fourth built-in Chore, `tuning` (ADR 0062), is the one **records-scoped**
+Chore: it reads the root's Dispatch Records store (`.spindrift/dispatch-records.db`,
+the same one `spindrift stats` reads) rather than the tree, so the Box never
+sees the Records itself. It reuses the Ledger, claim, budgets, filing, and
+dedup unchanged, with three differences.
+
+**Due.** The `tuning` interval defaults to `24h` — a catalog default, so a bare
+`BUTLER_EVERY` token does not move it; only `BUTLER_EVERY tuning=<duration>`
+does. It is also due only when at least `BUTLER_TUNING_MIN_RECORDS` (schema key
+`butlerTuningMinRecords`, default `20`) settled Records are newer than its Ledger
+`cursor`, which for this Chore is a Record ID rather than a commit; the
+no-work reason is `too few new settled records`.
+While too few have settled, a daemon re-checks the store hourly (failed and
+unmerged Dispatches move no branch tip, so a tip move would never lift it). The
+window is the Records settled since the cursor Record, in the order the store
+saw them settle (not claim order, so a long-running Dispatch claimed earlier
+still lands in a later window); a cursor the store no longer holds restarts the
+window from every settled Record, so the next sweep is due at once with the
+whole store history as its window and an empty baseline. One way the cursor goes
+unknown is a forced re-parse (`--reingest`) that changes a Record's ID, which
+deletes the old row. A root with no store, or an empty one, is never due. A
+live claim and the daily sweep, finding, and token budgets apply as for any
+Chore. Dispatches launched on CI runners never reach a root's store, so only
+Dispatches run from this root are counted.
+
+**Digest.** Before launch the host renders a fixed markdown digest from the
+store and hands it to the Box as the fenced `# CHORE INPUT` section
+(`CHORE_INPUT`; a code Chore gets no such section). It covers the window from
+the cursor to the latest settled Record — the Record count and notional cost —
+as a summary plus a per-role table, each figure set beside the same figure over a
+trailing 7-day baseline with a Δ. Every row carries its sample size `n` and a
+stable anchor, and a row whose `n` is under `BUTLER_TUNING_MIN_SAMPLE` (schema key
+`butlerTuningMinSample`, default `15`) is marked thin; the prompt tells the Box not
+to argue from a thin row except as an `evidence-gap`. The figures come from the
+same aggregation as `spindrift stats`, and the host computes every number. Both
+tuning knobs are host-only; the Box never sees them.
+
+**Findings.** The Box classifies each finding into one of six classes
+(`cost-waste`, `quality-regression`, `prompt-gap`, `model-fit`, `knob-tuning`,
+`evidence-gap`). The Chore never promotes and never patches: it has no default
+`BUTLER_CHORE_CLASSES` or `BUTLER_PATCH_CLASSES` entry, and an entry naming it
+is rejected at preflight. Each finding is filed with `agent-butler-finding` and
+`agent-tuning-finding` (the host creates the label if missing) and carries the
+`chore=tuning` term in its dedup marker; a PR closing it merges only by hand
+(see [Merge guard](#merge-guard)). The finished sweep's Done commit moves the
+cursor to the latest Record it covered.
 
 ## Stats
 
