@@ -16,33 +16,12 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/forge"
-	"spindrift.dev/launcher/internal/passmachine"
-	"spindrift.dev/launcher/internal/settle"
+	"spindrift.dev/launcher/internal/recordstats"
 )
 
-// statsRolePipeline orders the known pass roles as a Dispatch runs them; any
-// other role sorts after them alphabetically.
-var statsRolePipeline = []passmachine.Role{
-	passmachine.RoleImplement, passmachine.RoleReview, passmachine.RoleFix,
-	passmachine.RoleLand, passmachine.RoleDeltaReview,
-}
-
-const statsNone = "(none)"
-
 // statsEmpty groups a stamped Record whose knob value is genuinely empty,
-// apart from a Record with no snapshot of that knob (statsNone).
+// apart from a Record with no snapshot of that knob (recordstats.None).
 const statsEmpty = "(empty)"
-
-type statsRoleRow struct {
-	role       string
-	passes     int
-	usd        float64
-	durationMs int64
-	apiCalls   int
-	verdicts   int
-	blocks     int
-}
 
 type statsOptions struct {
 	asJSON          bool
@@ -307,66 +286,6 @@ func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups 
 	return nil
 }
 
-func statsRoleRank(role string) int {
-	if i := slices.Index(statsRolePipeline, passmachine.Role(role)); i >= 0 {
-		return i
-	}
-	return len(statsRolePipeline)
-}
-
-func aggregateStatsRoles(records []dispatchrecord.Record) (rows []statsRoleRow, passes int, usd float64) {
-	byRole := map[string]*statsRoleRow{}
-	for _, r := range records {
-		for _, p := range r.Passes {
-			role := p.Role
-			if role == "" {
-				role = statsNone
-			}
-			row := byRole[role]
-			if row == nil {
-				row = &statsRoleRow{role: role}
-				byRole[role] = row
-			}
-			row.passes++
-			row.usd += p.USD
-			row.durationMs += p.DurationMs
-			row.apiCalls += p.APICalls
-			if p.Verdict != "" {
-				row.verdicts++
-				if passmachine.Verdict(p.Verdict) == passmachine.VerdictBlock {
-					row.blocks++
-				}
-			}
-			passes++
-			usd += p.USD
-		}
-	}
-	for _, row := range byRole {
-		rows = append(rows, *row)
-	}
-	slices.SortFunc(rows, func(a, b statsRoleRow) int {
-		if ra, rb := statsRoleRank(a.role), statsRoleRank(b.role); ra != rb {
-			return ra - rb
-		}
-		return strings.Compare(a.role, b.role)
-	})
-	return rows, passes, usd
-}
-
-// landedKeys counts distinct (kind, Dispatch key) pairs with a Record the host
-// settled merged. Other complete reasons (a PR left open, already-resolved, a
-// verdict, filed findings) did not put code on the default branch.
-func landedKeys(records []dispatchrecord.Record) int {
-	type key struct{ kind, key string }
-	seen := map[key]bool{}
-	for _, r := range records {
-		if r.Outcome == forge.Complete.String() && r.Reason == settle.ReasonMerged {
-			seen[key{r.Kind, r.DispatchKey}] = true
-		}
-	}
-	return len(seen)
-}
-
 // shareOf renders sum/n as a whole percentage "P% of N", or an em dash when n
 // is zero.
 func shareOf(sum float64, n int) string {
@@ -422,8 +341,8 @@ func outcomeSources(records []dispatchrecord.Record) (settled, none int) {
 }
 
 func renderStats(w io.Writer, records []dispatchrecord.Record) error {
-	rows, passes, usd := aggregateStatsRoles(records)
-	landed := landedKeys(records)
+	rows, passes, usd := recordstats.AggregateRoles(records)
+	landed := recordstats.LandedKeys(records)
 	perLanded := "-"
 	if landed > 0 {
 		perLanded = fmt.Sprintf("$%.2f", usd/float64(landed))
@@ -441,13 +360,9 @@ func renderStats(w io.Writer, records []dispatchrecord.Record) error {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "ROLE\tPASSES\tUSD\tAVG_USD\tAVG_MIN\tAPI_CALLS\tBLOCK_RATE")
 	for _, row := range rows {
-		blockRate := "-"
-		if passmachine.Role(row.role).IsReview() && row.verdicts > 0 {
-			blockRate = fmt.Sprintf("%.0f%%", 100*float64(row.blocks)/float64(row.verdicts))
-		}
-		n := float64(row.passes)
+		n := float64(row.Passes)
 		fmt.Fprintf(tw, "%s\t%d\t$%.2f\t$%.2f\t%.1f\t%d\t%s\n",
-			row.role, row.passes, row.usd, row.usd/n, (time.Duration(row.durationMs)*time.Millisecond).Minutes()/n, row.apiCalls, blockRate)
+			row.Role, row.Passes, row.USD, row.USD/n, (time.Duration(row.DurationMs)*time.Millisecond).Minutes()/n, row.APICalls, row.BlockRate())
 	}
 	return tw.Flush()
 }
