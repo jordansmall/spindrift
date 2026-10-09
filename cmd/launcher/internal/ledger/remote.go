@@ -46,10 +46,13 @@ func NewRemote(scratch, url string, gitArgs ...string) (Remote, error) {
 		if out, err := exec.Command("git", "init", "--bare", "-q", scratch).CombinedOutput(); err != nil {
 			return Remote{}, fmt.Errorf("ledger: init scratch repo %s: %w: %s", scratch, err, out)
 		}
-		// Same rationale as the bare repo test fixtures: a detached `git gc
-		// --auto` racing a later cleanup of scratch is a spurious failure.
-		if out, err := exec.Command("git", "-C", scratch, "config", "gc.auto", "0").CombinedOutput(); err != nil {
-			return Remote{}, fmt.Errorf("ledger: disable gc.auto in scratch repo %s: %w: %s", scratch, err, out)
+		// A detached `git gc --auto` or maintenance run racing a later
+		// cleanup of scratch is a spurious failure. Persist each knob in the
+		// repo, since later commands here carry no -c guard.
+		for _, kv := range gitexec.NoAutoMaintenanceConfig() {
+			if out, err := exec.Command("git", "-C", scratch, "config", kv[0], kv[1]).CombinedOutput(); err != nil {
+				return Remote{}, fmt.Errorf("ledger: set %s in scratch repo %s: %w: %s", kv[0], scratch, err, out)
+			}
 		}
 	}
 	r := Remote{repo: scratch, url: url, gitArgs: gitArgs, mirror: Local{Repo: scratch}}

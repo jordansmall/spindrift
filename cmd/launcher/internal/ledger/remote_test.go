@@ -269,3 +269,22 @@ func TestRemoteStaleMirrorInvisibleUntilRace(t *testing.T) {
 		t.Fatalf("Read after losing the race = %q, want the rival's commit %q (lost race resynced the mirror)", tip.Commit, rivalTip.Commit)
 	}
 }
+
+func TestNewRemote_ScratchDisablesAutoMaintenance(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	setGitIdentityEnv(t)
+	scratch := t.TempDir()
+	if _, err := ledger.NewRemote(scratch, ledgertest.NewRepo(t)); err != nil {
+		t.Fatalf("NewRemote: %v", err)
+	}
+	for key, want := range map[string]string{"maintenance.auto": "false", "gc.auto": "0"} {
+		out, err := exec.Command("git", "-C", scratch, "config", "--get", key).Output()
+		if err != nil {
+			t.Fatalf("git config --get %s: %v", key, err)
+		}
+		if got := strings.TrimSpace(string(out)); got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
