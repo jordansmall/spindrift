@@ -52,11 +52,11 @@ func quickstartCheckDeps(a answers) launcherchecks.Deps {
 				return launcherchecks.Backend{}, false
 			}
 			b := launcherchecks.Backend{Descriptor: row}
-			// forgejo is the only backend the wizard can validate, because its
-			// validators read knobs (FORGEJO_BASE_URL, FORGEJO_TOKEN) the wizard
-			// prompts for. Every other backend declares no validator or reads a
-			// knob the wizard never collects, so its row checks axis membership
-			// only.
+			// forgejo is the only backend the wizard can validate: its validators
+			// read FORGEJO_BASE_URL (derived from the git remote) and
+			// FORGEJO_TOKEN (the credential the wizard acquires). Every other
+			// backend declares no validator or reads a knob the wizard never
+			// collects, so its row checks axis membership only.
 			if name == backend.Forgejo.Name {
 				validateForgejo := func() error {
 					return forgejo.ValidateForgejoEnv(a.tracker.forgejoBaseURL, a.token)
