@@ -63,6 +63,10 @@ in
       "lib/chore-catalog.nix"
       "lib/env-schema.nix"
       "flake.nix"
+      # Holds the model/effort pins and this guard list itself; the fixture
+      # mirrors the pins (issue #4974).
+      "nix/dogfood-defaults.nix"
+      "lib/default-model-fixture.nix"
     ];
     autoFormat = true;
     autoLint = true;

@@ -1,6 +1,7 @@
-# Pins for MERGE_GUARD_PATHS (ADR 0016, ADR 0062, issue #4949): the shipped
-# schema default stays unchanged, and the dogfood restates it plus the globs
-# for behaviour-changing files that must merge by hand whatever their origin.
+# Pins for MERGE_GUARD_PATHS (ADR 0016, ADR 0062, issues #4949 and #4974): the
+# shipped schema default stays unchanged, and the dogfood restates it plus the
+# globs for behaviour-changing files that must merge by hand whatever their
+# origin.
 {
   pkgs,
   config,
@@ -25,6 +26,8 @@ let
     "lib/chore-catalog.nix"
     "lib/env-schema.nix"
     "flake.nix"
+    "nix/dogfood-defaults.nix"
+    "lib/default-model-fixture.nix"
   ];
 in
 {
