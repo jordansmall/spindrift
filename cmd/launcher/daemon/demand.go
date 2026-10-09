@@ -92,6 +92,7 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 	// Every knob is read whatever the tracker, so one Settings feeds whichever
 	// adapter ISSUE_TRACKER names. The branch prefix is left blank: it only names
 	// agent branches, which counting never touches.
+	statusMapping := childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING"))
 	s := trackerbuild.Settings{
 		RepoSlug:          childKnob(doc, "REPO_SLUG", os.Getenv("REPO_SLUG")),
 		LocalIssuesDir:    childKnob(doc, "LOCAL_ISSUES_DIR", os.Getenv("LOCAL_ISSUES_DIR")),
@@ -101,7 +102,7 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 		JiraProjectKey:    childKnob(doc, "JIRA_PROJECT_KEY", os.Getenv("JIRA_PROJECT_KEY")),
 		JiraEmail:         childKnob(doc, "JIRA_EMAIL", os.Getenv("JIRA_EMAIL")),
 		JiraToken:         childKnob(doc, "JIRA_TOKEN", os.Getenv("JIRA_TOKEN")),
-		JiraStatusMapping: childKnob(doc, "JIRA_STATUS_MAPPING", os.Getenv("JIRA_STATUS_MAPPING")),
+		JiraStatusMapping: statusMapping,
 		JiraHTTPClient:    &http.Client{Timeout: jiraProbeTimeout},
 	}
 	name := issueTrackerName(doc)
@@ -109,6 +110,8 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 	if !ok {
 		return nil, allMissing(probed, fmt.Sprintf("unknown ISSUE_TRACKER %q", name))
 	}
+	// Validate sees the raw mapping, so a malformed one is rejected even when
+	// only the research kind (which ignores it) is probed.
 	if err := tr.Validate(s); err != nil {
 		return nil, allMissing(probed, err.Error()+tokenFormHint(doc, name, s))
 	}
@@ -128,6 +131,7 @@ func buildTrackerSources(doc *inputdoc.Document, probed []*dispatchkind.Descript
 			continue
 		}
 		s.Labels = labels
+		s.JiraStatusMapping = trackerbuild.JiraStatusMappingFor(d.Tracker, statusMapping)
 		// Only the tracker's capabilities matter: no code forge is in play, and the
 		// descriptors feed fields counting never reads.
 		counter := forge.ResolveCapabilities(nil, tr.New(s), backend.Descriptor{}, backend.Descriptor{}).DemandCounter
