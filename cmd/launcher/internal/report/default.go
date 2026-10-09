@@ -46,3 +46,8 @@ func NotDue(key dispatchkey.Key, next NextDue) {
 func Model(key dispatchkey.Key, model, role string) {
 	Default().Model(key, model, role)
 }
+
+// CIWait forwards to Default().CIWait.
+func CIWait(key dispatchkey.Key, prURL string) {
+	Default().CIWait(key, prURL)
+}

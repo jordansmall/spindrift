@@ -145,7 +145,7 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 
 	s.SettleAdopted(&dispatch.Fake{RecordIDResult: "work:9@t"}, "9", 0, testPR)
 
-	recs := readRecords()
+	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want exactly 1 (completeLanding's Complete must never itself reach the daemon): %+v", len(recs), recs)
 	}
@@ -183,7 +183,7 @@ func TestSettle_SettleUnresolved_NoOutcomeNote_ReachesSettledRecord(t *testing.T
 	}
 	s.Settle(dispatch.NewFake(), "9", 0, result)
 
-	recs := readRecords()
+	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 {
 		t.Fatalf("records: got %d, want 1: %+v", len(recs), recs)
 	}
@@ -314,7 +314,7 @@ func readWriteRecords(t *testing.T, status, landing string, setup func(fc *forge
 			Outcome: outcome.Outcome{Issue: "77", Landing: landing, Status: status, Note: "ok"},
 		},
 	})
-	return readRecords()
+	return withoutCIWait(readRecords())
 }
 
 // The read-write ready path names the agent branch's open PR, resolved
@@ -384,7 +384,7 @@ func TestSettle_GithubReadOnly_ReadyOpenedPR_LatchedDespiteCheckStateError(t *te
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
-	recs := readRecords()
+	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 || recs[0].PRURL != prURL || recs[0].State != "failed" {
 		t.Fatalf("records = %+v, want one failed record with PRURL=%s", recs, prURL)
 	}
@@ -402,7 +402,7 @@ func TestSettleAdopted_CheckStateError_StillCarriesPR(t *testing.T) {
 
 	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
 
-	recs := readRecords()
+	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 || recs[0].PRURL != testPR || recs[0].State != "failed" {
 		t.Fatalf("records = %+v, want one failed record with PRURL=%s", recs, testPR)
 	}
@@ -492,7 +492,7 @@ func TestSettle_GithubReadOnly_BlockedDraftPR_SettledRecordCarriesPR(t *testing.
 	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
-	recs := readRecords()
+	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 || recs[0].PRURL != prURL || recs[0].State != "failed" {
 		t.Fatalf("records = %+v, want one failed record with PRURL=%s", recs, prURL)
 	}
@@ -511,7 +511,7 @@ func TestSettleAdopted_SettledRecordCarriesPR(t *testing.T) {
 
 	s.SettleAdopted(dispatch.NewFake(), "77", 0, testPR)
 
-	recs := readRecords()
+	recs := withoutCIWait(readRecords())
 	if len(recs) != 1 || recs[0].Event != report.EventSettled || recs[0].PRURL != testPR {
 		t.Fatalf("records = %+v, want one settled record with PRURL=%s", recs, testPR)
 	}

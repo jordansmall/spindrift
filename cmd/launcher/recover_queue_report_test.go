@@ -15,7 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-func TestRecoverQueueOne_ReportsBoxThenSettledComplete(t *testing.T) {
+func TestRecoverQueueOne_ReportsBoxCIWaitThenSettledComplete(t *testing.T) {
 	x := newQueueRecoverFixture(t)
 	x.addFailed(t, "42", "ready")
 	read := testutil.InstallPipeReporter(t)
@@ -26,14 +26,17 @@ func TestRecoverQueueOne_ReportsBoxThenSettledComplete(t *testing.T) {
 
 	got := read()
 	key := dispatchkey.Issue("42")
-	if len(got) != 2 {
-		t.Fatalf("records = %+v, want box then settled", got)
+	if len(got) != 3 {
+		t.Fatalf("records = %+v, want box, ci_wait, then settled", got)
 	}
 	if got[0].Event != report.EventBox || got[0].Key != key || got[0].Phase != report.PhaseRecover {
 		t.Errorf("first record = %+v, want box for #42 at phase %q", got[0], report.PhaseRecover)
 	}
-	if got[1].Event != report.EventSettled || got[1].Key != key || got[1].State != forge.Complete.String() {
-		t.Errorf("second record = %+v, want settled(%s) for #42", got[1], forge.Complete)
+	if got[1].Event != report.EventCIWait || got[1].Key != key || got[1].PRURL == "" || got[1].PRURL != got[2].PRURL {
+		t.Errorf("second record = %+v, want ci_wait for #42 naming the settled PR %q", got[1], got[2].PRURL)
+	}
+	if got[2].Event != report.EventSettled || got[2].Key != key || got[2].State != forge.Complete.String() {
+		t.Errorf("third record = %+v, want settled(%s) for #42", got[2], forge.Complete)
 	}
 }
 

@@ -549,3 +549,37 @@ func TestModel_RoundTrip(t *testing.T) {
 		t.Errorf("line = %s, want no model_role when empty", lines[1])
 	}
 }
+
+// TestCIWait_RoundTrip pins that a ci_wait record carries the key and PR URL
+// over the wire and nothing else.
+func TestCIWait_RoundTrip(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer r.Close()
+	t.Cleanup(func() { w.Close() })
+
+	rep := FromEnv(getenvFor(map[string]string{"SPINDRIFT_REPORT_FD": fmt.Sprint(int(w.Fd()))}), io.Discard)
+	if rep == nil {
+		t.Fatal("FromEnv returned nil")
+	}
+	rep.CIWait(dispatchkey.Issue("4961"), "https://github.com/o/r/pull/7")
+	w.Close()
+
+	line, err := bufio.NewReader(r).ReadBytes('\n')
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var got Record
+	if err := json.Unmarshal(line, &got); err != nil {
+		t.Fatalf("unmarshal %q: %v", line, err)
+	}
+	want := Record{Event: EventCIWait, Key: dispatchkey.Issue("4961"), PRURL: "https://github.com/o/r/pull/7"}
+	if got != want {
+		t.Errorf("record = %+v, want %+v", got, want)
+	}
+	if !strings.Contains(string(line), `"event":"ci_wait"`) {
+		t.Errorf("line %q lacks event ci_wait", line)
+	}
+}

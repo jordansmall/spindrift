@@ -49,7 +49,8 @@ type Record struct {
 	// on a recover box, which runs no Box.
 	RecordID string
 	// PRURL is a settled record's PR: the one the Dispatch opened or adopted,
-	// empty when none (and on every other event).
+	// empty when none; a ci_wait record's PR, the one the host now waits on.
+	// Empty on every other event.
 	PRURL string
 	// NextDue is a not_due record's answer, parsed off the wire by
 	// UnmarshalJSON; zero on every other event.
@@ -147,18 +148,19 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// EventBox, EventSettled, EventNotDue and EventModel are the Record.Event
-// values this package ever writes. Naming them once here and using the name
-// everywhere else (internal/daemon's parser, dispatch loop, and pool event
-// stream) means a typo in the wire value is a compile error, not a silent parse
-// miss on the reading side — issue #3627's review finding. The JSON on the
-// wire is unchanged: these are still the bare strings
-// "box"/"settled"/"not_due"/"model".
+// EventBox, EventSettled, EventNotDue, EventModel and EventCIWait are the
+// Record.Event values this package ever writes. Naming them once here and
+// using the name everywhere else (internal/daemon's parser, dispatch loop, and
+// pool event stream) means a typo in the wire value is a compile error, not a
+// silent parse miss on the reading side — issue #3627's review finding. The
+// JSON on the wire is unchanged: these are still the bare strings
+// "box"/"settled"/"not_due"/"model"/"ci_wait".
 const (
 	EventBox     = "box"
 	EventSettled = "settled"
 	EventNotDue  = "not_due"
 	EventModel   = "model"
+	EventCIWait  = "ci_wait"
 )
 
 // NextDueOnTipMove is the next_due wire value for a Chore that only a
@@ -254,6 +256,13 @@ func (r *Reporter) NotDue(key dispatchkey.Key, next NextDue) {
 // debounces: one record per change of the (role, model) pair, not per message.
 func (r *Reporter) Model(key dispatchkey.Key, model, role string) {
 	r.emit(Record{Event: EventModel, Key: key, Model: model, ModelRole: role})
+}
+
+// CIWait records that the host has entered a CI wait on key's PR prURL, so the
+// parent can show the Dispatch as waiting on CI. One record per wait entered,
+// not per poll.
+func (r *Reporter) CIWait(key dispatchkey.Key, prURL string) {
+	r.emit(Record{Event: EventCIWait, Key: key, PRURL: prURL})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe
