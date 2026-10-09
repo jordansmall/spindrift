@@ -352,10 +352,18 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 	s.settledMu.Lock()
 	rec, ok := s.settledLatch[num]
 	pr := s.prLatch[num]
+	_, owned := s.reportKey[num]
 	delete(s.settledLatch, num)
 	delete(s.prLatch, num)
+	delete(s.reportKey, num)
 	s.settledMu.Unlock()
 	if !ok {
+		return
+	}
+	if owned {
+		// A Chore owns this issue (SettlePatch) and already sent its one
+		// terminal record; an issue-keyed one would be a kind mismatch
+		// (issue #4966).
 		return
 	}
 	ds := claude.DispatchSettled{State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr}
@@ -363,8 +371,8 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 		ds.MergeCommit = readMergeCommit(s.cfg.Capabilities.MergeCommitReader, "#"+num, pr, os.Stderr)
 	}
 	if d == nil {
-		// A nil Dispatcher (the butler patch gate) has no Record, so nothing
-		// is appended: the primary log's stamp may name an unrelated one.
+		// A nil Dispatcher has no Record, so nothing is appended: the primary
+		// log's stamp may name an unrelated one.
 		Settled(dispatchkey.Issue(num), "", ds)
 		return
 	}
@@ -480,6 +488,16 @@ func (s *Settle) latchPR(num, pr string) {
 		s.prLatch = make(map[string]string)
 	}
 	s.prLatch[num] = pr
+}
+
+// keyFor is the key num's report records go out under.
+func (s *Settle) keyFor(num string) dispatchkey.Key {
+	s.settledMu.Lock()
+	defer s.settledMu.Unlock()
+	if k, ok := s.reportKey[num]; ok {
+		return k
+	}
+	return dispatchkey.Issue(num)
 }
 
 // latchBranchPR latches the open PR on num's agent branch. The branch is

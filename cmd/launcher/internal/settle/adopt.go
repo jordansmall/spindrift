@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 )
 
@@ -37,6 +38,21 @@ func (s *Settle) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, pr
 	case landingAbandoned:
 		// See landingAbandoned: another actor owns the issue's comment and state.
 	}
+}
+
+// SettlePatch is the butler patch gate's entry (ADR 0057). It reports under
+// owner, the dispatching Chore's key, since the daemon parses a butler child's
+// records as chore-keyed (issue #4966). The owner is latched per num and
+// cleared by SettleAdopted's deferred flushSettled, so a num must not be gated
+// twice concurrently; adoptLandings gates each finding issue once, in turn.
+func (s *Settle) SettlePatch(owner dispatchkey.Key, num, prURL string) {
+	s.settledMu.Lock()
+	if s.reportKey == nil {
+		s.reportKey = make(map[string]dispatchkey.Key)
+	}
+	s.reportKey[num] = owner
+	s.settledMu.Unlock()
+	s.SettleAdopted(nil, num, 0, prURL)
 }
 
 // verifyMerged confirms a PR reported merged carries both a MERGED state and
