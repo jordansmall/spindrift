@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/gitexec"
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
@@ -37,7 +38,7 @@ func relayBundle(repoPath, outboxDir, ref string) error {
 		return fmt.Errorf("local: malformed bundle %s: %w: %s", bundlePath, err, out)
 	}
 	refspec := "+" + ref + ":refs/heads/" + ref
-	if out, err := exec.Command("git", "-C", repoPath, "-c", "maintenance.auto=false", "fetch", bundlePath, refspec).CombinedOutput(); err != nil {
+	if out, err := gitAt(repoPath, "fetch", bundlePath, refspec).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: fetch bundle %s: %w: %s", bundlePath, err, out)
 	}
 	return nil
@@ -89,11 +90,11 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 	// Cloning a repo past the loose-object threshold can fork a detached
 	// `git maintenance --auto` that is still repacking when the deferred
 	// os.RemoveAll (or a caller's t.TempDir cleanup) runs.
-	if out, err := exec.Command("git", "-c", "maintenance.auto=false", "clone", repoPath, dir).CombinedOutput(); err != nil {
+	if out, err := exec.Command("git", append(gitexec.NoAutoMaintenance("-c"), "clone", repoPath, dir)...).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: clone %s: %w: %s", repoPath, err, out)
 	}
 	gitIn := func(args ...string) *exec.Cmd {
-		return exec.Command("git", append([]string{"-C", dir, "-c", "maintenance.auto=false"}, args...)...)
+		return gitAt(dir, args...)
 	}
 	// A rebase re-commits each replayed commit under the current committer, so a
 	// clone with no ambient git config fails with "please tell me who you are".
@@ -113,11 +114,11 @@ func rebaseLand(repoPath, branch, integrationBranch, userName, userEmail string)
 
 	// Fetch rather than push from the clone: a push runs receive-pack on
 	// repoPath, which does not reliably honor the pushing command's
-	// `-c maintenance.auto=false`. The refspec is forced because a retry may
+	// `-c` auto-maintenance guard. The refspec is forced because a retry may
 	// diverge from what this branch left there before, and the update-ref is a
 	// compare-and-swap against oldTip, so a concurrent land is refused.
 	branchRefspec := "+refs/heads/" + branch + ":refs/heads/" + branch
-	if out, err := exec.Command("git", "-C", repoPath, "-c", "maintenance.auto=false", "fetch", dir, branchRefspec).CombinedOutput(); err != nil {
+	if out, err := gitAt(repoPath, "fetch", dir, branchRefspec).CombinedOutput(); err != nil {
 		return fmt.Errorf("local: fetch rebased %s: %w: %s", branch, err, out)
 	}
 	if out, err := exec.Command("git", "-C", repoPath, "update-ref", integrationRef, "refs/heads/"+branch, oldTip).CombinedOutput(); err != nil {
@@ -208,4 +209,8 @@ func patchEquivalentToIntegration(repoPath, sha, integrationBranch string) (bool
 		}
 	}
 	return true, nil
+}
+
+func gitAt(path string, args ...string) *exec.Cmd {
+	return exec.Command("git", gitexec.GuardedArgs(path, args...)...)
 }
