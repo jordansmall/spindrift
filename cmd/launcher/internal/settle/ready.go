@@ -353,7 +353,8 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 // SUCCESS inherited from an earlier attempt until a non-terminal state proves
 // this run's checks are alive (#1652), bounded by registrationWindow (#2475).
 func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistration bool) (watchObservation, string) {
-	report.CIWait(dispatchkey.Issue(num), pr)
+	key := dispatchkey.Issue(num)
+	report.CIWait(key, pr, "")
 	deadline := s.cfg.MergePollTimeout
 	w := watch{
 		pollInterval:        s.cfg.MergePollInterval,
@@ -361,9 +362,23 @@ func (s *Settle) gateToGreen(num string, gen uint64, pr string, requireRegistrat
 		requireRegistration: requireRegistration,
 		clock:               s.clock,
 	}
+	checkState := func() (forge.RollupState, error) { return s.pr.CheckState(pr) }
+	if rr := s.ciRun; rr != nil {
+		// Checks may not exist when the wait starts, so announce the run URL
+		// when it first appears, changes or disappears, not on every tick.
+		var announced string
+		checkState = func() (forge.RollupState, error) {
+			state, run, err := rr.CheckRun(pr)
+			if err == nil && run != announced {
+				announced = run
+				report.CIWait(key, pr, run)
+			}
+			return state, err
+		}
+	}
 	obs := w.poll(
 		func() bool { return s.terminated(num, gen) },
-		func() (forge.RollupState, error) { return s.pr.CheckState(pr) },
+		checkState,
 	)
 
 	switch obs.outcome {

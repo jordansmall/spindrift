@@ -145,6 +145,15 @@ func TestFake_DoesNotImplementHostPostedIssueFilerByDefault(t *testing.T) {
 	}
 }
 
+// RunURLFake is a wrapper precisely so the plain Fake stays a forge with no
+// CIRunReporter capability, like forgejo.
+func TestFake_DoesNotImplementCIRunReporter(t *testing.T) {
+	f := forge.NewFake()
+	if _, ok := any(f).(forge.CIRunReporter); ok {
+		t.Fatal("bare *Fake unexpectedly satisfies CIRunReporter")
+	}
+}
+
 // The read-only issue-filing relay (issue #2018) is reachable only through
 // the AsIssueFiler wrapper, matching createDraftPR's AsGithubReadOnly-only
 // restriction.

@@ -550,8 +550,8 @@ func TestModel_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestCIWait_RoundTrip pins that a ci_wait record carries the key and PR URL
-// over the wire and nothing else.
+// TestCIWait_RoundTrip pins that a ci_wait record carries the key, PR URL and
+// run URL over the wire and nothing else.
 func TestCIWait_RoundTrip(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -564,7 +564,7 @@ func TestCIWait_RoundTrip(t *testing.T) {
 	if rep == nil {
 		t.Fatal("FromEnv returned nil")
 	}
-	rep.CIWait(dispatchkey.Issue("4961"), "https://github.com/o/r/pull/7")
+	rep.CIWait(dispatchkey.Issue("4961"), "https://github.com/o/r/pull/7", "https://github.com/o/r/actions/runs/9")
 	w.Close()
 
 	line, err := bufio.NewReader(r).ReadBytes('\n')
@@ -575,7 +575,7 @@ func TestCIWait_RoundTrip(t *testing.T) {
 	if err := json.Unmarshal(line, &got); err != nil {
 		t.Fatalf("unmarshal %q: %v", line, err)
 	}
-	want := Record{Event: EventCIWait, Key: dispatchkey.Issue("4961"), PRURL: "https://github.com/o/r/pull/7"}
+	want := Record{Event: EventCIWait, Key: dispatchkey.Issue("4961"), PRURL: "https://github.com/o/r/pull/7", RunURL: "https://github.com/o/r/actions/runs/9"}
 	if got != want {
 		t.Errorf("record = %+v, want %+v", got, want)
 	}

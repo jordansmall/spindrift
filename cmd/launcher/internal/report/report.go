@@ -52,6 +52,10 @@ type Record struct {
 	// empty when none; a ci_wait record's PR, the one the host now waits on.
 	// Empty on every other event.
 	PRURL string
+	// RunURL is a ci_wait record's CI run for the PR's head commit, empty until
+	// the forge registers one or when it cannot report one. Empty on every
+	// other event.
+	RunURL string
 	// NextDue is a not_due record's answer, parsed off the wire by
 	// UnmarshalJSON; zero on every other event.
 	NextDue NextDue
@@ -109,6 +113,7 @@ type recordWire struct {
 	PassLog  string `json:"pass_log,omitempty"`
 	RecordID string `json:"record_id,omitempty"`
 	PRURL    string `json:"pr_url,omitempty"`
+	RunURL   string `json:"run_url,omitempty"`
 	NextDue  string `json:"next_due,omitempty"`
 
 	Model     string `json:"model,omitempty"`
@@ -117,7 +122,7 @@ type recordWire struct {
 
 func (r Record) MarshalJSON() ([]byte, error) {
 	issue, chore := r.Key.Fields()
-	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, RecordID: r.RecordID, PRURL: r.PRURL, NextDue: r.NextDue.wire(), Model: r.Model, ModelRole: r.ModelRole})
+	return json.Marshal(recordWire{Event: r.Event, Issue: issue, Chore: chore, Phase: r.Phase, State: r.State, Note: r.Note, PassLog: r.PassLog, RecordID: r.RecordID, PRURL: r.PRURL, RunURL: r.RunURL, NextDue: r.NextDue.wire(), Model: r.Model, ModelRole: r.ModelRole})
 }
 
 // UnmarshalJSON leaves Key zero, without error, when neither issue nor chore
@@ -144,7 +149,7 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 			return err
 		}
 	}
-	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, RecordID: w.RecordID, PRURL: w.PRURL, NextDue: nd, Model: w.Model, ModelRole: w.ModelRole}
+	*r = Record{Event: w.Event, Key: key, Phase: w.Phase, State: w.State, Note: w.Note, PassLog: w.PassLog, RecordID: w.RecordID, PRURL: w.PRURL, RunURL: w.RunURL, NextDue: nd, Model: w.Model, ModelRole: w.ModelRole}
 	return nil
 }
 
@@ -260,9 +265,9 @@ func (r *Reporter) Model(key dispatchkey.Key, model, role string) {
 
 // CIWait records that the host has entered a CI wait on key's PR prURL, so the
 // parent can show the Dispatch as waiting on CI. One record per wait entered,
-// not per poll.
-func (r *Reporter) CIWait(key dispatchkey.Key, prURL string) {
-	r.emit(Record{Event: EventCIWait, Key: key, PRURL: prURL})
+// plus one each time runURL first appears or changes mid-wait; never per poll.
+func (r *Reporter) CIWait(key dispatchkey.Key, prURL, runURL string) {
+	r.emit(Record{Event: EventCIWait, Key: key, PRURL: prURL, RunURL: runURL})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe
