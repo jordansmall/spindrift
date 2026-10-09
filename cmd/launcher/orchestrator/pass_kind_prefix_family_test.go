@@ -14,7 +14,7 @@ import (
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
 
-// guardEnv builds one orchestrator-on, fresh-work Env sitting in Assemble's
+// guardEnv builds one fresh-work, review-rendering Env sitting in Assemble's
 // covered cell, mirroring promptassembly's own coveredEnv fixture. IssueText is
 // the one axis this test varies across its two Assemble calls.
 func guardEnv(issueText string) promptassembly.Env {
@@ -163,7 +163,7 @@ func TestPassKindsLeadWithFamilyPrefix(t *testing.T) {
 		t.Fatalf("Assemble: %v", err)
 	}
 	if result.Prompt == "" || result.ReviewPromptText == "" {
-		t.Fatalf("guardEnv did not render a base prompt and a review prompt; got base=%d bytes review=%d bytes -- fixture no longer sits in Assemble's covered orchestrator-on cell", len(result.Prompt), len(result.ReviewPromptText))
+		t.Fatalf("guardEnv did not render a base prompt and a review prompt; got base=%d bytes review=%d bytes -- fixture no longer sits in Assemble's covered review-rendering cell", len(result.Prompt), len(result.ReviewPromptText))
 	}
 
 	basePromptFile := writeTemp(t, "base-prompt.txt", result.Prompt)

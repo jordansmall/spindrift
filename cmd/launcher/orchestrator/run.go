@@ -73,9 +73,10 @@ type config struct {
 	// independently of it. Zero means no cap.
 	maxBudgetUSD float64
 	// reviewPromptFile is the code-owned review pass's prompt file (issue
-	// #2037), scanned by scanReviewLog rather than scanPassLog. Empty keeps
-	// run's pre-#2037 single-loop behavior, so the handoff carries it only on
-	// the ORCHESTRATOR-on work-dispatch path (ADR 0035's master switch).
+	// #2037), scanned by scanReviewLog rather than scanPassLog. Empty selects
+	// the single-loop path, which advise-only (research, butler) dispatches and
+	// warm fix passes take, so the handoff carries it only on fresh work
+	// dispatches.
 	reviewPromptFile string
 	// topLevelRole is forwarded as driver-exec's --top-level-role (issue
 	// #2092). Empty omits the flag, which keeps the legacy single-loop path's

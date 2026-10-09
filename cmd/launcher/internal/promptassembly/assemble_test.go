@@ -2677,7 +2677,7 @@ func TestAssembleOrchestratorNoReviewerKey(t *testing.T) {
 	}
 }
 
-// The orchestrator-on cell with no AgentsJSONTemplate: AgentsJSON stays
+// The fresh-work cell with no AgentsJSONTemplate: AgentsJSON stays
 // empty, so no --agents flag, and ReviewPromptText still renders because it
 // does not depend on the template.
 func TestAssembleOrchestratorEmptyAgentsTemplate(t *testing.T) {
@@ -2772,7 +2772,7 @@ func TestAssemblePartialSkillsCovered(t *testing.T) {
 	}
 }
 
-// TestAssemblePartialSkillsCovered for the orchestrator-on branch (issue
+// TestAssemblePartialSkillsCovered for the review-rendering branch (issue
 // #2354).
 func TestAssembleOrchestratorPartialSkillsCovered(t *testing.T) {
 	reg := loadTestRegistry(t)

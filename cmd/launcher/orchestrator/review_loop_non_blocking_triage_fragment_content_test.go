@@ -7,14 +7,14 @@ import (
 )
 
 // nonBlockingTriageItemListEndMarker is item 3's own final sentence, the point
-// both fragment files' shared item list ends on. Anchoring extraction to this
+// the review-loop fragment's item list ends on. Anchoring extraction to this
 // literal text rather than to the next blank line means a blank line inside the
 // item list can never truncate the extraction early.
 const nonBlockingTriageItemListEndMarker = "not a weakening of it."
 
-// nonBlockingTriageParagraph extracts the shared non-blocking triage item list,
-// from the "1. Fix inline" item through nonBlockingTriageItemListEndMarker, out
-// of a review-loop fragment's raw content, then whitespace-normalizes the
+// nonBlockingTriageParagraph extracts the non-blocking triage item list, from
+// the "1. Fix inline" item through nonBlockingTriageItemListEndMarker, out of
+// the review-loop fragment's raw content, then whitespace-normalizes the
 // result (issue #2701).
 func nonBlockingTriageParagraph(t *testing.T, content string) string {
 	t.Helper()
@@ -253,8 +253,7 @@ func TestNonBlockingTriageIsRoundAwareAndIssueAnchored(t *testing.T) {
 		// AC3: a finding escalated by REVIEW's own round-aware tiebreak must not
 		// be silently dropped once it reaches FILE ISSUES. All three filer
 		// variants — direct, relay, and relay-socket — carry this addition, kept
-		// identical to each other the same way the two review-loop fragments are
-		// (issue #2701).
+		// identical to each other (issue #2701).
 		directRecap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-direct.md"))
 		relayRecap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-relay.md"))
 		relaySocketRecap := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/file-issues-relay-socket.md"))
