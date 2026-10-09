@@ -858,10 +858,10 @@ func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
 
 // runLineageMarkerPath returns the sentinel file Run() drops right after its
 // quarantinePriorRunLogs call, so a caller that never went through Run()
-// (main.go's package-level recoverIssue, adopting an open PR or settling a
-// relayed branch) can tell pass logs quarantined at the start of this logical
-// run from ones no Run() ever quarantined (issue #2575). It never matches
-// AllAttemptLogPaths' pattern.
+// (main.go's recoverIssue, adopting an open PR or settling a relayed branch)
+// can tell pass logs quarantined at the start of this logical run from ones no
+// Run() ever quarantined (issue #2575). It never matches AllAttemptLogPaths'
+// pattern.
 func runLineageMarkerPath(pwd, number string) string {
 	return filepath.Join(HostLogDirFor(pwd), "issue-"+number+".run-lineage")
 }
@@ -907,11 +907,11 @@ func (d *Dispatch) RecordWarnings(warnings []string) {
 }
 
 // EnsureRunLineage gives a Dispatch that reaches Fix, CumulativeUsage, or
-// UsageReport without Run() (main.go's package-level recoverIssue adopting an
-// open PR or settling a relayed branch) the same guarantee Run's
-// quarantinePriorRunLogs call makes (issue #2575). The marker is normally
-// already there. A missing one (an orphaned PR, or a pre-#2575 log dir)
-// quarantines everything so the count starts from zero.
+// UsageReport without Run() (main.go's recoverIssue adopting an open PR or
+// settling a relayed branch) the same guarantee Run's quarantinePriorRunLogs
+// call makes (issue #2575). The marker is normally already there. A missing one
+// (an orphaned PR, or a pre-#2575 log dir) quarantines everything so the count
+// starts from zero.
 func (d *Dispatch) EnsureRunLineage() error {
 	if fileExists(runLineageMarkerPath(d.pwd, d.number)) {
 		return nil

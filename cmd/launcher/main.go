@@ -1345,9 +1345,9 @@ func logDiscoveryPoll(c config, issues []issue, first bool, seen map[string]bool
 
 // registryFor returns s's own termination registry, or a fresh one when s owns
 // none (settle.Fake, ResearchSettle). Getting one rather than installing one is
-// the point: RunContinuous, both waves.Dispatch call sites, and the
-// package-level recoverIssue each reach the same registry as their settler, so
-// a Console recover gesture cannot replace the session's registry and strand the operator's later marks
+// the point: RunContinuous, both waves.Dispatch call sites, and recoverIssue
+// each reach the same registry as their settler, so a Console recover gesture
+// cannot replace the session's registry and strand the operator's later marks
 // where no settle goroutine looks (#3522). An abort (second signal) and a
 // settle goroutine already polling CI therefore agree on an issue's fate:
 // observeAbort's Reclaim marks it here and the settler checks that same mark at
@@ -1612,12 +1612,11 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 	return nil
 }
 
-// recoverFailed is the package-level recoverIssue's single terminal-failure
-// exit, so a recover attempt on an issue already agent-complete can never
-// downgrade it to agent-failed (issue #2477). The workflow's claim strips the
-// prior terminal label before this process starts, so the pre-claim state has
-// to be read back out of the issue timeline via the optional
-// PriorClaimStateReader.
+// recoverFailed is recoverIssue's single terminal-failure exit, so a recover
+// attempt on an issue already agent-complete can never downgrade it to
+// agent-failed (issue #2477). The workflow's claim strips the prior terminal
+// label before this process starts, so the pre-claim state has to be read back
+// out of the issue timeline via the optional PriorClaimStateReader.
 func recoverFailed(it forge.IssueTracker, caps forge.Capabilities, num string, origErr error, stdout, stderr io.Writer) error {
 	if caps.PriorClaimStateReader == nil {
 		return origErr
