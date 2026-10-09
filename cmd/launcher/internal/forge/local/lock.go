@@ -1,10 +1,13 @@
 package local
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
+
+	"spindrift.dev/launcher/internal/flock"
 )
 
 // AccumulationLock is a held cross-process advisory lock on an Accumulation repo's path.
@@ -30,9 +33,14 @@ func AcquireAccumulationLock(repoPath string) (*AccumulationLock, error) {
 		return nil, fmt.Errorf("open accumulation lock file %s: %w", lockPath, err)
 	}
 
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := flock.TryExclusive(file); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("accumulation repo %s is locked by another process (lock file %s): %w", repoPath, lockPath, err)
+		if !errors.Is(err, flock.ErrHeld) {
+			return nil, fmt.Errorf("lock accumulation lock file %s: %w", lockPath, err)
+		}
+		// Wrap the bare errno, not err: ErrHeld's text would otherwise
+		// change this operator-facing message from its pre-flock wording.
+		return nil, fmt.Errorf("accumulation repo %s is locked by another process (lock file %s): %w", repoPath, lockPath, syscall.EWOULDBLOCK)
 	}
 
 	return &AccumulationLock{path: lockPath, file: file}, nil
