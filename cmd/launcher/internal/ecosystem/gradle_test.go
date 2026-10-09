@@ -10,7 +10,7 @@ import (
 )
 
 // TestGradleInitScript_ExactContent pins the full rendered script for a
-// route declaring a gradle-path.
+// route declaring a gradle path.
 func TestGradleInitScript_ExactContent(t *testing.T) {
 	got := GradleInitScript(27182, "r0", gradleDeclaredRoutes())
 	want := `def spindriftMavenUrl = "http://127.0.0.1:27182/r0/maven/"
@@ -132,20 +132,23 @@ func TestGradleInitScript_PrefixInterpolated(t *testing.T) {
 	}
 }
 
-// TestGradleInitScript_NoGradlePathIsInert pins the fallback (issue #3259).
+// TestGradleInitScript_NoDeclaredPathIsInert pins the fallback (issue #3259).
 // Gradle has no InTreeConfigPath and registrypathset.Derive never tags
 // "gradle", so a route with no declared gradle path renders an inert script
 // rather than a bare-route-root redirect, which would 404 against the
 // Forwarder's path-set enforcement.
-func TestGradleInitScript_NoGradlePathIsInert(t *testing.T) {
+func TestGradleInitScript_NoDeclaredPathIsInert(t *testing.T) {
 	got := GradleInitScript(27182, "r0", []registrymanifest.Route{{Prefix: "r0"}})
 	for _, marker := range []string{"allprojects", "gradle.beforeSettings", "gradle.settingsEvaluated", "gradle.projectsEvaluated", "spindriftMavenUrl", "repos.clear", "repos.maven"} {
 		if strings.Contains(got, marker) {
-			t.Errorf("gradle-path-less GradleInitScript = %q, must not contain %q", got, marker)
+			t.Errorf("path-less GradleInitScript = %q, must not contain %q", got, marker)
 		}
 	}
+	if strings.Contains(got, GradleRetiredRouteKey) {
+		t.Errorf("inert GradleInitScript = %q, must not name the retired %q key (ADR 0048)", got, GradleRetiredRouteKey)
+	}
 	if strings.TrimSpace(got) == "" {
-		t.Error("gradle-path-less GradleInitScript is empty, want a minimal valid (but inert) init script")
+		t.Error("path-less GradleInitScript is empty, want a minimal valid (but inert) init script")
 	}
 }
 

@@ -39,17 +39,18 @@ var gradleRow = Row{
 // GradleInitScript renders the Gradle init-script dropped into
 // $GRADLE_USER_HOME/init.d/. A JVM-wide proxy property cannot replace it:
 // Gradle resolves against whatever repositories{} its own scripts declare.
-// The path comes from routes[0]'s declared gradle-path (ADR 0045, #3259,
-// #3404); with none declared, this renders an inert script.
+// The path comes from the path key of routes[0]'s [routes.ecosystems.gradle]
+// block (ADR 0045, ADR 0048, #3259, #3404); with none declared, this renders
+// an inert script.
 func GradleInitScript(port int, prefix string, routes []registrymanifest.Route) string {
 	if path := declaredPath(routes, nameGradle); path != "" {
 		return gradleRedirectScript(fmt.Sprintf("http://127.0.0.1:%d/%s%s/", port, prefix, path))
 	}
 	return "// spindrift: gradle has no discoverable per-registry path to redirect\n" +
-		"// onto (no in-tree config file to derive one from, and no gradle-path\n" +
-		"// declared in the routes file) -- this init script intentionally\n" +
-		"// installs no repository redirection, so the build falls through to\n" +
-		"// whatever repositories it declares itself.\n"
+		"// onto (no in-tree config file to derive one from, and no path key in a\n" +
+		"// [routes.ecosystems.gradle] block of the routes file) -- this init\n" +
+		"// script intentionally installs no repository redirection, so the\n" +
+		"// build falls through to whatever repositories it declares itself.\n"
 }
 
 // gradleRedirectScript points every intercepted repository at mavenURL,
