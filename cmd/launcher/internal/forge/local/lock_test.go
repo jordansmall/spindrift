@@ -1,8 +1,11 @@
 package local
 
 import (
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -41,6 +44,31 @@ func TestAcquireAccumulationLock_SecondAcquireFailsWhileHeld(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(msg), "locked") && !strings.Contains(strings.ToLower(msg), "another") {
 		t.Errorf("error %q: expected to mention that the lock is held by another process", msg)
+	}
+}
+
+func TestAcquireAccumulationLock_HeldErrorWrapsEWOULDBLOCKExactly(t *testing.T) {
+	repoPath := filepath.Join(t.TempDir(), "accum.git")
+
+	first, err := AcquireAccumulationLock(repoPath)
+	if err != nil {
+		t.Fatalf("first AcquireAccumulationLock(%q): unexpected error: %v", repoPath, err)
+	}
+	t.Cleanup(func() {
+		_ = first.Release()
+	})
+
+	_, err = AcquireAccumulationLock(repoPath)
+	if err == nil {
+		t.Fatalf("second AcquireAccumulationLock(%q): expected error, got nil", repoPath)
+	}
+
+	want := fmt.Sprintf("accumulation repo %s is locked by another process (lock file %s): %s", repoPath, repoPath+".lock", syscall.EWOULDBLOCK)
+	if err.Error() != want {
+		t.Errorf("error message = %q, want %q", err.Error(), want)
+	}
+	if !errors.Is(err, syscall.EWOULDBLOCK) {
+		t.Errorf("error %v: expected to wrap syscall.EWOULDBLOCK", err)
 	}
 }
 
