@@ -14,6 +14,14 @@
    again": report the rejection, with the valid classes it names, back as
    your result.
 
+   When you were handed the finding's cited digest anchors and metric slug,
+   carry them verbatim too. On the log carrier, add a `"cites"` list (one
+   entry per anchor) and a `"metric"` string to the `SPINDRIFT_ISSUE_INTENT`
+   JSON payload; on the socket carrier, add one `-cite '<anchor>'` per anchor
+   and `-metric '<slug>'` to the `driver-exec signal issue-intent` call. If
+   the call rejects the finding for a missing cite or metric, report the
+   rejection back as your result. Omit both when you were not handed them.
+
    When you were handed a patch alongside the finding, carry it verbatim
    into the filing call — never invent or edit one. On the log carrier,
    add a `"patch"` key to the `SPINDRIFT_ISSUE_INTENT` JSON payload: a
