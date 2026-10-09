@@ -613,6 +613,8 @@ slotLoop:
 					p.passBaton(slot, batonPassClaimed)
 				case report.EventModel:
 					p.noteModel(slot, kind, revision, rec)
+				case report.EventCIWait:
+					p.noteCIWait(slot, rec)
 				case report.EventSettled:
 					p.noteSettled(slot, kind, revision, rec)
 				case report.EventNotDue:

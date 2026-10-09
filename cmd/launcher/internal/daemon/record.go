@@ -46,7 +46,8 @@ var ErrKindMismatch = errors.New("record key does not match child kind")
 // with no key, an invalid one, or one whose shape doesn't match kind: a
 // Chore-keyed record from a non-butler child, or an issue-keyed record from
 // a butler child. A not_due record with a missing or unparseable next_due
-// (report.ParseNextDue) is malformed too, as is a model record with no model.
+// (report.ParseNextDue) is malformed too, as are a model record with no model
+// and a ci_wait record with no pr_url.
 func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	if line == "" {
 		return Record{}, false, nil
@@ -56,7 +57,7 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 		return Record{}, false, err
 	}
 	switch rec.Event {
-	case report.EventBox, report.EventSettled, report.EventNotDue, report.EventModel:
+	case report.EventBox, report.EventSettled, report.EventNotDue, report.EventModel, report.EventCIWait:
 	default:
 		return Record{}, false, nil
 	}
@@ -82,6 +83,9 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	}
 	if rec.Event == report.EventModel && rec.Model == "" {
 		return Record{}, false, fmt.Errorf("record: model for %q: missing model", rec.Key)
+	}
+	if rec.Event == report.EventCIWait && rec.PRURL == "" {
+		return Record{}, false, fmt.Errorf("record: ci_wait for %q: missing pr_url", rec.Key)
 	}
 	return rec, true, nil
 }

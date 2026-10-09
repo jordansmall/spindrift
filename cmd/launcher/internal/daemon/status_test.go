@@ -823,3 +823,24 @@ func TestPoolSnapshotCarriesChildReportedNextDue(t *testing.T) {
 		t.Errorf("JSON = %s, want next_due_on_tip_move true", data)
 	}
 }
+
+// TestSlotStatus_CIWaitMarshalsUnderCIWaitKeysAndOmitsWhenEmpty pins the
+// additive "ci_wait" and "pr_url" keys, absent until a ci_wait record.
+func TestSlotStatus_CIWaitMarshalsUnderCIWaitKeysAndOmitsWhenEmpty(t *testing.T) {
+	data, err := json.Marshal(SlotStatus{Busy: true, CIWait: true, PRURL: "https://example.test/pr/7"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	for _, want := range []string{`"ci_wait":true`, `"pr_url":"https://example.test/pr/7"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("marshalled = %s, want it to contain %q", data, want)
+		}
+	}
+	data, err = json.Marshal(SlotStatus{Busy: true})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"ci_wait"`) || strings.Contains(string(data), `"pr_url"`) {
+		t.Errorf("marshalled = %s, want no ci_wait keys when empty", data)
+	}
+}

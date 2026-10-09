@@ -285,3 +285,18 @@ func TestParseRecord_Model(t *testing.T) {
 		t.Errorf("model record without model = (%v, %v), want an error", ok, err)
 	}
 }
+
+func TestParseRecord_CIWait(t *testing.T) {
+	work := KindOf(dispatchkind.Work)
+	got, ok, err := ParseRecord(`{"event":"ci_wait","issue":"42","pr_url":"https://example.test/pr/7"}`, work)
+	if err != nil || !ok {
+		t.Fatalf("ParseRecord = (%v, %v), want an accepted record", ok, err)
+	}
+	want := Record{Event: report.EventCIWait, Key: dispatchkey.Issue("42"), PRURL: "https://example.test/pr/7"}
+	if got != want {
+		t.Errorf("ParseRecord = %+v, want %+v", got, want)
+	}
+	if _, ok, err := ParseRecord(`{"event":"ci_wait","issue":"42"}`, work); err == nil || ok {
+		t.Errorf("ci_wait record without pr_url = (%v, %v), want an error", ok, err)
+	}
+}
