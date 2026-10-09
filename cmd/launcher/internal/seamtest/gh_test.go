@@ -176,7 +176,8 @@ func TestGhGraphQLProbes(t *testing.T) {
 		_, out := runGh(t, cfg, "api", "graphql", "-f", "query="+query, "-f", "owner=o", "-f", "repo=r", "-F", "number=9", "--jq", "ignored")
 		return out
 	}
-	if got := gql("{pullRequest{commits{nodes{commit{statusCheckRollup{state}}}}}}"); got != "SUCCESS\n" {
+	const checksQuery = "{pullRequest{commits{nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{detailsUrl status}}}}}}}}}"
+	if got := gql(checksQuery); got != "{\"state\":\"SUCCESS\"}\n" {
 		t.Errorf("checks = %q", got)
 	}
 	if got := gql("{pullRequest{mergeable}}"); got != "MERGEABLE\n" {
@@ -191,8 +192,18 @@ func TestGhGraphQLProbes(t *testing.T) {
 	if err := json.Unmarshal([]byte(gql(contextsQuery)), &nodes); err != nil || len(nodes) != 1 || nodes[0]["name"] != "build" {
 		t.Errorf("scripted contexts = %v, err %v", nodes, err)
 	}
-	if got := gql("{pullRequest{commits{nodes{commit{statusCheckRollup{state}}}}}}"); got != "SUCCESS\n" {
+	if got := gql(checksQuery); got != "{\"state\":\"SUCCESS\"}\n" {
 		t.Errorf("checks after scripting contexts = %q", got)
+	}
+	cfg.PRs[0].RunURL = "https://github.com/o/r/actions/runs/77/job/1"
+	var rollup struct {
+		State    string
+		Contexts struct {
+			Nodes []struct{ DetailsURL, Status string }
+		}
+	}
+	if err := json.Unmarshal([]byte(gql(checksQuery)), &rollup); err != nil || rollup.State != "SUCCESS" || len(rollup.Contexts.Nodes) != 1 || rollup.Contexts.Nodes[0].DetailsURL != cfg.PRs[0].RunURL {
+		t.Errorf("scripted run URL rollup = %+v, err %v", rollup, err)
 	}
 	if _, out := runGh(t, cfg, "api", "graphql", "-f", "query={repository{autoMergeAllowed}}", "-f", "owner=o"); out != "false\n" {
 		t.Errorf("autoMergeAllowed = %q", out)

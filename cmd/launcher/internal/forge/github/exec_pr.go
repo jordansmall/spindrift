@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	neturl "net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -153,29 +155,81 @@ func (e *execClient) PRState(url string) (forge.PRState, error) {
 // CheckState returns the aggregate statusCheckRollup state of the PR's head
 // commit, or StateNone when no checks are registered.
 func (e *execClient) CheckState(url string) (forge.RollupState, error) {
+	state, _, err := e.CheckRun(url)
+	return state, err
+}
+
+// actionsRunRE matches a GitHub Actions run URL, optionally followed by the
+// /job/<id> segment a check run's detailsUrl carries. Group 1 is the
+// https://host/owner/repo prefix, group 2 the run path.
+var actionsRunRE = regexp.MustCompile(`^(https://[^/]+/[^/]+/[^/]+)(/actions/runs/\d+)(?:/job/\d+)?/?$`)
+
+// rollupQueryResult is the statusCheckRollup object CheckRun's --jq emits, or
+// {} when the head commit has no checks.
+type rollupQueryResult struct {
+	State    string `json:"state"`
+	Contexts struct {
+		Nodes []struct {
+			TypeName   string `json:"__typename"`
+			DetailsURL string `json:"detailsUrl"`
+			Status     string `json:"status"`
+		} `json:"nodes"`
+	} `json:"contexts"`
+}
+
+// CheckRun implements forge.CIRunReporter. The run URL is the first Actions run
+// of the head commit still in flight, else the first one, so the link follows
+// live work rather than a finished sibling workflow. Only runs under the PR's
+// own host, owner and repo count.
+func (e *execClient) CheckRun(url string) (forge.RollupState, string, error) {
 	// Parse https://github.com/OWNER/REPO/pull/NUMBER
 	parts := strings.Split(url, "/")
 	if len(parts) < 7 {
-		return forge.StateNone, fmt.Errorf("invalid PR URL: %s", url)
+		return forge.StateNone, "", fmt.Errorf("invalid PR URL: %s", url)
 	}
 	owner, repo, number := parts[3], parts[4], parts[6]
-	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state}}}}}}}`
+	prefix := strings.Join(parts[:5], "/")
+	const gql = `query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:50){nodes{__typename ... on CheckRun{detailsUrl status}}}}}}}}}}`
 	cmd := exec.Command("gh", "api", "graphql",
 		"-f", "query="+gql,
 		"-f", "owner="+owner,
 		"-f", "repo="+repo,
 		"-F", "number="+number,
-		"--jq", `.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state // ""`,
+		"--jq", `.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup // {}`,
 	)
 	out, err := cmd.Output()
 	if err != nil {
-		return forge.StateNone, ghCommandErr("gh api graphql (statusCheckRollup)", err)
+		return forge.StateNone, "", ghCommandErr("gh api graphql (statusCheckRollup)", err)
 	}
-	s := strings.TrimSpace(string(out))
-	if s == "" {
-		return forge.StateNone, nil
+	var rollup rollupQueryResult
+	if s := strings.TrimSpace(string(out)); s != "" {
+		if err := json.Unmarshal([]byte(s), &rollup); err != nil {
+			return forge.StateNone, "", fmt.Errorf("parse statusCheckRollup: %w", err)
+		}
 	}
-	return forge.RollupState(s), nil
+	state := forge.RollupState(rollup.State)
+	if state == "" {
+		state = forge.StateNone
+	}
+	var first string
+	for _, n := range rollup.Contexts.Nodes {
+		if n.TypeName != "CheckRun" {
+			continue
+		}
+		m := actionsRunRE.FindStringSubmatch(n.DetailsURL)
+		if m == nil || !strings.EqualFold(m[1], prefix) {
+			continue
+		}
+		// Dropping /job/<id> keeps the URL stable as a run's jobs register.
+		run := m[1] + m[2]
+		if n.Status != "COMPLETED" {
+			return state, run, nil
+		}
+		if first == "" {
+			first = run
+		}
+	}
+	return state, first, nil
 }
 
 // HeadCommitSHA returns the PR's current head commit SHA.
@@ -615,3 +669,4 @@ var _ forge.BranchProtectionForge = (*execClient)(nil)
 var _ forge.BranchPusher = (*execClient)(nil)
 var _ forge.BranchDeleter = (*execClient)(nil)
 var _ forge.DraftPRCreator = (*execClient)(nil)
+var _ forge.CIRunReporter = (*execClient)(nil)
