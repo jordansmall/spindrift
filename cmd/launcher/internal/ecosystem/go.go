@@ -64,9 +64,10 @@ func ComputeGoBindings(port int, prefix string, routes []registrymanifest.Route,
 	var result GoBindings
 
 	goProxyBound := false
-	// go-path parse validation rejects a bare "/" (registryroutes.go's
-	// validateDeclaredPath), so unlike npm's whole-host case this path can never
-	// normalize to "", and the URL below concatenates it as-is.
+	// Parse validation of the [routes.ecosystems.go] path key rejects a bare "/"
+	// (registryroutes.go's validateDeclaredPath), so unlike npm's whole-host case
+	// this path can never normalize to "", and the URL below concatenates it
+	// as-is.
 	if path := declaredPath(routes, nameGo); path != "" {
 		result.Exports = append(result.Exports, EnvExport{Name: "GOPROXY", Value: fmt.Sprintf("http://127.0.0.1:%d/%s%s", port, prefix, path)})
 		goProxyBound = true
