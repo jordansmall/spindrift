@@ -64,6 +64,10 @@ type settleRun struct {
 	// patch backs the patch rung (ADR 0057, issue #4074) -- see Runner.run
 	// for how patch.forge's presence gates it.
 	patch patchRung
+
+	// tuning is the stored digest of a records-scoped sweep; nil for a code
+	// Chore.
+	tuning *tuningSnapshot
 }
 
 // patchRung is what the patch rung needs (ADR 0057, issue #4074/#4076): tree
@@ -275,6 +279,9 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 		Patched:   patched,
 		Usage:     d.CumulativeUsage(),
 		Dropped:   filing.Dropped,
+	}
+	if s.tuning != nil {
+		state.Snapshot = &s.tuning.ref
 	}
 	if _, err := ledger.Finish(s.ledger, s.chore, finishParent, state, s.now()); err != nil {
 		fmt.Printf("    #%s  status=ledger-finish-failed  !! %v\n", num, err)

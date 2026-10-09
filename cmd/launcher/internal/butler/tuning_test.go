@@ -1,6 +1,8 @@
 package butler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -104,6 +106,25 @@ type tuningRun struct {
 	fc      *forge.Fake
 	input   []string
 	boxes   int
+
+	// recordIDs holds the Record ID each fake Box answered, derived from the
+	// Chore's pinned ClaimTime the way the real Dispatch mints it.
+	recordIDs []string
+	// onRun, when set, runs as each fake Box's Run begins.
+	onRun func(recordID string)
+}
+
+// hookedBox lets a test observe the instant its fake Box launches.
+type hookedBox struct {
+	*dispatch.Fake
+	onRun func()
+}
+
+func (h hookedBox) Run() dispatch.Disposition {
+	if h.onRun != nil {
+		h.onRun()
+	}
+	return h.Fake.Run()
 }
 
 // sweepTuning runs one tuning Sweep at now against r's backend and forge
@@ -113,7 +134,14 @@ func (tr *tuningRun) sweepTuning(t *testing.T, policy Policy, now time.Time) (Ou
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
 		tr.boxes++
 		tr.input = append(tr.input, c.Input)
-		return readyDispatcher()
+		d := readyDispatcher()
+		d.RecordIDResult = dispatchrecord.RecordID("tuning", c.Name, c.ClaimTime)
+		tr.recordIDs = append(tr.recordIDs, d.RecordIDResult)
+		return hookedBox{Fake: d, onRun: func() {
+			if tr.onRun != nil {
+				tr.onRun(d.RecordIDResult)
+			}
+		}}
 	}
 	tree := fakeTree{head: "headsha", filesErr: fmt.Errorf("a records-scoped Chore must not list tracked files")}
 	r := New(tr.backend, tree, tr.fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
@@ -138,6 +166,82 @@ func seedTuningDone(t *testing.T, tr *tuningRun, at time.Time, cursor string) {
 	}
 	if _, err := ledger.Finish(tr.backend, "tuning", claim, ledger.State{LastSwept: "headsha", Cursor: cursor}, at); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	var storedAtLaunch bool
+	tr.onRun = func(id string) {
+		s, err := dispatchrecord.Open(root)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer s.Close()
+		_, storedAtLaunch, _ = s.TuningSnapshot(id)
+	}
+
+	out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Kind != Swept || len(tr.input) != 1 {
+		t.Fatalf("Outcome = %+v, boxes = %d, want one Swept Box", out, tr.boxes)
+	}
+	id := tr.recordIDs[0]
+	sum := sha256.Sum256([]byte(tr.input[0]))
+	want := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
+
+	if !storedAtLaunch {
+		t.Error("the snapshot was not in the store when the Box launched")
+	}
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	snap, ok, err := store.TuningSnapshot(id)
+	if err != nil || !ok {
+		t.Fatalf("TuningSnapshot(%q) = ok %v, err %v", id, ok, err)
+	}
+	if snap.Rendered != tr.input[0] || snap.SHA256 != want.SHA256 || !snap.CreatedAt.Equal(tuningNow) {
+		t.Errorf("snapshot = %+v, want the Box's input, sha %s, created %v", snap, want.SHA256, tuningNow)
+	}
+
+	tip, err := tr.backend.Read("tuning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip.State.Snapshot == nil || *tip.State.Snapshot != want {
+		t.Errorf("Ledger Snapshot = %+v, want %+v", tip.State.Snapshot, want)
+	}
+	raw, err := json.Marshal(tip.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "| Anchor |") || strings.Contains(string(raw), snap.Rendered[:20]) {
+		t.Errorf("the digest text leaked into the Ledger state: %s", raw)
+	}
+}
+
+func TestSweep_Tuning_NoRecordIDLeavesClaim(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	// A Box that answers no Record ID cannot have its snapshot keyed.
+	newBox := func(dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
+	r := New(tr.backend, fakeTree{head: "headsha"}, tr.fc.AsIssueFiler(), newBox, tuningPolicy(root, 1), func() time.Time { return tuningNow })
+	var err error
+	captureStdout(t, func() { _, err = r.Sweep([]string{"tuning"}) })
+	if err == nil {
+		t.Fatal("Sweep succeeded without a Record ID to key the snapshot")
+	}
+	tip, rerr := tr.backend.Read("tuning")
+	if rerr != nil || tip.State.ClaimedBy == nil || tip.State.Snapshot != nil {
+		t.Errorf("tip = %+v, err %v, want the claim left standing", tip.State, rerr)
 	}
 }
 
@@ -599,10 +703,16 @@ func sweepTuningInput(t *testing.T, root string, digestBytes int) string {
 // An over-cap store reaches the Box trimmed: evidence first, outliers second,
 // the aggregate tables whole.
 func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
-	root := t.TempDir()
 	const records = 8
-	seedBlockedReviews(t, root, records, 2000)
-	full := sweepTuningInput(t, root, 0)
+	// Each sweep gets its own store: every sweep claims at tuningNow, so a
+	// shared store would already hold that Record ID's tuning snapshot.
+	sweep := func(t *testing.T, digestBytes int) string {
+		t.Helper()
+		root := t.TempDir()
+		seedBlockedReviews(t, root, records, 2000)
+		return sweepTuningInput(t, root, digestBytes)
+	}
+	full := sweep(t, 0)
 	if n := strings.Count(full, "**evidence:"); n != records {
 		t.Fatalf("uncapped input has %d evidence items, want %d", n, records)
 	}
@@ -610,7 +720,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 
 	t.Run("evidence trimmed", func(t *testing.T) {
 		const capBytes = 6000
-		in := sweepTuningInput(t, root, capBytes)
+		in := sweep(t, capBytes)
 		if len(in) > capBytes {
 			t.Fatalf("len = %d, want <= %d", len(in), capBytes)
 		}
@@ -626,7 +736,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	})
 
 	t.Run("outliers trimmed too", func(t *testing.T) {
-		in := sweepTuningInput(t, root, len(tables)+400)
+		in := sweep(t, len(tables)+400)
 		if len(in) > len(tables)+400 {
 			t.Fatalf("len = %d, want <= %d", len(in), len(tables)+400)
 		}
@@ -640,7 +750,7 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 
 	t.Run("cap between the tables and the trailer", func(t *testing.T) {
 		capBytes := len(tables) + 20
-		in := sweepTuningInput(t, root, capBytes)
+		in := sweep(t, capBytes)
 		if len(in) > capBytes {
 			t.Fatalf("len = %d, want <= %d", len(in), capBytes)
 		}
@@ -650,14 +760,14 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 	})
 
 	t.Run("cap below the tables", func(t *testing.T) {
-		in := sweepTuningInput(t, root, 1)
+		in := sweep(t, 1)
 		if !strings.HasPrefix(in, tables) || strings.Contains(in, "## Outliers") || strings.Contains(in, "## Evidence") {
 			t.Errorf("want the tables alone:\n%s", in)
 		}
 	})
 
 	t.Run("roomy cap leaves the digest alone", func(t *testing.T) {
-		if in := sweepTuningInput(t, root, len(full)); in != full {
+		if in := sweep(t, len(full)); in != full {
 			t.Errorf("a cap the digest fits changed it")
 		}
 	})

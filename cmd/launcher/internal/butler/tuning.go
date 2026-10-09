@@ -8,6 +8,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/hostpaths"
+	"spindrift.dev/launcher/internal/ledger"
 )
 
 // loadRecords reads the Dispatch Records store a records-scoped Chore sweeps
@@ -32,4 +33,29 @@ func (p Policy) loadRecords() ([]dispatchrecord.Record, error) {
 		return nil, fmt.Errorf("read dispatch records: %w", err)
 	}
 	return records, nil
+}
+
+// storeSnapshot writes a tuning sweep's digest to the Dispatch Records store,
+// creating it if this is the first write. The Ledger carries only the ref
+// (ADR 0062): the digest itself is never committed or pushed.
+func (p Policy) storeSnapshot(snap dispatchrecord.TuningSnapshot) error {
+	if p.RecordsRoot == "" {
+		return errors.New("no dispatch records root configured")
+	}
+	store, err := dispatchrecord.Open(p.RecordsRoot)
+	if err != nil {
+		return fmt.Errorf("open dispatch records store: %w", err)
+	}
+	defer store.Close()
+	if err := store.PutTuningSnapshot(snap); err != nil {
+		return fmt.Errorf("store tuning snapshot: %w", err)
+	}
+	return nil
+}
+
+// tuningSnapshot is a records-scoped sweep's stored digest: ref goes on the
+// Done commit, digest is the text the Box was served.
+type tuningSnapshot struct {
+	ref    ledger.Snapshot
+	digest string
 }
