@@ -184,16 +184,19 @@ func isNoBuilderError(stderr string) bool {
 }
 
 // isTransientRegistryError reports whether stderr indicates a network hiccup
-// reaching the registry rather than a genuine failure, so a caller can retry
-// or skip instead of failing on a blip (issue #2015). Its only caller is the
-// integration test, but it lives here untagged so checks-inbox unit-tests it
-// without a real container runtime on PATH.
+// reaching the registry, or the registry rate-limiting or erroring with a 5xx,
+// rather than a genuine failure, so a caller can retry or skip instead of
+// failing on a blip (issue #2015). Its only caller is the integration test,
+// but it lives here untagged so checks-inbox unit-tests it without a real
+// container runtime on PATH.
 func isTransientRegistryError(stderr string) bool {
 	for _, s := range []string{
 		"i/o timeout",
 		"no such host",
 		"connection refused",
 		"TLS handshake timeout",
+		"toomanyrequests",
+		"invalid status code from registry 5",
 	} {
 		if strings.Contains(stderr, s) {
 			return true
