@@ -2,10 +2,11 @@
 # assembly and `spindrift stats`. It runs the Go golden tests
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
-# cmd/launcher/stats_reverts_test.go) with UPDATE_GOLDENS=1, which flips
-# their compare helpers from fail to overwrite. Separate from
-# nix/regen.nix's regen verb because these goldens are the output of
-# running the test, not a pure render of a Nix value.
+# cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go) with
+# UPDATE_GOLDENS=1, which flips their compare helpers from fail to
+# overwrite. Separate from nix/regen.nix's regen verb because these
+# goldens are the output of running the test, not a pure render of a
+# Nix value.
 { pkgs, fixtures }:
 let
   buildConstants = import ../lib/build-constants.nix;
