@@ -65,6 +65,9 @@ type GhPR struct {
 	Checks      string `json:"checks"`
 	Mergeable   string `json:"mergeable"`
 	Contexts    string `json:"contexts"`
+	// RunURL, when set, is the detailsUrl of one in-progress Actions CheckRun
+	// the CheckRun query reports alongside Checks.
+	RunURL string `json:"run_url,omitempty"`
 }
 
 // GhReply scripts the answer to the invocations it matches.
@@ -369,14 +372,21 @@ func (c GhConfig) graphql(args []string, prior [][]string) (string, error) {
 		return "", err
 	}
 	switch {
-	// The failure-detail query also names statusCheckRollup, so it must match first.
+	// CheckRun's query also names contexts(, so it must match before the
+	// failure-detail query. Its --jq emits the rollup object, {} with no checks.
+	case strings.Contains(query, "statusCheckRollup{state"):
+		if p.RunURL != "" {
+			return fmt.Sprintf("{\"state\":%q,\"contexts\":{\"nodes\":[{\"__typename\":\"CheckRun\",\"status\":\"IN_PROGRESS\",\"detailsUrl\":%q}]}}\n", p.Checks, p.RunURL), nil
+		}
+		if p.Checks == "" {
+			return "{}\n", nil
+		}
+		return fmt.Sprintf("{\"state\":%q}\n", p.Checks), nil
 	case strings.Contains(query, "contexts("):
 		if p.Contexts == "" {
 			return "[]\n", nil
 		}
 		return p.Contexts + "\n", nil
-	case strings.Contains(query, "statusCheckRollup"):
-		return p.Checks + "\n", nil
 	case strings.Contains(query, "mergeable"):
 		return p.Mergeable + "\n", nil
 	}

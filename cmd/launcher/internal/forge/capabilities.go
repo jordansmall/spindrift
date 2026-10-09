@@ -15,6 +15,7 @@ type Capabilities struct {
 	LandingRepair           LandingRepair
 	LandingContainmentQuery LandingContainmentQuery
 	PRForge                 PRForge
+	CIRunReporter           CIRunReporter
 	DraftPRCreator          DraftPRCreator
 	BranchPusher            BranchPusher
 	BranchDeleter           BranchDeleter
@@ -58,6 +59,7 @@ func ResolveCapabilities(cf CodeForge, it IssueTracker, forgeDesc, trackerDesc b
 	c.LandingRepair, _ = cf.(LandingRepair)
 	c.LandingContainmentQuery, _ = cf.(LandingContainmentQuery)
 	c.PRForge, _ = cf.(PRForge)
+	c.CIRunReporter, _ = cf.(CIRunReporter)
 	c.DraftPRCreator, _ = cf.(DraftPRCreator)
 	c.BranchPusher, _ = cf.(BranchPusher)
 	c.BranchDeleter, _ = cf.(BranchDeleter)

@@ -383,3 +383,153 @@ fi
 		t.Fatalf("Probe error must not also be errors.Is forge.ErrAuthFailure; got: %v", err)
 	}
 }
+
+const checkRunPRURL = "https://github.com/owner/repo/pull/42"
+
+func graphQLRollupGH(rollupJSON string) string {
+	return `if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
+  printf '%s\n' '` + rollupJSON + `'
+  exit 0
+fi
+`
+}
+
+// Every job of one Actions run must map to the same run URL, so the URL stays
+// stable across polls as jobs register (issue #4962).
+func TestCheckRun_ReturnsActionsRunURLWithJobSuffixTrimmed(t *testing.T) {
+	prependFakeGH(t, graphQLRollupGH(`{"state":"PENDING","contexts":{"nodes":[
+{"__typename":"StatusContext"},
+{"__typename":"CheckRun","detailsUrl":"https://github.com/owner/repo/actions/runs/123/job/456"},
+{"__typename":"CheckRun","detailsUrl":"https://github.com/owner/repo/actions/runs/123/job/789"}]}}`))
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	state, runURL, err := c.CheckRun(checkRunPRURL)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if state != forge.StatePending {
+		t.Errorf("state = %q, want %q", state, forge.StatePending)
+	}
+	if want := "https://github.com/owner/repo/actions/runs/123"; runURL != want {
+		t.Errorf("runURL = %q, want %q", runURL, want)
+	}
+}
+
+func TestCheckRun_NoChecksReturnsNoneAndNoURL(t *testing.T) {
+	prependFakeGH(t, graphQLRollupGH(`{}`))
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	state, runURL, err := c.CheckRun(checkRunPRURL)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if state != forge.StateNone || runURL != "" {
+		t.Errorf("CheckRun = (%q, %q), want (%q, \"\")", state, runURL, forge.StateNone)
+	}
+}
+
+func TestCheckRun_NonActionsDetailsURLYieldsNoURL(t *testing.T) {
+	prependFakeGH(t, graphQLRollupGH(`{"state":"SUCCESS","contexts":{"nodes":[
+{"__typename":"CheckRun","detailsUrl":"https://ci.example.com/builds/9"}]}}`))
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	state, runURL, err := c.CheckRun(checkRunPRURL)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if state != forge.StateSuccess || runURL != "" {
+		t.Errorf("CheckRun = (%q, %q), want (%q, \"\")", state, runURL, forge.StateSuccess)
+	}
+}
+
+func TestCheckRun_InvalidPRURL(t *testing.T) {
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if _, _, err := c.CheckRun("not-a-pr-url"); err == nil {
+		t.Fatal("CheckRun: want invalid PR URL error, got nil")
+	}
+}
+
+func TestCheckRun_GraphQLFailureSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "api" ] && [ "$2" = "graphql" ]; then
+  printf 'HTTP 403: Forbidden\n' >&2
+  exit 1
+fi
+`)
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, _, err := c.CheckRun(checkRunPRURL)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 403: Forbidden") {
+		t.Fatalf("CheckRun error must surface gh's stderr; got: %v", err)
+	}
+}
+
+// With several workflows on one commit the link must follow the run still in
+// flight, not whichever node GraphQL happens to list first.
+func TestCheckRun_PrefersRunNotYetCompleted(t *testing.T) {
+	prependFakeGH(t, graphQLRollupGH(`{"state":"PENDING","contexts":{"nodes":[
+{"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/owner/repo/actions/runs/1/job/10"},
+{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/owner/repo/actions/runs/2/job/20"}]}}`))
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, runURL, err := c.CheckRun(checkRunPRURL)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if want := "https://github.com/owner/repo/actions/runs/2"; runURL != want {
+		t.Errorf("runURL = %q, want %q", runURL, want)
+	}
+}
+
+func TestCheckRun_FallsBackToFirstRunWhenAllCompleted(t *testing.T) {
+	prependFakeGH(t, graphQLRollupGH(`{"state":"SUCCESS","contexts":{"nodes":[
+{"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/owner/repo/actions/runs/1/job/10"},
+{"__typename":"CheckRun","status":"COMPLETED","detailsUrl":"https://github.com/owner/repo/actions/runs/2/job/20"}]}}`))
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, runURL, err := c.CheckRun(checkRunPRURL)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if want := "https://github.com/owner/repo/actions/runs/1"; runURL != want {
+		t.Errorf("runURL = %q, want %q", runURL, want)
+	}
+}
+
+// A run URL on another host or repo must never reach the dashboard link.
+func TestCheckRun_IgnoresRunsOutsideThePRsRepo(t *testing.T) {
+	prependFakeGH(t, graphQLRollupGH(`{"state":"PENDING","contexts":{"nodes":[
+{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://evil.example.com/owner/repo/actions/runs/1"},
+{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/other/repo/actions/runs/2"},
+{"__typename":"CheckRun","status":"IN_PROGRESS","detailsUrl":"https://github.com/owner/other/actions/runs/3"}]}}`))
+
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	_, runURL, err := c.CheckRun(checkRunPRURL)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if runURL != "" {
+		t.Errorf("runURL = %q, want \"\"", runURL)
+	}
+}
+
+// Driven through the shared stateful gh fake rather than an inline stub, so the
+// query text the adapter sends is what selects the fake's response.
+func TestExecClient_CheckRun_ViaPRForgeFake(t *testing.T) {
+	h := newPRForgeHarness(t)
+	url := h.SeedOpenPR("7")
+	h.SeedCheckStates(url, []forge.RollupState{forge.StatePending})
+	h.SeedRunChecks(url,
+		"COMPLETED https://github.com/owner/repo/actions/runs/5/job/1",
+		"QUEUED https://github.com/owner/repo/actions/runs/6/job/2")
+
+	state, runURL, err := h.cf.(forge.CIRunReporter).CheckRun(url)
+	if err != nil {
+		t.Fatalf("CheckRun: %v", err)
+	}
+	if state != forge.StatePending {
+		t.Errorf("state = %q, want %q", state, forge.StatePending)
+	}
+	if want := "https://github.com/owner/repo/actions/runs/6"; runURL != want {
+		t.Errorf("runURL = %q, want %q", runURL, want)
+	}
+}

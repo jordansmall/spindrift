@@ -121,13 +121,29 @@ api-graphql)
 	*"statusCheckRollup{contexts"*)
 		cat "$STATE_DIR/prs/$num/contexts.json" 2>/dev/null || echo '[]'
 		;;
-	*"statusCheckRollup{state}"*)
+	*"statusCheckRollup{state contexts"*)
+		# Emits what CheckRun's --jq does: the rollup object, {} with no checks.
 		f="$STATE_DIR/prs/$num/checks"
+		st=""
 		if [ -s "$f" ]; then
-			head -n 1 "$f"
+			st=$(head -n 1 "$f")
 			tail -n +2 "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+		fi
+		# run_url holds one "<STATUS> <detailsUrl>" CheckRun per line; unlike
+		# the checks queue it is not consumed.
+		nodes=""
+		if [ -s "$STATE_DIR/prs/$num/run_url" ]; then
+			while read -r status durl; do
+				node=$(printf '{"__typename":"CheckRun","detailsUrl":"%s","status":"%s"}' "$durl" "$status")
+				nodes="${nodes:+$nodes,}$node"
+			done < "$STATE_DIR/prs/$num/run_url"
+		fi
+		if [ -n "$nodes" ]; then
+			printf '{"state":"%s","contexts":{"nodes":[%s]}}\n' "$st" "$nodes"
+		elif [ -z "$st" ]; then
+			printf '{}\n'
 		else
-			printf '\n'
+			printf '{"state":"%s"}\n' "$st"
 		fi
 		;;
 	esac

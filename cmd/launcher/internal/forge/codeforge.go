@@ -71,6 +71,16 @@ type LandingContainmentQuery interface {
 	LandingContained(landing Landing, scope SeedScope) (contained bool, err error)
 }
 
+// CIRunReporter is the optional interface for a PRForge that can name the CI
+// run behind a PR's head commit (github only, issue #4962). Forgejo has no
+// equivalent and does not implement it.
+type CIRunReporter interface {
+	// CheckRun returns CheckState's rollup state together with the URL of the CI
+	// run for the PR's head commit, or "" when none is registered yet. One call
+	// returns both so a poll loop spends one forge call per tick.
+	CheckRun(url string) (RollupState, string, error)
+}
+
 // PRForge is the optional PR, CI-rollup, and auto-merge interface. Only adapters
 // that open pull requests and watch CI implement it (github, forgejo); the
 // push-only git adapter does not. Callers discover it with a type assertion.

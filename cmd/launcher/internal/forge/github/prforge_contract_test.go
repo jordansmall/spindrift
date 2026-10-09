@@ -219,3 +219,13 @@ func TestExecClient_HeadCommitSHA(t *testing.T) {
 		t.Fatalf("HeadCommitSHA(%q) after advance = %q, want the branch's real head %q", url, sha2, want)
 	}
 }
+
+// SeedRunChecks scripts the Actions CheckRun nodes CheckRun's GraphQL query
+// returns for url's PR, one "<STATUS> <detailsUrl>" per entry.
+func (h *prforgeHarness) SeedRunChecks(url string, runs ...string) {
+	prDir := filepath.Join(h.stateDir, "prs", prNum(url))
+	if err := os.MkdirAll(prDir, 0o755); err != nil {
+		h.t.Fatal(err)
+	}
+	writeFile(h.t, filepath.Join(prDir, "run_url"), strings.Join(runs, "\n")+"\n")
+}
