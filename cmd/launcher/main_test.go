@@ -6554,7 +6554,17 @@ func TestSettledLabels_ByKind(t *testing.T) {
 		t.Errorf("work settledLabels = %v, want %v", got, want)
 	}
 	research := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
-	if got, want := settledLabels(research), []string{research.failedLabel}; !slices.Equal(got, want) {
-		t.Errorf("research settledLabels = %v, want %v", got, want)
+	wantResearch := []string{research.failedLabel, "agent-research-recommend", "agent-research-reject", "agent-research-unclear"}
+	if got := settledLabels(research); !slices.Equal(got, wantResearch) {
+		t.Errorf("research settledLabels = %v, want %v", got, wantResearch)
+	}
+
+	// Configured RESEARCH_VERDICTS labels flow through, and a verdict label
+	// colliding with the failed label is not listed twice.
+	custom := research
+	custom.researchVerdicts = `[{"verdict":"recommend","label":"r-yes"},{"verdict":"reject","label":"agent-research-failed"}]`
+	wantCustom := []string{custom.failedLabel, "r-yes"}
+	if got := settledLabels(custom); !slices.Equal(got, wantCustom) {
+		t.Errorf("custom RESEARCH_VERDICTS settledLabels = %v, want %v", got, wantCustom)
 	}
 }
