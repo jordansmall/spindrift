@@ -421,7 +421,7 @@ in
     env = "BUTLER_EVERY";
     group = "dispatch";
     default = "6h";
-    doc = "space-separated tokens controlling how often each enabled butler Chore is due: a bare Go time.ParseDuration string sets the default interval for every enabled Chore not otherwise overridden, and a `<chore>=<duration>` token overrides that interval for one Chore, e.g. BUTLER_EVERY=6h docs-drift=168h. The interval is measured from the Chore's last done Ledger commit; 0 means no interval (due whenever there is something to scan). With no bare default token, the default interval is 6h. An override naming a Chore not in BUTLER_CHORES is rejected. Validated by the launcher at `spindrift butler` and daemon startup whenever BUTLER_CHORES enables a Chore";
+    doc = "space-separated tokens controlling how often each enabled butler Chore is due: a bare Go time.ParseDuration string sets the default interval for every enabled Chore not otherwise overridden, and a `<chore>=<duration>` token overrides that interval for one Chore, e.g. BUTLER_EVERY=6h docs-drift=168h. The interval is measured from the Chore's last done Ledger commit; 0 means no interval (due whenever there is something to scan). With no bare default token, the default interval is 6h. A catalog Chore may carry its own default interval (tuning: 24h), which a bare token does not change -- only a `<chore>=` override does. An override naming a Chore not in BUTLER_CHORES is rejected. Validated by the launcher at `spindrift butler` and daemon startup whenever BUTLER_CHORES enables a Chore";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.every";
@@ -490,6 +490,28 @@ in
     legacySettingsExempt = true;
     intKind = "nonneg";
     nixSubPath = "butler.maxPatchesPerDay";
+    boxEnv = false;
+  };
+  butlerTuningMinRecords = {
+    env = "BUTLER_TUNING_MIN_RECORDS";
+    group = "dispatch";
+    default = 20;
+    doc = "fewest new settled Dispatch Records since the tuning Chore's last sweep before it is due (ADR 0062), alongside its BUTLER_EVERY interval (tuning default 24h); host-only -- the Box never sees this value";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "butler.tuningMinRecords";
+    boxEnv = false;
+  };
+  butlerTuningMinSample = {
+    env = "BUTLER_TUNING_MIN_SAMPLE";
+    group = "dispatch";
+    default = 15;
+    doc = "per-row sample size n under which the tuning Chore's digest marks a row thin (ADR 0062); host-only -- the Box never sees this value";
+    flakeOption = true;
+    legacySettingsExempt = true;
+    intKind = "positive";
+    nixSubPath = "butler.tuningMinSample";
     boxEnv = false;
   };
   butlerPatchClasses = {

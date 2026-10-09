@@ -29,6 +29,8 @@ type schemaConfig struct {
 	butlerPatchMaxLines          int
 	butlerPatchPaths             string
 	butlerPromotionMaxFiles      int
+	butlerTuningMinRecords       int
+	butlerTuningMinSample        int
 	bwrapUnshareNet              bool
 	claudeOAuthToken             string
 	codeForge                    string
@@ -124,6 +126,8 @@ func loadSchemaConfig() schemaConfig {
 		butlerPatchMaxLines:       atoiSchema("BUTLER_PATCH_MAX_LINES"),
 		butlerPatchPaths:          getenvSchema("BUTLER_PATCH_PATHS"),
 		butlerPromotionMaxFiles:   atoiSchema("BUTLER_PROMOTION_MAX_FILES"),
+		butlerTuningMinRecords:    atoiSchema("BUTLER_TUNING_MIN_RECORDS"),
+		butlerTuningMinSample:     atoiSchema("BUTLER_TUNING_MIN_SAMPLE"),
 		bwrapUnshareNet:           getenvSchema("BWRAP_UNSHARE_NET") != "",
 		claudeOAuthToken:          os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"),
 		codeForge:                 getenvSchema("CODE_FORGE"),
