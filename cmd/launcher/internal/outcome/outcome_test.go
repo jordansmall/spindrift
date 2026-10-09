@@ -984,7 +984,7 @@ func TestLastCommentLineInLog_NonceMismatchCountsRejectedLines(t *testing.T) {
 }
 
 // An empty expectedNonce never verifies a line, mirroring LineHasNonce's own
-// invariant now that parseSignalLine no longer calls it directly. The fixture
+// invariant even though classifySignalLine does not call it. The fixture
 // has only one field after the token, so under issue #2089 it also reads as a
 // doc example rather than a signal attempt: it stays silently non-matched
 // (err == nil) rather than warning.
@@ -1321,7 +1321,7 @@ func TestAllIssueIntentLinesInLog_DedupsSubagentEcho(t *testing.T) {
 
 // Issue #2976: a token-bearing line with an undecodable payload is dropped but
 // counted via rejectedCount, exactly as a nonce mismatch is. Both are
-// token-bearing lines that failed to verify per parseSignalLine.
+// token-bearing lines that failed to verify per classifySignalLine.
 func TestAllIssueIntentLinesInLog_MalformedBase64CountedAsRejected(t *testing.T) {
 	genuine := base64.StdEncoding.EncodeToString([]byte(`{"title":"genuine"}`))
 	path := writeLog(t,
