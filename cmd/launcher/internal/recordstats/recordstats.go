@@ -44,11 +44,20 @@ type RoleRow struct {
 	Blocks     int
 }
 
-// BlockRate is the share of verdicts that blocked, as a whole percentage
-// string, or "-" when the role is not a review role or issued no verdict.
-func (r RoleRow) BlockRate() string {
+// BlockPercent is the share of verdicts that blocked, as a percentage, and
+// false when the role is not a review role or issued no verdict.
+func (r RoleRow) BlockPercent() (float64, bool) {
 	if passmachine.Role(r.Role).IsReview() && r.Verdicts > 0 {
-		return fmt.Sprintf("%.0f%%", 100*float64(r.Blocks)/float64(r.Verdicts))
+		return 100 * float64(r.Blocks) / float64(r.Verdicts), true
+	}
+	return 0, false
+}
+
+// BlockRate is BlockPercent as a whole-percentage string, or "-" when there
+// is none.
+func (r RoleRow) BlockRate() string {
+	if v, ok := r.BlockPercent(); ok {
+		return fmt.Sprintf("%.0f%%", v)
 	}
 	return "-"
 }
