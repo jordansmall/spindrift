@@ -253,8 +253,8 @@ let
   # COMMS, then CHECK/COMMIT, then the outcome contract, in that order, so a
   # fix prompt missing all three ends up with them in the order
   # issue-prompt.md carries them (issue #455). This mirrors the injection
-  # order in agent/entrypoint.sh, so the baked and mounted-override cases
-  # agree.
+  # order in cmd/launcher/internal/promptassembly, so the baked and
+  # mounted-override cases agree.
   injectFixSharedBlocks =
     promptText: injectOutcomeContract (injectCheckCommit (injectComms promptText));
 
@@ -466,10 +466,11 @@ let
   # subagents ride agentsJsonTemplate's --agents JSON flag instead.
   driverAgentFiles = driverEntry.agentFilesTemplate { roster = finalRoster; };
 
-  # Name to prompt-file map (issue #264), read at runtime by entrypoint.sh's
-  # per-agent prompt injection loop so a custom agent's prompt resolves the
-  # same way as the built-in names. normalizeRoster guarantees every entry
-  # carries a promptFile (issue #2152), so there is no fallback to re-derive.
+  # Name to prompt-file map (issue #264), read at runtime by the per-agent
+  # prompt injection in cmd/launcher/internal/promptassembly so a custom
+  # agent's prompt resolves the same way as the built-in names. normalizeRoster
+  # guarantees every entry carries a promptFile (issue #2152), so there is no
+  # fallback to re-derive.
   agentsPromptFilesJson = builtins.toJSON (
     lib.listToAttrs (
       map (e: {
@@ -929,9 +930,9 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # In-box orchestrator (issue #1996, ADR 0007): the Go binary entrypoint.sh
-  # hands the implementor pass off to instead of calling driver-exec
-  # directly. Its fileset carries the same
+  # In-box orchestrator (issue #1996, ADR 0007): the Go binary the box program
+  # (cmd/launcher/box) hands the implementor pass off to instead of calling
+  # driver-exec directly. Its fileset carries the same
   # import closure driverExecBin needs, plus the packages its own multi-pass
   # loop reaches for (issue #1998).
   orchestratorBin = pkgs.buildGoModule {

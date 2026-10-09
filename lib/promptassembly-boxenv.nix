@@ -11,8 +11,9 @@
 # separate process cannot see it.
 
 # Fields that are not env reads stay CLI flags on assembleprompt_cmd.go per
-# issue #2979: the *SkillBaked probes entrypoint.sh resolves by statting
-# DRIVER_SKILLS_DIR, and the output path inputs.
+# issue #2979: the *SkillBaked probes box resolves by statting
+# DRIVER_SKILLS_DIR (promptassembly.ProbeBakedSkills), and the output path
+# inputs.
 [
   {
     field = "AgentsJSONTemplate";

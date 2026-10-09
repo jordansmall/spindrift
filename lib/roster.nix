@@ -179,8 +179,8 @@ rec {
 
   # The legacy positional knobs default to null rather than "", since ""
   # already means the #392 opt-out. Every entry's `prompt` is null:
-  # agent/entrypoint.sh injects each agent's rendered prompt from
-  # `promptFile` at runtime, never at eval time.
+  # cmd/launcher/internal/promptassembly injects each agent's rendered prompt
+  # from `promptFile` at runtime, never at eval time.
   defaultRoster =
     {
       scoutModel ? null,

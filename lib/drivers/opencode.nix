@@ -19,11 +19,12 @@
   # skills directory exists or is wired.
   skillsDirRelative = ".claude/skills";
 
-  # agent/entrypoint.sh's file-rewrite loop (issue #2153) rewrites each baked
-  # agent file's body at runtime through this path, so it must stay in lockstep
-  # with the path agentFilesTemplate below bakes into or the loop silently
-  # no-ops. Optional, not in default.nix's requiredAttrs: a Driver whose
-  # subagents are not on-disk files (claude) has nothing to rewrite.
+  # The file-rewrite loop in cmd/launcher/internal/promptassembly (issue
+  # #2153) rewrites each baked agent file's body at runtime through this
+  # path, so it must stay in lockstep with the path agentFilesTemplate below
+  # bakes into or the loop silently no-ops. Optional, not in default.nix's
+  # requiredAttrs: a Driver whose subagents are not on-disk files (claude)
+  # has nothing to rewrite.
   agentFilesDirRelative = ".config/opencode/agents";
 
   # sessionCacheDirRelative is deliberately omitted: opencode wires no resumable
