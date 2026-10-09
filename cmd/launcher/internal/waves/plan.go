@@ -148,21 +148,21 @@ type Config struct {
 	// off through. When unset, it defaults to retry.RealClock().
 	Clock retry.Clock
 
-	// Stop is the operator wind-down seam (#3520). runContinuousDispatch
-	// (main.go) hands it a channel that closes on the first SIGTERM; nil
-	// means the caller offers no stop request, true of every other call
-	// site. Closing it asks RunContinuous to drain rather than launch
-	// further Boxes. Tests close this channel directly.
+	// Stop is the operator wind-down seam (#3520). The headless callers (run,
+	// selectiveListDispatch, and runContinuousDispatch) hand it a channel that
+	// closes on the first SIGTERM/SIGINT; nil means the Console or a test. On
+	// close, RunContinuous drains and Dispatch's one-shot wave stops
+	// launching, while in-flight Boxes finish. Tests close this channel
+	// directly.
 	Stop <-chan struct{}
 
-	// Abort is the operator second-signal escalation seam (#3521):
-	// runContinuousDispatch hands it a channel that closes on a second
-	// SIGTERM/SIGINT while a Stop-driven drain is already under way. nil
-	// means the caller offers no abort request, true of every other call
-	// site. Closing it makes RunContinuous stop launching further Boxes (the
-	// same guard Stop trips) and additionally terminate.Reclaim every
-	// in-flight issue rather than waiting for it to finish on its own. Tests
-	// close this channel directly.
+	// Abort is the operator second-signal escalation seam (#3521): the same
+	// headless callers hand it a channel that closes on a second
+	// SIGTERM/SIGINT, after Stop has already closed. nil means the Console or
+	// a test. Closing it makes RunContinuous and Dispatch's one-shot wave stop
+	// launching further Boxes (the same guard Stop trips) and additionally
+	// terminate.Reclaim every in-flight issue rather than waiting for it to
+	// finish on its own. Tests close this channel directly.
 	Abort <-chan struct{}
 }
 
