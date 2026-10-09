@@ -85,7 +85,7 @@ in
     fi
 
     # The default template's chores/*.md stems (issue #3905).
-    grep -q '"CHORE_CATALOG":"bugs docs-drift refactor"' "$runDoc"
+    grep -q '"CHORE_CATALOG":"bugs docs-drift refactor tuning"' "$runDoc"
 
     # The Pass log stamp inputs (issue #4783): roster models and Driver CLI version.
     grep -qE '"ROLE_MODELS":"\{\\"[a-z-]+\\":\\"[^"\\]+\\"' "$runDoc"

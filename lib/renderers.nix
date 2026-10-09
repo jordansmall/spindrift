@@ -698,6 +698,16 @@ rec {
           renderGoStringSlice choreCatalog.classLists.${n}
         }},\n"
       ) names;
+      everyNames = builtins.sort builtins.lessThan (builtins.attrNames choreCatalog.everyDefaults);
+      everyWidth = builtins.foldl' (
+        a: n: if builtins.stringLength n > a then builtins.stringLength n else a
+      ) 0 everyNames;
+      everyLines = map (
+        n:
+        "\t\"${n}\":${padRight (everyWidth - builtins.stringLength n + 1) ""}\"${
+          choreCatalog.everyDefaults.${n}
+        }\",\n"
+      ) everyNames;
     in
     renderGoStringSliceFile {
       generator = "nix/regen.nix";
@@ -713,6 +723,14 @@ rec {
     + "// Regenerate with `nix run .#regen` after editing lib/chore-catalog.nix.\n"
     + "var builtinClassLists = map[string][]string{\n"
     + concatStrings classListLines
+    + "}\n"
+    + "\n// builtinRecordsScoped names the built-in Chores that sweep the dispatch record store\n"
+    + "// instead of the Target repo's tree (ADR 0062).\n"
+    + "var builtinRecordsScoped = []string{${renderGoStringSlice choreCatalog.recordsScoped}}\n"
+    + "\n// builtinEvery is each built-in Chore's catalog default sweep interval, a Go\n"
+    + "// time.ParseDuration string; a Chore absent here has none.\n"
+    + "var builtinEvery = map[string]string{\n"
+    + concatStrings everyLines
     + "}\n";
 
   # cmd/launcher/internal/promptassembly/skillprobe.go's generated skill-baked

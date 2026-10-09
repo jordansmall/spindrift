@@ -401,7 +401,7 @@ in
     env = "BUTLER_CHORES";
     group = "dispatch";
     default = "";
-    doc = "space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs`, `refactor`, and `docs-drift` (templates/default/prompts/chores/). `spindrift butler --chore <name>` refuses a name not listed here; each name must contain only letters, digits, '-', and '_', not starting with '-', or `spindrift butler` and daemon startup reject it (issue #4095); each name may appear only once, a duplicate is rejected too (issue #4143)";
+    doc = "space-separated list of butler Chore names this Consumer opts into (ADR 0056); empty (default) enables none. The built-in catalog is `bugs`, `refactor`, `docs-drift`, and `tuning` (templates/default/prompts/chores/). `spindrift butler --chore <name>` refuses a name not listed here; each name must contain only letters, digits, '-', and '_', not starting with '-', or `spindrift butler` and daemon startup reject it (issue #4095); each name may appear only once, a duplicate is rejected too (issue #4143)";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.chores";
