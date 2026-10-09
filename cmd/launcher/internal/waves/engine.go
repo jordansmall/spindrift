@@ -68,9 +68,10 @@ func writeDepsOfFailedMarker(pwd string) error {
 // shutdown RunContinuous has (#3522), via shutdown.Gate rather than a
 // hand-rolled copy of RunContinuous's own latch: a Stop closes off further
 // launches from the batch while in-flight Boxes finish normally, and an
-// Abort additionally reclaims them. terminated may be nil, meaning no
-// registry is shared with a caller outside this wave (every headless call
-// site); dispatchWave substitutes a fresh one itself, before building the
+// Abort additionally reclaims them. terminated is nil only when Dispatch's
+// session, or its Terminated, is nil (tests only; see Session.Terminated),
+// meaning no registry is shared with a caller outside this wave;
+// dispatchWave substitutes a fresh one itself, before building the
 // Gate, so the wave's own result switch below and the Gate it hands to every
 // goroutine provably share the same registry (#3522 review finding: reading
 // the pre-substitution terminated here lost every abort mark the Gate's own
@@ -342,10 +343,10 @@ func SignalledStopAlready(stop, abort <-chan struct{}) bool {
 //
 // session may be nil, mirroring RunContinuous's own Session parameter
 // (#3522): a nil session, or a nil session.Terminated, means no registry is
-// shared with a caller outside this wave, and dispatchWave's Gate builds its
-// own. session.Limiter is deliberately never read here -- a one-shot wave's
-// cap never resizes (dispatchWave's own doc says why), so there is nothing
-// for a live Limiter to buy this path.
+// shared with a caller outside this wave, and dispatchWave substitutes a
+// fresh one before building its Gate. session.Limiter is deliberately never
+// read here -- a one-shot wave's cap never resizes (dispatchWave's own doc
+// says why), so there is nothing for a live Limiter to buy this path.
 //
 // The cfg.Stop/cfg.Abort override is applied once here, at the boundary,
 // rather than at each of NewPlan/run's individual returns: dispatchWave's
