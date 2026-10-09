@@ -2,6 +2,7 @@ package tuning
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -251,5 +252,196 @@ func TestRenderLandedShareEmptyWithoutWorkRecords(t *testing.T) {
 	got := line(t, d.Text, "summary:landed-share")
 	if want := "| summary:landed-share | Landed share of work Records | 0 | — | — | — | thin |"; got != want {
 		t.Fatalf("row = %q\nwant  %q", got, want)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func atRev(r dispatchrecord.Record, rev string) dispatchrecord.Record {
+	r.Revision = rev
+	return r
+}
+
+func TestRenderQualityRowsDashWhenImmature(t *testing.T) {
+	d := Render([]dispatchrecord.Record{rec("w", hour, 1)}, "", now, 1)
+	for anchor, want := range map[string]string{
+		"summary:reverted":        "| summary:reverted | Reverted share of merged work | 0 | — | — | — | thin |",
+		"summary:churn":           "| summary:churn | Mean 14-day churn | 0 | — | — | — | thin |",
+		"role:implement:reverted": "| role:implement:reverted | implement reverted share | 0 | — | — | — | thin |",
+		"role:implement:churn":    "| role:implement:churn | implement mean 14-day churn | 0 | — | — | — | thin |",
+	} {
+		if got := line(t, d.Text, anchor); got != want {
+			t.Fatalf("row = %q\nwant  %q", got, want)
+		}
+	}
+}
+
+func TestRenderQualityRowsFilled(t *testing.T) {
+	b := rec("b", 5*hour, 1)
+	b.Reverted, b.Churn14d = ptr(false), nil
+	w1, w2, w3 := rec("w1", 3*hour, 1), rec("w2", 2*hour, 1), rec("w3", hour, 1)
+	w1.Reverted, w1.Churn14d = ptr(true), ptr(0.1)
+	w2.Reverted, w2.Churn14d = ptr(false), ptr(0.3)
+	// w3 is not yet matured: it must count toward neither n nor the figure.
+	d := Render([]dispatchrecord.Record{b, w1, w2, w3}, "b", now, 2)
+	for anchor, want := range map[string]string{
+		"summary:reverted":        "| summary:reverted | Reverted share of merged work | 2 | 50% | 0% | +50pp |  |",
+		"summary:churn":           "| summary:churn | Mean 14-day churn | 2 | 20% | — | — |  |",
+		"role:implement:reverted": "| role:implement:reverted | implement reverted share | 2 | 50% | 0% | +50pp |  |",
+		"role:implement:churn":    "| role:implement:churn | implement mean 14-day churn | 2 | 20% | — | — |  |",
+	} {
+		if got := line(t, d.Text, anchor); got != want {
+			t.Fatalf("row = %q\nwant  %q", got, want)
+		}
+	}
+}
+
+// A role's quality is read over the Records that ran that role.
+func TestRenderRoleQualityCoversOnlyRecordsHoldingTheRole(t *testing.T) {
+	impl := rec("w1", 2*hour, 1)
+	impl.Reverted = ptr(true)
+	rev := rec("w2", hour, 1)
+	rev.Passes = []dispatchrecord.Pass{{Role: string(passmachine.RoleReview)}}
+	rev.Reverted = ptr(false)
+	d := Render([]dispatchrecord.Record{impl, rev}, "", now, 1)
+	if got, want := line(t, d.Text, "role:implement:reverted"), "| role:implement:reverted | implement reverted share | 1 | 100% | — | — |  |"; got != want {
+		t.Fatalf("row = %q\nwant  %q", got, want)
+	}
+	if got, want := line(t, d.Text, "summary:reverted"), "| summary:reverted | Reverted share of merged work | 2 | 50% | — | — |  |"; got != want {
+		t.Fatalf("row = %q\nwant  %q", got, want)
+	}
+}
+
+func TestRenderNoSplitsWhenDimensionsHaveOneValue(t *testing.T) {
+	b, w := atRev(rec("b", 5*hour, 1), "r1"), atRev(rec("w", hour, 1), "r1")
+	b.Passes[0].Models, w.Passes[0].Models = []string{"opus"}, []string{"opus"}
+	b.PromptHashes, w.PromptHashes = map[string]string{"implement": "h"}, map[string]string{"implement": "h"}
+	d := Render([]dispatchrecord.Record{b, w}, "b", now, 1)
+	if strings.Contains(d.Text, "Splits") || strings.Contains(d.Text, "###") {
+		t.Fatalf("single-valued dimensions must not render:\n%s", d.Text)
+	}
+	// Unlabelled Records are no value at all.
+	d = Render([]dispatchrecord.Record{rec("b", 5*hour, 1), rec("w", hour, 1)}, "b", now, 1)
+	if strings.Contains(d.Text, "Splits") {
+		t.Fatalf("unlabelled Records must not render a split:\n%s", d.Text)
+	}
+}
+
+func TestRenderRevisionSplitIncludesBaselineOnlyValue(t *testing.T) {
+	records := []dispatchrecord.Record{
+		atRev(rec("b", 5*hour, 1), "r1"),
+		atRev(rec("w1", 3*hour, 4), "r2"),
+		atRev(rec("w2", 2*hour, 6), "r2"),
+	}
+	d := Render(records, "b", now, 1)
+	for _, want := range []string{
+		"| revision:r2:usd-per-record | USD per Record (r2) | 2 | $5.00 | — | — |  |",
+		"| revision:r2:passes-per-record | Passes per Record (r2) | 2 | 1.0 | — | — |  |",
+		"| revision:r2:landed-share | Landed share of work Records (r2) | 2 | 0% | — | — |  |",
+		"| revision:r2:reverted | Reverted share of merged work (r2) | 0 | — | — | — | thin |",
+		"| revision:r2:churn | Mean 14-day churn (r2) | 0 | — | — | — | thin |",
+		"| revision:r1:usd-per-record | USD per Record (r1) | 0 | — | $1.00 | — | thin |",
+	} {
+		if !strings.Contains(d.Text, want+"\n") {
+			t.Fatalf("digest lacks %q:\n%s", want, d.Text)
+		}
+	}
+	idx := func(s string) int { return strings.Index(d.Text, s) }
+	if !(idx("## Roles") < idx("## Splits") && idx("## Splits") < idx("### revision") && idx("| revision:r2:usd-per-record") < idx("| revision:r1:usd-per-record")) {
+		t.Fatalf("sections out of order (Roles, Splits, revision; window values before baseline-only):\n%s", d.Text)
+	}
+	if strings.Contains(d.Text, "### model") || strings.Contains(d.Text, "### prompt:") {
+		t.Fatalf("only revision varies:\n%s", d.Text)
+	}
+}
+
+// A Record with no revision stamp is not a value of the dimension, so one
+// stamped revision beside unstamped Records is still a single value.
+func TestRenderSplitDropsUnlabelledGroup(t *testing.T) {
+	records := []dispatchrecord.Record{atRev(rec("b", 5*hour, 1), "r1"), rec("w", hour, 1)}
+	if d := Render(records, "b", now, 1); strings.Contains(d.Text, "Splits") {
+		t.Fatalf("one revision plus unlabelled Records must not split:\n%s", d.Text)
+	}
+}
+
+func TestRenderModelSplitIsPassLevel(t *testing.T) {
+	r := rec("w1", 2*hour, 3)
+	r.Passes[0].Models = []string{"opus"}
+	r.Passes = append(r.Passes, dispatchrecord.Pass{Role: string(passmachine.RoleReview), USD: 1, Models: []string{"sonnet", "haiku"}})
+	r2 := rec("w2", hour, 5)
+	r2.Passes[0].Models = []string{"opus"}
+	d := Render([]dispatchrecord.Record{r, r2}, "", now, 1)
+	for _, want := range []string{
+		"### model",
+		"| model:opus:usd-per-record | USD per Record (opus) | 2 | $4.00 | — | — |  |",
+		"| model:haiku+sonnet:usd-per-record | USD per Record (haiku+sonnet) | 1 | $1.00 | — | — |  |",
+	} {
+		if !strings.Contains(d.Text, want) {
+			t.Fatalf("digest lacks %q:\n%s", want, d.Text)
+		}
+	}
+	if strings.Contains(d.Text, "### revision") {
+		t.Fatalf("revision does not vary:\n%s", d.Text)
+	}
+}
+
+func TestRenderPromptSplitPerRole(t *testing.T) {
+	b, w := rec("b", 5*hour, 1), rec("w", hour, 2)
+	b.PromptHashes = map[string]string{"implement": "h1", "review": "x"}
+	w.PromptHashes = map[string]string{"implement": "h2", "review": "x"}
+	d := Render([]dispatchrecord.Record{b, w}, "b", now, 1)
+	for _, want := range []string{
+		"### prompt:implement",
+		"| prompt:implement:h2:usd-per-record | USD per Record (h2) | 1 | $2.00 | — | — |  |",
+		"| prompt:implement:h1:usd-per-record | USD per Record (h1) | 0 | — | $1.00 | — | thin |",
+	} {
+		if !strings.Contains(d.Text, want) {
+			t.Fatalf("digest lacks %q:\n%s", want, d.Text)
+		}
+	}
+	if strings.Contains(d.Text, "### prompt:review") {
+		t.Fatalf("review prompt has one hash:\n%s", d.Text)
+	}
+}
+
+var anchorGrammar = regexp.MustCompile(`^[a-z]+(:[A-Za-z0-9._+-]+)+$`)
+
+// Anchors are what a finding cites: each must be unique in a digest and made
+// of safe characters whatever a Record's revision, model or role was stamped
+// with, and no value may add a cell to its row.
+func TestRenderAnchorsAreUniqueAndTableSafe(t *testing.T) {
+	var records []dispatchrecord.Record
+	for i, rev := range []string{"a b", "a_b", "x|y", "`z`", "(none)", "r\tq"} {
+		r := atRev(rec(fmt.Sprintf("r%d", i), time.Duration(10-i)*hour, 1), rev)
+		r.Passes[0].Role = "im|pl:" + rev
+		r.Passes[0].Models = []string{"m " + rev}
+		r.PromptHashes = map[string]string{"implement": rev}
+		records = append(records, r)
+	}
+	d := Render(records, "", now, 1)
+	seen := map[string]bool{}
+	rows := 0
+	for _, l := range strings.Split(d.Text, "\n") {
+		if !strings.HasPrefix(l, "| ") || strings.HasPrefix(l, "| Anchor ") {
+			continue
+		}
+		rows++
+		if n := strings.Count(l, "|"); n != 8 {
+			t.Errorf("row has %d pipes, want 8: %q", n, l)
+		}
+		anchor := strings.SplitN(l, " ", 3)[1]
+		if !anchorGrammar.MatchString(anchor) {
+			t.Errorf("anchor %q outside the grammar", anchor)
+		}
+		if seen[anchor] {
+			t.Errorf("anchor %q repeated", anchor)
+		}
+		seen[anchor] = true
+	}
+	if rows == 0 || !strings.Contains(d.Text, "### revision") {
+		t.Fatalf("no revision split rendered:\n%s", d.Text)
+	}
+	if strings.Contains(d.Text, "`") {
+		t.Fatalf("backtick survived into the digest:\n%s", d.Text)
 	}
 }

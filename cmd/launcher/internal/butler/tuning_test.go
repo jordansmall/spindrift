@@ -33,6 +33,12 @@ func seedRecords(t *testing.T, root string, keyBase, n int, first time.Time) []s
 
 // seedRecordsCost is seedRecords with the implement pass costing implementUSD.
 func seedRecordsCost(t *testing.T, root string, keyBase, n int, first time.Time, implementUSD float64) []string {
+	return seedRecordsStamped(t, root, keyBase, n, first, implementUSD, nil)
+}
+
+// seedRecordsStamped is seedRecordsCost with stamp, when set, editing each
+// Record's dispatch_start (revision, role models).
+func seedRecordsStamped(t *testing.T, root string, keyBase, n int, first time.Time, implementUSD float64, stamp func(*claude.DispatchStart)) []string {
 	t.Helper()
 	dir := hostpaths.LogDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -50,10 +56,14 @@ func seedRecordsCost(t *testing.T, root string, keyBase, n int, first time.Time,
 		claim := first.Add(time.Duration(i) * time.Hour)
 		id := dispatchrecord.RecordID("work", key, claim)
 		ts := claim.Add(time.Minute).Format(time.RFC3339)
+		start := &claude.DispatchStart{
+			RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: claim, Started: claim, Driver: "claude",
+		}
+		if stamp != nil {
+			stamp(start)
+		}
 		lines := []string{
-			op(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
-				RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: claim, Started: claim, Driver: "claude",
-			}}),
+			op(claude.SpindriftOp{Op: "dispatch_start", Start: start}),
 			op(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 			result(ts, implementUSD),
 			op(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
@@ -313,6 +323,63 @@ func TestSweep_Tuning_InputCarriesBaselineAndDelta(t *testing.T) {
 		if !strings.Contains(tr.input[0], want) {
 			t.Errorf("Chore input lacks %q:\n%s", want, tr.input[0])
 		}
+	}
+}
+
+func atRevision(rev string) func(*claude.DispatchStart) {
+	return func(s *claude.DispatchStart) { s.Revision = rev }
+}
+
+// A dimension is split out only where the window and baseline between them
+// hold more than one value of it.
+func TestSweep_Tuning_InputCarriesSplitsAndQualityRows(t *testing.T) {
+	root := t.TempDir()
+	base := seedRecordsStamped(t, root, 1, 3, tuningNow.Add(-72*time.Hour), 2, atRevision("rev-old"))
+	seedRecordsStamped(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4, atRevision("rev-new"))
+	tr := newTuningRun(t)
+	seedTuningDone(t, tr, tuningNow.Add(-48*time.Hour), base[2])
+
+	if out, err := tr.sweepTuning(t, tuningPolicy(root, 3), tuningNow); err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	in := tr.input[0]
+	for _, want := range []string{
+		"## Splits", "### revision",
+		"| revision:rev-new:usd-per-record | USD per Record (rev-new) | 3 | $5.00 | — | — | thin |",
+		"| revision:rev-old:usd-per-record | USD per Record (rev-old) | 0 | — | $3.00 | — | thin |",
+		"| revision:rev-new:reverted |", "| revision:rev-new:churn |",
+		"| summary:reverted | Reverted share of merged work | 0 | — | — | — | thin |",
+		"| summary:churn | Mean 14-day churn | 0 | — | — | — | thin |",
+		"| role:implement:reverted | implement reverted share | 0 | — | — | — | thin |",
+		"| role:review:churn | review mean 14-day churn | 0 | — | — | — | thin |",
+	} {
+		if !strings.Contains(in, want) {
+			t.Errorf("Chore input lacks %q:\n%s", want, in)
+		}
+	}
+	// Every pass ran opus and no prompt hash was reported: nothing to compare.
+	for _, absent := range []string{"### model", "### prompt:"} {
+		if strings.Contains(in, absent) {
+			t.Errorf("Chore input has %q though that dimension has one value:\n%s", absent, in)
+		}
+	}
+	if strings.Index(in, "## Splits") < strings.Index(in, "## Roles") {
+		t.Errorf("Splits must follow Roles:\n%s", in)
+	}
+}
+
+func TestSweep_Tuning_NoSplitsWhenEveryDimensionHasOneValue(t *testing.T) {
+	root := t.TempDir()
+	base := seedRecordsStamped(t, root, 1, 3, tuningNow.Add(-72*time.Hour), 2, atRevision("same"))
+	seedRecordsStamped(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4, atRevision("same"))
+	tr := newTuningRun(t)
+	seedTuningDone(t, tr, tuningNow.Add(-48*time.Hour), base[2])
+
+	if out, err := tr.sweepTuning(t, tuningPolicy(root, 3), tuningNow); err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	if strings.Contains(tr.input[0], "Splits") {
+		t.Errorf("Chore input has a Splits section for single-valued dimensions:\n%s", tr.input[0])
 	}
 }
 
