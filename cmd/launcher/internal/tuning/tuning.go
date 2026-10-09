@@ -198,8 +198,7 @@ func signedNum(v float64) string { return fmt.Sprintf("%+.1f", v) }
 func signedPP(v float64) string  { return fmt.Sprintf("%+.0fpp", v) }
 
 func writeTable(b *strings.Builder, rows []row, minSample int) {
-	b.WriteString("| Anchor | Metric | n | Window | Baseline | Δ | Flag |\n")
-	b.WriteString("|---|---|---|---|---|---|---|\n")
+	b.WriteString(tableHeader)
 	for _, r := range rows {
 		win, base, delta := absent, absent, absent
 		if r.win.ok {
