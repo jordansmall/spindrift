@@ -121,7 +121,11 @@ that rewrote the reviewer prompt would merge itself once green.
    dogfood Consumer config adds `templates/**`, `skills/**`,
    `fragments/**`, the Chore catalog, the env schema, and `flake.nix` to
    `MERGE_GUARD_PATHS`. That catches the same behaviour changes from any
-   origin. The shipped default is unchanged.
+   origin. The shipped default is unchanged. (Amended by issue #4974: the
+   model and effort pins live in `nix/dogfood-defaults.nix`, which
+   `flake.nix` only imports, and `lib/default-model-fixture.nix` mirrors
+   them, so the list also names both files. That file holds the guard list
+   too, so a PR that shrinks the guard now trips it.)
 
 ## Considered Options
 
