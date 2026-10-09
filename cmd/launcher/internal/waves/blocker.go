@@ -153,20 +153,26 @@ func detectCycle(edges map[string][]string, nums []string) (string, bool) {
 }
 
 // blockerReady is Readiness.Ready's logic, plus the forge.Issue it fetched. fi
-// is nil when a merged-PR lookup settled readiness without calling it.Issue, so
+// is nil when a merged or open PR, or a PRState error, settled readiness without
+// calling it.Issue (a closed-unmerged PR defers to the issue's state, #4893), so
 // blockerStatus can tell "no fetch happened" from "fetched and still open".
 // Both optional handles come from caps, not a type assertion on cf (#2946); a
 // zero scope (no parent) keeps an IntegrationRef-landed blocker unready (#2130).
 func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, dep string, scope forge.SeedScope) (ready bool, fi *forge.Issue) {
+	closedReason, mergedReason := "no discoverable PR", "no discoverable agent branch"
 	if pr := caps.PRForge; pr != nil {
 		branch := cf.AgentBranch(dep)
 		prURL, found, err := pr.PRForBranch(branch)
 		if err == nil && found {
 			state, stateErr := pr.PRState(prURL)
-			if stateErr == nil {
+			if stateErr != nil {
+				return false, nil
+			}
+			if state != forge.PRClosed {
 				return state == forge.PRMerged, nil
 			}
-			return false, nil
+			closedReason = "agent PR closed unmerged"
+			mergedReason = closedReason
 		}
 	}
 	issue, err := it.Issue(dep)
@@ -176,10 +182,10 @@ func blockerReady(it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabili
 	}
 	switch issue.State {
 	case forge.IssueClosed:
-		fmt.Printf("    .. blocker #%s is closed (no discoverable PR); treating as satisfied\n", dep)
+		fmt.Printf("    .. blocker #%s is closed (%s); treating as satisfied\n", dep, closedReason)
 		return true, &issue
 	case forge.IssueMerged:
-		fmt.Printf("    .. blocker #%s is a merged PR (no discoverable agent branch); treating as satisfied\n", dep)
+		fmt.Printf("    .. blocker #%s is a merged PR (%s); treating as satisfied\n", dep, mergedReason)
 		return true, &issue
 	}
 	if issue.Landing != "" {
