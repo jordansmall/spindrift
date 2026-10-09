@@ -81,7 +81,9 @@ The checks `spindrift doctor` runs, grouped by what it probes.
   (ADR 0057), advisory unless `--butler` promotes them (`agent-butler-patch`
   only while the patch rung is on: `BUTLER_MAX_PATCHES_PER_DAY` above 0 and a
   `github`/`forgejo` tracker naming the same backend as `CODE_FORGE`).
-- `agent-tuning-finding` (ADR 0062), advisory.
+- `agent-tuning-finding` (ADR 0062), advisory unless `--butler` promotes it,
+  and then only while `tuning` is in `BUTLER_CHORES` on a tracker with a
+  label registry (`github`/`forgejo`).
 - When run interactively (TTY attached) and labels are missing, doctor
   offers to create them, with the prompt itself stating the
   required/advisory tier counts and what declining each means; in CI (no
@@ -248,7 +250,9 @@ case (issue #3920).
 
 Passing `--butler` also promotes `agent-butler-finding` from advisory to
 Required (`agent-butler-patch` too, but only while the patch rung is on, since a
-zero `BUTLER_MAX_PATCHES_PER_DAY` cap never applies it), and `--research` does
+zero `BUTLER_MAX_PATCHES_PER_DAY` cap never applies it, and
+`agent-tuning-finding` only while `tuning` is in `BUTLER_CHORES` on a tracker
+with a label registry), and `--research` does
 the same for the research tier, so those missing labels exit 4 like a missing
 triage label (create prompt included). The daemon's startup preflight passes
 each flag for the kind it runs (issue #4400), except that `--research` is passed
@@ -3856,9 +3860,12 @@ non-configurable provenance label on a finding a tuning Chore files. A PR
 closing an issue wearing it merges by hand. Trackers with no label registry
 (`local`, `jira`) carry the same fact as a `chore=tuning` term in the issue
 body's dedup marker. `spindrift doctor` checks and, in interactive mode,
-offers to create it, but treats it as advisory: a missing
-`agent-tuning-finding` label never fails the check, even under `--butler`.
-To create it manually:
+offers to create it, but treats it as advisory: like the labels above, a
+missing `agent-tuning-finding` label never fails the check unless `--butler`
+promotes the butler tier, and even then only while `tuning` is in
+`BUTLER_CHORES` on a tracker with a label registry (`github`/`forgejo`). It is
+never required on `local`/`jira`, where the body marker carries the fact. To
+create it manually:
 
 ```sh
 gh label create agent-tuning-finding --repo owner/repo --color 1d76db --description "Filed from a tuning Chore finding; a PR closing it merges by hand (ADR 0062)"
@@ -5290,7 +5297,8 @@ own startup doctor preflight and refuses to start when the butler cannot
 run or its labels are missing — `agent-butler-finding`, plus
 `agent-butler-patch` only while the patch rung is on
 (`BUTLER_MAX_PATCHES_PER_DAY` above 0 and a matching `github`/`forgejo`
-tracker and forge); the
+tracker and forge), plus `agent-tuning-finding` only while `tuning` is in
+`BUTLER_CHORES` on `github` or `forgejo`; the
 host still ensure-creates them when it files a finding. See the
 [Daemon](#daemon) section's **Startup preflight** description
 (issue #3920).
@@ -7060,14 +7068,16 @@ preflight halt instead of halting the pool on its first butler slot (exit
 6, config-invalid) after the pool has already started. `--butler` also makes
 the butler label tier Required, so a missing `agent-butler-finding` (or
 `agent-butler-patch`, while the patch rung is on: `BUTLER_MAX_PATCHES_PER_DAY`
-above 0 and a matching `github`/`forgejo` tracker and forge) refuses
-the start. A daemon whose operator explicitly selected the research kind
-(`nix run .#daemon -- research`) likewise passes `--research`, which makes the
-research label tier Required (issue #4400); the bare invocation keeps research
-labels advisory even though it draws from the research queue. An explicit
-`dispatch`/`research` selector never adds `--butler`, so butler-only
-misconfiguration never refuses a daemon that was never going to run the
-butler. The daemon passes no verbosity flag, so doctor's quiet-by-default behavior
+above 0 and a matching `github`/`forgejo` tracker and forge, or
+`agent-tuning-finding`, while `tuning` is in `BUTLER_CHORES` on `github` or
+`forgejo`) refuses the start. A daemon whose operator explicitly selected
+the research kind (`nix run .#daemon -- research`) likewise passes
+`--research`, which makes the research label tier Required (issue #4400);
+the bare invocation keeps research labels advisory even though it draws
+from the research queue. An explicit `dispatch`/`research` selector never
+adds `--butler`, so butler-only misconfiguration never refuses a daemon
+that was never going to run the butler. The daemon passes no verbosity
+flag, so doctor's quiet-by-default behavior
 (`--verbose`/`-v` opts back into the full report) governs the preflight: a
 healthy start adds no doctor report at all to the daemon's own stderr, and a
 refused one adds only two things: the failing `MISSING:` rows (a missing

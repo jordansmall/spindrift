@@ -92,10 +92,12 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
   `ready-for-agent` like any other issue before an agent picks it up. Any PR
   closing an issue wearing it merges only by hand, regardless of `MERGE_MODE`
   and `MERGE_GUARD_PATHS`: the host flips the PR ready, marks the issue
-  `agent-complete`, and comments on the PR naming the label. On
+  `agent-complete`, and comments on the PR naming the label. A butler daemon
+  with `tuning` in `BUTLER_CHORES` refuses to start without it. On
   `local`/`jira`, which have no label registry, the `chore=tuning` term in
-  the issue body's dedup marker stands in for it. Removing the label is the
-  deliberate override. See [Merge guard](docs/reference.md#merge-guard).
+  the issue body's dedup marker stands in for it (and nothing is required
+  at startup). Removing the label is the deliberate override. See [Merge
+  guard](docs/reference.md#merge-guard).
 
 ### Dispatch authentication
 
