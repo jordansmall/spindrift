@@ -2979,14 +2979,17 @@ generated `flake.nix`.
   `spindrift doctor`'s `Probe()` check validates Jira auth and reachability
   independently of the GitHub Code Forge probe.
 
-  A [research dispatch](#research-dispatch)'s verdict terminals
-  (`recommend` / `reject` / `unclear`) always ride this same label-fallback
-  mechanism — they swap the `agent-research-*` labels, never a Jira workflow
-  status. `JIRA_STATUS_MAPPING` has no research-state keys, and none are
-  planned: jira-native workflow-status mapping for research states is
-  deferred until a Jira user exists (ADR 0022). The `local` tracker maps
-  research states the same way it maps work states, through its frontmatter
-  `state` field.
+  A [research dispatch](#research-dispatch)'s states — its queue, its claim,
+  and its verdict terminals (`recommend` / `reject` / `unclear`) — always
+  ride this same label-fallback mechanism: they match and swap the
+  `agent-research-*` labels, never a Jira workflow status. The research
+  tracker is built without `JIRA_STATUS_MAPPING`, so the work mapping never
+  moves a researched issue's status or pulls work issues into the research
+  queue (issue #4919). `JIRA_STATUS_MAPPING` has no research-state keys,
+  and none are planned: jira-native workflow-status mapping for research
+  states is deferred until a Jira user exists (ADR 0022). The `local`
+  tracker maps research states the same way it maps work states, through
+  its frontmatter `state` field.
 
 - **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
