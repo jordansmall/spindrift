@@ -21,7 +21,7 @@ func TestDispatchLabels_TransitionRemoveLabels_MatchesWorkflowFiles(t *testing.T
 		Failed:       "agent-failed",
 		Ambiguous:    "agent-ambiguous-spec",
 	}
-	want := labels.TransitionRemoveLabels(forge.Dispatchable, forge.InProgress)
+	want := forge.TransitionRemoveLabels(labels, forge.VerdictLabels{}, forge.Dispatchable, forge.InProgress)
 	if len(want) == 0 {
 		t.Fatal("TransitionRemoveLabels(Dispatchable, InProgress) returned no labels — parity check would pass vacuously")
 	}
@@ -70,5 +70,21 @@ func TestDispatchLabels_TransitionRemoveLabels_MatchesWorkflowFiles(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+// agent-research.yml hand-lists the labels the research claim removes; the
+// launcher's claim must strip no label the CI claim would leave behind.
+func TestTransitionRemoveLabels_ResearchClaimMatchesWorkflowFile(t *testing.T) {
+	want := forge.TransitionRemoveLabels(forge.ResearchDispatchLabels(), forge.ResearchVerdictLabels(), forge.Dispatchable, forge.InProgress)
+	if len(want) == 0 {
+		t.Fatal("research claim removes no labels — parity check would pass vacuously")
+	}
+	path := filepath.Join("..", "..", "..", "..", ".github", "workflows", "agent-research.yml")
+	workflowSet, rawValue := forgetest.ParseWorkflowRemoveLabelSet(t, path, "claim-remove-labels")
+	for _, label := range want {
+		if !workflowSet[label] {
+			t.Errorf("%s: missing label %q (workflow claim-remove set: %q)", path, label, rawValue)
+		}
 	}
 }

@@ -353,8 +353,8 @@ func (j *jiraClient) alreadyClaimedNative(payload jiraIssuePayload, from forge.D
 // workflow transition matching StatusMapping[to]. When to is unmapped or that
 // transition is unavailable, it swaps the DispatchLabels for from/to instead
 // (ADR 0013) so the lifecycle always makes progress. Either way it removes the
-// labels forge.DispatchLabels.TransitionRemoveLabels names, so a claim or
-// landing also strips a stale terminal label like the other trackers.
+// labels forge.TransitionRemoveLabels names, so a claim or landing also strips
+// a stale terminal or research verdict label like the other trackers.
 //
 // A claim (to == InProgress) first GETs num and errors on
 // forge.ErrAlreadyClaimed without transitioning when either the native status
@@ -380,7 +380,7 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 			// must not survive a successful native transition. Best-effort: a
 			// cleanup failure must not undo the transition that already
 			// succeeded.
-			_ = j.swapLabel(num, "", j.cfg.Labels.TransitionRemoveLabels(from, to)...)
+			_ = j.swapLabel(num, "", forge.TransitionRemoveLabels(j.cfg.Labels, j.cfg.VerdictLabels, from, to)...)
 			return nil
 		}
 		if !errors.Is(err, errTransitionUnavailable) {
@@ -391,7 +391,7 @@ func (j *jiraClient) TransitionState(num string, from, to forge.DispatchState) e
 	if toLabel == "" {
 		return fmt.Errorf("jira: no status mapping or fallback label configured for state %v", to)
 	}
-	return j.swapLabel(num, toLabel, j.cfg.Labels.TransitionRemoveLabels(from, to)...)
+	return j.swapLabel(num, toLabel, forge.TransitionRemoveLabels(j.cfg.Labels, j.cfg.VerdictLabels, from, to)...)
 }
 
 // CompleteVerdict swaps num's InProgress fallback label for verdict's terminal

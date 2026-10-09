@@ -268,10 +268,10 @@ func (tf *IssueTrackerFake) Issue(num string) (Issue, error) {
 // TransitionState swaps the from-state label for the to-state label on issue
 // num, best-effort on a missing issue (no error) to match the gh CLI. A claim
 // (to == InProgress) also strips the stale terminal labels
-// DispatchLabels.TransitionRemoveLabels names, as the github adapter does, so a
-// test on the Fake cannot pass while the real adapter misbehaves (#1985). A
-// landing (to == Complete) also strips a stale Failed, as the adapters do
-// (#4651).
+// TransitionRemoveLabels names, as the github adapter does, so a test on the
+// Fake cannot pass while the real adapter misbehaves (#1985). A claim also
+// strips any research verdict label. A landing (to == Complete) also strips a
+// stale Failed, as the adapters do (#4651).
 //
 // A claim also errors on ErrAlreadyClaimed without mutating labels when num
 // already carries InProgress (#3887), so a test on the Fake pins the same
@@ -292,7 +292,7 @@ func (tf *IssueTrackerFake) TransitionState(num string, from, to DispatchState) 
 	}
 	add := tf.labels.Label(to)
 	remove := map[string]bool{}
-	for _, l := range tf.labels.TransitionRemoveLabels(from, to) {
+	for _, l := range TransitionRemoveLabels(tf.labels, tf.VerdictLabels, from, to) {
 		remove[l] = true
 	}
 	var next []string

@@ -84,7 +84,7 @@ func TestDispatchLabels_TransitionRemoveLabels_ClaimStripsStaleTerminals(t *test
 		Failed:       "agent-failed",
 		Ambiguous:    "agent-ambiguous-spec",
 	}
-	got := d.TransitionRemoveLabels(Dispatchable, InProgress)
+	got := d.transitionRemoveLabels(Dispatchable, InProgress)
 	want := []string{"ready-for-agent", "agent-complete", "agent-failed", "agent-ambiguous-spec"}
 	if len(got) != len(want) {
 		t.Fatalf("TransitionRemoveLabels = %v, want %v", got, want)
@@ -106,7 +106,7 @@ func TestDispatchLabels_TransitionRemoveLabels_NeitherClaimNorLandingOnlyRemoves
 		Complete:     "agent-complete",
 		Failed:       "agent-failed",
 	}
-	got := d.TransitionRemoveLabels(InProgress, Failed)
+	got := d.transitionRemoveLabels(InProgress, Failed)
 	want := []string{"agent-in-progress"}
 	if len(got) != 1 || got[0] != want[0] {
 		t.Errorf("TransitionRemoveLabels = %v, want %v", got, want)
@@ -156,7 +156,7 @@ func TestDispatchLabels_TransitionRemoveLabels_CompleteStripsStaleFailed(t *test
 		Complete:     "agent-complete",
 		Failed:       "agent-failed",
 	}
-	got := d.TransitionRemoveLabels(InProgress, Complete)
+	got := d.transitionRemoveLabels(InProgress, Complete)
 	want := []string{"agent-in-progress", "agent-failed"}
 	if !slices.Equal(got, want) {
 		t.Errorf("TransitionRemoveLabels = %v, want %v", got, want)
@@ -212,5 +212,51 @@ func TestDispatchLabels_SettledLabels(t *testing.T) {
 				t.Errorf("SettledLabels = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSettledLabels_AppendsVerdictLabelsInOrderDeduplicated(t *testing.T) {
+	d := ResearchDispatchLabels()
+	v := NewVerdictLabels(
+		VerdictLabel{Verdict: Recommend, Label: "agent-research-recommend"},
+		VerdictLabel{Verdict: Reject, Label: "agent-research-failed"}, // equals d.Failed
+		VerdictLabel{Verdict: Unclear, Label: "agent-research-unclear"},
+		VerdictLabel{Verdict: "blank", Label: ""}, // empty label: skipped
+	)
+	got := SettledLabels(d, v)
+	want := []string{"agent-research-failed", "agent-research-recommend", "agent-research-unclear"}
+	if !slices.Equal(got, want) {
+		t.Errorf("SettledLabels = %v, want %v", got, want)
+	}
+}
+
+func TestSettledLabels_ZeroVerdictsIsDispatchSettledLabels(t *testing.T) {
+	d := DispatchLabels{Complete: "agent-complete", Failed: "agent-failed"}
+	if got, want := SettledLabels(d, VerdictLabels{}), d.SettledLabels(); !slices.Equal(got, want) {
+		t.Errorf("SettledLabels = %v, want %v", got, want)
+	}
+}
+
+func TestTransitionRemoveLabels_ClaimStripsVerdictLabels(t *testing.T) {
+	d := ResearchDispatchLabels()
+	v := ResearchVerdictLabels()
+	got := TransitionRemoveLabels(d, v, Dispatchable, InProgress)
+	want := []string{
+		"agent-research", "agent-research-failed",
+		"agent-research-recommend", "agent-research-reject", "agent-research-unclear",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("TransitionRemoveLabels = %v, want %v", got, want)
+	}
+}
+
+func TestTransitionRemoveLabels_NonClaimLeavesVerdictLabels(t *testing.T) {
+	d := ResearchDispatchLabels()
+	v := ResearchVerdictLabels()
+	for _, to := range []DispatchState{Dispatchable, Complete, Failed} {
+		got := TransitionRemoveLabels(d, v, InProgress, to)
+		if want := d.transitionRemoveLabels(InProgress, to); !slices.Equal(got, want) {
+			t.Errorf("to=%v: TransitionRemoveLabels = %v, want %v", to, got, want)
+		}
 	}
 }

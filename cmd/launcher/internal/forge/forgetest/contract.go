@@ -6,6 +6,7 @@ package forgetest
 
 import (
 	"errors"
+	"slices"
 	"testing"
 
 	"spindrift.dev/launcher/internal/forge"
@@ -248,6 +249,21 @@ func testResearchVerdictTerminals(t *testing.T, h Harness) {
 		}
 		if !found {
 			t.Fatalf("%s: labels = %v, want to contain verdict terminal %q", tc.num, iss.Labels, tc.wantLabel)
+		}
+
+		// Re-queue and re-claim: the claim must shed the prior verdict.
+		if err := tr.TransitionState(tc.num, forge.Untriaged, forge.Dispatchable); err != nil {
+			t.Fatalf("%s: re-queue TransitionState(Untriaged, Dispatchable): %v", tc.num, err)
+		}
+		if err := tr.TransitionState(tc.num, forge.Dispatchable, forge.InProgress); err != nil {
+			t.Fatalf("%s: re-claim TransitionState(Dispatchable, InProgress): %v", tc.num, err)
+		}
+		iss, err = tr.Issue(tc.num)
+		if err != nil {
+			t.Fatalf("%s: Issue after re-claim: %v", tc.num, err)
+		}
+		if slices.Contains(iss.Labels, tc.wantLabel) {
+			t.Fatalf("%s: labels = %v after re-claim, want stale verdict %q stripped", tc.num, iss.Labels, tc.wantLabel)
 		}
 	}
 }
