@@ -34,6 +34,8 @@ var TriageLabelMeta = map[string]LabelMeta{
 	"agent-butler-finding": LabelMeta{Description: "Filed from a butler Chore finding", Color: "f9d0c4"},
 
 	"agent-butler-patch": LabelMeta{Description: "Butler finding the host landed as a patch PR (ADR 0057)", Color: "5319e7"},
+
+	"agent-tuning-finding": LabelMeta{Description: "Filed from a tuning Chore finding; a PR closing it merges by hand (ADR 0062)", Color: "1d76db"},
 }
 
 // FindingTypeLabels is the closed bug/enhancement/chore issue-intent

@@ -557,7 +557,7 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	if len(stub.calls) != 2 {
 		t.Fatalf("ListIssuesWithLabels calls = %d, want 2 (one per state)", len(stub.calls))
 	}
-	want := []string{dispatchkind.Work.FindingLabel, dispatchkind.Research.FindingLabel, dispatchkind.Butler.FindingLabel, "agent-butler-patch"}
+	want := []string{dispatchkind.Work.FindingLabel, dispatchkind.Research.FindingLabel, dispatchkind.Butler.FindingLabel, "agent-butler-patch", "agent-tuning-finding"}
 	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
 		call := stub.callFor(state)
 		if call == nil {
@@ -796,5 +796,73 @@ func TestFindingLabelsListsEachLabelOnce(t *testing.T) {
 		if !seen[d.FindingLabel] {
 			t.Errorf("findingLabels omits %s's FindingLabel %q", d.Name, d.FindingLabel)
 		}
+	}
+}
+
+func TestNormalizeDedupKey_TuningChoreTermIsStable(t *testing.T) {
+	if got := normalizeDedupKey(tuningChoreTerm); got != tuningChoreTerm {
+		t.Fatalf("normalizeDedupKey(%q) = %q, want it unchanged", tuningChoreTerm, got)
+	}
+}
+
+func TestCarriesTuningMarker(t *testing.T) {
+	quoted := dedupMarkerPrefix + "chore=tuning, quoted" + dedupMarkerSuffix
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"term alone", "body\n\n" + buildDedupMarker([]string{"chore=tuning"}), true},
+		{"among other terms", "body\n\n" + buildDedupMarker([]string{"race in settle", "chore=tuning", "dup"}), true},
+		{"case and whitespace normalized", "body\n\n" + buildDedupMarker([]string{"  Chore=Tuning  "}), true},
+		{"only in an earlier marker line", quoted + "\n\nprose\n\n" + buildDedupMarker([]string{"other"}), false},
+		{"last marker wins when it carries the term", quoted + "\n" + buildDedupMarker([]string{"chore=tuning"}), true},
+		{"marker without the term", "body\n\n" + buildDedupMarker([]string{"race in settle"}), false},
+		{"term in prose only", "chore=tuning", false},
+		{"no marker", "plain body", false},
+		{"empty body", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := carriesTuningMarker(tc.body); got != tc.want {
+				t.Errorf("carriesTuningMarker = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDedupMarker_RoundTripsTuningChoreTerm(t *testing.T) {
+	marker := buildDedupMarker([]string{"Site:Key", tuningChoreTerm})
+	got := parseDedupMarker(marker)
+	want := []string{"site:key", tuningChoreTerm}
+	if !slices.Equal(got, want) {
+		t.Fatalf("parseDedupMarker = %v, want %v", got, want)
+	}
+}
+
+// chore=tuning is provenance, not a site: every tuning finding carries it, so
+// it must neither index nor count toward matching.
+func TestTuningChoreTermIsNotADedupKey(t *testing.T) {
+	label := dispatchkind.Work.FindingLabel
+	index := make(map[string]string)
+	indexFindingIssues(index, []forge.Issue{
+		{Number: "7", Labels: []string{label}, Body: buildDedupMarker([]string{"site a", tuningChoreTerm})},
+	})
+	if _, ok := index[tuningChoreTerm]; ok {
+		t.Errorf("index = %v, want %q not indexed", index, tuningChoreTerm)
+	}
+
+	ov := matchDedup(index, map[string]bool{"site b": true, tuningChoreTerm: true})
+	if ov.full || len(ov.covered) != 0 || len(ov.refs) != 0 {
+		t.Errorf("matchDedup(distinct tuning finding) = %+v, want no overlap", ov)
+	}
+
+	ov = matchDedup(index, map[string]bool{"site a": true, tuningChoreTerm: true})
+	if !ov.full || len(ov.covered) != 1 || len(ov.refs) != 1 || ov.refs[0] != "#7" {
+		t.Errorf("matchDedup(real keys covered + term) = %+v, want full against #7", ov)
+	}
+
+	ov = matchDedup(map[string]string{tuningChoreTerm: "#7"}, map[string]bool{tuningChoreTerm: true})
+	if ov.full || len(ov.covered) != 0 {
+		t.Errorf("matchDedup(term-only intent) = %+v, want not full", ov)
 	}
 }

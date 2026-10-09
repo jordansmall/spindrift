@@ -1146,14 +1146,14 @@ func TestRun_RequiredLabels_RestOfTierStaysAdvisory(t *testing.T) {
 	cfg.RequiredLabels = []string{"agent-butler-finding"}
 	var buf bytes.Buffer
 	if err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil); err != nil {
-		t.Fatalf("err = %v, want nil (patch label and research tier are advisory)", err)
+		t.Fatalf("err = %v, want nil (patch and tuning labels and research tier are advisory)", err)
 	}
 	out := buf.String()
 	if !strings.Contains(out, "advisory: label \"agent-butler-patch\" missing") {
 		t.Errorf("want advisory row for the patch label, got:\n%s", out)
 	}
-	if !strings.Contains(out, "1 butler label(s) missing") {
-		t.Errorf("want butler summary counting only the patch label, got:\n%s", out)
+	if !strings.Contains(out, "2 butler label(s) missing") {
+		t.Errorf("want butler summary counting the patch and tuning labels, got:\n%s", out)
 	}
 }
 
@@ -1194,7 +1194,7 @@ func TestRun_RequiredLabels_InteractivePrompt(t *testing.T) {
 	if !errors.Is(err, ErrRequiredLabelsMissing) {
 		t.Fatalf("declined: err = %v, want ErrRequiredLabelsMissing", err)
 	}
-	if want := "2 required (declining leaves this check failing) and 1 advisory"; !strings.Contains(buf.String(), want) {
+	if want := "2 required (declining leaves this check failing) and 2 advisory"; !strings.Contains(buf.String(), want) {
 		t.Errorf("prompt lacks %q, got:\n%s", want, buf.String())
 	}
 
@@ -1226,5 +1226,16 @@ func TestLabelMetaFor(t *testing.T) {
 	}
 	if _, ok := LabelMetaFor("no-such-label"); ok {
 		t.Errorf("LabelMetaFor(no-such-label) ok, want false")
+	}
+}
+
+// TuningFindingLabel is the Go handle on the name ButlerLabelNames() lists;
+// the two must agree or settle's merge hold keys on an unregistered label.
+func TestTuningFindingLabel_IsInButlerLabelNames(t *testing.T) {
+	if TuningFindingLabel != "agent-tuning-finding" {
+		t.Fatalf("TuningFindingLabel = %q", TuningFindingLabel)
+	}
+	if !slices.Contains(ButlerLabelNames(), TuningFindingLabel) {
+		t.Fatalf("ButlerLabelNames() = %v, missing %q", ButlerLabelNames(), TuningFindingLabel)
 	}
 }

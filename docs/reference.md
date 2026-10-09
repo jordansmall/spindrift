@@ -3827,6 +3827,21 @@ filing time if missing. To create it manually:
 gh label create agent-butler-patch --repo owner/repo --color 5319e7 --description "Butler finding the host landed as a patch PR (ADR 0057)"
 ```
 
+#### Create the tuning-finding label on the Target repo
+
+The `agent-tuning-finding` label (ADR 0062) is a single fixed,
+non-configurable provenance label on a finding a tuning Chore files. A PR
+closing an issue wearing it merges by hand. Trackers with no label registry
+(`local`, `jira`) carry the same fact as a `chore=tuning` term in the issue
+body's dedup marker. `spindrift doctor` checks and, in interactive mode,
+offers to create it, but treats it as advisory: a missing
+`agent-tuning-finding` label never fails the check unless `--butler`
+promotes the butler tier. To create it manually:
+
+```sh
+gh label create agent-tuning-finding --repo owner/repo --color 1d76db --description "Filed from a tuning Chore finding; a PR closing it merges by hand (ADR 0062)"
+```
+
 #### Configuring the research verdict vocabulary (`RESEARCH_VERDICTS`)
 
 By default the research kind's verdict terminals are the fixed three above:
