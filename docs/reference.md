@@ -4566,8 +4566,10 @@ of KB. `-title`, `-type` and `-dedup` stay flags: all are short enough
 that neither concern bites. `pr-intent` requires `-title`; `issue-intent`
 requires `-title` and `-type` (`bug`, `enhancement` or `chore`), and
 accepts a repeatable, optional `-dedup <site key>` per dedup term (issue
-#3609); `status` takes no flags. The command's exit code is the
-acceptance: exit 0 prints a receipt — `signal <kind> accepted: <n>
+#3609), plus a repeatable `-cite <digest anchor>` and a `-metric <slug>`
+that the Box requires whenever `CHORE_INPUT` is set (a tuning finding,
+issue #4952) and that other Chores omit; `status` takes no flags. The
+command's exit code is the acceptance: exit 0 prints a receipt — `signal <kind> accepted: <n>
 bytes, <hash>, sequence <n>` — and the signal is taken; a non-zero exit
 prints `signal <kind> rejected (<status>): <reason>` and the signal was
 NOT taken, so the agent can never mistake a rejection for success. A

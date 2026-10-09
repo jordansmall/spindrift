@@ -14,8 +14,11 @@ import (
 // front, the same order internal/butler's settle step already reserves
 // Ledger slots before any PostIssue call.
 type Finding struct {
-	Class, Concurrence string
-	DedupTerms         []string
+	Class, Concurrence, Metric string
+	// Cites are the Tuning digest anchors a tuning finding argues from (issue
+	// #4952); internal/butler checks them against the stored digest snapshot.
+	Cites      []string
+	DedupTerms []string
 	// Patch is an optional unified diff (ADR 0057, issue #4072), carried
 	// through unexamined: whether it is ever applied is the host's own
 	// later decision, gated on Class, never this plan callback's.
@@ -29,7 +32,7 @@ type Finding struct {
 // finding is in's promotion-relevant view, the projection both FileButlerFindings
 // call sites (the plan callback and its per-finding decorate) need.
 func (in issueIntent) finding() Finding {
-	return Finding{Class: in.Class, Concurrence: in.Concurrence, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title}
+	return Finding{Class: in.Class, Concurrence: in.Concurrence, Cites: in.Cites, Metric: in.Metric, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title}
 }
 
 // Decoration is what a plan's per-finding callback adds to one finding's

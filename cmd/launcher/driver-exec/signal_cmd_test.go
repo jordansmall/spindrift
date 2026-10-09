@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -598,6 +599,60 @@ func TestRunSignal_IssueIntentClassList(t *testing.T) {
 	})
 }
 
+// TestRunSignal_IssueIntentTuningCitesMetric pins the Box-side guard for a
+// tuning finding (issue #4952): with CHORE_INPUT set (only a records-scoped
+// Chore gets a host-rendered digest), -cite and -metric are required and a
+// failure sends nothing; a code Chore, with CHORE_INPUT unset, needs neither.
+func TestRunSignal_IssueIntentTuningCitesMetric(t *testing.T) {
+	base := []string{"issue-intent", "-title", "t", "-type", "chore"}
+
+	forEachTransport(t, func(t *testing.T, transport string) {
+		srv := startSignalServer(t, transport, signalsocket.Config{Consumes: allKinds()})
+
+		t.Run("missing cite", func(t *testing.T) {
+			t.Setenv("CHORE_INPUT", "digest")
+			rc, out := runVerb(t, "b", append(base, "-metric", "avg-usd")...)
+			if rc == 0 || !strings.Contains(out, "-cite is required") {
+				t.Errorf("rc = %d, out = %q, want a non-zero exit naming -cite", rc, out)
+			}
+		})
+		t.Run("missing metric", func(t *testing.T) {
+			t.Setenv("CHORE_INPUT", "digest")
+			rc, out := runVerb(t, "b", append(base, "-cite", "summary:avg-usd")...)
+			if rc == 0 || !strings.Contains(out, "-metric is required") {
+				t.Errorf("rc = %d, out = %q, want a non-zero exit naming -metric", rc, out)
+			}
+		})
+		if n := len(srv.buf.IssueIntents()); n != 0 {
+			t.Fatalf("a rejected tuning intent sent %d intents, want 0", n)
+		}
+
+		t.Run("both present", func(t *testing.T) {
+			t.Setenv("CHORE_INPUT", "digest")
+			if rc, out := runVerb(t, "b", append(base, "-cite", "summary:avg-usd", "-cite", "role:implement:avg-usd", "-metric", "avg-usd")...); rc != 0 {
+				t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+			}
+		})
+		t.Run("code chore needs neither", func(t *testing.T) {
+			t.Setenv("CHORE_INPUT", "")
+			if rc, out := runVerb(t, "code body", base...); rc != 0 {
+				t.Fatalf("exit = %d, want 0 (out=%q)", rc, out)
+			}
+		})
+
+		got := srv.buf.IssueIntents()
+		if len(got) != 2 {
+			t.Fatalf("intents = %+v, want 2", got)
+		}
+		if want := []string{"summary:avg-usd", "role:implement:avg-usd"}; !slices.Equal(got[0].Cites, want) || got[0].Metric != "avg-usd" {
+			t.Errorf("intent[0] = %+v, want cites %v and metric avg-usd", got[0], want)
+		}
+		if len(got[1].Cites) != 0 || got[1].Metric != "" {
+			t.Errorf("intent[1] = %+v, want no cites or metric", got[1])
+		}
+	})
+}
+
 // TestRunSignal_IssueIntentPatchFile pins -patch-file (ADR 0057, issue
 // #4072): its absence carries no Patch, and it reads the named file's
 // content verbatim into the buffered intent's Patch field.
@@ -682,6 +737,19 @@ func TestRunSignal_IssueIntentDedupWireBody(t *testing.T) {
 		got := post(t, "issue-intent", "-title", "t", "-type", "bug")
 		if strings.Contains(got, "class") || strings.Contains(got, "concurrence") {
 			t.Errorf("posted body = %s, want no class or concurrence key at all", got)
+		}
+	})
+	t.Run("no cites or metric", func(t *testing.T) {
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug")
+		if strings.Contains(got, "cites") || strings.Contains(got, "metric") {
+			t.Errorf("posted body = %s, want no cites or metric key at all", got)
+		}
+	})
+	t.Run("cites and metric", func(t *testing.T) {
+		t.Setenv("CHORE_INPUT", "digest")
+		got := post(t, "issue-intent", "-title", "t", "-type", "bug", "-cite", "summary:avg-usd", "-metric", "avg-usd")
+		if !strings.Contains(got, `"cites":["summary:avg-usd"]`) || !strings.Contains(got, `"metric":"avg-usd"`) {
+			t.Errorf("posted body = %s, want cites and metric fields", got)
 		}
 	})
 	t.Run("class only", func(t *testing.T) {
