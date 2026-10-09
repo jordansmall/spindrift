@@ -87,10 +87,12 @@ type SlotStatus struct {
 	Model     string `json:"model,omitempty"`
 	ModelRole string `json:"model_role,omitempty"`
 	// CIWait is set while the running child waits on its PR's CI, and PRURL
-	// names that PR, from the child's latest ci_wait record; the next box or
-	// settled record clears both.
-	CIWait bool   `json:"ci_wait,omitempty"`
-	PRURL  string `json:"pr_url,omitempty"`
+	// names that PR, from the child's latest ci_wait record; CIRunURL is that
+	// record's CI run URL, empty until the run is known. The next box or
+	// settled record clears all three.
+	CIWait   bool   `json:"ci_wait,omitempty"`
+	PRURL    string `json:"pr_url,omitempty"`
+	CIRunURL string `json:"ci_run_url,omitempty"`
 	// ChildStart and ChildStartN pin the running child's Dispatch as the
 	// dashboard names it: the time string of its child_start event, and how
 	// many earlier child_starts on this slot share that exact string.

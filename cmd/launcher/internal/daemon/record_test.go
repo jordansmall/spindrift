@@ -300,3 +300,14 @@ func TestParseRecord_CIWait(t *testing.T) {
 		t.Errorf("ci_wait record without pr_url = (%v, %v), want an error", ok, err)
 	}
 }
+
+func TestParseRecord_CIWaitRunURL(t *testing.T) {
+	work := KindOf(dispatchkind.Work)
+	got, ok, err := ParseRecord(`{"event":"ci_wait","issue":"42","pr_url":"https://example.test/pr/7","run_url":"https://example.test/runs/9"}`, work)
+	if err != nil || !ok {
+		t.Fatalf("ParseRecord = (%v, %v), want an accepted record", ok, err)
+	}
+	if got.RunURL != "https://example.test/runs/9" {
+		t.Errorf("RunURL = %q, want the record's run_url", got.RunURL)
+	}
+}

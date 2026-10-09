@@ -844,3 +844,22 @@ func TestSlotStatus_CIWaitMarshalsUnderCIWaitKeysAndOmitsWhenEmpty(t *testing.T)
 		t.Errorf("marshalled = %s, want no ci_wait keys when empty", data)
 	}
 }
+
+// TestSlotStatus_CIRunURLMarshalsUnderCIRunURLKeyAndOmitsWhenEmpty pins the
+// additive "ci_run_url" key, absent until a ci_wait record carries a run.
+func TestSlotStatus_CIRunURLMarshalsUnderCIRunURLKeyAndOmitsWhenEmpty(t *testing.T) {
+	data, err := json.Marshal(SlotStatus{Busy: true, CIWait: true, PRURL: "https://example.test/pr/7", CIRunURL: "https://example.test/runs/9"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if want := `"ci_run_url":"https://example.test/runs/9"`; !strings.Contains(string(data), want) {
+		t.Errorf("marshalled = %s, want it to contain %q", data, want)
+	}
+	data, err = json.Marshal(SlotStatus{Busy: true, CIWait: true, PRURL: "https://example.test/pr/7"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"ci_run_url"`) {
+		t.Errorf("marshalled = %s, want no ci_run_url key when empty", data)
+	}
+}
