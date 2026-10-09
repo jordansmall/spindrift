@@ -1,20 +1,15 @@
 {
-  "lastSwept": "483ef2d3cf34cac2184752d92a2b1ba57aa1bbc1",
-  "cursor": "cmd/launcher/readcontext.go",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-09T10:26:15.209242617-04:00"
-  },
+  "lastSwept": "01d4a5b3249efc7894b19aaa089415effe588922",
+  "cursor": "cmd/launcher/stamp.go",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 58,
+    "output_tokens": 8718,
+    "cache_read_input_tokens": 1737056,
+    "cache_creation_input_tokens": 82140,
+    "total_cost_usd": 1.2133890999999999,
+    "duration_ms": 114442,
+    "duration_api_ms": 113447,
+    "num_turns": 31
   }
 }
