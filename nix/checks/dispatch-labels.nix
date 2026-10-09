@@ -196,7 +196,7 @@ let
     };
     "cmd/launcher/internal/doctor/doctor.go" = {
       src = builtins.readFile ../../cmd/launcher/internal/doctor/doctor.go;
-      extract = src: extractResearchLabelNamesLiteral src ++ extractAmbiguousLabelNamesLiteral src;
+      extract = extractDoctorLabels;
     };
   };
   # The literals are each Descriptor's FindingLabel value (issue #3989), the one
@@ -214,6 +214,15 @@ let
       patchLabels = extractGoFieldLabelAxis "PatchLabel:" src;
     in
     if findingLabels == [ ] || patchLabels == [ ] then [ ] else findingLabels ++ patchLabels;
+  # Same all-or-nothing shape for doctor.go: either extractor coming back empty
+  # empties the surface rather than leaving the other half to pass alone.
+  extractDoctorLabels =
+    src:
+    let
+      researchLabels = extractResearchLabelNamesLiteral src;
+      sliceLabels = extractReturnStringSliceLabels src;
+    in
+    if researchLabels == [ ] || sliceLabels == [ ] then [ ] else researchLabels ++ sliceLabels;
   extractGoFieldLabelAxis =
     marker: src:
     let
@@ -306,7 +315,9 @@ let
   # Like labelLiteralAfterMarker, but for a Go `[]string{"a", "b"}` literal:
   # every quoted item up to the closing brace, not just the first. The segment
   # starts just after the marker's opening quote, so splitting the span on `"`
-  # puts the items at the even indices and the `, ` separators at the odd ones.
+  # puts the items at the even indices and the separators at the odd ones. A
+  # separator holding anything but whitespace and commas (say a named
+  # constant) makes the whole extraction [ ], so emptyOffenders fires.
   labelLiteralsInSpanAfterMarker =
     marker: src:
     let
@@ -314,13 +325,17 @@ let
         segment:
         let
           quoteParts = splitString "\"" (builtins.head (splitString "}" segment));
-          items = builtins.genList (i: builtins.elemAt quoteParts (2 * i)) (
-            (builtins.length quoteParts + 1) / 2
-          );
+          at = builtins.elemAt quoteParts;
+          items = builtins.genList (i: at (2 * i)) ((builtins.length quoteParts + 1) / 2);
+          separators = builtins.genList (i: at (2 * i + 1)) (builtins.length quoteParts / 2);
         in
-        filter (value: builtins.match "[a-z0-9-]+" value != null) items;
+        if builtins.all (sep: builtins.match "[ \t\n,]*" sep != null) separators then
+          filter (value: builtins.match "[a-z0-9-]+" value != null) items
+        else
+          null;
+      perSegment = map labelsFromSegment (builtins.tail (splitString marker src));
     in
-    concatMap labelsFromSegment (builtins.tail (splitString marker src));
+    if elem null perSegment then [ ] else concatMap (l: l) perSegment;
   # doctor.go's ResearchLabelNames() literal (ADR 0041). The marker is unique in
   # that file: its other append(names, ...) calls have no quote after the comma.
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
@@ -331,8 +346,9 @@ let
   # shape — so it cannot cross-match ResearchLabelNames()'s different
   # `append(names, "...")` shape. Every literal in each span is extracted
   # (ButlerLabelNames() lists two); all are registered (labels.ambiguous,
-  # labels.butlerFinding, labels.butlerPatch).
-  extractAmbiguousLabelNamesLiteral = labelLiteralsInSpanAfterMarker ''return []string{"'';
+  # labels.butlerFinding, labels.butlerPatch). A non-literal item in a span
+  # empties the whole result.
+  extractReturnStringSliceLabels = labelLiteralsInSpanAfterMarker ''return []string{"'';
   # extractLabelCreateTokens and extractNameFieldTokens scan line by line, so a
   # shell `\`-continued `gh label create` would leave the marker and its
   # literal on different lines and match neither. Folding backslash-newline
@@ -369,6 +385,39 @@ let
         )
       }";
     registryOffenders;
+  # harnessSurfaces with one surface's source replaced.
+  withSurfaceSrc =
+    path: src:
+    harnessSurfaces
+    // {
+      ${path} = harnessSurfaces.${path} // {
+        inherit src;
+      };
+    };
+  # Builds a check requiring assertHarnessWritesInRegistry to reject `path`
+  # with `needle` replaced by a named constant; `what` names the literal for
+  # the failure messages. The no-op guard catches a needle that stopped matching.
+  expectNamedConstantRejection =
+    {
+      name,
+      path,
+      needle,
+      constant,
+      what,
+    }:
+    let
+      doctoredSrc = replaceStrings [ needle ] [ constant ] harnessSurfaces.${path}.src;
+      result = builtins.tryEval (assertHarnessWritesInRegistry {
+        harnessSurfaces = withSurfaceSrc path doctoredSrc;
+        registryLabels = allRegistryLabels;
+      });
+    in
+    assert assertMsg (
+      doctoredSrc != harnessSurfaces.${path}.src
+    ) "${name}: ${what} no longer matches the doctoring pattern; update the replaceStrings needle";
+    assert assertMsg (!result.success)
+      "${name}: expected assertHarnessWritesInRegistry to reject a synthetic ${path} with ${what} moved to a named constant, but it evaluated successfully";
+    pkgs.runCommand name { } "touch $out";
 
   # Issue #2641: each case doctors one guard shape the extractor could skip, so
   # each must make assertTriggerGuardsPinned reject. Keyed by check name so the
@@ -656,35 +705,15 @@ mapAttrs (
 
   # Proves one descriptor's FindingLabel moving to a named constant still
   # fails closed: the other descriptors keep extracting, so without the
-  # all-or-nothing rule in extractDispatchkindLabels the surface stays non-empty
+  # all-or-nothing rule in extractGoFieldLabelAxis the surface stays non-empty
   # and the butler's label goes uncovered.
-  label-registry-covers-harness-writes-named-constant-regression =
-    let
-      doctoredDispatchkindSrc =
-        replaceStrings
-          [ ''FindingLabel:   "agent-butler-finding"'' ]
-          [ "FindingLabel:   butlerFindingLabel" ]
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
-          // {
-            src = doctoredDispatchkindSrc;
-          };
-      };
-      result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
-        registryLabels = allRegistryLabels;
-      });
-    in
-    assert assertMsg
-      (
-        doctoredDispatchkindSrc != harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src
-      )
-      "label-registry-covers-harness-writes-named-constant-regression: the butler descriptor's FindingLabel literal no longer matches the doctoring pattern; update the replaceStrings needle";
-    assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-named-constant-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the butler's FindingLabel moved to a named constant, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-named-constant-regression" { } "touch $out";
+  label-registry-covers-harness-writes-named-constant-regression = expectNamedConstantRejection {
+    name = "label-registry-covers-harness-writes-named-constant-regression";
+    path = "cmd/launcher/internal/dispatchkind/dispatchkind.go";
+    needle = ''FindingLabel:   "agent-butler-finding"'';
+    constant = "FindingLabel:   butlerFindingLabel";
+    what = "the butler descriptor's FindingLabel literal";
+  };
 
   # Proves assertHarnessWritesInRegistry catches doctor.go's hand-written
   # ResearchLabelNames() literal drifting from lib/labels.nix's researchFinding
@@ -741,7 +770,7 @@ mapAttrs (
 
   # Mirrors the research-finding drift regression above for doctor.go's other
   # literal, AmbiguousLabelNames()'s "agent-ambiguous-spec" (issue #2817).
-  # Guards against extractAmbiguousLabelNamesLiteral going blind as much as
+  # Guards against extractReturnStringSliceLabels going blind as much as
   # against assertHarnessWritesInRegistry itself.
   label-registry-covers-harness-writes-ambiguous-label-drift-regression =
     let
@@ -757,7 +786,7 @@ mapAttrs (
       };
       extractedLabels = labelsWrittenBy {
         src = doctoredDoctorSrc;
-        extract = extractAmbiguousLabelNamesLiteral;
+        extract = extractReturnStringSliceLabels;
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
         harnessSurfaces = doctoredHarnessSurfaces;
@@ -775,7 +804,7 @@ mapAttrs (
           "agent-butler-patch"
         ]
       )
-      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractAmbiguousLabelNamesLiteral to find [ \"agent-unregistered-label\" \"agent-butler-finding\" \"agent-butler-patch\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractReturnStringSliceLabels to find [ \"agent-unregistered-label\" \"agent-butler-finding\" \"agent-butler-patch\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { }
@@ -789,26 +818,26 @@ mapAttrs (
       doctoredDoctorSrc =
         replaceStrings [ ''"agent-butler-patch"'' ] [ ''"agent-unregistered-label"'' ]
           originalDoctorSrc;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/doctor/doctor.go" =
-          harnessSurfaces."cmd/launcher/internal/doctor/doctor.go"
-          // {
-            src = doctoredDoctorSrc;
-          };
-      };
       extractedLabels = labelsWrittenBy {
         src = doctoredDoctorSrc;
-        extract = extractAmbiguousLabelNamesLiteral;
+        extract = extractReturnStringSliceLabels;
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
+        harnessSurfaces = withSurfaceSrc "cmd/launcher/internal/doctor/doctor.go" doctoredDoctorSrc;
         registryLabels = allRegistryLabels;
       });
     in
     assert assertMsg (doctoredDoctorSrc != originalDoctorSrc)
       "label-registry-covers-harness-writes-butler-patch-drift-regression: the \"agent-butler-patch\" needle no longer matches doctor.go, so the doctoring is a no-op";
-    assert assertMsg (builtins.elem "agent-unregistered-label" extractedLabels)
-      "label-registry-covers-harness-writes-butler-patch-drift-regression: expected extractAmbiguousLabelNamesLiteral to find agent-unregistered-label in ButlerLabelNames()'s second literal, but got: ${concatStringsSep ", " extractedLabels}";
+    assert assertMsg
+      (
+        extractedLabels == [
+          "agent-ambiguous-spec"
+          "agent-butler-finding"
+          "agent-unregistered-label"
+        ]
+      )
+      "label-registry-covers-harness-writes-butler-patch-drift-regression: expected extractReturnStringSliceLabels to find [ \"agent-ambiguous-spec\" \"agent-butler-finding\" \"agent-unregistered-label\" ] on the doctored ButlerLabelNames() literal, but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-butler-patch-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ButlerLabelNames()'s agent-butler-patch literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-butler-patch-drift-regression" { }
@@ -854,31 +883,20 @@ mapAttrs (
   # registry (issue #4897); production reads it in butler/settle.go and doctor.
   label-registry-covers-harness-writes-patch-label-drift-regression =
     let
+      originalDispatchkindSrc = harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
       doctoredDispatchkindSrc =
-        replaceStrings
-          [ ''PatchLabel:     "agent-butler-patch"'' ]
-          [ ''PatchLabel:     "agent-unregistered-label"'' ]
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
-          // {
-            src = doctoredDispatchkindSrc;
-          };
-      };
+        replaceStrings [ ''"agent-butler-patch"'' ] [ ''"agent-unregistered-label"'' ]
+          originalDispatchkindSrc;
       extractedLabels = labelsWrittenBy {
         src = doctoredDispatchkindSrc;
         extract = extractDispatchkindLabels;
       };
       result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
+        harnessSurfaces = withSurfaceSrc "cmd/launcher/internal/dispatchkind/dispatchkind.go" doctoredDispatchkindSrc;
         registryLabels = allRegistryLabels;
       });
     in
-    assert assertMsg
-      (
-        doctoredDispatchkindSrc != harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src
-      )
+    assert assertMsg (doctoredDispatchkindSrc != originalDispatchkindSrc)
       "label-registry-covers-harness-writes-patch-label-drift-regression: the butler descriptor's PatchLabel literal no longer matches the doctoring pattern; update the replaceStrings needle";
     assert assertMsg (elem "agent-unregistered-label" extractedLabels)
       "label-registry-covers-harness-writes-patch-label-drift-regression: expected the dispatchkind extractor to find \"agent-unregistered-label\" among ${builtins.toJSON extractedLabels} on the PatchLabel: assignment, but it didn't";
@@ -890,29 +908,24 @@ mapAttrs (
   # Proves a PatchLabel that stops extracting fails closed even though
   # FindingLabel still extracts.
   label-registry-covers-harness-writes-patch-label-named-constant-regression =
-    let
-      doctoredDispatchkindSrc =
-        replaceStrings [ ''PatchLabel:     "agent-butler-patch"'' ] [ "PatchLabel:     butlerPatchLabel" ]
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src;
-      doctoredHarnessSurfaces = harnessSurfaces // {
-        "cmd/launcher/internal/dispatchkind/dispatchkind.go" =
-          harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go"
-          // {
-            src = doctoredDispatchkindSrc;
-          };
+    expectNamedConstantRejection
+      {
+        name = "label-registry-covers-harness-writes-patch-label-named-constant-regression";
+        path = "cmd/launcher/internal/dispatchkind/dispatchkind.go";
+        needle = ''"agent-butler-patch"'';
+        constant = "butlerPatchLabel";
+        what = "the butler descriptor's PatchLabel literal";
       };
-      result = builtins.tryEval (assertHarnessWritesInRegistry {
-        harnessSurfaces = doctoredHarnessSurfaces;
-        registryLabels = allRegistryLabels;
-      });
-    in
-    assert assertMsg
-      (
-        doctoredDispatchkindSrc != harnessSurfaces."cmd/launcher/internal/dispatchkind/dispatchkind.go".src
-      )
-      "label-registry-covers-harness-writes-patch-label-named-constant-regression: the butler descriptor's PatchLabel literal no longer matches the doctoring pattern; update the replaceStrings needle";
-    assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-patch-label-named-constant-regression: expected assertHarnessWritesInRegistry to reject a synthetic dispatchkind.go with the butler's PatchLabel moved to a named constant, but it evaluated successfully";
-    pkgs.runCommand "label-registry-covers-harness-writes-patch-label-named-constant-regression" { }
-      "touch $out";
+
+  # Proves ButlerLabelNames()'s second item turning into a named constant fails
+  # closed even though the first literal still extracts (issue #4897).
+  label-registry-covers-harness-writes-butler-patch-named-constant-regression =
+    expectNamedConstantRejection
+      {
+        name = "label-registry-covers-harness-writes-butler-patch-named-constant-regression";
+        path = "cmd/launcher/internal/doctor/doctor.go";
+        needle = ''"agent-butler-patch"'';
+        constant = "butlerPatchLabel";
+        what = "ButlerLabelNames()'s agent-butler-patch literal";
+      };
 }
