@@ -3,6 +3,7 @@ package gitexec
 import (
 	"errors"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -96,5 +97,45 @@ func TestOutputErrTrimsAndWrapsStderr(t *testing.T) {
 	wrapped := OutputErr("ledger", err, "run")
 	if !strings.HasSuffix(wrapped.Error(), ": boom") {
 		t.Fatalf("wrapped = %q, want suffix %q", wrapped.Error(), ": boom")
+	}
+}
+
+func TestNoAutoMaintenance(t *testing.T) {
+	want := []string{"-c", "gc.auto=0", "-c", "maintenance.auto=false"}
+	got := NoAutoMaintenance("-c")
+	if !slices.Equal(got, want) {
+		t.Fatalf("NoAutoMaintenance(-c) = %v, want %v", got, want)
+	}
+	wantCfg := []string{"--config", "gc.auto=0", "--config", "maintenance.auto=false"}
+	if cfg := NoAutoMaintenance("--config"); !slices.Equal(cfg, wantCfg) {
+		t.Fatalf("NoAutoMaintenance(--config) = %v, want %v", cfg, wantCfg)
+	}
+	got[0] = "mutated"
+	if again := NoAutoMaintenance("-c"); !slices.Equal(again, want) {
+		t.Fatalf("second call = %v, want %v: result aliases shared state", again, want)
+	}
+}
+
+func TestNoAutoMaintenanceConfig(t *testing.T) {
+	want := [][2]string{{"gc.auto", "0"}, {"maintenance.auto", "false"}}
+	got := NoAutoMaintenanceConfig()
+	if !slices.Equal(got, want) {
+		t.Fatalf("NoAutoMaintenanceConfig() = %v, want %v", got, want)
+	}
+	got[0][1] = "mutated"
+	if again := NoAutoMaintenanceConfig(); !slices.Equal(again, want) {
+		t.Fatalf("second call = %v, want %v: result aliases shared state", again, want)
+	}
+}
+
+func TestGuardedArgs(t *testing.T) {
+	want := []string{"-C", "/d", "-c", "gc.auto=0", "-c", "maintenance.auto=false", "fetch", "origin"}
+	got := GuardedArgs("/d", "fetch", "origin")
+	if !slices.Equal(got, want) {
+		t.Fatalf("GuardedArgs = %v, want %v", got, want)
+	}
+	got[0] = "mutated"
+	if again := GuardedArgs("/d", "fetch", "origin"); !slices.Equal(again, want) {
+		t.Fatalf("second call = %v, want %v: result aliases shared state", again, want)
 	}
 }
