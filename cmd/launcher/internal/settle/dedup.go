@@ -64,6 +64,18 @@ const (
 	dedupMarkerSuffix = " -->"
 )
 
+// tuningChoreTerm is the dedup-marker term a tuning Chore finding carries
+// (ADR 0062). Trackers without a label registry (local, jira) cannot wear
+// agent-tuning-finding, so the merge hold of a PR closing such a finding
+// recognises it by this term instead. "=" is not a dedupPunctRun separator,
+// so the term survives normalizeDedupKey unchanged. It is excluded from dedup
+// matching because every tuning finding carries it.
+const tuningChoreTerm = "chore=tuning"
+
+// isProvenanceTerm reports whether k records where a finding came from rather
+// than a site to dedup on, so the index and the overlap match both skip it.
+func isProvenanceTerm(k string) bool { return k == tuningChoreTerm }
+
 // dedupPunctRun matches a run of site-key separators plus any touching space,
 // so "Type.Field", "Type:Field", "type#field", "type_field", and
 // "Type. Field" fold alike.
@@ -186,6 +198,13 @@ func parseDedupMarker(body string) []string {
 	return nil
 }
 
+// carriesTuningMarker reports whether body's last dedup marker line carries
+// tuningChoreTerm. Like parseDedupMarker it ignores earlier marker lines, so
+// a finding quoting the marker format cannot claim the term.
+func carriesTuningMarker(body string) bool {
+	return slices.Contains(parseDedupMarker(body), tuningChoreTerm)
+}
+
 // isFindingIssue reports whether labels carries one of findingLabels, the
 // provenance labels fileIssueIntentsDetailed files with. Dedup only ever
 // consults finding issues: an ordinary backlog issue that happens to share
@@ -210,6 +229,9 @@ func indexFindingIssues(index map[string]string, issues []forge.Issue) {
 		}
 		ref := "#" + iss.Number
 		for _, k := range parseDedupMarker(iss.Body) {
+			if isProvenanceTerm(k) {
+				continue
+			}
 			index[k] = ref
 		}
 	}
@@ -278,7 +300,12 @@ func (ov dedupOverlap) partial() bool { return !ov.full && len(ov.covered) > 0 }
 // index already tracks.
 func matchDedup(index map[string]string, keys map[string]bool) dedupOverlap {
 	var ov dedupOverlap
+	total := 0
 	for k := range keys {
+		if isProvenanceTerm(k) {
+			continue
+		}
+		total++
 		if _, ok := index[k]; ok {
 			ov.covered = append(ov.covered, k)
 		}
@@ -292,7 +319,7 @@ func matchDedup(index map[string]string, keys map[string]bool) dedupOverlap {
 			ov.refs = append(ov.refs, ref)
 		}
 	}
-	ov.full = len(keys) > 0 && len(ov.covered) == len(keys)
+	ov.full = total > 0 && len(ov.covered) == total
 	return ov
 }
 

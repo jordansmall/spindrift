@@ -83,14 +83,20 @@ func AmbiguousLabelNames() []string {
 	return []string{"agent-ambiguous-spec"}
 }
 
-// ButlerLabelNames returns the two fixed butler-tier label names, checked
+// TuningFindingLabel is the provenance label on a tuning Chore finding
+// (ADR 0062); settle holds the merge of a PR closing an issue wearing it.
+// A test pins it to a ButlerLabelNames entry.
+const TuningFindingLabel = "agent-tuning-finding"
+
+// ButlerLabelNames returns the three fixed butler-tier label names, checked
 // advisory the same way agent-research-finding is: the butler kind carries no
 // lifecycle labels of its own (claims live in the Ledger), so these are its
 // only doctor-visible labels. agent-butler-finding (ADR 0056) marks every
 // Chore finding the host files; agent-butler-patch (ADR 0057) joins it on a
-// finding the host lands as a patch PR.
+// finding the host lands as a patch PR; agent-tuning-finding (ADR 0062)
+// marks a tuning Chore finding, whose closing PR merges by hand.
 func ButlerLabelNames() []string {
-	return []string{"agent-butler-finding", "agent-butler-patch"}
+	return []string{"agent-butler-finding", "agent-butler-patch", "agent-tuning-finding"}
 }
 
 // labelTier is one optional label family; each name is advisory unless

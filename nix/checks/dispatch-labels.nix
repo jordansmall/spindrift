@@ -175,6 +175,7 @@ let
       ++ labels.reviewFinding
       ++ labels.butlerFinding
       ++ labels.butlerPatch
+      ++ labels.tuningFinding
     )
     ++ labels.triggerOnly;
   # The surfaces that write or create a label literal outside the
@@ -345,9 +346,9 @@ let
   # AmbiguousLabelNames() and ButlerLabelNames() (ADR 0056) both share the
   # shape — so it cannot cross-match ResearchLabelNames()'s different
   # `append(names, "...")` shape. Every literal in each span is extracted
-  # (ButlerLabelNames() lists two); all are registered (labels.ambiguous,
-  # labels.butlerFinding, labels.butlerPatch). A non-literal item in a span
-  # empties the whole result.
+  # (ButlerLabelNames() lists three); all are registered (labels.ambiguous,
+  # labels.butlerFinding, labels.butlerPatch, labels.tuningFinding). A
+  # non-literal item in a span empties the whole result.
   extractReturnStringSliceLabels = labelLiteralsInSpanAfterMarker ''return []string{"'';
   # extractLabelCreateTokens and extractNameFieldTokens scan line by line, so a
   # shell `\`-continued `gh label create` would leave the marker and its
@@ -794,23 +795,25 @@ mapAttrs (
       });
     in
     # The shared `return []string{"` marker also matches ButlerLabelNames()'s
-    # untouched "agent-butler-finding" and "agent-butler-patch" literals (ADRs
-    # 0056, 0057), so the doctored source yields all three, in file order.
+    # untouched "agent-butler-finding", "agent-butler-patch" and
+    # "agent-tuning-finding" literals (ADRs 0056, 0057, 0062), so the doctored
+    # source yields all four, in file order.
     assert assertMsg
       (
         extractedLabels == [
           "agent-unregistered-label"
           "agent-butler-finding"
           "agent-butler-patch"
+          "agent-tuning-finding"
         ]
       )
-      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractReturnStringSliceLabels to find [ \"agent-unregistered-label\" \"agent-butler-finding\" \"agent-butler-patch\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+      "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected extractReturnStringSliceLabels to find [ \"agent-unregistered-label\" \"agent-butler-finding\" \"agent-butler-patch\" \"agent-tuning-finding\" ] on the doctored AmbiguousLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-ambiguous-label-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with AmbiguousLabelNames()'s agent-ambiguous-spec literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-ambiguous-label-drift-regression" { }
       "touch $out";
 
-  # ButlerLabelNames() returns two literals in one span; the extractor must
+  # ButlerLabelNames() returns several literals in one span; the extractor must
   # see the second ("agent-butler-patch"), not just the first (issue #4897).
   label-registry-covers-harness-writes-butler-patch-drift-regression =
     let
@@ -835,9 +838,10 @@ mapAttrs (
           "agent-ambiguous-spec"
           "agent-butler-finding"
           "agent-unregistered-label"
+          "agent-tuning-finding"
         ]
       )
-      "label-registry-covers-harness-writes-butler-patch-drift-regression: expected extractReturnStringSliceLabels to find [ \"agent-ambiguous-spec\" \"agent-butler-finding\" \"agent-unregistered-label\" ] on the doctored ButlerLabelNames() literal, but got: ${concatStringsSep ", " extractedLabels}";
+      "label-registry-covers-harness-writes-butler-patch-drift-regression: expected extractReturnStringSliceLabels to find [ \"agent-ambiguous-spec\" \"agent-butler-finding\" \"agent-unregistered-label\" \"agent-tuning-finding\" ] on the doctored ButlerLabelNames() literal, but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
       "label-registry-covers-harness-writes-butler-patch-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ButlerLabelNames()'s agent-butler-patch literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-butler-patch-drift-regression" { }

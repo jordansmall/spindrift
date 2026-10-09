@@ -172,6 +172,18 @@ in
     }
   ];
 
+  # Tuning Chore finding provenance (ADR 0062): a PR closing an issue with this
+  # label merges by hand. Doctor-visible and advisory like butlerFinding. Its
+  # color must stay distinct from every other TriageLabelMeta color.
+  tuningFinding = [
+    {
+      role = "TuningFinding";
+      name = "agent-tuning-finding";
+      color = "1d76db";
+      description = "Filed from a tuning Chore finding; a PR closing it merges by hand (ADR 0062)";
+    }
+  ];
+
   # A local-only frontmatter marker, never a real created GitHub/Forgejo label:
   # forge.DispatchLabels.AllLabels() (cmd/launcher/internal/forge/dispatch.go)
   # excludes it, and the Go renderer must not emit it into TriageLabelMeta or

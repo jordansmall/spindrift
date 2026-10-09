@@ -895,7 +895,9 @@ rec {
         + "\n"
         + concatStrings (map mapEntryLit labels.butlerFinding)
         + "\n"
-        + concatStrings (map mapEntryLit labels.butlerPatch);
+        + concatStrings (map mapEntryLit labels.butlerPatch)
+        + "\n"
+        + concatStrings (map mapEntryLit labels.tuningFinding);
       findingTypeEntries = concatStrings (map mapEntryLit labels.findingType);
       reviewFindingEntries = concatStrings (map mapEntryLit labels.reviewFinding);
     in
