@@ -508,6 +508,17 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 
 	var written []string
 	for _, f := range render(a) {
+		outcome, err := preserveExisting(dir, f, w)
+		if err != nil {
+			return err
+		}
+		switch outcome {
+		case mergedExisting:
+			written = append(written, f.path+" (merged)")
+			continue
+		case keptExisting:
+			continue
+		}
 		if err := os.WriteFile(filepath.Join(dir, f.path), []byte(f.content), f.mode); err != nil {
 			return fmt.Errorf("write %s: %w", f.path, err)
 		}
@@ -566,6 +577,116 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	fmt.Fprintln(w, "\nNext: run `spindrift dispatch`.")
 
 	return nil
+}
+
+// existingOutcome is what preserveExisting did with a scaffold file.
+type existingOutcome int
+
+const (
+	writeFresh     existingOutcome = iota // no existing file to protect; write normally
+	mergedExisting                        // .gitignore was appended to
+	keptExisting                          // existing file left alone
+)
+
+// preserveExisting applies the existing-file policy for the two shared dotfiles
+// the operator may already own.
+func preserveExisting(dir string, f scaffoldFile, w io.Writer) (existingOutcome, error) {
+	if f.path != ".gitignore" && f.path != ".envrc" {
+		return writeFresh, nil
+	}
+	path := filepath.Join(dir, f.path)
+	existing, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return writeFresh, nil
+	}
+	if err != nil {
+		return writeFresh, fmt.Errorf("read %s: %w", f.path, err)
+	}
+	if f.path == ".envrc" {
+		hint := ""
+		if !hasUseFlake(string(existing)) {
+			hint = " — add `use flake` so direnv loads the dev shell"
+		}
+		fmt.Fprintf(w, "kept: .envrc (existing)%s\n", hint)
+		return keptExisting, nil
+	}
+	// Merged rather than refused: this file is what keeps the 0600
+	// harness.env secrets out of git, and refusing would push operators
+	// toward --force.
+	suffix := mergeGitignore(string(existing))
+	if suffix == "" {
+		fmt.Fprintln(w, "kept: .gitignore (already has the spindrift entries)")
+		return keptExisting, nil
+	}
+	// O_APPEND, not a rewrite: a failed write can never truncate the
+	// operator's own entries.
+	af, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, f.mode)
+	if err != nil {
+		return writeFresh, fmt.Errorf("write %s: %w", f.path, err)
+	}
+	if _, err := af.WriteString(suffix); err != nil {
+		_ = af.Close()
+		return writeFresh, fmt.Errorf("write %s: %w", f.path, err)
+	}
+	if err := af.Close(); err != nil {
+		return writeFresh, fmt.Errorf("write %s: %w", f.path, err)
+	}
+	fmt.Fprintln(w, "merged: .gitignore")
+	return mergedExisting, nil
+}
+
+func hasUseFlake(envrc string) bool {
+	for _, line := range strings.Split(envrc, "\n") {
+		if f := strings.Fields(line); len(f) >= 2 && f[0] == "use" && f[1] == "flake" {
+			return true
+		}
+	}
+	return false
+}
+
+// mergeGitignore returns the text to append to existing so every
+// quickstartGitignore entry is ignored, or "" when none is missing. Presence
+// follows git's matching: leading whitespace is literal, trailing whitespace
+// is not, and for a given pattern the last of "X" / "!X" wins. The block uses
+// CRLF when existing does.
+func mergeGitignore(existing string) string {
+	have := map[string]bool{}
+	for _, line := range strings.Split(existing, "\n") {
+		line = strings.TrimRight(line, " \t\r")
+		if neg, ok := strings.CutPrefix(line, "!"); ok {
+			have[neg] = false
+		} else {
+			have[line] = true
+		}
+	}
+	var missing []string
+	for _, line := range strings.Split(quickstartGitignore, "\n") {
+		t := strings.TrimSpace(line)
+		if t == "" || strings.HasPrefix(t, "#") || have[t] {
+			continue
+		}
+		have[t] = true
+		missing = append(missing, t)
+	}
+	if len(missing) == 0 {
+		return ""
+	}
+	nl := "\n"
+	if strings.Contains(existing, "\r\n") {
+		nl = "\r\n"
+	}
+	var b strings.Builder
+	if existing != "" {
+		if !strings.HasSuffix(existing, "\n") {
+			b.WriteString(nl)
+		}
+		b.WriteString(nl)
+	}
+	b.WriteString("# spindrift" + nl)
+	for _, m := range missing {
+		b.WriteString(m + nl)
+	}
+	return b.String()
 }
 
 // acquireGHToken reuses an ambient GH_TOKEN without prompting, otherwise it

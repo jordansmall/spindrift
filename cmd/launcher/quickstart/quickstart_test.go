@@ -3170,3 +3170,181 @@ func TestRunQuickstart_ForgejoTokenAcquisitionFailures_AbortWithActionableGuidan
 		})
 	}
 }
+
+func runQuickstartSeeded(t *testing.T, seed map[string]string, force bool) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	for name, content := range seed {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com", "ghp_faketoken",
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	if err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, force); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+	return dir, out.String()
+}
+
+func TestRunQuickstart_ExistingGitignoreAndEnvrc_Preserved(t *testing.T) {
+	for _, force := range []bool{false, true} {
+		t.Run(fmt.Sprintf("force=%v", force), func(t *testing.T) {
+			const gi, rc = "node_modules/\n.env\n", "use nix\nexport FOO=1\n"
+			dir, out := runQuickstartSeeded(t, map[string]string{".gitignore": gi, ".envrc": rc}, force)
+
+			got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+			if err != nil {
+				t.Fatalf("read .gitignore: %v", err)
+			}
+			if !strings.HasPrefix(string(got), gi) {
+				t.Errorf(".gitignore lost its original bytes, got:\n%s", got)
+			}
+			if !strings.Contains("\n"+string(got), "\nharness.env\n") {
+				t.Errorf(".gitignore missing harness.env line, got:\n%s", got)
+			}
+			gotRC, err := os.ReadFile(filepath.Join(dir, ".envrc"))
+			if err != nil {
+				t.Fatalf("read .envrc: %v", err)
+			}
+			if string(gotRC) != rc {
+				t.Errorf(".envrc changed to %q", gotRC)
+			}
+			baks, err := filepath.Glob(filepath.Join(dir, "*.bak*"))
+			if err != nil {
+				t.Fatalf("glob backups: %v", err)
+			}
+			for _, b := range baks {
+				if strings.Contains(filepath.Base(b), "gitignore") || strings.Contains(filepath.Base(b), "envrc") {
+					t.Errorf("unexpected backup %s", b)
+				}
+			}
+			for _, want := range []string{"merged: .gitignore", "kept: .envrc (existing)", "use flake", "  .gitignore (merged)\n"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("transcript missing %q, got:\n%s", want, out)
+				}
+			}
+			if strings.Contains(out, "  .gitignore\n") {
+				t.Errorf("merged .gitignore listed as a fresh write:\n%s", out)
+			}
+			if strings.Contains(out, "  .envrc\n") {
+				t.Errorf("kept .envrc listed as written:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestRunQuickstart_ExistingEnvrcWithUseFlake_NoHint(t *testing.T) {
+	_, out := runQuickstartSeeded(t, map[string]string{".envrc": "use flake\n"}, false)
+	if !strings.Contains(out, "kept: .envrc (existing)\n") {
+		t.Errorf("expected plain kept line, got:\n%s", out)
+	}
+}
+
+func TestRunQuickstart_GitignoreAlreadyComplete_Untouched(t *testing.T) {
+	dir, out := runQuickstartSeeded(t, map[string]string{".gitignore": quickstartGitignore}, false)
+	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if string(got) != quickstartGitignore {
+		t.Errorf(".gitignore changed:\n%s", got)
+	}
+	if !strings.Contains(out, "kept: .gitignore (already has the spindrift entries)") {
+		t.Errorf("expected kept line, got:\n%s", out)
+	}
+	if strings.Contains(out, "  .gitignore\n") || strings.Contains(out, "  .gitignore (merged)\n") {
+		t.Errorf("untouched .gitignore listed as written:\n%s", out)
+	}
+}
+
+func TestRunQuickstart_EmptyGitignore_GetsBlockWithoutLeadingBlankLine(t *testing.T) {
+	dir, _ := runQuickstartSeeded(t, map[string]string{".gitignore": ""}, false)
+	got, err := os.ReadFile(filepath.Join(dir, ".gitignore"))
+	if err != nil {
+		t.Fatalf("read .gitignore: %v", err)
+	}
+	if !strings.HasPrefix(string(got), "# spindrift\n") || !strings.Contains(string(got), "\nharness.env\n") {
+		t.Errorf("unexpected .gitignore, got:\n%s", got)
+	}
+}
+
+func TestRunQuickstart_GitignoreUnreadable_Errors(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, ".gitignore"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift", "podman", "Ada Lovelace", "ada@example.com", "ghp_faketoken",
+	}, "\n") + "\n")
+	env := fakeEnvironment{env: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-oauth-faketoken"}, runtimes: map[string]bool{"podman": true}}
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, stdin, true, false)
+	if err == nil || !strings.Contains(err.Error(), ".gitignore") {
+		t.Fatalf("expected an error naming .gitignore, got: %v", err)
+	}
+}
+
+func TestMergeGitignore(t *testing.T) {
+	const existing = "harness.env\n.direnv/"
+	suffix := mergeGitignore(existing)
+	if suffix == "" {
+		t.Fatal("expected a suffix")
+	}
+	merged := existing + suffix
+	for _, l := range []string{"harness.env", ".direnv/"} {
+		if n := strings.Count("\n"+merged+"\n", "\n"+l+"\n"); n != 1 {
+			t.Errorf("%q appears %d times, got:\n%s", l, n, merged)
+		}
+	}
+	if !strings.HasPrefix(merged, "harness.env\n.direnv/\n\n# spindrift\n") {
+		t.Errorf("unexpected join, got:\n%s", merged)
+	}
+	if !strings.Contains(merged, "flake.nix.bak*") {
+		t.Errorf("missing appended entry, got:\n%s", merged)
+	}
+	if again := mergeGitignore(merged); again != "" {
+		t.Errorf("merge not idempotent, got suffix:\n%s", again)
+	}
+	if got := mergeGitignore(quickstartGitignore); got != "" {
+		t.Errorf("full gitignore should need no suffix, got:\n%s", got)
+	}
+}
+
+func TestMergeGitignore_LeadingWhitespaceIsLiteral(t *testing.T) {
+	// git treats the leading space as part of the pattern, so " harness.env"
+	// does not ignore harness.env.
+	suffix := mergeGitignore(" harness.env\n")
+	if !strings.Contains("\n"+suffix, "\nharness.env\n") {
+		t.Errorf("harness.env not appended, got:\n%s", suffix)
+	}
+	if got := mergeGitignore(strings.Replace(quickstartGitignore, "harness.env\n", "harness.env  \n", 1)); got != "" {
+		t.Errorf("trailing whitespace should be ignored, got suffix:\n%s", got)
+	}
+}
+
+func TestMergeGitignore_NegationLastMatchWins(t *testing.T) {
+	suffix := mergeGitignore("harness.env\n!harness.env\n")
+	if !strings.Contains("\n"+suffix, "\nharness.env\n") {
+		t.Errorf("negated harness.env not re-appended, got:\n%s", suffix)
+	}
+	if strings.Contains("\n"+mergeGitignore("!harness.env\nharness.env\n"), "\nharness.env\n") {
+		t.Errorf("later harness.env should count as present")
+	}
+}
+
+func TestMergeGitignore_CRLFKeepsLineEndings(t *testing.T) {
+	suffix := mergeGitignore("node_modules/\r\n")
+	if !strings.HasPrefix(suffix, "\r\n# spindrift\r\n") {
+		t.Errorf("unexpected CRLF prefix, got %q", suffix)
+	}
+	if strings.Contains(strings.ReplaceAll(suffix, "\r\n", ""), "\n") {
+		t.Errorf("bare LF in CRLF suffix: %q", suffix)
+	}
+	if again := mergeGitignore("node_modules/\r\n" + suffix); again != "" {
+		t.Errorf("CRLF merge not idempotent, got %q", again)
+	}
+}
