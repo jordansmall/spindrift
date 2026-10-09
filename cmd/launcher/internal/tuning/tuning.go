@@ -8,6 +8,16 @@
 //
 //	summary:<metric>          e.g. summary:usd-per-record
 //	role:<role>:<metric>      e.g. role:implement:avg-usd
+//	<dim>:<value>:<metric>    e.g. revision:abc123:usd-per-record
+//
+// <dim> is revision, model, or prompt:<role> (so a prompt anchor carries a
+// second colon-joined name before its value). A value is sanitised to letters,
+// digits and . _ + - so it cannot break a table row or the anchor, and
+// suffixed _2, _3, ... if two values collapse to one. A split dimension is
+// shown only where the window and baseline hold more than one value of it.
+//
+// Quality rows (reverted, churn) join the summary, each role and each split
+// value; their n counts only the Records that have matured.
 //
 // Each row also carries n, the window's sample size for that row; a row with
 // n below the floor is marked thin. The output is not fenced: the prompt
@@ -83,7 +93,7 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, minSa
 		start = "(start)"
 	}
 	wRoles, wPasses, wUSD := recordstats.AggregateRoles(window)
-	bRoles, bPasses, bUSD := recordstats.AggregateRoles(baseline)
+	bRoles, bPasses, _ := recordstats.AggregateRoles(baseline)
 
 	var b strings.Builder
 	b.WriteString("# Tuning digest\n\n")
@@ -100,22 +110,35 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, minSa
 	}
 
 	b.WriteString("\n## Summary\n\n")
-	writeTable(&b, summaryRows(window, baseline, wPasses, bPasses, wUSD, bUSD), minSample)
+	writeTable(&b, groupRows("summary:", "", window, baseline), minSample)
 
 	b.WriteString("\n## Roles\n\n")
-	writeTable(&b, roleRows(wRoles, bRoles, len(window), len(baseline)), minSample)
+	writeTable(&b, roleRows(wRoles, bRoles, window, baseline), minSample)
+
+	if splits := splitSections(window, baseline); len(splits) > 0 {
+		b.WriteString("\n## Splits\n")
+		for _, s := range splits {
+			fmt.Fprintf(&b, "\n### %s\n\n", s.name)
+			writeTable(&b, s.rows, minSample)
+		}
+	}
 	d.Text = b.String()
 	return d
 }
 
 func orNone(s string) string {
 	if s == "" {
-		return "(none)"
+		return recordstats.None
 	}
 	return s
 }
 
-func summaryRows(window, baseline []dispatchrecord.Record, wPasses, bPasses int, wUSD, bUSD float64) []row {
+// groupRows builds the per-group figures for the Records of one group (the
+// whole window, or one value of a split) beside the same group's baseline
+// Records. tag distinguishes the group in each Metric cell.
+func groupRows(prefix, tag string, window, baseline []dispatchrecord.Record) []row {
+	_, wPasses, wUSD := recordstats.AggregateRoles(window)
+	_, bPasses, bUSD := recordstats.AggregateRoles(baseline)
 	perRecord := func(rs []dispatchrecord.Record, total float64) metric {
 		if len(rs) == 0 {
 			return metric{}
@@ -141,21 +164,42 @@ func summaryRows(window, baseline []dispatchrecord.Record, wPasses, bPasses int,
 	}
 	wWork, bWork := workOnly(window), workOnly(baseline)
 	n := len(window)
+	return append([]row{
+		{prefix + "usd-per-record", "USD per Record" + tag, n, perRecord(window, wUSD), perRecord(baseline, bUSD), usd, signedUSD},
+		{prefix + "passes-per-record", "Passes per Record" + tag, n, perRecord(window, float64(wPasses)), perRecord(baseline, float64(bPasses)), num, signedNum},
+		{prefix + "landed-share", "Landed share of work Records" + tag, len(wWork), landed(wWork), landed(bWork), pct, signedPP},
+	}, qualityRows(prefix, "Reverted share of merged work"+tag, "Mean 14-day churn"+tag, window, baseline)...)
+}
+
+// qualityRows are the reverted% and churn% rows of a group of Records. Both are
+// filled in only once a Record matures, so each row's n counts the Records
+// that carry the figure, not the group, and an immature group renders dashes.
+func qualityRows(prefix, revertedLabel, churnLabel string, window, baseline []dispatchrecord.Record) []row {
+	figure := func(f func([]dispatchrecord.Record) (float64, int), rs []dispatchrecord.Record) (metric, int) {
+		v, filled := f(rs)
+		return metric{v, filled > 0}, filled
+	}
+	wRev, wRevN := figure(recordstats.RevertedPercent, window)
+	bRev, _ := figure(recordstats.RevertedPercent, baseline)
+	wChurn, wChurnN := figure(recordstats.MeanChurnPercent, window)
+	bChurn, _ := figure(recordstats.MeanChurnPercent, baseline)
 	return []row{
-		{"summary:usd-per-record", "USD per Record", n, perRecord(window, wUSD), perRecord(baseline, bUSD), usd, signedUSD},
-		{"summary:passes-per-record", "Passes per Record", n, perRecord(window, float64(wPasses)), perRecord(baseline, float64(bPasses)), num, signedNum},
-		{"summary:landed-share", "Landed share of work Records", len(wWork), landed(wWork), landed(bWork), pct, signedPP},
+		{prefix + "reverted", revertedLabel, wRevN, wRev, bRev, pct, signedPP},
+		{prefix + "churn", churnLabel, wChurnN, wChurn, bChurn, pct, signedPP},
 	}
 }
 
 // roleRows builds the per-role table. Every Δ compares like with like: the
 // window and the baseline differ in size, so passes are normalised per Record
-// (winRecords, baseRecords) rather than compared as raw counts.
-func roleRows(win, base []recordstats.RoleRow, winRecords, baseRecords int) []row {
+// rather than compared as raw counts. A role's reverted and churn figures are
+// read over the Records that ran the role.
+func roleRows(win, base []recordstats.RoleRow, window, baseline []dispatchrecord.Record) []row {
+	winRecords, baseRecords := len(window), len(baseline)
 	byRole := map[string]recordstats.RoleRow{}
 	for _, r := range base {
 		byRole[r.Role] = r
 	}
+	wHolding, bHolding := recordsByRole(window), recordsByRole(baseline)
 	perPass := func(r recordstats.RoleRow, ok bool, f func(recordstats.RoleRow) float64) metric {
 		if !ok || r.Passes == 0 {
 			return metric{}
@@ -174,19 +218,134 @@ func roleRows(win, base []recordstats.RoleRow, winRecords, baseRecords int) []ro
 		return float64(r.DurationMs) / float64(time.Minute.Milliseconds())
 	}
 	var out []row
+	taken := map[string]bool{}
 	for _, w := range win { // already in pipeline order
 		bl, has := byRole[w.Role]
-		anchor := "role:" + w.Role + ":"
+		role := unique(safe(w.Role), taken)
+		anchor := "role:" + role + ":"
 		out = append(out,
-			row{anchor + "passes-per-record", w.Role + " passes per Record", winRecords, passesPerRecord(w, winRecords), passesPerRecord(bl, baseRecords), num, signedNum},
-			row{anchor + "avg-usd", w.Role + " avg USD per pass", w.Passes, perPass(w, true, usdOf), perPass(bl, has, usdOf), usd, signedUSD},
-			row{anchor + "avg-min", w.Role + " avg minutes per pass", w.Passes, perPass(w, true, minOf), perPass(bl, has, minOf), num, signedNum},
+			row{anchor + "passes-per-record", role + " passes per Record", winRecords, passesPerRecord(w, winRecords), passesPerRecord(bl, baseRecords), num, signedNum},
+			row{anchor + "avg-usd", role + " avg USD per pass", w.Passes, perPass(w, true, usdOf), perPass(bl, has, usdOf), usd, signedUSD},
+			row{anchor + "avg-min", role + " avg minutes per pass", w.Passes, perPass(w, true, minOf), perPass(bl, has, minOf), num, signedNum},
 		)
 		if wp, ok := w.BlockPercent(); ok {
 			bp, bok := bl.BlockPercent()
-			out = append(out, row{anchor + "block-rate", w.Role + " block rate", w.Verdicts, metric{wp, true}, metric{bp, bok && has}, pct, signedPP})
+			out = append(out, row{anchor + "block-rate", role + " block rate", w.Verdicts, metric{wp, true}, metric{bp, bok && has}, pct, signedPP})
+		}
+		out = append(out, qualityRows(anchor, role+" reverted share", role+" mean 14-day churn", wHolding[w.Role], bHolding[w.Role])...)
+	}
+	return out
+}
+
+// recordsByRole maps each role to the Records holding one of its passes.
+func recordsByRole(records []dispatchrecord.Record) map[string][]dispatchrecord.Record {
+	out := map[string][]dispatchrecord.Record{}
+	for _, g := range recordstats.GroupPasses(records, recordstats.RoleKey) {
+		out[g.Key] = g.Records
+	}
+	return out
+}
+
+type splitSection struct {
+	name string
+	rows []row
+}
+
+// splitSections compares the window and baseline by revision, model, and each
+// role's prompt hash. A dimension is shown only where the two between them
+// hold more than one value of it; Records the dimension does not label are not
+// a value, since "unknown" cannot be told apart from a change.
+func splitSections(window, baseline []dispatchrecord.Record) []splitSection {
+	byRecord := func(key func(dispatchrecord.Record) string) func([]dispatchrecord.Record) []recordstats.Group {
+		return func(rs []dispatchrecord.Record) []recordstats.Group { return recordstats.GroupRecords(rs, key) }
+	}
+	type dimension struct {
+		name  string
+		group func([]dispatchrecord.Record) []recordstats.Group
+	}
+	dims := []dimension{
+		{"revision", byRecord(recordstats.RevisionKey)},
+		{"model", func(rs []dispatchrecord.Record) []recordstats.Group {
+			return recordstats.GroupPasses(rs, recordstats.ModelKey)
+		}},
+	}
+	for _, role := range recordstats.PromptRoles() {
+		dims = append(dims, dimension{"prompt:" + role, byRecord(recordstats.PromptKey(role))})
+	}
+
+	var out []splitSection
+	for _, dim := range dims {
+		wg, bg := labelled(dim.group(window)), labelled(dim.group(baseline))
+		var values []string
+		for _, g := range wg {
+			values = append(values, g.Key)
+		}
+		for _, g := range bg {
+			if _, in := wg.find(g.Key); !in {
+				values = append(values, g.Key)
+			}
+		}
+		if len(values) < 2 {
+			continue
+		}
+		taken := map[string]bool{}
+		var rows []row
+		for _, v := range values {
+			wr, _ := wg.find(v)
+			br, _ := bg.find(v)
+			sv := unique(safe(v), taken)
+			rows = append(rows, groupRows(dim.name+":"+sv+":", " ("+sv+")", wr, br)...)
+		}
+		out = append(out, splitSection{dim.name, rows})
+	}
+	return out
+}
+
+type labelledGroups []recordstats.Group
+
+// labelled drops the (none) group: Records the dimension leaves unlabelled.
+func labelled(groups []recordstats.Group) labelledGroups {
+	var out labelledGroups
+	for _, g := range groups {
+		if g.Key != recordstats.None {
+			out = append(out, g)
 		}
 	}
+	return out
+}
+
+func (gs labelledGroups) find(key string) ([]dispatchrecord.Record, bool) {
+	for _, g := range gs {
+		if g.Key == key {
+			return g.Records, true
+		}
+	}
+	return nil, false
+}
+
+// safe maps a stamped value onto the anchor alphabet. Anchors and Metric
+// cells are read back by a later digest and cited verbatim, and the values
+// come from Records, so anything outside letters, digits and . _ + - (a pipe,
+// a backtick, whitespace, the anchor separator) becomes "_".
+func safe(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '+', r == '-':
+			return r
+		}
+		return '_'
+	}, s)
+}
+
+// unique returns s, suffixed until it is not in taken, and records it. Two
+// distinct values can collapse to one under safe; each must keep its own
+// anchor.
+func unique(s string, taken map[string]bool) string {
+	out := s
+	for i := 2; taken[out]; i++ {
+		out = fmt.Sprintf("%s_%d", s, i)
+	}
+	taken[out] = true
 	return out
 }
 
