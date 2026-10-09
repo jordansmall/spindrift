@@ -547,8 +547,9 @@ in
       '';
 
   # Skills configured at build time must land at the fixed /agent/skills path
-  # (issue #2489) alongside the harness-owned skills; agent/entrypoint.sh
-  # copies from there into the Driver's runtime skills dir at box startup.
+  # (issue #2489) alongside the harness-owned skills; the box program
+  # (cmd/launcher/box) copies from there into the Driver's runtime skills dir
+  # at startup.
   skills-baked-into-image = pkgs.runCommand "skills-baked-into-image" { } ''
     grep -q 'BAKED-SKILL-MARKER' \
       ${skillsHarness.internals.agentFiles}/agent/skills/baked-skill/SKILL.md
