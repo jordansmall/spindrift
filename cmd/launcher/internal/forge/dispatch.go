@@ -135,13 +135,13 @@ func (d DispatchLabels) AlreadyClaimed(from, to DispatchState, labels []string) 
 	return slices.Contains(labels, d.InProgress)
 }
 
-// TransitionRemoveLabels returns the labels a TransitionState(from, to)
+// transitionRemoveLabels returns the labels a TransitionState(from, to)
 // call removes: from's label, plus on a claim (to == InProgress) any stale
 // Complete/Failed/Ambiguous label left by a prior run, matching the
 // claim-remove-labels set in .github/workflows/agent-dispatch.yml (#1985),
 // and on a landing (to == Complete) a stale Failed, since a local
 // `spindrift recover` never re-claims an issue parked agent-failed (#4651).
-func (d DispatchLabels) TransitionRemoveLabels(from, to DispatchState) []string {
+func (d DispatchLabels) transitionRemoveLabels(from, to DispatchState) []string {
 	seen := map[string]bool{}
 	var out []string
 	add := func(l string) {
@@ -158,6 +158,36 @@ func (d DispatchLabels) TransitionRemoveLabels(from, to DispatchState) []string 
 	}
 	if to == Complete {
 		add(d.Failed)
+	}
+	return out
+}
+
+// SettledLabels returns d's settled labels followed by every non-empty verdict
+// label in v's entry order, deduplicated: the terminals a settle may write,
+// all of which a claim strips. A research settle writes its verdict label, not
+// d.Complete.
+func SettledLabels(d DispatchLabels, v VerdictLabels) []string {
+	out := d.SettledLabels()
+	for _, e := range v.entries {
+		if e.Label != "" && !slices.Contains(out, e.Label) {
+			out = append(out, e.Label)
+		}
+	}
+	return out
+}
+
+// TransitionRemoveLabels is d.transitionRemoveLabels plus, on a claim, every
+// verdict label in v, so a re-queued research issue sheds the prior run's
+// verdict (the CI claim's claim-remove-labels set in agent-research.yml).
+func TransitionRemoveLabels(d DispatchLabels, v VerdictLabels, from, to DispatchState) []string {
+	out := d.transitionRemoveLabels(from, to)
+	if to != InProgress {
+		return out
+	}
+	for _, l := range SettledLabels(d, v) {
+		if !slices.Contains(out, l) {
+			out = append(out, l)
+		}
 	}
 	return out
 }

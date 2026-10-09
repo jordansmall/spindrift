@@ -421,8 +421,8 @@ func appendAbsentLabels(existing, add []string) []string {
 
 // TransitionState replaces num's label set, dropping the from label and adding
 // the to label. A claim to InProgress also drops the stale terminal labels
-// DispatchLabels.TransitionRemoveLabels names, and a landing to Complete drops
-// a stale Failed (#4651).
+// forge.TransitionRemoveLabels names plus any research verdict label,
+// and a landing to Complete drops a stale Failed (#4651).
 //
 // A claim (to == InProgress) errors on forge.ErrAlreadyClaimed without
 // touching labels when num already carries InProgress (#3887). The check is
@@ -436,7 +436,7 @@ func (c *forgejoClient) TransitionState(num string, from, to forge.DispatchState
 	if c.cfg.Labels.AlreadyClaimed(from, to, iss.Labels) {
 		return fmt.Errorf("forgejo: issue %s: %w (%q)", num, forge.ErrAlreadyClaimed, c.cfg.Labels.Label(to))
 	}
-	remove := c.cfg.Labels.TransitionRemoveLabels(from, to)
+	remove := forge.TransitionRemoveLabels(c.cfg.Labels, c.cfg.VerdictLabels, from, to)
 	newLabels := make([]string, 0, len(iss.Labels))
 	for _, l := range iss.Labels {
 		if !slices.Contains(remove, l) {
