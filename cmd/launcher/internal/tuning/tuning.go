@@ -9,6 +9,9 @@
 //	summary:<metric>          e.g. summary:usd-per-record
 //	role:<role>:<metric>      e.g. role:implement:avg-usd
 //	<dim>:<value>:<metric>    e.g. revision:abc123:usd-per-record
+//	record:<id>               an Outliers row
+//	evidence:<id>:<ordinal>:verdict|dispositions
+//	                          a fenced Evidence item
 //
 // <dim> is revision, model, or prompt:<role> (so a prompt anchor carries a
 // second colon-joined name before its value). A value is sanitised to letters,
@@ -18,6 +21,11 @@
 //
 // Quality rows (reverted, churn) join the summary, each role and each split
 // value; their n counts only the Records that have matured.
+//
+// Outliers follow the tables: every failed, blocked, or ambiguous Record of
+// the window, then the OutlierTopK dearest of the rest. Evidence quotes
+// blocked review verdicts and fix dispositions, each in a promptfence block;
+// an <id> is sanitised like a value.
 //
 // Each row also carries n, the window's sample size for that row; a row with
 // n below the floor is marked thin. The output is not fenced: the prompt
@@ -122,6 +130,8 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, minSa
 			writeTable(&b, s.rows, minSample)
 		}
 	}
+	outliers(window).write(&b)
+	evidence(window).write(&b)
 	d.Text = b.String()
 	return d
 }
