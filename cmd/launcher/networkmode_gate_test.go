@@ -8,9 +8,10 @@ import (
 
 // Pins issue #2562: NETWORK_MODE is runtime-overridable but RUNNER_KIND is
 // baked at eval time, so mkHarness's networkModeCoherenceOk assert never sees
-// this pairing and bwrap.go's isolateNet fails open onto the full host network
-// namespace. The gate keys on c.runnerKind, never c.runtime (issue #2538),
-// because runnerForKind reads runnerKind to select the bwrap adapter.
+// this pairing, and bwrap would render no-host-loopback no differently from
+// the isolated-by-default NETWORK_MODE=open. The gate keys on c.runnerKind,
+// never c.runtime (issue #2538), because runnerForKind reads runnerKind to
+// select the bwrap adapter.
 func TestNetworkModeRuntimeGate_BwrapNoHostLoopbackFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"
@@ -30,7 +31,7 @@ func TestNetworkModeRuntimeGate_BwrapNoHostLoopbackFails(t *testing.T) {
 // The gate must key on c.runnerKind, not c.runtime: bootstrap_test.go pins
 // RUNNER_KIND=bwrap with RUNTIME=podman as a supported pairing, so a
 // c.runtime-keyed gate would let NETWORK_MODE=no-host-loopback through to
-// bwrap.go's fail-open isolateNet=false.
+// the bwrap adapter, which renders it identically to NETWORK_MODE=open.
 func TestNetworkModeRuntimeGate_BwrapRunnerKindWithPodmanRuntimeFails(t *testing.T) {
 	c := minimalValidConfig()
 	c.runnerKind = "bwrap"

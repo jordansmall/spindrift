@@ -1110,8 +1110,8 @@ func checkReadOnlyCapabilityGate(c config) error {
 // non-open mode beside a raw knob hits networkArg's raw-wins full egress.
 func checkNetworkModeRuntimeGate(c config) error {
 	// Keys on runnerKind, never runtime: RUNNER_KIND=bwrap/RUNTIME=podman is a
-	// supported pairing, and keying on runtime would both reject it and let it
-	// reach bwrap.go's fail-open isolateNet=false (issue #2538).
+	// supported pairing, and keying on runtime would miss that pairing and let
+	// no-host-loopback reach the bwrap adapter (issue #2538).
 	if c.runnerNetworkMode() == runner.NetworkModeNoHostLoopback && c.runnerKind == freshness.KindBwrap {
 		return newLaunchGateConfigError("NETWORK_MODE=no-host-loopback is unsupported on RUNNER_KIND=bwrap -- it has no rendering distinct from the isolated-by-default NETWORK_MODE=open; use NETWORK_MODE=open instead, or RUNNER_KIND=oci for the docker/nerdctl inert-but-correct render")
 	}
@@ -1133,7 +1133,9 @@ func checkNetworkModeRuntimeGate(c config) error {
 // checkBwrapPastaGate refuses to launch rather than silently share the host
 // network namespace when the bwrap runner needs pasta (issue #2666) and pasta
 // is not on PATH. NetworkMode "host" and "none" never invoke pasta, matching
-// bwrap.go's own isolateNet condition, so the gate is a no-op for them.
+// bwrap.go's own pastaPath condition, so the gate is a no-op for them; host
+// beside BWRAP_UNSHARE_NET would invoke pasta, but checkNetworkModeRuntimeGate
+// refuses that pairing.
 func checkBwrapPastaGate(c config) error {
 	if c.runnerKind != freshness.KindBwrap {
 		return nil
