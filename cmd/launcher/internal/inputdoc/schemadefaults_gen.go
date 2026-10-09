@@ -24,6 +24,7 @@ var schemaDefaults = map[string]string{
 	"BUTLER_PATCH_MAX_LINES":        "20",
 	"BUTLER_PATCH_PATHS":            "docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.md,!**/CONTRIBUTING.md,!**/AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**",
 	"BUTLER_PROMOTION_MAX_FILES":    "3",
+	"BUTLER_TUNING_DIGEST_BYTES":    "49152",
 	"BUTLER_TUNING_MIN_RECORDS":     "20",
 	"BUTLER_TUNING_MIN_SAMPLE":      "15",
 	"CODE_FORGE":                    "github",

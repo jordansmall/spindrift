@@ -142,6 +142,8 @@
             #     patchPaths = "docs/**,*.md,!docs/adr/**,!**/CLAUDE.md,!**/CONTEXT.md,!**/CONTRIBUTING.md,!**/AGENTS.md,!skills/**,!templates/**,!fragments/**,!.github/**";
             #     # host limit on the files (paths named by its dedup/site keys) an auto-promoted butler finding may touch; a finding over it, or naming none, is filed unlabelled even when its class is allow-listed
             #     promotionMaxFiles = 3;
+            #     # byte cap on the tuning Chore's digest (ADR 0062): over it, evidence is trimmed first and outliers second, never the aggregate tables; host-only -- the Box never sees this value
+            #     tuningDigestBytes = 49152;
             #     # fewest new settled Dispatch Records since the tuning Chore's last sweep before it is due (ADR 0062), alongside its BUTLER_EVERY interval (tuning default 24h); host-only -- the Box never sees this value
             #     tuningMinRecords = 20;
             #     # per-row sample size n under which the tuning Chore's digest marks a row thin (ADR 0062); host-only -- the Box never sees this value

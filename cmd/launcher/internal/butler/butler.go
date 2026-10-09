@@ -67,6 +67,10 @@ type Policy struct {
 	// TuningMinSample is BUTLER_TUNING_MIN_SAMPLE, the per-row sample size
 	// under which the digest marks a row thin.
 	TuningMinSample int
+	// TuningDigestBytes is BUTLER_TUNING_DIGEST_BYTES, the byte cap on the
+	// digest: over it, Evidence is trimmed first and Outliers second, never the
+	// aggregate tables.
+	TuningDigestBytes int
 }
 
 // DefaultPatchPaths is BUTLER_PATCH_PATHS' schema default (lib/env-schema.nix
@@ -315,7 +319,8 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 	var scope chore.Scope
 	var input string
 	if c.Records {
-		dg := tuning.Render(records, claim.State.Cursor, claimedAt, r.policy.TuningMinSample)
+		dg := tuning.Render(records, claim.State.Cursor, claimedAt,
+			tuning.Limits{MinSample: r.policy.TuningMinSample, MaxBytes: r.policy.TuningDigestBytes})
 		scope = chore.Scope{Head: head, NextCursor: dg.Latest}
 		input = dg.Text
 	} else {
