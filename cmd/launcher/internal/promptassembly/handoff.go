@@ -10,8 +10,8 @@ import (
 // DefaultMaxReviewRounds and DefaultMaxSlices are the orchestrator's shipped
 // --max-review-rounds / --max-slices caps (issue #2460). assemble-prompt's own
 // flags default to these values so a zero Handoff.Caps cannot silently turn
-// both caps off (issue #2975). orchestrator/caps.go asserts the same constants
-// in TestValidateCapsAcceptsShippedDefaults, so the two cannot drift.
+// both caps off (issue #2975). orchestrator/caps_test.go asserts the same
+// constants in TestValidateCapsAcceptsShippedDefaults, so the two cannot drift.
 const (
 	DefaultMaxReviewRounds = 3
 	DefaultMaxSlices       = 9
