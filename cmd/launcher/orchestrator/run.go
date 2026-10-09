@@ -74,7 +74,7 @@ type config struct {
 	maxBudgetUSD float64
 	// reviewPromptFile is the code-owned review pass's prompt file (issue
 	// #2037), scanned by scanReviewLog rather than scanPassLog. Empty keeps
-	// run's pre-#2037 single-loop behavior, so entrypoint.sh sets it only on
+	// run's pre-#2037 single-loop behavior, so the handoff carries it only on
 	// the ORCHESTRATOR-on work-dispatch path (ADR 0035's master switch).
 	reviewPromptFile string
 	// topLevelRole is forwarded as driver-exec's --top-level-role (issue
@@ -661,8 +661,8 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 
 	// A BLOCK here contradicts the land pass's claimed status=ready, so append
 	// a corrective status=blocked result event to the land pass's log, where
-	// the entrypoint's last-match-wins scan finds it after the ready line.
-	// Not echoed to stdout: the entrypoint prints the extracted line itself.
+	// box's last-match-wins scan (outcome.ExtractOutcomeLine) finds it after the
+	// ready line. Not echoed to stdout: box prints the extracted line itself.
 	// Issue and Landing carry over verbatim.
 	if passmachine.Verdict(deltaVerdict) == passmachine.VerdictBlock {
 		blocked := landOutcome
@@ -779,8 +779,8 @@ const deltaReviewNoteMaxRunes = 1500
 
 // deltaReviewBlockNote turns the delta-review pass's multi-line findings into
 // the single line outcome.Outcome.Note can carry. strings.Fields collapses
-// every whitespace run so an embedded newline can never split the line the
-// entrypoint's last-match-wins scan depends on, and truncation counts runes,
+// every whitespace run so an embedded newline can never split the line that
+// box's last-match-wins scan depends on, and truncation counts runes,
 // never bytes, so it cannot split a multi-byte rune.
 func deltaReviewBlockNote(findings string) string {
 	prefix := "bounded delta review blocked the landing"

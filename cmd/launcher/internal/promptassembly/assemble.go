@@ -135,7 +135,7 @@ func checkCoveredCell(e Env) error {
 
 	// A kind with its own base prompt but no SelfContainedBase has nothing to
 	// render under SelfContained=true; main.go's validate() rejects this
-	// combination on the CLI path, but the entrypoint env path calls Assemble
+	// combination on the CLI path, but the box env path calls Assemble
 	// directly, so it needs its own gate here too.
 	if e.SelfContained && d.Prompts.Base != "" && d.Prompts.SelfContainedBase == "" {
 		return fmt.Errorf("dispatch kind %q: self-contained not supported: %w", d.Name, ErrUnsupportedCell)

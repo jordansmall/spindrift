@@ -258,7 +258,7 @@ func (d *Dispatch) Fix(pass int, ciFailureSummary string) Disposition {
 }
 
 // ResolveConflict dispatches a conflict-resolution box against pr.
-// CONFLICT_RESOLVE_PR_URL puts the entrypoint in conflict-resolve mode: it
+// CONFLICT_RESOLVE_PR_URL puts the Box in conflict-resolve mode: it
 // resolves the rebase conflict, publishes the branch (pushed directly, else
 // bundled to the outbox for the launcher to relay, issue #1979), and exits
 // without the main agent prompt, so it needs neither retry nor driver cache.

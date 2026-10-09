@@ -1,8 +1,8 @@
 // Command orchestrator owns the implementor loop's control flow instead of
-// leaving it to entrypoint.sh (issue #1996, ADR 0007). It loops driver-exec
-// for as many passes as the implementor's review verdicts and numeric caps
-// call for (issue #1998), forwarding the shared handoff file that carries
-// every driver/model/effort/devshell/argv fact (issue #2975).
+// leaving it to the old entrypoint.sh shell loop (issue #1996, ADR 0007). It
+// loops driver-exec for as many passes as the implementor's review verdicts and
+// numeric caps call for (issue #1998), forwarding the shared handoff file that
+// carries every driver/model/effort/devshell/argv fact (issue #2975).
 package main
 
 import (

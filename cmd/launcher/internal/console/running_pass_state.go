@@ -31,8 +31,9 @@ func RunningPassState(pwd, number string) string {
 	}
 }
 
-// passManifestPath mirrors the path entrypoint.sh hands the Box orchestrator as
-// -manifest-path; this side reads whatever is there, or nothing at all.
+// passManifestPath mirrors the path box (cmd/launcher/box) hands the Box
+// orchestrator as -manifest-path; this side reads whatever is there, or
+// nothing at all.
 func passManifestPath(pwd, number string) string {
 	return filepath.Join(dispatch.OutboxDirFor(pwd, number), passmanifest.FileName)
 }
