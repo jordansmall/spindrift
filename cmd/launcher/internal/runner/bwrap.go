@@ -110,7 +110,7 @@ type bwrapAdapter struct {
 	agentEnv      string // baked nix store path for the agent env (PATH, SSL, …)
 	passwdFile    string // baked nix store path for /etc/passwd
 	groupFile     string // baked nix store path for /etc/group
-	bakedPrefetch string // baked prefetch snippet fed to the entrypoint
+	bakedPrefetch string // baked prefetch snippet handed to the Box as PREFETCH
 	// nixConfigFile is the baked store path for /etc/nix/nix.conf (ADR 0042),
 	// empty when the Consumer's nixInBox knob is off. That emptiness gates this
 	// mount and nixVarSnapshotDir's together, since nix is not on PATH either

@@ -709,9 +709,9 @@ registry = "sparse+http://127.0.0.1:%d/%s/"
 
 // cargoBareKeyPattern matches cargo/TOML's own bare-key charset. A quoted
 // [registries."..."] table name can otherwise carry arbitrary text (spaces,
-// ";", "$(...)"), and that text flows unquoted as a shell variable name into
-// the env-export file entrypoint.sh sources, so any name failing this check
-// must never reach a caller.
+// ";", "$(...)"), and that text becomes an env var name box exports and
+// driver-exec's bind-registry verb can still write into a sourceable env
+// file, so any name failing this check must never reach a caller.
 var cargoBareKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
 // CargoPlaceholderToken is the fixed, non-secret value emitted for every cargo

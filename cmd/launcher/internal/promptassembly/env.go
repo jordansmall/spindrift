@@ -7,9 +7,10 @@ package promptassembly
 
 import "spindrift.dev/launcher/internal/dispatchkind"
 
-// These are the defaults entrypoint.sh's "${VAR:-default}" expansion applies
-// when the Env field arrives empty. Issue #2533 moved every other
-// gate-family default upstream into nix, carried pre-resolved on Env.
+// These are the defaults applied when the Env field arrives empty, the
+// "${VAR:-default}" expansion entrypoint.sh applied before box took over.
+// Issue #2533 moved every other gate-family default upstream into nix,
+// carried pre-resolved on Env.
 const defaultIssueTracker = "github"
 
 // defaultDispatchKind is a var only because a const can't read
@@ -40,7 +41,7 @@ type Env struct {
 	// subagent model is configured. Assemble parses its JSON content, but the
 	// filer/worker presence facts are no longer re-derived from it: they arrive
 	// pre-resolved below (issue #2533).
-	AgentsJSONTemplate string // entrypoint.sh: $AGENTS_JSON_TEMPLATE
+	AgentsJSONTemplate string // $AGENTS_JSON_TEMPLATE
 
 	// FilerEnabled, WorkerProvisioned, and ScoutProvisioned are true when the
 	// roster nix bakes into AgentsJSONTemplate carries that entry. nix resolves
@@ -53,36 +54,37 @@ type Env struct {
 	// "github" when empty. The PR-body ticket-reference gates switch on the raw
 	// "local" comparison rather than an axis; the per-axis suffixes arrive
 	// pre-resolved below (issue #2533).
-	IssueTracker string // entrypoint.sh: $ISSUE_TRACKER
+	IssueTracker string // $ISSUE_TRACKER
 
 	// TrackerAxisRead, TrackerAxisWrite, and TrackerAxisFiler are nix's
-	// pre-resolved form of entrypoint.sh's "${ISSUE_TRACKER:-github}" case
-	// statement (issue #2533). Read is "GITHUB"/"LOCAL"/"FORGEJO"; Write is
-	// "GITHUB"/"FORGEJO", or "" when the tracker has no in-box direct-write path
-	// (local always relays instead); Filer is "GH"/"FORGEJO".
+	// pre-resolved form of the "${ISSUE_TRACKER:-github}" case statement
+	// entrypoint.sh once held (issue #2533). Read is
+	// "GITHUB"/"LOCAL"/"FORGEJO"; Write is "GITHUB"/"FORGEJO", or "" when the
+	// tracker has no in-box direct-write path (local always relays instead);
+	// Filer is "GH"/"FORGEJO".
 	TrackerAxisRead  string
 	TrackerAxisWrite string
 	TrackerAxisFiler string
 
 	// BoxWriteEnabled is the launcher's host-side resolution of
 	// BOX_FORGE_AND_ISSUE_ACCESS, forwarded only when writes are permitted.
-	BoxWriteEnabled bool // entrypoint.sh: $BOX_WRITE_ENABLED presence
+	BoxWriteEnabled bool // $BOX_WRITE_ENABLED presence
 
 	// HostMediatedRemote and OutboxRelayCapable are per-dispatch presence facts
 	// the launcher forwards: the CODE_FORGE has no writable remote at all, and
 	// its backend gets outbox-relay treatment under a read-only Box.
-	HostMediatedRemote bool // entrypoint.sh: $BOX_HOST_MEDIATED_REMOTE presence
-	OutboxRelayCapable bool // entrypoint.sh: $BOX_OUTBOX_RELAY_CAPABLE presence
+	HostMediatedRemote bool // $BOX_HOST_MEDIATED_REMOTE presence
+	OutboxRelayCapable bool // $BOX_OUTBOX_RELAY_CAPABLE presence
 
 	// LocalIssueReference is local tracker's PR-body opt-in: the body carries a
 	// non-auto-closing `Local-issue: <slug>` breadcrumb instead of no reference.
-	LocalIssueReference bool // entrypoint.sh: $LOCAL_ISSUE_REFERENCE presence
+	LocalIssueReference bool // $LOCAL_ISSUE_REFERENCE presence
 
 	// CodeForge selects the CODE_FORGE-backend gate family. The resolved suffix
 	// arrives via ForgeBackend below, but gates_access_forge.go still reads
 	// CodeForge directly when ForgeBackend is empty, which happens when an older
 	// host launcher never forwarded it (issue #2533).
-	CodeForge string // entrypoint.sh: $CODE_FORGE
+	CodeForge string // $CODE_FORGE
 
 	// ForgeBackend is nix's pre-resolved CODE_FORGE backend suffix (issue
 	// #2533): "GH" or "FORGEJO", with every value other than "forgejo"
@@ -91,64 +93,65 @@ type Env struct {
 
 	// DispatchKind, SelfContained, FixPass, and ResumeAfterHold select which
 	// prompt renders (research/fix/issue) and the session-resume mode.
-	DispatchKind    string // entrypoint.sh: $DISPATCH_KIND (default "work"; entrypoint.sh never branches on it)
-	SelfContained   bool   // entrypoint.sh: $SELF_CONTAINED == "1", read via _is_self_contained
-	FixPass         int    // entrypoint.sh: $FIX_PASS (fix-pass number; >0 selects fix-prompt.md)
-	ResumeAfterHold bool   // entrypoint.sh: $RESUME_AFTER_HOLD presence
+	DispatchKind    string // $DISPATCH_KIND (default "work")
+	SelfContained   bool   // $SELF_CONTAINED == "1"
+	FixPass         int    // $FIX_PASS (fix-pass number; >0 selects fix-prompt.md)
+	ResumeAfterHold bool   // $RESUME_AFTER_HOLD presence
 
 	// DispatchKey, DispatchKeying, DispatchAnnounceVerb are the kind's axes
-	// (issue #3996), forwarded as separate facts so the entrypoint and
-	// prompts never have to re-derive them from DispatchKind.
-	DispatchKey          string // entrypoint.sh: $DISPATCH_KEY (bare issue number, or "butler-<chore>")
-	DispatchKeying       string // entrypoint.sh: $DISPATCH_KEYING ("issue" or "chore")
-	DispatchAnnounceVerb string // entrypoint.sh: $DISPATCH_ANNOUNCE_VERB (Box start-line verb)
+	// (issue #3996), forwarded as separate facts so box and prompts never have
+	// to re-derive them from DispatchKind.
+	DispatchKey          string // $DISPATCH_KEY (bare issue number, or "butler-<chore>")
+	DispatchKeying       string // $DISPATCH_KEYING ("issue" or "chore")
+	DispatchAnnounceVerb string // $DISPATCH_ANNOUNCE_VERB (Box start-line verb)
 
 	// SignalCarrier is the BOX_SIGNAL_CARRIER knob (ADR 0052, issue #3725) as the
 	// Box sees it: "log" (also what empty means: only an older host launcher
 	// forwards nothing, issue #4376) or "socket" (the schema default). It
 	// selects which variant of each signal fragment renders (issue #3726).
-	SignalCarrier string // entrypoint.sh: $BOX_SIGNAL_CARRIER
+	SignalCarrier string // $BOX_SIGNAL_CARRIER
 
 	// PromptsDir, AgentsPromptFiles, and DriverAgentFilesDir locate the
 	// fragment/prompt files and the per-Driver agent-file rewrite target.
-	PromptsDir          string // entrypoint.sh: $PROMPTS_DIR (default "/agent/prompts"; SPINDRIFT_PROMPT_DIR override resolved before this phase)
-	AgentsPromptFiles   string // entrypoint.sh: $AGENTS_PROMPT_FILES (nix-baked agent-name -> promptFile JSON map)
-	DriverAgentFilesDir string // entrypoint.sh: $DRIVER_AGENT_FILES_DIR (opencode-style baked agent files dir; empty for claude)
+	PromptsDir          string // --prompts-dir, from $PROMPTS_DIR (default "/agent/prompts"; SPINDRIFT_PROMPT_DIR override resolved before this phase)
+	AgentsPromptFiles   string // --agents-prompt-files, from $AGENTS_PROMPT_FILES (nix-baked agent-name -> promptFile JSON map)
+	DriverAgentFilesDir string // --driver-agent-files-dir, from $DRIVER_AGENT_FILES_DIR (opencode-style baked agent files dir; empty for claude)
 
 	// Shared-block contract files injected into the rendered prompt.
-	CommsContractFile           string // entrypoint.sh: $COMMS_CONTRACT_FILE
-	CheckContractFile           string // entrypoint.sh: $CHECK_CONTRACT_FILE
-	OutcomeContractFile         string // entrypoint.sh: $OUTCOME_CONTRACT_FILE
-	ResearchOutcomeContractFile string // entrypoint.sh: $RESEARCH_OUTCOME_CONTRACT_FILE
+	CommsContractFile           string // --comms-contract-file, from $COMMS_CONTRACT_FILE
+	CheckContractFile           string // --check-contract-file, from $CHECK_CONTRACT_FILE
+	OutcomeContractFile         string // --outcome-contract-file, from $OUTCOME_CONTRACT_FILE
+	ResearchOutcomeContractFile string // --research-outcome-contract-file, from $RESEARCH_OUTCOME_CONTRACT_FILE
 
 	// SkillsFound is the comma-separated list of skill directory basenames found
 	// under DRIVER_SKILLS_DIR, pre-resolved because Gates does no I/O. It is
 	// non-empty exactly when at least one skill was baked, and it is both the
 	// SKILLS_FOUND gate's own value and skill-preamble.md's ${SKILLS_FOUND}
 	// substitution.
-	SkillsFound string // entrypoint.sh: local SKILLS_FOUND
+	SkillsFound string // ScanSkillsFound over the skills dir
 
 	// AutoFormat and AutoLint mirror lib/env-schema.nix's Consumer knobs.
-	// entrypoint.sh gates each on presence ("[ -n "${AUTO_FORMAT:-}" ]"), not a
-	// boolean parse, so a bool set only when the knob was set reproduces it.
-	AutoFormat bool // entrypoint.sh: $AUTO_FORMAT knob presence
-	AutoLint   bool // entrypoint.sh: $AUTO_LINT knob presence
+	// Each gates on presence (a non-empty env value, as entrypoint.sh's
+	// "[ -n "${AUTO_FORMAT:-}" ]" did), not a boolean parse, so a bool set only
+	// when the knob was set reproduces it.
+	AutoFormat bool // $AUTO_FORMAT knob presence
+	AutoLint   bool // $AUTO_LINT knob presence
 
 	// CIFailureSummary is the launcher-forwarded CI failure text, set only on a
 	// fix-pass Box when CI failed (issue #426). Its own presence is the gate,
 	// and its value is ci-failure.md's ${CI_FAILURE_SUMMARY} substitution.
-	CIFailureSummary string // entrypoint.sh: $CI_FAILURE_SUMMARY
+	CIFailureSummary string // $CI_FAILURE_SUMMARY
 
 	// The seven fixed substitution names every prompt render carries alongside
 	// the fragment registry's per-row vars. They are not registry-derived, so
 	// they live on Env rather than on a FragmentRow.
-	IssueNumber     string // entrypoint.sh: $ISSUE_NUMBER
-	IssueTitle      string // entrypoint.sh: $ISSUE_TITLE
-	Branch          string // entrypoint.sh: $BRANCH
-	BaseBranch      string // entrypoint.sh: $BASE_BRANCH
-	InProgressLabel string // entrypoint.sh: $IN_PROGRESS_LABEL
-	CompleteLabel   string // entrypoint.sh: $COMPLETE_LABEL
-	RunNonce        string // entrypoint.sh: $RUN_NONCE
+	IssueNumber     string // $ISSUE_NUMBER
+	IssueTitle      string // $ISSUE_TITLE
+	Branch          string // $BRANCH
+	BaseBranch      string // $BASE_BRANCH
+	InProgressLabel string // $IN_PROGRESS_LABEL
+	CompleteLabel   string // $COMPLETE_LABEL
+	RunNonce        string // $RUN_NONCE
 
 	// RecordID is the host's Record ID for this Dispatch (issue #4786). It keys
 	// the Box's prompt_hashes op and is not a prompt var.
@@ -157,9 +160,9 @@ type Env struct {
 	// IssueText is the subject issue's body plus recent comments
 	// (forge.IssueText, issue #3445). Deliberately not one of the seven fixed
 	// names above: assemblePromptBodies registers a fenced, sectioned
-	// ISSUE_TEXT entry separately, because scalars mirrors entrypoint.sh's
-	// fixed-name list byte for byte and substitutes each name's raw value.
-	IssueText string // entrypoint.sh: $ISSUE_TEXT
+	// ISSUE_TEXT entry separately, because scalars substitutes each fixed
+	// name's raw value.
+	IssueText string // $ISSUE_TEXT
 
 	// ResearchVerdicts is the raw RESEARCH_VERDICTS JSON (empty = the default
 	// set). assemblePromptBodies renders the research prompt's status

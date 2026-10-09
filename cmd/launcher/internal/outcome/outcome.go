@@ -23,8 +23,9 @@ const Token = markerChannelOutcomeToken
 
 // PRIntentToken is the exact SPINDRIFT_PR_INTENT marker literal (issue #2045,
 // the #2036 fix): a read-only Box's draft-PR title/body hand-off, scanned
-// host-side by LastPRIntentInLog and in-box by entrypoint.sh's
-// required-marker gate. Generated from the markerChannels registry (#2974).
+// host-side by LastPRIntentInLog and in-box by the required-marker gate
+// (internal/markergate, run from cmd/launcher/box). Generated from the
+// markerChannels registry (#2974).
 const PRIntentToken = markerChannelPRIntentToken
 
 // CommentToken is the exact SPINDRIFT_COMMENT marker literal (issue #1940):
