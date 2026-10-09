@@ -377,6 +377,66 @@ func TestReadinessReady_ClosedIssueFallback(t *testing.T) {
 	}
 }
 
+// TestReadinessReady_ClosedPRDefersToIssueState guards #4893: a PR closed
+// unmerged settles nothing, so readiness falls through to the issue's state
+// (a human absorbing the work and closing the issue still satisfies the blocker).
+func TestReadinessReady_ClosedPRDefersToIssueState(t *testing.T) {
+	const prURL = "https://github.com/owner/repo/pull/99"
+	setup := func(issueState forge.IssueState) *forge.Fake {
+		fc := forge.NewFake()
+		fc.BranchPrefix = "agent/issue-"
+		fc.SetIssue(forge.Issue{Number: "99", State: issueState})
+		fc.SetPR("agent/issue-99", forge.PR{URL: prURL})
+		fc.SetPRState(prURL, forge.PRClosed)
+		return fc
+	}
+
+	t.Run("closed issue is satisfied", func(t *testing.T) {
+		fc := setup(forge.IssueClosed)
+		var ready bool
+		out := testutil.CaptureStdout(t, func() {
+			ready = (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{})
+		})
+		if !ready {
+			t.Error("Readiness.Ready: want true for closed PR + closed issue, got false")
+		}
+		if !strings.Contains(out, "blocker #99 is closed (agent PR closed unmerged); treating as satisfied") {
+			t.Errorf("output must name the closed-unmerged PR; got:\n%s", out)
+		}
+	})
+
+	t.Run("open issue is held", func(t *testing.T) {
+		fc := setup(forge.IssueOpen)
+		if (Readiness{}).Ready(fc, fc, capsFor(fc, fc), "99", forge.SeedScope{}) {
+			t.Error("Readiness.Ready: want false for closed PR + open issue, got true")
+		}
+		if len(fc.IssueCalls) != 1 {
+			t.Errorf("IssueCalls = %v, want exactly 1 (closed PR must fall through to the issue)", fc.IssueCalls)
+		}
+	})
+}
+
+// TestReadinessStatus_ClosedPRClosedIssueFetchesOnce guards #4893 and #1098: the
+// closed-PR fall-through already fetched the issue, so blockerStatus must reuse it.
+func TestReadinessStatus_ClosedPRClosedIssueFetchesOnce(t *testing.T) {
+	c := baseConfig()
+	fc := forge.NewFake()
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "11", State: forge.IssueClosed})
+	fc.SetPR("agent/issue-11", forge.PR{URL: "https://github.com/owner/repo/pull/11"})
+	fc.SetPRState("https://github.com/owner/repo/pull/11", forge.PRClosed)
+	edges := map[string][]string{"10": {"11"}}
+
+	_, _, unready := (Readiness{Edges: edges}).Status(c, fc, fc, capsFor(fc, fc), "10")
+
+	if len(unready) != 0 {
+		t.Errorf("Readiness.Status: want unready=[], got %v", unready)
+	}
+	if len(fc.IssueCalls) != 1 {
+		t.Errorf("IssueCalls = %v, want exactly 1", fc.IssueCalls)
+	}
+}
+
 func TestReadinessReady_LocalLandingVerifiedMerged(t *testing.T) {
 	fc := forge.NewFake()
 	landing := "agent/issue-99@abc123"
