@@ -210,6 +210,9 @@ func TestSweep_CleanRunFilesAndWritesDoneCommit(t *testing.T) {
 			if tip.State.LastSwept != head {
 				t.Errorf("LastSwept = %q, want %q", tip.State.LastSwept, head)
 			}
+			if tip.State.Snapshot != nil {
+				t.Errorf("Snapshot = %+v, want nil for a code Chore", tip.State.Snapshot)
+			}
 			if len(tip.State.Filed) != 1 || tip.State.Filed[0] != fc.PostIssueURL {
 				t.Errorf("Filed = %v, want [%s]", tip.State.Filed, fc.PostIssueURL)
 			}
