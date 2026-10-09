@@ -12,28 +12,33 @@ import (
 )
 
 // RevertWindow is how long after a merge commit a base-branch commit still
-// counts as reverting it.
+// counts as reverting it. It also bounds churn: the churn_14d column and the
+// docs name these 14 days, so changing it means renaming both.
 const RevertWindow = 14 * 24 * time.Hour
 
 var fullSHA = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
-// FillReverts settles, for every Record with a merge commit and no verdict
-// yet, whether a base-branch commit reverted that merge within RevertWindow,
-// and stamps reverted and matured_at on the Record. clone is a git checkout of
-// the forge's base branch, judged by refs/remotes/origin/HEAD when it resolves
-// and HEAD otherwise.
+// FillMaturity settles, for every Record with a merge commit and no verdict
+// yet, whether a base-branch commit reverted that merge within RevertWindow
+// and how much of its added lines other commits rewrote in that window, and
+// stamps reverted, churn_14d and matured_at on the Record together. clone is a
+// git checkout of the forge's base branch, judged by refs/remotes/origin/HEAD
+// when it resolves and HEAD otherwise.
 //
 // A Record stays unfilled, without error, when the clone cannot yet answer for
-// it: the merge commit is not in the clone or not on its base branch, its first
-// parent is missing (a shallow clone's boundary), the window has not elapsed
-// at now, or the clone's tip is older than the window's end (a stale clone must
-// never record a false "not reverted"). A revert is a commit in the window
-// whose message carries git revert's "This reverts commit <sha>" trailer, or
-// whose patch is the exact inverse of the merge's diff. An error means git
-// could not run or the clone is not a usable repository. A Record whose own
-// check fails is skipped and stays unfilled while the pass goes on to the
-// rest; those errors come back joined once every Record has been tried.
-func (s *Store) FillReverts(clone string, now time.Time) error {
+// it: the merge commit is not in the clone or not on its base branch, the
+// window has not elapsed at now, or the clone's tip is older than the window's
+// end (a stale clone must never record a false "not reverted"). A revert is a
+// commit in the window whose message carries git revert's "This reverts commit
+// <sha>" trailer, or whose patch is the exact inverse of the merge's diff; a
+// merge whose first parent is missing (a shallow clone's boundary) cannot be
+// checked for an inverse, so it stays unfilled only when a candidate revert
+// needs one, and its churn stays empty. Churn is judged by churnWithinWindow.
+// An error means git could not run or the clone is not a usable repository. A
+// Record whose own check fails is skipped and stays unfilled while the pass
+// goes on to the rest; those errors come back joined once every Record has
+// been tried.
+func (s *Store) FillMaturity(clone string, now time.Time) error {
 	rows, err := s.db.Query(`SELECT record_id, merge_commit FROM records WHERE merge_commit <> '' AND matured_at IS NULL ORDER BY record_id`)
 	if err != nil {
 		return err
@@ -68,16 +73,16 @@ func (s *Store) FillReverts(clone string, now time.Time) error {
 	}
 	var failed []error
 	for _, p := range todo {
-		reverted, matured, err := revertedWithinWindow(clone, p.merge, tip, tipTime, now)
+		m, matured, err := judgeMaturity(clone, p.merge, tip, tipTime, now)
 		if err != nil {
-			failed = append(failed, fmt.Errorf("dispatchrecord: revert check for %s: %w", p.id, err))
+			failed = append(failed, fmt.Errorf("dispatchrecord: maturity check for %s: %w", p.id, err))
 			continue
 		}
 		if !matured {
 			continue
 		}
-		if _, err := s.db.Exec(`UPDATE records SET reverted = ?, matured_at = ? WHERE record_id = ?`,
-			reverted, now.UnixMilli(), p.id); err != nil {
+		if _, err := s.db.Exec(`UPDATE records SET reverted = ?, churn_14d = ?, matured_at = ? WHERE record_id = ?`,
+			m.reverted, m.churn, now.UnixMilli(), p.id); err != nil {
 			return err
 		}
 	}
@@ -111,37 +116,54 @@ func commitTime(clone, rev string) (time.Time, error) {
 	return time.Unix(sec, 0), nil
 }
 
-// revertedWithinWindow reports whether merge was reverted, and whether the
-// clone could answer at all (matured).
-func revertedWithinWindow(clone, merge, tip string, tipTime, now time.Time) (reverted, matured bool, err error) {
+// maturity is one Record's post-merge verdict; churn is nil when the merge's
+// added lines cannot be told (see churnWithinWindow).
+type maturity struct {
+	reverted bool
+	churn    *float64
+}
+
+// judgeMaturity settles both post-merge columns or neither: matured is false
+// unless the clone can answer for the revert check and the churn check alike.
+func judgeMaturity(clone, merge, tip string, tipTime, now time.Time) (m maturity, matured bool, err error) {
 	// The merge commit comes from a log, so refuse anything that is not a full
 	// object name before it can reach git as an option or revision expression.
 	if !fullSHA.MatchString(merge) {
-		return false, false, nil
+		return maturity{}, false, nil
 	}
 	if _, err := runGit(clone, "", "cat-file", "-e", merge+"^{commit}"); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
-			return false, false, nil
+			return maturity{}, false, nil
 		}
-		return false, false, err
+		return maturity{}, false, err
 	}
-	if _, err := runGit(clone, "", "merge-base", "--is-ancestor", merge, tip); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == 1 {
-			return false, false, nil
-		}
-		return false, false, err
+	if onTip, err := gitTest(clone, "merge-base", "--is-ancestor", merge, tip); err != nil || !onTip {
+		return maturity{}, false, err
 	}
 	mergedAt, err := commitTime(clone, merge)
 	if err != nil {
-		return false, false, err
+		return maturity{}, false, err
 	}
 	end := mergedAt.Add(RevertWindow)
 	if now.Before(end) || tipTime.Before(end) {
-		return false, false, nil
+		return maturity{}, false, nil
 	}
 
+	m.reverted, matured, err = revertedWithinWindow(clone, merge, tip, end)
+	if err != nil || !matured {
+		return maturity{}, false, err
+	}
+	m.churn, matured, err = churnWithinWindow(clone, merge, tip, end)
+	if err != nil || !matured {
+		return maturity{}, false, err
+	}
+	return m, true, nil
+}
+
+// revertedWithinWindow reports whether merge was reverted by a commit dated no
+// later than end, and whether the clone could answer at all (matured).
+func revertedWithinWindow(clone, merge, tip string, end time.Time) (reverted, matured bool, err error) {
 	out, err := runGit(clone, "", "log", "--ancestry-path", "--format=%H %ct", merge+".."+tip)
 	if err != nil {
 		return false, false, err
@@ -178,12 +200,9 @@ func revertedWithinWindow(clone, merge, tip string, tipTime, now time.Time) (rev
 	// merge's diff inverted. The merge's first parent is the base it landed on.
 	// For a rebase merge the recorded commit is only the last rebased commit, so
 	// a squashed revert of a multi-commit PR goes unseen.
-	if _, err := runGit(clone, "", "rev-parse", "--verify", "--quiet", merge+"^1^{commit}"); err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			// A shallow clone's boundary commit looks parentless; it cannot answer.
-			return false, false, nil
-		}
+	hasParent, err := hasFirstParent(clone, merge)
+	if err != nil || !hasParent {
+		// A shallow clone's boundary commit cannot answer.
 		return false, false, err
 	}
 	inverse, err := runGit(clone, "", "diff", "--no-color", "--no-ext-diff", merge, merge+"^1")
@@ -216,6 +235,20 @@ func revertedWithinWindow(clone, merge, tip string, tipTime, now time.Time) (rev
 		}
 	}
 	return false, true, nil
+}
+
+// gitTest runs a git command used as a yes/no test: true on exit 0, false on
+// exit 1, an error for anything else (git's fatal errors exit 128).
+func gitTest(clone string, args ...string) (bool, error) {
+	_, err := runGit(clone, "", args...)
+	if err == nil {
+		return true, nil
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // runGit runs git in clone and returns its stdout. A failure to start git

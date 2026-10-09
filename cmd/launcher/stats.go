@@ -174,12 +174,12 @@ func statsRootRecords(root string, reingest, fillRevisions bool, stderr io.Write
 	// Only a root that is itself a Target clone can answer for its merge
 	// commits; any other root leaves them unfilled.
 	if top, err := isCheckoutTop(root); err != nil {
-		fmt.Fprintf(stderr, "warning: not filling reverts: %v\n", err)
+		fmt.Fprintf(stderr, "warning: not filling reverts or churn: %v\n", err)
 	} else if top {
-		if err := store.FillReverts(root, statsNow()); err != nil {
-			// FillReverts fills what it can; the error lists only the
+		if err := store.FillMaturity(root, statsNow()); err != nil {
+			// FillMaturity fills what it can; the error lists only the
 			// Records it had to leave behind.
-			warnEach(stderr, "reverts left unfilled", err)
+			warnEach(stderr, "reverts and churn left unfilled", err)
 		}
 	}
 	records, err := store.Records()
