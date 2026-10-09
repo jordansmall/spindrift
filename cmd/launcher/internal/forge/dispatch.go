@@ -105,6 +105,21 @@ func (d DispatchLabels) AllLabels() []string {
 	return []string{d.Dispatchable, d.InProgress, d.Complete, d.Failed, d.Ambiguous}
 }
 
+// SettledLabels returns the non-empty, deduplicated labels a settle may write
+// on reaching a terminal state (Complete, Failed, Ambiguous); a claim strips
+// them all. Recoverable is excluded: it is a local-only frontmatter marker.
+func (d DispatchLabels) SettledLabels() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, l := range []string{d.Complete, d.Failed, d.Ambiguous} {
+		if l != "" && !seen[l] {
+			seen[l] = true
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
 // AlreadyClaimed reports whether a TransitionState(from, to) onto an issue
 // carrying labels claims an issue that is already InProgress (#3887). A from
 // state sharing the InProgress label is exempt: agent-dispatch.yml claims up
@@ -137,9 +152,9 @@ func (d DispatchLabels) TransitionRemoveLabels(from, to DispatchState) []string 
 	}
 	add(d.Label(from))
 	if to == InProgress {
-		add(d.Complete)
-		add(d.Failed)
-		add(d.Ambiguous)
+		for _, l := range d.SettledLabels() {
+			add(l)
+		}
 	}
 	if to == Complete {
 		add(d.Failed)
