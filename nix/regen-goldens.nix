@@ -1,10 +1,10 @@
 # Update-mode regenerator for the Go-test goldens (issue #2951): prompt
 # assembly and `spindrift stats`. It runs the Go golden tests
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
-# cmd/launcher/stats_test.go) with UPDATE_GOLDENS=1, which flips their
-# compare helpers from fail to overwrite. Separate from nix/regen.nix's regen
-# verb because these goldens are the output of running the test, not a pure
-# render of a Nix value.
+# cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go) with
+# UPDATE_GOLDENS=1, which flips their compare helpers from fail to
+# overwrite. Separate from nix/regen.nix's regen verb because these goldens
+# are the output of running the test, not a pure render of a Nix value.
 { pkgs, fixtures }:
 let
   buildConstants = import ../lib/build-constants.nix;
@@ -57,6 +57,8 @@ pkgs.writeShellApplication {
 
     cd "$scratch/src/cmd/launcher"
     go test -count=1 -tags integration -run '^TestPromptAssemblyGoldens$' ./internal/promptassembly
-    go test -count=1 -run '^TestStats_(Golden|By.*)$' .
+    # Selects by name: a new statsGolden caller must end in Golden or start
+    # with By, or update mode silently skips it (issue #4861).
+    go test -count=1 -run '^TestStats_(.*Golden|By.*)$' .
   '';
 }
