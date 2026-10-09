@@ -7098,6 +7098,18 @@ replaces them, and each new `box` record clears them. They are absent before
 the child's first `model` record and on any other phase, and never carry to the
 next child. The opencode driver never reports a `model_role`. They are
 additive and omitted when empty, so `schema` does not bump.
+`ci_wait` and `pr_url` can be present only on a `running` slot while its
+child waits on its PR's CI, and are set by the child's latest `ci_wait`
+report record (see **Event stream**, below): the initial green wait, the
+wait after each fix pass, and a merge-gate re-wait after a force-push. A
+merge retry blocked by checks stays inside the wait the green gate already
+reported, so it sends no record of its own: the earlier `ci_wait` is never
+cleared before that point.
+`pr_url` names that PR. The next `box` record or the `settled` record
+clears both, and they never carry to the next child. Only a Code Forge with
+PRs (`github`, `forgejo`) enters a CI wait, so a `git` or `local` slot never
+shows them. They are additive and omitted when empty, so `schema` does not
+bump.
 `phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
@@ -8236,6 +8248,12 @@ driver the launcher sends one whenever the Box's active (role, model) pair
 changes, never once per message. Under the opencode driver it sends one,
 with no `model_role`, whenever a `step_finish` event names a different model
 id from the last one sent.
+A `ci_wait` record is `{"event":"ci_wait","issue":"<N>","pr_url":"<url>"}`,
+sent each time settle enters a CI wait. The daemon publishes it on the slot's
+status entry (`ci_wait`, `pr_url`) and emits no pool event for it. A
+butler patch PR's CI wait shows no pill: settle keys the record by the
+finding issue while the butler child is chore-keyed, so the daemon drops it
+as a kind mismatch, as it already does that PR's `settled` record.
 
 **What this first cut doesn't do.** The instance lock, the queryable status
 file (issue #3545, above), the self-change halt (issue #3543, above) and
@@ -8325,6 +8343,10 @@ heartbeat's family label, and follows whichever of the coordinator and its
 subagents spoke last. Under opencode the card shows the model alone, with no
 role, and only updates when a step finishes, so it can lag the running model
 by up to one step. A slot carrying no `model` shows nothing extra.
+A slot whose child waits on its PR's CI also shows a `waiting on CI` pill
+with its own phase colour, linking to the PR in a new tab, from the slot's
+`ci_wait` and `pr_url`; a slot carrying no `pr_url` shows no pill. The
+live re-render picks it up like any other status field.
 
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
