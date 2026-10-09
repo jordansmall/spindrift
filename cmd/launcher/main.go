@@ -616,12 +616,16 @@ func dispatchLabels(c config) forge.DispatchLabels {
 // settle. The recover CLI bootstraps as Work, so it keeps Ambiguous; the
 // daemon's recover kind has no Statuses row and drops it, which is harmless
 // because its queue path needs SelfReportSuccess and never settles Ambiguous.
+// Research settles its terminal through CompleteVerdict, so its configured
+// verdict labels count as settled too; forge.TransitionRemoveLabels strips them
+// on a claim, so one on an in-flight issue is this run's own settle.
+// researchVerdictLabels is empty for every non-research kind.
 func settledLabels(c config) []string {
 	dl := dispatchLabels(c)
 	if !slices.Contains(c.kind().Statuses, outcome.StatusAmbiguous) {
 		dl.Ambiguous = ""
 	}
-	return dl.SettledLabels()
+	return forge.SettledLabels(dl, researchVerdictLabels(c))
 }
 
 // researchVerdictLabels returns the configured verdict-label mapping

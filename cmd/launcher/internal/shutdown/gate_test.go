@@ -21,6 +21,9 @@ var settledLabels = forge.DispatchLabels{
 	Ambiguous: "agent-ambiguous-spec",
 }.SettledLabels()
 
+// researchSettledLabels is the research kind's terminal set, as callers pass it.
+var researchSettledLabels = forge.SettledLabels(forge.ResearchDispatchLabels(), forge.ResearchVerdictLabels())
+
 // stubReaper is a minimal terminate.Reaper: it counts Kill calls per issue
 // and, when killSignal is non-nil, signals it after each Kill so a watcher
 // test can wait on the reclaim without a sleep.
@@ -210,14 +213,26 @@ func TestLeave_BeforeAbort_IssueNotReclaimed(t *testing.T) {
 // to dispatchable (#3522); reclaiming a failed or ambiguous one re-queues a
 // failure meant for human triage (#4888).
 func TestAbort_SettledIssueNotReclaimed(t *testing.T) {
-	for _, label := range settledLabels {
-		t.Run(label, func(t *testing.T) {
+	type tc struct {
+		name, label string
+		set         []string
+	}
+	var cases []tc
+	for _, l := range settledLabels {
+		cases = append(cases, tc{"work/" + l, l, settledLabels})
+	}
+	for _, l := range researchSettledLabels {
+		cases = append(cases, tc{"research/" + l, l, researchSettledLabels})
+	}
+	for _, c := range cases {
+		label, set := c.label, c.set
+		t.Run(c.name, func(t *testing.T) {
 			fc := newFakeForge(t, "1", "2")
 			fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: []string{label}})
 			reaper := &stubReaper{}
 			abort := make(chan struct{})
 
-			g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, settledLabels)
+			g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, set)
 
 			if !g.Launch("1", func() {}) {
 				t.Fatal("Launch #1: want true")
@@ -248,6 +263,39 @@ func TestAbort_SettledIssueNotReclaimed(t *testing.T) {
 				t.Errorf("#2 (still in flight): reclaim comments = %d, want 1", got)
 			}
 		})
+	}
+}
+
+// TestAbort_ResearchReclaimsIssueWithPriorVerdict pins that an issue re-queued
+// for research, still wearing a prior run's verdict label, is not mistaken for
+// this run's settle: the claim strips the stale verdict, so abort reclaims it.
+func TestAbort_ResearchReclaimsIssueWithPriorVerdict(t *testing.T) {
+	d := forge.ResearchDispatchLabels()
+	fc := forge.NewFake(d)
+	fc.VerdictLabels = forge.ResearchVerdictLabels()
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "1", Title: "issue 1", Labels: []string{d.Dispatchable, "agent-research-unclear"}})
+	if err := fc.TransitionState("1", forge.Dispatchable, forge.InProgress); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	reaper := &stubReaper{}
+	abort := make(chan struct{})
+
+	g := shutdown.NewGate(nil, abort, fc, fc, reaper, nil, researchSettledLabels)
+	if !g.Launch("1", func() {}) {
+		t.Fatal("Launch #1: want true")
+	}
+	close(abort)
+	g.Settle()
+
+	if got := inProgressToDispatchableCount(fc, "1"); got != 1 {
+		t.Errorf("#1: InProgress->Dispatchable transitions = %d, want 1", got)
+	}
+	if got := reaper.killCount("1"); got != 1 {
+		t.Errorf("#1: kill count = %d, want 1", got)
+	}
+	if got := reclaimCommentCount(fc, "1", terminate.CommentSuffix); got != 1 {
+		t.Errorf("#1: reclaim comments = %d, want 1", got)
 	}
 }
 

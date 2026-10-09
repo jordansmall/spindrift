@@ -36,8 +36,9 @@ type Gate struct {
 	reaper terminate.Reaper
 	reg    *terminate.Registry
 	// settled holds the labels a settle writes on reaching a terminal state
-	// (Complete, Failed, Ambiguous), the ones unsettled below reads. Empty
-	// disables that check.
+	// (forge.SettledLabels: Complete, Failed, Ambiguous, plus any research
+	// verdict labels), the ones unsettled below reads. Empty disables that
+	// check.
 	settled []string
 
 	// mu also guards signalled, aborted, aborting, inflight, and claimed
@@ -75,8 +76,9 @@ type Gate struct {
 
 // NewGate returns a Gate reading stop/abort. Either channel may be nil,
 // meaning the caller offers no such request (the Gate is then inert).
-// settled is the caller's terminal labels (forge.DispatchLabels.SettledLabels),
-// which unsettled reads; pass nil to leave that check off.
+// settled is the kind's settled labels (forge.SettledLabels: Complete, Failed,
+// Ambiguous, plus any research verdict labels), which unsettled reads; pass
+// nil to leave that check off.
 func NewGate(stop, abort <-chan struct{}, it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, settled []string) *Gate {
 	if reg == nil {
 		// A fresh Registry behaves exactly like the nil one it replaces
@@ -323,8 +325,9 @@ func reclaimOne(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reap
 // AbortInFlight announces the abort, then calls terminate.Reclaim for each
 // num in sorted order, logging each failure to stderr rather than returning
 // it. Exported so RunContinuous's own abort path runs the same loop (#3522).
-// settled is the caller's terminal labels (forge.DispatchLabels.SettledLabels),
-// which unsettled reads; pass nil to leave that check off.
+// settled is the kind's settled labels (forge.SettledLabels: Complete, Failed,
+// Ambiguous, plus any research verdict labels), which unsettled reads; pass
+// nil to leave that check off.
 func AbortInFlight(it forge.IssueTracker, cf forge.CodeForge, reaper terminate.Reaper, reg *terminate.Registry, settled []string, nums []string) {
 	nums = unsettled(it, settled, nums)
 	if len(nums) == 0 {
