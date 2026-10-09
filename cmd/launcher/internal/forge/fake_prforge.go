@@ -70,6 +70,11 @@ type PRForgeFake struct {
 	// MarkReadyCalls records all PR URLs passed to MarkReady, in order.
 	MarkReadyCalls []string
 
+	// CommentPRErr, if non-nil, is returned by CommentPR.
+	CommentPRErr error
+	// CommentPRCalls records every CommentPR call, in order.
+	CommentPRCalls []CommentPRCall
+
 	// MarkDraftErr, if non-nil, is returned by MarkDraft.
 	MarkDraftErr error
 	// MarkDraftCalls records all PR URLs passed to MarkDraft, in order.
@@ -347,6 +352,20 @@ func (pf *PRForgeFake) MarkReady(prURL string) error {
 	}
 	pf.drafts[prURL] = false
 	return nil
+}
+
+// CommentPRCall is one recorded CommentPR call.
+type CommentPRCall struct {
+	PR   string
+	Body string
+}
+
+// CommentPR records the call to CommentPRCalls and returns CommentPRErr.
+func (pf *PRForgeFake) CommentPR(prURL, body string) error {
+	pf.mu.Lock()
+	defer pf.mu.Unlock()
+	pf.CommentPRCalls = append(pf.CommentPRCalls, CommentPRCall{PR: prURL, Body: body})
+	return pf.CommentPRErr
 }
 
 // MarkDraft records the call to MarkDraftCalls and, unless MarkDraftErr fails

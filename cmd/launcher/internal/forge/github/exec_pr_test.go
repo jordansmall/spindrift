@@ -571,3 +571,32 @@ exit 1
 		t.Fatalf("MergeCommit error = %v, want gh's stderr", err)
 	}
 }
+
+func TestCommentPR_PostsBodyOnPR(t *testing.T) {
+	dir := prependFakeGH(t, "exit 0\n")
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	if err := c.CommentPR("https://github.com/owner/repo/pull/42", "held for review"); err != nil {
+		t.Fatalf("CommentPR: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "call-00.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "pr\ncomment\nhttps://github.com/owner/repo/pull/42\n--body\nheld for review\n"
+	if string(got) != want {
+		t.Fatalf("gh argv = %q, want %q", got, want)
+	}
+}
+
+func TestCommentPR_FailureSurfacesStderr(t *testing.T) {
+	prependFakeGH(t, `if [ "$1" = "pr" ] && [ "$2" = "comment" ]; then
+  printf 'HTTP 404: Not Found\n' >&2
+  exit 1
+fi
+`)
+	c := NewExecClient("owner/repo", testLabels, "agent/issue-")
+	err := c.CommentPR("https://github.com/owner/repo/pull/42", "x")
+	if err == nil || !strings.Contains(err.Error(), "HTTP 404: Not Found") {
+		t.Fatalf("CommentPR error must surface gh's stderr; got: %v", err)
+	}
+}

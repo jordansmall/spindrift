@@ -123,6 +123,8 @@ type PRForge interface {
 	// MarkReady flips the PR out of draft. Marking an already-ready PR succeeds
 	// rather than reporting a failure.
 	MarkReady(prURL string) error
+	// CommentPR posts a comment on the PR itself, not on its closing issue.
+	CommentPR(prURL, body string) error
 	// MarkDraft flips the PR back to draft. Marking an already-draft PR
 	// succeeds rather than reporting a failure.
 	MarkDraft(prURL string) error
