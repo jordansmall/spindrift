@@ -76,7 +76,7 @@ that rewrote the reviewer prompt would merge itself once green.
 4. **The host validates every finding against the snapshot it served.**
    A tuning `IssueIntent` carries `cites`, the digest anchors it argues
    from. At settle the host drops the finding (recorded in
-   `Ledger.dropped` with a reason) when:
+   `Ledger.drops` with a reason, and counted in `Ledger.dropped`) when:
    - any cite is absent from the stored snapshot;
    - its target file is missing at the scanned HEAD;
    - no cited aggregate row reaches the sample floor. `evidence-gap` is

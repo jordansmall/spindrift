@@ -14,7 +14,7 @@ import (
 // front, the same order internal/butler's settle step already reserves
 // Ledger slots before any PostIssue call.
 type Finding struct {
-	Class, Concurrence, Metric string
+	Class, Concurrence string
 	// Cites are the Tuning digest anchors a tuning finding argues from (issue
 	// #4952); internal/butler checks them against the stored digest snapshot.
 	Cites      []string
@@ -32,11 +32,12 @@ type Finding struct {
 // finding is in's promotion-relevant view, the projection both FileButlerFindings
 // call sites (the plan callback and its per-finding decorate) need.
 func (in issueIntent) finding() Finding {
-	return Finding{Class: in.Class, Concurrence: in.Concurrence, Cites: in.Cites, Metric: in.Metric, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title}
+	return Finding{Class: in.Class, Concurrence: in.Concurrence, Cites: in.Cites, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title}
 }
 
 // Decoration is what a plan's per-finding callback adds to one finding's
-// filing: an optional Backlink appended to its body, any ExtraLabels beyond
+// filing: optional host-authored Backlink text appended to its body (the
+// backlink, a promotion note, a tuning finding's Evidence table), any ExtraLabels beyond
 // the provenance label, and an OnFiled hook run only after PostIssue
 // succeeds -- never on a failed or skipped intent (see
 // fileIssueIntentsDetailedFunc's decorate contract), and handed the filed
