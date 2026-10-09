@@ -96,9 +96,10 @@ func loadRegistryProbeCache(pwd string, want registryProbeCacheKey) (endpoint re
 
 // storeRegistryProbeCache remembers a fresh probe verdict for key. pwd == ""
 // is a silent no-op, and an endpoint that is neither unix nor tcp is
-// rejected. Given a non-empty pwd it writes unconditionally: the "no registry
-// proxy configured, no file written" guarantee is the caller's, today
-// dispatch/box.go's route-count gate, and #3114's doctor row must repeat it.
+// rejected. Given a non-empty pwd it writes unconditionally: whether to probe
+// at all is decided by RegistryProxyTransport's callers — see dispatch/box.go's
+// needRegistryProxy || needSignalSocket gate, which the doctor's two transport
+// rows mirror.
 func storeRegistryProbeCache(pwd string, key registryProbeCacheKey, endpoint registrymanifest.Endpoint, tcpAddHost bool) error {
 	path := registryProbeCachePath(pwd)
 	if path == "" {
