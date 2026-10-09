@@ -242,7 +242,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 	slices.SortStableFunc(records, func(a, b dispatchrecord.Record) int {
 		return cmp.Or(a.ClaimTime.Compare(b.ClaimTime), strings.Compare(a.Root, b.Root), strings.Compare(a.ID, b.ID))
 	})
-	var groups []statsGroup
+	var groups []recordstats.Group
 	if opts.by.dim != "" {
 		groups = groupStats(records, opts.by)
 	}
@@ -267,7 +267,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 
 // encodeStatsJSON writes one line per Record, tagged with its group when --by
 // is set.
-func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups []statsGroup, by statsBy) error {
+func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups []recordstats.Group, by statsBy) error {
 	if by.dim == "" {
 		for _, r := range records {
 			if err := enc.Encode(r); err != nil {
@@ -277,8 +277,8 @@ func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups 
 		return nil
 	}
 	for _, g := range groups {
-		for _, r := range g.records {
-			if err := enc.Encode(statsGroupedRecord{Group: g.key, Record: r}); err != nil {
+		for _, r := range g.Records {
+			if err := enc.Encode(statsGroupedRecord{Group: g.Key, Record: r}); err != nil {
 				return err
 			}
 		}
@@ -286,45 +286,27 @@ func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups 
 	return nil
 }
 
-// shareOf renders sum/n as a whole percentage "P% of N", or an em dash when n
-// is zero.
-func shareOf(sum float64, n int) string {
+// shareOf renders a percentage as a whole "P% of N", or an em dash when n is
+// zero.
+func shareOf(pct float64, n int) string {
 	if n == 0 {
 		return "—"
 	}
-	return fmt.Sprintf("%.0f%% of %d", 100*sum/float64(n), n)
+	return fmt.Sprintf("%.0f%% of %d", pct, n)
 }
 
 // revertedShare renders the share of filled Records whose merge was reverted,
-// or an em dash when none is filled. An unfilled Record is not yet known to
-// stand, so it never counts as zero.
+// or an em dash when none is filled.
 func revertedShare(records []dispatchrecord.Record) string {
-	filled, reverted := 0, 0
-	for _, r := range records {
-		if r.Reverted == nil {
-			continue
-		}
-		filled++
-		if *r.Reverted {
-			reverted++
-		}
-	}
-	return shareOf(float64(reverted), filled)
+	pct, filled := recordstats.RevertedPercent(records)
+	return shareOf(pct, filled)
 }
 
 // meanChurn renders the mean 14-day churn of the Records that carry one, or
-// an em dash when none does. A Record without one is unfilled or its lines
-// cannot be told, so it is skipped rather than averaged in as zero.
+// an em dash when none does.
 func meanChurn(records []dispatchrecord.Record) string {
-	filled, sum := 0, 0.0
-	for _, r := range records {
-		if r.Churn14d == nil {
-			continue
-		}
-		filled++
-		sum += *r.Churn14d
-	}
-	return shareOf(sum, filled)
+	pct, filled := recordstats.MeanChurnPercent(records)
+	return shareOf(pct, filled)
 }
 
 // outcomeSources counts Records whose outcome is the host's dispatch_settled

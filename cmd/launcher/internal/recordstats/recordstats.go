@@ -68,10 +68,7 @@ func AggregateRoles(records []dispatchrecord.Record) (rows []RoleRow, passes int
 	byRole := map[string]*RoleRow{}
 	for _, r := range records {
 		for _, p := range r.Passes {
-			role := p.Role
-			if role == "" {
-				role = None
-			}
+			role := NoneIfEmpty(p.Role)
 			row := byRole[role]
 			if row == nil {
 				row = &RoleRow{Role: role}
@@ -88,8 +85,8 @@ func AggregateRoles(records []dispatchrecord.Record) (rows []RoleRow, passes int
 				}
 			}
 			passes++
-			usd += p.USD
 		}
+		usd += RecordUSD(r)
 	}
 	for _, row := range byRole {
 		rows = append(rows, *row)
@@ -115,4 +112,13 @@ func LandedKeys(records []dispatchrecord.Record) int {
 		}
 	}
 	return len(seen)
+}
+
+// RecordUSD is the notional cost of one Record: the sum of its passes' USD.
+func RecordUSD(r dispatchrecord.Record) float64 {
+	var total float64
+	for _, p := range r.Passes {
+		total += p.USD
+	}
+	return total
 }

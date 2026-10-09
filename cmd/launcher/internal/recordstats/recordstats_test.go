@@ -34,3 +34,13 @@ func TestAggregateRolesOrdersAndTotals(t *testing.T) {
 		t.Fatalf("implement BlockRate = %q, want -", br)
 	}
 }
+
+func TestRecordUSDSumsPasses(t *testing.T) {
+	r := dispatchrecord.Record{Passes: []dispatchrecord.Pass{{USD: 1.5}, {USD: 0.25}}}
+	if got := RecordUSD(r); got != 1.75 {
+		t.Fatalf("RecordUSD = %v, want 1.75", got)
+	}
+	if got := RecordUSD(dispatchrecord.Record{}); got != 0 {
+		t.Fatalf("RecordUSD of no passes = %v, want 0", got)
+	}
+}
