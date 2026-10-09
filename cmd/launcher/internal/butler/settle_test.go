@@ -1755,7 +1755,7 @@ func TestSettleRun_Patch_GateRunsDespiteLostFinish(t *testing.T) {
 			if got := s.settle(dispatch.NewFake(), patchReserveResult()); got.done {
 				t.Errorf("settled = %+v, want done=false (the Finish was lost)", got)
 			}
-			want := []fakePatchGateCall{{num: "9503", prURL: pf.draftURL}}
+			want := []fakePatchGateCall{{owner: dispatchkey.Chore("bugs"), num: "9503", prURL: pf.draftURL}}
 			if !slices.Equal(gate.calls, want) {
 				t.Errorf("gate calls = %+v, want %+v", gate.calls, want)
 			}

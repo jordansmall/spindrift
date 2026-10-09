@@ -2988,6 +2988,30 @@ func TestPoolSnapshotPublishesCIWait(t *testing.T) {
 	want("new child before its first ci_wait record", false, "")
 }
 
+// TestPoolSnapshotPublishesButlerPatchCIWait pins issue #4966: a butler child's
+// chore-keyed ci_wait line parses and marks its running slot as waiting on CI.
+func TestPoolSnapshotPublishesButlerPatchCIWait(t *testing.T) {
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), triKindConfig(2, 0), &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
+	defer p.cancel()
+	butler := KindOf(dispatchkind.Butler)
+	const pr = "https://example.test/pr/9"
+	slot := leadSlot + 1
+
+	rec, ok, err := ParseRecord(`{"event":"ci_wait","chore":"dead-code","pr_url":"`+pr+`"}`, butler)
+	if err != nil || !ok {
+		t.Fatalf("ParseRecord = ok %v, err %v; want an accepted chore-keyed ci_wait", ok, err)
+	}
+	if got, _, started := p.startChild(slot, butler, "rev1"); !started || got != butler {
+		t.Fatalf("startChild chose %q (started=%v), want the butler", got, started)
+	}
+	p.noteCIWait(slot, rec)
+
+	if s := p.snapshot().Slots[slot]; !s.CIWait || s.PRURL != pr {
+		t.Fatalf("CIWait, PRURL = %v, %q; want true, %q", s.CIWait, s.PRURL, pr)
+	}
+}
+
 // TestPoolNoteCIWaitDroppedWhenSlotNotRunning pins noteBox's race guard for
 // ci_wait records: one reported after the slot cleared changes nothing.
 func TestPoolNoteCIWaitDroppedWhenSlotNotRunning(t *testing.T) {

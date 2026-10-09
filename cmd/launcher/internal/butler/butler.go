@@ -82,12 +82,12 @@ type PatchForge interface {
 // finding issue's Done Ledger commit has landed (ADR 0057, issue #4076): the
 // same CI-watch/merge machinery a normal work dispatch settles through, but
 // entered through its adopt-an-open-PR seam since the finding issue was
-// never claimed by a Dispatcher -- d is always nil and gen is always 0 at
-// the call site. Production hands it a *settle.Settle built with Unclaimed
-// true (settle.Config.Unclaimed), which means no fix passes for an issue
-// nothing is dispatched against.
+// never claimed by a Dispatcher. owner is the Chore's key, the one the
+// daemon parses a butler child's records under (issue #4966). Production hands
+// it a *settle.Settle built with Unclaimed true (settle.Config.Unclaimed),
+// which means no fix passes for an issue nothing is dispatched against.
 type PatchGate interface {
-	SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string)
+	SettlePatch(owner dispatchkey.Key, num, prURL string)
 }
 
 // Kind names which of Sweep's four outcomes happened.
@@ -143,7 +143,7 @@ func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(d
 // decide's patch branch for every subsequent Sweep call, and gate is the
 // work merge gate a landed patch PR is handed to once its Done Ledger commit
 // lands (issue #4076). Returns r so a caller can chain it onto New. A non-nil
-// f must come with a non-nil gate -- Runner.run calls gate.SettleAdopted
+// f must come with a non-nil gate -- Runner.run calls gate.SettlePatch
 // unguarded once f lands a patch. If WithPatchForge is never called,
 // r.patchForge stays nil -- see Runner.run for what that gates.
 func (r *Runner) WithPatchForge(f PatchForge, gate PatchGate) *Runner {

@@ -16,6 +16,7 @@ import (
 	bkd "spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
@@ -1589,11 +1590,10 @@ func (f *fakePatchForge) DeleteBranch(branch, base string) error {
 	return f.deleteErr
 }
 
-// fakePatchGateCall records one PatchGate.SettleAdopted invocation.
+// fakePatchGateCall records one PatchGate.SettlePatch invocation.
 type fakePatchGateCall struct {
-	d     dispatch.Dispatcher
+	owner dispatchkey.Key
 	num   string
-	gen   uint64
 	prURL string
 }
 
@@ -1607,11 +1607,11 @@ type fakePatchGate struct {
 	onCall func(num, prURL string)
 }
 
-func (g *fakePatchGate) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+func (g *fakePatchGate) SettlePatch(owner dispatchkey.Key, num, prURL string) {
 	if g.onCall != nil {
 		g.onCall(num, prURL)
 	}
-	g.calls = append(g.calls, fakePatchGateCall{d: d, num: num, gen: gen, prURL: prURL})
+	g.calls = append(g.calls, fakePatchGateCall{owner: owner, num: num, prURL: prURL})
 }
 
 // patchTestPolicy builds a Policy with both the promotion and patch rungs on
@@ -2044,7 +2044,7 @@ func TestSweep_PatchPRCreateErrorsButPRWasCreatedAdopts(t *testing.T) {
 		t.Errorf("Promoted = %v, want none", tip.State.Promoted)
 	}
 	if len(gate.calls) != 1 || gate.calls[0].prURL != pf.openPR.URL {
-		t.Fatalf("gate.calls = %+v, want one SettleAdopted call with %q", gate.calls, pf.openPR.URL)
+		t.Fatalf("gate.calls = %+v, want one SettlePatch call with %q", gate.calls, pf.openPR.URL)
 	}
 }
 
@@ -2302,7 +2302,7 @@ func newPatchGateSettle(fc *forge.Fake, mergeMode, guardPaths string) *settle.Se
 }
 
 // snapshotGate wraps a real PatchGate and records the Ledger's state
-// immediately before and after one SettleAdopted call, so a test can pin
+// immediately before and after one SettlePatch call, so a test can pin
 // that a failed/no-op gate outcome writes no further Ledger commit on top
 // of the Chore's own Done commit (issue #4076).
 type snapshotGate struct {
@@ -2312,11 +2312,11 @@ type snapshotGate struct {
 	before, after ledger.State
 }
 
-func (g *snapshotGate) SettleAdopted(d dispatch.Dispatcher, num string, gen uint64, prURL string) {
+func (g *snapshotGate) SettlePatch(owner dispatchkey.Key, num, prURL string) {
 	if tip, err := g.backend.Read(g.chore); err == nil {
 		g.before = tip.State
 	}
-	g.gate.SettleAdopted(d, num, gen, prURL)
+	g.gate.SettlePatch(owner, num, prURL)
 	if tip, err := g.backend.Read(g.chore); err == nil {
 		g.after = tip.State
 	}
@@ -2375,14 +2375,11 @@ func TestSweep_PatchGateCalledAfterDoneCommit(t *testing.T) {
 		t.Fatalf("gate calls = %+v, want exactly 1", gate.calls)
 	}
 	call := gate.calls[0]
-	if call.d != nil {
-		t.Errorf("gate dispatcher = %v, want nil", call.d)
+	if want := dispatchkey.Chore("bugs"); call.owner != want {
+		t.Errorf("gate owner = %v, want the Chore key %v (issue #4966)", call.owner, want)
 	}
 	if call.num != "9500" {
 		t.Errorf("gate num = %q, want %q", call.num, "9500")
-	}
-	if call.gen != 0 {
-		t.Errorf("gate gen = %d, want 0", call.gen)
 	}
 	if call.prURL != prURL {
 		t.Errorf("gate prURL = %q, want %q", call.prURL, prURL)

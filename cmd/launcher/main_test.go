@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/butler"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
@@ -29,7 +31,6 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
-	"spindrift.dev/launcher/internal/settle"
 )
 
 // A bare `spindrift` prints help and exits 0 rather than falling through to
@@ -3910,12 +3911,12 @@ func TestButlerPatchGate_GreenImmediateMergeCompletesIssue(t *testing.T) {
 	lw := localloop.Wire(localloopConfig(c), fc)
 	caps := forge.ResolveCapabilities(fc, fc, backend.Descriptor{}, backend.Descriptor{})
 	s := newSettle(c, fc, lw, fc, caps)
-	ws, ok := s.(settle.WorkSettler)
+	pg, ok := s.(butler.PatchGate)
 	if !ok {
-		t.Fatalf("newSettle(butler kind) = %T, does not implement settle.WorkSettler", s)
+		t.Fatalf("newSettle(butler kind) = %T, does not implement butler.PatchGate", s)
 	}
 
-	ws.SettleAdopted(nil, "1", 0, prURL)
+	pg.SettlePatch(dispatchkey.Chore("docs-drift"), "1", prURL)
 
 	if fc.Merged != prURL {
 		t.Errorf("fc.Merged = %q, want %q", fc.Merged, prURL)

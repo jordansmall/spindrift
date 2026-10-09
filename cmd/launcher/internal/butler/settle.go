@@ -305,9 +305,7 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 // adoptLandings hands each landed patch's draft PR to the work merge gate.
 func (s *settleRun) adoptLandings(landings []patchLanding) {
 	for _, l := range landings {
-		// nil Dispatcher on purpose: the patch PR settles the finding issue, which
-		// has no Record of its own, and the Chore's Record already settled once.
-		s.patch.gate.SettleAdopted(nil, l.issueNum, 0, l.prURL)
+		s.patch.gate.SettlePatch(dispatchkey.Chore(s.chore), l.issueNum, l.prURL)
 	}
 }
 

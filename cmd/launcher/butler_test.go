@@ -910,7 +910,7 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 		factory:      testFactory(t, t.TempDir(), fr),
 		issueTracker: fc.AsIssueFiler(),
 		// This test never runs the patch rung (no PatchForge is wired), so
-		// the Fake's SettleAdopted is never called; it only needs to satisfy
+		// the Fake's SettlePatch is never called; it only needs to satisfy
 		// butler.PatchGate for lc.patchGate() (issue #4076).
 		settle:  settle.NewFake(),
 		cleanup: func() {},
