@@ -2113,17 +2113,21 @@ artifact, not a growing transcript:
   error.
 - **Seeded prompts.** Before any pass whose run-state carries prior data (in
   practice every pass after the first, though a warm-started state file would
-  seed pass 1 too), the orchestrator prepends a "Run-state handoff" section —
+  seed pass 1 too), the orchestrator appends a "Run-state handoff" section —
   last verdict, reviewer findings, scout-brief path, pass-summary path,
   decisions log — to the original prompt, so a fresh implementor pass knows
-  where a prior pass left off without reading its transcript.
+  where a prior pass left off without reading its transcript. This order
+  matters because prompt caching matches on a byte prefix: a per-pass block
+  kept as a suffix leaves the template body cacheable across passes (issue
+  #3445).
 - **Round-N review-prompt seeding.** A round-N (N>1) review pass gets its own,
-  narrower seeded section instead: its own prior verdict message plus the
-  append-only dispositions log's content, both verbatim, framed as claims to
-  verify against the diff — nothing else from the implementor (no pass
-  summary, no scout brief, no worker findings) reaches this prompt. Round 1's
-  review prompt is always unseeded. A missing dispositions log degrades to
-  seeding the prior verdict alone, never an error.
+  narrower seeded section instead, also appended after the original prompt:
+  its own prior verdict message plus the append-only dispositions log's
+  content, both verbatim, framed as claims to verify against the diff —
+  nothing else from the implementor (no pass summary, no scout brief, no
+  worker findings) reaches this prompt. Round 1's review prompt is always
+  unseeded. A missing dispositions log degrades to seeding the prior verdict
+  alone, never an error.
 - **Delta focus.** When the run state's reviewed-commit anchor looks like a
   real git commit SHA (7 to 64 lowercase hex characters, covering both a
   SHA-1 and a SHA-256 repo), the same round-N review prompt also gets a
