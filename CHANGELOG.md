@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.24.1](https://github.com/jordansmall/spindrift/compare/v0.24.0...v0.24.1) (2026-10-10)
+
+
+### Features
+
+* **butler:** add the tuning Chore knobs ([7a797e7](https://github.com/jordansmall/spindrift/commit/7a797e7651fe33fb00538e417b9fec731fc1de51)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **butler:** sweep the tuning Chore ([f29d60d](https://github.com/jordansmall/spindrift/commit/f29d60d2715a892cec53cdafefd936971cf5df92)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **chore:** add records-scoped due checks ([67becbd](https://github.com/jordansmall/spindrift/commit/67becbd887daa9d758821eea7217115afc70bdc5)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **chore:** add the tuning catalog row ([86db322](https://github.com/jordansmall/spindrift/commit/86db322bc1db1b5385a7325b844ee4af7a67b240)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **daemon:** publish a slot's CI run URL in status ([e670afd](https://github.com/jordansmall/spindrift/commit/e670afd7c435463870c108969d08843aa03f4fd1)), closes [#4962](https://github.com/jordansmall/spindrift/issues/4962)
+* **daemon:** publish a slot's CI wait in status ([6992345](https://github.com/jordansmall/spindrift/commit/6992345a39bbdcb7de901389db8cbe8136e6d6ac)), closes [#4961](https://github.com/jordansmall/spindrift/issues/4961)
+* **dashboard:** link the CI-wait pill to the CI run ([d662d44](https://github.com/jordansmall/spindrift/commit/d662d444fb7f0d0e16bca51acc02d97a347c41d4)), closes [#4962](https://github.com/jordansmall/spindrift/issues/4962)
+* **dashboard:** show a waiting-on-CI pill on slots ([4e7b360](https://github.com/jordansmall/spindrift/commit/4e7b3607513f7f105c9db46f95f57c130f6a0c7e)), closes [#4961](https://github.com/jordansmall/spindrift/issues/4961)
+* **dispatchrecord:** record 14-day churn of a merge ([acec393](https://github.com/jordansmall/spindrift/commit/acec39368c5f785256ba236cdacc682483cb5909)), closes [#4955](https://github.com/jordansmall/spindrift/issues/4955)
+* **dispatchrecord:** record and judge merge reverts ([439a2eb](https://github.com/jordansmall/spindrift/commit/439a2ebf7b5ee2fb180c8ca9595f964c712f105f)), closes [#4950](https://github.com/jordansmall/spindrift/issues/4950)
+* **dispatchrecord:** record settle order ([7bd20fd](https://github.com/jordansmall/spindrift/commit/7bd20fd9f8821a57c8611dbe2514a59b74e56bc2))
+* **doctor:** require agent-tuning-finding for tuning ([8cc27b8](https://github.com/jordansmall/spindrift/commit/8cc27b803cc54cd9643924b786adb6167af23e27)), closes [#4954](https://github.com/jordansmall/spindrift/issues/4954)
+* **dogfood:** guard behaviour-changing paths ([7cb61e5](https://github.com/jordansmall/spindrift/commit/7cb61e542b1944f4e489dd496d2f276f2b926524)), closes [#4949](https://github.com/jordansmall/spindrift/issues/4949)
+* **forge:** report the Actions run URL for a PR ([4d2e26b](https://github.com/jordansmall/spindrift/commit/4d2e26b72cfa14a1ebf000f3f56b15d2863cbbf0)), closes [#4962](https://github.com/jordansmall/spindrift/issues/4962)
+* **labels:** add agent-tuning-finding and its marker ([d066724](https://github.com/jordansmall/spindrift/commit/d0667245e1b2823a5e605c7bde372339ab009682)), closes [#4948](https://github.com/jordansmall/spindrift/issues/4948)
+* **promptassembly:** add a Chore input section ([7941304](https://github.com/jordansmall/spindrift/commit/7941304c3d179f217ffa0cca37508b6a4e9b4b52)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **settle:** hold the merge of a tuning-finding PR ([58556e8](https://github.com/jordansmall/spindrift/commit/58556e84559618b73a3710e84540f5d48974ba77)), closes [#4948](https://github.com/jordansmall/spindrift/issues/4948)
+* **settle:** re-report a CI wait once its run URL is known ([940aa97](https://github.com/jordansmall/spindrift/commit/940aa97d066587d9994af241be499b70d5329db5)), closes [#4962](https://github.com/jordansmall/spindrift/issues/4962)
+* **settle:** record the merge commit of a merged PR ([69f1ced](https://github.com/jordansmall/spindrift/commit/69f1ced593166a53e14725c086994aa453b054a0)), closes [#4950](https://github.com/jordansmall/spindrift/issues/4950)
+* **settle:** report a ci_wait record per CI wait ([991378e](https://github.com/jordansmall/spindrift/commit/991378eaa4848a6bc7ab00c69045469ed98e3b2b)), closes [#4961](https://github.com/jordansmall/spindrift/issues/4961)
+* **stats:** show the 14-day churn of merged work ([9be0483](https://github.com/jordansmall/spindrift/commit/9be048335f8c3b8ca90903d8d15fdcb97a4f6537)), closes [#4955](https://github.com/jordansmall/spindrift/issues/4955)
+* **stats:** show the reverted share of merged work ([5c8217a](https://github.com/jordansmall/spindrift/commit/5c8217a63db8877153b6f676089290cafbe1efe8)), closes [#4950](https://github.com/jordansmall/spindrift/issues/4950)
+* **tuning:** cap the digest at BUTLER_TUNING_DIGEST_BYTES ([297289e](https://github.com/jordansmall/spindrift/commit/297289ed6de0974dfc038194998b8f885505a9a7)), closes [#4956](https://github.com/jordansmall/spindrift/issues/4956)
+* **tuning:** list outliers and fenced review evidence ([f452790](https://github.com/jordansmall/spindrift/commit/f452790ad45e6048304d115495bf7b4299990b00)), closes [#4956](https://github.com/jordansmall/spindrift/issues/4956)
+* **tuning:** render the Tuning digest ([c7eaf7d](https://github.com/jordansmall/spindrift/commit/c7eaf7ddcd6aaa9075819a6a8b3093f7ed325170)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **tuning:** split the digest and add quality rows ([f5c47c3](https://github.com/jordansmall/spindrift/commit/f5c47c3b339f30225d884743e2667b00ea40e131)), closes [#4956](https://github.com/jordansmall/spindrift/issues/4956)
+* **tuning:** tell the Chore about splits, outliers and evidence ([d6c1ae4](https://github.com/jordansmall/spindrift/commit/d6c1ae4d3dfa529fde5721fba235d4dad21e1d7a)), closes [#4956](https://github.com/jordansmall/spindrift/issues/4956)
+
+
+### Bug Fixes
+
+* **butler:** hand the patch gate the Chore's key ([3c0021e](https://github.com/jordansmall/spindrift/commit/3c0021e803d37b44e0b50b3dfa075bc8dfa569c6)), closes [#4966](https://github.com/jordansmall/spindrift/issues/4966)
+* **churn:** follow later renames when blaming surviving lines ([985ef44](https://github.com/jordansmall/spindrift/commit/985ef44a7486a88887f37ec7b66fa9e15a32a0a1)), closes [#4978](https://github.com/jordansmall/spindrift/issues/4978)
+* **dogfood:** guard the model pins and the guard list itself ([8fa9c4e](https://github.com/jordansmall/spindrift/commit/8fa9c4efe2f8547e25b569420f14235d35c3616a)), closes [#4974](https://github.com/jordansmall/spindrift/issues/4974)
+* **settle:** report a patch PR under its Chore key ([d8739de](https://github.com/jordansmall/spindrift/commit/d8739ded61f37bcdfe9c2603ca6fe61f958ea0d0)), closes [#4966](https://github.com/jordansmall/spindrift/issues/4966)
+
+
+### Documentation
+
+* **adr:** add the tuning Chore over Records ([4131450](https://github.com/jordansmall/spindrift/commit/41314507545898b9d4fc89512d6ea0c9763cfef6))
+* **adr:** correct where ADR 0062 says the model pins live ([447cbc3](https://github.com/jordansmall/spindrift/commit/447cbc3ca5e4d74ea442383c354f71fd2448a309)), closes [#4974](https://github.com/jordansmall/spindrift/issues/4974)
+* **context:** define Tuning and Tuning digest ([e5fccdc](https://github.com/jordansmall/spindrift/commit/e5fccdca82e029ca5580b172c107842fcf3d1c6d))
+* describe the tuning-provenance merge hold ([607266d](https://github.com/jordansmall/spindrift/commit/607266dfdd798054c784c7795a428e147beb7ec5)), closes [#4948](https://github.com/jordansmall/spindrift/issues/4948)
+* **launcher:** drop stale gate count from launch gate comments ([7e9848e](https://github.com/jordansmall/spindrift/commit/7e9848e9b90dd8e9b5fe5ae9dcd48009b8d4786a)), closes [#4942](https://github.com/jordansmall/spindrift/issues/4942)
+* **launcher:** drop the removed two-path wording ([e31d77f](https://github.com/jordansmall/spindrift/commit/e31d77fcc9fd015dfe8608cb9de8413c69b1fef5)), closes [#4973](https://github.com/jordansmall/spindrift/issues/4973)
+* **launcher:** fix stale bwrap gate comments ([6db841f](https://github.com/jordansmall/spindrift/commit/6db841f15d7e1505cd689fa2be31f9dda75fdb6c)), closes [#4938](https://github.com/jordansmall/spindrift/issues/4938)
+* **launcher:** fix stale recover claim in settledLabels ([865f1a1](https://github.com/jordansmall/spindrift/commit/865f1a1d5e44875625fa4d630ec8d3191217b76b)), closes [#4941](https://github.com/jordansmall/spindrift/issues/4941)
+* **orchestrator:** fix drifted caps test comments ([2409697](https://github.com/jordansmall/spindrift/commit/2409697179a744e3b8d310c6d05d4ec27445c02b)), closes [#4939](https://github.com/jordansmall/spindrift/issues/4939)
+* **quickstart:** correct how the backend and Forgejo URL are chosen ([bd52db2](https://github.com/jordansmall/spindrift/commit/bd52db23f0553bb33353f9921f05336dbe4fde4f)), closes [#4975](https://github.com/jordansmall/spindrift/issues/4975)
+* **reference:** describe the complete Tuning digest ([48ff4be](https://github.com/jordansmall/spindrift/commit/48ff4beab385f1a11db528108d8d3190938a6b96)), closes [#4956](https://github.com/jordansmall/spindrift/issues/4956)
+* **reference:** describe the stats churn field ([484c5e1](https://github.com/jordansmall/spindrift/commit/484c5e1d50c924fc4d0111fcaf1369f7e6bf183e)), closes [#4955](https://github.com/jordansmall/spindrift/issues/4955)
+* **reference:** describe the stats reverted field ([6e71a98](https://github.com/jordansmall/spindrift/commit/6e71a986872473dee585afd6397deef853e19e78)), closes [#4950](https://github.com/jordansmall/spindrift/issues/4950)
+* **reference:** describe the tuning Chore ([718c35e](https://github.com/jordansmall/spindrift/commit/718c35e61f2705026f47cefb1a2c6385c1d5a5e7)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **reference:** document the slot CI run URL ([70faf36](https://github.com/jordansmall/spindrift/commit/70faf36463a2b273dc6b4e39f09b6e721b457bd8)), closes [#4962](https://github.com/jordansmall/spindrift/issues/4962)
+* **reference:** document the slot CI-wait fields ([288b1b5](https://github.com/jordansmall/spindrift/commit/288b1b53f2cc89aefc91b673ad1d04e368709266)), closes [#4961](https://github.com/jordansmall/spindrift/issues/4961)
+* **reference:** say churn follows a later rename ([2b9a764](https://github.com/jordansmall/spindrift/commit/2b9a7643d65ecca090802232b98850dd4a665f41))
+* **reference:** say the run-state handoff is appended ([c349242](https://github.com/jordansmall/spindrift/commit/c349242d94f4f302938fbdbe0798d0e624560530)), closes [#4972](https://github.com/jordansmall/spindrift/issues/4972)
+* **reference:** say when doctor requires the tuning label ([f19b516](https://github.com/jordansmall/spindrift/commit/f19b5165c9c0323946b8952b4d6ed4a865e3ec4b)), closes [#4954](https://github.com/jordansmall/spindrift/issues/4954)
+
+
+### Code Refactoring
+
+* **stats:** move aggregation to recordstats ([fe6ae15](https://github.com/jordansmall/spindrift/commit/fe6ae1542aeabe96028f1cf40961d2e2546ab8c7)), closes [#4951](https://github.com/jordansmall/spindrift/issues/4951)
+* **stats:** share split grouping and quality figures ([ab93a3a](https://github.com/jordansmall/spindrift/commit/ab93a3a8d149280fa10859c496d6201e4fa7c865)), closes [#4956](https://github.com/jordansmall/spindrift/issues/4956)
+
+
+### Tests
+
+* **checks:** pin MERGE_GUARD_PATHS default and dogfood ([a4b4256](https://github.com/jordansmall/spindrift/commit/a4b4256dc212f1aa17a5d44e7633c66d9c22cd08)), closes [#4949](https://github.com/jordansmall/spindrift/issues/4949)
+* **launcher:** name dispatch.ResolveFromLogs in recover comments ([789838b](https://github.com/jordansmall/spindrift/commit/789838ba788fe43165ca6efe8ae8cf4c1f86db17)), closes [#4992](https://github.com/jordansmall/spindrift/issues/4992)
+* **orchestrator:** fix stale comment pointers ([be3e365](https://github.com/jordansmall/spindrift/commit/be3e365c8659afa99deb47a38de5201f4ac294b5)), closes [#4976](https://github.com/jordansmall/spindrift/issues/4976)
+* **orchestrator:** restore the [#4108](https://github.com/jordansmall/spindrift/issues/4108) guard doc ([18991af](https://github.com/jordansmall/spindrift/commit/18991afc3b221447c395670780d6253c560cb33c)), closes [#4973](https://github.com/jordansmall/spindrift/issues/4973)
+* **runner:** skip OCI probes on registry 429/5xx ([3012c69](https://github.com/jordansmall/spindrift/commit/3012c69bfe885b3d46f32b4275693bffbf72ec8e))
+* **waves:** stop calling headless Session nil ([be981e1](https://github.com/jordansmall/spindrift/commit/be981e15a14bc228665b559c1d17ae8ff68e45ce)), closes [#4940](https://github.com/jordansmall/spindrift/issues/4940)
+
+
+### Miscellaneous Chores
+
+* **dogfood:** run a four-slot daemon pool ([190854f](https://github.com/jordansmall/spindrift/commit/190854ffcc7f3d122b8ed0aea753decfb2d4e3af))
+
 ## [0.24.0](https://github.com/jordansmall/spindrift/compare/v0.23.3...v0.24.0) (2026-10-09)
 
 
