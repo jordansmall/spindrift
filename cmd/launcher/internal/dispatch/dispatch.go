@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/chore"
@@ -65,6 +66,10 @@ type Chore struct {
 	// MaxFindings is this sweep's findings room (chore.Room.Findings): the
 	// most findings the Box may relay this run. Zero means no host limit.
 	MaxFindings int
+	// ClaimTime, when non-zero, is this run's claim time: the Dispatch's
+	// Record ID is minted from it at construction so the caller can read
+	// RecordID() before Run (issue #4952).
+	ClaimTime time.Time
 }
 
 // maxIssueIntents is the effective cap on the findings a Chore run's Box may

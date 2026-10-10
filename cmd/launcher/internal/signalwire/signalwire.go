@@ -106,15 +106,21 @@ type PRIntent struct {
 // Concurrence is the in-Box reviewer subagent's one-line agreement, empty
 // when it dissented or never ran. Neither can promote anything by itself --
 // the host holds the allow-list and the daily budget, and the Box cannot
-// change either. Patch (ADR 0057, issue #4072) is an optional unified diff of
-// modification hunks only, no binary content; the host alone decides
-// whether it is ever applied, and only for a finding whose Class is on the
-// host's own patch allow-list -- the Box merely carries it.
+// change either. Cites (digest anchors) and Metric (a slug) are a tuning
+// finding's evidence (issue #4952): their shape is checked for every
+// intent, but only a tuning Chore's Box requires them (driver-exec
+// demands both when CHORE_INPUT is set) and only the host's tuning
+// validation uses them. Patch (ADR 0057, issue #4072) is an optional
+// unified diff of modification hunks only, no binary content; the host
+// alone decides whether it is ever applied, and only for a finding whose
+// Class is on the host's own patch allow-list -- the Box merely carries it.
 type IssueIntent struct {
 	Title       string   `json:"title"`
 	Body        string   `json:"body"`
 	Type        string   `json:"type"`
 	DedupTerms  []string `json:"dedupTerms,omitempty"`
+	Cites       []string `json:"cites,omitempty"`
+	Metric      string   `json:"metric,omitempty"`
 	Class       string   `json:"class,omitempty"`
 	Concurrence string   `json:"concurrence,omitempty"`
 	Patch       string   `json:"patch,omitempty"`
@@ -157,6 +163,12 @@ func (i IssueIntent) validate(typeRequired bool) *Reject {
 	for idx, term := range i.DedupTerms {
 		fs = append(fs, Field{fmt.Sprintf("dedupTerms[%d]", idx), term})
 	}
+	for idx, cite := range i.Cites {
+		fs = append(fs, Field{fmt.Sprintf("cites[%d]", idx), cite})
+	}
+	if i.Metric != "" {
+		fs = append(fs, Field{"metric", i.Metric})
+	}
 	if i.Class != "" {
 		fs = append(fs, Field{"class", i.Class})
 	}
@@ -171,6 +183,10 @@ func (i IssueIntent) validate(typeRequired bool) *Reject {
 	}
 	if i.Class != "" && !ValidClass(i.Class) {
 		return &Reject{Status: "invalid_class", Reason: "class " + ClassRule, Code: http.StatusBadRequest}
+	}
+	// The metric slug deliberately shares the class grammar (ClassRule).
+	if i.Metric != "" && !ValidClass(i.Metric) {
+		return &Reject{Status: "invalid_metric", Reason: "metric " + ClassRule, Code: http.StatusBadRequest}
 	}
 	if i.Patch != "" {
 		if err := ValidateUnifiedDiff(i.Patch); err != nil {

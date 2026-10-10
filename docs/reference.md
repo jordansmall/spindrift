@@ -4566,9 +4566,12 @@ of KB. `-title`, `-type` and `-dedup` stay flags: all are short enough
 that neither concern bites. `pr-intent` requires `-title`; `issue-intent`
 requires `-title` and `-type` (`bug`, `enhancement` or `chore`), and
 accepts a repeatable, optional `-dedup <site key>` per dedup term (issue
-#3609); `status` takes no flags. The command's exit code is the
-acceptance: exit 0 prints a receipt — `signal <kind> accepted: <n>
-bytes, <hash>, sequence <n>` — and the signal is taken; a non-zero exit
+#3609), plus a repeatable `-cite <digest anchor>` and a `-metric <slug>`
+that the Box requires whenever `CHORE_INPUT` is set (a tuning finding,
+issue #4952) and that other Chores omit; `status` takes no flags. The
+command's exit code is the acceptance: exit 0 prints a receipt —
+`signal <kind> accepted: <n> bytes, <hash>, sequence <n>` — and the signal
+is taken; a non-zero exit
 prints `signal <kind> rejected (<status>): <reason>` and the signal was
 NOT taken, so the agent can never mistake a rejection for success. A
 usage failure the verb catches itself — an unknown flag, a missing
@@ -5670,6 +5673,34 @@ is rejected at preflight. Each finding is filed with `agent-butler-finding` and
 (see [Merge guard](#merge-guard)). The finished sweep's Done commit moves the
 cursor to the latest Record it covered.
 
+**Snapshot and validation.** The host stores the rendered digest in the Dispatch
+Records store's `tuning_snapshots` table, keyed by the sweep's Record ID, before
+it launches the Box; the Ledger's Done commit carries only `snapshot: {sweep,
+sha256}`, so the digest itself is never pushed. A tuning finding names the
+digest anchors it argues from (a repeatable `-cite <anchor>`, or `"cites"` on
+the log carrier) and the one metric it concerns (`-metric <slug>`, a lowercase
+slug, or `"metric"`). Only the socket carrier enforces this in the Box:
+`driver-exec signal issue-intent` requires both whenever `CHORE_INPUT` is set
+and rejects a finding without them. On the log carrier
+(`SPINDRIFT_ISSUE_INTENT` lines) nothing checks them in the Box; the host drops
+a finding with no cites at settle, but does not check that a metric is present,
+so a log-carrier finding with no metric is still filed. The target file is the
+path part of each `-dedup path:Symbol` term. At settle the host checks each
+finding against the stored snapshot and drops it, recording it in the Ledger's
+`drops` (title and reason) and counting it in `dropped`, when:
+
+- `unknown-cite`: a cite is not an anchor in the digest the sweep was served, or
+  the finding has no cites;
+- `missing-target`: a target file is missing or not tracked at the scanned
+  HEAD, or the finding's dedup terms name no path;
+- `thin-evidence`: none of the cited rows has `n` of at least
+  `BUTLER_TUNING_MIN_SAMPLE`. Class `evidence-gap` is exempt, since it argues
+  that data is missing.
+
+Each surviving finding gets a host-appended `## Evidence` section that
+re-renders the cited rows from the stored snapshot, so a reader sees the host's
+figures rather than the Box's transcription of them.
+
 ## Stats
 
 `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>]
@@ -5888,7 +5919,7 @@ Record until it gains output.
 SQLite database in the checkout. `.spindrift/` is git-ignored, so it is never
 committed. The schema version lives in `PRAGMA user_version`; migrations only
 move forward, and a binary refuses a database whose version is newer than its
-own. The current schema is version 10. Version 2 added the `verdict_text` and
+own. The current schema is version 11. Version 2 added the `verdict_text` and
 `dispositions` columns to passes. An older store opens, migrates, and keeps
 its rows; the migrations also mark every ingested log as changed, so the first
 plain `stats` after the upgrade re-parses every log still on disk and fills in
@@ -5910,11 +5941,14 @@ written as settled and never changes it, so it orders Records by when the host
 settled them, which claim time cannot (a long-running Dispatch claims early and
 settles late). Rows settled before the migration have no recorded settle time,
 so the migration backfills them in claim order. `spindrift stats` JSONL carries
-it as `settled_seq` (omitted until the Record is settled). The store uses WAL journaling, so another process
-can read it while `stats` writes. Because Records are kept in the database,
-they survive deleting the logs they came from. Deleting the database instead
-loses every Record whose log is gone: a re-run rebuilds only from the logs
-still on disk.
+it as `settled_seq` (omitted until the Record is settled). Version 11 adds the
+`tuning_snapshots` table (sweep Record ID, SHA-256, rendered digest, creation
+time) holding the digest a tuning Chore sweep was served; it is host-private
+and never pushed, since the Ledger carries only the Record ID and hash.
+The store uses WAL journaling, so another process can read it while `stats`
+writes. Because Records are kept in the database, they survive deleting the
+logs they came from. Deleting the database instead loses every Record whose
+log is gone: a re-run rebuilds only from the logs still on disk.
 
 **Ingest at settle.** The host keeps the store current without a `stats`
 run. Right after appending `dispatch_settled` to a Dispatch's primary Pass

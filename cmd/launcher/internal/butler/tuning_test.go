@@ -1,6 +1,10 @@
 package butler
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,7 +22,10 @@ import (
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
+	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/testutil"
+	"spindrift.dev/launcher/internal/tuning"
 )
 
 var tuningNow = time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
@@ -90,18 +97,88 @@ type tuningRun struct {
 	fc      *forge.Fake
 	input   []string
 	boxes   int
+
+	// recordIDs holds the Record ID each fake Box answered, derived from the
+	// Chore's pinned ClaimTime the way the real Dispatch mints it.
+	recordIDs []string
+	// onRun, when set, runs as each fake Box's Run begins.
+	onRun func(recordID string)
+
+	// intents are the raw issue-intent payloads each fake Box reports;
+	// defaults to one valid evidence-gap finding.
+	intents []string
+	// files are the paths tracked at the scanned HEAD; defaults to a.go.
+	files []string
+	// filesErr, when set, fails TrackedFiles.
+	filesErr error
+	// filesCalls counts TrackedFiles calls.
+	filesCalls int
+}
+
+// tuningIntent builds the raw payload of a tuning finding.
+func tuningIntent(t *testing.T, title, class string, cites []string, terms ...string) string {
+	t.Helper()
+	raw, err := json.Marshal(signalwire.IssueIntent{Title: title, Body: "tune it", Class: class, Cites: cites, Metric: "usd", DedupTerms: terms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+// countingTree counts TrackedFiles calls.
+type countingTree struct {
+	fakeTree
+	calls *int
+}
+
+func (c countingTree) TrackedFiles(commit string) ([]string, error) {
+	*c.calls++
+	return c.fakeTree.TrackedFiles(commit)
+}
+
+// hookedBox lets a test observe the instant its fake Box launches.
+type hookedBox struct {
+	*dispatch.Fake
+	onRun func()
+}
+
+func (h hookedBox) Run() dispatch.Disposition {
+	if h.onRun != nil {
+		h.onRun()
+	}
+	return h.Fake.Run()
 }
 
 // sweepTuning runs one tuning Sweep at now against r's backend and forge
-// fake, with a tree that must never be asked for files.
+// fake.
 func (tr *tuningRun) sweepTuning(t *testing.T, policy Policy, now time.Time) (Outcome, error) {
 	t.Helper()
 	newBox := func(c dispatch.Chore) dispatch.Dispatcher {
 		tr.boxes++
 		tr.input = append(tr.input, c.Input)
-		return readyDispatcher()
+		d := readyDispatcher()
+		intents := tr.intents
+		if intents == nil {
+			intents = []string{tuningIntent(t, "bug found", "evidence-gap", []string{"summary:usd-per-record"}, "a.go:Foo")}
+		}
+		d.RunResult = dispatch.Succeeded(dispatch.Result{
+			Resolved:          outcome.Resolved{Found: true, Outcome: outcome.Outcome{Issue: "butler-tuning", Status: outcome.StatusReady, Note: "swept"}},
+			IssueIntentsFound: true,
+			IssueIntents:      intents,
+		})
+		d.RecordIDResult = dispatchrecord.RecordID("tuning", c.Name, c.ClaimTime)
+		tr.recordIDs = append(tr.recordIDs, d.RecordIDResult)
+		return hookedBox{Fake: d, onRun: func() {
+			if tr.onRun != nil {
+				tr.onRun(d.RecordIDResult)
+			}
+		}}
 	}
-	tree := fakeTree{head: "headsha", filesErr: fmt.Errorf("a records-scoped Chore must not list tracked files")}
+	files := tr.files
+	if files == nil {
+		files = []string{"a.go"}
+	}
+	tree := countingTree{fakeTree: fakeTree{head: "headsha", files: files, filesErr: tr.filesErr}, calls: &tr.filesCalls}
 	r := New(tr.backend, tree, tr.fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
 	var out Outcome
 	var err error
@@ -124,6 +201,82 @@ func seedTuningDone(t *testing.T, tr *tuningRun, at time.Time, cursor string) {
 	}
 	if _, err := ledger.Finish(tr.backend, "tuning", claim, ledger.State{LastSwept: "headsha", Cursor: cursor}, at); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSweep_Tuning_StoresSnapshotAndLedgerRef(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	var storedAtLaunch bool
+	tr.onRun = func(id string) {
+		s, err := dispatchrecord.Open(root)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer s.Close()
+		_, storedAtLaunch, _ = s.TuningSnapshot(id)
+	}
+
+	out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Kind != Swept || len(tr.input) != 1 {
+		t.Fatalf("Outcome = %+v, boxes = %d, want one Swept Box", out, tr.boxes)
+	}
+	id := tr.recordIDs[0]
+	sum := sha256.Sum256([]byte(tr.input[0]))
+	want := ledger.Snapshot{Sweep: id, SHA256: hex.EncodeToString(sum[:])}
+
+	if !storedAtLaunch {
+		t.Error("the snapshot was not in the store when the Box launched")
+	}
+	store, err := dispatchrecord.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	snap, ok, err := store.TuningSnapshot(id)
+	if err != nil || !ok {
+		t.Fatalf("TuningSnapshot(%q) = ok %v, err %v", id, ok, err)
+	}
+	if snap.Rendered != tr.input[0] || snap.SHA256 != want.SHA256 || !snap.CreatedAt.Equal(tuningNow) {
+		t.Errorf("snapshot = %+v, want the Box's input, sha %s, created %v", snap, want.SHA256, tuningNow)
+	}
+
+	tip, err := tr.backend.Read("tuning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip.State.Snapshot == nil || *tip.State.Snapshot != want {
+		t.Errorf("Ledger Snapshot = %+v, want %+v", tip.State.Snapshot, want)
+	}
+	raw, err := json.Marshal(tip.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "| Anchor |") || strings.Contains(string(raw), snap.Rendered[:20]) {
+		t.Errorf("the digest text leaked into the Ledger state: %s", raw)
+	}
+}
+
+func TestSweep_Tuning_NoRecordIDLeavesClaim(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 5, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	// A Box that answers no Record ID cannot have its snapshot keyed.
+	newBox := func(dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
+	r := New(tr.backend, fakeTree{head: "headsha"}, tr.fc.AsIssueFiler(), newBox, tuningPolicy(root, 1), func() time.Time { return tuningNow })
+	var err error
+	captureStdout(t, func() { _, err = r.Sweep([]string{"tuning"}) })
+	if err == nil {
+		t.Fatal("Sweep succeeded without a Record ID to key the snapshot")
+	}
+	tip, rerr := tr.backend.Read("tuning")
+	if rerr != nil || tip.State.ClaimedBy == nil || tip.State.Snapshot != nil {
+		t.Errorf("tip = %+v, err %v, want the claim left standing", tip.State, rerr)
 	}
 }
 
@@ -328,5 +481,184 @@ func TestCatalogTuningFindingLabelMatchesDoctorConst(t *testing.T) {
 	}
 	if !cs[0].Records {
 		t.Error("catalog tuning row must be records-scoped")
+	}
+}
+
+// sweepWithIntents seeds 16 Records, so every window row clears the sample
+// floor of 15, runs one tuning Sweep reporting
+// intents, and returns the run and the Ledger tip.
+func sweepWithIntents(t *testing.T, intents ...string) (*tuningRun, ledger.Tip) {
+	t.Helper()
+	root := t.TempDir()
+	seedRecords(t, root, 1, 16, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	tr.intents = intents
+	out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
+	if err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	rows := tuning.Rows(tr.input[0])
+	if rows["summary:usd-per-record"].N < 15 {
+		t.Fatalf("summary:usd-per-record row = %+v, want a non-thin row", rows["summary:usd-per-record"])
+	}
+	tip, err := tr.backend.Read("tuning")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip.State.Phase != ledger.Done {
+		t.Fatalf("tip = %+v, want Done", tip.State)
+	}
+	return tr, tip
+}
+
+func TestSweep_Tuning_DropsFailingFindings(t *testing.T) {
+	good := []string{"summary:usd-per-record"}
+	tests := []struct {
+		name, intent, reason string
+	}{
+		{"unknown cite", tuningIntent(t, "f", "prompt-gap", []string{"summary:usd-per-record", "summary:nope"}, "a.go:Foo"), "unknown-cite"},
+		{"no cites", tuningIntent(t, "f", "prompt-gap", nil, "a.go:Foo"), "unknown-cite"},
+		{"missing target", tuningIntent(t, "f", "prompt-gap", good, "missing/file.md:knob"), "missing-target"},
+		{"no target", tuningIntent(t, "f", "prompt-gap", good), "missing-target"},
+		{"one of two targets missing", tuningIntent(t, "f", "prompt-gap", good, "a.go:Foo", "missing/file.md:knob"), "missing-target"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tr, tip := sweepWithIntents(t, tc.intent)
+			if len(tr.fc.PostIssueCalls) != 0 {
+				t.Errorf("PostIssueCalls = %+v, want none", tr.fc.PostIssueCalls)
+			}
+			want := []ledger.Drop{{Title: "f", Reason: tc.reason}}
+			if tip.State.Dropped != 1 || !slices.Equal(tip.State.Drops, want) {
+				t.Errorf("Dropped = %d, Drops = %v, want 1, %v", tip.State.Dropped, tip.State.Drops, want)
+			}
+		})
+	}
+}
+
+func TestSweep_Tuning_InvalidPayloadPassesThroughToFiling(t *testing.T) {
+	// Each payload fails the filing accept gate yet carries cites that would
+	// otherwise be an unknown-cite drop: filing skips it, so it must not be
+	// recorded as a drop (its model-authored title would reach the Ledger).
+	base := signalwire.IssueIntent{Title: "f", Body: "tune it", Class: "prompt-gap", Cites: []string{"summary:nope"}, Metric: "usd", DedupTerms: []string{"a.go:Foo"}}
+	withTitle := func(title string) signalwire.IssueIntent { in := base; in.Title = title; return in }
+	withBody := func(body string) signalwire.IssueIntent { in := base; in.Body = body; return in }
+	withMetric := func(metric string) signalwire.IssueIntent { in := base; in.Metric = metric; return in }
+	for name, in := range map[string]signalwire.IssueIntent{
+		"empty title": withTitle(""),
+		"oversize":    withTitle(strings.Repeat("x", signalwire.MaxBodyBytes+1)),
+		"empty body":  withBody(""),
+		"bad metric":  withMetric("Bad Metric!"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if in.Validate() == nil {
+				t.Fatal("fixture passes Validate, want a rejected intent")
+			}
+			raw, err := json.Marshal(in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertNoDrop(t, string(raw))
+		})
+	}
+	t.Run("undecodable labels", func(t *testing.T) {
+		// Passes IssueIntent.Validate but not filing's wider decode.
+		raw, err := json.Marshal(base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if base.Validate() != nil {
+			t.Fatal("fixture fails Validate, want an intent only filing's decode rejects")
+		}
+		assertNoDrop(t, strings.TrimSuffix(string(raw), "}")+`,"labels":5}`)
+	})
+}
+
+func assertNoDrop(t *testing.T, raw string) {
+	t.Helper()
+	tr, tip := sweepWithIntents(t, raw)
+	if len(tr.fc.PostIssueCalls) != 0 {
+		t.Errorf("PostIssueCalls = %+v, want none", tr.fc.PostIssueCalls)
+	}
+	if tip.State.Dropped != 0 || len(tip.State.Drops) != 0 {
+		t.Errorf("Dropped = %d, Drops = %v, want none", tip.State.Dropped, tip.State.Drops)
+	}
+}
+
+func TestSweep_Tuning_ThinEvidenceDropsButEvidenceGapIsExempt(t *testing.T) {
+	// A window of 3 Records is thin on every row against a floor of 15.
+	for _, tc := range []struct {
+		class     string
+		wantFiled int
+		wantDrops []ledger.Drop
+	}{
+		{"prompt-gap", 0, []ledger.Drop{{Title: "f", Reason: "thin-evidence"}}},
+		{"evidence-gap", 1, nil},
+	} {
+		t.Run(tc.class, func(t *testing.T) {
+			root := t.TempDir()
+			seedRecords(t, root, 1, 3, tuningNow.Add(-48*time.Hour))
+			tr := newTuningRun(t)
+			tr.intents = []string{tuningIntent(t, "f", tc.class, []string{"summary:usd-per-record"}, "a.go:Foo")}
+			if out, err := tr.sweepTuning(t, tuningPolicy(root, 3), tuningNow); err != nil || out.Kind != Swept || out.Filed != tc.wantFiled {
+				t.Fatalf("Sweep = %+v, %v, want Swept with %d filed", out, err, tc.wantFiled)
+			}
+			if r := tuning.Rows(tr.input[0])["summary:usd-per-record"]; r.N >= 15 {
+				t.Fatalf("row = %+v, want a thin row", r)
+			}
+			tip, err := tr.backend.Read("tuning")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(tip.State.Drops, tc.wantDrops) || tip.State.Dropped != len(tc.wantDrops) {
+				t.Errorf("Dropped = %d, Drops = %v, want %v", tip.State.Dropped, tip.State.Drops, tc.wantDrops)
+			}
+		})
+	}
+}
+
+func TestSweep_Tuning_FiledBodyEndsWithHostRenderedEvidence(t *testing.T) {
+	cites := []string{"summary:usd-per-record", "role:implement:avg-usd", "summary:usd-per-record"}
+	tr, tip := sweepWithIntents(t, tuningIntent(t, "f", "prompt-gap", cites, "a.go:Foo"))
+	if len(tr.fc.PostIssueCalls) != 1 || tip.State.Dropped != 0 || len(tip.State.Drops) != 0 {
+		t.Fatalf("PostIssueCalls = %d, tip = %+v, want one filed and no drops", len(tr.fc.PostIssueCalls), tip.State)
+	}
+	body := tr.fc.PostIssueCalls[0].Body
+	visible := strings.TrimSpace(body[:strings.LastIndex(body, "<!-- spindrift-dedup:")])
+	want := strings.TrimSpace(tuning.Evidence(tuning.Rows(tr.input[0]), cites))
+	if !strings.HasSuffix(visible, want) {
+		t.Errorf("body does not end with the host-rendered Evidence section:\n%s", body)
+	}
+	for _, anchor := range []string{"summary:usd-per-record", "role:implement:avg-usd"} {
+		line := tuning.Rows(tr.input[0])[anchor].Line
+		if strings.Count(visible, line) != 1 {
+			t.Errorf("Evidence should carry the Box-served row for %q exactly once: %s", anchor, line)
+		}
+	}
+}
+
+func TestSweep_Tuning_ListsTrackedFilesOnlyForFindingsPastTheCites(t *testing.T) {
+	tr, _ := sweepWithIntents(t, tuningIntent(t, "f", "prompt-gap", []string{"nope"}, "a.go:Foo"))
+	if tr.filesCalls != 0 {
+		t.Errorf("TrackedFiles called %d times, want 0 when no finding reaches the target check", tr.filesCalls)
+	}
+	tr, _ = sweepWithIntents(t,
+		tuningIntent(t, "a", "prompt-gap", []string{"summary:usd-per-record"}, "a.go:Foo"),
+		tuningIntent(t, "b", "prompt-gap", []string{"summary:usd-per-record"}, "a.go:Bar"))
+	if tr.filesCalls != 1 {
+		t.Errorf("TrackedFiles called %d times, want 1 per settle", tr.filesCalls)
+	}
+}
+
+func TestSweep_Tuning_TrackedFilesErrorLeavesClaim(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 16, tuningNow.Add(-48*time.Hour))
+	tr := newTuningRun(t)
+	tr.filesErr = errors.New("git exploded")
+	tr.intents = []string{tuningIntent(t, "f", "prompt-gap", []string{"summary:usd-per-record"}, "a.go:Foo")}
+	tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow)
+	tip, err := tr.backend.Read("tuning")
+	if err != nil || tip.State.ClaimedBy == nil || len(tr.fc.PostIssueCalls) != 0 {
+		t.Errorf("tip = %+v, err %v, posts %d, want the claim standing and nothing filed", tip.State, err, len(tr.fc.PostIssueCalls))
 	}
 }

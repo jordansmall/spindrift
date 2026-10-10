@@ -88,6 +88,9 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 		var dedup stringSliceFlag
 		fs.Var(&dedup, "dedup", "site key for dedup, e.g. path/to/file.go:Symbol; repeat for more than one")
 		class := fs.String("class", "", "the finding's class (every butler finding carries one); must be on CHORE_CLASS_LIST when that is set")
+		var cites stringSliceFlag
+		fs.Var(&cites, "cite", "a Tuning digest anchor the finding argues from; repeat for more than one; required when the Chore has a CHORE_INPUT digest")
+		metric := fs.String("metric", "", "the metric slug the finding concerns; required when the Chore has a CHORE_INPUT digest")
 		concurrence := fs.String("concurrence", "", "the reviewer subagent's one-line agreement (issue #3880); omit on dissent or if it never ran")
 		patchFile := fs.String("patch-file", "", "file holding a unified diff (ADR 0057, issue #4072); omit unless the finding's class is on the host's CHORE_PATCH_CLASSES")
 		if !parseSignalFlags(fs, rest, kind, stdout) {
@@ -107,6 +110,17 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 				return signalUsageFailure(stdout, kind, msg)
 			}
 		}
+		// Box-side only, like the class check: a host-rendered CHORE_INPUT digest
+		// reaches only a records-scoped (tuning) Chore, never a code Chore, so
+		// its presence is what makes cites and metric mandatory (issue #4952).
+		if os.Getenv("CHORE_INPUT") != "" {
+			if len(cites) == 0 {
+				return signalUsageFailure(stdout, kind, "-cite is required: name at least one Tuning digest anchor the finding argues from")
+			}
+			if *metric == "" {
+				return signalUsageFailure(stdout, kind, "-metric is required: name the metric slug the finding concerns")
+			}
+		}
 		client, base, secret, err := signalclient.Target()
 		if err != nil {
 			return signalFail(stdout, err)
@@ -121,14 +135,16 @@ func runSignal(args []string, stdin io.Reader, stdout io.Writer) int {
 				return signalFail(stdout, err)
 			}
 		}
-		// dedupTerms/class/concurrence/patch stay omitempty on the struct: a
-		// term-less, class-less, patch-less call's wire body must stay
+		// dedupTerms/cites/metric/class/concurrence/patch stay omitempty on
+		// the struct: a term-less, class-less, patch-less call's wire body must stay
 		// byte-identical to what it was before these fields existed.
 		return postSignal(stdout, client, base, secret, kind, rawFields(signalwire.IssueIntent{
 			Title:       *title,
 			Body:        body,
 			Type:        *issueType,
 			DedupTerms:  dedup,
+			Cites:       cites,
+			Metric:      *metric,
 			Class:       *class,
 			Concurrence: *concurrence,
 			Patch:       patch,

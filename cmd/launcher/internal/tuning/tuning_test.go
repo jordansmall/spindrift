@@ -253,3 +253,50 @@ func TestRenderLandedShareEmptyWithoutWorkRecords(t *testing.T) {
 		t.Fatalf("row = %q\nwant  %q", got, want)
 	}
 }
+
+func TestRowsReadsEveryRenderedAnchor(t *testing.T) {
+	d := Render([]dispatchrecord.Record{rec("b", 5*24*hour, 1), rec("w1", hour, 4), rec("w2", 2*hour, 6)}, "b", now, 1)
+	rows := Rows(d.Text)
+	if len(rows) == 0 {
+		t.Fatal("no rows parsed")
+	}
+	for _, anchor := range []string{"summary:usd-per-record", "role:implement:avg-usd"} {
+		r, ok := rows[anchor]
+		if !ok {
+			t.Fatalf("anchor %q missing from %v", anchor, rows)
+		}
+		if r.Anchor != anchor || r.Line != line(t, d.Text, anchor) {
+			t.Fatalf("row %q = %+v, want line %q", anchor, r, line(t, d.Text, anchor))
+		}
+	}
+	if got := rows["role:implement:avg-usd"].N; got != 2 {
+		t.Fatalf("n = %d, want 2", got)
+	}
+	for a, r := range rows {
+		if a == "Anchor" || strings.HasPrefix(a, "---") || strings.HasPrefix(r.Line, "|---") {
+			t.Fatalf("header or separator parsed as row %q", a)
+		}
+	}
+}
+
+func TestEvidenceRendersCitedRowsInOrderDeduped(t *testing.T) {
+	d := Render([]dispatchrecord.Record{rec("b", 5*24*hour, 1), rec("w1", hour, 4)}, "b", now, 1)
+	rows := Rows(d.Text)
+	out := Evidence(rows, []string{"role:implement:avg-usd", "summary:usd-per-record", "role:implement:avg-usd", "nope"})
+	if !strings.HasPrefix(out, "## Evidence") {
+		t.Fatalf("output = %q", out)
+	}
+	if !strings.Contains(out, tableHeader) {
+		t.Fatalf("header missing: %q", out)
+	}
+	a, s := rows["role:implement:avg-usd"].Line+"\n", rows["summary:usd-per-record"].Line+"\n"
+	if strings.Count(out, a) != 1 || strings.Count(out, s) != 1 {
+		t.Fatalf("rows not once each: %q", out)
+	}
+	if strings.Index(out, a) > strings.Index(out, s) {
+		t.Fatalf("cite order lost: %q", out)
+	}
+	if strings.Contains(out, "nope") {
+		t.Fatalf("unknown cite rendered: %q", out)
+	}
+}
