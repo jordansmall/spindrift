@@ -215,7 +215,7 @@ func TestRecoverByNumber_NoPRNoSelfReportStillNoOps(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	// No PR and no log written, so tempLogDir's dir stays empty and
-	// dispatch.LastSelfReportFromLogs finds nothing.
+	// dispatch.ResolveFromLogs finds nothing.
 
 	dir := tempLogDir(t)
 	err := recoverByNumber(c, fc, fc, capsFor(fc, fc), dir, testFactory(t, dir, nil), newWorkSettle(c, fc, testWired(fc), fc), "42", io.Discard, io.Discard)
@@ -266,7 +266,7 @@ func TestRecoverByNumber_NoPRRestoresPriorComplete(t *testing.T) {
 
 	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{c.inProgressLabel}})
 	// No PR and no log written, so tempLogDir's dir stays empty and
-	// dispatch.LastSelfReportFromLogs finds nothing.
+	// dispatch.ResolveFromLogs finds nothing.
 	fc.PriorClaimStates = map[string]forge.DispatchState{"42": forge.Complete}
 
 	dir := tempLogDir(t)
