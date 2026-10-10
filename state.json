@@ -1,20 +1,15 @@
 {
-  "lastSwept": "69f1ced593166a53e14725c086994aa453b054a0",
-  "cursor": "dashboard/go.mod",
-  "phase": "claimed",
-  "claimedBy": {
-    "host": "game-rig",
-    "slot": 0,
-    "start": "2026-10-09T20:00:02.581749594-04:00"
-  },
+  "lastSwept": "2b9a7643d65ecca090802232b98850dd4a665f41",
+  "cursor": "docs/adr/0016-merge-guard-bounds-drift-not-adversaries.md",
+  "phase": "done",
   "usage": {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_input_tokens": 0,
-    "cache_creation_input_tokens": 0,
-    "total_cost_usd": 0,
-    "duration_ms": 0,
-    "duration_api_ms": 0,
-    "num_turns": 0
+    "input_tokens": 30,
+    "output_tokens": 12062,
+    "cache_read_input_tokens": 720872,
+    "cache_creation_input_tokens": 64034,
+    "total_cost_usd": 0.8978064,
+    "duration_ms": 130689,
+    "duration_api_ms": 129858,
+    "num_turns": 18
   }
 }
