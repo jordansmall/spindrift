@@ -231,6 +231,32 @@ func TestSelfUpdateBlockedRevisionRetriedOnlyWhenTipMoves(t *testing.T) {
 	}
 }
 
+// A pool started with a blocked self-update (an image whose in-place exec
+// failed) does not rebuild that revision, and rebuilds once the tip moves.
+func TestSelfUpdateSeededBlockedRevisionIsNotRebuilt(t *testing.T) {
+	r := &scriptedRunner{
+		revisions: []string{"rev1", "rev1", "rev2", "rev2"},
+		selfPaths: []string{selfNew},
+		results:   []ChildResult{{Exit: 0}, {Exit: 0}, {Exit: 0}, {Exit: 5}},
+		onPrebuild: func(context.Context, int, Tip) error {
+			return &PrebuildError{Stage: "build", Err: errors.New("boom")}
+		},
+	}
+	cfg := testConfig(1)
+	cfg.SelfProgram = selfOld
+	cfg.SelfUpdate = SelfUpdate{Phase: SelfUpdateBlocked, Revision: "rev1", Reason: "exec: boom"}
+
+	Loop(context.Background(), cfg, r, newTestEmitter(&bytes.Buffer{}), &testClock{})
+
+	var revs []string
+	for _, tip := range r.prebuilds() {
+		revs = append(revs, tip.Revision)
+	}
+	if got := strings.Join(revs, ","); got != "rev2" {
+		t.Fatalf("prebuilt revisions = %s, want only rev2", got)
+	}
+}
+
 // A blocked entry does not outlive the mismatch: once a resolved tip builds
 // to the running path again, the status file stops reporting it.
 func TestSelfUpdateBlockedClearedWhenTipMatchesRunningBuild(t *testing.T) {
