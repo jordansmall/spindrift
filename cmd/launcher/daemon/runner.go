@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 	"unicode/utf8"
+	"unsafe"
 
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -489,10 +490,69 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 	return nil
 }
 
-// InheritChild is not wired yet: re-attaching a handed-off child (validating
-// its pid and pipe, rebuilding a hostChildHandle) is issue #5015.
-func (r *hostRunner) InheritChild(context.Context, daemon.ChildRequest, daemon.ChildState) (daemon.ChildHandle, error) {
-	return nil, errors.New("re-attaching an inherited child is not supported yet")
+// InheritChild re-attaches a child an earlier image handed off, trusting
+// nothing in st until it checks out. A standard stream is refused untouched;
+// any other report descriptor is re-marked close-on-exec before any other
+// check, so even a refused entry can never leak into a later child. A refused
+// entry's descriptor is left open, not closed: a forged entry may name one
+// this process holds for something else.
+func (r *hostRunner) InheritChild(_ context.Context, req daemon.ChildRequest, st daemon.ChildState) (daemon.ChildHandle, error) {
+	fd := st.ReportFD
+	if fd <= syscall.Stderr {
+		return nil, fmt.Errorf("report fd %d is a standard stream", fd)
+	}
+	if err := setCloseOnExec(fd, true); err != nil {
+		return nil, fmt.Errorf("report fd %d: %w", fd, err)
+	}
+	var stat syscall.Stat_t
+	if err := syscall.Fstat(fd, &stat); err != nil {
+		return nil, fmt.Errorf("report fd %d: %w", fd, err)
+	}
+	if uint32(stat.Mode)&syscall.S_IFMT != syscall.S_IFIFO {
+		return nil, fmt.Errorf("report fd %d is not a pipe", fd)
+	}
+	if err := checkWaitableChild(st.PID); err != nil {
+		return nil, err
+	}
+	// Non-blocking before os.NewFile: only then is the File pollable, which
+	// the read deadline behind an abandoned Wait needs.
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		return nil, fmt.Errorf("report fd %d: %w", fd, err)
+	}
+	proc, err := os.FindProcess(st.PID)
+	if err != nil {
+		return nil, fmt.Errorf("find child %d: %w", st.PID, err)
+	}
+	return &hostChildHandle{
+		proc:       proc,
+		reportRead: os.NewFile(uintptr(fd), "report pipe"),
+		kind:       req.Kind,
+		onRecord:   req.OnRecord,
+		stop:       req.Stop,
+		abort:      req.Abort,
+		reports:    reportState{partial: slices.Clone(st.Partial), discarding: st.Discarding},
+	}, nil
+}
+
+// waitidPID is waitid's P_PID idtype; the syscall package exports neither it
+// nor waitid itself.
+const waitidPID = 1
+
+// checkWaitableChild reports whether pid is a child of this process, running
+// or already exited and unreaped, without reaping it. wait4 refuses WNOWAIT,
+// so this is a raw waitid.
+func checkWaitableChild(pid int) error {
+	var info [128]byte // siginfo_t; sized for the largest of the supported OSes
+	_, _, errno := syscall.Syscall6(syscall.SYS_WAITID, waitidPID, uintptr(pid),
+		uintptr(unsafe.Pointer(&info[0])), syscall.WEXITED|syscall.WNOHANG|syscall.WNOWAIT, 0, 0)
+	switch errno {
+	case 0:
+		return nil
+	case syscall.ECHILD:
+		return fmt.Errorf("pid %d is not a child of this process", pid)
+	default:
+		return fmt.Errorf("check child %d: %w", pid, errno)
+	}
 }
 
 func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildHandle, error) {
@@ -714,7 +774,8 @@ func (h *hostChildHandle) State() daemon.ChildState {
 // after a Wait returned daemon.ErrWaitAbandoned (the pipe is still open). The
 // child keeps running and this image must not Wait on the handle again; the
 // handle (so its *os.File, whose finalizer would close the descriptor) must
-// stay referenced until the exec.
+// stay referenced until the exec. The exec path that calls it is wired in a
+// later slice (#5014, #5016).
 func (h *hostChildHandle) HandOff() (daemon.ChildState, error) {
 	fd, err := handOffFile(h.reportRead)
 	if err != nil {
@@ -728,50 +789,70 @@ func (h *hostChildHandle) HandOff() (daemon.ChildState, error) {
 	}, nil
 }
 
-// setCloseOnExec sets or clears FD_CLOEXEC on fd. Go opens every descriptor
-// close-on-exec, so a descriptor survives an exec only if handed off here.
-func setCloseOnExec(fd int, on bool) error {
+// descriptorFlags returns fd's descriptor flags (F_GETFD).
+func descriptorFlags(fd int) (uintptr, error) {
 	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFD), 0)
 	if errno != 0 {
-		return errno
+		return 0, errno
 	}
+	return flags, nil
+}
+
+// isCloseOnExec reports whether fd is marked close-on-exec.
+func isCloseOnExec(fd int) (bool, error) {
+	flags, err := descriptorFlags(fd)
+	return flags&syscall.FD_CLOEXEC != 0, err
+}
+
+// setCloseOnExec sets or clears FD_CLOEXEC on fd, leaving its other
+// descriptor flags as they were. Go opens every descriptor close-on-exec, so a
+// descriptor survives an exec only if handed off here.
+func setCloseOnExec(fd int, on bool) error {
+	flags, err := descriptorFlags(fd)
+	if err != nil {
+		return err
+	}
+	next := flags &^ syscall.FD_CLOEXEC
 	if on {
-		flags |= syscall.FD_CLOEXEC
-	} else {
-		flags &^= syscall.FD_CLOEXEC
+		next |= syscall.FD_CLOEXEC
 	}
-	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFD), flags); errno != 0 {
+	if next == flags {
+		return nil
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFD), next); errno != 0 {
 		return errno
 	}
 	return nil
 }
 
-// handOffFile clears close-on-exec on f so it survives an exec, and returns its
-// descriptor number. It reads the descriptor through SyscallConn, not f.Fd():
-// Fd switches the file to blocking mode, which would break the
-// SetReadDeadline-based abandon if the exec fails and this image carries on.
-func handOffFile(f *os.File) (int, error) {
+// fileDescriptor returns f's descriptor number. It reads it through
+// SyscallConn, not f.Fd(): Fd switches the file to blocking mode, which would
+// break the SetReadDeadline-based abandon if an exec fails and this image
+// carries on.
+func fileDescriptor(f *os.File) (int, error) {
 	rc, err := f.SyscallConn()
 	if err != nil {
 		return 0, err
 	}
 	fd := -1
-	var clearErr error
-	if err := rc.Control(func(u uintptr) {
-		fd = int(u)
-		clearErr = setCloseOnExec(fd, false)
-	}); err != nil {
+	if err := rc.Control(func(u uintptr) { fd = int(u) }); err != nil {
 		return 0, err
-	}
-	if clearErr != nil {
-		return 0, clearErr
 	}
 	return fd, nil
 }
 
-// reclaimDescriptor re-marks a handed-off descriptor close-on-exec, the
-// re-attaching image's half of handOffFile.
-func reclaimDescriptor(fd int) error { return setCloseOnExec(fd, true) }
+// handOffFile clears close-on-exec on f so it survives an exec, and returns its
+// descriptor number.
+func handOffFile(f *os.File) (int, error) {
+	fd, err := fileDescriptor(f)
+	if err != nil {
+		return 0, err
+	}
+	if err := setCloseOnExec(fd, false); err != nil {
+		return 0, err
+	}
+	return fd, nil
+}
 
 // openChildLog opens (creating it and its parent directories) the Child log
 // for appending.
