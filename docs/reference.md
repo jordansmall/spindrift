@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
-| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -6124,12 +6124,14 @@ described under Output. The others:
   A stamped Record whose value is empty groups as `(empty)`; one with no
   snapshot of the knob (inferred, or stamped before it existed) as `(none)`.
 - `model`: the Pass's models, sorted and joined with `+`.
+- `driver`: the Record's stamped Driver. An inferred Record has none stamped
+  and lands in `(none)`.
 
-`revision`, `prompt:<role>`, and `knob:<NAME>` group whole Records, while `role`
+`revision`, `driver`, `prompt:<role>`, and `knob:<NAME>` group whole Records, while `role`
 and `model` are per Pass: a Record is split across the groups its Passes fall
 in, and one with no Passes lands whole in `(none)`. Landed keys count per group,
 so a split Record counts in every group it appears in. A Record lacking the
-dimension (an inferred Record under `prompt:` or `knob:`, a Pass with no model)
+dimension (an inferred Record under `driver`, `prompt:`, or `knob:`, a Pass with no model)
 lands in `(none)`. An unknown dimension, prompt role, or knob, or an empty name,
 prints an error and usage and exits 1.
 
