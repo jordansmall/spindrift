@@ -247,6 +247,27 @@ func warnStrippedChildEnv(keys []string, stderr io.Writer) {
 	}
 }
 
+// resolveDriverEnv applies the baked-Driver-wins rule (ADR 0064, issue #5050)
+// to the daemon itself, printing the mismatch warning once. Children and the
+// doctor preflight run through the wrapper, which re-sources harness.env and
+// restores DRIVER, so stripping it cannot work; instead it returns the
+// DriverWarnedEnv entry to append to their env, telling each launcher this
+// value was already warned about. No mismatch, or an already-warned one,
+// returns nil.
+func resolveDriverEnv(doc *inputdoc.Document, stderr io.Writer) []string {
+	var baked string
+	if doc != nil {
+		baked = doc.Artifacts["DRIVER"]
+	}
+	ambient := os.Getenv("DRIVER")
+	_, warning := inputdoc.ResolveDriver(baked, ambient, inputdoc.DriverWarned())
+	if warning == "" {
+		return nil
+	}
+	fmt.Fprint(stderr, warning)
+	return []string{inputdoc.DriverWarnedEnv + "=" + inputdoc.DriverMarker(ambient, baked)}
+}
+
 // parseSlots turns MAX_PARALLEL's resolved string value into the daemon's
 // pool size. lib/env-schema.nix declares it intKind = "positive".
 func parseSlots(raw string) (int, error) {
@@ -710,6 +731,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// so the warning and the actual strip act on the same list.
 	stripped := strippedKeys(doc)
 	warnStrippedChildEnv(stripped, stderr)
+	driverEnv := resolveDriverEnv(doc, stderr)
 
 	shared, err := resolveChildSharedKnobs(doc)
 	if err != nil {
@@ -897,7 +919,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		nixSystem:     nixSystem,
 		// Snapshotted once here, not per-child: nothing between mainRun's
 		// entry and this line calls os.Setenv, so it's still a startup capture.
-		env:         os.Environ(),
+		env:         append(os.Environ(), driverEnv...),
 		knobs:       stripped,
 		doctorFlags: doctorFlags,
 		demand:      demand,

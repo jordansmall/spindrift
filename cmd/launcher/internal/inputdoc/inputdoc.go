@@ -165,18 +165,35 @@ func DaemonOnlyKnobs() []string {
 	return out
 }
 
+// DriverWarnedEnv names the marker env var a daemon sets on its children after
+// warning about an ambient DRIVER. Children re-source harness.env, which
+// restores that DRIVER, so the marker (not stripping) tells them the pair was
+// already warned about. Its value is DriverMarker(ambient, baked).
+const DriverWarnedEnv = "SPINDRIFT_DRIVER_WARNED"
+
+// DriverWarned reads the DriverWarnedEnv marker here, not inline at callers,
+// so the daemon's literal-key env guard (knob_env_guard_test.go) needs no
+// exemption for a non-knob read.
+func DriverWarned() string { return os.Getenv(DriverWarnedEnv) }
+
+// DriverMarker is the DriverWarnedEnv value for an (ambient, baked) pair. It
+// names both so a child baking a different Driver than the daemon still warns.
+func DriverMarker(ambient, baked string) string { return ambient + "/" + baked }
+
 // ResolveDriver returns the Driver to use and, when an ambient DRIVER
 // disagrees with the baked one, a warning for the caller to print once (ADR
 // 0064, issue #5050). The baked artifact always wins: ambient env includes
 // harness.env, which the wrapper sources, and a mismatched DRIVER would have
 // the host parse a Pass log as one Driver while the image runs another. With no
-// baked value (no --input document) the ambient value stands, unwarned.
-func ResolveDriver(baked, ambient string) (driver, warning string) {
+// baked value (no --input document) the ambient value stands, unwarned. When
+// warned equals DriverMarker(ambient, baked) a parent already warned about this
+// pair, so the warning is suppressed.
+func ResolveDriver(baked, ambient, warned string) (driver, warning string) {
 	if baked == "" {
 		return ambient, ""
 	}
-	if ambient != "" && ambient != baked {
-		warning = fmt.Sprintf("DRIVER=%s set in environment differs from the baked Driver %q; using the baked Driver %s\n", ambient, baked, baked)
+	if ambient != "" && ambient != baked && warned != DriverMarker(ambient, baked) {
+		warning = fmt.Sprintf("DRIVER=%s set in environment — differs from the baked Driver %s; using the baked Driver\n", ambient, baked)
 	}
 	return baked, warning
 }

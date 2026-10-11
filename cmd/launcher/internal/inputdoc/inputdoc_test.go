@@ -312,18 +312,22 @@ func TestResolveDriver(t *testing.T) {
 		name        string
 		baked       string
 		ambient     string
+		warned      string
 		wantDriver  string
 		wantWarning []string
 	}{
-		{"mismatch baked wins and warns", "claude", "opencode", "claude", []string{"DRIVER=opencode", `"claude"`, "using the baked Driver"}},
-		{"match is silent", "claude", "claude", "claude", nil},
-		{"unset is silent", "claude", "", "claude", nil},
-		{"no baked falls back to ambient", "", "opencode", "opencode", nil},
-		{"nothing set", "", "", "", nil},
+		{"mismatch baked wins and warns", "claude", "opencode", "", "claude", []string{"DRIVER=opencode set in environment — ", "baked Driver claude", "using the baked Driver"}},
+		{"marker naming the pair is silent", "claude", "opencode", "opencode/claude", "claude", nil},
+		{"marker for a different ambient still warns", "claude", "opencode", "other/claude", "claude", []string{"DRIVER=opencode"}},
+		{"marker for a different baked still warns", "claude", "opencode", "opencode/other", "claude", []string{"DRIVER=opencode"}},
+		{"match is silent", "claude", "claude", "", "claude", nil},
+		{"unset is silent", "claude", "", "", "claude", nil},
+		{"no baked falls back to ambient", "", "opencode", "", "opencode", nil},
+		{"nothing set", "", "", "", "", nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotDriver, gotWarning := ResolveDriver(tc.baked, tc.ambient)
+			gotDriver, gotWarning := ResolveDriver(tc.baked, tc.ambient, tc.warned)
 			if gotDriver != tc.wantDriver {
 				t.Errorf("driver = %q, want %q", gotDriver, tc.wantDriver)
 			}
