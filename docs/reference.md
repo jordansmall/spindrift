@@ -7464,10 +7464,15 @@ reports the latest daemon self-update prebuild (**Self-change halt**
 below): `phase` is `building` while the background prebuild runs, `built`
 once it has passed its smoke test (the pool is halting), or `blocked` after
 a failure; `revision` is the tip it was made at, and `reason` is the
-failure, present only when `phase` is `blocked`. The object is absent until
+failure, present only when `phase` is `blocked`. Under the in-place
+restart (ADR 0063), a passed build shows `waiting` instead while the pool
+starts no child and waits for a clean moment, then `restarting` once it
+has handed its running children off; a stop while `waiting` cancels the
+handoff, returns the phase to `built`, and drains. The object is absent until
 a fetched tip's daemon build first differs from the running one. A
 `blocked` entry clears once a resolved tip's self path matches the running
-build again. It is additive too, so `schema` does not bump (issue #5012).
+build again. It is additive too, so `schema` does not bump (issues #5012,
+#5014).
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
