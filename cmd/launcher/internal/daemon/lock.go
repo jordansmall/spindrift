@@ -99,6 +99,66 @@ func AcquireCheckoutLock(dir string, kinds []Kind) (*CheckoutLock, error) {
 	return &CheckoutLock{path: lockPath, file: file}, nil
 }
 
+// InheritCheckoutLock wraps a lock descriptor inherited across an in-place exec
+// (ADR 0063). The old image's open file description already holds LOCK_EX, so
+// TryExclusive on the shared description succeeds, while a description held
+// by anyone else fails with flock.ErrHeld. The descriptor is not closed on any
+// failure: a forged handoff document may name an fd this process uses for
+// something else. The path is unknown until Claim.
+func InheritCheckoutLock(fd int) (*CheckoutLock, error) {
+	var st syscall.Stat_t
+	if err := syscall.Fstat(fd, &st); err != nil {
+		return nil, fmt.Errorf("inherit checkout lock: stat descriptor %d: %w", fd, err)
+	}
+	if st.Mode&syscall.S_IFMT != syscall.S_IFREG {
+		return nil, fmt.Errorf("inherit checkout lock: descriptor %d is not a regular file", fd)
+	}
+	// The probe is a dup because an *os.File closes its descriptor when
+	// collected, and fd must stay untouched if the lock is refused. The dup
+	// shares fd's open file description, so it sees and takes the same lock.
+	syscall.ForkLock.RLock()
+	probeFD, err := syscall.Dup(fd)
+	if err == nil {
+		syscall.CloseOnExec(probeFD)
+	}
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		return nil, fmt.Errorf("inherit checkout lock: dup descriptor %d: %w", fd, err)
+	}
+	probe := os.NewFile(uintptr(probeFD), "checkout-lock-probe")
+	lockErr := flock.TryExclusive(probe)
+	_ = probe.Close()
+	if lockErr != nil {
+		return nil, fmt.Errorf("inherit checkout lock: descriptor %d: %w", fd, lockErr)
+	}
+	syscall.CloseOnExec(fd)
+	return &CheckoutLock{file: os.NewFile(uintptr(fd), "checkout-lock")}, nil
+}
+
+// Claim binds an inherited lock to dir, refusing unless the descriptor is that
+// checkout's lock file: an inherited lock on some other file would leave dir
+// unprotected.
+func (l *CheckoutLock) Claim(dir string) error {
+	lockPath := filepath.Join(dir, checkoutLockFileName)
+	have, err := l.file.Stat()
+	if err != nil {
+		return fmt.Errorf("claim checkout lock %s: stat inherited descriptor: %w", lockPath, err)
+	}
+	want, err := os.Stat(lockPath)
+	if err != nil {
+		return fmt.Errorf("claim checkout lock %s: %w", lockPath, err)
+	}
+	if !os.SameFile(have, want) {
+		return fmt.Errorf("inherited checkout lock descriptor (%s) is not the lock file %s", l.file.Name(), lockPath)
+	}
+	l.path = lockPath
+	return nil
+}
+
+// File is the held lock file; the exec step dups its descriptor into the
+// handoff.
+func (l *CheckoutLock) File() *os.File { return l.file }
+
 // Release unlocks and closes the lock file. Call it exactly once; there is
 // no finalizer. The file itself is left in place — see checkoutLockFileName.
 func (l *CheckoutLock) Release() error {
