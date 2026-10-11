@@ -784,3 +784,103 @@ func TestRun_NeverMergesOrPushes(t *testing.T) {
 		t.Errorf("LandingCallLog = %v, want reconcile to never touch the landing path", f.LandingCallLog)
 	}
 }
+
+// Settle records a bare branch landing for ambiguous/blocked runs that opened
+// no PR (issue #5001). One such unresolvable landing must degrade to a loud
+// line, not abort the sweep before later issues close or orphans reset.
+func TestRun_BranchLandingWithNoPRDoesNotAbortSweep(t *testing.T) {
+	labels := forge.DispatchLabels{Dispatchable: "dispatchable", InProgress: "in-progress"}
+	f := forge.NewFake(labels)
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Landing: "agent/issue-41"})
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
+	f.SetIssue(forge.Issue{Number: "43", State: forge.IssueOpen, Labels: []string{"in-progress"}})
+	lp := fakeLiveness{stale: map[string]bool{"43": true}, reachable: map[string]bool{"43": true}}
+
+	var res reconcile.Result
+	out := testutil.CaptureStdout(t, func() {
+		var err error
+		res, err = reconcile.Run(f, f, lp, capsFor(f, f), selfScope)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "#41  landing=agent/issue-41  status=landing-unverifiable") {
+		t.Errorf("want a landing-unverifiable line for #41; got: %q", out)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(res.Reset) != 1 || res.Reset[0] != "43" {
+		t.Errorf("Reset = %v, want [43]", res.Reset)
+	}
+	if len(f.RecordLandingCalls) != 0 {
+		t.Errorf("RecordLandingCalls = %v, want none", f.RecordLandingCalls)
+	}
+}
+
+// A bare branch landing whose branch did open a PR resolves through the branch
+// lookup, heals the record to the PR URL, and closes on merge.
+func TestRun_BranchLandingResolvesMergedPRAndCloses(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+	f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
+
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call recording the resolved PR", f.RecordLandingCalls)
+	}
+}
+
+// An integration-ref landing cannot verify through a PR Code Forge; it prints
+// the unverifiable line instead of failing PRState on a non-PR string.
+func TestRun_IntegrationRefLandingIsUnverifiableOnPRForge(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42@abc123"})
+	f.SetIssue(forge.Issue{Number: "43", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
+
+	var res reconcile.Result
+	out := testutil.CaptureStdout(t, func() {
+		var err error
+		res, err = reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "#42  landing=agent/issue-42@abc123  status=landing-unverifiable") {
+		t.Errorf("want a landing-unverifiable line for #42; got: %q", out)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "43" {
+		t.Errorf("Closed = %v, want [43]", res.Closed)
+	}
+}
+
+// Without a LandingRecorder a resolved branch PR still reconciles; the record
+// step is skipped rather than dereferencing a nil seam.
+func TestRun_BranchLandingResolvesWithoutLandingRecorder(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+	f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
+	caps := capsFor(f, f)
+	caps.LandingRecorder = nil
+
+	res, err := reconcile.Run(f, f, fakeLiveness{}, caps, selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(f.RecordLandingCalls) != 0 {
+		t.Errorf("RecordLandingCalls = %v, want none", f.RecordLandingCalls)
+	}
+}
