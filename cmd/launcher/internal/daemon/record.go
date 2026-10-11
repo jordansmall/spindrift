@@ -15,10 +15,12 @@ import (
 // reading half, and aliasing means there is only one struct definition for
 // the two halves to (dis)agree about — a field added on one side is visible
 // on the other by construction, not by a parity test someone has to remember
-// to keep passing. Safe because both halves are built from the same source
-// tree: there is never a daemon binary reading a wire shape an older or
-// newer internal/report wrote. See issue #3627's review finding: this alias
-// is what replaced the deleted parity test (TestAnnounceLine_ParsesBack).
+// to keep passing. The alias does not make the two halves ship together: after
+// an in-place restart (ADR 0063) an inherited child can be older than the
+// daemon reading it, so the reader must keep decoding the shape older children
+// wrote (pinned by TestParseRecord_OlderChildShapesStillDecode). See issue
+// #3627's review finding: this alias is what replaced the deleted parity test
+// (TestAnnounceLine_ParsesBack).
 type Record = report.Record
 
 // maxIssueLen caps a parsed issue number's digit run: generous enough for
