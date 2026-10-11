@@ -30,7 +30,7 @@ type statsOptions struct {
 	since           time.Time
 	kind            string
 	includeInferred bool
-	by              statsBy
+	by              statsByList
 }
 
 // parseStatsSince reads --since as RFC 3339 or a bare UTC date.
@@ -97,7 +97,7 @@ func parseStatsArgs(args []string) (statsOptions, error) {
 				}
 				opts.kind = value
 			case "--by":
-				by, err := parseStatsBy(value)
+				by, err := parseStatsByList(value)
 				if err != nil {
 					return opts, err
 				}
@@ -228,7 +228,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 			continue
 		}
 		seen[resolved] = true
-		recs, err := statsRootRecords(abs, opts.reingest, opts.by.dim == statsByRevision, stderr)
+		recs, err := statsRootRecords(abs, opts.reingest, opts.by.has(statsByRevision), stderr)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s\n", err)
 			return 1
@@ -242,8 +242,8 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 	slices.SortStableFunc(records, func(a, b dispatchrecord.Record) int {
 		return cmp.Or(a.ClaimTime.Compare(b.ClaimTime), strings.Compare(a.Root, b.Root), strings.Compare(a.ID, b.ID))
 	})
-	var groups []recordstats.Group
-	if opts.by.dim != "" {
+	var groups []statsGroup
+	if len(opts.by) > 0 {
 		groups = groupStats(records, opts.by)
 	}
 	if opts.asJSON {
@@ -253,7 +253,7 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	}
-	if opts.by.dim == "" || opts.by.dim == statsByRole {
+	if opts.by.plainTable() {
 		err = renderStats(stdout, records)
 	} else {
 		err = renderStatsGroups(stdout, groups, opts.by)
@@ -267,8 +267,8 @@ func cmdStats(args []string, stdout, stderr io.Writer) int {
 
 // encodeStatsJSON writes one line per Record, tagged with its group when --by
 // is set.
-func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups []recordstats.Group, by statsBy) error {
-	if by.dim == "" {
+func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups []statsGroup, by []statsBy) error {
+	if len(by) == 0 {
 		for _, r := range records {
 			if err := enc.Encode(r); err != nil {
 				return err
@@ -277,8 +277,8 @@ func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups 
 		return nil
 	}
 	for _, g := range groups {
-		for _, r := range g.Records {
-			if err := enc.Encode(statsGroupedRecord{Group: g.Key, Record: r}); err != nil {
+		for _, r := range g.records {
+			if err := enc.Encode(statsGroupedRecord{Group: g.label(), Record: r}); err != nil {
 				return err
 			}
 		}

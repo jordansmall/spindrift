@@ -28,7 +28,7 @@ the [README](../README.md); for vocabulary see [`CONTEXT.md`](../CONTEXT.md).
 | `spindrift recover`              | with no issue, land one `agent-failed` issue whose outbox holds a `seam.bundle` from a run that self-reported `status=ready`, has no open PR, has a free host claim, and is outside its backoff and under `MAX_RECOVER_ATTEMPTS` for that bundle; exits 2 when none qualifies, 7 on an operator stop; `github`/`forgejo` only, refused on `local` (ADR 0039) |
 | `spindrift doctor`               | run the preflight checks a dispatch depends on — see [`spindrift doctor` checks](#spindrift-doctor-checks) |
 | `spindrift reconcile`            | bookkeeping sweep: on any PR-capable Code Forge, record a late merge for each Dispatch Record whose PR was left open at settle and has merged since (see [Stats](#stats)); on a local tracker, also close issues whose recorded `landing` PR merged (ADR 0029). Also auto-invoked at the end of a `dispatch` run that names no issues — see [`reconcile`: late merges and closing a local issue](#reconcile-late-merges-and-closing-a-local-issue) |
-| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
+| `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>] [--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` | per-role Dispatch cost summary read from the logs under `.spindrift` (notional API-equivalent USD), optionally grouped by revision, model, driver, prompt hash, or knob; `--json` emits one Record per line — see [Stats](#stats) |
 | `spindrift registry discover <repo-dir> <routes-file>` | write a registry routes file (ADR 0045) by scanning the Target repo's own committed registry config, setup-time only, by the operator — see [Registry route discovery](#registry-route-discovery) |
 | `spindrift --help`               | concise usage: subcommands, common flags, and pointers to the full reference    |
 | `spindrift --help --all`         | the full flag reference, grouped by category (the terminal form of `man spindrift`) |
@@ -5756,7 +5756,7 @@ a reader sees the host's figures rather than the Box's transcription of them.
 ## Stats
 
 `spindrift stats [--json] [--reingest] [--root <dir>]... [--since <time>]
-[--kind <kind>] [--include-inferred=false] [--by <dimension>]` (ADR 0061) reports what past
+[--kind <kind>] [--include-inferred=false] [--by <dimension>[,<dimension>...]]` (ADR 0061) reports what past
 Dispatches cost, read entirely from the Pass logs already on disk. It reads the
 checkout the Dispatches ran from: the current directory, unless `--root` names
 others (see Filters and roots below). It never contacts the tracker, the forge,
@@ -6105,7 +6105,7 @@ Dispatch kind or `unknown`; any other value is an error), and `--include-inferre
 attribution is `inferred` (default `true`). The
 filters apply after the merge, to the table and to `--json` alike.
 
-**Grouping.** `--by <dimension>` splits the filtered, merged Records into
+**Grouping.** `--by <dimension>[,<dimension>...]` splits the filtered, merged Records into
 groups, each summarised on its own. `role` (the default) is the single table
 described under Output. The others:
 
@@ -6124,16 +6124,25 @@ described under Output. The others:
   A stamped Record whose value is empty groups as `(empty)`; one with no
   snapshot of the knob (inferred, or stamped before it existed) as `(none)`.
 - `model`: the Pass's models, sorted and joined with `+`.
-- `driver`: the Record's stamped Driver. An inferred Record has none stamped
-  and lands in `(none)`.
+- `driver`: the Record's stamped Driver. An inferred Record, or one stamped
+  before Driver stamping existed, has none and lands in `(none)`.
 
-`revision`, `driver`, `prompt:<role>`, and `knob:<NAME>` group whole Records, while `role`
-and `model` are per Pass: a Record is split across the groups its Passes fall
-in, and one with no Passes lands whole in `(none)`. Landed keys count per group,
-so a split Record counts in every group it appears in. A Record lacking the
-dimension (an inferred Record under `driver`, `prompt:`, or `knob:`, a Pass with no model)
-lands in `(none)`. An unknown dimension, prompt role, or knob, or an empty name,
-prints an error and usage and exits 1.
+`revision`, `driver`, `prompt:<role>`, and `knob:<NAME>` group whole Records,
+while `role` and `model` are per Pass: a Record is split across the groups its
+Passes fall in, and one with no Passes lands whole in `(none)`. Landed keys
+count per group, so a split Record counts in every group it appears in. A
+Record lacking the dimension (an inferred Record under `driver`, `prompt:`, or
+`knob:`, a Pass with no model) lands in `(none)`. An unknown dimension, prompt
+role, or knob, an empty name, an empty element, or a repeated dimension prints
+an error and usage and exits 1.
+
+`--by` takes one or more dimensions separated by commas, such as `--by
+driver,role`; whitespace around a comma is ignored. They nest in the order
+given: the first dimension's groups, each split by the next, so a Pass-level
+dimension after another sees only its group's Passes. Each group's header joins
+one `<by> = <key>` pair per dimension with `, `, such as `role = implement,
+model = opus`. `--by role` alone is the plain table; `role` in any longer list
+groups as usual.
 
 **Re-ingest.** `--reingest` re-parses every log still on disk, including those
 whose path, size, and mtime match their last ingest, and upserts the result.
@@ -6255,9 +6264,13 @@ and do not rely on them for cohort or outcome decisions.
 With an explicit `--by` (`role` included), `--json` prints one line per
 (group, Record) instead, each carrying a top-level `"group"` field and, for a
 per-Pass dimension, only that group's Passes. Without `--by` it is unchanged.
-For any dimension but `role`, the text output is, per group in order of first
-claim time (`(none)` last), a `<by> = <key>` header line followed by that
-group's own summary line and role table.
+With several dimensions `"group"` is still one string, the keys in `--by` order
+joined by `, ` (such as `"claude, implement"`); a key that itself contains `, `
+(a knob value, say) makes that string ambiguous. For any `--by` but `role`
+alone, the text output is, per group, a header line followed by that group's
+own summary line and role table. Groups come in order of first claim time,
+except that a `role` level follows pipeline order, with `(none)` last at each
+level.
 
 ## Registry route discovery
 

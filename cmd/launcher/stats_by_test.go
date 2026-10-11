@@ -102,6 +102,7 @@ func TestStats_ByGolden(t *testing.T) {
 		{"knob-merge-mode", "knob:MERGE_MODE"},
 		{"role", "role"},
 		{"driver", "driver"},
+		{"driver-role", "driver,role"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text, _ := runStats(t, root, "--by", tc.by)
@@ -149,12 +150,19 @@ func TestStats_ByRejectsBadDimension(t *testing.T) {
 	root := statsStampedRoot(t)
 	t.Chdir(root)
 	for _, tc := range []struct{ by, want string }{
-		{"flavour", `invalid --by "flavour": want role, revision, model, driver, prompt:<role> or knob:<NAME>`},
+		{"flavour", `invalid --by "flavour": element "flavour": want role, revision, model, driver, prompt:<role> or knob:<NAME>`},
 		{"prompt:nonsense", `unknown prompt role "nonsense", want one of legacy, implement, fix, land, review, delta-review, research, butler`},
 		{"prompt:", `unknown prompt role ""`},
 		{"knob:NO_SUCH_KNOB", `unknown knob "NO_SUCH_KNOB"`},
 		{"knob:GH_TOKEN", "knob GH_TOKEN is secret, never recorded"},
 		{"knob:", "knob name is empty"},
+		{"driver,", `invalid --by "driver,": empty dimension`},
+		{",role", `invalid --by ",role": empty dimension`},
+		{"role,role", `invalid --by "role,role": repeated dimension "role"`},
+		{"driver,bogus", `invalid --by "driver,bogus": element "bogus": want role`},
+		{"driver,knob:GH_TOKEN", `invalid --by "driver,knob:GH_TOKEN": element "knob:GH_TOKEN": knob GH_TOKEN is secret`},
+		{"driver, ", `invalid --by "driver, ": empty dimension`},
+		{"driver, role, driver", `invalid --by "driver, role, driver": repeated dimension "driver"`},
 	} {
 		t.Run(tc.by, func(t *testing.T) {
 			var stdout, stderr bytes.Buffer
@@ -239,6 +247,80 @@ func TestStats_ByRevisionUsesEventsForInferredRecords(t *testing.T) {
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
+
+func TestStats_ByRevisionAnywhereInTheListUsesEvents(t *testing.T) {
+	root := statsEventsRoot(t)
+	jsonl, _ := runStats(t, root, "--include-inferred", "--by", "driver,revision", "--json")
+	got := map[string]string{}
+	for _, line := range strings.Split(strings.TrimSuffix(jsonl, "\n"), "\n") {
+		var rec struct {
+			Group       string `json:"group"`
+			DispatchKey string `json:"dispatch_key"`
+			ClaimTime   string `json:"claim_time"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatal(err)
+		}
+		got[rec.DispatchKey+"@"+rec.ClaimTime] = rec.Group
+	}
+	want := map[string]string{
+		"10@2026-10-07T09:00:30Z": "(none), rev-ten",
+		"20@2026-10-07T10:00:30Z": "(none), rev-twenty",
+		"20@2026-10-07T13:00:30Z": "(none), (none)",
+		"30@2026-10-07T14:00:30Z": "(none), (none)",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("groups = %v, want %v", got, want)
+	}
+}
+
+func TestStats_ByTrimsSpacesAroundDimensions(t *testing.T) {
+	root := statsStampedRoot(t)
+	spaced, _ := runStats(t, root, "--by", " driver , role ")
+	tight, _ := runStats(t, root, "--by", "driver,role")
+	if spaced != tight {
+		t.Errorf("--by with spaces differs from the tight form:\n%s\nwant\n%s", spaced, tight)
+	}
+}
+
+func TestStats_ByTwoKnobsAreDistinctDimensions(t *testing.T) {
+	root := t.TempDir()
+	day := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	statsWriteLogs(t, root, map[string]string{
+		"issue-1.log": statsStampedLog("1", day,
+			claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "auto", "MERGE_METHOD": "squash"}}, nil,
+			[2]string{"implement", "claude-opus"}),
+		"issue-2.log": statsStampedLog("2", day.Add(time.Hour),
+			claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "auto", "MERGE_METHOD": "rebase"}}, nil,
+			[2]string{"implement", "claude-opus"}),
+		"issue-3.log": statsStampedLog("3", day.Add(2*time.Hour),
+			claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "manual", "MERGE_METHOD": "squash"}}, nil,
+			[2]string{"implement", "claude-opus"}),
+	})
+	text, _ := runStats(t, root, "--by", "knob:MERGE_MODE,knob:MERGE_METHOD")
+	for _, h := range []string{
+		"knob:MERGE_MODE = auto, knob:MERGE_METHOD = squash\n",
+		"knob:MERGE_MODE = auto, knob:MERGE_METHOD = rebase\n",
+		"knob:MERGE_MODE = manual, knob:MERGE_METHOD = squash\n",
+	} {
+		if !strings.Contains(text, h) {
+			t.Errorf("missing group header %q in:\n%s", h, text)
+		}
+	}
+	if n := strings.Count(text, "Records: "); n != 3 {
+		t.Errorf("%d groups, want 3:\n%s", n, text)
+	}
+}
+
+func TestStats_ByPassLevelDimensionBeforeRecordLevel(t *testing.T) {
+	root := statsStampedRoot(t)
+	text, _ := runStats(t, root, "--by", "role,driver")
+	for _, h := range []string{"role = implement, driver = claude\n", "role = implement, driver = opencode\n", "role = review, driver = claude\n"} {
+		if !strings.Contains(text, h) {
+			t.Errorf("missing group header %q in:\n%s", h, text)
+		}
 	}
 }
 
