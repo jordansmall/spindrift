@@ -84,11 +84,14 @@ const (
 	SelfUpdateWaiting SelfUpdatePhase = "waiting"
 	// SelfUpdateRestarting: the handoff is committed and cannot be cancelled.
 	SelfUpdateRestarting SelfUpdatePhase = "restarting"
+	// SelfUpdateHandoff: event only, never a status phase — the successor
+	// records that it took over from an in-place restart.
+	SelfUpdateHandoff SelfUpdatePhase = "handoff"
 )
 
-// event is the self_update event recording su's verdict. It carries no Slot:
+// Event is the self_update event recording su's verdict. It carries no Slot:
 // the build belongs to the pool, not to the slot that noticed the revision.
-func (su SelfUpdate) event() Event {
+func (su SelfUpdate) Event() Event {
 	return Event{Event: "self_update", Phase: string(su.Phase), Revision: su.Revision, Reason: su.Reason}
 }
 

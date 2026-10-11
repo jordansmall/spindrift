@@ -38,10 +38,16 @@ type Event struct {
 	// Phase is the box event's own field — "initial", "fix-pass-N",
 	// "conflict-resolve" or "recover" (report.PhaseRecover, queue-mode
 	// recover's claim) — carried straight from the child's report.Record
-	// (issue #3627); and the self_update event's, "built" or "blocked"
-	// (issue #5012). No other event sets it.
+	// (issue #3627); and the self_update event's, "built", "blocked" or
+	// "handoff" (issues #5012, #5016). No other event sets it.
 	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`
+	// FromPath, ToPath and Slots are the self_update handoff event's own
+	// fields: the running and the exec'd program store paths, and the
+	// inherited slot numbers.
+	FromPath string `json:"from_path,omitempty"`
+	ToPath   string `json:"to_path,omitempty"`
+	Slots    []int  `json:"slots,omitempty"`
 	// ChildLog is child_start's own field: the Child log file the child
 	// writes its output to, relative to the checkout.
 	ChildLog string `json:"child_log,omitempty"`

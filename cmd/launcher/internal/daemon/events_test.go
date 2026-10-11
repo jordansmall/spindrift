@@ -283,3 +283,23 @@ func TestEmitterMultipleEmitsOneLineEach(t *testing.T) {
 		}
 	}
 }
+
+func TestEventHandoffFieldsRoundTrip(t *testing.T) {
+	in := Event{Event: "self_update", Phase: "handoff", Revision: "rev1", FromPath: "/nix/store/a", ToPath: "/nix/store/b", Slots: []int{0, 2}}
+	line, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"from_path":"/nix/store/a"`, `"to_path":"/nix/store/b"`, `"slots":[0,2]`} {
+		if !strings.Contains(string(line), want) {
+			t.Errorf("line = %s, want %s", line, want)
+		}
+	}
+	var out Event
+	if err := json.Unmarshal(line, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.FromPath != in.FromPath || out.ToPath != in.ToPath || len(out.Slots) != 2 || out.Slots[1] != 2 {
+		t.Errorf("round trip = %+v, want %+v", out, in)
+	}
+}
