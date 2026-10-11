@@ -47,21 +47,21 @@ func (p *pool) selfUpdate(ctx context.Context, kind Kind, tip Tip) {
 				return nil
 			case err != nil:
 				s.self = SelfUpdate{Phase: SelfUpdateBlocked, Revision: revision, Reason: err.Error()}
-				return []Event{s.self.event()}
+				return []Event{s.self.Event()}
 			}
 			s.self = SelfUpdate{Phase: SelfUpdateBuilt, Revision: revision}
 			if p.cfg.RestartInPlace {
 				// Same step as the built event, so no slot starts a child in
 				// between. The pool neither halts nor drains: running
 				// children finish on their own while no new one starts.
-				built := s.self.event()
+				built := s.self.Event()
 				s.self.Phase = SelfUpdateWaiting
 				return []Event{built}
 			}
 			// Halting in this same step leaves no gap in which a slot could
 			// start a child after the built event.
 			halted = true
-			return append([]Event{s.self.event()}, s.recordHalt(Halt{
+			return append([]Event{s.self.Event()}, s.recordHalt(Halt{
 				Class:    HaltSelfChanged,
 				Detail:   fmt.Sprintf("daemon build at %s is %s, running %s", revision, tip.SelfPath, p.cfg.SelfProgram),
 				Kind:     kind,
