@@ -30,6 +30,7 @@ let
     imageHash = "deadbeef";
     launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
     imageName = "spindrift";
+    imageAttrName = "agent-closure";
     runtime = "bwrap";
     imageDrv = "/nix/store/ddd-image.drv";
     nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
@@ -54,6 +55,63 @@ let
     driverVersion = "1.2.3";
     nixStoreWritable = true;
     syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
+  };
+
+  # Shared by preambles-run-artifacts-oci and the OCI case of
+  # preambles-run-artifacts-image-attr-name below.
+  ociRunArtifactsBase = {
+    runnerKind = "oci";
+    driverEntry = {
+      name = "claude";
+      skillsDirRelative = ".claude/skills";
+    };
+    agentFilesPath = "/nix/store/aaa-agent-files";
+    agentEnvPath = "/nix/store/bbb-agent-env";
+    passwdFilePath = "/nix/store/eee-passwd";
+    groupFilePath = "/nix/store/fff-group";
+    # Required (no default) even though the OCI branch never reads them
+    # (issue #2672), like nixStoreWritable and syscallFilterPath below.
+    agentFilesDrv = "/nix/store/aaa-agent-files.drv";
+    agentEnvDrv = "/nix/store/bbb-agent-env.drv";
+    passwdFileDrv = "/nix/store/eee-passwd.drv";
+    groupFileDrv = "/nix/store/fff-group.drv";
+    agentClosurePath = "/nix/store/ggg-agent-closure";
+    prefetch = "";
+    imagePath = "/nix/store/ccc-image";
+    imageHash = "deadbeef";
+    launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
+    imageName = "spindrift";
+    imageAttrName = "agent-image";
+    runtime = "podman";
+    imageDrv = "/nix/store/ddd-image.drv";
+    nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
+    systems = {
+      host = "aarch64-darwin";
+      linux = "x86_64-linux";
+    };
+    boxEnvVars = "MODEL";
+    hostMediatedRemote = true;
+    outboxRelayCapable = false;
+    inBoxUnreachableTracker = true;
+    fullyLocal = true;
+    trackerAxisRead = "LOCAL";
+    trackerAxisWrite = "";
+    trackerAxisFiler = "GH";
+    forgeBackend = "GH";
+    filerEnabled = false;
+    workerProvisioned = false;
+    scoutProvisioned = false;
+    choreCatalog = "chore-a chore-b";
+    roleModels = ''{"reviewer":"claude-opus-4"}'';
+    driverVersion = "1.2.3";
+    # OCI's writable-store mechanism (lib/image.nix) never reads this
+    # artifact, so false is a placeholder, required only because
+    # nixStoreWritable has no default (issue #2665).
+    nixStoreWritable = false;
+    # Required (no default) even though the OCI branch never reads it
+    # (issue #2670).
+    syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
+    syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
   };
 in
 {
@@ -461,61 +519,23 @@ in
       "runArtifacts (bwrap) must default NIX_CONFIG_FILE to \"\" when nixConfigPath is omitted (the nixInBox-off shape), got: ${builtins.toJSON out}";
     pkgs.runCommand "preambles-run-artifacts-bwrap-nix-config-omitted" { } "touch $out";
 
+  # A non-default imageAttrName must reach FLAKE_IMAGE_ATTR on both runner
+  # branches (ADR 0064, issue #5049); the defaults are pinned above.
+  preambles-run-artifacts-image-attr-name =
+    let
+      bwrap = preambles.runArtifacts (bwrapRunArtifactsBase // { imageAttrName = "agent-closure-test"; });
+      oci = preambles.runArtifacts (ociRunArtifactsBase // { imageAttrName = "agent-image-test"; });
+    in
+    assert assertMsg (bwrap.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-closure-test")
+      "runArtifacts (bwrap) must derive FLAKE_IMAGE_ATTR from imageAttrName, got: ${builtins.toJSON bwrap}";
+    assert assertMsg (
+      oci.FLAKE_IMAGE_ATTR == ".#packages.x86_64-linux.agent-image-test"
+    ) "runArtifacts (oci) must derive FLAKE_IMAGE_ATTR from imageAttrName, got: ${builtins.toJSON oci}";
+    pkgs.runCommand "preambles-run-artifacts-image-attr-name" { } "touch $out";
+
   preambles-run-artifacts-oci =
     let
-      out = preambles.runArtifacts {
-        runnerKind = "oci";
-        driverEntry = {
-          name = "claude";
-          skillsDirRelative = ".claude/skills";
-        };
-        agentFilesPath = "/nix/store/aaa-agent-files";
-        agentEnvPath = "/nix/store/bbb-agent-env";
-        passwdFilePath = "/nix/store/eee-passwd";
-        groupFilePath = "/nix/store/fff-group";
-        # Required (no default) even though the OCI branch never reads them
-        # (issue #2672), like nixStoreWritable and syscallFilterPath below.
-        agentFilesDrv = "/nix/store/aaa-agent-files.drv";
-        agentEnvDrv = "/nix/store/bbb-agent-env.drv";
-        passwdFileDrv = "/nix/store/eee-passwd.drv";
-        groupFileDrv = "/nix/store/fff-group.drv";
-        agentClosurePath = "/nix/store/ggg-agent-closure";
-        prefetch = "";
-        imagePath = "/nix/store/ccc-image";
-        imageHash = "deadbeef";
-        launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
-        imageName = "spindrift";
-        runtime = "podman";
-        imageDrv = "/nix/store/ddd-image.drv";
-        nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";
-        systems = {
-          host = "aarch64-darwin";
-          linux = "x86_64-linux";
-        };
-        boxEnvVars = "MODEL";
-        hostMediatedRemote = true;
-        outboxRelayCapable = false;
-        inBoxUnreachableTracker = true;
-        fullyLocal = true;
-        trackerAxisRead = "LOCAL";
-        trackerAxisWrite = "";
-        trackerAxisFiler = "GH";
-        forgeBackend = "GH";
-        filerEnabled = false;
-        workerProvisioned = false;
-        scoutProvisioned = false;
-        choreCatalog = "chore-a chore-b";
-        roleModels = ''{"reviewer":"claude-opus-4"}'';
-        driverVersion = "1.2.3";
-        # OCI's writable-store mechanism (lib/image.nix) never reads this
-        # artifact, so false is a placeholder, required only because
-        # nixStoreWritable has no default (issue #2665).
-        nixStoreWritable = false;
-        # Required (no default) even though the OCI branch never reads it
-        # (issue #2670).
-        syscallFilterPath = "/nix/store/fake-syscall-filter-path/filter.bpf";
-        syscallFilterDrv = "/nix/store/fake-syscall-filter-path/filter.bpf.drv";
-      };
+      out = preambles.runArtifacts ociRunArtifactsBase;
     in
     assert assertMsg (
       out.IMAGE_ARCHIVE == "/nix/store/ccc-image"
@@ -619,6 +639,7 @@ in
         imageHash = "deadbeef";
         launcherCurrencyHash = "deadbeefdeadbeefdeadbeefdeadbeef";
         imageName = "spindrift-opencode";
+        imageAttrName = "agent-image";
         runtime = "podman";
         imageDrv = "/nix/store/ddd-image.drv";
         nixBuilderImage = "docker.io/nixos/nix@sha256:aaaa";

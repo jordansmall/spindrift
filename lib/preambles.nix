@@ -101,6 +101,7 @@ rec {
       imageHash,
       launcherCurrencyHash,
       imageName,
+      imageAttrName,
       runtime,
       imageDrv,
       nixBuilderImage,
@@ -174,7 +175,7 @@ rec {
           # bwrap agent closure's own flake attr and output path, so Probe()
           # can compare them without caring which runnerKind produced them
           # (issue #2667).
-          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-closure";
+          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux imageAttrName;
           IMAGE_TAG = agentClosurePath;
           # cmdBuild reads the run document, so it needs the drv behind each
           # bwrap artifact, as the OCI branch carries IMAGE_DRV (issue #2672).
@@ -194,7 +195,7 @@ rec {
           IMAGE_DRV = imageDrv;
           NIX_BUILDER_IMAGE = nixBuilderImage;
           NIX_VOLUME = "spindrift-nix";
-          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux "agent-image";
+          FLAKE_IMAGE_ATTR = flakeImageAttrFor systems.linux imageAttrName;
         }
     )
     // {
@@ -257,6 +258,7 @@ rec {
           prefetch = "dummy";
           imagePath = "dummy";
           imageHash = "dummy";
+          imageAttrName = "dummy";
           launcherCurrencyHash = "dummy";
           imageName = "dummy";
           runtime = "dummy";
