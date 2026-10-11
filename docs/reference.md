@@ -352,6 +352,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `nixStoreWritable` | `perSystem.spindrift.infra.nix.storeWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
 | `extraClosures` | `perSystem.spindrift.infra.image.extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
 | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+| `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
 | `roster`    | `perSystem.spindrift.agents.models.roster` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 | `byName`    | `perSystem.spindrift.agents.models.byName` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
 <!-- END GENERATED OPTION SURFACE TABLE -->
@@ -361,18 +362,18 @@ default or hand-declared structural option alike — is a first-class option
 directly under `perSystem.spindrift.<domain>.*` (ADR 0037): `agents`,
 `git`, `issues`, `forge`, `dispatch`, `infra`. Every remaining row above
 has no domain path, across three different reasons: the **`mkHarness`
-only** rows (the combined `scoutPrompt`/`reviewPrompt`/`filerPrompt` row
-and `nixBuilderImage`) aren't reachable from the flake module at all;
-**auto-supplied** `system` binds to flake-parts' own per-system value, not
-a domain-tree knob; and **flake-module only** `settings` is itself the
-deprecated compat shim (ADR 0037) that forwards *into* the domain tree
-below, so it has no domain path of its own to show. The flake surface bakes
-run knobs into the Launcher input document the `spindrift` CLI passes to
-the launcher binary via `--input`; an explicit `--flag` at dispatch time
-re-points a value without a rebuild. Domain names are the same headings as
-`spindrift --help --all`, so the flake surface stays in lockstep with the
-CLI help. Unknown domain or knob names are rejected at eval time by the
-NixOS module system.
+only** rows (the combined `scoutPrompt`/`reviewPrompt`/`filerPrompt` row,
+`nixBuilderImage`, and `imageAttrName`) aren't reachable from the flake
+module at all; **auto-supplied** `system` binds to flake-parts' own
+per-system value, not a domain-tree knob; and **flake-module only**
+`settings` is itself the deprecated compat shim (ADR 0037) that forwards
+*into* the domain tree below, so it has no domain path of its own to
+show. The flake surface bakes run knobs into the Launcher input document
+the `spindrift` CLI passes to the launcher binary via `--input`; an
+explicit `--flag` at dispatch time re-points a value without a rebuild.
+Domain names are the same headings as `spindrift --help --all`, so the
+flake surface stays in lockstep with the CLI help. Unknown domain or knob
+names are rejected at eval time by the NixOS module system.
 
 Every option on the domain tree — schema-generated or structural alike —
 has its own entry in [`docs/flake-options.md`](flake-options.md), with its
