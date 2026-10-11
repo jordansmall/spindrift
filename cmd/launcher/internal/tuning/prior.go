@@ -49,7 +49,7 @@ func priorFindings(prior []Prior, records []dispatchrecord.Record, minSample int
 	list := slices.SortedFunc(maps.Values(byNumber), func(a, b Prior) int { return -compareNumbers(a.Number, b.Number) })
 	list = list[:min(len(list), PriorFindingsN)]
 
-	s := section{head: fmt.Sprintf("\n"+priorHeading+"\n\nThe last %d tuning findings, newest first. For a merged one, Δ is the metric after "+
+	s := section{noun: "prior findings", head: fmt.Sprintf("\n"+priorHeading+"\n\nThe last %d tuning findings, newest first. For a merged one, Δ is the metric after "+
 		"its closing PR's merge minus before it, over the Records settled on each side; other states carry no Δ.\n\n"+
 		"| Anchor | State | Revision | Metric | n | Before | After | Δ | Flag |\n|---|---|---|---|---|---|---|---|---|\n", len(list))}
 	settled := chore.NewSettledRecords(records, "")

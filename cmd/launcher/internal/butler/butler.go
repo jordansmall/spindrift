@@ -73,8 +73,8 @@ type Policy struct {
 	// under which the digest marks a row thin.
 	TuningMinSample int
 	// TuningDigestBytes is BUTLER_TUNING_DIGEST_BYTES, the byte cap on the
-	// digest: over it, Evidence is trimmed first and Outliers second, never the
-	// aggregate tables.
+	// digest: over it, Evidence is trimmed first, Outliers second, and Prior
+	// findings third, never the aggregate tables.
 	TuningDigestBytes int
 	// TuningCooldown is BUTLER_TUNING_COOLDOWN, how long a tuning finding closed
 	// as not planned keeps suppressing a refile of the same pattern; 0 never

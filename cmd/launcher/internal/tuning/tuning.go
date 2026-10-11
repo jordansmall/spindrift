@@ -9,6 +9,7 @@
 //	summary:<metric>          e.g. summary:usd-per-record
 //	role:<role>:<metric>      e.g. role:implement:avg-usd
 //	<dim>:<value>:<metric>    e.g. revision:abc123:usd-per-record
+//	finding:<number>          a Prior findings row (a tuning finding's issue)
 //	record:<id>               an Outliers row
 //	evidence:<id>:<ordinal>:verdict|dispositions
 //	                          a fenced Evidence item
@@ -22,10 +23,12 @@
 // Quality rows (reverted, churn) join the summary, each role and each split
 // value; their n counts only the Records that have matured.
 //
-// Outliers follow the tables: every failed, blocked, or ambiguous Record of
-// the window, then the OutlierTopK dearest of the rest. Evidence quotes
-// blocked review verdicts and fix dispositions, each in a promptfence block;
-// an <id> is sanitised like a value.
+// Prior findings follow the tables: the newest PriorFindingsN tuning findings,
+// each with its state and, once merged, the change in its metric. Outliers
+// follow: every failed, blocked, or ambiguous Record of the window, then the
+// OutlierTopK dearest of the rest. Evidence quotes blocked review verdicts and
+// fix dispositions, each in a promptfence block; an <id> is sanitised like a
+// value.
 //
 // Each row also carries n, the window's sample size for that row; a row with
 // n below the floor is marked thin. The output is not fenced: the prompt
@@ -95,8 +98,9 @@ type Limits struct {
 	// MinSample marks a row thin when fewer window Records back it.
 	MinSample int
 	// MaxBytes caps the digest's size; zero or less means uncapped. Evidence
-	// is trimmed first and Outliers second, always from the tail; the
-	// aggregate tables are never trimmed, so a cap below them is exceeded.
+	// is trimmed first, Outliers second, and Prior findings third, always from
+	// the tail; the aggregate tables are never trimmed, so a cap below them is
+	// exceeded.
 	MaxBytes int
 }
 
@@ -139,7 +143,7 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, lim L
 		lim.MinSample, absent)
 	if len(window) == 0 {
 		b.WriteString("\nNo new settled Records.\n")
-		d.Text = b.String()
+		d.Text = trim(b.String(), []section{priorFindings(prior, records, lim.MinSample, merged)}, lim.MaxBytes)
 		return d
 	}
 
@@ -156,42 +160,47 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, lim L
 			writeTable(&b, s.rows, lim.MinSample)
 		}
 	}
-	// Written with the aggregates, so a byte cap never trims it.
-	priorFindings(prior, records, lim.MinSample, merged).write(&b)
-	d.Text = trim(b.String(), outliers(window), evidence(window), lim.MaxBytes)
+	d.Text = trim(b.String(), []section{priorFindings(prior, records, lim.MinSample, merged), outliers(window), evidence(window)}, lim.MaxBytes)
 	return d
 }
 
-// trim appends the Outliers and Evidence sections to the aggregate text,
-// dropping items from the tail (Evidence, then Outliers) until the result plus
-// its trailer fits maxBytes. Sizes are sums of item lengths, so it never
-// re-renders. The aggregates are kept whole, so a cap below them is exceeded.
-// The trailer is written only when it fits beside what is kept.
-func trim(aggregates string, out, ev section, maxBytes int) string {
+// trim appends the sections, given in display order, to the aggregate text,
+// dropping items from the tail of the last non-empty section backwards until
+// the result plus its trailer fits maxBytes. Sizes are sums of item lengths,
+// so it never re-renders. The aggregates are kept whole, so a cap below them
+// is exceeded. The trailer is written only when it fits beside what is kept.
+func trim(aggregates string, secs []section, maxBytes int) string {
 	total := len(aggregates)
-	for _, s := range []section{out, ev} {
-		if len(s.items) > 0 {
+	kept := make([]int, len(secs))
+	for i, s := range secs {
+		kept[i] = len(s.items)
+		if kept[i] > 0 {
 			total += len(s.head)
 		}
 		for _, it := range s.items {
 			total += len(it)
 		}
 	}
-	nOut, nEv := len(out.items), len(ev.items)
-	keptOut, keptEv := nOut, nEv
 	trailer := func() string {
-		return fmt.Sprintf("\n_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): %d evidence items and %d outliers omitted._\n",
-			maxBytes, nEv-keptEv, nOut-keptOut)
-	}
-	drop := func(s section, kept *int) {
-		*kept--
-		total -= len(s.items[*kept])
-		if *kept == 0 {
-			total -= len(s.head)
+		var omitted []string
+		for i := len(secs) - 1; i >= 0; i-- {
+			omitted = append(omitted, fmt.Sprintf("%d %s", len(secs[i].items)-kept[i], secs[i].noun))
 		}
+		if len(omitted) > 1 {
+			omitted[len(omitted)-1] = "and " + omitted[len(omitted)-1]
+		}
+		return fmt.Sprintf("\n_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): %s omitted._\n",
+			maxBytes, strings.Join(omitted, ", "))
 	}
+	last := len(secs) - 1
 	trimmed := false
-	for maxBytes > 0 && (keptOut > 0 || keptEv > 0) {
+	for maxBytes > 0 {
+		for last >= 0 && kept[last] == 0 {
+			last--
+		}
+		if last < 0 {
+			break
+		}
 		need := total
 		if trimmed {
 			need += len(trailer())
@@ -200,17 +209,18 @@ func trim(aggregates string, out, ev section, maxBytes int) string {
 			break
 		}
 		trimmed = true
-		if keptEv > 0 {
-			drop(ev, &keptEv)
-		} else {
-			drop(out, &keptOut)
+		kept[last]--
+		total -= len(secs[last].items[kept[last]])
+		if kept[last] == 0 {
+			total -= len(secs[last].head)
 		}
 	}
-	out.items, ev.items = out.items[:keptOut], ev.items[:keptEv]
 	var b strings.Builder
 	b.WriteString(aggregates)
-	out.write(&b)
-	ev.write(&b)
+	for i, s := range secs {
+		s.items = s.items[:kept[i]]
+		s.write(&b)
+	}
 	if trimmed && total+len(trailer()) <= maxBytes {
 		b.WriteString(trailer())
 	}

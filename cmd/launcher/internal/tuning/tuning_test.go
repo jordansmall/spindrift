@@ -713,7 +713,7 @@ func TestRenderCapTrimsEvidenceFirst(t *testing.T) {
 	if !strings.Contains(d.Text, "**evidence:fa:2:verdict**") || strings.Contains(d.Text, "**evidence:c5:3:dispositions**") {
 		t.Fatalf("evidence must lose its tail only:\n%s", d.Text)
 	}
-	want := fmt.Sprintf("_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): 1 evidence items and 0 outliers omitted._\n", capBytes)
+	want := fmt.Sprintf("_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): 1 evidence items, 0 outliers, and 0 prior findings omitted._\n", capBytes)
 	if !strings.HasSuffix(d.Text, "\n"+want) {
 		t.Fatalf("digest does not end with %q:\n%s", want, d.Text)
 	}
@@ -746,7 +746,7 @@ func TestRenderCapTrimsOutliersAfterEvidence(t *testing.T) {
 	if !slices.Contains(got, "fa") || !slices.Contains(got, "fb") {
 		t.Fatalf("a failure was trimmed before the cost outliers: %v", got)
 	}
-	if !strings.Contains(d.Text, fmt.Sprintf("%d evidence items and %d outliers omitted._\n", 2*len(records), len(all)-len(got))) {
+	if !strings.Contains(d.Text, fmt.Sprintf("%d evidence items, %d outliers, and 0 prior findings omitted._\n", 2*len(records), len(all)-len(got))) {
 		t.Fatalf("trailer miscounts:\n%s", d.Text)
 	}
 }
@@ -773,7 +773,7 @@ func TestRenderCapNeverTrimsAggregates(t *testing.T) {
 	// so a longer trailer wording cannot silently leave it no room.
 	const evOmitted, outOmitted = 16, 7
 	trailer := func(capBytes int) string {
-		return fmt.Sprintf("\n_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): %d evidence items and %d outliers omitted._\n", capBytes, evOmitted, outOmitted)
+		return fmt.Sprintf("\n_Trimmed to fit BUTLER_TUNING_DIGEST_BYTES (%d bytes): %d evidence items, %d outliers, and 0 prior findings omitted._\n", capBytes, evOmitted, outOmitted)
 	}
 	tables := aggregates(t, full.Text)
 	capBytes := len(tables)
@@ -862,5 +862,41 @@ func TestEvidenceEmptyWithoutACitedRow(t *testing.T) {
 	d := Render([]dispatchrecord.Record{rec("b", 5*24*hour, 1), rec("w1", hour, 4)}, "b", now, Limits{MinSample: 1}, nil, nil)
 	if out := Evidence(Rows(d.Text), []string{"record:abc", "evidence:abc:1:verdict"}); out != "" {
 		t.Fatalf("output = %q, want none without a cited aggregate row", out)
+	}
+}
+
+func TestRenderEmptyWindowKeepsPriorFindings(t *testing.T) {
+	prior := []Prior{{Number: "12", Open: true, Metric: "usd-per-record"}}
+	d := Render([]dispatchrecord.Record{rec("a", hour, 1)}, "a", now, Limits{MinSample: 5}, prior, nil)
+	if !strings.Contains(d.Text, "No new settled Records") {
+		t.Fatalf("empty window note missing:\n%s", d.Text)
+	}
+	if got := line(t, d.Text, "finding:12"); !strings.Contains(got, "| open |") {
+		t.Fatalf("prior finding row = %q", got)
+	}
+	if strings.Contains(d.Text, "## Outliers") || strings.Contains(d.Text, "| summary:") {
+		t.Fatalf("empty window rendered window sections:\n%s", d.Text)
+	}
+}
+
+// A trailer naming a single section reads "3 prior findings omitted", with no
+// dangling "and".
+func TestTrimTrailerSingleSectionHasNoAnd(t *testing.T) {
+	item := strings.Repeat("x", 99) + "\n"
+	sec := section{noun: "prior findings", head: "H\n", items: []string{item, item, item}}
+	got := trim("agg\n", []section{sec}, 226)
+	if !strings.Contains(got, ": 2 prior findings omitted._") {
+		t.Fatalf("trailer = %q, want \": 2 prior findings omitted._\"", got)
+	}
+	if strings.Contains(got, "and ") {
+		t.Fatalf("trailer has a stray \"and \": %q", got)
+	}
+}
+
+// The Prior findings header counts the findings listed, not the cap.
+func TestPriorFindingsHeaderCountsListed(t *testing.T) {
+	s := priorFindings([]Prior{{Number: "1"}, {Number: "2"}}, nil, 1, nil)
+	if !strings.Contains(s.head, "The last 2 tuning findings") {
+		t.Fatalf("head = %q, want a count of 2", s.head)
 	}
 }

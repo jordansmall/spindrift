@@ -17,6 +17,8 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver/claude"
@@ -618,13 +620,18 @@ func TestCatalogTuningFindingLabelMatchesDoctorConst(t *testing.T) {
 // writeRecordLog writes one Record's stream-json log: dispatch_start, the given body,
 // then a dispatch_settled op with the state and reason.
 func writeRecordLog(t *testing.T, root, key string, claim time.Time, state, reason string, body ...string) string {
+	return writeKindRecordLog(t, root, "work", key, claim, state, reason, body...)
+}
+
+// writeKindRecordLog is writeRecordLog for a Record of an arbitrary kind.
+func writeKindRecordLog(t *testing.T, root, kind, key string, claim time.Time, state, reason string, body ...string) string {
 	t.Helper()
 	dir := hostpaths.LogDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	id := dispatchrecord.RecordID("work", key, claim)
-	start := &claude.DispatchStart{RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: claim, Started: claim, Driver: "claude"}
+	id := dispatchrecord.RecordID(kind, key, claim)
+	start := &claude.DispatchStart{RecordID: id, Kind: kind, DispatchKey: key, ClaimTime: claim, Started: claim, Driver: "claude"}
 	lines := []string{claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "dispatch_start", Start: start})}
 	lines = append(lines, body...)
 	lines = append(lines, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{RecordID: id, State: state, Reason: reason}}))
@@ -880,6 +887,70 @@ func TestSweep_Tuning_InputFitsDigestCap(t *testing.T) {
 			t.Errorf("a cap the digest fits changed it")
 		}
 	})
+}
+
+// Under a tightening cap the digest sheds Evidence, then Outliers, then Prior
+// findings, each from the tail, and never the aggregate tables.
+func TestSweep_Tuning_CapTrimsPriorFindingsAfterOutliers(t *testing.T) {
+	const records, findings = 6, 4
+	sweep := func(t *testing.T, digestBytes int) string {
+		t.Helper()
+		root := t.TempDir()
+		seedBlockedReviews(t, root, records, 1500)
+		var closed []forge.Issue
+		for i := range findings {
+			iss := tuningFinding(fmt.Sprintf("PROJ-%d", 8+i), "usd-per-record")
+			iss.State = forge.IssueClosed
+			closed = append(closed, iss)
+		}
+		tr := newTuningRun(t)
+		tr.backlog = newBacklogTracker(t, tr.fc.AsIssueFiler(), nil, closed)
+		policy := tuningPolicy(root, 1)
+		policy.TuningDigestBytes = digestBytes
+		if out, err := tr.sweepTuning(t, policy, tuningNow); err != nil || out.Kind != Swept {
+			t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+		}
+		return tr.input[0]
+	}
+	count := func(in string) (ev, out, prior int) {
+		return strings.Count(in, "**evidence:"), strings.Count(in, "| record:"), len(priorRows(in))
+	}
+	full := sweep(t, 0)
+	fullEv, fullOut, fullPrior := count(full)
+	if fullEv != records || fullOut == 0 || fullPrior != findings {
+		t.Fatalf("uncapped input has %d evidence, %d outliers, %d prior findings", fullEv, fullOut, fullPrior)
+	}
+	tables := full[:strings.Index(full, "\n## Prior findings")]
+
+	var sawPriorTrim bool
+	for capBytes := len(full) - 1; capBytes > len(tables); capBytes -= 150 {
+		in := sweep(t, capBytes)
+		ev, out, prior := count(in)
+		if len(in) > capBytes {
+			t.Errorf("cap %d: len = %d, over the cap", capBytes, len(in))
+		}
+		if !strings.HasPrefix(in, tables) {
+			t.Errorf("cap %d: aggregate tables changed", capBytes)
+		}
+		if out < fullOut && ev != 0 {
+			t.Errorf("cap %d: an outlier dropped while %d evidence items survive", capBytes, ev)
+		}
+		if prior < fullPrior && (ev != 0 || out != 0) {
+			t.Errorf("cap %d: a prior finding dropped while %d evidence items and %d outliers survive", capBytes, ev, out)
+		}
+		if prior < fullPrior && prior > 0 {
+			sawPriorTrim = true
+		}
+		if prior < fullPrior || out < fullOut || ev < fullEv {
+			want := fmt.Sprintf("%d evidence items, %d outliers, and %d prior findings omitted", fullEv-ev, fullOut-out, fullPrior-prior)
+			if strings.Contains(in, "Trimmed") && !strings.Contains(in, want) {
+				t.Errorf("cap %d: trailer lacks %q", capBytes, want)
+			}
+		}
+	}
+	if !sawPriorTrim {
+		t.Error("no cap trimmed part of the Prior findings section")
+	}
 }
 
 // sweepWithIntents seeds 16 Records, so every window row clears the sample
@@ -1582,5 +1653,87 @@ func TestSweep_Tuning_PriorFindingFallsBackToSummaryRow(t *testing.T) {
 	want := "| finding:100 | merged | abc123def | usd-per-record | 3 | $3.00 | $5.00 | +2.00 | thin |"
 	if !strings.Contains(input, want) {
 		t.Errorf("digest lacks %q:\n%s", want, input)
+	}
+}
+
+// The tuning Chore's own settled Records count in the window like any other:
+// in the header, the Roles table, and the Outliers Kind and Key columns.
+func TestSweep_Tuning_CountsOwnChoreRecords(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	claim := tuningNow.Add(-24 * time.Hour)
+	writeKindRecordLog(t, root, dispatchkind.Butler.Name, dispatchkey.ChorePrefix+"tuning", claim, "complete", "merged",
+		claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "tuning"}),
+		resultLine(t, claim.Add(time.Minute).Format(time.RFC3339), 9, "done"))
+	ingestRecords(t, root)
+
+	input := sweepTuningInput(t, root, 0)
+
+	// 3 work Records of 2 passes each, plus the butler Record's one.
+	if want := "— 4 settled Records, 7 passes,"; !strings.Contains(input, want) {
+		t.Errorf("window header lacks %q:\n%s", want, input)
+	}
+	if !strings.Contains(input, "| role:tuning:passes-per-record |") {
+		t.Errorf("Roles table lacks the tuning role:\n%s", input)
+	}
+	if !strings.Contains(input, "| butler | butler-tuning | complete |") {
+		t.Errorf("Outliers lacks the butler Record's Kind and Key:\n%s", input)
+	}
+}
+
+type stubMergeReader struct {
+	calls   []string
+	stateFn func(url string) (forge.PRState, error)
+}
+
+func (s *stubMergeReader) PRState(url string) (forge.PRState, error) {
+	s.calls = append(s.calls, url)
+	return s.stateFn(url)
+}
+
+// A rate limit ends the forge lookups for the rest of the digest, each failure
+// is warned about, and a URL that could read as a CLI flag is never queried.
+func TestMergeLookup_StopsAfterRateLimitAndWarns(t *testing.T) {
+	reader := &stubMergeReader{stateFn: func(string) (forge.PRState, error) {
+		return "", fmt.Errorf("slow down: %w", forge.ErrRateLimit)
+	}}
+	var warn strings.Builder
+	r := New(nil, nil, nil, nil, Policy{}, time.Now).WithMergeReader(reader, nil)
+	r.warn = &warn
+	lookup := r.mergeLookup("tuning")
+
+	if _, ok := lookup("--flag"); ok || len(reader.calls) != 0 {
+		t.Fatalf("flag-like URL: ok=%v calls=%v, want no query", ok, reader.calls)
+	}
+	if _, ok := lookup("https://example.com/pulls/1"); ok {
+		t.Fatal("rate-limited lookup reported merged")
+	}
+	if _, ok := lookup("https://example.com/pulls/2"); ok {
+		t.Fatal("lookup after rate limit reported merged")
+	}
+	if want := []string{"https://example.com/pulls/1"}; !slices.Equal(reader.calls, want) {
+		t.Errorf("PRState calls = %v, want %v", reader.calls, want)
+	}
+	if !strings.Contains(warn.String(), "?? tuning: prior tuning finding PR https://example.com/pulls/1") {
+		t.Errorf("warn = %q, want the failed read named", warn.String())
+	}
+}
+
+// A merged PR whose commit cannot be read still counts merged, and says why
+// the revision is missing.
+func TestMergeLookup_WarnsOnMergeCommitFailure(t *testing.T) {
+	fc := forge.NewFake()
+	fc.SetPRState("https://example.com/pulls/1", forge.PRMerged)
+	fc.MergeCommitErr = errors.New("boom")
+	var warn strings.Builder
+	r := New(nil, nil, nil, nil, Policy{}, time.Now).WithMergeReader(fc, fc)
+	r.warn = &warn
+
+	commit, ok := r.mergeLookup("tuning")("https://example.com/pulls/1")
+	if !ok || commit != "" {
+		t.Fatalf("lookup = %q, %v, want merged with no commit", commit, ok)
+	}
+	if !strings.Contains(warn.String(), "could not read merge commit of https://example.com/pulls/1: boom") {
+		t.Errorf("warn = %q, want the merge commit failure", warn.String())
 	}
 }
