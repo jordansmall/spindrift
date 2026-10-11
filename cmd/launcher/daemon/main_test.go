@@ -1252,7 +1252,9 @@ func writeInputDocT(t *testing.T, settings map[string]string) string {
 // daemonKnobEnvVars is every env var the daemon package reads by name,
 // including the wrapper's SPINDRIFT_DAEMON_PROGRAM, cleared to keep
 // mainRun's self-change check off. TestClearKnobEnvT_CoversEveryKnob pins
-// it to the call sites.
+// it to the call sites. DRIVER is not a knob but an artifact read for the
+// baked-Driver rule (issue #5050); it is listed because the guard covers every
+// literal-keyed env read.
 var daemonKnobEnvVars = []string{
 	"DAEMON_APP", "BASE_BRANCH", "MAX_PARALLEL", "RESEARCH_RESERVATION",
 	"DAEMON_IDLE_FLOOR", "DAEMON_IDLE_CAP", "DAEMON_FAILURE_BACKOFF",
@@ -1264,7 +1266,7 @@ var daemonKnobEnvVars = []string{
 	"COMPLETE_LABEL", "FAILED_LABEL", "REPO_SLUG", "FORGEJO_BASE_URL", "FORGEJO_TOKEN",
 	"GH_TOKEN_REFRESH_FILE", "JIRA_BASE_URL", "JIRA_PROJECT_KEY", "JIRA_EMAIL", "JIRA_TOKEN",
 	"JIRA_STATUS_MAPPING", "FORGEJO_TOKEN_CMD", "JIRA_TOKEN_CMD",
-	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS",
+	"CODE_FORGE", "BOX_FORGE_AND_ISSUE_ACCESS", "DRIVER",
 }
 
 // clearKnobEnvT clears the daemon's knob env vars for the duration of the
@@ -2764,6 +2766,12 @@ func assertCapturedEnvT(t *testing.T, label string, env []string) {
 // into the consumer. Returns the input document path; each caller keeps its
 // own doctor/exec stubs and assertions, which diverge between the tests.
 func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
+	return capturedEnvFixtureArtifactsT(t, extra, nil)
+}
+
+// capturedEnvFixtureArtifactsT is capturedEnvFixtureT with extra Artifacts
+// merged into the written document.
+func capturedEnvFixtureArtifactsT(t *testing.T, extra, artifacts map[string]string) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
@@ -2777,6 +2785,12 @@ func capturedEnvFixtureT(t *testing.T, extra map[string]string) string {
 
 	doc := validKnobDocument()
 	doc.Settings["MODEL"] = "opus"
+	if len(artifacts) > 0 {
+		if doc.Artifacts == nil {
+			doc.Artifacts = map[string]string{}
+		}
+		maps.Copy(doc.Artifacts, artifacts)
+	}
 	for k, v := range extra {
 		doc.Settings[k] = v
 	}
@@ -3521,5 +3535,143 @@ func TestSuccessorArgs(t *testing.T) {
 				t.Errorf("successorArgs(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestResolveDriverEnv_MismatchWarnsOnceAndReturnsMarker(t *testing.T) {
+	t.Setenv("DRIVER", "opencode")
+	t.Setenv(inputdoc.DriverWarnedEnv, "")
+	doc := &inputdoc.Document{Artifacts: map[string]string{"DRIVER": "claude"}}
+	var stderr bytes.Buffer
+	got := resolveDriverEnv(doc, &stderr)
+	if want := []string{"SPINDRIFT_DRIVER_WARNED=opencode/claude"}; !slices.Equal(got, want) {
+		t.Errorf("env entries = %v, want %v", got, want)
+	}
+	out := stderr.String()
+	if n := strings.Count(out, "using the baked Driver"); n != 1 {
+		t.Errorf("warning count = %d, want 1; stderr=%q", n, out)
+	}
+	for _, want := range []string{"DRIVER=opencode", "baked Driver claude"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("stderr = %q, want it to contain %q", out, want)
+		}
+	}
+}
+
+func TestResolveDriverEnv_MatchUnsetOrNoDocIsSilentWithNoMarker(t *testing.T) {
+	baked := &inputdoc.Document{Artifacts: map[string]string{"DRIVER": "claude"}}
+	cases := []struct {
+		name    string
+		doc     *inputdoc.Document
+		ambient string
+		warned  string
+	}{
+		{"match", baked, "claude", ""},
+		{"unset", baked, "", ""},
+		{"no document", nil, "opencode", ""},
+		{"document without DRIVER", &inputdoc.Document{}, "opencode", ""},
+		{"already warned about this pair", baked, "opencode", "opencode/claude"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DRIVER", tc.ambient)
+			t.Setenv(inputdoc.DriverWarnedEnv, tc.warned)
+			var stderr bytes.Buffer
+			if got := resolveDriverEnv(tc.doc, &stderr); len(got) != 0 {
+				t.Errorf("env entries = %v, want none", got)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+// unsetEnvT makes key absent from os.Environ() for the test body: t.Setenv
+// registers the restore, Unsetenv drops the key, which the child-env marker
+// assertions read.
+func unsetEnvT(t *testing.T, key string) {
+	t.Helper()
+	t.Setenv(key, "")
+	if err := os.Unsetenv(key); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// driverMarkerEnvT returns the value of the DriverWarnedEnv entry in env, and
+// whether one is present.
+func driverMarkerEnvT(env []string) (string, bool) {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, inputdoc.DriverWarnedEnv+"="); ok {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren pins issue #5050 end to
+// end at the daemon: one stderr warning, and both the doctor preflight and a
+// dispatch child carry the marker that survives their harness.env re-sourcing.
+func TestMainRun_DriverMismatch_WarnsOnceAndMarksChildren(t *testing.T) {
+	path := capturedEnvFixtureArtifactsT(t, map[string]string{"DAEMON_BREAKER_THRESHOLD": "1"}, map[string]string{"DRIVER": "claude"})
+	t.Setenv("DRIVER", "opencode")
+	unsetEnvT(t, inputdoc.DriverWarnedEnv)
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	var doctorCmd *exec.Cmd
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		doctorCmd = exec.CommandContext(ctx, "/bin/sh", "-c", "exit 0")
+		return doctorCmd
+	}
+	origExec := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = origExec })
+	var childCmd *exec.Cmd
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		childCmd = exec.Command("/bin/sh", "-c", "exit 1")
+		return childCmd
+	}
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+
+	if n := strings.Count(stderr.String(), "using the baked Driver"); n != 1 {
+		t.Errorf("warning count = %d, want 1; stderr=%q", n, stderr.String())
+	}
+	for label, cmd := range map[string]*exec.Cmd{"doctor": doctorCmd, "dispatch child": childCmd} {
+		if cmd == nil {
+			t.Errorf("%s command was never built", label)
+			continue
+		}
+		if v, ok := driverMarkerEnvT(cmd.Env); !ok || v != "opencode/claude" {
+			t.Errorf("%s env marker = %q (present=%v), want opencode", label, v, ok)
+		}
+	}
+}
+
+func TestMainRun_DriverMatch_NoWarningNoMarker(t *testing.T) {
+	path := capturedEnvFixtureArtifactsT(t, nil, map[string]string{"DRIVER": "claude"})
+	t.Setenv("DRIVER", "claude")
+	unsetEnvT(t, inputdoc.DriverWarnedEnv)
+
+	origDoctor := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = origDoctor })
+	var captured *exec.Cmd
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		captured = exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+		return captured
+	}
+
+	var stdout, stderr bytes.Buffer
+	mainRun([]string{"--input", path, "dispatch"}, &stdout, &stderr)
+
+	if strings.Contains(stderr.String(), "using the baked Driver") {
+		t.Errorf("stderr = %q, want no Driver warning", stderr.String())
+	}
+	if captured == nil {
+		t.Fatal("runnerDoctorCommand was never called")
+	}
+	if v, ok := driverMarkerEnvT(captured.Env); ok {
+		t.Errorf("doctor env carries marker %q, want none", v)
 	}
 }

@@ -235,14 +235,22 @@ func TestResolveChoreCatalog_AbsentVersusEmpty(t *testing.T) {
 	}
 }
 
-// The baked Driver wins end to end: loadConfig uses it, and mainRun prints
-// the mismatch warning exactly once (ADR 0064, issue #5050).
-func TestMainRun_AmbientDriverMismatch_WarnsOnceAndBakedWins(t *testing.T) {
+// bakedDriverDocT writes an --input document baking Driver claude, clears
+// loadedDoc on cleanup, and returns the document path.
+func bakedDriverDocT(t *testing.T) string {
+	t.Helper()
 	docPath := filepath.Join(t.TempDir(), "input.json")
 	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{"DRIVER":"claude"}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { loadedDoc = nil })
+	return docPath
+}
+
+// The baked Driver wins end to end: loadConfig uses it, and mainRun prints
+// the mismatch warning exactly once (ADR 0064, issue #5050).
+func TestMainRun_AmbientDriverMismatch_WarnsOnceAndBakedWins(t *testing.T) {
+	docPath := bakedDriverDocT(t)
 
 	run := func(ambient string) string {
 		t.Setenv("DRIVER", ambient)
@@ -252,15 +260,44 @@ func TestMainRun_AmbientDriverMismatch_WarnsOnceAndBakedWins(t *testing.T) {
 	}
 
 	got := run("opencode")
-	if n := strings.Count(got, "DRIVER=opencode"); n != 1 {
+	if n := strings.Count(got, "using the baked Driver"); n != 1 {
 		t.Errorf("mismatch: %d warnings in stderr, want 1: %q", n, got)
 	}
 	if c := loadConfig(); c.driver != "claude" {
 		t.Errorf("driver = %q, want the baked claude", c.driver)
 	}
 	for _, ambient := range []string{"claude", ""} {
-		if got := run(ambient); strings.Contains(got, "baked Driver") {
+		if got := run(ambient); strings.Contains(got, "using the baked Driver") {
 			t.Errorf("ambient %q: stderr = %q, want no Driver warning", ambient, got)
 		}
+	}
+}
+
+// A daemon child re-sources harness.env, restoring the DRIVER the daemon
+// already warned about; SPINDRIFT_DRIVER_WARNED naming that exact ambient/baked pair keeps
+// the child silent, while a different pair still warns.
+func TestMainRun_AmbientDriverMismatch_WarnedMarkerSuppresses(t *testing.T) {
+	docPath := bakedDriverDocT(t)
+
+	cases := []struct {
+		name, ambient, marker string
+		verb                  []string
+		wantWarnings          int
+	}{
+		{"marker names the pair, research", "opencode", "opencode/claude", []string{"research"}, 0},
+		{"marker names the pair, doctor", "opencode", "opencode/claude", []string{"doctor", "extra"}, 0},
+		{"marker names another baked, research", "opencode", "opencode/other", []string{"research"}, 1},
+		{"no marker, doctor", "opencode", "", []string{"doctor", "extra"}, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("DRIVER", tc.ambient)
+			t.Setenv(inputdoc.DriverWarnedEnv, tc.marker)
+			var stdout, stderr bytes.Buffer
+			mainRun(append([]string{"--input", docPath}, tc.verb...), &stdout, &stderr)
+			if n := strings.Count(stderr.String(), "using the baked Driver"); n != tc.wantWarnings {
+				t.Errorf("%d warnings in stderr, want %d: %q", n, tc.wantWarnings, stderr.String())
+			}
+		})
 	}
 }
