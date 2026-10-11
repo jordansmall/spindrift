@@ -1804,6 +1804,36 @@ in
         touch $out
       '';
 
+  # Each Driver's Daemon bakes its own child-dispatch and self app refs
+  # (ADR 0064, issue #5049); they ride the run document's settings section as
+  # the DAEMON_APP / DAEMON_SELF_APP knobs, which the daemon resolves from it.
+  mkharness-daemon-app-refs =
+    let
+      defaultHarness = import ../../lib/mkHarness.nix ociHarnessArgs;
+      namedHarness = import ../../lib/mkHarness.nix (
+        ociHarnessArgs
+        // {
+          defaults = {
+            daemonApp = ".#claude";
+            daemonSelfApp = ".#claude-daemon";
+          };
+        }
+      );
+    in
+    pkgs.runCommand "mkharness-daemon-app-refs"
+      {
+        defaultDoc = defaultHarness.internals.runInputDocumentFile;
+        namedDoc = namedHarness.internals.runInputDocumentFile;
+      }
+      ''
+        ${bakedSettingCheck}
+        check '.#' DAEMON_APP "$defaultDoc"
+        check '.#daemon' DAEMON_SELF_APP "$defaultDoc"
+        check '.#claude' DAEMON_APP "$namedDoc"
+        check '.#claude-daemon' DAEMON_SELF_APP "$namedDoc"
+        touch $out
+      '';
+
   # Nothing else pins that the agent-closure linkFarm bundles BOTH sub-closures.
   # Dropping the "env" or "files" entry from lib/mkHarness.nix's linkFarm call
   # would narrow the bwrap freshness signal to one dimension while every other
