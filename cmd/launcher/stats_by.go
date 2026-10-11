@@ -16,6 +16,7 @@ const (
 	statsByRole     statsDim = "role"
 	statsByRevision statsDim = "revision"
 	statsByModel    statsDim = "model"
+	statsByDriver   statsDim = "driver"
 	statsByPrompt   statsDim = "prompt"
 	statsByKnob     statsDim = "knob"
 )
@@ -52,7 +53,7 @@ func statsKnobNames() (names, secret []string) {
 // parseStatsBy checks a --by value against the dimensions stats can group by.
 func parseStatsBy(by string) (statsBy, error) {
 	switch {
-	case by == string(statsByRole), by == string(statsByRevision), by == string(statsByModel):
+	case by == string(statsByRole), by == string(statsByRevision), by == string(statsByModel), by == string(statsByDriver):
 		return statsBy{dim: statsDim(by)}, nil
 	case strings.HasPrefix(by, string(statsByPrompt)+":"):
 		role := strings.TrimPrefix(by, string(statsByPrompt)+":")
@@ -73,7 +74,7 @@ func parseStatsBy(by string) (statsBy, error) {
 		}
 		return statsBy{dim: statsByKnob, arg: name}, nil
 	}
-	return statsBy{}, fmt.Errorf("invalid --by %q: want role, revision, model, prompt:<role> or knob:<NAME>", by)
+	return statsBy{}, fmt.Errorf("invalid --by %q: want role, revision, model, driver, prompt:<role> or knob:<NAME>", by)
 }
 
 // groupStats splits claim-time-sorted Records into ordered groups by a --by
@@ -89,6 +90,8 @@ func groupStats(records []dispatchrecord.Record, by statsBy) []recordstats.Group
 		return recordstats.GroupPasses(records, recordstats.ModelKey)
 	case statsByRevision:
 		return recordstats.GroupRecords(records, recordstats.RevisionKey)
+	case statsByDriver:
+		return recordstats.GroupRecords(records, recordstats.DriverKey)
 	case statsByPrompt:
 		return recordstats.GroupRecords(records, recordstats.PromptKey(by.arg))
 	case statsByKnob:

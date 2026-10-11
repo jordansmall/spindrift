@@ -63,14 +63,14 @@ func statsStampedRoot(t *testing.T) string {
 	day := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
 	statsWriteLogs(t, root, map[string]string{
 		"issue-70.log": statsStampedLog("70", day,
-			claude.DispatchStart{Revision: "rev-a", Knobs: map[string]string{"MERGE_MODE": "auto"}},
+			claude.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
 			map[string]string{"implement": "hash-i1", "review": "hash-r1"},
 			[2]string{"implement", "claude-opus"}, [2]string{"review", "claude-sonnet"}),
 		"issue-71.log": statsStampedLog("71", day.Add(time.Hour),
-			claude.DispatchStart{Revision: "rev-b", Knobs: map[string]string{"MERGE_MODE": "manual"}},
+			claude.DispatchStart{Revision: "rev-b", Driver: "opencode", Knobs: map[string]string{"MERGE_MODE": "manual"}},
 			map[string]string{"implement": "hash-i2"},
 			[2]string{"implement", "claude-opus+claude-haiku"}, [2]string{"review", "claude-sonnet"}),
-		"issue-72.log": statsStampedLog("72", day.Add(2*time.Hour), claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": ""}}, nil,
+		"issue-72.log": statsStampedLog("72", day.Add(2*time.Hour), claude.DispatchStart{Driver: "claude", Knobs: map[string]string{"MERGE_MODE": ""}}, nil,
 			[2]string{"implement", "claude-sonnet"}),
 		"issue-7.log": `{"type":"system","timestamp":"2026-10-07T12:00:00Z"}` + "\n" +
 			statsResult("2026-10-07T12:01:00Z", 0.1, 1, 6000, 5000, "claude-haiku"),
@@ -85,7 +85,7 @@ func statsStampedSecondRoot(t *testing.T) string {
 	root := t.TempDir()
 	statsWriteLogs(t, root, map[string]string{
 		"issue-80.log": statsStampedLog("80", time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC),
-			claude.DispatchStart{Revision: "rev-a", Knobs: map[string]string{"MERGE_MODE": "auto"}},
+			claude.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
 			map[string]string{"implement": "hash-i1"},
 			[2]string{"implement", "claude-opus"}),
 	})
@@ -101,6 +101,7 @@ func TestStats_ByGolden(t *testing.T) {
 		{"prompt-implement", "prompt:implement"},
 		{"knob-merge-mode", "knob:MERGE_MODE"},
 		{"role", "role"},
+		{"driver", "driver"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text, _ := runStats(t, root, "--by", tc.by)
@@ -148,7 +149,7 @@ func TestStats_ByRejectsBadDimension(t *testing.T) {
 	root := statsStampedRoot(t)
 	t.Chdir(root)
 	for _, tc := range []struct{ by, want string }{
-		{"flavour", `invalid --by "flavour": want role, revision, model, prompt:<role> or knob:<NAME>`},
+		{"flavour", `invalid --by "flavour": want role, revision, model, driver, prompt:<role> or knob:<NAME>`},
 		{"prompt:nonsense", `unknown prompt role "nonsense", want one of legacy, implement, fix, land, review, delta-review, research, butler`},
 		{"prompt:", `unknown prompt role ""`},
 		{"knob:NO_SUCH_KNOB", `unknown knob "NO_SUCH_KNOB"`},

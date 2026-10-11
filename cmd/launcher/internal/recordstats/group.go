@@ -118,6 +118,9 @@ func ModelKey(p dispatchrecord.Pass) string {
 	return NoneIfEmpty(strings.Join(models, "+"))
 }
 
+// DriverKey is the Record-level key of the Driver a Record was stamped with.
+func DriverKey(r dispatchrecord.Record) string { return NoneIfEmpty(r.Driver) }
+
 // RevisionKey is the Record-level key of the revision a Record ran at.
 func RevisionKey(r dispatchrecord.Record) string { return NoneIfEmpty(r.Revision) }
 
