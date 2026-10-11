@@ -24,7 +24,7 @@ The Driver is a **build-time** choice — one Driver per image, picked by a `mkH
 
 A Driver is inherently **two coordinated pieces keyed by one name**, because it straddles two hosts that cannot share code. The **in-box** half (invocation argv, agent-config rendering, skill wiring, outcome-line extraction) is baked into the image and is **nix-generated** (ADR 0005), living in a `lib/drivers/` registry that fans out like the env-schema preambles. The **host-side** half (transient classification, heartbeat parsing, usage extraction) lives in the launcher — a single native binary shared across all images, so it is a Go `Driver` strategy interface (the forge/runner idiom) selected at runtime by a `DRIVER` value threaded from the same knob that picks the image. A Go test asserts every nix Driver name has a matching Go strategy so the two registries cannot drift.
 
-Each Driver **normalizes its tool's misbehavior at its own boundary**, so the entrypoint tail, launcher, merge gate, and retry logic stay Driver-agnostic. opencode is badly behaved where claude is clean — it exits `0` on error, emits no `result` envelope (its final `step_finish` may not even fire before exit), and its rate-limit markers look nothing like Anthropic's. The opencode adapter therefore surfaces the sentinel as a bare stdout line — both Drivers render the same nix-generated `jq` extraction pipeline (`lib/drivers/outcome-extractor.nix`) and supply only their own `jqSelector`: opencode selects each `text` event's `.part.text` (`lib/drivers/opencode.nix:9`), claude the `result` event's `.result` (`lib/drivers/claude.nix:9`) — and **synthesizes** a trustworthy exit code from "valid outcome line present AND no `error` event" because opencode's own code is worthless. The upshot: the **`SPINDRIFT_OUTCOME` line is the true cross-Driver success contract**; the exit code is per-Driver corroboration only (already half-true when this was written, and now wholly so: the missing-line→`TaskFailed` rule is itself per-Driver, in each classifier's own scan — `cmd/launcher/internal/driver/claude/classify.go:110-111`, `opencode/classify.go:55-56`).
+Each Driver **normalizes its tool's misbehavior at its own boundary**, so the entrypoint tail, launcher, merge gate, and retry logic stay Driver-agnostic. opencode is badly behaved where claude is clean — it exits `0` on error, emits no `result` envelope (its final `step_finish` may not even fire before exit), and its rate-limit markers look nothing like Anthropic's. The opencode adapter therefore surfaces the sentinel as a bare stdout line — both Drivers render the same nix-generated `jq` extraction pipeline (`lib/drivers/outcome-extractor.nix`) and supply only their own `jqSelector`: opencode selects each `text` event's `.part.text` (`lib/drivers/opencode.nix`), claude the `result` event's `.result` (`lib/drivers/claude.nix`) — and **synthesizes** a trustworthy exit code from "valid outcome line present AND no `error` event" because opencode's own code is worthless. The upshot: the **`SPINDRIFT_OUTCOME` line is the true cross-Driver success contract**; the exit code is per-Driver corroboration only (already half-true when this was written, and now wholly so: the missing-line→`TaskFailed` rule is itself per-Driver, in each classifier's own scan — `cmd/launcher/internal/driver/claude/classify.go:110-111`, `cmd/launcher/internal/driver/opencode/classify.go:82-83`).
 
 *Amended by issue #4431:* outcome-line and result-text extraction is no longer
 part of the in-box half. The nix-generated `jq` extractor
@@ -180,7 +180,7 @@ one `awsBedrockBearerToken` (`AWS_BEARER_TOKEN_BEDROCK`) secret + non-secret
 in `bwrap.go` when its knob lands.
 
 **Egress / netns:** none of the three needs new runner-netns wiring under the
-current coarse network model (`lib/env-schema.nix:251-262`'s `NETWORK_MODE` is a
+current coarse network model (`lib/env-schema.nix:268-283`'s `NETWORK_MODE` is a
 four-choice knob — `open` (the default), `no-host-loopback`, `none`, `host` —
 selecting a whole-namespace stance, with no per-domain egress allowlist). The
 regional endpoints each leg reaches —
@@ -233,18 +233,18 @@ their own defaults leave reachable:
   default, reachable only under the `NETWORK_MODE=host` opt-out.** Under the
   default `open` the Box sits in its own network namespace behind a hardened
   pasta helper: `isolateNet()` is true for every mode but `host`
-  (`bwrap.go:387-389`), `pastaPath()` takes the pasta route for every isolated
-  mode but `none` (`bwrap.go:394-396`), and the helper is spawned with
+  (`bwrap.go:397-399`), `pastaPath()` takes the pasta route for every isolated
+  mode but `none` (`bwrap.go:404-406`), and the helper is spawned with
   `pastaHardenedFlags` — `-t none -T none -u none -U none --no-map-gw`
-  (`bwrap.go:640`) — so the gateway address that would otherwise splice back to
+  (`bwrap.go:663`) — so the gateway address that would otherwise splice back to
   the host is never mapped. Egress and DNS are unaffected (`--dns-forward
-  169.254.2.2`, `bwrap.go:590`, resolves without reopening that splice);
+  169.254.2.2`, `bwrap.go:613`, resolves without reopening that splice);
   what is gone is host loopback. `http://localhost:11434/v1` is therefore
   precisely the case that does **not** work by default, and a regression test
   pins it — `bwrap_integration_test.go:389-436` asserts a guest connection to
   host loopback via pasta's gateway address is blocked under `--no-map-gw`. Nor
   is `--unshare-net` a hard on/off switch keyed to its own knob: it is appended
-  only when `isolateNet && !a.pastaPath()` (`bwrap.go:564-566`), i.e. only under
+  only when `isolateNet && !a.pastaPath()` (`bwrap.go:587-589`), i.e. only under
   the fully-offline `NETWORK_MODE=none`. The reachable state is the explicit,
   bwrap-only `NETWORK_MODE=host`, which restores the pre-#2666
   shared-host-netns posture wholesale. What is genuinely unbuilt is the *scoped*
@@ -252,12 +252,12 @@ their own defaults leave reachable:
   hardening forecloses today — leaving `NETWORK_MODE=host`, wholesale rather
   than scoped, as the only in-repo way in. `no-host-loopback` is not a third
   state here at all: it throws at eval on `runtime=bwrap`
-  (`lib/mkHarness.nix:342-343`) precisely because the isolated-by-default `open`
+  (`lib/mkHarness.nix:372-373`) precisely because the isolated-by-default `open`
   already renders it.
 
 - **podman/docker (`cmd/launcher/internal/runner/oci.go`) — the compound
   `--network` value already covers it, no code change.** `networkArg()`
-  (`oci.go:414-429`) splices a non-empty raw `PODMAN_NETWORK` verbatim as a
+  (`oci.go:418-433`) splices a non-empty raw `PODMAN_NETWORK` verbatim as a
   single `--network <value>` arg and lets it win over the mode, so compound
   backend values already flow through the existing knob:
   `PODMAN_NETWORK=pasta:--map-gw` or
@@ -266,10 +266,10 @@ their own defaults leave reachable:
   `PODMAN_NETWORK` **alone** — `NETWORK_MODE` unset, or (at dispatch only)
   explicitly `open` — never as an override layered on a managed mode: two
   gates refuse that pairing before `networkArg()`'s raw-wins precedence can
-  apply. `checkNetworkModeRuntimeGate` (`cmd/launcher/main.go:1105-1113`)
+  apply. `checkNetworkModeRuntimeGate` (`cmd/launcher/main.go:1111-1131`)
   fails the launch whenever a non-`open` `NETWORK_MODE` is set beside a raw
   knob, and at the Consumer level `networkModeCoherenceOk`
-  (`lib/mkHarness.nix:336-341`) is stricter still — `network.mode` set at all
+  (`lib/mkHarness.nix:366-371`) is stricter still — `network.mode` set at all
   beside `network.podman` throws at eval, `open` included — so a Consumer
   wanting the compound value sets only `network.podman` and leaves
   `network.mode` unset. Absent that, `no-host-loopback` renders `pasta` on
