@@ -1,5 +1,14 @@
 # Migration Guide
 
+## Daemon child output moves off the daemon's stderr (issue #5009)
+
+The daemon no longer echoes each child's stdout and stderr onto its own
+stderr, so the systemd journal or terminal running the daemon no longer shows
+them. Read a child's output in its Child log under `.spindrift/logs/daemon/`
+(the file `child_start`'s `child_log` names) or through the Dashboard. Only
+when the Child log cannot be created does child output still land on the
+daemon's stderr.
+
 ## Settle tokened logs with a current launcher (issue #4812)
 
 Each Pass log's `dispatch_start` stamp now carries a `host_token`, and the

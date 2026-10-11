@@ -8303,8 +8303,9 @@ see [Butler](#butler)).
 
 **Event stream.** The daemon writes one JSON object per line to stdout — a
 JSON-lines stream, which a service manager can capture as it is. stdout is
-the machine stream only; human-facing output and the child's own
-stdout/stderr go to stderr instead. Event names and fields
+the machine stream only; stderr carries human-facing output only. Each
+child's own stdout/stderr go to its **Child log** (below), falling back to the
+daemon's stderr only when that file cannot be created. Event names and fields
 (`cmd/launcher/internal/daemon/events.go`, `loop.go`). Every event line
 carries a `v` integer (`eventVersion`, currently 1), stamped by the
 emitter beside `time` so no event can omit it; the table below leaves it
@@ -8390,9 +8391,12 @@ lock still writes its `halt` to stdout, but that line never reaches the
 holder's file; a restart appends to it rather than starting over. The
 [Dashboard](#dashboard) reads both generations for its history timeline.
 
-**Child log.** Each child's stdout and stderr are teed, byte for byte, to
-its own Child log as well as to the daemon's stderr, which is unchanged,
-so the journal still shows the same output. It is the only record of a
+**Child log.** Each child's stdout and stderr go, byte for byte, to
+its own Child log: the daemon hands the child the open file as both
+descriptors, so nothing is echoed to the daemon's stderr and a daemon killed
+outright does not take its children down (nor does the report pipe on
+descriptor 3: a child's report write ignores the `EPIPE` a dead reader
+leaves). It is the only record of a
 Dispatch that failed outside its Box: a build failure, a claim race, red
 CI, a merge-gate refusal. The file is
 `.spindrift/logs/daemon/<start>-slot<N>-<kind>.log` under the checkout,
@@ -8404,12 +8408,12 @@ milliseconds keep apart two children one slot starts inside the same
 second. `child_start`'s `child_log` names the file, relative to the
 checkout, so nothing has to derive it. Child logs are never pruned and
 grow without bound; prune `.spindrift/logs/daemon/` by hand. A Child log
-that cannot be created or written prints `daemon: child log ...` on
-stderr and costs neither the stderr copy nor the Dispatch. While a Child
-log is in use the child's stdout and stderr are a pipe the daemon tees, not
-the daemon's own stderr, so the child sees no TTY and output that checks for
-a terminal may change. Output a grandchild writes after the child exits and
-a 5-second grace period is lost.
+that cannot be created prints `daemon: child log ...` on stderr and never
+fails the Dispatch: the child then writes to the daemon's own stderr
+descriptor instead, again with no copy in between. A write failure on the
+Child log (for example a full disk) is not swallowed by the daemon: the
+child's own write gets the error (`ENOSPC`), as on any file. The child sees
+a regular file, not a TTY, so output that checks for a terminal may change.
 
 **Reasons and credentials.** A `reason` that embeds captured git or nix
 stderr (a failed `git fetch`, `git ls-remote`, or `nix eval`) has URL userinfo
@@ -8438,10 +8442,10 @@ The child never opens the descriptor itself — it inherits it via
 the function, before this process spawns its first Box, runtime, or
 subprocess, so none of them can inherit or hold the write end open. With
 the write end no longer shared with anything the child launches, the
-child's own stdout is free to be
-relayed to the daemon's stderr byte-for-byte, with no userspace scan or
-copy in between — what the daemon's log shows is exactly what the child
-printed, unmodified by this event stream sitting alongside it on a
+child's own stdout is free to go
+straight to its Child log (or the daemon's stderr) byte-for-byte, with no
+userspace scan or copy in between — what that log shows is exactly what the
+child printed, unmodified by this event stream sitting alongside it on a
 different descriptor. On the read side, an unknown record event is ignored
 with no error, and a malformed line is reported once to stderr and skipped
 rather than aborting the read loop — so a child built from a newer source

@@ -56,7 +56,9 @@ To make published files sufficient, the Daemon publishes three more things:
    file is the history.
 2. **A Child log per child** — the child's stdout and stderr teed verbatim
    to a file under `.spindrift/logs/daemon/`, still forwarded to stderr as
-   today. Not pruned for now; operators prune by hand.
+   today. Not pruned for now; operators prune by hand. (Amended by issue
+   #5009: the child now writes straight to the file, which is its stdout and
+   stderr, with no copy on the daemon's stderr.)
 3. **Events that name every log file.** `child_start` names the Child log;
    each `box` event names its Pass log. The Dashboard never derives a path,
    and it serves only files an event names — on an unauthenticated server
