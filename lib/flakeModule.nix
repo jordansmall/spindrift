@@ -301,21 +301,22 @@ let
   # One Driver's entry under agents.drivers.<name>: the Driver-valued options
   # at their agents-relative paths. byName and roster reuse the single-Driver
   # options; the entry has no Driver field, the attribute name is the Driver.
+  structuralEntryOptions = {
+    roster = structuralOptions.roster;
+    byName = byNameOption;
+  };
   driverEntryOptions = buildTree (
     map (key: {
       path = driverMap.paths.${key};
       opt = mkKnobOption key schema.${key};
     }) driverValued.env
-    ++ [
-      {
-        path = driverMap.paths.roster;
-        opt = structuralOptions.roster;
-      }
-      {
-        path = driverMap.paths.byName;
-        opt = byNameOption;
-      }
-    ]
+    ++ map (key: {
+      path = driverMap.paths.${key};
+      opt =
+        assert lib.assertMsg (structuralEntryOptions ? ${key})
+          "lib/flakeModule.nix: structuralEntryOptions has no option for Driver-valued structural key \"${key}\"";
+        structuralEntryOptions.${key};
+    }) driverValued.structural
   );
 
   # Like byNameTreeEntries, these two have no flat spelling, so they sit
@@ -525,12 +526,13 @@ in
 
       sharedDefaults = removeAttrs runDefaults driverValued.env;
       sharedArgs =
-        removeAttrs args [
-          "driver"
-          "roster"
-          "byName"
-          "defaults"
-        ]
+        removeAttrs args (
+          [
+            "driver"
+            "defaults"
+          ]
+          ++ driverValued.structural
+        )
         // lib.optionalAttrs (sharedDefaults != { }) { defaults = sharedDefaults; };
 
       # The non-null values of the given Driver-valued keys in a Driver's
@@ -569,20 +571,63 @@ in
 
       defaultDriverName = if shorthand then harness.internals.driverEntry.name else resolved.default;
       inherit (harness.internals) imageAttrName;
-      defaultAliasApps = {
-        ${defaultDriverName} = harness.apps.default;
-        "${defaultDriverName}-daemon" = harness.apps.daemon;
+      driverImageAttr = name: "${imageAttrName}-${name}";
+      # The package and apps a Driver's Harness publishes under that Driver's
+      # name; srcAttr is the image attribute the Harness itself built.
+      driverOutputs = name: h: srcAttr: {
+        packages = lib.optionalAttrs (h.packages ? ${srcAttr}) {
+          ${driverImageAttr name} = h.packages.${srcAttr};
+        };
+        apps = {
+          ${name} = h.apps.default;
+          "${name}-daemon" = h.apps.daemon;
+        };
       };
-      defaultAliasPackages = lib.optionalAttrs (harness.packages ? ${imageAttrName}) {
-        "${imageAttrName}-${defaultDriverName}" = harness.packages.${imageAttrName};
-      };
+      defaultOutputs = driverOutputs defaultDriverName harness imageAttrName;
+      # A non-default Driver's Harness contributes only its image/closure
+      # package and two apps; its base packages stay the default's. It names
+      # its own image attribute and Daemon apps so its freshness probe and
+      # child dispatch never point at the default's.
+      otherDrivers = lib.filter (n: n != defaultDriverName) (lib.attrNames cfg.agents.drivers);
+      otherHarness =
+        name:
+        let
+          a = argsFor name;
+        in
+        mkHarness (
+          a
+          // {
+            imageAttrName = driverImageAttr name;
+            defaults = (a.defaults or { }) // {
+              daemonApp = ".#${name}";
+              daemonSelfApp = ".#${name}-daemon";
+            };
+          }
+        );
+      otherOutputs =
+        lib.foldl'
+          (
+            acc: name:
+            let
+              o = driverOutputs name (otherHarness name) (driverImageAttr name);
+            in
+            {
+              packages = acc.packages // o.packages;
+              apps = acc.apps // o.apps;
+            }
+          )
+          {
+            packages = { };
+            apps = { };
+          }
+          (if shorthand then [ ] else otherDrivers);
       # nixfmt from the consumer's locked nixpkgs input, the same pin the
       # nix-fmt gate uses, so `nix fmt` fixes what the check catches.
       nixfmt = (import resolvedNixpkgs { inherit system; }).nixfmt;
     in
     {
-      packages = harness.packages // defaultAliasPackages;
-      apps = harness.apps // defaultAliasApps;
+      packages = harness.packages // defaultOutputs.packages // otherOutputs.packages;
+      apps = harness.apps // defaultOutputs.apps // otherOutputs.apps;
       formatter = nixfmt;
     };
 }
