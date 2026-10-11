@@ -41,8 +41,8 @@ type Event struct {
 	// (issue #3627); no other event sets it.
 	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`
-	// ChildLog is child_start's own field: the Child log file the child's
-	// output is teed to, relative to the checkout.
+	// ChildLog is child_start's own field: the Child log file the child
+	// writes its output to, relative to the checkout.
 	ChildLog string `json:"child_log,omitempty"`
 	// PassLog is the box event's own field: the Pass log that phase writes,
 	// relative to the checkout, carried unchanged from the child's record.
@@ -163,10 +163,10 @@ func (e *Emitter) warnf(format string, args ...any) {
 	fmt.Fprintf(e.errW, format, args...)
 }
 
-// Emit writes ev as one JSON line. It is safe to call concurrently — a later
-// slice tees child output from another goroutine while the loop goroutine
-// emits its own events. A caller-preset ev.Time is kept; otherwise now()
-// stamps it.
+// Emit writes ev as one JSON line. It is safe to call concurrently — each slot
+// goroutine emits from its child's OnRecord callback while other slots and
+// the loop goroutine emit their own events. A caller-preset ev.Time is kept;
+// otherwise now() stamps it.
 func (e *Emitter) Emit(ev Event) {
 	ev.V = eventVersion
 	if ev.Time == "" {
