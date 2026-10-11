@@ -22,7 +22,8 @@ let
   structuralTemplateExamples = import ./structural-template-examples.nix { inherit lib; };
   bakedSkills = import ./baked-skills.nix;
   structuralPaths = import ./structural-paths.nix;
-  byNamePaths = import ./byname-paths.nix;
+  extraOptionPaths = import ./extra-option-paths.nix;
+  driverMap = import ./driver-map.nix;
   buildConstants = import ./build-constants.nix;
   rosterDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).rosterDefaults;
   rosterNames = map (e: e.name) ((import ./roster.nix { inherit lib; }).defaultRoster { });
@@ -37,6 +38,15 @@ map assertMarkerShape [
     beginMarker = "<!-- BEGIN GENERATED DEFAULT MODELS -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED DEFAULT MODELS -->";
     generated = renderers.renderDefaultModelsDoc defaultModelFixture;
+  }
+  {
+    name = "driver-valued-paths-doc";
+    docPath = "docs/reference.md";
+    blockName = "DRIVER-VALUED PATHS";
+    sourceDesc = "the driverValued rows of lib/env-schema.nix and lib/structural-options-doc.nix, via lib/driver-map.nix";
+    beginMarker = "<!-- BEGIN GENERATED DRIVER-VALUED PATHS -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED DRIVER-VALUED PATHS -->";
+    generated = renderers.renderDriverValuedPathsDoc driverMap.paths;
   }
   {
     name = "roster-doc-flake-path";
@@ -82,11 +92,11 @@ map assertMarkerShape [
     blockName = "OPTION SURFACE TABLE";
     # The "-paths" name is narrower than the row, which now owns the whole table
     # (issue #2950), but it stays for name stability.
-    sourceDesc = "lib/structural-paths.nix, lib/byname-paths.nix, and lib/build-constants.nix";
+    sourceDesc = "lib/structural-paths.nix, lib/byname-paths.nix, lib/driver-map.nix, and lib/build-constants.nix";
     beginMarker = "<!-- BEGIN GENERATED OPTION SURFACE TABLE -- nix run .#regen -- DO NOT EDIT -->\n";
     endMarker = "<!-- END GENERATED OPTION SURFACE TABLE -->";
     generated = renderers.renderOptionSurfaceTableDoc {
-      inherit structuralPaths byNamePaths;
+      inherit structuralPaths extraOptionPaths;
       nixBuilderImage = buildConstants.nixBuilderImage;
     };
   }
