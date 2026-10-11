@@ -105,6 +105,9 @@ type Halt struct {
 	Detail   string
 	Kind     Kind
 	Revision string
+	// Handoff is set, with Class HaltNone, when the pool handed its busy slots
+	// off for an in-place restart (ADR 0063) instead of halting.
+	Handoff *Handoff
 }
 
 // String renders h in the operator-facing grammar docs/reference.md

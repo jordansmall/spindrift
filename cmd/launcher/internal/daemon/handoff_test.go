@@ -126,3 +126,37 @@ func TestHandoffVersionErrorNamesSupported(t *testing.T) {
 		t.Errorf("error %v should name the supported version", err)
 	}
 }
+
+// snapshot is restore's inverse: what a predecessor writes is what its
+// successor resumes from, and a pristine schedule or breaker writes nothing.
+func TestScheduleSnapshotInvertsRestore(t *testing.T) {
+	t0 := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	s := newSchedule([]Kind{workKind, butlerKind}, 0, time.Second, time.Minute, nil, nil)
+	if got := s.snapshot(); got != nil {
+		t.Fatalf("pristine snapshot = %+v, want none", got)
+	}
+	want := []HandoffKind{{
+		Kind: workKind, BackoffCur: 4 * time.Second, Until: t0, Jammed: true, Gen: 3,
+		DueAt: t0.Add(time.Hour), DueOnTipMove: true, LimitedUntil: t0.Add(time.Minute),
+	}}
+
+	got := s.restore(want).snapshot()
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("snapshot after restore = %+v, want %+v", got, want)
+	}
+}
+
+func TestBreakerSnapshotInvertsRestore(t *testing.T) {
+	t0 := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
+	want := []time.Time{t0, t0.Add(time.Second)}
+
+	got := newBreaker(3, time.Minute).restore(want).snapshot()
+
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("snapshot after restore = %v, want %v", got, want)
+	}
+	if got := newBreaker(3, time.Minute).snapshot(); len(got) != 0 {
+		t.Errorf("pristine snapshot = %v, want none", got)
+	}
+}

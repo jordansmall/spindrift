@@ -219,10 +219,6 @@ type Config struct {
 	Stop  <-chan struct{}
 	Abort <-chan struct{}
 
-	// abandonWaits, once closed, abandons every slot's wait on its child, which
-	// keeps running. Nothing closes it yet; the in-place restart (#5014) will.
-	abandonWaits <-chan struct{}
-
 	// Awake gates when a slot may start a new child: nil means no window
 	// is configured, so the daemon is always awake. When set, it only
 	// gates the moment a slot is about to start a child — a child already
@@ -326,7 +322,7 @@ type Config struct {
 //
 // It never kills a child it has started: the slot always waits on the handle
 // StartChild returned and emits that child's child_finish before halting,
-// unless the wait is abandoned (Config.abandonWaits), which leaves the child
+// unless the in-place handoff abandons the wait, which leaves the child
 // running rather than killing it. Otherwise this holds even if ctx was
 // cancelled mid-run or a sibling slot halted the pool in the meantime. "Stop
 // starting new work" is enforced by the admission check at the top of a
@@ -454,6 +450,9 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	// that cancels its ctx); wait it out so no event follows Loop's return.
 	p.bg.Wait()
 
+	if h := p.committedHandoff(); h != nil {
+		return Halt{Handoff: h}
+	}
 	return p.haltReason()
 }
 
@@ -547,7 +546,7 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// passBaton so LIFO runs it first — the reset lands before the baton is
 	// freed, so the sibling that hand-off wakes never reads this slot as
 	// still resolving.
-	defer p.setPhase(slot, PhaseIdle)
+	defer p.leaveSlot(slot)
 	// wantResolve carries idleSleep's return across the loop: set when a
 	// jammed kind's wait outlived its first IdleFloor slice (idleSleep,
 	// pool.go), it asks the next round to make one opportunistic resolution
@@ -682,12 +681,14 @@ slotLoop:
 		revision := tip.Revision
 
 		if p.cfg.SelfProgram != "" && tip.SelfPath != p.cfg.SelfProgram {
-			// Never re-execs: a self-change only records a halt reason and
+			// Never re-execs here: a self-change records a halt reason and
 			// cancels the pool's context — the same "stop starting new
 			// work, wait out whatever is running" halt every other reason
 			// already uses (see halt) — so a freshly merged but broken
-			// daemon cannot auto-load with nobody awake. selfUpdate gates
-			// that halt on a prebuild. An empty cfg.SelfProgram (the self
+			// daemon cannot auto-load with nobody awake. In-place mode
+			// (cfg.RestartInPlace) records no halt: the pool waits for a
+			// clean moment and hands off. selfUpdate gates either on a
+			// prebuild. An empty cfg.SelfProgram (the self
 			// check is off) always skips this comparison, since tip.SelfPath
 			// is then empty too, by construction of ResolveTip.
 			p.selfUpdate(ctx, kind, tip)
@@ -767,6 +768,7 @@ func (p *pool) childRequest(slot int, kind Kind, revision, childLog string) Chil
 		Abort:    cfg.Abort,
 		ChildLog: childLog,
 		OnRecord: func(rec Record) {
+			p.noteReported(slot)
 			switch rec.Event {
 			case report.EventBox:
 				p.noteBox(slot, kind, revision, rec)
@@ -809,10 +811,11 @@ func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision
 	cfg := p.cfg
 	var result ChildResult
 	if err == nil {
-		result, err = handle.Wait(cfg.abandonWaits)
+		result, err = handle.Wait(p.abandon)
 		if errors.Is(err, ErrWaitAbandoned) {
 			// The child is still running and its flight stays in place for
 			// the handoff: no child_finish, and not a failure.
+			p.noteAbandoned(slot, handle.State())
 			return true
 		}
 	}
