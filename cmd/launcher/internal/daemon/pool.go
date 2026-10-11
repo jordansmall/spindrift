@@ -30,6 +30,10 @@ type pool struct {
 
 	cancel context.CancelFunc
 
+	// abandon is closed when the in-place handoff commits: every slot's wait
+	// on its child ends, and the children keep running (see commitHandoffIfClean).
+	abandon chan struct{}
+
 	// baton is the discovery token (issue #3684): at most one slot may be
 	// between "started" and "announced a Box" at any moment, on the first
 	// wave and on every refill alike — a pool that lets two slots run
@@ -152,6 +156,9 @@ type slotState struct {
 	// start), which mutate keeps through the phase move and then clears.
 	sincePinned bool
 	flight      slotFlight
+	// handed is the child's runner-level state once the handoff abandoned the
+	// slot's wait; non-nil marks the slot as part of the handoff.
+	handed *ChildState
 }
 
 // mutate is the pool's one path to changing anything in state: every
@@ -180,6 +187,7 @@ func (p *pool) mutate(f func(s *state) []Event) {
 	before := make([]slotState, len(p.st.slots))
 	copy(before, p.st.slots)
 	evs := f(&p.st)
+	p.commitHandoffIfClean(&p.st)
 	// startChild and finishChild replace a whole slotState, zeroing since, and
 	// noteAwakeOpen re-sets idle on every iteration; restoring the prior
 	// since unless the phase moved keeps both from resetting it. A slot
@@ -322,6 +330,12 @@ type slotFlight struct {
 	gateGen int
 	// childStart pins the child_start event; see startChild.
 	childStart childStartPin
+	// childLog is the child's log path, kept for the handoff.
+	childLog string
+	// reported is set by the child's first record of any kind. The in-place
+	// handoff waits for it, since a child that has said nothing may be
+	// mid-discovery, claiming work the successor could not see.
+	reported bool
 	// pass is the Pass label (Record.Phase) of the child's most recent box
 	// record.
 	pass string
@@ -362,11 +376,12 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 	}
 	wake, wakeCancel := context.WithCancel(context.Background())
 	p := &pool{
-		cfg:    cfg,
-		r:      r,
-		em:     em,
-		clk:    clk,
-		cancel: cancel,
+		cfg:     cfg,
+		r:       r,
+		em:      em,
+		clk:     clk,
+		cancel:  cancel,
+		abandon: make(chan struct{}),
 		st: state{
 			slots:     slots,
 			lastStart: make([]childStartPin, cfg.Slots),
@@ -645,6 +660,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 		s.lastStart[slot] = pin
 		s.slots[slot] = slotState{phase: PhaseRunning, flight: slotFlight{kind: kind, revision: revision, continues: s.continues[kind], gateGen: s.sched.gateGenOf(kind), childStart: pin}}
 		childLog = childLogPath(now, slot, kind)
+		s.slots[slot].flight.childLog = childLog
 		return []Event{{Event: "child_start", Time: started, Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
 	})
 	return kind, childLog, ok
@@ -671,6 +687,8 @@ func (p *pool) occupyInherited() {
 				kind: hs.Kind, revision: hs.Revision, issues: slices.Clone(hs.Issues), key: hs.Key,
 				pass: hs.Pass, model: hs.Model, modelRole: hs.ModelRole, childStart: pin,
 				continues: s.continues[hs.Kind], gateGen: hs.GateGen,
+				// Its predecessor required the first report before handing off.
+				childLog: hs.ChildLog, reported: true,
 			}}
 			evs = append(evs, Event{Event: "child_inherited", Kind: hs.Kind, Key: hs.Key, Revision: hs.Revision, Slot: intPtr(hs.Slot), ChildLog: hs.ChildLog})
 		}
@@ -1060,12 +1078,14 @@ func (p *pool) parkIfHandingOff(ctx context.Context, slot int) bool {
 	return true
 }
 
-// stopped reports whether the pool has already recorded a halt reason —
-// deliberately not a raw ctx.Err() check; see haltIfStopping for why.
+// stopped reports whether the pool has already recorded a halt reason, or has
+// committed its in-place handoff (whose cancelled context must not read as a
+// fresh halt to the slots it wakes) — deliberately not a raw ctx.Err() check;
+// see haltIfStopping for why.
 func (p *pool) stopped() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.st.halted
+	return p.st.halted || p.st.self.Phase == SelfUpdateRestarting
 }
 
 // stopClosed reports whether cfg.Stop has been closed, without blocking. A
@@ -1129,7 +1149,9 @@ func (p *pool) haltIfStopping(ctx context.Context, kind Kind) bool {
 // the pool had already halted. It runs inside mutate so a caller can fold
 // other state changes into the same atomic step.
 func (s *state) recordHalt(h Halt) []Event {
-	if s.halted {
+	// A committed handoff already ends the pool (Loop returns it, not a halt),
+	// so a halt racing it must not emit an event for a pool that did not halt.
+	if s.halted || s.self.Phase == SelfUpdateRestarting {
 		return nil
 	}
 	s.halted = true

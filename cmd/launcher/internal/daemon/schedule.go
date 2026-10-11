@@ -671,3 +671,25 @@ func (s Schedule) restore(kinds []HandoffKind) Schedule {
 	}
 	return s
 }
+
+// snapshot is the inverse of restore: the per-kind state a successor needs to
+// resume where s stands. A kind still in its initial state has no entry,
+// since restore leaves an absent kind at exactly that.
+func (s Schedule) snapshot() []HandoffKind {
+	var out []HandoffKind
+	for _, k := range s.kinds {
+		ks := s.state[k]
+		cur := ks.gate.b.cur
+		if cur == ks.gate.b.floor {
+			cur = 0 // the initial step, which restore leaves alone
+		}
+		hk := HandoffKind{
+			Kind: k, BackoffCur: cur, Until: ks.gate.until, Jammed: ks.gate.jammed, Gen: ks.gate.gen,
+			DueAt: ks.due.At, DueOnTipMove: ks.due.OnTipMove, LimitedUntil: ks.limitedUntil,
+		}
+		if hk != (HandoffKind{Kind: k}) {
+			out = append(out, hk)
+		}
+	}
+	return out
+}

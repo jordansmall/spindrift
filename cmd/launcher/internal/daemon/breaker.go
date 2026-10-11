@@ -76,3 +76,9 @@ func (b breaker) restore(times []time.Time) breaker {
 	b.times = slices.Clone(times)
 	return b
 }
+
+// snapshot is the inverse of restore: a copy of the failure times held, so the
+// document does not alias the array evict reuses in place.
+func (b breaker) snapshot() []time.Time {
+	return slices.Clone(b.times)
+}

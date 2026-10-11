@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"spindrift.dev/launcher/internal/dispatchkey"
+	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/report"
 )
 
 const (
@@ -439,60 +445,43 @@ func waitSelfPhase(t *testing.T, dir string, phase SelfUpdatePhase) {
 }
 
 // inPlaceWaiting runs a two-slot in-place pool whose build passes once both
-// slots hold a child, waits for the waiting phase, then frees slot 1 so the
-// pool has a free slot that must not start a child. Slot 0's child stays
-// running. It returns Loop's halt channel and the buffer of events.
-func inPlaceWaiting(t *testing.T) (r *scriptedRunner, stop chan struct{}, dir string, done chan Halt, buf *bytes.Buffer) {
+// slots hold a child, waits for the waiting phase, then frees slot 0 so the
+// pool has a free slot that must not start a child. Slot 1's child stays
+// running and has not reported, which holds the handoff off.
+func inPlaceWaiting(t *testing.T) *handoffRig {
 	t.Helper()
-	r = &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{selfNew}}
-	r.holdSlots(2)
-	r.announceEachSlot()
-	gate := make(chan struct{})
-	r.onPrebuild = func(ctx context.Context, _ int, _ Tip) error {
-		select {
-		case <-gate:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+	rig := newHandoffRig(t, 2)
+	// Only slot 0 boxes, which frees the baton for slot 1; slot 1 never
+	// reports, so the handoff stays held off while it runs.
+	rig.r.onStart = func(_ context.Context, req ChildRequest) error {
+		if req.Slot == 0 {
+			req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("issue-0")})
 		}
+		return nil
 	}
-	stop = make(chan struct{})
-	dir = t.TempDir()
-	buf = &bytes.Buffer{}
-	cfg := testConfig(2)
-	cfg.SelfProgram = selfOld
-	cfg.RestartInPlace = true
-	cfg.Stop = stop
-	cfg.Status = NewStatusWriter(dir, time.Now)
-
-	done = make(chan Halt, 1)
-	go func() { done <- Loop(context.Background(), cfg, r, newTestEmitter(buf), &testClock{}) }()
-	r.awaitStart(t)
-	r.awaitStart(t)
-	close(gate)
-	waitSelfPhase(t, dir, SelfUpdateWaiting)
-	r.releaseSlot(t, 1, ChildResult{Exit: 0})
-	return
+	rig.run()
+	rig.r.awaitStart(t)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+	waitSelfPhase(t, rig.dir, SelfUpdateWaiting)
+	rig.r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	return rig
 }
 
 // In-place mode: a passing build neither halts nor drains. The status shows
 // waiting, and a slot freed meanwhile starts nothing.
 func TestSelfUpdateInPlaceWaitsWithoutHaltOrStart(t *testing.T) {
-	r, stop, dir, done, buf := inPlaceWaiting(t)
+	rig := inPlaceWaiting(t)
+	r, buf := rig.r, rig.buf
 
-	select {
-	case h := <-done:
-		t.Fatalf("pool ended with %+v while waiting, want it to keep waiting", h)
-	case <-time.After(50 * time.Millisecond):
-	}
-	waitSelfPhase(t, dir, SelfUpdateWaiting)
+	rig.stillWaiting(t, "a passing build waits for a clean moment")
 	if n := r.runCount(); n != 2 {
 		t.Fatalf("run calls = %d, want 2: no child may start while waiting", n)
 	}
 
-	close(stop)
-	r.releaseSlot(t, 0, ChildResult{Exit: 0})
-	<-done
+	close(rig.stop)
+	r.releaseSlot(t, 1, ChildResult{Exit: 0})
+	rig.wait(t)
 	events := decodeEvents(t, buf)
 	if n := countEvents(eventNames(events), "child_start"); n != 2 {
 		t.Errorf("child_start events = %d, want 2", n)
@@ -506,16 +495,17 @@ func TestSelfUpdateInPlaceWaitsWithoutHaltOrStart(t *testing.T) {
 // A stop while waiting cancels the handoff: an ordinary operator stop that
 // drains the running child, with the build left recorded as built.
 func TestSelfUpdateInPlaceStopWhileWaitingDrains(t *testing.T) {
-	r, stop, dir, done, buf := inPlaceWaiting(t)
+	rig := inPlaceWaiting(t)
+	r, dir, buf := rig.r, rig.dir, rig.buf
 
-	close(stop)
+	close(rig.stop)
 	select {
-	case h := <-done:
+	case h := <-rig.done:
 		t.Fatalf("pool ended with %+v before its running child finished", h)
 	case <-time.After(50 * time.Millisecond):
 	}
-	r.releaseSlot(t, 0, ChildResult{Exit: 0})
-	h := <-done
+	r.releaseSlot(t, 1, ChildResult{Exit: 0})
+	h := rig.wait(t)
 
 	if h.Class != HaltOperatorStop {
 		t.Fatalf("halt = %+v, want %v", h, HaltOperatorStop)
@@ -531,5 +521,376 @@ func TestSelfUpdateInPlaceStopWhileWaitingDrains(t *testing.T) {
 	}
 	if got := rep.Status.SelfUpdate.Phase; got != SelfUpdateBuilt {
 		t.Errorf("self_update phase = %q, want %q after the handoff was cancelled", got, SelfUpdateBuilt)
+	}
+}
+
+// handoffRig is an in-place pool of `slots` held slots whose build passes when
+// the test closes gate. announce makes every child box at start; without it a
+// child reports nothing until the test fires a record.
+type handoffRig struct {
+	r    *scriptedRunner
+	gate chan struct{}
+	dir  string
+	done chan Halt
+	buf  *bytes.Buffer
+	stop chan struct{}
+	cfg  Config
+}
+
+// newHandoffRig builds the rig without starting Loop, so a test can adjust
+// rig.cfg or the runner's hooks first; run starts it.
+func newHandoffRig(t *testing.T, slots int) *handoffRig {
+	t.Helper()
+	rig := &handoffRig{
+		r:    &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{selfNew}},
+		gate: make(chan struct{}),
+		dir:  t.TempDir(),
+		done: make(chan Halt, 1),
+		buf:  &bytes.Buffer{},
+		stop: make(chan struct{}),
+	}
+	rig.r.holdSlots(slots)
+	rig.r.onPrebuild = func(ctx context.Context, _ int, _ Tip) error {
+		select {
+		case <-rig.gate:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	rig.cfg = testConfig(slots)
+	rig.cfg.SelfProgram = selfOld
+	rig.cfg.RestartInPlace = true
+	rig.cfg.Stop = rig.stop
+	rig.cfg.Status = NewStatusWriter(rig.dir, time.Now)
+	return rig
+}
+
+func (rig *handoffRig) run() {
+	go func() {
+		rig.done <- Loop(context.Background(), rig.cfg, rig.r, newTestEmitter(rig.buf), &testClock{})
+	}()
+}
+
+func startHandoffRig(t *testing.T, slots int, announce bool) *handoffRig {
+	t.Helper()
+	rig := newHandoffRig(t, slots)
+	if announce {
+		rig.r.announceEachSlot()
+	}
+	rig.run()
+	return rig
+}
+
+// wait returns Loop's halt, failing the test when the pool does not end.
+func (rig *handoffRig) wait(t *testing.T) Halt {
+	t.Helper()
+	select {
+	case h := <-rig.done:
+		return h
+	case <-time.After(5 * time.Second):
+		t.Fatal("Loop did not return")
+		return Halt{}
+	}
+}
+
+// stillWaiting fails the test if the pool ends within a short grace period.
+func (rig *handoffRig) stillWaiting(t *testing.T, why string) {
+	t.Helper()
+	select {
+	case h := <-rig.done:
+		t.Fatalf("pool ended with %+v, want it to keep waiting: %s", h, why)
+	case <-time.After(50 * time.Millisecond):
+	}
+	waitSelfPhase(t, rig.dir, SelfUpdateWaiting)
+}
+
+func (r *scriptedRunner) inFlightNow() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.inFlight
+}
+
+// In-place mode, children running and past discovery: a passing build hands
+// off at once, carrying every busy slot, and touches none of the children.
+func TestSelfUpdateInPlaceHandsOffBusySlots(t *testing.T) {
+	rig := startHandoffRig(t, 2, true)
+	rig.r.awaitStart(t)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+
+	h := rig.wait(t)
+
+	if h.Class != HaltNone || h.Handoff == nil {
+		t.Fatalf("halt = %+v, want HaltNone carrying a handoff", h)
+	}
+	names := eventNames(decodeEvents(t, rig.buf))
+	if n := countEvents(names, "halt"); n != 0 {
+		t.Errorf("halt events = %d, want none: a handoff is not a halt", n)
+	}
+	if n := countEvents(names, "child_finish"); n != 0 {
+		t.Errorf("child_finish events = %d, want none: the children were not waited on", n)
+	}
+	if n := rig.r.inFlightNow(); n != 2 {
+		t.Errorf("children in flight = %d, want both still running", n)
+	}
+	if h.Handoff.Stop || h.Handoff.Abort {
+		t.Errorf("handoff latch = stop %v abort %v, want open", h.Handoff.Stop, h.Handoff.Abort)
+	}
+	if len(h.Handoff.Slots) != 2 {
+		t.Fatalf("handoff slots = %+v, want 2", h.Handoff.Slots)
+	}
+	for i, hs := range h.Handoff.Slots {
+		rig.r.mu.Lock()
+		child := rig.r.handles[i].state
+		rig.r.mu.Unlock()
+		wantKey := dispatchkey.Issue(fmt.Sprintf("issue-%d", i))
+		if hs.Slot != i || hs.Kind != workKind || hs.Revision != "rev1" || hs.Key != wantKey ||
+			!slices.Equal(hs.Issues, []string{fmt.Sprintf("issue-%d", i)}) || hs.Child.PID != child.PID ||
+			hs.ChildStart == "" || hs.ChildLog == "" {
+			t.Errorf("handoff slot %d = %+v, want its own kind, revision, key, issues, child %+v, start and log", i, hs, child)
+		}
+	}
+	rep, err := ReadStatus(rig.dir)
+	if err != nil || rep.Status == nil || rep.Status.SelfUpdate == nil {
+		t.Fatalf("ReadStatus = %+v, %v", rep, err)
+	}
+	if got := rep.Status.SelfUpdate.Phase; got != SelfUpdateRestarting {
+		t.Errorf("self_update phase = %q, want %q", got, SelfUpdateRestarting)
+	}
+	for _, sl := range rep.Status.Slots {
+		if !sl.Busy {
+			t.Errorf("slot %d reads %q after the handoff, want it still busy", sl.Slot, sl.Phase)
+		}
+	}
+
+	// The children are still collectable: the pool neither killed nor reaped them.
+	rig.r.releaseSlot(t, 0, ChildResult{Exit: 4})
+	rig.r.mu.Lock()
+	h0 := rig.r.handles[0]
+	rig.r.mu.Unlock()
+	if res, err := h0.Wait(nil); err != nil || res.Exit != 4 {
+		t.Errorf("slot 0 child Wait = (%+v, %v), want its released exit", res, err)
+	}
+}
+
+// The held discovery baton keeps the handoff waiting even when every running
+// child has reported something, until the holder boxes and passes it.
+func TestSelfUpdateInPlaceHeldBatonHoldsOffHandoff(t *testing.T) {
+	rig := startHandoffRig(t, 2, false)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+	rig.stillWaiting(t, "the child has reported nothing")
+
+	rig.r.fireOnRecord(t, 0, Record{Event: report.EventModel, Model: "opus"})
+	rig.stillWaiting(t, "the child reported but still holds the discovery baton")
+
+	rig.r.fireOnIssue(t, 0, "42")
+	h := rig.wait(t)
+
+	if h.Handoff == nil || len(h.Handoff.Slots) != 1 {
+		t.Fatalf("halt = %+v, want a handoff of the one busy slot", h)
+	}
+	if hs := h.Handoff.Slots[0]; hs.Slot != 0 || hs.Key != dispatchkey.Issue("42") {
+		t.Errorf("handoff slot = %+v, want slot 0 on issue 42", hs)
+	}
+	if n := rig.r.runCount(); n != 1 {
+		t.Errorf("run calls = %d, want 1: the free slot must not start a child", n)
+	}
+	waitSelfPhase(t, rig.dir, SelfUpdateRestarting)
+}
+
+// A Chore-keyed child passes the baton as it starts, so the first report is
+// the only thing holding the handoff off in a multi-slot pool.
+func TestSelfUpdateInPlaceChoreChildReportHoldsOffHandoff(t *testing.T) {
+	rig := newHandoffRig(t, 2)
+	rig.cfg.Kinds = []Kind{KindOf(dispatchkind.Butler)}
+	rig.run()
+	rig.r.awaitStart(t)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+	rig.stillWaiting(t, "neither Chore child has reported")
+
+	rig.r.fireOnRecord(t, 0, Record{Event: report.EventModel, Model: "opus"})
+	rig.stillWaiting(t, "slot 1's Chore child has not reported")
+
+	rig.r.fireOnRecord(t, 1, Record{Event: report.EventModel, Model: "opus"})
+	h := rig.wait(t)
+
+	if h.Class != HaltNone || h.Handoff == nil || len(h.Handoff.Slots) != 2 {
+		t.Fatalf("halt = %+v, want a handoff of both busy slots", h)
+	}
+}
+
+// A halt racing the committed handoff is not a halt: Loop returns a handoff,
+// so no halt event may be emitted or latched.
+func TestRecordHaltAfterHandoffCommitIsNoOp(t *testing.T) {
+	var s state
+	s.self.Phase = SelfUpdateRestarting
+
+	if evs := s.recordHalt(Halt{Class: HaltOperatorStop, Detail: "late"}); evs != nil {
+		t.Errorf("events = %v, want none after the handoff committed", evs)
+	}
+	if s.halted {
+		t.Error("halt latched after the handoff committed")
+	}
+}
+
+// A single-slot pool has no baton, so only the first report gates the handoff.
+func TestSelfUpdateInPlaceUnreportedChildHoldsOffHandoff(t *testing.T) {
+	rig := startHandoffRig(t, 1, false)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+	rig.stillWaiting(t, "the child has not sent its first report")
+
+	rig.r.fireOnRecord(t, 0, Record{Event: report.EventModel, Model: "opus"})
+	h := rig.wait(t)
+
+	if h.Class != HaltNone || h.Handoff == nil || len(h.Handoff.Slots) != 1 {
+		t.Fatalf("halt = %+v, want a handoff of the one busy slot", h)
+	}
+	if got := h.Handoff.Slots[0]; got.Child.PID == 0 || got.Key != (dispatchkey.Key{}) {
+		t.Errorf("handoff slot = %+v, want the child's pid and no key yet", got)
+	}
+}
+
+// The returned document is one a fresh pool resumes from: the slots seat as
+// inherited children with the key and kind the predecessor tracked.
+func TestSelfUpdateInPlaceHandoffRoundTrips(t *testing.T) {
+	rig := startHandoffRig(t, 2, true)
+	rig.r.awaitStart(t)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+	h := rig.wait(t)
+	if h.Handoff == nil {
+		t.Fatalf("halt = %+v, want a handoff", h)
+	}
+	var wire bytes.Buffer
+	if err := EncodeHandoff(&wire, *h.Handoff); err != nil {
+		t.Fatalf("EncodeHandoff: %v", err)
+	}
+	doc, err := DecodeHandoff(&wire)
+	if err != nil {
+		t.Fatalf("DecodeHandoff: %v", err)
+	}
+
+	r2 := &scriptedRunner{}
+	r2.holdSlots(2)
+	stop := make(chan struct{})
+	cfg := testConfig(2)
+	cfg.Stop = stop
+	cfg.Handoff = &doc
+	var buf bytes.Buffer
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(context.Background(), cfg, r2, newTestEmitter(&buf), &testClock{}) }()
+	r2.awaitStart(t)
+	r2.awaitStart(t)
+	close(stop)
+	r2.releaseSlot(t, 0, ChildResult{Exit: 0})
+	r2.releaseSlot(t, 1, ChildResult{Exit: 0})
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("resumed Loop did not return")
+	}
+
+	var inherited []Event
+	for _, ev := range decodeEvents(t, &buf) {
+		if ev.Event == "child_inherited" {
+			inherited = append(inherited, ev)
+		}
+	}
+	if len(inherited) != 2 {
+		t.Fatalf("child_inherited events = %+v, want 2", inherited)
+	}
+	for i, ev := range inherited {
+		if *ev.Slot != doc.Slots[i].Slot || ev.Kind != doc.Slots[i].Kind || ev.Key != doc.Slots[i].Key {
+			t.Errorf("inherited event %d = %+v, want slot %d kind %s key %v", i, ev, doc.Slots[i].Slot, doc.Slots[i].Kind, doc.Slots[i].Key)
+		}
+	}
+	for i, c := range r2.inheritCalls() {
+		if c.PID != doc.Slots[c.Slot].Child.PID {
+			t.Errorf("inherit call %d pid = %d, want slot %d's %d", i, c.PID, c.Slot, doc.Slots[c.Slot].Child.PID)
+		}
+	}
+}
+
+// In-place mode, every slot idle: a passing build commits the handoff at once
+// from the build's own state change, with nothing to carry. The slots are
+// asleep in their idle wait and must return on the commit, not on a timer.
+func TestSelfUpdateInPlaceIdlePoolHandsOffAtOnce(t *testing.T) {
+	r := &scriptedRunner{
+		revisions: []string{"rev1"}, selfPaths: []string{selfNew},
+		results: []ChildResult{{Exit: 2}},
+	}
+	gate := make(chan struct{})
+	r.onPrebuild = func(ctx context.Context, _ int, _ Tip) error {
+		select {
+		case <-gate:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	clk := &testClock{}
+	clk.park()
+	dir := t.TempDir()
+	buf := &bytes.Buffer{}
+	cfg := testConfig(2)
+	cfg.SelfProgram = selfOld
+	cfg.RestartInPlace = true
+	cfg.Stop = make(chan struct{})
+	cfg.Status = NewStatusWriter(dir, time.Now)
+
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(context.Background(), cfg, r, newTestEmitter(buf), clk) }()
+
+	// Both children have exited with no work and both slots sleep: the pool is
+	// idle, and only the parked clock could end that sleep.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		clk.mu.Lock()
+		asleep := len(clk.sleepers)
+		clk.mu.Unlock()
+		if asleep == 2 && r.runCount() == 2 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("slots asleep = %d, runs = %d, want both idle", asleep, r.runCount())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case h := <-done:
+		t.Fatalf("pool ended with %+v before the build passed", h)
+	default:
+	}
+	close(gate)
+
+	var h Halt
+	select {
+	case h = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Loop did not return after the build passed on an idle pool")
+	}
+	if h.Class != HaltNone || h.Handoff == nil {
+		t.Fatalf("halt = %+v, want HaltNone carrying a handoff", h)
+	}
+	if len(h.Handoff.Slots) != 0 {
+		t.Errorf("handoff slots = %+v, want none: no child was running", h.Handoff.Slots)
+	}
+	if n := r.runCount(); n != 2 {
+		t.Errorf("run calls = %d, want 2: a woken slot must not start a child", n)
+	}
+	events := decodeEvents(t, buf)
+	if n := countEvents(eventNames(events), "halt"); n != 0 {
+		t.Errorf("halt events = %d, want none: a handoff is not a halt", n)
+	}
+	rep, err := ReadStatus(dir)
+	if err != nil || rep.Status == nil || rep.Status.SelfUpdate == nil {
+		t.Fatalf("ReadStatus = %+v, %v", rep, err)
+	}
+	if got := rep.Status.SelfUpdate.Phase; got != SelfUpdateRestarting {
+		t.Errorf("self_update phase = %q, want %q", got, SelfUpdateRestarting)
 	}
 }
