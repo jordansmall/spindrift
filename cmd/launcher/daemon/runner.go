@@ -372,6 +372,11 @@ func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, i
 	return daemon.Demand{Ready: n}, nil
 }
 
+// Prebuild is a placeholder: it accepts every build unchecked, so a
+// self-change still halts the pool unvetted. TODO(#5012): realise
+// tip.SelfPath with a GC root and smoke-test it with --check-only.
+func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error { return nil }
+
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
 	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath:      r.repoPath,

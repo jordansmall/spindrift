@@ -36,6 +36,24 @@ type SelfEvalError struct{ Err error }
 func (e *SelfEvalError) Error() string { return e.Err.Error() }
 func (e *SelfEvalError) Unwrap() error { return e.Err }
 
+// PrebuildStage names the stage of Runner.Prebuild that failed.
+type PrebuildStage string
+
+const (
+	PrebuildStageBuild     PrebuildStage = "build"      // realising the new daemon
+	PrebuildStageSmokeTest PrebuildStage = "smoke-test" // running it with --check-only
+)
+
+// PrebuildError marks which stage of Runner.Prebuild failed. Error() leads
+// with the stage so the self_update blocked event's reason says which.
+type PrebuildError struct {
+	Stage PrebuildStage
+	Err   error
+}
+
+func (e *PrebuildError) Error() string { return string(e.Stage) + ": " + e.Err.Error() }
+func (e *PrebuildError) Unwrap() error { return e.Err }
+
 // FeatureBranchGoneError is what Runner.ResolveTip returns on a definitive
 // "absent" answer from the remote for the daemon's --feature-branch: the
 // branch used to exist and now doesn't, not a fetch that merely failed to
@@ -75,6 +93,13 @@ type Runner interface {
 	// a tracker counter ignores it.
 	Demand(ctx context.Context, kind Kind, fresh bool, inFlight dispatchkey.Set) (Demand, error)
 	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
+	// Prebuild realises tip.SelfPath with a GC root and smoke-tests it (the
+	// new daemon run with --check-only), so a self-change halt only ever
+	// hands the service manager a build already known to start. Only called
+	// when tip.SelfPath differs from Config.SelfProgram. A failure unwraps
+	// to *PrebuildError; ctx cancellation aborts it and is not a verdict on
+	// the build.
+	Prebuild(ctx context.Context, tip Tip) error
 }
 
 // ChildRequest is one child invocation's parameters. Slot is the daemon
@@ -178,9 +203,13 @@ type Config struct {
 	// (Runner.ResolveTip's Tip.SelfPath): a mismatch means a newer daemon has already
 	// merged, so continuing to orchestrate fresh Boxes from this stale
 	// build risks running work under code nobody has actually loaded. On
-	// a mismatch the loop finishes what is running and halts at the
-	// boundary — it never re-execs itself; a freshly merged but broken
-	// daemon must not auto-load with nobody awake. An operator who wants
+	// a mismatch the loop first prebuilds and smoke-tests the new build
+	// (Runner.Prebuild, issue #5012). Only a build that passes halts the
+	// pool: it finishes what is running and halts at the boundary. One
+	// that fails is recorded as a blocked self-update (status file and
+	// events) and the pool carries on under the running build until the
+	// tip moves. The loop never re-execs itself; a freshly merged but
+	// broken daemon must not auto-load with nobody awake. An operator who wants
 	// self-update composes that halt with an ordinary service restart
 	// policy and gets the behaviour by choice, not by default.
 	//
@@ -358,6 +387,9 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 		}(slot)
 	}
 	wg.Wait()
+	// A prebuild still running outlives its slots (they return on the halt
+	// that cancels its ctx); wait it out so no event follows Loop's return.
+	p.bg.Wait()
 
 	return p.haltReason()
 }
@@ -530,20 +562,17 @@ slotLoop:
 		revision := tip.Revision
 
 		if p.cfg.SelfProgram != "" && tip.SelfPath != p.cfg.SelfProgram {
-			// Never re-execs: this only records a halt reason and cancels
-			// the pool's context — the same "stop starting new work, wait
-			// out whatever is running" halt every other reason already uses
-			// (see halt) — so a freshly merged but broken daemon cannot
-			// auto-load with nobody awake. An empty cfg.SelfProgram (the
-			// self check is off) always skips this comparison, since
-			// tip.SelfPath is then empty too, by construction of ResolveTip.
-			p.halt(Halt{
-				Class:    HaltSelfChanged,
-				Detail:   fmt.Sprintf("daemon build at %s is %s, running %s", revision, tip.SelfPath, p.cfg.SelfProgram),
-				Kind:     kind,
-				Revision: revision,
-			})
-			return
+			// Never re-execs: a self-change only records a halt reason and
+			// cancels the pool's context — the same "stop starting new
+			// work, wait out whatever is running" halt every other reason
+			// already uses (see halt) — so a freshly merged but broken
+			// daemon cannot auto-load with nobody awake. selfUpdate gates
+			// that halt on a prebuild. An empty cfg.SelfProgram (the self
+			// check is off) always skips this comparison, since tip.SelfPath
+			// is then empty too, by construction of ResolveTip.
+			p.selfUpdate(ctx, kind, tip)
+		} else {
+			p.clearBlockedSelfUpdate()
 		}
 
 		// Acquired here, not before the resolve: the baton is a discovery

@@ -38,7 +38,8 @@ type Event struct {
 	// Phase is the box event's own field — "initial", "fix-pass-N",
 	// "conflict-resolve" or "recover" (report.PhaseRecover, queue-mode
 	// recover's claim) — carried straight from the child's report.Record
-	// (issue #3627); no other event sets it.
+	// (issue #3627); and the self_update event's, "built" or "blocked"
+	// (issue #5012). No other event sets it.
 	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`
 	// ChildLog is child_start's own field: the Child log file the child

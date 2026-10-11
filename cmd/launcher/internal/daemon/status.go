@@ -51,6 +51,38 @@ type Status struct {
 	// number without the checkout's config; empty when the tracker has no
 	// web repo.
 	RepoURL string `json:"repo_url,omitempty"`
+	// SelfUpdate is the latest self-update attempt (issue #5012): nil until
+	// a fetched tip's daemon build first differs from the running one.
+	SelfUpdate *SelfUpdate `json:"self_update,omitempty"`
+}
+
+// SelfUpdate is the prebuild of the daemon build a newer tip would load.
+type SelfUpdate struct {
+	// Phase is SelfUpdateBuilding while the prebuild runs, SelfUpdateBuilt
+	// once the build passed its smoke test (the pool is about to halt), or
+	// SelfUpdateBlocked when it failed and the pool kept its running build.
+	Phase SelfUpdatePhase `json:"phase"`
+	// Revision is the tip the build was made at; a blocked Revision is not
+	// retried until the tip moves past it.
+	Revision string `json:"revision"`
+	// Reason is the failure, set only when Phase is SelfUpdateBlocked.
+	Reason string `json:"reason,omitempty"`
+}
+
+// SelfUpdatePhase is a SelfUpdate's stage.
+type SelfUpdatePhase string
+
+// SelfUpdate phases.
+const (
+	SelfUpdateBuilding SelfUpdatePhase = "building"
+	SelfUpdateBuilt    SelfUpdatePhase = "built"
+	SelfUpdateBlocked  SelfUpdatePhase = "blocked"
+)
+
+// event is the self_update event recording su's verdict. It carries no Slot:
+// the build belongs to the pool, not to the slot that noticed the revision.
+func (su SelfUpdate) event() Event {
+	return Event{Event: "self_update", Phase: string(su.Phase), Revision: su.Revision, Reason: su.Reason}
 }
 
 // TrackerCheck is one tracker's rate-limit standing.
