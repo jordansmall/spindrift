@@ -6805,7 +6805,8 @@ start would refuse exits 1 with that same `daemon: ...` diagnostic. It
 accepts the rest of the daemon's argv unchanged — the kind selector and
 `--feature-branch` in any order — so a freshly built successor can be
 checked against the very argv it would run with, e.g. `nix run
-.#daemon -- --check-only research`.
+.#daemon -- --check-only research`. It is also the smoke test the
+self-update prebuild runs (**Self-change halt** below).
 
 **Feature branch.** `--feature-branch <branch>` retargets every child
 the daemon starts without moving the daemon's own tracking branch:
@@ -7427,7 +7428,15 @@ because it feeds issue links: `https://<GH_HOST>/<REPO_SLUG>` for `github`
 (`GH_HOST` defaults to `github.com`),
 `<FORGEJO_BASE_URL>/<REPO_SLUG>` (trailing slash trimmed) for `forgejo`. It
 is omitted for `local`, `jira`, or an empty `REPO_SLUG`. It is additive, so
-`schema` does not bump (issue #4718).
+`schema` does not bump (issue #4718). The top-level `self_update` object
+reports the latest daemon self-update prebuild (**Self-change halt**
+below): `phase` is `building` while the background prebuild runs, `built`
+once it has passed its smoke test (the pool is halting), or `blocked` after
+a failure; `revision` is the tip it was made at, and `reason` is the
+failure, present only when `phase` is `blocked`. The object is absent until
+a fetched tip's daemon build first differs from the running one. A
+`blocked` entry clears once a resolved tip's self path matches the running
+build again. It is additive too, so `schema` does not bump (issue #5012).
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
@@ -7829,10 +7838,49 @@ build text. A daemon started any other way (`go run` during development,
 say) cannot know its own build, so rather than guess, the check disables
 itself and says so on stderr.
 
-On a mismatch the pool halts through the same machinery every other halt
-uses (below): any child already running is waited out and still gets its
-`child_finish`, never killed — the halting slot simply starts no new
-child. **It never re-execs itself**: a freshly merged but broken daemon
+On a mismatch the daemon first prebuilds the new build (issue #5012, [ADR
+0063](adr/0063-the-daemon-prebuilds-its-successor-and-can-restart-in-place-keeping-its-children.md));
+only a build that passes its smoke test halts the pool. The prebuild runs
+in the background, owned by the pool rather than by any slot: the slot that
+first sees a revision whose self path differs starts it and carries on, and
+every slot, even with `MAX_PARALLEL=1`, keeps starting children on the
+running build meanwhile. It is single-flight. A slot that sees a newer tip
+while a build is building or built starts no second one and never halts on
+the newer, unbuilt path. The prebuild
+(`Prebuild`, `cmd/launcher/daemon/runner.go`) is four steps. It runs `nix
+eval` of the wrapper's derivation, taken from the context of the program
+string. It runs `nix build` of that derivation with a GC root at
+`spindrift-daemon.next` in the checkout's git dir, beside the status,
+events, and lock files (each prebuild overwrites it). It checks that the
+built output holds the evaluated self path. Then it runs the new self path
+with the daemon's own arguments minus the wrapper's `--input` pair, plus
+`--check-only` (**Check only** above), under the daemon's environment and
+working directory, so the new build's own wrapper supplies the input
+document it will actually run with. `nix build` is unbounded, but the smoke
+test is bounded by a 2-minute timeout (`prebuildSmokeTimeout`); a timeout
+is a smoke-test block whose reason says it timed out.
+
+On success the daemon emits a `self_update` event with phase `built` and
+the pool halts on the revision it built, the two landing together: no
+child starts after the `built` event. The halt goes through the same
+machinery every other halt uses (below): any child already running is
+waited out and still gets its `child_finish`, never killed. The halt, its
+`self-changed: ...` reason, and exit 10 are as before. The next start (a
+systemd restart, say) finds the build already in the store, so it does not
+pay a cold rebuild.
+
+A failure does not halt. A failed build or smoke test (the `reason` is
+prefixed `build: ` or `smoke-test: `, with the stderr tail capped at 2000
+bytes) leaves the pool running on the old build, emits a `self_update`
+event with phase `blocked`, and records the same in the status file's
+`self_update` object (**Status file** above). The same revision is not
+rebuilt, so a broken merge cannot loop the build; a moved tip, meaning a
+new revision whose self path still differs, retries. A `blocked` entry
+stays in the status file until such a tip triggers a rebuild, or until a
+resolved tip's self path matches the running build again, which clears it.
+A build cancelled by a stop records nothing.
+
+**It never re-execs itself**: a freshly merged but broken daemon
 must not auto-load with nobody awake. The halt carries its own exit code
 (below) precisely so an operator who *does* want self-update can compose it
 with an ordinary service restart policy and get that behaviour by choice,
@@ -8208,7 +8256,8 @@ checkout's working tree holds — and the daemon fetches, never pulls. A
 restart on its own therefore rebuilds the identical store path, mismatches
 the fetched tip again, and exits 10 again having dispatched nothing: a
 restart loop, not an update. The `ExecStartPre` is what moves the tree, so
-the next start is the build that just merged.
+the next start is the build that just merged, already prebuilt in the
+store (**Self-change halt** above).
 
 That composition stays opt-in for a second reason beyond the one
 **Self-change halt** gives: it needs a checkout the unit owns, and the two
@@ -8340,12 +8389,12 @@ out of the stream is still mechanical: a slot's `baton_hold`, then a
 waiting slot's own `child_start` once it finally acquires — the pass
 always names the slot giving the baton up, never the slot receiving it, so
 the receiver is identified by the `child_start` that follows, not by the
-pass event itself. `halt` and `shutdown` are the only events with no `slot` at
-all, since neither belongs to one slot: `halt` is the pool-wide exit, and
+pass event itself. `halt`, `shutdown`, and `self_update` carry no `slot`
+at all, since none belongs to one slot: `halt` is the pool-wide exit,
 `shutdown` is emitted from `announceStop` (`cmd/launcher/daemon/main.go`),
-which runs outside every slot's own goroutine. The startup
-`demand_source_missing` warning carries no `slot` either: it precedes every
-slot.
+which runs outside every slot's own goroutine, and `self_update` comes from
+the pool-owned background prebuild. The startup `demand_source_missing`
+warning carries no `slot` either: it precedes every slot.
 
 | event | fields | when |
 |-------|--------|------|
@@ -8371,6 +8420,7 @@ slot.
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out and so resets at least one jammed kind's backoff, or lifts a butler waiting on `on_tip_move` — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. The event is emitted only when that reset actually ended at least one kind's backoff, so `kinds` is never empty, and an ordinary advance of the base branch with nothing jammed emits no `tip_moved` at all — its absence does not mean the tip stood still. One move therefore yields at most one `tip_moved` pool-wide, not one per idling slot: `slot` names whichever slot's resolve observed the move (slots sharing one coalesced fetch all see it, but only the first to report it still finds a jammed kind to reset). `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
+| `self_update` | `time`, `phase`, `revision`, and `reason` when blocked | a daemon self-update prebuild finished (issue #5012, see **Self-change halt** above). `phase` is `built` (the new build passed its smoke test, and the `halt` event with `self-changed: ...` follows) or `blocked` (the build or smoke test failed; `reason` is prefixed `build: ` or `smoke-test: `, and the pool keeps running on its current build). `revision` is the tip the build was made at. No event marks a prebuild starting, and a build cancelled by a stop emits none; the status file's `self_update` shows `building` meanwhile |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`/`config-invalid:`, never started; `reason` is prefixed by cause, one of `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal carries `context-cancelled: …` instead), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above), `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above), `config-invalid: …` (the daemon's own startup config failed validation — a non-positive slot count, an unknown or duplicate kind, and the like — before any pool existed), `context-cancelled: …` (the operator's stop signal, or a caller's own cancelled context, ended the loop — `context-cancelled: stop requested` for the former, see **Halting** above), `breaker: …` (the pool-wide breaker tripped — see the `breaker_trip` row above and **Failures**), and, with no detail after it, a halt-mapped child outcome: `outcome: host-tainted` (a child exited 5), `outcome: config-invalid` (a child exited 6), or `outcome: signalled-stop` (a child exited 7 once the operator's Stop latch was already closed) — see the exit-code table above **Failures** |
 
