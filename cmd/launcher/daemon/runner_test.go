@@ -41,10 +41,10 @@ func mustHostRunner(t *testing.T, cfg hostRunnerConfig) *hostRunner {
 	return r
 }
 
-// TestRunChild_ExitCode points the exec seam at a scripted shell command
+// TestStartChild_ExitCode points the exec seam at a scripted shell command
 // instead of nix (this repo's tests never shell out to nix), and asserts a
 // non-zero exit comes back as ChildResult.Exit with no error.
-func TestRunChild_ExitCode(t *testing.T) {
+func TestStartChild_ExitCode(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -55,12 +55,12 @@ func TestRunChild_ExitCode(t *testing.T) {
 	// Every runner the tests below use passes env: os.Environ() — a nil env
 	// is rejected at construction now (TestNewHostRunner_RejectsNilEnv), and
 	// the snapshot is load-bearing for the tests whose children shell out:
-	// TestRunChild_ChildInOwnProcessGroup, TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds,
+	// TestStartChild_ChildInOwnProcessGroup, TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds,
 	// TestRunDoctor_CancelledContextTearsDownChild.
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if got.Exit != 2 {
 		t.Errorf("Exit = %d, want 2", got.Exit)
@@ -84,10 +84,10 @@ func captureStream(t *testing.T, target **os.File) func() []byte {
 	*target = w
 	// Drain concurrently rather than once the caller is done: a callee may
 	// wire a child process straight to this descriptor and write past a
-	// pipe's capacity before returning — RunChild does, and
-	// TestRunChild_StdoutRelayedUnchanged deliberately writes 70 KiB. With
+	// pipe's capacity before returning — StartChild does, and
+	// TestStartChild_StdoutRelayedUnchanged deliberately writes 70 KiB. With
 	// nothing reading, the child blocks in write() forever, so it never
-	// exits, never closes its report descriptor, and wedges RunChild's read
+	// exits, never closes its report descriptor, and wedges StartChild's read
 	// of the report pipe.
 	type capture struct {
 		out []byte
@@ -116,7 +116,7 @@ func captureStream(t *testing.T, target **os.File) func() []byte {
 	}
 }
 
-// captureStderr redirects os.Stderr for the caller. RunChild relays a
+// captureStderr redirects os.Stderr for the caller. StartChild relays a
 // child's stdout/stderr and its own malformed-record diagnostic through
 // os.Stderr, so this is the only observable route onto either from a test.
 func captureStderr(t *testing.T) func() []byte {
@@ -131,13 +131,13 @@ func captureStdout(t *testing.T) func() []byte {
 	return captureStream(t, &os.Stdout)
 }
 
-// TestRunChild_OnRecordDeliversBoxAndSettledInOrder drives a scripted child
+// TestStartChild_OnRecordDeliversBoxAndSettledInOrder drives a scripted child
 // that writes one "box" and one "settled" record to descriptor 3 (the
-// report pipe RunChild hands it — see daemon.ReportFD/SPINDRIFT_REPORT_FD),
+// report pipe StartChild hands it — see daemon.ReportFD/SPINDRIFT_REPORT_FD),
 // and asserts both reach ChildRequest.OnRecord, in order, with every field
 // intact: the live channel a slot has no other way to learn what a child is
 // doing, or how it settled, before it exits (issue #3545, #3627).
-func TestRunChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
+func TestStartChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -160,8 +160,8 @@ func TestRunChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 			got = append(got, rec)
 		},
 	}
-	if _, err := r.RunChild(context.Background(), req); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, req); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	want := []daemon.Record{
 		{Event: "box", Key: dispatchkey.Issue("101"), Phase: "initial"},
@@ -172,12 +172,12 @@ func TestRunChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 	}
 }
 
-// TestRunChild_UnknownEventIgnored asserts an event daemon.ParseRecord
+// TestStartChild_UnknownEventIgnored asserts an event daemon.ParseRecord
 // doesn't recognise is ignored outright: no OnRecord call, no error, no
 // stderr diagnostic, and the child's own clean exit still comes through —
 // a forward-compatible reader must tolerate an event it doesn't understand
 // yet (see ParseRecord's doc).
-func TestRunChild_UnknownEventIgnored(t *testing.T) {
+func TestStartChild_UnknownEventIgnored(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -193,9 +193,9 @@ func TestRunChild_UnknownEventIgnored(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
-	result, err := r.RunChild(context.Background(), req)
+	result, err := startAndWait(context.Background(), r, req)
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -208,12 +208,12 @@ func TestRunChild_UnknownEventIgnored(t *testing.T) {
 	}
 }
 
-// TestRunChild_MalformedLinesReportOnceThenValidArrives drives a child that
+// TestStartChild_MalformedLinesReportOnceThenValidArrives drives a child that
 // writes two malformed lines followed by one valid record: exactly one
 // stderr diagnostic must come out (not two — a hostile or buggy child
 // spamming bad lines must not spam the daemon's own log), and the valid
 // record after them must still reach OnRecord.
-func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
+func TestStartChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -229,8 +229,8 @@ func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
-	if _, err := r.RunChild(context.Background(), req); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, req); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("7"), Phase: "fix-pass-1"}}
 	if !reflect.DeepEqual(got, want) {
@@ -242,12 +242,12 @@ func TestRunChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 	}
 }
 
-// TestRunChild_KindMismatchReportedPastMalformedLine drives a butler child
+// TestStartChild_KindMismatchReportedPastMalformedLine drives a butler child
 // that writes a malformed line, then two issue-keyed records it may never
 // send: the malformed line's once-only diagnostic must not swallow the
 // mismatch, which gets exactly one diagnostic of its own, and no mismatched
 // record reaches OnRecord.
-func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
+func TestStartChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -263,8 +263,8 @@ func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Butler), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
-	if _, err := r.RunChild(context.Background(), req); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, req); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	want := []daemon.Record{{Event: "box", Key: dispatchkey.Chore("bugs"), Phase: "initial"}}
 	if !reflect.DeepEqual(got, want) {
@@ -279,10 +279,10 @@ func TestRunChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 	}
 }
 
-// TestRunChild_InvalidIssueRecordCarriesSingleDaemonPrefix pins readReports'
+// TestStartChild_InvalidIssueRecordCarriesSingleDaemonPrefix pins readReports'
 // "daemon: read child report: " as the line's only "daemon: ": ParseRecord's
 // own error text must stay unprefixed.
-func TestRunChild_InvalidIssueRecordCarriesSingleDaemonPrefix(t *testing.T) {
+func TestStartChild_InvalidIssueRecordCarriesSingleDaemonPrefix(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -294,8 +294,8 @@ func TestRunChild_InvalidIssueRecordCarriesSingleDaemonPrefix(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	readStderr := captureStderr(t)
 	req := daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}
-	if _, err := r.RunChild(context.Background(), req); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, req); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	want := `daemon: read child report: record: invalid issue "abc"` + "\n"
 	if stderr := string(readStderr()); stderr != want {
@@ -303,33 +303,33 @@ func TestRunChild_InvalidIssueRecordCarriesSingleDaemonPrefix(t *testing.T) {
 	}
 }
 
-// TestRunChild_ChildCommandErrorCarriesNoDaemonPrefix pins that a
-// ChildCommand/appFlakeref build error returned by RunChild carries no
+// TestStartChild_ChildCommandErrorCarriesNoDaemonPrefix pins that a
+// ChildCommand/appFlakeref build error returned by StartChild carries no
 // "daemon: " of its own — runSlot's "run-child: " backoff reason wraps it
-// as-is. The empty Revision fails before RunChild reaches any exec seam.
-func TestRunChild_ChildCommandErrorCarriesNoDaemonPrefix(t *testing.T) {
+// as-is. The empty Revision fails before StartChild reaches any exec seam.
+func TestStartChild_ChildCommandErrorCarriesNoDaemonPrefix(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	req := daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work)}
-	_, err := r.RunChild(context.Background(), req)
+	_, err := startAndWait(context.Background(), r, req)
 	if err == nil {
-		t.Fatalf("RunChild() error = nil, want non-nil")
+		t.Fatalf("StartChild() error = nil, want non-nil")
 	}
 	got := err.Error()
 	if !strings.HasPrefix(got, "revision must not be empty") {
-		t.Errorf("RunChild() error = %q, want prefix %q", got, "revision must not be empty")
+		t.Errorf("StartChild() error = %q, want prefix %q", got, "revision must not be empty")
 	}
 	if n := strings.Count(got, "daemon: "); n != 0 {
-		t.Errorf(`RunChild() error = %q, want zero "daemon: " (got %d)`, got, n)
+		t.Errorf(`StartChild() error = %q, want zero "daemon: " (got %d)`, got, n)
 	}
 }
 
-// TestRunChild_OverLongLineDiscardedThenValidArrives drives a child that
+// TestStartChild_OverLongLineDiscardedThenValidArrives drives a child that
 // writes one unterminated line well past report.MaxLine, then a valid record:
 // readReports must neither buffer the over-long run without limit nor wedge
 // on it (issue #3627's review finding) — the over-long line is reported
 // exactly once, like any other malformed line, and the record after it still
 // reaches OnRecord.
-func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
+func TestStartChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -348,8 +348,8 @@ func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
-	if _, err := r.RunChild(context.Background(), req); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, req); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("9"), Phase: "initial"}}
 	if !reflect.DeepEqual(got, want) {
@@ -361,7 +361,7 @@ func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 	}
 }
 
-// TestRunChild_SettledLongNoteDeliveredOneRecord closes issue #3627's review
+// TestStartChild_SettledLongNoteDeliveredOneRecord closes issue #3627's review
 // finding at the point it was reported: a Box's SPINDRIFT_OUTCOME note=<~5KB
 // prose> threads through settle/gate.go into report.Settled, and before the
 // fix the resulting JSON line exceeded report.MaxLine, so readReports hit
@@ -371,7 +371,7 @@ func TestRunChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 // report.emit's own clipping, not a stand-in for it. With the fix, the note
 // is clipped before the line ever reaches the wire, so exactly one record
 // reaches onRecord with the right issue and state.
-func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
+func TestStartChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -414,8 +414,8 @@ func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
-	if _, err := r.RunChild(context.Background(), req); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, req); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("OnRecord calls = %+v, want exactly 1", got)
@@ -428,12 +428,12 @@ func TestRunChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 	}
 }
 
-// TestRunChild_StdoutRelayedUnchanged asserts a child's stdout reaches the
+// TestStartChild_StdoutRelayedUnchanged asserts a child's stdout reaches the
 // daemon's stderr byte-for-byte, with no userspace copy: the child prints a
 // line matching the old (now-deleted) announce regex, followed by a line
 // past both bufio's 64 KiB default and the old raised 1 MiB cap, proving
 // the cap is really gone rather than just raised further.
-func TestRunChild_StdoutRelayedUnchanged(t *testing.T) {
+func TestStartChild_StdoutRelayedUnchanged(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -457,9 +457,9 @@ func TestRunChild_StdoutRelayedUnchanged(t *testing.T) {
 			t.Errorf("OnRecord called with %+v, want none (nothing written to the report pipe)", rec)
 		},
 	}
-	result, err := r.RunChild(context.Background(), req)
+	result, err := startAndWait(context.Background(), r, req)
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -470,11 +470,11 @@ func TestRunChild_StdoutRelayedUnchanged(t *testing.T) {
 	}
 }
 
-// TestRunChild_ChildLogTakesBothStreams asserts the Child log holds exactly
+// TestStartChild_ChildLogTakesBothStreams asserts the Child log holds exactly
 // the child's stdout and stderr, interleaved in write order, and the daemon's
 // stderr gets none of it. The payload carries a non-UTF-8 byte and no
 // trailing newline: nothing may line-buffer or re-encode.
-func TestRunChild_ChildLogTakesBothStreams(t *testing.T) {
+func TestStartChild_ChildLogTakesBothStreams(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -487,11 +487,11 @@ func TestRunChild_ChildLogTakesBothStreams(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	readStderr := captureStderr(t)
 	rel := filepath.Join(".spindrift", "logs", "daemon", "20261007T120304.123Z-slot0-dispatch.log")
-	result, err := r.RunChild(context.Background(), daemon.ChildRequest{
+	result, err := startAndWait(context.Background(), r, daemon.ChildRequest{
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", ChildLog: rel,
 	})
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -511,7 +511,7 @@ func TestRunChild_ChildLogTakesBothStreams(t *testing.T) {
 const daemonSideHelperEnv = "SPINDRIFT_TEST_DAEMON_SIDE_HELPER"
 
 // TestHelperDaemonSide is not a test: it is the Daemon side of
-// TestRunChild_ChildSurvivesDaemonSigkill, re-exec'd as its own process so the
+// TestStartChild_ChildSurvivesDaemonSigkill, re-exec'd as its own process so the
 // test can kill it outright. It is a no-op unless daemonSideHelperEnv is set.
 func TestHelperDaemonSide(t *testing.T) {
 	if os.Getenv(daemonSideHelperEnv) != "1" {
@@ -523,15 +523,15 @@ func TestHelperDaemonSide(t *testing.T) {
 		return exec.Command("/bin/sh", "-c", fmt.Sprintf(`echo first; echo err1 >&2; while [ ! -e %q ]; do sleep 0.05; done; echo second; echo err2 >&2; touch %q`, gate, done))
 	}
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: os.Getenv(daemonSideHelperEnv + "_REPO"), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	_, _ = r.RunChild(context.Background(), daemon.ChildRequest{
+	_, _ = startAndWait(context.Background(), r, daemon.ChildRequest{
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", ChildLog: "child.log",
 	})
 }
 
-// TestRunChild_ChildSurvivesDaemonSigkill asserts a Daemon killed outright
+// TestStartChild_ChildSurvivesDaemonSigkill asserts a Daemon killed outright
 // mid-run does not take its child down: the child writes straight to the
 // Child log, so nothing it writes can hit a pipe whose reader died.
-func TestRunChild_ChildSurvivesDaemonSigkill(t *testing.T) {
+func TestStartChild_ChildSurvivesDaemonSigkill(t *testing.T) {
 	repo := t.TempDir()
 	done := filepath.Join(repo, "done")
 	gate := filepath.Join(repo, "gate")
@@ -587,10 +587,10 @@ func TestRunChild_ChildSurvivesDaemonSigkill(t *testing.T) {
 	}
 }
 
-// TestRunChild_ChildLogUncreatableFallsBackToStderr asserts a Child log that
+// TestStartChild_ChildLogUncreatableFallsBackToStderr asserts a Child log that
 // cannot be created costs the Dispatch nothing: one diagnostic line, then the
 // child's output on the daemon's own stderr descriptor.
-func TestRunChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
+func TestStartChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -605,12 +605,12 @@ func TestRunChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
 	}
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	readStderr := captureStderr(t)
-	result, err := r.RunChild(context.Background(), daemon.ChildRequest{
+	result, err := startAndWait(context.Background(), r, daemon.ChildRequest{
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		ChildLog: filepath.Join("blocked", "x.log"),
 	})
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -621,7 +621,7 @@ func TestRunChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
 	}
 }
 
-// runWithLingeringGrandchild runs RunChild against a fake child that
+// runWithLingeringGrandchild runs StartChild against a fake child that
 // backgrounds a grandchild holding the Child log (fd 3 is closed for it so
 // the report pipe is not in play), then exits with exitCode. The grandchild is
 // killed on cleanup.
@@ -648,7 +648,7 @@ func runWithLingeringGrandchild(t *testing.T, exitCode int) (daemon.ChildResult,
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	readStderr := captureStderr(t)
 	start := time.Now()
-	result, err := r.RunChild(context.Background(), daemon.ChildRequest{
+	result, err := startAndWait(context.Background(), r, daemon.ChildRequest{
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		ChildLog: "child.log",
 	})
@@ -656,30 +656,30 @@ func runWithLingeringGrandchild(t *testing.T, exitCode int) (daemon.ChildResult,
 	return result, time.Since(start), err
 }
 
-// TestRunChild_ChildLogDoesNotWaitOnGrandchild asserts RunChild returns the
+// TestStartChild_ChildLogDoesNotWaitOnGrandchild asserts StartChild returns the
 // child's own exit, clean or not, once it exits, even when a grandchild still
 // holds the Child log open.
-func TestRunChild_ChildLogDoesNotWaitOnGrandchild(t *testing.T) {
+func TestStartChild_ChildLogDoesNotWaitOnGrandchild(t *testing.T) {
 	for _, exitCode := range []int{3, 0} {
 		t.Run(fmt.Sprintf("exit%d", exitCode), func(t *testing.T) {
 			result, d, err := runWithLingeringGrandchild(t, exitCode)
 			if err != nil {
-				t.Fatalf("RunChild() unexpected error: %v", err)
+				t.Fatalf("StartChild() unexpected error: %v", err)
 			}
 			if result.Exit != exitCode {
 				t.Errorf("Exit = %d, want %d", result.Exit, exitCode)
 			}
 			if d > 5*time.Second {
-				t.Errorf("RunChild took %v, want it prompt, not held by the grandchild", d)
+				t.Errorf("StartChild took %v, want it prompt, not held by the grandchild", d)
 			}
 		})
 	}
 }
 
-// TestRunChild_CleanExitNoRecords pins the other end of the report-pipe
+// TestStartChild_CleanExitNoRecords pins the other end of the report-pipe
 // seam: a clean exit with nothing written to descriptor 3 reports Exit 0
 // and fires OnRecord not at all.
-func TestRunChild_CleanExitNoRecords(t *testing.T) {
+func TestStartChild_CleanExitNoRecords(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -693,9 +693,9 @@ func TestRunChild_CleanExitNoRecords(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Research), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
-	result, err := r.RunChild(context.Background(), req)
+	result, err := startAndWait(context.Background(), r, req)
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -712,7 +712,7 @@ func TestRunChild_CleanExitNoRecords(t *testing.T) {
 const envDumpScript = `{ echo "MODEL=${MODEL-<unset>}"; echo "PATH=${PATH-<unset>}"; echo "GH_TOKEN=${GH_TOKEN-<unset>}"; } >%q; exit 0`
 
 // assertEnvStripsKnobsKeepsSecrets is the shared assertion for
-// TestRunChild_EnvStripsKnobsKeepsSecrets and
+// TestStartChild_EnvStripsKnobsKeepsSecrets and
 // TestRunDoctor_EnvStripsKnobsKeepsSecrets below: the daemon-side knob
 // MODEL must never reach the child, while a non-knob (PATH) and a
 // secret-shaped var (GH_TOKEN) must pass through untouched. A mismatch
@@ -755,11 +755,11 @@ func envDumpKeys(got, want []string) []string {
 	return keys
 }
 
-// TestRunChild_EnvStripsKnobsKeepsSecrets drives the exec seam with a
-// scripted child that dumps its own environment to a temp file (RunChild's
+// TestStartChild_EnvStripsKnobsKeepsSecrets drives the exec seam with a
+// scripted child that dumps its own environment to a temp file (StartChild's
 // stdout now goes straight to os.Stderr with no userspace copy, so a temp
 // file is the observable route here, same as RunDoctor's test below).
-func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
+func TestStartChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -777,9 +777,9 @@ func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 		env:        []string{"MODEL=from-shell", "PATH=/bin:/usr/bin", "GH_TOKEN=super-secret"},
 		knobs:      []string{"MODEL"},
 	})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if got.Exit != 0 {
 		t.Fatalf("Exit = %d, want 0", got.Exit)
@@ -795,7 +795,7 @@ func TestRunChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 // A document key whose value does not count is left out of the strip list, so
 // the child inherits the daemon's ambient value; a counting key is still
 // stripped.
-func TestRunChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testing.T) {
+func TestStartChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -810,8 +810,8 @@ func TestRunChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testing
 		env:   []string{"REPO_SLUG=o/r", "MODEL=from-shell", "PATH=/bin:/usr/bin"},
 		knobs: strippedKeys(doc),
 	})
-	if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	dumped, err := os.ReadFile(dumpFile)
 	if err != nil {
@@ -822,15 +822,15 @@ func TestRunChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testing
 	}
 }
 
-// TestRunChild_ChildInOwnProcessGroup asserts the child started through the
+// TestStartChild_ChildInOwnProcessGroup asserts the child started through the
 // runnerExecCommand seam is isolated into its own process group (Setpgid),
 // so a group-wide Ctrl-C SIGINT never reaches it — only the daemon's own
 // forwarded SIGTERM does (issue #3538). The child reports its own $$ to a
-// file rather than the test reading cmd.Process from outside RunChild:
+// file rather than the test reading cmd.Process from outside StartChild:
 // exec.Cmd's Process field is written by cmd.Start() with no synchronization
 // a test can observe now that nothing in the runner publishes the started
 // process, so a bare pointer read here would be a genuine data race.
-func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
+func TestStartChild_ChildInOwnProcessGroup(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	pidFile := filepath.Join(t.TempDir(), "child-pid")
@@ -842,8 +842,8 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-			t.Errorf("RunChild() unexpected error: %v", err)
+		if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+			t.Errorf("StartChild() unexpected error: %v", err)
 		}
 	}()
 
@@ -875,14 +875,14 @@ func TestRunChild_ChildInOwnProcessGroup(t *testing.T) {
 	<-done
 }
 
-// TestRunChild_StdinIsDevNull pins RunChild's deliberate choice not to set
+// TestStartChild_StdinIsDevNull pins StartChild's deliberate choice not to set
 // cmd.Stdin: the child's own process group (Setpgid, issue #3538) makes a
 // tty read a SIGTTIN stop, so dogfood.sh's mid-loop vault-unlock prompt has
 // no home under the daemon (issue #3548), and nothing may silently hand a
 // child the daemon's terminal. Capturing the seam's *exec.Cmd is race-free
-// here, unlike reading cmd.Process: RunChild writes Stdin, if at all,
+// here, unlike reading cmd.Process: StartChild writes Stdin, if at all,
 // before cmd.Start() and never after.
-func TestRunChild_StdinIsDevNull(t *testing.T) {
+func TestStartChild_StdinIsDevNull(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	var captured *exec.Cmd
@@ -892,8 +892,8 @@ func TestRunChild_StdinIsDevNull(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+	if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 
 	if captured.Stdin != nil {
@@ -1154,7 +1154,7 @@ trap 'n=$((n+1)); if [ "$n" -ge 2 ]; then exit 7; fi' TERM INT
 : >"$0"
 while :; do :; done`
 
-// startChild starts a RunChild call on its own goroutine with the given
+// startChild starts a StartChild call on its own goroutine with the given
 // Stop/Abort latch and hands back the channels its result or error lands
 // on, so each test only has to write the select and its own assertions
 // rather than re-declaring the same resultCh/errCh/go func plumbing.
@@ -1166,7 +1166,7 @@ func startChild(t *testing.T, r *hostRunner, stop, abort <-chan struct{}) (<-cha
 	resultCh := make(chan daemon.ChildResult, 1)
 	errCh := make(chan error, 1)
 	go func() {
-		got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop, Abort: abort})
+		got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop, Abort: abort})
 		if err != nil {
 			errCh <- err
 			return
@@ -1176,13 +1176,13 @@ func startChild(t *testing.T, r *hostRunner, stop, abort <-chan struct{}) (<-cha
 	return resultCh, errCh
 }
 
-// TestRunChild_StopClosedSignalsSIGTERM drives the exec seam at a script
+// TestStartChild_StopClosedSignalsSIGTERM drives the exec seam at a script
 // that traps SIGTERM and exits with a distinct code, so closing Stop proves
 // the signal reached the child specifically (child.Signal(pid) never
 // touches the wider process group) and that the child chose to exit on its
 // own terms rather than being SIGKILLed — the production half of the "halt
 // drains, never kills a Box" AC (issue #3538).
-func TestRunChild_StopClosedSignalsSIGTERM(t *testing.T) {
+func TestStartChild_StopClosedSignalsSIGTERM(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	dir := t.TempDir()
@@ -1215,7 +1215,7 @@ func TestRunChild_StopClosedSignalsSIGTERM(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	case got := <-resultCh:
 		if got.Exit != 7 {
 			t.Errorf("Exit = %d, want 7 (child trapped SIGTERM and exited on its own terms, not SIGKILLed)", got.Exit)
@@ -1225,13 +1225,13 @@ func TestRunChild_StopClosedSignalsSIGTERM(t *testing.T) {
 	}
 }
 
-// TestRunChild_StopSignalsEveryConcurrentChild is
-// TestRunChild_StopClosedSignalsSIGTERM at three concurrently running
-// children: each RunChild call starts its own forwarding goroutine, so a
+// TestStartChild_StopSignalsEveryConcurrentChild is
+// TestStartChild_StopClosedSignalsSIGTERM at three concurrently running
+// children: each StartChild call starts its own forwarding goroutine, so a
 // design that only signalled one child (or shared state that a second
-// RunChild call clobbered) would leave the other two abandoned rather than
+// StartChild call clobbered) would leave the other two abandoned rather than
 // drained.
-func TestRunChild_StopSignalsEveryConcurrentChild(t *testing.T) {
+func TestStartChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	dir := t.TempDir()
@@ -1270,7 +1270,7 @@ func TestRunChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	errCh := make(chan error, nChildren)
 	for slot := 0; slot < nChildren; slot++ {
 		go func(slot int) {
-			got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: slot, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
+			got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: slot, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
 			if err != nil {
 				errCh <- err
 				return
@@ -1286,7 +1286,7 @@ func TestRunChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	for i := 0; i < nChildren; i++ {
 		select {
 		case err := <-errCh:
-			t.Fatalf("RunChild() unexpected error: %v", err)
+			t.Fatalf("StartChild() unexpected error: %v", err)
 		case got := <-resultCh:
 			if got.Exit != 7 {
 				t.Errorf("Exit = %d, want 7 (child trapped SIGTERM and exited on its own terms, not SIGKILLed)", got.Exit)
@@ -1297,12 +1297,12 @@ func TestRunChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	}
 }
 
-// TestRunChild_ChildStartedAfterStopClosedIsSignalledAtOnce covers a child
-// started after Stop has already closed: RunChild's forwarding goroutine
+// TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce covers a child
+// started after Stop has already closed: StartChild's forwarding goroutine
 // selects on an already-closed channel, which fires immediately, so the
 // child is signalled at once rather than running its Box to completion
 // unsignalled.
-func TestRunChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
+func TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	dir := t.TempDir()
@@ -1328,15 +1328,15 @@ func TestRunChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	stop := make(chan struct{})
-	close(stop) // closed before RunChild is even called — the extreme end of the race window
+	close(stop) // closed before StartChild is even called — the extreme end of the race window
 
 	resultCh, errCh := startChild(t, r, stop, nil)
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	case got := <-resultCh:
-		// Not asserted as exactly 7: delivery fires the instant RunChild
+		// Not asserted as exactly 7: delivery fires the instant StartChild
 		// starts forwarding, which can outrace the shell's own `trap`
 		// install (interpreter startup costs real OS time; the send does
 		// not), so the process may end via SIGTERM's default action
@@ -1351,13 +1351,13 @@ func TestRunChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 	}
 }
 
-// TestRunChild_StopThenAbortDeliversDistinctKinds asserts closing Stop then
+// TestStartChild_StopThenAbortDeliversDistinctKinds asserts closing Stop then
 // Abort delivers two distinct signals to a running child — SIGTERM then
 // SIGINT — end to end with no seam override: the child traps both, counts,
 // and only exits on the second, the same first-drains/second-aborts
 // contract the child launcher enforces on itself (issue #3521), mirrored
 // here on the daemon's forwarding side.
-func TestRunChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
+func TestStartChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	dir := t.TempDir()
@@ -1395,7 +1395,7 @@ func TestRunChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 	case got := <-resultCh:
 		t.Fatalf("child exited after Stop alone (Exit=%d), want it to survive SIGTERM and only exit once Abort delivers SIGINT", got.Exit)
 	case err := <-errCh:
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
 
@@ -1403,7 +1403,7 @@ func TestRunChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	case got := <-resultCh:
 		if got.Exit != 7 {
 			t.Errorf("Exit = %d, want 7 (child observed SIGTERM then SIGINT and exited on the second)", got.Exit)
@@ -1413,17 +1413,17 @@ func TestRunChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 	}
 }
 
-// TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds is
-// TestRunChild_ChildStartedAfterStopClosedIsSignalledAtOnce with Stop and
-// Abort both already closed before RunChild is even called: the forwarding
+// TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds is
+// TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce with Stop and
+// Abort both already closed before StartChild is even called: the forwarding
 // goroutine must still send two distinct kinds, in order, not one signal
 // twice. It asserts on the *sequence* through the runnerSignal seam,
 // because OS-level delivery can't show it: a child born after both closes
 // has installed no handler yet, so it can die on the first signal's default
 // disposition before the second is even observable from outside. The child
-// here is the cheapest one that still drives RunChild's real forwarding
+// here is the cheapest one that still drives StartChild's real forwarding
 // path (sleep, not a trap script).
-func TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T) {
+func TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T) {
 	origExec := runnerExecCommand
 	origSignal := runnerSignal
 	t.Cleanup(func() { runnerExecCommand = origExec; runnerSignal = origSignal })
@@ -1451,13 +1451,13 @@ func TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T) 
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	case got := <-resultCh:
 		if got.Exit != 0 {
 			t.Errorf("Exit = %d, want 0 (unsignalled sleep 0.3 exits cleanly; runnerSignal is stubbed here, not the real kernel call)", got.Exit)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("RunChild did not return promptly")
+		t.Fatal("StartChild did not return promptly")
 	}
 
 	mu.Lock()
@@ -1469,13 +1469,13 @@ func TestRunChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T) 
 	}
 }
 
-// TestRunChild_ForwardingStopsAfterChildExits pins the done-channel
-// contract: once RunChild has returned for a child that exited on its own,
+// TestStartChild_ForwardingStopsAfterChildExits pins the done-channel
+// contract: once StartChild has returned for a child that exited on its own,
 // its forwarding goroutine must already be torn down, so a Stop that closes
 // afterward sends nothing. This is new coverage the per-goroutine design
 // needs that the old shared children map never required — there was no
 // stale map entry to leak a signal through in the first place.
-func TestRunChild_ForwardingStopsAfterChildExits(t *testing.T) {
+func TestStartChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	origExec := runnerExecCommand
 	origSignal := runnerSignal
 	t.Cleanup(func() { runnerExecCommand = origExec; runnerSignal = origSignal })
@@ -1495,9 +1495,9 @@ func TestRunChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 
 	stop := make(chan struct{})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
+	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if got.Exit != 0 {
 		t.Fatalf("Exit = %d, want 0", got.Exit)
@@ -1511,16 +1511,16 @@ func TestRunChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	n := len(sent)
 	mu.Unlock()
 	if n != 0 {
-		t.Errorf("signals sent after RunChild returned = %d, want 0 (the forwarding goroutine must not outlive its child)", n)
+		t.Errorf("signals sent after StartChild returned = %d, want 0 (the forwarding goroutine must not outlive its child)", n)
 	}
 }
 
-// TestRunChild_NilStopAbortRunsNormally asserts a ChildRequest carrying no
+// TestStartChild_NilStopAbortRunsNormally asserts a ChildRequest carrying no
 // latch at all — the terminal/one-off shape, e.g. a caller that never wires
 // Stop/Abort — runs and exits normally rather than the forwarding goroutine
 // panicking or blocking on a nil channel forever (a select on nil simply
 // never fires).
-func TestRunChild_NilStopAbortRunsNormally(t *testing.T) {
+func TestStartChild_NilStopAbortRunsNormally(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
@@ -1528,9 +1528,9 @@ func TestRunChild_NilStopAbortRunsNormally(t *testing.T) {
 	}
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	got, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
+		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
 	if got.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", got.Exit)
@@ -2015,7 +2015,7 @@ func TestRunDoctor_ZeroExit(t *testing.T) {
 }
 
 // TestRunDoctor_EnvStripsKnobsKeepsSecrets is RunDoctor's half of
-// TestRunChild_EnvStripsKnobsKeepsSecrets above: same script-dumps-to-a-file
+// TestStartChild_EnvStripsKnobsKeepsSecrets above: same script-dumps-to-a-file
 // route, since RunDoctor sends both streams straight to os.Stderr with no
 // existing capture pattern in this file.
 func TestRunDoctor_EnvStripsKnobsKeepsSecrets(t *testing.T) {
@@ -2401,15 +2401,15 @@ func TestNewHostRunner_AcceptsEmptyEnv(t *testing.T) {
 	}
 }
 
-// TestRunChild_FeatureBranchAppendsBaseBranchArg pins issue #3882's
+// TestStartChild_FeatureBranchAppendsBaseBranchArg pins issue #3882's
 // wiring: a non-empty featureBranch reaches the child argv as
 // --base-branch (daemon.ChildSpec's own field already does the appending;
 // this is the runner actually passing it through).
-// TestRunChild_FeatureBranchAppendsBaseBranchArg pins both halves of issue
+// TestStartChild_FeatureBranchAppendsBaseBranchArg pins both halves of issue
 // #3882's argv wiring in one table, flag-set and flag-unset, matching
 // TestParseArgs's style: an unset featureBranch must leave the child argv
 // byte-for-byte today — no --base-branch anywhere.
-func TestRunChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
+func TestStartChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 	tests := []struct {
 		name          string
 		featureBranch string
@@ -2431,8 +2431,8 @@ func TestRunChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 			}
 
 			r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: tt.featureBranch, selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-			if _, err := r.RunChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-				t.Fatalf("RunChild() unexpected error: %v", err)
+			if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
+				t.Fatalf("StartChild() unexpected error: %v", err)
 			}
 
 			joined := strings.Join(gotArgv, " ")
@@ -2450,7 +2450,7 @@ func TestRunChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 }
 
 // TestRunDoctor_FeatureBranchAppendsBaseBranchArg is the doctor preflight's
-// sibling of TestRunChild_FeatureBranchAppendsBaseBranchArg above.
+// sibling of TestStartChild_FeatureBranchAppendsBaseBranchArg above.
 func TestRunDoctor_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 	orig := runnerDoctorCommand
 	t.Cleanup(func() { runnerDoctorCommand = orig })
@@ -2474,7 +2474,7 @@ func TestRunDoctor_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 // TestResolveTip_FetchesBaseBranchNotFeatureBranch pins the invariant that
 // ResolveTip's fetch and self-path eval both always track baseBranch, never
 // featureBranch: a merge to the feature branch alone must never halt the
-// daemon self-changed (issue #3882) — only RunChild/RunDoctor ever see
+// daemon self-changed (issue #3882) — only StartChild/RunDoctor ever see
 // featureBranch. selfAttr is set here (unlike an eval-skipping spec) so the
 // self-change eval path in evalSelfPath actually runs, with runnerEvalCommand
 // stubbed the same way TestResolveTip_SelfPathHappyPath stubs it.
@@ -3059,3 +3059,18 @@ func TestPrebuildStderr_CutsOnRuneBoundary(t *testing.T) {
 		t.Errorf("prebuildStderr() has len %d, want a ... prefix and at most %d tail bytes", len(got), prebuildStderrTail)
 	}
 }
+
+// startAndWait is StartChild then Wait(nil): the whole run of one child, for
+// tests that assert on its outcome rather than on the start/wait split.
+func startAndWait(ctx context.Context, r *hostRunner, req daemon.ChildRequest) (daemon.ChildResult, error) {
+	h, err := r.StartChild(ctx, req)
+	if err != nil {
+		return daemon.ChildResult{}, err
+	}
+	return h.Wait(nil)
+}
+
+// doneHandle is a child handle that has already finished with a zero result.
+type doneHandle struct{}
+
+func (doneHandle) Wait(<-chan struct{}) (daemon.ChildResult, error) { return daemon.ChildResult{}, nil }

@@ -200,7 +200,7 @@ func TestPoolRunningButlerChildIsNeverPreemptedAcrossSlots(t *testing.T) {
 	// The sibling's own child exits host-tainted, halting the pool. Even
 	// that must not reach into slot 0: its butler child is still running
 	// and releases below with its own result, not because cancellation
-	// unwound RunChild out from under it.
+	// unwound StartChild out from under it.
 	r.releaseSlot(t, 1, ChildResult{Exit: 5})
 	// Wait for the halt to land before releasing slot 0, or slot 0 can
 	// race it and start a third child.

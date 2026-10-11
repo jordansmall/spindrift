@@ -96,7 +96,7 @@ func TestBuildDemandSources_ConfiguredWorkLabel(t *testing.T) {
 }
 
 // A relative LOCAL_ISSUES_DIR must resolve against the daemon's cwd, which
-// is the cwd every child inherits (RunChild sets no cmd.Dir) and the base the
+// is the cwd every child inherits (StartChild sets no cmd.Dir) and the base the
 // launcher's own local.NewLocalTracker resolves it against.
 func TestBuildDemandSources_RelativeDirResolvesAgainstCwd(t *testing.T) {
 	clearKnobEnvT(t)
@@ -680,10 +680,10 @@ func (r *demandLoopRunner) ResolveTip(context.Context) (daemon.Tip, error) {
 	return daemon.Tip{Revision: "rev1"}, nil
 }
 
-func (r *demandLoopRunner) RunChild(context.Context, daemon.ChildRequest) (daemon.ChildResult, error) {
+func (r *demandLoopRunner) StartChild(context.Context, daemon.ChildRequest) (daemon.ChildHandle, error) {
 	r.started.Add(1)
 	r.cancel()
-	return daemon.ChildResult{}, nil
+	return doneHandle{}, nil
 }
 
 func TestBuildDemandSources_MissingReasonPerProbedKind(t *testing.T) {

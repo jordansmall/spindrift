@@ -84,6 +84,10 @@ type scriptedRunner struct {
 	results  []ChildResult
 	runErrAt int
 	runErr   error
+	// waitErrAt is runErrAt for the Wait half: a 1-based total call index
+	// whose handle's Wait returns waitErr once the child has ended.
+	waitErrAt int
+	waitErr   error
 
 	// Hooks fire before the scripted answer is computed, at each seam
 	// crossing, so a test can cancel a context or read a clock at exactly
@@ -123,17 +127,21 @@ type scriptedRunner struct {
 
 	// release/started: installed by holdSlots for tests that need to hold
 	// several children open at once and release them one at a time. A nil
-	// release (the default) means RunChild never blocks here at all.
+	// release (the default) means StartChild and Wait never block here at all.
 	release map[int]chan ChildResult
 	started chan int
+	// handles: each held child's latest handle by slot, for a test to Wait on
+	// again after the pool abandoned its wait.
+	handles map[int]*scriptedHandle
 }
 
-// holdSlots switches RunChild into blocking mode for slots 0..n-1: each
-// call records itself, fires onStart, announces its slot on started, then
-// blocks until releaseSlot sends its result. Buffered release channels (1
-// each) and a started channel sized to n mean no slot's goroutine ever
-// blocks sending on a single wave — only on the intentional release wait —
-// so a test that spans several waves must drain each wave before the next.
+// holdSlots switches the child into blocking mode for slots 0..n-1: each
+// start records itself, fires onStart, announces its slot on started, then
+// its Wait blocks until releaseSlot sends its result. Buffered release
+// channels (1 each) and a started channel sized to n mean no slot's goroutine
+// ever blocks sending on a single wave — only on the intentional release
+// wait — so a test that spans several waves must drain each wave before the
+// next.
 func (r *scriptedRunner) holdSlots(n int) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -231,7 +239,7 @@ func (r *scriptedRunner) rearmResolve(t *testing.T, n int) {
 	close(hold)
 }
 
-// releaseSlot hands slot's blocked RunChild call its result. It fails the
+// releaseSlot hands slot's blocked child its result. It fails the
 // test rather than sending to a nil channel for a slot outside holdSlots'
 // range, since a nil send blocks forever with none of awaitStart/
 // awaitSleep's five-second bound.
@@ -247,7 +255,7 @@ func (r *scriptedRunner) releaseSlot(t *testing.T, slot int, res ChildResult) {
 }
 
 // announceEachSlot installs an onStart that announces "issue-<slot>" through
-// req.OnRecord, the one shape every RunChild call site that wants a per-slot
+// req.OnRecord, the one shape every child start that wants a per-slot
 // issue announcement needs.
 func (r *scriptedRunner) announceEachSlot() {
 	r.onStart = func(ctx context.Context, req ChildRequest) error {
@@ -274,10 +282,10 @@ func (r *scriptedRunner) awaitStart(t *testing.T) int {
 	}
 }
 
-// fireOnRecord calls slot's most recently captured RunChild call's
+// fireOnRecord calls slot's most recently started child's
 // OnRecord, simulating a live report-pipe record while that child is still
 // in flight. Failing rather than silently no-op-ing on a nil hook catches a
-// test that fires before the slot's RunChild call has actually happened.
+// test that fires before the slot's child has actually started.
 func (r *scriptedRunner) fireOnRecord(t *testing.T, slot int, rec Record) {
 	t.Helper()
 	r.mu.Lock()
@@ -322,17 +330,17 @@ func (r *scriptedRunner) kindCount(k Kind) int {
 	return r.kindCalls[k]
 }
 
-// peakConcurrency is the high-water mark of slots simultaneously inside
-// RunChild, tracked across the call's whole body (not just the blocking
-// holdSlots wait) so it reflects genuine overlap however the result is
-// produced.
+// peakConcurrency is the high-water mark of children simultaneously started
+// and not yet ended, tracked from StartChild until its Wait returns (not just
+// the blocking holdSlots wait) so it reflects genuine overlap however the
+// result is produced.
 func (r *scriptedRunner) peakConcurrency() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.peak
 }
 
-// calls returns a copy of every recorded RunChild call, in order.
+// calls returns a copy of every recorded StartChild call, in order.
 func (r *scriptedRunner) calls() []runCall {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -474,7 +482,7 @@ func pickScripted(list []ChildResult, idx int) ChildResult {
 	return list[idx]
 }
 
-func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildResult, error) {
+func (r *scriptedRunner) StartChild(ctx context.Context, req ChildRequest) (ChildHandle, error) {
 	r.mu.Lock()
 	r.runCalls = append(r.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
 	total := len(r.runCalls)
@@ -496,42 +504,96 @@ func (r *scriptedRunner) RunChild(ctx context.Context, req ChildRequest) (ChildR
 	r.mu.Unlock()
 
 	// The mutex must not be held across a hook call or the blocking
-	// holdSlots wait below: several slots call RunChild at once in the
+	// holdSlots wait: several slots call StartChild at once in the
 	// start-gate and dual-kind tests, and holding mu here would serialize
 	// what those tests need to run genuinely concurrently.
-	defer func() {
+	end := func() {
 		r.mu.Lock()
 		r.inFlight--
 		r.mu.Unlock()
-	}()
+	}
 
 	if r.onStart != nil {
 		if err := r.onStart(ctx, req); err != nil {
-			return ChildResult{}, err
+			end()
+			return nil, err
 		}
 	}
 
 	if release != nil {
 		ch := release[req.Slot]
 		if ch == nil {
-			// A nil receive here blocks forever, unlike awaitStart/
+			// A nil receive in Wait blocks forever, unlike awaitStart/
 			// awaitSleep's explicit five-second bound; fail the call
 			// instead of hanging the test on a slot outside holdSlots' range.
-			return ChildResult{}, fmt.Errorf("scriptedRunner: RunChild: slot %d out of holdSlots range", req.Slot)
+			end()
+			return nil, fmt.Errorf("scriptedRunner: StartChild: slot %d out of holdSlots range", req.Slot)
 		}
 		if started != nil {
 			started <- req.Slot
 		}
-		return <-ch, nil
+		h := &scriptedHandle{end: end, release: ch}
+		r.mu.Lock()
+		if r.handles == nil {
+			r.handles = make(map[int]*scriptedHandle)
+		}
+		r.handles[req.Slot] = h
+		r.mu.Unlock()
+		return h, nil
 	}
 
 	if r.runErrAt != 0 && total == r.runErrAt {
-		return ChildResult{}, r.runErr
+		end()
+		return nil, r.runErr
+	}
+	var waitErr error
+	if r.waitErrAt != 0 && total == r.waitErrAt {
+		waitErr = r.waitErr
 	}
 	if list, ok := r.byKind[req.Kind]; ok {
-		return pickScripted(list, kindIdx), nil
+		return &scriptedHandle{end: end, res: pickScripted(list, kindIdx), done: true, err: waitErr}, nil
 	}
-	return pickScripted(r.results, total-1), nil
+	return &scriptedHandle{end: end, res: pickScripted(r.results, total-1), done: true, err: waitErr}, nil
+}
+
+// run is StartChild then Wait(nil), for tests that drive the double directly
+// rather than through the pool.
+func (r *scriptedRunner) run(ctx context.Context, req ChildRequest) (ChildResult, error) {
+	h, err := r.StartChild(ctx, req)
+	if err != nil {
+		return ChildResult{}, err
+	}
+	return h.Wait(nil)
+}
+
+// scriptedHandle is one scripted child. A held child (release non-nil) ends
+// when its slot's result arrives; abandoning its Wait leaves it in flight and
+// a later Wait can still collect the result.
+type scriptedHandle struct {
+	end     func()
+	release <-chan ChildResult
+	res     ChildResult
+	done    bool
+	err     error // Wait's error once the child has ended
+}
+
+func (h *scriptedHandle) Wait(abandon <-chan struct{}) (ChildResult, error) {
+	if !h.done {
+		select {
+		case h.res = <-h.release:
+			h.done = true
+		case <-abandon:
+			return ChildResult{}, ErrWaitAbandoned
+		}
+	}
+	if h.end != nil {
+		h.end()
+		h.end = nil
+	}
+	if h.err != nil {
+		return ChildResult{}, h.err
+	}
+	return h.res, nil
 }
 
 // testClock is the package's one scriptable Clock double, covering every
@@ -812,9 +874,9 @@ func TestScriptedRunnerSelfPathUnscriptedNeverServed(t *testing.T) {
 // return zero values rather than panicking on the empty-list index.
 func TestScriptedRunnerAllUnsetYieldsZeroValuesNotPanic(t *testing.T) {
 	r := &scriptedRunner{}
-	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0})
+	res, err := r.run(context.Background(), ChildRequest{Slot: 0})
 	if err != nil || res.Exit != 0 {
-		t.Fatalf("RunChild with nothing scripted = (%+v, %v), want (zero ChildResult, nil)", res, err)
+		t.Fatalf("run with nothing scripted = (%+v, %v), want (zero ChildResult, nil)", res, err)
 	}
 	tip, err := r.ResolveTip(context.Background())
 	if err != nil || tip.Revision != "" {
@@ -826,16 +888,16 @@ func TestScriptedRunnerResultsSharedSequence(t *testing.T) {
 	r := &scriptedRunner{results: []ChildResult{{Exit: 0}, {Exit: 3}}}
 	ctx := context.Background()
 
-	res, err := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, err := r.run(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if err != nil || res.Exit != 0 {
 		t.Fatalf("call 1 = (%+v, %v), want Exit 0", res, err)
 	}
-	res, err = r.RunChild(ctx, ChildRequest{Slot: 1, Kind: KindOf(dispatchkind.Work)})
+	res, err = r.run(ctx, ChildRequest{Slot: 1, Kind: KindOf(dispatchkind.Work)})
 	if err != nil || res.Exit != 3 {
 		t.Fatalf("call 2 = (%+v, %v), want Exit 3", res, err)
 	}
 	// exhausted: repeats last
-	res, err = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, err = r.run(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if err != nil || res.Exit != 3 {
 		t.Fatalf("call 3 = (%+v, %v), want Exit 3 (repeat)", res, err)
 	}
@@ -855,10 +917,10 @@ func TestScriptedRunnerRunErrAt(t *testing.T) {
 		runErr:   errors.New("runboom"),
 	}
 	ctx := context.Background()
-	if _, err := r.RunChild(ctx, ChildRequest{Slot: 0}); err != nil {
+	if _, err := r.run(ctx, ChildRequest{Slot: 0}); err != nil {
 		t.Fatalf("call 1 err = %v, want nil", err)
 	}
-	if _, err := r.RunChild(ctx, ChildRequest{Slot: 0}); err == nil {
+	if _, err := r.run(ctx, ChildRequest{Slot: 0}); err == nil {
 		t.Fatalf("call 2 err = nil, want runErr")
 	}
 }
@@ -872,20 +934,20 @@ func TestScriptedRunnerByKindScripting(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	res, _ := r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, _ := r.run(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 0 {
 		t.Fatalf("dispatch call 1 exit = %d, want 0", res.Exit)
 	}
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Research)})
+	res, _ = r.run(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Research)})
 	if res.Exit != 9 {
 		t.Fatalf("research call 1 exit = %d, want 9", res.Exit)
 	}
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, _ = r.run(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 1 {
 		t.Fatalf("dispatch call 2 exit = %d, want 1", res.Exit)
 	}
 	// dispatch queue exhausted: repeats last
-	res, _ = r.RunChild(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, _ = r.run(ctx, ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 1 {
 		t.Fatalf("dispatch call 3 exit = %d, want 1 (repeat)", res.Exit)
 	}
@@ -902,7 +964,7 @@ func TestScriptedRunnerByKindWinsOverResults(t *testing.T) {
 		byKind:  map[Kind][]ChildResult{KindOf(dispatchkind.Work): {{Exit: 5}}},
 		results: []ChildResult{{Exit: 2}},
 	}
-	res, _ := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, _ := r.run(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if res.Exit != 5 {
 		t.Fatalf("exit = %d, want 5 (byKind wins over results)", res.Exit)
 	}
@@ -914,20 +976,20 @@ func TestScriptedRunnerRunErrAtWinsOverByKind(t *testing.T) {
 		runErrAt: 1,
 		runErr:   errors.New("runboom"),
 	}
-	res, err := r.RunChild(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
+	res, err := r.run(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)})
 	if err == nil || res.Exit != 0 {
 		t.Fatalf("= (%+v, %v), want (zero ChildResult, runErr) (runErrAt wins over byKind)", res, err)
 	}
 }
 
-// A RunChild call for a slot outside holdSlots' range must error rather
+// A StartChild call for a slot outside holdSlots' range must error rather
 // than block forever receiving from a nil release channel.
-func TestScriptedRunnerRunChildOutOfRangeSlotErrors(t *testing.T) {
+func TestScriptedRunnerStartChildOutOfRangeSlotErrors(t *testing.T) {
 	r := &scriptedRunner{}
 	r.holdSlots(1)
-	_, err := r.RunChild(context.Background(), ChildRequest{Slot: 1})
+	_, err := r.run(context.Background(), ChildRequest{Slot: 1})
 	if err == nil {
-		t.Fatalf("RunChild for out-of-range slot 1 err = nil, want an error")
+		t.Fatalf("StartChild for out-of-range slot 1 err = nil, want an error")
 	}
 }
 
@@ -938,11 +1000,11 @@ func TestScriptedRunnerHoldSlots(t *testing.T) {
 	done := make(chan ChildResult, 2)
 
 	go func() {
-		res, _ := r.RunChild(ctx, ChildRequest{Slot: 0})
+		res, _ := r.run(ctx, ChildRequest{Slot: 0})
 		done <- res
 	}()
 	go func() {
-		res, _ := r.RunChild(ctx, ChildRequest{Slot: 1})
+		res, _ := r.run(ctx, ChildRequest{Slot: 1})
 		done <- res
 	}()
 
@@ -971,7 +1033,7 @@ func TestScriptedRunnerFireOnIssueCallsCapturedHook(t *testing.T) {
 	var got string
 	r.holdSlots(1)
 	go func() {
-		_, _ = r.RunChild(context.Background(), ChildRequest{Slot: 0, OnRecord: func(rec Record) { got, _ = rec.Key.Fields() }})
+		_, _ = r.run(context.Background(), ChildRequest{Slot: 0, OnRecord: func(rec Record) { got, _ = rec.Key.Fields() }})
 	}()
 	r.awaitStart(t)
 	r.fireOnIssue(t, 0, "issue-42")
@@ -1034,7 +1096,7 @@ func TestScriptedRunnerOnStartHook(t *testing.T) {
 			return errors.New("startboom")
 		},
 	}
-	_, err := r.RunChild(context.Background(), ChildRequest{Slot: 3})
+	_, err := r.run(context.Background(), ChildRequest{Slot: 3})
 	if err == nil || err.Error() != "startboom" {
 		t.Fatalf("err = %v, want startboom", err)
 	}

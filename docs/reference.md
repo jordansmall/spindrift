@@ -6930,17 +6930,17 @@ releases the baton live, the instant the holder's child announces a Box
 (`OnRecord`), not at child exit, so the hold never spans a whole Box run;
 every other way a round can end without a claim passes it too
 (`passBaton`) — the child returning having announced nothing (queue empty,
-none dispatchable, an unrecognised exit, or a `RunChild` seam error, one
-site covering all four), the Awake window shutting between the fetch and
-the child start, and the holder returning for any reason at all, caught by
-one deferred pass in `runSlot` that needs no guard of its own since
-`passBaton` no-ops for a slot that isn't holding. Two more release reasons
-exist in code — a pre-child unclassified failure reaching `backoffOrHalt`
-(a fetch or self-build evaluation error), and `pickKind` finding no
-runnable kind before an idle sleep — but since the baton is now acquired
-after both of those points, only the pre-assigned initial holder's very
-first round can ever reach them still holding it; every later round for
-every slot has already passed the baton, or not yet acquired it, by the
+none dispatchable, an unrecognised exit, or a `StartChild`/`Wait` seam
+error, one site covering all four), the Awake window shutting between the
+fetch and the child start, and the holder returning for any reason at
+all, caught by one deferred pass in `runSlot` that needs no guard of its
+own since `passBaton` no-ops for a slot that isn't holding. Two more
+release reasons exist in code — a pre-child unclassified failure reaching
+`backoffOrHalt` (a fetch or self-build evaluation error), and `pickKind`
+finding no runnable kind before an idle sleep — but since the baton is now
+acquired after both of those points, only the pre-assigned initial holder's
+very first round can ever reach them still holding it; every later round
+for every slot has already passed the baton, or not yet acquired it, by the
 time either can fire. Chore-keyed kinds (the butler, keyed `ByChore` on the
 dispatch-kind descriptor) skip the baton: `awaitBaton` is not called for
 them, because two butler children racing for one Chore are settled by the
@@ -7062,7 +7062,7 @@ image tag here for concurrent children to race over.
 research child, and the doctor preflight below — execs with the daemon's own
 environment minus every key whose `--input` document `settings` value
 counts (`withoutKeys`, `cmd/launcher/internal/daemon/command.go`, called from both
-`ChildCommand` and `DoctorCommand`; assigned to `cmd.Env` by `RunChild` and
+`ChildCommand` and `DoctorCommand`; assigned to `cmd.Env` by `StartChild` and
 `RunDoctor` in `cmd/launcher/daemon/runner.go`). A value counts when it is
 non-empty, or empty for a knob where empty is itself a setting — a bool knob,
 whose `false` Nix renders as `""`, or an `emptyDisables` knob
@@ -7779,18 +7779,19 @@ degenerates to the old single-timer in-place wait.
 | 5    | host-tainted | halt the pool |
 | 6    | config-invalid | halt the pool |
 | 7    | signalled stop | halt the pool once the operator's Stop latch is already closed; while Stop is still open, an unrecognised operator-external signal instead backs this slot off (see **Failures** below) |
-| anything else | unrecognised (an unclassified exit code, a `RunChild` seam error, or a `ResolveTip` error — a fetch failure or a self-build evaluation failure, carrying different reasons — all land here) | back this slot off alone for `FailureBackoff` and refill it — see **Failures** below |
+| anything else | unrecognised (an unclassified exit code, a `StartChild`/`Wait` seam error, or a `ResolveTip` error — a fetch failure or a self-build evaluation failure, carrying different reasons — all land here) | back this slot off alone for `FailureBackoff` and refill it — see **Failures** below |
 
 **Failures.** An unclassified failure — an exit code `Interpret`
-(`cmd/launcher/internal/daemon/outcome.go`) doesn't recognise, a `RunChild`
-seam error, or a `ResolveTip` error (a fetch failure, or a self-build
-evaluation failure — see **Self-change halt** below; the two carry
-different reasons, and it's the self-build one's halt class that decides
-the exit code if the breaker trips on it) — no longer halts the pool
-by itself: the failing slot backs off for `DAEMON_FAILURE_BACKOFF` (default 1
-minute, see [Advanced tuning](#advanced-tuning)) and refills itself, and the
-sibling slots never notice. A `RunChild` seam error, an unrecognised exit
-code, or exit 7 while Stop was still open — every one of these reaching
+(`cmd/launcher/internal/daemon/outcome.go`) doesn't recognise, a
+`StartChild`/`Wait` seam error, or a `ResolveTip` error (a fetch
+failure, or a self-build evaluation failure — see **Self-change halt**
+below; the two carry different reasons, and it's the self-build one's halt
+class that decides the exit code if the breaker trips on it) — no longer
+halts the pool by itself: the failing slot backs off for
+`DAEMON_FAILURE_BACKOFF` (default 1 minute, see [Advanced
+tuning](#advanced-tuning)) and refills itself, and the sibling slots never
+notice. A `StartChild`/`Wait` seam error, an unrecognised exit code, or
+exit 7 while Stop was still open — every one of these reaching
 `backoffOrHalt` (`cmd/launcher/internal/daemon/pool.go`) — is carved out
 first and never counted at all once the operator's Stop latch was already
 closed when it landed (issue #3595, now by construction): it is an
@@ -7989,7 +7990,7 @@ moment that channel closes — the same `HaltOperatorStop` class, reason
 already renders as — cancelling a context shared by every slot, so a
 sibling asleep in its idle wait or blocked in a fetch stops promptly. Every
 running child's own `forwardSignals` goroutine
-(`cmd/launcher/daemon/runner.go`), started once per child by `RunChild`,
+(`cmd/launcher/daemon/runner.go`), started once per child by `StartChild`,
 sends it a `SIGTERM` at that same close — the drain request, the same
 gesture as the launcher's own relay. It never kills a child that is
 already running its Boxes: the child chooses to
@@ -8412,7 +8413,7 @@ warning carries no `slot` either: it precedes every slot.
 | `awake_close` | `time`, `slot`, `wait`, `reason` | the first slot parks on a shut Awake window — not the close instant itself, so a pool still busy at the close reports the transition, and computes `wait` (how long until the next opening), at that later parking. `reason` is ordinarily `"outside the Awake window"`; if `Window.Until`'s zone-period walk exhausts its 8-day horizon without finding an opening (a walk bug no real IANA zone reaches), `reason` instead reads `"no Awake window opening found within the walk horizon: re-checking then"` and `wait` is that 192h re-check, not a real opening — the daemon re-checks rather than halting |
 | `awake_open` | `time`, `slot`, `reason` | the Awake window reopens after a prior `awake_close`; never emitted for a daemon that starts inside an already-open window |
 | `baton_hold` | `time`, `slot`, `reason` | a slot reaches `awaitBaton` (`pool.go`) and finds another slot still discovering, so it parks — one event per park, since each parking slot logs independently on its own pass through the loop; `reason` is the fixed `batonHoldReason`, `"waiting for the discovery baton: another slot's child is still discovering"`, matching the other wait events in this stream |
-| `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `RunChild` seam error, so long as that exit does not halt the pool (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs —, the holder re-deciding at `startChild` and finding a sibling's result (an exit 2 zeroing a probed kind's count) took away the Start it decided on before blocking on the baton (`batonPassOutpaced`, `"a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"`), or the holder starting a Chore-keyed child, which discovers no tracker issue, so the baton passes at the start rather than at a `box` record (`batonPassChoreKeyed`, `"the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"`), or the holder returning for any reason at all before its round otherwise resolved, including a child exit that halts the pool or trips the breaker, whose pass waits until after the `halt` event so no sibling starts a child on a halting pool (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
+| `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `StartChild`/`Wait` seam error, so long as that exit does not halt the pool (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs —, the holder re-deciding at `startChild` and finding a sibling's result (an exit 2 zeroing a probed kind's count) took away the Start it decided on before blocking on the baton (`batonPassOutpaced`, `"a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"`), or the holder starting a Chore-keyed child, which discovers no tracker issue, so the baton passes at the start rather than at a `box` record (`batonPassChoreKeyed`, `"the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"`), or the holder returning for any reason at all before its round otherwise resolved, including a child exit that halts the pool or trips the breaker, whose pass waits until after the `halt` event so no sibling starts a child on a halting pool (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, a gone feature branch, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal (doctor's verdict or a gone feature branch), a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the three the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-feature-branch-gone` for a `--feature-branch` naming a branch origin does not have, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot`, `child_log` | just before a child is launched. `child_log` names the child's **Child log** (below), relative to the checkout; a daemon that predates Child logs omits it. Carries no `issue` or `chore` — the daemon cannot know which issue or chore a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
 | `box` | `time`, `kind`, `issue` or `chore`, `phase`, `pass_log`, `record_id`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later (`spindrift stats --by revision` reads it for [inferred](#stats) Records). A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set. `pass_log` names the Pass log that phase writes, relative to the checkout (the un-suffixed path, even when a stale log was rotated aside), carried unchanged from the child's record (a later Dispatch of the same issue or Chore reuses the path once the earlier run's copy is moved to `<pass_log>.prior-run.N`, so the path alone does not identify a run); absent for `recover`, which runs no Box. `record_id` is the Dispatch's [Record ID](#stats), the same for every phase of one Dispatch, so unlike `pass_log` it does identify a run; added without a `v` bump, and absent for `recover` |

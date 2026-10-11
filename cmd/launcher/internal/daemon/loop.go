@@ -72,7 +72,7 @@ func (e *FeatureBranchGoneError) Error() string {
 //
 // A child's box/settled records reach the caller live, through
 // ChildRequest.OnRecord, as they arrive — not bundled onto ChildResult —
-// so there is nothing left for RunChild's return value to carry once the
+// so there is nothing left for the handle's Wait result to carry once the
 // seam itself fails partway through a run: whatever records a child
 // reported before a wait failure already reached the stream through
 // OnRecord, and ChildResult only ever needed to report the exit.
@@ -92,7 +92,7 @@ type Runner interface {
 	// those children can hold (the host outbox) leaves them out of its count,
 	// a tracker counter ignores it.
 	Demand(ctx context.Context, kind Kind, fresh bool, inFlight dispatchkey.Set) (Demand, error)
-	RunChild(ctx context.Context, req ChildRequest) (ChildResult, error)
+	StartChild(ctx context.Context, req ChildRequest) (ChildHandle, error)
 	// Prebuild realises tip.SelfPath with a GC root and smoke-tests it (the
 	// new daemon run with --check-only), so a self-change halt only ever
 	// hands the service manager a build already known to start. Only called
@@ -101,6 +101,21 @@ type Runner interface {
 	// the build.
 	Prebuild(ctx context.Context, tip Tip) error
 }
+
+// ChildHandle is one started child. Only one Wait may run at a time, and once
+// a Wait returns anything other than ErrWaitAbandoned the handle is spent and
+// must not be waited on again. Wait delivers the child's records through
+// the request's OnRecord and forwards its Stop/Abort latches while it waits;
+// it returns the child's exit. Closing abandon stops the wait without
+// signalling or reaping the child: Wait returns ErrWaitAbandoned and the
+// child keeps running — the in-place restart (ADR 0063) hands the child on
+// rather than waiting for it. A nil abandon never abandons.
+type ChildHandle interface {
+	Wait(abandon <-chan struct{}) (ChildResult, error)
+}
+
+// ErrWaitAbandoned is what ChildHandle.Wait returns when abandon closed first.
+var ErrWaitAbandoned = errors.New("child wait abandoned")
 
 // ChildRequest is one child invocation's parameters. Slot is the daemon
 // pool slot the child occupies (0-based): it is how the event stream says
@@ -189,6 +204,10 @@ type Config struct {
 	Stop  <-chan struct{}
 	Abort <-chan struct{}
 
+	// abandonWaits, once closed, abandons every slot's wait on its child, which
+	// keeps running. Nothing closes it yet; the in-place restart (#5014) will.
+	abandonWaits <-chan struct{}
+
 	// Awake gates when a slot may start a new child: nil means no window
 	// is configured, so the daemon is always awake. When set, it only
 	// gates the moment a slot is about to start a child — a child already
@@ -242,7 +261,7 @@ type Config struct {
 
 	// FailureBackoff is how long a slot sleeps before refilling itself
 	// after an unclassified failure (an unrecognised exit code, a
-	// RunChild seam error, or a ResolveTip error): the bad
+	// StartChild/Wait seam error, or a ResolveTip error): the bad
 	// slot backs off and retries alone, rather than the whole pool
 	// stopping over one issue. Must be non-negative.
 	FailureBackoff time.Duration
@@ -273,8 +292,8 @@ type Config struct {
 // into a process exit code.
 //
 // An unclassified failure is not one of those: a resolve failure, a
-// RunChild error, an unrecognised exit code, or exit 7 while Stop is still
-// open (someone else signalled that child) backs its own slot off and
+// StartChild/Wait error, an unrecognised exit code, or exit 7 while Stop is
+// still open (someone else signalled that child) backs its own slot off and
 // refills it, leaving the siblings working, and only reaches a halt by
 // tripping the breaker — unless cfg.Stop has already closed or ctx is
 // already cancelled (an operator SIGTERM forwarded to a child that had not
@@ -282,17 +301,18 @@ type Config struct {
 // which case it is an ordinary stop and never reaches the breaker at all
 // (issue #3595, by construction — see backoffOrHalt, pool.go).
 //
-// It never kills a child it has started: once a slot calls RunChild, it
-// always waits for it to return and always emits that child's child_finish
-// before halting, even if ctx was cancelled mid-run or a sibling slot
-// halted the pool in the meantime. "Stop starting new work" is enforced by
-// the admission check at the top of a slot's loop, plus one re-check right
-// after awaitBaton: a slot can park there arbitrarily long, and the holder
-// hands the baton off only after deciding whether the pool halts, so the
-// slot it wakes must re-ask. cfg.Stop and Abort ride every ChildRequest (see
-// ChildRequest's own doc), so a child started after Stop closes is signalled
-// by the Runner at once, and nothing after those two checks needs to
-// re-assert the same fact.
+// It never kills a child it has started: the slot always waits on the handle
+// StartChild returned and emits that child's child_finish before halting,
+// unless the wait is abandoned (Config.abandonWaits), which leaves the child
+// running rather than killing it. Otherwise this holds even if ctx was
+// cancelled mid-run or a sibling slot halted the pool in the meantime. "Stop
+// starting new work" is enforced by the admission check at the top of a
+// slot's loop, plus one re-check right after awaitBaton: a slot can park
+// there arbitrarily long, and the holder hands the baton off only after
+// deciding whether the pool halts, so the slot it wakes must re-ask.
+// cfg.Stop and Abort ride every ChildRequest (see ChildRequest's own doc),
+// so a child started after Stop closes is signalled by the Runner at once,
+// and nothing after those two checks needs to re-assert the same fact.
 //
 // cfg.Slots must be positive: a zero or negative pool size would silently
 // run no children while looking like a healthy daemon, so Loop rejects it
@@ -533,7 +553,7 @@ slotLoop:
 				// A gone feature branch halts outright rather than
 				// following the breaker/backoff path (see
 				// HaltFeatureBranchGone) — and does so before any claim is
-				// taken (claims only happen after startChild/RunChild
+				// taken (claims only happen after startChild/StartChild
 				// below).
 				var gone *FeatureBranchGoneError
 				if errors.As(err, &gone) {
@@ -657,7 +677,16 @@ slotLoop:
 				// this switch and fall through unmatched.
 			},
 		}
-		result, err := p.r.RunChild(ctx, req)
+		handle, err := p.r.StartChild(ctx, req)
+		var result ChildResult
+		if err == nil {
+			result, err = handle.Wait(cfg.abandonWaits)
+			if errors.Is(err, ErrWaitAbandoned) {
+				// The child is still running and its flight stays in place for
+				// the handoff: no child_finish, and not a failure.
+				return
+			}
+		}
 		// Read under the pool lock, and before finishChild zeroes the
 		// slot's flight: this is the only place the key (issue or Chore)
 		// the child claimed is still available at all.

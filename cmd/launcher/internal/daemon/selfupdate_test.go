@@ -374,7 +374,7 @@ func TestSelfUpdateCancelledBuildLeavesNoVerdict(t *testing.T) {
 		t.Fatalf("halt class = %v, want the child's own halt", h.Class)
 	}
 	if statusErr != nil || status.Status == nil {
-		t.Fatalf("ReadStatus during RunChild: %v, %v", status.Status, statusErr)
+		t.Fatalf("ReadStatus during a running child: %v, %v", status.Status, statusErr)
 	}
 	if got := status.Status.SelfUpdate; got == nil || got.Phase != SelfUpdateBuilding || got.Revision != "rev1" {
 		t.Fatalf("status self_update during build = %+v, want building at rev1", got)

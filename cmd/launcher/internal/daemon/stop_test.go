@@ -13,7 +13,7 @@ import (
 // TestLoopClosedStopHaltsWithNoChildStarted covers the "already stopped
 // before Loop was even called" edge of the operator-stop latch: a
 // pre-closed Config.Stop must halt deterministically before any slot ever
-// reaches RunChild, not merely once the background watcher happens to be
+// reaches StartChild, not merely once the background watcher happens to be
 // scheduled.
 func TestLoopClosedStopHaltsWithNoChildStarted(t *testing.T) {
 	stop := make(chan struct{})
@@ -149,7 +149,7 @@ func TestChildRequestCarriesStopThenAbortInOrder(t *testing.T) {
 
 	r := &scriptedRunner{
 		// Exit 7 (signalled-stop) is HaltPool in Interpret's table: runSlot
-		// halts the pool and returns right after this one RunChild call, so
+		// halts the pool and returns right after this one StartChild call, so
 		// there is no retry to race the order captured below against a
 		// second onStart invocation.
 		results: []ChildResult{{Exit: 7}},
@@ -250,7 +250,7 @@ func TestLoopStopClosedDuringResolveTipStartsNoChild(t *testing.T) {
 
 // closeOnChildStartWriter closes Stop and Abort (once) when it sees the
 // child_start event. startChild emits it synchronously on the slot
-// goroutine after the post-awaitBaton re-check and before RunChild, so this
+// goroutine after the post-awaitBaton re-check and before StartChild, so this
 // lands both latches exactly in the one window the re-check cannot cover.
 type closeOnChildStartWriter struct {
 	w     io.Writer
@@ -271,7 +271,7 @@ func (c *closeOnChildStartWriter) Write(p []byte) (int, error) {
 
 // TestChildRequestForwardsLatchesClosedAfterAdmission pins
 // ChildRequest.Stop/Abort's per-child forwarding: both latches can still
-// close in the window between the post-awaitBaton re-check and RunChild,
+// close in the window between the post-awaitBaton re-check and StartChild,
 // and the child's request must carry the pool's own latches, closed.
 func TestChildRequestForwardsLatchesClosedAfterAdmission(t *testing.T) {
 	stop := make(chan struct{})
