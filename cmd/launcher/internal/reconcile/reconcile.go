@@ -112,25 +112,47 @@ type prReconciler struct {
 }
 
 // reconcile checks one open issue against live PR state: it closes the issue
-// on a merged landing PR, discovers an unrecorded landing by agent branch, and
-// flags one whose landing PR closed unmerged.
+// on a merged landing PR, discovers an unrecorded landing by agent branch,
+// resolves a bare branch landing to its PR, and flags one whose landing PR
+// closed unmerged. A recorded branch landing that resolves to no PR prints the
+// landing-unverifiable line and lets the sweep continue.
 func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	landing := iss.Landing
 	if landing == "" {
 		if p.lr == nil {
 			return nil
 		}
-		url, found, err := p.pr.PRForBranch(p.cf.AgentBranch(iss.Number))
-		if err != nil {
-			return fmt.Errorf("reconcile issue %s: resolve branch PR: %w", iss.Number, err)
-		}
-		if !found {
-			return nil
-		}
-		if err := p.lr.RecordLanding(iss.Number, url); err != nil {
-			return fmt.Errorf("reconcile issue %s: record landing: %w", iss.Number, err)
+		url, found, err := p.resolveBranch(iss.Number, p.cf.AgentBranch(iss.Number))
+		if err != nil || !found {
+			return err
 		}
 		landing = url
+	} else {
+		parsed, err := forge.ParseLanding(landing)
+		if err != nil {
+			// Defensive: landing is non-empty here, the only input ParseLanding rejects.
+			fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! %v\n", iss.Number, iss.Landing, err)
+			return nil
+		}
+		switch parsed.Kind {
+		case forge.LandingPRURL:
+			landing = parsed.URL
+		case forge.LandingBranchRef:
+			// Settle records a bare branch for ambiguous/blocked runs that opened
+			// no PR (issue #5001), so a miss here is expected, not a sweep error.
+			url, found, err := p.resolveBranch(iss.Number, parsed.Branch)
+			if err != nil {
+				return err
+			}
+			if !found {
+				fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! no PR found for branch %s\n", iss.Number, iss.Landing, parsed.Branch)
+				return nil
+			}
+			landing = url
+		default:
+			fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! landing does not verify through a PR Code Forge\n", iss.Number, iss.Landing)
+			return nil
+		}
 	}
 	state, err := p.pr.PRState(landing)
 	if err != nil {
@@ -152,6 +174,24 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 		res.Abandoned = append(res.Abandoned, iss.Number)
 	}
 	return nil
+}
+
+// resolveBranch finds the PR opened from branch and, when a LandingRecorder is
+// wired, records its URL so the next sweep reads a PR URL, not the branch.
+func (p prReconciler) resolveBranch(num, branch string) (url string, found bool, err error) {
+	url, found, err = p.pr.PRForBranch(branch)
+	if err != nil {
+		return "", false, fmt.Errorf("reconcile issue %s: resolve branch PR: %w", num, err)
+	}
+	if !found {
+		return "", false, nil
+	}
+	if p.lr != nil {
+		if err := p.lr.RecordLanding(num, url); err != nil {
+			return "", false, fmt.Errorf("reconcile issue %s: record landing: %w", num, err)
+		}
+	}
+	return url, true, nil
 }
 
 // localLandingReconciler bundles the seams the local-landing path needs per
