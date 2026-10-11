@@ -23,6 +23,8 @@ let
     sort
     ;
   driverMap = import ../../lib/driver-map.nix;
+  # FLAKE_IMAGE_ATTR names the image's Linux twin, not a darwin host.
+  linuxSystem = (import ../../lib/nixpkgs-shared.nix).linuxTwin.${system};
   schema = import ../../lib/env-schema.nix;
   structuralDoc = import ../../lib/structural-options-doc.nix;
 
@@ -88,6 +90,15 @@ let
   evaluates = spindrift: (builtins.tryEval (outputs spindrift ? spindrift)).success;
   drvPaths = mapAttrs (_: p: p.drvPath);
   programs = mapAttrs (_: a: a.program);
+  bakedSettingCheck = ''
+    check() {
+      got=$(grep -o "\"$2\":\"[^\"]*\"" "$3" | sed -e 's/.*:"//' -e 's/"$//')
+      if [ "$got" != "$1" ]; then
+        echo "baked $2=$got, expected $1" >&2
+        exit 1
+      fi
+    }
+  '';
 
   expectErr =
     name: result: needles:
@@ -486,4 +497,143 @@ in
       agentOptions.defaultDriver.type.name == "nullOr" && agentOptions.defaultDriver.default == null
     ) "agents.defaultDriver must be a nullOr string defaulting to null";
     pkgs.runCommand "flakemodule-driver-map-options" { } "touch $out";
+
+  # Every declared Driver gets its own apps and image/closure attribute; the
+  # default's are aliases of its one Harness, and building a second Driver
+  # must not change what the first builds (ADR 0064).
+  flakemodule-driver-map-outputs =
+    let
+      isLinux = pkgs.stdenv.hostPlatform.isLinux;
+      claude = {
+        agents.drivers.claude.models.default = "x";
+        agents.defaultDriver = "claude";
+      };
+      two = recursiveUpdate claude {
+        agents.drivers.opencode.models.default = "anthropic/claude-sonnet-5";
+      };
+      names = x: sort builtins.lessThan (attrNames x);
+      twoApps = appsOf two;
+      twoPkgs = outputs two;
+      onePkgs = outputs claude;
+      bwrapPkgs = outputs (recursiveUpdate two { infra.runtime = "bwrap"; });
+    in
+    assert assertMsg
+      (
+        names twoApps == [
+          "claude"
+          "claude-daemon"
+          "daemon"
+          "default"
+          "opencode"
+          "opencode-daemon"
+        ]
+      )
+      "two Drivers must expose exactly default, daemon, and each Driver's two apps, got ${builtins.toJSON (names twoApps)}";
+    assert assertMsg (
+      twoApps.claude == twoApps.default && twoApps.claude-daemon == twoApps.daemon
+    ) "the default Driver's apps must alias default and daemon";
+    assert assertMsg (
+      twoApps.opencode.program != twoApps.claude.program
+      && twoApps.opencode-daemon.program != twoApps.claude-daemon.program
+    ) "the second Driver's apps must be its own Harness's, not the default's";
+    assert assertMsg (
+      programs (appsOf claude) == removeAttrs (programs twoApps) [
+        "opencode"
+        "opencode-daemon"
+      ]
+    ) "the default Driver's apps must not change when another Driver is declared";
+    # Only the image attribute is contributed; base packages stay the default's.
+    assert assertMsg
+      (
+        names twoPkgs == names (onePkgs // pkgs.lib.optionalAttrs isLinux { agent-image-opencode = null; })
+      )
+      "a non-default Driver must contribute only its image attribute, got ${builtins.toJSON (names twoPkgs)}";
+    assert assertMsg (
+      drvPaths (removeAttrs twoPkgs [ "agent-image-opencode" ]) == drvPaths onePkgs
+    ) "the default Driver's packages must not change when another Driver is declared";
+    assert assertMsg (
+      !isLinux || twoPkgs.agent-image-opencode.drvPath != twoPkgs.agent-image-claude.drvPath
+    ) "the two Drivers' images must differ";
+    assert assertMsg (
+      !isLinux
+      || (
+        bwrapPkgs ? agent-closure-opencode
+        && bwrapPkgs ? agent-closure-claude
+        && !(bwrapPkgs ? agent-image-opencode)
+      )
+    ) "under bwrap each Driver gets an agent-closure-<driver> attribute";
+    pkgs.runCommand "flakemodule-driver-map-outputs" { } "touch $out";
+
+  # The module exposes only packages and apps, so a non-default Harness's
+  # baked run input document is reached by proving the module's app programs
+  # equal a direct mkHarness call with the expected arguments.
+  flakemodule-driver-map-baked =
+    let
+      base = {
+        agents.drivers.claude.models.default = "x";
+        agents.defaultDriver = "claude";
+        agents.drivers.opencode.models.default = "anthropic/claude-sonnet-5";
+      };
+      withTop = recursiveUpdate base { dispatch.daemonApp = ".#custom"; };
+      bwrap = recursiveUpdate base { infra.runtime = "bwrap"; };
+      ocArgs = {
+        driver = "opencode";
+        defaults = {
+          model = "anthropic/claude-sonnet-5";
+          daemonApp = ".#opencode";
+          daemonSelfApp = ".#opencode-daemon";
+        };
+      };
+      oc = direct (ocArgs // { imageAttrName = "agent-image-opencode"; });
+      ocBwrap = direct (
+        ocArgs
+        // {
+          runtime = "bwrap";
+          imageAttrName = "agent-closure-opencode";
+        }
+      );
+      sameApps =
+        a: h:
+        a.opencode.program == h.apps.default.program && a.opencode-daemon.program == h.apps.daemon.program;
+      claudeDirect =
+        defaults:
+        direct {
+          driver = "claude";
+          defaults = {
+            model = "x";
+          }
+          // defaults;
+        };
+    in
+    assert assertMsg (sameApps (appsOf base) oc)
+      "the module's opencode apps must equal a direct mkHarness call with its own image attribute and daemon refs";
+    assert assertMsg (sameApps (appsOf withTop) oc)
+      "a top-level daemonApp must not reach a non-default Driver";
+    assert assertMsg (
+      (appsOf withTop).default.program != (appsOf base).default.program
+      &&
+        (appsOf withTop).default.program == (claudeDirect { daemonApp = ".#custom"; }).apps.default.program
+    ) "a top-level daemonApp must reach the default Driver";
+    assert assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux || sameApps (appsOf bwrap) ocBwrap
+    ) "under bwrap the opencode Harness must probe agent-closure-opencode";
+    pkgs.runCommand "flakemodule-driver-map-baked"
+      {
+        ocDoc = oc.internals.runInputDocumentFile;
+        bwrapDoc = ocBwrap.internals.runInputDocumentFile;
+        defaultDoc = (claudeDirect { }).internals.runInputDocumentFile;
+        customDoc = (claudeDirect { daemonApp = ".#custom"; }).internals.runInputDocumentFile;
+      }
+      ''
+        ${bakedSettingCheck}
+        check '.#packages.${linuxSystem}.agent-image-opencode' FLAKE_IMAGE_ATTR "$ocDoc"
+        check '.#opencode' DAEMON_APP "$ocDoc"
+        check '.#opencode-daemon' DAEMON_SELF_APP "$ocDoc"
+        check '.#packages.${linuxSystem}.agent-closure-opencode' FLAKE_IMAGE_ATTR "$bwrapDoc"
+        check '.#packages.${linuxSystem}.agent-image' FLAKE_IMAGE_ATTR "$defaultDoc"
+        check '.#' DAEMON_APP "$defaultDoc"
+        check '.#daemon' DAEMON_SELF_APP "$defaultDoc"
+        check '.#custom' DAEMON_APP "$customDoc"
+        touch $out
+      '';
 }
