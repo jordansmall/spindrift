@@ -48,25 +48,27 @@ type parsedArgs struct {
 	Kinds            []daemon.Kind
 	ExplicitSelector bool   // true when argv named a kind selector; false for the bare "every kind" default (see gateKinds)
 	FeatureBranch    string // empty when --feature-branch is absent; see hostRunner.featureBranch
+	CheckOnly        bool   // --check-only: validate input and config, exit 0 or 1 with the startup diagnostic (see mainRun)
 }
 
 // parseArgs parses `daemon --input <path> [--feature-branch <branch>]
-// [dispatch|research|butler|recover]` — --feature-branch may appear before
-// or after the positional kind selector. With no positional verb the daemon
-// draws from every kind off one pool (issue #3541, #3878) — an operator stops
-// having to choose between advancing work, enriching the backlog, and
-// butler upkeep. `dispatch` alone keeps work-only operation, which is how an
-// operator who has not created the research labels on their target repo
-// runs the daemon; `research` alone restricts it to advise-only research;
-// `butler` alone restricts it to the chore; `recover` alone restricts it to
-// queue-mode `spindrift recover` (issue #4656). The bare default's butler
-// and recover are provisional until gateKinds, since parseArgs has no
-// document to resolve BUTLER_CHORES, CODE_FORGE or
-// BOX_FORGE_AND_ISSUE_ACCESS against.
+// [--check-only] [dispatch|research|butler|recover]` — --feature-branch and
+// --check-only may appear before or after the positional kind selector. With
+// no positional verb the daemon draws from every kind off one pool (issue
+// #3541, #3878) — an operator stops having to choose between advancing work,
+// enriching the backlog, and butler upkeep. `dispatch` alone keeps work-only
+// operation, which is how an operator who has not created the research
+// labels on their target repo runs the daemon; `research` alone restricts it
+// to advise-only research; `butler` alone restricts it to the chore;
+// `recover` alone restricts it to queue-mode `spindrift recover` (issue
+// #4656). The bare default's butler and recover are provisional until
+// gateKinds, since parseArgs has no document to resolve BUTLER_CHORES,
+// CODE_FORGE or BOX_FORGE_AND_ISSUE_ACCESS against.
 func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
 	var havePath bool
 	var featureBranch string
+	var checkOnly bool
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == inputFlag {
@@ -76,6 +78,10 @@ func parseArgs(args []string) (parsedArgs, error) {
 			inputPath = args[i+1]
 			havePath = true
 			i++
+			continue
+		}
+		if args[i] == "--check-only" {
+			checkOnly = true
 			continue
 		}
 		if args[i] == "--feature-branch" {
@@ -109,7 +115,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 	if err != nil {
 		return parsedArgs{}, err
 	}
-	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch}, nil
+	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch, CheckOnly: checkOnly}, nil
 }
 
 // errNoOutboxRelay is why a recover kind is disabled: no read-only Box's
@@ -811,6 +817,15 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		if err != nil {
 			return fail(stderr, err)
 		}
+	}
+
+	// Stops before the lock and preflight: a freshly built successor
+	// smoke-tests itself this way beside the live daemon, which holds the lock.
+	// Keep it ahead of the demand build and token watcher too; no test can
+	// observe the watcher's goroutine.
+	if args.CheckOnly {
+		fmt.Fprintln(stderr, "daemon: check-only: input and config are valid")
+		return 0
 	}
 
 	// Built from the daemon's own resolved knobs, per kind row, once the
