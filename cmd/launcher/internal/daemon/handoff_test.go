@@ -13,9 +13,12 @@ import (
 func fullHandoff() Handoff {
 	t0 := time.Date(2026, 10, 11, 12, 0, 0, 123456789, time.UTC)
 	return Handoff{
-		LockFD: 3,
-		Stop:   true,
-		Abort:  true,
+		LockFD:   3,
+		FromPath: "/nix/store/aaa-old/bin/daemon",
+		ToPath:   "/nix/store/bbb-new/bin/daemon",
+		Revision: "rev1",
+		Stop:     true,
+		Abort:    true,
 		Slots: []HandoffSlot{
 			{
 				Slot: 0, Kind: "work", Revision: "abc123",
