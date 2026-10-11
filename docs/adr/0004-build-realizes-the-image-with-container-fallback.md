@@ -1,8 +1,9 @@
 # `build` realizes the image, using the container runtime as a fallback Linux builder
 
 The `build` command doesn't just load the baked image archive — it realizes it
-first, by `nix build`-ing the image's `.drv` path (baked into the script with
-its string context discarded, the same trick `run` uses for the output path).
+first, by `nix build`-ing the image's `.drv` path (baked into the run input
+document with its string context discarded, the same trick `run` uses for the
+output path).
 When the host can't realize a Linux derivation — the common case on a stock
 mac — `build` falls back to running the build inside an ephemeral Nix container
 on the runtime it already requires: the machine that can *run* the Box can
@@ -29,8 +30,10 @@ invoked from the Consumer flake's directory (the same `$PWD` convention
 incremental.
 
 The build logic now lives entirely in the Go binary (`internal/runner` OCI and
-bwrap adapters) rather than in bash scripts. The `build` shell wrapper is a
-thin env-var exporter that execs `launcher build`; the three bash scripts
-(`build.sh`, `build-image.sh`, `bwrap-build.sh`) have been deleted. The runner
-seam (`runner.Runner`) also pins the docker compatibility fix: `image inspect`
-replaces `image exists`, which docker does not support.
+bwrap adapters) rather than in bash scripts. `spindrift build` is a subcommand
+of the `spindrift` wrapper, which execs `launcher --input <document> build`
+(knobs reach the launcher through that input document, [ADR
+0020](0020-knobs-flow-through-the-launcher-input-document.md)); the three bash
+scripts (`build.sh`, `build-image.sh`, `bwrap-build.sh`) have been deleted. The
+runner seam (`runner.Runner`) also pins the docker compatibility fix: `image
+inspect` replaces `image exists`, which docker does not support.
