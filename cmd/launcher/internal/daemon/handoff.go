@@ -170,12 +170,14 @@ func DecodeHandoff(r io.Reader) (Handoff, error) {
 // validate refuses a pid or descriptor that cannot name a real child: pid 0
 // or a negative one would make a signal reach a whole process group, a
 // negative descriptor is no descriptor at all, and one pid on two slots would
-// let both supervise, signal and report the same child.
+// let both supervise, signal and report the same child. A report descriptor
+// shared with another slot or the lock would put two handles on one descriptor.
 func (h Handoff) validate() error {
 	if h.LockFD < 0 {
 		return fmt.Errorf("handoff: lock_fd %d is not a descriptor", h.LockFD)
 	}
 	pids := make(map[int]int, len(h.Slots))
+	fds := make(map[int]int, len(h.Slots))
 	for _, s := range h.Slots {
 		if s.Child.PID <= 0 {
 			return fmt.Errorf("handoff slot %d: pid %d is not a process", s.Slot, s.Child.PID)
@@ -187,6 +189,13 @@ func (h Handoff) validate() error {
 		if s.Child.ReportFD < 0 {
 			return fmt.Errorf("handoff slot %d: report_fd %d is not a descriptor", s.Slot, s.Child.ReportFD)
 		}
+		if s.Child.ReportFD == h.LockFD {
+			return fmt.Errorf("handoff slot %d: report_fd %d is the lock_fd", s.Slot, s.Child.ReportFD)
+		}
+		if first, dup := fds[s.Child.ReportFD]; dup {
+			return fmt.Errorf("handoff slot %d: report_fd %d is already slot %d's", s.Slot, s.Child.ReportFD, first)
+		}
+		fds[s.Child.ReportFD] = s.Slot
 	}
 	return nil
 }
