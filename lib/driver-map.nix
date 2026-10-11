@@ -45,11 +45,17 @@ let
       d: p == d || builtins.substring 0 (builtins.stringLength d + 1) p == d + "."
     ) driverValuedDotted;
 
+  optional = cond: x: if cond then [ x ] else [ ];
   join = builtins.concatStringsSep ", ";
   quote = n: "\"${n}\"";
+  # Paths arrive bare (agents.x.y); every message names them by the
+  # consumer-facing option path.
+  full = p: "perSystem.spindrift.${p}";
+  fullList = ps: join (map full ps);
   rest = p: builtins.substring (builtins.stringLength "agents.") (builtins.stringLength p) p;
-  moveHint = p: "agents.drivers.<name>.${rest p}";
-  moveHints = ps: join (map (p: "${p} -> ${moveHint p}") ps);
+  moveHint = p: full "agents.drivers.<name>.${rest p}";
+  moveHints = ps: join (map (p: "${full p} -> ${moveHint p}") ps);
+  moveClause = ps: if ps == [ ] then "" else " (${moveHints ps})";
 
   fail = error: {
     inherit error;
@@ -71,6 +77,11 @@ let
       setPaths = map (t: t.path) topLevel;
       driverValuedSet = builtins.filter isDriverValuedPath setPaths;
       declaredList = join (map quote declared);
+      fixClause = builtins.concatStringsSep " and " (
+        optional (driverValuedSet != [ ])
+          "move each Driver-valued setting under ${full "agents.drivers.<name>.<rest>"}${moveClause driverValuedSet}"
+        ++ optional (builtins.elem "agents.driver" setPaths) "drop ${full "agents.driver"}, since the attribute name is the Driver"
+      );
     in
     if declared == [ ] then
       if defaultDriver != null then
@@ -78,21 +89,34 @@ let
       else
         ok null
     else if builtins.length declared > 1 && driverValuedSet != [ ] then
-      fail "perSystem.spindrift.agents.drivers declares several Drivers (${declaredList}), so a Driver-valued setting cannot be set at top level (${join driverValuedSet}) -- move each under every Driver it applies to: ${moveHints driverValuedSet}"
+      fail "perSystem.spindrift.agents.drivers declares several Drivers (${declaredList}), so a Driver-valued setting cannot be set at top level (${fullList driverValuedSet}) -- move each under every Driver it applies to: ${moveHints driverValuedSet}"
     else if setPaths != [ ] then
-      fail "perSystem.spindrift.agents.drivers is set alongside the single-Driver form (${join setPaths}) -- move each Driver-valued setting under agents.drivers.<name>.<rest> (${moveHints driverValuedSet}) and drop agents.driver, since the attribute name is the Driver"
+      fail "perSystem.spindrift.agents.drivers is set alongside the single-Driver form (${fullList setPaths}) -- ${fixClause}"
     else if defaultDriver == null then
       if builtins.length declared == 1 then
         ok (builtins.head declared)
       else
         fail "perSystem.spindrift.agents.defaultDriver is required when several Drivers are declared (${declaredList}) -- set perSystem.spindrift.agents.defaultDriver to one of them"
     else if !(drivers ? ${defaultDriver}) then
-      fail "perSystem.spindrift.agents.defaultDriver is ${quote defaultDriver}, which is not a declared Driver (${declaredList}) -- declare perSystem.spindrift.agents.drivers.${defaultDriver} or set agents.defaultDriver to one of the declared names"
+      fail "perSystem.spindrift.agents.defaultDriver is ${quote defaultDriver}, which is not a declared Driver (${declaredList}) -- declare perSystem.spindrift.agents.drivers.${defaultDriver} or set ${full "agents.defaultDriver"} to one of the declared names"
     else
       ok defaultDriver;
 in
 {
   inherit resolve paths;
+  # Where the module declares the map and its default-Driver name; read by
+  # lib/flakeModule.nix and nix/checks/schema-drift.nix's
+  # flake-nixpath-exhaustive-disjoint check, like lib/byname-paths.nix.
+  optionPaths = {
+    drivers = [
+      "agents"
+      "drivers"
+    ];
+    defaultDriver = [
+      "agents"
+      "defaultDriver"
+    ];
+  };
   # Marked schema keys, split by origin: `env` rows live in lib/env-schema.nix
   # (mkHarness args by flat key), `structural` in lib/structural-options-doc.nix.
   driverValued = {

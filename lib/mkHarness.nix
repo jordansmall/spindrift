@@ -1809,6 +1809,10 @@ else
       boxBin = imageDriver.boxBin;
       driverEntry = imageDriver.driverEntry;
 
+      # The resolved name, so lib/flakeModule.nix aliases the right package
+      # without re-deriving the bwrap/OCI default.
+      inherit imageAttrName;
+
       # daemonBin is otherwise reachable only as apps.daemon.program, a
       # string -- exposed here so nix/checks/equivalence.nix's store-path
       # checks can compare and override it directly (issue #3621).
