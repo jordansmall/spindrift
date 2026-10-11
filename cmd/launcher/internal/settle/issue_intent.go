@@ -164,7 +164,7 @@ type filedIntent struct {
 // any ensureTypeLabel match, never the payload's own (issue #1949). A package
 // function, not a *Settle method, so ResearchSettle can call it (issue #2590).
 func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel, bodyBacklink string) []filedIntent {
-	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, func(issueIntent) (string, []string, func(string)) { return bodyBacklink, nil, nil })
+	return fileIssueIntentsDetailedFunc(it, num, result, provenanceLabel, DedupPolicy{}, func(issueIntent) (string, []string, func(string)) { return bodyBacklink, nil, nil })
 }
 
 // fileIssueIntentsDetailedFunc is fileIssueIntentsDetailed's per-intent sibling
@@ -182,7 +182,7 @@ func fileIssueIntentsDetailed(it forge.IssueTracker, num string, result dispatch
 // fileIssueIntentsDetailed delegates to this with a constant closure,
 // rather than the other way around, so callers with a fixed backlink keep the
 // plain (it, num, result, provenanceLabel, bodyBacklink string) shape.
-func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
+func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result dispatch.Result, provenanceLabel string, dedup DedupPolicy, decorate func(issueIntent) (bodyBacklink string, extraLabels []string, onFiled func(url string))) []filedIntent {
 	if !result.IssueIntentsFound {
 		return nil
 	}
@@ -218,14 +218,18 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 			fmt.Fprintf(os.Stderr, "    ?? #%s: skipping invalid issue-intent payload: %s\n", num, rej.Reason)
 			continue
 		}
-		keys, dropped := splitDedupTerms(in.DedupTerms)
+		terms := in.DedupTerms
+		if dedup.Terms != nil {
+			terms = dedup.Terms(in.finding())
+		}
+		keys, dropped := splitDedupTerms(terms)
 		if len(dropped) > 0 {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: dropped unusable dedup term(s) %q\n", num, dropped)
 		}
 		if len(keys) == 0 {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: no usable dedup term for %q: filing without dedup\n", num, in.Title)
 		} else if dedupIndex == nil {
-			dedupIndex = backlogDedupIndex(it, num)
+			dedupIndex = backlogDedupIndex(it, num, dedup.NotPlannedBefore)
 		}
 		applyRunLineOverlap(dedupIndex, runKeys, keys)
 		ov := matchDedup(dedupIndex, keys)
@@ -263,9 +267,9 @@ func fileIssueIntentsDetailedFunc(it forge.IssueTracker, num string, result disp
 		// A finding wearing the tuning label also carries tuningChoreTerm, so
 		// a tracker with no label registry (local, jira) can still recognise
 		// it; deriving the term from the label keeps the two from diverging.
-		markerTerms := in.DedupTerms
+		markerTerms := terms
 		if slices.Contains(extraLabels, doctor.TuningFindingLabel) {
-			markerTerms = append(slices.Clone(in.DedupTerms), tuningChoreTerm)
+			markerTerms = append(slices.Clone(terms), tuningChoreTerm)
 		}
 		marker := buildDedupMarker(markerTerms)
 		if marker == "" {

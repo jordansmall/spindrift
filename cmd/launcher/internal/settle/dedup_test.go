@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
@@ -129,7 +130,7 @@ func TestMatchDedup_AcrossOldAndNewSeparatorStyle(t *testing.T) {
 	index := make(map[string]string)
 	indexFindingIssues(index, []forge.Issue{
 		{Number: "9", Labels: []string{dispatchkind.Work.FindingLabel}, Body: oldMarkerBody},
-	})
+	}, time.Time{})
 
 	ov := matchDedup(index, keys)
 	if !ov.full || len(ov.refs) != 1 || ov.refs[0] != "#9" {
@@ -552,7 +553,7 @@ func TestBacklogDedupIndex_PrefersLabeledBacklogLister(t *testing.T) {
 	// index proves the capability path, not the fallback, produced it.
 	stub.SetIssue(forge.Issue{Number: "1", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: from list open issues -->"})
 
-	index := backlogDedupIndex(stub, "100")
+	index := backlogDedupIndex(stub, "100", time.Time{})
 
 	if len(stub.calls) != 2 {
 		t.Fatalf("ListIssuesWithLabels calls = %d, want 2 (one per state)", len(stub.calls))
@@ -587,7 +588,7 @@ func TestBacklogDedupIndex_FallsBackToListOpenIssues(t *testing.T) {
 	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{dispatchkind.Work.FindingLabel}, Body: "<!-- spindrift-dedup: race in settle -->"})
 	fc.SetIssue(forge.Issue{Number: "2", Labels: []string{"unrelated"}, Body: "<!-- spindrift-dedup: not a finding -->"})
 
-	index := backlogDedupIndex(fc, "100")
+	index := backlogDedupIndex(fc, "100", time.Time{})
 
 	if index["race in settle"] != "#1" {
 		t.Errorf("index[race in settle] = %q, want #1", index["race in settle"])
@@ -612,7 +613,7 @@ func TestBacklogDedupIndex_ListFailureWarnsAndReturnsEmpty(t *testing.T) {
 
 	var index map[string]string
 	stderr := captureStderr(t, func() {
-		index = backlogDedupIndex(stub, "100")
+		index = backlogDedupIndex(stub, "100", time.Time{})
 	})
 
 	if len(index) != 0 {
@@ -636,7 +637,7 @@ func TestBacklogDedupIndex_IndexesClosedFindingIssue(t *testing.T) {
 		},
 	}
 
-	index := backlogDedupIndex(stub, "100")
+	index := backlogDedupIndex(stub, "100", time.Time{})
 
 	if index["closed site"] != "#5" {
 		t.Errorf("index[closed site] = %q, want #5", index["closed site"])
@@ -656,7 +657,7 @@ func TestBacklogDedupIndex_IndexesClosedButlerFindingIssue(t *testing.T) {
 		},
 	}
 
-	index := backlogDedupIndex(stub, "100")
+	index := backlogDedupIndex(stub, "100", time.Time{})
 
 	if index["closed butler site"] != "#7" {
 		t.Errorf("index[closed butler site] = %q, want #7", index["closed butler site"])
@@ -676,7 +677,7 @@ func TestBacklogDedupIndex_IndexesButlerPatchLabelledIssue(t *testing.T) {
 		},
 	}
 
-	index := backlogDedupIndex(stub, "100")
+	index := backlogDedupIndex(stub, "100", time.Time{})
 
 	if index["patched butler site"] != "#9" {
 		t.Errorf("index[patched butler site] = %q, want #9", index["patched butler site"])
@@ -695,7 +696,7 @@ func TestBacklogDedupIndex_ClosedNonFindingIssueNotIndexed(t *testing.T) {
 		},
 	}
 
-	index := backlogDedupIndex(stub, "100")
+	index := backlogDedupIndex(stub, "100", time.Time{})
 
 	if _, ok := index["not a finding"]; ok {
 		t.Error("index carries a key from a closed issue lacking a finding label")
@@ -718,7 +719,7 @@ func TestBacklogDedupIndex_OpenRefWinsOverClosedForSharedKey(t *testing.T) {
 		},
 	}
 
-	index := backlogDedupIndex(stub, "100")
+	index := backlogDedupIndex(stub, "100", time.Time{})
 
 	if index["shared site"] != "#9" {
 		t.Errorf("index[shared site] = %q, want #9 (open ref wins)", index["shared site"])
@@ -743,7 +744,7 @@ func TestBacklogDedupIndex_ClosedFailureWarnsAndKeepsOpenKeys(t *testing.T) {
 
 	var index map[string]string
 	stderr := captureStderr(t, func() {
-		index = backlogDedupIndex(stub, "100")
+		index = backlogDedupIndex(stub, "100", time.Time{})
 	})
 
 	if index["open site"] != "#9" {
@@ -771,7 +772,7 @@ func TestBacklogDedupIndex_OpenFailureWarnsAndKeepsClosedKeys(t *testing.T) {
 
 	var index map[string]string
 	stderr := captureStderr(t, func() {
-		index = backlogDedupIndex(stub, "100")
+		index = backlogDedupIndex(stub, "100", time.Time{})
 	})
 
 	if index["closed site"] != "#5" {
@@ -846,7 +847,7 @@ func TestTuningChoreTermIsNotADedupKey(t *testing.T) {
 	index := make(map[string]string)
 	indexFindingIssues(index, []forge.Issue{
 		{Number: "7", Labels: []string{label}, Body: buildDedupMarker([]string{"site a", tuningChoreTerm})},
-	})
+	}, time.Time{})
 	if _, ok := index[tuningChoreTerm]; ok {
 		t.Errorf("index = %v, want %q not indexed", index, tuningChoreTerm)
 	}
@@ -864,5 +865,39 @@ func TestTuningChoreTermIsNotADedupKey(t *testing.T) {
 	ov = matchDedup(map[string]string{tuningChoreTerm: "#7"}, map[string]bool{tuningChoreTerm: true})
 	if ov.full || len(ov.covered) != 0 {
 		t.Errorf("matchDedup(term-only intent) = %+v, want not full", ov)
+	}
+}
+
+// A closed-not-planned tuning finding stops suppressing once its close is at or
+// before the cutoff; a code finding, a zero cutoff, and an unknown close time
+// keep it.
+func TestIndexFindingIssues_NotPlannedExpiry(t *testing.T) {
+	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	label := dispatchkind.Butler.FindingLabel
+	tuning := buildDedupMarker([]string{"k", tuningChoreTerm})
+	code := buildDedupMarker([]string{"k"})
+	cases := []struct {
+		name    string
+		iss     forge.Issue
+		cutoff  time.Time
+		covered bool
+	}{
+		{"before cutoff", forge.Issue{Body: tuning, ClosedNotPlanned: true, ClosedAt: cutoff.Add(-time.Hour)}, cutoff, false},
+		{"at cutoff", forge.Issue{Body: tuning, ClosedNotPlanned: true, ClosedAt: cutoff}, cutoff, false},
+		{"after cutoff", forge.Issue{Body: tuning, ClosedNotPlanned: true, ClosedAt: cutoff.Add(time.Hour)}, cutoff, true},
+		{"unknown close time", forge.Issue{Body: tuning, ClosedNotPlanned: true}, cutoff, true},
+		{"zero cutoff", forge.Issue{Body: tuning, ClosedNotPlanned: true, ClosedAt: cutoff.Add(-time.Hour)}, time.Time{}, true},
+		{"closed completed", forge.Issue{Body: tuning, ClosedAt: cutoff.Add(-time.Hour)}, cutoff, true},
+		{"code finding", forge.Issue{Body: code, ClosedNotPlanned: true, ClosedAt: cutoff.Add(-time.Hour)}, cutoff, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			c.iss.Number, c.iss.Labels = "5", []string{label}
+			index := make(map[string]string)
+			indexFindingIssues(index, []forge.Issue{c.iss}, c.cutoff)
+			if _, ok := index["k"]; ok != c.covered {
+				t.Errorf("key covered = %v, want %v", ok, c.covered)
+			}
+		})
 	}
 }

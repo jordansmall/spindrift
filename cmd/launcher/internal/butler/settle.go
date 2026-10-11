@@ -150,7 +150,15 @@ func (s *settleRun) settle(d dispatch.Dispatcher, result dispatch.Result) settle
 	// gate calls after ledger.Finish below; the Ledger's Patched URLs derive
 	// from it.
 	var landings []patchLanding
-	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
+	// A tuning Chore keys on the pattern a finding names and lets a rejected
+	// idea return after the cooldown; a code Chore keeps site keys, forever.
+	// The cutoff must stay now-cooldown: a zero NotPlannedBefore never
+	// expires, but a zero cooldown would expire every not-planned close.
+	var dedup settle.DedupPolicy
+	if s.tuning != nil {
+		dedup = settle.DedupPolicy{Terms: tuningPatternTerms, NotPlannedBefore: s.now().Add(-s.tuning.policy.TuningCooldown)}
+	}
+	filing := settle.FileButlerFindings(s.it, num, result, s.room.Findings, dedup, func(kept []settle.Finding) func(settle.Finding) settle.Decoration {
 		// An unconfigured/off policy can never promote, so it reserves none
 		// of the day's shared promotion room. room.Promotions is Sweep's own
 		// snapshot, handed down rather than re-walked here (issue #3994): a
