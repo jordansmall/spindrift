@@ -648,3 +648,26 @@ func (ks kindSched) view(now time.Time) KindView {
 	}
 	return v
 }
+
+// restore folds a handoff's per-kind schedule state into s, so a successor
+// resumes the gates, backoff step, reported due and rate-limit pause its
+// predecessor had instead of re-probing every queue cold. The backoff's floor
+// and cap stay the new config's: a changed knob takes effect on restart, so a
+// carried step is clamped into the new range. An entry for a kind s does not
+// hold is skipped (Loop's validateHandoff has already refused one).
+func (s Schedule) restore(kinds []HandoffKind) Schedule {
+	for _, hk := range kinds {
+		ks, ok := s.state[hk.Kind]
+		if !ok {
+			continue
+		}
+		if hk.BackoffCur > 0 {
+			ks.gate.b.cur = min(max(hk.BackoffCur, ks.gate.b.floor), ks.gate.b.cap)
+		}
+		ks.gate.until, ks.gate.jammed, ks.gate.gen = hk.Until, hk.Jammed, hk.Gen
+		ks.due = NextDue{At: hk.DueAt, OnTipMove: hk.DueOnTipMove}
+		ks.limitedUntil = hk.LimitedUntil
+		s = s.with(hk.Kind, ks)
+	}
+	return s
+}

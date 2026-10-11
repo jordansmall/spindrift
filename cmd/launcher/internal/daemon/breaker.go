@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"slices"
 	"time"
 )
 
@@ -65,4 +66,13 @@ func (b breaker) evict(now time.Time) []time.Time {
 		}
 	}
 	return kept
+}
+
+// restore seeds the breaker with the failure times a handoff carried. The
+// slice is copied: the document's backing array must not be shared with the
+// one evict reuses in place. Times outside the window fall away at the next
+// recordAndCheck.
+func (b breaker) restore(times []time.Time) breaker {
+	b.times = slices.Clone(times)
+	return b
 }

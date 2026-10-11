@@ -488,14 +488,18 @@ func pickScripted(list []ChildResult, idx int) ChildResult {
 	return list[idx]
 }
 
-func (r *scriptedRunner) StartChild(ctx context.Context, req ChildRequest) (ChildHandle, error) {
+// beginChild is the bookkeeping every child seam (StartChild, InheritChild)
+// shares, so the two cannot drift: record appends the call under mu and
+// returns its 1-based total; the helper then counts the kind, registers
+// req.OnRecord and takes the child in flight. end undoes the in-flight count.
+func (r *scriptedRunner) beginChild(req ChildRequest, record func() int) (total, kindIdx int, release map[int]chan ChildResult, started chan int, end func()) {
 	r.mu.Lock()
-	r.runCalls = append(r.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
-	total := len(r.runCalls)
+	defer r.mu.Unlock()
+	total = record()
 	if r.kindCalls == nil {
 		r.kindCalls = make(map[Kind]int)
 	}
-	kindIdx := r.kindCalls[req.Kind]
+	kindIdx = r.kindCalls[req.Kind]
 	r.kindCalls[req.Kind]++
 	if r.onRecord == nil {
 		r.onRecord = make(map[int]func(Record))
@@ -505,20 +509,24 @@ func (r *scriptedRunner) StartChild(ctx context.Context, req ChildRequest) (Chil
 	if r.inFlight > r.peak {
 		r.peak = r.inFlight
 	}
-	release := r.release
-	started := r.started
-	r.mu.Unlock()
+	end = func() {
+		r.mu.Lock()
+		r.inFlight--
+		r.mu.Unlock()
+	}
+	return total, kindIdx, r.release, r.started, end
+}
+
+func (r *scriptedRunner) StartChild(ctx context.Context, req ChildRequest) (ChildHandle, error) {
+	total, kindIdx, release, started, end := r.beginChild(req, func() int {
+		r.runCalls = append(r.runCalls, runCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot})
+		return len(r.runCalls)
+	})
 
 	// The mutex must not be held across a hook call or the blocking
 	// holdSlots wait: several slots call StartChild at once in the
 	// start-gate and dual-kind tests, and holding mu here would serialize
 	// what those tests need to run genuinely concurrently.
-	end := func() {
-		r.mu.Lock()
-		r.inFlight--
-		r.mu.Unlock()
-	}
-
 	if r.onStart != nil {
 		if err := r.onStart(ctx, req); err != nil {
 			end()
@@ -579,33 +587,15 @@ func (r *scriptedRunner) scriptedDone(req ChildRequest, total, kindIdx int, end 
 // in flight; otherwise a held slot gets a held handle and anything else the
 // next scripted result.
 func (r *scriptedRunner) InheritChild(ctx context.Context, req ChildRequest, child ChildState) (ChildHandle, error) {
+	total, kindIdx, release, started, end := r.beginChild(req, func() int {
+		r.inherits = append(r.inherits, inheritCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot, PID: child.PID, Stop: req.Stop, Abort: req.Abort, CtxErr: ctx.Err()})
+		return len(r.runCalls) + len(r.inherits)
+	})
 	r.mu.Lock()
-	r.inherits = append(r.inherits, inheritCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot, PID: child.PID})
-	total := len(r.runCalls) + len(r.inherits)
-	if r.kindCalls == nil {
-		r.kindCalls = make(map[Kind]int)
-	}
-	kindIdx := r.kindCalls[req.Kind]
-	r.kindCalls[req.Kind]++
-	if r.onRecord == nil {
-		r.onRecord = make(map[int]func(Record))
-	}
-	r.onRecord[req.Slot] = req.OnRecord
-	r.inFlight++
-	if r.inFlight > r.peak {
-		r.peak = r.inFlight
-	}
-	release := r.release
-	started := r.started
 	exited, hasExit := r.exited[child.PID]
 	inheritErr := r.inheritErr
 	r.mu.Unlock()
 
-	end := func() {
-		r.mu.Lock()
-		r.inFlight--
-		r.mu.Unlock()
-	}
 	if inheritErr != nil {
 		end()
 		return nil, inheritErr
@@ -1460,6 +1450,12 @@ type inheritCall struct {
 	Revision string
 	Slot     int
 	PID      int
+	// Stop and Abort are the request's latches, to see what a resumed pool
+	// handed the inherited child.
+	Stop, Abort <-chan struct{}
+	// CtxErr is the ctx error at the call: a re-attach is never to be aborted
+	// by a pool halt.
+	CtxErr error
 }
 
 func TestScriptedRunnerInheritChildExitedByPID(t *testing.T) {
