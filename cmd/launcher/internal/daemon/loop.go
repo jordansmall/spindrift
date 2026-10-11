@@ -96,7 +96,8 @@ type ChildRequest struct {
 	Abort    <-chan struct{}
 
 	// ChildLog is the Child log file, relative to the checkout, that the
-	// Runner tees the child's output into; child_start names the same path.
+	// Runner hands the child as its stdout and stderr; child_start names the
+	// same path.
 	ChildLog string
 
 	// OnRecord, when non-nil, is called with each Record the child reports

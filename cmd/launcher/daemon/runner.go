@@ -13,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"syscall"
-	"time"
 
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -39,10 +38,6 @@ type hostRunner struct {
 	knobs         []string      // keys of the Launcher input document's settings map, stripped from env before a child sees it
 	doctorFlags   []string      // kind flags RunDoctor adds to doctor (see doctorPreflightFlags in main.go)
 	demand        demandSources // per-kind tracker Demand counters; a kind absent here is exit-driven
-
-	// childLogWaitDelay bounds how long RunChild waits on the Child log tee
-	// after the child exits; zero means defaultChildLogWaitDelay.
-	childLogWaitDelay time.Duration
 
 	// flightMu guards flight below, plus the Moved baseline and the
 	// self-path memo fields further down: resolveTipOnce is the sole leader
@@ -410,12 +405,13 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	// "Background realize process isolation" in docs/reference.md.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	// The daemon's own stdout is the JSON-lines event stream, so the child's
-	// stdout and stderr both land on the daemon's stderr, same as RunDoctor
-	// below. Without a Child log that is the descriptor itself, with no
-	// userspace copy. With one, a single shared writer tees both streams into
-	// the file: os/exec then uses one pipe and one copy goroutine for the two,
-	// so their interleaving is preserved. A log that cannot be created never
-	// fails the Dispatch.
+	// stdout and stderr both go to a file descriptor, never through the
+	// daemon: the Child log when one opens, else the daemon's stderr (same as
+	// RunDoctor below). os/exec hands an *os.File to the child as-is, with no
+	// pipe and no copy goroutine, so a child can neither stall nor die
+	// (SIGPIPE) because the daemon stopped reading. The log is O_APPEND and
+	// shared by both streams, which keeps their interleaving in write order.
+	// A log that cannot be created never fails the Dispatch.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if req.ChildLog != "" {
@@ -424,17 +420,8 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 			fmt.Fprintf(os.Stderr, "daemon: child log %s: %s\n", req.ChildLog, err)
 		} else {
 			defer logFile.Close()
-			tee := io.MultiWriter(os.Stderr, &lossyLog{w: logFile})
-			cmd.Stdout = tee
-			cmd.Stderr = tee
-			// The tee is a pipe, so Wait would otherwise block until every
-			// holder of its write end closes it: a grandchild (podman, nix)
-			// outliving the child would wedge the slot. cmd has no Context,
-			// so this only bounds the wait after the child has exited.
-			cmd.WaitDelay = r.childLogWaitDelay
-			if cmd.WaitDelay == 0 {
-				cmd.WaitDelay = defaultChildLogWaitDelay
-			}
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
 		}
 	}
 	// cmd.Stdin left nil (os/exec gives the child /dev/null): the Setpgid
@@ -484,12 +471,6 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	if waitErr == nil {
 		return daemon.ChildResult{Exit: 0}, nil
 	}
-	// ErrWaitDelay means the child exited cleanly but a grandchild kept the
-	// tee pipe open past the wait delay; the exit status is still the
-	// child's own.
-	if errors.Is(waitErr, exec.ErrWaitDelay) {
-		return daemon.ChildResult{Exit: cmd.ProcessState.ExitCode()}, nil
-	}
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
 		// A non-zero exit is the child's own outcome, not a seam failure —
@@ -499,8 +480,6 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	return daemon.ChildResult{}, fmt.Errorf("wait child: %w", waitErr)
 }
 
-const defaultChildLogWaitDelay = 5 * time.Second
-
 // openChildLog opens (creating it and its parent directories) the Child log
 // for appending.
 func openChildLog(path string) (*os.File, error) {
@@ -508,25 +487,6 @@ func openChildLog(path string) (*os.File, error) {
 		return nil, err
 	}
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-}
-
-// lossyLog drops a write error after the first: io.MultiWriter stops at the
-// first failing writer, and a full disk under the Child log must not cut the
-// child's output off from the daemon's stderr, or the child off from its
-// stdout.
-type lossyLog struct {
-	w      io.Writer
-	failed bool
-}
-
-func (l *lossyLog) Write(p []byte) (int, error) {
-	if !l.failed {
-		if _, err := l.w.Write(p); err != nil {
-			l.failed = true
-			fmt.Fprintf(os.Stderr, "daemon: child log write: %s\n", err)
-		}
-	}
-	return len(p), nil
 }
 
 // readReports reads report-protocol lines from r to EOF and, for each one

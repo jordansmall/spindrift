@@ -468,11 +468,11 @@ func TestRunChild_StdoutRelayedUnchanged(t *testing.T) {
 	}
 }
 
-// TestRunChild_ChildLogTeesBothStreams asserts the Child log holds exactly
-// the child's stdout and stderr, interleaved in write order, while the
-// daemon's stderr still gets the same bytes. The payload carries a non-UTF-8
-// byte and no trailing newline: the tee must not line-buffer or re-encode.
-func TestRunChild_ChildLogTeesBothStreams(t *testing.T) {
+// TestRunChild_ChildLogTakesBothStreams asserts the Child log holds exactly
+// the child's stdout and stderr, interleaved in write order, and the daemon's
+// stderr gets none of it. The payload carries a non-UTF-8 byte and no
+// trailing newline: nothing may line-buffer or re-encode.
+func TestRunChild_ChildLogTakesBothStreams(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 
@@ -494,8 +494,8 @@ func TestRunChild_ChildLogTeesBothStreams(t *testing.T) {
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
 	}
-	if got := string(readStderr()); got != want {
-		t.Errorf("daemon stderr = %q, want %q", got, want)
+	if got := string(readStderr()); got != "" {
+		t.Errorf("daemon stderr = %q, want empty", got)
 	}
 	logged, err := os.ReadFile(filepath.Join(dir, rel))
 	if err != nil {
@@ -506,9 +506,88 @@ func TestRunChild_ChildLogTeesBothStreams(t *testing.T) {
 	}
 }
 
+const daemonSideHelperEnv = "SPINDRIFT_TEST_DAEMON_SIDE_HELPER"
+
+// TestHelperDaemonSide is not a test: it is the Daemon side of
+// TestRunChild_ChildSurvivesDaemonSigkill, re-exec'd as its own process so the
+// test can kill it outright. It is a no-op unless daemonSideHelperEnv is set.
+func TestHelperDaemonSide(t *testing.T) {
+	if os.Getenv(daemonSideHelperEnv) != "1" {
+		t.Skip("helper process only")
+	}
+	done := os.Getenv(daemonSideHelperEnv + "_DONE")
+	gate := os.Getenv(daemonSideHelperEnv + "_GATE")
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", fmt.Sprintf(`echo first; echo err1 >&2; while [ ! -e %q ]; do sleep 0.05; done; echo second; echo err2 >&2; touch %q`, gate, done))
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: os.Getenv(daemonSideHelperEnv + "_REPO"), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	_, _ = r.RunChild(context.Background(), daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", ChildLog: "child.log",
+	})
+}
+
+// TestRunChild_ChildSurvivesDaemonSigkill asserts a Daemon killed outright
+// mid-run does not take its child down: the child writes straight to the
+// Child log, so nothing it writes can hit a pipe whose reader died.
+func TestRunChild_ChildSurvivesDaemonSigkill(t *testing.T) {
+	repo := t.TempDir()
+	done := filepath.Join(repo, "done")
+	gate := filepath.Join(repo, "gate")
+	logPath := filepath.Join(repo, "child.log")
+
+	helper := exec.Command(os.Args[0], "-test.run=^TestHelperDaemonSide$")
+	helper.Env = append(os.Environ(), daemonSideHelperEnv+"=1", daemonSideHelperEnv+"_DONE="+done, daemonSideHelperEnv+"_GATE="+gate, daemonSideHelperEnv+"_REPO="+repo)
+	helper.Stdout, helper.Stderr = io.Discard, io.Discard
+	if err := helper.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	t.Cleanup(func() { _ = helper.Process.Kill(); _ = helper.Wait() })
+	// The child sits in its own process group, out of the helper's kill, so
+	// release its gate on any early exit or it polls forever as an orphan.
+	t.Cleanup(func() { _ = os.WriteFile(gate, nil, 0o600) })
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if b, _ := os.ReadFile(logPath); strings.Contains(string(b), "first") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("child never wrote to the Child log")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := helper.Process.Kill(); err != nil {
+		t.Fatalf("kill helper: %v", err)
+	}
+	_ = helper.Wait()
+	// The child holds its second write until the Daemon is dead and reaped, so
+	// it always lands after the Daemon, which once read this output, is gone.
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline = time.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(done); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("child died with the Daemon before finishing")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	logged, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "first\nerr1\nsecond\nerr2\n"; string(logged) != want {
+		t.Errorf("Child log = %q, want %q", logged, want)
+	}
+}
+
 // TestRunChild_ChildLogUncreatableFallsBackToStderr asserts a Child log that
 // cannot be created costs the Dispatch nothing: one diagnostic line, then the
-// old stderr-only relay.
+// child's output on the daemon's own stderr descriptor.
 func TestRunChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
@@ -541,8 +620,8 @@ func TestRunChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
 }
 
 // runWithLingeringGrandchild runs RunChild against a fake child that
-// backgrounds a grandchild holding the tee pipe (fd 3 is closed for it so
-// only the tee pipe is in play), then exits with exitCode. The grandchild is
+// backgrounds a grandchild holding the Child log (fd 3 is closed for it so
+// the report pipe is not in play), then exits with exitCode. The grandchild is
 // killed on cleanup.
 func runWithLingeringGrandchild(t *testing.T, exitCode int) (daemon.ChildResult, time.Duration, error) {
 	t.Helper()
@@ -565,7 +644,6 @@ func runWithLingeringGrandchild(t *testing.T, exitCode int) (daemon.ChildResult,
 	})
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: dir, appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	r.childLogWaitDelay = 200 * time.Millisecond
 	readStderr := captureStderr(t)
 	start := time.Now()
 	result, err := r.RunChild(context.Background(), daemon.ChildRequest{
@@ -577,35 +655,22 @@ func runWithLingeringGrandchild(t *testing.T, exitCode int) (daemon.ChildResult,
 }
 
 // TestRunChild_ChildLogDoesNotWaitOnGrandchild asserts RunChild returns the
-// child's own exit once it exits, even when a grandchild still holds the tee
-// pipe open.
+// child's own exit, clean or not, once it exits, even when a grandchild still
+// holds the Child log open.
 func TestRunChild_ChildLogDoesNotWaitOnGrandchild(t *testing.T) {
-	result, d, err := runWithLingeringGrandchild(t, 3)
-	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
-	}
-	if result.Exit != 3 {
-		t.Errorf("Exit = %d, want 3", result.Exit)
-	}
-	if d > 10*time.Second {
-		t.Errorf("RunChild took %v, want it bounded by the wait delay", d)
-	}
-}
-
-// TestRunChild_ChildLogCleanExitWithGrandchild covers the exec.ErrWaitDelay
-// path: the child exits 0 while a grandchild holds the tee pipe, so Wait
-// returns ErrWaitDelay rather than an ExitError, and RunChild must still
-// report the child's clean exit.
-func TestRunChild_ChildLogCleanExitWithGrandchild(t *testing.T) {
-	result, d, err := runWithLingeringGrandchild(t, 0)
-	if err != nil {
-		t.Fatalf("RunChild() unexpected error: %v", err)
-	}
-	if result.Exit != 0 {
-		t.Errorf("Exit = %d, want 0", result.Exit)
-	}
-	if d > 10*time.Second {
-		t.Errorf("RunChild took %v, want it bounded by the wait delay", d)
+	for _, exitCode := range []int{3, 0} {
+		t.Run(fmt.Sprintf("exit%d", exitCode), func(t *testing.T) {
+			result, d, err := runWithLingeringGrandchild(t, exitCode)
+			if err != nil {
+				t.Fatalf("RunChild() unexpected error: %v", err)
+			}
+			if result.Exit != exitCode {
+				t.Errorf("Exit = %d, want %d", result.Exit, exitCode)
+			}
+			if d > 5*time.Second {
+				t.Errorf("RunChild took %v, want it prompt, not held by the grandchild", d)
+			}
+		})
 	}
 }
 
@@ -2813,29 +2878,5 @@ func TestRunDoctor_CapturesRequiredLabelsLine(t *testing.T) {
 	}
 	if exit != 4 || line != want {
 		t.Errorf("RunDoctor() = (%d, %q), want (4, %q)", exit, line, want)
-	}
-}
-
-type countingFailWriter struct{ calls int }
-
-func (w *countingFailWriter) Write(p []byte) (int, error) {
-	w.calls++
-	return 0, errors.New("disk full")
-}
-
-// TestLossyLog_SwallowsWriteErrors pins that a failing Child log never fails
-// the tee, so the child's output keeps reaching the daemon's stderr.
-func TestLossyLog_SwallowsWriteErrors(t *testing.T) {
-	fw := &countingFailWriter{}
-	readStderr := captureStderr(t)
-	l := &lossyLog{w: fw}
-	for range 2 {
-		if n, err := l.Write([]byte("abc")); n != 3 || err != nil {
-			t.Fatalf("Write() = %d, %v; want 3, nil", n, err)
-		}
-	}
-	_ = readStderr()
-	if fw.calls != 1 {
-		t.Errorf("underlying writes = %d, want 1 (stop after the first failure)", fw.calls)
 	}
 }
