@@ -106,6 +106,12 @@ type Issue struct {
 	// IssueTracker adapter from its own agent-priority-* labels. The sort that
 	// consumes it is not part of this type.
 	Priority Priority
+	// ClosedAt is when the issue closed; zero when open or when the adapter
+	// does not report it.
+	ClosedAt time.Time
+	// ClosedNotPlanned reports the tracker recorded the close as "not planned".
+	// Only github reports a close reason; every other adapter leaves it false.
+	ClosedNotPlanned bool
 }
 
 // Priority is the canonical dispatch priority (ADR 0040): Critical > High >

@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
@@ -2143,12 +2144,51 @@ esac`)
 			t.Fatal(err)
 		}
 		argv := string(raw)
-		if !strings.Contains(argv, "--json\nnumber,title,body,labels") {
+		if !strings.Contains(argv, "--json\nnumber,title,body,labels,stateReason,closedAt") {
 			t.Errorf("argv = %q, want body in --json fields", argv)
 		}
 		if !strings.Contains(argv, "--search\nsort:created-desc") {
 			t.Errorf("argv = %q, want sort:created-desc", argv)
 		}
+	}
+}
+
+// Closed findings carry the close facts the tuning cooldown needs: only a
+// NOT_PLANNED close sets ClosedNotPlanned, and a missing or unparsable
+// closedAt leaves ClosedAt zero (never expires) rather than failing the list.
+func TestExecClient_ListIssuesWithLabels_DecodesCloseFacts(t *testing.T) {
+	prependFakeGH(t, `printf '[`+
+		`{"number":1,"title":"a","body":"","labels":[],"stateReason":"NOT_PLANNED","closedAt":"2026-03-04T05:06:07Z"},`+
+		`{"number":2,"title":"b","body":"","labels":[],"stateReason":"COMPLETED","closedAt":"2026-03-04T05:06:07Z"},`+
+		`{"number":3,"title":"c","body":"","labels":[],"stateReason":"DUPLICATE","closedAt":null},`+
+		`{"number":4,"title":"d","body":"","labels":[],"stateReason":"NOT_PLANNED","closedAt":"garbage"},`+
+		`{"number":5,"title":"e","body":"","labels":[],"stateReason":"","closedAt":"0001-01-01T00:00:00Z"}`+
+		`]'`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-tuning-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	byNum := make(map[string]forge.Issue)
+	for _, iss := range issues {
+		byNum[iss.Number] = iss
+	}
+	want := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if g := byNum["1"]; !g.ClosedNotPlanned || !g.ClosedAt.Equal(want) {
+		t.Errorf("issue 1 = notPlanned %v closedAt %v, want true %v", g.ClosedNotPlanned, g.ClosedAt, want)
+	}
+	if g := byNum["2"]; g.ClosedNotPlanned || !g.ClosedAt.Equal(want) {
+		t.Errorf("issue 2 (COMPLETED) = notPlanned %v closedAt %v, want false %v", g.ClosedNotPlanned, g.ClosedAt, want)
+	}
+	if g := byNum["3"]; g.ClosedNotPlanned || !g.ClosedAt.IsZero() {
+		t.Errorf("issue 3 (DUPLICATE, null closedAt) = notPlanned %v closedAt %v, want false zero", g.ClosedNotPlanned, g.ClosedAt)
+	}
+	if g := byNum["4"]; !g.ClosedNotPlanned || !g.ClosedAt.IsZero() {
+		t.Errorf("issue 4 (bad closedAt) = notPlanned %v closedAt %v, want true zero", g.ClosedNotPlanned, g.ClosedAt)
+	}
+	if g := byNum["5"]; !g.ClosedAt.IsZero() {
+		t.Errorf("issue 5 (zero-time closedAt) = %v, want zero", g.ClosedAt)
 	}
 }
 

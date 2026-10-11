@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -35,18 +36,27 @@ type ghIssueRow struct {
 	Title  string    `json:"title"`
 	Body   string    `json:"body"`
 	Labels []ghLabel `json:"labels"`
+	// StateReason and ClosedAt are requested only by ListIssuesWithLabels.
+	// ClosedAt stays a string so a null or malformed value cannot fail the list.
+	StateReason string `json:"stateReason"`
+	ClosedAt    string `json:"closedAt"`
 }
 
 // toIssue converts a raw gh row to a forge.Issue, resolving Priority from the
 // row's own labels.
 func (r ghIssueRow) toIssue() forge.Issue {
 	names := labelNames(r.Labels)
+	// An unparsable closedAt stays zero, which downstream reads as "never
+	// expires" -- the conservative direction for a dedup cooldown.
+	closedAt, _ := time.Parse(time.RFC3339, r.ClosedAt)
 	return forge.Issue{
-		Number:   strconv.Itoa(r.Number),
-		Title:    r.Title,
-		Body:     r.Body,
-		Labels:   names,
-		Priority: forge.ResolvePriority(names),
+		Number:           strconv.Itoa(r.Number),
+		Title:            r.Title,
+		Body:             r.Body,
+		Labels:           names,
+		Priority:         forge.ResolvePriority(names),
+		ClosedAt:         closedAt,
+		ClosedNotPlanned: r.StateReason == "NOT_PLANNED",
 	}
 }
 
@@ -138,7 +148,7 @@ func (e *execClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 			"--label", label,
 			"--limit", strconv.Itoa(forge.DedupScanLimit),
 			"--search", "sort:created-desc",
-			"--json", "number,title,body,labels",
+			"--json", "number,title,body,labels,stateReason,closedAt",
 		)
 		out, err := cmd.Output()
 		if err != nil {
