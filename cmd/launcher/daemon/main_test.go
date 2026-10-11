@@ -218,6 +218,7 @@ func TestParseArgs(t *testing.T) {
 		wantKinds            []daemon.Kind
 		wantExplicitSelector bool
 		wantFeatureBranch    string
+		wantCheckOnly        bool
 		wantErr              bool
 	}{
 		{
@@ -299,6 +300,30 @@ func TestParseArgs(t *testing.T) {
 			wantFeatureBranch:    "feature-x",
 		},
 		{
+			name:                 "check-only before kind selector",
+			args:                 []string{"--input", "/tmp/in.json", "--check-only", "dispatch"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
+			wantExplicitSelector: true,
+			wantCheckOnly:        true,
+		},
+		{
+			name:                 "check-only after kind selector and feature branch",
+			args:                 []string{"--input", "/tmp/in.json", "dispatch", "--feature-branch", "feature-x", "--check-only"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
+			wantExplicitSelector: true,
+			wantFeatureBranch:    "feature-x",
+			wantCheckOnly:        true,
+		},
+		{
+			name:          "check-only first, with no selector",
+			args:          []string{"--check-only", "--input", "/tmp/in.json"},
+			wantPath:      "/tmp/in.json",
+			wantKinds:     []daemon.Kind{daemon.KindOf(dispatchkind.Work), daemon.KindOf(dispatchkind.Research), daemon.KindOf(dispatchkind.Butler), daemon.KindOf(dispatchkind.Recover)},
+			wantCheckOnly: true,
+		},
+		{
 			name:    "--feature-branch with no value",
 			args:    []string{"--input", "/tmp/in.json", "--feature-branch"},
 			wantErr: true,
@@ -338,8 +363,8 @@ func TestParseArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs(%v) unexpected error: %v", tt.args, err)
 			}
-			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.ExplicitSelector != tt.wantExplicitSelector || got.FeatureBranch != tt.wantFeatureBranch {
-				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v ExplicitSelector:%v FeatureBranch:%q}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantExplicitSelector, tt.wantFeatureBranch)
+			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.ExplicitSelector != tt.wantExplicitSelector || got.FeatureBranch != tt.wantFeatureBranch || got.CheckOnly != tt.wantCheckOnly {
+				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v ExplicitSelector:%v FeatureBranch:%q CheckOnly:%v}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantExplicitSelector, tt.wantFeatureBranch, tt.wantCheckOnly)
 			}
 		})
 	}
@@ -837,6 +862,120 @@ func TestMainRun_BadDaemonIdleCapFailsStartup(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "DAEMON_IDLE_CAP") || !strings.Contains(stderr.String(), "DAEMON_IDLE_FLOOR") {
 		t.Errorf("stderr = %q, want it to name both DAEMON_IDLE_CAP and DAEMON_IDLE_FLOOR", stderr.String())
+	}
+}
+
+// checkOnlyNoNetworkT fails the test if the daemon reaches any process seam
+// (doctor, git fetch, exec, eval) that --check-only must never touch. The gh
+// demand probe and the token-refresh goroutine have no seam, so the early
+// return's position in mainRun (before them) is what keeps them out.
+func checkOnlyNoNetworkT(t *testing.T) {
+	t.Helper()
+	origDoctor, origFetch := runnerDoctorCommand, runnerFetchCommand
+	origExec, origEval := runnerExecCommand, runnerEvalCommand
+	t.Cleanup(func() {
+		runnerDoctorCommand, runnerFetchCommand = origDoctor, origFetch
+		runnerExecCommand, runnerEvalCommand = origExec, origEval
+	})
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		t.Errorf("--check-only exec'd: %s %v", name, args)
+		return exec.Command("/bin/sh", "-c", "exit 1")
+	}
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		t.Errorf("--check-only evaluated: %s %v", name, args)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+	runnerDoctorCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		t.Errorf("--check-only ran doctor: %s %v", name, args)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		t.Errorf("--check-only fetched: %s %v", name, args)
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+}
+
+// TestMainRun_CheckOnlyValidConfigExitsZero: --check-only parses the input
+// document, validates the config, and exits 0 without doctor, fetch, or a
+// single event on stdout (the machine-readable stream).
+func TestMainRun_CheckOnlyValidConfigExitsZero(t *testing.T) {
+	clearKnobEnvT(t)
+	checkOnlyNoNetworkT(t)
+	docPath := writeInputDocT(t, map[string]string{
+		"DAEMON_APP":   ".#dogfood",
+		"BASE_BRANCH":  "main",
+		"MAX_PARALLEL": "1",
+	})
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", docPath, "--check-only", "dispatch"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("mainRun() = %d, want 0; stderr = %q", got, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+// TestMainRun_CheckOnlyIgnoresHeldLock: a freshly built successor runs
+// --check-only beside the live daemon that holds the instance lock, so it
+// must not take it.
+func TestMainRun_CheckOnlyIgnoresHeldLock(t *testing.T) {
+	inputPath := lockedCheckoutT(t)
+	checkOnlyNoNetworkT(t)
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", inputPath, "--check-only"}, &stdout, &stderr)
+	if got != 0 {
+		t.Fatalf("mainRun() = %d, want 0; stderr = %q", got, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "halt") {
+		t.Errorf("stdout = %q, want no halt event", stdout.String())
+	}
+}
+
+// TestMainRun_CheckOnlyBadConfigMatchesRealStart: a bad config fails
+// --check-only with the same diagnostic a real start prints.
+func TestMainRun_CheckOnlyBadConfigMatchesRealStart(t *testing.T) {
+	clearKnobEnvT(t)
+	docPath := writeInputDocT(t, map[string]string{
+		"DAEMON_APP":        ".#dogfood",
+		"BASE_BRANCH":       "main",
+		"MAX_PARALLEL":      "1",
+		"DAEMON_IDLE_FLOOR": "5m",
+		"DAEMON_IDLE_CAP":   "1m",
+	})
+
+	var realOut, realErr, checkOut, checkErr bytes.Buffer
+	if got := mainRun([]string{"--input", docPath, "dispatch"}, &realOut, &realErr); got != 1 {
+		t.Fatalf("real start mainRun() = %d, want 1", got)
+	}
+	if got := mainRun([]string{"--input", docPath, "dispatch", "--check-only"}, &checkOut, &checkErr); got != 1 {
+		t.Fatalf("--check-only mainRun() = %d, want 1", got)
+	}
+	if checkErr.String() != realErr.String() {
+		t.Errorf("--check-only stderr = %q, want the real start's %q", checkErr.String(), realErr.String())
+	}
+}
+
+// TestMainRun_CheckOnlyMissingInputDocument: an unreadable --input fails
+// --check-only with the same diagnostic a real start prints.
+func TestMainRun_CheckOnlyMissingInputDocument(t *testing.T) {
+	checkOnlyNoNetworkT(t)
+	missing := filepath.Join(t.TempDir(), "does-not-exist.json")
+
+	var realOut, realErr, checkOut, checkErr bytes.Buffer
+	if got := mainRun([]string{"--input", missing}, &realOut, &realErr); got != 1 {
+		t.Fatalf("real start mainRun() = %d, want 1", got)
+	}
+	if got := mainRun([]string{"--input", missing, "--check-only"}, &checkOut, &checkErr); got != 1 {
+		t.Fatalf("--check-only mainRun() = %d, want 1", got)
+	}
+	if checkErr.String() != realErr.String() {
+		t.Errorf("--check-only stderr = %q, want the real start's %q", checkErr.String(), realErr.String())
+	}
+	if !strings.Contains(checkErr.String(), "read input document") {
+		t.Errorf("stderr = %q, want it to mention the unreadable input document", checkErr.String())
 	}
 }
 
