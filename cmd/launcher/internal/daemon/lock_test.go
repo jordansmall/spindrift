@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
+	"spindrift.dev/launcher/internal/flock"
 )
 
 // TestAcquireCheckoutLock_SucceedsThroughMomentarySharedProbe pins the
@@ -234,5 +236,108 @@ func TestAcquireCheckoutLock_ReleasedAfterHolderKilled(t *testing.T) {
 		t.Fatalf("AcquireCheckoutLock after holder killed: unexpected error: %v", err)
 	case <-time.After(10 * time.Second):
 		t.Fatalf("timed out waiting to acquire lock after holder killed")
+	}
+}
+
+// dupFD returns a descriptor sharing f's open file description, as the exec
+// step hands one across: flock belongs to the description, so the dup holds
+// the lock f holds.
+func dupFD(t *testing.T, f *os.File) int {
+	t.Helper()
+	fd, err := syscall.Dup(int(f.Fd()))
+	if err != nil {
+		t.Fatalf("dup: %v", err)
+	}
+	return fd
+}
+
+func TestInheritCheckoutLock_InheritedDescriptorClaimsItsCheckout(t *testing.T) {
+	dir := t.TempDir()
+	held, err := AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Work)})
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	inherited, err := InheritCheckoutLock(dupFD(t, held.File()))
+	if err != nil {
+		t.Fatalf("InheritCheckoutLock on a dup of the held lock: %v", err)
+	}
+	if err := inherited.Claim(dir); err != nil {
+		t.Fatalf("Claim of the checkout it locks: %v", err)
+	}
+
+	// The old image's descriptor is gone after a real exec; closing it here
+	// must not release the lock the inherited description still holds.
+	_ = held.file.Close()
+	if _, err := AcquireCheckoutLock(dir, nil); err == nil {
+		t.Fatal("fresh acquire succeeded while the inherited lock is held")
+	}
+	if err := inherited.Release(); err != nil {
+		t.Fatalf("release inherited lock: %v", err)
+	}
+	fresh, err := AcquireCheckoutLock(dir, nil)
+	if err != nil {
+		t.Fatalf("acquire after releasing the inherited lock: %v", err)
+	}
+	_ = fresh.Release()
+}
+
+func TestInheritCheckoutLock_ClaimRefusesAnotherCheckoutsLock(t *testing.T) {
+	dirA, dirB := t.TempDir(), t.TempDir()
+	held, err := AcquireCheckoutLock(dirA, nil)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer held.Release()
+	if err := os.WriteFile(filepath.Join(dirB, checkoutLockFileName), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inherited, err := InheritCheckoutLock(dupFD(t, held.File()))
+	if err != nil {
+		t.Fatalf("InheritCheckoutLock: %v", err)
+	}
+	err = inherited.Claim(dirB)
+	if err == nil {
+		t.Fatal("Claim of a checkout the descriptor does not lock succeeded")
+	}
+	if !strings.Contains(err.Error(), filepath.Join(dirB, checkoutLockFileName)) {
+		t.Errorf("Claim error = %v, want it to name the checkout's lock file", err)
+	}
+}
+
+func TestInheritCheckoutLock_RefusesAFileLockedByAnotherDescription(t *testing.T) {
+	dir := t.TempDir()
+	held, err := AcquireCheckoutLock(dir, nil)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	defer held.Release()
+	other, err := os.Open(filepath.Join(dir, checkoutLockFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Close()
+
+	_, err = InheritCheckoutLock(int(other.Fd()))
+	if !errors.Is(err, flock.ErrHeld) {
+		t.Fatalf("InheritCheckoutLock = %v, want flock.ErrHeld", err)
+	}
+	if _, serr := other.Stat(); serr != nil {
+		t.Errorf("refused descriptor was closed: %v", serr)
+	}
+}
+
+func TestInheritCheckoutLock_RefusesNonRegularFileAndLeavesItOpen(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+
+	if _, err := InheritCheckoutLock(int(r.Fd())); err == nil {
+		t.Fatal("InheritCheckoutLock accepted a pipe")
+	}
+	if _, err := r.Stat(); err != nil {
+		t.Errorf("refused descriptor was closed: %v", err)
 	}
 }
