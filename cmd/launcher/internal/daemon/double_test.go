@@ -133,6 +133,12 @@ type scriptedRunner struct {
 	// handles: each held child's latest handle by slot, for a test to Wait on
 	// again after the pool abandoned its wait.
 	handles map[int]*scriptedHandle
+	// inherits records InheritChild calls; exited maps a pid to the exit of a
+	// child that finished while the handoff was in flight (InheritChild returns
+	// an already-done handle for it); inheritErr fails the seam itself.
+	inherits   []inheritCall
+	exited     map[int]ChildResult
+	inheritErr error
 }
 
 // holdSlots switches the child into blocking mode for slots 0..n-1: each
@@ -521,39 +527,103 @@ func (r *scriptedRunner) StartChild(ctx context.Context, req ChildRequest) (Chil
 	}
 
 	if release != nil {
-		ch := release[req.Slot]
-		if ch == nil {
-			// A nil receive in Wait blocks forever, unlike awaitStart/
-			// awaitSleep's explicit five-second bound; fail the call
-			// instead of hanging the test on a slot outside holdSlots' range.
-			end()
-			return nil, fmt.Errorf("scriptedRunner: StartChild: slot %d out of holdSlots range", req.Slot)
-		}
-		if started != nil {
-			started <- req.Slot
-		}
-		h := &scriptedHandle{end: end, release: ch}
-		r.mu.Lock()
-		if r.handles == nil {
-			r.handles = make(map[int]*scriptedHandle)
-		}
-		r.handles[req.Slot] = h
-		r.mu.Unlock()
-		return h, nil
+		return r.heldHandle(req, release, started, end)
 	}
 
 	if r.runErrAt != 0 && total == r.runErrAt {
 		end()
 		return nil, r.runErr
 	}
+	return r.scriptedDone(req, total, kindIdx, end), nil
+}
+
+// heldHandle is the holdSlots child: it ends when its slot's result arrives.
+func (r *scriptedRunner) heldHandle(req ChildRequest, release map[int]chan ChildResult, started chan int, end func()) (ChildHandle, error) {
+	ch := release[req.Slot]
+	if ch == nil {
+		// A nil receive in Wait blocks forever, unlike awaitStart/
+		// awaitSleep's explicit five-second bound; fail the call
+		// instead of hanging the test on a slot outside holdSlots' range.
+		end()
+		return nil, fmt.Errorf("scriptedRunner: StartChild: slot %d out of holdSlots range", req.Slot)
+	}
+	if started != nil {
+		started <- req.Slot
+	}
+	h := &scriptedHandle{end: end, release: ch}
+	r.mu.Lock()
+	if r.handles == nil {
+		r.handles = make(map[int]*scriptedHandle)
+	}
+	r.handles[req.Slot] = h
+	r.mu.Unlock()
+	return h, nil
+}
+
+// scriptedDone is the already-finished child the byKind/results scripting
+// picks for call number total (1-based) and per-kind index kindIdx.
+func (r *scriptedRunner) scriptedDone(req ChildRequest, total, kindIdx int, end func()) *scriptedHandle {
 	var waitErr error
 	if r.waitErrAt != 0 && total == r.waitErrAt {
 		waitErr = r.waitErr
 	}
 	if list, ok := r.byKind[req.Kind]; ok {
-		return &scriptedHandle{end: end, res: pickScripted(list, kindIdx), done: true, err: waitErr}, nil
+		return &scriptedHandle{end: end, res: pickScripted(list, kindIdx), done: true, err: waitErr}
 	}
-	return &scriptedHandle{end: end, res: pickScripted(r.results, total-1), done: true, err: waitErr}, nil
+	return &scriptedHandle{end: end, res: pickScripted(r.results, total-1), done: true, err: waitErr}
+}
+
+// InheritChild rebuilds the handle of a child an earlier daemon image started.
+// It registers req.OnRecord and counts in flight like StartChild, then picks
+// the handle by pid: exited[pid] is a child that finished while the handoff was
+// in flight; otherwise a held slot gets a held handle and anything else the
+// next scripted result.
+func (r *scriptedRunner) InheritChild(ctx context.Context, req ChildRequest, child ChildState) (ChildHandle, error) {
+	r.mu.Lock()
+	r.inherits = append(r.inherits, inheritCall{Kind: req.Kind, Revision: req.Revision, Slot: req.Slot, PID: child.PID})
+	total := len(r.runCalls) + len(r.inherits)
+	if r.kindCalls == nil {
+		r.kindCalls = make(map[Kind]int)
+	}
+	kindIdx := r.kindCalls[req.Kind]
+	r.kindCalls[req.Kind]++
+	if r.onRecord == nil {
+		r.onRecord = make(map[int]func(Record))
+	}
+	r.onRecord[req.Slot] = req.OnRecord
+	r.inFlight++
+	if r.inFlight > r.peak {
+		r.peak = r.inFlight
+	}
+	release := r.release
+	started := r.started
+	exited, hasExit := r.exited[child.PID]
+	inheritErr := r.inheritErr
+	r.mu.Unlock()
+
+	end := func() {
+		r.mu.Lock()
+		r.inFlight--
+		r.mu.Unlock()
+	}
+	if inheritErr != nil {
+		end()
+		return nil, inheritErr
+	}
+	if hasExit {
+		return &scriptedHandle{end: end, res: exited, done: true}, nil
+	}
+	if release != nil {
+		return r.heldHandle(req, release, started, end)
+	}
+	return r.scriptedDone(req, total, kindIdx, end), nil
+}
+
+// inheritCalls returns a copy of every recorded InheritChild call, in order.
+func (r *scriptedRunner) inheritCalls() []inheritCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.inherits)
 }
 
 // run is StartChild then Wait(nil), for tests that drive the double directly
@@ -1382,4 +1452,53 @@ func (r *scriptedRunner) prebuilds() []Tip {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.prebuildTips)
+}
+
+// inheritCall is one recorded InheritChild call.
+type inheritCall struct {
+	Kind     Kind
+	Revision string
+	Slot     int
+	PID      int
+}
+
+func TestScriptedRunnerInheritChildExitedByPID(t *testing.T) {
+	r := &scriptedRunner{
+		results: []ChildResult{{Exit: 2}},
+		exited:  map[int]ChildResult{42: {Exit: 9}},
+	}
+	var got []Record
+	req := ChildRequest{Slot: 1, Kind: KindOf(dispatchkind.Work), Revision: "r1", OnRecord: func(rec Record) { got = append(got, rec) }}
+
+	h, err := r.InheritChild(context.Background(), req, ChildState{PID: 42})
+	if err != nil {
+		t.Fatalf("InheritChild: %v", err)
+	}
+	if res, err := h.Wait(nil); err != nil || res.Exit != 9 {
+		t.Fatalf("Wait = (%+v, %v), want exit 9", res, err)
+	}
+	want := []inheritCall{{Kind: KindOf(dispatchkind.Work), Revision: "r1", Slot: 1, PID: 42}}
+	if calls := r.inheritCalls(); !slices.Equal(calls, want) {
+		t.Fatalf("inheritCalls = %+v, want %+v", calls, want)
+	}
+
+	r.mu.Lock()
+	push := r.onRecord[1]
+	r.mu.Unlock()
+	if push == nil {
+		t.Fatal("OnRecord not registered for the inherited slot")
+	}
+	push(Record{Event: "box"})
+	if len(got) != 1 {
+		t.Fatalf("records delivered = %d, want 1", len(got))
+	}
+
+	// A pid with no scripted exit takes the next scripted result.
+	h, err = r.InheritChild(context.Background(), ChildRequest{Slot: 0, Kind: KindOf(dispatchkind.Work)}, ChildState{PID: 7})
+	if err != nil {
+		t.Fatalf("InheritChild: %v", err)
+	}
+	if res, _ := h.Wait(nil); res.Exit != 2 {
+		t.Fatalf("exit = %d, want 2 (scripted result)", res.Exit)
+	}
 }

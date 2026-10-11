@@ -276,6 +276,10 @@ func (r *wiringRunner) StartChild(_ context.Context, req daemon.ChildRequest) (d
 	return doneHandle{}, nil
 }
 
+func (r *wiringRunner) InheritChild(context.Context, daemon.ChildRequest, daemon.ChildState) (daemon.ChildHandle, error) {
+	return doneHandle{}, nil
+}
+
 // TestRecoverOutboxDemand_DrivesTheLoopThroughTheDaemonWiring assembles the
 // pool Config from the same buildDemandSources, probeIntervals and trackers
 // calls mainRun makes, over a real temp outbox, and checks the schedule: no

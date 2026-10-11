@@ -93,6 +93,11 @@ type Runner interface {
 	// a tracker counter ignores it.
 	Demand(ctx context.Context, kind Kind, fresh bool, inFlight dispatchkey.Set) (Demand, error)
 	StartChild(ctx context.Context, req ChildRequest) (ChildHandle, error)
+	// InheritChild rebuilds the handle of a child an earlier daemon image
+	// started and handed off (ADR 0063). The handle behaves exactly as
+	// StartChild's: records through req.OnRecord, Stop/Abort forwarding,
+	// Wait and abandon.
+	InheritChild(ctx context.Context, req ChildRequest, child ChildState) (ChildHandle, error)
 	// Prebuild realises tip.SelfPath with a GC root and smoke-tests it (the
 	// new daemon run with --check-only), so a self-change halt only ever
 	// hands the service manager a build already known to start. Only called
@@ -647,131 +652,149 @@ slotLoop:
 			// to hold the baton for. A no-op when this slot does not hold it.
 			p.passBaton(slot, batonPassChoreKeyed)
 		}
-		req := ChildRequest{
-			Slot:     slot,
-			Kind:     kind,
-			Revision: revision,
-			Stop:     cfg.Stop,
-			Abort:    cfg.Abort,
-			ChildLog: childLog,
-			OnRecord: func(rec Record) {
-				switch rec.Event {
-				case report.EventBox:
-					p.noteBox(slot, kind, revision, rec)
-					// A claim settles discovery the moment it happens, live,
-					// rather than waiting for this child to exit.
-					p.passBaton(slot, batonPassClaimed)
-				case report.EventModel:
-					p.noteModel(slot, kind, revision, rec)
-				case report.EventCIWait:
-					p.noteCIWait(slot, rec)
-				case report.EventSettled:
-					p.noteSettled(slot, kind, revision, rec)
-				case report.EventNotDue:
-					p.noteNotDue(slot, rec)
-				}
-				// No default clause: an event this switch hasn't been
-				// taught yet is silently ignored. ParseRecord already
-				// dropped a genuinely unknown event upstream (record.go),
-				// so only a known-but-unhandled Event value can reach
-				// this switch and fall through unmatched.
-			},
-		}
+		req := p.childRequest(slot, kind, revision, childLog)
 		handle, err := p.r.StartChild(ctx, req)
-		var result ChildResult
-		if err == nil {
-			result, err = handle.Wait(cfg.abandonWaits)
-			if errors.Is(err, ErrWaitAbandoned) {
-				// The child is still running and its flight stays in place for
-				// the handoff: no child_finish, and not a failure.
-				return
-			}
-		}
-		// Read under the pool lock, and before finishChild zeroes the
-		// slot's flight: this is the only place the key (issue or Chore)
-		// the child claimed is still available at all.
-		key := p.flightClaim(slot)
-		flight := p.flightReport(slot)
-		p.finishChild(slot)
-		// Every post-child exit without a claim passes the baton, but only
-		// after the round's halt decision: Continue/Wait pass ChildEnded
-		// explicitly, failure paths pass in backoffOrHalt past the breaker
-		// check, HaltPool relies on the deferred batonPassStopped after
-		// p.halt. A pass is a no-op once a box record released the baton.
-		// A pass before a HaltPool or breaker halt lands would let a parked
-		// sibling start a child on a pool about to stop (issue #4365).
-		// child_finish still precedes the halt. Continue/Wait pass after
-		// folding the result into the kind's backoff state too, so a woken
-		// sibling's Decide never sees a gate this child already earned
-		// as still open (issue #4380).
-		if err != nil {
-			// The seam failed, not the child (e.g. it could not even be
-			// started), so there is no exit code to report — but a
-			// child_start was already emitted, and every started child
-			// gets a matching child_finish so the stream never shows one
-			// without the other. Every box/settled record the child
-			// reported before this failure already reached the stream live
-			// through OnRecord, so there is nothing left to replay here.
-			p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err), batonPassChildEnded) {
-				return
-			}
-			continue
-		}
-
-		exit := result.Exit
-		// Exit 7 means "the operator stopped this child" only while Stop
-		// was already closed when the child exited; read the latch once,
-		// here, rather than let a later close race Interpret's answer.
-		outcome, action, haltClass := Interpret(exit, p.stopClosed())
-		p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
-
-		switch action {
-		case Continue:
-			// Exit 0 (dispatched) or exit 4 (image-stale): the check
-			// answered something other than "nothing to do", so whatever
-			// streak of no-work checks this kind's backoff was tracking is
-			// over. The other kind's own timer, if any, is untouched.
-			p.resetKind(kind)
-			p.passBaton(slot, batonPassChildEnded)
-			continue
-		case Wait:
-			if !cfg.Awake.Open(p.clk.Now()) {
-				// The window closed while the child ran, so this wait is
-				// the window's, not the idle backoff's: recording a no-work
-				// result here would spend a backoff step on a span the shut
-				// window already covers. awaitWindow, at the top, parks the
-				// whole remaining span in one sleep instead, and this kind's
-				// idle streak stays untouched so it resumes where it left
-				// off.
-				p.passBaton(slot, batonPassChildEnded)
-				continue
-			}
-			// noteWaitResult records the no-work result and decides the
-			// jam-vs-idle predicate together, in one mutate — see its own
-			// doc for why the two must not be read from two different
-			// instants.
-			p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable, flight)
-			p.passBaton(slot, batonPassChildEnded)
-			// No sleep here: this kind is now gated until its gate
-			// deadline, and the top of the loop's Decide/idleSleep decides
-			// whether that means switching to the other kind at once or
-			// genuinely idling.
-			continue
-		case Backoff:
-			if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit), batonPassChildEnded) {
-				return
-			}
-			continue
-		default: // HaltPool
-			// haltClass is never HaltNone here: Interpret's one table ties
-			// action == HaltPool to a real class, pinned by
-			// TestInterpret_HaltPoolIffHaltClassSet.
-			// No baton pass before the halt: the deferred batonPassStopped
-			// runs after it.
-			p.halt(Halt{Class: haltClass, Kind: kind, Revision: revision})
+		if p.superviseChild(ctx, slot, kind, revision, handle, err) {
 			return
 		}
+	}
+}
+
+// childRequest builds the request for a child of kind pinned to revision on
+// slot, wiring its live records into the pool's bookkeeping.
+func (p *pool) childRequest(slot int, kind Kind, revision, childLog string) ChildRequest {
+	cfg := p.cfg
+	return ChildRequest{
+		Slot:     slot,
+		Kind:     kind,
+		Revision: revision,
+		Stop:     cfg.Stop,
+		Abort:    cfg.Abort,
+		ChildLog: childLog,
+		OnRecord: func(rec Record) {
+			switch rec.Event {
+			case report.EventBox:
+				p.noteBox(slot, kind, revision, rec)
+				// A claim settles discovery the moment it happens, live,
+				// rather than waiting for this child to exit.
+				p.passBaton(slot, batonPassClaimed)
+			case report.EventModel:
+				p.noteModel(slot, kind, revision, rec)
+			case report.EventCIWait:
+				p.noteCIWait(slot, rec)
+			case report.EventSettled:
+				p.noteSettled(slot, kind, revision, rec)
+			case report.EventNotDue:
+				p.noteNotDue(slot, rec)
+			}
+			// No default clause: an event this switch hasn't been
+			// taught yet is silently ignored. ParseRecord already
+			// dropped a genuinely unknown event upstream (record.go),
+			// so only a known-but-unhandled Event value can reach
+			// this switch and fall through unmatched.
+		},
+	}
+}
+
+// superviseChild waits out a child on slot and carries its outcome through the
+// pool's bookkeeping: the flight, the baton, the kind's backoff state and any
+// halt. handle and err are StartChild's (or InheritChild's) results. It
+// reports whether the slot must stop (true) or loop around to its next round.
+func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision string, handle ChildHandle, err error) bool {
+	cfg := p.cfg
+	var result ChildResult
+	if err == nil {
+		result, err = handle.Wait(cfg.abandonWaits)
+		if errors.Is(err, ErrWaitAbandoned) {
+			// The child is still running and its flight stays in place for
+			// the handoff: no child_finish, and not a failure.
+			return true
+		}
+	}
+	// Read under the pool lock, and before finishChild zeroes the
+	// slot's flight: this is the only place the key (issue or Chore)
+	// the child claimed is still available at all.
+	key := p.flightClaim(slot)
+	flight := p.flightReport(slot)
+	p.finishChild(slot)
+	// Every post-child exit without a claim passes the baton, but only
+	// after the round's halt decision: Continue/Wait pass ChildEnded
+	// explicitly, failure paths pass in backoffOrHalt past the breaker
+	// check, HaltPool relies on the deferred batonPassStopped after
+	// p.halt. A pass is a no-op once a box record released the baton.
+	// A pass before a HaltPool or breaker halt lands would let a parked
+	// sibling start a child on a pool about to stop (issue #4365).
+	// child_finish still precedes the halt. Continue/Wait pass after
+	// folding the result into the kind's backoff state too, so a woken
+	// sibling's Decide never sees a gate this child already earned
+	// as still open (issue #4380).
+	if err != nil {
+		// The seam failed, not the child (e.g. it could not even be
+		// started), so there is no exit code to report — but a
+		// child_start was already emitted, and every started child
+		// gets a matching child_finish so the stream never shows one
+		// without the other. Every box/settled record the child
+		// reported before this failure already reached the stream live
+		// through OnRecord, so there is nothing left to replay here.
+		p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
+		if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err), batonPassChildEnded) {
+			return true
+		}
+		return false
+	}
+
+	exit := result.Exit
+	// Exit 7 means "the operator stopped this child" only while Stop
+	// was already closed when the child exited; read the latch once,
+	// here, rather than let a later close race Interpret's answer.
+	outcome, action, haltClass := Interpret(exit, p.stopClosed())
+	p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Exit: &exit, Outcome: outcome, Slot: intPtr(slot)})
+
+	switch action {
+	case Continue:
+		// Exit 0 (dispatched) or exit 4 (image-stale): the check
+		// answered something other than "nothing to do", so whatever
+		// streak of no-work checks this kind's backoff was tracking is
+		// over. The other kind's own timer, if any, is untouched.
+		p.resetKind(kind)
+		p.passBaton(slot, batonPassChildEnded)
+		return false
+	case Wait:
+		if !cfg.Awake.Open(p.clk.Now()) {
+			// The window closed while the child ran, so this wait is
+			// the window's, not the idle backoff's: recording a no-work
+			// result here would spend a backoff step on a span the shut
+			// window already covers. awaitWindow, at the top, parks the
+			// whole remaining span in one sleep instead, and this kind's
+			// idle streak stays untouched so it resumes where it left
+			// off.
+			p.passBaton(slot, batonPassChildEnded)
+			return false
+		}
+		// noteWaitResult records the no-work result and decides the
+		// jam-vs-idle predicate together, in one mutate — see its own
+		// doc for why the two must not be read from two different
+		// instants.
+		p.noteWaitResult(slot, kind, revision, outcome == outcomeNoneDispatchable, flight)
+		p.passBaton(slot, batonPassChildEnded)
+		// No sleep here: this kind is now gated until its gate
+		// deadline, and the top of the loop's Decide/idleSleep decides
+		// whether that means switching to the other kind at once or
+		// genuinely idling.
+		return false
+	case Backoff:
+		if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit), batonPassChildEnded) {
+			return true
+		}
+		return false
+	default: // HaltPool
+		// haltClass is never HaltNone here: Interpret's one table ties
+		// action == HaltPool to a real class, pinned by
+		// TestInterpret_HaltPoolIffHaltClassSet.
+		// No baton pass before the halt: the deferred batonPassStopped
+		// runs after it.
+		p.halt(Halt{Class: haltClass, Kind: kind, Revision: revision})
+		return true
 	}
 }
 
