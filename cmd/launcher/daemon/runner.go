@@ -489,6 +489,12 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 	return nil
 }
 
+// InheritChild is not wired yet: re-attaching a handed-off child (validating
+// its pid and pipe, rebuilding a hostChildHandle) is issue #5015.
+func (r *hostRunner) InheritChild(context.Context, daemon.ChildRequest, daemon.ChildState) (daemon.ChildHandle, error) {
+	return nil, errors.New("re-attaching an inherited child is not supported yet")
+}
+
 func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildHandle, error) {
 	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath:      r.repoPath,
