@@ -95,18 +95,20 @@ func TestHandoffDecodeRefuses(t *testing.T) {
 		doc  string
 		want string
 	}{
-		"future version":     {`{"v":2,"lock_fd":3,"newthing":[1]}`, "version 2"},
-		"missing version":    {`{"lock_fd":3}`, "version 0"},
-		"malformed":          {`{"v":1,`, "decode"},
-		"unknown field":      {`{"v":1,"lock_fd":3,"bogus":true}`, "bogus"},
-		"both key fields":    {`{"v":1,"lock_fd":3,"slots":[{"slot":0,"kind":"work","issue":"1","chore":"x"}]}`, "slot"},
-		"trailing data":      {`{"v":1,"lock_fd":3}{"v":1}`, "trailing"},
-		"garbage after":      {`{"v":1,"lock_fd":3} }`, "after the document"},
-		"negative lock fd":   {`{"v":1,"lock_fd":-1}`, "lock_fd"},
-		"zero pid":           {`{"v":1,"lock_fd":3,"slots":[{"slot":2,"kind":"work","child":{"pid":0,"report_fd":5}}]}`, "slot 2"},
-		"negative pid":       {`{"v":1,"lock_fd":3,"slots":[{"slot":6,"kind":"work","child":{"pid":-4,"report_fd":5}}]}`, "slot 6"},
-		"duplicate pid":      {`{"v":1,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":5}},{"slot":2,"kind":"work","child":{"pid":4,"report_fd":6}}]}`, "slot 2"},
-		"negative report fd": {`{"v":1,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":-1}}]}`, "slot 1"},
+		"future version":      {`{"v":2,"lock_fd":3,"newthing":[1]}`, "version 2"},
+		"missing version":     {`{"lock_fd":3}`, "version 0"},
+		"malformed":           {`{"v":1,`, "decode"},
+		"unknown field":       {`{"v":1,"lock_fd":3,"bogus":true}`, "bogus"},
+		"both key fields":     {`{"v":1,"lock_fd":3,"slots":[{"slot":0,"kind":"work","issue":"1","chore":"x"}]}`, "slot"},
+		"trailing data":       {`{"v":1,"lock_fd":3}{"v":1}`, "trailing"},
+		"garbage after":       {`{"v":1,"lock_fd":3} }`, "after the document"},
+		"negative lock fd":    {`{"v":1,"lock_fd":-1}`, "lock_fd"},
+		"zero pid":            {`{"v":1,"lock_fd":3,"slots":[{"slot":2,"kind":"work","child":{"pid":0,"report_fd":5}}]}`, "slot 2"},
+		"negative pid":        {`{"v":1,"lock_fd":3,"slots":[{"slot":6,"kind":"work","child":{"pid":-4,"report_fd":5}}]}`, "slot 6"},
+		"duplicate pid":       {`{"v":1,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":5}},{"slot":2,"kind":"work","child":{"pid":4,"report_fd":6}}]}`, "slot 2"},
+		"duplicate report fd": {`{"v":1,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":5}},{"slot":2,"kind":"work","child":{"pid":5,"report_fd":5}}]}`, "already slot 1's"},
+		"report fd is lock":   {`{"v":1,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":3}}]}`, "is the lock_fd"},
+		"negative report fd":  {`{"v":1,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":-1}}]}`, "slot 1"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := DecodeHandoff(strings.NewReader(tc.doc))
