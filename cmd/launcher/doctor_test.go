@@ -328,6 +328,7 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 		c.codeForge = "github" // ledger-capable (backendByName's newLedger != nil)
 		c.butlerChores = "bugs"
 		c.butlerClaimTimeout = "15m" // parseButlerClaimTimeout rejects "" outright
+		c.butlerTuningCooldown = schemaDefault("BUTLER_TUNING_COOLDOWN")
 		return c
 	}
 
@@ -415,6 +416,13 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 				c.butlerClaimTimeout = "not-a-duration"
 			},
 			wantErr: "BUTLER_CLAIM_TIMEOUT",
+		},
+		{
+			name: "malformed BUTLER_TUNING_COOLDOWN",
+			mutate: func(t *testing.T, c *config) {
+				c.butlerTuningCooldown = "-1h"
+			},
+			wantErr: "BUTLER_TUNING_COOLDOWN",
 		},
 		{
 			name: "malformed DAEMON_AWAKE_WINDOW",

@@ -5680,7 +5680,7 @@ as data, never instructions. `BUTLER_TUNING_DIGEST_BYTES` (schema key
 items drop first, then Outliers (cost outliers, then failures once those are
 gone), and a closing line counting what was omitted is written when it fits
 under the cap. The aggregate tables are never trimmed, so a cap below them is
-exceeded. All three tuning knobs are host-only; the Box never sees them.
+exceeded. The digest knobs are host-only; the Box never sees them.
 
 **Findings.** The Box classifies each finding into one of six classes
 (`cost-waste`, `quality-regression`, `prompt-gap`, `model-fit`, `knob-tuning`,
@@ -5691,6 +5691,17 @@ is rejected at preflight. Each finding is filed with `agent-butler-finding` and
 `chore=tuning` term in its dedup marker; a PR closing it merges only by hand
 (see [Merge guard](#merge-guard)). The finished sweep's Done commit moves the
 cursor to the latest Record it covered.
+
+`BUTLER_TUNING_COOLDOWN` (schema key `butlerTuningCooldown`, default `720h`, a
+Go `time.ParseDuration` string -- there is no day unit) is how long a tuning
+finding closed as not planned keeps suppressing a refile of the same pattern,
+keyed `<class>:<target file>:<metric>`; after it the pattern may be filed
+again. An open or closed-completed match always suppresses, and code Chores
+keep permanent suppression. `0` means a not-planned close never suppresses; a
+negative value is rejected at `spindrift butler` time and by `spindrift
+doctor`. Only GitHub reports a close reason, so on `forgejo`, `jira` and
+`local` every closed tuning finding keeps suppressing permanently. Like the
+digest knobs it is host-only.
 
 **Snapshot and validation.** The host stores the rendered digest in the Dispatch
 Records store's `tuning_snapshots` table, keyed by the sweep's Record ID, before
