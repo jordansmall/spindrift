@@ -3346,16 +3346,32 @@ func TestStartChild_AlreadyAbandonedWaitReturnsAtOnce(t *testing.T) {
 // after a Wait on it was abandoned with both read.
 func startAbandonedChild(t *testing.T, r *hostRunner) *hostChildHandle {
 	t.Helper()
+	return startAbandonedScript(t, r, `{"event":"box","issue":"101","phase":"initial"}`+"\n"+`{"event":"settled","issue":"101",`,
+		`while :; do sleep 0.05; done`)
+}
+
+// startAbandonedScript runs a child (report pipe on fd 3) that writes initial
+// and then runs script, and returns its handle once a Wait on it was abandoned
+// after the first record. initial goes out as one write (cat of a file): sh
+// line-buffers printf, so a record and a trailing fragment would be two
+// writes, and the abandon could land before the fragment was read.
+func startAbandonedScript(t *testing.T, r *hostRunner, initial, script string) *hostChildHandle {
+	t.Helper()
+	initialFile := filepath.Join(t.TempDir(), "initial")
+	if err := os.WriteFile(initialFile, []byte(initial), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script = fmt.Sprintf("cat %s >&3\n%s", initialFile, script)
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/bin/sh", "-c", `printf '%s\n%s' '{"event":"box","issue":"101","phase":"initial"}' '{"event":"settled","issue":"101",' >&3
-while :; do sleep 0.05; done`)
+		return exec.Command("/bin/sh", "-c", script)
 	}
 	firstRecord := make(chan struct{})
+	var once sync.Once
 	handle, err := r.StartChild(context.Background(), daemon.ChildRequest{
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-		OnRecord: func(daemon.Record) { close(firstRecord) },
+		OnRecord: func(daemon.Record) { once.Do(func() { close(firstRecord) }) },
 	})
 	if err != nil {
 		t.Fatalf("StartChild() unexpected error: %v", err)
@@ -3386,19 +3402,31 @@ while :; do sleep 0.05; done`)
 	return h
 }
 
-// fdOf returns f's descriptor number without Fd(), which would switch it to
-// blocking mode.
+// fdOf is fileDescriptor for a test.
 func fdOf(t *testing.T, f *os.File) int {
 	t.Helper()
-	rc, err := f.SyscallConn()
+	fd, err := fileDescriptor(f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fd := -1
-	if err := rc.Control(func(u uintptr) { fd = int(u) }); err != nil {
+	return fd
+}
+
+// simulateExec models the exec between two daemon images inside one test
+// process: the successor sees the report descriptor as a bare inheritable
+// number with the old image's *os.File (and its epoll registration, which
+// would make a second File on the same number unpollable) gone.
+func simulateExec(t *testing.T, h *hostChildHandle, st daemon.ChildState) daemon.ChildState {
+	t.Helper()
+	fd, err := syscall.Dup(st.ReportFD)
+	if err != nil {
 		t.Fatal(err)
 	}
-	return fd
+	if err := h.reportRead.Close(); err != nil {
+		t.Fatal(err)
+	}
+	st.ReportFD = fd
+	return st
 }
 
 // inheritableFDs lists this process's open descriptors lacking FD_CLOEXEC.
@@ -3419,11 +3447,7 @@ func inheritableFDs(t *testing.T) []int {
 		if err != nil {
 			continue
 		}
-		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFD), 0)
-		if errno != 0 {
-			continue
-		}
-		if flags&syscall.FD_CLOEXEC == 0 {
+		if cloexec, err := isCloseOnExec(fd); err == nil && !cloexec {
 			fds = append(fds, fd)
 		}
 	}
@@ -3469,7 +3493,7 @@ func TestHostChildHandle_HandOffDescribesTheAbandonedChild(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("HandOff() = %+v, want %+v", got, want)
 	}
-	if err := reclaimDescriptor(got.ReportFD); err != nil {
+	if err := setCloseOnExec(got.ReportFD, true); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -3495,12 +3519,14 @@ func TestHandOff_ClearsCloseOnExecOnlyOnNamedDescriptors(t *testing.T) {
 	before := inheritableFDs(t)
 
 	var named []int
+	var states []daemon.ChildState
 	for _, h := range []*hostChildHandle{a, b} {
 		st, err := h.HandOff()
 		if err != nil {
 			t.Fatalf("HandOff() unexpected error: %v", err)
 		}
 		named = append(named, st.ReportFD)
+		states = append(states, st)
 	}
 	for _, f := range []*os.File{lock, docRead} {
 		fd, err := handOffFile(f)
@@ -3515,12 +3541,181 @@ func TestHandOff_ClearsCloseOnExecOnlyOnNamedDescriptors(t *testing.T) {
 		t.Errorf("inheritable descriptors after hand-off = %v, want %v (before %v + named %v)", got, want, before, named)
 	}
 
-	for _, fd := range named {
-		if err := reclaimDescriptor(fd); err != nil {
-			t.Fatalf("reclaimDescriptor(%d) unexpected error: %v", fd, err)
+	// The successor image: a second runner re-attaches the children, and the
+	// lock and document descriptors are reclaimed by their own owners.
+	second := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	for i, h := range []*hostChildHandle{a, b} {
+		states[i] = simulateExec(t, h, states[i])
+	}
+	for _, st := range states {
+		if _, err := second.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st); err != nil {
+			t.Fatalf("InheritChild(%+v) unexpected error: %v", st, err)
+		}
+	}
+	for _, f := range []*os.File{lock, docRead} {
+		if err := setCloseOnExec(fdOf(t, f), true); err != nil {
+			t.Fatalf("setCloseOnExec() unexpected error: %v", err)
 		}
 	}
 	if got := inheritableFDs(t); !slices.Equal(got, before) {
-		t.Errorf("inheritable descriptors after reclaim = %v, want %v", got, before)
+		t.Errorf("inheritable descriptors after re-attach = %v, want %v", got, before)
 	}
+}
+
+// TestInheritChild_ContinuesASplitLineOnASecondRunner hands a child with half
+// a record read off to a second runner instance: the carried fragment is
+// completed by the rest of the line, later records and the exit reach the
+// second runner's callback, and an abandoned Wait on the inherited handle works.
+func TestInheritChild_ContinuesASplitLineOnASecondRunner(t *testing.T) {
+	cfg := hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()}
+	goFile := filepath.Join(t.TempDir(), "go")
+	first := startAbandonedScript(t, mustHostRunner(t, cfg), `{"event":"box","issue":"101","phase":"initial"}`+"\n"+`{"event":"box","issue":"101",`,
+		fmt.Sprintf(`while [ ! -e %s ]; do sleep 0.05; done
+printf '%%s\n%%s\n' '"phase":"fix-pass-1"}' '{"event":"box","issue":"101","phase":"fix-pass-2"}' >&3
+exit 3`, goFile))
+	st, err := first.HandOff()
+	if err != nil {
+		t.Fatalf("HandOff() unexpected error: %v", err)
+	}
+	st = simulateExec(t, first, st)
+
+	var mu sync.Mutex
+	var got []daemon.Record
+	handle, err := mustHostRunner(t, cfg).InheritChild(context.Background(), daemon.ChildRequest{
+		Kind: daemon.KindOf(dispatchkind.Work),
+		OnRecord: func(r daemon.Record) {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, r)
+		},
+	}, st)
+	if err != nil {
+		t.Fatalf("InheritChild() unexpected error: %v", err)
+	}
+
+	// The child is still waiting on the go-file, so this Wait can only
+	// return through the read deadline — which needs a pollable descriptor.
+	abandon := make(chan struct{})
+	close(abandon)
+	if _, err := handle.Wait(abandon); !errors.Is(err, daemon.ErrWaitAbandoned) {
+		t.Fatalf("Wait(closed abandon) error = %v, want ErrWaitAbandoned", err)
+	}
+
+	if err := os.WriteFile(goFile, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := handle.Wait(nil)
+	if err != nil {
+		t.Fatalf("Wait() unexpected error: %v", err)
+	}
+	if res.Exit != 3 {
+		t.Errorf("Wait() exit = %d, want 3", res.Exit)
+	}
+	want := []daemon.Record{
+		{Event: "box", Key: dispatchkey.Issue("101"), Phase: "fix-pass-1"},
+		{Event: "box", Key: dispatchkey.Issue("101"), Phase: "fix-pass-2"},
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("second runner records = %+v, want %+v", got, want)
+	}
+}
+
+// TestInheritChild_DropsAForgedOrStaleHandoff pins that an entry failing
+// validation is refused with its reason and adopts nothing: the descriptor it
+// names stays open (another entry may name it) but is close-on-exec again.
+func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	req := daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}
+
+	live := exec.Command("sleep", "30")
+	if err := live.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = live.Process.Kill(); _ = live.Wait() })
+	reaped := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := reaped.Run(); err != nil {
+		t.Fatal(err)
+	}
+
+	// inheritable returns a pipe's read end as a successor would find it:
+	// open, with close-on-exec cleared by the previous image.
+	inheritable := func(t *testing.T) (*os.File, int) {
+		t.Helper()
+		pr, pw, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = pr.Close(); _ = pw.Close() })
+		fd, err := handOffFile(pr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pr, fd
+	}
+
+	t.Run("pid that is not a child", func(t *testing.T) {
+		for name, pid := range map[string]int{"init": 1, "reaped": reaped.Process.Pid} {
+			pr, fd := inheritable(t)
+			h, err := r.InheritChild(context.Background(), req, daemon.ChildState{PID: pid, ReportFD: fd})
+			if err == nil || !strings.Contains(err.Error(), "is not a child of this process") {
+				t.Errorf("%s: InheritChild() = (%v, %v), want a not-a-child error", name, h, err)
+			}
+			if slices.Contains(inheritableFDs(t), fd) {
+				t.Errorf("%s: fd %d still inheritable after a refused entry", name, fd)
+			}
+			if _, err := pr.Stat(); err != nil {
+				t.Errorf("%s: report pipe unusable after a refused entry: %v", name, err)
+			}
+		}
+	})
+
+	t.Run("report fd is not a pipe", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "regular")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = f.Close() })
+		fd, err := handOffFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h, err := r.InheritChild(context.Background(), req, daemon.ChildState{PID: live.Process.Pid, ReportFD: fd})
+		if err == nil || !strings.Contains(err.Error(), "is not a pipe") {
+			t.Errorf("InheritChild() = (%v, %v), want a not-a-pipe error", h, err)
+		}
+		if slices.Contains(inheritableFDs(t), fd) {
+			t.Errorf("fd %d still inheritable after a refused entry", fd)
+		}
+		if _, err := f.Stat(); err != nil {
+			t.Errorf("file unusable after a refused entry: %v", err)
+		}
+	})
+
+	t.Run("standard stream", func(t *testing.T) {
+		before := inheritableFDs(t)
+		for fd := 0; fd <= 2; fd++ {
+			h, err := r.InheritChild(context.Background(), req, daemon.ChildState{PID: live.Process.Pid, ReportFD: fd})
+			if err == nil || !strings.Contains(err.Error(), "standard stream") {
+				t.Errorf("fd %d: InheritChild() = (%v, %v), want a standard-stream error", fd, h, err)
+			}
+		}
+		if got := inheritableFDs(t); !slices.Equal(got, before) {
+			t.Errorf("inheritable descriptors = %v after refused standard streams, want %v", got, before)
+		}
+	})
+
+	t.Run("closed descriptor", func(t *testing.T) {
+		f, err := os.CreateTemp(t.TempDir(), "closed")
+		if err != nil {
+			t.Fatal(err)
+		}
+		fd := fdOf(t, f)
+		_ = f.Close()
+		h, err := r.InheritChild(context.Background(), req, daemon.ChildState{PID: live.Process.Pid, ReportFD: fd})
+		if err == nil || !strings.Contains(err.Error(), "report fd") {
+			t.Errorf("InheritChild() = (%v, %v), want a report-fd error", h, err)
+		}
+	})
 }
