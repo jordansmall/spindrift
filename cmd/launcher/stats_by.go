@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -50,7 +51,8 @@ func statsKnobNames() (names, secret []string) {
 	return names, secret
 }
 
-// parseStatsBy checks a --by value against the dimensions stats can group by.
+// parseStatsBy checks one dimension against those stats can group by; its
+// errors are the reason alone, for the caller to frame with the full --by value.
 func parseStatsBy(by string) (statsBy, error) {
 	switch {
 	case by == string(statsByRole), by == string(statsByRevision), by == string(statsByModel), by == string(statsByDriver):
@@ -58,7 +60,7 @@ func parseStatsBy(by string) (statsBy, error) {
 	case strings.HasPrefix(by, string(statsByPrompt)+":"):
 		role := strings.TrimPrefix(by, string(statsByPrompt)+":")
 		if roles := recordstats.PromptRoles(); !slices.Contains(roles, role) {
-			return statsBy{}, fmt.Errorf("invalid --by %q: unknown prompt role %q, want one of %s", by, role, strings.Join(roles, ", "))
+			return statsBy{}, fmt.Errorf("unknown prompt role %q, want one of %s", role, strings.Join(roles, ", "))
 		}
 		return statsBy{dim: statsByPrompt, arg: role}, nil
 	case strings.HasPrefix(by, string(statsByKnob)+":"):
@@ -66,21 +68,83 @@ func parseStatsBy(by string) (statsBy, error) {
 		known, secret := statsKnobNames()
 		switch {
 		case name == "":
-			return statsBy{}, fmt.Errorf("invalid --by %q: knob name is empty", by)
+			return statsBy{}, errors.New("knob name is empty")
 		case slices.Contains(secret, name):
-			return statsBy{}, fmt.Errorf("invalid --by %q: knob %s is secret, never recorded", by, name)
+			return statsBy{}, fmt.Errorf("knob %s is secret, never recorded", name)
 		case !slices.Contains(known, name):
-			return statsBy{}, fmt.Errorf("invalid --by %q: unknown knob %q", by, name)
+			return statsBy{}, fmt.Errorf("unknown knob %q", name)
 		}
 		return statsBy{dim: statsByKnob, arg: name}, nil
 	}
-	return statsBy{}, fmt.Errorf("invalid --by %q: want role, revision, model, driver, prompt:<role> or knob:<NAME>", by)
+	return statsBy{}, errors.New("want role, revision, model, driver, prompt:<role> or knob:<NAME>")
 }
 
-// groupStats splits claim-time-sorted Records into ordered groups by a --by
+// statsByList is a parsed --by value's dimensions in --by order; empty is no --by.
+type statsByList []statsBy
+
+func (l statsByList) has(dim statsDim) bool {
+	return slices.ContainsFunc(l, func(b statsBy) bool { return b.dim == dim })
+}
+
+// plainTable reports whether the summary keeps the ungrouped per-role table:
+// no --by, or --by role alone.
+func (l statsByList) plainTable() bool {
+	return len(l) == 0 || slices.Equal(l, statsByList{{dim: statsByRole}})
+}
+
+// parseStatsByList parses a comma-separated --by value into its ordered
+// dimensions. An empty element or a repeated dimension is an error; two knobs
+// or prompt roles are distinct dimensions.
+func parseStatsByList(by string) (statsByList, error) {
+	var dims statsByList
+	for _, part := range strings.Split(by, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("invalid --by %q: empty dimension", by)
+		}
+		d, err := parseStatsBy(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid --by %q: element %q: %w", by, part, err)
+		}
+		if slices.Contains(dims, d) {
+			return nil, fmt.Errorf("invalid --by %q: repeated dimension %q", by, d)
+		}
+		dims = append(dims, d)
+	}
+	return dims, nil
+}
+
+// statsGroup is one cell of a (possibly multi-dimension) --by grouping: one
+// key per dimension, in --by order.
+type statsGroup struct {
+	keys    []string
+	records []dispatchrecord.Record
+}
+
+// label is the group's keys joined in --by order, the JSON "group" value.
+func (g statsGroup) label() string { return strings.Join(g.keys, ", ") }
+
+// groupStats nests the single-dimension groupings in --by order: the first
+// dimension's groups, each split by the next, so a pass-level dimension after
+// another sees only that group's passes.
+func groupStats(records []dispatchrecord.Record, dims []statsBy) []statsGroup {
+	groups := []statsGroup{{records: records}}
+	for _, d := range dims {
+		var next []statsGroup
+		for _, g := range groups {
+			for _, sub := range groupStatsBy(g.records, d) {
+				next = append(next, statsGroup{keys: append(slices.Clone(g.keys), sub.Key), records: sub.Records})
+			}
+		}
+		groups = next
+	}
+	return groups
+}
+
+// groupStatsBy splits claim-time-sorted Records into ordered groups by one
 // dimension. Groups keep first-appearance order (the pipeline order for role),
 // (none) last; a pass-level dimension (role, model) is split per pass.
-func groupStats(records []dispatchrecord.Record, by statsBy) []recordstats.Group {
+func groupStatsBy(records []dispatchrecord.Record, by statsBy) []recordstats.Group {
 	switch by.dim {
 	case statsByRole:
 		groups := recordstats.GroupPasses(records, recordstats.RoleKey)
@@ -109,19 +173,23 @@ func groupStats(records []dispatchrecord.Record, by statsBy) []recordstats.Group
 	panic("stats: cannot group by --by " + by.String())
 }
 
-// renderStatsGroups prints each group under a "<by> = <key>" header, the
-// group's own summary and role table below it.
-func renderStatsGroups(w io.Writer, groups []recordstats.Group, by statsBy) error {
+// renderStatsGroups prints each group under a "<by> = <key>" header (one pair
+// per dimension, joined by ", "), the group's own summary and role table below.
+func renderStatsGroups(w io.Writer, groups []statsGroup, dims []statsBy) error {
 	for i, g := range groups {
 		if i > 0 {
 			if _, err := fmt.Fprintln(w); err != nil {
 				return err
 			}
 		}
-		if _, err := fmt.Fprintf(w, "%s = %s\n", by, g.Key); err != nil {
+		pairs := make([]string, len(dims))
+		for j, d := range dims {
+			pairs[j] = d.String() + " = " + g.keys[j]
+		}
+		if _, err := fmt.Fprintln(w, strings.Join(pairs, ", ")); err != nil {
 			return err
 		}
-		if err := renderStats(w, g.Records); err != nil {
+		if err := renderStats(w, g.records); err != nil {
 			return err
 		}
 	}
