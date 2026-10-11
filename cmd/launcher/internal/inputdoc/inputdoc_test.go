@@ -306,3 +306,35 @@ func TestSchemaDefault(t *testing.T) {
 		}
 	}
 }
+
+func TestResolveDriver(t *testing.T) {
+	cases := []struct {
+		name        string
+		baked       string
+		ambient     string
+		wantDriver  string
+		wantWarning []string
+	}{
+		{"mismatch baked wins and warns", "claude", "opencode", "claude", []string{"DRIVER=opencode", `"claude"`, "using the baked Driver"}},
+		{"match is silent", "claude", "claude", "claude", nil},
+		{"unset is silent", "claude", "", "claude", nil},
+		{"no baked falls back to ambient", "", "opencode", "opencode", nil},
+		{"nothing set", "", "", "", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotDriver, gotWarning := ResolveDriver(tc.baked, tc.ambient)
+			if gotDriver != tc.wantDriver {
+				t.Errorf("driver = %q, want %q", gotDriver, tc.wantDriver)
+			}
+			if tc.wantWarning == nil && gotWarning != "" {
+				t.Errorf("warning = %q, want none", gotWarning)
+			}
+			for _, s := range tc.wantWarning {
+				if !strings.Contains(gotWarning, s) {
+					t.Errorf("warning = %q, want it to contain %q", gotWarning, s)
+				}
+			}
+		})
+	}
+}

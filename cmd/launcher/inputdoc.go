@@ -30,6 +30,12 @@ func getenvArtifact(key, def string) string {
 	return def
 }
 
+// resolveDriver applies inputdoc.ResolveDriver to this process's loaded
+// document and ambient DRIVER.
+func resolveDriver() (driver, warning string) {
+	return inputdoc.ResolveDriver(docArtifact("DRIVER"), os.Getenv("DRIVER"))
+}
+
 // docArtifact reads key strictly from the loaded document's Artifacts, never
 // from os.Getenv. The keys it backs are nix-resolved policy signals
 // (capability, tracker/forge, agent presence), so a stray ambient env var must

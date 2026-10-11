@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -231,5 +232,35 @@ func TestResolveChoreCatalog_AbsentVersusEmpty(t *testing.T) {
 				t.Errorf("resolveChoreCatalog() = %+v, want %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+// The baked Driver wins end to end: loadConfig uses it, and mainRun prints
+// the mismatch warning exactly once (ADR 0064, issue #5050).
+func TestMainRun_AmbientDriverMismatch_WarnsOnceAndBakedWins(t *testing.T) {
+	docPath := filepath.Join(t.TempDir(), "input.json")
+	if err := os.WriteFile(docPath, []byte(`{"settings":{},"artifacts":{"DRIVER":"claude"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { loadedDoc = nil })
+
+	run := func(ambient string) string {
+		t.Setenv("DRIVER", ambient)
+		var stdout, stderr bytes.Buffer
+		mainRun([]string{"--input", docPath, "research"}, &stdout, &stderr)
+		return stderr.String()
+	}
+
+	got := run("opencode")
+	if n := strings.Count(got, "DRIVER=opencode"); n != 1 {
+		t.Errorf("mismatch: %d warnings in stderr, want 1: %q", n, got)
+	}
+	if c := loadConfig(); c.driver != "claude" {
+		t.Errorf("driver = %q, want the baked claude", c.driver)
+	}
+	for _, ambient := range []string{"claude", ""} {
+		if got := run(ambient); strings.Contains(got, "baked Driver") {
+			t.Errorf("ambient %q: stderr = %q, want no Driver warning", ambient, got)
+		}
 	}
 }

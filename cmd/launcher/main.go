@@ -374,6 +374,9 @@ func loadConfig() config {
 	// --input document that also omits RUNNER_KIND gets "", which
 	// runnerForKind/buildRunnerForKind treat as "oci".
 	runnerKind := getenvArtifact("RUNNER_KIND", "")
+	// loadConfig runs from several call sites, so mainRun prints the warning
+	// once instead.
+	driver, _ := resolveDriver()
 
 	return config{
 		schemaConfig: sc,
@@ -402,7 +405,7 @@ func loadConfig() config {
 		nixStoreWritable:   getenvArtifact("NIX_STORE_WRITABLE", "") == "true",
 		runtime:            runtime,
 		runnerKind:         runnerKind,
-		driver:             getenvArtifact("DRIVER", ""),
+		driver:             driver,
 		image:              image,
 
 		driverSessionCacheDir: getenvArtifact("DRIVER_SESSION_CACHE_DIR", ""),
@@ -2401,6 +2404,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s\n", err)
 		return 1
 	}
+	_, driverWarning := resolveDriver()
+	ambientWarnings.WriteString(driverWarning)
 	flushAmbientWarnings(stderr, &ambientWarnings)
 	// Pass-through booleans such as --no-build may precede the verb (issue
 	// #3784), so args[0] is not necessarily it.
