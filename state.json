@@ -1,26 +1,20 @@
 {
   "lastSwept": "564d10d2c18d9c3cd9492f57b9a8880b6a5c590d",
   "cursor": "docs/adr/0049-role-capability-profiles-are-provider-neutral.md",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/5043",
-    "https://github.com/jordansmall/spindrift/issues/5044",
-    "https://github.com/jordansmall/spindrift/issues/5045",
-    "https://github.com/jordansmall/spindrift/issues/5046",
-    "https://github.com/jordansmall/spindrift/issues/5047"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/5043",
-    "https://github.com/jordansmall/spindrift/issues/5046"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-11T18:57:28.693706311-04:00"
+  },
   "usage": {
-    "input_tokens": 48,
-    "output_tokens": 19887,
-    "cache_read_input_tokens": 1283501,
-    "cache_creation_input_tokens": 68997,
-    "total_cost_usd": 6.005534100000001,
-    "duration_ms": 406812,
-    "duration_api_ms": 800463,
-    "num_turns": 35
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
