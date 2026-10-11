@@ -50,6 +50,12 @@ func seedRecordsCost(t *testing.T, root string, keyBase, n int, first time.Time,
 // seedRecordsStamped is seedRecordsCost with stamp, when set, editing each
 // Record's dispatch_start (revision, role models).
 func seedRecordsStamped(t *testing.T, root string, keyBase, n int, first time.Time, implementUSD float64, stamp func(*claude.DispatchStart)) []string {
+	return seedRecordsSettled(t, root, keyBase, n, first, implementUSD, stamp, claude.DispatchSettled{State: "complete", Reason: "merged"})
+}
+
+// seedRecordsSettled is seedRecordsStamped with each Record's settled op
+// copied from settled (RecordID filled in per Record).
+func seedRecordsSettled(t *testing.T, root string, keyBase, n int, first time.Time, implementUSD float64, stamp func(*claude.DispatchStart), settled claude.DispatchSettled) []string {
 	t.Helper()
 	dir := hostpaths.LogDir(root)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -79,7 +85,7 @@ func seedRecordsStamped(t *testing.T, root string, keyBase, n int, first time.Ti
 			result(ts, implementUSD),
 			op(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
 			result(ts, 1),
-			op(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{RecordID: id, State: "complete", Reason: "merged"}}),
+			op(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{RecordID: id, State: settled.State, Reason: settled.Reason, PRURL: settled.PRURL, MergeCommit: settled.MergeCommit}}),
 		}
 		if err := os.WriteFile(filepath.Join(dir, "issue-"+key+".log"), []byte(strings.Join(lines, "")), 0o644); err != nil {
 			t.Fatal(err)
@@ -247,7 +253,7 @@ func (tr *tuningRun) sweepTuning(t *testing.T, policy Policy, now time.Time) (Ou
 	if tr.backlog != nil {
 		it = tr.backlog
 	}
-	r := New(tr.backend, tree, it, newBox, policy, func() time.Time { return now })
+	r := New(tr.backend, tree, it, newBox, policy, func() time.Time { return now }).WithMergeReader(tr.fc, tr.fc)
 	var out Outcome
 	var err error
 	tr.stdout = captureStdout(t, func() { out, err = r.Sweep([]string{"tuning"}) })
@@ -1340,5 +1346,241 @@ func TestSweep_CodeChore_ClosedNotPlannedSuppressesPermanently(t *testing.T) {
 	out, err := second.Sweep([]string{"bugs"})
 	if err != nil || out.Kind != Swept || len(fc.PostIssueCalls) != 1 {
 		t.Fatalf("second Sweep = %+v, %v, posts = %d, want Swept with the finding suppressed", out, err, len(fc.PostIssueCalls))
+	}
+}
+
+// tuningFinding is a tuning finding issue as filing leaves it: the cited
+// Evidence section, then the hidden dedup marker carrying the pattern key.
+func tuningFinding(number, metric string, cites ...string) forge.Issue {
+	body := "tune it\n"
+	rows := map[string]tuning.Row{}
+	for _, c := range cites {
+		rows[c] = tuning.Row{Anchor: c, Line: "| " + c + " | cited | 3 | $4.00 | $2.00 | +2.00 | thin |"}
+	}
+	if ev := tuning.Evidence(rows, cites); ev != "" {
+		body += "\n" + ev
+	}
+	body += "\n<!-- spindrift-dedup: chore=tuning, evidence-gap:a:go:" + metric + " -->"
+	return forge.Issue{Number: number, Title: "finding " + number, Body: body, Labels: []string{doctor.TuningFindingLabel}}
+}
+
+// priorRows returns the digest's "| finding:" table lines.
+func priorRows(input string) []string {
+	var rows []string
+	for _, line := range strings.Split(input, "\n") {
+		if strings.HasPrefix(line, "| finding:") {
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
+func sweepWithPrior(t *testing.T, root string, open, closed []forge.Issue, prep ...func(*forge.Fake)) string {
+	t.Helper()
+	tr := newTuningRun(t)
+	tr.backlog = newBacklogTracker(t, tr.fc.AsIssueFiler(), open, closed)
+	for _, p := range prep {
+		p(tr.fc)
+	}
+	if out, err := tr.sweepTuning(t, tuningPolicy(root, 1), tuningNow); err != nil || out.Kind != Swept {
+		t.Fatalf("Sweep = %+v, %v, want Swept", out, err)
+	}
+	if len(tr.input) != 1 {
+		t.Fatalf("Box dispatched %d times, want 1", len(tr.input))
+	}
+	return tr.input[0]
+}
+
+// The digest lists the newest PriorFindingsN tuning findings, open and closed,
+// newest first, each with its state; a finding of another Chore never appears.
+// Keys are Jira-style, so the order is by trailing number across digit widths.
+func TestSweep_Tuning_InputListsPriorFindingsNewestFirst(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	var open, closed []forge.Issue
+	total := tuning.PriorFindingsN + 2
+	for i := range total {
+		iss := tuningFinding(fmt.Sprintf("PROJ-%d", 8+i), "usd-per-record")
+		switch i % 3 {
+		case 0:
+			iss.State = forge.IssueOpen
+			open = append(open, iss)
+		case 1:
+			iss.State, iss.ClosedNotPlanned = forge.IssueClosed, true
+			closed = append(closed, iss)
+		default:
+			iss.State = forge.IssueClosed
+			closed = append(closed, iss)
+		}
+	}
+	other := forge.Issue{Number: "999", Body: "x\n<!-- spindrift-dedup: evidence-gap:a:go:usd-per-record -->", Labels: []string{"agent-butler-finding"}, State: forge.IssueOpen}
+	open = append(open, other)
+
+	input := sweepWithPrior(t, root, open, closed)
+
+	rows := priorRows(input)
+	if len(rows) != tuning.PriorFindingsN {
+		t.Fatalf("got %d prior rows, want %d:\n%s", len(rows), tuning.PriorFindingsN, input)
+	}
+	for i, row := range rows {
+		n := 8 + total - 1 - i
+		want := map[int]string{0: "open", 1: "closed-not-planned", 2: "closed-completed"}[(n-8)%3]
+		wantPrefix := fmt.Sprintf("| finding:PROJ-%d | %s | — | usd-per-record | — | — | — | — | ", n, want)
+		if !strings.HasPrefix(row, wantPrefix) {
+			t.Errorf("row %d = %q, want prefix %q", i, row, wantPrefix)
+		}
+	}
+	if strings.Contains(input, "finding:999") || strings.Contains(input, "finding:PROJ-8 ") || strings.Contains(input, "finding:PROJ-9 ") {
+		t.Errorf("digest lists a non-tuning or beyond-N finding:\n%s", input)
+	}
+	if strings.Index(input, "## Prior findings") > strings.Index(input, "## Outliers") {
+		t.Errorf("Prior findings does not precede Outliers:\n%s", input)
+	}
+}
+
+// A finding whose closing PR merged shows that PR's merge commit and the
+// change in its cited metric from the Records settled before the merge to
+// those settled after.
+func TestSweep_Tuning_PriorFindingShowsMergeDelta(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil, claude.DispatchSettled{State: "complete", Reason: "merged", MergeCommit: "abc123def"})
+	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+	closed := []forge.Issue{
+		tuningFinding("100", "avg-usd", "role:implement:avg-usd"),
+		tuningFinding("101", "usd-per-record"),
+	}
+	for i := range closed {
+		closed[i].State = forge.IssueClosed
+	}
+
+	input := sweepWithPrior(t, root, nil, closed)
+
+	want := "| finding:100 | merged | abc123def | avg-usd | 3 | $2.00 | $4.00 | +2.00 | thin |"
+	if !strings.Contains(input, want) {
+		t.Errorf("digest lacks %q:\n%s", want, input)
+	}
+	if rows := priorRows(input); len(rows) != 2 || !strings.HasPrefix(rows[0], "| finding:101 | closed-completed | — |") {
+		t.Errorf("prior rows = %q, want finding:101 unmerged then finding:100", rows)
+	}
+	if !tuning.Anchors(input)["finding:100"] {
+		t.Error("finding:100 is not a citable anchor")
+	}
+}
+
+// A work PR closing a tuning finding is held for a human at settle, so its
+// Record carries the hold reason and the PR URL but no merge; the forge says
+// the human has since merged it.
+func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanShowsDelta(t *testing.T) {
+	const pr = "https://example.com/pulls/5"
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
+		claude.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+	closed := []forge.Issue{
+		tuningFinding("100", "avg-usd", "role:implement:avg-usd"),
+		tuningFinding("101", "usd-per-record"),
+	}
+	for i := range closed {
+		closed[i].State = forge.IssueClosed
+	}
+
+	input := sweepWithPrior(t, root, nil, closed, func(fc *forge.Fake) {
+		fc.SetPRState(pr, forge.PRMerged)
+		fc.SetMergeCommit(pr, "abc123def")
+	})
+
+	want := "| finding:100 | merged | abc123def | avg-usd | 3 | $2.00 | $4.00 | +2.00 | thin |"
+	if !strings.Contains(input, want) {
+		t.Errorf("digest lacks %q:\n%s", want, input)
+	}
+	if rows := priorRows(input); len(rows) != 2 || !strings.HasPrefix(rows[0], "| finding:101 | closed-completed | — |") {
+		t.Errorf("prior rows = %q, want finding:101 unmerged then finding:100", rows)
+	}
+}
+
+// A forge that reports the PR merged but not its commit still shows merged,
+// with no revision.
+func TestSweep_Tuning_PriorFindingHeldPRMergedWithoutCommit(t *testing.T) {
+	const pr = "https://example.com/pulls/5"
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
+		claude.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+	iss := tuningFinding("100", "usd-per-record")
+	iss.State = forge.IssueClosed
+
+	input := sweepWithPrior(t, root, nil, []forge.Issue{iss}, func(fc *forge.Fake) { fc.SetPRState(pr, forge.PRMerged) })
+
+	want := "| finding:100 | merged | — | usd-per-record | 3 | $3.00 | $5.00 | +2.00 | thin |"
+	if !strings.Contains(input, want) {
+		t.Errorf("digest lacks %q:\n%s", want, input)
+	}
+}
+
+// A held PR still open, or one whose state cannot be read, is not merged: the
+// row keeps the issue's own state, with no revision and no Δ.
+func TestSweep_Tuning_PriorFindingHeldPRNotMergedShowsNoDelta(t *testing.T) {
+	const pr = "https://example.com/pulls/5"
+	cases := []struct {
+		name string
+		prep func(*forge.Fake)
+	}{
+		{"open", func(fc *forge.Fake) { fc.SetPRState(pr, forge.PROpen) }},
+		{"closed unmerged", func(fc *forge.Fake) { fc.SetPRState(pr, forge.PRClosed) }},
+		{"state unreadable", func(fc *forge.Fake) { fc.PRStateErr = errors.New("boom") }},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+			seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
+				claude.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+			seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+			iss := tuningFinding("100", "usd-per-record")
+			iss.State = forge.IssueClosed
+
+			input := sweepWithPrior(t, root, nil, []forge.Issue{iss}, c.prep)
+
+			if rows := priorRows(input); len(rows) != 1 || !strings.HasPrefix(rows[0], "| finding:100 | closed-completed | — | usd-per-record | — | — | — | — | ") {
+				t.Errorf("prior rows = %q, want finding:100 closed-completed with no revision or Δ", rows)
+			}
+		})
+	}
+}
+
+// A finding is recognised by its chore=tuning marker alone, whatever finding
+// label it wears (the local and jira trackers have no tuning label registry).
+func TestSweep_Tuning_PriorFindingRecognisedByMarkerAlone(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	marked := tuningFinding("200", "usd-per-record")
+	marked.Labels = []string{"agent-butler-finding"}
+	marked.State = forge.IssueOpen
+	unmarked := forge.Issue{Number: "201", Body: "x\n<!-- spindrift-dedup: evidence-gap:a:go:usd-per-record -->", Labels: []string{"agent-butler-finding"}, State: forge.IssueOpen}
+
+	input := sweepWithPrior(t, root, []forge.Issue{marked, unmarked}, nil)
+
+	if rows := priorRows(input); len(rows) != 1 || !strings.HasPrefix(rows[0], "| finding:200 | open | — | usd-per-record |") {
+		t.Errorf("prior rows = %q, want only finding:200 open", rows)
+	}
+}
+
+// With no cited row the Δ is read off the summary row for the finding's metric.
+func TestSweep_Tuning_PriorFindingFallsBackToSummaryRow(t *testing.T) {
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil, claude.DispatchSettled{State: "complete", Reason: "merged", MergeCommit: "abc123def"})
+	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+	iss := tuningFinding("100", "usd-per-record")
+	iss.State = forge.IssueClosed
+
+	input := sweepWithPrior(t, root, nil, []forge.Issue{iss})
+
+	want := "| finding:100 | merged | abc123def | usd-per-record | 3 | $3.00 | $5.00 | +2.00 | thin |"
+	if !strings.Contains(input, want) {
+		t.Errorf("digest lacks %q:\n%s", want, input)
 	}
 }

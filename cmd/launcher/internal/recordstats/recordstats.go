@@ -100,6 +100,12 @@ func AggregateRoles(records []dispatchrecord.Record) (rows []RoleRow, passes int
 	return rows, passes, usd
 }
 
+// Merged reports whether the host settled r merged: its PR landed on the
+// default branch.
+func Merged(r dispatchrecord.Record) bool {
+	return r.Outcome == forge.Complete.String() && r.Reason == settle.ReasonMerged
+}
+
 // LandedKeys counts distinct (kind, Dispatch key) pairs with a Record the host
 // settled merged. Other complete reasons (a PR left open, already-resolved, a
 // verdict, filed findings) did not put code on the default branch.
@@ -107,7 +113,7 @@ func LandedKeys(records []dispatchrecord.Record) int {
 	type key struct{ kind, key string }
 	seen := map[key]bool{}
 	for _, r := range records {
-		if r.Outcome == forge.Complete.String() && r.Reason == settle.ReasonMerged {
+		if Merged(r) {
 			seen[key{r.Kind, r.DispatchKey}] = true
 		}
 	}

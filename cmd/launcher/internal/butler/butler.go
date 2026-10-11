@@ -10,6 +10,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"slices"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/report"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/tuning"
 )
 
@@ -144,21 +147,24 @@ type Outcome struct {
 
 // Runner sweeps one due Chore per Sweep call.
 type Runner struct {
-	backend    ledger.Backend
-	tree       Tree
-	it         forge.IssueTracker
-	newBox     func(dispatch.Chore) dispatch.Dispatcher
-	policy     Policy
-	now        func() time.Time
-	patchForge PatchForge
-	patchGate  PatchGate
+	backend     ledger.Backend
+	tree        Tree
+	it          forge.IssueTracker
+	newBox      func(dispatch.Chore) dispatch.Dispatcher
+	policy      Policy
+	now         func() time.Time
+	patchForge  PatchForge
+	patchGate   PatchGate
+	mergeRead   MergeReader
+	mergeCommit forge.MergeCommitReader
+	warn        io.Writer
 }
 
 // New constructs a Runner. newBox builds the Dispatcher for one Chore run (a
 // real *dispatch.Factory.NewChore in production, dispatch.Fake in tests).
 // The patch rung stays off until a caller opts in with WithPatchForge.
 func New(backend ledger.Backend, tree Tree, it forge.IssueTracker, newBox func(dispatch.Chore) dispatch.Dispatcher, policy Policy, now func() time.Time) *Runner {
-	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now}
+	return &Runner{backend: backend, tree: tree, it: it, newBox: newBox, policy: policy, now: now, warn: os.Stderr}
 }
 
 // WithPatchForge opts r into the patch rung (ADR 0057, issue #4074): f backs
@@ -172,6 +178,54 @@ func (r *Runner) WithPatchForge(f PatchForge, gate PatchGate) *Runner {
 	r.patchForge = f
 	r.patchGate = gate
 	return r
+}
+
+// MergeReader reads whether a PR has merged, so the tuning digest can show a
+// finding's PR as merged after a human merged it (settle holds that PR, so no
+// Record says so).
+type MergeReader interface {
+	PRState(url string) (forge.PRState, error)
+}
+
+// WithMergeReader opts r into reading PR merges for the tuning digest's Prior
+// findings. A nil m leaves them to the Records alone; a nil commits leaves the
+// merge commit unnamed. Returns r so a caller can chain it onto New.
+func (r *Runner) WithMergeReader(m MergeReader, commits forge.MergeCommitReader) *Runner {
+	r.mergeRead, r.mergeCommit = m, commits
+	return r
+}
+
+// mergeLookup is r.mergeRead as the digest's tuning.MergeLookup, nil without a
+// reader. A failed read counts as not merged and is warned about; a rate limit
+// also ends the lookups for the rest of the digest. A URL the forge client
+// could read as a flag is never queried.
+func (r *Runner) mergeLookup(choreName string) tuning.MergeLookup {
+	if r.mergeRead == nil {
+		return nil
+	}
+	limited := false
+	return func(url string) (string, bool) {
+		if limited || !settle.QueryablePRURL(url) {
+			return "", false
+		}
+		state, err := r.mergeRead.PRState(url)
+		if err != nil {
+			limited = errors.Is(err, forge.ErrRateLimit)
+			fmt.Fprintf(r.warn, "    ?? %s: prior tuning finding PR %s: %v\n", choreName, url, err)
+			return "", false
+		}
+		if state != forge.PRMerged {
+			return "", false
+		}
+		if r.mergeCommit != nil {
+			commit, err := r.mergeCommit.MergeCommit(url)
+			if err == nil {
+				return commit, true
+			}
+			fmt.Fprintf(r.warn, "    ?? %s: could not read merge commit of %s: %v\n", choreName, url, err)
+		}
+		return "", true
+	}
 }
 
 // Sweep picks the first due Chore out of chores (in order) and runs it, or
@@ -326,8 +380,16 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 	var input string
 	var claimTime time.Time
 	if c.Records {
+		findings, err := settle.TuningFindings(r.it)
+		if err != nil {
+			fmt.Fprintf(r.warn, "    ?? %s: prior tuning findings: %v\n", choreName, err)
+		}
+		prior := make([]tuning.Prior, 0, len(findings))
+		for _, f := range findings {
+			prior = append(prior, tuning.Prior{Number: f.Issue.Number, Open: f.Open, NotPlanned: f.Issue.ClosedNotPlanned, Metric: f.Metric, Body: f.Issue.Body})
+		}
 		dg := tuning.Render(records, claim.State.Cursor, claimedAt,
-			tuning.Limits{MinSample: r.policy.TuningMinSample, MaxBytes: r.policy.TuningDigestBytes})
+			tuning.Limits{MinSample: r.policy.TuningMinSample, MaxBytes: r.policy.TuningDigestBytes}, prior, r.mergeLookup(choreName))
 		scope = chore.Scope{Head: head, NextCursor: dg.Latest}
 		input = dg.Text
 		// The sweep's Record ID keys the stored digest, so it is pinned to the
