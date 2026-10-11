@@ -137,4 +137,26 @@
     docDefault = "`null`";
     driverValued = true;
   };
+
+  drivers = {
+    doc = ''
+      Drivers built side by side (ADR 0064, issue #5052), keyed by Driver
+      name (a lib/drivers/ registry name: claude, opencode). Each entry
+      holds only the Driver-valued settings, at the same agents-relative
+      paths as their top-level spelling: models.default, models.effort,
+      models.roster, models.byName, the per-agent models.* overrides, and
+      bashTimeoutMs. Everything else stays shared at the top level. Setting
+      this alongside agents.driver or any top-level Driver-valued setting
+      fails evaluation, as does a top-level Driver-valued setting with
+      several Drivers declared.
+    '';
+    docType = "attrset of Driver entries keyed by Driver name";
+    docDefault = "`{}`";
+  };
+
+  defaultDriver = {
+    doc = "The Driver behind `apps.default` and `apps.daemon`, and the one whose Harness keeps the unsuffixed image and closure names. Inferred when a single Driver is declared; required, and must name a declared Driver, when several are.";
+    docType = "null or string";
+    docDefault = "`null`";
+  };
 }

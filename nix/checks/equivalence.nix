@@ -788,7 +788,8 @@ in
     pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";
 
   # Issue #2572: every one of the 13 structural knobs (lib/structural-paths.nix)
-  # plus "byName" needs a non-empty string doc/docType/docDefault entry in
+  # plus byName and the driver map's drivers/defaultDriver (lib/byname-paths.nix,
+  # lib/driver-map.nix) needs a non-empty string doc/docType/docDefault entry in
   # lib/structural-options-doc.nix, which lib/renderers.nix's
   # renderStructuralOptionsDoc turns into a docs/flake-options.md row. It is
   # plain data because lib/renderers.nix must stay pure-builtins, no flake eval.
@@ -802,7 +803,10 @@ in
         ;
       structuralPlacements = import ../../lib/structural-paths.nix;
       structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
-      allNames = attrNames structuralPlacements ++ [ "byName" ];
+      allNames =
+        attrNames structuralPlacements
+        ++ attrNames (import ../../lib/byname-paths.nix)
+        ++ attrNames (import ../../lib/driver-map.nix).optionPaths;
       hasDocMeta =
         key: name:
         structuralOptionsDoc ? ${name}
@@ -821,7 +825,7 @@ in
     assert assertMsg (missingDocDefault == [ ])
       "lib/structural-options-doc.nix: every structural option (13 knobs + byName) must declare a non-empty string docDefault: missing on ${concatStringsSep ", " missingDocDefault}";
     assert assertMsg (extraNames == [ ])
-      "lib/structural-options-doc.nix: has doc entries for unknown/stale structural option(s) not in lib/structural-paths.nix (+ byName): ${concatStringsSep ", " extraNames}";
+      "lib/structural-options-doc.nix: has doc entries for unknown/stale structural option(s) not in lib/structural-paths.nix, lib/byname-paths.nix or lib/driver-map.nix's optionPaths: ${concatStringsSep ", " extraNames}";
     pkgs.runCommand "structural-options-doc-metadata" { } "touch $out";
 
   # Promoted operator-tunable knobs (issue #353): the 13 newly consumer-tunable

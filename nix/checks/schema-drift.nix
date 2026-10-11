@@ -194,14 +194,14 @@ let
 
   structuralPaths = import ../../lib/structural-paths.nix;
   byNamePaths = import ../../lib/byname-paths.nix;
-  driverMapOptionPaths = (import ../../lib/driver-map.nix).optionPaths;
+  extraOptionPaths = import ../../lib/extra-option-paths.nix;
   resolveNixPath = import ../../lib/nixpath.nix;
   # Renders each segment-list value of a paths attrset as its dotted string,
   # so allNixPaths below does not repeat the same map once per source.
   dotted = attrs: map (pkgs.lib.concatStringsSep ".") (pkgs.lib.attrValues attrs);
 
   # Computed once rather than inside each collision guard, so a regression in
-  # this fold-in, such as dropping the byNamePaths splice, is visible to every
+  # this fold-in, such as dropping the extraOptionPaths splice, is visible to every
   # consumer instead of one guard recomputing its own copy (issue #2731).
   allNixPaths =
     let
@@ -213,8 +213,7 @@ let
     in
     (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
     ++ (dotted structuralPaths)
-    ++ (dotted byNamePaths)
-    ++ (dotted driverMapOptionPaths);
+    ++ (dotted extraOptionPaths);
 
   # Frozen ground truth, in its own file so it is not a fourth hand-copy of a
   # knob list living only in this check (issue #2522 review finding).
@@ -1550,7 +1549,7 @@ checkedMerge {
       schema = import ../../lib/env-schema.nix;
       structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
       generated = pkgs.writeText "flake-options.md.generated" (
-        renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths byNamePaths
+        renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths (extraOptionPaths)
       );
     in
     pkgs.runCommand "flake-options-doc"
@@ -2309,7 +2308,7 @@ checkedMerge {
       "documented-fact-guard: expected assertMarkedBlockOk to reject a synthetic drifted docSrc for every documentedFacts row, but it evaluated successfully for: ${concatStringsSep ", " unexpectedlySucceeded}";
     pkgs.runCommand "documented-fact-guard" { inherit gofmtDriftGuards; } "touch $out";
 
-  # renderOptionSurfaceTableDoc must throw when a structuralPaths/byNamePaths
+  # renderOptionSurfaceTableDoc must throw when a structuralPaths/extraOptionPaths
   # key has no matching table row, rather than letting it vanish from the
   # generated block (issues #2950, #3067). deepSeq forces the throw inside
   # tryEval instead of it escaping as a lazy thunk. Only the added-key
@@ -2326,7 +2325,7 @@ checkedMerge {
                 "syntheticKnob"
               ];
             };
-            inherit byNamePaths;
+            inherit extraOptionPaths;
             nixBuilderImage = "synthetic-guard-image";
           };
         in
@@ -2334,7 +2333,7 @@ checkedMerge {
       );
     in
     assert assertMsg (!driftedResult.success)
-      "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/byNamePaths carries a key with no matching row in the rendered table, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
+      "option-surface-doc-paths-exhaustive-guard (issue #2950): renderOptionSurfaceTableDoc must throw when structuralPaths/extraOptionPaths carries a key with no matching row in the rendered table, so a newly added structural path without a matching doc row fails loudly at eval time instead of silently vanishing from the generated option-surface table -- it did not throw for a synthetic unlisted key";
     pkgs.runCommand "option-surface-doc-paths-exhaustive-guard" { } "touch $out";
 
   # The guard above only sees tryEval's success or failure, so a renderer
@@ -2353,7 +2352,7 @@ checkedMerge {
                 "allowUnfree"
               ];
             };
-            inherit byNamePaths;
+            inherit extraOptionPaths;
             nixBuilderImage = "synthetic-guard-image";
           };
         in
@@ -2381,7 +2380,7 @@ checkedMerge {
                 "settings"
               ];
             };
-            inherit byNamePaths;
+            inherit extraOptionPaths;
             nixBuilderImage = "synthetic-guard-image";
           };
         in
@@ -2409,7 +2408,8 @@ checkedMerge {
         "imageAttrName"
       ];
       rendered = renderers.renderOptionSurfaceTableDoc {
-        inherit structuralPaths byNamePaths;
+        inherit structuralPaths;
+        inherit extraOptionPaths;
         nixBuilderImage = "pin-guard-image";
       };
       rowNames = map (cells: cells.name) (renderers.optionSurfaceRowNamePaths rendered);
@@ -2417,14 +2417,14 @@ checkedMerge {
       # row and needs no number bumped here, while a stray or lost row still
       # breaks the count.
       expectedRowCount =
-        builtins.length (builtins.attrNames (structuralPaths // byNamePaths))
+        builtins.length (builtins.attrNames (structuralPaths // extraOptionPaths))
         + builtins.length editorialRowNames;
       missingEditorialNames = builtins.filter (n: !(builtins.elem n rowNames)) editorialRowNames;
     in
     assert assertMsg (missingEditorialNames == [ ])
       "option-surface-doc-editorial-rows-pin (issue #3067): the editorial rows (no registry key by design) must still appear as first-column names in the rendered option-surface table -- missing: ${builtins.concatStringsSep ", " missingEditorialNames}";
     assert assertMsg (builtins.length rowNames == expectedRowCount)
-      "option-surface-doc-editorial-rows-pin (issue #3067): expected exactly ${builtins.toString expectedRowCount} data rows in the rendered option-surface table (one per structuralPaths/byNamePaths key plus ${builtins.toString (builtins.length editorialRowNames)} editorial), got ${builtins.toString (builtins.length rowNames)}: ${builtins.concatStringsSep ", " rowNames}";
+      "option-surface-doc-editorial-rows-pin (issue #3067): expected exactly ${builtins.toString expectedRowCount} data rows in the rendered option-surface table (one per structuralPaths/extraOptionPaths key plus ${builtins.toString (builtins.length editorialRowNames)} editorial), got ${builtins.toString (builtins.length rowNames)}: ${builtins.concatStringsSep ", " rowNames}";
     pkgs.runCommand "option-surface-doc-editorial-rows-pin" { } "touch $out";
 
   # The renderer's table is inline, so a registry override cannot cross-wire a
@@ -2436,7 +2436,8 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       rendered = renderers.renderOptionSurfaceTableDoc {
-        inherit structuralPaths byNamePaths;
+        inherit structuralPaths;
+        inherit extraOptionPaths;
         nixBuilderImage = "value-guard-image";
       };
       registryPath = key: "`perSystem.spindrift.${builtins.concatStringsSep "." structuralPaths.${key}}`";
@@ -2447,7 +2448,7 @@ checkedMerge {
           [ "${overlaysRow}${registryPath "nixpkgs"}" ]
           rendered;
       crossWiredMismatches = renderers.optionSurfaceDomainPathMismatches (
-        structuralPaths // byNamePaths
+        structuralPaths // extraOptionPaths
       ) crossWired;
       crossWiredNames = map (m: m.name) crossWiredMismatches;
     in
@@ -2459,13 +2460,13 @@ checkedMerge {
 
   # flake-options-doc above regenerates the byName row from the same source it
   # diffs against, so it cannot catch a path renderStructuralOptionsDoc
-  # hardcodes. Feeding a synthetic byNamePaths proves the renderer derives the
+  # hardcodes. Feeding synthetic extra option paths proves the renderer derives the
   # path from its argument (issue #2796).
   structural-options-doc-byname-path-derived-guard =
     let
       inherit (pkgs.lib) assertMsg hasInfix;
       structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
-      syntheticByNamePaths = {
+      syntheticExtraOptionPaths = {
         byName = [
           "agents"
           "synthetic"
@@ -2474,10 +2475,10 @@ checkedMerge {
       };
       rendered =
         renderers.renderStructuralOptionsDoc structuralOptionsDoc structuralPaths
-          syntheticByNamePaths;
+          syntheticExtraOptionPaths;
     in
     assert assertMsg (hasInfix "perSystem.spindrift.agents.synthetic.byName" rendered)
-      "structural-options-doc-byname-path-derived-guard (issue #2796): renderStructuralOptionsDoc's byName row must derive its path from the passed byNamePaths argument, not a hardcoded literal -- expected the rendered doc to contain \"perSystem.spindrift.agents.synthetic.byName\"";
+      "structural-options-doc-byname-path-derived-guard (issue #2796): renderStructuralOptionsDoc's byName row must derive its path from the passed extra option paths argument, not a hardcoded literal -- expected the rendered doc to contain \"perSystem.spindrift.agents.synthetic.byName\"";
     pkgs.runCommand "structural-options-doc-byname-path-derived-guard" { } "touch $out";
 
   # Pins regen.regenRowScript's dispatch against three synthetic rows: a

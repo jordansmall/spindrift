@@ -347,7 +347,7 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `skills`    | `perSystem.spindrift.agents.skills` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | `perSystem.spindrift.infra.runtime` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-| `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050) |
+| `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
 | `nixInBox`  | `perSystem.spindrift.infra.nix.inBox` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixStoreWritable` | `perSystem.spindrift.infra.nix.storeWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
 | `extraClosures` | `perSystem.spindrift.infra.image.extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
@@ -355,6 +355,8 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
 | `roster`    | `perSystem.spindrift.agents.models.roster` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
 | `byName`    | `perSystem.spindrift.agents.models.byName` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+| `drivers`   | `perSystem.spindrift.agents.drivers` | per-Driver map | attrset of Driver entries keyed by Driver name | `{}` | Drivers built side by side (ADR 0064); each entry holds only the Driver-valued settings, at their agents-relative paths; see [Several Drivers side by side](#several-drivers-side-by-side) |
+| `defaultDriver` | `perSystem.spindrift.agents.defaultDriver` | shared | string | `null` | the Driver behind `apps.default` and `apps.daemon`; inferred with one declared Driver, required with several |
 <!-- END GENERATED OPTION SURFACE TABLE -->
 
 Every knob settable on `perSystem.spindrift.*` — schema-generated run
@@ -881,6 +883,77 @@ pass-through described earlier in this section.
 | `filer` | *(empty; dogfood pins `claude-haiku-4-5-20251001`)* |
 | `worker` | `claude-sonnet-5` |
 <!-- END GENERATED DEFAULT MODELS -->
+
+#### Several Drivers side by side
+
+`perSystem.spindrift.agents.drivers` builds more than one Driver from a single
+flake, keyed by Driver name (a `lib/drivers/` registry name: `claude`,
+`opencode`; [ADR 0064](adr/0064-a-consumer-flake-declares-its-drivers-side-by-side.md)).
+Each entry carries only the settings whose valid values depend on the Driver,
+and everything else (`packages`, `runtime`, `prompt`, ...) stays shared at the
+top level:
+
+```nix
+perSystem.spindrift.agents = {
+  defaultDriver = "claude";
+  drivers.claude.models.default = "claude-sonnet-5";
+  drivers.opencode.models.default = "anthropic/claude-sonnet-4-5";
+};
+```
+
+An entry nests the Driver-valued settings at the same path they have under
+`agents`:
+
+<!-- BEGIN GENERATED DRIVER-VALUED PATHS -- nix run .#regen -- DO NOT EDIT -->
+- `bashTimeoutMs`
+- `models.byName`
+- `models.default`
+- `models.effort`
+- `models.filer`
+- `models.review`
+- `models.reviewEffort`
+- `models.roster`
+- `models.scout`
+- `models.worker`
+<!-- END GENERATED DRIVER-VALUED PATHS -->
+
+The entry has no `driver` field; the attribute name is the Driver. These are the rows marked `driverValued` in
+`lib/env-schema.nix` and `lib/structural-options-doc.nix`, so adding a Driver
+to the registry needs no change here.
+
+`agents.defaultDriver` picks the Driver behind `apps.default` and
+`apps.daemon`. It is inferred when one Driver is declared, required when
+several are, and must always name a declared Driver. These fail evaluation,
+each naming the fix:
+
+- `agents.drivers` set alongside `agents.driver` or any top-level
+  Driver-valued setting;
+- a Driver-valued setting at top level while several Drivers are declared;
+- several Drivers with no `agents.defaultDriver`;
+- an `agents.defaultDriver` that is not a declared Driver.
+
+The existing form, `agents.driver` plus the top-level `agents.models.*`
+settings, needs no migration and raises no warning: it is the one-entry map
+written the old way, and every output it produced before is unchanged. It
+additionally gains the per-Driver aliases listed under Outputs below, which are
+the same build under a second name.
+
+Outputs. The default Driver keeps today's names: `apps.default`,
+`apps.daemon`, `agent-image` (or `agent-closure` under bwrap), and its OCI
+image name. Every declared Driver, the default included, also gets
+`.#<driver>` and `.#<driver>-daemon` apps and an `agent-image-<driver>` (OCI)
+or `agent-closure-<driver>` (bwrap) package; for the default these alias the
+same build. A non-default Driver's Harness bakes its own image attribute into
+its freshness probe, and `.#<driver>` / `.#<driver>-daemon` into its Daemon as
+the child dispatch target (`DAEMON_APP`) and self reference
+(`DAEMON_SELF_APP`), so it never probes or relaunches the default's image. A
+top-level `dispatch.daemonApp` / `dispatch.daemonSelfApp` applies to the
+default Driver only. Because the default's per-Driver apps are aliases of
+`apps.default` and `apps.daemon` rather than a second build, they keep the
+default's baked references (`.#` / `.#daemon`, or those top-level `dispatch.*`
+overrides), not `.#<driver>` / `.#<driver>-daemon`; both names resolve to the
+same Harness, so a Daemon never mixes Drivers. The other Harnesses contribute
+just those three outputs.
 
 #### Authoring a new Driver
 

@@ -21,13 +21,13 @@ let
   schema = import ../lib/env-schema.nix;
   structuralOptionsDoc = import ../lib/structural-options-doc.nix;
   structuralPaths = import ../lib/structural-paths.nix;
-  byNamePaths = import ../lib/byname-paths.nix;
+  extraOptionPaths = import ../lib/extra-option-paths.nix;
   envExample = renderers.renderHarnessEnvExample schema;
   flagTable = renderers.renderFlagTableGo schema;
   schemaConfigFile = renderers.renderSchemaConfigGo schema;
   flakeOptionsDoc =
     renderers.renderFlakeOptionsDocFull schema structuralOptionsDoc structuralPaths
-      byNamePaths;
+      extraOptionPaths;
   driverRegistry = import ../lib/drivers/default.nix { inherit (pkgs) lib; };
   driverNamesFile = renderers.renderDriverNamesGo driverRegistry.entries;
   choreCatalog = import ../lib/chore-catalog.nix;

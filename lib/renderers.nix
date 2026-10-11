@@ -449,6 +449,21 @@ rec {
     + (builtins.concatStringsSep "/" (map (n: "${n}=${rosterDefaults.${n}.effort}") rosterNames))
     + "`\n";
 
+  # docs/reference.md lists the Driver-valued settings an agents.drivers.<name>
+  # entry accepts; this renders them from lib/driver-map.nix's `paths` (flat
+  # key -> agents-relative segments) so the list cannot drift from the
+  # `driverValued` marks (ADR 0064). Takes the paths as an argument rather than
+  # importing driver-map.nix, which imports lib/structural-options-doc.nix.
+  renderDriverValuedPathsDoc =
+    paths:
+    builtins.concatStringsSep "" (
+      map (p: "- `${p}`\n") (
+        builtins.sort builtins.lessThan (
+          map (k: builtins.concatStringsSep "." paths.${k}) (builtins.attrNames paths)
+        )
+      )
+    );
+
   # docs/reference.md restates the dogfood Consumer config's roster and
   # coordinator pins as prose; this pins that string to
   # lib/default-model-fixture.nix's dogfoodPins (issue #2514, documentedFact
@@ -504,7 +519,7 @@ rec {
   renderOptionSurfaceTableDoc =
     {
       structuralPaths,
-      byNamePaths,
+      extraOptionPaths,
       # From lib/build-constants.nix, the source lib/mkHarness.nix itself
       # defaults from, so this row's default cell is not a second hand-typed
       # digest that could drift from it (issue #2950 review finding).
@@ -527,14 +542,16 @@ rec {
         | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
         | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
         | `runtime`   | `${path "runtime" structuralPaths}` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-        | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050) |
+        | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
         | `nixInBox`  | `${path "nixInBox" structuralPaths}` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
         | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
         | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
         | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
         | `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
         | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-        | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+        | `byName`    | `${path "byName" extraOptionPaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" extraOptionPaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+        | `drivers`   | `${path "drivers" extraOptionPaths}` | per-Driver map | attrset of Driver entries keyed by Driver name | `{}` | Drivers built side by side (ADR 0064); each entry holds only the Driver-valued settings, at their agents-relative paths; see [Several Drivers side by side](#several-drivers-side-by-side) |
+        | `defaultDriver` | `${path "defaultDriver" extraOptionPaths}` | shared | string | `null` | the Driver behind `apps.default` and `apps.daemon`; inferred with one declared Driver, required with several |
       '';
       # Row names are read back off `table` itself, not a hand-kept side list, so
       # a wrong name breaks the render everyone reads (issue #2950 review
@@ -545,12 +562,14 @@ rec {
       # Forward direction only. A row with no registry key is legitimate (the
       # editorial rows), so schema-drift.nix's editorial-rows-pin holds that side.
       rowlessKeys = builtins.filter (k: !(builtins.elem k rowNames)) (
-        builtins.attrNames (structuralPaths // byNamePaths)
+        builtins.attrNames (structuralPaths // extraOptionPaths)
       );
-      domainPathMismatches = optionSurfaceDomainPathMismatches (structuralPaths // byNamePaths) table;
+      domainPathMismatches = optionSurfaceDomainPathMismatches (
+        structuralPaths // extraOptionPaths
+      ) table;
     in
     if rowlessKeys != [ ] then
-      throw "renderOptionSurfaceTableDoc: structuralPaths/byNamePaths carries key(s) with no matching option-surface table row: ${builtins.concatStringsSep ", " rowlessKeys} -- add a matching row to this function (lib/renderers.nix)"
+      throw "renderOptionSurfaceTableDoc: structuralPaths/extraOptionPaths carries key(s) with no matching option-surface table row: ${builtins.concatStringsSep ", " rowlessKeys} -- add a matching row to this function (lib/renderers.nix)"
     else if domainPathMismatches != [ ] then
       throw "renderOptionSurfaceTableDoc: option-surface table row(s) whose domain path does not match its registry entry: ${
         builtins.concatStringsSep ", " (
@@ -1470,18 +1489,14 @@ rec {
   # since a structural option has none. `doc` may be multi-line prose, collapsed
   # here because an embedded newline would break the markdown table's shape.
   renderStructuralOptionsDoc =
-    structuralOptionsDoc: structuralPaths: byNamePaths:
+    structuralOptionsDoc: structuralPaths: extraOptionPaths:
     let
-      byNameStructuralPath = builtins.concatStringsSep "." byNamePaths.byName;
-      pathFor =
-        name:
-        if name == "byName" then
-          byNameStructuralPath
-        else
-          builtins.concatStringsSep "." structuralPaths.${name};
+      # extraOptionPaths is every option path declared outside structuralPaths:
+      # byName plus the driver map's drivers and defaultDriver.
+      pathFor = name: builtins.concatStringsSep "." (structuralPaths.${name} or extraOptionPaths.${name});
       # docType is the field where escapeCell earns its keep: runtime's
       # `"podman"` | `"docker"` | ... reliably contains a literal "|".
-      names = builtins.attrNames structuralPaths ++ [ "byName" ];
+      names = builtins.attrNames structuralPaths ++ builtins.attrNames extraOptionPaths;
       sortedNames = builtins.sort (a: b: pathFor a < pathFor b) names;
       renderRow =
         name:
@@ -1507,7 +1522,7 @@ rec {
   # (issue #2572). Both nix/regen.nix and the flake-options-doc check call this
   # one renderer (CONTRIBUTING.md's one-renderer-per-artifact contract).
   renderFlakeOptionsDocFull =
-    schema: structuralOptionsDoc: structuralPaths: byNamePaths:
+    schema: structuralOptionsDoc: structuralPaths: extraOptionPaths:
     let
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
       flakeOptionNames = builtins.attrNames flakeOptionEntries;
@@ -1550,7 +1565,7 @@ rec {
     + "See [`docs/reference.md`](reference.md) for the full option surface and runtime vars.\n"
     + "\n"
     + concatStrings (map renderSection domainOrder)
-    + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths byNamePaths;
+    + renderStructuralOptionsDoc structuralOptionsDoc structuralPaths extraOptionPaths;
 
   # share/bash-completion/completions/spindrift content: subcommand completion
   # for the first word, flag completion anywhere after it, and filename

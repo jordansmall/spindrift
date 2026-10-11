@@ -327,7 +327,7 @@ let
       opt = mkOption {
         type = types.attrsOf (types.submodule { options = driverEntryOptions; });
         default = { };
-        description = "Drivers this flake builds side by side, keyed by Driver name; each entry carries that Driver's own model, effort, roster and Bash-timeout settings (ADR 0064).";
+        description = structuralOptionsDoc.drivers.doc;
       };
     }
     {
@@ -335,7 +335,7 @@ let
       opt = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "The Driver behind `apps.default` and `apps.daemon`. Optional with a single declared Driver; required with several.";
+        description = structuralOptionsDoc.defaultDriver.doc;
       };
     }
   ];
