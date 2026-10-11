@@ -73,6 +73,10 @@ type Policy struct {
 	// digest: over it, Evidence is trimmed first and Outliers second, never the
 	// aggregate tables.
 	TuningDigestBytes int
+	// TuningCooldown is BUTLER_TUNING_COOLDOWN, how long a tuning finding closed
+	// as not planned keeps suppressing a refile of the same pattern; 0 never
+	// suppresses on a not-planned close.
+	TuningCooldown time.Duration
 }
 
 // DefaultPatchPaths is BUTLER_PATCH_PATHS' schema default (lib/env-schema.nix

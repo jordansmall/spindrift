@@ -29,6 +29,7 @@ type schemaConfig struct {
 	butlerPatchMaxLines          int
 	butlerPatchPaths             string
 	butlerPromotionMaxFiles      int
+	butlerTuningCooldown         string
 	butlerTuningDigestBytes      int
 	butlerTuningMinRecords       int
 	butlerTuningMinSample        int
@@ -127,6 +128,7 @@ func loadSchemaConfig() schemaConfig {
 		butlerPatchMaxLines:       atoiSchema("BUTLER_PATCH_MAX_LINES"),
 		butlerPatchPaths:          getenvSchema("BUTLER_PATCH_PATHS"),
 		butlerPromotionMaxFiles:   atoiSchema("BUTLER_PROMOTION_MAX_FILES"),
+		butlerTuningCooldown:      getenvSchema("BUTLER_TUNING_COOLDOWN"),
 		butlerTuningDigestBytes:   atoiSchema("BUTLER_TUNING_DIGEST_BYTES"),
 		butlerTuningMinRecords:    atoiSchema("BUTLER_TUNING_MIN_RECORDS"),
 		butlerTuningMinSample:     atoiSchema("BUTLER_TUNING_MIN_SAMPLE"),

@@ -340,6 +340,7 @@ func testButlerLaunchContext(t *testing.T, repo, butlerChores string) *launchCon
 			butlerChores:                 butlerChores,
 			butlerEvery:                  schemaDefault("BUTLER_EVERY"),
 			butlerClaimTimeout:           schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			butlerTuningCooldown:         schemaDefault("BUTLER_TUNING_COOLDOWN"),
 			daemonAwakeWindow:            schemaDefault("DAEMON_AWAKE_WINDOW"),
 			baseBranch:                   schemaDefault("BASE_BRANCH"),
 		}},
@@ -406,6 +407,11 @@ func TestCmdButler_RejectsMalformedButlerSettings(t *testing.T) {
 			name:       "BUTLER_CLAIM_TIMEOUT",
 			set:        func(cfg *config) { cfg.butlerClaimTimeout = "not-a-duration" },
 			wantSubstr: "BUTLER_CLAIM_TIMEOUT",
+		},
+		{
+			name:       "BUTLER_TUNING_COOLDOWN",
+			set:        func(cfg *config) { cfg.butlerTuningCooldown = "-1h" },
+			wantSubstr: "BUTLER_TUNING_COOLDOWN",
 		},
 		{
 			name:       "DAEMON_AWAKE_WINDOW",
@@ -856,6 +862,43 @@ func TestParseButlerClaimTimeout(t *testing.T) {
 	}
 }
 
+func TestParseButlerTuningCooldown(t *testing.T) {
+	cases := []struct {
+		name    string
+		value   string
+		want    time.Duration
+		wantErr bool
+	}{
+		{"schema default", "720h", 720 * time.Hour, false},
+		{"short valid duration", "36h", 36 * time.Hour, false},
+		{"zero seconds disables the cooldown", "0s", 0, false},
+		{"bare zero disables the cooldown", "0", 0, false},
+		{"negative is rejected", "-1h", 0, true},
+		{"unparseable is rejected", "30d", 0, true},
+		{"empty is rejected", "", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseButlerTuningCooldown(tc.value)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("parseButlerTuningCooldown(%q): got nil error, want one", tc.value)
+				}
+				if !strings.Contains(err.Error(), "BUTLER_TUNING_COOLDOWN") {
+					t.Errorf("error %q does not name BUTLER_TUNING_COOLDOWN", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseButlerTuningCooldown(%q): %v", tc.value, err)
+			}
+			if got != tc.want {
+				t.Errorf("parseButlerTuningCooldown(%q) = %v, want %v", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
 // promotableRunFunc builds a runner.Fake.RunFunc that reports one finding
 // clearing every promotion gate (allow-listed class, one file, non-blank
 // concurrence) -- the real-Dispatch, log-carrier equivalent of internal/
@@ -902,6 +945,7 @@ func TestCmdButler_PromotesFindingWithConfiguredWorkLabel(t *testing.T) {
 			butlerChoreClasses:           "bugs=error-handling",
 			butlerEvery:                  schemaDefault("BUTLER_EVERY"),
 			butlerClaimTimeout:           schemaDefault("BUTLER_CLAIM_TIMEOUT"),
+			butlerTuningCooldown:         schemaDefault("BUTLER_TUNING_COOLDOWN"),
 			daemonAwakeWindow:            schemaDefault("DAEMON_AWAKE_WINDOW"),
 			baseBranch:                   schemaDefault("BASE_BRANCH"),
 			butlerMaxPromotionsPerDay:    1,
