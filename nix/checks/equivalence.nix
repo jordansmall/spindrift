@@ -25,6 +25,22 @@ let
     templatePkgs
     harnessNoRevision
     ;
+  # Shared by the mkharness-image-attr-name / mkharness-daemon-app-refs checks
+  # (ADR 0064, issue #5049): a minimal OCI mkHarness call, and a shell
+  # extractor asserting one baked run-document setting.
+  ociHarnessArgs = {
+    inherit nixpkgs system;
+    packages = p: [ p.hello ];
+  };
+  bakedSettingCheck = ''
+    check() {
+      got=$(grep -o "\"$2\":\"[^\"]*\"" "$3" | sed -e 's/.*:"//' -e 's/"$//')
+      if [ "$got" != "$1" ]; then
+        echo "baked $2=$got, expected $1" >&2
+        exit 1
+      fi
+    }
+  '';
   # Shared by the mkharness-review-effort-* checks below (issue #2512): each
   # asserts against a differently-configured mkHarness call's own resolved
   # `internals.roster` (issue #2529), but only needs the reviewer's effort.
@@ -1744,6 +1760,47 @@ in
             exit 1
             ;;
         esac
+        touch $out
+      '';
+
+  # A second Harness in one flake needs its own output attribute (ADR 0064,
+  # issue #5049); the baked freshness probe must follow that name, never the
+  # default, or Probe would realize the first Harness's image.
+  mkharness-image-attr-name =
+    let
+      inherit (pkgs.lib) assertMsg;
+      ociNamed = import ../../lib/mkHarness.nix (
+        ociHarnessArgs // { imageAttrName = "agent-image-test"; }
+      );
+      bwrapNamed = import ../../lib/mkHarness.nix (
+        bwrapHarnessArgs // { imageAttrName = "agent-closure-test"; }
+      );
+      names = h: builtins.toJSON (builtins.attrNames h.packages);
+    in
+    assert assertMsg (
+      ociNamed.packages ? agent-image-test
+    ) "an OCI harness must expose its image under imageAttrName, got: ${names ociNamed}";
+    assert assertMsg (!(ociNamed.packages ? agent-image))
+      "an OCI harness with a custom imageAttrName must not also expose agent-image, got: ${names ociNamed}";
+    assert assertMsg (
+      bwrapNamed.packages ? agent-closure-test
+    ) "a bwrap harness must expose its closure under imageAttrName, got: ${names bwrapNamed}";
+    assert assertMsg (!(bwrapNamed.packages ? agent-closure))
+      "a bwrap harness with a custom imageAttrName must not also expose agent-closure, got: ${names bwrapNamed}";
+    assert assertMsg (
+      !(builtins.tryEval
+        (import ../../lib/mkHarness.nix (ociHarnessArgs // { imageAttrName = "spindrift"; })).packages
+      ).success
+    ) "an imageAttrName colliding with a built-in package must be rejected";
+    pkgs.runCommand "mkharness-image-attr-name"
+      {
+        ociDoc = ociNamed.internals.runInputDocumentFile;
+        bwrapDoc = bwrapNamed.internals.runInputDocumentFile;
+      }
+      ''
+        ${bakedSettingCheck}
+        check '.#packages.${system}.agent-image-test' FLAKE_IMAGE_ATTR "$ociDoc"
+        check '.#packages.${system}.agent-closure-test' FLAKE_IMAGE_ATTR "$bwrapDoc"
         touch $out
       '';
 

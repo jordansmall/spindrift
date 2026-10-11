@@ -146,6 +146,8 @@ let
     "mkharness-agent-closure-package"
     "mkharness-agent-closure-bundles-both"
     "mkharness-agent-closure-tracks-prefetch"
+    # Builds a bwrap harness whose packages exist only when isLinux.
+    "mkharness-image-attr-name"
     # Same isLinux gate one hop further out: asserts config.packages carries
     # agent-closure, which flake.nix only re-exports when
     # fixtures.dogfoodBwrapHarness.packages has it.

@@ -94,6 +94,10 @@
   # Container runtime the launcher commands drive: "podman" (default), "docker",
   # or "rancher" (Rancher Desktop containerd mode; invokes nerdctl).
   runtime ? "podman",
+  # The flake output attribute the image (OCI) or agent closure (bwrap) is
+  # exposed under, and the one the baked freshness probe realizes. A second
+  # Harness in one flake needs its own name (ADR 0064, issue #5049).
+  imageAttrName ? (if runtime == "bwrap" then "agent-closure" else "agent-image"),
   # The agent CLI Driver (ADR 0009, issues #261/#262): selects one entry from
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
   # to the Go launcher as DRIVER (host-side half). "claude" and "opencode".
@@ -1198,7 +1202,7 @@ let
   # The image's store path as plain text (context discarded), so the launcher
   # commands embed the exact Linux image path without taking a build-time
   # dependency on it. That lets `build`, `run` and `nix flake check` build
-  # natively on darwin; realizing the image stays `nix build .#agent-image`.
+  # natively on darwin; realizing the image stays `nix build .#<imageAttrName>`.
   imagePath = builtins.unsafeDiscardStringContext (toString image);
 
   # The content-hash image tag: a changed flake produces a new hash, so the
@@ -1288,6 +1292,7 @@ let
       imageHash
       launcherCurrencyHash
       runtime
+      imageAttrName
       imageDrv
       nixBuilderImage
       systems
@@ -1729,6 +1734,25 @@ let
       true
     else
       throw "mkHarness: BUTLER_CHORES enables chore(s) with no prompt file in choresDir: ${lib.concatStringsSep ", " butlerChoresMissingPrompt}; each needs <name>.md in the chores directory";
+  # The always-present flake packages; imageAttrName must not shadow one of
+  # them, or the `//` merge below would silently drop the sibling package.
+  basePackages = {
+    inherit spindrift;
+    launcher-currency = launcherCurrencyBin;
+    spindrift-manpage = manpage;
+    spindrift-bash-completion = bashCompletion;
+    spindrift-fish-completion = fishCompletion;
+    spindrift-zsh-completion = zshCompletion;
+  };
+  imageAttrNameOk =
+    if imageAttrName == "" then
+      throw "mkHarness: imageAttrName must not be empty"
+    else if lib.hasInfix "." imageAttrName then
+      throw "mkHarness: imageAttrName '${imageAttrName}' must not contain '.' -- it names a single flake package attribute, and a dotted name would be read as an attribute path"
+    else if basePackages ? ${imageAttrName} then
+      throw "mkHarness: imageAttrName '${imageAttrName}' collides with the built-in package of the same name; pick a name outside: ${lib.concatStringsSep ", " (lib.attrNames basePackages)}"
+    else
+      true;
 in
 if removedDefaultKeys != [ ] then
   throw "mkHarness: defaults.${lib.head removedDefaultKeys}: ${
@@ -1748,6 +1772,7 @@ else
   assert jiraStatusMappingOk;
   assert daemonAwakeWindowOk;
   assert butlerChoresPromptOk;
+  assert imageAttrNameOk;
   warnAll {
     inherit
       image
@@ -1813,19 +1838,13 @@ else
       inherit rosterWarnings;
     };
 
-    packages = {
-      inherit spindrift;
-      launcher-currency = launcherCurrencyBin;
-      spindrift-manpage = manpage;
-      spindrift-bash-completion = bashCompletion;
-      spindrift-fish-completion = fishCompletion;
-      spindrift-zsh-completion = zshCompletion;
-    }
-    # The OCI image is not relevant for the bwrap runner (no image build/load).
-    // lib.optionalAttrs (isLinux && runtime != "bwrap") { agent-image = image; }
-    # The bwrap counterpart: one flake package standing in for the whole
-    # agent closure, so freshness (issue #2667) has a single attr to realize.
-    // lib.optionalAttrs (isLinux && runtime == "bwrap") { agent-closure = agentClosure; };
+    packages =
+      basePackages
+      # The OCI image is not relevant for the bwrap runner (no image build/load).
+      // lib.optionalAttrs (isLinux && runtime != "bwrap") { ${imageAttrName} = image; }
+      # The bwrap counterpart: one flake package standing in for the whole
+      # agent closure, so freshness (issue #2667) has a single attr to realize.
+      // lib.optionalAttrs (isLinux && runtime == "bwrap") { ${imageAttrName} = agentClosure; };
 
     apps.default = {
       type = "app";
