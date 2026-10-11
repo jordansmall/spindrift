@@ -394,6 +394,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		},
 		demandFlights: make(map[Kind]*demandFlight),
 	}
+	p.st.self = cfg.SelfUpdate
 	// Must precede any slot running, so own starts read the restored gate
 	// generation (gateGenOf) and the restored breaker.
 	if h := cfg.Handoff; h != nil {

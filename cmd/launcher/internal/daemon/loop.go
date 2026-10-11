@@ -256,6 +256,11 @@ type Config struct {
 	// while SelfProgram is empty.
 	RestartInPlace bool
 
+	// SelfUpdate is the self-update state the pool starts in; zero is none.
+	// An image whose in-place exec failed starts blocked at that revision,
+	// so it is not rebuilt until the tip moves (ADR 0063, issue #5016).
+	SelfUpdate SelfUpdate
+
 	// IdleFloor and IdleCap bound each kind's own idle backoff: the first
 	// no-work check (exit 2 always, exit 3 when the pool is otherwise
 	// idle) waits IdleFloor, and each further consecutive no-work check
