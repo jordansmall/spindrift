@@ -147,8 +147,11 @@ type slotState struct {
 	phase Phase
 	// since is when phase last changed; mutate maintains it, so no phase
 	// assignment site needs to.
-	since  time.Time
-	flight slotFlight
+	since time.Time
+	// sincePinned marks a since the seater chose (an inherited child's real
+	// start), which mutate keeps through the phase move and then clears.
+	sincePinned bool
+	flight      slotFlight
 }
 
 // mutate is the pool's one path to changing anything in state: every
@@ -179,14 +182,17 @@ func (p *pool) mutate(f func(s *state) []Event) {
 	evs := f(&p.st)
 	// startChild and finishChild replace a whole slotState, zeroing since, and
 	// noteAwakeOpen re-sets idle on every iteration; restoring the prior
-	// since unless the phase moved keeps both from resetting it.
+	// since unless the phase moved keeps both from resetting it. A slot
+	// seated with sincePinned keeps its since across the move that seats it.
 	now := p.clk.Now()
 	for i := range p.st.slots {
-		if p.st.slots[i].phase == before[i].phase {
+		switch {
+		case p.st.slots[i].phase == before[i].phase:
 			p.st.slots[i].since = before[i].since
-		} else {
+		case !p.st.slots[i].sincePinned:
 			p.st.slots[i].since = now
 		}
+		p.st.slots[i].sincePinned = false
 	}
 	for _, ev := range evs {
 		p.em.Emit(ev)
@@ -372,6 +378,12 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 			wakeCancel: wakeCancel,
 		},
 		demandFlights: make(map[Kind]*demandFlight),
+	}
+	// Must precede any slot running, so own starts read the restored gate
+	// generation (gateGenOf) and the restored breaker.
+	if h := cfg.Handoff; h != nil {
+		p.st.sched = p.st.sched.restore(h.Kinds)
+		p.st.b = p.st.b.restore(h.Breaker)
 	}
 	if cfg.Slots > 1 {
 		// A single slot has no sibling to race, so it must take no wait
@@ -651,10 +663,14 @@ func (p *pool) occupyInherited() {
 		for _, hs := range h.Slots {
 			pin := childStartPin{time: hs.ChildStart, n: hs.ChildStartN}
 			s.lastStart[hs.Slot] = pin
-			s.slots[hs.Slot] = slotState{phase: PhaseRunning, flight: slotFlight{
+			since := p.clk.Now()
+			if t, err := time.Parse(time.RFC3339, hs.ChildStart); err == nil {
+				since = t
+			}
+			s.slots[hs.Slot] = slotState{phase: PhaseRunning, since: since, sincePinned: true, flight: slotFlight{
 				kind: hs.Kind, revision: hs.Revision, issues: slices.Clone(hs.Issues), key: hs.Key,
 				pass: hs.Pass, model: hs.Model, modelRole: hs.ModelRole, childStart: pin,
-				continues: s.continues[hs.Kind], gateGen: s.sched.gateGenOf(hs.Kind),
+				continues: s.continues[hs.Kind], gateGen: hs.GateGen,
 			}}
 			evs = append(evs, Event{Event: "child_inherited", Kind: hs.Kind, Key: hs.Key, Revision: hs.Revision, Slot: intPtr(hs.Slot), ChildLog: hs.ChildLog})
 		}

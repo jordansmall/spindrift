@@ -96,7 +96,8 @@ type Runner interface {
 	// InheritChild rebuilds the handle of a child an earlier daemon image
 	// started and handed off (ADR 0063). The handle behaves exactly as
 	// StartChild's: records through req.OnRecord, Stop/Abort forwarding,
-	// Wait and abandon.
+	// Wait and abandon. ctx is never cancelled by a pool halt: the child is
+	// already running, so a halt must not fail the re-attach.
 	InheritChild(ctx context.Context, req ChildRequest, child ChildState) (ChildHandle, error)
 	// Prebuild realises tip.SelfPath with a GC root and smoke-tests it (the
 	// new daemon run with --check-only), so a self-change halt only ever
@@ -380,6 +381,15 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 		if detail := validateHandoff(cfg); detail != "" {
 			return invalidConfig(em, cfg, detail)
 		}
+		// A latch the predecessor had already closed stays closed: the
+		// closed-Stop path below then halts before any child starts, and
+		// childRequest hands the closed latch to every inherited child.
+		if cfg.Handoff.Stop {
+			cfg.Stop = closedLatch()
+		}
+		if cfg.Handoff.Abort {
+			cfg.Abort = closedLatch()
+		}
 	}
 
 	p, pctx := newPool(ctx, cfg, r, em, clk)
@@ -435,10 +445,31 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	return p.haltReason()
 }
 
-// validateHandoff names the first defect in cfg.Handoff's slots, "" when it
-// fits the pool: each slot inside [0, cfg.Slots), named once, of a configured
-// kind.
+func closedLatch() <-chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
+// validateHandoff names the first defect in cfg.Handoff's slots and kinds, ""
+// when it fits the pool: each slot inside [0, cfg.Slots), named once, of a
+// configured kind, and each kind entry configured and named once. A slot's
+// gate generation may not pass its kind's carried one (0 when the kind has no
+// entry, since its counter restarts there): it cannot have started under a
+// generation its kind never reached.
 func validateHandoff(cfg Config) string {
+	seenKind := make(map[Kind]bool, len(cfg.Handoff.Kinds))
+	kindGen := make(map[Kind]int, len(cfg.Handoff.Kinds))
+	for _, hk := range cfg.Handoff.Kinds {
+		switch {
+		case !slices.Contains(cfg.Kinds, hk.Kind):
+			return fmt.Sprintf("handoff schedule state names kind %q, which is not in kinds", hk.Kind)
+		case seenKind[hk.Kind]:
+			return fmt.Sprintf("handoff names kind %q twice", hk.Kind)
+		}
+		seenKind[hk.Kind] = true
+		kindGen[hk.Kind] = hk.Gen
+	}
 	seen := make(map[int]bool, len(cfg.Handoff.Slots))
 	for _, hs := range cfg.Handoff.Slots {
 		switch {
@@ -448,6 +479,8 @@ func validateHandoff(cfg Config) string {
 			return fmt.Sprintf("handoff names slot %d twice", hs.Slot)
 		case !slices.Contains(cfg.Kinds, hs.Kind):
 			return fmt.Sprintf("handoff slot %d runs kind %q, which is not in kinds", hs.Slot, hs.Kind)
+		case hs.GateGen > kindGen[hs.Kind]:
+			return fmt.Sprintf("handoff slot %d started under gate generation %d, past kind %q's %d", hs.Slot, hs.GateGen, hs.Kind, kindGen[hs.Kind])
 		}
 		seen[hs.Slot] = true
 	}
@@ -517,8 +550,10 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// report its child_finish, as it does for a child it started itself.
 	if h := p.inheritedSlot(slot); h != nil {
 		req := p.childRequest(slot, h.Kind, h.Revision, h.ChildLog)
-		handle, err := p.r.InheritChild(ctx, req, h.Child)
-		if p.superviseChild(ctx, slot, h.Kind, h.Revision, handle, err) {
+		// The child is already running: a halt that cancelled ctx must not
+		// abort the re-attach, or its real exit would surface as an error.
+		handle, err := p.r.InheritChild(context.WithoutCancel(ctx), req, h.Child)
+		if p.superviseChild(ctx, slot, h.Kind, h.Revision, handle, err, seamInheritChild) {
 			return
 		}
 	}
@@ -699,7 +734,7 @@ slotLoop:
 		}
 		req := p.childRequest(slot, kind, revision, childLog)
 		handle, err := p.r.StartChild(ctx, req)
-		if p.superviseChild(ctx, slot, kind, revision, handle, err) {
+		if p.superviseChild(ctx, slot, kind, revision, handle, err, seamRunChild) {
 			return
 		}
 	}
@@ -741,11 +776,21 @@ func (p *pool) childRequest(slot int, kind Kind, revision, childLog string) Chil
 	}
 }
 
+// childSeam names the Runner seam a supervised child came through; it prefixes
+// the failure reason when that seam errors.
+type childSeam string
+
+const (
+	seamRunChild     childSeam = "run-child"
+	seamInheritChild childSeam = "inherit-child"
+)
+
 // superviseChild waits out a child on slot and carries its outcome through the
 // pool's bookkeeping: the flight, the baton, the kind's backoff state and any
-// halt. handle and err are StartChild's (or InheritChild's) results. It
-// reports whether the slot must stop (true) or loop around to its next round.
-func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision string, handle ChildHandle, err error) bool {
+// halt. handle and err are StartChild's (or InheritChild's) results; seam
+// names which one for the failure reason. It reports whether the slot must
+// stop (true) or loop around to its next round.
+func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision string, handle ChildHandle, err error, seam childSeam) bool {
 	cfg := p.cfg
 	var result ChildResult
 	if err == nil {
@@ -775,17 +820,15 @@ func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision
 	// as still open (issue #4380).
 	if err != nil {
 		// The seam failed, not the child (e.g. it could not even be
-		// started), so there is no exit code to report — but a
-		// child_start was already emitted, and every started child
-		// gets a matching child_finish so the stream never shows one
-		// without the other. Every box/settled record the child
-		// reported before this failure already reached the stream live
-		// through OnRecord, so there is nothing left to replay here.
+		// started or re-attached), so there is no exit code to report —
+		// but a child_start or child_inherited was already emitted, and
+		// every such child gets a matching child_finish so the stream
+		// never shows one without the other. Every box/settled record
+		// the child reported before this failure already reached the
+		// stream live through OnRecord, so there is nothing left to
+		// replay here.
 		p.emit(Event{Event: "child_finish", Kind: kind, Key: key, Revision: revision, Outcome: "error", Slot: intPtr(slot)})
-		if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("run-child: %v", err), batonPassChildEnded) {
-			return true
-		}
-		return false
+		return p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("%s: %v", seam, err), batonPassChildEnded)
 	}
 
 	exit := result.Exit
@@ -828,10 +871,7 @@ func (p *pool) superviseChild(ctx context.Context, slot int, kind Kind, revision
 		// genuinely idling.
 		return false
 	case Backoff:
-		if p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit), batonPassChildEnded) {
-			return true
-		}
-		return false
+		return p.backoffOrHalt(ctx, slot, kind, revision, fmt.Sprintf("outcome: %s (exit %d)", outcome, exit), batonPassChildEnded)
 	default: // HaltPool
 		// haltClass is never HaltNone here: Interpret's one table ties
 		// action == HaltPool to a real class, pinned by
