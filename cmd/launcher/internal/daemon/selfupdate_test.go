@@ -423,3 +423,113 @@ func TestSelfUpdateStopDuringBuildRecordsNothing(t *testing.T) {
 		t.Fatalf("halt events = %d, want exactly 1", n)
 	}
 }
+
+// waitSelfPhase polls the status file until its self_update shows phase.
+func waitSelfPhase(t *testing.T, dir string, phase SelfUpdatePhase) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if rep, err := ReadStatus(dir); err == nil && rep.Status != nil &&
+			rep.Status.SelfUpdate != nil && rep.Status.SelfUpdate.Phase == phase {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("status self_update never reached %q", phase)
+}
+
+// inPlaceWaiting runs a two-slot in-place pool whose build passes once both
+// slots hold a child, waits for the waiting phase, then frees slot 1 so the
+// pool has a free slot that must not start a child. Slot 0's child stays
+// running. It returns Loop's halt channel and the buffer of events.
+func inPlaceWaiting(t *testing.T) (r *scriptedRunner, stop chan struct{}, dir string, done chan Halt, buf *bytes.Buffer) {
+	t.Helper()
+	r = &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{selfNew}}
+	r.holdSlots(2)
+	r.announceEachSlot()
+	gate := make(chan struct{})
+	r.onPrebuild = func(ctx context.Context, _ int, _ Tip) error {
+		select {
+		case <-gate:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	stop = make(chan struct{})
+	dir = t.TempDir()
+	buf = &bytes.Buffer{}
+	cfg := testConfig(2)
+	cfg.SelfProgram = selfOld
+	cfg.RestartInPlace = true
+	cfg.Stop = stop
+	cfg.Status = NewStatusWriter(dir, time.Now)
+
+	done = make(chan Halt, 1)
+	go func() { done <- Loop(context.Background(), cfg, r, newTestEmitter(buf), &testClock{}) }()
+	r.awaitStart(t)
+	r.awaitStart(t)
+	close(gate)
+	waitSelfPhase(t, dir, SelfUpdateWaiting)
+	r.releaseSlot(t, 1, ChildResult{Exit: 0})
+	return
+}
+
+// In-place mode: a passing build neither halts nor drains. The status shows
+// waiting, and a slot freed meanwhile starts nothing.
+func TestSelfUpdateInPlaceWaitsWithoutHaltOrStart(t *testing.T) {
+	r, stop, dir, done, buf := inPlaceWaiting(t)
+
+	select {
+	case h := <-done:
+		t.Fatalf("pool ended with %+v while waiting, want it to keep waiting", h)
+	case <-time.After(50 * time.Millisecond):
+	}
+	waitSelfPhase(t, dir, SelfUpdateWaiting)
+	if n := r.runCount(); n != 2 {
+		t.Fatalf("run calls = %d, want 2: no child may start while waiting", n)
+	}
+
+	close(stop)
+	r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	<-done
+	events := decodeEvents(t, buf)
+	if n := countEvents(eventNames(events), "child_start"); n != 2 {
+		t.Errorf("child_start events = %d, want 2", n)
+	}
+	su := selfUpdateEvents(events)
+	if len(su) != 1 || su[0].Phase != string(SelfUpdateBuilt) {
+		t.Errorf("self_update events = %+v, want one built", su)
+	}
+}
+
+// A stop while waiting cancels the handoff: an ordinary operator stop that
+// drains the running child, with the build left recorded as built.
+func TestSelfUpdateInPlaceStopWhileWaitingDrains(t *testing.T) {
+	r, stop, dir, done, buf := inPlaceWaiting(t)
+
+	close(stop)
+	select {
+	case h := <-done:
+		t.Fatalf("pool ended with %+v before its running child finished", h)
+	case <-time.After(50 * time.Millisecond):
+	}
+	r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	h := <-done
+
+	if h.Class != HaltOperatorStop {
+		t.Fatalf("halt = %+v, want %v", h, HaltOperatorStop)
+	}
+	events := decodeEvents(t, buf)
+	names := eventNames(events)
+	if countEvents(names, "halt") != 1 || countEvents(names, "child_finish") != 2 || countEvents(names, "child_start") != 2 {
+		t.Errorf("events = %v, want one halt, two child_start and two child_finish", names)
+	}
+	rep, err := ReadStatus(dir)
+	if err != nil || rep.Status == nil || rep.Status.SelfUpdate == nil {
+		t.Fatalf("ReadStatus = %+v, %v", rep, err)
+	}
+	if got := rep.Status.SelfUpdate.Phase; got != SelfUpdateBuilt {
+		t.Errorf("self_update phase = %q, want %q after the handoff was cancelled", got, SelfUpdateBuilt)
+	}
+}

@@ -59,8 +59,11 @@ type Status struct {
 // SelfUpdate is the prebuild of the daemon build a newer tip would load.
 type SelfUpdate struct {
 	// Phase is SelfUpdateBuilding while the prebuild runs, SelfUpdateBuilt
-	// once the build passed its smoke test (the pool is about to halt), or
-	// SelfUpdateBlocked when it failed and the pool kept its running build.
+	// once the build passed its smoke test (the pool is about to halt),
+	// SelfUpdateBlocked when it failed and the pool kept its running build,
+	// and, in the in-place mode, SelfUpdateWaiting while the pool holds off
+	// new children for a clean moment to hand off, then SelfUpdateRestarting.
+	// A stop while waiting drops the phase back to SelfUpdateBuilt.
 	Phase SelfUpdatePhase `json:"phase"`
 	// Revision is the tip the build was made at; a blocked Revision is not
 	// retried until the tip moves past it.
@@ -77,6 +80,10 @@ const (
 	SelfUpdateBuilding SelfUpdatePhase = "building"
 	SelfUpdateBuilt    SelfUpdatePhase = "built"
 	SelfUpdateBlocked  SelfUpdatePhase = "blocked"
+	// SelfUpdateWaiting: in-place mode, build passed, no slot starts a child.
+	SelfUpdateWaiting SelfUpdatePhase = "waiting"
+	// SelfUpdateRestarting: the handoff is committed and cannot be cancelled.
+	SelfUpdateRestarting SelfUpdatePhase = "restarting"
 )
 
 // event is the self_update event recording su's verdict. It carries no Slot:
@@ -490,4 +497,10 @@ func parseHolderPid(identity string) int {
 		return 0
 	}
 	return pid
+}
+
+// handingOff reports whether the in-place self-update has stopped the pool
+// starting children: a build is waiting for, or committed to, a handoff.
+func (su SelfUpdate) handingOff() bool {
+	return su.Phase == SelfUpdateWaiting || su.Phase == SelfUpdateRestarting
 }
