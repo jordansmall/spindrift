@@ -44,6 +44,10 @@ type pool struct {
 	st  state
 	seq uint64 // publish sequence counter; see mutate
 
+	// bg tracks the background self-update prebuild, which Loop waits out so
+	// no event follows its return.
+	bg sync.WaitGroup
+
 	// demandFlights holds each kind's in-flight Demand probe, so slots that
 	// all find the same kind stale share one Runner.Demand call. Guarded by
 	// p.mu but kept off state: it is coordination, not published pool state.
@@ -78,6 +82,10 @@ type state struct {
 	// reportStale.
 	tip       string
 	continues map[Kind]int
+
+	// self is the latest self-update attempt; zero until a tip's daemon
+	// build first differs from the running one. See selfUpdate.
+	self SelfUpdate
 
 	// wake is the current wake generation: a parked slot sleeps on a context
 	// derived from it, and wakeParked cancels it and installs a fresh one
@@ -594,6 +602,12 @@ func (s *state) reportStale(kind Kind, revision string, continues int, nd NextDu
 func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kind, childLog string, ok bool) {
 	now := p.clk.Now()
 	p.mutate(func(s *state) []Event {
+		// A halt can land between the slot's last admission check and here,
+		// notably the self-update goroutine's, which no slot's loop orders
+		// against; no child may start once it has.
+		if s.halted {
+			return nil
+		}
 		// A slot not holding the baton, deciding on a Chore-keyed
 		// provisional kind, must not switch to an issue-keyed one: only the
 		// holder discovers issues.
@@ -1044,6 +1058,18 @@ func (p *pool) haltIfStopping(ctx context.Context, kind Kind) bool {
 	return false
 }
 
+// recordHalt latches h as the halt reason and returns its event, or nil when
+// the pool had already halted. It runs inside mutate so a caller can fold
+// other state changes into the same atomic step.
+func (s *state) recordHalt(h Halt) []Event {
+	if s.halted {
+		return nil
+	}
+	s.halted = true
+	s.reason = h
+	return []Event{h.Event()}
+}
+
 // halt records h as the pool's halt reason if none is recorded yet, emits
 // the single pool-level halt event, and cancels the derived context.
 // Idempotent: once the pool has halted, later calls (racing siblings, or a
@@ -1052,13 +1078,9 @@ func (p *pool) haltIfStopping(ctx context.Context, kind Kind) bool {
 func (p *pool) halt(h Halt) {
 	first := false
 	p.mutate(func(s *state) []Event {
-		if s.halted {
-			return nil
-		}
-		s.halted = true
-		s.reason = h
-		first = true
-		return []Event{h.Event()}
+		evs := s.recordHalt(h)
+		first = evs != nil
+		return evs
 	})
 	if !first {
 		return
@@ -1478,6 +1500,12 @@ func (p *pool) snapshotLocked() Status {
 	kinds := make([]Kind, len(p.cfg.Kinds))
 	copy(kinds, p.cfg.Kinds)
 
+	var selfUpdate *SelfUpdate
+	if p.st.self != (SelfUpdate{}) {
+		su := p.st.self
+		selfUpdate = &su
+	}
+
 	return Status{
 		Kinds:    kinds,
 		State:    computedState,
@@ -1486,6 +1514,8 @@ func (p *pool) snapshotLocked() Status {
 		Checks:   checks,
 		Trackers: trackers,
 		RepoURL:  p.cfg.RepoURL,
+
+		SelfUpdate: selfUpdate,
 	}
 }
 

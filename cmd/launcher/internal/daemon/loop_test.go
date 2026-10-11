@@ -1347,11 +1347,13 @@ func TestLoopAwakeWindowClosesDuringResolveTipParksInsteadOfStarting(t *testing.
 	wantEvents(t, &buf, []string{"awake_close", "awake_open", "child_start", "child_finish", "halt"}, "no child_start until the slot has parked and reopened")
 }
 
-// TestLoopSelfChangeHaltsAtIterationBoundary asserts the loop halts before
-// starting a child when ResolveTip's Tip.SelfPath reports the daemon's own build
-// changed at the fetched tip, and that the halt reason names it.
-func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
+// TestLoopSelfChangeHaltsAfterPrebuild asserts the loop halts once the new
+// build is prebuilt when ResolveTip's Tip.SelfPath reports the daemon's own
+// build changed at the fetched tip, that no child starts after the built
+// event, and that the halt reason names the change.
+func TestLoopSelfChangeHaltsAfterPrebuild(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
+	prebuildAfterFirstChild(r, nil)
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -1364,25 +1366,24 @@ func TestLoopSelfChangeHaltsAtIterationBoundary(t *testing.T) {
 	if h.Class != HaltSelfChanged {
 		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
 	}
-	if r.runCount() != 0 {
-		t.Fatalf("run calls = %d, want 0: the halt must land before a child is launched", r.runCount())
-	}
 
-	events := wantEvents(t, &buf, []string{"halt"}, "exactly one halt event")
-	if events[0].Reason != h.String() {
-		t.Errorf("halt event reason = %q, want %q", events[0].Reason, h.String())
+	_, halt := builtThenHalt(t, decodeEvents(t, &buf))
+	if halt.Reason != h.String() {
+		t.Errorf("halt event reason = %q, want %q", halt.Reason, h.String())
 	}
 }
 
 // TestLoopSelfChangeNeverReExecs asserts that once a self-change halt has
 // fired, Loop returns without ever calling RunChild again — no re-exec, no
-// further iteration, whatever ran before the halt is all that ever runs.
+// further iteration: no child starts after the built event, and the one
+// mismatching revision is prebuilt once.
 func TestLoopSelfChangeNeverReExecs(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1", "rev2"},
 		results:   []ChildResult{{Exit: 0}},
 		selfPaths: []string{"/nix/store/old-path", "/nix/store/new-path"},
 	}
+	prebuildAfterFirstChild(r, nil)
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -1395,8 +1396,12 @@ func TestLoopSelfChangeNeverReExecs(t *testing.T) {
 	if h.Class != HaltSelfChanged {
 		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
 	}
-	if r.runCount() != 1 {
-		t.Fatalf("run calls = %d, want 1: the first iteration's matching self-path should run its child, the second iteration's mismatch must halt before any further child", r.runCount())
+	if r.runCount() < 1 {
+		t.Fatalf("run calls = %d, want the matching first iteration's child to run", r.runCount())
+	}
+	builtThenHalt(t, decodeEvents(t, &buf))
+	if n := r.prebuildCount(); n != 1 {
+		t.Fatalf("prebuild calls = %d, want 1", n)
 	}
 }
 
@@ -1473,6 +1478,7 @@ func TestLoopEmptySelfProgramNeverHaltsEvenWithSelfPathReported(t *testing.T) {
 // runSlot's own field comparison.
 func TestLoopSelfChangeHaltDetailFormat(t *testing.T) {
 	r := &scriptedRunner{revisions: []string{"rev1"}, selfPaths: []string{"/nix/store/new-path"}}
+	prebuildAfterFirstChild(r, nil)
 	clk := &testClock{}
 	var buf bytes.Buffer
 	em := newTestEmitter(&buf)
@@ -1868,17 +1874,22 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 		runSlot(pctx, siblingSlot, cfg, p)
 	}()
 
-	<-started      // the long-running child is confirmed running
+	<-started // the long-running child is confirmed running
+	// The halt follows the sibling's prebuild, which the running child must
+	// outlast: a child that finished first would let its slot start another
+	// at the mismatched revision while the build is still in flight.
+	<-pctx.Done()
 	close(release) // let it finish now that it is known to have been running
 
 	wg.Wait()
+	p.bg.Wait()
 	h := p.haltReason()
 
 	if h.Class != HaltSelfChanged {
 		t.Fatalf("halt class = %v, want %v", h.Class, HaltSelfChanged)
 	}
-	if r.runCount() != 1 {
-		t.Fatalf("run calls = %d, want 1: only the already-running child ever runs", r.runCount())
+	if r.runCount() < 1 {
+		t.Fatalf("run calls = %d, want the already-running child", r.runCount())
 	}
 
 	events := decodeEvents(t, &buf)

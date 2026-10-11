@@ -92,6 +92,9 @@ type scriptedRunner struct {
 	onResolve func(ctx context.Context, call int) error
 	onSelf    func(ctx context.Context, call int, revision string) error
 	onStart   func(ctx context.Context, req ChildRequest) error
+	// onPrebuild answers Prebuild: call is its 1-based index. Unset means
+	// success.
+	onPrebuild func(ctx context.Context, call int, tip Tip) error
 
 	// Demand scripting: demand/demandErr are set (and may change) during a
 	// test through setDemand/setDemandErr, so they live under mu with the
@@ -111,6 +114,7 @@ type scriptedRunner struct {
 	mu           sync.Mutex
 	resolveCalls int
 	selfCalls    int
+	prebuildTips []Tip
 	runCalls     []runCall
 	kindCalls    map[Kind]int
 	inFlight     int
@@ -1288,4 +1292,32 @@ func (p *pool) markNoWork(kind Kind, now time.Time, jammed bool) time.Duration {
 func (p *pool) gateOf(kind Kind, now time.Time) (time.Time, bool) {
 	v := p.st.sched.View(kind, now)
 	return v.Until, v.Gated
+}
+
+// Prebuild counts the call, then answers through onPrebuild if set and
+// with success otherwise: most tests never script a self-update at all, and
+// the ones that mismatch SelfProgram expect the halt to follow.
+func (r *scriptedRunner) Prebuild(ctx context.Context, tip Tip) error {
+	r.mu.Lock()
+	r.prebuildTips = append(r.prebuildTips, tip)
+	call := len(r.prebuildTips)
+	r.mu.Unlock()
+	if r.onPrebuild != nil {
+		return r.onPrebuild(ctx, call, tip)
+	}
+	return nil
+}
+
+// prebuildCount is how many times Prebuild was called.
+func (r *scriptedRunner) prebuildCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.prebuildTips)
+}
+
+// prebuilds returns a copy of every Tip Prebuild was called with, in order.
+func (r *scriptedRunner) prebuilds() []Tip {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.prebuildTips)
 }

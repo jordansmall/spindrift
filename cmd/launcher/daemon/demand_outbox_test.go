@@ -374,3 +374,5 @@ func TestHostRunnerDemand_OutboxNamesItsBundles(t *testing.T) {
 		t.Errorf("replaced bundle 1: %+v -> %+v, want same Ready and only key 1's ID changed", before, after)
 	}
 }
+
+func (r *wiringRunner) Prebuild(context.Context, daemon.Tip) error { return nil }
