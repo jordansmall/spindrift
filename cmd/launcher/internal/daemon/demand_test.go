@@ -32,7 +32,7 @@ func probedConfig(slots int, interval time.Duration, kinds ...Kind) Config {
 	return cfg
 }
 
-// startTimes records the fake-clock instant of every RunChild.
+// startTimes records the fake-clock instant of every StartChild.
 type startTimes struct {
 	mu    sync.Mutex
 	clk   *testClock
@@ -216,7 +216,7 @@ func TestLoopNoDemandWhileEverySlotBusy(t *testing.T) {
 
 	clk.advanceBy(24 * time.Hour)
 	// Nothing can run a probe now: assert a settled count rather than race
-	// one. Both slots are inside RunChild, blocked on their release.
+	// one. Both slots are inside a child, blocked on their release.
 	time.Sleep(20 * time.Millisecond)
 	if got := r.demandCount(workKind); got != before {
 		t.Fatalf("Demand calls = %d with every slot busy, want unchanged %d", got, before)
@@ -763,7 +763,7 @@ func TestLoopExtraSlotsDoNotSpawnAfterSiblingExitTwoZeroedDemand(t *testing.T) {
 	// re-decided, so a short settle is the only way to observe it.
 	time.Sleep(20 * time.Millisecond)
 	if got := r.runCount(); got != 1 {
-		t.Fatalf("RunChild calls = %d, want 1: siblings must not spawn after exit 2 zeroed the count", got)
+		t.Fatalf("StartChild calls = %d, want 1: siblings must not spawn after exit 2 zeroed the count", got)
 	}
 
 	cancel()

@@ -2983,7 +2983,7 @@ func TestMainRun_DoctorChildGetsCapturedEnv(t *testing.T) {
 // TestMainRun_DispatchChildGetsCapturedEnv is the dispatch-child sibling of
 // TestMainRun_DoctorChildGetsCapturedEnv above: it stubs the doctor preflight
 // to pass, so daemon.Loop actually starts a slot and runs a child through
-// runnerExecCommand (runner.go's RunChild seam), and asserts that child gets
+// runnerExecCommand (runner.go's StartChild seam), and asserts that child gets
 // the same captured, knob-stripped environment. Bounding: the stubbed child
 // exits 1, an unclassified outcome (Interpret's default case), and
 // DAEMON_BREAKER_THRESHOLD is set to 1 (the parser's own minimum) so the

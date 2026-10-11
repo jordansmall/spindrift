@@ -144,7 +144,7 @@ func TestPoolBatonSerializesDiscoveryOnColdStart(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
 	// Structurally guaranteed, not a timing race: a slot parked in
-	// awaitBaton cannot reach RunChild until the baton reaches it, so
+	// awaitBaton cannot reach StartChild until the baton reaches it, so
 	// r.started must have nothing further to give yet.
 	select {
 	case got := <-r.started:
@@ -315,7 +315,7 @@ func TestPoolBatonCancellationNeverDeadlocksAWaitingSlot(t *testing.T) {
 // pass the baton on any one of these would leave the sibling parked on
 // baton_hold forever, indistinguishable from a genuine hang.
 
-// TestPoolBatonPassesOnQueueEmptyChildEnd pins the post-RunChild release for
+// TestPoolBatonPassesOnQueueEmptyChildEnd pins the post-StartChild release for
 // a queue-empty child (exit 2): the holder's round ends having found no work
 // at all, and the baton must still move — a pool that held it through every
 // empty-queue result would let one slot's dry queue stall its sibling's
@@ -431,7 +431,7 @@ func TestPoolHaltPoolExitPassesNoBatonBeforeHalt(t *testing.T) {
 // tripping one; the sibling is parked on baton_hold throughout.
 //
 // A held slot cannot return a seam error, so the seam case gates the lead's
-// RunChild in onStart instead and scripts exit 5 for any child that starts
+// StartChild in onStart instead and scripts exit 5 for any child that starts
 // after it: a sibling that wrongly runs surfaces as a host-tainted halt, not
 // the breaker's.
 func TestPoolBreakerTripPassesNoBatonBeforeHalt(t *testing.T) {
@@ -478,7 +478,7 @@ func TestPoolBreakerTripPassesNoBatonBeforeHalt(t *testing.T) {
 				t.Fatalf("halt = %q, want a breaker halt", got)
 			}
 			if n := r.runCount(); n != 1 {
-				t.Fatalf("RunChild calls = %d, want 1: the sibling must not start a child", n)
+				t.Fatalf("StartChild calls = %d, want 1: the sibling must not start a child", n)
 			}
 		})
 	}
@@ -488,7 +488,7 @@ func TestPoolBreakerTripPassesNoBatonBeforeHalt(t *testing.T) {
 // TestPoolBatonPassesOnQueueEmptyChildEnd's sibling for exit 3: work
 // existed but every issue found was claimed or overlap-deferred, a
 // different outcome label (outcomeNoneDispatchable) than exit 2's, but the
-// same post-RunChild release site — the baton must move on both alike, not
+// same post-StartChild release site — the baton must move on both alike, not
 // just the plain empty-queue case.
 //
 // The clock is parked for the same reason as in
@@ -531,7 +531,7 @@ func TestPoolBatonPassesOnNoneDispatchableChildEnd(t *testing.T) {
 	assertBatonPassReason(t, events, batonPassChildEnded)
 }
 
-// TestPoolBatonPassesOnUnrecognisedExit pins the same post-RunChild release
+// TestPoolBatonPassesOnUnrecognisedExit pins the same post-StartChild release
 // site for an unrecognised exit code (Interpret's default case, Backoff):
 // the child ended abnormally rather than announcing anything, and the
 // release must still be honest about it — batonPassChildEnded, the same
@@ -580,7 +580,7 @@ func TestPoolBatonPassesOnUnrecognisedExit(t *testing.T) {
 }
 
 // TestPoolBatonPassesOnSeamFailure pins the same release reason for a
-// RunChild seam error (the child could not even be started/waited on, not a
+// StartChild seam error (the child could not even be started/waited on, not a
 // real exit code at all): backoffOrHalt is handed batonPassChildEnded, so the
 // reason on the stream honestly says a child ended rather than claiming the
 // round failed before starting one.
@@ -607,7 +607,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 	select {
 	case h = <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Loop never returned: a RunChild seam error left the pool deadlocked")
+		t.Fatal("Loop never returned: a StartChild seam error left the pool deadlocked")
 	}
 	reason := h.String()
 	if !strings.Contains(reason, "host-tainted") {
@@ -622,7 +622,7 @@ func TestPoolBatonPassesOnSeamFailure(t *testing.T) {
 		}
 	}
 
-	// runErrAt=1 seam-errors leadSlot's own RunChild call, so the round
+	// runErrAt=1 seam-errors leadSlot's own StartChild call, so the round
 	// that follows is siblingSlot's — the only other configured slot
 	// (slots==2) — and with the clock parked exactly two children start,
 	// in exactly that order: leadSlot's seam-failed one, then the
@@ -787,7 +787,7 @@ func TestPoolBatonColdStartInsideShutWindowGatesDiscoveryAtOpen(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
 	// Structurally guaranteed, not a timing race: both siblings are parked
-	// in awaitBaton and cannot reach RunChild until the holder claims
+	// in awaitBaton and cannot reach StartChild until the holder claims
 	// something, so r.started must have nothing further to give yet.
 	select {
 	case got := <-r.started:
@@ -912,7 +912,7 @@ func TestPoolBatonPassesOnPreChildFailure(t *testing.T) {
 // the same drought, not just the one kind that is dry.
 //
 // The kind is seeded gated directly, before either slot starts, rather
-// than driven by a real no-work RunChild: passBaton(batonPassChildEnded)
+// than driven by a real no-work StartChild: passBaton(batonPassChildEnded)
 // fires before markNoWork in loop.go's own Wait case, so racing a live
 // no-work exit against the sibling's very next pickKind call would leave
 // this test's own outcome dependent on which side of that gap the sibling
@@ -1036,7 +1036,7 @@ func TestPoolBatonPassesWhenHolderStopsBeforeResolving(t *testing.T) {
 // finishing in the same tick still discover one after the other, not both
 // at once. Every claim below is driven manually via fireOnIssue (not
 // announceEachSlot), so the test controls exactly when each replacement's
-// own claim reaches the pool rather than racing it against RunChild's own
+// own claim reaches the pool rather than racing it against StartChild's own
 // entry.
 func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 	const slots = 3
@@ -1101,7 +1101,7 @@ func TestPoolBatonSerializesRefillsAfterTheFirstWave(t *testing.T) {
 	nw.waitForLine(t, "\"event\":\"baton_hold\"")
 
 	// Structurally guaranteed, not a timing race: the loser is parked on
-	// awaitBaton and cannot reach RunChild until the winner claims
+	// awaitBaton and cannot reach StartChild until the winner claims
 	// something, so r.started must have nothing further to give yet.
 	select {
 	case got := <-r.started:
@@ -1167,7 +1167,7 @@ func TestPoolOneKindPoolBehavesAsBefore(t *testing.T) {
 
 	for _, call := range r.calls() {
 		if call.Kind != KindOf(dispatchkind.Work) {
-			t.Fatalf("RunChild call %+v used kind %q, want only %q for a one-kind pool", call, call.Kind, KindOf(dispatchkind.Work))
+			t.Fatalf("StartChild call %+v used kind %q, want only %q for a one-kind pool", call, call.Kind, KindOf(dispatchkind.Work))
 		}
 	}
 

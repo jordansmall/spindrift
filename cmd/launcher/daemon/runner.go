@@ -25,7 +25,7 @@ import (
 )
 
 // hostRunner is the production daemon.Runner: ResolveTip's fetch half shells
-// out to git, and RunChild and ResolveTip's eval half shell out to nix. It
+// out to git, and StartChild and ResolveTip's eval half shell out to nix. It
 // is the only place in this binary that touches either.
 type hostRunner struct {
 	repoPath   string
@@ -52,7 +52,7 @@ type hostRunner struct {
 	// self-path memo fields further down: resolveTipOnce is the sole leader
 	// while flight is non-nil, and it writes all of them before clearing
 	// flight, so the next leader's Lock is ordered after that write by the
-	// same lock/unlock pair (see ResolveTip). RunChild's signal forwarding
+	// same lock/unlock pair (see ResolveTip). A child handle's signal forwarding
 	// (forwardSignals) takes no lock of its own — it starts fresh per child
 	// from req.Stop/req.Abort — so nothing else in this runner contends
 	// with flightMu.
@@ -133,7 +133,7 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 
 // runnerFetchCommand is ResolveTip's fetch-half exec seam: a test overrides
 // it to skip a real git remote, the way runnerExecCommand/runnerEvalCommand
-// already stand in for RunChild/the eval half below. Both the `git fetch`
+// already stand in for StartChild/the eval half below. Both the `git fetch`
 // and the `git rev-parse` go through it, so a test can count invocations
 // (three callers, one fetch) or block inside the first call to synchronise
 // on the leader actually being in flight, rather than sleeping and hoping.
@@ -201,8 +201,8 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 }
 
 // runnerExecCommand is the exec seam: a test overrides it to skip nix and
-// run a scripted `/bin/sh -c ...` in its place, since RunChild's own
-// behaviour (exit code passthrough, issue-line scanning) doesn't depend on
+// run a scripted `/bin/sh -c ...` in its place, since a child handle's
+// Wait behaviour (exit code passthrough, issue-line scanning) doesn't depend on
 // what the child actually is.
 var runnerExecCommand = exec.Command
 
@@ -489,7 +489,7 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 	return nil
 }
 
-func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
+func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildHandle, error) {
 	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{
 		RepoPath:      r.repoPath,
 		AppAttr:       r.appAttr,
@@ -500,7 +500,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 		FeatureBranch: r.featureBranch,
 	})
 	if err != nil {
-		return daemon.ChildResult{}, err
+		return nil, err
 	}
 
 	cmd := runnerExecCommand(childCmd.Argv[0], childCmd.Argv[1:]...)
@@ -531,14 +531,22 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	// A log that cannot be created never fails the Dispatch.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+	// The child holds its own copy of the Child log once started, so the
+	// parent's closes when StartChild returns, on every path.
+	var logFile *os.File
+	defer func() {
+		if logFile != nil {
+			_ = logFile.Close()
+		}
+	}()
 	if req.ChildLog != "" {
-		logFile, err := openChildLog(filepath.Join(r.repoPath, req.ChildLog))
+		f, err := openChildLog(filepath.Join(r.repoPath, req.ChildLog))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "daemon: child log %s: %s\n", req.ChildLog, err)
 		} else {
-			defer logFile.Close()
-			cmd.Stdout = logFile
-			cmd.Stderr = logFile
+			logFile = f
+			cmd.Stdout = f
+			cmd.Stderr = f
 		}
 	}
 	// cmd.Stdin left nil (os/exec gives the child /dev/null): the Setpgid
@@ -551,7 +559,7 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 
 	reportRead, reportWrite, err := os.Pipe()
 	if err != nil {
-		return daemon.ChildResult{}, fmt.Errorf("report pipe: %w", err)
+		return nil, fmt.Errorf("report pipe: %w", err)
 	}
 	// The write end is exec.Cmd.ExtraFiles' first (and only) entry, which
 	// always lands at fd 3 in the child — daemon.ReportFD names that same
@@ -562,29 +570,51 @@ func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (dae
 	if err := cmd.Start(); err != nil {
 		_ = reportRead.Close()
 		_ = reportWrite.Close()
-		return daemon.ChildResult{}, fmt.Errorf("start child: %w", err)
+		return nil, fmt.Errorf("start child: %w", err)
 	}
 	// The parent's copy of the write end must close right after Start: the
 	// child has its own (inherited, distinct fd) copy, but as long as the
-	// parent also holds one open, the read loop below never sees EOF even
+	// parent also holds one open, the read loop in Wait never sees EOF even
 	// after the child exits — Wait would then hang behind a read that never
 	// returns.
 	_ = reportWrite.Close()
 
-	stopForwarding := forwardSignals(cmd.Process, req.Stop, req.Abort)
+	return &hostChildHandle{
+		cmd:        cmd,
+		reportRead: reportRead,
+		kind:       req.Kind,
+		onRecord:   req.OnRecord,
+		stop:       req.Stop,
+		abort:      req.Abort,
+	}, nil
+}
+
+// hostChildHandle is a started host child: Wait reads its report pipe to EOF,
+// then reaps it.
+type hostChildHandle struct {
+	cmd        *exec.Cmd
+	reportRead *os.File
+	kind       daemon.Kind
+	onRecord   func(daemon.Record)
+	stop       <-chan struct{}
+	abort      <-chan struct{}
+}
+
+func (h *hostChildHandle) Wait(<-chan struct{}) (daemon.ChildResult, error) {
+	stopForwarding := forwardSignals(h.cmd.Process, h.stop, h.abort)
 	defer stopForwarding()
 
 	// Read to EOF (the normal case: the write end closes when the child
 	// exits) before Wait, right here rather than on a separate goroutine —
 	// there is no stdout goroutine any more, and this read is the only
 	// thing standing between the child exiting and Wait returning.
-	readReports(reportRead, req.Kind, req.OnRecord)
+	readReports(h.reportRead, h.kind, h.onRecord)
 	// Close the read end before Wait, not after: a child still writing past
 	// this point (there shouldn't be any, since readReports just hit EOF)
 	// gets EPIPE instead of wedging the daemon on a pipe nobody drains.
-	_ = reportRead.Close()
+	_ = h.reportRead.Close()
 
-	waitErr := cmd.Wait()
+	waitErr := h.cmd.Wait()
 	if waitErr == nil {
 		return daemon.ChildResult{Exit: 0}, nil
 	}
@@ -674,7 +704,7 @@ func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record)) {
 
 // runnerDoctorCommand is RunDoctor's exec seam: a test overrides it to skip
 // nix and run a scripted `/bin/sh -c ...` in its place — the same gesture
-// runnerExecCommand and runnerEvalCommand already make for RunChild and
+// runnerExecCommand and runnerEvalCommand already make for StartChild and
 // evalSelfPath.
 var runnerDoctorCommand = exec.CommandContext
 
@@ -695,12 +725,12 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, 
 	}
 
 	cmd := runnerDoctorCommand(ctx, doctorCmd.Argv[0], doctorCmd.Argv[1:]...)
-	// Same knob-stripped env as RunChild above (see its comment).
+	// Same knob-stripped env as StartChild above (see its comment).
 	cmd.Env = doctorCmd.Env
 	// Both stdout and stderr go straight to the daemon's own stderr: the
 	// daemon's stdout is the JSON-lines event stream, so a doctor report
 	// written there would corrupt it, and the report itself is where the
-	// operator reads which row failed and its remedy. Unlike RunChild, the
+	// operator reads which row failed and its remedy. Unlike StartChild, the
 	// preflight gets no report pipe and no SPINDRIFT_REPORT_FD (doctorCmd.Env
 	// above never carries it — see DoctorCommand): it dispatches nothing, so
 	// it has nothing to report.
@@ -713,7 +743,7 @@ func (r *hostRunner) RunDoctor(ctx context.Context, revision string) (exit int, 
 	// cmd.Stdin left nil (os/exec gives the child /dev/null) so doctor takes
 	// its non-interactive path rather than sitting on a create-labels prompt
 	// nobody in a daemon context can answer; no Setpgid either, unlike
-	// RunChild — a Ctrl-C during the preflight should kill exactly it.
+	// StartChild — a Ctrl-C during the preflight should kill exactly it.
 
 	waitErr := cmd.Run()
 	if waitErr == nil {
@@ -794,11 +824,11 @@ func (m *markerLineWriter) line() string {
 // child's.
 //
 // The returned stop func tears the goroutine down without sending anything
-// once the child has already exited on its own (RunChild's deferred call);
+// once the child has already exited on its own (the handle's Wait defers it);
 // without it the goroutine would sit on stop/abort for the life of the
 // daemon process instead of the life of its one child. It blocks until the
 // goroutine is actually gone: closing done alone only *asks* it to stop, and
-// a goroutine still unscheduled when RunChild returns would then reach its
+// a goroutine still unscheduled when Wait returns would then reach its
 // select with stop closed too and pick that case at random, signalling a
 // child that has already exited.
 func forwardSignals(p *os.Process, stop, abort <-chan struct{}) (stopForwarding func()) {

@@ -151,7 +151,7 @@ func TestPoolRunsSlotsConcurrentlyAndNeverAbandonsAStartedChild(t *testing.T) {
 	}
 
 	// Every slot halts on release (exit 5 == host-tainted). Whichever
-	// slot's RunChild returns first wins the halt race; the others must
+	// slot's child ends first wins the halt race; the others must
 	// still be allowed to finish rather than being cut off.
 	for s := 0; s < slots; s++ {
 		r.releaseSlot(t, s, ChildResult{Exit: 5})
@@ -235,7 +235,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 	// nw notifies on every event line as it is written, so the test can
 	// block until the pool's halt is actually recorded before releasing
 	// slot 0/1's still-in-flight children — without it, those slots can
-	// race ahead of the halt and try a third RunChild call this test never
+	// race ahead of the halt and try a third StartChild call this test never
 	// scripts a release for.
 	nw := newNotifyWriter()
 	em := newTestEmitter(nw)
@@ -261,7 +261,7 @@ func TestPoolBreakerTripsAtThresholdAcrossSlots(t *testing.T) {
 
 	// Slot 0 fails (1st pool-wide failure, below threshold): it backs off
 	// and restarts. Awaiting a start again is only possible once that
-	// restart's RunChild call is in flight, so it also proves the breaker
+	// restart's StartChild call is in flight, so it also proves the breaker
 	// recorded slot 0's failure before slot 1's is sent below.
 	r.releaseSlot(t, 0, ChildResult{Exit: 1})
 	if got := r.awaitStart(t); got != 0 {
@@ -351,7 +351,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 	const threshold = 3
 
 	// started/arrived/release: a test-local barrier releasing every
-	// slot's first RunChild call at once, so the concurrent crossing the
+	// slot's first StartChild call at once, so the concurrent crossing the
 	// serialized test above cannot reach really is concurrent.
 	started := make(chan int, slots)
 	var mu sync.Mutex
@@ -364,7 +364,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			// Announce immediately, before ever joining the barrier
 			// below: whichever slot currently holds the discovery baton
-			// must pass it the instant its own RunChild call begins, or
+			// must pass it the instant its own StartChild call begins, or
 			// the other slots would still be parked waiting for it and
 			// could never join the barrier this test's whole premise
 			// depends on.
@@ -373,7 +373,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 			}
 			// Non-blocking, because the number of later calls is
 			// unbounded: a non-crossing slot races around through its
-			// backoff and back into RunChild as many times as the
+			// backoff and back into StartChild as many times as the
 			// scheduler allows while the crossing slot sits between
 			// recordAndCheck and halt. Only the first `slots` sends are
 			// ever read, so a blocking send fills the buffer and parks a
@@ -456,7 +456,7 @@ func TestPoolBreakerTripsAtThresholdConcurrently(t *testing.T) {
 
 // TestPoolExit3WithSiblingRunningReportsIdleNotJam pins the routine half of
 // the occupancy axis: a slot's exit 3 while a sibling is genuinely still
-// running (blocked mid-RunChild, not merely between calls) must report
+// running (blocked mid-child, not merely between calls) must report
 // idle, not jam — the issues this slot found none-dispatchable were
 // claimed or overlap-deferred against that very sibling.
 func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
@@ -487,7 +487,7 @@ func TestPoolExit3WithSiblingRunningReportsIdleNotJam(t *testing.T) {
 	}
 
 	// Slot 1 exits none-dispatchable while slot 0 is still blocked mid-
-	// RunChild (genuinely occupied, not just between calls) — this must
+	// StartChild (genuinely occupied, not just between calls) — this must
 	// report idle.
 	r.releaseSlot(t, 1, ChildResult{Exit: 3})
 	nw.waitForLine(t, "\"event\":\"idle\"")
@@ -583,7 +583,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 	// baton.
 	r.announceEachSlot()
 	// clk: Sleep must remain provably parked rather than testClock's
-	// instant advance racing straight back into a second RunChild call,
+	// instant advance racing straight back into a second StartChild call,
 	// so "this slot is now asleep" is a real synchronization point this
 	// test can wait on via sleepSignal, and the only way any Sleep call
 	// ever returns is the pool itself being cancelled below.
@@ -621,7 +621,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 
 	// End the test: cancelling the top-level ctx reaches both slots
 	// through their gated Sleep call (blocked on ctx.Done()), so both
-	// return via haltIfStopping without ever starting a third RunChild call
+	// return via haltIfStopping without ever starting a third StartChild call
 	// this test never scripts a release for.
 	cancel()
 	reason := (<-done).String()
@@ -663,7 +663,7 @@ func TestPoolExit3WithPoolIdleIsAJam(t *testing.T) {
 // below, and slot 1's own kind stays gated (noteWaitResult) after its
 // exit-3, none-dispatchable result — with clk parked, slot 1's idleSleep
 // blocks rather than spinning the virtual clock forward and slipping into
-// a genuine, unreleased second RunChild call, so it can never issue a
+// a genuine, unreleased second StartChild call, so it can never issue a
 // competing fetch of its own before the test ends.
 func TestPoolExit3WithSiblingResolvingReportsJam(t *testing.T) {
 	const slots = 2
@@ -776,7 +776,7 @@ func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 // TestPoolExit3WithSiblingBackingOffReportsJam pins that a sibling asleep
 // out a failure backoff does not suppress the jam alarm: every backoffOrHalt
 // entry leaves no claim the sibling could release (issue #4205). Slot 0's
-// first child fails the RunChild seam itself (runErrAt/runErr), landing it in
+// first child fails the StartChild seam itself (runErrAt/runErr), landing it in
 // backoffOrHalt's parked Sleep; slot 1's own fetch is held at the onResolve
 // hook until that Sleep is confirmed entered (the sleepSignal below), so
 // slot 1's later exit-3 is guaranteed to land while slot 0 is genuinely
@@ -785,8 +785,8 @@ func TestPoolResolvingSlotResetsToIdleOnCancel(t *testing.T) {
 // leadSlot is launched alone first and confirmed resolved (call 1) before
 // siblingSlot is launched: the baton no longer gates ResolveTip (issue
 // #3625's structural fix), so both slots' round-1 resolves would otherwise
-// race for call 1/2, and runErrAt=1 (a global RunChild-call index, the same
-// convention as call) needs slot 0's own RunChild to land on index 1
+// race for call 1/2, and runErrAt=1 (a global StartChild-call index, the same
+// convention as call) needs slot 0's own StartChild to land on index 1
 // deterministically too.
 func TestPoolExit3WithSiblingBackingOffReportsJam(t *testing.T) {
 	const slots = 2
@@ -1534,7 +1534,7 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 	cfg := dualKindConfig(slots, 0)
 	r := &scriptedRunner{revisions: []string{"rev2"}, moved: []bool{true}}
 	r.holdSlots(slots)
-	// announceEachSlot: without it, the first slot to reach RunChild would
+	// announceEachSlot: without it, the first slot to reach StartChild would
 	// never pass the baton onward (that happens on the child's first
 	// announced issue, runSlot's ChildRequest.OnRecord callback's
 	// passBaton(batonPassClaimed) call), so the second slot would stay
@@ -1558,7 +1558,7 @@ func TestLoopMultiSlotSiblingResolveClearsJam(t *testing.T) {
 		}(s)
 	}
 
-	// Both slots reach RunChild — the pool really did run two slots, not
+	// Both slots reach StartChild — the pool really did run two slots, not
 	// one slot and a sibling that never got there.
 	seen := map[int]bool{}
 	for i := 0; i < slots; i++ {
@@ -1956,7 +1956,7 @@ func TestPoolSnapshotState(t *testing.T) {
 						req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("x")})
 						// onStart runs on a pool slot goroutine, not this
 						// test's own: a fatal read here would Goexit that
-						// goroutine mid-RunChild, and Loop's wg.Wait (called
+						// goroutine mid-child, and Loop's wg.Wait (called
 						// below, on this test's goroutine) would then hang
 						// rather than surface the failure. Capture the error
 						// and assert it once Loop has returned instead.

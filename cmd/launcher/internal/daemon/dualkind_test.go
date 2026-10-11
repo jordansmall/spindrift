@@ -39,7 +39,7 @@ func slotsSeen(calls []runCall, kind Kind) map[int]bool {
 // kindGate stops a dual-kind Loop run through scriptedRunner's onStart
 // hook rather than being grown onto the seam double itself — this is
 // dualkind_test.go's own scheduling-stop concern, not
-// something every scriptedRunner user needs. limit is the total RunChild
+// something every scriptedRunner user needs. limit is the total StartChild
 // count across every kind at which onStart fires cancelFn. With cancelWhen
 // set, limit is a safety cap set far above whatever the goal below needs,
 // so a genuine regression fails in bounded time as a clear "safety cap
@@ -51,7 +51,7 @@ func slotsSeen(calls []runCall, kind Kind) map[int]bool {
 // (via r's own calls()/kindCount() accessors, never r's internal lock); the
 // first time it returns true, onStart fires cancelFn. This is deliberately
 // the condition each test actually asserts on (e.g. "every slot has run"),
-// not a call count: with several slot goroutines calling RunChild
+// not a call count: with several slot goroutines calling StartChild
 // concurrently, a shared count races the Go scheduler (one fast slot can
 // burn the whole budget before a sibling is ever scheduled), so the stop
 // has to be the asserted state itself, which the loop is guaranteed to
@@ -753,13 +753,13 @@ func (f *fatalRecorder) Fatalf(format string, args ...any) {
 	f.called = true
 }
 
-// runNTimes drives r through n RunChild calls on slot 0, the gate's onStart
+// runNTimes drives r through n StartChild calls on slot 0, the gate's onStart
 // already installed as r.onStart.
 func runNTimes(t *testing.T, r *scriptedRunner, n int) {
 	t.Helper()
 	for i := 0; i < n; i++ {
-		if _, err := r.RunChild(context.Background(), ChildRequest{Kind: KindOf(dispatchkind.Research), Slot: 0}); err != nil {
-			t.Fatalf("RunChild: %v", err)
+		if _, err := r.run(context.Background(), ChildRequest{Kind: KindOf(dispatchkind.Research), Slot: 0}); err != nil {
+			t.Fatalf("StartChild: %v", err)
 		}
 	}
 }

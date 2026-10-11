@@ -271,9 +271,9 @@ func (r *wiringRunner) Demand(ctx context.Context, k daemon.Kind, fresh bool, in
 	return (&hostRunner{demand: r.demand}).Demand(ctx, k, fresh, inFlight)
 }
 
-func (r *wiringRunner) RunChild(_ context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
+func (r *wiringRunner) StartChild(_ context.Context, req daemon.ChildRequest) (daemon.ChildHandle, error) {
 	r.onStart(req.Kind)
-	return daemon.ChildResult{}, nil
+	return doneHandle{}, nil
 }
 
 // TestRecoverOutboxDemand_DrivesTheLoopThroughTheDaemonWiring assembles the

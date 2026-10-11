@@ -53,7 +53,7 @@ type missingSources map[daemon.Kind]string
 // exit-driven; a set -cmd form earns a hint in the reason (tokenFormHint).
 //
 // A relative LOCAL_ISSUES_DIR is used as written: it resolves against the
-// daemon's cwd, which every child inherits (RunChild sets no cmd.Dir), so
+// daemon's cwd, which every child inherits (StartChild sets no cmd.Dir), so
 // both sides read the same directory.
 //
 // The github probe runs `gh` in the daemon's own environment, so it sees the
@@ -165,7 +165,7 @@ type outboxDemand struct {
 
 // newOutboxDemand resolves the attempt bound and backoff as a recover child
 // does; the outbox is read relative to the daemon's cwd, which every child
-// inherits (RunChild sets no cmd.Dir).
+// inherits (StartChild sets no cmd.Dir).
 func newOutboxDemand(doc *inputdoc.Document) *outboxDemand {
 	return &outboxDemand{
 		maxAttempts: launcherInt(doc, "MAX_RECOVER_ATTEMPTS", os.Getenv("MAX_RECOVER_ATTEMPTS")),

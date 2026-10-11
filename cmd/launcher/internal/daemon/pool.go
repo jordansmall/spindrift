@@ -226,7 +226,7 @@ const (
 	batonPassClaimed batonReason = "the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"
 	// batonPassChildEnded fires when the holder's child returns without
 	// ever announcing a Box (queue empty, none dispatchable, an
-	// unrecognised exit, or a RunChild seam error) and the pool is not
+	// unrecognised exit, or a StartChild/Wait seam error) and the pool is not
 	// halting: the holder's round is over either way, so the baton passes
 	// regardless of which of those it was. A HaltPool exit or a breaker
 	// trip passes none, since a woken sibling would start a child before the
@@ -340,10 +340,10 @@ type ciWait struct {
 // newPool derives ctx into a context pool.cancel can stop independently of
 // the caller, and returns both the pool and that derived context — every
 // slot runs against the derived one, never the caller's directly, so
-// RunChild is already contractually drain-safe under a cancelled ctx (see
-// loop.go's own doc), and hostRunner.RunChild uses exec.Command rather than
-// CommandContext, so cancelling it can never kill a running child. r, clk,
-// the breaker, and the Schedule are all pool-wide policy, not
+// StartChild and Wait are already contractually drain-safe under a cancelled
+// ctx (see loop.go's own doc), and hostRunner.StartChild uses exec.Command
+// rather than CommandContext, so cancelling it can never kill a running
+// child. r, clk, the breaker, and the Schedule are all pool-wide policy, not
 // slot-tracking state, but they live here so backoffOrHalt and runSlot stop
 // threading them as parameters.
 func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) (*pool, context.Context) {
@@ -651,7 +651,7 @@ func childLogPath(start time.Time, slot int, kind Kind) string {
 const childLogTimeLayout = "20060102T150405.000Z"
 
 // finishChild moves slot back to idle and zeroes its flight. A slot calls this
-// immediately after RunChild returns, before the result is interpreted: it
+// immediately after the child's Wait returns, before the result is interpreted: it
 // must clear its own running phase before it ever asks siblingsEngaged, or
 // it would count itself as an engaged sibling and "none dispatchable, pool
 // otherwise idle" could never be true for a lone slot.
@@ -676,7 +676,7 @@ func (p *pool) finishChild(slot int) {
 // event stream. Both in one mutate so the event and the status snapshot it
 // rides alongside always agree. A no-op — no state change, no event — if
 // slot is not currently running: the child reported after the slot
-// cleared, which can only be a race (RunChild already returned), not a
+// cleared, which can only be a race (Wait already returned), not a
 // state worth publishing. Any key change counts as a new claim, folded into the
 // Schedule as Claimed so the kind is re-probed before its next start; a
 // repeat of the same key moves no count. A switch back to a key the slot
@@ -814,7 +814,7 @@ func (s *state) working() bool {
 //
 // PhaseBackingOff is one of those (#4205): every backoffOrHalt entry leaves
 // nothing releasable. A ResolveTip failure never took a claim, and a
-// RunChild seam failure or Backoff outcome follows a child that already
+// StartChild/Wait seam failure or Backoff outcome follows a child that already
 // exited, so any claim it took was either cleared (agent-failed, shutdown
 // abort) or orphaned as agent-in-progress until `spindrift recover`. The
 // overlap gate reads tracker labels, not slot phase, so the sleep releases
@@ -1089,7 +1089,7 @@ func (p *pool) halt(h Halt) {
 }
 
 // backoffOrHalt is what a slot calls on an unclassified failure (a
-// ResolveTip error, a RunChild seam error, an unrecognised exit code,
+// ResolveTip error, a StartChild/Wait seam error, an unrecognised exit code,
 // or exit 7 while Stop is open — someone else signalled that child): it
 // records the failure in the pool-wide breaker and either trips the pool
 // (enough failures landed across the pool within the window to look

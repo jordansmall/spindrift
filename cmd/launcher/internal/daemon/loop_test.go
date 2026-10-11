@@ -289,12 +289,12 @@ func TestLoopResolveErrorBacksOffThenHalts(t *testing.T) {
 	}
 }
 
-// TestLoopRunChildErrorBacksOffAndEmitsChildFinish pins the new contract: a
-// RunChild seam error backs off its slot rather than halting the pool, but
+// TestLoopStartChildErrorBacksOffAndEmitsChildFinish pins the new contract: a
+// StartChild seam error backs off its slot rather than halting the pool, but
 // still emits the child_finish for the child it already started — a
 // started child always gets a matching finish. A follow-up host-tainted
 // exit gives the fake a real halt so the test still terminates.
-func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
+func TestLoopStartChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 	wantErr := errors.New("exec: nix not found")
 	r := &scriptedRunner{revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr, results: []ChildResult{{Exit: 5}}}
 	clk := &testClock{}
@@ -310,18 +310,35 @@ func TestLoopRunChildErrorBacksOffAndEmitsChildFinish(t *testing.T) {
 	wantEvents(t, &buf, []string{"child_start", "child_finish", "backoff", "child_start", "child_finish", "halt"}, "")
 }
 
-// TestLoopRunChildErrorStillEmitsAnnouncedBoxes covers the non-ExitError
+// TestLoopWaitErrorBacksOffAndEmitsChildFinish is the Wait half of the above:
+// a handle whose Wait fails is handled exactly like a StartChild error.
+func TestLoopWaitErrorBacksOffAndEmitsChildFinish(t *testing.T) {
+	wantErr := errors.New("wait: signal: killed")
+	r := &scriptedRunner{revisions: []string{"rev1"}, waitErrAt: 1, waitErr: wantErr, results: []ChildResult{{Exit: 5}}}
+	clk := &testClock{}
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	reason := Loop(context.Background(), testConfig(1), r, em, clk).String()
+
+	if !strings.Contains(reason, "host-tainted") {
+		t.Errorf("halt reason = %q, want the follow-up host-tainted halt, not the wait failure itself", reason)
+	}
+
+	wantEvents(t, &buf, []string{"child_start", "child_finish", "backoff", "child_start", "child_finish", "halt"}, "")
+}
+
+// TestLoopWaitErrorStillEmitsAnnouncedBoxes covers the non-ExitError
 // wait-failure path (runner.go): a child can report a box record over its
-// pipe and only then have the seam itself fail (a wait failure that is no
+// pipe and only then have Wait itself fail (a wait failure that is no
 // ExitError). That box must still reach the durable stream, so a box event
 // lands before child_finish even on the error path — reported live via
-// OnRecord, from onStart, since a seam-failed call never reaches a
-// scripted ChildResult at all.
-func TestLoopRunChildErrorStillEmitsAnnouncedBoxes(t *testing.T) {
+// OnRecord, from onStart, as the host runner delivers records during Wait.
+func TestLoopWaitErrorStillEmitsAnnouncedBoxes(t *testing.T) {
 	wantErr := errors.New("wait: signal: killed")
 	var calls int
 	r := &scriptedRunner{
-		revisions: []string{"rev1"}, runErrAt: 1, runErr: wantErr,
+		revisions: []string{"rev1"}, waitErrAt: 1, waitErr: wantErr,
 		results: []ChildResult{{Exit: 5}},
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			calls++
@@ -452,7 +469,7 @@ func TestLoopCancelledContextHaltsBeforeStartingNewWork(t *testing.T) {
 
 // TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild pins issue
 // #4365's re-check after awaitBaton: a ctx cancelled mid-fetch (a bare
-// caller cancel, not cfg.Stop) is caught between ResolveTip and RunChild,
+// caller cancel, not cfg.Stop) is caught between ResolveTip and StartChild,
 // so no child starts and the loop halts with the context-cancelled reason
 // rather than ever reaching the breaker.
 func TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild(t *testing.T) {
@@ -472,7 +489,7 @@ func TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild(t *testing.T) 
 	reason := Loop(ctx, testConfig(1), r, em, clk).String()
 
 	if r.runCount() != 0 {
-		t.Fatalf("run calls = %d, want 0: ctx is re-checked between ResolveTip and RunChild", r.runCount())
+		t.Fatalf("run calls = %d, want 0: ctx is re-checked between ResolveTip and StartChild", r.runCount())
 	}
 	wantEvents(t, &buf, []string{"halt"}, "no child starts once the cancelled ctx is seen")
 	if !strings.Contains(reason, "context") {
@@ -480,13 +497,13 @@ func TestLoopCancelledDuringResolveTipHaltsBeforeStartingTheChild(t *testing.T) 
 	}
 }
 
-func TestLoopNeverAbandonsAStartedChild(t *testing.T) {
-	// A Runner whose RunChild cancels ctx mid-run, as the production
+func TestLoopNeverKillsAStartedChild(t *testing.T) {
+	// A Runner whose child cancels ctx mid-run, as the production
 	// adapter's process-exit path will (next slice) — the loop must still
 	// wait for the result and emit that child's child_finish before it
 	// re-checks ctx and halts, never killing the child itself.
 	ctx, cancel := context.WithCancel(context.Background())
-	// RunChild cancelling ctx then returning result — the running child
+	// the child cancelling ctx then returning result — the running child
 	// must still be waited on and its child_finish emitted, never abandoned.
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
@@ -565,23 +582,25 @@ func assertCancelledStopNoBreaker(t *testing.T, reason string, events []Event) {
 	}
 }
 
-// TestLoopCtxCancelledIsNotABreakerFailure covers two RunChild-result races
+// TestLoopCtxCancelledIsNotABreakerFailure covers two child-result races
 // against an operator's SIGTERM tearing the loop's ctx down mid-run, neither
 // of which must spend a breaker failure — both must halt on the
 // cancellation instead of reaching backoffOrHalt.
 func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 	tests := []struct {
-		name   string
-		result ChildResult
-		err    error
+		name    string
+		result  ChildResult
+		runErr  error // injected at StartChild
+		waitErr error // injected at the handle's Wait
 	}{
 		// This issue's slice: a child forwarded SIGTERM that dies on the
 		// default disposition before installing its own handler reports an
 		// unclassified exit (e.g. 143), same as any other unrecognised code.
 		{name: "unclassified exit", result: ChildResult{Exit: 143}},
-		// The RunChild seam-error branch: the child's own wait can fail as
-		// an operator SIGTERM tears it down.
-		{name: "RunChild seam error", err: errors.New("wait: signal: killed")},
+		// The seam-error branches: starting the child, or its own wait, can
+		// fail as an operator SIGTERM tears it down.
+		{name: "StartChild seam error", runErr: errors.New("start: signal: killed")},
+		{name: "Wait seam error", waitErr: errors.New("wait: signal: killed")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -594,9 +613,11 @@ func TestLoopCtxCancelledIsNotABreakerFailure(t *testing.T) {
 					return nil
 				},
 			}
-			if tt.err != nil {
-				r.runErrAt = 1
-				r.runErr = tt.err
+			if tt.runErr != nil {
+				r.runErrAt, r.runErr = 1, tt.runErr
+			}
+			if tt.waitErr != nil {
+				r.waitErrAt, r.waitErr = 1, tt.waitErr
 			}
 			clk := &testClock{}
 			var buf bytes.Buffer
@@ -1281,7 +1302,7 @@ func TestLoopAwakeWindowClosesWhileChildRunsFinishesThenParks(t *testing.T) {
 	r := &scriptedRunner{
 		revisions: []string{"rev1"},
 		results:   []ChildResult{{Exit: 3}, {Exit: 5}},
-		// RunChild advances the shared clock, simulating a Box that
+		// The child advances the shared clock, simulating a Box that
 		// outlasts the Awake window: the window can close mid-run without
 		// anything in the loop noticing until the child itself returns.
 		onStart: func(ctx context.Context, req ChildRequest) error {
@@ -1374,7 +1395,7 @@ func TestLoopSelfChangeHaltsAfterPrebuild(t *testing.T) {
 }
 
 // TestLoopSelfChangeNeverReExecs asserts that once a self-change halt has
-// fired, Loop returns without ever calling RunChild again — no re-exec, no
+// fired, Loop returns without ever calling StartChild again — no re-exec, no
 // further iteration: no child starts after the built event, and the one
 // mismatching revision is prebuilt once.
 func TestLoopSelfChangeNeverReExecs(t *testing.T) {
@@ -1603,7 +1624,7 @@ func TestLoopFeatureBranchGoneHaltsOutright(t *testing.T) {
 // acceptance criterion TestLoopFeatureBranchGoneHaltsOutright's resolveAt: 1
 // leaves untested: the gone answer arriving after a child has already run
 // and completed, not on the very first resolve. The halt must still land
-// before the next claim, with no further RunChild call.
+// before the next claim, with no further StartChild call.
 func TestLoopFeatureBranchGoneMidRunHaltsOutright(t *testing.T) {
 	r := &scriptedRunner{
 		revisions:  []string{"rev1"},
@@ -1644,7 +1665,7 @@ func TestLoopFeatureBranchGoneMidRunHaltsOutright(t *testing.T) {
 func TestLoopFeatureBranchGoneDrainsRunningSibling(t *testing.T) {
 	leadEntered := make(chan struct{}) // closed once the lead's resolve (call 1) is under way
 	started := make(chan struct{})     // closed by onStart the moment the lead's child starts
-	release := make(chan struct{})     // closed by the test to let RunChild return
+	release := make(chan struct{})     // closed by the test to let the child's Wait return
 	var startOnce sync.Once
 	var leadEnteredOnce sync.Once
 
@@ -1824,7 +1845,7 @@ func TestLoopSelfChangeDrainsRunningChild(t *testing.T) {
 	const newPath = "/nix/store/new-path"
 	leadEntered := make(chan struct{}) // closed by onSelf once leadSlot's call 1 lands
 	started := make(chan struct{})     // closed by onStart the moment the child starts
-	release := make(chan struct{})     // closed by the test to let RunChild return
+	release := make(chan struct{})     // closed by the test to let the child's Wait return
 	var startOnce sync.Once
 	var leadEnteredOnce sync.Once
 
@@ -1949,7 +1970,7 @@ func TestLoopPublishesSlotSince(t *testing.T) {
 	Loop(context.Background(), cfg, r, newTestEmitter(&buf), clk)
 
 	if err1 != nil || err2 != nil {
-		t.Fatalf("ReadStatus during RunChild: %v, %v", err1, err2)
+		t.Fatalf("ReadStatus during a running child: %v, %v", err1, err2)
 	}
 	want := t0.Add(time.Hour).Format(time.RFC3339)
 	for i, rep := range []StatusReport{first, second} {
@@ -1986,7 +2007,7 @@ func TestLoopPublishesChildStartPin(t *testing.T) {
 		onStart: func(ctx context.Context, req ChildRequest) error {
 			rep, err := ReadStatus(dir)
 			if err != nil {
-				t.Errorf("ReadStatus during RunChild: %v", err)
+				t.Errorf("ReadStatus during a running child: %v", err)
 			}
 			reads = append(reads, rep)
 			return nil
@@ -2025,7 +2046,7 @@ func TestLoopPublishesChildStartPin(t *testing.T) {
 
 // TestLoopPublishesLiveStatus drives a Loop run with Config.Status pointed
 // at a temp dir and asserts the status file names the in-flight child's
-// kind/revision/issues while RunChild is still running, and that a valid
+// kind/revision/issues while the child is still running, and that a valid
 // status file survives the run (issue #3545).
 func TestLoopPublishesLiveStatus(t *testing.T) {
 	dir := t.TempDir()
@@ -2059,7 +2080,7 @@ func TestLoopPublishesLiveStatus(t *testing.T) {
 	}
 
 	if probeErr != nil {
-		t.Fatalf("ReadStatus during RunChild: %v", probeErr)
+		t.Fatalf("ReadStatus during a running child: %v", probeErr)
 	}
 	if report.Status == nil {
 		t.Fatalf("status was nil while the child was still running")
@@ -2179,7 +2200,7 @@ func TestLoopBoxSettledAndUnknownRecords(t *testing.T) {
 	}
 
 	if probeErr != nil {
-		t.Fatalf("ReadStatus during RunChild: %v", probeErr)
+		t.Fatalf("ReadStatus during a running child: %v", probeErr)
 	}
 	if report.Status == nil {
 		t.Fatalf("status was nil while the child was still running")
@@ -2244,7 +2265,7 @@ func TestLoopButlerBoxSettledCarryChoreNotIssue(t *testing.T) {
 	}
 
 	if probeErr != nil {
-		t.Fatalf("ReadStatus during RunChild: %v", probeErr)
+		t.Fatalf("ReadStatus during a running child: %v", probeErr)
 	}
 	if statusReport.Status == nil {
 		t.Fatalf("status was nil while the child was still running")
@@ -2589,5 +2610,57 @@ func TestLoopPublishesRepoURL(t *testing.T) {
 	}
 	if report.Status == nil || report.Status.RepoURL != "https://github.com/o/r" {
 		t.Fatalf("published status = %+v, want repo_url https://github.com/o/r", report.Status)
+	}
+}
+
+// An abandoned wait leaves the child running: Loop returns once every slot has
+// left, with no child_finish and no halt, and the
+// child is still in flight on the double, where a later Wait on the same handle
+// collects the released result.
+func TestLoopAbandonedWaitLeavesChildRunning(t *testing.T) {
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(1)
+	abandon := make(chan struct{})
+	cfg := testConfig(1)
+	cfg.abandonWaits = abandon
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(context.Background(), cfg, r, em, &testClock{}) }()
+
+	if slot := r.awaitStart(t); slot != 0 {
+		t.Fatalf("started slot = %d, want 0", slot)
+	}
+	close(abandon)
+	var halt Halt
+	select {
+	case halt = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Loop did not return after the waits were abandoned")
+	}
+
+	if reason := halt.String(); reason != "" {
+		t.Errorf("halt reason = %q, want none: an abandoned wait is not a halt", reason)
+	}
+	wantEvents(t, &buf, []string{"child_start"}, "an abandoned wait must emit no child_finish, backoff or halt")
+	r.mu.Lock()
+	n := r.inFlight
+	h := r.handles[0]
+	r.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("inFlight after abandoned wait = %d, want 1", n)
+	}
+
+	r.releaseSlot(t, 0, ChildResult{Exit: 4})
+	res, err := h.Wait(nil)
+	if err != nil || res.Exit != 4 {
+		t.Fatalf("second Wait = (%+v, %v), want (Exit 4, nil)", res, err)
+	}
+	r.mu.Lock()
+	n = r.inFlight
+	r.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("inFlight after completed Wait = %d, want 0", n)
 	}
 }
