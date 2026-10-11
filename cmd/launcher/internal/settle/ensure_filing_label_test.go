@@ -75,7 +75,7 @@ func TestSettleEntryPoints_EnsureFilingLabelPerKind(t *testing.T) {
 			func() *forge.Fake { return forge.NewFake(testDispatchLabels) },
 			func(fc *forge.Fake) {
 				plan := func([]Finding) func(Finding) Decoration { return func(Finding) Decoration { return Decoration{} } }
-				FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, plan)
+				FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, DedupPolicy{}, plan)
 			},
 		},
 	} {
@@ -116,7 +116,7 @@ func TestFileButlerFindings_EnsuresExtraLabels(t *testing.T) {
 	plan := func([]Finding) func(Finding) Decoration {
 		return func(Finding) Decoration { return Decoration{ExtraLabels: []string{patchLabel}} }
 	}
-	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, plan)
+	filing := FileButlerFindings(fc.AsIssueFiler(), "1", twoIntents(), 0, DedupPolicy{}, plan)
 
 	if len(filing.Filed) != 2 {
 		t.Fatalf("filed = %v, want 2", filing.Filed)

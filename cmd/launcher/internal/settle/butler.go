@@ -27,12 +27,15 @@ type Finding struct {
 	// patch's commit subject/PR title (issue #4074) -- unexamined here, same
 	// as Patch.
 	Title string
+	// Metric is the tuning finding's metric slug, the last part of its pattern key
+	// (class, file, metric).
+	Metric string
 }
 
 // finding is in's promotion-relevant view, the projection both FileButlerFindings
 // call sites (the plan callback and its per-finding decorate) need.
 func (in issueIntent) finding() Finding {
-	return Finding{Class: in.Class, Concurrence: in.Concurrence, Cites: in.Cites, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title}
+	return Finding{Class: in.Class, Concurrence: in.Concurrence, Cites: in.Cites, DedupTerms: in.DedupTerms, Patch: in.Patch, Title: in.Title, Metric: in.Metric}
 }
 
 // Decoration is what a plan's per-finding callback adds to one finding's
@@ -68,7 +71,7 @@ type ButlerFiling struct {
 // failed count (PostIssue failures only; a dedup skip or malformed payload is
 // neither), so a caller can tell a sweep whose every filing failed from one
 // that simply found nothing.
-func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
+func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Result, maxPerSweep int, dedup DedupPolicy, plan func(kept []Finding) func(Finding) Decoration) ButlerFiling {
 	kept, dropped := capIntents(result.IssueIntents, maxPerSweep)
 	capped := result
 	capped.IssueIntents = kept
@@ -83,7 +86,7 @@ func FileButlerFindings(it forge.IssueTracker, num string, result dispatch.Resul
 	}
 	decide := plan(findings)
 
-	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, dispatchkind.Butler.FindingLabel, func(in issueIntent) (string, []string, func(string)) {
+	rawFiled := fileIssueIntentsDetailedFunc(it, num, capped, dispatchkind.Butler.FindingLabel, dedup, func(in issueIntent) (string, []string, func(string)) {
 		d := decide(in.finding())
 		return d.Backlink, d.ExtraLabels, d.OnFiled
 	})

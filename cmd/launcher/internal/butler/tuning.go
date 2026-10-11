@@ -12,6 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/ledger"
+	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/tuning"
 )
@@ -166,4 +167,16 @@ func (t *tuningSnapshot) validate(in signalwire.IssueIntent, tracked func() (map
 		return dropThinEvidence, nil
 	}
 	return "", nil
+}
+
+// tuningPatternTerms keys a tuning finding on the pattern it names, one
+// class:file:metric per file, not on the code site (ADR 0062 §6): two patterns
+// on one prompt file stay distinct. It feeds only settle's dedup; f.DedupTerms
+// stays the files, which butlerBacklink still reads.
+func tuningPatternTerms(f settle.Finding) []string {
+	var terms []string
+	for _, file := range butlerFiles(f.DedupTerms) {
+		terms = append(terms, f.Class+":"+file+":"+f.Metric)
+	}
+	return terms
 }

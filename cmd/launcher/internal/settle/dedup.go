@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"spindrift.dev/launcher/internal/dispatchkind"
@@ -221,10 +222,14 @@ func isFindingIssue(labels []string) bool {
 // indexFindingIssues folds each finding-labelled issue in issues into index,
 // keyed by its marker's dedup terms and valued "#<number>". A non-finding
 // issue is skipped: dedup only ever consults an issue fileIssueIntentsDetailed
-// itself filed. Later calls overwrite earlier ones for a shared key.
-func indexFindingIssues(index map[string]string, issues []forge.Issue) {
+// itself filed. Later calls overwrite earlier ones for a shared key. An issue
+// that notPlannedExpired at notPlannedBefore is skipped too.
+func indexFindingIssues(index map[string]string, issues []forge.Issue, notPlannedBefore time.Time) {
 	for _, iss := range issues {
 		if !isFindingIssue(iss.Labels) {
+			continue
+		}
+		if notPlannedExpired(iss, notPlannedBefore) {
 			continue
 		}
 		ref := "#" + iss.Number
@@ -237,20 +242,31 @@ func indexFindingIssues(index map[string]string, issues []forge.Issue) {
 	}
 }
 
+// notPlannedExpired reports whether iss is a tuning finding closed
+// not-planned at or before cutoff (ADR 0062 §6: a rejected idea may return
+// once its cooldown ends). A zero cutoff or an unknown ClosedAt never
+// expires one, and a code finding, carrying no tuning marker, never does.
+func notPlannedExpired(iss forge.Issue, cutoff time.Time) bool {
+	return !cutoff.IsZero() && iss.ClosedNotPlanned && !iss.ClosedAt.IsZero() &&
+		!iss.ClosedAt.After(cutoff) && carriesTuningMarker(iss.Body)
+}
+
 // backlogDedupIndex maps every dedup key already covered to a
 // human-readable reference: a "#<number>" for a key covered by a finding
 // issue, open or closed -- closing a finding is a durable triage decision the
-// host enforces (issue #3873) -- or a `this run's "<title>"` string for a key
-// fileIssueIntentsDetailed adds in place as this same run files its own
-// intents. A list failure is non-fatal: it warns, in the same style as the
-// sibling ListLabels warning this call sits beside, and contributes nothing
-// to the index -- exactly as an open-lookup failure did before #3873 -- so
-// the closed and open lookups degrade independently: during an open-side
-// outage, closed keys still suppress a refile. Closed is indexed first so an
-// open issue, the one still actively tracked, wins a shared key. Every real
-// adapter implements forge.LabeledBacklogLister; a tracker without it (a
-// test fake) falls back to ListOpenIssues, open-only.
-func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
+// host enforces (issue #3873), except that a tuning finding closed
+// not-planned expires at notPlannedBefore (see notPlannedExpired) -- or a
+// `this run's "<title>"` string for a key fileIssueIntentsDetailed adds in
+// place as this same run files its own intents. A list failure is non-fatal:
+// it warns, in the same style as the sibling ListLabels warning this call
+// sits beside, and contributes nothing to the index -- exactly as an
+// open-lookup failure did before #3873 -- so the closed and open lookups
+// degrade independently: during an open-side outage, closed keys still
+// suppress a refile. Closed is indexed first so an open issue, the one still
+// actively tracked, wins a shared key. Every real adapter implements
+// forge.LabeledBacklogLister; a tracker without it (a test fake) falls back
+// to ListOpenIssues, open-only.
+func backlogDedupIndex(it forge.IssueTracker, num string, notPlannedBefore time.Time) map[string]string {
 	index := make(map[string]string)
 	lister, ok := it.(forge.LabeledBacklogLister)
 	if !ok {
@@ -259,7 +275,7 @@ func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: list open issues (unlabelled fallback) failed: %v\n", num, err)
 			return index
 		}
-		indexFindingIssues(index, issues)
+		indexFindingIssues(index, issues, notPlannedBefore)
 		return index
 	}
 	for _, state := range []forge.IssueState{forge.IssueClosed, forge.IssueOpen} {
@@ -267,7 +283,7 @@ func backlogDedupIndex(it forge.IssueTracker, num string) map[string]string {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "    ?? #%s: list %s finding issues failed: %v\n", num, strings.ToLower(string(state)), err)
 		}
-		indexFindingIssues(index, issues)
+		indexFindingIssues(index, issues, notPlannedBefore)
 	}
 	return index
 }
@@ -421,4 +437,15 @@ func applyRunLineOverlap(dedupIndex, runKeys map[string]string, keys map[string]
 		dedupIndex[k] = ref
 		runKeys[k] = ref
 	}
+}
+
+// DedupPolicy is a filing's dedup shape (ADR 0062 §6); its zero value is site
+// keys with permanent suppression, what research and the code Chores use.
+type DedupPolicy struct {
+	// Terms, when set, replaces a finding's own DedupTerms as both its dedup
+	// key set and its marker terms.
+	Terms func(Finding) []string
+	// NotPlannedBefore: a closed-not-planned tuning finding closed at or
+	// before it no longer suppresses; zero never expires.
+	NotPlannedBefore time.Time
 }

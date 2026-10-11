@@ -103,6 +103,7 @@ func tuningPolicy(root string, minRecords int) Policy {
 	p.RecordsRoot = root
 	p.TuningMinRecords = minRecords
 	p.TuningMinSample = 15
+	p.TuningCooldown = 720 * time.Hour
 	return p
 }
 
@@ -131,12 +132,57 @@ type tuningRun struct {
 	filesErr error
 	// filesCalls counts TrackedFiles calls.
 	filesCalls int
+	// backlog, when set, is the tracker sweepTuning uses; forge.Fake lists
+	// open issues only.
+	backlog *backlogTracker
+}
+
+// backlogTracker adds the closed-capable labelled listing the real adapters
+// implement to a Fake issue filer, serving seeded issues by state.
+type backlogTracker struct {
+	forge.IssueTracker
+	filer        forge.HostPostedIssueFiler
+	labeler      forge.IssueLabeler
+	open, closed []forge.Issue
+}
+
+func newBacklogTracker(t *testing.T, it forge.IssueTracker, open, closed []forge.Issue) *backlogTracker {
+	t.Helper()
+	filer, ok := it.(forge.HostPostedIssueFiler)
+	if !ok {
+		t.Fatalf("%T does not implement forge.HostPostedIssueFiler", it)
+	}
+	labeler, ok := it.(forge.IssueLabeler)
+	if !ok {
+		t.Fatalf("%T does not implement forge.IssueLabeler", it)
+	}
+	return &backlogTracker{IssueTracker: it, filer: filer, labeler: labeler, open: open, closed: closed}
+}
+
+func (b *backlogTracker) PostIssue(title, body string, labels []string) (string, error) {
+	return b.filer.PostIssue(title, body, labels)
+}
+
+func (b *backlogTracker) AddLabels(num string, labels []string) error {
+	return b.labeler.AddLabels(num, labels)
+}
+
+func (b *backlogTracker) ListIssuesWithLabels(state forge.IssueState, _ []string) ([]forge.Issue, error) {
+	if state == forge.IssueClosed {
+		return b.closed, nil
+	}
+	return b.open, nil
 }
 
 // tuningIntent builds the raw payload of a tuning finding.
 func tuningIntent(t *testing.T, title, class string, cites []string, terms ...string) string {
 	t.Helper()
-	raw, err := json.Marshal(signalwire.IssueIntent{Title: title, Body: "tune it", Class: class, Cites: cites, Metric: "usd", DedupTerms: terms})
+	return tuningIntentMetric(t, title, class, "usd", cites, terms...)
+}
+
+func tuningIntentMetric(t *testing.T, title, class, metric string, cites []string, terms ...string) string {
+	t.Helper()
+	raw, err := json.Marshal(signalwire.IssueIntent{Title: title, Body: "tune it", Class: class, Cites: cites, Metric: metric, DedupTerms: terms})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +243,11 @@ func (tr *tuningRun) sweepTuning(t *testing.T, policy Policy, now time.Time) (Ou
 		files = []string{"a.go"}
 	}
 	tree := countingTree{fakeTree: fakeTree{head: "headsha", files: files, filesErr: tr.filesErr}, calls: &tr.filesCalls}
-	r := New(tr.backend, tree, tr.fc.AsIssueFiler(), newBox, policy, func() time.Time { return now })
+	var it forge.IssueTracker = tr.fc.AsIssueFiler()
+	if tr.backlog != nil {
+		it = tr.backlog
+	}
+	r := New(tr.backend, tree, it, newBox, policy, func() time.Time { return now })
 	var out Outcome
 	var err error
 	tr.stdout = captureStdout(t, func() { out, err = r.Sweep([]string{"tuning"}) })
@@ -1202,5 +1252,93 @@ func TestEvidenceGapClassIsATuningChoreClass(t *testing.T) {
 	}
 	if !slices.Contains(cs[0].ClassList, evidenceGapClass) {
 		t.Errorf("tuning Chore classes = %v, want %q among them", cs[0].ClassList, evidenceGapClass)
+	}
+}
+
+// refiledAfter files one default tuning finding, then sweeps again with second
+// (the default finding when empty) against a backlog that backlog derives from
+// the first filing, and returns how many issues the second sweep filed.
+func refiledAfter(t *testing.T, second string, backlog func(filed forge.Issue) (open, closed []forge.Issue)) int {
+	t.Helper()
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	tr := newTuningRun(t)
+	if out, err := tr.sweepTuning(t, tuningPolicy(root, 3), tuningNow.Add(-48*time.Hour)); err != nil || out.Filed != 1 {
+		t.Fatalf("first Sweep = %+v, %v, want 1 filed", out, err)
+	}
+	filed := forge.Issue{Number: "77", Body: tr.fc.PostIssueCalls[0].Body, Labels: []string{"agent-butler-finding", doctor.TuningFindingLabel}}
+	open, closed := backlog(filed)
+	tr.backlog = newBacklogTracker(t, tr.fc.AsIssueFiler(), open, closed)
+	if second != "" {
+		tr.intents = []string{second}
+	}
+	seedRecords(t, root, 10, 3, tuningNow.Add(-24*time.Hour))
+	if out, err := tr.sweepTuning(t, tuningPolicy(root, 3), tuningNow); err != nil || out.Kind != Swept {
+		t.Fatalf("second Sweep = %+v, %v, want Swept", out, err)
+	}
+	return len(tr.fc.PostIssueCalls) - 1
+}
+
+const day = 24 * time.Hour
+
+func closedTuning(filed forge.Issue, notPlanned bool, age time.Duration) []forge.Issue {
+	filed.ClosedNotPlanned = notPlanned
+	filed.ClosedAt = tuningNow.Add(-age)
+	return []forge.Issue{filed}
+}
+
+func TestSweep_Tuning_PatternDedup(t *testing.T) {
+	cites := []string{"summary:usd-per-record"}
+	openMatch := func(f forge.Issue) ([]forge.Issue, []forge.Issue) { return []forge.Issue{f}, nil }
+	closedAt := func(notPlanned bool, age time.Duration) func(forge.Issue) ([]forge.Issue, []forge.Issue) {
+		return func(f forge.Issue) ([]forge.Issue, []forge.Issue) { return nil, closedTuning(f, notPlanned, age) }
+	}
+	unknownCloseTime := func(f forge.Issue) ([]forge.Issue, []forge.Issue) {
+		c := closedTuning(f, true, 0)
+		c[0].ClosedAt = time.Time{}
+		return nil, c
+	}
+	cases := []struct {
+		name    string
+		second  string
+		backlog func(forge.Issue) ([]forge.Issue, []forge.Issue)
+		want    int
+	}{
+		{"open match suppresses", "", openMatch, 0},
+		{"closed completed suppresses", "", closedAt(false, 90*day), 0},
+		{"closed not planned inside cooldown suppresses", "", closedAt(true, 10*day), 0},
+		{"closed not planned past cooldown files again", "", closedAt(true, 40*day), 1},
+		{"closed not planned exactly at cooldown files again", "", closedAt(true, 30*day), 1},
+		{"closed not planned with unknown close time suppresses", "", unknownCloseTime, 0},
+		{"same file and class with another metric files", tuningIntentMetric(t, "other", "evidence-gap", "tokens", cites, "a.go:Foo"), openMatch, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := refiledAfter(t, c.second, c.backlog); got != c.want {
+				t.Errorf("second Sweep filed %d, want %d", got, c.want)
+			}
+		})
+	}
+}
+
+// A code Chore keeps its site keys and permanent suppression: a closed
+// not-planned match never expires, however old.
+func TestSweep_CodeChore_ClosedNotPlannedSuppressesPermanently(t *testing.T) {
+	backend := ledger.Local{Repo: ledgertest.NewRepo(t)}
+	fc := forge.NewFake()
+	fc.PostIssueURL = "https://example.com/issues/900"
+	newBox := func(dispatch.Chore) dispatch.Dispatcher { return readyDispatcher() }
+	files := []string{"a.go"}
+	now := tuningNow.Add(-90 * day)
+	first := New(backend, fakeTree{head: "head1", files: files}, fc.AsIssueFiler(), newBox, testPolicy(), func() time.Time { return now })
+	if out, err := first.Sweep([]string{"bugs"}); err != nil || out.Filed != 1 {
+		t.Fatalf("first Sweep = %+v, %v, want 1 filed", out, err)
+	}
+	filed := forge.Issue{Number: "900", Body: fc.PostIssueCalls[0].Body, Labels: []string{"agent-butler-finding"}, ClosedNotPlanned: true, ClosedAt: now}
+	it := newBacklogTracker(t, fc.AsIssueFiler(), nil, []forge.Issue{filed})
+	second := New(backend, fakeTree{head: "head2", files: files}, it, newBox, testPolicy(), func() time.Time { return tuningNow })
+	out, err := second.Sweep([]string{"bugs"})
+	if err != nil || out.Kind != Swept || len(fc.PostIssueCalls) != 1 {
+		t.Fatalf("second Sweep = %+v, %v, posts = %d, want Swept with the finding suppressed", out, err, len(fc.PostIssueCalls))
 	}
 }
