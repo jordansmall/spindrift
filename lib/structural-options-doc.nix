@@ -45,6 +45,7 @@
     '';
     docType = "list of subagent-entry attrs";
     docDefault = "`lib/roster.nix`'s `defaultRoster`";
+    driverValued = true;
   };
 
   runtime = {
@@ -134,5 +135,6 @@
     '';
     docType = "attrset of `{ model?; effort?; }` keyed by roster entry name";
     docDefault = "`null`";
+    driverValued = true;
   };
 }

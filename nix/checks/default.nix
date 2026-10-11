@@ -94,6 +94,7 @@ let
     // (import ./versioning-prompt-template-carve-out.nix common)
     // (import ./go.nix common)
     // (import ./roster.nix common)
+    // (import ./driver-map.nix common)
     // (import ./promptassembly.nix common)
     // (import ./prompt-assembly-golden-coverage.nix common)
     // (import ./baked-skills.nix common)

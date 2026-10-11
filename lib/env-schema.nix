@@ -169,6 +169,7 @@ in
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "models.effort";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -181,6 +182,7 @@ in
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "bashTimeoutMs";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -192,6 +194,7 @@ in
     flakeOption = true;
     hostConfig = true;
     nixSubPath = "models.default";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -202,6 +205,7 @@ in
     doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.scout";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -212,6 +216,7 @@ in
     doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED for non-orchestrator use: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md). Under ORCHESTRATOR, the roster reviewer entry is itself superseded by the code-owned review pass, which instead binds its model from this value (captured before the roster entry is deleted, falling back to the coordinator model when unset). An explicit dispatch-time value (REVIEW_MODEL=... / --review-model ...) overrides even that baked extraction on an already-built image, no rebuild needed (issue #3171) -- precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback; unset or empty at dispatch leaves the baked chain unchanged.";
     flakeOption = true;
     nixSubPath = "models.review";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -222,6 +227,7 @@ in
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "models.reviewEffort";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -232,6 +238,7 @@ in
     doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.filer";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
@@ -242,6 +249,7 @@ in
     doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents. When set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to this subagent (fragments/coordinator.md). DEPRECATED: superseded by the byName/roster options (agents.models.byName for a one-agent override, agents.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.worker";
+    driverValued = true;
     boxEnv = true;
     boxEnvOnly = true;
   };
