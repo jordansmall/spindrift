@@ -164,3 +164,19 @@ func DaemonOnlyKnobs() []string {
 	sort.Strings(out)
 	return out
 }
+
+// ResolveDriver returns the Driver to use and, when an ambient DRIVER
+// disagrees with the baked one, a warning for the caller to print once (ADR
+// 0064, issue #5050). The baked artifact always wins: ambient env includes
+// harness.env, which the wrapper sources, and a mismatched DRIVER would have
+// the host parse a Pass log as one Driver while the image runs another. With no
+// baked value (no --input document) the ambient value stands, unwarned.
+func ResolveDriver(baked, ambient string) (driver, warning string) {
+	if baked == "" {
+		return ambient, ""
+	}
+	if ambient != "" && ambient != baked {
+		warning = fmt.Sprintf("DRIVER=%s set in environment differs from the baked Driver %q; using the baked Driver %s\n", ambient, baked, baked)
+	}
+	return baked, warning
+}
