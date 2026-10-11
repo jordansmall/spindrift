@@ -32,6 +32,12 @@ let
   # nix/checks/schema-drift.nix's flake-nixpath-exhaustive-disjoint check
   # (issue #2731) imports the same literal instead of a copy inlined here.
   byNamePaths = import ./byname-paths.nix;
+  # The Driver map (ADR 0064, issue #5052): which settings are Driver-valued,
+  # where they sit, and the resolver deciding the default Driver.
+  driverMap = import ./driver-map.nix;
+  inherit (driverMap) driverValued;
+  driversPath = driverMap.optionPaths.drivers;
+  defaultDriverPath = driverMap.optionPaths.defaultDriver;
 
   sectionKnobs = lib.foldl' (
     acc: knobName:
@@ -292,6 +298,47 @@ let
       }
     ];
 
+  # One Driver's entry under agents.drivers.<name>: the Driver-valued options
+  # at their agents-relative paths. byName and roster reuse the single-Driver
+  # options; the entry has no Driver field, the attribute name is the Driver.
+  driverEntryOptions = buildTree (
+    map (key: {
+      path = driverMap.paths.${key};
+      opt = mkKnobOption key schema.${key};
+    }) driverValued.env
+    ++ [
+      {
+        path = driverMap.paths.roster;
+        opt = structuralOptions.roster;
+      }
+      {
+        path = driverMap.paths.byName;
+        opt = byNameOption;
+      }
+    ]
+  );
+
+  # Like byNameTreeEntries, these two have no flat spelling, so they sit
+  # outside structuralOptions and get no deprecation shim.
+  driverMapTreeEntries = [
+    {
+      path = driversPath;
+      opt = mkOption {
+        type = types.attrsOf (types.submodule { options = driverEntryOptions; });
+        default = { };
+        description = "Drivers this flake builds side by side, keyed by Driver name; each entry carries that Driver's own model, effort, roster and Bash-timeout settings (ADR 0064).";
+      };
+    }
+    {
+      path = defaultDriverPath;
+      opt = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "The Driver behind `apps.default` and `apps.daemon`. Optional with a single declared Driver; required with several.";
+      };
+    }
+  ];
+
   # The assert compares key sets first: a row added to only one of
   # structuralOptions and structuralPlacements would otherwise fail as an
   # opaque `attribute 'X' missing` inside this mapAttrsToList.
@@ -353,7 +400,11 @@ in
       oldFlatShims
       // settingsOption
       // (buildTree (
-        flakeOptionTreeEntries ++ structuralTreeEntries ++ byNameTreeEntries ++ removedKnobTreeEntries
+        flakeOptionTreeEntries
+        ++ structuralTreeEntries
+        ++ byNameTreeEntries
+        ++ driverMapTreeEntries
+        ++ removedKnobTreeEntries
       ));
   };
 
@@ -427,6 +478,8 @@ in
       # default and drop byName.
       byNameModels = lib.getAttrFromPath byNamePaths.byName cfg;
 
+      # The single-Driver form's harness arguments; every declared Driver's
+      # arguments extend sharedArgs, which is these minus the Driver-valued ones.
       args = {
         inherit system;
         nixpkgs = resolvedNixpkgs;
@@ -451,17 +504,85 @@ in
           }
         ) removedKnobs
       );
+
+      # What the Consumer set in the single-Driver form, by dotted path; the
+      # resolver rejects mixing it with agents.drivers.
+      topLevelSet =
+        lib.optional (structuralResolved.driver != null) { path = "agents.driver"; }
+        ++ map (key: {
+          path = resolveNixPath key flakeOptionEntries.${key};
+        }) (lib.filter (key: runDefaults ? ${key}) driverValued.env)
+        ++ lib.optional (structuralResolved.roster != null) {
+          path = lib.concatStringsSep "." structuralPlacements.roster;
+        }
+        ++ lib.optional (byNameModels != null) { path = lib.concatStringsSep "." byNamePaths.byName; };
+
+      resolved = driverMap.resolve {
+        inherit (cfg.agents) drivers defaultDriver;
+        topLevel = topLevelSet;
+      };
+      shorthand = resolved.default == null;
+
+      sharedDefaults = removeAttrs runDefaults driverValued.env;
+      sharedArgs =
+        removeAttrs args [
+          "driver"
+          "roster"
+          "byName"
+          "defaults"
+        ]
+        // lib.optionalAttrs (sharedDefaults != { }) { defaults = sharedDefaults; };
+
+      # The non-null values of the given Driver-valued keys in a Driver's
+      # entry, found by the marking's own paths.
+      entryValues =
+        entry: keys:
+        lib.filterAttrs (_: v: v != null) (
+          lib.genAttrs keys (key: lib.getAttrFromPath driverMap.paths.${key} entry)
+        );
+
+      # mkHarness arguments for one declared Driver: the shared arguments plus
+      # that entry's own values. Under the shorthand `args` is used verbatim.
+      argsFor =
+        name:
+        let
+          entry = cfg.agents.drivers.${name};
+          entryDefaults = entryValues entry driverValued.env;
+          defaults = sharedDefaults // entryDefaults;
+        in
+        sharedArgs
+        // {
+          driver = name;
+        }
+        // entryValues entry driverValued.structural
+        // lib.optionalAttrs (defaults != { }) { inherit defaults; };
+
       harness =
         if removedKnobHits != [ ] then
           throw "${(lib.head removedKnobHits).at}: ${(lib.head removedKnobHits).message}"
+        else if resolved.error != null then
+          throw resolved.error
+        else if shorthand then
+          mkHarness args
         else
-          mkHarness args;
+          mkHarness (argsFor resolved.default);
+
+      defaultDriverName = if shorthand then harness.internals.driverEntry.name else resolved.default;
+      inherit (harness.internals) imageAttrName;
+      defaultAliasApps = {
+        ${defaultDriverName} = harness.apps.default;
+        "${defaultDriverName}-daemon" = harness.apps.daemon;
+      };
+      defaultAliasPackages = lib.optionalAttrs (harness.packages ? ${imageAttrName}) {
+        "${imageAttrName}-${defaultDriverName}" = harness.packages.${imageAttrName};
+      };
       # nixfmt from the consumer's locked nixpkgs input, the same pin the
       # nix-fmt gate uses, so `nix fmt` fixes what the check catches.
       nixfmt = (import resolvedNixpkgs { inherit system; }).nixfmt;
     in
     {
-      inherit (harness) packages apps;
+      packages = harness.packages // defaultAliasPackages;
+      apps = harness.apps // defaultAliasApps;
       formatter = nixfmt;
     };
 }

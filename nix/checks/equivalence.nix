@@ -1975,6 +1975,7 @@ in
         "boxBin"
         "driverEntry"
         "daemonBin"
+        "imageAttrName"
         "runInputDocumentFile"
         "roster"
         "launcherCurrencyFileset"

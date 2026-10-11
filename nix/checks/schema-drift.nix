@@ -194,6 +194,7 @@ let
 
   structuralPaths = import ../../lib/structural-paths.nix;
   byNamePaths = import ../../lib/byname-paths.nix;
+  driverMapOptionPaths = (import ../../lib/driver-map.nix).optionPaths;
   resolveNixPath = import ../../lib/nixpath.nix;
   # Renders each segment-list value of a paths attrset as its dotted string,
   # so allNixPaths below does not repeat the same map once per source.
@@ -212,7 +213,8 @@ let
     in
     (map (n: resolveNixPath n schema.${n}) flakeOptionNames)
     ++ (dotted structuralPaths)
-    ++ (dotted byNamePaths);
+    ++ (dotted byNamePaths)
+    ++ (dotted driverMapOptionPaths);
 
   # Frozen ground truth, in its own file so it is not a fourth hand-copy of a
   # knob list living only in this check (issue #2522 review finding).
