@@ -184,18 +184,23 @@ comes after it.
 ## Amendment (issue #2930): bind-registry continues the rule's pattern
 
 `driver-exec bind-registry` (backed by `cmd/launcher/internal/bindregistry`)
-is the sixth verb `main.go`'s `mainRun` dispatch chain checks, in the order it
-checks them: `bundle-out` (1st), `outcome-backstop` (2nd), `marker-gate`
-(3rd), `assemble-prompt` (4th), `readonly-guards` (5th), `bind-registry`
-(6th). That dispatch-chain position is a separate fact from this ADR's own
-instance count of the rule it names — the amendment above already counts
-`assemble-prompt` as the *third* instance despite it sitting 4th in dispatch
-order, so dispatch position and rule-instance count are not the same
-number. What this amendment records is narrower: `bind-registry` is a
-further instance of the rule — an in-box decision tree over
-launcher-delivered plumbing gets a named `driver-exec` verb owner, not ad hoc
-bash — continuing the pattern `bundle-out`, `outcome-backstop`, and
-`assemble-prompt` already established.
+was the sixth verb `main.go`'s `mainRun` dispatch chain checked when this
+amendment landed, in the order it checked them: `bundle-out` (1st),
+`outcome-backstop` (2nd), `marker-gate` (3rd), `assemble-prompt` (4th),
+`readonly-guards` (5th), `bind-registry` (6th). That dispatch-chain position
+is a separate fact from this ADR's own instance count of the rule it names —
+the amendment above already counts `assemble-prompt` as the *third* instance
+despite it then sitting 4th in dispatch order, so dispatch position and
+rule-instance count are not the same number. What this amendment records is
+narrower: `bind-registry` is a further instance of the rule — an in-box
+decision tree over launcher-delivered plumbing gets a named `driver-exec`
+verb owner, not ad hoc bash — continuing the pattern `bundle-out`,
+`outcome-backstop`, and `assemble-prompt` already established. The box port
+has since deleted `bundle-out`, `outcome-backstop`, `marker-gate`, and
+`readonly-guards`, so `mainRun` no longer checks them: the `box` binary runs
+the read-only guards, marker-gate, and outcome backstop in-process
+([ADR 0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md)),
+and calls `internal/bundleout` in-process for bundle-out (issue #4301).
 
 As it lands in issue #2930, the verb owns computing the toolchain-nudge
 ecosystem classification from the shared ecosystem table
