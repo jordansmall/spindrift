@@ -60,7 +60,7 @@ func TestStartChild_ExitCode(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if got.Exit != 2 {
 		t.Errorf("Exit = %d, want 2", got.Exit)
@@ -161,7 +161,7 @@ func TestStartChild_OnRecordDeliversBoxAndSettledInOrder(t *testing.T) {
 		},
 	}
 	if _, err := startAndWait(context.Background(), r, req); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	want := []daemon.Record{
 		{Event: "box", Key: dispatchkey.Issue("101"), Phase: "initial"},
@@ -195,7 +195,7 @@ func TestStartChild_UnknownEventIgnored(t *testing.T) {
 	}
 	result, err := startAndWait(context.Background(), r, req)
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -230,7 +230,7 @@ func TestStartChild_MalformedLinesReportOnceThenValidArrives(t *testing.T) {
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := startAndWait(context.Background(), r, req); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("7"), Phase: "fix-pass-1"}}
 	if !reflect.DeepEqual(got, want) {
@@ -264,7 +264,7 @@ func TestStartChild_KindMismatchReportedPastMalformedLine(t *testing.T) {
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := startAndWait(context.Background(), r, req); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	want := []daemon.Record{{Event: "box", Key: dispatchkey.Chore("bugs"), Phase: "initial"}}
 	if !reflect.DeepEqual(got, want) {
@@ -295,7 +295,7 @@ func TestStartChild_InvalidIssueRecordCarriesSingleDaemonPrefix(t *testing.T) {
 	readStderr := captureStderr(t)
 	req := daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}
 	if _, err := startAndWait(context.Background(), r, req); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	want := `daemon: read child report: record: invalid issue "abc"` + "\n"
 	if stderr := string(readStderr()); stderr != want {
@@ -312,14 +312,14 @@ func TestStartChild_ChildCommandErrorCarriesNoDaemonPrefix(t *testing.T) {
 	req := daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work)}
 	_, err := startAndWait(context.Background(), r, req)
 	if err == nil {
-		t.Fatalf("StartChild() error = nil, want non-nil")
+		t.Fatalf("startAndWait() error = nil, want non-nil")
 	}
 	got := err.Error()
 	if !strings.HasPrefix(got, "revision must not be empty") {
-		t.Errorf("StartChild() error = %q, want prefix %q", got, "revision must not be empty")
+		t.Errorf("startAndWait() error = %q, want prefix %q", got, "revision must not be empty")
 	}
 	if n := strings.Count(got, "daemon: "); n != 0 {
-		t.Errorf(`StartChild() error = %q, want zero "daemon: " (got %d)`, got, n)
+		t.Errorf(`startAndWait() error = %q, want zero "daemon: " (got %d)`, got, n)
 	}
 }
 
@@ -349,7 +349,7 @@ func TestStartChild_OverLongLineDiscardedThenValidArrives(t *testing.T) {
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := startAndWait(context.Background(), r, req); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("9"), Phase: "initial"}}
 	if !reflect.DeepEqual(got, want) {
@@ -415,7 +415,7 @@ func TestStartChild_SettledLongNoteDeliveredOneRecord(t *testing.T) {
 		OnRecord: func(rec daemon.Record) { got = append(got, rec) },
 	}
 	if _, err := startAndWait(context.Background(), r, req); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if len(got) != 1 {
 		t.Fatalf("OnRecord calls = %+v, want exactly 1", got)
@@ -459,7 +459,7 @@ func TestStartChild_StdoutRelayedUnchanged(t *testing.T) {
 	}
 	result, err := startAndWait(context.Background(), r, req)
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -491,7 +491,7 @@ func TestStartChild_ChildLogTakesBothStreams(t *testing.T) {
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", ChildLog: rel,
 	})
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -610,7 +610,7 @@ func TestStartChild_ChildLogUncreatableFallsBackToStderr(t *testing.T) {
 		ChildLog: filepath.Join("blocked", "x.log"),
 	})
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -656,7 +656,7 @@ func runWithLingeringGrandchild(t *testing.T, exitCode int) (daemon.ChildResult,
 	return result, time.Since(start), err
 }
 
-// TestStartChild_ChildLogDoesNotWaitOnGrandchild asserts StartChild returns the
+// TestStartChild_ChildLogDoesNotWaitOnGrandchild asserts start+wait returns the
 // child's own exit, clean or not, once it exits, even when a grandchild still
 // holds the Child log open.
 func TestStartChild_ChildLogDoesNotWaitOnGrandchild(t *testing.T) {
@@ -664,13 +664,13 @@ func TestStartChild_ChildLogDoesNotWaitOnGrandchild(t *testing.T) {
 		t.Run(fmt.Sprintf("exit%d", exitCode), func(t *testing.T) {
 			result, d, err := runWithLingeringGrandchild(t, exitCode)
 			if err != nil {
-				t.Fatalf("StartChild() unexpected error: %v", err)
+				t.Fatalf("startAndWait() unexpected error: %v", err)
 			}
 			if result.Exit != exitCode {
 				t.Errorf("Exit = %d, want %d", result.Exit, exitCode)
 			}
 			if d > 5*time.Second {
-				t.Errorf("StartChild took %v, want it prompt, not held by the grandchild", d)
+				t.Errorf("start+wait took %v, want it prompt, not held by the grandchild", d)
 			}
 		})
 	}
@@ -695,7 +695,7 @@ func TestStartChild_CleanExitNoRecords(t *testing.T) {
 	}
 	result, err := startAndWait(context.Background(), r, req)
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if result.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", result.Exit)
@@ -779,7 +779,7 @@ func TestStartChild_EnvStripsKnobsKeepsSecrets(t *testing.T) {
 	})
 	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if got.Exit != 0 {
 		t.Fatalf("Exit = %d, want 0", got.Exit)
@@ -811,7 +811,7 @@ func TestStartChild_EnvKeepsAmbientForKeyWhoseDocumentValueDoesNotCount(t *testi
 		knobs: strippedKeys(doc),
 	})
 	if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	dumped, err := os.ReadFile(dumpFile)
 	if err != nil {
@@ -843,7 +843,7 @@ func TestStartChild_ChildInOwnProcessGroup(t *testing.T) {
 	go func() {
 		defer close(done)
 		if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-			t.Errorf("StartChild() unexpected error: %v", err)
+			t.Errorf("startAndWait() unexpected error: %v", err)
 		}
 	}()
 
@@ -893,7 +893,7 @@ func TestStartChild_StdinIsDevNull(t *testing.T) {
 
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 
 	if captured.Stdin != nil {
@@ -1215,7 +1215,7 @@ func TestStartChild_StopClosedSignalsSIGTERM(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	case got := <-resultCh:
 		if got.Exit != 7 {
 			t.Errorf("Exit = %d, want 7 (child trapped SIGTERM and exited on its own terms, not SIGKILLed)", got.Exit)
@@ -1286,7 +1286,7 @@ func TestStartChild_StopSignalsEveryConcurrentChild(t *testing.T) {
 	for i := 0; i < nChildren; i++ {
 		select {
 		case err := <-errCh:
-			t.Fatalf("StartChild() unexpected error: %v", err)
+			t.Fatalf("startAndWait() unexpected error: %v", err)
 		case got := <-resultCh:
 			if got.Exit != 7 {
 				t.Errorf("Exit = %d, want 7 (child trapped SIGTERM and exited on its own terms, not SIGKILLed)", got.Exit)
@@ -1334,7 +1334,7 @@ func TestStartChild_ChildStartedAfterStopClosedIsSignalledAtOnce(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	case got := <-resultCh:
 		// Not asserted as exactly 7: delivery fires the instant StartChild
 		// starts forwarding, which can outrace the shell's own `trap`
@@ -1395,7 +1395,7 @@ func TestStartChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 	case got := <-resultCh:
 		t.Fatalf("child exited after Stop alone (Exit=%d), want it to survive SIGTERM and only exit once Abort delivers SIGINT", got.Exit)
 	case err := <-errCh:
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	case <-time.After(200 * time.Millisecond):
 	}
 
@@ -1403,7 +1403,7 @@ func TestStartChild_StopThenAbortDeliversDistinctKinds(t *testing.T) {
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	case got := <-resultCh:
 		if got.Exit != 7 {
 			t.Errorf("Exit = %d, want 7 (child observed SIGTERM then SIGINT and exited on the second)", got.Exit)
@@ -1451,13 +1451,13 @@ func TestStartChild_ChildStartedAfterBothLatchesClosedSeesBothKinds(t *testing.T
 
 	select {
 	case err := <-errCh:
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	case got := <-resultCh:
 		if got.Exit != 0 {
 			t.Errorf("Exit = %d, want 0 (unsignalled sleep 0.3 exits cleanly; runnerSignal is stubbed here, not the real kernel call)", got.Exit)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("StartChild did not return promptly")
+		t.Fatal("startAndWait did not return promptly")
 	}
 
 	mu.Lock()
@@ -1497,7 +1497,7 @@ func TestStartChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	stop := make(chan struct{})
 	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if got.Exit != 0 {
 		t.Fatalf("Exit = %d, want 0", got.Exit)
@@ -1511,7 +1511,7 @@ func TestStartChild_ForwardingStopsAfterChildExits(t *testing.T) {
 	n := len(sent)
 	mu.Unlock()
 	if n != 0 {
-		t.Errorf("signals sent after StartChild returned = %d, want 0 (the forwarding goroutine must not outlive its child)", n)
+		t.Errorf("signals sent after startAndWait returned = %d, want 0 (the forwarding goroutine must not outlive its child)", n)
 	}
 }
 
@@ -1530,7 +1530,7 @@ func TestStartChild_NilStopAbortRunsNormally(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 	got, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
 	if err != nil {
-		t.Fatalf("StartChild() unexpected error: %v", err)
+		t.Fatalf("startAndWait() unexpected error: %v", err)
 	}
 	if got.Exit != 0 {
 		t.Errorf("Exit = %d, want 0", got.Exit)
@@ -2432,7 +2432,7 @@ func TestStartChild_FeatureBranchAppendsBaseBranchArg(t *testing.T) {
 
 			r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: tt.featureBranch, selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
 			if _, err := startAndWait(context.Background(), r, daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}); err != nil {
-				t.Fatalf("StartChild() unexpected error: %v", err)
+				t.Fatalf("startAndWait() unexpected error: %v", err)
 			}
 
 			joined := strings.Join(gotArgv, " ")
@@ -3074,3 +3074,268 @@ func startAndWait(ctx context.Context, r *hostRunner, req daemon.ChildRequest) (
 type doneHandle struct{}
 
 func (doneHandle) Wait(<-chan struct{}) (daemon.ChildResult, error) { return daemon.ChildResult{}, nil }
+
+// TestStartChild_AbandonedWaitLeavesChildRunning is the in-place-restart
+// prefactor's contract (ADR 0063): closing a Wait's abandon channel stops the
+// wait without signalling, reaping or closing anything of the child's, and a
+// later Wait on the same handle resumes cleanly — including a report line the
+// abandoned read had only half received.
+func TestStartChild_AbandonedWaitLeavesChildRunning(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	dir := t.TempDir()
+	marker, goFile := filepath.Join(dir, "marker"), filepath.Join(dir, "go")
+	script := fmt.Sprintf(`trap 'echo signalled >%[1]q; exit 9' TERM INT
+printf '%%s\n%%s' '{"event":"box","issue":"101","phase":"initial"}' '{"event":"settled","issue":"101",' >&3
+while [ ! -e %[2]q ]; do sleep 0.05; done
+printf '%%s\n' '"state":"merged"}' >&3
+exit 3`, marker, goFile)
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	var mu sync.Mutex
+	var got []daemon.Record
+	firstRecord := make(chan struct{})
+	stop := make(chan struct{})
+	req := daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		Stop: stop,
+		OnRecord: func(rec daemon.Record) {
+			mu.Lock()
+			defer mu.Unlock()
+			got = append(got, rec)
+			if len(got) == 1 {
+				close(firstRecord)
+			}
+		},
+	}
+	handle, err := r.StartChild(context.Background(), req)
+	if err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
+	}
+	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+
+	abandon := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() {
+		_, err := handle.Wait(abandon)
+		waited <- err
+	}()
+	waitFor := func(what string, c <-chan struct{}) {
+		t.Helper()
+		select {
+		case <-c:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+	waitFor("first record", firstRecord)
+	// The record and the half line leave the child in one pipe write (atomic
+	// under PIPE_BUF) and the reader takes both in one read, so once the record
+	// is delivered the fragment is already held by the Wait's reader.
+	close(abandon)
+	select {
+	case err := <-waited:
+		if !errors.Is(err, daemon.ErrWaitAbandoned) {
+			t.Fatalf("abandoned Wait error = %v, want ErrWaitAbandoned", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned Wait did not return")
+	}
+
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("child not alive after abandon: %v", err)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("child was signalled by an abandoned Wait")
+	}
+
+	if err := os.WriteFile(goFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result, err := handle.Wait(nil)
+	if err != nil {
+		t.Fatalf("resumed Wait() unexpected error: %v", err)
+	}
+	if result.Exit != 3 {
+		t.Errorf("resumed Exit = %d, want 3", result.Exit)
+	}
+	want := []daemon.Record{
+		{Event: "box", Key: dispatchkey.Issue("101"), Phase: "initial"},
+		{Event: "settled", Key: dispatchkey.Issue("101"), State: "merged"},
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("OnRecord calls = %+v, want %+v", got, want)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("child was signalled during the resumed Wait")
+	}
+}
+
+// TestStartChild_AbandonedWaitDoesNotResendSIGTERM pins that a Wait resumed
+// after an abandon does not forward a stop it already forwarded: the child's
+// stopsignal.Relay counts deliveries, not kinds, so a second SIGTERM would
+// escalate a drain to an abort (issue #3538).
+func TestStartChild_AbandonedWaitDoesNotResendSIGTERM(t *testing.T) {
+	origExec, origSignal := runnerExecCommand, runnerSignal
+	t.Cleanup(func() { runnerExecCommand = origExec; runnerSignal = origSignal })
+
+	dir := t.TempDir()
+	goFile, ready := filepath.Join(dir, "go"), filepath.Join(dir, "ready")
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", fmt.Sprintf("trap ':' TERM INT; touch %q; while [ ! -e %q ]; do sleep 0.05; done", ready, goFile))
+	}
+	var mu sync.Mutex
+	var sigs []os.Signal
+	runnerSignal = func(p *os.Process, sig os.Signal) error {
+		mu.Lock()
+		sigs = append(sigs, sig)
+		mu.Unlock()
+		return p.Signal(sig)
+	}
+	count := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(sigs)
+	}
+	waitCount := func(n int, within time.Duration) bool {
+		deadline := time.Now().Add(within)
+		for time.Now().Before(deadline) {
+			if count() >= n {
+				return true
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		return count() >= n
+	}
+
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	stop := make(chan struct{})
+	handle, err := r.StartChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", Stop: stop})
+	if err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
+	}
+	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+
+	abandon := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() {
+		_, err := handle.Wait(abandon)
+		waited <- err
+	}()
+	waitForArmed(t, ready)
+	close(stop)
+	if !waitCount(1, 5*time.Second) {
+		t.Fatal("stop closed but no SIGTERM was forwarded")
+	}
+	close(abandon)
+	select {
+	case err := <-waited:
+		if !errors.Is(err, daemon.ErrWaitAbandoned) {
+			t.Fatalf("abandoned Wait error = %v, want ErrWaitAbandoned", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned Wait did not return")
+	}
+
+	type outcome struct {
+		res daemon.ChildResult
+		err error
+	}
+	resumed := make(chan outcome, 1)
+	go func() {
+		res, err := handle.Wait(nil)
+		resumed <- outcome{res, err}
+	}()
+	// A negative check has no event to wait on; the window is how long a
+	// resent signal would have to show up in.
+	if waitCount(2, 300*time.Millisecond) {
+		t.Fatalf("resumed Wait forwarded %d signals, want the one SIGTERM only", count())
+	}
+	if err := os.WriteFile(goFile, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case o := <-resumed:
+		if o.err != nil || o.res.Exit != 0 {
+			t.Fatalf("resumed Wait = (%+v, %v), want clean exit", o.res, o.err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("resumed Wait did not return")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !reflect.DeepEqual(sigs, []os.Signal{syscall.SIGTERM}) {
+		t.Errorf("signals = %v, want exactly [SIGTERM]", sigs)
+	}
+}
+
+// TestReadReports_DiscardContinuesAcrossDeadline pins that a read deadline
+// landing inside an over-long line leaves the reader still discarding: the
+// line's tail, even when it looks like a record, is not parsed on resume.
+func TestReadReports_DiscardContinuesAcrossDeadline(t *testing.T) {
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pr.Close(); _ = pw.Close() })
+
+	var got []daemon.Record
+	onRecord := func(rec daemon.Record) { got = append(got, rec) }
+	kind := daemon.KindOf(dispatchkind.Work)
+	var st reportState
+
+	// Written from a goroutine so the write never gates the read.
+	go func() { _, _ = pw.Write(bytes.Repeat([]byte("x"), 2*report.MaxLine)) }()
+	_ = pr.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if err := readReports(pr, kind, onRecord, &st); !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("first readReports error = %v, want deadline", err)
+	}
+
+	_ = pr.SetReadDeadline(time.Time{})
+	// The first line is the over-long line's tail; the second is a real record.
+	_, _ = pw.WriteString(`{"event":"box","issue":"102","phase":"initial"}` + "\n")
+	_, _ = pw.WriteString(`{"event":"box","issue":"103","phase":"initial"}` + "\n")
+	_ = pw.Close()
+	if err := readReports(pr, kind, onRecord, &st); !errors.Is(err, io.EOF) {
+		t.Fatalf("resumed readReports error = %v, want EOF", err)
+	}
+	want := []daemon.Record{{Event: "box", Key: dispatchkey.Issue("103"), Phase: "initial"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("records = %+v, want %+v (the over-long line's tail must be discarded)", got, want)
+	}
+}
+
+// TestStartChild_AlreadyAbandonedWaitReturnsAtOnce covers an abandon channel
+// that is closed before Wait starts: the child is left untouched.
+func TestStartChild_AlreadyAbandonedWaitReturnsAtOnce(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", "sleep 30")
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	handle, err := r.StartChild(context.Background(), daemon.ChildRequest{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"})
+	if err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
+	}
+	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+
+	abandon := make(chan struct{})
+	close(abandon)
+	if _, err := handle.Wait(abandon); !errors.Is(err, daemon.ErrWaitAbandoned) {
+		t.Fatalf("Wait(closed abandon) error = %v, want ErrWaitAbandoned", err)
+	}
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Errorf("child not alive after abandon: %v", err)
+	}
+}

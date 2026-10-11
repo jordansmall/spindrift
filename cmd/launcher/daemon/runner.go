@@ -53,8 +53,8 @@ type hostRunner struct {
 	// while flight is non-nil, and it writes all of them before clearing
 	// flight, so the next leader's Lock is ordered after that write by the
 	// same lock/unlock pair (see ResolveTip). A child handle's signal forwarding
-	// (forwardSignals) takes no lock of its own — it starts fresh per child
-	// from req.Stop/req.Abort — so nothing else in this runner contends
+	// (forwardSignals) takes no lock of its own — it reads the handle's own
+	// stop/abort and sent latch — so nothing else in this runner contends
 	// with flightMu.
 	flightMu sync.Mutex
 	flight   *tipFlight
@@ -590,7 +590,10 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 }
 
 // hostChildHandle is a started host child: Wait reads its report pipe to EOF,
-// then reaps it.
+// then reaps it. A Wait can instead be abandoned (daemon.ChildHandle), which
+// leaves the child running and the pipe open; a later Wait resumes the read.
+// Abandon applies while the report pipe is open; a child closes it only on its
+// way out.
 type hostChildHandle struct {
 	cmd        *exec.Cmd
 	reportRead *os.File
@@ -598,17 +601,69 @@ type hostChildHandle struct {
 	onRecord   func(daemon.Record)
 	stop       <-chan struct{}
 	abort      <-chan struct{}
+	// reports is the read state that must outlive one Wait: a resumed Wait
+	// continues the line, discard and once-only warnings the abandoned one left.
+	reports reportState
+	// sent latches the signals already forwarded, so a resumed Wait never
+	// resends one.
+	sent signalsSent
 }
 
-func (h *hostChildHandle) Wait(<-chan struct{}) (daemon.ChildResult, error) {
-	stopForwarding := forwardSignals(h.cmd.Process, h.stop, h.abort)
+// reportState is readReports' state across calls on one pipe.
+type reportState struct {
+	// partial is a line fragment cut by a deadline, prefixed onto the next
+	// call's first line. Copied: ReadSlice's slice dies with its reader.
+	partial                       []byte
+	discarding                    bool
+	reportedBad, reportedMismatch bool
+}
+
+// signalsSent records which stop signals forwardSignals already delivered.
+type signalsSent struct{ term, intr bool }
+
+// setReadDeadline only logs a failure, so an abandoned Wait whose deadline
+// did not take effect blocks until the child exits.
+func setReadDeadline(f *os.File, t time.Time) {
+	if err := f.SetReadDeadline(t); err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: set report pipe read deadline: %v\n", err)
+	}
+}
+
+func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, error) {
+	stopForwarding := forwardSignals(h.cmd.Process, h.stop, h.abort, &h.sent)
 	defer stopForwarding()
+
+	// Abandoning interrupts the blocking pipe read with a read deadline in
+	// the past rather than closing the pipe, so the child keeps its report
+	// channel. A previous abandon left that deadline set; clear it first.
+	setReadDeadline(h.reportRead, time.Time{})
+	stopWatching := func() {}
+	if abandon != nil {
+		done := make(chan struct{})
+		gone := make(chan struct{})
+		go func() {
+			defer close(gone)
+			select {
+			case <-abandon:
+				setReadDeadline(h.reportRead, time.Now())
+			case <-done:
+			}
+		}()
+		stopWatching = func() {
+			close(done)
+			<-gone
+		}
+	}
 
 	// Read to EOF (the normal case: the write end closes when the child
 	// exits) before Wait, right here rather than on a separate goroutine —
 	// there is no stdout goroutine any more, and this read is the only
 	// thing standing between the child exiting and Wait returning.
-	readReports(h.reportRead, h.kind, h.onRecord)
+	readErr := readReports(h.reportRead, h.kind, h.onRecord, &h.reports)
+	stopWatching()
+	if errors.Is(readErr, os.ErrDeadlineExceeded) {
+		return daemon.ChildResult{}, daemon.ErrWaitAbandoned
+	}
 	// Close the read end before Wait, not after: a child still writing past
 	// this point (there shouldn't be any, since readReports just hit EOF)
 	// gets EPIPE instead of wedging the daemon on a pipe nobody drains.
@@ -636,11 +691,17 @@ func openChildLog(path string) (*os.File, error) {
 	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 }
 
-// readReports reads report-protocol lines from r to EOF and, for each one
-// daemon.ParseRecord accepts, calls onRecord (when non-nil). It uses a
-// bufio.Reader's ReadSlice rather than a bufio.Scanner deliberately: a
-// Scanner reintroduces exactly the line cap and drain-or-wedge problem this
-// change deletes the stdout scan to get rid of, and unlike the ReadString
+// readReports reads report-protocol lines from r until a read fails (EOF is
+// the normal end) and returns that error, so a caller can tell a read
+// deadline (os.ErrDeadlineExceeded) from EOF. A line cut short by a deadline
+// is not parsed: its bytes are stashed in st.partial and prefixed onto the next
+// line a later call reads, and an over-long line being discarded stays
+// discarded (st.discarding) across calls, as do the once-only warnings below.
+// For each complete line daemon.ParseRecord accepts, it calls onRecord (when
+// non-nil). It uses a bufio.Reader's ReadSlice rather than a bufio.Scanner
+// deliberately: a Scanner reintroduces exactly the line cap and
+// drain-or-wedge problem this change deletes the stdout scan to get rid of,
+// and unlike the ReadString
 // this replaced, the reader's own fixed buffer size (report.MaxLine) is the
 // bound — ReadSlice reports bufio.ErrBufferFull instead of growing the
 // buffer, so a line longer than the cap is discarded up to its next newline
@@ -654,13 +715,12 @@ func openChildLog(path string) (*os.File, error) {
 // side (report.emit), so a legitimate child's line can never itself be over
 // this cap; the over-long path below stays as the defence against a
 // hostile/buggy child (issue #3627's review finding).
-func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record)) {
+func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record), st *reportState) error {
 	reader := bufio.NewReaderSize(r, report.MaxLine)
-	reportedBad, reportedMismatch := false, false
 	reportOnce := func(err error) {
-		reported := &reportedBad
+		reported := &st.reportedBad
 		if errors.Is(err, daemon.ErrKindMismatch) {
-			reported = &reportedMismatch
+			reported = &st.reportedMismatch
 		}
 		if !*reported {
 			*reported = true
@@ -668,20 +728,40 @@ func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record)) {
 		}
 	}
 	for {
+		if st.discarding {
+			// Keep pulling from the over-long line (never parsing the
+			// fragment — it isn't a complete record) until a newline
+			// surfaces or the reader hits EOF/another error.
+			var err error
+			for {
+				if _, err = reader.ReadSlice('\n'); !errors.Is(err, bufio.ErrBufferFull) {
+					break
+				}
+			}
+			if err != nil {
+				return err
+			}
+			st.discarding = false
+			continue
+		}
 		line, err := reader.ReadSlice('\n')
 		if errors.Is(err, bufio.ErrBufferFull) {
 			reportOnce(fmt.Errorf("line exceeds %d bytes, discarding", report.MaxLine))
-			// The line so far didn't fit; keep pulling from the same line
-			// (never parsing the fragment already in hand — it isn't a
-			// complete record) until a newline surfaces or the reader hits
-			// EOF/another error, then resume the normal loop.
-			for errors.Is(err, bufio.ErrBufferFull) {
-				_, err = reader.ReadSlice('\n')
-			}
-			if err != nil {
-				return
-			}
+			// A stashed fragment belongs to this over-long line; drop it.
+			st.partial = nil
+			st.discarding = true
 			continue
+		}
+		if len(st.partial) != 0 {
+			// Prefix and new bytes together may pass report.MaxLine; that
+			// only happens for a hostile child, and the memory is still
+			// bounded by one fragment plus one buffer.
+			line = append(st.partial, line...)
+			st.partial = nil
+		}
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			st.partial = bytes.Clone(line)
+			return err
 		}
 		line = bytes.TrimSuffix(line, []byte("\n"))
 		if len(line) != 0 {
@@ -697,7 +777,7 @@ func readReports(r *os.File, kind daemon.Kind, onRecord func(daemon.Record)) {
 			// EOF (the normal case, once the write end closes at child
 			// exit) and any other read error both just end the loop: there
 			// is nothing left to read either way.
-			return
+			return err
 		}
 	}
 }
@@ -823,6 +903,11 @@ func (m *markerLineWriter) line() string {
 // so which signal arrives is the daemon's problem to get right, not the
 // child's.
 //
+// sent latches what was already delivered, so a later call for the same
+// child (a Wait resumed after an abandon) never repeats a kind. The goroutine
+// is the only writer and the returned stop func joins it, so sequential calls
+// need no lock.
+//
 // The returned stop func tears the goroutine down without sending anything
 // once the child has already exited on its own (the handle's Wait defers it);
 // without it the goroutine would sit on stop/abort for the life of the
@@ -831,21 +916,27 @@ func (m *markerLineWriter) line() string {
 // a goroutine still unscheduled when Wait returns would then reach its
 // select with stop closed too and pick that case at random, signalling a
 // child that has already exited.
-func forwardSignals(p *os.Process, stop, abort <-chan struct{}) (stopForwarding func()) {
+func forwardSignals(p *os.Process, stop, abort <-chan struct{}, sent *signalsSent) (stopForwarding func()) {
 	done := make(chan struct{})
 	gone := make(chan struct{})
 	go func() {
 		defer close(gone)
-		select {
-		case <-stop:
-			_ = runnerSignal(p, syscall.SIGTERM)
-		case <-done:
-			return
+		if !sent.term {
+			select {
+			case <-stop:
+				sent.term = true
+				_ = runnerSignal(p, syscall.SIGTERM)
+			case <-done:
+				return
+			}
 		}
-		select {
-		case <-abort:
-			_ = runnerSignal(p, syscall.SIGINT)
-		case <-done:
+		if !sent.intr {
+			select {
+			case <-abort:
+				sent.intr = true
+				_ = runnerSignal(p, syscall.SIGINT)
+			case <-done:
+			}
 		}
 	}()
 	return func() {
