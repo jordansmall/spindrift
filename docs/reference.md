@@ -5678,9 +5678,10 @@ wrapped with promptfence so it cannot close its fence, and the prompt treats it
 as data, never instructions. `BUTLER_TUNING_DIGEST_BYTES` (schema key
 `butlerTuningDigestBytes`, default `49152`) caps the digest: over it, Evidence
 items drop first, then Outliers (cost outliers, then failures once those are
-gone), and a closing line counting what was omitted is written when it fits
-under the cap. The aggregate tables are never trimmed, so a cap below them is
-exceeded. The digest knobs are host-only; the Box never sees them.
+gone), then Prior findings (oldest first), and a closing line counting what was
+omitted is written when it fits under the cap. The aggregate tables are never
+trimmed, so a cap below them is exceeded. The digest knobs are host-only; the
+Box never sees them.
 
 **Findings.** The Box classifies each finding into one of six classes
 (`cost-waste`, `quality-regression`, `prompt-gap`, `model-fit`, `knob-tuning`,
