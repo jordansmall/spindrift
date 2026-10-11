@@ -24,11 +24,21 @@ type Handoff struct {
 	V int `json:"v"`
 	// LockFD is the inherited descriptor holding the instance lock.
 	LockFD int `json:"lock_fd"`
+	// FromPath, ToPath and Revision name the restart for the successor to
+	// record: the predecessor's own program, the prebuilt program it exec'd and
+	// that program's revision. The predecessor does not emit the handoff event
+	// itself, since an exec that then fails would leave one behind.
+	FromPath string `json:"from_path,omitempty"`
+	ToPath   string `json:"to_path,omitempty"`
+	Revision string `json:"revision,omitempty"`
 	// Stop and Abort carry the stop latch's state.
-	Stop  bool          `json:"stop,omitempty"`
-	Abort bool          `json:"abort,omitempty"`
-	Slots []HandoffSlot `json:"slots,omitempty"`
-	Kinds []HandoffKind `json:"kinds,omitempty"`
+	Stop  bool `json:"stop,omitempty"`
+	Abort bool `json:"abort,omitempty"`
+	// SIGHUPIgnored: the predecessor's SIGHUP was ignored before the exec, so
+	// the successor keeps it ignored rather than restoring the default.
+	SIGHUPIgnored bool          `json:"sighup_ignored,omitempty"`
+	Slots         []HandoffSlot `json:"slots,omitempty"`
+	Kinds         []HandoffKind `json:"kinds,omitempty"`
 	// Breaker is the failure times inside the breaker's window.
 	Breaker []time.Time `json:"breaker,omitempty"`
 }

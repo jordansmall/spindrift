@@ -3477,91 +3477,6 @@ func TestStartChild_StateAfterAbandonNamesChild(t *testing.T) {
 	}
 }
 
-func TestHostChildHandle_HandOffDescribesTheAbandonedChild(t *testing.T) {
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	h := startAbandonedChild(t, r)
-
-	got, err := h.HandOff()
-	if err != nil {
-		t.Fatalf("HandOff() unexpected error: %v", err)
-	}
-	want := daemon.ChildState{
-		PID:      h.proc.Pid,
-		ReportFD: fdOf(t, h.reportRead),
-		Partial:  []byte(`{"event":"settled","issue":"101",`),
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("HandOff() = %+v, want %+v", got, want)
-	}
-	if err := setCloseOnExec(got.ReportFD, true); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// TestHandOff_ClearsCloseOnExecOnlyOnNamedDescriptors pins that a hand-off
-// leaves exactly the descriptors it names inheritable — each child's report
-// read end, the instance lock and the handoff document — and that reclaiming
-// them restores the starting set.
-func TestHandOff_ClearsCloseOnExecOnlyOnNamedDescriptors(t *testing.T) {
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	lock, err := os.CreateTemp(t.TempDir(), "lock")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	docRead, docWrite, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = docRead.Close(); _ = docWrite.Close() })
-	a, b := startAbandonedChild(t, r), startAbandonedChild(t, r)
-
-	before := inheritableFDs(t)
-
-	var named []int
-	var states []daemon.ChildState
-	for _, h := range []*hostChildHandle{a, b} {
-		st, err := h.HandOff()
-		if err != nil {
-			t.Fatalf("HandOff() unexpected error: %v", err)
-		}
-		named = append(named, st.ReportFD)
-		states = append(states, st)
-	}
-	for _, f := range []*os.File{lock, docRead} {
-		fd, err := handOffFile(f)
-		if err != nil {
-			t.Fatalf("handOffFile() unexpected error: %v", err)
-		}
-		named = append(named, fd)
-	}
-	want := append(slices.Clone(before), named...)
-	slices.Sort(want)
-	if got := inheritableFDs(t); !slices.Equal(got, want) {
-		t.Errorf("inheritable descriptors after hand-off = %v, want %v (before %v + named %v)", got, want, before, named)
-	}
-
-	// The successor image: a second runner re-attaches the children, and the
-	// lock and document descriptors are reclaimed by their own owners.
-	second := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-	for i, h := range []*hostChildHandle{a, b} {
-		states[i] = simulateExec(t, h, states[i])
-	}
-	for _, st := range states {
-		if _, err := second.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st); err != nil {
-			t.Fatalf("InheritChild(%+v) unexpected error: %v", st, err)
-		}
-	}
-	for _, f := range []*os.File{lock, docRead} {
-		if err := setCloseOnExec(fdOf(t, f), true); err != nil {
-			t.Fatalf("setCloseOnExec() unexpected error: %v", err)
-		}
-	}
-	if got := inheritableFDs(t); !slices.Equal(got, before) {
-		t.Errorf("inheritable descriptors after re-attach = %v, want %v", got, before)
-	}
-}
-
 // TestInheritChild_ContinuesASplitLineOnASecondRunner hands a child with half
 // a record read off to a second runner instance: the carried fragment is
 // completed by the rest of the line, later records and the exit reach the
@@ -3573,11 +3488,7 @@ func TestInheritChild_ContinuesASplitLineOnASecondRunner(t *testing.T) {
 		fmt.Sprintf(`while [ ! -e %s ]; do sleep 0.05; done
 printf '%%s\n%%s\n' '"phase":"fix-pass-1"}' '{"event":"box","issue":"101","phase":"fix-pass-2"}' >&3
 exit 3`, goFile))
-	st, err := first.HandOff()
-	if err != nil {
-		t.Fatalf("HandOff() unexpected error: %v", err)
-	}
-	st = simulateExec(t, first, st)
+	st := simulateExec(t, first, first.State())
 
 	var mu sync.Mutex
 	var got []daemon.Record
@@ -3648,8 +3559,8 @@ func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = pr.Close(); _ = pw.Close() })
-		fd, err := handOffFile(pr)
-		if err != nil {
+		fd := fdOf(t, pr)
+		if err := setCloseOnExec(fd, false); err != nil {
 			t.Fatal(err)
 		}
 		return pr, fd
@@ -3677,8 +3588,8 @@ func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { _ = f.Close() })
-		fd, err := handOffFile(f)
-		if err != nil {
+		fd := fdOf(t, f)
+		if err := setCloseOnExec(fd, false); err != nil {
 			t.Fatal(err)
 		}
 		h, err := r.InheritChild(context.Background(), req, daemon.ChildState{PID: live.Process.Pid, ReportFD: fd})
@@ -3718,4 +3629,398 @@ func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
 			t.Errorf("InheritChild() = (%v, %v), want a report-fd error", h, err)
 		}
 	})
+}
+
+// execReadyRunner is a runner whose last Prebuild and latest fetched tip agree
+// on prebuildSelfPath, so execTarget accepts it until a test spoils one side.
+func execReadyRunner(t *testing.T, mut func(*hostRunnerConfig)) *hostRunner {
+	t.Helper()
+	cfg := hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), selfArgs: []string{"dispatch"}}
+	if mut != nil {
+		mut(&cfg)
+	}
+	r := mustHostRunner(t, cfg)
+	r.prebuilt = daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath}
+	r.lastRevision, r.haveLastRevision = "abc", true
+	r.memoRevision, r.memoPath, r.haveMemo = "abc", prebuildSelfPath, true
+	return r
+}
+
+func TestExecTarget(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*hostRunner)
+		cfg     func(*hostRunnerConfig)
+		wantErr string
+	}{
+		{name: "accepted"},
+		{name: "accepted with a feature branch", cfg: func(c *hostRunnerConfig) { c.featureBranch = "feat" }},
+		{name: "no prebuild", mutate: func(r *hostRunner) { r.prebuilt = daemon.Tip{} }, wantErr: "no prebuilt"},
+		{name: "outside the store", mutate: func(r *hostRunner) { r.prebuilt.SelfPath, r.memoPath = "/usr/bin/daemon", "/usr/bin/daemon" }, wantErr: "/nix/store/"},
+		{name: "unclean path", mutate: func(r *hostRunner) {
+			r.prebuilt.SelfPath = "/nix/store/q75/../zzz/bin/d"
+			r.memoPath = r.prebuilt.SelfPath
+		}, wantErr: "not clean"},
+		{name: "tip moved on", mutate: func(r *hostRunner) { r.lastRevision = "def" }, wantErr: "latest fetched tip"},
+		{name: "latest eval failed", mutate: func(r *hostRunner) { r.haveMemo = false }, wantErr: "latest fetched tip"},
+		{name: "latest tip builds elsewhere", mutate: func(r *hostRunner) { r.memoPath = "/nix/store/other/bin/d" }, wantErr: "/nix/store/other/bin/d"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := execReadyRunner(t, tc.cfg)
+			if tc.mutate != nil {
+				tc.mutate(r)
+			}
+			tip, err := r.execTarget()
+			if tc.wantErr == "" {
+				if err != nil || tip.SelfPath != prebuildSelfPath {
+					t.Fatalf("execTarget() = %+v, %v, want %s", tip, err, prebuildSelfPath)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("execTarget() error = %v, want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestExecTarget_FeatureBranchNeverChoosesThePath drives a real ResolveTip with
+// a feature branch whose tip would evaluate to a different daemon than the
+// base tip's: only the base tip is ever evaluated, so a prebuild of the
+// feature branch's path is refused.
+func TestExecTarget_FeatureBranchNeverChoosesThePath(t *testing.T) {
+	const (
+		baseRev  = "1111111111111111111111111111111111111111"
+		featRev  = "2222222222222222222222222222222222222222"
+		baseSelf = "/nix/store/base-daemon/bin/daemon"
+		featSelf = "/nix/store/feat-daemon/bin/daemon"
+	)
+	origFetch, origEval := runnerFetchCommand, runnerEvalCommand
+	t.Cleanup(func() { runnerFetchCommand, runnerEvalCommand = origFetch, origEval })
+	sh := func(ctx context.Context, script string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", script)
+	}
+	runnerFetchCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		switch {
+		case slices.Contains(args, "rev-parse"):
+			return sh(ctx, "echo "+baseRev)
+		case slices.Contains(args, "ls-remote"):
+			return sh(ctx, "echo "+featRev+" refs/heads/feat")
+		}
+		return sh(ctx, "exit 0")
+	}
+	var evalArgs [][]string
+	runnerEvalCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		evalArgs = append(evalArgs, args)
+		for _, a := range args {
+			switch {
+			case strings.Contains(a, baseRev):
+				return sh(ctx, "echo "+baseSelf)
+			case strings.Contains(a, featRev):
+				return sh(ctx, "echo "+featSelf)
+			}
+		}
+		return sh(ctx, "exit 1")
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", featureBranch: "feat", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), selfArgs: []string{"dispatch"}})
+	tip, err := r.ResolveTip(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip.Revision != baseRev || tip.SelfPath != baseSelf {
+		t.Fatalf("ResolveTip() = %+v, want the base tip %s at %s", tip, baseRev, baseSelf)
+	}
+	if len(evalArgs) != 1 || strings.Contains(strings.Join(evalArgs[0], " "), featRev) {
+		t.Fatalf("eval argv = %v, want one eval of the base tip only", evalArgs)
+	}
+
+	r.prebuilt = daemon.Tip{Revision: featRev, SelfPath: featSelf}
+	if _, err := r.execTarget(); err == nil || !strings.Contains(err.Error(), baseSelf) {
+		t.Fatalf("execTarget() with the feature branch's path = %v, want a refusal naming %s", err, baseSelf)
+	}
+	r.prebuilt = daemon.Tip{Revision: baseRev, SelfPath: baseSelf}
+	if got, err := r.execTarget(); err != nil || got.SelfPath != baseSelf {
+		t.Fatalf("execTarget() with the base tip's path = %+v, %v, want it accepted", got, err)
+	}
+}
+
+func TestPrebuild_RecordsTheTipOnlyOnSuccess(t *testing.T) {
+	h := newPrebuildHarness(t, "exit 1", "echo /nix/store/q75-spindrift-daemon", "exit 0")
+	tip := daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath}
+	if err := h.r.Prebuild(context.Background(), tip); err == nil {
+		t.Fatal("Prebuild() = nil, want the eval failure")
+	}
+	if h.r.prebuilt != (daemon.Tip{}) {
+		t.Errorf("prebuilt after a failed Prebuild = %+v, want zero", h.r.prebuilt)
+	}
+	ok := newPrebuildHarness(t, "echo /nix/store/il4-spindrift-daemon.drv", "echo /nix/store/q75-spindrift-daemon", "exit 0")
+	if err := ok.r.Prebuild(context.Background(), tip); err != nil {
+		t.Fatal(err)
+	}
+	if ok.r.prebuilt != tip {
+		t.Errorf("prebuilt = %+v, want %+v", ok.r.prebuilt, tip)
+	}
+}
+
+// stubSelfExec installs fn as the exec seam for the test.
+func stubSelfExec(t *testing.T, fn func(argv0 string, argv, envv []string) error) {
+	t.Helper()
+	orig := runnerSelfExec
+	t.Cleanup(func() { runnerSelfExec = orig })
+	runnerSelfExec = fn
+}
+
+// handoffWithChild abandons a child on r and returns a one-slot Handoff naming
+// it by the handle's own (close-on-exec) report fd, plus an instance lock file.
+func handoffWithChild(t *testing.T, r *hostRunner) (daemon.Handoff, *hostChildHandle, *os.File) {
+	t.Helper()
+	h := startAbandonedChild(t, r)
+	lock, err := os.CreateTemp(t.TempDir(), "lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	return daemon.Handoff{Slots: []daemon.HandoffSlot{{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Child: h.State()}}}, h, lock
+}
+
+func TestExecSuccessor_FailedExecLeavesTheImageIntact(t *testing.T) {
+	r := execReadyRunner(t, nil)
+	ho, h, lock := handoffWithChild(t, r)
+	st := ho.Slots[0].Child
+
+	var inside []uintptr
+	stubSelfExec(t, func(string, []string, []string) error {
+		inside = stopHandlers(t)
+		return errors.New("exec boom")
+	})
+	before := stopHandlers(t)
+	fdsBefore := inheritableFDs(t)
+
+	if err := r.execSuccessor(ho, lock, nil, "/self"); err == nil || !strings.Contains(err.Error(), "exec boom") {
+		t.Fatalf("execSuccessor() error = %v, want the exec failure", err)
+	}
+
+	for i, h := range inside {
+		if h != sigIgnore {
+			t.Errorf("%v inside exec = %#x, want SIG_IGN", stopSignals[i], h)
+		}
+	}
+	if after := stopHandlers(t); !slices.Equal(after, before) {
+		t.Errorf("handlers after = %#x, want them restored to %#x", after, before)
+	}
+	if fdsAfter := inheritableFDs(t); !slices.Equal(fdsAfter, fdsBefore) {
+		t.Errorf("inheritable fds after = %v, want %v (dups leaked)", fdsAfter, fdsBefore)
+	}
+	if !reflect.DeepEqual(ho.Slots[0].Child, st) {
+		t.Error("the caller's handoff was modified")
+	}
+
+	got, err := r.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st)
+	if err != nil {
+		t.Fatalf("InheritChild() unexpected error: %v", err)
+	}
+	if got.(*hostChildHandle) != h {
+		t.Fatal("InheritChild() did not reuse the registered handle")
+	}
+	_ = h.proc.Kill()
+	res, err := got.Wait(nil)
+	if err != nil || res.Exit != -1 {
+		t.Errorf("Wait() = %+v, %v, want a signal exit", res, err)
+	}
+}
+
+func TestExecSuccessor_HandsDescriptorsAndDocumentToTheSuccessor(t *testing.T) {
+	r := execReadyRunner(t, nil)
+	ho, _, lock := handoffWithChild(t, r)
+	ho.Stop = true
+	if len(r.handles) != 1 {
+		t.Fatalf("registered handles = %d, want 1", len(r.handles))
+	}
+	origReport := ho.Slots[0].Child.ReportFD
+
+	var gotArgv0 string
+	var gotArgv, gotEnv []string
+	var doc daemon.Handoff
+	var docErr error
+	var docFD int
+	stubSelfExec(t, func(argv0 string, argv, envv []string) error {
+		gotArgv0, gotArgv, gotEnv = argv0, argv, envv
+		docFD, docErr = strconv.Atoi(argv[len(argv)-1])
+		if docErr != nil {
+			return nil
+		}
+		var buf bytes.Buffer
+		chunk := make([]byte, 4096)
+		for {
+			n, err := syscall.Read(docFD, chunk)
+			if n <= 0 || err != nil {
+				break
+			}
+			buf.Write(chunk[:n])
+		}
+		doc, docErr = daemon.DecodeHandoff(&buf)
+		return nil
+	})
+
+	fdsBefore := inheritableFDs(t)
+	err := r.execSuccessor(ho, lock, nil, "/nix/store/aaa-old/bin/daemon")
+	if err != nil {
+		t.Fatalf("execSuccessor() = %v, want nil", err)
+	}
+	fdsAtExec := inheritableFDs(t)
+	if docErr != nil {
+		t.Fatalf("handoff document: %v", docErr)
+	}
+	if len(doc.Slots) != 1 {
+		t.Fatalf("document slots = %d, want 1", len(doc.Slots))
+	}
+	dups := []int{docFD, doc.LockFD, doc.Slots[0].Child.ReportFD}
+	t.Cleanup(func() {
+		for _, fd := range dups {
+			_ = syscall.Close(fd)
+		}
+	})
+
+	if gotArgv0 != prebuildSelfPath {
+		t.Errorf("exec target = %q, want %s", gotArgv0, prebuildSelfPath)
+	}
+	if doc.FromPath != "/nix/store/aaa-old/bin/daemon" || doc.ToPath != prebuildSelfPath || doc.Revision == "" || doc.Revision != r.prebuilt.Revision {
+		t.Errorf("document from/to/revision = %q/%q/%q, want the old path, %s and the prebuilt revision %q", doc.FromPath, doc.ToPath, doc.Revision, prebuildSelfPath, r.prebuilt.Revision)
+	}
+	wantArgv := []string{prebuildSelfPath, "dispatch", "--handoff-fd", strconv.Itoa(docFD)}
+	if !slices.Equal(gotArgv, wantArgv) {
+		t.Errorf("argv = %v, want %v", gotArgv, wantArgv)
+	}
+	if !slices.Equal(gotEnv, r.env) {
+		t.Error("env differs from the runner's captured environment")
+	}
+	wantFDs := append(slices.Clone(fdsBefore), dups...)
+	slices.Sort(wantFDs)
+	if !slices.Equal(fdsAtExec, wantFDs) {
+		t.Errorf("inheritable fds at exec = %v, want %v (before %v + exactly the named dups %v)", fdsAtExec, wantFDs, fdsBefore, dups)
+	}
+	for _, fd := range dups {
+		if cloexec, err := isCloseOnExec(fd); err != nil || cloexec {
+			t.Errorf("dup fd %d close-on-exec = %v, %v, want inheritable", fd, cloexec, err)
+		}
+	}
+	for _, c := range []struct {
+		name      string
+		orig, dup int
+	}{{"lock", fdOf(t, lock), doc.LockFD}, {"report", origReport, doc.Slots[0].Child.ReportFD}} {
+		if c.orig == c.dup {
+			t.Errorf("%s: document names the original fd %d", c.name, c.orig)
+		}
+		if cloexec, err := isCloseOnExec(c.orig); err != nil || !cloexec {
+			t.Errorf("%s: original fd %d close-on-exec = %v, %v, want true", c.name, c.orig, cloexec, err)
+		}
+		var a, b syscall.Stat_t
+		if syscall.Fstat(c.orig, &a) != nil || syscall.Fstat(c.dup, &b) != nil || a.Ino != b.Ino || a.Dev != b.Dev {
+			t.Errorf("%s: dup %d is not the same file as %d", c.name, c.dup, c.orig)
+		}
+	}
+	if !doc.Stop || doc.Slots[0].Child.PID != ho.Slots[0].Child.PID || !bytes.Equal(doc.Slots[0].Child.Partial, ho.Slots[0].Child.Partial) {
+		t.Errorf("document = %+v does not carry the handoff %+v", doc, ho)
+	}
+	if ho.LockFD != 0 || ho.Slots[0].Child.ReportFD != origReport {
+		t.Error("the caller's handoff was modified")
+	}
+	if len(r.handles) != 0 {
+		t.Errorf("registered handles after exec = %d, want 0 (the successor owns them)", len(r.handles))
+	}
+}
+
+func TestExecSuccessor_RefusesWithoutExec(t *testing.T) {
+	called := false
+	stubSelfExec(t, func(string, []string, []string) error { called = true; return nil })
+
+	stopped := make(chan struct{})
+	close(stopped)
+	r := execReadyRunner(t, nil)
+	lock, err := os.CreateTemp(t.TempDir(), "lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	if err := r.execSuccessor(daemon.Handoff{}, lock, stopped, "/self"); !errors.Is(err, errStopBeforeExec) {
+		t.Errorf("execSuccessor(stop closed) = %v, want errStopBeforeExec", err)
+	}
+
+	r.prebuilt = daemon.Tip{}
+	if err := r.execSuccessor(daemon.Handoff{}, lock, nil, "/self"); err == nil {
+		t.Error("execSuccessor() without a prebuild = nil, want an error")
+	}
+	if called {
+		t.Error("the exec seam was called")
+	}
+}
+
+func TestExecSuccessor_OversizedDocumentIsRefused(t *testing.T) {
+	stubSelfExec(t, func(string, []string, []string) error { t.Error("exec called"); return nil })
+	r := execReadyRunner(t, nil)
+	lock, err := os.CreateTemp(t.TempDir(), "lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	before := inheritableFDs(t)
+	err = r.execSuccessor(daemon.Handoff{Breaker: make([]time.Time, 1<<14)}, lock, nil, "/self")
+	if err == nil || !strings.Contains(err.Error(), "exceeds the pipe's capacity") {
+		t.Fatalf("execSuccessor() = %v, want a capacity refusal", err)
+	}
+	if after := inheritableFDs(t); !slices.Equal(after, before) {
+		t.Errorf("inheritable fds after = %v, want %v", after, before)
+	}
+}
+
+func TestWaitUnclaimed_ReapsRegisteredChildren(t *testing.T) {
+	r := execReadyRunner(t, nil)
+	h := startAbandonedChild(t, r)
+	if len(r.handles) != 1 {
+		t.Fatalf("registered handles = %d, want 1", len(r.handles))
+	}
+	_ = h.proc.Kill()
+	done := make(chan struct{})
+	go func() { r.waitUnclaimed(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("waitUnclaimed did not return")
+	}
+	if len(r.handles) != 0 {
+		t.Errorf("registered handles after = %d, want 0", len(r.handles))
+	}
+	if _, err := h.proc.Wait(); err == nil {
+		t.Error("child was not reaped by waitUnclaimed")
+	}
+}
+
+func TestInheritChild_ClaimsAPreAdoptedHandle(t *testing.T) {
+	cfg := hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()}
+	first := startAbandonedChild(t, mustHostRunner(t, cfg))
+	st := simulateExec(t, first, first.State())
+	if !slices.Contains(inheritableFDs(t), st.ReportFD) {
+		t.Fatalf("fd %d is not inheritable before adoption", st.ReportFD)
+	}
+
+	adopted, err := adoptChild(st)
+	if err != nil {
+		t.Fatalf("adoptChild() unexpected error: %v", err)
+	}
+	if slices.Contains(inheritableFDs(t), st.ReportFD) {
+		t.Errorf("fd %d still inheritable after adoption", st.ReportFD)
+	}
+	cfg.adopted = map[int]*hostChildHandle{st.ReportFD: adopted}
+	r := mustHostRunner(t, cfg)
+	got, err := r.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st)
+	if err != nil {
+		t.Fatalf("InheritChild() unexpected error: %v", err)
+	}
+	if got.(*hostChildHandle) != adopted {
+		t.Error("InheritChild() did not reuse the pre-adopted handle")
+	}
+	if len(r.handles) != 0 {
+		t.Errorf("registered handles = %d, want 0 once claimed", len(r.handles))
+	}
 }

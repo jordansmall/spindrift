@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -76,6 +78,17 @@ type hostRunner struct {
 	memoRevision string
 	memoPath     string
 	haveMemo     bool
+
+	// prebuilt is the tip of the last successful Prebuild: the daemon an
+	// in-place restart may switch to. Guarded by flightMu.
+	prebuilt daemon.Tip
+
+	// handles are children whose report pipe this image holds but no pool
+	// supervises: an abandoned Wait's handle, or a successor's pre-adopted
+	// one. Keyed by report fd. It keeps each *os.File referenced, since its
+	// finalizer would close the descriptor before an exec could carry it on.
+	handlesMu sync.Mutex
+	handles   map[int]*hostChildHandle
 }
 
 // tipFlight is one in-flight (or just-finished, until its leader clears
@@ -105,6 +118,9 @@ type hostRunnerConfig struct {
 	demand        demandSources
 	stateDir      string
 	selfArgs      []string
+	// adopted seeds hostRunner.handles with a successor's pre-adopted
+	// children (see adoptChild), keyed by report fd.
+	adopted map[int]*hostChildHandle
 }
 
 // newHostRunner rejects a nil cfg.env. withoutKeys
@@ -116,7 +132,7 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 	if cfg.env == nil {
 		return nil, errors.New("host runner: no captured environment (hostRunnerConfig.env is nil) — children would exec with no PATH; pass os.Environ()")
 	}
-	return &hostRunner{
+	r := &hostRunner{
 		repoPath:      cfg.repoPath,
 		appAttr:       cfg.appAttr,
 		baseBranch:    cfg.baseBranch,
@@ -129,7 +145,13 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		demand:        cfg.demand,
 		stateDir:      cfg.stateDir,
 		selfArgs:      cfg.selfArgs,
-	}, nil
+		handles:       make(map[int]*hostChildHandle, len(cfg.adopted)),
+	}
+	for fd, h := range cfg.adopted {
+		h.owner = r
+		r.handles[fd] = h
+	}
+	return r, nil
 }
 
 // runnerFetchCommand is ResolveTip's fetch-half exec seam: a test overrides
@@ -211,6 +233,10 @@ var runnerExecCommand = exec.Command
 // way runnerExecCommand is overridden, to skip nix and run a scripted
 // `/bin/sh -c ...` in its place.
 var runnerEvalCommand = exec.CommandContext
+
+// runnerSelfExec is the in-place restart's exec seam: a test overrides it, since a real
+// exec never returns on success.
+var runnerSelfExec = syscall.Exec
 
 // runnerSignal is the signal seam: forwardSignals' goroutine sends through
 // it rather than calling p.Signal directly. OS-level delivery can't show a
@@ -487,6 +513,9 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 		}
 		return &daemon.PrebuildError{Stage: daemon.PrebuildStageSmokeTest, Err: fmt.Errorf("%s --check-only: %w", tip.SelfPath, err)}
 	}
+	r.flightMu.Lock()
+	r.prebuilt = tip
+	r.flightMu.Unlock()
 	return nil
 }
 
@@ -497,6 +526,26 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 // entry's descriptor is left open, not closed: a forged entry may name one
 // this process holds for something else.
 func (r *hostRunner) InheritChild(_ context.Context, req daemon.ChildRequest, st daemon.ChildState) (daemon.ChildHandle, error) {
+	h := r.takeHandle(st)
+	if h == nil {
+		var err error
+		if h, err = adoptChild(st); err != nil {
+			return nil, err
+		}
+	}
+	h.kind = req.Kind
+	h.onRecord = req.OnRecord
+	h.stop = req.Stop
+	h.abort = req.Abort
+	h.owner = r
+	return h, nil
+}
+
+// adoptChild is InheritChild's validation: it turns st into a handle with no
+// pool wiring yet (kind, record callback and stop channels are the caller's).
+// A successor runs it before reading its input document, so a failure is
+// reported later by the pool's own InheritChild on the same st.
+func adoptChild(st daemon.ChildState) (*hostChildHandle, error) {
 	fd := st.ReportFD
 	if fd <= syscall.Stderr {
 		return nil, fmt.Errorf("report fd %d is a standard stream", fd)
@@ -526,12 +575,48 @@ func (r *hostRunner) InheritChild(_ context.Context, req daemon.ChildRequest, st
 	return &hostChildHandle{
 		proc:       proc,
 		reportRead: os.NewFile(uintptr(fd), "report pipe"),
-		kind:       req.Kind,
-		onRecord:   req.OnRecord,
-		stop:       req.Stop,
-		abort:      req.Abort,
 		reports:    reportState{partial: slices.Clone(st.Partial), discarding: st.Discarding},
 	}, nil
+}
+
+// takeHandle removes and returns the registered handle for st's report fd and
+// pid, or nil. Reusing it keeps the one *os.File on an fd the poller already
+// watches: a second os.NewFile on it would be unpollable.
+func (r *hostRunner) takeHandle(st daemon.ChildState) *hostChildHandle {
+	r.handlesMu.Lock()
+	defer r.handlesMu.Unlock()
+	h := r.handles[st.ReportFD]
+	if h == nil || h.proc.Pid != st.PID {
+		return nil
+	}
+	delete(r.handles, st.ReportFD)
+	return h
+}
+
+// register records h as held by this image but supervised by no pool.
+func (r *hostRunner) register(h *hostChildHandle) {
+	fd, err := fileDescriptor(h.reportRead)
+	if err != nil {
+		// SyscallConn fails only on a closed file, so no descriptor is left
+		// for the handles map to protect.
+		fmt.Fprintf(os.Stderr, "daemon: register abandoned child %d: %v\n", h.proc.Pid, err)
+		return
+	}
+	r.handlesMu.Lock()
+	r.handles[fd] = h
+	r.handlesMu.Unlock()
+}
+
+// waitUnclaimed waits out every handle no pool claimed, so a resumed image
+// exiting before its pool took its inherited children does not orphan them.
+func (r *hostRunner) waitUnclaimed() {
+	r.handlesMu.Lock()
+	hs := slices.Collect(maps.Values(r.handles))
+	clear(r.handles)
+	r.handlesMu.Unlock()
+	for _, h := range hs {
+		_, _ = h.Wait(nil)
+	}
 }
 
 // waitidPID is waitid's P_PID idtype; the syscall package exports neither it
@@ -652,6 +737,7 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 		onRecord:   req.OnRecord,
 		stop:       req.Stop,
 		abort:      req.Abort,
+		owner:      r,
 	}, nil
 }
 
@@ -675,6 +761,9 @@ type hostChildHandle struct {
 	// sent latches the signals already forwarded, so a resumed Wait never
 	// resends one.
 	sent signalsSent
+	// owner registers the handle when a Wait is abandoned; nil registers
+	// nowhere.
+	owner *hostRunner
 }
 
 // reportState is readReports' state across calls on one pipe.
@@ -730,6 +819,9 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 	readErr := readReports(h.reportRead, h.kind, h.onRecord, &h.reports)
 	stopWatching()
 	if errors.Is(readErr, os.ErrDeadlineExceeded) {
+		if h.owner != nil {
+			h.owner.register(h)
+		}
 		return daemon.ChildResult{}, daemon.ErrWaitAbandoned
 	}
 	// Close the read end before Wait, not after: a child still writing past
@@ -766,27 +858,6 @@ func (h *hostChildHandle) State() daemon.ChildState {
 		fmt.Fprintf(os.Stderr, "daemon: read report pipe fd: %v\n", err)
 	}
 	return st
-}
-
-// HandOff describes this running child for a daemon image about to exec: its
-// pid, its report pipe's read end with close-on-exec cleared so it survives
-// the exec, and the read state a resumed Wait would have continued. Valid only
-// after a Wait returned daemon.ErrWaitAbandoned (the pipe is still open). The
-// child keeps running and this image must not Wait on the handle again; the
-// handle (so its *os.File, whose finalizer would close the descriptor) must
-// stay referenced until the exec. The exec path that calls it is wired in a
-// later slice (#5014, #5016).
-func (h *hostChildHandle) HandOff() (daemon.ChildState, error) {
-	fd, err := handOffFile(h.reportRead)
-	if err != nil {
-		return daemon.ChildState{}, fmt.Errorf("hand off report pipe: %w", err)
-	}
-	return daemon.ChildState{
-		PID:        h.proc.Pid,
-		ReportFD:   fd,
-		Partial:    slices.Clone(h.reports.partial),
-		Discarding: h.reports.discarding,
-	}, nil
 }
 
 // descriptorFlags returns fd's descriptor flags (F_GETFD).
@@ -836,19 +907,6 @@ func fileDescriptor(f *os.File) (int, error) {
 	}
 	fd := -1
 	if err := rc.Control(func(u uintptr) { fd = int(u) }); err != nil {
-		return 0, err
-	}
-	return fd, nil
-}
-
-// handOffFile clears close-on-exec on f so it survives an exec, and returns its
-// descriptor number.
-func handOffFile(f *os.File) (int, error) {
-	fd, err := fileDescriptor(f)
-	if err != nil {
-		return 0, err
-	}
-	if err := setCloseOnExec(fd, false); err != nil {
 		return 0, err
 	}
 	return fd, nil
@@ -1115,4 +1173,227 @@ func forwardSignals(p *os.Process, stop, abort <-chan struct{}, sent *signalsSen
 		close(done)
 		<-gone
 	}
+}
+
+// errStopBeforeExec is execSuccessor's refusal to exec once a stop is latched:
+// the caller re-enters the pool, which halts and drains its children.
+var errStopBeforeExec = errors.New("stop latched before exec")
+
+// execTarget returns the prebuilt daemon an in-place restart may switch to. The
+// path must be a clean store path and the one evaluated at the latest fetched
+// base-branch tip (ResolveTip evaluates baseBranch even with featureBranch
+// set), so a tip that moved on again, or whose eval failed, is not exec'd.
+func (r *hostRunner) execTarget() (daemon.Tip, error) {
+	r.flightMu.Lock()
+	defer r.flightMu.Unlock()
+	t, p := r.prebuilt, r.prebuilt.SelfPath
+	switch {
+	case p == "":
+		return daemon.Tip{}, errors.New("no prebuilt daemon")
+	case filepath.Clean(p) != p:
+		return daemon.Tip{}, fmt.Errorf("prebuilt daemon path %q is not clean", p)
+	case !strings.HasPrefix(p, "/nix/store/"):
+		return daemon.Tip{}, fmt.Errorf("prebuilt daemon path %q is not under /nix/store/", p)
+	case !r.haveMemo || !r.haveLastRevision || r.memoRevision != r.lastRevision:
+		return daemon.Tip{}, fmt.Errorf("no self path evaluated at the latest fetched tip %q", r.lastRevision)
+	case r.memoPath != p:
+		return daemon.Tip{}, fmt.Errorf("prebuilt daemon %q is not the latest tip's %q", p, r.memoPath)
+	}
+	return t, nil
+}
+
+// stopSignals are ignored across the exec window. A stop landing there must be
+// dropped, not left pending: the Go runtime unblocks SIGTERM/SIGINT/SIGHUP
+// before it installs handlers, so one pending at the exec would kill the
+// successor with the default action before its main runs. SIG_IGN survives
+// execve; handlers do not.
+var stopSignals = []syscall.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP}
+
+const (
+	// sigsetBytes is the kernel's sigset size for rt_sigaction (64 signals).
+	sigsetBytes = 8
+	sigDefault  = 0 // SIG_DFL as a kernel handler value
+	sigIgnore   = 1 // SIG_IGN
+)
+
+// signalSettle is how long execSuccessor waits after ignoring the stop
+// signals, so a stop the Go runtime already took before the SIG_IGN drains
+// through the os/signal relay into the stop latch and is seen by the re-check.
+var signalSettle = 20 * time.Millisecond
+
+// kernelSigaction is the kernel's struct sigaction on linux amd64/arm64, the
+// layout Go's runtime uses for its own rt_sigaction calls.
+type kernelSigaction struct {
+	handler, flags, restorer uintptr
+	mask                     uint64
+}
+
+// sigaction installs act for sig (nil to only read) and returns the previous
+// kernel action.
+func sigaction(sig syscall.Signal, act *kernelSigaction) (old kernelSigaction, err error) {
+	_, _, errno := syscall.RawSyscall6(syscall.SYS_RT_SIGACTION, uintptr(sig),
+		uintptr(unsafe.Pointer(act)), uintptr(unsafe.Pointer(&old)), sigsetBytes, 0, 0)
+	if errno != 0 {
+		return kernelSigaction{}, errno
+	}
+	return old, nil
+}
+
+// ignoreStopSignals sets the stop signals to SIG_IGN and returns a func putting
+// every saved action back exactly. hupIgnored reports that SIGHUP was already
+// ignored (nohup), which the successor must keep rather than restore to the
+// default. On error nothing stays changed.
+func ignoreStopSignals() (restore func(), hupIgnored bool, err error) {
+	saved := make(map[syscall.Signal]kernelSigaction, len(stopSignals))
+	restore = func() {
+		for sig, old := range saved {
+			_, _ = sigaction(sig, &old)
+		}
+	}
+	for _, sig := range stopSignals {
+		ign := kernelSigaction{handler: sigIgnore}
+		old, err := sigaction(sig, &ign)
+		if err != nil {
+			restore()
+			return nil, false, fmt.Errorf("ignore %v: %w", sig, err)
+		}
+		saved[sig] = old
+		if sig == syscall.SIGHUP {
+			hupIgnored = old.handler == sigIgnore
+		}
+	}
+	return restore, hupIgnored, nil
+}
+
+// restoreSIGHUP gives a successor's SIGHUP its default action back when the
+// exec left it ignored by ignoreStopSignals (hupWasIgnored false). Only an
+// ignored SIGHUP is touched, so a Go handler installed since is left alone.
+func restoreSIGHUP(hupWasIgnored bool) error {
+	if hupWasIgnored {
+		return nil
+	}
+	cur, err := sigaction(syscall.SIGHUP, nil)
+	if err != nil || cur.handler != sigIgnore {
+		return err
+	}
+	_, err = sigaction(syscall.SIGHUP, &kernelSigaction{handler: sigDefault})
+	return err
+}
+
+// dupInheritable dups fd without close-on-exec; ForkLock keeps a concurrent
+// fork from catching it half-made.
+func dupInheritable(fd int) (int, error) {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	return syscall.Dup(fd)
+}
+
+// handoffDocPipe writes the encoded document into a fresh pipe and returns the
+// read end, inheritable. The write is non-blocking, so a document past the
+// pipe's capacity is refused instead of deadlocking before the exec.
+func handoffDocPipe(doc []byte) (int, error) {
+	var p [2]int
+	syscall.ForkLock.RLock()
+	err := syscall.Pipe2(p[:], syscall.O_CLOEXEC|syscall.O_NONBLOCK)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
+		return -1, fmt.Errorf("handoff pipe: %w", err)
+	}
+	defer syscall.Close(p[0])
+	n, err := syscall.Write(p[1], doc)
+	_ = syscall.Close(p[1])
+	if err != nil && !errors.Is(err, syscall.EAGAIN) {
+		return -1, fmt.Errorf("write handoff document: %w", err)
+	}
+	if n < len(doc) {
+		return -1, fmt.Errorf("handoff document (%d bytes) exceeds the pipe's capacity", len(doc))
+	}
+	return dupInheritable(p[0])
+}
+
+// execSuccessor replaces this image with the prebuilt daemon, handing h to it
+// on a pipe named by --handoff-fd. The lock and every slot's report pipe are
+// dup'd into the document and the dups survive the exec; the originals stay
+// close-on-exec and untouched, so on a failed exec this image carries on with
+// h as it was. fromPath is this image's own program, recorded in the document
+// for the successor. A nil return means the exec happened (only a test seam
+// returns).
+func (r *hostRunner) execSuccessor(h daemon.Handoff, lock *os.File, stop <-chan struct{}, fromPath string) error {
+	target, err := r.execTarget()
+	if err != nil {
+		return err
+	}
+	select {
+	case <-stop:
+		return errStopBeforeExec
+	default:
+	}
+
+	restore, hupIgnored, err := ignoreStopSignals()
+	if err != nil {
+		return fmt.Errorf("ignore stop signals: %w", err)
+	}
+	if signalSettle > 0 {
+		time.Sleep(signalSettle)
+	}
+	select {
+	case <-stop:
+		restore()
+		return errStopBeforeExec
+	default:
+	}
+
+	var dups []int
+	release := func() {
+		for _, fd := range dups {
+			_ = syscall.Close(fd)
+		}
+	}
+	dup := func(src int) (int, error) {
+		fd, err := dupInheritable(src)
+		if err == nil {
+			dups = append(dups, fd)
+		}
+		return fd, err
+	}
+
+	wire := h
+	wire.FromPath, wire.ToPath, wire.Revision = fromPath, target.SelfPath, target.Revision
+	wire.SIGHUPIgnored = hupIgnored
+	wire.Slots = slices.Clone(h.Slots)
+	lockFD, err := fileDescriptor(lock)
+	if err == nil {
+		wire.LockFD, err = dup(lockFD)
+	}
+	for i := 0; err == nil && i < len(wire.Slots); i++ {
+		wire.Slots[i].Child.ReportFD, err = dup(wire.Slots[i].Child.ReportFD)
+	}
+	var doc bytes.Buffer
+	if err == nil {
+		err = daemon.EncodeHandoff(&doc, wire)
+	}
+	var docFD int
+	if err == nil {
+		if docFD, err = handoffDocPipe(doc.Bytes()); err == nil {
+			dups = append(dups, docFD)
+		}
+	}
+	if err != nil {
+		release()
+		restore()
+		return fmt.Errorf("prepare handoff: %w", err)
+	}
+
+	argv := append([]string{target.SelfPath}, r.selfArgs...)
+	argv = append(argv, "--handoff-fd", strconv.Itoa(docFD))
+	err = runnerSelfExec(target.SelfPath, argv, r.env)
+	restore()
+	if err != nil {
+		release()
+		return err
+	}
+	r.handlesMu.Lock()
+	clear(r.handles)
+	r.handlesMu.Unlock()
+	return nil
 }
