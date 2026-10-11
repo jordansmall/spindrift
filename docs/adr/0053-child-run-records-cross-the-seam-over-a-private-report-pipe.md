@@ -46,9 +46,10 @@ operator sets it, and it does not appear in `harness.env.example`. The
 child's own stdout is unaffected by any of this — it is relayed to the
 daemon's stderr byte-for-byte, with no userspace parsing standing between
 the two. (Amended by
-[ADR 0063](0063-the-daemon-prebuilds-its-successor-and-can-restart-in-place-keeping-its-children.md):
-a child's stdout and stderr now go straight to its Child log file, so no
-daemon-side pipe can stall or kill it.)
+[ADR 0063](0063-the-daemon-prebuilds-its-successor-and-can-restart-in-place-keeping-its-children.md)
+and issue #5009: a child's stdout and stderr now go straight to its Child
+log file, not the daemon's stderr, so no daemon-side pipe can stall or kill
+it; the report pipe is unchanged.)
 
 ## Consequences
 

@@ -969,9 +969,10 @@ _Avoid_: journal (that is systemd's copy, absent outside systemd), audit log.
 
 **Child log**:
 One Daemon child's own output — the launcher's side of a Dispatch: build,
-claim, Box start, settle, CI polling, merge gate, outcome — teed to a file the
-child's start event names. The only record of a Dispatch that failed outside
-its Box. Distinct from a [[Pass log]], which is the agent's side.
+claim, Box start, settle, CI polling, merge gate, outcome — written straight
+to a file the child's start event names. The only record of a Dispatch that
+failed outside its Box. Distinct from a [[Pass log]], which is the agent's
+side.
 _Avoid_: runner log (the runner is the Box isolation seam), daemon log, box
 log.
 
