@@ -234,6 +234,32 @@ func SelfCommand(s SelfSpec) ([]string, error) {
 	return []string{"nix", "eval", "--raw", pinnedFlakeref(s.RepoPath, s.Revision, frag)}, nil
 }
 
+// selfDrvApply is SelfDrvCommand's --apply expression: the program string's
+// context holds exactly the wrapper derivation, which is what `nix build`
+// can realise.
+const selfDrvApply = `p: let c = builtins.attrNames (builtins.getContext p); in ` +
+	`if builtins.length c == 1 then builtins.head c ` +
+	`else throw "expected exactly one derivation in the program's context, got ${toString (builtins.length c)}"`
+
+// SelfDrvCommand builds the argv that evaluates the .drv path behind the
+// daemon's program at a pinned revision. `nix build` cannot take the program
+// string itself (it errors "has context ... but the string is not the right
+// placeholder"), so the build goes through the derivation, which the
+// program string's context names.
+func SelfDrvCommand(s SelfSpec) ([]string, error) {
+	argv, err := SelfCommand(s)
+	if err != nil {
+		return nil, err
+	}
+	return append(argv, "--apply", selfDrvApply), nil
+}
+
+// SelfBuildCommand builds the argv that realises drvPath's default output,
+// pins it with a GC root at outLink, and prints its store path.
+func SelfBuildCommand(drvPath, outLink string) []string {
+	return []string{"nix", "build", "--out-link", outLink, "--print-out-paths", drvPath + "^out"}
+}
+
 // DoctorSpec is everything one pinned startup-preflight invocation needs.
 type DoctorSpec struct {
 	RepoPath string   // absolute path to the operator's checkout

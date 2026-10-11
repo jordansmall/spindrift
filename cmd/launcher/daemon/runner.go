@@ -10,9 +10,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -38,6 +41,12 @@ type hostRunner struct {
 	knobs         []string      // keys of the Launcher input document's settings map, stripped from env before a child sees it
 	doctorFlags   []string      // kind flags RunDoctor adds to doctor (see doctorPreflightFlags in main.go)
 	demand        demandSources // per-kind tracker Demand counters; a kind absent here is exit-driven
+
+	// stateDir holds the Prebuild GC root; selfArgs is the daemon's own argv
+	// minus its wrapper-supplied --input, replayed (plus --check-only) to the
+	// successor.
+	stateDir string
+	selfArgs []string
 
 	// flightMu guards flight below, plus the Moved baseline and the
 	// self-path memo fields further down: resolveTipOnce is the sole leader
@@ -93,6 +102,8 @@ type hostRunnerConfig struct {
 	knobs         []string
 	doctorFlags   []string
 	demand        demandSources
+	stateDir      string
+	selfArgs      []string
 }
 
 // newHostRunner rejects a nil cfg.env. withoutKeys
@@ -115,6 +126,8 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 		knobs:         cfg.knobs,
 		doctorFlags:   cfg.doctorFlags,
 		demand:        cfg.demand,
+		stateDir:      cfg.stateDir,
+		selfArgs:      cfg.selfArgs,
 	}, nil
 }
 
@@ -372,10 +385,109 @@ func (r *hostRunner) Demand(ctx context.Context, kind daemon.Kind, fresh bool, i
 	return daemon.Demand{Ready: n}, nil
 }
 
-// Prebuild is a placeholder: it accepts every build unchecked, so a
-// self-change still halts the pool unvetted. TODO(#5012): realise
-// tip.SelfPath with a GC root and smoke-test it with --check-only.
-func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error { return nil }
+// runnerPrebuildCommand is Prebuild's exec seam for its two stages, `nix
+// build` and the successor smoke test, kept apart from runnerEvalCommand so a
+// test can script them independently of the eval; tests tell them apart by
+// the program name ("nix" or tip.SelfPath).
+var runnerPrebuildCommand = exec.CommandContext
+
+// prebuildGCRoot is the single GC-root name under the state directory that
+// each prebuild overwrites.
+const prebuildGCRoot = "spindrift-daemon.next"
+
+// prebuildStderrTail caps, in bytes, the child stderr embedded in a
+// PrebuildError: a failed nix build's log can run to thousands of lines, and
+// the error lands in the event stream and status file.
+const prebuildStderrTail = 2000
+
+// prebuildSmokeTimeout bounds the successor's --check-only run. It only loads
+// input and config, so a run past this is a hang; unbounded, it would hold
+// the pool in `building` forever instead of reaching `blocked`. A var so a
+// test can shrink it. `nix build` is deliberately unbounded: a cold build can
+// legitimately take long.
+var prebuildSmokeTimeout = 2 * time.Minute
+
+// prebuildWaitDelay is how long Prebuild waits for the smoke test's stderr
+// pipe after killing it: a wrapper's grandchild can hold the pipe open and
+// would otherwise defeat the timeout.
+const prebuildWaitDelay = 5 * time.Second
+
+// prebuildStderr cuts on a rune boundary so the tail is still valid UTF-8.
+func prebuildStderr(b *bytes.Buffer) string {
+	s := redactedStderr(b)
+	if len(s) > prebuildStderrTail {
+		start := len(s) - prebuildStderrTail
+		for start < len(s) && !utf8.RuneStart(s[start]) {
+			start++
+		}
+		s = "..." + s[start:]
+	}
+	return s
+}
+
+// prebuildRun runs cmd capturing stdout and stderr; a failure carries the
+// redacted stderr tail. It returns the trimmed stdout.
+func prebuildRun(cmd *exec.Cmd) (string, error) {
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("%w: %s", err, prebuildStderr(&stderr))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// Prebuild realises tip.SelfPath under a GC root in the state directory and
+// smoke-tests it, so a self-change halts the pool only for a daemon that is
+// known to build and to accept the operator's own arguments. The single
+// root (prebuildGCRoot) is overwritten by each prebuild.
+func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
+	build := func(err error) error { return &daemon.PrebuildError{Stage: daemon.PrebuildStageBuild, Err: err} }
+
+	drvArgv, err := daemon.SelfDrvCommand(daemon.SelfSpec{
+		RepoPath: r.repoPath,
+		SelfAttr: r.selfAttr,
+		Revision: tip.Revision,
+		System:   r.nixSystem,
+	})
+	if err != nil {
+		return build(err)
+	}
+	drvPath, err := prebuildRun(runnerEvalCommand(ctx, drvArgv[0], drvArgv[1:]...))
+	if err != nil {
+		return build(fmt.Errorf("nix eval %s: %w", strings.Join(drvArgv[1:], " "), err))
+	}
+	if drvPath == "" {
+		return build(errors.New("nix eval printed no derivation path"))
+	}
+
+	buildArgv := daemon.SelfBuildCommand(drvPath, filepath.Join(r.stateDir, prebuildGCRoot))
+	outPath, err := prebuildRun(runnerPrebuildCommand(ctx, buildArgv[0], buildArgv[1:]...))
+	if err != nil {
+		return build(fmt.Errorf("nix build %s: %w", drvPath, err))
+	}
+	if outPath == "" || !strings.HasPrefix(tip.SelfPath, outPath+"/") {
+		return build(fmt.Errorf("nix build of %s produced %q, which does not hold %s", drvPath, outPath, tip.SelfPath))
+	}
+
+	// --input is dropped from selfArgs (see successorArgs): the successor's
+	// own wrapper supplies the input document it will actually run with.
+	// Dir stays empty so the wrapper finds harness.env from the daemon's cwd,
+	// exactly as the real restart will.
+	smokeArgs := append(slices.Clone(r.selfArgs), "--check-only")
+	smokeCtx, cancel := context.WithTimeout(ctx, prebuildSmokeTimeout)
+	defer cancel()
+	cmd := runnerPrebuildCommand(smokeCtx, tip.SelfPath, smokeArgs...)
+	cmd.Env = r.env
+	cmd.WaitDelay = prebuildWaitDelay
+	if _, err := prebuildRun(cmd); err != nil {
+		if ctx.Err() == nil && errors.Is(smokeCtx.Err(), context.DeadlineExceeded) {
+			err = fmt.Errorf("timed out after %s: %w", prebuildSmokeTimeout, err)
+		}
+		return &daemon.PrebuildError{Stage: daemon.PrebuildStageSmokeTest, Err: fmt.Errorf("%s --check-only: %w", tip.SelfPath, err)}
+	}
+	return nil
+}
 
 func (r *hostRunner) RunChild(ctx context.Context, req daemon.ChildRequest) (daemon.ChildResult, error) {
 	childCmd, err := daemon.ChildCommand(daemon.ChildSpec{

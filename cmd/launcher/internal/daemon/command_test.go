@@ -565,3 +565,31 @@ func TestDoctorCommand_AppendsFlags(t *testing.T) {
 		t.Errorf("argv = %v carries --research with Flags unset", got.Argv)
 	}
 }
+
+func TestSelfDrvCommand(t *testing.T) {
+	spec := SelfSpec{RepoPath: "/home/op/repo", SelfAttr: ".#daemon", Revision: "abc123", System: "x86_64-linux"}
+	got, err := SelfDrvCommand(spec)
+	if err != nil {
+		t.Fatalf("SelfDrvCommand(%+v): unexpected error: %v", spec, err)
+	}
+	self, _ := SelfCommand(spec)
+	// Same pinned flakeref as SelfCommand, then --apply with the expression.
+	if len(got) != len(self)+2 || !reflect.DeepEqual(got[:len(self)], self) || got[len(self)] != "--apply" {
+		t.Fatalf("SelfDrvCommand = %v, want SelfCommand's argv %v followed by --apply <expr>", got, self)
+	}
+	if !strings.Contains(got[len(self)+1], "getContext") {
+		t.Errorf("--apply expression = %q, want it to read the string context", got[len(self)+1])
+	}
+
+	if _, err := SelfDrvCommand(SelfSpec{RepoPath: "/r", SelfAttr: ".#daemon", Revision: "", System: "x86_64-linux"}); err == nil {
+		t.Error("SelfDrvCommand with empty revision: want error (the pin is validated like SelfCommand's)")
+	}
+}
+
+func TestSelfBuildCommand(t *testing.T) {
+	got := SelfBuildCommand("/nix/store/aaa-spindrift-daemon.drv", "/git/spindrift-daemon.next")
+	want := []string{"nix", "build", "--out-link", "/git/spindrift-daemon.next", "--print-out-paths", "/nix/store/aaa-spindrift-daemon.drv^out"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SelfBuildCommand = %v, want %v", got, want)
+	}
+}
