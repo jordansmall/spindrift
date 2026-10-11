@@ -618,7 +618,7 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 		// A halt can land between the slot's last admission check and here,
 		// notably the self-update goroutine's, which no slot's loop orders
 		// against; no child may start once it has.
-		if s.halted {
+		if s.halted || s.self.handingOff() {
 			return nil
 		}
 		// A slot not holding the baton, deciding on a Chore-keyed
@@ -1041,6 +1041,25 @@ func (p *pool) passBaton(slot int, reason batonReason) {
 	p.baton <- struct{}{}
 }
 
+// parkIfHandingOff holds slot while the in-place self-update waits for its
+// clean moment: no child may start, yet the slot must not return, or a pool
+// with every slot free would end without a halt or a handoff. It parks until
+// the pool's context is cancelled (a stop's halt does that) and reports true
+// so the caller returns. The baton is passed first so a sibling parked on it
+// is not stranded behind a slot that will not discover.
+func (p *pool) parkIfHandingOff(ctx context.Context, slot int) bool {
+	p.mu.Lock()
+	handingOff := p.st.self.handingOff()
+	p.mu.Unlock()
+	if !handingOff {
+		return false
+	}
+	p.setPhase(slot, PhaseIdle)
+	p.passBaton(slot, batonPassStopped)
+	<-ctx.Done()
+	return true
+}
+
 // stopped reports whether the pool has already recorded a halt reason —
 // deliberately not a raw ctx.Err() check; see haltIfStopping for why.
 func (p *pool) stopped() bool {
@@ -1115,6 +1134,10 @@ func (s *state) recordHalt(h Halt) []Event {
 	}
 	s.halted = true
 	s.reason = h
+	if s.self.Phase == SelfUpdateWaiting {
+		// The handoff is cancelled; the build it waited to hand off stays.
+		s.self.Phase = SelfUpdateBuilt
+	}
 	return []Event{h.Event()}
 }
 

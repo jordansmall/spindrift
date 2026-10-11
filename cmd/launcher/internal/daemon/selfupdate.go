@@ -20,7 +20,8 @@ func (p *pool) selfUpdate(ctx context.Context, kind Kind, tip Tip) {
 	build := false
 	p.mutate(func(s *state) []Event {
 		switch {
-		case s.self.Phase == SelfUpdateBuilding, s.self.Phase == SelfUpdateBuilt:
+		case s.self.Phase == SelfUpdateBuilding, s.self.Phase == SelfUpdateBuilt,
+			s.self.Phase == SelfUpdateWaiting, s.self.Phase == SelfUpdateRestarting:
 		case s.self.Phase == SelfUpdateBlocked && s.self.Revision == revision:
 		default:
 			s.self = SelfUpdate{Phase: SelfUpdateBuilding, Revision: revision}
@@ -49,6 +50,14 @@ func (p *pool) selfUpdate(ctx context.Context, kind Kind, tip Tip) {
 				return []Event{s.self.event()}
 			}
 			s.self = SelfUpdate{Phase: SelfUpdateBuilt, Revision: revision}
+			if p.cfg.RestartInPlace {
+				// Same step as the built event, so no slot starts a child in
+				// between. The pool neither halts nor drains: running
+				// children finish on their own while no new one starts.
+				built := s.self.event()
+				s.self.Phase = SelfUpdateWaiting
+				return []Event{built}
+			}
 			// Halting in this same step leaves no gap in which a slot could
 			// start a child after the built event.
 			halted = true

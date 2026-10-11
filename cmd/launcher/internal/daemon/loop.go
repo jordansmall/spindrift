@@ -242,15 +242,23 @@ type Config struct {
 	// pool: it finishes what is running and halts at the boundary. One
 	// that fails is recorded as a blocked self-update (status file and
 	// events) and the pool carries on under the running build until the
-	// tip moves. The loop never re-execs itself; a freshly merged but
-	// broken daemon must not auto-load with nobody awake. An operator who wants
-	// self-update composes that halt with an ordinary service restart
-	// policy and gets the behaviour by choice, not by default.
+	// tip moves. The loop never re-execs itself: by default a passing
+	// build drains the pool and halts self-changed, and the operator's
+	// service restart policy loads it. RestartInPlace selects the other
+	// mode, which waits for a clean moment instead of draining.
 	//
 	// Empty disables the check entirely: a daemon that cannot know its
 	// own build must not guess, and must never halt on a comparison it
 	// cannot make.
 	SelfProgram string
+
+	// RestartInPlace selects the in-place self-update mode (ADR 0063): a
+	// passing prebuild no longer halts and drains the pool. It stops
+	// starting children and waits for a clean moment to hand off, and a
+	// stop requested meanwhile cancels the handoff and drains as usual.
+	// False (the default) drains, then halts self-changed. Has no effect
+	// while SelfProgram is empty.
+	RestartInPlace bool
 
 	// IdleFloor and IdleCap bound each kind's own idle backoff: the first
 	// no-work check (exit 2 always, exit 3 when the pool is otherwise
@@ -568,6 +576,9 @@ slotLoop:
 		// started after Stop closes is signalled by the Runner at once, so
 		// nothing else needs to re-assert "stop starting new work".
 		if p.haltIfStopping(ctx, "") {
+			return
+		}
+		if p.parkIfHandingOff(ctx, slot) {
 			return
 		}
 
