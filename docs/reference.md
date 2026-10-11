@@ -6792,6 +6792,21 @@ landing mid-evaluation can't produce a build of a tree that never existed
 as a commit, and a child started an hour into the night is still pinned to
 the tip as it was when that slot came free, not the tip at daemon startup.
 
+**Check only.** `--check-only` is a smoke test: the daemon loads its
+`--input` document, resolves and validates the knobs a real start checks
+before its preflight, then exits 0 with one stderr line (`daemon:
+check-only: input and config are valid`) and nothing on stdout. It stops
+before the instance lock, the token-refresh watcher, the startup
+preflight's doctor run, and any fetch, so it makes no network or tracker
+call and a live daemon holding the checkout's lock never blocks it.
+Because it skips `doctor`, config only doctor validates (the butler's
+remaining config especially) is not checked. A document or knob the real
+start would refuse exits 1 with that same `daemon: ...` diagnostic. It
+accepts the rest of the daemon's argv unchanged — the kind selector and
+`--feature-branch` in any order — so a freshly built successor can be
+checked against the very argv it would run with, e.g. `nix run
+.#daemon -- --check-only research`.
+
 **Feature branch.** `--feature-branch <branch>` retargets every child
 the daemon starts without moving the daemon's own tracking branch:
 the daemon still fetches, pins, and self-checks its own `BASE_BRANCH`
