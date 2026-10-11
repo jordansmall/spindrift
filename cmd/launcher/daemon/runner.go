@@ -688,6 +688,27 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 	return daemon.ChildResult{}, fmt.Errorf("wait child: %w", waitErr)
 }
 
+// State reads the child's pid, its report pipe's fd and the read state a
+// successor continues from. The fd comes from SyscallConn rather than Fd():
+// Fd switches the file to blocking mode, which would defeat the read-deadline
+// abandon on a handle that is waited on again.
+func (h *hostChildHandle) State() daemon.ChildState {
+	st := daemon.ChildState{
+		PID:        h.cmd.Process.Pid,
+		ReportFD:   -1,
+		Partial:    slices.Clone(h.reports.partial),
+		Discarding: h.reports.discarding,
+	}
+	rc, err := h.reportRead.SyscallConn()
+	if err == nil {
+		err = rc.Control(func(fd uintptr) { st.ReportFD = int(fd) })
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: read report pipe fd: %v\n", err)
+	}
+	return st
+}
+
 // openChildLog opens (creating it and its parent directories) the Child log
 // for appending.
 func openChildLog(path string) (*os.File, error) {

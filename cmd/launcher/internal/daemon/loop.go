@@ -118,6 +118,10 @@ type Runner interface {
 // rather than waiting for it. A nil abandon never abandons.
 type ChildHandle interface {
 	Wait(abandon <-chan struct{}) (ChildResult, error)
+	// State is the runner-level state a successor needs to re-attach this
+	// child (ADR 0063). Only meaningful once a Wait has returned
+	// ErrWaitAbandoned: the partial report line is stable only then.
+	State() ChildState
 }
 
 // ErrWaitAbandoned is what ChildHandle.Wait returns when abandon closed first.
