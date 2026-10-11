@@ -311,3 +311,42 @@ func TestParseRecord_CIWaitRunURL(t *testing.T) {
 		t.Errorf("RunURL = %q, want the record's run_url", got.RunURL)
 	}
 }
+
+// The fixtures are frozen wire literals, deliberately not produced by
+// internal/report's writer: a child started by an older image keeps writing
+// this shape to a newer daemon after an in-place restart (ADR 0063), so
+// changing a fixture means breaking an inherited child.
+func TestParseRecord_OlderChildShapesStillDecode(t *testing.T) {
+	work, butler := KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)
+	cases := []struct {
+		name string
+		line string
+		kind Kind
+		want Record
+	}{
+		{"box", `{"event":"box","issue":"42","phase":"initial","pass_log":".spindrift/pass-1.log","record_id":"r-1"}`, work,
+			Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial", PassLog: ".spindrift/pass-1.log", RecordID: "r-1"}},
+		{"box without later fields", `{"event":"box","issue":"42","phase":"initial"}`, work,
+			Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial"}},
+		{"chore box", `{"event":"box","chore":"bugs","phase":"initial"}`, butler,
+			Record{Event: report.EventBox, Key: dispatchkey.Chore("bugs"), Phase: "initial"}},
+		{"settled", `{"event":"settled","issue":"42","state":"complete","note":"merged","pr_url":"https://example.test/pr/7","record_id":"r-1"}`, work,
+			Record{Event: report.EventSettled, Key: dispatchkey.Issue("42"), State: "complete", Note: "merged", PRURL: "https://example.test/pr/7", RecordID: "r-1"}},
+		{"not_due", `{"event":"not_due","chore":"bugs","next_due":"2026-01-01T15:00:00Z"}`, butler,
+			Record{Event: report.EventNotDue, Key: dispatchkey.Chore("bugs"), NextDue: report.NextDue{At: time.Date(2026, 1, 1, 15, 0, 0, 0, time.UTC)}}},
+		{"model", `{"event":"model","issue":"42","model":"claude-sonnet-5-5","model_role":"coordinator"}`, work,
+			Record{Event: report.EventModel, Key: dispatchkey.Issue("42"), Model: "claude-sonnet-5-5", ModelRole: "coordinator"}},
+		{"ci_wait", `{"event":"ci_wait","issue":"42","pr_url":"https://example.test/pr/7","run_url":"https://example.test/runs/9"}`, work,
+			Record{Event: report.EventCIWait, Key: dispatchkey.Issue("42"), PRURL: "https://example.test/pr/7", RunURL: "https://example.test/runs/9"}},
+		{"unknown field", `{"event":"box","issue":"42","phase":"initial","from_the_future":{"a":1}}`, work,
+			Record{Event: report.EventBox, Key: dispatchkey.Issue("42"), Phase: "initial"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok, err := ParseRecord(tc.line, tc.kind)
+			if err != nil || !ok || got != tc.want {
+				t.Fatalf("ParseRecord = (%+v, %v, %v), want (%+v, true, nil)", got, ok, err, tc.want)
+			}
+		})
+	}
+}
