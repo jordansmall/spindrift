@@ -138,6 +138,7 @@ type scriptedRunner struct {
 	// an already-done handle for it); inheritErr fails the seam itself.
 	inherits   []inheritCall
 	exited     map[int]ChildResult
+	pidSeq     int // last fake pid handed to a started child
 	inheritErr error
 }
 
@@ -558,7 +559,7 @@ func (r *scriptedRunner) heldHandle(req ChildRequest, release map[int]chan Child
 	if started != nil {
 		started <- req.Slot
 	}
-	h := &scriptedHandle{end: end, release: ch}
+	h := &scriptedHandle{end: end, release: ch, state: r.newChildState()}
 	r.mu.Lock()
 	if r.handles == nil {
 		r.handles = make(map[int]*scriptedHandle)
@@ -576,9 +577,9 @@ func (r *scriptedRunner) scriptedDone(req ChildRequest, total, kindIdx int, end 
 		waitErr = r.waitErr
 	}
 	if list, ok := r.byKind[req.Kind]; ok {
-		return &scriptedHandle{end: end, res: pickScripted(list, kindIdx), done: true, err: waitErr}
+		return &scriptedHandle{end: end, res: pickScripted(list, kindIdx), done: true, err: waitErr, state: r.newChildState()}
 	}
-	return &scriptedHandle{end: end, res: pickScripted(r.results, total-1), done: true, err: waitErr}
+	return &scriptedHandle{end: end, res: pickScripted(r.results, total-1), done: true, err: waitErr, state: r.newChildState()}
 }
 
 // InheritChild rebuilds the handle of a child an earlier daemon image started.
@@ -601,12 +602,28 @@ func (r *scriptedRunner) InheritChild(ctx context.Context, req ChildRequest, chi
 		return nil, inheritErr
 	}
 	if hasExit {
-		return &scriptedHandle{end: end, res: exited, done: true}, nil
+		return &scriptedHandle{end: end, res: exited, done: true, state: child}, nil
 	}
 	if release != nil {
-		return r.heldHandle(req, release, started, end)
+		h, err := r.heldHandle(req, release, started, end)
+		if err != nil {
+			return nil, err
+		}
+		h.(*scriptedHandle).state = child
+		return h, nil
 	}
-	return r.scriptedDone(req, total, kindIdx, end), nil
+	h := r.scriptedDone(req, total, kindIdx, end)
+	h.state = child
+	return h, nil
+}
+
+// newChildState gives a started child a distinct nonzero pid and report fd, so
+// a test can check a handoff names the right child.
+func (r *scriptedRunner) newChildState() ChildState {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.pidSeq++
+	return ChildState{PID: 1000 + r.pidSeq, ReportFD: 100 + r.pidSeq}
 }
 
 // inheritCalls returns a copy of every recorded InheritChild call, in order.
@@ -635,7 +652,10 @@ type scriptedHandle struct {
 	res     ChildResult
 	done    bool
 	err     error // Wait's error once the child has ended
+	state   ChildState
 }
+
+func (h *scriptedHandle) State() ChildState { return h.state }
 
 func (h *scriptedHandle) Wait(abandon <-chan struct{}) (ChildResult, error) {
 	if !h.done {
@@ -1496,5 +1516,34 @@ func TestScriptedRunnerInheritChildExitedByPID(t *testing.T) {
 	}
 	if res, _ := h.Wait(nil); res.Exit != 2 {
 		t.Fatalf("exit = %d, want 2 (scripted result)", res.Exit)
+	}
+}
+
+func TestScriptedHandleStateNamesEachChild(t *testing.T) {
+	r := &scriptedRunner{results: []ChildResult{{Exit: 0}}}
+	req := ChildRequest{Kind: KindOf(dispatchkind.Work), Revision: "r1"}
+	a, err := r.StartChild(context.Background(), req)
+	if err != nil {
+		t.Fatalf("StartChild: %v", err)
+	}
+	b, err := r.StartChild(context.Background(), req)
+	if err != nil {
+		t.Fatalf("StartChild: %v", err)
+	}
+	sa, sb := a.State(), b.State()
+	if sa.PID == 0 || sb.PID == 0 || sa.PID == sb.PID {
+		t.Fatalf("pids = %d, %d, want distinct and nonzero", sa.PID, sb.PID)
+	}
+	if sa.ReportFD <= 0 || sb.ReportFD <= 0 || sa.ReportFD == sb.ReportFD {
+		t.Fatalf("report fds = %d, %d, want distinct and positive", sa.ReportFD, sb.ReportFD)
+	}
+
+	// An inherited child keeps the pid it was handed, so a handoff round-trips.
+	c, err := r.InheritChild(context.Background(), req, ChildState{PID: sa.PID, ReportFD: 9})
+	if err != nil {
+		t.Fatalf("InheritChild: %v", err)
+	}
+	if got := c.State(); got.PID != sa.PID || got.ReportFD != 9 {
+		t.Fatalf("inherited State = %+v, want pid %d fd 9", got, sa.PID)
 	}
 }

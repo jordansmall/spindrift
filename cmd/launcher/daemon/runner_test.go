@@ -3074,6 +3074,7 @@ func startAndWait(ctx context.Context, r *hostRunner, req daemon.ChildRequest) (
 type doneHandle struct{}
 
 func (doneHandle) Wait(<-chan struct{}) (daemon.ChildResult, error) { return daemon.ChildResult{}, nil }
+func (doneHandle) State() daemon.ChildState                         { return daemon.ChildState{} }
 
 // TestStartChild_AbandonedWaitLeavesChildRunning is the in-place-restart
 // prefactor's contract (ADR 0063): closing a Wait's abandon channel stops the
@@ -3337,5 +3338,68 @@ func TestStartChild_AlreadyAbandonedWaitReturnsAtOnce(t *testing.T) {
 	}
 	if err := syscall.Kill(pid, 0); err != nil {
 		t.Errorf("child not alive after abandon: %v", err)
+	}
+}
+
+// TestStartChild_StateAfterAbandonNamesChild pins what a handoff reads off an
+// abandoned handle (ADR 0063): the child's pid, its report pipe's fd, and the
+// report line the abandoned read had only half received.
+func TestStartChild_StateAfterAbandonNamesChild(t *testing.T) {
+	orig := runnerExecCommand
+	t.Cleanup(func() { runnerExecCommand = orig })
+
+	const half = `{"event":"settled","issue":"101",`
+	script := fmt.Sprintf(`printf '%%s\n%%s' '{"event":"box","issue":"101","phase":"initial"}' '%s' >&3
+sleep 30`, half)
+	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
+		return exec.Command("/bin/sh", "-c", script)
+	}
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+
+	firstRecord := make(chan struct{})
+	var once sync.Once
+	handle, err := r.StartChild(context.Background(), daemon.ChildRequest{
+		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+		OnRecord: func(daemon.Record) { once.Do(func() { close(firstRecord) }) },
+	})
+	if err != nil {
+		t.Fatalf("StartChild() unexpected error: %v", err)
+	}
+	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+
+	abandon := make(chan struct{})
+	waited := make(chan error, 1)
+	go func() {
+		_, err := handle.Wait(abandon)
+		waited <- err
+	}()
+	select {
+	case <-firstRecord:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for first record")
+	}
+	close(abandon)
+	select {
+	case err := <-waited:
+		if !errors.Is(err, daemon.ErrWaitAbandoned) {
+			t.Fatalf("abandoned Wait error = %v, want ErrWaitAbandoned", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("abandoned Wait did not return")
+	}
+
+	st := handle.State()
+	if st.PID != pid {
+		t.Errorf("State().PID = %d, want %d", st.PID, pid)
+	}
+	if st.ReportFD < 0 {
+		t.Errorf("State().ReportFD = %d, want a non-negative fd", st.ReportFD)
+	}
+	if string(st.Partial) != half {
+		t.Errorf("State().Partial = %q, want %q", st.Partial, half)
+	}
+	if st.Discarding {
+		t.Error("State().Discarding = true, want false")
 	}
 }
