@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -3498,6 +3499,26 @@ func TestDoctorPreflightFlags(t *testing.T) {
 			}
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("doctorPreflightFlags = %v, want %v (kinds %v, explicit %v)", got, tc.want, args.Kinds, args.ExplicitSelector)
+			}
+		})
+	}
+}
+
+func TestSuccessorArgs(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want []string
+	}{
+		{"wrapper input then operator args", []string{"--input", "/old/doc.json", "--feature-branch", "feat", "research"}, []string{"--feature-branch", "feat", "research"}},
+		{"no input", []string{"dispatch"}, []string{"dispatch"}},
+		{"input mid-argv", []string{"dispatch", "--input", "a", "--input", "b", "--check-only"}, []string{"dispatch", "--check-only"}},
+		{"empty", nil, []string{}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := successorArgs(tc.in); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("successorArgs(%v) = %v, want %v", tc.in, got, tc.want)
 			}
 		})
 	}

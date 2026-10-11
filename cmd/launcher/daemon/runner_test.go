@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
@@ -2878,5 +2880,182 @@ func TestRunDoctor_CapturesRequiredLabelsLine(t *testing.T) {
 	}
 	if exit != 4 || line != want {
 		t.Errorf("RunDoctor() = (%d, %q), want (4, %q)", exit, line, want)
+	}
+}
+
+// prebuildHarness scripts the three commands Prebuild runs: the drv eval
+// (runnerEvalCommand), `nix build` and the smoke test (both through
+// runnerPrebuildCommand, told apart by the program name). Each script gets the
+// real argv as "$@"; the two that the tests assert on append it to a file.
+type prebuildHarness struct {
+	r        *hostRunner
+	stateDir string
+	buildLog string
+	smokeLog string
+}
+
+func newPrebuildHarness(t *testing.T, evalScript, buildScript, smokeScript string) *prebuildHarness {
+	t.Helper()
+	origEval, origBuild := runnerEvalCommand, runnerPrebuildCommand
+	t.Cleanup(func() { runnerEvalCommand, runnerPrebuildCommand = origEval, origBuild })
+
+	h := &prebuildHarness{stateDir: t.TempDir()}
+	h.buildLog = filepath.Join(h.stateDir, "build.argv")
+	h.smokeLog = filepath.Join(h.stateDir, "smoke.argv")
+	runnerEvalCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", append([]string{"-c", evalScript, "sh"}, args...)...)
+	}
+	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		script, log := smokeScript, h.smokeLog
+		if name == "nix" {
+			script, log = buildScript, h.buildLog
+		}
+		return exec.CommandContext(ctx, "/bin/sh", append([]string{"-c", `printf '%s\n' "$@" >` + log + "\n" + script, "sh"}, args...)...)
+	}
+	h.r = mustHostRunner(t, hostRunnerConfig{
+		repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux",
+		env: os.Environ(), stateDir: h.stateDir,
+		selfArgs: []string{"--feature-branch", "feat", "dispatch"},
+	})
+	return h
+}
+
+func (h *prebuildHarness) read(t *testing.T, path string) []string {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.Split(strings.TrimSpace(string(b)), "\n")
+}
+
+const prebuildSelfPath = "/nix/store/q75-spindrift-daemon/bin/spindrift-daemon"
+
+func TestPrebuild_Success(t *testing.T) {
+	h := newPrebuildHarness(t,
+		"echo /nix/store/il4-spindrift-daemon.drv",
+		"echo /nix/store/q75-spindrift-daemon",
+		"echo 'daemon: check-only: input and config are valid' >&2")
+
+	if err := h.r.Prebuild(context.Background(), daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath}); err != nil {
+		t.Fatalf("Prebuild() = %v, want nil", err)
+	}
+
+	wantBuild := daemon.SelfBuildCommand("/nix/store/il4-spindrift-daemon.drv", filepath.Join(h.stateDir, prebuildGCRoot))[1:]
+	if got := h.read(t, h.buildLog); !reflect.DeepEqual(got, wantBuild) {
+		t.Errorf("nix build argv = %v, want %v", got, wantBuild)
+	}
+	wantSmoke := []string{"--feature-branch", "feat", "dispatch", "--check-only"}
+	if got := h.read(t, h.smokeLog); !reflect.DeepEqual(got, wantSmoke) {
+		t.Errorf("smoke-test argv = %v, want %v (no --input: the successor uses its own)", got, wantSmoke)
+	}
+}
+
+func TestPrebuild_Failures(t *testing.T) {
+	cases := []struct {
+		name                       string
+		eval, build, smoke         string
+		wantStage                  daemon.PrebuildStage
+		wantInErr                  string
+		wantSmokeRan, wantBuildRan bool
+	}{
+		{
+			name:      "eval fails",
+			eval:      "echo 'eval boom' >&2; exit 1",
+			build:     "echo /nix/store/q75-spindrift-daemon",
+			smoke:     "exit 0",
+			wantStage: daemon.PrebuildStageBuild, wantInErr: "eval boom",
+		},
+		{
+			name:      "eval prints nothing",
+			eval:      "exit 0",
+			build:     "echo /nix/store/q75-spindrift-daemon",
+			smoke:     "exit 0",
+			wantStage: daemon.PrebuildStageBuild,
+		},
+		{
+			name:      "nix build fails",
+			eval:      "echo /nix/store/il4-spindrift-daemon.drv",
+			build:     "echo 'build boom' >&2; exit 1",
+			smoke:     "exit 0",
+			wantStage: daemon.PrebuildStageBuild, wantInErr: "build boom", wantBuildRan: true,
+		},
+		{
+			name:      "out path does not hold the program",
+			eval:      "echo /nix/store/il4-spindrift-daemon.drv",
+			build:     "echo /nix/store/zzz-other",
+			smoke:     "exit 0",
+			wantStage: daemon.PrebuildStageBuild, wantInErr: "/nix/store/zzz-other", wantBuildRan: true,
+		},
+		{
+			name:      "smoke test fails",
+			eval:      "echo /nix/store/il4-spindrift-daemon.drv",
+			build:     "echo /nix/store/q75-spindrift-daemon",
+			smoke:     "echo 'daemon: bad config' >&2; exit 1",
+			wantStage: daemon.PrebuildStageSmokeTest, wantInErr: "daemon: bad config", wantBuildRan: true, wantSmokeRan: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newPrebuildHarness(t, tc.eval, tc.build, tc.smoke)
+			err := h.r.Prebuild(context.Background(), daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath})
+			var pe *daemon.PrebuildError
+			if !errors.As(err, &pe) {
+				t.Fatalf("Prebuild() = %v, want a *daemon.PrebuildError", err)
+			}
+			if pe.Stage != tc.wantStage {
+				t.Errorf("Stage = %q, want %q (err: %v)", pe.Stage, tc.wantStage, err)
+			}
+			if !strings.Contains(err.Error(), tc.wantInErr) {
+				t.Errorf("err = %q, want it to contain %q", err, tc.wantInErr)
+			}
+			for _, c := range []struct {
+				name string
+				path string
+				want bool
+			}{{"nix build", h.buildLog, tc.wantBuildRan}, {"smoke test", h.smokeLog, tc.wantSmokeRan}} {
+				if _, statErr := os.Stat(c.path); (statErr == nil) != c.want {
+					t.Errorf("%s ran = %v, want %v", c.name, statErr == nil, c.want)
+				}
+			}
+		})
+	}
+}
+
+func TestPrebuild_SmokeTestHangTimesOut(t *testing.T) {
+	orig := prebuildSmokeTimeout
+	prebuildSmokeTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { prebuildSmokeTimeout = orig })
+
+	h := newPrebuildHarness(t,
+		"echo /nix/store/il4-spindrift-daemon.drv",
+		"echo /nix/store/q75-spindrift-daemon",
+		"exec sleep 30")
+
+	start := time.Now()
+	err := h.r.Prebuild(context.Background(), daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath})
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("Prebuild took %v, want it bounded by the smoke timeout", elapsed)
+	}
+	var pe *daemon.PrebuildError
+	if !errors.As(err, &pe) || pe.Stage != daemon.PrebuildStageSmokeTest {
+		t.Fatalf("Prebuild() = %v, want a smoke-test *daemon.PrebuildError", err)
+	}
+	if !strings.Contains(err.Error(), "timed out after") {
+		t.Errorf("err = %q, want it to say the smoke test timed out", err)
+	}
+}
+
+func TestPrebuildStderr_CutsOnRuneBoundary(t *testing.T) {
+	// "é" is two bytes and starts at odd offsets here, so a cut at an even
+	// offset lands mid-character.
+	var b bytes.Buffer
+	b.WriteString("x" + strings.Repeat("é", prebuildStderrTail) + "y")
+	got := prebuildStderr(&b)
+	if !utf8.ValidString(got) {
+		t.Errorf("prebuildStderr() = %q, want valid UTF-8", got)
+	}
+	if !strings.HasPrefix(got, "...") || len(got) > prebuildStderrTail+len("...") {
+		t.Errorf("prebuildStderr() has len %d, want a ... prefix and at most %d tail bytes", len(got), prebuildStderrTail)
 	}
 }

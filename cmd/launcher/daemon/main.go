@@ -901,6 +901,8 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		knobs:       stripped,
 		doctorFlags: doctorFlags,
 		demand:      demand,
+		stateDir:    gitDirPath,
+		selfArgs:    successorArgs(argv),
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -964,4 +966,21 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 func main() {
 	os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr))
+}
+
+// successorArgs is the operator's own argv with every --input pair removed.
+// The `nix run .#daemon` wrapper prepends `--input <doc>` pointing at the
+// running daemon's document; the successor's wrapper supplies its own, and
+// parseArgs lets a later --input win, so replaying the old one would make the
+// smoke test validate the old document instead of the new build's.
+func successorArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		if args[i] == inputFlag && i+1 < len(args) {
+			i++
+			continue
+		}
+		out = append(out, args[i])
+	}
+	return out
 }
