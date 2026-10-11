@@ -499,7 +499,7 @@ rec {
   # docs/reference.md's "### Option surface" table (issue #2739, documentedFact
   # registry by issue #2950), header through last row as one block: an
   # HTML-comment marker line between GFM table rows terminates the table, so a
-  # per-row generated span is impossible. The four rows with no domain path are
+  # per-row generated span is impossible. The five rows with no domain path are
   # copied verbatim as editorial text (out of scope per spec #2921).
   renderOptionSurfaceTableDoc =
     {
@@ -532,6 +532,7 @@ rec {
         | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
         | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
         | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
+        | `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
         | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
         | `byName`    | `${path "byName" byNamePaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" byNamePaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
       '';

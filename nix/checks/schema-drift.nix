@@ -2397,12 +2397,13 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       # `reviewPrompt` and `filerPrompt` share the `scoutPrompt` row, whose
-      # cell reports only that first name: four editorial names, four rows.
+      # cell reports only that first name: five editorial names, five rows.
       editorialRowNames = [
         "system"
         "scoutPrompt"
         "settings"
         "nixBuilderImage"
+        "imageAttrName"
       ];
       rendered = renderers.renderOptionSurfaceTableDoc {
         inherit structuralPaths byNamePaths;
