@@ -247,7 +247,7 @@ provisioning, same as the capability gate has always assumed for `github`'s
 neither `BOX_GH_TOKEN` nor the introspection call is ever consulted outside
 `read-only`.
 
-Requiring a distinct Box token also closes a quieter leak: `boxGHTokenResolver`
+Requiring a distinct Box token also closes a quieter leak: `boxTokenResolver`
 already short-circuits to `BOX_GH_TOKEN` ahead of `GH_TOKEN` whenever it's
 set, so once the gate makes a distinct `BOX_GH_TOKEN` mandatory under
 `read-only`, `GH_TOKEN_REFRESH_FILE`'s rotation loop only ever rewrites the
