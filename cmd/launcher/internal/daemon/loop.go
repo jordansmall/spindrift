@@ -190,6 +190,11 @@ type Config struct {
 
 	Slots int
 
+	// Handoff, when non-nil, is the in-place restart document this pool resumes
+	// from (ADR 0063): it occupies the Slots the document names and supervises
+	// their inherited children as its own. nil is a cold start.
+	Handoff *Handoff
+
 	// RepoURL is the Target repo's web URL, published on every status write;
 	// issue links are built from it plus the issue number. "" when the tracker
 	// has no web repo.
@@ -371,9 +376,20 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 		return invalidConfig(em, cfg, fmt.Sprintf("breaker window must be positive, got %s", cfg.BreakerWindow))
 	}
 
+	if cfg.Handoff != nil {
+		if detail := validateHandoff(cfg); detail != "" {
+			return invalidConfig(em, cfg, detail)
+		}
+	}
+
 	p, pctx := newPool(ctx, cfg, r, em, clk)
 	defer p.cancel()
-	p.publishInitial()
+	// The first status write already shows the inherited slots, so it stands
+	// in for publishInitial.
+	p.occupyInherited()
+	if cfg.Handoff == nil {
+		p.publishInitial()
+	}
 
 	// A Stop already closed before Loop was even called must halt before
 	// any slot starts, not merely once the background watcher below happens
@@ -417,6 +433,25 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	p.bg.Wait()
 
 	return p.haltReason()
+}
+
+// validateHandoff names the first defect in cfg.Handoff's slots, "" when it
+// fits the pool: each slot inside [0, cfg.Slots), named once, of a configured
+// kind.
+func validateHandoff(cfg Config) string {
+	seen := make(map[int]bool, len(cfg.Handoff.Slots))
+	for _, hs := range cfg.Handoff.Slots {
+		switch {
+		case hs.Slot < 0 || hs.Slot >= cfg.Slots:
+			return fmt.Sprintf("handoff slot %d is outside the pool's %d slots", hs.Slot, cfg.Slots)
+		case seen[hs.Slot]:
+			return fmt.Sprintf("handoff names slot %d twice", hs.Slot)
+		case !slices.Contains(cfg.Kinds, hs.Kind):
+			return fmt.Sprintf("handoff slot %d runs kind %q, which is not in kinds", hs.Slot, hs.Kind)
+		}
+		seen[hs.Slot] = true
+	}
+	return ""
 }
 
 // invalidConfig emits and returns a Halt of class HaltInvalidConfig carrying
@@ -477,6 +512,16 @@ func runSlot(ctx context.Context, slot int, cfg Config, p *pool) {
 	// could be stale by the time it reopens; only the request to
 	// re-resolve survives, not the resolution itself.
 	var wantResolve bool
+	// An inherited child is supervised before the first admission check: it is
+	// already running, so even a pool that is halting must wait it out and
+	// report its child_finish, as it does for a child it started itself.
+	if h := p.inheritedSlot(slot); h != nil {
+		req := p.childRequest(slot, h.Kind, h.Revision, h.ChildLog)
+		handle, err := p.r.InheritChild(ctx, req, h.Child)
+		if p.superviseChild(ctx, slot, h.Kind, h.Revision, handle, err) {
+			return
+		}
+	}
 slotLoop:
 	for {
 		// The pool's admission check (issue #3626), re-asked once after

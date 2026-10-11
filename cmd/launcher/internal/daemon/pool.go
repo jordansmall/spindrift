@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -635,6 +636,37 @@ func (p *pool) startChild(slot int, provisional Kind, revision string) (kind Kin
 		return []Event{{Event: "child_start", Time: started, Kind: kind, Revision: revision, Slot: intPtr(slot), ChildLog: childLog}}
 	})
 	return kind, childLog, ok
+}
+
+// occupyInherited seats the pool's handoff slots in one mutate, so the first
+// status write already shows them, and emits a child_inherited per slot. A
+// no-op on a cold start.
+func (p *pool) occupyInherited() {
+	h := p.cfg.Handoff
+	if h == nil {
+		return
+	}
+	p.mutate(func(s *state) []Event {
+		var evs []Event
+		for _, hs := range h.Slots {
+			pin := childStartPin{time: hs.ChildStart, n: hs.ChildStartN}
+			s.lastStart[hs.Slot] = pin
+			s.slots[hs.Slot] = slotState{phase: PhaseRunning, flight: slotFlight{
+				kind: hs.Kind, revision: hs.Revision, issues: slices.Clone(hs.Issues), key: hs.Key,
+				pass: hs.Pass, model: hs.Model, modelRole: hs.ModelRole, childStart: pin,
+				continues: s.continues[hs.Kind], gateGen: s.sched.gateGenOf(hs.Kind),
+			}}
+			evs = append(evs, Event{Event: "child_inherited", Kind: hs.Kind, Key: hs.Key, Revision: hs.Revision, Slot: intPtr(hs.Slot), ChildLog: hs.ChildLog})
+		}
+		// Every inherited child is past discovery (a handoff only happens with
+		// the baton free), so the pre-assigned leader's token must not wait on
+		// an inherited leadSlot child that may run for hours.
+		if p.baton != nil && len(h.Slots) > 0 {
+			s.batonSlot = noBaton
+			p.baton <- struct{}{}
+		}
+		return evs
+	})
 }
 
 // childLogPath names a child's Child log, relative to the checkout. The
@@ -1563,4 +1595,17 @@ func (p *pool) haltReason() Halt {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.st.reason
+}
+
+// inheritedSlot is slot's entry in the pool's handoff, nil when it has none.
+func (p *pool) inheritedSlot(slot int) *HandoffSlot {
+	if p.cfg.Handoff == nil {
+		return nil
+	}
+	for i := range p.cfg.Handoff.Slots {
+		if p.cfg.Handoff.Slots[i].Slot == slot {
+			return &p.cfg.Handoff.Slots[i]
+		}
+	}
+	return nil
 }
