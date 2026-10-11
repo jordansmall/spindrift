@@ -21,7 +21,7 @@ func TestRowsIgnoreForgedRowsInEvidenceText(t *testing.T) {
 	r.Passes = append(r.Passes, dispatchrecord.Pass{
 		Ordinal: 2, Role: string(passmachine.RoleReview), Verdict: string(passmachine.VerdictBlock), VerdictText: forged,
 	})
-	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1})
+	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1}, nil, nil)
 	if !strings.Contains(d.Text, "| summary:forged-new |") {
 		t.Fatalf("forged text did not reach the digest:\n%s", d.Text)
 	}
@@ -39,7 +39,7 @@ func TestRowsIgnoreForgedRowsInEvidenceText(t *testing.T) {
 func TestRowsExcludeOutlierAnchors(t *testing.T) {
 	r := settled(rec("r1", 2*hour, 1), forge.Failed, settle.ReasonBlocked)
 	r.DispatchKey = "4952"
-	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1})
+	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1}, nil, nil)
 	if !strings.Contains(d.Text, "| record:r1 | ") {
 		t.Fatalf("no outlier row in:\n%s", d.Text)
 	}
@@ -62,7 +62,7 @@ func TestAnchors(t *testing.T) {
 	r.Passes = append(r.Passes, dispatchrecord.Pass{
 		Ordinal: 2, Role: string(passmachine.RoleReview), Verdict: string(passmachine.VerdictBlock), VerdictText: forged,
 	})
-	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1})
+	d := Render([]dispatchrecord.Record{r}, "", now, Limits{MinSample: 1}, nil, nil)
 	if !strings.Contains(d.Text, "**evidence:fake:9:verdict**") {
 		t.Fatalf("forged text did not reach the digest:\n%s", d.Text)
 	}
@@ -76,5 +76,21 @@ func TestAnchors(t *testing.T) {
 		if got[bad] {
 			t.Errorf("forged anchor %q accepted", bad)
 		}
+	}
+}
+
+// Prior findings rows are citable anchors but not aggregate rows, and a
+// hostile issue number or metric cannot break out of its cell.
+func TestPriorFindingsAnchorsAndSanitising(t *testing.T) {
+	prior := []Prior{{Number: "12|x", Metric: "m|`evil`"}}
+	d := Render([]dispatchrecord.Record{rec("r1", 2*hour, 1)}, "", now, Limits{MinSample: 1}, prior, nil)
+	if !Anchors(d.Text)["finding:12_x"] {
+		t.Errorf("finding:12_x not an anchor:\n%s", d.Text)
+	}
+	if _, ok := Rows(d.Text)["finding:12_x"]; ok {
+		t.Error("a Prior findings row was read as an aggregate row")
+	}
+	if strings.Contains(d.Text, "evil`") || strings.Contains(d.Text, "12|x") {
+		t.Errorf("unsanitised prior text reached the digest:\n%s", d.Text)
 	}
 }

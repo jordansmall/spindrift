@@ -75,6 +75,21 @@ type row struct {
 	delta         func(float64) string
 }
 
+// cells renders the window figure, the baseline figure, and their Δ.
+func (r row) cells() (win, base, delta string) {
+	win, base, delta = absent, absent, absent
+	if r.win.ok {
+		win = r.format(r.win.v)
+	}
+	if r.base.ok {
+		base = r.format(r.base.v)
+		if r.win.ok {
+			delta = r.delta(r.win.v - r.base.v)
+		}
+	}
+	return win, base, delta
+}
+
 // Limits are the knobs a digest is rendered under.
 type Limits struct {
 	// MinSample marks a row thin when fewer window Records back it.
@@ -87,8 +102,9 @@ type Limits struct {
 
 // Render builds the digest for the settled Records of records after cursor,
 // against a baseline of the settled Records before them claimed within
-// BaselineWindow of now.
-func Render(records []dispatchrecord.Record, cursor string, now time.Time, lim Limits) Digest {
+// BaselineWindow of now. merged, if non-nil, tells a prior finding's held PR
+// that a human has since merged.
+func Render(records []dispatchrecord.Record, cursor string, now time.Time, lim Limits, prior []Prior, merged MergeLookup) Digest {
 	window := chore.NewSettledRecords(records, cursor)
 	inWindow := make(map[string]bool, len(window))
 	for _, r := range window {
@@ -140,6 +156,8 @@ func Render(records []dispatchrecord.Record, cursor string, now time.Time, lim L
 			writeTable(&b, s.rows, lim.MinSample)
 		}
 	}
+	// Written with the aggregates, so a byte cap never trims it.
+	priorFindings(prior, records, lim.MinSample, merged).write(&b)
 	d.Text = trim(b.String(), outliers(window), evidence(window), lim.MaxBytes)
 	return d
 }
@@ -433,16 +451,7 @@ func signedPP(v float64) string  { return fmt.Sprintf("%+.0fpp", v) }
 func writeTable(b *strings.Builder, rows []row, minSample int) {
 	b.WriteString(tableHeader)
 	for _, r := range rows {
-		win, base, delta := absent, absent, absent
-		if r.win.ok {
-			win = r.format(r.win.v)
-		}
-		if r.base.ok {
-			base = r.format(r.base.v)
-			if r.win.ok {
-				delta = r.delta(r.win.v - r.base.v)
-			}
-		}
+		win, base, delta := r.cells()
 		flag := ""
 		if r.n < minSample {
 			flag = "thin"

@@ -119,7 +119,7 @@ func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now t
 	var stopErr error
 	for _, r := range recs {
 		if r.OutcomeSource != dispatchrecord.OutcomeSourceSettled || r.Outcome != forge.Complete.String() ||
-			!ReasonLeavesPROpen(r.Reason) || !queryablePRURL(r.PRURL) {
+			!ReasonLeavesPROpen(r.Reason) || !QueryablePRURL(r.PRURL) {
 			continue
 		}
 		if r.ClaimTime.IsZero() || r.ClaimTime.Before(now.Add(-LateMergeWindow)) {
@@ -181,10 +181,10 @@ func primaryLog(root string, r dispatchrecord.Record) string {
 	return ""
 }
 
-// queryablePRURL reports whether u is an absolute http(s) URL with a host. The
+// QueryablePRURL reports whether u is an absolute http(s) URL with a host. The
 // Record's PR URL can come from text the Box printed, and the forge client
 // passes it as an argument, so anything that could read as a flag is refused.
-func queryablePRURL(u string) bool {
+func QueryablePRURL(u string) bool {
 	p, err := url.Parse(u)
 	return err == nil && (p.Scheme == "http" || p.Scheme == "https") && p.Host != ""
 }

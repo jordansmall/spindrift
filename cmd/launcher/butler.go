@@ -357,7 +357,7 @@ func cmdButler(lc *launchContext, choreName string, stderr io.Writer) int {
 		TuningCooldown:    settings.tuningCooldown,
 	}
 
-	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.patchGate())
+	sweeper := butler.New(backend, tree, lc.issueTracker, newDispatcher, policy, time.Now).WithPatchForge(butlerPatchForge(lc.codeForge, lc.capabilities), lc.patchGate()).WithMergeReader(butlerMergeReader(lc.capabilities))
 	o, err := sweeper.Sweep(candidates)
 	if err == nil {
 		err = butlerOutcomeErr(o)
@@ -382,4 +382,14 @@ func butlerVerbHandler(args []string, stdout, stderr io.Writer) int {
 		return bootstrapExitCode(err)
 	}
 	return cmdButler(lc, choreName, stderr)
+}
+
+// butlerMergeReader is cmdButler's butler.WithMergeReader pair: the PR reader
+// and the optional merge-commit reader, each nil when caps lacks it. A nil
+// PRForge leaves the tuning digest to the Records alone.
+func butlerMergeReader(caps forge.Capabilities) (butler.MergeReader, forge.MergeCommitReader) {
+	if caps.PRForge == nil {
+		return nil, nil
+	}
+	return caps.PRForge, caps.MergeCommitReader
 }

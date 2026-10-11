@@ -449,3 +449,53 @@ type DedupPolicy struct {
 	// before it no longer suppresses; zero never expires.
 	NotPlannedBefore time.Time
 }
+
+// TuningFinding is a tuning finding issue as the backlog holds it, with the
+// metric its pattern key names.
+type TuningFinding struct {
+	Issue forge.Issue
+	// Open reports the issue was listed open; false means closed.
+	Open bool
+	// Metric is the last part of the marker's class:file:metric pattern term,
+	// empty when the marker carries none.
+	Metric string
+}
+
+// TuningFindings lists the tuning findings in the backlog, open and closed,
+// recognised by the tuning term in their dedup marker so trackers with no
+// label registry list them too. A list failure is non-fatal for the lookup it
+// hit: the findings the other lookup returned are still returned, beside the
+// first error.
+func TuningFindings(it forge.IssueTracker) ([]TuningFinding, error) {
+	var out []TuningFinding
+	collect := func(issues []forge.Issue, open bool) {
+		for _, iss := range issues {
+			if !isFindingIssue(iss.Labels) || !carriesTuningMarker(iss.Body) {
+				continue
+			}
+			f := TuningFinding{Issue: iss, Open: open}
+			for _, k := range parseDedupMarker(iss.Body) {
+				if !isProvenanceTerm(k) {
+					f.Metric = k[strings.LastIndex(k, ":")+1:]
+					break
+				}
+			}
+			out = append(out, f)
+		}
+	}
+	lister, ok := it.(forge.LabeledBacklogLister)
+	if !ok {
+		issues, err := it.ListOpenIssues()
+		collect(issues, true)
+		return out, err
+	}
+	var firstErr error
+	for _, state := range []forge.IssueState{forge.IssueOpen, forge.IssueClosed} {
+		issues, err := lister.ListIssuesWithLabels(state, findingLabels)
+		if err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("list %s finding issues: %w", strings.ToLower(string(state)), err)
+		}
+		collect(issues, state == forge.IssueOpen)
+	}
+	return out, firstErr
+}

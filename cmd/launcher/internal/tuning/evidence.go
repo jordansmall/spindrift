@@ -16,6 +16,7 @@ const (
 	summaryHeading  = "## Summary"
 	rolesHeading    = "## Roles"
 	splitsHeading   = "## Splits"
+	priorHeading    = "## Prior findings"
 	outliersHeading = "## Outliers"
 	evidenceHeading = "## Evidence"
 )
@@ -23,6 +24,7 @@ const (
 // Line prefixes of the anchored Outliers rows and Evidence items, shared by the
 // renderer and Anchors so a format change cannot leave anchors unparsed.
 const (
+	priorRowPrefix     = "| finding:"
 	outlierRowPrefix   = "| record:"
 	evidenceItemPrefix = "**evidence:"
 )
@@ -104,11 +106,12 @@ func Evidence(rows map[string]Row, cites []string) string {
 }
 
 // Anchors returns every anchor a rendered digest offers a finding to cite: the
-// aggregate rows, the Outliers "record:<id>" rows, and the Evidence
-// "evidence:<id>:<n>:<kind>" items. Only host-written lines count. Evidence
-// text is Box-written inside a promptfence.Block fence, so lines from a fence
-// opener to its identical closer are skipped, and a forged heading, row or
-// evidence line inside one neither adds an anchor nor changes section.
+// aggregate rows, the Prior findings "finding:<n>" rows, the Outliers
+// "record:<id>" rows, and the Evidence "evidence:<id>:<n>:<kind>" items. Only
+// host-written lines count. Evidence text is Box-written inside a
+// promptfence.Block fence, so lines from a fence opener to its identical
+// closer are skipped, and a forged heading, row or evidence line inside one
+// neither adds an anchor nor changes section.
 func Anchors(digest string) map[string]bool {
 	anchors := map[string]bool{}
 	for a := range Rows(digest) {
@@ -131,7 +134,8 @@ func Anchors(digest string) map[string]bool {
 			continue
 		}
 		switch {
-		case section == outliersHeading && strings.HasPrefix(line, outlierRowPrefix):
+		case section == priorHeading && strings.HasPrefix(line, priorRowPrefix),
+			section == outliersHeading && strings.HasPrefix(line, outlierRowPrefix):
 			if a, _, ok := strings.Cut(strings.TrimPrefix(line, "| "), " |"); ok {
 				anchors[a] = true
 			}
