@@ -23,4 +23,5 @@ ab-results/
 
 # go build output in the launcher and Dashboard modules
 /cmd/launcher/launcher
+/cmd/launcher/daemon/daemon
 /dashboard/dashboard

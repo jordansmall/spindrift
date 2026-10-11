@@ -3118,7 +3118,7 @@ exit 3`, marker, goFile)
 	if err != nil {
 		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
-	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	pid := handle.(*hostChildHandle).proc.Pid
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 
 	abandon := make(chan struct{})
@@ -3223,7 +3223,7 @@ func TestStartChild_AbandonedWaitDoesNotResendSIGTERM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
-	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	pid := handle.(*hostChildHandle).proc.Pid
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 
 	abandon := make(chan struct{})
@@ -3328,7 +3328,7 @@ func TestStartChild_AlreadyAbandonedWaitReturnsAtOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
-	pid := handle.(*hostChildHandle).cmd.Process.Pid
+	pid := handle.(*hostChildHandle).proc.Pid
 	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 
 	abandon := make(chan struct{})
@@ -3341,43 +3341,38 @@ func TestStartChild_AlreadyAbandonedWaitReturnsAtOnce(t *testing.T) {
 	}
 }
 
-// TestStartChild_StateAfterAbandonNamesChild pins what a handoff reads off an
-// abandoned handle (ADR 0063): the child's pid, its report pipe's fd, and the
-// report line the abandoned read had only half received.
-func TestStartChild_StateAfterAbandonNamesChild(t *testing.T) {
+// startAbandonedChild starts a /bin/sh child that writes one complete record
+// and then half a line to its report pipe and idles, and returns its handle
+// after a Wait on it was abandoned with both read.
+func startAbandonedChild(t *testing.T, r *hostRunner) *hostChildHandle {
+	t.Helper()
 	orig := runnerExecCommand
 	t.Cleanup(func() { runnerExecCommand = orig })
-
-	const half = `{"event":"settled","issue":"101",`
-	script := fmt.Sprintf(`printf '%%s\n%%s' '{"event":"box","issue":"101","phase":"initial"}' '%s' >&3
-sleep 30`, half)
 	runnerExecCommand = func(name string, args ...string) *exec.Cmd {
-		return exec.Command("/bin/sh", "-c", script)
+		return exec.Command("/bin/sh", "-c", `printf '%s\n%s' '{"event":"box","issue":"101","phase":"initial"}' '{"event":"settled","issue":"101",' >&3
+while :; do sleep 0.05; done`)
 	}
-	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
-
 	firstRecord := make(chan struct{})
-	var once sync.Once
 	handle, err := r.StartChild(context.Background(), daemon.ChildRequest{
 		Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
-		OnRecord: func(daemon.Record) { once.Do(func() { close(firstRecord) }) },
+		OnRecord: func(daemon.Record) { close(firstRecord) },
 	})
 	if err != nil {
 		t.Fatalf("StartChild() unexpected error: %v", err)
 	}
-	pid := handle.(*hostChildHandle).cmd.Process.Pid
-	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	h := handle.(*hostChildHandle)
+	t.Cleanup(func() { _ = h.proc.Kill(); _, _ = h.proc.Wait() })
 
 	abandon := make(chan struct{})
 	waited := make(chan error, 1)
 	go func() {
-		_, err := handle.Wait(abandon)
+		_, err := h.Wait(abandon)
 		waited <- err
 	}()
 	select {
 	case <-firstRecord:
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for first record")
+		t.Fatal("timed out waiting for the first record")
 	}
 	close(abandon)
 	select {
@@ -3388,18 +3383,144 @@ sleep 30`, half)
 	case <-time.After(5 * time.Second):
 		t.Fatal("abandoned Wait did not return")
 	}
+	return h
+}
 
-	st := handle.State()
-	if st.PID != pid {
-		t.Errorf("State().PID = %d, want %d", st.PID, pid)
+// fdOf returns f's descriptor number without Fd(), which would switch it to
+// blocking mode.
+func fdOf(t *testing.T, f *os.File) int {
+	t.Helper()
+	rc, err := f.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
 	}
-	if st.ReportFD < 0 {
-		t.Errorf("State().ReportFD = %d, want a non-negative fd", st.ReportFD)
+	fd := -1
+	if err := rc.Control(func(u uintptr) { fd = int(u) }); err != nil {
+		t.Fatal(err)
 	}
-	if string(st.Partial) != half {
-		t.Errorf("State().Partial = %q, want %q", st.Partial, half)
+	return fd
+}
+
+// inheritableFDs lists this process's open descriptors lacking FD_CLOEXEC.
+func inheritableFDs(t *testing.T) []int {
+	t.Helper()
+	d, err := os.Open("/proc/self/fd")
+	if err != nil {
+		t.Skipf("no /proc/self/fd: %v", err)
+	}
+	names, err := d.Readdirnames(-1)
+	_ = d.Close() // closed first so its own descriptor reads as EBADF below and drops out
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fds []int
+	for _, n := range names {
+		fd, err := strconv.Atoi(n)
+		if err != nil {
+			continue
+		}
+		flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFD), 0)
+		if errno != 0 {
+			continue
+		}
+		if flags&syscall.FD_CLOEXEC == 0 {
+			fds = append(fds, fd)
+		}
+	}
+	slices.Sort(fds)
+	return fds
+}
+
+// TestStartChild_StateAfterAbandonNamesChild pins what a handoff reads off an
+// abandoned handle (ADR 0063): the child's pid, its report pipe's fd, and the
+// report line the abandoned read had only half received.
+func TestStartChild_StateAfterAbandonNamesChild(t *testing.T) {
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	h := startAbandonedChild(t, r)
+
+	st := h.State()
+	if st.PID != h.proc.Pid {
+		t.Errorf("State().PID = %d, want %d", st.PID, h.proc.Pid)
+	}
+	if want := fdOf(t, h.reportRead); st.ReportFD != want {
+		t.Errorf("State().ReportFD = %d, want %d", st.ReportFD, want)
+	}
+	if want := `{"event":"settled","issue":"101",`; string(st.Partial) != want {
+		t.Errorf("State().Partial = %q, want %q", st.Partial, want)
 	}
 	if st.Discarding {
 		t.Error("State().Discarding = true, want false")
+	}
+}
+
+func TestHostChildHandle_HandOffDescribesTheAbandonedChild(t *testing.T) {
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	h := startAbandonedChild(t, r)
+
+	got, err := h.HandOff()
+	if err != nil {
+		t.Fatalf("HandOff() unexpected error: %v", err)
+	}
+	want := daemon.ChildState{
+		PID:      h.proc.Pid,
+		ReportFD: fdOf(t, h.reportRead),
+		Partial:  []byte(`{"event":"settled","issue":"101",`),
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("HandOff() = %+v, want %+v", got, want)
+	}
+	if err := reclaimDescriptor(got.ReportFD); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestHandOff_ClearsCloseOnExecOnlyOnNamedDescriptors pins that a hand-off
+// leaves exactly the descriptors it names inheritable — each child's report
+// read end, the instance lock and the handoff document — and that reclaiming
+// them restores the starting set.
+func TestHandOff_ClearsCloseOnExecOnlyOnNamedDescriptors(t *testing.T) {
+	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+	lock, err := os.CreateTemp(t.TempDir(), "lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	docRead, docWrite, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docRead.Close(); _ = docWrite.Close() })
+	a, b := startAbandonedChild(t, r), startAbandonedChild(t, r)
+
+	before := inheritableFDs(t)
+
+	var named []int
+	for _, h := range []*hostChildHandle{a, b} {
+		st, err := h.HandOff()
+		if err != nil {
+			t.Fatalf("HandOff() unexpected error: %v", err)
+		}
+		named = append(named, st.ReportFD)
+	}
+	for _, f := range []*os.File{lock, docRead} {
+		fd, err := handOffFile(f)
+		if err != nil {
+			t.Fatalf("handOffFile() unexpected error: %v", err)
+		}
+		named = append(named, fd)
+	}
+	want := append(slices.Clone(before), named...)
+	slices.Sort(want)
+	if got := inheritableFDs(t); !slices.Equal(got, want) {
+		t.Errorf("inheritable descriptors after hand-off = %v, want %v (before %v + named %v)", got, want, before, named)
+	}
+
+	for _, fd := range named {
+		if err := reclaimDescriptor(fd); err != nil {
+			t.Fatalf("reclaimDescriptor(%d) unexpected error: %v", fd, err)
+		}
+	}
+	if got := inheritableFDs(t); !slices.Equal(got, before) {
+		t.Errorf("inheritable descriptors after reclaim = %v, want %v", got, before)
 	}
 }

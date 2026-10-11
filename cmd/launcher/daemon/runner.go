@@ -586,7 +586,7 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 	_ = reportWrite.Close()
 
 	return &hostChildHandle{
-		cmd:        cmd,
+		proc:       cmd.Process,
 		reportRead: reportRead,
 		kind:       req.Kind,
 		onRecord:   req.OnRecord,
@@ -601,7 +601,9 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 // Abandon applies while the report pipe is open; a child closes it only on its
 // way out.
 type hostChildHandle struct {
-	cmd        *exec.Cmd
+	// proc, not an *exec.Cmd: a child a previous daemon image started has no
+	// Cmd here, only a pid.
+	proc       *os.Process
 	reportRead *os.File
 	kind       daemon.Kind
 	onRecord   func(daemon.Record)
@@ -636,7 +638,7 @@ func setReadDeadline(f *os.File, t time.Time) {
 }
 
 func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, error) {
-	stopForwarding := forwardSignals(h.cmd.Process, h.stop, h.abort, &h.sent)
+	stopForwarding := forwardSignals(h.proc, h.stop, h.abort, &h.sent)
 	defer stopForwarding()
 
 	// Abandoning interrupts the blocking pipe read with a read deadline in
@@ -675,17 +677,14 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 	// gets EPIPE instead of wedging the daemon on a pipe nobody drains.
 	_ = h.reportRead.Close()
 
-	waitErr := h.cmd.Wait()
-	if waitErr == nil {
-		return daemon.ChildResult{Exit: 0}, nil
+	state, err := h.proc.Wait()
+	if err != nil {
+		return daemon.ChildResult{}, fmt.Errorf("wait child: %w", err)
 	}
-	var exitErr *exec.ExitError
-	if errors.As(waitErr, &exitErr) {
-		// A non-zero exit is the child's own outcome, not a seam failure —
-		// daemon.Loop's Interpret is what turns it into a verdict.
-		return daemon.ChildResult{Exit: exitErr.ExitCode()}, nil
-	}
-	return daemon.ChildResult{}, fmt.Errorf("wait child: %w", waitErr)
+	// A non-zero exit is the child's own outcome, not a seam failure —
+	// daemon.Loop's Interpret is what turns it into a verdict. ExitCode is -1
+	// for a signal death.
+	return daemon.ChildResult{Exit: state.ExitCode()}, nil
 }
 
 // State reads the child's pid, its report pipe's fd and the read state a
@@ -694,7 +693,7 @@ func (h *hostChildHandle) Wait(abandon <-chan struct{}) (daemon.ChildResult, err
 // abandon on a handle that is waited on again.
 func (h *hostChildHandle) State() daemon.ChildState {
 	st := daemon.ChildState{
-		PID:        h.cmd.Process.Pid,
+		PID:        h.proc.Pid,
 		ReportFD:   -1,
 		Partial:    slices.Clone(h.reports.partial),
 		Discarding: h.reports.discarding,
@@ -708,6 +707,71 @@ func (h *hostChildHandle) State() daemon.ChildState {
 	}
 	return st
 }
+
+// HandOff describes this running child for a daemon image about to exec: its
+// pid, its report pipe's read end with close-on-exec cleared so it survives
+// the exec, and the read state a resumed Wait would have continued. Valid only
+// after a Wait returned daemon.ErrWaitAbandoned (the pipe is still open). The
+// child keeps running and this image must not Wait on the handle again; the
+// handle (so its *os.File, whose finalizer would close the descriptor) must
+// stay referenced until the exec.
+func (h *hostChildHandle) HandOff() (daemon.ChildState, error) {
+	fd, err := handOffFile(h.reportRead)
+	if err != nil {
+		return daemon.ChildState{}, fmt.Errorf("hand off report pipe: %w", err)
+	}
+	return daemon.ChildState{
+		PID:        h.proc.Pid,
+		ReportFD:   fd,
+		Partial:    slices.Clone(h.reports.partial),
+		Discarding: h.reports.discarding,
+	}, nil
+}
+
+// setCloseOnExec sets or clears FD_CLOEXEC on fd. Go opens every descriptor
+// close-on-exec, so a descriptor survives an exec only if handed off here.
+func setCloseOnExec(fd int, on bool) error {
+	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_GETFD), 0)
+	if errno != 0 {
+		return errno
+	}
+	if on {
+		flags |= syscall.FD_CLOEXEC
+	} else {
+		flags &^= syscall.FD_CLOEXEC
+	}
+	if _, _, errno := syscall.Syscall(syscall.SYS_FCNTL, uintptr(fd), uintptr(syscall.F_SETFD), flags); errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+// handOffFile clears close-on-exec on f so it survives an exec, and returns its
+// descriptor number. It reads the descriptor through SyscallConn, not f.Fd():
+// Fd switches the file to blocking mode, which would break the
+// SetReadDeadline-based abandon if the exec fails and this image carries on.
+func handOffFile(f *os.File) (int, error) {
+	rc, err := f.SyscallConn()
+	if err != nil {
+		return 0, err
+	}
+	fd := -1
+	var clearErr error
+	if err := rc.Control(func(u uintptr) {
+		fd = int(u)
+		clearErr = setCloseOnExec(fd, false)
+	}); err != nil {
+		return 0, err
+	}
+	if clearErr != nil {
+		return 0, clearErr
+	}
+	return fd, nil
+}
+
+// reclaimDescriptor re-marks a handed-off descriptor close-on-exec, the
+// re-attaching image's half of handOffFile.
+func reclaimDescriptor(fd int) error { return setCloseOnExec(fd, true) }
 
 // openChildLog opens (creating it and its parent directories) the Child log
 // for appending.
