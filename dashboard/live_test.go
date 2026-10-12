@@ -186,6 +186,15 @@ func TestEventsStatusRewriteSendsFrame(t *testing.T) {
 	st.quiet(t)
 }
 
+func TestEventsSelfUpdatePhaseChangeSendsFrame(t *testing.T) {
+	st := openStream(t, withSelfUpdate(statusJSON(t, "working", "", noSlots), "building", selfRev), "")
+	st.expect(t, "status", "rebuilding")
+	st.expect(t, "history")
+	st.writeStatus(t, withSelfUpdate(statusJSON(t, "working", "", noSlots), "waiting", selfRev))
+	st.expect(t, "status", "waiting to restart", "<code>0123456789ab</code>")
+	st.quiet(t)
+}
+
 func TestEventsAppendedEntrySendsOneFrame(t *testing.T) {
 	st := openStream(t, statusJSON(t, "working", "", noSlots), evLine("2026-10-07T11:00:00Z", "child_start"))
 	st.expect(t, "status")

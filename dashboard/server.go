@@ -116,6 +116,12 @@ type view struct {
 	Trackers []TrackerCheck
 	Slots    []slotView
 
+	// SelfUpdate is the pill label for an in-flight self-update, empty when none
+	// is worth showing; SelfDrain marks a halt that is that update's drain.
+	SelfUpdate    string
+	SelfUpdateRev string
+	SelfDrain     bool
+
 	History    []historyEntry // newest first; shown in every mode
 	HistoryErr error          // an Events generation that exists but could not be read
 }
@@ -158,6 +164,20 @@ type slotView struct {
 	CIRunURL    string
 }
 
+// selfUpdateLabel is the pill text for a self-update phase; every other
+// phase shows no pill.
+func selfUpdateLabel(phase string) string {
+	switch phase {
+	case selfUpdateBuilding:
+		return "rebuilding"
+	case selfUpdateWaiting:
+		return "waiting to restart"
+	case selfUpdateRestarting:
+		return "restarting"
+	}
+	return ""
+}
+
 // viewFrom builds the view from one read of the status file, which a stream
 // can run on its own cached read.
 func (s *server) viewFrom(st *Status, raw []byte, err error) view {
@@ -189,6 +209,14 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		Written:  st.Time,
 		Total:    len(st.Slots),
 		Trackers: st.Trackers,
+	}
+	if su := st.SelfUpdate; su != nil {
+		v.SelfUpdate = selfUpdateLabel(su.Phase)
+		v.SelfUpdateRev = shortRev(su.Revision)
+		// An unrelated halt (breaker, operator stop) can land while the phase is
+		// built (recordHalt also resets waiting to built); only self-changed drains.
+		v.SelfDrain = v.Halted && su.Phase == selfUpdateBuilt &&
+			strings.HasPrefix(st.Reason, haltReasonSelfChanged+":")
 	}
 	if started, err := time.Parse(time.RFC3339, st.Started); err == nil {
 		d := now.Sub(started)

@@ -1,7 +1,11 @@
 {{define "reason"}}
   {{- if .Halted}}
   <section class="banner halted">
+    {{- if .SelfDrain}}
+    <strong>Pool draining for a self-update to <code>{{.SelfUpdateRev}}</code></strong>
+    {{- else}}
     <strong>Pool halted</strong>
+    {{- end}}
     <p class="reason">{{if .Reason}}{{.Reason}}{{else}}no reason published{{end}}</p>
   </section>
   {{- else if .Reason}}
@@ -15,6 +19,9 @@
   <h1>Spindrift Daemon</h1>
 {{- if .Live}}
   <span class="pill state-{{.State}}">{{.State}}</span>
+  {{- if .SelfUpdate}}
+  <span class="pill self-update">{{.SelfUpdate}}{{if .SelfUpdateRev}} <code>{{.SelfUpdateRev}}</code>{{end}}</span>
+  {{- end}}
 {{- end}}
 </header>
 <div class="sections">

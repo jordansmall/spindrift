@@ -403,3 +403,88 @@ func TestFormatDuration(t *testing.T) {
 		}
 	}
 }
+
+// withSelfUpdate adds the Daemon's optional self_update object to a status file.
+func withSelfUpdate(status, phase, rev string) string {
+	su := `"self_update":{"phase":"` + phase + `","revision":"` + rev + `"},`
+	return strings.Replace(status, `"slots":`, su+`"slots":`, 1)
+}
+
+const selfRev = "0123456789abcdef0123456789abcdef01234567"
+
+func TestSelfUpdatePill(t *testing.T) {
+	for name, tc := range map[string]struct{ state, reason, phase, label string }{
+		"building":   {"working", "", "building", "rebuilding"},
+		"waiting":    {"working", "", "waiting", "waiting to restart"},
+		"restarting": {"working", "", "restarting", "restarting"},
+		// The build continues under an unrelated halt, so the pill stays accurate.
+		"building halted": {"halted", "breaker: 3 failures", "building", "rebuilding"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := withSelfUpdate(statusJSON(t, tc.state, tc.reason, `[]`), tc.phase, selfRev)
+			_, body := get(t, &c, "/")
+			for _, want := range []string{`class="pill self-update"`, tc.label, "<code>0123456789ab</code>"} {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing %q", want)
+				}
+			}
+			if strings.Contains(body, selfRev) {
+				t.Errorf("revision not shortened")
+			}
+		})
+	}
+}
+
+func TestSelfUpdateBuiltWhileHaltedIsDrainBanner(t *testing.T) {
+	c := withSelfUpdate(statusJSON(t, "halted", "self-changed: tip moved", `[]`), "built", selfRev)
+	_, body := get(t, &c, "/")
+	for _, want := range []string{"draining for a self-update to", "<code>0123456789ab</code>", "self-changed: tip moved"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+	if strings.Contains(body, "Pool halted") {
+		t.Errorf("drain rendered as a bare halt")
+	}
+	if strings.Contains(body, `class="pill self-update"`) {
+		t.Errorf("built phase shows a pill")
+	}
+}
+
+func TestSelfUpdateBuiltUnrelatedHaltIsNotDrain(t *testing.T) {
+	c := withSelfUpdate(statusJSON(t, "halted", "breaker: 3 failures", `[]`), "built", selfRev)
+	_, body := get(t, &c, "/")
+	for _, want := range []string{"Pool halted", "breaker: 3 failures"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
+	}
+	if strings.Contains(body, "draining") {
+		t.Errorf("unrelated halt rendered as a self-update drain")
+	}
+}
+
+func TestSelfUpdateNoPillOrDrain(t *testing.T) {
+	for name, tc := range map[string]struct {
+		c      string
+		halted bool
+	}{
+		"built not halted": {withSelfUpdate(statusJSON(t, "working", "", `[]`), "built", selfRev), false},
+		"blocked":          {withSelfUpdate(statusJSON(t, "working", "", `[]`), "blocked", selfRev), false},
+		"blocked halted":   {withSelfUpdate(statusJSON(t, "halted", "boom", `[]`), "blocked", selfRev), true},
+		"unknown":          {withSelfUpdate(statusJSON(t, "working", "", `[]`), "mystery", selfRev), false},
+		"absent":           {statusJSON(t, "working", "", `[]`), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, body := get(t, &tc.c, "/")
+			for _, bad := range []string{"self-update", "rebuilding", "waiting to restart", "restarting", "draining"} {
+				if strings.Contains(body, bad) {
+					t.Errorf("body contains %q", bad)
+				}
+			}
+			if tc.halted && !strings.Contains(body, "Pool halted") {
+				t.Errorf("plain halt lost its banner")
+			}
+		})
+	}
+}
