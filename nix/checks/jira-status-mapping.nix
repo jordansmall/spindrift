@@ -235,17 +235,27 @@ in
     assert assertMsg (!stringResult.success) "parse must throw on a bare JSON string";
     pkgs.runCommand "jira-status-mapping-parse-rejects-non-object" { } "touch $out";
 
-  # Known divergence from the Go side (see lib/jira-status-mapping.nix's
-  # header): validate checks keys only, not value types, so a non-string value
-  # survives here even though Go's map[string]string unmarshal would reject
-  # it. Pinned so a tightened check cannot change this without updating that
-  # caveat too.
-  jira-status-mapping-parse-allows-non-string-value =
+  # Go decodes into map[string]string, so any value that is not a JSON string
+  # or null fails at launcher startup, before the key loop runs.
+  jira-status-mapping-parse-rejects-non-string-value =
     let
-      out = jsm.parse (builtins.toJSON { complete = 5; });
+      rejects = v: !(builtins.tryEval (jsm.parse (builtins.toJSON v))).success;
     in
-    assert assertMsg (
-      out == { complete = 5; }
-    ) "parse must pass a non-string value through unchanged (known Go divergence)";
-    pkgs.runCommand "jira-status-mapping-parse-allows-non-string-value" { } "touch $out";
+    assert assertMsg (rejects { complete = 5; }) "parse must throw on a number value";
+    assert assertMsg (rejects { complete = true; }) "parse must throw on a boolean value";
+    assert assertMsg (rejects {
+      failed = {
+        a = 1;
+      };
+    }) "parse must throw on an object value";
+    assert assertMsg (rejects { complete = [ "x" ]; }) "parse must throw on an array value";
+    pkgs.runCommand "jira-status-mapping-parse-rejects-non-string-value" { } "touch $out";
+
+  # Go leaves a null value as an empty status without error.
+  jira-status-mapping-parse-allows-null-value =
+    let
+      out = jsm.parse (builtins.toJSON { complete = null; });
+    in
+    assert assertMsg (out == { complete = null; }) "parse must pass a null value through unchanged";
+    pkgs.runCommand "jira-status-mapping-parse-allows-null-value" { } "touch $out";
 }
