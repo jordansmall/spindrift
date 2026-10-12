@@ -185,6 +185,18 @@ func TestParseFlags_FlagWinsOverEnv(t *testing.T) {
 	}
 }
 
+// An explicit empty --merge-guard-paths disables the guard (#5077): it must
+// resolve to "" through the real schema table, not collapse into the default.
+func TestParseFlags_MergeGuardPathsEmptyDisablesGuard(t *testing.T) {
+	t.Setenv("MERGE_GUARD_PATHS", "foo/**")
+	if _, err := parseFlags([]string{"--merge-guard-paths", ""}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := loadConfig().mergeGuardPaths; got != "" {
+		t.Errorf("mergeGuardPaths = %q, want empty (guard disabled)", got)
+	}
+}
+
 func TestParseFlags_RepoSlugFlagWinsOverEnv(t *testing.T) {
 	t.Setenv("REPO_SLUG", "env-org/env-repo")
 	_, err := parseFlags([]string{"--repo-slug", "flag-org/flag-repo"})
