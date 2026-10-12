@@ -82,6 +82,7 @@ let
         "Built"
         "Waiting"
         "Restarting"
+        "Blocked"
       ];
 
   # Matches a declaration line only (`const x = v`, in-block `x = v`, or typed
