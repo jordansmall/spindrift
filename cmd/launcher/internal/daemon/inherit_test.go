@@ -375,6 +375,36 @@ func TestInvalidHandoffHaltsInvalidConfigWithoutInheriting(t *testing.T) {
 	}
 }
 
+// TestConfigValidateNamesTheHandoffThatDoesNotFit pins Validate as the
+// single check mainRun runs before a resumed image emits anything: the error
+// text is the halt detail Loop would report.
+func TestConfigValidateNamesTheHandoffThatDoesNotFit(t *testing.T) {
+	badKind := inheritedWork(0, 100)
+	badKind.Kind = KindOf(dispatchkind.Research)
+	for name, tc := range map[string]struct {
+		h    *Handoff
+		want string
+	}{
+		"slot beyond the pool": {handoffOf(inheritedWork(2, 100)), "handoff slot 2 is outside the pool's 2 slots"},
+		"kind not in kinds":    {handoffOf(badKind), "which is not in kinds"},
+	} {
+		cfg := testConfig(2)
+		cfg.Handoff = tc.h
+		err := cfg.Validate()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: Validate = %v, want an error containing %q", name, err, tc.want)
+		}
+	}
+	if err := testConfig(2).Validate(); err != nil {
+		t.Errorf("Validate on a fitting config = %v, want nil", err)
+	}
+	cfg := testConfig(2)
+	cfg.Slots = 0
+	if err := cfg.Validate(); err == nil || err.Error() != "slots must be a positive integer, got 0" {
+		t.Errorf("Validate with zero slots = %v", err)
+	}
+}
+
 // TestInheritedLeadSlotDoesNotStrandSiblings: slot 0 (the pre-assigned baton
 // leader) is inherited and never finishes, yet slot 1 still starts a child.
 func TestInheritedLeadSlotDoesNotStrandSiblings(t *testing.T) {
