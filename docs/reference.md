@@ -6483,11 +6483,14 @@ there. Treat them as data: never feed them to an agent or a shell unfenced,
 and do not rely on them for cohort or outcome decisions.
 
 With an explicit `--by` (`role` included), `--json` prints one line per
-(group, Record) instead, each carrying a top-level `"group"` field and, for a
-per-Pass dimension, only that group's Passes. Without `--by` it is unchanged.
-With several dimensions `"group"` is still one string, the keys in `--by` order
-joined by `, ` (such as `"claude, implement"`); a key that itself contains `, `
-(a knob value, say) makes that string ambiguous. For any `--by` but `role`
+(group, Record) instead, each carrying top-level `"group"` and `"group_keys"`
+fields and, for a per-Pass dimension, only that group's Passes. Without `--by`
+it is unchanged. `"group_keys"` is the group's keys as an array of strings in
+`--by` order (such as `["claude", "implement"]`; one element for a single
+dimension), with the same `(none)`/`(empty)` placeholders as the text output.
+`"group"` is those keys joined by `, ` (such as `"claude, implement"`), a
+display label only: a key that itself contains `, ` (a knob value, say) makes
+it ambiguous, so parse `"group_keys"`. For any `--by` but `role`
 alone, the text output is, per group, a header line followed by that group's
 own summary line and role table. Groups come in order of first claim time,
 except that a `role` level follows pipeline order, with `(none)` last at each
