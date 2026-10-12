@@ -1080,13 +1080,6 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
 
-	// After the preflight, so a refused start never replaces the rollback
-	// target's root. A fresh context: a stop latched meanwhile cancels
-	// preflightCtx, and the roots must still end up right for the next image.
-	rootCtx, cancelRoot := context.WithTimeout(context.Background(), selfRootTimeout)
-	r.rootSelf(rootCtx, selfProgram, stderr)
-	cancelRoot()
-
 	cfg := daemon.Config{
 		Kinds:               args.Kinds,
 		ResearchReservation: reservation,
@@ -1112,6 +1105,31 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 			cfg.SelfUpdate = daemon.SelfUpdate{Phase: daemon.SelfUpdateBlocked, Revision: res.handoff.Revision, Reason: res.handoff.Reason}
 		}
 	}
+
+	// Every pool-config check runs here, fresh starts included, so each
+	// config-invalid halt from this binary goes through finish (which also
+	// prints the stderr line); Loop's invalidConfig is reached only by
+	// embedders and tests. A resumed image whose config cannot take the
+	// handoff (a handed-off kind the new build no longer runs, MAX_PARALLEL
+	// below a handed-off slot) refuses like a failed preflight: before any
+	// halt event, so a rolled-back image leaves none, and before rootSelf.
+	// With no rollback it halts config-invalid and the deferred wait-out
+	// drains the inherited children.
+	if err := cfg.Validate(); err != nil {
+		h := daemon.Halt{Class: daemon.HaltInvalidConfig, Detail: err.Error()}
+		if tryRollBack(h.Diagnostic()) {
+			return 0
+		}
+		return finish(stderr, em, statusWriter, args.Kinds, h)
+	}
+
+	// After the preflight and config check, so a refused start never replaces
+	// the rollback target's root. A fresh context: a stop latched meanwhile
+	// cancels preflightCtx, and the roots must still end up right for the next
+	// image.
+	rootCtx, cancelRoot := context.WithTimeout(context.Background(), selfRootTimeout)
+	r.rootSelf(rootCtx, selfProgram, stderr)
+	cancelRoot()
 
 	var code int
 	code, handedOff = superviseLoop(cfg, r, em, clk, lock, selfProgram)
