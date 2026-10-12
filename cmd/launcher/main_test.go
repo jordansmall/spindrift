@@ -31,6 +31,7 @@ import (
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/settle"
 )
 
 // A bare `spindrift` prints help and exits 0 rather than falling through to
@@ -3144,51 +3145,137 @@ func TestNewCodeForge_GitReadOnly_ReturnsPlainAdapter(t *testing.T) {
 	}
 }
 
-// CODE_FORGE=github keeps the "branches pushed and PRs opened" wording, since
-// it is the only forge that opens PRs (issue #1733).
-func TestDispatchCompletionBanner_Github(t *testing.T) {
-	c := minimalValidConfig()
-	c.codeForge = "github"
-	c.repoSlug = "owner/repo"
+// The all-delivered wording per forge is unchanged by settled outcomes:
+// github is the only forge whose line claims PRs (issue #1733), git and
+// forgejo share the "branches pushed" wording, and local lands host-side onto
+// the Accumulation repo's Integration branch (ADR 0033), naming no single
+// branch since each seam resolves its own from its own parent frontmatter
+// (issue #1734).
+func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
+	complete := forge.Complete.String()
+	tests := []struct {
+		name      string
+		codeForge string
+		outcomes  []settle.DispatchOutcome
+		want      string
+	}{
+		{
+			"github", "github",
+			[]settle.DispatchOutcome{
+				{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/1"},
+				{Key: dispatchkey.Issue("12"), State: complete, Reason: settle.ReasonManual, PRURL: "https://github.com/owner/repo/pull/2"},
+			},
+			"==> all agents finished — branches pushed and PRs opened on owner/repo.\n",
+		},
+		{
+			"git", "git",
+			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged}},
+			"==> all agents finished — branches pushed on owner/repo.\n",
+		},
+		{
+			"forgejo", "forgejo",
+			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged}},
+			"==> all agents finished — branches pushed on owner/repo.\n",
+		},
+		{
+			"local", "local",
+			[]settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged}},
+			"==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.codeForge = tc.codeForge
+			c.repoSlug = "owner/repo"
+			c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+			c.mergeMode = "immediate"
 
-	got := dispatchCompletionBanner(c)
-
-	want := "==> all agents finished — branches pushed and PRs opened on owner/repo.\n"
-	if got != want {
-		t.Errorf("dispatchCompletionBanner(github) = %q, want %q", got, want)
+			if got := dispatchCompletionBanner(c, tc.outcomes); got != tc.want {
+				t.Errorf("dispatchCompletionBanner(%s) = %q, want %q", tc.codeForge, got, tc.want)
+			}
+		})
 	}
 }
 
-// CODE_FORGE=git reports branches pushed but drops the PR claim: the git
-// adapter is push-only and never opens a PR (issue #1733).
-func TestDispatchCompletionBanner_Git(t *testing.T) {
-	c := minimalValidConfig()
-	c.codeForge = "git"
-	c.repoSlug = "owner/repo"
-	c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
-
-	got := dispatchCompletionBanner(c)
-
-	want := "==> all agents finished — branches pushed on owner/repo.\n"
-	if got != want {
-		t.Errorf("dispatchCompletionBanner(git) = %q, want %q", got, want)
+// mixedOutcomes is one delivered dispatch plus a representative mix of ways a
+// dispatch can fail to deliver, each shaped as settle really records it: an
+// InProgress merge-blocked
+// record with no PR (a read-only github draft-PR create failure, blockHandoff),
+// a Complete merge-blocked record with no PR (a push-only landing failure,
+// landPushOnly), relay-failed, a Failed ci-red that still has its PR open,
+// already-resolved, blocked, ambiguous, a Chore key, and an empty Reason (the
+// State stands in).
+func mixedOutcomes() []settle.DispatchOutcome {
+	complete, failed := forge.Complete.String(), forge.Failed.String()
+	return []settle.DispatchOutcome{
+		{Key: dispatchkey.Issue("11"), State: complete, Reason: settle.ReasonMerged, PRURL: "https://github.com/owner/repo/pull/11"},
+		{Key: dispatchkey.Issue("12"), State: forge.InProgress.String(), Reason: settle.ReasonMergeBlocked},
+		{Key: dispatchkey.Issue("13"), State: complete, Reason: settle.ReasonMergeBlocked},
+		{Key: dispatchkey.Issue("14"), State: failed, Reason: settle.ReasonRelayFailed},
+		{Key: dispatchkey.Issue("15"), State: failed, Reason: settle.ReasonCIRed, PRURL: "https://github.com/owner/repo/pull/15"},
+		{Key: dispatchkey.Issue("16"), State: complete, Reason: settle.ReasonAlreadyResolved},
+		{Key: dispatchkey.Issue("17"), State: failed, Reason: settle.ReasonBlocked},
+		{Key: dispatchkey.Issue("18"), State: forge.Ambiguous.String(), Reason: settle.ReasonAmbiguous},
+		{Key: dispatchkey.Chore("docs-drift"), State: complete, Reason: settle.ReasonMergeBlocked},
+		{Key: dispatchkey.Issue("19"), State: failed},
 	}
 }
 
-// CODE_FORGE=local claims neither a push nor a PR: the launcher lands seams
-// host-side onto the Accumulation repo's Integration branch (ADR 0033, issue
-// #1733). It names no single branch, since each seam resolves its own from
-// its own parent frontmatter (issue #1734), so one run may land onto several.
-func TestDispatchCompletionBanner_Local(t *testing.T) {
-	c := minimalValidConfig()
-	c.codeForge = "local"
-	c.mergeMode = "immediate"
+func TestDelivered(t *testing.T) {
+	complete, failed := forge.Complete.String(), forge.Failed.String()
+	tests := []struct {
+		name string
+		o    settle.DispatchOutcome
+		want bool
+	}{
+		{"merged with PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonMerged, PRURL: "u"}, true},
+		{"merge-blocked without PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonMergeBlocked}, false},
+		{"merge-blocked with PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonMergeBlocked, PRURL: "u"}, true},
+		{"already-resolved", settle.DispatchOutcome{State: complete, Reason: settle.ReasonAlreadyResolved}, false},
+		{"relay-failed", settle.DispatchOutcome{State: failed, Reason: settle.ReasonRelayFailed}, false},
+		{"ci-red with PR", settle.DispatchOutcome{State: failed, Reason: settle.ReasonCIRed, PRURL: "u"}, false},
+		{"push-only manual without PR", settle.DispatchOutcome{State: complete, Reason: settle.ReasonManual}, true},
+		{"in-progress merge-blocked", settle.DispatchOutcome{State: forge.InProgress.String(), Reason: settle.ReasonMergeBlocked}, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delivered(tc.o); got != tc.want {
+				t.Errorf("delivered(%+v) = %v, want %v", tc.o, got, tc.want)
+			}
+		})
+	}
+}
 
-	got := dispatchCompletionBanner(c)
+// When any dispatch did not deliver, every forge prints the same neutral line
+// naming those dispatches and their status, claiming nothing about what
+// failed: a merge-blocked dispatch may have pushed its branch (a git merge
+// failure, a forgejo draft-create failure), so "pushed no branch" could be
+// false (issue #5145).
+func TestDispatchCompletionBanner_NamesDispatchesThatDidNotDeliver(t *testing.T) {
+	want := "==> all agents finished — 9 of 10 dispatches did not deliver: " +
+		"#12 (merge-blocked), #13 (merge-blocked), #14 (relay-failed), #15 (ci-red), " +
+		"#16 (already-resolved), #17 (blocked), #18 (ambiguous), " +
+		"butler-docs-drift (merge-blocked), #19 (failed).\n"
+	for _, codeForge := range []string{"github", "git", "forgejo", "local"} {
+		t.Run(codeForge, func(t *testing.T) {
+			c := minimalValidConfig()
+			c.codeForge = codeForge
+			c.repoSlug = "owner/repo"
+			c.codeForgeRemoteURL = "https://git.example.com/owner/repo.git"
+			c.mergeMode = "immediate"
 
-	want := "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
-	if got != want {
-		t.Errorf("dispatchCompletionBanner(local) = %q, want %q", got, want)
+			got := dispatchCompletionBanner(c, mixedOutcomes())
+
+			if got != want {
+				t.Errorf("dispatchCompletionBanner(%s, mixed) = %q, want %q", codeForge, got, want)
+			}
+			for _, claim := range []string{"PRs opened", "branches pushed", "pushed no branch"} {
+				if strings.Contains(got, claim) {
+					t.Errorf("dispatchCompletionBanner(%s, mixed) = %q, must not claim %q", codeForge, got, claim)
+				}
+			}
+		})
 	}
 }
 
