@@ -676,18 +676,53 @@ func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker)
 }
 
 // dispatchCompletionBanner returns the forge-aware end-of-dispatch line, so
-// the single/wave and continuous paths share one wording (issue #1733).
-func dispatchCompletionBanner(c config) string {
+// the single/wave and continuous paths share one wording (issue #1733). When
+// any settled dispatch did not deliver, it names those dispatches in a
+// forge-neutral line: a merge-blocked dispatch may or may not have pushed a
+// branch or opened a PR, so only its status says what happened (issue #5145).
+// Dispatches the tally never sees (reclaimed mid-run or abandoned) are not
+// counted.
+func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) string {
+	var allLandedLine string
 	switch c.codeForge {
 	case "git", "forgejo":
-		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
+		allLandedLine = fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
 	case "local":
-		return "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
+		allLandedLine = "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
 	default:
 		// validate restricts c.codeForge to git, local, forgejo, or github, so
 		// a future forge fails loud there rather than inheriting this wording.
-		return fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+		allLandedLine = fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
 	}
+	var missed []string
+	for _, o := range outcomes {
+		if delivered(o) {
+			continue
+		}
+		label := o.Key.String()
+		if !o.Key.IsChore() {
+			label = "#" + label
+		}
+		status := o.Reason
+		if status == "" {
+			status = o.State
+		}
+		missed = append(missed, fmt.Sprintf("%s (%s)", label, status))
+	}
+	if len(missed) == 0 {
+		return allLandedLine
+	}
+	return fmt.Sprintf("==> all agents finished — %d of %d dispatches did not deliver: %s.\n", len(missed), len(outcomes), strings.Join(missed, ", "))
+}
+
+// delivered reports whether o earns the all-delivered banner line. Only a
+// Complete counts, so a Failed dispatch with its PR open (ci-red etc.) is still
+// named; a merge-blocked Complete counts only if its PR opened (push-only
+// forges never latch a PR URL, so their clean Completes count). An
+// already-resolved Complete opened nothing, so it is named too.
+func delivered(o settle.DispatchOutcome) bool {
+	return o.State == forge.Complete.String() && o.Reason != settle.ReasonAlreadyResolved &&
+		(o.PRURL != "" || o.Reason != settle.ReasonMergeBlocked)
 }
 
 // absCodeForgeAccumulationRepoDir resolves the Accumulation repo dir (ADR
@@ -1714,11 +1749,13 @@ func run(lc *launchContext, stdout, stderr io.Writer) error {
 	cfg.Abort = abortCh
 	claimer := waves.NewLabelClaimer(it, c.label, c.inProgressLabel)
 	terminated := registryFor(s)
+	tally := &settle.Tally{}
+	defer settle.InstallTally(tally)()
 	if err := waves.Dispatch(cfg, &waves.Session{Terminated: terminated}, it, cf, pwd, f, s, in, claimer); err != nil {
 		return err
 	}
 
-	fmt.Fprint(stdout, dispatchCompletionBanner(c))
+	fmt.Fprint(stdout, dispatchCompletionBanner(c, tally.Outcomes()))
 	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout)
 }
 
@@ -1929,6 +1966,8 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 	}
 	queue := waves.NewHeadlessQueue(discover, waves.NewLabelClaimer(it, c.label, c.inProgressLabel), pending, pwd)
 	terminated := registryFor(s)
+	tally := &settle.Tally{}
+	defer settle.InstallTally(tally)()
 	if err := waves.RunContinuous(cfg, &waves.Session{Terminated: terminated}, it, cf, f, s, queue, fresh); err != nil {
 		// No reachable path leaves both err and firstQueryErr non-nil: #2780
 		// proved a genuine first-discover error cannot reach a later staleness
@@ -1978,7 +2017,7 @@ func runContinuousDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		}
 		return err
 	}
-	fmt.Fprint(stdout, dispatchCompletionBanner(c))
+	fmt.Fprint(stdout, dispatchCompletionBanner(c, tally.Outcomes()))
 	return reconcileAfterDispatch(c, it, cf, lp, caps, pwd, stdout)
 }
 
