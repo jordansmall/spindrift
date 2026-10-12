@@ -8200,11 +8200,13 @@ handler exists. The flag is refused at startup, exiting 1, anywhere but
 linux amd64/arm64 (for one, a macOS host), where the exec path is not
 built.
 
-*Rollback.* A resumed image that refuses to start, because its config does
-not validate or its startup preflight (`doctor`) fails, does not drain what
-it inherited. Once it has re-attached the children it `exec`s back to the
-previous build (the handoff's `from_path`, still rooted, below) with the
-same lock, children and handoff document, now marked as a rollback. The
+*Rollback.* A resumed image that refuses to start, because its config
+does not validate (including a handoff it cannot take: a handed-off slot
+past `MAX_PARALLEL`, or a handed-off kind it no longer runs) or its
+startup preflight (`doctor`) fails, does not drain what it inherited.
+Once it has re-attached the children it `exec`s back to the previous
+build (the handoff's `from_path`, still rooted, below) with the same
+lock, children and handoff document, now marked as a rollback. The
 build it lands on emits `self_update` phase `rolled-back` instead of
 `handoff`, with the refusal as `reason`, and starts with its self-update
 blocked at the refused revision (the status file shows `blocked`), so
