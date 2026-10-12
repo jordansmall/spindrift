@@ -280,6 +280,14 @@ let
       fragment = "filer-label-relay-butler.md";
       var = "FILER_LABEL_RELAY_BUTLER_STEP";
     }
+    # The records-scoped Chore's cite/metric hand-off (issue #5008): fragments
+    # do not nest, so this is its own row spliced right after the row above.
+    # CHORE_INPUT is only ever forwarded to a butler run, so it alone gates it.
+    {
+      gate = "CHORE_INPUT";
+      fragment = "filer-label-relay-butler-records.md";
+      var = "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP";
+    }
     {
       gate = "FILER_FILE_DIRECT_GH";
       fragment = "filer-file-direct.md";

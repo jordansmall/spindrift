@@ -17,7 +17,7 @@ issue number alone — research never opens a PR; a butler delegation (ADR
 
 Steps:
 
-${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}${FILER_LABEL_RELAY_BUTLER_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
+${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_STEP}${FILER_LABEL_RELAY_RESEARCH_STEP}${FILER_LABEL_RELAY_BUTLER_STEP}${FILER_LABEL_RELAY_BUTLER_RECORDS_STEP}2. Dedup — a finding must not already be tracked, or already dismissed:
    - Dedup the batch against itself first: two findings sharing a site key,
      or naming the same symbol, are one finding — file it once. The host
      catches only exact keys and overlapping line ranges, so one defect

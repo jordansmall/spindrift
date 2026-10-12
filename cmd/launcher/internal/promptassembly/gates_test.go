@@ -545,3 +545,23 @@ func TestGatesChorePatchClasses(t *testing.T) {
 		})
 	}
 }
+
+func TestGatesChoreInput(t *testing.T) {
+	cases := []struct {
+		name       string
+		choreInput string
+		want       bool
+	}{
+		{name: "unset", choreInput: "", want: false},
+		{name: "set", choreInput: "# Tuning digest", want: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := Gates(Env{ChoreInput: tc.choreInput})
+			if got["CHORE_INPUT"] != tc.want {
+				t.Errorf("Gates(ChoreInput=%q)[\"CHORE_INPUT\"] = %v, want %v", tc.choreInput, got["CHORE_INPUT"], tc.want)
+			}
+		})
+	}
+}

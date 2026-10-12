@@ -96,5 +96,8 @@ func Gates(e Env) map[string]bool {
 	// Same presence-is-the-gate shape (ADR 0057, issue #4073).
 	g["CHORE_PATCH_CLASSES"] = e.ChorePatchClasses != ""
 
+	// Same shape; set only for a records-scoped Chore (issue #5008).
+	g["CHORE_INPUT"] = e.ChoreInput != ""
+
 	return g
 }

@@ -163,6 +163,11 @@
     "var": "FILER_LABEL_RELAY_BUTLER_STEP"
   },
   {
+    "gate": "CHORE_INPUT",
+    "fragment": "filer-label-relay-butler-records.md",
+    "var": "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP"
+  },
+  {
     "gate": "FILER_FILE_DIRECT_GH",
     "fragment": "filer-file-direct.md",
     "var": "FILER_FILE_DIRECT_STEP"
