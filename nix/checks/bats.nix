@@ -5,7 +5,7 @@
   ...
 }:
 let
-  inherit (fixtures) batsHarness;
+  inherit (fixtures) batsHarness multiDriverBatsHarness;
 
   # Issue #2648 slice 1. `batsShards` is threaded in via `common`
   # (nix/checks/default.nix) rather than imported here, so its directory scan
@@ -83,6 +83,7 @@ let
     # (batsHarness), since the real `gh` is pinned into its runtimeInputs
     # PATH and would otherwise shadow a PATH-injected fake.
     SPINDRIFT_CMD = "${batsHarness.spindrift}/bin/spindrift";
+    SPINDRIFT_MULTI_DRIVER_CMD = "${multiDriverBatsHarness.spindrift}/bin/spindrift";
   };
 
   # Shared by the bats-shard-N derivations: stage a writable copy of tests/,

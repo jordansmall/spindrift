@@ -102,6 +102,9 @@
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
   # to the Go launcher as DRIVER (host-side half). "claude" and "opencode".
   driver ? "claude",
+  # Set by lib/flakeModule.nix when more than one Driver is declared (ADR 0064,
+  # issue #5053): the wrapper then layers harness.<driver>.env over harness.env.
+  multiDriver ? false,
   # Fallback Linux builder for a host that cannot realize the Linux image
   # itself. Fully qualified so podman needs no default registry, and pinned by
   # manifest-list digest: this container runs with the consumer tree
@@ -182,6 +185,7 @@ let
   # scope. Generators below derive all per-knob output from this registry, so
   # no per-knob lines appear anywhere else in this file.
   schema = import ./env-schema.nix;
+  driverMap = import ./driver-map.nix;
 
   # Single source of truth for the completion renderers' subcommand candidate
   # lists (issues #1575/#1577) and the man page SUBCOMMANDS section below.
@@ -1482,14 +1486,56 @@ let
   # (secrets, gitignored) from $PWD, since the harness is a store path with no
   # working tree. Knobs and artifacts flow through the --input
   # document instead (ADR 0020), so this wrapper bakes nothing per-knob.
-  runShellBody = ''
-    if [ -f "$PWD/harness.env" ]; then
-      set -a
-      # shellcheck disable=SC1091
-      . "$PWD/harness.env"
-      set +a
-    fi
-  '';
+  runShellBody =
+    let
+      # Sources `file` with every assignment exported; `pre` is extra lines run
+      # inside the existence guard, before the source.
+      sourceEnv =
+        file: pre:
+        lib.concatStringsSep "\n" (
+          [ ''if [ -f "${file}" ]; then'' ]
+          ++ map (l: "  " + l) (
+            pre
+            ++ [
+              "set -a"
+              "# shellcheck disable=SC1091"
+              ''. "${file}"''
+              "set +a"
+            ]
+          )
+          ++ [ "fi" ]
+        )
+        + "\n";
+
+      driverValuedEnvNames = map (k: schema.${k}.env) driverMap.driverValued.env;
+
+      # A Driver-valued knob in harness.env still applies, to every Driver; it
+      # belongs in harness.${driver}.env. Scans for NAME=, NAME+=, and the
+      # export/readonly/declare forms, warning once per knob.
+      warnDriverValued = lib.optionals (driverValuedEnvNames != [ ]) (
+        lib.splitString "\n" (
+          lib.removeSuffix "\n" ''
+            warned=" "
+            while IFS= read -r line || [ -n "$line" ]; do
+              if [[ $line =~ ^[[:space:]]*((export|readonly|declare([[:space:]]+-[[:alnum:]]+)*)[[:space:]]+)?(${lib.concatStringsSep "|" driverValuedEnvNames})\+?= ]]; then
+                knob=''${BASH_REMATCH[4]}
+                case $warned in
+                *" $knob "*) ;;
+                *)
+                  warned="$warned$knob "
+                  echo "spindrift: warning: harness.env sets $knob, a Driver-valued knob, so it applies to every Driver; set it in harness.${driver}.env instead" >&2
+                  ;;
+                esac
+              fi
+            done <"$PWD/harness.env"
+          ''
+        )
+      );
+    in
+    if !multiDriver then
+      sourceEnv "$PWD/harness.env" [ ]
+    else
+      sourceEnv "$PWD/harness.env" warnDriverValued + sourceEnv "$PWD/harness.${driver}.env" [ ];
 
   # Roff man page rendered from the schema so `man spindrift` carries the full
   # flag reference while `spindrift --help` stays concise.
