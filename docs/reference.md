@@ -5881,22 +5881,26 @@ wrapped with promptfence so it cannot close its fence, and the prompt treats it
 as data, never instructions. `## Prior findings` lists the last 10 tuning
 findings, newest first (found by the `chore=tuning` term in their dedup marker,
 so `local` and `jira` work too), each under anchor `finding:<number>` with a
-state of `open`, `closed-completed`, `closed-not-planned`, or `merged`. A merged
-finding (the latest work Record for its issue settled merged, or its PR was
-held at settle and the PR forge says a human has since merged it) shows its
-PR's merge commit as Revision plus Before, After, and Δ (after minus before)
-for its metric: the aggregate row its issue body's Evidence table cites for
-that metric (else `summary:<metric>`), recomputed over the Records settled
-after the merging Record (the held Record, for a later human merge) as After
-against those settled before it (claimed within 7 days of it) as Before. `n`
-is the after-side count, thin under `BUTLER_TUNING_MIN_SAMPLE`; other states
-carry no Δ. No settle time is stored, so a Dispatch claimed before the merge
-but settled after it counts as after. Closed-not-planned is told apart on the
-GitHub, Jira, and `local` trackers (`Issue.ClosedNotPlanned`); on Forgejo a
-not-planned close renders `closed-completed`. The tuning Chore's own butler
-Records count in the window like any other kind's, so it can flag its own cost
-as `cost-waste`. A `finding:` anchor is not an aggregate row and never counts
-toward the sample floor.
+state of `open`, `closed-completed`, `closed-not-planned`, `merged`, or
+`merged-reopened`. A merged finding (the latest work Record for its issue
+settled merged, or its PR was held at settle and the PR forge says a human has
+since merged it) shows its PR's merge commit as Revision plus Before, After,
+and Δ (after minus before) for its metric: the aggregate row its issue body's
+Evidence table cites for that metric (else `summary:<metric>`), recomputed over
+the Records settled after the merging Record (the held Record, for a later
+human merge) as After against those settled before it (claimed within 7 days
+of it) as Before. `n` is the after-side count, thin under
+`BUTLER_TUNING_MIN_SAMPLE`; other states carry no Δ. A merged finding whose
+issue was reopened after it closed (GitHub only, from the issue's `REOPENED`
+state reason) shows `merged-reopened` instead, with the same Revision and Δ; a
+reopened finding that never merged shows `open`. No settle time is stored, so a
+Dispatch claimed before the merge but settled after it counts as after.
+Closed-not-planned is told apart on the GitHub, Jira, and `local` trackers
+(`Issue.ClosedNotPlanned`); on Forgejo a not-planned close renders
+`closed-completed`. The tuning Chore's own butler Records count in the window
+like any other kind's, so it can flag its own cost as `cost-waste`. A
+`finding:` anchor is not an aggregate row and never counts toward the sample
+floor.
 `BUTLER_TUNING_DIGEST_BYTES` (schema key
 `butlerTuningDigestBytes`, default `49152`) caps the digest: over it, Evidence
 items drop first, then Outliers (cost outliers, then failures once those are

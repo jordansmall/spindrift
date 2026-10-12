@@ -25,6 +25,9 @@ type Prior struct {
 	// Open is the issue's state; a closed one is closed-not-planned when
 	// NotPlanned, else closed-completed.
 	Open, NotPlanned bool
+	// Reopened marks an open issue a human reopened after it closed. Only some
+	// trackers report it; elsewhere it stays false.
+	Reopened bool
 	// Metric is the finding's metric slug.
 	Metric string
 	// Body is the issue body, read only for the anchors its Evidence table cites.
@@ -49,7 +52,7 @@ func priorFindings(prior []Prior, records []dispatchrecord.Record, minSample int
 	list := slices.SortedFunc(maps.Values(byNumber), func(a, b Prior) int { return -compareNumbers(a.Number, b.Number) })
 	list = list[:min(len(list), PriorFindingsN)]
 
-	s := section{noun: "prior findings", head: fmt.Sprintf("\n"+priorHeading+"\n\nThe last %d tuning findings, newest first. For a merged one, Δ is the metric after "+
+	s := section{noun: "prior findings", head: fmt.Sprintf("\n"+priorHeading+"\n\nThe last %d tuning findings, newest first. For a merged or merged-reopened one, Δ is the metric after "+
 		"its closing PR's merge minus before it, over the Records settled on each side; other states carry no Δ.\n\n"+
 		"| Anchor | State | Revision | Metric | n | Before | After | Δ | Flag |\n|---|---|---|---|---|---|---|---|---|\n", len(list))}
 	settled := chore.NewSettledRecords(records, "")
@@ -58,7 +61,12 @@ func priorFindings(prior []Prior, records []dispatchrecord.Record, minSample int
 		merge, commit, isMerged := mergingRecord(settled, p.Number, merged)
 		switch {
 		case isMerged:
+			// A reopen outranks the merge as a relevance signal, but the PR did land,
+			// so the revision and Δ stay.
 			state, revision = "merged", cell(commit)
+			if p.Reopened {
+				state = "merged-reopened"
+			}
 			if r, ok := mergeRow(settled, merge, p); ok {
 				after, before, delta = r.cells()
 				n = strconv.Itoa(r.n)

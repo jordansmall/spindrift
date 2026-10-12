@@ -386,7 +386,7 @@ func (r *Runner) run(c chore.Chore, tip ledger.Tip, head string, records []dispa
 		}
 		prior := make([]tuning.Prior, 0, len(findings))
 		for _, f := range findings {
-			prior = append(prior, tuning.Prior{Number: f.Issue.Number, Open: f.Open, NotPlanned: f.Issue.ClosedNotPlanned, Metric: f.Metric, Body: f.Issue.Body})
+			prior = append(prior, tuning.Prior{Number: f.Issue.Number, Open: f.Open, NotPlanned: f.Issue.ClosedNotPlanned, Reopened: f.Issue.Reopened, Metric: f.Metric, Body: f.Issue.Body})
 		}
 		dg := tuning.Render(records, claim.State.Cursor, claimedAt,
 			tuning.Limits{MinSample: r.policy.TuningMinSample, MaxBytes: r.policy.TuningDigestBytes}, prior, r.mergeLookup(choreName))
