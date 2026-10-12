@@ -7947,7 +7947,7 @@ like a tip-fetch failure.
 Ready crossing zero, `demand_rose` a rising count (or a new `recover`
 bundle) lifting a jam, and `probe_rate_limited`, `probe_failed` and
 `probe_resumed` the probe outcome changing; `ready`, `probed_at`,
-`next_probe`, `jam_until` and `ready_at_jam` on each status `kinds`
+`next_probe`, `jam_until` and `ready_at_jam` on each status `checks[]`
 entry, and `rate_limited_until` on each `trackers` entry, show the state.
 
 The GitHub probe is usually one conditional request: `gh api` for the first
