@@ -451,7 +451,9 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	if len(body) > maxRewriteBodyBytes {
 		// Over cap: relay untouched, splicing the bytes already read in front
 		// of the unread remainder instead of buffering the rest too. The cap
-		// exists so an oversized body is never fully held in memory.
+		// exists so an oversized body is never fully held in memory. The line
+		// names the row and request path only, never the body or credential.
+		log.Printf("registryproxy: %s: body over %d bytes on /%s%s, left unchanged", row.Name, maxRewriteBodyBytes, sel.rs.prefix, sel.path)
 		resp.Body = &bodyWithClose{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), closer: resp.Body}
 		return nil
 	}
