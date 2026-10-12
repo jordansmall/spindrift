@@ -1,5 +1,17 @@
 # Migration Guide
 
+## Skill content entries must have a safe name (issue #5022)
+
+A `{ name; src; }` entry in `perSystem.spindrift.agents.skills` (or in the
+`skills` argument of a direct `mkHarness` call) now fails evaluation when its
+name is empty, `.`, `..`, or contains any character outside `[A-Za-z0-9._-]`.
+Previously such a name was spliced into the image-baking scripts unchecked.
+
+Most of those names never worked: Claude Code did not discover the skill, or
+the bake wrote outside the skills directory. A name like `foo+bar` may have
+worked by accident, though, and must now be renamed. Path and derivation
+entries are unaffected.
+
 ## Piped input no longer confirms unlabeled `spindrift dispatch` (issue #4995)
 
 `spindrift dispatch <n>...` asks `[y/N]` before dispatching an issue

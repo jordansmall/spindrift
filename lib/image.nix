@@ -270,8 +270,8 @@ let
         # no consumer host's system reaches the derivation graph (#597).
         if builtins.isAttrs f && !(lib.isDerivation f) then
           ''
-            mkdir -p $out/agent/skills/${f.name}
-            cp ${p.writeText "SKILL.md" f.src} $out/agent/skills/${f.name}/SKILL.md
+            mkdir -p $out/agent/skills/${lib.escapeShellArg f.name}
+            cp ${p.writeText "SKILL.md" f.src} $out/agent/skills/${lib.escapeShellArg f.name}/SKILL.md
           ''
         else
           ''

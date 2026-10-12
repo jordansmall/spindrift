@@ -401,6 +401,7 @@ let
   # An explicit `roster` always wins; otherwise it resolves from the four
   # deprecated per-agent model knobs (issue #264, lib/roster.nix).
   rosterLib = import ./roster.nix { inherit lib; };
+  skillsLib = import ./skills.nix;
   # The one schema-defaults reader (issue #2506), also used above in
   # non-strict mode. It is a separate file so roster.nix can import it without
   # importing mkHarness.nix; lib/roster-schema-defaults.nix explains why.
@@ -1053,8 +1054,9 @@ let
       agentsJsonTemplate
       agentsPromptFilesJson
       customRosterPromptFiles
-      skills
       ;
+    # Validated here so both bake sites (skillsDir below, lib/image.nix) inherit it.
+    skills = skillsLib.validateSkills skills;
   };
   imageContracts = {
     inherit
@@ -1195,8 +1197,8 @@ let
           f:
           if builtins.isAttrs f && !(lib.isDerivation f) then
             ''
-              mkdir -p $out/${f.name}
-              cp ${hostPkgs.writeText "SKILL.md" f.src} $out/${f.name}/SKILL.md
+              mkdir -p $out/${lib.escapeShellArg f.name}
+              cp ${hostPkgs.writeText "SKILL.md" f.src} $out/${lib.escapeShellArg f.name}/SKILL.md
             ''
           else
             ''
