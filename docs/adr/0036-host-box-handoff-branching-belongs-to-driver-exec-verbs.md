@@ -202,16 +202,21 @@ the read-only guards, marker-gate, and outcome backstop in-process
 ([ADR 0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md)),
 and calls `internal/bundleout` in-process for bundle-out (issue #4301).
 
-As it lands in issue #2930, the verb owns computing the toolchain-nudge
+As it landed in issue #2930, the verb owned computing the toolchain-nudge
 ecosystem classification from the shared ecosystem table
 (`cmd/launcher/internal/registryproxy.Ecosystems()`, the same table the
-Registry proxy's own path-allowlist already reads), collapsing the
+Registry proxy's own path-allowlist already read), collapsing the
 npm-family rows (npm, yarn, pnpm) into one presentation classification, and
-emitting that classification into a sourceable env file. `agent/entrypoint.sh`'s
-`phase_toolchain_nudge` sources that file instead of re-deriving its own
-lockfile if/elif chain — the same file-output idiom `assemble-prompt` already
-established for handing decisions back to a parent process that cannot
-inherit a child's exports.
+emitting that classification into a sourceable env file.
+`agent/entrypoint.sh`'s `phase_toolchain_nudge` sourced that file instead
+of re-deriving its own lockfile if/elif chain — the same file-output idiom
+`assemble-prompt` had established for handing decisions back to a parent
+process that cannot inherit a child's exports. The box port has since
+moved that decision in-process: the `box` binary calls
+`internal/toolchain` (issue #4297), which calls `bindregistry.Classify`
+directly against `internal/ecosystem.Table` (`Ecosystems()` is gone), so
+the verb no longer emits a classification env file and
+`phase_toolchain_nudge` is gone.
 
 Following the `assemble-prompt` amendment's own precedent, this amendment
 does not design `bind-registry`'s eventual fuller scope — the apply/revert
