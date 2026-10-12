@@ -73,13 +73,14 @@ and reports `behind_by > 0`.
 re-runs the merge gate's CI wait — forcing the combined tree (this PR's
 changes replayed onto the sibling's already-merged changes) through CI
 before the merge can complete. A CI failure on that rebased tree now demotes
-the same way a genuine red gate result always has; a clean rebase proceeds
-to merge as before. The preflight rebase draws its own attempt budget off
-`MAX_REBASE_ATTEMPTS` rather than sharing counters with the reactive
-conflict-retry loop — the two are independent triggers, and charging one
-against the other's budget would let a stale-base retry (or vice versa)
-exhaust an allowance the real conflict path still needed. `0` still means
-"no rebase behavior at all," so no second knob is needed for an off-switch.
+the same way a genuine red gate result always has (amended by issue #5095,
+see the Amendment below); a clean rebase proceeds to merge as before. The
+preflight rebase draws its own attempt budget off `MAX_REBASE_ATTEMPTS` rather
+than sharing counters with the reactive conflict-retry loop — the two are
+independent triggers, and charging one against the other's budget would let a
+stale-base retry (or vice versa) exhaust an allowance the real conflict path
+still needed. `0` still means "no rebase behavior at all," so no second knob is
+needed for an off-switch.
 
 Explicitly **not** chosen: downgrading a stale-but-green PR to manual (the
 merge-guard's pattern, ADR 0016). Under `MERGE_MODE=immediate`, a PR is
@@ -128,3 +129,32 @@ combined tree) instead of just relocating it to a human.
   `TestMergeImmediate_StaleBaseConflictResolvesViaDispatcher`,
   `TestMergeImmediate_StaleBaseConflictResolveFailureBlocksMerge`,
   `TestMergeImmediate_StaleBaseConflictResolveRewaitFailsBlocksMerge`).
+
+## Amendment (issue #5095): a red post-force-push head gets a fix pass
+
+The Decision above says a rebased tree whose CI fails demotes the same way a
+genuine red gate always has, but a red gate gets a fix pass first and a red
+re-wait did not: #5053 settled `landing-failed` 13 seconds after a
+conflict-resolve force-push went red on a single check, with no fix pass
+dispatched while `MAX_FIX_ATTEMPTS` budget remained.
+
+A post-force-push re-wait that ends genuinely red now takes the same fix pass
+as a pre-merge red, in `immediate` landing, for every force-push source
+(rebase-retry, this preflight, and the agent conflict-resolve Box). The pass
+draws from the shared `MAX_FIX_ATTEMPTS` counter, not a fresh allowance per
+force-push. A head the fix turns green loops back through the merge gate's
+green wait into a fresh merge attempt, exactly like a first-green head, so
+the rebase-retry and conflict-resolve budgets start fresh for it.
+
+The issue still settles `Failed` (`landing-failed`) when the fix budget is
+spent — whether the red re-wait finds it already spent or a fix pass on the
+force-pushed head spends it and leaves the head red — and when the re-wait
+times out or its CI state cannot be read, or the conflict-resolve dispatch or
+its outbox relay fails. A red head's failure comment names the passes used:
+`landing failed: <err>; fix budget exhausted (N of M fix pass(es) used, K on
+the force-pushed head) — no green PR exists at the current head`. The other
+endings keep the plain comment, with no count, because a timeout or a failed
+dispatch or relay is not something a fix pass answers. The cost is a larger
+poll-window ceiling, recorded in [Dispatch exit
+codes](../reference.md#dispatch-exit-codes) where the ceiling is
+computed.
