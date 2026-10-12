@@ -714,8 +714,9 @@ prompt assembly (the one `assemble-prompt` verb shares) is a
 nix-only change: one registry row plus one fragment file, no `box` edit.
 `conflict-resolve-prompt.md` is the one exception — box's conflict-resolve pass
 (`cmd/launcher/box/conflict.go`, package `conflictresolve`) renders it
-earlier, before box assembles the prompt, so its `CAVEMAN_STEP`/`SKILL_PREAMBLE`
-gates are computed by that pass itself rather than by the registry. All
+earlier, before box assembles the prompt, so its `CAVEMAN_STEP`,
+`CHECK_HYGIENE_STEP`, `NIX_CHECKS_STEP` and `SKILL_PREAMBLE` gates are computed
+by that pass itself rather than by the registry. All
 instruction prose — conditional or not — lives with the rest of the prompt
 surface rather than as heredocs in a shell script.
 `SPINDRIFT_PROMPT_DIR` therefore overrides fragments the same way it
@@ -2926,6 +2927,14 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   closes the issue whenever the PR merges.
   (Dependency ordering keys off the PR actually being merged, not this label —
   see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
+  The conflict-resolve box runs under the repo's devShell when it has one and,
+  after `git rebase --continue`, runs the scoped in-Box check and fixes what it
+  surfaces (issue #5096). It publishes even if a check is still red — only an
+  unfinished rebase aborts — and narrates the agent's final message, naming
+  any still-red check, into the Box log as `==> conflict-resolve pass
+  summary:` (each line prefixed `  | `, so no summary line can forge a
+  host-scanned `SPINDRIFT_` line); the post-force-push fix pass owns
+  whatever repair remains.
 - **A relay that exhausts its retries parks the issue.** When a read-only Box
   prints `status=ready` but the Launcher's host-side bundle relay still fails
   (anything but a missing bundle) after `TRANSIENT_RETRY_MAX` retries, settle
