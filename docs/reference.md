@@ -4192,12 +4192,15 @@ landing: "https://github.com/owner/repo/pull/123"
   issue directly at settle time, since an already-resolved outcome has
   nothing landed for reconcile to observe (issue #4017).
 - `landing` is the immutable landing reference (a PR URL, or a push-only
-  branch ref under `CODE_FORGE=git`) the launcher writes after a work
-  outcome line is parsed. It's a plain pointer, not cached merge-state — a
-  later `reconcile` re-checks the forge live rather than trusting this field
-  for anything beyond "where did this land." `reconcile` (below) also writes
-  it itself when it discovers a PR by agent branch for an issue with no
-  recorded `landing`.
+  branch ref under `CODE_FORGE=git`) the launcher writes only from its own
+  evidence (a PR it opened or adopted, a merge it performed, a push-only
+  branch it relayed), never from the work outcome line's Box-controlled
+  `landing=` value (issue #5005); a read-write PR forge's ready run records
+  nothing at settle. It's a plain pointer, not
+  cached merge-state — a later `reconcile` re-checks the forge live rather
+  than trusting this field for anything beyond "where did this land."
+  `reconcile` (below) also writes it itself when it discovers a PR by agent
+  branch for an issue with no recorded `landing`.
 - `abandoned` is a boolean, local-only flag (ADR 0029) `reconcile` (below)
   sets when the issue's `landing` PR was closed without merging — a human
   rejected it. The issue stays open (`abandoned` never implies `closed`), so
@@ -4269,6 +4272,8 @@ discovers the PR by the issue's agent branch (the same branch→PR resolution
 `PRForge.PRForBranch` gives every other call site), records it as `landing`,
 then closes the issue if that discovered PR already merged; if it's still
 open, reconcile records the landing and leaves the issue for a later sweep.
+A recorded bare branch counts only when it is the issue's own agent branch;
+any other branch prints `landing-unverifiable` and leaves the issue open.
 When a `landing` PR (recorded or freshly discovered) was closed **without**
 merging, reconcile sets `abandoned: true` instead of closing — a human
 rejected it, so there's no merge left to wait on. The exception is a
