@@ -1470,9 +1470,9 @@ checkedMerge {
       "mkharness-jira-status-mapping-guard-not-triggered: expected mkHarness to accept a direct-caller `defaults.jiraStatusMapping` with only valid keys (\"inProgress\") under ISSUE_TRACKER=jira, but it failed to evaluate";
     pkgs.runCommand "mkharness-jira-status-mapping-guard-not-triggered" { } "touch $out";
 
-  # A non-jira tracker never reaches backend.go's jira.ParseStatusMapping, so
-  # a stale JIRA_STATUS_MAPPING left from a prior ISSUE_TRACKER=jira config
-  # must not fail a github-tracker build.
+  # A non-jira tracker never reaches jira.ParseStatusMapping in
+  # trackerbuild.go, so a stale JIRA_STATUS_MAPPING left from a prior
+  # ISSUE_TRACKER=jira config must not fail a github-tracker build.
   mkharness-jira-status-mapping-guard-non-jira-tracker-not-triggered =
     let
       inherit (pkgs.lib) assertMsg;
