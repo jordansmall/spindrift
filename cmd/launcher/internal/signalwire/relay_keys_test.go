@@ -19,6 +19,7 @@ import (
 var relayFragments = []string{
 	filepath.Join(repopath.PromptsDir(), "fragments", "filer-file-relay.md"),
 	filepath.Join(repopath.PromptsDir(), "fragments", "filer-label-relay-butler.md"),
+	filepath.Join(repopath.PromptsDir(), "fragments", "filer-label-relay-butler-records.md"),
 }
 
 // extraTaughtAllowed is prose-taught keys that legitimately aren't on
