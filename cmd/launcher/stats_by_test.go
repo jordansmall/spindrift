@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -57,6 +58,27 @@ func statsWriteLogs(t *testing.T, root string, logs map[string]string) {
 // statsStampedRoot holds three stamped Dispatches that differ in revision,
 // knobs, prompt hashes and models, one stamped Dispatch recording none of
 // them bar one empty-valued knob, and one inferred Record.
+type statsGroupedLine struct {
+	Group       string   `json:"group"`
+	GroupKeys   []string `json:"group_keys"`
+	DispatchKey string   `json:"dispatch_key"`
+	ClaimTime   string   `json:"claim_time"`
+	Root        string   `json:"root"`
+}
+
+func statsGroupedLines(t *testing.T, jsonl string) []statsGroupedLine {
+	t.Helper()
+	var recs []statsGroupedLine
+	for _, line := range strings.Split(strings.TrimSuffix(jsonl, "\n"), "\n") {
+		var rec statsGroupedLine
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatal(err)
+		}
+		recs = append(recs, rec)
+	}
+	return recs
+}
+
 func statsStampedRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -131,11 +153,7 @@ func TestStats_ByMergesAcrossRoots(t *testing.T) {
 	statsGolden(t, "stats-by-multiroot.jsonl", statsNormalize(jsonl, roots))
 
 	groupRoots := map[string]map[string]bool{}
-	for _, line := range strings.Split(strings.TrimSuffix(jsonl, "\n"), "\n") {
-		var rec struct{ Group, Root string }
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatal(err)
-		}
+	for _, rec := range statsGroupedLines(t, jsonl) {
 		if groupRoots[rec.Group] == nil {
 			groupRoots[rec.Group] = map[string]bool{}
 		}
@@ -228,15 +246,7 @@ func TestStats_ByRevisionUsesEventsForInferredRecords(t *testing.T) {
 	statsGolden(t, "stats-by-revision-events.jsonl", statsNormalize(jsonl, roots))
 
 	got := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSuffix(jsonl, "\n"), "\n") {
-		var rec struct {
-			Group       string `json:"group"`
-			DispatchKey string `json:"dispatch_key"`
-			ClaimTime   string `json:"claim_time"`
-		}
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatal(err)
-		}
+	for _, rec := range statsGroupedLines(t, jsonl) {
 		got[rec.DispatchKey+"@"+rec.ClaimTime] = rec.Group
 	}
 	want := map[string]string{
@@ -254,16 +264,19 @@ func TestStats_ByRevisionAnywhereInTheListUsesEvents(t *testing.T) {
 	root := statsEventsRoot(t)
 	jsonl, _ := runStats(t, root, "--include-inferred", "--by", "driver,revision", "--json")
 	got := map[string]string{}
-	for _, line := range strings.Split(strings.TrimSuffix(jsonl, "\n"), "\n") {
-		var rec struct {
-			Group       string `json:"group"`
-			DispatchKey string `json:"dispatch_key"`
-			ClaimTime   string `json:"claim_time"`
-		}
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			t.Fatal(err)
-		}
-		got[rec.DispatchKey+"@"+rec.ClaimTime] = rec.Group
+	gotKeys := map[string][]string{}
+	for _, rec := range statsGroupedLines(t, jsonl) {
+		at := rec.DispatchKey + "@" + rec.ClaimTime
+		got[at], gotKeys[at] = rec.Group, rec.GroupKeys
+	}
+	wantKeys := map[string][]string{
+		"10@2026-10-07T09:00:30Z": {"(none)", "rev-ten"},
+		"20@2026-10-07T10:00:30Z": {"(none)", "rev-twenty"},
+		"20@2026-10-07T13:00:30Z": {"(none)", "(none)"},
+		"30@2026-10-07T14:00:30Z": {"(none)", "(none)"},
+	}
+	if !maps.EqualFunc(gotKeys, wantKeys, slices.Equal) {
+		t.Errorf("group_keys = %q, want %q", gotKeys, wantKeys)
 	}
 	want := map[string]string{
 		"10@2026-10-07T09:00:30Z": "(none), rev-ten",
@@ -311,6 +324,36 @@ func TestStats_ByTwoKnobsAreDistinctDimensions(t *testing.T) {
 	}
 	if n := strings.Count(text, "Records: "); n != 3 {
 		t.Errorf("%d groups, want 3:\n%s", n, text)
+	}
+}
+
+// Keys containing ", " make the joined "group" label ambiguous; group_keys
+// carries the keys unjoined so a consumer can tell the groups apart.
+func TestStats_ByJSONGroupKeysDisambiguateCommaKeys(t *testing.T) {
+	root := t.TempDir()
+	day := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
+	statsWriteLogs(t, root, map[string]string{
+		"issue-1.log": statsStampedLog("1", day,
+			hostop.DispatchStart{Knobs: map[string]string{"MERGE_GUARD_PATHS": "a, b", "MERGE_MODE": "auto"}}, nil,
+			[2]string{"implement", "claude-opus"}),
+		"issue-2.log": statsStampedLog("2", day.Add(time.Hour),
+			hostop.DispatchStart{Knobs: map[string]string{"MERGE_GUARD_PATHS": "a", "MERGE_MODE": "b, auto"}}, nil,
+			[2]string{"implement", "claude-opus"}),
+	})
+	jsonl, _ := runStats(t, root, "--by", "knob:MERGE_GUARD_PATHS,knob:MERGE_MODE", "--json")
+	groups := map[string]string{}
+	keys := map[string][]string{}
+	for _, rec := range statsGroupedLines(t, jsonl) {
+		groups[rec.DispatchKey], keys[rec.DispatchKey] = rec.Group, rec.GroupKeys
+	}
+	if groups["1"] != "a, b, auto" || groups["2"] != "a, b, auto" {
+		t.Errorf("group labels = %v, want both %q", groups, "a, b, auto")
+	}
+	if want := []string{"a, b", "auto"}; !slices.Equal(keys["1"], want) {
+		t.Errorf("issue 1 group_keys = %q, want %q", keys["1"], want)
+	}
+	if want := []string{"a", "b, auto"}; !slices.Equal(keys["2"], want) {
+		t.Errorf("issue 2 group_keys = %q, want %q", keys["2"], want)
 	}
 }
 
