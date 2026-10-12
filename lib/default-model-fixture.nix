@@ -8,7 +8,7 @@
   # two key-for-key.
   schemaDefaults = {
     model = "claude-sonnet-5";
-    scoutModel = "claude-haiku-4-5-20251001";
+    scoutModel = "claude-haiku-5-5";
     reviewModel = "claude-opus-5";
     filerModel = "";
     workerModel = "claude-sonnet-5";
@@ -20,7 +20,7 @@
   # dogfood's `defaults`; the rest are roster entry names.
   dogfoodPins = {
     model = "claude-opus-5-5";
-    filer = "claude-haiku-4-5-20251001";
+    filer = "claude-haiku-5-5";
     reviewer = "claude-opus-5-5";
     worker = "claude-sonnet-5-5";
   };
