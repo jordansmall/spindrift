@@ -69,6 +69,9 @@ let
     # straight out of the composite action's `run:` block, so it tracks the
     # real body rather than a hand-copied stand-in.
     GH_TOKEN_REFRESHER_ACTION_YML = ../../.github/actions/gh-token-refresher/action.yml;
+    # CI's change classifier and required-check verdict (issue #5155).
+    CI_CHANGES_SH = ../../.github/scripts/ci-changes.sh;
+    CI_OK_SH = ../../.github/scripts/ci-ok.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles and fragment
     # registry tests/entrypoint-shim.bats reads: the same bytes the Go seam
@@ -158,6 +161,8 @@ in
           ${../../ab-orchestrator.sh} \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
+          ${../../.github/scripts/ci-changes.sh} \
+          ${../../.github/scripts/ci-ok.sh} \
           ${../../tests/fakes/runtime} \
           ${../../tests/fakes/gh} \
           ${../../tests/helper.bash}
