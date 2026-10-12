@@ -13,12 +13,14 @@ import (
 func fullHandoff() Handoff {
 	t0 := time.Date(2026, 10, 11, 12, 0, 0, 123456789, time.UTC)
 	return Handoff{
-		LockFD:   3,
-		FromPath: "/nix/store/aaa-old/bin/daemon",
-		ToPath:   "/nix/store/bbb-new/bin/daemon",
-		Revision: "rev1",
-		Stop:     true,
-		Abort:    true,
+		LockFD:     3,
+		FromPath:   "/nix/store/aaa-old/bin/daemon",
+		ToPath:     "/nix/store/bbb-new/bin/daemon",
+		Revision:   "rev1",
+		RolledBack: true,
+		Reason:     "preflight: doctor exited 1",
+		Stop:       true,
+		Abort:      true,
 		Slots: []HandoffSlot{
 			{
 				Slot: 0, Kind: "work", Revision: "abc123",
@@ -72,7 +74,7 @@ func TestHandoffKeysTravelAsIssueAndChoreFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := buf.String()
-	for _, frag := range []string{`"issue":"42"`, `"chore":"bugs"`, `"v":1`} {
+	for _, frag := range []string{`"issue":"42"`, `"chore":"bugs"`, `"v":2`} {
 		if !strings.Contains(s, frag) {
 			t.Errorf("document missing %s: %s", frag, s)
 		}
@@ -98,7 +100,7 @@ func TestHandoffDecodeRefuses(t *testing.T) {
 		doc  string
 		want string
 	}{
-		"future version":      {`{"v":2,"lock_fd":3,"newthing":[1]}`, "version 2"},
+		"future version":      {`{"v":3,"lock_fd":3,"newthing":[1]}`, "version 3"},
 		"missing version":     {`{"lock_fd":3}`, "version 0"},
 		"malformed":           {`{"v":1,`, "decode"},
 		"unknown field":       {`{"v":1,"lock_fd":3,"bogus":true}`, "bogus"},
@@ -127,7 +129,7 @@ func TestHandoffDecodeRefuses(t *testing.T) {
 
 func TestHandoffVersionErrorNamesSupported(t *testing.T) {
 	_, err := DecodeHandoff(strings.NewReader(`{"v":7}`))
-	if err == nil || !strings.Contains(err.Error(), "supports 1") {
+	if err == nil || !strings.Contains(err.Error(), "supports 1 to 2") {
 		t.Errorf("error %v should name the supported version", err)
 	}
 }
@@ -163,5 +165,15 @@ func TestBreakerSnapshotInvertsRestore(t *testing.T) {
 	}
 	if got := newBreaker(3, time.Minute).snapshot(); len(got) != 0 {
 		t.Errorf("pristine snapshot = %v, want none", got)
+	}
+}
+
+func TestHandoffDecodeAcceptsPreviousVersion(t *testing.T) {
+	h, err := DecodeHandoff(strings.NewReader(`{"v":1,"lock_fd":3,"from_path":"/nix/store/a/bin/d"}`))
+	if err != nil {
+		t.Fatalf("DecodeHandoff refused a v1 document: %v", err)
+	}
+	if h.V != 1 || h.FromPath != "/nix/store/a/bin/d" {
+		t.Errorf("decoded %+v, want the v1 document as written", h)
 	}
 }
