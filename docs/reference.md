@@ -4606,21 +4606,24 @@ choice permitted under read-only today has a genuinely relay-based hand-off:
 `git push` as its read-only hand-off; that shape exists only as latent guard
 infrastructure for a hypothetical future backend.
 
-The other three rows above get the same local-guard treatment, but via a `gh`
-shim rather than a push hook (issue #2465): for a read-only `github` Box (the
-same `_is_readonly_github` gate the push guard above uses), the Box installs a
-`gh` shim ahead of the real `gh` binary on `PATH` that rejects `gh pr create`,
-`gh pr ready`, `gh pr merge`, `gh issue comment`, `gh issue create`, and `gh
-api` calls with a mutating method (`POST`/`PATCH`/`PUT`/`DELETE`, including
-gh's implied `POST` when `-f`/`-F`/`--field`/`--raw-field`/`--input` is
-passed with no explicit method; `gh api graphql` is exempt, so its mutations
-fail at the forge),
-each rejection naming the relay that replaces it — the PR-intent line, the
-Launcher's own ready/merge once CI is green, the outcome `note=` field, or the
-issue-intent line, as appropriate. Reads (`gh issue view`, `gh pr view`, `gh
-run view`, `gh run list`, a plain `gh api` `GET`, and so on) pass through to
-the real `gh` untouched. Like the push guard above, this is a cheap interim
-guard, not adversary-proof.
+The other three rows above get the same local-guard treatment, but via
+`gh`/`fj` shims rather than a push hook (issue #2465): on every read-only Box
+other than a [`--self-contained` research run](#self-contained-research-mode),
+`installReadonlyGuards` (`cmd/launcher/box/readonlyguards.go`) installs a
+`gh` shim and an `fj` shim, each ahead of the real binary on `PATH` and
+only when that binary is on `PATH`, independent of the push hook's own gate
+above. The `gh` shim rejects `gh pr create`, `gh pr ready`, `gh pr merge`,
+`gh issue comment`, `gh issue create`, and `gh api` calls with a mutating
+method (`POST`/`PATCH`/`PUT`/`DELETE`, including gh's implied `POST` when
+`-f`/`-F`/`--field`/`--raw-field`/`--input` is passed with no explicit method;
+`gh api graphql` is exempt, so its mutations fail at the forge), each rejection
+naming the relay that replaces it — the PR-intent line, the Launcher's own
+ready/merge once CI is green, the outcome `note=` field, or the issue-intent
+line, as appropriate. Reads (`gh issue view`, `gh pr view`, `gh run view`,
+`gh run list`, a plain `gh api` `GET`, and so on) pass through to the real `gh`
+untouched. The `fj` shim likewise rejects `fj pr create`, `fj pr ready`, `fj pr
+merge`, `fj issue comment`, and `fj issue create`. Like the push guard above,
+this is a cheap interim guard, not adversary-proof.
 
 The issue-filing row has the same local guard, and the Filer always uses the
 relay under `read-only` (issue #2019; it was once gated on the since-removed
