@@ -1575,6 +1575,44 @@ checkedMerge {
         touch $out
       '';
 
+  # No real knob defaults to `true`, so the flake-options-doc diff alone cannot
+  # cover that branch of the default renderer (issue #5036).
+  flake-options-doc-default-literal-guard =
+    let
+      inherit (pkgs.lib) assertMsg hasInfix;
+      structuralOptionsDoc = import ../../lib/structural-options-doc.nix;
+      knob = default: {
+        flakeOption = true;
+        group = "infra";
+        env = "SYNTHETIC";
+        doc = "synthetic";
+        inherit default;
+      };
+      rendered = renderers.renderFlakeOptionsDocFull {
+        yes = knob true;
+        no = knob false;
+        blank = knob "";
+        zero = knob 0.0;
+        text = knob "abc";
+        count = knob 3;
+        none = knob null;
+      } structuralOptionsDoc structuralPaths extraOptionPaths;
+      cell = literal: "| `SYNTHETIC` | `${literal}` | synthetic |";
+      expected = [
+        "true"
+        "false"
+        "\"\""
+        "0.0"
+        "abc"
+        "3"
+        "null"
+      ];
+      missing = builtins.filter (literal: !(hasInfix (cell literal) rendered)) expected;
+    in
+    assert assertMsg (missing == [ ])
+      "flake-options-doc-default-literal-guard (issue #5036): renderFlakeOptionsDocFull must render each default as a literal code span -- missing: ${builtins.concatStringsSep ", " missing}";
+    pkgs.runCommand "flake-options-doc-default-literal-guard" { } "touch $out";
+
   # lib/structural-template-examples.nix only regex-matches each example's
   # rendered text, never the values, so an unusable example could ship
   # (issue #2572). Each entry must survive normalizeRoster, match its
