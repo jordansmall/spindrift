@@ -2032,6 +2032,7 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 		body[i] = byte('a' + i%26)
 	}
 	copy(body[maxRewriteBodyBytes-len(straddle)/2:], straddle)
+	logs := captureLog(t)
 
 	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -2049,6 +2050,10 @@ func TestModifyResponse_OverCapBodySplicedByteIdentical(t *testing.T) {
 
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	wantLog := fmt.Sprintf("body over %d bytes on /%s/config.json, left unchanged", maxRewriteBodyBytes, prefix)
+	if n := strings.Count(logs.String(), "body over"); n != 1 || !strings.Contains(logs.String(), wantLog) {
+		t.Errorf("log = %q, want exactly one line containing %q", logs.String(), wantLog)
 	}
 	got := rr.Body.Bytes()
 	if len(got) != len(body) {
