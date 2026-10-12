@@ -19,9 +19,18 @@ const fourLines = "one\ntwo\nthree\nfour\n"
 // newChurnRepo merges a feature branch that adds f.txt (fourLines) at mergedAt.
 func newChurnRepo(t *testing.T) (gitRepo, string) {
 	t.Helper()
+	return newChurnRepoAdding(t, "f.txt", fourLines)
+}
+
+// newChurnRepoAdding merges a feature branch that adds each path, content pair
+// at mergedAt.
+func newChurnRepoAdding(t *testing.T, pathsAndContents ...string) (gitRepo, string) {
+	t.Helper()
 	g := newBaseRepo(t)
 	g.git(mergedAt, "checkout", "-q", "-b", "feature")
-	g.commitFile(mergedAt.Add(-time.Hour), "f.txt", fourLines, "feature work")
+	for i := 0; i < len(pathsAndContents); i += 2 {
+		g.commitFile(mergedAt.Add(-time.Hour), pathsAndContents[i], pathsAndContents[i+1], "feature work")
+	}
 	g.git(mergedAt, "checkout", "-q", "main")
 	g.git(mergedAt, "merge", "--no-ff", "-m", "merge feature", "feature")
 	return g, g.git(mergedAt, "rev-parse", "HEAD")
@@ -348,25 +357,104 @@ func TestChurnIsNotInflatedByAGitlink(t *testing.T) {
 	wantChurn(t, fillAfterWindow(t, g, merge), 0.25)
 }
 
-func TestSurvivingLinesTreatsOnlyAMissingPathAsAbsent(t *testing.T) {
+func TestIsBlobAtErrorsOnlyOnAnUnreadableTree(t *testing.T) {
 	g, merge := newChurnRepo(t)
-	if n, err := survivingLines(g.dir, merge, "gone.txt", merge); err != nil || n != 0 {
-		t.Fatalf("missing path: n=%d err=%v; want 0, nil", n, err)
+	if ok, err := isBlobAt(g.dir, merge, "gone.txt"); err != nil || ok {
+		t.Fatalf("missing path: ok=%v err=%v; want false, nil", ok, err)
 	}
-	if _, err := survivingLines(g.dir, strings.Repeat("0", 40), "f.txt", merge); err == nil {
+	if ok, err := isBlobAt(g.dir, merge, "f.txt"); err != nil || !ok {
+		t.Fatalf("present file: ok=%v err=%v; want true, nil", ok, err)
+	}
+	if _, err := isBlobAt(g.dir, strings.Repeat("0", 40), "f.txt"); err == nil {
 		t.Fatal("an unreadable tree must be an error, not an absent path")
 	}
+}
+
+// replaceWithDirAt deletes the file at path and commits a directory there.
+func replaceWithDirAt(g gitRepo, at time.Time, path string) {
+	g.t.Helper()
+	g.git(at, "rm", "-q", path)
+	if err := os.Mkdir(filepath.Join(g.dir, path), 0o755); err != nil {
+		g.t.Fatal(err)
+	}
+	g.commitFile(at, path+"/g", "g\n", "turn "+path+" into a directory")
 }
 
 // A path that a later commit turned into a directory is still listed by
 // ls-tree, but blame cannot read it: the merge's lines there are rewritten.
 func TestChurnCountsAFileReplacedByADirectoryInsideTheWindow(t *testing.T) {
 	g, merge := newChurnRepo(t)
+	replaceWithDirAt(g, mergedAt.Add(24*time.Hour), "f.txt")
+	wantChurn(t, fillAfterWindow(t, g, merge), 1)
+}
+
+// countRenameScans swaps the rename-diff seam for a counter of its calls.
+func countRenameScans(t *testing.T) *int {
+	t.Helper()
+	calls := 0
+	orig := findLaterRenames
+	findLaterRenames = func(clone, merge, state string) (map[string]string, error) {
+		calls++
+		return orig(clone, merge, state)
+	}
+	t.Cleanup(func() { findLaterRenames = orig })
+	return &calls
+}
+
+// While every added path is still a file at the window's end no rename can
+// change the answer, so the exhaustive rename diff is skipped.
+func TestChurnSkipsTheRenameScanWhileEveryAddedPathSurvives(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	g.commitFile(mergedAt.Add(24*time.Hour), "f.txt", "one\nTWO\nthree\nfour\n", "rewrite a line")
+	calls := countRenameScans(t)
+	wantChurn(t, fillAfterWindow(t, g, merge), 0.25)
+	if *calls != 0 {
+		t.Fatalf("rename scan ran %d times; want 0", *calls)
+	}
+}
+
+func TestChurnScansForRenamesWhenAnAddedPathIsRenamedInsideTheWindow(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "g.txt", "")
+	calls := countRenameScans(t)
+	wantChurn(t, fillAfterWindow(t, g, merge), 0)
+	if *calls != 1 {
+		t.Fatalf("rename scan ran %d times; want 1", *calls)
+	}
+}
+
+func TestChurnScansForRenamesWhenAnAddedPathBecameADirectory(t *testing.T) {
+	g, merge := newChurnRepo(t)
+	replaceWithDirAt(g, mergedAt.Add(24*time.Hour), "f.txt")
+	calls := countRenameScans(t)
+	wantChurn(t, fillAfterWindow(t, g, merge), 1)
+	if *calls != 1 {
+		t.Fatalf("rename scan ran %d times; want 1", *calls)
+	}
+}
+
+func TestChurnScansForRenamesWhenAnAddedPathBecameASubmodule(t *testing.T) {
+	g, merge := newChurnRepo(t)
 	at := mergedAt.Add(24 * time.Hour)
 	g.git(at, "rm", "-q", "f.txt")
-	if err := os.Mkdir(filepath.Join(g.dir, "f.txt"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	g.commitFile(at, "f.txt/g", "g\n", "turn f.txt into a directory")
+	g.git(at, "update-index", "--add", "--cacheinfo", "160000,"+gitlinkSHA1+",f.txt")
+	g.git(at, "commit", "-m", "turn f.txt into a submodule")
+	calls := countRenameScans(t)
 	wantChurn(t, fillAfterWindow(t, g, merge), 1)
+	if *calls != 1 {
+		t.Fatalf("rename scan ran %d times; want 1", *calls)
+	}
+}
+
+// The rename diff is exhaustive, so it runs once per merge however many added
+// paths need it.
+func TestChurnScansForRenamesOnceForSeveralAddedPathsRenamedInsideTheWindow(t *testing.T) {
+	g, merge := newChurnRepoAdding(t, "f.txt", fourLines, "g.txt", "five\nsix\nseven\neight\n")
+	mvAt(g, mergedAt.Add(24*time.Hour), "f.txt", "f2.txt", "")
+	mvAt(g, mergedAt.Add(48*time.Hour), "g.txt", "g2.txt", "")
+	calls := countRenameScans(t)
+	wantChurn(t, fillAfterWindow(t, g, merge), 0)
+	if *calls != 1 {
+		t.Fatalf("rename scan ran %d times; want 1", *calls)
+	}
 }

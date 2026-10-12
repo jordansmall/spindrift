@@ -59,14 +59,30 @@ func churnWithinWindow(clone, merge, tip string, end time.Time) (churn *float64,
 		return nil, true, nil
 	}
 
-	renames, err := laterRenames(clone, merge, state)
-	if err != nil {
-		return nil, false, err
-	}
+	// The rename diff is exhaustive and costs deletions times additions, so it
+	// runs only once an added path is no longer a file at state.
+	var renames map[string]string
+	scanned := false
 	surviving := 0
 	for path, n := range added {
+		blob, err := isBlobAt(clone, state, path)
+		if err != nil {
+			return nil, false, err
+		}
 		blamed := path
-		if moved, ok := renames[path]; ok {
+		if !blob {
+			if !scanned {
+				if renames, err = findLaterRenames(clone, merge, state); err != nil {
+					return nil, false, err
+				}
+				scanned = true
+			}
+			moved, ok := renames[path]
+			if !ok {
+				continue
+			}
+			// Without -B or -C, git pairs a rename only between files, so the
+			// destination needs no blob check of its own.
 			blamed = moved
 		}
 		kept, err := survivingLines(clone, state, blamed, merge)
@@ -128,10 +144,17 @@ func addedLines(clone, merge string) (map[string]int, int, error) {
 	return added, total, nil
 }
 
+// findLaterRenames is laterRenames, swapped by tests to count its calls; a test
+// that swaps it must not run in parallel.
+var findLaterRenames = laterRenames
+
 // laterRenames maps each path merge..state renamed away to where it went, so a
 // moved file's lines are blamed at their new path. A single diff reports a chain
 // (f to g to h) as f to h. Without copy detection a rename source is always a
-// path deleted at state, so it is never also a live file there.
+// path deleted at state, so it is never also a live file there. The rename
+// limit stays unbounded (-l0) on purpose: past a limit git skips inexact pairing
+// with exit 0 and only a stderr warning, so renames would vanish and churn
+// inflate.
 func laterRenames(clone, merge, state string) (map[string]string, error) {
 	out, err := runGit(clone, "", "diff", "-M", "-l0", "-z", "--name-status", "--diff-filter=R", merge, state)
 	if err != nil {
@@ -148,15 +171,15 @@ func laterRenames(clone, merge, state string) (map[string]string, error) {
 	return renames, nil
 }
 
-// survivingLines counts the lines of path at state that first-parent blame
-// credits to merge. A path absent at state, or no longer a file there, has none.
-func survivingLines(clone, state, path, merge string) (int, error) {
+// isBlobAt reports whether path is a regular file (a blob) at state. A path
+// absent at state, or no longer a file there, is not.
+func isBlobAt(clone, state, path string) (bool, error) {
 	// cat-file -e exits 128 for a missing path, the same as for a corrupt store,
 	// so an ls-tree that lists nothing is the only unambiguous "absent". A path
 	// replaced by a directory or submodule is listed too, but blame cannot read it.
 	listed, err := runGit(clone, "", "ls-tree", "-z", state, "--", path)
 	if err != nil {
-		return 0, err
+		return false, err
 	}
 	isBlob := false
 	for _, entry := range strings.Split(listed, "\x00") {
@@ -167,9 +190,12 @@ func survivingLines(clone, state, path, merge string) (int, error) {
 			isBlob = len(fields) == 3 && fields[1] == "blob"
 		}
 	}
-	if !isBlob {
-		return 0, nil
-	}
+	return isBlob, nil
+}
+
+// survivingLines counts the lines of path, a blob at state, that first-parent
+// blame credits to merge.
+func survivingLines(clone, state, path, merge string) (int, error) {
 	out, err := runGit(clone, "", "blame", "--first-parent", "--porcelain", state, "--", path)
 	if err != nil {
 		return 0, err
