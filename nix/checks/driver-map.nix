@@ -425,6 +425,7 @@ in
         "agents.driver"
       ]
       ++ map (segs: "agents." + concatStringsSep "." segs) (builtins.attrValues driverMap.paths);
+      migrating = builtins.readFile ../../MIGRATING.md;
       msgsFor =
         topLevel:
         driverMap.deprecations {
@@ -456,6 +457,10 @@ in
     assert assertMsg (
       builtins.length (msgsFor (top oldPaths)) == builtins.length oldPaths
     ) "deprecations: setting every path must warn once per path";
+    # MIGRATING.md's table is hand-written; every old option must have a row.
+    assert assertMsg (builtins.all (
+      p: hasInfix "| `perSystem.spindrift.${p}" migrating
+    ) oldPaths) "MIGRATING.md: the issue #5055 table must map every single-Driver option";
     assert assertMsg (msgsFor [ ] == [ ]) "deprecations: no settings, no warnings";
     assert assertMsg (has (builtins.head (msgsFor (top [ "agents.driver" ]))) [
       "perSystem.spindrift.agents.defaultDriver"

@@ -347,14 +347,14 @@ lives under the out-of-contract `internals` attrset (see [Calling
 | `skills`    | `perSystem.spindrift.agents.skills` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
 | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
 | `runtime`   | `perSystem.spindrift.infra.runtime` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-| `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | **Deprecated** (ADR 0064): declare `agents.drivers.<name>` instead, whose attribute name is the Driver; see [Several Drivers side by side](#several-drivers-side-by-side). The agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
+| `driver`    | `perSystem.spindrift.agents.driver` | shared         | string                      | `"claude"`         | **Deprecated** (ADR 0064): set `agents.drivers.<name>` instead; the top-level form still works and warns. The attribute name is the Driver; see [Several Drivers side by side](#several-drivers-side-by-side). The agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
 | `nixInBox`  | `perSystem.spindrift.infra.nix.inBox` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
 | `nixStoreWritable` | `perSystem.spindrift.infra.nix.storeWritable` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
 | `extraClosures` | `perSystem.spindrift.infra.image.extraClosures` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
 | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"docker.io/nixos/nix@sha256:bf1d938835ab96312f098fa6c2e9cab367728e0aad0646ee3e02a787c80d8fb8"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
 | `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
-| `roster`    | `perSystem.spindrift.agents.models.roster` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | **Deprecated** (ADR 0064) at top level: set it under `agents.drivers.<name>` instead, see [Several Drivers side by side](#several-drivers-side-by-side); supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-| `byName`    | `perSystem.spindrift.agents.models.byName` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | **Deprecated** (ADR 0064) at top level: set it under `agents.drivers.<name>` instead, see [Several Drivers side by side](#several-drivers-side-by-side); name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+| `roster`    | `perSystem.spindrift.agents.models.roster` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | **Deprecated** (ADR 0064): set `perSystem.spindrift.agents.drivers.<name>.models.roster` instead; the top-level form still works and warns. See [Several Drivers side by side](#several-drivers-side-by-side); supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
+| `byName`    | `perSystem.spindrift.agents.models.byName` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `agents.models.byName`, defaults to `null`) | **Deprecated** (ADR 0064): set `perSystem.spindrift.agents.drivers.<name>.models.byName` instead; the top-level form still works and warns. See [Several Drivers side by side](#several-drivers-side-by-side); name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
 | `drivers`   | `perSystem.spindrift.agents.drivers` | per-Driver map | attrset of Driver entries keyed by Driver name | `{}` | Drivers built side by side (ADR 0064); each entry holds only the Driver-valued settings, at their agents-relative paths; see [Several Drivers side by side](#several-drivers-side-by-side) |
 | `defaultDriver` | `perSystem.spindrift.agents.defaultDriver` | shared | string | `null` | the Driver behind `apps.default` and `apps.daemon`; inferred with one declared Driver, required with several |
 <!-- END GENERATED OPTION SURFACE TABLE -->
@@ -461,30 +461,36 @@ post-green [merge policy](#how-a-run-works)
 (`manual`/`immediate`/`auto`); `git.merge.guardPaths` is the [merge
 guard](#merge-guard)'s glob list, downgrading a green PR to manual
 regardless of `git.merge.policy` when it touches a guarded path;
-`agents.models.default` is the Claude model the in-container implementor
-agent runs, threaded into the container as `MODEL` so `MODEL=...` switches
-models at runtime with no image rebuild. `agents.models.scout`/
-`agents.models.review` tier the read-only scout and reviewer subagents the
-same way; each is composed into `--agents` independently by its own knob,
-so emptying one drops only that subagent, never both.
-`agents.models.filer` is the same shape but opt-in — empty by default, so
-the filer is not provisioned at all until a model is set; see
-[Filer](#filer). `agents.models.scout`/`agents.models.filer`/
-`agents.models.worker` are all **deprecated** in favor of the structural
-[`roster`](#subagent-roster) option. `agents.models.review` is
-not deprecated: on the fresh-work path the roster reviewer entry is
-superseded by the code-owned review pass, which binds its model from
-`agents.models.review` instead (falling back to the coordinator model when
-unset).
+`agents.drivers.<name>.models.default` is the model the in-container
+implementor agent runs, threaded into the container as `MODEL` so `MODEL=...`
+switches models at runtime with no image rebuild. `agents.drivers.<name>.models.scout`/
+`agents.drivers.<name>.models.review` tier the read-only scout and reviewer
+subagents the same way; each is composed into `--agents` independently by its
+own knob, so emptying one drops only that subagent, never both.
+`agents.drivers.<name>.models.filer` is the same shape but opt-in — empty by
+default, so the filer is not provisioned at all until a model is set; see
+[Filer](#filer). The top-level spellings (`agents.models.default`,
+`agents.models.scout`, `agents.models.review`, `agents.models.filer`,
+`agents.models.worker`) are **deprecated** (ADR 0064) in favour of the
+`agents.drivers.<name>` entry; see [Several Drivers side by
+side](#several-drivers-side-by-side) and [MIGRATING.md](../MIGRATING.md).
+`models.scout`/`models.filer`/`models.worker` are further superseded by the
+structural [`roster`](#subagent-roster) option, which is also set per Driver.
+`models.review` is not superseded by it: on the fresh-work path the roster
+reviewer entry is superseded by the code-owned review pass, which binds its
+model from `agents.drivers.<name>.models.review` instead (falling back to the
+coordinator model when unset).
 
 #### Subagent roster
 
 `roster` (issue #264) is a *structural* option, declared as a real
 `mkOption` in `lib/flakeModule.nix`, that a flakeModule Consumer sets
-directly at its flake path:
+directly at its flake path, set per Driver (ADR 0064). The top-level
+`agents.models.roster` is the deprecated single-Driver form; the path below
+is the spelling to use:
 
 <!-- BEGIN GENERATED ROSTER FLAKE PATH -- nix run .#regen -- DO NOT EDIT -->
-`perSystem.spindrift.agents.models.roster`
+`perSystem.spindrift.agents.drivers.<name>.models.roster`
 <!-- END GENERATED ROSTER FLAKE PATH -->
 
 `mkHarness` also takes a `roster` argument, forwarded from the Consumer's
@@ -501,7 +507,7 @@ knob per hardcoded agent, a Consumer flake can pass any number of roster
 entries, including a custom Nth agent beyond the historical four. When
 `roster` is omitted, `mkHarness` falls back to `lib/roster.nix`'s
 `defaultRoster`, built from the four legacy model args (or their
-`agents.models.*` defaults) and reproducing today's
+`agents.drivers.<name>.models.*` defaults) and reproducing today's
 scout/reviewer/filer/worker composition exactly, plus a fifth `review-axis`
 entry (issue #3447) that has no legacy model arg of its own — see
 [ADR 0049](adr/0049-role-capability-profiles-are-provider-neutral.md).
@@ -561,12 +567,13 @@ schema default, when more than one is set for the same name — since
 behavior for an unmentioned name must switch to explicit
 `models.<name> = ""`.
 
-`agents.models.byName` (issue #2560) is the versioned, Consumer-facing flake
-option for the same name-keyed override `models` gives `defaultRoster`
+`agents.drivers.<name>.models.byName` (issue #2560; the top-level
+`agents.models.byName` is the deprecated single-Driver form) is the versioned,
+Consumer-facing flake option for the same name-keyed override `models` gives `defaultRoster`
 callers directly:
 
 ```nix
-perSystem.spindrift.agents.models.byName = {
+perSystem.spindrift.agents.drivers.claude.models.byName = {
   filer = {
     model = "claude-haiku-4-5-20251001";
     effort = "high";
@@ -590,7 +597,7 @@ legacy knobs — a typo'd key or field in `byName` alongside an explicit
 moot once `roster` wins. It's declared as a real domain-tree option in
 `lib/flakeModule.nix` (`byNameOption`/`byNameTreeEntries`), forwarded into
 `mkHarness`'s `byName` arg, which threads into `lib/roster.nix`'s
-`defaultRoster` the same way `agents.models.roster` threads its own
+`defaultRoster` the same way `agents.drivers.<name>.models.roster` threads its own
 `roster` argument in — ignored when an explicit `roster` is supplied (same
 precedence the legacy per-agent knobs already have, stated earlier in this
 section). Per name, `models.<name>` still outranks `byName.<name>.model`
@@ -654,7 +661,8 @@ The legacy knobs map onto the default roster's entry names:
 still work — the default roster derives from them unchanged, as a fallback
 under `models` — but a `nix eval` warning fires whenever any of them is set,
 whether via the `mkHarness` `defaults` argument or a Consumer's
-`agents.models.*`, pointing at this section. Unlike those knobs, which
+`agents.drivers.<name>.models.*` (the top-level `agents.models.*` is the
+deprecated single-Driver form), pointing at this section. Unlike those knobs, which
 retier or add/drop a subagent with no image rebuild (`SCOUT_MODEL=...` at
 dispatch time, no `spindrift build`), adding an arbitrary Nth custom agent
 via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
@@ -933,11 +941,14 @@ each naming the fix:
 - several Drivers with no `agents.defaultDriver`;
 - an `agents.defaultDriver` that is not a declared Driver.
 
-The existing form, `agents.driver` plus the top-level `agents.models.*`
-settings, needs no migration and raises no warning: it is the one-entry map
-written the old way, and every output it produced before is unchanged. It
-additionally gains the per-Driver aliases listed under Outputs below, which are
-the same build under a second name.
+The single-Driver form, `agents.driver` plus the top-level Driver-valued
+settings (`agents.models.*` and `agents.bashTimeoutMs`), is deprecated
+(issue #5055). It still builds: it is the one-entry map written the old way,
+every output it produced before is unchanged, and it gains the per-Driver
+aliases listed under Outputs below, which are the same build under a second
+name. Each setting it uses raises one evaluation warning naming its
+`agents.drivers.<name>` path; [MIGRATING.md](../MIGRATING.md) maps every old
+option to its new place. A later minor release removes it.
 
 Outputs. The default Driver keeps today's names: `apps.default`,
 `apps.daemon`, `agent-image` (or `agent-closure` under bwrap), and its OCI
@@ -1342,7 +1353,7 @@ entries.
 
 ```nix
 perSystem = { inputs, lib, ... }: {
-  spindrift.agents.models.roster =
+  spindrift.agents.drivers.claude.models.roster =
     (spindrift.lib.rosterLib { inherit lib; }).defaultRoster {
       byName.reviewer.model = "claude-opus-5";
     };
@@ -1520,7 +1531,7 @@ exceptions.
 | `MERGE_GUARD_PATHS`       | `.github/**,.forgejo/**,**/CLAUDE.md,**/AGENTS.md,.claude/**,.opencode/**` (baked) | comma-separated globs; a green PR touching a matched path downgrades to manual regardless of `MERGE_MODE` (`github` and `forgejo` Code Forges only; empty disables — see [Merge guard](#merge-guard)) |
 | `MODEL`                   | (baked; see [Default models](#default-models)) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
-| `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.bashTimeoutMs`, issue #4409), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; `opencode` declares none and ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: 10 minutes); a value that is not a positive integer is skipped with a warning in the Box log |
+| `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; `opencode` declares none and ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: 10 minutes); a value that is not a positive integer is skipped with a warning in the Box log |
 | `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset); an explicit dispatch-time `REVIEW_MODEL=...`/`--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback |
 | `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, an explicit dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged |
@@ -3504,13 +3515,13 @@ An opt-in subagent, alongside the scout and reviewer, that turns the
 non-blocking findings a review surfaces into tracked issues — but only the
 ones the work loop escalated for a human, not the whole Non-blocking section.
 Off by default; the current, non-deprecated way to opt in sets
-`perSystem.spindrift.agents.models.roster` (see [`roster`](#subagent-roster))
+`perSystem.spindrift.agents.drivers.<name>.models.roster` (see [`roster`](#subagent-roster))
 to `lib/roster.nix`'s `defaultRoster` with `models.filer` set, e.g. in a
 Consumer flake:
 
 ```nix
 perSystem = { inputs, lib, ... }: {
-  spindrift.agents.models.roster =
+  spindrift.agents.drivers.claude.models.roster =
     (import "${inputs.spindrift}/lib/roster.nix" { inherit lib; }).defaultRoster {
       models.filer = "your-model-id";
     };
@@ -6716,7 +6727,7 @@ efforts, and its orchestrator review effort, are all set via `roster` in
 `nix/dogfood-defaults.nix` — see [Subagent roster](#subagent-roster) for the
 mechanism and dogfood's specific values.
 
-**Bash timeout.** The dogfood config sets `agents.bashTimeoutMs` to
+**Bash timeout.** The dogfood config sets `agents.drivers.claude.bashTimeoutMs` to
 `1800000` (30 minutes) from `nix/dogfood-defaults.nix`'s
 `driverBashTimeoutMs`, because a cold `checks-inbox` gate outruns Claude
 Code's stock 10-minute Bash cap (issue #4409). Other Consumers leave it

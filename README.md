@@ -162,7 +162,7 @@ perSystem = { config, pkgs, ... }: {
     git.merge.policy = "immediate";   # manual (default) | immediate | auto
     dispatch.maxParallel = 3;         # Boxes at once
     infra.runtime = "podman";         # podman | docker | rancher | bwrap
-    # agents.driver = "opencode";     # default: claude
+    # agents.drivers.opencode = { };  # default: claude
   };
 
   devShells.default = pkgs.mkShell {
@@ -255,7 +255,7 @@ The first three are on by default. The rest are off until you enable them.
 - **Auto-format and auto-lint.** `agents.format.enable` and
   `agents.lint.enable` run the project's formatter or linter on changed files
   before each commit. spindrift detects which tool to run.
-- **Subagent roster.** `agents.models.roster` sets the model and effort for
+- **Subagent roster.** `agents.drivers.<name>.models.roster` sets the model and effort for
   the scout, reviewer, worker, and filer subagents, and can add your own. When
   the filer is enabled, it files non-blocking review findings as
   `agent-review-finding` issues. See
