@@ -11,8 +11,42 @@ permissions:
   actions: write
 
 jobs:
+  # Classifies the PR diff as `docs` or `code` (issue #5155). The heavy jobs
+  # skip on `docs` here, inside the workflow, never via `paths-ignore`: a
+  # commit with no checks reads rollup state NONE, which the launcher's CI
+  # watcher waits out until its deadline, so a docs-only agent PR would never
+  # land. Pushes to main always run the full matrix, which also keeps main's
+  # nix store cache whole.
+  changes:
+    name: classify changes
+    runs-on: ubuntu-latest
+    outputs:
+      kind: ${{ steps.classify.outputs.kind }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify the diff against the PR base
+        id: classify
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            git diff --name-status -M "$BASE_SHA...$HEAD_SHA" >"$RUNNER_TEMP/diff"
+            kind=$(.github/scripts/ci-changes.sh <"$RUNNER_TEMP/diff")
+          else
+            kind=code
+          fi
+          echo "kind=$kind" >>"$GITHUB_OUTPUT"
+          echo "change kind: $kind"
+
   check:
     name: flake check + image realize (${{ matrix.nix-system }})
+    needs: changes
+    if: needs.changes.outputs.kind == 'code'
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -93,6 +127,8 @@ jobs:
   # with `check` — no `needs:` between them.
   check-macos:
     name: flake check (aarch64-darwin)
+    needs: changes
+    if: needs.changes.outputs.kind == 'code'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -137,3 +173,49 @@ jobs:
           nix eval --raw .#checks.aarch64-darwin \
             --apply 'cs: builtins.concatStringsSep "\n" (map (n: ".#checks.aarch64-darwin.${n}") (builtins.attrNames cs))' \
             | nix build --stdin --out-link "$RUNNER_TEMP/check-roots/check"
+
+  # The docs-only lane (issue #5155): one Linux runner building the checks
+  # that read docs files, in place of the matrix above.
+  docs:
+    name: docs checks (x86_64-linux)
+    needs: changes
+    if: needs.changes.outputs.kind == 'docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v16
+
+      - name: Restore the nix store
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-x86_64-linux-${{ github.sha }}
+          restore-prefixes-first-match: nix-x86_64-linux-
+          save: false
+
+      - name: Build the docs checks
+        run: nix build .#packages.x86_64-linux.checks-docs --print-build-logs
+
+  # The single required status check (issue #5155): branch protection names
+  # this job alone, so it runs whatever the change kind and passes only when
+  # the lane that kind requires succeeded and nothing failed or was cancelled.
+  ci-ok:
+    name: ci-ok
+    needs: [changes, check, check-macos, docs]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require the change kind's lane to have passed
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+          KIND: ${{ needs.changes.outputs.kind }}
+        run: |
+          if [ "$KIND" = docs ]; then
+            required=(changes docs)
+          else
+            required=(changes check check-macos)
+          fi
+          .github/scripts/ci-ok.sh "${required[@]}" <<<"$NEEDS"
