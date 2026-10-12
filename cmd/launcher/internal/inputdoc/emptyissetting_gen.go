@@ -13,6 +13,7 @@ var emptyIsSetting = map[string]bool{
 	"JIRA_INCLUDE_COMMENTS": true,
 	"LOCAL_ISSUE_REFERENCE": true,
 	"MEMORY_LIMIT":          true,
+	"MERGE_GUARD_PATHS":     true,
 	"PIDS_LIMIT":            true,
 	"PREFLIGHT_STALE_BASE":  true,
 }
