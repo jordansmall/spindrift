@@ -742,6 +742,69 @@ in
       "normalizeRosterResult's message must describe the problem (\"does not exist\"), got: ${builtins.toJSON result.message}";
     pkgs.runCommand "roster-normalize-rejects-empty-inline-prompt" { } "touch $out";
 
+  # Issue #5035: an inline prompt whose promptFile is already shipped would
+  # fail the image build with `cp: Permission denied`, so eval rejects it --
+  # for the default-injected name (reviewer -> review-prompt.md), a plain
+  # shipped name, both shipped directories, and a ".." path resolving back
+  # onto a shipped file. An empty inline prompt and a non-colliding
+  # promptFile stay accepted.
+  roster-normalize-inline-prompt-shadowing-shipped =
+    let
+      resultFor =
+        extra:
+        rosterLib.normalizeRosterResult [
+          (
+            {
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              prompt = "Custom prompt";
+            }
+            // extra
+          )
+        ];
+      check =
+        label: extra: entryName: needle:
+        let
+          r = resultFor extra;
+        in
+        assert assertMsg (
+          !r.ok && r.violation == "inline-prompt-shadows-shipped" && r.entryName == entryName
+        ) "${label}: expected inline-prompt-shadows-shipped for ${entryName}, got: ${builtins.toJSON r}";
+        assert assertMsg (
+          hasInfix entryName r.message && hasInfix needle r.message
+        ) "${label}: message must name ${entryName} and ${needle}, got: ${builtins.toJSON r.message}";
+        true;
+    in
+    assert check "reviewer default" { name = "reviewer"; } "reviewer" "review-prompt.md";
+    assert check "plain shipped name" { name = "fix"; } "fix" "fix-prompt.md";
+    assert check "shipped directory" {
+      name = "mine";
+      promptFile = "fragments";
+    } "mine" "fragments";
+    assert check "shipped chores directory" {
+      name = "mine";
+      promptFile = "chores";
+    } "mine" "chores";
+    assert check "traversal back onto a shipped file" {
+      name = "mine";
+      promptFile = "../prompts/review-prompt.md";
+    } "mine" "review-prompt.md";
+    # An empty inline prompt is "no prompt", so it falls back to the shipped file.
+    assert assertMsg
+      (resultFor {
+        name = "reviewer";
+        prompt = "";
+      }).ok
+      "an empty inline prompt on a shipped promptFile must stay accepted";
+    assert assertMsg
+      (resultFor {
+        name = "auditor";
+      }).ok
+      "an inline prompt on a promptFile that is not shipped must stay accepted";
+    pkgs.runCommand "roster-normalize-inline-prompt-shadowing-shipped" { } "touch $out";
+
   # Issue #2571 review fix (Finding C): "reviewer" is the one agent name whose
   # injected promptFile default does not follow the "<name>-prompt.md"
   # convention. Its template is templates/default/prompts/review-prompt.md;
