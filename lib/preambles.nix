@@ -38,8 +38,9 @@ rec {
       ) flakeOptionEntries
     );
 
-  # The Go launcher reads BOX_ENV_VARS and builds its container-arg list from
-  # it, so runOneOCI / runOneBwrap need no hand-enumerated forwarding lists.
+  # The Go launcher reads BOX_ENV_VARS and builds the Box's env from it
+  # (buildBoxEnv in cmd/launcher/internal/dispatch), so neither runner
+  # backend needs a hand-enumerated forwarding list.
   renderBoxEnvVarsList =
     schema:
     builtins.concatStringsSep " " (
