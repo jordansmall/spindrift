@@ -30,12 +30,13 @@ repeated forced runs never clobber an earlier backup — issue #2563), and is
 interactive-only: a non-TTY exits with a "write the files directly for
 scripted setup" message.
 
-The wizard is GitHub-only (issue #1559): it never prompts for the Issue
-Tracker, always writing `issueTracker = "github"` and letting the Code Forge
-follow as github; `driver` is fixed at `claude` (the only one). The Jira and
-local Issue Tracker adapters, and the runtime `ISSUE_TRACKER` validation, stay
-available for an operator who hand-edits the generated flake — the wizard just
-never offers them. Detected values
+The wizard is GitHub-only (issue #1559) (Amended by issue #5044: it now picks
+`github` or `forgejo` from the git remote; see the amendment below): it never
+prompts for the Issue Tracker, always writing `issueTracker = "github"` and
+letting the Code Forge follow as github; `driver` is fixed at `claude` (the
+only one). The Jira and local Issue Tracker adapters, and the runtime
+`ISSUE_TRACKER` validation, stay available for an operator who hand-edits the
+generated flake — the wizard just never offers them. Detected values
 (runtime by `podman → docker → nerdctl(⇒ rancher) → bwrap` precedence, git
 identity from host `git config`, repoSlug from `git remote`) appear as inline
 pre-filled defaults. nerdctl is probed after docker since Rancher Desktop's
@@ -75,7 +76,9 @@ remaining step.
   fine-grained tokens (`github_pat_`) have no introspection endpoint, so the
   wizard only probes that they have *enough*, prints the four permissions they
   should carry, and trusts the creation-time scoping. The `gh auth token`
-  fallback is therefore the case the gate most often bites.
+  fallback is therefore the case the gate most often bites. A Forgejo token
+  gets a live Probe against the instance instead: Forgejo tokens carry no
+  sniffable prefix, so there is no least-privilege audit on that path.
 - `apps.quickstart` becomes a public entry point advertised in the README's
   Quick start, alongside (not replacing) `nix flake init -t` for users who
   prefer to hand-edit.
@@ -84,3 +87,20 @@ remaining step.
   (issue #1275): nerdctl is probed after docker, since Rancher Desktop's
   dockerd mode already satisfies the `docker` branch and only containerd
   mode needs the nerdctl/rancher branch.
+
+## Amendment (issue #5044): the wizard picks github or forgejo from the git remote
+
+The Forgejo on-ramp (issue #1966), part of [ADR
+0038](0038-the-forgejo-backend-decision-set.md)'s decision set, ended
+"GitHub-only". The wizard now picks the backend from the git remote:
+`github` for a github.com remote or no remote, with no prompt; `forgejo`,
+auto-detected and announced, for a codeberg.org remote; and for any other host
+a `Backend` prompt over the quickstart-eligible backends in the shared backend
+registry (`backend.QuickstartEligible()`, today `github` and `forgejo`),
+defaulting to `github`. The answer is written as `issues.tracker`.
+
+A `forgejo` choice sets both the Issue Tracker and the Code Forge to
+`forgejo`, so the Code Forge still follows the tracker. The generated flake
+carries a Forgejo base URL only for a non-Codeberg instance, since Codeberg is
+the default. Unchanged: Jira and local are never offered (still available by
+hand-editing the generated flake), and `driver` stays fixed at `claude`.
