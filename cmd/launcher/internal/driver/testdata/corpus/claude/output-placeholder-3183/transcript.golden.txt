@@ -1,0 +1,3 @@
+[implementor] Task(scout)
+[implementor] spawning scout
+[implementor] continuing

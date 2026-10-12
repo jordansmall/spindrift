@@ -1,0 +1,53 @@
+{
+  "EarliestEventMs": 0,
+  "Found": true,
+  "HasEventSpan": false,
+  "LatestEventMs": 0,
+  "OutputIsMainLoopOnly": true,
+  "SummedByAgent": [
+    {
+      "APICalls": 2,
+      "Agent": "main",
+      "CacheCreationInputTokens": 150,
+      "CacheReadInputTokens": 3000,
+      "OutputTokens": 33815,
+      "UncachedInputTokens": 80
+    },
+    {
+      "APICalls": 2,
+      "Agent": "scout",
+      "CacheCreationInputTokens": 30,
+      "CacheReadInputTokens": 500,
+      "OutputTokens": 0,
+      "UncachedInputTokens": 25
+    }
+  ],
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 3000,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 150,
+      "Model": "claude-opus-4-8",
+      "OutputTokens": 26,
+      "UncachedInputTokens": 80
+    },
+    {
+      "CacheReadInputTokens": 500,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 30,
+      "Model": "claude-haiku-4-5",
+      "OutputTokens": 11,
+      "UncachedInputTokens": 25
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 150,
+    "cache_read_input_tokens": 3000,
+    "duration_api_ms": 6000,
+    "duration_ms": 9000,
+    "input_tokens": 105,
+    "num_turns": 3,
+    "output_tokens": 33815,
+    "total_cost_usd": 0.42
+  }
+}

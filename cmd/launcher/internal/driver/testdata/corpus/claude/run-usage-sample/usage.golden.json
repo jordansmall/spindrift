@@ -1,0 +1,69 @@
+{
+  "EarliestEventMs": 0,
+  "Found": true,
+  "HasEventSpan": false,
+  "LatestEventMs": 0,
+  "OutputIsMainLoopOnly": true,
+  "SummedByAgent": [
+    {
+      "APICalls": 2,
+      "Agent": "main",
+      "CacheCreationInputTokens": 400,
+      "CacheReadInputTokens": 3000,
+      "OutputTokens": 20,
+      "UncachedInputTokens": 140
+    },
+    {
+      "APICalls": 2,
+      "Agent": "scout",
+      "CacheCreationInputTokens": 70,
+      "CacheReadInputTokens": 800,
+      "OutputTokens": 0,
+      "UncachedInputTokens": 18
+    },
+    {
+      "APICalls": 1,
+      "Agent": "subagent",
+      "CacheCreationInputTokens": 0,
+      "CacheReadInputTokens": 700,
+      "OutputTokens": 0,
+      "UncachedInputTokens": 30
+    }
+  ],
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 3000,
+      "CacheWrite1hTokens": 140,
+      "CacheWrite5mTokens": 260,
+      "Model": "claude-opus-4-8",
+      "OutputTokens": 70,
+      "UncachedInputTokens": 140
+    },
+    {
+      "CacheReadInputTokens": 800,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 70,
+      "Model": "claude-haiku-4-5-20251001",
+      "OutputTokens": 9,
+      "UncachedInputTokens": 18
+    },
+    {
+      "CacheReadInputTokens": 700,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 0,
+      "Model": "claude-sonnet-5",
+      "OutputTokens": 15,
+      "UncachedInputTokens": 30
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 100,
+    "cache_read_input_tokens": 2000,
+    "duration_api_ms": 42000,
+    "duration_ms": 68000,
+    "input_tokens": 40,
+    "num_turns": 5,
+    "output_tokens": 20,
+    "total_cost_usd": 0.3109
+  }
+}

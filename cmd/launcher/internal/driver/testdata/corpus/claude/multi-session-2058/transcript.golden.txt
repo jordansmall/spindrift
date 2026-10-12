@@ -1,0 +1,9 @@
+[implementor] Implementing the change now.
+[implementor] Findings noted, requesting changes.
+[implementor] Findings fixed, re-running checks.
+[implementor] Approved, one nit remains.
+[implementor] Nit fixed, committing the slice.
+[implementor] Blocking finding: missing test coverage.
+[implementor] Coverage added, checks are green.
+[implementor] Approved.
+[implementor] Merged.

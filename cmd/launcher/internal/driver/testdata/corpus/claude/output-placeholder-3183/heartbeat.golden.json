@@ -1,0 +1,19 @@
+{
+  "lines": [
+    "#42 ── implementor · opus ──────────",
+    "#42 [plan] spawning scout",
+    "#42 [plan] · 1 subagent",
+    "#42 [plan] continuing",
+    "#42 scout · 3 turns"
+  ],
+  "onModel": [
+    {
+      "model": "claude-opus-4-8",
+      "role": "implementor"
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "role": "scout"
+    }
+  ]
+}
