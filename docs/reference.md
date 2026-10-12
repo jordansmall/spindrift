@@ -8957,8 +8957,8 @@ is its own process and its own Go module (`dashboard/`, stdlib only), not
 part of the daemon: it reads only what the daemon publishes, the status
 file (`spindrift-daemon.status`) and the Events file
 (`spindrift-daemon.events` and its `.1` generation) in the checkout's
-git dir, plus the Child logs those events name, and it never picks,
-starts, stops, or settles anything.
+git dir, plus the Child and Pass logs those events name, and it never
+picks, starts, stops, or settles anything.
 Because it never takes the daemon's lock, it stays up while the daemon is
 down. See [ADR
 0060](adr/0060-the-dashboard-is-a-read-only-process-over-the-daemons-published-files.md).
