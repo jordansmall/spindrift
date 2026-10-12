@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
@@ -1389,8 +1390,8 @@ func TestJiraClient_ListIssues_CloudWalksSearchJQLByToken(t *testing.T) {
 			t.Errorf("path = %q, want /rest/api/2/search/jql", r.URL.Path)
 		}
 		q := r.URL.Query()
-		if got := q.Get("fields"); got != "summary,description,status,labels" {
-			t.Errorf("fields = %q, want summary,description,status,labels", got)
+		if got := q.Get("fields"); got != "summary,description,status,labels,resolution,resolutiondate" {
+			t.Errorf("fields = %q, want summary,description,status,labels,resolution,resolutiondate", got)
 		}
 		tokens = append(tokens, q.Get("nextPageToken"))
 		if q.Get("nextPageToken") == "" {
@@ -1471,5 +1472,78 @@ func TestJiraClient_TransitionState_CompleteFallbackStripsStaleFailed(t *testing
 	want := []map[string]string{{"remove": "agent-in-progress"}, {"remove": "agent-failed"}, {"add": "agent-complete"}}
 	if !reflect.DeepEqual(gotLabelOps, want) {
 		t.Errorf("label ops = %v, want %v", gotLabelOps, want)
+	}
+}
+
+// The tuning cooldown (settle.notPlannedExpired) needs the close reason and
+// time on every read path: Issue, the Cloud /search/jql list, and the
+// Server/DC /search list. A malformed resolutiondate leaves ClosedAt zero
+// rather than failing the read; Duplicate stays false so it keeps suppressing,
+// as github's NOT_PLANNED-only mapping does.
+func TestJiraClient_ReportsClosedNotPlannedAndClosedAt(t *testing.T) {
+	closed := time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC)
+	const date = `"resolutiondate":"2026-08-15T10:30:00.000+0000"`
+	cases := []struct {
+		name       string
+		fields     string
+		notPlanned bool
+		closedAt   time.Time
+	}{
+		{"wont do", `"resolution":{"name":"Won't Do"},` + date, true, closed},
+		{"wont fix", `"resolution":{"name":"Won't Fix"},` + date, true, closed},
+		{"declined, case-insensitive", `"resolution":{"name":"DECLINED"},` + date, true, closed},
+		{"offset date", `"resolution":{"name":"Won't Do"},"resolutiondate":"2026-08-15T12:30:00.000+0200"`, true, closed},
+		{"done", `"resolution":{"name":"Done"},` + date, false, closed},
+		{"fixed", `"resolution":{"name":"Fixed"},` + date, false, closed},
+		{"duplicate", `"resolution":{"name":"Duplicate"},` + date, false, closed},
+		{"malformed date", `"resolution":{"name":"Won't Do"},"resolutiondate":"yesterday"`, true, time.Time{}},
+		{"null resolution", `"resolution":null,"resolutiondate":null`, false, time.Time{}},
+		{"absent resolution", `"labels":[]`, false, time.Time{}},
+	}
+	issueJSON := func(fields string) string {
+		return `{"key":"PROJ-1","fields":{"summary":"s","status":{"name":"Done","statusCategory":{"key":"done"}},` + fields + `}}`
+	}
+	listClosed := func(jc forge.IssueTracker) ([]forge.Issue, error) {
+		return jc.(forge.LabeledBacklogLister).ListIssuesWithLabels(forge.IssueClosed, []string{"l"})
+	}
+	paths := []struct {
+		name  string
+		email string
+		read  func(forge.IssueTracker) ([]forge.Issue, error)
+	}{
+		{"issue", "", func(jc forge.IssueTracker) ([]forge.Issue, error) {
+			iss, err := jc.Issue("PROJ-1")
+			return []forge.Issue{iss}, err
+		}},
+		{"cloud list", "bot@example.com", listClosed},
+		{"server list", "", listClosed},
+	}
+	for _, p := range paths {
+		for _, c := range cases {
+			t.Run(p.name+"/"+c.name, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasPrefix(r.URL.Path, "/rest/api/2/issue/") {
+						w.Write([]byte(issueJSON(c.fields)))
+						return
+					}
+					w.Write([]byte(`{"issues":[` + issueJSON(c.fields) + `],"total":1,"isLast":true}`))
+				}))
+				defer srv.Close()
+				jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Email: p.email, Token: "tok", ProjectKey: "PROJ", Labels: testLabels})
+				issues, err := p.read(jc)
+				if err != nil {
+					t.Fatalf("read: %v", err)
+				}
+				if len(issues) != 1 {
+					t.Fatalf("got %d issues, want 1", len(issues))
+				}
+				if got := issues[0].ClosedNotPlanned; got != c.notPlanned {
+					t.Errorf("ClosedNotPlanned = %v, want %v", got, c.notPlanned)
+				}
+				if got := issues[0].ClosedAt; !got.Equal(c.closedAt) {
+					t.Errorf("ClosedAt = %v, want %v", got, c.closedAt)
+				}
+			})
+		}
 	}
 }

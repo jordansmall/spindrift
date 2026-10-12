@@ -148,7 +148,11 @@ type jiraIssuePayload struct {
 			} `json:"statusCategory"`
 		} `json:"status"`
 		Labels     []string `json:"labels"`
-		IssueLinks []struct {
+		Resolution struct {
+			Name string `json:"name"`
+		} `json:"resolution"`
+		ResolutionDate string `json:"resolutiondate"`
+		IssueLinks     []struct {
 			Type struct {
 				Inward  string `json:"inward"`
 				Outward string `json:"outward"`
@@ -215,6 +219,36 @@ func issueState(p jiraIssuePayload) forge.IssueState {
 	return forge.IssueOpen
 }
 
+// jiraDateLayout is the timestamp format Jira emits (not RFC3339: the zone
+// offset has no colon).
+const jiraDateLayout = "2006-01-02T15:04:05.000-0700"
+
+// jiraNotPlannedResolutions are the default resolution names that mean the
+// work was declined, matched case-insensitively. Duplicate is left out on
+// purpose: github's NOT_PLANNED mapping excludes it, and a duplicate finding
+// should keep suppressing refiles.
+var jiraNotPlannedResolutions = []string{"Won't Do", "Won't Fix", "Declined"}
+
+// issue maps the payload to a forge.Issue. The close reason and time are
+// reported only for a closed issue, and a malformed resolutiondate leaves
+// ClosedAt zero (which never expires a cooldown) rather than failing the read.
+func (p jiraIssuePayload) issue() forge.Issue {
+	iss := forge.Issue{
+		Number: p.Key,
+		Title:  p.Fields.Summary,
+		Body:   p.Fields.Description,
+		State:  issueState(p),
+		Labels: p.Fields.Labels,
+	}
+	if iss.State == forge.IssueClosed {
+		iss.ClosedAt, _ = time.Parse(jiraDateLayout, p.Fields.ResolutionDate)
+		iss.ClosedNotPlanned = slices.ContainsFunc(jiraNotPlannedResolutions, func(r string) bool {
+			return strings.EqualFold(r, p.Fields.Resolution.Name)
+		})
+	}
+	return iss
+}
+
 type jiraCommentsPayload struct {
 	Comments []struct {
 		Author struct {
@@ -232,14 +266,7 @@ func (j *jiraClient) Issue(num string) (forge.Issue, error) {
 	if err := j.rest.Do(http.MethodGet, "/rest/api/2/issue/"+num, nil, &payload); err != nil {
 		return forge.Issue{}, err
 	}
-
-	return forge.Issue{
-		Number: payload.Key,
-		Title:  payload.Fields.Summary,
-		Body:   payload.Fields.Description,
-		State:  issueState(payload),
-		Labels: payload.Fields.Labels,
-	}, nil
+	return payload.issue(), nil
 }
 
 // Comments implements forge.CommentLister, returning issue num's comments
@@ -566,13 +593,7 @@ func (j *jiraClient) ListIssuesWithLabels(state forge.IssueState, labels []strin
 func issuesFromIssues(payload []jiraIssuePayload) []forge.Issue {
 	issues := make([]forge.Issue, len(payload))
 	for i, p := range payload {
-		issues[i] = forge.Issue{
-			Number: p.Key,
-			Title:  p.Fields.Summary,
-			Body:   p.Fields.Description,
-			State:  issueState(p),
-			Labels: p.Fields.Labels,
-		}
+		issues[i] = p.issue()
 	}
 	return issues
 }
@@ -596,7 +617,7 @@ func (j *jiraClient) doSearch(jql string) ([]jiraIssuePayload, error) {
 		err := j.rest.Paginate(func(int) (bool, error) {
 			q := url.Values{
 				"jql":        {jql},
-				"fields":     {"summary,description,status,labels"},
+				"fields":     {"summary,description,status,labels,resolution,resolutiondate"},
 				"maxResults": {fmt.Sprintf("%d", forge.ResultPageLimit)},
 			}
 			if token != "" {
