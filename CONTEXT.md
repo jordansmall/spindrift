@@ -952,10 +952,12 @@ when the Daemon is permitted to act, not when the repository is quiet).
 **In-place restart**:
 The [[Daemon]] replacing its own build with a newer one without giving up its
 running children: it becomes the successor in the same process, so every
-child it started stays its child and keeps its Slot. Opt-in; the default
-answer to the Daemon's build moving is still to drain and exit. Either way the
-successor is built and proven to start before the old build lets go, so a
-successor that cannot run leaves the old one running (ADR 0063).
+child it started stays its child and keeps its Slot. Opt-in, with the
+`--restart-in-place` flag; the default answer to the Daemon's build moving is
+still to drain and exit (drain mode). Either way the successor is built and
+proven to start before the old build lets go, so a successor that cannot run
+leaves the old one running. A resumed successor that refuses to start hands
+its children back to the old build (a rollback; ADR 0063).
 _Avoid_: hot reload, self-update (names the outcome, not which mechanism),
 adoption (no child is ever orphaned to adopt), detach.
 
