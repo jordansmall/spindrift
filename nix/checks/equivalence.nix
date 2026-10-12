@@ -2096,10 +2096,11 @@ in
     pkgs.runCommand "mkharness-roster-custom-entry-missing-prompt-fields-throws" { } "touch $out";
 
   # The other AC4 shape: an inline `prompt` with no `promptFile`. This entry
-  # passes validation and survives customRosterPromptFiles' `prompt != null`
-  # filter, so it IS baked. `resolvedRoster` is normalized before
-  # customRosterPromptFiles derives from it (issue #2152 slice B); a regression
-  # reading `e.promptFile` first throws a missing-attribute error here (#264).
+  # passes validation and survives customRosterPromptFiles' `hasInlinePrompt`
+  # filter (non-null, non-empty), so it IS baked. `resolvedRoster` is
+  # normalized before customRosterPromptFiles derives from it (issue #2152
+  # slice B); a regression reading `e.promptFile` first throws a
+  # missing-attribute error here (#264).
   mkharness-roster-custom-entry-inline-prompt-no-file =
     let
       inlineRoster = [
@@ -2122,6 +2123,33 @@ in
     assert pkgs.lib.assertMsg result.success
       "mkHarness must not throw when a custom roster entry sets an inline prompt but omits promptFile (issue #264 review finding)";
     pkgs.runCommand "mkharness-roster-custom-entry-inline-prompt-no-file" { } "touch $out";
+
+  # `prompt = ""` means "no inline prompt" (normalizeRoster falls back to the
+  # promptFile), so it must not reach the custom-prompt copy loop: that loop
+  # runs after the shipped prompts are copied and would hit a read-only store
+  # file. Only building promptDir exercises the loop; evaluating the harness
+  # alone does not.
+  mkharness-roster-reviewer-empty-inline-prompt-builds =
+    let
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        roster = [
+          {
+            name = "reviewer";
+            model = "claude-sonnet-5";
+            description = "";
+            tools = [ ];
+            mode = "subagent";
+            prompt = "";
+          }
+        ];
+      };
+    in
+    pkgs.runCommand "mkharness-roster-reviewer-empty-inline-prompt-builds" { } ''
+      test -s ${direct.internals.promptDir}/review-prompt.md
+      touch $out
+    '';
 
   # Issue #2512: reviewEffort is the one legacy knob documented (lib/roster.nix)
   # to override the reviewer entry's effort regardless of roster source, unlike
