@@ -79,8 +79,10 @@ func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediati
 	caps := forge.ResolveCapabilities(cf, s.it, s.cfg.Capabilities.ForgeDescriptor, s.cfg.Capabilities.TrackerDescriptor)
 	m = NewMediation(caps, s.it, s.cfg.OutboxDir, s.cfg.BaseBranch)
 	// Wrapped here, not in NewMediation, so Open and relayBlockedWork's direct
-	// push-only relay share the one retry policy (issue #4649).
+	// push-only relay share the one retry policy (issue #4649), and the draft-PR
+	// create retries the same way (issue #5146).
 	m.br = s.retryingRelay(num, gen, m.br)
+	m.dpc = s.retryingDraftPR(num, gen, m.dpc, caps.PRForge)
 	m.onOpen = func(url string) { s.latchPR(num, url) }
 	return cf.AgentBranch(num), m
 }
