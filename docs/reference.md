@@ -8127,9 +8127,11 @@ the new self path
 with the daemon's own arguments minus the wrapper's `--input` pair, plus
 `--check-only` (**Check only** above), under the daemon's environment and
 working directory, so the new build's own wrapper supplies the input
-document it will actually run with. `nix build` is unbounded, but the smoke
-test is bounded by a 2-minute timeout (`prebuildSmokeTimeout`); a timeout
-is a smoke-test block whose reason says it timed out.
+document it will actually run with. `nix eval` and `nix build` together are
+bounded by a 60-minute timeout (`prebuildBuildTimeout`); a timeout there is
+a block whose reason is prefixed `build: ` and says it timed out. The smoke
+test has its own 2-minute timeout (`prebuildSmokeTimeout`); a timeout there
+is a `smoke-test: ` block that says the same. A stop is not a timeout.
 
 On success the daemon emits a `self_update` event with phase `built` and
 the pool halts on the revision it built, the two landing together: no
