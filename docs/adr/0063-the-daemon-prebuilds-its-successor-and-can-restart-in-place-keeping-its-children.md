@@ -188,7 +188,8 @@ open:
   back and forth.
 - **Config validation refusals roll back too**, not only a failed startup
   preflight. Both fail after the children are re-attached and before the pool
-  runs, so they are the same case.
+  runs, so they are the same case. (The issue #5039 amendment below widens
+  this to Loop's pool-config and handoff-fit checks.)
 - **Two fixed GC roots in the checkout's git dir.** `spindrift-daemon.current`
   roots the running build and `spindrift-daemon.next` the prebuilt successor.
   An image whose startup succeeds roots itself as `.current` and deletes `.next`.
@@ -196,3 +197,20 @@ open:
   target, so the build rolled back to cannot be collected. A forward `exec` is
   refused unless `.current` holds the running build. This is the "running build
   and one predecessor" bound in the consequences.
+
+## Amendment (issue #5039): handoff-fit refusals roll back, and exit 1 without one
+
+"Config validation refusals roll back too" held only for the checks the new
+image ran itself. The pool's own config check, which includes whether the
+handoff fits the new config (each handed-off slot inside `MAX_PARALLEL`, each
+handed-off kind still configured), failed inside the pool's startup, after the
+halt was emitted, and drained the children instead of rolling back. The new
+image now runs that same check after its preflight and before it roots itself,
+so a handoff the new build's config cannot take is handed back like any other
+refusal and leaves no halt event behind. Validation is not deferred until the
+pool has taken the children over, since that would supervise slots or kinds the
+new config cannot represent.
+
+With no rollback possible, the image halts `config-invalid` and drains what it
+inherited, holding the lock until the children exit. It exits 1, the config
+error code. The decision text's "exit 11" is the preflight refusal's code only.
