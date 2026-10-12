@@ -893,6 +893,22 @@ func TestTrimTrailerSingleSectionHasNoAnd(t *testing.T) {
 	}
 }
 
+// A finding whose PR merged but whose issue was reopened after it closed
+// renders merged-reopened, keeping the merge revision and the Δ.
+func TestPriorFindingsMergedReopened(t *testing.T) {
+	before := rec("b", 3*hour, 2)
+	merge := rec("w", 2*hour, 9)
+	merge.DispatchKey, merge.PRURL = "7", "https://example.com/pulls/1"
+	after := rec("a", hour, 5)
+	lookup := func(string) (string, bool) { return "abc123", true }
+	s := priorFindings([]Prior{{Number: "7", Open: true, Reopened: true, Metric: "usd-per-record"}}, []dispatchrecord.Record{before, merge, after}, 1, lookup)
+	got := strings.Join(s.items, "")
+	want := "| finding:7 | merged-reopened | abc123 | usd-per-record | 1 | $2.00 | $5.00 | +3.00 |"
+	if !strings.Contains(got, want) {
+		t.Errorf("merged reopened row lacks %q:\n%s", want, got)
+	}
+}
+
 // The Prior findings header counts the findings listed, not the cap.
 func TestPriorFindingsHeaderCountsListed(t *testing.T) {
 	s := priorFindings([]Prior{{Number: "1"}, {Number: "2"}}, nil, 1, nil)

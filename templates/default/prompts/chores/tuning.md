@@ -16,7 +16,13 @@ first, each with its issue state. For a finding whose PR merged, even one
 a human merged after it was held, it also gives the metric's before and
 after figures and their Δ (after minus before) around that merge, so you
 can follow up on whether the suggestion helped. Do not re-file a
-finding that is still open.
+finding that is still open. A state of merged-reopened means the PR
+merged but the issue was reopened after it closed, a sign the fix may
+have fallen short; a follow-up finding on what the fix missed is fair,
+but the host keys a tuning finding on its class, target file, and metric
+and suppresses one whose every class, file, and metric term matches the
+open finding's, so the follow-up needs a different file, class, or
+metric.
 
 The digest is this run's scope: the diff range and slice above are blank
 for this Chore, so there is nothing to sweep. The Target repo checkout is

@@ -1539,6 +1539,40 @@ func TestSweep_Tuning_PriorFindingShowsMergeDelta(t *testing.T) {
 	}
 }
 
+// A merged finding whose issue was reopened after it closed renders
+// merged-reopened, still with its merge revision and Δ; one the tracker cannot
+// report reopened keeps merged, and a reopened one that never merged stays open.
+func TestSweep_Tuning_PriorFindingReopenedAfterMerge(t *testing.T) {
+	cases := []struct {
+		name     string
+		merged   bool
+		reopened bool
+		want     string
+	}{
+		{"merged and reopened", true, true, "| finding:100 | merged-reopened | abc123def | avg-usd | 3 | $2.00 | $4.00 | +2.00 | thin |"},
+		{"merged, open, not reopened", true, false, "| finding:100 | merged | abc123def | avg-usd | 3 | $2.00 | $4.00 | +2.00 | thin |"},
+		{"reopened, never merged", false, true, "| finding:100 | open | — | avg-usd |"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+			if c.merged {
+				seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil, hostop.DispatchSettled{State: "complete", Reason: "merged", MergeCommit: "abc123def"})
+				seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+			}
+			iss := tuningFinding("100", "avg-usd", "role:implement:avg-usd")
+			iss.Reopened = c.reopened
+
+			input := sweepWithPrior(t, root, []forge.Issue{iss}, nil)
+
+			if !strings.Contains(input, c.want) {
+				t.Errorf("digest lacks %q:\n%s", c.want, input)
+			}
+		})
+	}
+}
+
 // A work PR closing a tuning finding is held for a human at settle, so its
 // Record carries the hold reason and the PR URL but no merge; the forge says
 // the human has since merged it.
@@ -1568,6 +1602,29 @@ func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanShowsDelta(t *testing.T) {
 	}
 	if rows := priorRows(input); len(rows) != 2 || !strings.HasPrefix(rows[0], "| finding:101 | closed-completed | — |") {
 		t.Errorf("prior rows = %q, want finding:101 unmerged then finding:100", rows)
+	}
+}
+
+// A held PR a human later merged, whose issue was then reopened, renders
+// merged-reopened with the merge revision and Δ.
+func TestSweep_Tuning_PriorFindingHeldPRMergedByHumanThenReopened(t *testing.T) {
+	const pr = "https://example.com/pulls/5"
+	root := t.TempDir()
+	seedRecords(t, root, 1, 3, tuningNow.Add(-72*time.Hour))
+	seedRecordsSettled(t, root, 100, 1, tuningNow.Add(-48*time.Hour), 2, nil,
+		hostop.DispatchSettled{State: "complete", Reason: settle.ReasonTuningProvenance, PRURL: pr})
+	seedRecordsCost(t, root, 10, 3, tuningNow.Add(-24*time.Hour), 4)
+	iss := tuningFinding("100", "avg-usd", "role:implement:avg-usd")
+	iss.Reopened = true
+
+	input := sweepWithPrior(t, root, []forge.Issue{iss}, nil, func(fc *forge.Fake) {
+		fc.SetPRState(pr, forge.PRMerged)
+		fc.SetMergeCommit(pr, "abc123def")
+	})
+
+	want := "| finding:100 | merged-reopened | abc123def | avg-usd | 3 | $2.00 | $4.00 | +2.00 | thin |"
+	if !strings.Contains(input, want) {
+		t.Errorf("digest lacks %q:\n%s", want, input)
 	}
 }
 
