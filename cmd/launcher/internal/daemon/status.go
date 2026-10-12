@@ -138,6 +138,10 @@ type SlotStatus struct {
 	CIWait   bool   `json:"ci_wait,omitempty"`
 	PRURL    string `json:"pr_url,omitempty"`
 	CIRunURL string `json:"ci_run_url,omitempty"`
+	// ImageBuildSince is RFC3339 UTC: when the running child began building
+	// its Box image. Set until the child's finished record, its next box
+	// record, or its settled record clears it.
+	ImageBuildSince string `json:"image_build_since,omitempty"`
 	// ChildStart and ChildStartN pin the running child's Dispatch as the
 	// dashboard names it: the time string of its child_start event, and how
 	// many earlier child_starts on this slot share that exact string.
