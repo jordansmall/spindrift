@@ -434,7 +434,9 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	// call's cfg.Stop. cfg.Stop is nil-safe: a nil channel never receives,
 	// so an unset Stop makes this select equivalent to just waiting on
 	// pctx.Done.
+	watcherDone := make(chan struct{})
 	go func() {
+		defer close(watcherDone)
 		select {
 		case <-cfg.Stop:
 			p.haltStopRequested("")
@@ -454,6 +456,11 @@ func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Hal
 	// A prebuild still running outlives its slots (they return on the halt
 	// that cancels its ctx); wait it out so no event follows Loop's return.
 	p.bg.Wait()
+	// The watcher can wake on cfg.Stop as the slots return, and its halt
+	// still publishes a status write; join it so nothing follows Loop's
+	// return.
+	p.cancel()
+	<-watcherDone
 
 	if h := p.committedHandoff(); h != nil {
 		return Halt{Handoff: h}
