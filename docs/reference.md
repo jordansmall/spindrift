@@ -962,6 +962,31 @@ opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
 opencode entry inherits that Driver's limits: no Filer or worker is
 provisioned.
 
+Runtime env. With several Drivers declared, each Driver's apps (`.#<driver>`,
+`.#<driver>-daemon`, and for the default Driver `apps.default` and
+`apps.daemon`) source `$PWD/harness.env` and then, if it exists,
+`$PWD/harness.<driver>.env`, both exported. Where both set a key the Driver
+file wins. Precedence against your shell env and dispatch-time flags is
+unchanged: the Driver file sits in the same tier as `harness.env`, after it,
+so it overrides the shell env, and flags still win over both. Another
+Driver's file is never read, so `harness.opencode.env` does not reach the
+`claude` app. Put the Driver-valued knobs (the `driverValued` rows in
+`lib/env-schema.nix`, such as `MODEL` and `EFFORT`) in the Driver's own file,
+and keep shared knobs (forge tokens, git identity, `*_CMD` credential
+commands) in `harness.env`. If `harness.env` assigns a Driver-valued knob
+anyway, the wrapper prints one line per knob to stderr before sourcing (it
+recognizes `MODEL=`, `MODEL+=`, and the `export`, `readonly`, and `declare`
+forms), and the knob still applies to every Driver:
+
+```
+spindrift: warning: harness.env sets MODEL, a Driver-valued knob, so it applies to every Driver; set it in harness.claude.env instead
+```
+
+With a single Driver (the `agents.driver` shorthand or a one-entry
+`agents.drivers`) no Driver file is read, even if present, and nothing warns.
+A Daemon's child dispatches re-run the Daemon's `DAEMON_APP`, which re-sources both files,
+so a child of a multi-Driver Daemon prints the warning too.
+
 #### Authoring a new Driver
 
 `lib/drivers/default.nix` is the registry: the deep module that both
@@ -1439,7 +1464,10 @@ baked as Nix options — so one image drives any Target repo without a rebuild
 (ADR 0001). Secrets stay **runtime env** (`harness.env` or your shell, never
 the flake); every other knob below is a flake `settings.*` value or a
 `--flag` (ADR 0020) — the env var column still works this release (deprecated,
-warns) but is no longer the primary channel:
+warns) but is no longer the primary channel. When you build several Drivers
+from one flake, each Driver's apps also read an optional
+`harness.<driver>.env` after `harness.env`; see [Several Drivers side by
+side](#several-drivers-side-by-side).
 
 Every secret knob (`GH_TOKEN`, `BOX_GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
 `ANTHROPIC_API_KEY`, `JIRA_TOKEN`) can also be sourced from an external
@@ -7235,8 +7263,9 @@ their line keeps the older wording:
 DAEMON_IDLE_FLOOR=5s set in environment — not forwarded to children; use the --input document's settings.DAEMON_IDLE_FLOOR
 ```
 
-Anything a child's own wrapper re-sources from `harness.env` in its
-working directory is outside the daemon's control and stays so.
+Anything a child's own wrapper re-sources from `harness.env` (or, with
+several Drivers, `harness.<driver>.env`) in its working directory is outside
+the daemon's control and stays so.
 
 Every child's stdin is `/dev/null`: it runs in its own process group (see
 **Halting** below), and a background process group that reads the tty is
