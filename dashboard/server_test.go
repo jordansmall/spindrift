@@ -184,13 +184,13 @@ func TestRunningSlotShowsCIWait(t *testing.T) {
 	}
 	waiting := running(`,"ci_wait":true,"pr_url":"https://github.com/o/r/pull/12"`)
 	_, body := get(t, &waiting, "/")
-	want := `<a class="pill ci-wait" href="https://github.com/o/r/pull/12" target="_blank" rel="noopener noreferrer">waiting on CI</a>`
+	want := `<a class="pill ci-wait extlink" href="https://github.com/o/r/pull/12" target="_blank" rel="noopener noreferrer">waiting on CI</a>`
 	if !strings.Contains(body, want) {
 		t.Errorf("want %q in card:\n%s", want, body)
 	}
 	withRun := running(`,"ci_wait":true,"pr_url":"https://github.com/o/r/pull/12","ci_run_url":"https://github.com/o/r/actions/runs/99"`)
 	_, body = get(t, &withRun, "/")
-	want = `<a class="pill ci-wait" href="https://github.com/o/r/actions/runs/99" target="_blank" rel="noopener noreferrer">waiting on CI</a>`
+	want = `<a class="pill ci-wait extlink" href="https://github.com/o/r/actions/runs/99" target="_blank" rel="noopener noreferrer">waiting on CI</a>`
 	if !strings.Contains(body, want) {
 		t.Errorf("run URL present: want %q in card:\n%s", want, body)
 	}
