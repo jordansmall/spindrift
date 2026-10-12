@@ -22,6 +22,7 @@ let
     attrNames
     concatStringsSep
     sort
+    splitString
     ;
   driverMap = import ../../lib/driver-map.nix;
   # FLAKE_IMAGE_ATTR names the image's Linux twin, not a darwin host.
@@ -425,7 +426,9 @@ in
         "agents.driver"
       ]
       ++ map (segs: "agents." + concatStringsSep "." segs) (builtins.attrValues driverMap.paths);
-      migrating = builtins.readFile ../../MIGRATING.md;
+      # Line by line: hasInfix's `.*pattern.*` regex over the ~100KB file
+      # backtracks and segfaults CI's Nix (see nix/checks/changelog.nix).
+      migratingLines = splitString "\n" (builtins.readFile ../../MIGRATING.md);
       msgsFor =
         topLevel:
         driverMap.deprecations {
@@ -459,7 +462,7 @@ in
     ) "deprecations: setting every path must warn once per path";
     # MIGRATING.md's table is hand-written; every old option must have a row.
     assert assertMsg (builtins.all (
-      p: hasInfix "| `perSystem.spindrift.${p}" migrating
+      p: builtins.any (hasInfix "| `perSystem.spindrift.${p}") migratingLines
     ) oldPaths) "MIGRATING.md: the issue #5055 table must map every single-Driver option";
     assert assertMsg (msgsFor [ ] == [ ]) "deprecations: no settings, no warnings";
     assert assertMsg (has (builtins.head (msgsFor (top [ "agents.driver" ]))) [
