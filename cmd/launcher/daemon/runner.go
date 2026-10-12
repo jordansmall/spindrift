@@ -470,13 +470,19 @@ const prebuildStderrTail = 2000
 // prebuildSmokeTimeout bounds the successor's --check-only run. It only loads
 // input and config, so a run past this is a hang; unbounded, it would hold
 // the pool in `building` forever instead of reaching `blocked`. A var so a
-// test can shrink it. `nix build` is deliberately unbounded: a cold build can
-// legitimately take long.
+// test can shrink it.
 var prebuildSmokeTimeout = 2 * time.Minute
 
-// prebuildWaitDelay is how long Prebuild waits for the smoke test's stderr
-// pipe after killing it: a wrapper's grandchild can hold the pipe open and
-// would otherwise defeat the timeout.
+// prebuildBuildTimeout bounds `nix eval` and `nix build` together. Generous,
+// because a cold build can legitimately take long, but finite: a hung nix
+// would otherwise hold the pool in `building` forever instead of reaching
+// `blocked`. Killing the build loses no finished derivation; the store keeps
+// them. A var so a test can shrink it.
+var prebuildBuildTimeout = 60 * time.Minute
+
+// prebuildWaitDelay is how long Prebuild waits for a step's output pipes after
+// killing it: a wrapper's grandchild can hold a pipe open and would otherwise
+// defeat the timeout.
 const prebuildWaitDelay = 5 * time.Second
 
 // prebuildStderr cuts on a rune boundary so the tail is still valid UTF-8.
@@ -504,6 +510,16 @@ func prebuildRun(cmd *exec.Cmd) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// annotateTimeout marks err as a timeout when child's own bound d expired.
+// Testing parent too keeps a stop, or a deadline parent itself carries, from
+// being reported as child's timeout.
+func annotateTimeout(parent, child context.Context, d time.Duration, err error) error {
+	if parent.Err() == nil && errors.Is(child.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("timed out after %s: %w", d, err)
+	}
+	return err
+}
+
 // Prebuild realises tip.SelfPath under a GC root in the state directory and
 // smoke-tests it, so a self-change halts the pool only for a daemon that is
 // known to build and to accept the operator's own arguments. The single
@@ -520,18 +536,24 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 	if err != nil {
 		return build(err)
 	}
-	drvPath, err := prebuildRun(runnerEvalCommand(ctx, drvArgv[0], drvArgv[1:]...))
+	buildCtx, cancelBuild := context.WithTimeout(ctx, prebuildBuildTimeout)
+	defer cancelBuild()
+	evalCmd := runnerEvalCommand(buildCtx, drvArgv[0], drvArgv[1:]...)
+	evalCmd.WaitDelay = prebuildWaitDelay
+	drvPath, err := prebuildRun(evalCmd)
 	if err != nil {
-		return build(fmt.Errorf("nix eval %s: %w", strings.Join(drvArgv[1:], " "), err))
+		return build(fmt.Errorf("nix eval %s: %w", strings.Join(drvArgv[1:], " "), annotateTimeout(ctx, buildCtx, prebuildBuildTimeout, err)))
 	}
 	if drvPath == "" {
 		return build(errors.New("nix eval printed no derivation path"))
 	}
 
 	buildArgv := daemon.SelfBuildCommand(drvPath, filepath.Join(r.stateDir, prebuildGCRoot))
-	outPath, err := prebuildRun(runnerPrebuildCommand(ctx, buildArgv[0], buildArgv[1:]...))
+	buildCmd := runnerPrebuildCommand(buildCtx, buildArgv[0], buildArgv[1:]...)
+	buildCmd.WaitDelay = prebuildWaitDelay
+	outPath, err := prebuildRun(buildCmd)
 	if err != nil {
-		return build(fmt.Errorf("nix build %s: %w", drvPath, err))
+		return build(fmt.Errorf("nix build %s: %w", drvPath, annotateTimeout(ctx, buildCtx, prebuildBuildTimeout, err)))
 	}
 	if outPath == "" || !strings.HasPrefix(tip.SelfPath, outPath+"/") {
 		return build(fmt.Errorf("nix build of %s produced %q, which does not hold %s", drvPath, outPath, tip.SelfPath))
@@ -548,9 +570,7 @@ func (r *hostRunner) Prebuild(ctx context.Context, tip daemon.Tip) error {
 	cmd.Env = r.env
 	cmd.WaitDelay = prebuildWaitDelay
 	if _, err := prebuildRun(cmd); err != nil {
-		if ctx.Err() == nil && errors.Is(smokeCtx.Err(), context.DeadlineExceeded) {
-			err = fmt.Errorf("timed out after %s: %w", prebuildSmokeTimeout, err)
-		}
+		err = annotateTimeout(ctx, smokeCtx, prebuildSmokeTimeout, err)
 		return &daemon.PrebuildError{Stage: daemon.PrebuildStageSmokeTest, Err: fmt.Errorf("%s --check-only: %w", tip.SelfPath, err)}
 	}
 	r.flightMu.Lock()

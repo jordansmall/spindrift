@@ -3098,6 +3098,94 @@ func TestPrebuild_SmokeTestHangTimesOut(t *testing.T) {
 	}
 }
 
+func TestPrebuild_BuildStepHangTimesOut(t *testing.T) {
+	for _, tc := range []struct {
+		name, eval, build string
+	}{
+		{"eval", "exec sleep 30", "echo /nix/store/q75-spindrift-daemon"},
+		{"build", "echo /nix/store/il4-spindrift-daemon.drv", "exec sleep 30"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := prebuildBuildTimeout
+			prebuildBuildTimeout = 100 * time.Millisecond
+			t.Cleanup(func() { prebuildBuildTimeout = orig })
+
+			h := newPrebuildHarness(t, tc.eval, tc.build, "true")
+
+			start := time.Now()
+			err := h.r.Prebuild(context.Background(), daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath})
+			if elapsed := time.Since(start); elapsed > 10*time.Second {
+				t.Errorf("Prebuild took %v, want it bounded by the build timeout", elapsed)
+			}
+			var pe *daemon.PrebuildError
+			if !errors.As(err, &pe) || pe.Stage != daemon.PrebuildStageBuild {
+				t.Fatalf("Prebuild() = %v, want a build-stage *daemon.PrebuildError", err)
+			}
+			if !strings.Contains(err.Error(), "timed out after") {
+				t.Errorf("err = %q, want it to say the build timed out", err)
+			}
+		})
+	}
+}
+
+// TestPrebuild_BuildTimeoutSpansEvalAndBuild pins one bound over both steps:
+// each sleep fits the timeout alone, but not together.
+func TestPrebuild_BuildTimeoutSpansEvalAndBuild(t *testing.T) {
+	orig := prebuildBuildTimeout
+	prebuildBuildTimeout = time.Second
+	t.Cleanup(func() { prebuildBuildTimeout = orig })
+
+	h := newPrebuildHarness(t,
+		"sleep 0.6; echo /nix/store/il4-spindrift-daemon.drv",
+		"sleep 0.6; echo /nix/store/q75-spindrift-daemon",
+		"true")
+
+	err := h.r.Prebuild(context.Background(), daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath})
+	var pe *daemon.PrebuildError
+	if !errors.As(err, &pe) || pe.Stage != daemon.PrebuildStageBuild {
+		t.Fatalf("Prebuild() = %v, want a build-stage *daemon.PrebuildError", err)
+	}
+	if !strings.Contains(err.Error(), "nix build") || !strings.Contains(err.Error(), "timed out after") {
+		t.Errorf("err = %q, want nix build to time out on the shared bound", err)
+	}
+}
+
+func TestPrebuild_StopDuringBuildIsNotATimeout(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+	}{
+		{"cancel", func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			time.AfterFunc(100*time.Millisecond, cancel)
+			return ctx, cancel
+		}},
+		// The caller's own deadline expiring is DeadlineExceeded on buildCtx
+		// too; only the parent check keeps it from reading as the build bound.
+		{"parent deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), 100*time.Millisecond)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newPrebuildHarness(t,
+				"echo /nix/store/il4-spindrift-daemon.drv",
+				"exec sleep 30",
+				"true")
+
+			ctx, cancel := tc.ctx()
+			defer cancel()
+			err := h.r.Prebuild(ctx, daemon.Tip{Revision: "abc", SelfPath: prebuildSelfPath})
+			var pe *daemon.PrebuildError
+			if !errors.As(err, &pe) || pe.Stage != daemon.PrebuildStageBuild {
+				t.Fatalf("Prebuild() = %v, want a build-stage *daemon.PrebuildError", err)
+			}
+			if strings.Contains(err.Error(), "timed out after") {
+				t.Errorf("err = %q, want a stop not reported as a timeout", err)
+			}
+		})
+	}
+}
+
 func TestPrebuildStderr_CutsOnRuneBoundary(t *testing.T) {
 	// "é" is two bytes and starts at odd offsets here, so a cut at an even
 	// offset lands mid-character.
