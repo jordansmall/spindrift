@@ -672,7 +672,10 @@ in
         grep -qF '/principle-laziness-protocol' ${principleLazinessProtocolAnchor}
         grep -qF '/principle-redesign-from-first-principles' ${principleRedesignFromFirstPrinciplesAnchor}
         ! grep -qF 'PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP' \
-          ${batsHarness.internals.promptDir}/fix-prompt.md
+          ${batsHarness.internals.promptDir}/fix-prompt.md || {
+            echo "fix-prompt.md carries the PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP anchor; fix passes must not redesign" >&2
+            exit 1
+          }
         touch $out
       '';
 
@@ -1346,7 +1349,10 @@ in
     pkgs.runCommand "pr-body-reference-local-off-has-no-reference" { }
       ''
         ! grep -qi 'closes\|fixes\|local-issue\|''${ISSUE_NUMBER}' \
-          ${../../templates/default/prompts/fragments/pr-body-local-noref.md}
+          ${../../templates/default/prompts/fragments/pr-body-local-noref.md} || {
+            echo "pr-body-local-noref.md references the ticket (closing keyword, local-issue, or ISSUE_NUMBER) with the toggle off (issue #1429)" >&2
+            exit 1
+          }
         touch $out
       '';
 
@@ -1354,7 +1360,10 @@ in
     pkgs.runCommand "pr-body-reference-local-on-has-breadcrumb-not-closing-keyword" { }
       ''
         grep -qF 'Local-issue: ''${ISSUE_NUMBER}' ${../../templates/default/prompts/fragments/pr-body-local-ref.md}
-        ! grep -qi 'closes\|fixes' ${../../templates/default/prompts/fragments/pr-body-local-ref.md}
+        ! grep -qi 'closes\|fixes' ${../../templates/default/prompts/fragments/pr-body-local-ref.md} || {
+          echo "pr-body-local-ref.md contains a closing keyword (closes/fixes); the local-issue reference must be a breadcrumb only (issue #1429)" >&2
+          exit 1
+        }
         touch $out
       '';
 
@@ -1441,7 +1450,10 @@ in
         grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-github-readonly.md}
         for f in research-verdict-github-readonly.md research-verdict-local.md; do
           grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments}/"$f"
-          ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments}/"$f"
+          ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments}/"$f" || {
+            echo "$f invokes the SPINDRIFT_COMMENT_BEGIN grammar; read-only verdict fragments use the nonce-guarded SPINDRIFT_COMMENT line (issue #1917)" >&2
+            exit 1
+          }
         done
         touch $out
       '';
@@ -1474,7 +1486,10 @@ in
         done
         grep -q 'note=' ${../../templates/default/prompts/fragments/issue-blocked-comment-forgejo-readonly.md}
         grep -q 'SPINDRIFT_COMMENT ''${RUN_NONCE}' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md}
-        ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md}
+        ! grep -q 'SPINDRIFT_COMMENT_BEGIN' ${../../templates/default/prompts/fragments/research-verdict-forgejo-readonly.md} || {
+          echo "research-verdict-forgejo-readonly.md invokes the SPINDRIFT_COMMENT_BEGIN grammar (issue #1963)" >&2
+          exit 1
+        }
         touch $out
       '';
 
@@ -1642,10 +1657,16 @@ in
     pkgs.runCommand "filer-direct-forgejo-fragments-speak-fj-and-curl" { }
       ''
         grep -q 'fj issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}
-        ! grep -q 'gh issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md}
+        ! grep -q 'gh issue create' ${../../templates/default/prompts/fragments/filer-file-direct-forgejo.md} || {
+          echo "filer-file-direct-forgejo.md invokes gh issue create (issue #1963)" >&2
+          exit 1
+        }
         grep -q '/api/v1/repos' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
         grep -q 'agent-review-finding' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
-        ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md}
+        ! grep -q 'gh label create' ${../../templates/default/prompts/fragments/filer-label-direct-forgejo.md} || {
+          echo "filer-label-direct-forgejo.md invokes gh label create (issue #1963)" >&2
+          exit 1
+        }
         touch $out
       '';
 
@@ -1675,14 +1696,22 @@ in
   # The OPEN A PULL REQUEST read-write create step forks on CODE_FORGE (issue
   # #1963, OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO computed in
   # promptassembly): the github fragment keeps `gh pr create` and never
-  # invokes `fj pr create`, and the forgejo fragment the reverse.
+  # invokes `fj pr create`, and the forgejo fragment the reverse. The forgejo
+  # pin matches the invocation `gh pr create --`, since that fragment's
+  # "Do NOT run `gh pr create`" reminder names the bare command (issue #5066).
   open-pr-create-fragments-fork-forge-on-read-write =
     pkgs.runCommand "open-pr-create-fragments-fork-forge-on-read-write" { }
       ''
         grep -q 'gh pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md}
-        ! grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md}
+        ! grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-git.md} || {
+          echo "open-pr-create-git.md invokes fj pr create (issue #1963)" >&2
+          exit 1
+        }
         grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
-        ! grep -q 'gh pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
+        ! grep -q 'gh pr create --' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md} || {
+          echo "open-pr-create-forgejo.md invokes gh pr create (issues #1963, #5066)" >&2
+          exit 1
+        }
         touch $out
       '';
 
@@ -1692,9 +1721,15 @@ in
   # forgejo fragment the reverse.
   fix-ci-read-fragments-fork-forge = pkgs.runCommand "fix-ci-read-fragments-fork-forge" { } ''
     grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
-    ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-github.md}
+    ! grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-github.md} || {
+      echo "fix-ci-read-github.md invokes fj pr status (issue #1963)" >&2
+      exit 1
+    }
     grep -q 'fj pr status' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md}
-    ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md}
+    ! grep -q 'gh pr view' ${../../templates/default/prompts/fragments/fix-ci-read-forgejo.md} || {
+      echo "fix-ci-read-forgejo.md invokes gh pr view (issue #1963)" >&2
+      exit 1
+    }
     touch $out
   '';
 
