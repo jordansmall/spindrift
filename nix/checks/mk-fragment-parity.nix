@@ -93,7 +93,7 @@ let
 
   # `skillClause`/`fallbackClause` default to `clause`. Per-side wording exists
   # because the two sides sometimes state one bound with no shared literal
-  # (skill "wrapped at 72", fallback "body ≤72"); the number must sit inside
+  # (skill "72-column wrapping", fallback "body ≤72"); the number must sit inside
   # both needles so a one-sided bound change still goes red.
   clauseCheck = c: {
     name = "${skillName}-fragment-parity-clause-${c.name}";
