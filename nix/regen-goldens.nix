@@ -1,8 +1,10 @@
 # Update-mode regenerator for the Go-test goldens (issue #2951): prompt
-# assembly and `spindrift stats`. It runs the Go golden tests
+# assembly, `spindrift stats`, and the per-Driver Pass-log corpus. It runs
+# the Go golden tests
 # (cmd/launcher/internal/promptassembly/golden_integration_test.go,
 # cmd/launcher/stats_test.go, cmd/launcher/stats_by_test.go,
-# cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go) with
+# cmd/launcher/stats_reverts_test.go, cmd/launcher/stats_churn_test.go,
+# cmd/launcher/internal/driver/corpus_test.go) with
 # UPDATE_GOLDENS=1, which flips their compare helpers from fail to
 # overwrite. Separate from nix/regen.nix's regen verb because these
 # goldens are the output of running the test, not a pure render of a
@@ -42,8 +44,9 @@ pkgs.writeShellApplication {
     # has none, so run the test from a copy of the module. The test finds the
     # goldens and the raw prompt templates at ../../tests and ../../templates
     # relative to the module, so those two are symlinks back into the checkout,
-    # as is the module's own testdata/golden: goldens written through them land
-    # in the repo.
+    # as are the module's own testdata/golden and the Driver corpus
+    # (internal/driver/testdata/corpus): goldens written through them land in
+    # the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
     chmod -R +w "$scratch/src"
@@ -52,6 +55,8 @@ pkgs.writeShellApplication {
     ln -s "$root/templates" "$scratch/src/templates"
     rm -rf "$scratch/src/cmd/launcher/testdata/golden"
     ln -s "$root/cmd/launcher/testdata/golden" "$scratch/src/cmd/launcher/testdata/golden"
+    rm -rf "$scratch/src/cmd/launcher/internal/driver/testdata/corpus"
+    ln -s "$root/cmd/launcher/internal/driver/testdata/corpus" "$scratch/src/cmd/launcher/internal/driver/testdata/corpus"
 
     ${import ./checks/go-check-env.nix}
     export SPINDRIFT_SEAM_FIXTURES_DIR=${fixtures.seamFixtures}
@@ -62,5 +67,6 @@ pkgs.writeShellApplication {
     # Selects by name: a new statsGolden caller must end in Golden or start
     # with By, or update mode silently skips it (issue #4861).
     go test -count=1 -run '^TestStats_(.*Golden|By.*)$' .
+    go test -count=1 -run '^TestDriverCorpusGoldens$' ./internal/driver
   '';
 }

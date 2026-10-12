@@ -1119,6 +1119,40 @@ appends the same canonical contract to a rendered issue prompt that omits it,
 idempotently, so a runtime-mounted custom prompt can't ship an agent that
 never emits the outcome line either.
 
+##### Driver Pass-log corpus
+
+Every Driver also carries a corpus of Pass logs under
+`cmd/launcher/internal/driver/testdata/corpus/<driver>/<case>/pass.jsonl`
+(issue #5180), seeded from the synthetic per-Driver fixtures and grown with
+scrubbed real logs. The seed logs are frozen copies that deliberately do not
+track later edits to those fixtures (the corpus pins behaviour, so a fixture
+edit must not move a golden). `TestDriverCorpusGoldens` drives each registered
+Driver over each log and compares its output to goldens beside it:
+`classification.golden.json` (transient-vs-terminal classification),
+`usage.golden.json` (token and cost report),
+`heartbeat.golden.json` (heartbeat lines and `OnModel` calls),
+`transcript.golden.txt` and `result.golden.txt` (the rendered transcript and
+final result), and `resolve-exit.golden.json` (exit-code resolution). The test
+fails until a newly registered Driver has at least one `<case>` log.
+
+To add a log, scrub a raw capture, then review it by hand for private repo
+content the scrubber cannot recognise (it redacts only credential-shaped
+strings):
+
+```sh
+cd cmd/launcher
+go run ./internal/driver/corpus/scrub raw.jsonl \
+  internal/driver/testdata/corpus/<driver>/<case>/pass.jsonl
+```
+
+Then write its goldens with `nix run .#regen-goldens`, or, from
+`cmd/launcher`, `UPDATE_GOLDENS=1 go test -run '^TestDriverCorpusGoldens$'
+./internal/driver`. Goldens are permanent: regenerate them only in a change
+that deliberately alters a reader's output (a behaviour fix), never in a
+Driver's switch to the shared readers (issue #4944), where an unchanged golden
+is the proof the switch preserved behaviour. `TestDriverCorpusHasNoCredentials`
+rejects any credential-shaped string in the corpus, in CI and the in-box gate.
+
 #### Loop/background affordances are stripped, not merely discouraged
 
 A headless Box run has no harness watching for a promised re-invocation:
