@@ -709,3 +709,53 @@ func BenchmarkDispatchFollowTick(b *testing.B) {
 		}
 	}
 }
+
+func TestFindDispatchAcrossInPlaceRestart(t *testing.T) {
+	dir := t.TempDir()
+	appendTo(t, filepath.Join(dir, eventsFileName), restartPre+restartHandoff+restartPost)
+	srv := newServer(dir, filepath.Join(dir, statusFileName))
+
+	a, ok := srv.findDispatch(0, "2026-10-07T09:00:00Z", 0)
+	if !ok || a.ChildLog != "logs/A.log" || a.Closed || a.Exit != nil {
+		t.Fatalf("inherited slot 0 Dispatch = %+v, ok=%v", a, ok)
+	}
+	if len(a.PassLogs) != 2 || a.PassLogs[0].Path != "logs/a-initial.log" ||
+		a.PassLogs[1].Path != "logs/a-fix.log" || a.Phase != "fix-pass-1" {
+		t.Errorf("slot 0 pass logs not continuous across the restart: %+v", a.PassLogs)
+	}
+	if len(a.Subject) != 1 || a.Subject[0].Label != "#42" {
+		t.Errorf("slot 0 subject = %+v", a.Subject)
+	}
+	if latest, ok := srv.findDispatch(0, "", 0); !ok || latest.ChildLog != "logs/A.log" {
+		t.Errorf("latest on slot 0 = %+v, want the inherited Dispatch", latest)
+	}
+
+	b, ok := srv.findDispatch(1, "2026-10-07T09:02:00Z", 0)
+	if !ok || b.ChildLog != "logs/B.log" || !b.Closed || b.Exit == nil || *b.Exit != 0 || b.Outcome != "complete" {
+		t.Fatalf("inherited slot 1 Dispatch = %+v, ok=%v", b, ok)
+	}
+	if len(b.PassLogs) != 1 || b.PassLogs[0].Path != "logs/b-initial.log" {
+		t.Errorf("slot 1 pass logs = %+v", b.PassLogs)
+	}
+
+	c, ok := srv.findDispatch(1, "", 0)
+	if !ok || c.ChildLog != "logs/C.log" || c.Closed || len(c.PassLogs) != 0 {
+		t.Errorf("post-restart slot 1 Dispatch = %+v, ok=%v", c, ok)
+	}
+}
+
+func TestDispatchEventsKeepsGoingAcrossInPlaceRestart(t *testing.T) {
+	const query = "/dispatch/events?slot=0&at=2026-10-07T09:00:00Z"
+	st := openStreamAt(t, query, "", restartPre)
+	st.expect(t, "head", "initial")
+	st.expect(t, "pass", `"path":"logs/a-initial.log"`)
+	st.quiet(t)
+
+	appendTo(t, st.events(), restartHandoff)
+	st.quiet(t) // neither event closes the Dispatch or changes its header
+
+	appendTo(t, st.events(), restartPost)
+	st.expect(t, "head", "fix-pass-1")
+	st.expect(t, "pass", `"path":"logs/a-fix.log"`)
+	st.quiet(t)
+}

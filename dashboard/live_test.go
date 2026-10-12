@@ -305,3 +305,80 @@ func TestEventsLiveRowCarriesOwningDispatch(t *testing.T) {
 		t.Errorf("entry does not link to the snapshot's child_start:\n%s", f.data)
 	}
 }
+
+// TestEventsDaemonLiveAcrossInPlaceRestart pins that a restart which execs the
+// new image under the same pid and rewrites the status file never reads as a
+// stopped Daemon: the pid stays alive and the inherited Slot stays busy.
+func TestEventsDaemonLiveAcrossInPlaceRestart(t *testing.T) {
+	busy := `[{"slot":0,"phase":"running","busy":true,"kind":"work","issues":["42"],` +
+		`"child_start":"2026-10-07T09:00:00Z"}]`
+	inherited := `[{"slot":0,"phase":"running","busy":true,"kind":"work","issues":["42"],` +
+		`"revision":"fedcba9876543210","child_start":"2026-10-07T09:00:00Z"}]`
+	// The status file a daemon holds between deciding to restart and the exec.
+	midHandoff := strings.Replace(statusJSON(t, "waiting", "", busy), `"checks":[]`,
+		`"checks":[],"self_update":{"phase":"restarting","revision":"0123456789abcdef"}`, 1)
+	notLive := []string{"no Daemon running", "no longer running"}
+
+	for _, content := range []string{
+		statusJSON(t, "working", "", busy),
+		midHandoff,
+		statusJSON(t, "checking", "", inherited),
+	} {
+		code, body := get(t, &content, "/")
+		if code != 200 {
+			t.Fatalf("code = %d", code)
+		}
+		for _, bad := range notLive {
+			if strings.Contains(body, bad) {
+				t.Errorf("live Daemon rendered as %q", bad)
+			}
+		}
+		if !strings.Contains(body, `data-slot="0" data-phase="running"`) {
+			t.Errorf("busy Slot card missing:\n%s", body)
+		}
+	}
+
+	st := openStream(t, statusJSON(t, "working", "", busy), restartPre)
+	st.expect(t, "status", "state-working")
+	st.expect(t, "history")
+
+	st.writeStatus(t, midHandoff)
+	f := st.expect(t, "status", "state-waiting")
+	for _, bad := range notLive {
+		if strings.Contains(f.data, bad) {
+			t.Fatalf("mid-handoff status frame reports the Daemon gone (%q):\n%s", bad, f.data)
+		}
+	}
+
+	appendTo(t, st.events(), restartHandoff)
+	st.writeStatus(t, statusJSON(t, "checking", "", inherited))
+	var sawStatus, sawLink bool
+	entries := 0
+	for !sawStatus || entries < 3 {
+		f := st.next(t)
+		switch f.event {
+		case "status":
+			sawStatus = true
+			for _, bad := range notLive {
+				if strings.Contains(f.data, bad) {
+					t.Fatalf("status frame reports the Daemon gone (%q):\n%s", bad, f.data)
+				}
+			}
+			if !strings.Contains(f.data, "state-checking") || !strings.Contains(f.data, `data-slot="0" data-phase="running"`) {
+				t.Fatalf("status frame lacks the rewritten live state:\n%s", f.data)
+			}
+		case "entry":
+			entries++
+			if strings.Contains(f.data, "ev-child_inherited") &&
+				strings.Contains(f.data, `href="/dispatch?slot=0&at=2026-10-07T09%3a00%3a00Z"`) {
+				sawLink = true
+			}
+		default:
+			t.Fatalf("unexpected %s frame:\n%s", f.event, f.data)
+		}
+	}
+	if !sawLink {
+		t.Error("no child_inherited entry links to slot 0's pre-restart Dispatch")
+	}
+	st.quiet(t)
+}
