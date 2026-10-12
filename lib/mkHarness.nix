@@ -82,11 +82,14 @@
   # research-verdict-*-readonly.md lookup at a broken fixture directory
   # without touching the real templates tree.
   fragmentsDir ? ../templates/default/prompts/fragments,
-  # Skill files baked into the image at /home/agent/.claude/skills. Each
-  # element is a path/derivation (copied under its basename) or a
-  # { name; src; } content entry (issue #597) re-realized with the image's own
-  # Linux pkgs, never a consumer host derivation, which would tag the image's
-  # drvPath with the host system. SPINDRIFT_SKILLS_DIR shadows all of them.
+  # Skill files baked into the image at /agent/skills, alongside the
+  # harness-owned skills. Each element is a path/derivation (copied under its
+  # basename) or a { name; src; } content entry (issue #597) re-realized with
+  # the image's own Linux pkgs, never a consumer host derivation, which would
+  # tag the image's drvPath with the host system. The box program copies the
+  # baked set into the Driver's runtime skills dir at startup, then copies
+  # SPINDRIFT_SKILLS_DIR (staged at /operator-skills) over the top, so an
+  # operator skill wins a name clash without erasing the baked set.
   skills ? [ ],
   # Non-secret run config baked into the `run` command as its built-in defaults;
   # a matching env var still wins at runtime, so one build can be re-pointed.
