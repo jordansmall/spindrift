@@ -9,6 +9,58 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.25.0 — 2026-10-12
+
+The Daemon can update itself without dropping its work, and one flake can
+now build several Drivers side by side.
+
+**⚠ Breaking changes** this release: an ambient `DRIVER` no longer overrides
+the Driver baked into the build.
+
+- **Daemon self-update without the cold rebuild.** When a merge changes the
+  daemon itself, it now prebuilds the new version in the background and
+  smoke-tests it with the new `--check-only` flag while slots keep working
+  on the current build. Only a build that passes halts the pool, so the
+  next start is fast. A build that fails is reported as `blocked` and isn't
+  retried until the branch moves again, so a broken merge can't loop.
+- **New: `--restart-in-place`.** Opt in and the daemon doesn't drain on a
+  self-update at all. It waits for a quiet moment, then swaps itself for
+  the new build in the same process, keeping its slots and every running
+  child. If the new build refuses to start (bad config, failed preflight),
+  it rolls back to the previous build and keeps going. Both builds are
+  pinned with GC roots in the checkout's git dir so the rollback target
+  can't be collected out from under it. Linux only; the default is still
+  drain-and-exit.
+- **Dashboard shows what the Daemon is doing.** Slots now show a "building
+  image" pill and a "waiting on CI" pill that links to the Actions run.
+  The header shows the self-update phase and how long it's been there,
+  warns with a banner when the update is blocked, and the timeline records
+  in-place restarts.
+- **New Driver config: `agents.drivers`.** Declare each Driver under
+  `agents.drivers.<name>`, holding only the settings that depend on it
+  (models, effort, roster, `bashTimeoutMs`), and pick the one behind
+  `nix run .` and `.#daemon` with `agents.defaultDriver`. Every Driver gets
+  its own `.#<driver>` and `.#<driver>-daemon` apps and its own image, so
+  `nix run .#opencode` and `nix run .` can live in the same flake. Driver
+  knobs like `MODEL` go in `harness.<driver>.env`, layered over the shared
+  `harness.env`. The old `agents.driver` plus top-level `agents.models.*`
+  form still builds and warns once per setting; `MIGRATING.md` maps each
+  old option to its new home. It'll be removed in a later minor release.
+- **⚠ Breaking: the baked Driver wins.** A `DRIVER` set in your shell or
+  `harness.env` no longer switches Drivers at runtime. The launcher and
+  daemon warn, naming both values, and use the one baked into the build.
+  To run another Driver, declare it in `agents.drivers` and use its app.
+- **Tuning Chore.** A new butler Chore reads a digest of your Dispatch
+  Records (cost, outliers, review evidence, prior findings) and files
+  suggestions to tune prompts and config, labeled `agent-tuning-finding`.
+  Any PR that closes one of those is always held for a human to merge.
+  `spindrift stats` also gains 14-day churn and reverted share for merged
+  work, a `--by driver` grouping, and comma-combined `--by` dimensions.
+- **Smoother landings.** Conflict resolution now runs under the repo's
+  devShell and checks the rebase before finishing. A PR whose CI goes red
+  after landing force-pushed it (a rebase retry or a conflict resolve) now
+  gets a fix pass from its remaining budget instead of failing outright.
+
 ## 0.24.0 — 2026-10-09
 
 Dispatch Records and `spindrift stats`: spindrift now keeps a durable
