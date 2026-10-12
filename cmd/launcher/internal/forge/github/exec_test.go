@@ -2192,6 +2192,35 @@ func TestExecClient_ListIssuesWithLabels_DecodesCloseFacts(t *testing.T) {
 	}
 }
 
+// A REOPENED stateReason (an open issue a human reopened) sets Reopened and
+// nothing else does; Reopened never doubles as a close reason.
+func TestExecClient_ListIssuesWithLabels_DecodesReopened(t *testing.T) {
+	prependFakeGH(t, `printf '[`+
+		`{"number":1,"title":"a","body":"","labels":[],"stateReason":"REOPENED","closedAt":null},`+
+		`{"number":2,"title":"b","body":"","labels":[],"stateReason":"COMPLETED","closedAt":"2026-03-04T05:06:07Z"},`+
+		`{"number":3,"title":"c","body":"","labels":[],"stateReason":"","closedAt":null}`+
+		`]'`)
+
+	c := NewExecClient("owner/repo", forge.DispatchLabels{}, "agent/issue-")
+	issues, err := c.ListIssuesWithLabels(forge.IssueOpen, []string{"agent-tuning-finding"})
+	if err != nil {
+		t.Fatalf("ListIssuesWithLabels: %v", err)
+	}
+	byNum := make(map[string]forge.Issue)
+	for _, iss := range issues {
+		byNum[iss.Number] = iss
+	}
+	if g := byNum["1"]; !g.Reopened || g.ClosedNotPlanned {
+		t.Errorf("issue 1 (REOPENED) = reopened %v notPlanned %v, want true false", g.Reopened, g.ClosedNotPlanned)
+	}
+	if g := byNum["2"]; g.Reopened {
+		t.Errorf("issue 2 (COMPLETED) reopened = true, want false")
+	}
+	if g := byNum["3"]; g.Reopened {
+		t.Errorf("issue 3 (no reason) reopened = true, want false")
+	}
+}
+
 // A per-label gh failure (e.g. the target repo lacks agent-research-finding,
 // or a transient 403 on that call) must not empty the whole dedup index --
 // the issues the succeeding label already returned still come back, with a
