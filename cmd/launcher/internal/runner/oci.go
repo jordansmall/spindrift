@@ -19,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/registryprobe"
+	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
@@ -124,6 +125,12 @@ func (a *ociAdapter) EnsureReady() error {
 		fmt.Printf("==> image '%s' already realized elsewhere; skipping the build\n", a.image)
 		return nil
 	}
+
+	// Only the cold path reports: a warm or sibling-realised run builds nothing,
+	// so there is no "building image" state to show. The deferred finish clears
+	// it on every exit, failures included.
+	report.ImageBuild(report.ImageBuildStarted)
+	defer report.ImageBuild(report.ImageBuildFinished)
 
 	fmt.Printf("==> image '%s' not found — building first\n", a.image)
 

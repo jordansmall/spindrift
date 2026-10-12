@@ -583,3 +583,46 @@ func TestCIWait_RoundTrip(t *testing.T) {
 		t.Errorf("line %q lacks event ci_wait", line)
 	}
 }
+
+// TestImageBuild_RoundTrip pins that an image_build record is keyless on the
+// wire: bootstrap sends it before any dispatch key exists.
+func TestImageBuild_RoundTrip(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	defer r.Close()
+	t.Cleanup(func() { w.Close() })
+
+	rep := FromEnv(getenvFor(map[string]string{"SPINDRIFT_REPORT_FD": fmt.Sprint(int(w.Fd()))}), io.Discard)
+	if rep == nil {
+		t.Fatal("FromEnv returned nil")
+	}
+	rep.ImageBuild(ImageBuildStarted)
+	rep.ImageBuild(ImageBuildFinished)
+	w.Close()
+
+	br := bufio.NewReader(r)
+	for _, state := range []ImageBuildState{ImageBuildStarted, ImageBuildFinished} {
+		line, err := br.ReadBytes('\n')
+		if err != nil {
+			t.Fatalf("read: %v", err)
+		}
+		var got Record
+		if err := json.Unmarshal(line, &got); err != nil {
+			t.Fatalf("unmarshal %q: %v", line, err)
+		}
+		if want := (Record{Event: EventImageBuild, State: string(state)}); got != want {
+			t.Errorf("record = %+v, want %+v", got, want)
+		}
+		if want := `{"event":"image_build","state":"` + string(state) + `"}` + "\n"; string(line) != want {
+			t.Errorf("line = %q, want %q", line, want)
+		}
+	}
+}
+
+func TestImageBuild_NilReporterIsNoOp(t *testing.T) {
+	var rep *Reporter
+	rep.ImageBuild(ImageBuildStarted)
+	rep.ImageBuild(ImageBuildFinished)
+}

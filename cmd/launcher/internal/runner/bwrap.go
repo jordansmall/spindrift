@@ -16,6 +16,7 @@ import (
 	"syscall"
 
 	"spindrift.dev/launcher/internal/registrymanifest"
+	"spindrift.dev/launcher/internal/report"
 )
 
 // execCommand is the test seam for hardcoded-binary orchestration (nix, bwrap)
@@ -1296,6 +1297,11 @@ type closureSpec struct {
 // set (nixInBox on) it also realizes the nix-config closure and snapshots the
 // host nix store DB (ADR 0042) for the run adapter's /nix/var overlay to mount.
 func (a *bwrapBuildAdapter) EnsureReady() error {
+	// Reported even when warm: realizing is idempotent and fast then, so the
+	// pair clears near-instantly, and a failure still clears via the defer.
+	report.ImageBuild(report.ImageBuildStarted)
+	defer report.ImageBuild(report.ImageBuildFinished)
+
 	fmt.Println("==> bwrap runner: realizing agent store closures (no image build/load)")
 
 	closures := []closureSpec{

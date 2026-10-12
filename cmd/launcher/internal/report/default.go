@@ -51,3 +51,8 @@ func Model(key dispatchkey.Key, model, role string) {
 func CIWait(key dispatchkey.Key, prURL, runURL string) {
 	Default().CIWait(key, prURL, runURL)
 }
+
+// ImageBuild forwards to Default().ImageBuild.
+func ImageBuild(state ImageBuildState) {
+	Default().ImageBuild(state)
+}

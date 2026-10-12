@@ -153,19 +153,33 @@ func (r *Record) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// EventBox, EventSettled, EventNotDue, EventModel and EventCIWait are the
-// Record.Event values this package ever writes. Naming them once here and
-// using the name everywhere else (internal/daemon's parser, dispatch loop, and
-// pool event stream) means a typo in the wire value is a compile error, not a
-// silent parse miss on the reading side — issue #3627's review finding. The
-// JSON on the wire is unchanged: these are still the bare strings
-// "box"/"settled"/"not_due"/"model"/"ci_wait".
+// EventBox, EventSettled, EventNotDue, EventModel, EventCIWait and
+// EventImageBuild are the Record.Event values this package ever writes.
+// Naming them once here and using the name everywhere else (internal/daemon's
+// parser, dispatch loop, and pool event stream) means a typo in the wire value
+// is a compile error, not a silent parse miss on the reading side — issue
+// #3627's review finding. The JSON on the wire is unchanged: these are still
+// the bare strings "box"/"settled"/"not_due"/"model"/"ci_wait"/"image_build".
 const (
 	EventBox     = "box"
 	EventSettled = "settled"
 	EventNotDue  = "not_due"
 	EventModel   = "model"
 	EventCIWait  = "ci_wait"
+
+	// EventImageBuild is keyless: the Box image builds in bootstrap, before any
+	// dispatch key exists, so the record carries only a State.
+	EventImageBuild = "image_build"
+)
+
+// ImageBuildState is an image_build record's State. The type keeps a typo in a
+// state a compile error (issue #3627); Record.State stays a plain string
+// because ci_wait shares it. Only the daemon parses it.
+type ImageBuildState string
+
+const (
+	ImageBuildStarted  ImageBuildState = "started"
+	ImageBuildFinished ImageBuildState = "finished"
 )
 
 // NextDueOnTipMove is the next_due wire value for a Chore that only a
@@ -268,6 +282,12 @@ func (r *Reporter) Model(key dispatchkey.Key, model, role string) {
 // plus one each time runURL first appears or changes mid-wait; never per poll.
 func (r *Reporter) CIWait(key dispatchkey.Key, prURL, runURL string) {
 	r.emit(Record{Event: EventCIWait, Key: key, PRURL: prURL, RunURL: runURL})
+}
+
+// ImageBuild records that the Box image build entered state (ImageBuildStarted
+// or ImageBuildFinished). Keyless: see EventImageBuild.
+func (r *Reporter) ImageBuild(state ImageBuildState) {
+	r.emit(Record{Event: EventImageBuild, State: string(state)})
 }
 
 // emit swallows write failures: a broken report pipe (parent gone, pipe
