@@ -169,10 +169,13 @@ Since v0.22.0, an unset `BOX_SIGNAL_CARRIER` means the Signal socket: the
 three mid-run signal channels (comment, PR intent, issue intent) cross the
 Box seam over a Launcher-owned socket instead of marker lines in the Box
 log. Unset is treated exactly like an explicit `socket`, so Consumers on
-`NETWORK_MODE=none`, or on `no-host-loopback` with a runtime that can only
-reach the socket over its TCP fallback, now hit a startup error (the
-Signal-socket launch gate) until they set `BOX_SIGNAL_CARRIER=log`. There is
-no silent fallback, and `log` stays selectable through the whole 0.22 minor.
+`NETWORK_MODE=none` now fail at launcher startup (the Signal-socket launch
+gate) until they set `BOX_SIGNAL_CARRIER=log`. Consumers on `no-host-loopback` with a
+runtime that can only reach the socket over its TCP fallback instead hit the
+transport-probe error (`signal socket: registry proxy transport probe: ...`)
+when each Dispatch starts, which does not name the knob; `BOX_SIGNAL_CARRIER=log`
+is the fix there too. There is no silent fallback, and `log` stays selectable
+through the whole 0.22 minor.
 
 Custom or forked prompts that rely on the marker lines should know that the
 socket-variant prompt fragments now render by default; set

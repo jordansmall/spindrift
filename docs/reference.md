@@ -1543,7 +1543,7 @@ exceptions.
 | `CODE_FORGE_REMOTE_URL`   | — (required when `CODE_FORGE=git`) | plain git remote URL to clone from and push to (self-hosted git, gitea, GitLab-without-MRs, a bare server repo) |
 | `CODE_FORGE_ACCUMULATION_REPO_DIR` | `.spindrift/accum.git` under the launcher's working directory when `CODE_FORGE=local` (auto-created and seeded); an explicit value overrides it | host path to the bare Accumulation repo, mounted read-only into the Box and landed into host-side |
 | `BOX_FORGE_AND_ISSUE_ACCESS` | `read-write` (baked)   | a third axis, orthogonal to `CODE_FORGE`/`ISSUE_TRACKER` (issue #1914): `read-write` (the Box writes directly, unchanged) or `read-only` (the Launcher host-mediates every write instead — see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)), coherence-checked against the selected forge/tracker's registry capability bits at `nix build` (Consumer eval) time (issue #2526) — `read-only` is permitted only when the selected forge implements bundle-relay and host-side draft-PR-create and the selected tracker implements host-posted comments; `local`, `github`, and `forgejo` all satisfy the check today; a Go startup gate remains only as a backstop for a runtime override past what nix already validated |
-| `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at startup under `NETWORK_MODE=none` and where the transport needs TCP under `no-host-loopback`; set `log` there |
+| `BOX_SIGNAL_CARRIER`     | `socket` (per-run only; not bakeable) | transport for the three mid-run signal channels (comment, PR intent, issue intent) crossing the launcher/Box seam: `socket` (the default — routed over a launcher-owned Signal socket, see [ADR 0052](adr/0052-mid-run-signals-cross-the-seam-over-a-launcher-socket.md) and [Signal socket](#signal-socket-box_signal_carriersocket) below) or `log` (the opt-out — nonce-guarded marker lines in the Box log, as before; stays selectable through the whole 0.22 minor). Unset counts as `socket`, so it fails at launcher startup under `NETWORK_MODE=none`, and when each Dispatch starts under `no-host-loopback` where the transport needs TCP; set `log` there |
 | `LABEL`                   | `ready-for-agent` (baked) | issues to pick up                     |
 | `ISSUE_NUMBER`            | — (empty = discover)   | dispatch only this one issue, bypassing the `LABEL` query (per-run only; not bakeable) |
 | `ISSUE_TRACKER`           | `github` (baked)       | IssueTracker backend: `github`, `local` (private Markdown + YAML frontmatter files — see [Local issue tracker](#local-issue-tracker-issue_trackerlocal)), `jira`, or `forgejo` (see [Issue Tracker backends](#issue-tracker-backends)) |
@@ -4651,16 +4651,17 @@ could. Advisory means the row never fails `spindrift doctor`
 itself, it just tells the operator before dispatch what the
 Dispatch-level gate below would otherwise only surface mid-run.
 
-Requesting `socket` where the transport can't work is a startup error,
-never a silent fallback to `log`, and an unset knob is such a request: it
+Requesting `socket` where the transport can't work fails closed, never a
+silent fallback to `log`, and an unset knob is such a request: it
 is treated exactly like an explicit `socket`, with no mode-dependent
 default. So `NETWORK_MODE=none` fails at launcher
 startup (the socket transport needs the loopback this mode tears down), and
-`NETWORK_MODE=no-host-loopback` fails when the Dispatch starts, before the
+`NETWORK_MODE=no-host-loopback` fails when each Dispatch starts, before the
 Box container, because the per-Dispatch transport probe refuses the TCP
 fallback under that mode (the Signal-socket gate on a TCP verdict is a
-backstop for a cached verdict). Both errors name the mode, and the
-signal-carrier gate's message names the remedy, `BOX_SIGNAL_CARRIER=log`.
+backstop for a cached verdict). Both errors name the mode, and the `none`
+startup gate's message names the remedy, `BOX_SIGNAL_CARRIER=log`; the probe
+error under `no-host-loopback` does not, so set it there yourself.
 A Consumer that runs under one of these modes and has not set the knob
 therefore sees the error after upgrading to 0.22 and must set `log`
 explicitly.
