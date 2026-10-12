@@ -1204,13 +1204,12 @@ func (r *hostRunner) execTarget() (daemon.Tip, error) {
 	r.flightMu.Lock()
 	defer r.flightMu.Unlock()
 	t, p := r.prebuilt, r.prebuilt.SelfPath
+	pathErr := validStorePath("prebuilt daemon", p)
 	switch {
 	case p == "":
 		return daemon.Tip{}, errors.New("no prebuilt daemon")
-	case filepath.Clean(p) != p:
-		return daemon.Tip{}, fmt.Errorf("prebuilt daemon path %q is not clean", p)
-	case !strings.HasPrefix(p, "/nix/store/"):
-		return daemon.Tip{}, fmt.Errorf("prebuilt daemon path %q is not under /nix/store/", p)
+	case pathErr != nil:
+		return daemon.Tip{}, pathErr
 	case !r.haveMemo || !r.haveLastRevision || r.memoRevision != r.lastRevision:
 		return daemon.Tip{}, fmt.Errorf("no self path evaluated at the latest fetched tip %q", r.lastRevision)
 	case r.memoPath != p:
@@ -1246,18 +1245,52 @@ func dupInheritable(fd int) (int, error) {
 	return syscall.Dup(fd)
 }
 
+// validStorePath refuses a program path an exec may not switch to: it must be
+// clean and under /nix/store/. what names the program in the error.
+func validStorePath(what, p string) error {
+	switch {
+	case filepath.Clean(p) != p:
+		return fmt.Errorf("%s path %q is not clean", what, p)
+	case !strings.HasPrefix(p, "/nix/store/"):
+		return fmt.Errorf("%s path %q is not under /nix/store/", what, p)
+	}
+	return nil
+}
+
 // execSuccessor replaces this image with the prebuilt daemon, handing h to it
-// on a pipe named by --handoff-fd. The lock and every slot's report pipe are
-// dup'd into the document and the dups survive the exec; the originals stay
-// close-on-exec and untouched, so on a failed exec this image carries on with
-// h as it was. fromPath is this image's own program, recorded in the document
-// for the successor. A nil return means the exec happened (only a test seam
-// returns).
+// on a pipe named by --handoff-fd. fromPath is this image's own program,
+// recorded in the document for the successor. A nil return means the exec
+// happened (only a test seam returns).
 func (r *hostRunner) execSuccessor(h daemon.Handoff, lock *os.File, stop <-chan struct{}, fromPath string) error {
 	target, err := r.execTarget()
 	if err != nil {
 		return err
 	}
+	h.FromPath, h.ToPath, h.Revision = fromPath, target.SelfPath, target.Revision
+	if err := execHandoff(h, lock, stop, r.env, r.selfArgs); err != nil {
+		return err
+	}
+	r.forgetHandles()
+	return nil
+}
+
+// forgetHandles drops every child handle once an exec has handed the children
+// on, so the deferred wait-out neither waits on nor signals them.
+func (r *hostRunner) forgetHandles() {
+	r.handlesMu.Lock()
+	clear(r.handles)
+	r.handlesMu.Unlock()
+}
+
+// execHandoff replaces this image with the program at h.ToPath, handing h to it
+// on a pipe named by --handoff-fd; both directions of a restart (the forward
+// handoff and the rollback) go through it, so it needs no runner. The lock and
+// every slot's report pipe are dup'd into the document and the dups survive
+// the exec; the originals stay close-on-exec and untouched, so on a failed
+// exec this image carries on with h as it was. The caller sets h.FromPath,
+// h.ToPath and h.Revision, which the successor reads. A nil return means the
+// exec happened (only a test seam returns).
+func execHandoff(h daemon.Handoff, lock *os.File, stop <-chan struct{}, env, selfArgs []string) error {
 	select {
 	case <-stop:
 		return errStopBeforeExec
@@ -1286,7 +1319,6 @@ func (r *hostRunner) execSuccessor(h daemon.Handoff, lock *os.File, stop <-chan 
 	}
 
 	wire := h
-	wire.FromPath, wire.ToPath, wire.Revision = fromPath, target.SelfPath, target.Revision
 	wire.SIGHUPIgnored = hupIgnored
 	wire.Slots = slices.Clone(h.Slots)
 	lockFD, err := fileDescriptor(lock)
@@ -1327,16 +1359,13 @@ func (r *hostRunner) execSuccessor(h daemon.Handoff, lock *os.File, stop <-chan 
 	default:
 	}
 
-	argv := append([]string{target.SelfPath}, r.selfArgs...)
+	argv := append([]string{h.ToPath}, selfArgs...)
 	argv = append(argv, handoffFlag, strconv.Itoa(docFD))
-	err = runnerSelfExec(target.SelfPath, argv, r.env)
+	err = runnerSelfExec(h.ToPath, argv, env)
 	restore()
 	if err != nil {
 		release()
 		return err
 	}
-	r.handlesMu.Lock()
-	clear(r.handles)
-	r.handlesMu.Unlock()
 	return nil
 }

@@ -762,6 +762,36 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		waitOut(hs, stopSig, abortSig)
 	}()
 
+	// tryRollBack hands a resumed image's children back to the build it came
+	// from, so a build that cannot start does not cost the operator the children
+	// it adopted. It reports whether the exec happened.
+	tryRollBack := func(reason string) bool {
+		if res == nil {
+			return false
+		}
+		if err := res.rollBack(stopSig, successorArgs(argv), reason); err != nil {
+			fmt.Fprintf(stderr, "daemon: no rollback: %v\n", err)
+			return false
+		}
+		fmt.Fprintf(stderr, "daemon: %s; rolled back to %s\n", reason, res.handoff.FromPath)
+		// Only a test seam returns from the exec: the children now belong to
+		// the build rolled back to, as do the lock and the descriptors.
+		clear(inherited)
+		if r != nil {
+			r.forgetHandles()
+		}
+		handedOff = true
+		return true
+	}
+	// refuse ends a startup that failed: rolled back where possible, else a
+	// plain failure, after which the wait-out above drains the children.
+	refuse := func(err error) int {
+		if tryRollBack(err.Error()) {
+			return 0
+		}
+		return fail(stderr, err)
+	}
+
 	// `status` is dispatched here, ahead of parseArgs, not folded into it:
 	// parseArgs's one positional slot is the kind selector (dispatch |
 	// research, see its own doc), and overloading that same slot with a
@@ -787,16 +817,16 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	args, err := parseArgs(argv)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	if args.RestartInPlace && !inPlaceRestartSupported {
-		return fail(stderr, fmt.Errorf("--restart-in-place: %w", errInPlaceUnsupported))
+		return refuse(fmt.Errorf("--restart-in-place: %w", errInPlaceUnsupported))
 	}
 
 	doc, err := inputdoc.Load(args.InputPath)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	// Computed once here, right after the document loads (the earliest
@@ -808,12 +838,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	shared, err := resolveChildSharedKnobs(doc)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	baseBranch := shared.baseBranch
 	slots, err := parseSlots(shared.maxParallel)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	// The schema validates DAEMON_AWAKE_WINDOW at Nix eval time, but an
@@ -821,7 +851,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// bypasses that entirely, so this runtime parse is the actual guarantee.
 	awake, err := daemon.ParseWindow(shared.awakeWindow)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	gatedKinds, err := gateKinds(args.Kinds, args.ExplicitSelector, gateKnobs{
@@ -830,12 +860,12 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		boxAccess: shared.boxAccess,
 	})
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	args.Kinds = gatedKinds
 	doctorFlags, err := doctorPreflightFlags(args.Kinds, args.ExplicitSelector)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	// SPINDRIFT_DAEMON_PROGRAM is exported by the generated wrapper
@@ -862,39 +892,39 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	withSelf, multiKind := selfProgram != "", len(args.Kinds) > 1
 	own, err := resolveDaemonOnlyKnobs(doc, stderr, withSelf, multiKind)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	appAttr := own.app
 	idleFloor, err := parseIdleFloor(own.idleFloor)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	idleCap, err := parseIdleCap(own.idleCap, idleFloor)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	probeOverride, err := parseProbeInterval(own.probeInterval)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	failureBackoff, err := parseFailureBackoff(own.failureBackoff)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	breakerThreshold, err := parseBreakerThreshold(own.breakerThreshold)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	breakerWindow, err := parseBreakerWindow(own.breakerWindow)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	// BOX_SIGNAL_CARRIER is env-only (absent from the --input document's
 	// settings map), so it is read with os.Getenv rather than doc.Resolve —
 	// Resolve would fail on a legitimately-unset knob.
 	if err := validateSignalCarrier(os.Getenv("BOX_SIGNAL_CARRIER")); err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	var selfAttr, nixSystem string
@@ -902,7 +932,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		selfAttr = own.selfApp
 		nixSystem, err = nixSystemDouble(runtime.GOOS, runtime.GOARCH)
 		if err != nil {
-			return fail(stderr, err)
+			return refuse(err)
 		}
 	}
 
@@ -910,7 +940,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if multiKind {
 		reservation, err = parseResearchReservation(own.researchReservation, slots)
 		if err != nil {
-			return fail(stderr, err)
+			return refuse(err)
 		}
 	}
 
@@ -937,11 +967,11 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	wd, err := os.Getwd()
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	repoPath, err := repoRoot(wd)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	clk := hostClock{}
@@ -949,7 +979,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 
 	gitDirPath, err := gitDir(wd)
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 	if res != nil {
 		err = lock.Claim(gitDirPath)
@@ -1007,7 +1037,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		inherited:   inherited,
 	})
 	if err != nil {
-		return fail(stderr, err)
+		return refuse(err)
 	}
 
 	// Before startupPreflight, so the split is visible even if it halts.
@@ -1042,6 +1072,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// pool: with Stop closed it halts and drains the inherited children
 	// instead of abandoning them.
 	if h := startupPreflight(preflightCtx, r, em); h.Class != daemon.HaltNone && (res == nil || h.Class != daemon.HaltOperatorStop) {
+		// Before finish, so a rolled-back image leaves no halt event behind.
+		if tryRollBack(h.Diagnostic()) {
+			return 0
+		}
 		// finish keeps the pre-580296cf halt-event-then-diagnostic order.
 		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
@@ -1067,6 +1101,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	}
 	if res != nil {
 		cfg.Handoff = &res.handoff
+		if res.handoff.RolledBack {
+			cfg.SelfUpdate = daemon.SelfUpdate{Phase: daemon.SelfUpdateBlocked, Revision: res.handoff.Revision, Reason: res.handoff.Reason}
+		}
 	}
 
 	var code int
@@ -1140,8 +1177,11 @@ func handoffEvent(h daemon.Handoff) daemon.Event {
 	for _, s := range h.Slots {
 		slots = append(slots, s.Slot)
 	}
-	// A literal, since the handoff's extra fields (FromPath, ToPath, Revision,
+	// Literals, since the handoff's extra fields (FromPath, ToPath, Revision,
 	// Slots) are the ones the event-stream-parity check reads from it.
+	if h.RolledBack {
+		return daemon.Event{Event: "self_update", Phase: string(daemon.SelfUpdateRolledBack), Revision: h.Revision, Reason: h.Reason, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
+	}
 	return daemon.Event{Event: "self_update", Phase: string(daemon.SelfUpdateHandoff), Revision: h.Revision, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
 }
 
@@ -1152,6 +1192,52 @@ type resumed struct {
 	// inherited are the children that validated, by report fd. One that did
 	// not is left for the pool's InheritChild to report.
 	inherited map[int]*hostChildHandle
+}
+
+// rollbackReasonMax caps, in bytes, the refusal reason a rollback records: the
+// handoff document must fit one pipe's capacity, and a longer one would turn
+// the rollback into drain-and-exit.
+const rollbackReasonMax = 2000
+
+// capRollbackReason keeps the head of reason, where a diagnostic leads with
+// its cause, cutting on a rune boundary so the result is valid UTF-8.
+func capRollbackReason(reason string) string {
+	if len(reason) <= rollbackReasonMax {
+		return reason
+	}
+	return strings.ToValidUTF8(reason[:rollbackReasonMax], "") + "..."
+}
+
+// rollBack execs back to the build this image was resumed from, handing it
+// the same lock and the children this image re-attached, and recording reason
+// as the refusal. It never rolls back a rolled-back image, so a pair of builds
+// that both refuse to start cannot hand the children to each other forever. A
+// nil return means the exec happened (only a test seam returns).
+func (res *resumed) rollBack(stop <-chan struct{}, selfArgs []string, reason string) error {
+	h := res.handoff
+	switch {
+	case h.RolledBack:
+		return errors.New("this image is itself a rollback")
+	case h.Stop:
+		return errStopBeforeExec
+	case h.V < daemon.HandoffRollbackVersion:
+		return fmt.Errorf("the previous daemon wrote handoff version %d, which cannot read a rollback", h.V)
+	case h.FromPath == "":
+		return errors.New("no previous daemon")
+	}
+	if err := validStorePath("previous daemon", h.FromPath); err != nil {
+		return err
+	}
+	// Dropped slots were never adopted, so their descriptors are not ours to
+	// pass on.
+	h.Slots = slices.DeleteFunc(slices.Clone(h.Slots), func(s daemon.HandoffSlot) bool {
+		return res.inherited[s.Child.ReportFD] == nil
+	})
+	h.RolledBack, h.Reason = true, capRollbackReason(reason)
+	h.FromPath, h.ToPath = h.ToPath, h.FromPath
+	// Not the runner's env: a rollback can run before the host runner exists,
+	// and the target's wrapper rebuilds its own environment.
+	return execHandoff(h, res.lock.File(), stop, os.Environ(), selfArgs)
 }
 
 // splitHandoffFlag strips every --handoff-fd pair from argv, returning the

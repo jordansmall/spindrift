@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/daemon"
@@ -3987,6 +3988,8 @@ func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
 func TestMainRun_ResumeTakesOverBeforeParsingInput(t *testing.T) {
 	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
 	call, _ := f.handOff(t)
+	// No way back: a rollback would hand the child on instead of draining it.
+	f.execErr = errors.New("no rollback")
 	installed := f.installs.Load()
 	f.mu.Lock()
 	pid := f.children[0].Process.Pid
@@ -4020,6 +4023,7 @@ func TestMainRun_ResumeTakesOverBeforeParsingInput(t *testing.T) {
 func TestMainRun_ResumeThatFailsStartupStillHonoursStop(t *testing.T) {
 	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
 	call, _ := f.handOff(t)
+	f.execErr = errors.New("no rollback")
 	f.mu.Lock()
 	pid := f.children[0].Process.Pid
 	f.mu.Unlock()
@@ -4157,5 +4161,317 @@ func TestMainRun_RestartInPlaceRefusedWhereUnsupported(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), errInPlaceUnsupported.Error()) {
 		t.Errorf("stderr = %q, want it to carry %q", stderr.String(), errInPlaceUnsupported)
+	}
+}
+
+// failDoctor makes the next images' doctor preflight exit non-zero until the
+// test ends.
+func failDoctor(t *testing.T) {
+	t.Helper()
+	prev := runnerDoctorCommand
+	t.Cleanup(func() { runnerDoctorCommand = prev })
+	runnerDoctorCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+	}
+}
+
+// pollUntil reports whether cond came true within five seconds.
+func pollUntil(cond func() bool) bool {
+	for range 500 {
+		if cond() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return cond()
+}
+
+// assertStillRunning fails the test if mainRun exits within a short grace: the
+// image is expected to be waiting out its inherited child.
+func assertStillRunning(t *testing.T, code <-chan int, out *lockedBuffer) {
+	t.Helper()
+	select {
+	case got := <-code:
+		t.Fatalf("image exited %d while its inherited child still runs; output:\n%s", got, out.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+// resumeArgv is what an image's wrapper runs the exec'd program with: the
+// operator's argv from the exec call, with --input re-added.
+func (f *inPlaceFixture) resumeArgv(call selfExecCall) []string {
+	return append([]string{"--input", f.input}, call.argv[1:]...)
+}
+
+func (f *inPlaceFixture) execCalls() []selfExecCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.execs)
+}
+
+// refuseAndRollBack hands off, then starts the second image with a doctor that
+// fails, and returns the rollback exec the second image made. The second image
+// has exited 0, still holding the lock for the third.
+func (f *inPlaceFixture) refuseAndRollBack(t *testing.T) selfExecCall {
+	t.Helper()
+	const newSelf = "/nix/store/bbb-new/bin/daemon"
+	call, _ := f.handOff(t)
+	// The third image must start with a working doctor.
+	prevDoctor := runnerDoctorCommand
+	defer func() { runnerDoctorCommand = prevDoctor }()
+	failDoctor(t)
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", newSelf)
+	code, out := f.start(f.resumeArgv(call))
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("refusing image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
+	}
+	calls := f.execCalls()
+	if len(calls) != 2 {
+		t.Fatalf("exec calls = %d, want 2 (handoff, rollback); output:\n%s", len(calls), out.String())
+	}
+	back := calls[1]
+	n := len(back.argv)
+	if back.path != "/nix/store/aaa-old/bin/daemon" || back.argv[0] != back.path || n < 3 || back.argv[n-2] != handoffFlag {
+		t.Fatalf("rollback exec = %+v, want the old program with %s <fd>", back, handoffFlag)
+	}
+	assertNoHandoffIn(t, "rollback exec", back.env)
+	if _, ok := findEvent(eventsIn(out), "self_update", "rolled-back"); ok {
+		t.Errorf("the refusing image emitted the rolled-back event itself; output:\n%s", out.String())
+	}
+	if _, ok := findEvent(eventsIn(out), "halt", ""); ok {
+		t.Errorf("a rolled-back image left a halt event behind; output:\n%s", out.String())
+	}
+	assertLockHeld(t, f.gitDir, true)
+	return back
+}
+
+// TestMainRun_ResumedImageThatRefusesToStartRollsBack drives three images: the
+// first hands off, the second re-attaches but fails its doctor preflight and
+// execs back to the first's build, and the third resumes from that document,
+// records the rollback, keeps the inherited child and does not retry the
+// revision it was rolled back from.
+func TestMainRun_ResumedImageThatRefusesToStartRollsBack(t *testing.T) {
+	const newSelf = "/nix/store/bbb-new/bin/daemon"
+	f := newInPlaceFixtureT(t, newSelf)
+	var prebuilds atomic.Int32
+	origPrebuild := runnerPrebuildCommand
+	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		prebuilds.Add(1)
+		return origPrebuild(ctx, name, args...)
+	}
+	// One per tip resolution, counted when it starts.
+	var resolves atomic.Int32
+	origFetch := runnerFetchCommand
+	t.Cleanup(func() { runnerFetchCommand = origFetch })
+	runnerFetchCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
+		if slices.Contains(args, "rev-parse") {
+			resolves.Add(1)
+		}
+		return origFetch(ctx, name, args...)
+	}
+	back := f.refuseAndRollBack(t)
+	failedPrebuilds := prebuilds.Load()
+
+	stop := make(chan struct{})
+	f.stop = stop
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	code, out := f.start(f.resumeArgv(back))
+	ev := waitForEvent(t, out, "self_update", "rolled-back")
+	if ev.FromPath != newSelf || ev.ToPath != "/nix/store/aaa-old/bin/daemon" || ev.Revision == "" || !slices.Equal(ev.Slots, []int{0}) {
+		t.Errorf("rolled-back event = %+v, want from the failed build to the old one, a revision and slots [0]", ev)
+	}
+	if !strings.Contains(ev.Reason, "preflight") {
+		t.Errorf("rolled-back reason = %q, want the preflight refusal", ev.Reason)
+	}
+	if _, ok := findEvent(eventsIn(out), "self_update", "handoff"); ok {
+		t.Errorf("the rolled-back image also recorded a handoff; output:\n%s", out.String())
+	}
+	waitForEvent(t, out, "child_inherited", "")
+
+	var su *daemon.SelfUpdate
+	pollUntil(func() bool {
+		r, err := daemon.ReadStatus(f.gitDir)
+		if err != nil || r.Status == nil {
+			return false
+		}
+		su = r.Status.SelfUpdate
+		return su != nil && su.Phase == daemon.SelfUpdateBlocked
+	})
+	if su == nil || su.Phase != daemon.SelfUpdateBlocked || su.Revision != ev.Revision {
+		t.Errorf("status self_update = %+v, want blocked at %s", su, ev.Revision)
+	}
+
+	seen := resolves.Load()
+	writeFileT(t, f.goFile, "")
+	waitForEvent(t, out, "child_finish", "")
+	// The tip is still the refused revision. The second resolution starts only
+	// after the first one's self-update decision, so a retry would have shown
+	// by then: as a prebuild, a building event or an exec, after which the
+	// image resolves no more.
+	if !pollUntil(func() bool {
+		_, building := findEvent(eventsIn(out), "self_update", "building")
+		return resolves.Load() >= seen+2 || building || prebuilds.Load() != failedPrebuilds || len(f.execCalls()) != 2
+	}) {
+		t.Fatalf("the rolled-back image resolved the tip %d times after its child finished, want 2; output:\n%s", resolves.Load()-seen, out.String())
+	}
+	close(stop)
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("rolled-back image exited %d, want 0; output:\n%s", got, out.String())
+	}
+	if n := len(f.execCalls()); n != 2 {
+		t.Errorf("exec calls = %d, want 2: the rolled-back image must not retry the failed revision", n)
+	}
+	if n := prebuilds.Load(); n != failedPrebuilds {
+		t.Errorf("prebuilds after the rollback = %d, want %d: the failed revision was rebuilt", n, failedPrebuilds)
+	}
+	if _, ok := findEvent(eventsIn(out), "self_update", "building"); ok {
+		t.Errorf("the failed revision was built again; output:\n%s", out.String())
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_RollbackImpossibleDrainsAndExits pins that a refusal whose
+// rollback exec fails ends the way it did before rollback existed: the
+// inherited child is waited out and the exit code is the refusal's.
+func TestMainRun_RollbackImpossibleDrainsAndExits(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	f.execErr = errors.New("boom")
+	failDoctor(t)
+	code, out := f.start(f.resumeArgv(call))
+	pollUntil(func() bool { return len(f.execCalls()) == 2 })
+	if n := len(f.execCalls()); n != 2 {
+		t.Fatalf("exec calls = %d, want the rollback attempt; output:\n%s", n, out.String())
+	}
+	assertStillRunning(t, code, out)
+	assertLockHeld(t, f.gitDir, true)
+	writeFileT(t, f.goFile, "")
+	if got := waitCode(t, code, out); got != daemon.ExitPreflightFailed {
+		t.Fatalf("image exited %d, want %d; output:\n%s", got, daemon.ExitPreflightFailed, out.String())
+	}
+	if _, ok := findEvent(eventsIn(out), "self_update", "rolled-back"); ok {
+		t.Errorf("a rolled-back event was recorded though the exec failed; output:\n%s", out.String())
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_RollbackRefusedForVersion1Predecessor pins that an image resumed
+// from a version 1 document, whose writer cannot read the rollback fields,
+// drains its inherited child and exits as if rollback did not exist.
+func TestMainRun_RollbackRefusedForVersion1Predecessor(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	fd, err := strconv.Atoi(call.argv[len(call.argv)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(os.NewFile(uintptr(fd), "handoff doc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"v":2`)) {
+		t.Fatalf("handoff document is not version 2: %s", raw)
+	}
+	v1fd, err := handoffDocPipe(bytes.Replace(raw, []byte(`"v":2`), []byte(`"v":1`), 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	call.argv = slices.Clone(call.argv)
+	call.argv[len(call.argv)-1] = strconv.Itoa(v1fd)
+
+	failDoctor(t)
+	code, out := f.start(f.resumeArgv(call))
+	assertStillRunning(t, code, out)
+	writeFileT(t, f.goFile, "")
+	if got := waitCode(t, code, out); got != daemon.ExitPreflightFailed {
+		t.Fatalf("image exited %d, want %d; output:\n%s", got, daemon.ExitPreflightFailed, out.String())
+	}
+	if n := len(f.execCalls()); n != 1 {
+		t.Errorf("exec calls = %d, want 1: no rollback exec for a version 1 predecessor", n)
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_RolledBackImageDoesNotRollBackAgain pins that the build rolled
+// back to, if it too refuses to start, drains and exits rather than handing
+// the children back and forth.
+func TestMainRun_RolledBackImageDoesNotRollBackAgain(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	back := f.refuseAndRollBack(t)
+	failDoctor(t)
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	code, out := f.start(f.resumeArgv(back))
+	writeFileT(t, f.goFile, "")
+	if got := waitCode(t, code, out); got != daemon.ExitPreflightFailed {
+		t.Fatalf("rolled-back image exited %d, want %d; output:\n%s", got, daemon.ExitPreflightFailed, out.String())
+	}
+	if n := len(f.execCalls()); n != 2 {
+		t.Errorf("exec calls = %d, want 2: a rolled-back image must not roll back again", n)
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_ConfigRefusalAfterResumeRollsBack pins that every refusal after
+// the re-attach rolls back, not only the preflight's: here the new build
+// cannot load its input document.
+func TestMainRun_ConfigRefusalAfterResumeRollsBack(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	code, out := f.start(append([]string{"--input", filepath.Join(t.TempDir(), "missing.json")}, call.argv[1:]...))
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
+	}
+	calls := f.execCalls()
+	if len(calls) != 2 || calls[1].path != "/nix/store/aaa-old/bin/daemon" {
+		t.Fatalf("exec calls = %+v, want the handoff then a rollback to the old program", calls)
+	}
+	assertLockHeld(t, f.gitDir, true)
+}
+
+// TestResumedRollBack_RefusesUnusableFromPath pins that a handoff document
+// naming no usable previous program is refused before any exec.
+func TestResumedRollBack_RefusesUnusableFromPath(t *testing.T) {
+	tests := []struct {
+		name, fromPath, wantErr string
+	}{
+		{"empty", "", "no previous daemon"},
+		{"not clean", "/nix/store/aaa-old/../bbb/bin/daemon", "is not clean"},
+		{"outside the store", "/usr/bin/daemon", "is not under /nix/store/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var execs atomic.Int32
+			prev := runnerSelfExec
+			t.Cleanup(func() { runnerSelfExec = prev })
+			runnerSelfExec = func(string, []string, []string) error {
+				execs.Add(1)
+				return nil
+			}
+			res := &resumed{handoff: daemon.Handoff{V: daemon.HandoffRollbackVersion, FromPath: tt.fromPath, ToPath: "/nix/store/bbb-new/bin/daemon"}}
+			err := res.rollBack(nil, nil, "refused")
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("rollBack() = %v, want an error containing %q", err, tt.wantErr)
+			}
+			if n := execs.Load(); n != 0 {
+				t.Errorf("exec calls = %d, want 0", n)
+			}
+		})
+	}
+}
+
+func TestCapRollbackReason(t *testing.T) {
+	if got := capRollbackReason("short"); got != "short" {
+		t.Errorf("capRollbackReason(short) = %q, want it unchanged", got)
+	}
+	long := "x" + strings.Repeat("é", rollbackReasonMax) + "y"
+	got := capRollbackReason(long)
+	if !utf8.ValidString(got) {
+		t.Errorf("capRollbackReason() = %q, want valid UTF-8", got)
+	}
+	if !strings.HasPrefix(got, "xé") || !strings.HasSuffix(got, "...") {
+		t.Errorf("capRollbackReason() = %q..., want the head kept and a ... suffix", got[:10])
+	}
+	if len(got) > rollbackReasonMax+len("...") {
+		t.Errorf("capRollbackReason() has len %d, want at most %d", len(got), rollbackReasonMax+len("..."))
 	}
 }
