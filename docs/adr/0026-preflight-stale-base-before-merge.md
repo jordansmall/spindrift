@@ -158,3 +158,15 @@ dispatch or relay is not something a fix pass answers. The cost is a larger
 poll-window ceiling, recorded in [Dispatch exit
 codes](../reference.md#dispatch-exit-codes) where the ceiling is
 computed.
+
+## Amendment (issue #5096): the conflict-resolve Box checks its own rebase
+
+A clean textual resolve can still break a check, and the force-push above was
+the first place that surfaced. The conflict-resolve pass now runs under the
+devShell when the repo has one and, once `git rebase --continue` finishes,
+runs the repo's scoped in-Box check gate and fixes what it surfaces before the
+Box publishes. A check still red after its own attempts does not hold the
+publish back: the Box's go/no-go stays "is a rebase still in progress?", and
+the agent's final message, naming the check it ran and each still-red check,
+is narrated into the Box log as the pass summary. The remaining repair belongs
+to the host's post-force-push fix pass described above.
