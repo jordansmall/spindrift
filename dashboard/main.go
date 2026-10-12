@@ -1,5 +1,7 @@
-// Command dashboard is a read-only web view of a Daemon's published status
-// file (ADR 0060). It reads only that file and never takes the Daemon's lock.
+// Command dashboard is a read-only web view of a Daemon's published files
+// (ADR 0060): the status file, the Events file, and the Child and Pass logs
+// those events name. It reads only these files and never takes the Daemon's
+// lock.
 package main
 
 import (
