@@ -717,3 +717,34 @@ func TestRejectReceiptHashMatchesAccept(t *testing.T) {
 		t.Fatalf("reject bytes %d != accept bytes %d", rejGot.Bytes, accGot.Bytes)
 	}
 }
+
+// Settle cuts a PR title at the first newline, so a multi-line title is
+// refused on receipt rather than accepted and then split (issue #5004).
+func TestRejectMultilineTitle(t *testing.T) {
+	for _, title := range []string{"fix(x): a\nmore detail", "\nfix: x", "fix: a\r\nb", "fix: a\rb"} {
+		b := newAll(t)
+		_, rej := b.AcceptPRIntent(signalwire.PRIntent{Title: title, Body: "b"})
+		mustReject(t, rej, "multiline_title", 400)
+		if st := b.Status(); st.PRIntent != nil {
+			t.Fatalf("title %q: Status().PRIntent = %+v after reject, want nil", title, st.PRIntent)
+		}
+		if _, ok := b.PRIntent(); ok {
+			t.Fatalf("title %q: PRIntent() stored after reject", title)
+		}
+	}
+}
+
+func TestRejectedMultilineRetryKeepsStoredPRIntent(t *testing.T) {
+	b := newAll(t)
+	first := mustAcceptPR(t, b, signalwire.PRIntent{Title: "fix: ok", Body: "b"})
+	_, rej := b.AcceptPRIntent(signalwire.PRIntent{Title: "fix: ok\nmore", Body: "b2"})
+	mustReject(t, rej, "multiline_title", 400)
+
+	got, ok := b.PRIntent()
+	if !ok || got.Title != "fix: ok" || got.Body != "b" {
+		t.Fatalf("PRIntent() = (%+v, %v), want the first intent", got, ok)
+	}
+	if st := b.Status(); st.PRIntent == nil || *st.PRIntent != first {
+		t.Fatalf("Status().PRIntent = %+v, want %+v", st.PRIntent, first)
+	}
+}

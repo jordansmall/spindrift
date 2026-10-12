@@ -113,10 +113,7 @@ func (b *Buffer) AcceptPRIntent(p signalwire.PRIntent) (signalwire.Receipt, *sig
 	if rej := b.checkKind(signalwire.KindPRIntent); rej != nil {
 		return partial, rej
 	}
-	if rej := signalwire.CheckFields(
-		signalwire.Field{Name: "title", Value: p.Title},
-		signalwire.Field{Name: "body", Value: p.Body},
-	); rej != nil {
+	if rej := p.Validate(); rej != nil {
 		return partial, rej
 	}
 
