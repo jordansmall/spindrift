@@ -195,12 +195,13 @@ jobs:
             | nix build --stdin --out-link "$RUNNER_TEMP/check-roots/check"
 
   # The docs-only lane (issue #5155): one Linux runner building the checks
-  # that read docs files, in place of the matrix above.
+  # that read docs files, in place of the matrix above. aarch64 because its
+  # runner finishes the same work faster than the x86_64 one.
   docs:
-    name: docs checks (x86_64-linux)
+    name: docs checks (aarch64-linux)
     needs: changes
     if: needs.changes.outputs.kind == 'docs'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
@@ -210,12 +211,12 @@ jobs:
       - name: Restore the nix store
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-x86_64-linux-${{ github.sha }}
-          restore-prefixes-first-match: nix-x86_64-linux-
+          primary-key: nix-aarch64-linux-${{ github.sha }}
+          restore-prefixes-first-match: nix-aarch64-linux-
           save: false
 
       - name: Build the docs checks
-        run: nix build .#packages.x86_64-linux.checks-docs --print-build-logs
+        run: nix build .#packages.aarch64-linux.checks-docs --print-build-logs
 
   # The single required status check (issue #5155): branch protection names
   # this job alone, so it runs whatever the change kind and passes only when
