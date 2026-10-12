@@ -532,6 +532,14 @@ to hand-authored `roster` entries as much as to `defaultRoster`'s own
 built-in entries, though in practice those always ship a real
 `promptFile` under `templates/default/prompts/`.
 
+A non-empty inline `prompt` on an entry whose `promptFile` (explicit, or the
+auto-derived default) already exists under `templates/default/prompts/` is
+rejected at eval (`inline-prompt-shadows-shipped`): the inline prompt would
+overwrite the shipped file. Override a shipped prompt through the `*Prompt`
+`mkHarness` args or `SPINDRIFT_PROMPT_DIR` instead, never through a roster
+`prompt`. An empty-string `prompt` counts as no inline prompt and falls back to
+the `promptFile`.
+
 This promptFile check runs at eval time against the checked-in
 `templates/default/prompts/` directory only, so it cannot see a file that's
 only ever supplied via a *runtime* prompt-dir override
