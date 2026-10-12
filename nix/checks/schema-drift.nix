@@ -258,7 +258,7 @@ let
     assert assertMsg (issues.stale == [ ])
       "lib/legacy-settings-section.nix: entry has no matching lib/env-schema.nix knob (stale alias) -- remove it: ${concatStringsSep ", " issues.stale}";
     assert assertMsg (issues.wronglyExempt == [ ])
-      "lib/env-schema.nix: legacySettingsExempt = true; but the knob appears in nix/checks/schema-drift.nix's frozen preFreezeFlakeOptionNames list, i.e. it predates the ADR 0037 Pass 2 freeze and had a real old settings.<section> alias -- give it a real lib/legacy-settings-section.nix row instead of an exemption: ${concatStringsSep ", " issues.wronglyExempt}";
+      "lib/env-schema.nix: legacySettingsExempt = true; but the knob appears in the frozen list in lib/pre-freeze-flake-options.nix (imported as preFreezeFlakeOptionNames), i.e. it predates the ADR 0037 Pass 2 freeze and had a real old settings.<section> alias -- give it a real lib/legacy-settings-section.nix row instead of an exemption: ${concatStringsSep ", " issues.wronglyExempt}";
     legacySettingsSection;
 
   # Uniqueness and prefix-disjointness over a flat list of dotted nixPath
