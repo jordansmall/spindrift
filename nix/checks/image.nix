@@ -115,8 +115,8 @@ in
     ! grep -q '"reviewer"' <<<"$scout_line" \
       || { echo "scout-only harness unexpectedly bakes a reviewer entry" >&2; exit 1; }
     # defaultRoster's fixed default effort (issue #2386) must survive the
-    # roster==null fallback (lib/mkHarness.nix:326-336) end-to-end: the
-    # driver-level checks (nix/checks/drivers.nix) pin the effort table
+    # roster==null fallback (lib/mkHarness.nix's resolvedRoster) end-to-end:
+    # the driver-level checks (nix/checks/drivers.nix) pin the effort table
     # lookup's render but bypass that fallback by feeding a hand-built
     # roster straight to the driver renderer, so only this fixture (no
     # `roster` arg) proves the wiring from lib/roster.nix's rosterDefaults
@@ -220,7 +220,7 @@ in
     # A Consumer that sets no model knobs and passes no roster (bats harness:
     # no `defaults`, no `roster`) must still get a reviewer on the schema
     # default (issue #2433) via the roster==null fallback
-    # (lib/mkHarness.nix:317-327) -- reviewModel's default moved to
+    # (lib/mkHarness.nix's resolvedRoster) -- reviewModel's default moved to
     # ${reviewModelSchemaDefault} so every Consumer's reviewer runs on the
     # strongest available model without configuring anything.
     bats_line=$(grep '^export AGENTS_JSON_TEMPLATE=' ${batsHarness.internals.agentFiles}/agent/entrypoint.sh)
@@ -246,10 +246,10 @@ in
     grep -q 'model: "anthropic/claude-x"' "$scout" \
       || { echo "opencode scout.md missing its configured model (JSON-encoded, issue #2152 slice C)" >&2; exit 1; }
     # Mirrors agents-json-baked's new effort assertions (slice 1, same file):
-    # proves the roster==null fallback (lib/mkHarness.nix:317-327) bakes the
-    # new per-agent effort defaults correctly for the on-disk opencode
-    # agent-files mechanism too, not just the --agents JSON one, since
-    # nix/checks/drivers.nix's driver-level effort checks bypass that
+    # proves the roster==null fallback (lib/mkHarness.nix's resolvedRoster)
+    # bakes the new per-agent effort defaults correctly for the on-disk
+    # opencode agent-files mechanism too, not just the --agents JSON one,
+    # since nix/checks/drivers.nix's driver-level effort checks bypass that
     # fallback by feeding a hand-built roster straight to the renderer.
     grep -q 'reasoningEffort: "${rosterDefaults.scout.effort}"' "$scout" \
       || { echo "opencode scout.md missing default scout effort in baked frontmatter" >&2; exit 1; }
