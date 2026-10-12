@@ -5,6 +5,10 @@
 > binary now owns the sequence around the orchestrator, and the
 > `ORCHESTRATOR_ENABLED` switch below is removed with its off-path.
 
+> **Note (issue #5045):** the hardcoded `claude` Driver is gone: every log
+> reader in the orchestrator now selects the Driver by name; see the
+> [issue #5045 amendment](#amendment-issue-5045-the-driver-is-selected-by-name).
+
 ADR 0007 drew the runtime into three tiers: nix computes everything knowable
 at evaluation time, a nix-built Go binary orchestrates live state, and the
 in-container entrypoint stays thin generated bash — linear exec glue with no
@@ -74,7 +78,9 @@ Concretely:
   (both live inside JSON string fields). That call is hardcoded to
   `driver.New("claude")` today — the one Driver-specific line in an otherwise
   Driver-agnostic loop — noted here as a gap a future opencode Driver will
-  need to close, not a violation of ADR 0009.
+  need to close, not a violation of ADR 0009. (Amended by issue #5045:
+  issue #262 closed this gap, and the Driver is now selected by name; see
+  the amendment below.)
 - **The entrypoint is a swap, not a rewrite.** `ORCHESTRATOR_ENABLED` (default
   off) is the only seam: off, `entrypoint.sh` calls `driver-exec` directly
   exactly as before; on, the identical flag set goes to `orchestrator`
@@ -105,7 +111,9 @@ Concretely:
   inline.** Rejected for now in favor of routing transcript rendering
   through each Driver's own ADR 0009 strategy (`RenderTranscript`); the
   orchestrator's one hardcoded `driver.New("claude")` call is a known,
-  narrow gap rather than the general shape.
+  narrow gap rather than the general shape. (Amended by issue #5045: issue
+  #262 closed this gap, and the Driver is now selected by name; see the
+  amendment below.)
 
 ## Consequences
 
@@ -130,7 +138,9 @@ Concretely:
   N=1.
 - The orchestrator's hardcoded `claude` Driver in `scanPassLog` is a known
   gap against ADR 0009's Driver-agnostic goal, left for whichever issue lands
-  the opencode Driver rather than solved speculatively here.
+  the opencode Driver rather than solved speculatively here. (Amended by
+  issue #5045: issue #262 closed this gap, and the Driver is now selected by
+  name; see the amendment below.)
 - Default is off (`ORCHESTRATOR_ENABLED=false`); every existing dispatch
   keeps its current single-pass `driver-exec` behavior unchanged until an
   operator opts in. (Amended by issue #4290: the default is now on; see the
@@ -228,3 +238,22 @@ time, name `ORCHESTRATOR_ENABLED` as removed, whether it arrives as env, an
 input-document key, a flake option, a legacy settings alias, or a `defaults`
 key. A Consumer that silently kept the old value would believe it still had
 the direct path.
+
+## Amendment (issue #5045): the Driver is selected by name
+
+The "hardcoded `driver.New("claude")`" gap named in the body, Considered Options,
+and Consequences above is closed. Commit 025a3c59 (issue #262,
+`feat(driver): select the Driver strategy by name in the box`) gave the
+orchestrator its own `--driver` flag (default `claude`), which `entrypoint.sh`
+fed from the Driver preamble's baked `DRIVER_NAME`, and made `scanPassLog` and
+`scanReviewLog` call `driver.New(driverName)` instead of
+`driver.New("claude")`. The path has since moved: the orchestrator no longer
+takes a `--driver` flag. Prompt assembly's `--driver` flag (default `claude`)
+fills the Handoff's `Driver` field (issue #2975), and the orchestrator reads
+that into `config.driver`, where an empty value means `claude`, matching
+`driver.New`. Every Driver-reading helper in
+`cmd/launcher/orchestrator/run.go` (`scanPassLog`, `scanPassOutcome`,
+`scanReviewLog`, `passReport`, and `appendResultEvent`) resolves its strategy
+the same way. The opencode Driver therefore gets its own `RenderTranscript`
+strategy for every log the orchestrator reads, and the loop is
+Driver-agnostic end to end, as ADR 0009 aims.
