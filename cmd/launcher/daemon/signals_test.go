@@ -1,3 +1,5 @@
+//go:build linux && (amd64 || arm64)
+
 package main
 
 import (
@@ -6,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -16,10 +19,9 @@ import (
 	"unsafe"
 
 	"spindrift.dev/launcher/internal/daemon"
+	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/stopsignal"
 )
-
-func init() { signalSettle = 0 }
 
 // stopHandlers returns the kernel handler value of each of stopSignals.
 func stopHandlers(t testing.TB) []uintptr {
@@ -37,12 +39,12 @@ func stopHandlers(t testing.TB) []uintptr {
 
 func TestIgnoreStopSignals_IgnoresThenRestoresExactly(t *testing.T) {
 	before := stopHandlers(t)
-	restore, hupIgnored, err := ignoreStopSignals()
+	if hupIgnored, err := sigHUPIgnored(); err != nil || hupIgnored {
+		t.Errorf("sigHUPIgnored() = %v, %v, want false: the test binary does not ignore SIGHUP", hupIgnored, err)
+	}
+	restore, err := ignoreStopSignals()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if hupIgnored {
-		t.Error("hupIgnored = true, want false: the test binary does not ignore SIGHUP")
 	}
 	for i, h := range stopHandlers(t) {
 		if h != sigIgnore {
@@ -55,21 +57,21 @@ func TestIgnoreStopSignals_IgnoresThenRestoresExactly(t *testing.T) {
 	}
 }
 
-func TestIgnoreStopSignals_ReportsAnAlreadyIgnoredSIGHUP(t *testing.T) {
+func TestSigHUPIgnored_ReportsAnAlreadyIgnoredSIGHUP(t *testing.T) {
 	old, err := sigaction(syscall.SIGHUP, &kernelSigaction{handler: sigIgnore})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = sigaction(syscall.SIGHUP, &old) })
 
-	restore, hupIgnored, err := ignoreStopSignals()
+	if hupIgnored, err := sigHUPIgnored(); err != nil || !hupIgnored {
+		t.Errorf("sigHUPIgnored() = %v, %v, want true for an inherited SIG_IGN", hupIgnored, err)
+	}
+	restore, err := ignoreStopSignals()
 	if err != nil {
 		t.Fatal(err)
 	}
 	restore()
-	if !hupIgnored {
-		t.Error("hupIgnored = false, want true for an inherited SIG_IGN")
-	}
 	if cur, _ := sigaction(syscall.SIGHUP, nil); cur.handler != sigIgnore {
 		t.Errorf("SIGHUP after restore = %#x, want it still SIG_IGN", cur.handler)
 	}
@@ -101,9 +103,8 @@ func TestRestoreSIGHUP(t *testing.T) {
 
 func TestExecSuccessor_StopDuringSettleAbortsAndRestores(t *testing.T) {
 	stubSelfExec(t, func(string, []string, []string) error { t.Error("exec called"); return nil })
-	signalSettle = 200 * time.Millisecond
-	t.Cleanup(func() { signalSettle = 0 })
 	r := execReadyRunner(t, nil)
+	setSignalSettle(t, 200*time.Millisecond)
 	lock, err := os.CreateTemp(t.TempDir(), "lock")
 	if err != nil {
 		t.Fatal(err)
@@ -208,8 +209,11 @@ func sigxPredecessor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, hupIgnored, err := ignoreStopSignals()
+	hupIgnored, err := sigHUPIgnored()
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ignoreStopSignals(); err != nil {
 		t.Fatal(err)
 	}
 	// Signals sent while ignored are dropped, but one blocked on the exec
@@ -256,4 +260,50 @@ func sigxSuccessor(t *testing.T) {
 	}
 	os.Stdout.WriteString(sigxMarker + "\n")
 	os.Exit(0)
+}
+
+func TestExecSuccessor_FailedExecLeavesTheImageIntact(t *testing.T) {
+	r := execReadyRunner(t, nil)
+	ho, h, lock := handoffWithChild(t, r)
+	st := ho.Slots[0].Child
+
+	var inside []uintptr
+	stubSelfExec(t, func(string, []string, []string) error {
+		inside = stopHandlers(t)
+		return errors.New("exec boom")
+	})
+	before := stopHandlers(t)
+	fdsBefore := inheritableFDs(t)
+
+	if err := r.execSuccessor(ho, lock, nil, "/self"); err == nil || !strings.Contains(err.Error(), "exec boom") {
+		t.Fatalf("execSuccessor() error = %v, want the exec failure", err)
+	}
+
+	for i, h := range inside {
+		if h != sigIgnore {
+			t.Errorf("%v inside exec = %#x, want SIG_IGN", stopSignals[i], h)
+		}
+	}
+	if after := stopHandlers(t); !slices.Equal(after, before) {
+		t.Errorf("handlers after = %#x, want them restored to %#x", after, before)
+	}
+	if fdsAfter := inheritableFDs(t); !slices.Equal(fdsAfter, fdsBefore) {
+		t.Errorf("inheritable fds after = %v, want %v (dups leaked)", fdsAfter, fdsBefore)
+	}
+	if !reflect.DeepEqual(ho.Slots[0].Child, st) {
+		t.Error("the caller's handoff was modified")
+	}
+
+	got, err := r.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st)
+	if err != nil {
+		t.Fatalf("InheritChild() unexpected error: %v", err)
+	}
+	if got.(*hostChildHandle) != h {
+		t.Fatal("InheritChild() did not reuse the registered handle")
+	}
+	_ = h.proc.Kill()
+	res, err := got.Wait(nil)
+	if err != nil || res.Exit != -1 {
+		t.Errorf("Wait() = %+v, %v, want a signal exit", res, err)
+	}
 }

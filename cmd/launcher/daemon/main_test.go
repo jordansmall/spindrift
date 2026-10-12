@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -220,6 +222,7 @@ func TestParseArgs(t *testing.T) {
 		wantExplicitSelector bool
 		wantFeatureBranch    string
 		wantCheckOnly        bool
+		wantRestartInPlace   bool
 		wantErr              bool
 	}{
 		{
@@ -318,6 +321,22 @@ func TestParseArgs(t *testing.T) {
 			wantCheckOnly:        true,
 		},
 		{
+			// The default is drain: an in-place restart is strictly opt-in.
+			name:                 "restart-in-place is off by default",
+			args:                 []string{"--input", "/tmp/in.json", "dispatch"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
+			wantExplicitSelector: true,
+		},
+		{
+			name:                 "restart-in-place after the selector",
+			args:                 []string{"--input", "/tmp/in.json", "dispatch", "--restart-in-place"},
+			wantPath:             "/tmp/in.json",
+			wantKinds:            []daemon.Kind{daemon.KindOf(dispatchkind.Work)},
+			wantExplicitSelector: true,
+			wantRestartInPlace:   true,
+		},
+		{
 			name:          "check-only first, with no selector",
 			args:          []string{"--check-only", "--input", "/tmp/in.json"},
 			wantPath:      "/tmp/in.json",
@@ -364,8 +383,8 @@ func TestParseArgs(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parseArgs(%v) unexpected error: %v", tt.args, err)
 			}
-			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.ExplicitSelector != tt.wantExplicitSelector || got.FeatureBranch != tt.wantFeatureBranch || got.CheckOnly != tt.wantCheckOnly {
-				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v ExplicitSelector:%v FeatureBranch:%q CheckOnly:%v}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantExplicitSelector, tt.wantFeatureBranch, tt.wantCheckOnly)
+			if got.InputPath != tt.wantPath || !slices.Equal(got.Kinds, tt.wantKinds) || got.ExplicitSelector != tt.wantExplicitSelector || got.FeatureBranch != tt.wantFeatureBranch || got.CheckOnly != tt.wantCheckOnly || got.RestartInPlace != tt.wantRestartInPlace {
+				t.Errorf("parseArgs(%v) = %+v, want {InputPath:%q Kinds:%v ExplicitSelector:%v FeatureBranch:%q CheckOnly:%v RestartInPlace:%v}", tt.args, got, tt.wantPath, tt.wantKinds, tt.wantExplicitSelector, tt.wantFeatureBranch, tt.wantCheckOnly, tt.wantRestartInPlace)
 			}
 		})
 	}
@@ -3528,6 +3547,8 @@ func TestSuccessorArgs(t *testing.T) {
 		{"no input", []string{"dispatch"}, []string{"dispatch"}},
 		{"input mid-argv", []string{"dispatch", "--input", "a", "--input", "b", "--check-only"}, []string{"dispatch", "--check-only"}},
 		{"empty", nil, []string{}},
+		// A replayed handoff fd would name a descriptor the next image never got.
+		{"handoff fd", []string{"--input", "d", "--handoff-fd", "7", "dispatch", "--restart-in-place"}, []string{"dispatch", "--restart-in-place"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3673,5 +3694,468 @@ func TestMainRun_DriverMatch_NoWarningNoMarker(t *testing.T) {
 	}
 	if v, ok := driverMarkerEnvT(captured.Env); ok {
 		t.Errorf("doctor env carries marker %q, want none", v)
+	}
+}
+
+// selfExecCall is one runnerSelfExec invocation a test captured.
+type selfExecCall struct {
+	path      string
+	argv, env []string
+}
+
+// inPlaceFixture is a mainRun setup in which the first tip fetch finds a newer
+// daemon build, so a --restart-in-place pool prebuilds it, waits for its child
+// to report, and execs it. Every external seam is stubbed: nix eval prints
+// newSelf, nix build and the smoke test succeed, and the exec records its
+// arguments and returns as if it had happened.
+type inPlaceFixture struct {
+	input, gitDir, goFile, newSelf string
+	// stop is the latch installStopSignal hands the next mainRun.
+	stop <-chan struct{}
+	// installs counts installStopSignal calls.
+	installs atomic.Int32
+	// onInstall, when set, supplies the latch installStopSignal returns instead
+	// of stop, and runs inside the call.
+	onInstall func() <-chan struct{}
+	// termFile is written by the child when it receives SIGTERM.
+	termFile string
+
+	mu       sync.Mutex
+	children []*exec.Cmd
+	execs    []selfExecCall
+	execErr  error
+}
+
+func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
+	requireInPlaceRestart(t)
+	t.Helper()
+	for _, bin := range []string{"git", "/bin/sh"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	setSignalSettle(t, 0)
+	clearKnobEnvT(t)
+	consumer := bareOriginConsumerT(t)
+	doc := validKnobDocument()
+	doc.Settings["DAEMON_SELF_APP"] = ".#dogfood"
+	f := &inPlaceFixture{
+		input:    writeInputDocument(t, doc),
+		goFile:   filepath.Join(t.TempDir(), "go"),
+		newSelf:  newSelf,
+		stop:     make(chan struct{}),
+		termFile: filepath.Join(t.TempDir(), "term"),
+	}
+	t.Chdir(consumer)
+	var err error
+	if f.gitDir, err = gitDir(consumer); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+
+	sh := func(ctx context.Context, script string) *exec.Cmd {
+		return exec.CommandContext(ctx, "/bin/sh", "-c", script)
+	}
+	origInstall, origDoctor, origEval, origPrebuild := installStopSignal, runnerDoctorCommand, runnerEvalCommand, runnerPrebuildCommand
+	origExec, origSelfExec := runnerExecCommand, runnerSelfExec
+	t.Cleanup(func() {
+		installStopSignal, runnerDoctorCommand, runnerEvalCommand, runnerPrebuildCommand = origInstall, origDoctor, origEval, origPrebuild
+		runnerExecCommand, runnerSelfExec = origExec, origSelfExec
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, c := range f.children {
+			if c.Process != nil {
+				_ = c.Process.Kill()
+			}
+		}
+	})
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		f.installs.Add(1)
+		if f.onInstall != nil {
+			return f.onInstall(), make(chan struct{}), func() {}
+		}
+		return f.stop, make(chan struct{}), func() {}
+	}
+	runnerDoctorCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd { return sh(ctx, "exit 0") }
+	runnerEvalCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		if slices.Contains(args, "--apply") {
+			return sh(ctx, "echo /nix/store/ccc-daemon.drv")
+		}
+		return sh(ctx, "echo "+newSelf)
+	}
+	runnerPrebuildCommand = func(ctx context.Context, name string, _ ...string) *exec.Cmd {
+		if name == "nix" {
+			return sh(ctx, "echo "+filepath.Dir(filepath.Dir(newSelf)))
+		}
+		return sh(ctx, "exit 0")
+	}
+	// One report so the pool's clean moment can arrive, then it runs until
+	// the go-file appears or it is sent SIGTERM, which it records in $2.
+	const child = `trap 'echo term >"$2"; exit 0' TERM
+printf '%s\n' '{"event":"box","issue":"101","phase":"initial"}' >&3
+while [ ! -e "$1" ]; do sleep 0.02; done`
+	runnerExecCommand = func(string, ...string) *exec.Cmd {
+		c := exec.Command("/bin/sh", "-c", child, "sh", f.goFile, f.termFile)
+		f.mu.Lock()
+		f.children = append(f.children, c)
+		f.mu.Unlock()
+		return c
+	}
+	runnerSelfExec = func(path string, argv, env []string) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.execs = append(f.execs, selfExecCall{path, slices.Clone(argv), slices.Clone(env)})
+		return f.execErr
+	}
+	return f
+}
+
+// start runs mainRun on argv in the background under f.stop.
+func (f *inPlaceFixture) start(argv []string) (code <-chan int, out *lockedBuffer) {
+	out = &lockedBuffer{}
+	c := make(chan int, 1)
+	go func() { c <- mainRun(argv, out, out) }()
+	return c, out
+}
+
+func waitCode(t *testing.T, code <-chan int, out *lockedBuffer) int {
+	t.Helper()
+	select {
+	case got := <-code:
+		return got
+	case <-time.After(10 * time.Second):
+		t.Fatalf("mainRun did not return; output:\n%s", out.String())
+		return 0
+	}
+}
+
+func eventsIn(out *lockedBuffer) (evs []daemon.Event) {
+	for _, line := range strings.Split(out.String(), "\n") {
+		if ev, ok := mergedEvent(line); ok {
+			evs = append(evs, ev)
+		}
+	}
+	return evs
+}
+
+func findEvent(evs []daemon.Event, name, phase string) (daemon.Event, bool) {
+	for _, ev := range evs {
+		if ev.Event == name && ev.Phase == phase {
+			return ev, true
+		}
+	}
+	return daemon.Event{}, false
+}
+
+func waitForEvent(t *testing.T, out *lockedBuffer, name, phase string) daemon.Event {
+	t.Helper()
+	for range 1000 {
+		if ev, ok := findEvent(eventsIn(out), name, phase); ok {
+			return ev
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("no %s event (phase %q); output:\n%s", name, phase, out.String())
+	return daemon.Event{}
+}
+
+func assertNoHandoffIn(t *testing.T, what string, env []string) {
+	t.Helper()
+	for _, kv := range env {
+		// Names only: a value is arbitrary ambient text, and may be a credential.
+		key, _, _ := strings.Cut(kv, "=")
+		if strings.Contains(strings.ToLower(key), "handoff") {
+			t.Errorf("%s environment carries %s", what, key)
+		}
+	}
+}
+
+// handOff runs the first image to its exec and returns the captured call.
+func (f *inPlaceFixture) handOff(t *testing.T) (selfExecCall, *lockedBuffer) {
+	t.Helper()
+	code, out := f.start([]string{"--input", f.input, "--restart-in-place", "dispatch"})
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("first image exited %d; output:\n%s", got, out.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.execs) != 1 {
+		t.Fatalf("exec calls = %d, want 1; output:\n%s", len(f.execs), out.String())
+	}
+	return f.execs[0], out
+}
+
+func assertLockHeld(t *testing.T, gitDirPath string, want bool) {
+	t.Helper()
+	lock, err := daemon.AcquireCheckoutLock(gitDirPath, []daemon.Kind{daemon.KindOf(dispatchkind.Work)})
+	if err == nil {
+		_ = lock.Release()
+	}
+	if held := err != nil; held != want {
+		t.Fatalf("checkout lock held = %v, want %v (acquire err: %v)", held, want, err)
+	}
+}
+
+// TestMainRun_RestartInPlaceHandsOffAndReattaches drives both images of an
+// in-place restart in one process: the first execs (a stub) the prebuilt
+// daemon with its child still running and the lock still held; the second,
+// started from the exec's own argv, re-attaches that child and drains it.
+func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
+	const newSelf = "/nix/store/bbb-new/bin/daemon"
+	f := newInPlaceFixtureT(t, newSelf)
+
+	call, out := f.handOff(t)
+	if call.path != newSelf || call.argv[0] != newSelf {
+		t.Errorf("exec path = %q argv0 = %q, want %q", call.path, call.argv[0], newSelf)
+	}
+	n := len(call.argv)
+	if n < 3 || call.argv[n-2] != handoffFlag {
+		t.Fatalf("exec argv = %v, want it to end in %s <fd>", call.argv, handoffFlag)
+	}
+	if want := []string{"--restart-in-place", "dispatch"}; !slices.Equal(call.argv[1:n-2], want) {
+		t.Errorf("exec operator args = %v, want %v", call.argv[1:n-2], want)
+	}
+	assertNoHandoffIn(t, "exec", call.env)
+	// The successor records the handoff once it has re-attached, so a failed
+	// exec never leaves one behind.
+	if _, ok := findEvent(eventsIn(out), "self_update", "handoff"); ok {
+		t.Errorf("the old image emitted a handoff event; output:\n%s", out.String())
+	}
+	assertLockHeld(t, f.gitDir, true)
+
+	// The go-file is never written, so the inherited child can only end through
+	// a SIGTERM forwarded by the successor; it is therefore still running when
+	// the successor inherits it.
+	f.mu.Lock()
+	pid := f.children[0].Process.Pid
+	f.mu.Unlock()
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("kill(%d, 0) = %v before the second image started: the child must still be running", pid, err)
+	}
+	if _, err := os.Stat(f.termFile); err == nil {
+		t.Fatal("child already saw SIGTERM before the second image started")
+	}
+
+	// A stop delivered between the two runs: the earliest the successor can
+	// catch one is the moment it installs its handler (a signal inside the
+	// execve itself is dropped, see signals_test.go; one landing once the
+	// successor's main has started is latched), so the latch it gets is
+	// already closed.
+	f.onInstall = func() <-chan struct{} {
+		stopped := make(chan struct{})
+		close(stopped)
+		return stopped
+	}
+	// What the successor's wrapper does: it re-adds --input and exports its own path.
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", newSelf)
+	code, out2 := f.start(append([]string{"--input", f.input}, call.argv[1:]...))
+	if got := waitCode(t, code, out2); got != 0 {
+		t.Fatalf("second image exited %d; output:\n%s", got, out2.String())
+	}
+	if b, err := os.ReadFile(f.termFile); err != nil || strings.TrimSpace(string(b)) != "term" {
+		t.Errorf("child term marker = %q (err %v), want \"term\": the stop was not forwarded to the inherited child", b, err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("kill(%d, 0) = %v, want ESRCH: the inherited child was not drained", pid, err)
+	}
+	evs := eventsIn(out2)
+	for _, name := range []string{"child_inherited", "child_finish"} {
+		if _, ok := findEvent(evs, name, ""); !ok {
+			t.Errorf("second image emitted no %s event; output:\n%s", name, out2.String())
+		}
+	}
+	ev, ok := findEvent(evs, "self_update", "handoff")
+	if !ok {
+		t.Fatalf("second image emitted no self_update handoff event; output:\n%s", out2.String())
+	}
+	if ev.FromPath != "/nix/store/aaa-old/bin/daemon" || ev.ToPath != newSelf || ev.Revision == "" || !slices.Equal(ev.Slots, []int{0}) {
+		t.Errorf("handoff event = %+v, want from the old to the new path, a revision and slots [0]", ev)
+	}
+	f.mu.Lock()
+	assertNoHandoffIn(t, "child", f.children[0].Env)
+	f.mu.Unlock()
+	report, err := daemon.ReadStatus(f.gitDir)
+	if err != nil || report.Status == nil || report.Status.Pid != os.Getpid() {
+		t.Errorf("status after the second image = %+v (err %v), want pid %d", report.Status, err, os.Getpid())
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_ResumeTakesOverBeforeParsingInput pins that a successor inherits
+// the lock and the children ahead of everything that can fail: with no input
+// document it still keeps the lock until the child it inherited is waited out.
+func TestMainRun_ResumeTakesOverBeforeParsingInput(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	installed := f.installs.Load()
+	f.mu.Lock()
+	pid := f.children[0].Process.Pid
+	f.mu.Unlock()
+
+	code, out := f.start(append([]string{"--input", filepath.Join(t.TempDir(), "missing.json")}, call.argv[1:]...))
+	select {
+	case got := <-code:
+		t.Fatalf("second image exited %d while its inherited child still runs; output:\n%s", got, out.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+	assertLockHeld(t, f.gitDir, true)
+	if n := f.installs.Load(); n != installed+1 {
+		t.Errorf("stop latch installs by the second image = %d, want 1: it must be latched before the input document is read", n-installed)
+	}
+
+	writeFileT(t, f.goFile, "")
+	if got := waitCode(t, code, out); got != 1 {
+		t.Fatalf("second image exited %d, want 1 (no input document); output:\n%s", got, out.String())
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("kill(%d, 0) = %v, want ESRCH: the inherited child was not reaped", pid, err)
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_ResumeThatFailsStartupStillHonoursStop pins that a successor
+// waiting out the children it inherited, because its startup failed, forwards
+// a stop that arrives during the wait: the operator's Ctrl-C must still reach
+// them rather than sit in a latch nothing reads.
+func TestMainRun_ResumeThatFailsStartupStillHonoursStop(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	f.mu.Lock()
+	pid := f.children[0].Process.Pid
+	f.mu.Unlock()
+
+	stop := make(chan struct{})
+	f.onInstall = func() <-chan struct{} { return stop }
+	code, out := f.start(append([]string{"--input", filepath.Join(t.TempDir(), "missing.json")}, call.argv[1:]...))
+	select {
+	case got := <-code:
+		t.Fatalf("second image exited %d while its inherited child still runs; output:\n%s", got, out.String())
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(stop)
+	if got := waitCode(t, code, out); got != 1 {
+		t.Fatalf("second image exited %d, want 1 (no input document); output:\n%s", got, out.String())
+	}
+	if b, err := os.ReadFile(f.termFile); err != nil || strings.TrimSpace(string(b)) != "term" {
+		t.Errorf("child term marker = %q (err %v), want \"term\": the stop was not forwarded to the inherited child", b, err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("kill(%d, 0) = %v, want ESRCH: the inherited child was not drained", pid, err)
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_RestartInPlaceExecFailureKeepsSupervising pins that an exec that
+// fails, or a target the exec refuses, blocks the update and hands the same
+// children back to a fresh pool run instead of dropping them.
+func TestMainRun_RestartInPlaceExecFailureKeepsSupervising(t *testing.T) {
+	tests := []struct {
+		name       string
+		newSelf    string
+		execErr    error
+		wantReason string
+		wantExecs  int
+	}{
+		{"exec error", "/nix/store/bbb-new/bin/daemon", errors.New("boom"), "exec: boom", 1},
+		{"target outside the store", "/opt/bbb-new/bin/daemon", nil, "exec: prebuilt daemon path \"/opt/bbb-new/bin/daemon\" is not under /nix/store/", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newInPlaceFixtureT(t, tt.newSelf)
+			f.execErr = tt.execErr
+			stop := make(chan struct{})
+			f.stop = stop
+
+			code, out := f.start([]string{"--input", f.input, "--restart-in-place", "dispatch"})
+			ev := waitForEvent(t, out, "self_update", "blocked")
+			if ev.Reason != tt.wantReason {
+				t.Errorf("blocked reason = %q, want %q", ev.Reason, tt.wantReason)
+			}
+			close(stop)
+			if got := waitCode(t, code, out); got != 0 {
+				t.Fatalf("mainRun exited %d, want 0; output:\n%s", got, out.String())
+			}
+			evs := eventsIn(out)
+			if _, ok := findEvent(evs, "self_update", "handoff"); ok {
+				t.Errorf("a handoff event was recorded though the exec failed; output:\n%s", out.String())
+			}
+			for _, name := range []string{"child_inherited", "child_finish"} {
+				if _, ok := findEvent(evs, name, ""); !ok {
+					t.Errorf("no %s event after the failed exec; output:\n%s", name, out.String())
+				}
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if len(f.execs) != tt.wantExecs {
+				t.Errorf("exec calls = %d, want %d", len(f.execs), tt.wantExecs)
+			}
+			if len(f.children) != 1 {
+				t.Errorf("children started = %d, want 1: the pool must re-attach the first, not start another", len(f.children))
+			}
+		})
+	}
+}
+
+// TestMainRun_WithoutRestartInPlaceDrainsAndExits10 pins that the in-place
+// restart is strictly opt-in: the same self-change without the flag prebuilds
+// the successor, drains the pool and exits ExitSelfChanged, never exec'ing.
+func TestMainRun_WithoutRestartInPlaceDrainsAndExits10(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+
+	code, out := f.start([]string{"--input", f.input, "dispatch"})
+	waitForEvent(t, out, "self_update", "built")
+	writeFileT(t, f.goFile, "")
+	if got := waitCode(t, code, out); got != daemon.ExitSelfChanged {
+		t.Fatalf("mainRun exited %d, want %d; output:\n%s", got, daemon.ExitSelfChanged, out.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.execs) != 0 {
+		t.Errorf("exec calls = %d, want 0 without --restart-in-place", len(f.execs))
+	}
+	if _, ok := findEvent(eventsIn(out), "self_update", "handoff"); ok {
+		t.Errorf("a handoff event was recorded without --restart-in-place; output:\n%s", out.String())
+	}
+}
+
+func TestSplitHandoffFlag(t *testing.T) {
+	argv := []string{"--input", "d", "dispatch"}
+	rest, _, found, err := splitHandoffFlag(argv)
+	if err != nil || found || !slices.Equal(rest, argv) {
+		t.Errorf("splitHandoffFlag(no flag) = %v, %v, %v; want argv unchanged, not found", rest, found, err)
+	}
+	rest, raw, found, err := splitHandoffFlag([]string{"a", handoffFlag, "5", "b", handoffFlag, "7"})
+	if err != nil || !found || raw != "7" || !slices.Equal(rest, []string{"a", "b"}) {
+		t.Errorf("splitHandoffFlag(repeated) = %v, %q, %v, %v; want [a b], the last value", rest, raw, found, err)
+	}
+	if _, _, _, err := splitHandoffFlag([]string{handoffFlag}); err == nil {
+		t.Error("splitHandoffFlag(flag without a value) succeeded")
+	}
+}
+
+func TestResumeFromHandoff_RefusesBadDescriptor(t *testing.T) {
+	for _, bad := range []string{"abc", "1", "-4"} {
+		if res, err := resumeFromHandoff(bad); err == nil || res != nil {
+			t.Errorf("resumeFromHandoff(%q) = %v, %v; want an error", bad, res, err)
+		}
+	}
+}
+
+// TestMainRun_RestartInPlaceRefusedWhereUnsupported pins that the refusal
+// fires before the input document is read: the path does not exist, yet the
+// error names the platform limit rather than a load failure.
+func TestMainRun_RestartInPlaceRefusedWhereUnsupported(t *testing.T) {
+	prev := inPlaceRestartSupported
+	inPlaceRestartSupported = false
+	t.Cleanup(func() { inPlaceRestartSupported = prev })
+
+	var stdout, stderr bytes.Buffer
+	got := mainRun([]string{"--input", filepath.Join(t.TempDir(), "absent.json"), "--restart-in-place"}, &stdout, &stderr)
+	if got != 1 {
+		t.Errorf("mainRun() = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), errInPlaceUnsupported.Error()) {
+		t.Errorf("stderr = %q, want it to carry %q", stderr.String(), errInPlaceUnsupported)
 	}
 }
