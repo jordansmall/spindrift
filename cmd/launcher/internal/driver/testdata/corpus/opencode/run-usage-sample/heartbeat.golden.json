@@ -1,0 +1,19 @@
+{
+  "lines": [
+    "#42 · turn 1 done"
+  ],
+  "onModel": [
+    {
+      "model": "gpt-5",
+      "role": ""
+    },
+    {
+      "model": "claude-sonnet-4",
+      "role": ""
+    },
+    {
+      "model": "gpt-5",
+      "role": ""
+    }
+  ]
+}

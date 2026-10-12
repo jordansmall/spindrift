@@ -1,0 +1,2 @@
+[implementor] Agent(scout)
+[implementor] scouting now

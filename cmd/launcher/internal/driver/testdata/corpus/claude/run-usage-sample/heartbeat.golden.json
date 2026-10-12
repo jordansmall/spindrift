@@ -1,0 +1,26 @@
+{
+  "lines": [
+    "#42 ── implementor · opus ──────────",
+    "#42 [plan] scouting now",
+    "#42 [plan] · 1 subagent",
+    "#42 [plan] · 5 turns"
+  ],
+  "onModel": [
+    {
+      "model": "claude-opus-4-8",
+      "role": "implementor"
+    },
+    {
+      "model": "claude-haiku-4-5-20251001",
+      "role": "scout"
+    },
+    {
+      "model": "claude-sonnet-5",
+      "role": "subagent"
+    },
+    {
+      "model": "claude-opus-4-8",
+      "role": "implementor"
+    }
+  ]
+}

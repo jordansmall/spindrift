@@ -1,0 +1,36 @@
+{
+  "EarliestEventMs": 1000,
+  "Found": true,
+  "HasEventSpan": true,
+  "LatestEventMs": 4000,
+  "OutputIsMainLoopOnly": false,
+  "SummedByAgent": null,
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 300,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 30,
+      "Model": "claude-sonnet-4",
+      "OutputTokens": 100,
+      "UncachedInputTokens": 200
+    },
+    {
+      "CacheReadInputTokens": 700,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 70,
+      "Model": "gpt-5",
+      "OutputTokens": 215,
+      "UncachedInputTokens": 400
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 100,
+    "cache_read_input_tokens": 1000,
+    "duration_api_ms": 0,
+    "duration_ms": 3000,
+    "input_tokens": 600,
+    "num_turns": 3,
+    "output_tokens": 315,
+    "total_cost_usd": 0.06
+  }
+}

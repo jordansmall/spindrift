@@ -1,0 +1,13 @@
+{
+  "lines": [
+    "#42 · Looking into issue #42.",
+    "#42 · Reading main.",
+    "#42 · Fixed the issue and verified the tests pass."
+  ],
+  "onModel": [
+    {
+      "model": "claude-sonnet-4",
+      "role": ""
+    }
+  ]
+}
