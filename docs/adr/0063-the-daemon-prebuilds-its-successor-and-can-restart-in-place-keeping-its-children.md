@@ -52,7 +52,7 @@ for a clean moment: the discovery baton is free, so no child sits between
 selecting an issue and claiming it, and no stop or abort has been requested. It
 then:
 
-- blocks SIGTERM, SIGINT and SIGHUP;
+- sets SIGTERM, SIGINT and SIGHUP to ignored, which survives the `exec`;
 - clears close-on-exec only on the descriptors the handoff names: the instance
   lock, each child's report-pipe read end, and the handoff itself;
 - `exec`s the successor's exact store path, which must be under the Nix store
@@ -61,9 +61,13 @@ then:
 Because `exec` keeps the pid, every running child stays a child of that pid. A
 child that exits during the window stays a zombie until the new image collects
 its exit status, so its pid can never be recycled. The instance `flock` is never
-released, so no second Daemon can start inside the window. A signal sent during
-the window stays pending instead of killing the process, and the new image
-receives it once its handlers are installed.
+released, so no second Daemon can start inside the window. A stop signal
+landing inside the window is dropped, not held for the new image: Go's runtime
+unblocks those three signals before any handler exists, so a pending one would
+kill the new image on the default action. The new image latches SIGTERM and
+SIGINT from the start of its `main` and acts on them only after it has
+re-attached. In the instant between Go installing its own handlers and `main`
+starting, a SIGTERM still kills the new image; Go offers no earlier hook.
 
 **The handoff is a versioned document on an inherited descriptor**, named by
 argv. It is never an environment variable, which every later child would
@@ -79,9 +83,10 @@ act, before reading its input document, preflight or config validation, is to:
 2. validate each pid as a waitable child and each descriptor as a pipe;
 3. re-mark them close-on-exec;
 4. rebuild child handles;
-5. unblock signals.
+5. restore SIGHUP's default, unless the predecessor already had it ignored. The
+   stop latch for SIGTERM and SIGINT is installed before step 1.
 
-Anything that fails validation is dropped and reported, never adopted. From then
+Anything that fails validation is dropped and reported, never inherited. From then
 on, own and inherited children share one supervision path: records,
 `child_finish`, outcome interpretation, backoff, breaker, kind gating and halt.
 A new image whose preflight then refuses to start `exec`s back to the previous,
@@ -151,3 +156,15 @@ is not decided here.
 - **The documented systemd unit runs `--restart-in-place`**, and its restart
   policy now only matters for crashes.
 - Spec: issue #4986.
+
+## Amendment (issue #5016): the exec window ignores stop signals instead of blocking them
+
+The first draft blocked SIGTERM, SIGINT and SIGHUP across the `exec` so a signal
+would stay pending for the new image. That cannot work: Go's runtime unblocks
+those signals at startup, before any handler is installed, so a signal pending
+at `execve` kills the new image on the default action. The old image now sets
+the three to ignored (`SIG_IGN` survives `exec`), so one landing inside the
+window is dropped. The new image installs its stop latch before it re-attaches
+and restores SIGHUP's default afterwards unless the handoff says it was
+ignored. The new image, not the old, emits the `handoff` `self_update` event, so
+a failed `exec` leaves none.
