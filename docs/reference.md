@@ -1699,8 +1699,8 @@ row to also say "(its `--flag` is accepted but inert)" (issue #3855).
 | `MERGE_POLL_INTERVAL`  | `30`    | `branches`         | seconds between CI-status polls in the merge gate. Not a rate-limit lever: the gate issues one strictly-serialized, single-point GraphQL query at a time, only while a PR is actively mid-landing, bounded by `MERGE_POLL_TIMEOUT` — it never bursts. The cadence-sensitive pollers are the *continuous refill* ticker (runs for the launcher's whole lifetime and bursts outside its ticker) and the *console backlog* poll — slow those in a rate-limit sweep, not this knob. The interval is also reused as four fixed-call-count delays (the `SUCCESS` confirm re-poll, the `3 ×` check-registration window, the merge-blocked-by-checks retry, and the fix-pass no-op confirm), so raising it stretches every landing for zero rate-limit benefit (issue #3249) |
 | `MERGE_POLL_TIMEOUT`   | `3600`  | `branches`         | seconds to wait for CI green before abandoning the merge — at the default, a merge that rides out the full deadline can outlive an installation token's ~1h lifetime when `GH_TOKEN_REFRESH_FILE` is unset (see [GitHub App installation token](#github-app-installation-token-recommended)) |
 | `OVERLAP_GATE`         | `defer` | `concurrency`      | declared `## Touches` overlap policy: `defer` (hold a Dispatchable issue whose declared touch-set intersects an in-progress issue's, retrying once the collider completes) or `off` (disable the check — see [Declared touch-set overlap](#declared-touch-set-overlap)) |
-| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649); once the `status=ready` landing relay exhausts them the issue parks `agent-failed` (issue #4651), while the fix-pass and conflict-resolve relays never park |
-| `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry; also the backoff between host-side bundle relay retries for a read-only Box (issue #4649) |
+| `TRANSIENT_RETRY_MAX`  | `3`     | `selfHealing`      | retries for transient box exits (529/network backoff; consecutive 429 holds); also bounds the retries of a host-side bundle relay for a read-only Box (issue #4649) and of the host-side draft PR create after it (issue #5146); once the `status=ready` landing relay exhausts them the issue parks `agent-failed` (issue #4651), while the fix-pass and conflict-resolve relays never park |
+| `TRANSIENT_BACKOFF_SECS` | `30`  | `selfHealing`      | base linear backoff per transient retry; also the backoff between host-side bundle relay retries for a read-only Box (issue #4649) and between draft PR create retries (issue #5146) |
 | `HOLD_JITTER_SECS`     | `5`     | `selfHealing`      | jitter added to a 429 hold-until-reset before re-dispatch |
 | `DEV_SHELL_NAME`       | `default` | `sandbox`        | which devShell to enter; set `ci` to use a lean headless shell distinct from the interactive `default` |
 | `DEV_SHELL_PROBE_TIMEOUT` | `300` | `sandbox`        | seconds before the in-box devShell probe is abandoned for the baked toolchain |
@@ -2949,11 +2949,14 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   falls back to adding the `agent-complete` label while the native status
   stays Failed (the gap recovering after red CI already has). On the
   PR-shaped path a relay that succeeds but whose host-side draft-PR create
-  then fails parks the issue the same way, with reason `draft-pr-failed` and
-  a `draft PR create failed: <err>` comment (issue #5144); `spindrift recover
-  <n>` opens the PR from the preserved bundle. A missing bundle, a wiring
-  error, or a missing PR intent with no fallback still posts "merge blocked"
-  and leaves the issue `agent-in-progress`.
+  then fails retries the create on the same bound and backoff, on GitHub and
+  Forgejo alike, adopting instead any open PR a timed-out create made on the
+  branch (issue #5146); once those retries run out it parks the issue the
+  same way, with reason `draft-pr-failed` and a `draft PR create failed:
+  <err>` comment (issue #5144); `spindrift recover <n>` opens the PR from
+  the preserved bundle. A missing bundle, a wiring error, or a missing PR
+  intent with no fallback still posts "merge blocked" and leaves the issue
+  `agent-in-progress`.
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
@@ -4481,7 +4484,8 @@ If the `status=ready` "land the branch" relay still fails after
 `agent-failed` with the bundle kept in the outbox;
 `spindrift recover <n>` relays and lands it (issue #4651). On a PR-shaped
 forge a relay that succeeds but whose host-side draft-PR create then fails
-parks the same way, reason `draft-pr-failed`, routed to the same `recover`
+past the same retries (issue #5146, GitHub and Forgejo alike) parks the same
+way, reason `draft-pr-failed`, routed to the same `recover`
 (issue #5144). Bare `spindrift
 recover` finds and lands one such issue itself, moving it `agent-failed` →
 `agent-in-progress` and ending `agent-complete` on a land or back on
