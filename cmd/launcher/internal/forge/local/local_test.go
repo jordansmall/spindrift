@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -1676,5 +1677,159 @@ func TestLocalTracker_TouchesAndDepsOf_IgnoreCommentSection(t *testing.T) {
 	}
 	if want := []forge.Dependency{{ID: "real-dep", Source: forge.DepSourceBody}}; !reflect.DeepEqual(deps, want) {
 		t.Errorf("DepsOf = %v, want %v", deps, want)
+	}
+}
+
+// The tuning cooldown (settle.notPlannedExpired) needs the close reason and
+// time (issue #5028). They are human-edited frontmatter, so a malformed
+// closedat reads as zero rather than failing the list, and an unrecognised or
+// absent closedreason is a completed close.
+func TestLocalTracker_ReportsClosedNotPlannedAndClosedAt(t *testing.T) {
+	closed := time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC)
+	cases := []struct {
+		name       string
+		fm         localFrontmatter
+		notPlanned bool
+		closedAt   time.Time
+	}{
+		{"not planned", localFrontmatter{ClosedReason: "not-planned", ClosedAt: "2026-08-15T10:30:00Z"}, true, closed},
+		{"offset date", localFrontmatter{ClosedReason: "not-planned", ClosedAt: "2026-08-15T12:30:00+02:00"}, true, closed},
+		{"completed", localFrontmatter{ClosedAt: "2026-08-15T10:30:00Z"}, false, closed},
+		{"other reason", localFrontmatter{ClosedReason: "duplicate", ClosedAt: "2026-08-15T10:30:00Z"}, false, closed},
+		{"malformed date", localFrontmatter{ClosedReason: "not-planned", ClosedAt: "yesterday"}, true, time.Time{}},
+		{"no date", localFrontmatter{ClosedReason: "not-planned"}, true, time.Time{}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			c.fm.Title, c.fm.Created, c.fm.Closed = "F", "2026-07-09T12:00:00Z", true
+			c.fm.Labels = []string{"agent-tuning-finding"}
+			writeLocalIssue(t, dir, "f", localIssue{frontmatter: c.fm})
+			lt := NewLocalTracker(dir, testLabels)
+			listed, err := lt.ListIssuesWithLabels(forge.IssueClosed, []string{"agent-tuning-finding"})
+			if err != nil || len(listed) != 1 {
+				t.Fatalf("ListIssuesWithLabels = %+v, %v; want one issue", listed, err)
+			}
+			one, err := lt.Issue("f")
+			if err != nil {
+				t.Fatalf("Issue: %v", err)
+			}
+			for name, iss := range map[string]forge.Issue{"list": listed[0], "issue": one} {
+				if iss.ClosedNotPlanned != c.notPlanned || !iss.ClosedAt.Equal(c.closedAt) {
+					t.Errorf("%s: ClosedNotPlanned, ClosedAt = %v, %v; want %v, %v",
+						name, iss.ClosedNotPlanned, iss.ClosedAt, c.notPlanned, c.closedAt)
+				}
+			}
+		})
+	}
+}
+
+// An open issue never reports a close reason or time, even when stale
+// closedat/closedreason lines linger in the file.
+func TestLocalTracker_OpenIssueReportsNoCloseInfo(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "f", localIssue{frontmatter: localFrontmatter{
+		Title: "F", Created: "2026-07-09T12:00:00Z",
+		ClosedReason: "not-planned", ClosedAt: "2026-08-15T10:30:00Z",
+	}})
+	iss, err := NewLocalTracker(dir, testLabels).Issue("f")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.ClosedNotPlanned || !iss.ClosedAt.IsZero() {
+		t.Errorf("ClosedNotPlanned, ClosedAt = %v, %v; want false, zero", iss.ClosedNotPlanned, iss.ClosedAt)
+	}
+}
+
+func TestLocalIssue_RenderParseRoundTrip_CloseInfo(t *testing.T) {
+	li := localIssue{
+		frontmatter: localFrontmatter{
+			Title: "F", Created: "2026-07-09T12:00:00Z", Closed: true,
+			ClosedAt: "2026-08-15T10:30:00Z", ClosedReason: "not-planned",
+		},
+		body: "body\n",
+	}
+	got, err := parseLocalIssue([]byte(li.render()))
+	if err != nil {
+		t.Fatalf("parseLocalIssue(render()): %v", err)
+	}
+	if !reflect.DeepEqual(got, li) {
+		t.Errorf("round trip = %+v, want %+v", got, li)
+	}
+}
+
+// A later rewrite (a state transition here) must keep a human-set closedreason
+// and the stamped closedat.
+func TestLocalTracker_Rewrite_PreservesCloseInfo(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "f", localIssue{frontmatter: localFrontmatter{
+		Title: "F", Created: "2026-07-09T12:00:00Z", Closed: true, State: testLabels.InProgress,
+		ClosedAt: "2026-08-15T10:30:00Z", ClosedReason: "not-planned",
+	}})
+	lt := NewLocalTracker(dir, testLabels)
+	if err := lt.Comment("f", "note"); err != nil {
+		t.Fatalf("Comment: %v", err)
+	}
+	if err := lt.TransitionState("f", forge.InProgress, forge.Complete); err != nil {
+		t.Fatalf("TransitionState: %v", err)
+	}
+	iss, err := lt.Issue("f")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if !iss.ClosedNotPlanned || !iss.ClosedAt.Equal(time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC)) {
+		t.Errorf("after rewrite ClosedNotPlanned, ClosedAt = %v, %v", iss.ClosedNotPlanned, iss.ClosedAt)
+	}
+}
+
+// CloseIssue stamps closedat (the adapter has no clock seam, so the check is a
+// bounded window) and never writes closedreason: only a human edit marks a
+// local close not planned.
+func TestLocalTracker_CloseIssue_StampsClosedAtNotReason(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "f", localIssue{frontmatter: localFrontmatter{Title: "F", Created: "2026-07-09T12:00:00Z"}})
+	lt := NewLocalTracker(dir, testLabels)
+	before := time.Now().Truncate(time.Second)
+	if err := lt.CloseIssue("f"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+	after := time.Now()
+	iss, err := lt.Issue("f")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if iss.ClosedAt.Before(before) || iss.ClosedAt.After(after) {
+		t.Errorf("ClosedAt = %v, want within [%v, %v]", iss.ClosedAt, before, after)
+	}
+	if iss.ClosedNotPlanned {
+		t.Error("ClosedNotPlanned = true after CloseIssue, want false")
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "f.md"))
+	if err != nil {
+		t.Fatalf("read issue file: %v", err)
+	}
+	if strings.Contains(string(data), "closedreason") {
+		t.Errorf("CloseIssue wrote closedreason:\n%s", data)
+	}
+}
+
+// Closing an already-closed issue keeps its closedat: a hand-closed
+// not-planned finding's cooldown clock must not restart.
+func TestLocalTracker_CloseIssue_KeepsClosedAtWhenAlreadyClosed(t *testing.T) {
+	dir := t.TempDir()
+	writeLocalIssue(t, dir, "f", localIssue{frontmatter: localFrontmatter{
+		Title: "F", Created: "2026-07-09T12:00:00Z", Closed: true,
+		ClosedAt: "2026-08-15T10:30:00Z", ClosedReason: "not-planned",
+	}})
+	lt := NewLocalTracker(dir, testLabels)
+	if err := lt.CloseIssue("f"); err != nil {
+		t.Fatalf("CloseIssue: %v", err)
+	}
+	iss, err := lt.Issue("f")
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	if want := time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC); !iss.ClosedAt.Equal(want) {
+		t.Errorf("ClosedAt = %v, want unchanged %v", iss.ClosedAt, want)
 	}
 }
