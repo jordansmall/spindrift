@@ -12,6 +12,7 @@
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
+  inherit (import ../../lib/driver-map.nix) underDriver exampleDriver;
   schema = import ../../lib/env-schema.nix;
   # Shared with nix/regen.nix's marker-splice loop so a block's marker
   # literals and renderer call are typed exactly once (issue #2948).
@@ -390,7 +391,18 @@ let
       lines = filter (l: l != "") (splitString "\n" generated);
       linePath = line: trim (builtins.head (splitString "=" line));
       actualPaths = map linePath lines;
-      missing = filter (key: !(builtins.elem (resolveNixPath key schema.${key}) actualPaths)) keys;
+      # A Driver-valued key's example renders under agents.drivers.claude
+      # (ADR 0064), so the expected path moves with it.
+      expectedPath =
+        key:
+        let
+          resolved = resolveNixPath key schema.${key};
+        in
+        if schema.${key}.driverValued or false then
+          concatStringsSep "." (underDriver exampleDriver (splitString "." resolved))
+        else
+          resolved;
+      missing = filter (key: !(builtins.elem (expectedPath key) actualPaths)) keys;
     in
     if missing == [ ] then
       true
@@ -1572,14 +1584,7 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       rosterEntry = builtins.head (
-        builtins.filter (
-          e:
-          e.path == [
-            "agents"
-            "models"
-            "roster"
-          ]
-        ) structuralTemplateExamples
+        builtins.filter (e: pkgs.lib.last e.path == "roster") structuralTemplateExamples
       );
       parsedFromLines = builtins.tryEval (
         let
@@ -1654,7 +1659,7 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       byNameEntry = builtins.head (
-        builtins.filter (e: e.path == byNamePaths.byName) structuralTemplateExamples
+        builtins.filter (e: pkgs.lib.last e.path == "byName") structuralTemplateExamples
       );
       parsedFromLines = builtins.tryEval (
         let
@@ -2808,10 +2813,10 @@ checkedMerge {
     let
       inherit (pkgs.lib) assertMsg;
       driftedGenerated = ''
-        agents.models.WRONG_HAND_TYPED_PATH = "x";
-        agents.models.scout = "x";
-        agents.models.review = "x";
-        agents.models.filer = "x";
+        agents.drivers.claude.models.WRONG_HAND_TYPED_PATH = "x";
+        agents.drivers.claude.models.scout = "x";
+        agents.drivers.claude.models.review = "x";
+        agents.drivers.claude.models.filer = "x";
       '';
       result = builtins.tryEval (assertRendererPathsResolveOk {
         generated = driftedGenerated;

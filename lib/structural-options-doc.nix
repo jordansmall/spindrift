@@ -7,9 +7,12 @@
 # docDefault is the effective default a Consumer sees at runtime, which for most
 # knobs differs from the mkOption's literal `default = null;` because mkHarness
 # fills the real value in later. byName is the exception: null really is unset.
+let
+  deprecationNote = import ./driver-deprecation-note.nix;
+in
 {
   driver = {
-    doc = "The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" (default) and \"opencode\" are the Drivers today.";
+    doc = "${deprecationNote "perSystem.spindrift.agents.drivers.<name>"} The attribute name is the Driver (see MIGRATING.md). The agent CLI Driver (ADR 0009): a build-time choice selecting one entry from the lib/drivers/ registry, baked into the image and threaded to the launcher as DRIVER. \"claude\" (default) and \"opencode\" are the Drivers today.";
     docType = "string";
     docDefault = "`\"claude\"`";
   };

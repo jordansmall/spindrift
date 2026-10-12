@@ -8,6 +8,7 @@ let
   defaultModelFixture = import ./default-model-fixture.nix;
   structuralPaths = import ./structural-paths.nix;
   byNamePaths = import ./byname-paths.nix;
+  inherit (import ./driver-map.nix) underDriver exampleDriver;
   rosterLib = import ./roster.nix { inherit lib; };
   entryFor = name: roster: builtins.head (builtins.filter (e: e.name == name) roster);
   defaultRosterEntries = rosterLib.defaultRoster { };
@@ -99,14 +100,14 @@ in
 # re-parsing the rendered text.
 map checkEntry [
   {
-    path = byNamePaths.byName;
+    path = underDriver exampleDriver byNamePaths.byName;
     doc = "Name-keyed model/effort shorthand (issue #2560): a lighter alternative to the roster list below when you only want to override one agent's model or effort.";
     example = byNameExample;
     lines = renderByNameLines byNameExample;
   }
   {
-    path = structuralPaths.roster;
-    doc = "Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above, when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this two-entry scout/reviewer example verbatim drops filer/worker/review-axis. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings).";
+    path = underDriver exampleDriver structuralPaths.roster;
+    doc = "Subagent roster (issue #264): the first-class N-agent list. Supersedes the four deprecated per-agent model knobs (filer/review above, scout/worker below) and the byName shorthand above (agents.drivers.<name>.models.byName), when set. An explicit roster like this one replaces defaultRoster wholesale, so a Consumer copying this two-entry scout/reviewer example verbatim drops filer/worker/review-axis. Add entries for them too, and keep review-axis alongside reviewer or mkHarness fires its explicit-roster warning (rosterWarnings).";
     example = rosterExample;
     lines = renderRosterLines rosterExample;
   }

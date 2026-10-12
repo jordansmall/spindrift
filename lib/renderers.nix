@@ -28,6 +28,16 @@ let
   # into its dot-separated segments. ADR 0037.
   splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
   resolveNixPath = import ./nixpath.nix;
+  inherit (import ./driver-map.nix) underDriver exampleDriver deprecationNote;
+  # Opens the description of a Driver-valued setting's row in the generated
+  # option docs (ADR 0064); `dotted` is its top-level path (agents.<rest>).
+  driverValuedNote =
+    entry: dotted:
+    if entry.driverValued or false then
+      deprecationNote "perSystem.spindrift.${builtins.concatStringsSep "." (underDriver "<name>" (splitNixPath dotted))}"
+      + " "
+    else
+      "";
   # A Go `[]string{"a", "b"}` literal's inner comma-joined, quoted contents.
   renderGoStringSlice = items: builtins.concatStringsSep ", " (map (s: "\"${s}\"") items);
   # A whole generated Go file whose body is a single `var X = []string{...}`
@@ -191,9 +201,12 @@ rec {
           tree // { ${seg} = insertLeaf (tree.${seg} or { }) rest entry; };
       schemaDomainTree = builtins.foldl' (
         acc: key:
-        insertLeaf acc (splitNixPath (
-          resolveNixPath key flakeOptionEntries.${key}
-        )) flakeOptionEntries.${key}
+        let
+          segs = splitNixPath (resolveNixPath key flakeOptionEntries.${key});
+        in
+        insertLeaf acc (
+          if flakeOptionEntries.${key}.driverValued or false then underDriver exampleDriver segs else segs
+        ) flakeOptionEntries.${key}
       ) { } (builtins.attrNames flakeOptionEntries);
       # Structural examples are not env-schema.nix knobs, so they carry their own
       # hand-given path instead of a resolveNixPath call.
@@ -542,14 +555,14 @@ rec {
         | `skills`    | `${path "skills" structuralPaths}` | shared         | list of path/derivation/`{ name; src; }` | `[]`  | skills baked into the image at the fixed `/agent/skills` path alongside the harness-owned skills (e.g. `auto-format`, `auto-lint`, `check-hygiene`, `code-comments`, baked regardless of this list), each as a `<name>/SKILL.md` directory (the only layout Claude Code discovers — a flat `<name>.md` is ignored) so the headless agent can `/invoke` them; a `{ name; src; }` content entry (name + SKILL.md body) is realized with the image's own Linux `pkgs` rather than copied from a pre-built host derivation, keeping the agent-image drvPath host-independent (issue #597); the `box` binary copies both into the Driver's actual runtime skills dir at box startup, then copies `SPINDRIFT_SKILLS_DIR` (staged at `/operator-skills`) over the top so runtime overrides win without erasing the baked set (issue #2489) |
         | `settings`  | — | **flake-module only** | submodule, grouped by section (see below) | `{}` | **deprecated** compat shim (ADR 0037): every schema-generated knob is now a first-class option in the domain tree below; this submodule still works pre-1.0 (forwards with an eval warning) but new config should use the domain paths directly |
         | `runtime`   | `${path "runtime" structuralPaths}` | shared         | `"podman"` \| `"docker"` \| `"rancher"` \| `"bwrap"` | `"podman"` | runner the `spindrift build`/`dispatch` commands drive: an OCI runtime (`"rancher"` is an alias for Rancher Desktop's containerd mode, driven via `nerdctl`), or the daemonless bubblewrap sandbox (`bwrap`, Linux-only, no image build/load) |
-        | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | the agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
+        | `driver`    | `${path "driver" structuralPaths}` | shared         | string                      | `"claude"`         | ${deprecationNote "agents.drivers.<name>"} The attribute name is the Driver; see [Several Drivers side by side](#several-drivers-side-by-side). The agent CLI Driver baked into the image and threaded to the launcher (ADR 0009); `"claude"` (default) and `"opencode"` are the Drivers today. A non-`claude` Driver realises its own `spindrift-<driver>` image (e.g. `spindrift-opencode`) so per-Driver artifacts never collide. An ambient `DRIVER`, exported or set in `harness.env`, never overrides it: the launcher and daemon warn, naming both values, and use the baked one (issue #5050). To build several Drivers from one flake see [Several Drivers side by side](#several-drivers-side-by-side) |
         | `nixInBox`  | `${path "nixInBox" structuralPaths}` | shared         | bool                        | `true`             | bake a usable nix (binary + registered store DB + sandbox-off, `cores = 4`-bounded config) into the box so `nix flake check` / `nix develop` work inside it; set `false` for a lean, nix-free image (ADR 0008) |
         | `nixStoreWritable` | `${path "nixStoreWritable" structuralPaths}` | shared  | bool                 | `false`            | self-test mode (ADR 0018): make `/nix/store` itself (not its existing contents) agent-writable so in-box `nix flake check` can substitute/build new paths instead of hitting EACCES; new paths live only in the container's ephemeral copy-on-write layer. Not hermetic — the entrypoint prints a loud `==> WARNING`; both runners support it (ADR 0042) — bwrap overlays an ephemeral tmpfs upper on the store instead |
         | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
         | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
         | `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
-        | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-        | `byName`    | `${path "byName" extraOptionPaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" extraOptionPaths}`, defaults to `null`) | name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+        | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | ${deprecationNote "agents.drivers.<name>"} See [Several Drivers side by side](#several-drivers-side-by-side); supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
+        | `byName`    | `${path "byName" extraOptionPaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" extraOptionPaths}`, defaults to `null`) | ${deprecationNote "agents.drivers.<name>"} See [Several Drivers side by side](#several-drivers-side-by-side); name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
         | `drivers`   | `${path "drivers" extraOptionPaths}` | per-Driver map | attrset of Driver entries keyed by Driver name | `{}` | Drivers built side by side (ADR 0064); each entry holds only the Driver-valued settings, at their agents-relative paths; see [Several Drivers side by side](#several-drivers-side-by-side) |
         | `defaultDriver` | `${path "defaultDriver" extraOptionPaths}` | shared | string | `null` | the Driver behind `apps.default` and `apps.daemon`; inferred with one declared Driver, required with several |
       '';
@@ -615,7 +628,9 @@ rec {
       # `nixSubPath` rename cannot leave this example stale while the drift
       # check stays green (issue #2557 review finding).
       item = key: value: {
-        path = resolveNixPath key schema.${key};
+        path = builtins.concatStringsSep "." (
+          underDriver exampleDriver (splitNixPath (resolveNixPath key schema.${key}))
+        );
         inherit value;
       };
     in
@@ -1503,7 +1518,9 @@ rec {
         let
           entry = structuralOptionsDoc.${name};
         in
-        "| `perSystem.spindrift.${pathFor name}` | ${escapeCell entry.docType} | ${escapeCell entry.docDefault} | ${escapeCell (oneLine entry.doc)} |\n";
+        "| `perSystem.spindrift.${pathFor name}` | ${escapeCell entry.docType} | ${escapeCell entry.docDefault} | ${
+          escapeCell (oneLine (driverValuedNote entry (pathFor name) + entry.doc))
+        } |\n";
     in
     "## Structural options (`perSystem.spindrift`)\n\n"
     + "Hand-declared structural knobs (ADR 0037; issue #2572) — build-time\n"
@@ -1533,7 +1550,9 @@ rec {
         let
           entry = flakeOptionEntries.${name};
         in
-        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${escapeCell (oneLine entry.doc)} |\n";
+        "| `perSystem.spindrift.${resolveNixPath name entry}` | `${entry.env}` | ${renderDefault entry} | ${
+          escapeCell (oneLine (driverValuedNote entry (resolveNixPath name entry) + entry.doc))
+        } |\n";
       renderSection =
         domain:
         let
