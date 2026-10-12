@@ -8138,7 +8138,17 @@ machinery every other halt uses (below): any child already running is
 waited out and still gets its `child_finish`, never killed. The halt, its
 `self-changed: ...` reason, and exit 10 are as before. The next start (a
 systemd restart, say) finds the build already in the store, so it does not
-pay a cold rebuild.
+pay a cold rebuild, as long as `BASE_BRANCH` has not moved since the
+fetch that resolved the built tip. A tip that moves during the prebuild
+(single-flight, above) or during the drain (a halted pool resolves no
+tips) leaves the next start to build the newer tip cold, with no
+`--check-only` smoke test, unless its daemon self path is the built one
+(a docs-only merge, say). A broken newer build then fails at startup
+instead. A newer tip that does not compile makes `nix run` exit non-zero,
+and an input or startup error exits 1. The drain unit (**Self-update by
+choice** below) restarts on both, five times thirty seconds apart, then
+parks in `failed`. A preflight refusal, invalid config included, exits
+11, which its `RestartPreventExitStatus` keeps down.
 
 **Restart in place.** Started with `--restart-in-place` (issue #5016, ADR
 0063), a passing build does not drain. The pool starts no new child and
@@ -8165,7 +8175,11 @@ latched just before the `exec` cancels it and drains instead. A failed
 `exec`, or a refused target, keeps the old image running with its
 descriptors and signal dispositions restored: it emits `self_update`
 phase `blocked` with an `exec: ` reason and carries on as if the prebuild
-had failed. A stop signal landing inside the `exec` is dropped, not
+had failed. A tip that moves during the prebuild can surface this way: the
+target is no longer the latest tip's self path, so the `exec` is refused
+and the phase is `blocked` at the built revision. The newer tip is then
+prebuilt like any other moved tip (below). A stop signal landing inside
+the `exec` is dropped, not
 delivered to the new image: Go's runtime unblocks those three signals as
 it starts, so a pending one would otherwise kill the new image before its
 handler exists. The flag is refused at startup, exiting 1, anywhere but
@@ -8619,7 +8633,8 @@ never pulls. A restart on its own therefore rebuilds the identical store
 path, mismatches the fetched tip again, and exits 10 again having dispatched
 nothing: a restart loop, not an update. The `ExecStartPre` is what moves the
 tree, so the next start is the build that just merged, already prebuilt in
-the store (**Self-change halt** above).
+the store unless the tip moved since the fetch that resolved the built
+tip (**Self-change halt** above).
 
 The drain-mode composition stays opt-in for a second reason beyond the one
 **Self-change halt** gives: it needs a checkout the unit owns, and the two
