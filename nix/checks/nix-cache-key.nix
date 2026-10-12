@@ -25,9 +25,12 @@ let
   ciHasCacheKey = hasInfix "primary-key: ${ciKey}" ciSrc;
   ciHasCachePrefix = hasInfix "restore-prefixes-first-match: ${ciPrefix}" ciSrc;
   ciHasMatrixLeg = hasInfix "nix-system: x86_64-linux" ciSrc;
-  # The docs-only lane (issue #5155) restores the same cache outside the matrix.
-  ciDocsLaneHasCacheKey = hasInfix "primary-key: ${render ciKey}" ciSrc;
-  ciDocsLaneHasCachePrefix = hasInfix "restore-prefixes-first-match: ${render ciPrefix}" ciSrc;
+  # The docs-only lane (issue #5155) restores the aarch64-linux leg's cache
+  # outside the matrix; that runner finishes faster than the x86_64 one.
+  renderDocs = replaceStrings [ "\${{ matrix.nix-system }}" ] [ "aarch64-linux" ];
+  ciHasDocsMatrixLeg = hasInfix "nix-system: aarch64-linux" ciSrc;
+  ciDocsLaneHasCacheKey = hasInfix "primary-key: ${renderDocs ciKey}" ciSrc;
+  ciDocsLaneHasCachePrefix = hasInfix "restore-prefixes-first-match: ${renderDocs ciPrefix}" ciSrc;
 
   setupHasCacheKey = hasInfix "primary-key: ${render ciKey}" setupSrc;
   setupHasCachePrefix = hasInfix "restore-prefixes-first-match: ${render ciPrefix}" setupSrc;
@@ -44,10 +47,12 @@ in
       "ci.yml's cache save restore-prefixes-first-match no longer matches the expected templated form ('${ciPrefix}') — agent-setup's restore prefix would no longer match (issue #3937).";
     assert assertMsg ciHasMatrixLeg
       "ci.yml's matrix no longer has an x86_64-linux leg — agent-setup restores against a cache ci.yml never saves (issue #3937).";
+    assert assertMsg ciHasDocsMatrixLeg
+      "ci.yml's matrix no longer has an aarch64-linux leg — the docs lane restores against a cache ci.yml never saves (issue #5155).";
     assert assertMsg ciDocsLaneHasCacheKey
-      "ci.yml's docs lane restore primary-key no longer matches the x86_64-linux save key ('${render ciKey}') — every docs-only PR silently builds cold (issue #5155).";
+      "ci.yml's docs lane restore primary-key no longer matches the aarch64-linux save key ('${renderDocs ciKey}') — every docs-only PR silently builds cold (issue #5155).";
     assert assertMsg ciDocsLaneHasCachePrefix
-      "ci.yml's docs lane restore-prefixes-first-match is no longer '${render ciPrefix}' — every docs-only PR silently builds cold (issue #5155).";
+      "ci.yml's docs lane restore-prefixes-first-match is no longer '${renderDocs ciPrefix}' — every docs-only PR silently builds cold (issue #5155).";
     assert assertMsg setupHasCacheKey
       "agent-setup/action.yml's restore primary-key no longer matches ci.yml's x86_64-linux save key — restore-only misses every run and every agent job silently degrades to a cold build (issue #3937).";
     assert assertMsg setupHasCachePrefix
