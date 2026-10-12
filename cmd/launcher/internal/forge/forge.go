@@ -113,6 +113,10 @@ type Issue struct {
 	// github, jira and local report a close reason; forgejo, which has none,
 	// leaves it false.
 	ClosedNotPlanned bool
+	// Reopened reports an open issue that was reopened after it closed. Only
+	// github's ListIssuesWithLabels reads it (stateReason REOPENED); every other
+	// adapter and read path leaves it false.
+	Reopened bool
 }
 
 // Priority is the canonical dispatch priority (ADR 0040): Critical > High >

@@ -57,6 +57,7 @@ func (r ghIssueRow) toIssue() forge.Issue {
 		Priority:         forge.ResolvePriority(names),
 		ClosedAt:         closedAt,
 		ClosedNotPlanned: r.StateReason == "NOT_PLANNED",
+		Reopened:         r.StateReason == "REOPENED",
 	}
 }
 
