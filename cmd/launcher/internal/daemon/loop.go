@@ -340,60 +340,12 @@ type Config struct {
 //
 // cfg.Slots must be positive: a zero or negative pool size would silently
 // run no children while looking like a healthy daemon, so Loop rejects it
-// as a halt-shaped config error instead.
+// as a halt-shaped config error instead (see Config.Validate).
 func Loop(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) Halt {
-	if cfg.Slots <= 0 {
-		return invalidConfig(em, cfg, fmt.Sprintf("slots must be a positive integer, got %d", cfg.Slots))
+	if err := cfg.Validate(); err != nil {
+		return invalidConfig(em, cfg, err.Error())
 	}
-	if len(cfg.Kinds) == 0 {
-		return invalidConfig(em, cfg, "kinds must be non-empty")
-	}
-	seenKinds := make(map[Kind]bool, len(cfg.Kinds))
-	for _, k := range cfg.Kinds {
-		if _, ok := dispatchkind.ByVerb(string(k)); !ok {
-			return invalidConfig(em, cfg, fmt.Sprintf("unknown kind %q", k))
-		}
-		if seenKinds[k] {
-			return invalidConfig(em, cfg, fmt.Sprintf("duplicate kind %q", k))
-		}
-		seenKinds[k] = true
-	}
-	for _, k := range sortedKeys(cfg.ProbeIntervals) {
-		if !seenKinds[k] {
-			return invalidConfig(em, cfg, fmt.Sprintf("probe interval for kind %q, which is not in kinds", k))
-		}
-		if d := cfg.ProbeIntervals[k]; d < 0 {
-			return invalidConfig(em, cfg, fmt.Sprintf("probe interval for kind %q must be non-negative, got %s", k, d))
-		}
-	}
-	for _, k := range sortedKeys(cfg.Trackers) {
-		if !seenKinds[k] {
-			return invalidConfig(em, cfg, fmt.Sprintf("tracker for kind %q, which is not in kinds", k))
-		}
-	}
-	if cfg.ResearchReservation < 0 || cfg.ResearchReservation > cfg.Slots {
-		return invalidConfig(em, cfg, fmt.Sprintf("research reservation must be between 0 and slots (%d), got %d", cfg.Slots, cfg.ResearchReservation))
-	}
-	if cfg.IdleFloor <= 0 {
-		return invalidConfig(em, cfg, fmt.Sprintf("idle floor must be positive, got %s", cfg.IdleFloor))
-	}
-	if cfg.IdleCap < cfg.IdleFloor {
-		return invalidConfig(em, cfg, fmt.Sprintf("idle cap must be >= idle floor, got cap %s < floor %s", cfg.IdleCap, cfg.IdleFloor))
-	}
-	if cfg.FailureBackoff < 0 {
-		return invalidConfig(em, cfg, fmt.Sprintf("failure backoff must be non-negative, got %s", cfg.FailureBackoff))
-	}
-	if cfg.BreakerThreshold <= 0 {
-		return invalidConfig(em, cfg, fmt.Sprintf("breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold))
-	}
-	if cfg.BreakerWindow <= 0 {
-		return invalidConfig(em, cfg, fmt.Sprintf("breaker window must be positive, got %s", cfg.BreakerWindow))
-	}
-
 	if cfg.Handoff != nil {
-		if detail := validateHandoff(cfg); detail != "" {
-			return invalidConfig(em, cfg, detail)
-		}
 		// A latch the predecessor had already closed stays closed: the
 		// closed-Stop path below then halts before any child starts, and
 		// childRequest hands the closed latch to every inherited child.
@@ -474,12 +426,79 @@ func closedLatch() <-chan struct{} {
 	return c
 }
 
+// Validate is the whole of the config check Loop runs before any pool exists,
+// pure over cfg: it emits nothing and writes no status. cmd/launcher/daemon's
+// mainRun runs it first, so a resumed image whose config or handoff no longer
+// fits (MAX_PARALLEL lowered, a kind dropped) rolls back to its predecessor
+// before anything emits a halt (ADR 0063, issue #5039). Loop calls it again,
+// so the guard also holds for embedders and for superviseLoop's re-entry
+// (which fits by construction: it runs on the image's freshly built handoff).
+func (cfg Config) Validate() error {
+	if cfg.Slots <= 0 {
+		return fmt.Errorf("slots must be a positive integer, got %d", cfg.Slots)
+	}
+	if len(cfg.Kinds) == 0 {
+		return errors.New("kinds must be non-empty")
+	}
+	seenKinds := make(map[Kind]bool, len(cfg.Kinds))
+	for _, k := range cfg.Kinds {
+		if _, ok := dispatchkind.ByVerb(string(k)); !ok {
+			return fmt.Errorf("unknown kind %q", k)
+		}
+		if seenKinds[k] {
+			return fmt.Errorf("duplicate kind %q", k)
+		}
+		seenKinds[k] = true
+	}
+	for _, k := range sortedKeys(cfg.ProbeIntervals) {
+		if !seenKinds[k] {
+			return fmt.Errorf("probe interval for kind %q, which is not in kinds", k)
+		}
+		if d := cfg.ProbeIntervals[k]; d < 0 {
+			return fmt.Errorf("probe interval for kind %q must be non-negative, got %s", k, d)
+		}
+	}
+	for _, k := range sortedKeys(cfg.Trackers) {
+		if !seenKinds[k] {
+			return fmt.Errorf("tracker for kind %q, which is not in kinds", k)
+		}
+	}
+	if cfg.ResearchReservation < 0 || cfg.ResearchReservation > cfg.Slots {
+		return fmt.Errorf("research reservation must be between 0 and slots (%d), got %d", cfg.Slots, cfg.ResearchReservation)
+	}
+	if cfg.IdleFloor <= 0 {
+		return fmt.Errorf("idle floor must be positive, got %s", cfg.IdleFloor)
+	}
+	if cfg.IdleCap < cfg.IdleFloor {
+		return fmt.Errorf("idle cap must be >= idle floor, got cap %s < floor %s", cfg.IdleCap, cfg.IdleFloor)
+	}
+	if cfg.FailureBackoff < 0 {
+		return fmt.Errorf("failure backoff must be non-negative, got %s", cfg.FailureBackoff)
+	}
+	if cfg.BreakerThreshold <= 0 {
+		return fmt.Errorf("breaker threshold must be a positive integer, got %d", cfg.BreakerThreshold)
+	}
+	if cfg.BreakerWindow <= 0 {
+		return fmt.Errorf("breaker window must be positive, got %s", cfg.BreakerWindow)
+	}
+	if cfg.Handoff != nil {
+		if detail := validateHandoff(cfg); detail != "" {
+			return errors.New(detail)
+		}
+	}
+	return nil
+}
+
 // validateHandoff names the first defect in cfg.Handoff's slots and kinds, ""
 // when it fits the pool: each slot inside [0, cfg.Slots), named once, of a
 // configured kind, and each kind entry configured and named once. A slot's
 // gate generation may not pass its kind's carried one (0 when the kind has no
 // entry, since its counter restarts there): it cannot have started under a
 // generation its kind never reached.
+//
+// A failure here is a startup refusal, never an inherited-child drain inside
+// Loop: it runs before any InheritChild. Its caller is Config.Validate, which
+// cmd/launcher/daemon's mainRun runs first and so owns rollback or drain.
 func validateHandoff(cfg Config) string {
 	seenKind := make(map[Kind]bool, len(cfg.Handoff.Kinds))
 	kindGen := make(map[Kind]int, len(cfg.Handoff.Kinds))
