@@ -120,7 +120,9 @@ type view struct {
 	// is worth showing; SelfDrain marks a halt that is that update's drain.
 	SelfUpdate    string
 	SelfUpdateRev string
-	SelfDrain     bool
+	// SelfUpdateElapsed is empty when the status file carries no usable since.
+	SelfUpdateElapsed string
+	SelfDrain         bool
 	// SelfBlocked marks a Daemon deliberately running its old build because its
 	// next one failed prebuild or smoke test; the reason is that failure's text.
 	SelfBlocked       bool
@@ -218,6 +220,7 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 	if su := st.SelfUpdate; su != nil {
 		v.SelfUpdate = selfUpdateLabel(su.Phase)
 		v.SelfUpdateRev = shortRev(su.Revision)
+		v.SelfUpdateElapsed = elapsedSince(now, su.Since)
 		if su.Phase == selfUpdateBlocked {
 			v.SelfBlocked, v.SelfBlockedReason = true, su.Reason
 		}
@@ -226,10 +229,7 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		v.SelfDrain = v.Halted && su.Phase == selfUpdateBuilt &&
 			strings.HasPrefix(st.Reason, haltReasonSelfChanged+":")
 	}
-	if started, err := time.Parse(time.RFC3339, st.Started); err == nil {
-		d := now.Sub(started)
-		v.Uptime = formatDuration(d)
-	} else {
+	if v.Uptime = elapsedSince(now, st.Started); v.Uptime == "" {
 		v.Uptime = "unknown"
 	}
 	for _, c := range st.Checks {
@@ -275,13 +275,8 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		if sl.Chore != "" {
 			sv.Subject = append(sv.Subject, subject{Label: sl.Chore})
 		}
-		if since, err := time.Parse(time.RFC3339, sl.Since); err == nil {
-			d := now.Sub(since)
-			sv.Elapsed = formatDuration(d)
-		}
-		if since, err := time.Parse(time.RFC3339, sl.ImageBuildSince); err == nil {
-			sv.ImageBuildElapsed = formatDuration(now.Sub(since))
-		}
+		sv.Elapsed = elapsedSince(now, sl.Since)
+		sv.ImageBuildElapsed = elapsedSince(now, sl.ImageBuildSince)
 		v.Slots = append(v.Slots, sv)
 	}
 	return v
@@ -346,6 +341,16 @@ func seconds(d time.Duration) int64 {
 		return 0
 	}
 	return int64(d / time.Second)
+}
+
+// elapsedSince formats the time from the RFC3339 stamp s to now, or "" when s
+// is empty or unparseable.
+func elapsedSince(now time.Time, s string) string {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return ""
+	}
+	return formatDuration(now.Sub(t))
 }
 
 // formatDuration renders d as "2d 2h 1m", "2h 0m 0s", "12m 3s" or "5s"; the

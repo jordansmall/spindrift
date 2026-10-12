@@ -53,6 +53,9 @@ type SelfUpdate struct {
 	Revision string `json:"revision"`
 	// Reason is published only with the `blocked` phase.
 	Reason string `json:"reason,omitempty"`
+	// Since is RFC3339 UTC: when the Daemon entered Phase. Absent from status
+	// files written before it was published.
+	Since string `json:"since,omitempty"`
 }
 
 // The self-update phases the Dashboard acts on, mirroring the daemon's

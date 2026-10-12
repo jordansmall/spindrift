@@ -429,7 +429,16 @@ func TestFormatDuration(t *testing.T) {
 // withSelfUpdate adds the Daemon's optional self_update object to a status
 // file; a reason, which only the blocked phase carries, is emitted when given.
 func withSelfUpdate(status, phase, rev string, reason ...string) string {
+	return withSelfUpdateSince(status, phase, rev, "", reason...)
+}
+
+// withSelfUpdateSince is withSelfUpdate with the phase's since stamp; an empty
+// since omits the key.
+func withSelfUpdateSince(status, phase, rev, since string, reason ...string) string {
 	su := `"self_update":{"phase":"` + phase + `","revision":"` + rev + `"`
+	if since != "" {
+		su += `,"since":"` + since + `"`
+	}
 	if len(reason) > 0 {
 		su += `,"reason":` + strconv.Quote(reason[0])
 	}
@@ -533,6 +542,34 @@ func TestSelfUpdatePill(t *testing.T) {
 			}
 			if strings.Contains(body, selfRev) {
 				t.Errorf("revision not shortened")
+			}
+		})
+	}
+}
+
+func TestSelfUpdatePillElapsed(t *testing.T) {
+	since := testNow.Add(-(2*time.Minute + 14*time.Second)).Format(time.RFC3339)
+	for name, tc := range map[string]struct {
+		content string
+		want    string
+	}{
+		"since present": {
+			withSelfUpdateSince(statusJSON(t, "working", "", `[]`), "building", selfRev, since),
+			`rebuilding · 2m 14s <code>0123456789ab</code>`,
+		},
+		"since absent": {
+			withSelfUpdate(statusJSON(t, "working", "", `[]`), "building", selfRev),
+			`rebuilding <code>0123456789ab</code>`,
+		},
+		"since unparseable": {
+			withSelfUpdateSince(statusJSON(t, "working", "", `[]`), "building", selfRev, "not-a-time"),
+			`rebuilding <code>0123456789ab</code>`,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, body := get(t, &tc.content, "/")
+			if !strings.Contains(body, tc.want) {
+				t.Errorf("body missing %q", tc.want)
 			}
 		})
 	}

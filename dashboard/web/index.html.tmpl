@@ -20,7 +20,7 @@
 {{- if .Live}}
   <span class="pill state-{{.State}}">{{.State}}</span>
   {{- if .SelfUpdate}}
-  <span class="pill self-update">{{.SelfUpdate}}{{if .SelfUpdateRev}} <code>{{.SelfUpdateRev}}</code>{{end}}</span>
+  <span class="pill self-update">{{.SelfUpdate}}{{if .SelfUpdateElapsed}} · {{.SelfUpdateElapsed}}{{end}}{{if .SelfUpdateRev}} <code>{{.SelfUpdateRev}}</code>{{end}}</span>
   {{- end}}
 {{- end}}
 </header>
