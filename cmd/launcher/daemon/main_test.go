@@ -4477,6 +4477,95 @@ func TestMainRun_ConfigRefusalAfterResumeRollsBack(t *testing.T) {
 	assertLockHeld(t, f.gitDir, true)
 }
 
+// kindMismatchArgv resumes the handed-off dispatch slot under a selector that
+// no longer includes dispatch, a handoff-fit refusal (Config.Validate in
+// mainRun) rather than a flag or input one.
+func (f *inPlaceFixture) kindMismatchArgv(call selfExecCall) []string {
+	argv := f.resumeArgv(call)
+	i := slices.Index(argv, "dispatch")
+	if i < 0 {
+		panic("no dispatch selector in " + strings.Join(argv, " "))
+	}
+	argv[i] = "research"
+	return argv
+}
+
+// TestMainRun_HandoffFitRefusalAfterResumeRollsBack pins that a handoff the
+// new build's config cannot take (here the slot's kind left the selector)
+// refuses like a failed preflight: it rolls back before any halt event, and
+// the previous build keeps supervising the child.
+func TestMainRun_HandoffFitRefusalAfterResumeRollsBack(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	code, out := f.start(f.kindMismatchArgv(call))
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
+	}
+	calls := f.execCalls()
+	if len(calls) != 2 || calls[1].path != "/nix/store/aaa-old/bin/daemon" {
+		t.Fatalf("exec calls = %+v, want the handoff then a rollback to the old program", calls)
+	}
+	if _, ok := findEvent(eventsIn(out), "halt", ""); ok {
+		t.Errorf("a rolled-back image left a halt event behind; output:\n%s", out.String())
+	}
+	r, err := daemon.ReadStatus(f.gitDir)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if r.Status != nil && r.Status.State == daemon.StateHalted {
+		t.Errorf("a rolled-back image left a halted status: %+v", r.Status)
+	}
+	assertLockHeld(t, f.gitDir, true)
+
+	// The old build is run with the original selector; the rollback exec only
+	// forwarded the refusing image's.
+	back := f.resumeArgv(calls[1])
+	back[slices.Index(back, "research")] = "dispatch"
+	stop := make(chan struct{})
+	f.stop = stop
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	code, out = f.start(back)
+	ev := waitForEvent(t, out, "self_update", "rolled-back")
+	if !strings.Contains(ev.Reason, "config-invalid") {
+		t.Errorf("rolled-back reason = %q, want the config refusal", ev.Reason)
+	}
+	writeFileT(t, f.goFile, "")
+	waitForEvent(t, out, "child_finish", "")
+	close(stop)
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("rolled-back image exited %d, want 0; output:\n%s", got, out.String())
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
+// TestMainRun_HandoffFitRefusalWithoutRollbackHaltsAndDrains pins that with no
+// rollback possible the same refusal halts config-invalid (exit 1, not the
+// preflight's 11) and waits out the inherited child with the lock held.
+func TestMainRun_HandoffFitRefusalWithoutRollbackHaltsAndDrains(t *testing.T) {
+	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	call, _ := f.handOff(t)
+	f.execErr = errors.New("boom")
+	code, out := f.start(f.kindMismatchArgv(call))
+	pollUntil(func() bool { return len(f.execCalls()) == 2 })
+	assertStillRunning(t, code, out)
+	assertLockHeld(t, f.gitDir, true)
+	writeFileT(t, f.goFile, "")
+	if got := waitCode(t, code, out); got != 1 {
+		t.Fatalf("image exited %d, want 1; output:\n%s", got, out.String())
+	}
+	if ev, ok := findEvent(eventsIn(out), "halt", ""); !ok || !strings.Contains(ev.Reason, "config-invalid") {
+		t.Errorf("halt event = %+v (found %v), want reason config-invalid; output:\n%s", ev, ok, out.String())
+	}
+	r, err := daemon.ReadStatus(f.gitDir)
+	if err != nil {
+		t.Fatalf("ReadStatus: %v", err)
+	}
+	if r.Status == nil || r.Status.State != daemon.StateHalted {
+		t.Errorf("published status = %+v, want state %q", r.Status, daemon.StateHalted)
+	}
+	assertLockHeld(t, f.gitDir, false)
+}
+
 // TestResumedRollBack_RefusesUnusableFromPath pins that a handoff document
 // naming no usable previous program is refused before any exec.
 func TestResumedRollBack_RefusesUnusableFromPath(t *testing.T) {
