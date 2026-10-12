@@ -205,7 +205,8 @@ in
       ''
         spindriftCmd="$templateSpindrift/bin/spindrift"
 
-        ! grep -q '@imagePath@' "$spindriftCmd"
+        ! grep -q '@imagePath@' "$spindriftCmd" \
+          || { echo "unsubstituted @imagePath@ in $spindriftCmd" >&2; exit 1; }
         grep -q -- '--input' "$spindriftCmd"
         grep -q "$imagePath" "$runDoc"
         case "$imagePath" in
@@ -226,7 +227,8 @@ in
   # keys, so a new flakeOption knob is not automatically asserted here.
   mkharness-defaults = pkgs.runCommand "mkharness-defaults" { } ''
     runDoc=${customHarness.internals.runInputDocumentFile}
-    ! grep -q -- '@label@' "$runDoc"
+    ! grep -q -- '@label@' "$runDoc" \
+      || { echo "unsubstituted @label@ in $runDoc" >&2; exit 1; }
     grep -q '"LABEL":"custom-label"' "$runDoc"
     grep -q '"BASE_BRANCH":"develop"' "$runDoc"
     grep -q '"MAX_PARALLEL":"5"' "$runDoc"
