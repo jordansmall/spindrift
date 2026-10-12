@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -19,7 +19,7 @@ var stampClaim = time.Date(2026, 5, 1, 8, 0, 0, 0, time.UTC)
 func stampLine(started time.Time) string { return tokenStampLine(started, "") }
 
 func tokenStampLine(started time.Time, token string) string {
-	return opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
+	return opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{
 		RecordID:      RecordID("work", "42", stampClaim),
 		HostToken:     token,
 		Kind:          "work",
@@ -179,7 +179,7 @@ func TestStoreMigratesV1DatabaseKeepingRows(t *testing.T) {
 }
 
 func hashesLine(recordID string, roles map[string]string) string {
-	return opLine(claude.SpindriftOp{Op: "prompt_hashes", PromptHashes: &claude.PromptHashes{RecordID: recordID, Roles: roles}})
+	return opLine(hostop.SpindriftOp{Op: "prompt_hashes", PromptHashes: &hostop.PromptHashes{RecordID: recordID, Roles: roles}})
 }
 
 func TestPromptHashesUnionAcrossLogsOfOneDispatch(t *testing.T) {
@@ -230,7 +230,7 @@ func settledLine(recordID, state, reason string) string {
 }
 
 func tokenSettledLine(recordID, state, reason, token string) string {
-	return opLine(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+	return opLine(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 		RecordID: recordID, State: state, Reason: reason, Note: "n", PRURL: "https://x/pr/1", HostToken: token,
 	}})
 }
@@ -388,7 +388,7 @@ func TestSettledOpFollowedByOrchestratorOpIsIgnored(t *testing.T) {
 	id := RecordID("work", "42", stampClaim)
 	path := writeLog(t, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
 		settledLine(id, "complete", "merged"),
-		opLine(claude.SpindriftOp{Op: "pass_usage", Usage: &claude.PassUsage{APICalls: 1}}))...)
+		opLine(hostop.SpindriftOp{Op: "pass_usage", Usage: &hostop.PassUsage{APICalls: 1}}))...)
 	rec, _, err := ParseLog(path)
 	if err != nil {
 		t.Fatal(err)
@@ -417,7 +417,7 @@ func TestReadStamp(t *testing.T) {
 	}{
 		{"stamped", write("stamped.log", stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1)...), id, "", true},
 		{"tokened", write("tokened.log", append([]string{tokenStampLine(stampClaim, "tok")}, workLog("2026-05-01T09:00:00Z", 1)...)...), id, "tok", true},
-		{"empty record_id", write("noid.log", opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{HostToken: "tok"}})), "", "", false},
+		{"empty record_id", write("noid.log", opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{HostToken: "tok"}})), "", "", false},
 		{"unstamped", write("unstamped.log", workLog("2026-05-01T09:00:00Z", 1)...), "", "", false},
 		{"stamp not first", write("late.log", append(workLog("2026-05-01T09:00:00Z", 1), stampLine(stampClaim))...), "", "", false},
 		{"empty", write("empty.log"), "", "", false},

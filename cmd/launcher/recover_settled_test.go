@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/recoverrecord"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
@@ -30,7 +30,7 @@ func stampPrimaryLog(t *testing.T, dir, num string) string {
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: recoverRecordID}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: recoverRecordID}})
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -40,15 +40,15 @@ func stampPrimaryLog(t *testing.T, dir, num string) string {
 	return path
 }
 
-func settledLogOps(t *testing.T, path string) []claude.DispatchSettled {
+func settledLogOps(t *testing.T, path string) []hostop.DispatchSettled {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ops []claude.DispatchSettled
+	var ops []hostop.DispatchSettled
 	for _, line := range strings.Split(string(data), "\n") {
-		var ev claude.Event
+		var ev hostop.Event
 		if json.Unmarshal([]byte(line), &ev) == nil && ev.SpindriftOp != nil && ev.SpindriftOp.Settled != nil {
 			ops = append(ops, *ev.SpindriftOp.Settled)
 		}

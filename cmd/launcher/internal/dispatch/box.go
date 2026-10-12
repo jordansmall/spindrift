@@ -19,9 +19,9 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/ecosystem"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/panicguard"
 	"spindrift.dev/launcher/internal/registrymanifest"
@@ -354,7 +354,7 @@ func (d *Dispatch) LogPath() string {
 
 // dispatchStart builds the stamp heading a fresh Pass log: the launcher's
 // deployment facts from Config.Stamp plus this Dispatch's identity.
-func (d *Dispatch) dispatchStart() claude.DispatchStart {
+func (d *Dispatch) dispatchStart() hostop.DispatchStart {
 	s := d.cfg.Stamp
 	s.RecordID = d.recordID
 	s.Kind = d.cfg.kindName()
@@ -456,7 +456,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	// every fresh log carries one: a retry rotates the previous log aside, so
 	// a claim-time write alone would be lost.
 	start := d.dispatchStart()
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &start})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &start})
 	if _, err := logFile.WriteString(stamp); err != nil {
 		return fmt.Errorf("write dispatch_start: %w", err)
 	}

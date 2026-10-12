@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -65,7 +65,7 @@ func mergeRecordStore(t *testing.T, merge string) *Store {
 	root := t.TempDir()
 	id := RecordID("work", "42", stampClaim)
 	putLog(t, root, "issue-42.log", append(stampedLog(stampClaim, "2026-05-01T09:00:00Z", 1),
-		opLine(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		opLine(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 			RecordID: id, State: "complete", Reason: "merged", MergeCommit: merge,
 		}}))...)
 	s := openStore(t, root)

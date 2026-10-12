@@ -12,14 +12,14 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/golden"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/settle"
 )
 
-func statsOp(op claude.SpindriftOp) string { return claude.EncodeSpindriftOp(op) }
+func statsOp(op hostop.SpindriftOp) string { return hostop.EncodeSpindriftOp(op) }
 
 func statsAssistant(id string) string {
 	return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"m","content":[]}}`+"\n", id)
@@ -63,24 +63,24 @@ func statsFixtureRoot(t *testing.T) string {
 	}
 
 	write("issue-42.log",
-		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		`{"type":"system","timestamp":"2026-10-07T12:34:56.789Z"}`+"\n",
 		statsAssistant("a"), statsAssistant("b"),
 		statsResult("2026-10-07T12:35:00Z", 1.5, 7, 240000, 3000, "claude-opus"),
-		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+		statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
 		statsAssistant("c"),
 		statsResultText("VERDICT: BLOCK\n- missing nil check in handler", "2026-10-07T12:36:00Z", 0.5, 2, 60000, 900, "claude-sonnet"),
-		statsOp(claude.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}),
-		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
+		statsOp(hostop.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}),
+		statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
 		statsWriteDispositions("e", "1. nil check: fixed"),
 		statsResult("2026-10-07T12:37:00Z", 1, 3, 120000, 1500, "claude-opus"),
-		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 4, Role: "review"}),
+		statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 4, Role: "review"}),
 		statsAssistant("d"),
 		statsResultText("VERDICT: APPROVE", "2026-10-07T12:38:00Z", 0.25, 1, 30000, 400, "claude-sonnet"),
-		statsOp(claude.SpindriftOp{Op: "verdict", Pass: 4, Verdict: "APPROVE"}),
+		statsOp(hostop.SpindriftOp{Op: "verdict", Pass: 4, Verdict: "APPROVE"}),
 	)
 	write("issue-42.log.prior-run.1",
-		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		`{"type":"system","timestamp":"2026-10-06T09:00:00Z"}`+"\n",
 		statsAssistant("p"),
 		statsResult("2026-10-06T09:05:00Z", 0.75, 4, 300000, 2000, "claude-opus"),
@@ -95,7 +95,7 @@ func statsFixtureRoot(t *testing.T) string {
 		statsAssistant("y"),
 		statsResult("2026-10-05T02:01:00Z", 0.1, 1, 6000, 5000, "claude-haiku"),
 	)
-	crash := write("issue-99.log", statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	crash := write("issue-99.log", statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	mtime := time.Date(2026, 10, 4, 8, 0, 0, 0, time.UTC)
 	if err := os.Chtimes(crash, mtime, mtime); err != nil {
 		t.Fatal(err)
@@ -113,7 +113,7 @@ func statsFixtureRoot(t *testing.T) string {
 		"SPINDRIFT_OUTCOME issue=55 landing=none status=recommend note=x\n",
 	)
 	write("issue-55.log",
-		statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		`{"type":"system","timestamp":"2026-10-07T14:00:00Z"}`+"\n",
 		statsResult("2026-10-07T14:05:00Z", 2.25, 9, 300000, 4000, "claude-opus"),
 	)
@@ -143,7 +143,7 @@ func statsSecondRoot(t *testing.T) string {
 		"issue-8.log": `{"type":"system","timestamp":"2026-10-07T12:35:30Z"}` + "\n" +
 			statsResult("2026-10-07T12:36:30Z", 0.2, 1, 60000, 800, "claude-sonnet") +
 			"SPINDRIFT_OUTCOME issue=8 landing=none status=reject note=y\n",
-		"issue-9.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+		"issue-9.log": statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
 			`{"type":"system","timestamp":"2026-10-08T08:00:00Z"}` + "\n" +
 			statsResult("2026-10-08T08:10:00Z", 1.1, 5, 600000, 2500, "claude-opus"),
 	}
@@ -436,7 +436,7 @@ func TestStats_ExcludingInferredKeepsStamped(t *testing.T) {
 	root := statsFixtureRoot(t)
 	claim := time.Date(2026, 10, 7, 16, 0, 0, 0, time.UTC)
 	id := dispatchrecord.RecordID("work", "70", claim)
-	stamped := statsOp(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
+	stamped := statsOp(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{
 		RecordID: id, Kind: "work", DispatchKey: "70", ClaimTime: claim, Started: claim,
 	}}) + `{"type":"system","timestamp":"2026-10-07T16:00:01Z"}` + "\n" +
 		statsResult("2026-10-07T16:05:00Z", 0.5, 2, 60000, 900, "claude-opus")
@@ -550,8 +550,8 @@ func TestStats_UnreadableLogWarnsAndExitsZero(t *testing.T) {
 		t.Fatal(err)
 	}
 	logs := map[string]string{
-		"issue-7.log":  statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T12:35:00Z", 1.5, 7, 240000, 3000, "claude-opus"),
-		"issue-12.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T13:35:00Z", 2.5, 7, 240000, 3000, "claude-opus"),
+		"issue-7.log":  statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T12:35:00Z", 1.5, 7, 240000, 3000, "claude-opus"),
+		"issue-12.log": statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) + statsResult("2026-10-07T13:35:00Z", 2.5, 7, 240000, 3000, "claude-opus"),
 	}
 	for name, body := range logs {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {

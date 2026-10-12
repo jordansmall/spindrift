@@ -17,7 +17,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -26,14 +26,14 @@ import (
 // decodeSpindriftOps decodes every well-formed "spindrift_op" line in stdout,
 // in emission order. collectPassUsageOps (run_test.go) decodes pass_usage
 // alone; these tests also need pass_start, delta_review_trigger, and verdict.
-func decodeSpindriftOps(t *testing.T, stdout string) []claude.SpindriftOp {
+func decodeSpindriftOps(t *testing.T, stdout string) []hostop.SpindriftOp {
 	t.Helper()
-	var ops []claude.SpindriftOp
+	var ops []hostop.SpindriftOp
 	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		var ev claude.Event
+		var ev hostop.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
 		}

@@ -11,8 +11,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmanifest"
@@ -372,7 +372,7 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 		// (issue #4966).
 		return
 	}
-	ds := claude.DispatchSettled{State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr}
+	ds := hostop.DispatchSettled{State: rec.state, Reason: rec.reason, Note: rec.note, PRURL: pr}
 	if d != nil && rec.reason == ReasonMerged && pr != "" {
 		ds.MergeCommit = readMergeCommit(s.cfg.Capabilities.MergeCommitReader, "#"+num, pr, os.Stderr)
 	}
@@ -405,14 +405,14 @@ func (s *Settle) flushSettled(d dispatch.Dispatcher, num string) {
 // nothing is appended; with no Record ID nothing is appended either, and the
 // log's stamp is deliberately not consulted — it may name an earlier
 // Dispatch's Record that this one must not rewrite (see SettledPrior).
-func Settled(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
+func Settled(key dispatchkey.Key, logPath string, ds hostop.DispatchSettled) {
 	switch {
 	case logPath == "":
 	case ds.RecordID == "":
-		fmt.Fprintf(os.Stderr, "    ?? %s: no record id, not appending %s to %s\n", key, claude.OpDispatchSettled, logPath)
+		fmt.Fprintf(os.Stderr, "    ?? %s: no record id, not appending %s to %s\n", key, hostop.OpDispatchSettled, logPath)
 	default:
 		if err := appendSettled(logPath, ds); err != nil {
-			fmt.Fprintf(os.Stderr, "    ?? %s: could not append %s to %s: %v\n", key, claude.OpDispatchSettled, logPath, err)
+			fmt.Fprintf(os.Stderr, "    ?? %s: could not append %s to %s: %v\n", key, hostop.OpDispatchSettled, logPath, err)
 		} else {
 			ingestSettled(key, logPath)
 		}
@@ -448,7 +448,7 @@ func ingestSettled(key dispatchkey.Key, logPath string) {
 }
 
 // appendSettled appends ds to the existing log at logPath, never creating it.
-func appendSettled(logPath string, ds claude.DispatchSettled) error {
+func appendSettled(logPath string, ds hostop.DispatchSettled) error {
 	if s, ok := dispatchrecord.ReadStamp(logPath); ok && s.RecordID == ds.RecordID {
 		ds.HostToken = s.HostToken
 	}
@@ -456,7 +456,7 @@ func appendSettled(logPath string, ds claude.DispatchSettled) error {
 	if err != nil {
 		return err
 	}
-	_, err = f.WriteString(claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &ds}))
+	_, err = f.WriteString(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &ds}))
 	if closeErr := f.Close(); err == nil {
 		err = closeErr
 	}
@@ -467,7 +467,7 @@ func appendSettled(logPath string, ds claude.DispatchSettled) error {
 // Record ID (recover's, an adopt's): the Record it settles is the prior
 // Dispatch's, so a ds with no RecordID takes the one stamped at the head of
 // logPath. Use it only where that prior Record is genuinely the target.
-func SettledPrior(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
+func SettledPrior(key dispatchkey.Key, logPath string, ds hostop.DispatchSettled) {
 	if ds.RecordID == "" && logPath != "" {
 		if s, ok := dispatchrecord.ReadStamp(logPath); ok {
 			ds.RecordID = s.RecordID
@@ -480,7 +480,7 @@ func SettledPrior(key dispatchkey.Key, logPath string, ds claude.DispatchSettled
 // Run (or failed trying), keyed by what d minted. A Dispatch that failed before
 // minting a Record ID appends nothing rather than touching an earlier one.
 func SettledBy(d dispatch.Dispatcher, key dispatchkey.Key, state, reason, note string) {
-	Settled(key, d.LogPath(), claude.DispatchSettled{RecordID: d.RecordID(), State: state, Reason: reason, Note: note})
+	Settled(key, d.LogPath(), hostop.DispatchSettled{RecordID: d.RecordID(), State: state, Reason: reason, Note: note})
 }
 
 // latchPR records the PR num's gate is working, for flushSettled to name on

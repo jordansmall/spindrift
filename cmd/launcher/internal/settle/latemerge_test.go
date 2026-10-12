@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -39,11 +39,11 @@ func writeLogAt(t *testing.T, root, key string, ts time.Time, state, reason, prU
 		t.Fatal(err)
 	}
 	path = filepath.Join(dir, "issue-"+key+".log")
-	body := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+	body := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
 		RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: ts, Started: ts, HostToken: "tok-" + key,
 	}}) +
 		`{"type":"result","timestamp":"2026-05-01T09:00:00Z","num_turns":1,"result":"done"}` + "\n" +
-		claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &claude.DispatchSettled{
+		hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{
 			RecordID: id, State: state, Reason: reason, PRURL: prURL, HostToken: "tok-" + key,
 		}})
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {

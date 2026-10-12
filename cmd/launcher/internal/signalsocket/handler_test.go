@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/signalwire"
 )
@@ -414,14 +414,14 @@ func TestHandlerAcceptsUsageReportForAKindNotConsumed(t *testing.T) {
 	}
 }
 
-func mirroredOps(t *testing.T, log string) []claude.SpindriftOp {
+func mirroredOps(t *testing.T, log string) []hostop.SpindriftOp {
 	t.Helper()
-	var ops []claude.SpindriftOp
+	var ops []hostop.SpindriftOp
 	for _, line := range strings.Split(strings.TrimSuffix(log, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		var ev claude.Event
+		var ev hostop.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			t.Fatalf("mirror line %q: %v", line, err)
 		}

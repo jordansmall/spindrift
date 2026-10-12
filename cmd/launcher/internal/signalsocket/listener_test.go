@@ -13,25 +13,25 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/registrymanifest"
 	"spindrift.dev/launcher/internal/signalwire"
 	"spindrift.dev/launcher/internal/unixsocket"
 )
 
-// mirroredOps decodes log as a stream of claude.Event lines and returns the
+// mirroredOps decodes log as a stream of hostop.Event lines and returns the
 // spindrift_op payloads, failing the test on anything else. Package-local
 // twin of handler_test.go's helper of the same name: that one lives in
 // signalsocket_test and this file is package signalsocket, so the two are
 // not the same identifier despite the shared name.
-func mirroredOps(t *testing.T, log string) []claude.SpindriftOp {
+func mirroredOps(t *testing.T, log string) []hostop.SpindriftOp {
 	t.Helper()
-	var ops []claude.SpindriftOp
+	var ops []hostop.SpindriftOp
 	for _, line := range strings.Split(strings.TrimSuffix(log, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		var ev claude.Event
+		var ev hostop.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			t.Fatalf("mirror line %q: %v", line, err)
 		}

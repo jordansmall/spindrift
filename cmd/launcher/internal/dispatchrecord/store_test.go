@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/passmachine"
 )
@@ -47,10 +47,10 @@ func appendLog(t *testing.T, p string, lines ...string) {
 
 func workLog(ts string, cost float64) []string {
 	return []string{
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		assistant("a1"),
 		result(ts, cost, 3, 1000, 800, "opus", "haiku"),
-		opLine(claude.SpindriftOp{Op: "verdict", Verdict: "ready"}),
+		opLine(hostop.SpindriftOp{Op: "verdict", Verdict: "ready"}),
 	}
 }
 
@@ -141,7 +141,7 @@ func TestStoreReparsesAppendedLogIntoSameRecord(t *testing.T) {
 	before := records(t, s)
 
 	appendLog(t, p,
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
 		result("2026-03-01T10:05:00.000Z", 0.5, 1, 10, 5, "opus"))
 
 	if n := ingest(t, s); n != 1 {
@@ -522,7 +522,7 @@ func TestStoreSchemaVersionAndWAL(t *testing.T) {
 
 func TestStoreMtimeFallbackIDChangeReplacesRecord(t *testing.T) {
 	root := t.TempDir()
-	p := putLog(t, root, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
 	ingest(t, s)
 	if got := records(t, s); len(got) != 1 {
@@ -617,7 +617,7 @@ func TestStoreOverwrittenLogKeepsEarlierTimestampedRecord(t *testing.T) {
 
 func TestStoreGrowFromProvisionalLeavesOneRecord(t *testing.T) {
 	root := t.TempDir()
-	p := putLog(t, root, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
 	ingest(t, s)
 	appendLog(t, p, result("2026-10-07T12:00:00.000Z", 1, 1, 10, 5, "opus"))
@@ -633,7 +633,7 @@ func TestStoreGrowFromProvisionalLeavesOneRecord(t *testing.T) {
 
 func TestStoreKeepsProvisionalRecordWhenDeletedLogPathIsReused(t *testing.T) {
 	root := t.TempDir()
-	p := putLog(t, root, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
 	ingest(t, s)
 	provisional := ids(records(t, s))
@@ -657,7 +657,7 @@ func TestStoreKeepsProvisionalRecordWhenDeletedLogPathIsReused(t *testing.T) {
 
 func TestStoreTruncatedProvisionalLogKeepsRecord(t *testing.T) {
 	root := t.TempDir()
-	p := putLog(t, root, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
 	ingest(t, s)
 	before := ids(records(t, s))
@@ -690,7 +690,7 @@ func TestStoreTruncatedProvisionalLogKeepsRecord(t *testing.T) {
 
 func TestStoreLogDirRemovedKeepsProvisionalRecord(t *testing.T) {
 	root := t.TempDir()
-	putLog(t, root, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
 	ingest(t, s)
 	provisional := ids(records(t, s))
@@ -714,7 +714,7 @@ func TestStoreLogDirRemovedKeepsProvisionalRecord(t *testing.T) {
 
 func TestStoreProvisionalReplacedWhenPathReusedWithoutIngest(t *testing.T) {
 	root := t.TempDir()
-	p := putLog(t, root, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	p := putLog(t, root, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	s := openStore(t, root)
 	ingest(t, s)
 	if err := os.Remove(p); err != nil {
@@ -754,9 +754,9 @@ func TestStoreEventFreeLogYieldsNoRecordUntilItGrows(t *testing.T) {
 
 func reviewEvidenceLog(verdict string) []string {
 	return []string{
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "review"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "review"}),
 		resultText("2026-10-07T12:00:00Z", verdict),
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "fix"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "fix"}),
 		assistantTool("f1", "Write", map[string]string{"file_path": passmachine.DispositionsPath, "content": "fixed: all"}),
 		toolResult("f1", false),
 		resultText("2026-10-07T12:01:00Z", "done"),
@@ -1126,7 +1126,7 @@ func TestStoreGrowingProvisionalSatelliteLeavesNoPassesBehind(t *testing.T) {
 	root := t.TempDir()
 	putLog(t, root, "issue-9.log.prior-run.1", workLog("2026-03-01T10:00:00.000Z", 1)...)
 	putLog(t, root, "issue-9.log", workLog("2026-03-05T10:00:00.000Z", 1)...)
-	fix := putLog(t, root, "issue-9-fix-1.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"}))
+	fix := putLog(t, root, "issue-9-fix-1.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"}))
 	chtimes := func(ts string) {
 		t.Helper()
 		mt, err := time.Parse(time.RFC3339, ts)
@@ -1606,7 +1606,7 @@ func writeLogs(t *testing.T, root string, ws ...logWrite) {
 // land on the same Records however the files and their growth interleave
 // across Ingest calls.
 func TestStoreAssignmentIsOrderIndependentForGrowingLogs(t *testing.T) {
-	pass1 := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})
+	pass1 := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})
 	prior := logWrite{name: "issue-9.log.prior-run.1", lines: workLog("2026-03-01T10:00:00.000Z", 1)}
 	priorFix := logWrite{name: "issue-9-fix-1.log.prior-run.1", lines: workLog("2026-03-02T11:00:00.000Z", 2)}
 
@@ -1615,7 +1615,7 @@ func TestStoreAssignmentIsOrderIndependentForGrowingLogs(t *testing.T) {
 	primary := logWrite{name: "issue-9.log", lines: workLog("2026-03-05T10:00:00.000Z", 3)}
 
 	provPrimary := logWrite{name: "issue-9.log", mtime: "2026-03-05T11:00:00Z",
-		lines: []string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}}
+		lines: []string{opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}}
 	donePrimary := logWrite{name: "issue-9.log", mtime: "2026-03-05T12:00:00Z", lines: workLog("2026-03-05T12:00:00.000Z", 3)}
 	laterFix := logWrite{name: "issue-9-fix-1.log", lines: workLog("2026-03-05T13:00:00.000Z", 4)}
 
@@ -1710,7 +1710,7 @@ func TestStoreProvisionalPrimaryResultRekeysJoinedSatellite(t *testing.T) {
 	root := t.TempDir()
 	writeLogs(t, root,
 		logWrite{name: "issue-9.log", mtime: "2026-03-01T11:00:00Z",
-			lines: []string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}},
+			lines: []string{opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})}},
 		logWrite{name: "issue-9-fix-1.log", lines: workLog("2026-03-01T13:00:00.000Z", 2)})
 	s := openStore(t, root)
 	ingest(t, s)
@@ -2281,7 +2281,7 @@ func TestStoreMigratesV9DatabaseBackfillingSettleOrderFromClaimOrder(t *testing.
 // keyedLog is a stamped work log for Dispatch key, unlike stampedLog whose
 // stamp always names key 42.
 func keyedLog(key string, claim time.Time, ts string) []string {
-	stamp := opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
+	stamp := opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{
 		RecordID: RecordID("work", key, claim), Kind: "work", DispatchKey: key, ClaimTime: claim, Started: claim,
 	}})
 	return append([]string{stamp}, workLog(ts, 1)...)

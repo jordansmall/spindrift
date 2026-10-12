@@ -10,7 +10,7 @@ import (
 	"strings"
 	"syscall"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // artifactSnapshot is the pre-pass content hash of a round-log handoff
@@ -115,11 +115,11 @@ func (rl roundLog) appendFresh(logPath *string, roundNum int, header, content st
 	if mean, total, exceeded := rl.checkBudget(content); exceeded {
 		msg := fmt.Sprintf("round %d mean %.1f/entry (ceiling %d), total %d tokens (ceiling %d)", roundNum, mean, rl.meanCeiling, total, rl.totalCeiling)
 		fmt.Fprintln(os.Stderr, "orchestrator: "+rl.phase+" budget exceeded:", msg)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: rl.phase + "_budget", Error: msg}))
+		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "run_state_error", Phase: rl.phase + "_budget", Error: msg}))
 	}
 	if err := rl.appendRound(logPath, header, content); err != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: append "+rl.phase+" log:", err)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: rl.phase + "_log", Error: err.Error()}))
+		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "run_state_error", Phase: rl.phase + "_log", Error: err.Error()}))
 	}
 }
 
@@ -164,7 +164,7 @@ func (rl roundLog) readAndAppendFresh(sourcePath string, statePath *string, logP
 	content, readErr := os.ReadFile(*statePath)
 	if readErr != nil {
 		fmt.Fprintln(os.Stderr, "orchestrator: read "+rl.phase+" for log:", readErr)
-		fmt.Fprint(stdout, claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "run_state_error", Phase: rl.phase + "_log", Error: readErr.Error()}))
+		fmt.Fprint(stdout, hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "run_state_error", Phase: rl.phase + "_log", Error: readErr.Error()}))
 		return
 	}
 	trimmed := strings.TrimSpace(string(content))

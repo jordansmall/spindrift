@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 var revertEpoch = time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
@@ -77,8 +77,8 @@ func statsRevertFixtureRoot(t *testing.T) (string, map[string]string) {
 		key := strconv.Itoa(i + 1)
 		claim := revertDay(i)
 		id := dispatchrecord.RecordID("work", key, claim)
-		logs["issue-"+key+".log"] = statsStampedLog(key, claim, claude.DispatchStart{Revision: m.rev}, nil, [2]string{"implement", "claude-opus"}) +
-			statsOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		logs["issue-"+key+".log"] = statsStampedLog(key, claim, hostop.DispatchStart{Revision: m.rev}, nil, [2]string{"implement", "claude-opus"}) +
+			statsOp(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 				RecordID: id, State: "complete", Reason: "merged", MergeCommit: m.sha,
 			}})
 	}
@@ -136,8 +136,8 @@ func TestStats_RevertsStayDashWithoutATargetClone(t *testing.T) {
 	statsClock(t, revertDay(31))
 	claim := revertDay(0)
 	statsWriteLogs(t, root, map[string]string{
-		"issue-1.log": statsStampedLog("1", claim, claude.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
-			statsOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		"issue-1.log": statsStampedLog("1", claim, hostop.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
+			statsOp(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 				RecordID: dispatchrecord.RecordID("work", "1", claim), State: "complete", Reason: "merged",
 				MergeCommit: strings.Repeat("a", 40),
 			}}),
@@ -158,8 +158,8 @@ func TestStats_RevertsWarnWhenTheCloneIsUnusable(t *testing.T) {
 	statsClock(t, revertDay(31))
 	claim := revertDay(0)
 	statsWriteLogs(t, root, map[string]string{
-		"issue-1.log": statsStampedLog("1", claim, claude.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
-			statsOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		"issue-1.log": statsStampedLog("1", claim, hostop.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
+			statsOp(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 				RecordID: dispatchrecord.RecordID("work", "1", claim), State: "complete", Reason: "merged",
 				MergeCommit: strings.Repeat("a", 40),
 			}}),
@@ -187,8 +187,8 @@ func TestStats_RevertsWarnOncePerUnfilledRecord(t *testing.T) {
 		merge := revertCommit(t, root, revertDay(i+1), file, "merge "+n+"\n", "merge "+n)
 		blobs = append(blobs, revertGit(t, root, revertDay(0), "rev-parse", merge+":"+file))
 		claim := revertDay(i + 1)
-		logs["issue-"+n+".log"] = statsStampedLog(n, claim, claude.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
-			statsOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		logs["issue-"+n+".log"] = statsStampedLog(n, claim, hostop.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
+			statsOp(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 				RecordID: dispatchrecord.RecordID("work", n, claim), State: "complete", Reason: "merged",
 				MergeCommit: merge,
 			}})

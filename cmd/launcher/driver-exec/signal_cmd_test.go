@@ -17,7 +17,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/signalclient"
 	"spindrift.dev/launcher/internal/signalsocket"
 	"spindrift.dev/launcher/internal/signalwire"
@@ -804,9 +804,9 @@ func TestRunSignal_MirrorsOneOpPerRequest(t *testing.T) {
 			t.Fatalf("status exit = %d, want 0 (out=%q)", rc, out)
 		}
 
-		var ops []claude.SpindriftOp
+		var ops []hostop.SpindriftOp
 		for _, line := range strings.Split(strings.TrimSpace(srv.log.String()), "\n") {
-			var ev claude.Event
+			var ev hostop.Event
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				t.Fatalf("mirror line %q is not an event: %v", line, err)
 			}
@@ -1041,9 +1041,9 @@ func TestRunSignal_UsageFailureReportsOverSocket(t *testing.T) {
 			t.Fatal("exit = 0, want non-zero")
 		}
 
-		var ops []claude.SpindriftOp
+		var ops []hostop.SpindriftOp
 		for _, line := range strings.Split(strings.TrimSpace(srv.log.String()), "\n") {
-			var ev claude.Event
+			var ev hostop.Event
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				t.Fatalf("mirror line %q is not an event: %v", line, err)
 			}
@@ -1089,9 +1089,9 @@ func TestRunSignal_UsageReportTruncatesOversizeReason(t *testing.T) {
 		t.Fatalf("printed line = %q, want the full untruncated flag name", got)
 	}
 
-	var ops []claude.SpindriftOp
+	var ops []hostop.SpindriftOp
 	for _, line := range strings.Split(strings.TrimSpace(srv.log.String()), "\n") {
-		var ev claude.Event
+		var ev hostop.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			t.Fatalf("mirror line %q is not an event: %v", line, err)
 		}

@@ -13,18 +13,18 @@ import (
 	"spindrift.dev/launcher/internal/daemon"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
 // statsStampedLog is a stamped work Dispatch log: dispatch_start, optional
 // prompt_hashes, then one pass per (role, models) entry.
-func statsStampedLog(key string, claim time.Time, start claude.DispatchStart, hashes map[string]string, passes ...[2]string) string {
+func statsStampedLog(key string, claim time.Time, start hostop.DispatchStart, hashes map[string]string, passes ...[2]string) string {
 	start.RecordID = dispatchrecord.RecordID("work", key, claim)
 	start.Kind, start.DispatchKey, start.ClaimTime, start.Started = "work", key, claim, claim
-	out := statsOp(claude.SpindriftOp{Op: "dispatch_start", Start: &start})
+	out := statsOp(hostop.SpindriftOp{Op: "dispatch_start", Start: &start})
 	if hashes != nil {
-		out += statsOp(claude.SpindriftOp{Op: "prompt_hashes", PromptHashes: &claude.PromptHashes{RecordID: start.RecordID, Roles: hashes}})
+		out += statsOp(hostop.SpindriftOp{Op: "prompt_hashes", PromptHashes: &hostop.PromptHashes{RecordID: start.RecordID, Roles: hashes}})
 	}
 	for i, p := range passes {
 		ts := claim.Add(time.Duration(i+1) * time.Minute).Format(time.RFC3339)
@@ -32,7 +32,7 @@ func statsStampedLog(key string, claim time.Time, start claude.DispatchStart, ha
 		for _, m := range strings.Split(p[1], "+") {
 			models = append(models, `"`+m+`":{}`)
 		}
-		out += statsOp(claude.SpindriftOp{Op: "pass_start", Pass: i + 1, Role: p[0]}) +
+		out += statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: i + 1, Role: p[0]}) +
 			`{"type":"system","timestamp":"` + ts + `"}` + "\n" +
 			`{"type":"result","result":"","timestamp":"` + ts + `","num_turns":2,"total_cost_usd":1.5,"duration_ms":60000,"duration_api_ms":900,` +
 			`"usage":{"input_tokens":10,"output_tokens":20,"cache_read_input_tokens":30,"cache_creation_input_tokens":40},` +
@@ -63,14 +63,14 @@ func statsStampedRoot(t *testing.T) string {
 	day := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
 	statsWriteLogs(t, root, map[string]string{
 		"issue-70.log": statsStampedLog("70", day,
-			claude.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
+			hostop.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
 			map[string]string{"implement": "hash-i1", "review": "hash-r1"},
 			[2]string{"implement", "claude-opus"}, [2]string{"review", "claude-sonnet"}),
 		"issue-71.log": statsStampedLog("71", day.Add(time.Hour),
-			claude.DispatchStart{Revision: "rev-b", Driver: "opencode", Knobs: map[string]string{"MERGE_MODE": "manual"}},
+			hostop.DispatchStart{Revision: "rev-b", Driver: "opencode", Knobs: map[string]string{"MERGE_MODE": "manual"}},
 			map[string]string{"implement": "hash-i2"},
 			[2]string{"implement", "claude-opus+claude-haiku"}, [2]string{"review", "claude-sonnet"}),
-		"issue-72.log": statsStampedLog("72", day.Add(2*time.Hour), claude.DispatchStart{Driver: "claude", Knobs: map[string]string{"MERGE_MODE": ""}}, nil,
+		"issue-72.log": statsStampedLog("72", day.Add(2*time.Hour), hostop.DispatchStart{Driver: "claude", Knobs: map[string]string{"MERGE_MODE": ""}}, nil,
 			[2]string{"implement", "claude-sonnet"}),
 		"issue-7.log": `{"type":"system","timestamp":"2026-10-07T12:00:00Z"}` + "\n" +
 			statsResult("2026-10-07T12:01:00Z", 0.1, 1, 6000, 5000, "claude-haiku"),
@@ -85,7 +85,7 @@ func statsStampedSecondRoot(t *testing.T) string {
 	root := t.TempDir()
 	statsWriteLogs(t, root, map[string]string{
 		"issue-80.log": statsStampedLog("80", time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC),
-			claude.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
+			hostop.DispatchStart{Revision: "rev-a", Driver: "claude", Knobs: map[string]string{"MERGE_MODE": "auto"}},
 			map[string]string{"implement": "hash-i1"},
 			[2]string{"implement", "claude-opus"}),
 	})
@@ -188,7 +188,7 @@ func statsEventsRoot(t *testing.T) string {
 	root := t.TempDir()
 	gitRun(t, root, "init")
 	inferred := func(ts string) string {
-		return statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+		return statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
 			`{"type":"system","timestamp":"` + ts + `"}` + "\n" +
 			statsResult(ts, 1, 1, 1000, 900, "claude-opus")
 	}
@@ -290,13 +290,13 @@ func TestStats_ByTwoKnobsAreDistinctDimensions(t *testing.T) {
 	day := time.Date(2026, 10, 7, 9, 0, 0, 0, time.UTC)
 	statsWriteLogs(t, root, map[string]string{
 		"issue-1.log": statsStampedLog("1", day,
-			claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "auto", "MERGE_METHOD": "squash"}}, nil,
+			hostop.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "auto", "MERGE_METHOD": "squash"}}, nil,
 			[2]string{"implement", "claude-opus"}),
 		"issue-2.log": statsStampedLog("2", day.Add(time.Hour),
-			claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "auto", "MERGE_METHOD": "rebase"}}, nil,
+			hostop.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "auto", "MERGE_METHOD": "rebase"}}, nil,
 			[2]string{"implement", "claude-opus"}),
 		"issue-3.log": statsStampedLog("3", day.Add(2*time.Hour),
-			claude.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "manual", "MERGE_METHOD": "squash"}}, nil,
+			hostop.DispatchStart{Knobs: map[string]string{"MERGE_MODE": "manual", "MERGE_METHOD": "squash"}}, nil,
 			[2]string{"implement", "claude-opus"}),
 	})
 	text, _ := runStats(t, root, "--by", "knob:MERGE_MODE,knob:MERGE_METHOD")
@@ -328,7 +328,7 @@ func TestStats_ByRevisionIgnoresAnEnclosingRepoEvents(t *testing.T) {
 	outer := statsEventsRoot(t)
 	root := filepath.Join(outer, "nested")
 	statsWriteLogs(t, root, map[string]string{
-		"issue-10.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+		"issue-10.log": statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
 			`{"type":"system","timestamp":"2026-10-07T09:00:30Z"}` + "\n" +
 			statsResult("2026-10-07T09:00:30Z", 1, 1, 1000, 900, "claude-opus"),
 	})
@@ -367,7 +367,7 @@ func TestStats_ByRevisionUsesEventsForButlerChoreKey(t *testing.T) {
 	root := t.TempDir()
 	gitRun(t, root, "init")
 	statsWriteLogs(t, root, map[string]string{
-		"issue-butler-deps.log": statsOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "butler"}) +
+		"issue-butler-deps.log": statsOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "butler"}) +
 			`{"type":"system","timestamp":"2026-10-07T09:00:30Z"}` + "\n" +
 			statsResult("2026-10-07T09:00:30Z", 1, 1, 1000, 900, "claude-opus"),
 	})

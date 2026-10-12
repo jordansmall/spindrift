@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/reconcile"
@@ -665,12 +665,12 @@ func lateMergeFixture(t *testing.T) (root, idA string, f *forge.Fake, c config) 
 	write := func(key, reason, pr string, cost float64) string {
 		id := "work:" + key + "@x"
 		ts := time.Now().Add(-time.Hour).UTC() // inside settle.LateMergeWindow
-		body := statsOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+		body := statsOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
 			RecordID: id, Kind: "work", DispatchKey: key, ClaimTime: ts, Started: ts,
 		}}) +
 			statsAssistant("m-"+key) +
 			statsResult("2026-05-01T09:00:00Z", cost, 1, 1000, 900, "m") +
-			statsOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &claude.DispatchSettled{
+			statsOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{
 				RecordID: id, State: "complete", Reason: reason, PRURL: pr,
 			}})
 		if err := os.WriteFile(filepath.Join(dir, "issue-"+key+".log"), []byte(body), 0o644); err != nil {

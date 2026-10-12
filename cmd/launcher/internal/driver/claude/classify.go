@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
@@ -180,7 +181,7 @@ func isHostOp(chunk string) bool {
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
 		return false
 	}
-	return ev.Type == "spindrift_op" && ev.SpindriftOp != nil && (ev.SpindriftOp.Op == OpDispatchStart || ev.SpindriftOp.Op == OpDispatchSettled)
+	return ev.Type == "spindrift_op" && ev.SpindriftOp != nil && (ev.SpindriftOp.Op == hostop.OpDispatchStart || ev.SpindriftOp.Op == hostop.OpDispatchSettled)
 }
 
 // agentContentEvent is the minimal stream-json envelope for telling

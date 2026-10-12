@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // statsChurnFixtureRoot makes the root a Target clone holding four merged work
@@ -52,8 +52,8 @@ func statsChurnFixtureRootRevs(t *testing.T, revs [4]string) (string, map[string
 		key := strconv.Itoa(i + 1)
 		claim := revertDay(i)
 		id := dispatchrecord.RecordID("work", key, claim)
-		logs["issue-"+key+".log"] = statsStampedLog(key, claim, claude.DispatchStart{Revision: m.rev}, nil, [2]string{"implement", "claude-opus"}) +
-			statsOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		logs["issue-"+key+".log"] = statsStampedLog(key, claim, hostop.DispatchStart{Revision: m.rev}, nil, [2]string{"implement", "claude-opus"}) +
+			statsOp(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 				RecordID: id, State: "complete", Reason: "merged", MergeCommit: m.sha,
 			}})
 	}
@@ -133,8 +133,8 @@ func TestStats_ChurnStaysDashWithoutATargetClone(t *testing.T) {
 	statsClock(t, revertDay(31))
 	claim := revertDay(0)
 	statsWriteLogs(t, root, map[string]string{
-		"issue-1.log": statsStampedLog("1", claim, claude.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
-			statsOp(claude.SpindriftOp{Op: "dispatch_settled", Settled: &claude.DispatchSettled{
+		"issue-1.log": statsStampedLog("1", claim, hostop.DispatchStart{}, nil, [2]string{"implement", "claude-opus"}) +
+			statsOp(hostop.SpindriftOp{Op: "dispatch_settled", Settled: &hostop.DispatchSettled{
 				RecordID: dispatchrecord.RecordID("work", "1", claim), State: "complete", Reason: "merged",
 				MergeCommit: strings.Repeat("a", 40),
 			}}),

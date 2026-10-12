@@ -15,8 +15,8 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/runner"
@@ -141,7 +141,7 @@ func seamTranscript(role, msgID, ts, outcomeLine string) string {
 		resultField = `,"result":` + string(result)
 		tail = outcomeLine + "\n"
 	}
-	return claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: role}) +
+	return hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: role}) +
 		`{"type":"assistant","message":{"id":"` + msgID + `","model":"m","content":[]}}` + "\n" +
 		`{"type":"result","timestamp":"` + ts + `","num_turns":1,"total_cost_usd":1,` +
 		`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}}` + resultField + "}\n" +
@@ -220,10 +220,10 @@ func TestSettleAdopted_FixPassContinuesPriorRecord(t *testing.T) {
 	d := seamDispatch(t, root, num, fr)
 
 	// The prior run's primary log: its stamp, one pass, and a stale failed verdict.
-	primary := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+	primary := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
 		RecordID: prior, Kind: "work", DispatchKey: num, ClaimTime: claim, Started: claim,
 	}}) + seamTranscript("implement", "a1", "2026-05-01T09:00:00Z", "") +
-		claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &claude.DispatchSettled{RecordID: prior, State: "failed", Reason: "box-failed"}})
+		hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{RecordID: prior, State: "failed", Reason: "box-failed"}})
 	if err := os.WriteFile(dispatch.LogPathFor(root, num), []byte(primary), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -334,8 +334,8 @@ func TestSettle_IngestFailureIsLoggedNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(log), claude.OpDispatchSettled) {
-		t.Errorf("log lacks the %s op", claude.OpDispatchSettled)
+	if !strings.Contains(string(log), hostop.OpDispatchSettled) {
+		t.Errorf("log lacks the %s op", hostop.OpDispatchSettled)
 	}
 }
 

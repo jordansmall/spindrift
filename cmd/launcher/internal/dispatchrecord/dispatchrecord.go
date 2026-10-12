@@ -21,6 +21,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
@@ -229,10 +230,10 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 // ReadStamp returns the log's leading dispatch_start stamp, false when the log is
 // missing, empty, or does not open with one. It decodes only the first event,
 // by the same rule parseLog applies.
-func ReadStamp(path string) (claude.DispatchStart, bool) {
+func ReadStamp(path string) (hostop.DispatchStart, bool) {
 	f, err := os.Open(path)
 	if err != nil {
-		return claude.DispatchStart{}, false
+		return hostop.DispatchStart{}, false
 	}
 	defer f.Close()
 	br := bufio.NewReader(f)
@@ -240,19 +241,19 @@ func ReadStamp(path string) (claude.DispatchStart, bool) {
 		line, isPrefix, err := br.ReadLine()
 		if err != nil || isPrefix {
 			// A stamp is a short line; an oversized one is Box output.
-			return claude.DispatchStart{}, false
+			return hostop.DispatchStart{}, false
 		}
 		var ev logLine
 		if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type == "" {
 			continue
 		}
-		if op := ev.SpindriftOp; ev.Type == "spindrift_op" && op != nil && op.Op == claude.OpDispatchStart && op.Start != nil {
+		if op := ev.SpindriftOp; ev.Type == "spindrift_op" && op != nil && op.Op == hostop.OpDispatchStart && op.Start != nil {
 			if op.Start.RecordID == "" {
-				return claude.DispatchStart{}, false
+				return hostop.DispatchStart{}, false
 			}
 			return *op.Start, true
 		}
-		return claude.DispatchStart{}, false
+		return hostop.DispatchStart{}, false
 	}
 }
 
@@ -276,11 +277,11 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		haveTS    bool
 		sawLine   bool
 		sawEvent  bool
-		stamp     *claude.DispatchStart
+		stamp     *hostop.DispatchStart
 		// hashes holds reported prompt hashes by the record_id they claim, since
 		// the op need not follow the stamp it must match.
 		hashes  = map[string]map[string]string{}
-		settled *claude.DispatchSettled
+		settled *hostop.DispatchSettled
 		// boxStatus is the status of the last SPINDRIFT_OUTCOME line in any result.
 		boxStatus string
 		// status is the last plain-text SPINDRIFT_OUTCOME line's status.
@@ -332,7 +333,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		sawEvent = true
 		// The host appends only dispatch_settled ops after the Box exits, so
 		// anything else after a settled op means the Box printed it.
-		if ev.Type != "spindrift_op" || ev.SpindriftOp == nil || ev.SpindriftOp.Op != claude.OpDispatchSettled {
+		if ev.Type != "spindrift_op" || ev.SpindriftOp == nil || ev.SpindriftOp.Op != hostop.OpDispatchSettled {
 			settled = nil
 		}
 		if ev.Timestamp != "" && !haveTS {
@@ -347,7 +348,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 				return
 			}
 			switch op.Op {
-			case claude.OpDispatchStart:
+			case hostop.OpDispatchStart:
 				if first && op.Start != nil && op.Start.RecordID != "" {
 					stamp = op.Start
 				}
@@ -358,7 +359,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 					}
 					maps.Copy(hashes[h.RecordID], h.Roles)
 				}
-			case claude.OpDispatchSettled:
+			case hostop.OpDispatchSettled:
 				// An op naming another Record is not this log's to claim, and
 				// must not displace one that is. The Box shares this log and
 				// knows the Record ID, so a tokened stamp also demands the host
