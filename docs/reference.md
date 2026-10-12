@@ -8943,7 +8943,12 @@ is why slots sit idle under `--restart-in-place`), or `restarting`
 (`restarting`). Only the self-change halt (reason `self-changed: …`)
 while the phase is `built`, the default drain, titles the halted banner
 as a drain for a self-update instead of `Pool halted`; any other halt
-keeps `Pool halted`. A status file with no `self_update`, or in any other
+keeps `Pool halted`. Phase `blocked` (the build or its smoke test failed,
+so the Daemon deliberately keeps running its previous build) instead shows a
+warning banner, distinct from the halted banner since the pool keeps working,
+naming the short revision (or `unknown revision`) and the reason (or `no
+reason published`). It clears on the live re-render once the phase moves
+on, and a Daemon that is no longer running never shows it. A status file with no `self_update`, or in any other
 phase, shows nothing extra.
 
 Below them is a history timeline, newest first, of the last 200 child
