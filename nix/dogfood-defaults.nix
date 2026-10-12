@@ -1,7 +1,8 @@
 # The dogfood's tuned leaf values, defined once and consumed by both flake.nix's
 # `spindrift` module config and nix/fixtures.nix's direct mkHarness mirror, so
 # the flakemodule-equivalence check compares two wiring paths rather than two
-# hand-copied value sets (issue #459).
+# hand-copied value sets (issue #459). The `opencode` block alone feeds
+# flake.nix only; the mirror covers the default (claude) Harness.
 { system, lib }:
 let
   isLinux = builtins.match ".*-linux" system != null;
@@ -43,6 +44,25 @@ in
       filer = "claude-haiku-4-5-20251001";
       reviewer = "claude-opus-5-5";
       worker = "claude-sonnet-5-5";
+    };
+  };
+  # The opencode Driver entry (ADR 0064, issue #5054) exists to prove Driver
+  # switching, not to be tuned. claude's values stay at top-level `roster` and
+  # `defaults.*` because the fixtures mirror and the dogfood pin checks read
+  # them there; dogfood-roster-names-only-pins reads the first `models`
+  # attrset in this file, so this one must stay below claude's. github-copilot
+  # is opencode's supported Provider, so ids are Provider-namespaced. Filer and worker are never
+  # provisioned under opencode; the worker is opted out (`""`) so the schema's
+  # non-namespaced default stays out of the baked agent files. A roster, not
+  # the legacy per-agent knobs, so the flake trips no deprecation warning.
+  opencode = {
+    model = "github-copilot/claude-opus-4.5";
+    roster = rosterLib.defaultRoster {
+      models = {
+        scout = "github-copilot/claude-haiku-4.5";
+        reviewer = "github-copilot/claude-opus-4.5";
+        worker = "";
+      };
     };
   };
   defaults = {
