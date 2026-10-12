@@ -1,5 +1,26 @@
 # Migration Guide
 
+## The scout's default model is now Haiku 5.5 (issue #5135)
+
+The scout's default model changed from `claude-haiku-4-5-20251001` to
+`claude-haiku-5-5`. A Consumer that relies on the default now gets Haiku 5.5
+after upgrading; nothing needs to change unless you want the old model.
+
+To keep Haiku 4.5, pin it explicitly in the flake and rebuild the image:
+
+```nix
+perSystem.spindrift.agents.drivers.claude.models.byName.scout.model =
+  "claude-haiku-4-5-20251001";
+```
+
+On another Driver, put its name in place of `claude` in that path.
+
+The scout's model is baked into the image at build time, so setting
+`SCOUT_MODEL` at dispatch time does not change it.
+
+The Filer stays opt-in (its default is still empty); the model the docs
+recommend when you do enable it is now `claude-haiku-5-5`.
+
 ## The single-Driver options give way to `agents.drivers` (issue #5055)
 
 `perSystem.spindrift.agents.driver` and every top-level Driver-valued
