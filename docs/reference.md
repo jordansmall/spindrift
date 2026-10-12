@@ -7534,6 +7534,13 @@ next `box` record or the `settled` record clears all three, and they never
 carry to the next child. Only a Code Forge with PRs (`github`, `forgejo`)
 enters a CI wait, so a `git` or `local` slot never shows them. They are
 additive and omitted when empty, so `schema` does not bump.
+`image_build_since` can be present only on a `running` slot while its child
+builds or realises its Box image, and is when the child's latest
+`image_build` record with `state` `started` arrived (RFC3339 UTC; see
+**Event stream**, below). The matching `finished` record, the next `box`
+record, the `settled` record, or the child exiting (the slot leaves
+`running`) clears it, and it never carries to the next child. It is
+additive and omitted when empty, so `schema` does not bump.
 `phase` is the slot's own position in its iteration,
 one of five values: `idle` (parked, holding nothing), `awaiting_window`
 (parked because the Awake window is shut), `resolving` (fetching the
@@ -8648,7 +8655,7 @@ history; the **Status file** (above) is the present — a reader wanting
 only "what is happening right now" reads that file instead of replaying
 the stream from the top:
 
-Every per-slot event — `child_start`, `child_inherited`, `box`, `settled`, `child_finish`, `idle`, `jam`,
+Every per-slot event — `child_start`, `child_inherited`, `box`, `image_build`, `settled`, `child_finish`, `idle`, `jam`,
 `tip_moved`, `backoff`, `breaker_trip` — carries a `slot` (0-based, the pool slot the
 event belongs to); `breaker_trip`'s `slot` is whichever slot's failure was
 the one that crossed `BreakerThreshold`, since the breaker itself counts
@@ -8690,6 +8697,7 @@ warning carries no `slot` either: it precedes every slot.
 | `child_inherited` | `time`, `kind`, `issue` or `chore`, `revision`, `slot`, `child_log` | once per busy Slot that a daemon resumed from an in-place restart's handoff (ADR 0063) inherits, before any new child starts. It stands where `child_start` would for a child the previous daemon image launched, with the `issue` or `chore` the child had already boxed (omitted if it had not boxed yet). The child's later records and its `child_finish` follow as for any child; a child that fails to re-attach shows `child_inherited`, then `child_finish` with outcome `error`, then a `backoff` whose reason starts `inherit-child:` |
 | `box` | `time`, `kind`, `issue` or `chore`, `phase`, `pass_log`, `record_id`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later (`spindrift stats --by revision` reads it for [inferred](#stats) Records). A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set. `pass_log` names the Pass log that phase writes, relative to the checkout (the un-suffixed path, even when a stale log was rotated aside), carried unchanged from the child's record (a later Dispatch of the same issue or Chore reuses the path once the earlier run's copy is moved to `<pass_log>.prior-run.N`, so the path alone does not identify a run); absent for `recover`, which runs no Box. `record_id` is the Dispatch's [Record ID](#stats), the same for every phase of one Dispatch, so unlike `pass_log` it does identify a run; added without a `v` bump, and absent for `recover` |
 | `model` | `time`, `kind`, `issue` or `chore`, `model`, `model_role`, `revision`, `slot` | each time the child reported that the Box's active model changed (the exact model id, plus the optional role, such as a reviewer, that is running it); the record is emitted as it arrives, so the Events file keeps the history a slot's status entry drops. `model_role` is absent when the model has no role |
+| `image_build` | `time`, `kind`, `state`, `revision`, `slot` | each time the child reported that its Box image build started or finished (`state` `started` or `finished`); a build that never reports `finished` (the child died mid-build) is cleared on the status entry by the next `box`, the `settled` record, or the child exiting, but leaves only its `started` row here |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
 | `settled` | `time`, `kind`, `issue` or `chore`, `state`, `note`, `pr_url`, `record_id`, `revision`, `slot` | emitted once per issue (or, for a butler run, per Chore), at the end of that issue's settle path — never live at each terminal transition, so `state` carries the issue's last word, never two contradicting rows. Only the dispatch settle path defers through a `flushSettled` latch (issue #3627), since it alone can reach a terminal state twice for the same issue (a green `completeLanding` that `verifyMerged` later demotes to Failed); the research settle path, `recoverFailed`, and the butler settle path each reach exactly one terminal state per issue/Chore and emit inline, already once. `state` is the launcher's own dispatch-state vocabulary (`complete`, `failed`, `recoverable`, `ambiguous`), never `child_finish`'s `outcome` vocabulary above, and the two must not be confused: a `child_finish` reports how the *child process* ended, a `settled` reports what the *issue* ended up at, and the two can disagree (a child can exit `dispatched` for an issue that itself settles `failed`). `note` carries the settling site's own reason wherever one is live — the research path's `"no verdict comment block"` was the original motivating case, and the dispatch settle path now fills it too (the blocked/ambiguous/already-resolved outcome's own note, the unresolved path's classification detail, `verifyMerged`'s demotion reason, the recoverable reason) rather than always passing `""`: with the daemon's terminal gone, that reason previously survived nowhere on disk. The record does not carry the settle's warnings (scan errors, stale-marker and rejected-line warnings): `note` is clipped at `report.MaxLine`, so a settle writes them untruncated, one per line, to the sidecar `.spindrift/logs/issue-<n>.warnings` (a butler run: `issue-butler-<chore>.warnings`) — read it to diagnose a failed settle. `pr_url` is the PR the Dispatch opened or adopted, carried from the child's record: a PR the host opened, adopted, or recovered (named as soon as the host resolves it), the open PR on the agent branch of a read-write Box (resolved host-side at settle, never from the Box's `landing=`). It is present even when the landing went red or failed, and absent when there is no PR (push-only forges, research, a butler Chore's own settle, a failure before any PR, no open PR on the agent branch at settle) (issue #4718). `record_id` is the Dispatch's [Record ID](#stats), matching its `box` events and its `dispatch_settled` op; added without a `v` bump, and absent on a Dispatch that failed before minting a Record ID |
 | `demand_appeared` | `time`, `kind`, `slot`, `ready` | a Demand probe of a probed kind found startable items (`ready` above 0) where the previous count was 0, or the kind had never been probed; emitted on the zero crossing only, so a count that merely changes between two positive values emits nothing |
@@ -8841,6 +8849,17 @@ so its slot shows the pill. The patch PR sends no `settled` record of its own,
 since the Chore already sent its one before the patch PRs are adopted, so the
 slot keeps the last patch PR's `ci_wait` until the child exits (or a later
 `box` or `settled` record on the slot clears it).
+An `image_build` record is `{"event":"image_build","state":"started"}` or
+the same with `"state":"finished"`, and names no `issue` or `chore`: the
+child sends it from bootstrap, before it has claimed anything. The OCI
+runner sends `started` just before it runs `nix build` on a cold image, and
+`finished` when that build and load end, failure included; an image that is
+already loaded, or that a sibling child realised while this one waited on
+the image lock, sends neither. The bwrap build adapter realises its store
+closures on every run, so it always sends the pair, and a warm run clears
+almost at once. The daemon rejects any other `state`, publishes a running
+build on the slot's status entry (`image_build_since`), and emits each
+record as an `image_build` event.
 
 **What this first cut doesn't do.** The instance lock, the queryable status
 file (issue #3545, above), the self-change halt (issue #3543, above) and
@@ -8935,6 +8954,9 @@ with its own phase colour, linking in a new tab to the CI run when the slot
 carries a `ci_run_url` and to the PR otherwise, from the slot's `ci_wait`,
 `pr_url` and `ci_run_url`; a slot carrying no `pr_url` shows no pill. The
 live re-render picks it up like any other status field.
+A slot whose child is building its Box image shows a `building image` pill
+with how long the build has run so far, from the slot's `image_build_since`;
+a slot without it shows no pill.
 
 While the Daemon updates itself, the header shows its status file's
 `self_update` beside the state pill, with the short revision:
@@ -8949,9 +8971,9 @@ phase, shows nothing extra.
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
 breaker trips, halts, self-update steps (including an in-place restart's
-handoff) and inherited children, read from both generations of the Events
-file (see **Events file** under [Daemon](#daemon)). Other events are left
-out.
+handoff), inherited children and Box image builds, read from both
+generations of the Events file (see **Events file** under
+[Daemon](#daemon)). Other events are left out.
 The timeline shows in every case below, so a stopped or restarted daemon
 still leaves its history on the page. An absent Events file just means no
 history yet; if a generation exists but cannot be read, the page shows
