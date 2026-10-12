@@ -246,6 +246,38 @@ func TestSelectiveDispatchExitCode_ZeroSelected_ReturnsExitCode3(t *testing.T) {
 	}
 }
 
+// Pins selectiveDispatchExitCode's wiring of isStdinTTY(): without a terminal
+// and without --yes, an unlabeled issue aborts before any Box launches.
+func TestSelectiveDispatchExitCode_NonTTYUnlabeled_AbortsWithoutDispatch(t *testing.T) {
+	withStdinTTY(t, false)
+
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "15", Labels: []string{}})
+	fr := runner.NewFake()
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, fr),
+		settle:       settle.NewFake(),
+	}
+
+	var stderr bytes.Buffer
+	if got := selectiveDispatchExitCode(lc, []string{"15"}, false, io.Discard, &stderr); got != 1 {
+		t.Errorf("selectiveDispatchExitCode(lc) = %d, want 1", got)
+	}
+	if !strings.Contains(stderr.String(), "--yes") {
+		t.Errorf("stderr = %q, want a --yes hint", stderr.String())
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+}
+
 // CONTINUOUS_DISPATCH must preserve exit-2 semantics unchanged (#527): an empty
 // queue exits the same way whether or not continuous mode is enabled.
 func TestRunExitCode_ContinuousDispatch_EmptyQueue_ReturnsExitCode2(t *testing.T) {

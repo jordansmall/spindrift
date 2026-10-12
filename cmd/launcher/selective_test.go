@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,7 @@ func TestSelectiveListDispatch_AllLabeledNoPrompt(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15", "18"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15", "18"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestSelectiveListDispatch_UnlabeledWarnsAndPrompts(t *testing.T) {
 	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -98,7 +99,7 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 	stdin := strings.NewReader("n\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, true, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected error on abort, got nil")
 	}
@@ -108,27 +109,32 @@ func TestSelectiveListDispatch_UnlabeledAbortOnN(t *testing.T) {
 }
 
 func TestSelectiveListDispatch_YesFlagSkipsPrompt(t *testing.T) {
-	c := baseConfig()
-	c.label = "ready-for-agent"
-	c.maxParallel = 4
+	// --yes must dispatch with or without a terminal.
+	for _, interactive := range []bool{true, false} {
+		t.Run(fmt.Sprintf("interactive=%v", interactive), func(t *testing.T) {
+			c := baseConfig()
+			c.label = "ready-for-agent"
+			c.maxParallel = 4
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
+			fc := forge.NewFake()
+			fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
 
-	fr := runner.NewFake()
-	dir := tempLogDir(t)
-	f := testFactory(t, dir, fr)
-	s := testNewSettle(c, fc, testWired(fc), fc)
+			fr := runner.NewFake()
+			dir := tempLogDir(t)
+			f := testFactory(t, dir, fr)
+			s := testNewSettle(c, fc, testWired(fc), fc)
 
-	stdin := &bytes.Buffer{} // No input, so the test would hang if the prompt fired.
-	stdout := &bytes.Buffer{}
+			stdin := &bytes.Buffer{} // No input, so the test would hang if the prompt fired.
+			stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, true, stdin, stdout)
-	if err != nil {
-		t.Fatalf("selectiveListDispatch with --yes: %v", err)
-	}
-	if len(fr.RunCalls) != 1 {
-		t.Errorf("RunCalls: got %d, want 1", len(fr.RunCalls))
+			err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, true, interactive, stdin, stdout)
+			if err != nil {
+				t.Fatalf("selectiveListDispatch with --yes: %v", err)
+			}
+			if len(fr.RunCalls) != 1 {
+				t.Errorf("RunCalls: got %d, want 1", len(fr.RunCalls))
+			}
+		})
 	}
 }
 
@@ -145,12 +151,49 @@ func TestSelectiveListDispatch_NonInteractiveAbort(t *testing.T) {
 	f := testFactory(t, dir, fr)
 	s := testNewSettle(c, fc, testWired(fc), fc)
 
-	stdin := &bytes.Buffer{} // An empty buffer reads EOF at once, which is the non-interactive case.
+	// A piped "y" must not confirm when stdin is not a terminal.
+	stdin := strings.NewReader("y\n")
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, false, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected non-interactive abort error, got nil")
+	}
+	if !strings.Contains(err.Error(), "--yes") {
+		t.Errorf("abort error should point at --yes, got: %v", err)
+	}
+	if len(fr.RunCalls) != 0 {
+		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
+	}
+	if stdin.Len() != 2 {
+		t.Errorf("stdin was read in non-interactive mode: %d bytes left, want 2", stdin.Len())
+	}
+	if strings.Contains(stdout.String(), "[y/N]") {
+		t.Errorf("unexpected prompt in non-interactive mode: %s", stdout.String())
+	}
+}
+
+func TestSelectiveListDispatch_InteractiveEOFAborts(t *testing.T) {
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 4
+
+	fc := forge.NewFake()
+	fc.SetIssue(forge.Issue{Number: "15", Title: "unlabeled", Labels: []string{}})
+
+	fr := runner.NewFake()
+	dir := tempLogDir(t)
+	f := testFactory(t, dir, fr)
+	s := testNewSettle(c, fc, testWired(fc), fc)
+
+	stdout := &bytes.Buffer{}
+
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, true, &bytes.Buffer{}, stdout)
+	if err == nil {
+		t.Fatal("expected abort on EOF, got nil")
+	}
+	if !strings.Contains(stdout.String(), "[y/N]") {
+		t.Errorf("expected confirmation prompt before EOF abort, got: %s", stdout.String())
 	}
 	if len(fr.RunCalls) != 0 {
 		t.Errorf("RunCalls: got %d, want 0", len(fr.RunCalls))
@@ -176,7 +219,7 @@ func TestSelectiveListDispatch_BlockerOrderedAhead(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15", "99"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15", "99"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -208,7 +251,7 @@ func TestSelectiveListDispatch_InListUnmergedBlocker_DispatchesOnlyBlocker(t *te
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -243,7 +286,7 @@ func TestSelectiveListDispatch_UnmetExternalEviction(t *testing.T) {
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -567,7 +610,7 @@ func TestSelectiveListDispatch_DepsOfCheckFailure_HoldsIssueNotDispatched(t *tes
 	stdout := &bytes.Buffer{}
 
 	it := failDepsOf{Fake: fc, num: "12"}
-	err := selectiveListDispatch(c, it, fc, capsFor(it, fc), dir, f, s, []string{"12", "15"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, it, fc, capsFor(it, fc), dir, f, s, []string{"12", "15"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -640,7 +683,7 @@ func TestSelectiveListDispatch_LocalTrackerSlugID_ResolvesOnlyThatIssue(t *testi
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, it, cf, capsFor(it, cf), dir, f, s, []string{"feature-x"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, it, cf, capsFor(it, cf), dir, f, s, []string{"feature-x"}, false, true, stdin, stdout)
 	if err != nil {
 		t.Fatalf("selectiveListDispatch: %v", err)
 	}
@@ -680,7 +723,7 @@ func TestSelectiveListDispatch_UnknownID_FailsFastDispatchesNothing(t *testing.T
 	stdin := &bytes.Buffer{}
 	stdout := &bytes.Buffer{}
 
-	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "SPIN-99"}, false, stdin, stdout)
+	err := selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"12", "SPIN-99"}, false, true, stdin, stdout)
 	if err == nil {
 		t.Fatal("expected error for unresolvable ID, got nil")
 	}

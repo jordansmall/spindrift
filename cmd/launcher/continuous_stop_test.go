@@ -30,6 +30,14 @@ func withStubbedSignals(t *testing.T, stopClosed, abortClosed bool) {
 	t.Cleanup(func() { installStopSignal = orig })
 }
 
+// withStdinTTY overrides the isStdinTTY seam for the test's lifetime.
+func withStdinTTY(t *testing.T, tty bool) {
+	t.Helper()
+	orig := isStdinTTY
+	t.Cleanup(func() { isStdinTTY = orig })
+	isStdinTTY = func() bool { return tty }
+}
+
 // withClosedStopSignal stubs a first-signal-only world: stop is closed,
 // abort stays open (#3520).
 func withClosedStopSignal(t *testing.T) {

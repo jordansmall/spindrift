@@ -252,6 +252,36 @@ func TestSelectiveDispatchExitCode_SignalledStop(t *testing.T) {
 	}
 }
 
+// A fired stop wins over the non-terminal unlabeled abort, which would
+// otherwise exit 1.
+func TestSelectiveDispatchExitCode_SignalledStop_BeatsNonTTYUnlabeledAbort(t *testing.T) {
+	withClosedStopSignal(t)
+	withStdinTTY(t, false)
+
+	c := baseConfig()
+	c.label = "ready-for-agent"
+	c.maxParallel = 1
+	dir := tempLogDir(t)
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{}})
+	lc := &launchContext{
+		config:       c,
+		pwd:          dir,
+		issueTracker: fc,
+		codeForge:    fc,
+		factory:      testFactory(t, dir, nil),
+		settle:       settle.NewFake(),
+	}
+
+	var stderr bytes.Buffer
+	if got := selectiveDispatchExitCode(lc, []string{"1"}, false, io.Discard, &stderr); got != exitSignalledStop {
+		t.Errorf("selectiveDispatchExitCode(lc) = %d, want %d", got, exitSignalledStop)
+	}
+	if stderr.Len() != 0 {
+		t.Errorf("stderr = %q, want empty", stderr.String())
+	}
+}
+
 // The abort counterpart of the stop case above, in the both-closed shape a
 // real second Ctrl-C delivers. It does not isolate abort (the closed stop wins
 // first); TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily
@@ -413,7 +443,7 @@ func TestSelectiveListDispatch_ResearchAbort_ReclaimsOntoResearchFamily(t *testi
 
 	resultCh := make(chan error, 1)
 	go func() {
-		resultCh <- selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"1"}, true, strings.NewReader(""), io.Discard)
+		resultCh <- selectiveListDispatch(c, fc, fc, capsFor(fc, fc), dir, f, s, []string{"1"}, true, true, strings.NewReader(""), io.Discard)
 	}()
 
 	waitOn(t, started, "issue #1 was never dispatched")

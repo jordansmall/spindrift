@@ -1,5 +1,14 @@
 # Migration Guide
 
+## Piped input no longer confirms unlabeled `spindrift dispatch` (issue #4995)
+
+`spindrift dispatch <n>...` asks `[y/N]` before dispatching an issue
+that lacks the dispatch label. It now asks only when stdin is a terminal.
+Without one, the run aborts non-zero before any Box launches and never
+reads stdin, so a script like `yes | spindrift dispatch 15` that used to
+confirm the prompt now aborts. Pass `--yes` (alias `--force`) instead, as
+ADR 0011 already prescribes.
+
 ## The scout's default model is now Haiku 5.5 (issue #5135)
 
 The scout's default model changed from `claude-haiku-4-5-20251001` to

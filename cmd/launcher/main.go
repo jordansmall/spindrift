@@ -2121,7 +2121,7 @@ func cmdPreview(stdout, stderr io.Writer, issueNums []string) int {
 // issue, just as a queue drain can), 1 for any other error, 0 on success.
 // Split out so it is testable without bootstrap.
 func selectiveDispatchExitCode(lc *launchContext, nums []string, forceYes bool, stdout, stderr io.Writer) int {
-	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, os.Stdin, stdout)
+	err := selectiveListDispatch(lc.config, lc.issueTracker, lc.codeForge, lc.capabilities, lc.pwd, lc.factory, lc.settle, nums, forceYes, isStdinTTY(), os.Stdin, stdout)
 	if err == nil {
 		return 0
 	}

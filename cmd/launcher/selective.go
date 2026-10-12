@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -18,7 +19,9 @@ import (
 // hold: in-list blockers are ordered ahead, and unmet external blockers evict
 // dependents. caps is the caller's resolved forge.Capabilities (issue #2946),
 // safe to reuse because cf is fixed for this whole call.
-func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes bool, stdin io.Reader, stdout io.Writer) error {
+// interactive reports whether stdin is a terminal; without one, unlabeled
+// issues need forceYes.
+func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, caps forge.Capabilities, pwd string, f *dispatch.Factory, s settle.Settler, nums []string, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
 	// Installed once, ahead of the first fetch, the same placement run uses
 	// (#3522): every pre-wave early return below checks
 	// waves.SignalledStopAlready so a signal that already fired wins over any
@@ -35,8 +38,8 @@ func selectiveListDispatch(c config, it forge.IssueTracker, cf forge.CodeForge, 
 		for _, num := range unlabeled {
 			fmt.Fprintf(stdout, "⚠ #%s not ready-for-agent; dispatching anyway (explicit)\n", num)
 		}
-		if !confirmUnlabeled(len(unlabeled), forceYes, stdin, stdout) {
-			return signalledOr(stopCh, abortCh, fmt.Errorf("aborted: unlabeled issue(s) not confirmed"))
+		if err := confirmUnlabeled(len(unlabeled), forceYes, interactive, stdin, stdout); err != nil {
+			return signalledOr(stopCh, abortCh, err)
 		}
 	}
 
@@ -86,19 +89,28 @@ func fetchSelectiveIssues(c config, it forge.IssueTracker, nums []string) ([]iss
 	return issues, unlabeled, nil
 }
 
-// confirmUnlabeled prompts once for all n issues. When stdin is not a terminal
-// and forceYes is false it returns false rather than hanging.
-func confirmUnlabeled(n int, forceYes bool, stdin io.Reader, stdout io.Writer) bool {
+var errUnlabeledNotConfirmed = errors.New("aborted: unlabeled issue(s) not confirmed")
+
+// confirmUnlabeled prompts once for all n issues and returns nil when
+// confirmed. Without a terminal and without forceYes it errors without
+// reading stdin, so a piped "y" never confirms and an open pipe never blocks.
+func confirmUnlabeled(n int, forceYes, interactive bool, stdin io.Reader, stdout io.Writer) error {
 	if forceYes {
-		return true
+		return nil
+	}
+	if !interactive {
+		return fmt.Errorf("%w (stdin is not a terminal; pass --yes to dispatch them)", errUnlabeledNotConfirmed)
 	}
 	fmt.Fprintf(stdout, "Dispatch %d unlabeled issue(s)? [y/N] ", n)
 	scanner := bufio.NewScanner(stdin)
 	if !scanner.Scan() {
 		fmt.Fprintln(stdout)
-		return false
+		return errUnlabeledNotConfirmed
 	}
-	return strings.ToLower(strings.TrimSpace(scanner.Text())) == "y"
+	if strings.ToLower(strings.TrimSpace(scanner.Text())) != "y" {
+		return errUnlabeledNotConfirmed
+	}
+	return nil
 }
 
 // evictUnmetBlockers removes issues whose unmerged blockers are absent from the
