@@ -108,13 +108,27 @@ rec {
       expectMismatch ? false,
     }:
     let
-      inherit (pkgs.lib) removeSuffix;
+      inherit (pkgs.lib)
+        assertMsg
+        hasPrefix
+        removePrefix
+        removeSuffix
+        ;
+      # Repo-relative, not `toString file`: that is a path inside the flake-source
+      # store copy, whose hash covers the whole tree and would move this drv on
+      # any unrelated edit.
+      repoPrefix = "${toString ../.}/";
+      displayPath =
+        assert assertMsg (hasPrefix repoPrefix (
+          toString file
+        )) "documented-fact-checker: ${toString file} is outside the repo root";
+        removePrefix repoPrefix (toString file);
       raw = pkgs.writeText "${name}.raw" generated;
       beginLine = removeSuffix "\n" beginMarker;
       markersPresent = splitMarkedBlock {
         inherit blockName beginMarker endMarker;
         docSrc = builtins.readFile file;
-        docPath = toString file;
+        docPath = displayPath;
       };
       postProcessStep = if gofmt then "gofmt -w reconstructed" else "";
       effectiveNativeBuildInputs = nativeBuildInputs ++ (if gofmt then [ pkgs.go ] else [ ]);
@@ -131,7 +145,7 @@ rec {
         else
           ''
             diff reconstructed "$committed" \
-              || { echo "${toString file} generated ${blockName} span is out of sync with ${sourceDesc} -- regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+              || { echo "${displayPath} generated ${blockName} span is out of sync with ${sourceDesc} -- regenerate it with \`nix run .#regen\`" >&2; exit 1; }
             touch $out
           '';
     in
