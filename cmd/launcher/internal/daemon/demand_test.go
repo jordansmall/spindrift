@@ -780,8 +780,13 @@ func TestLoopEmptyChildExitKeepsRealDrain(t *testing.T) {
 	r.holdSlots(2)
 	r.announceEachSlot()
 	r.setDemand(workKind, 1)
+	// The free-running testClock lets a parked sibling re-probe any number of
+	// times before it starts, so only probes after both starts count here
+	// (zero means unarmed: a start always follows a probe). Cancel on the
+	// second post-exit probe, once the first has emitted demand_drained.
+	var armedAt atomic.Int64
 	r.onDemand = func(_ context.Context, k Kind) {
-		if r.demandCount(k) >= 4 {
+		if at := armedAt.Load(); at > 0 && int64(r.demandCount(k)) >= at+2 {
 			cancel()
 		}
 	}
@@ -795,6 +800,7 @@ func TestLoopEmptyChildExitKeepsRealDrain(t *testing.T) {
 	r.awaitStart(t)
 	r.awaitStart(t)
 	r.setDemand(workKind, 0)
+	armedAt.Store(int64(r.demandCount(workKind)))
 	r.releaseSlot(t, 1, ChildResult{Exit: 2})
 	select {
 	case <-ctx.Done():
