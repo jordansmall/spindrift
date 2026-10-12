@@ -90,6 +90,7 @@ let
     // (import ./doctor-report-routing.nix common)
     // (import ./agent-workflow-smoke.nix common)
     // (import ./nix-cache-key.nix common)
+    // (import ./ci-scripts-from-base.nix common)
     // (import ./changelog.nix common)
     // (import ./versioning-prompt-template-carve-out.nix common)
     // (import ./go.nix common)

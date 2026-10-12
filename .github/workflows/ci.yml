@@ -27,6 +27,24 @@ jobs:
         with:
           fetch-depth: 0
 
+      # A PR is judged by its base's CI scripts, never its own: they sit
+      # outside .github/workflows/, so a token that can't edit this workflow
+      # could otherwise rewrite the verdict. The PR's copy stands in only
+      # while the base has none, i.e. on the PR that adds the script. Kept
+      # inline (here and in ci-ok) because a composite action under
+      # .github/actions/ would be PR-editable too.
+      - name: Use the base branch's CI scripts
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          for f in ci-changes.sh ci-ok.sh; do
+            if git cat-file -e "$BASE_SHA:.github/scripts/$f" 2>/dev/null; then
+              git show "$BASE_SHA:.github/scripts/$f" >".github/scripts/$f"
+            fi
+          done
+
       - name: Classify the diff against the PR base
         id: classify
         env:
@@ -36,7 +54,7 @@ jobs:
         run: |
           if [ "$EVENT" = pull_request ]; then
             git diff --name-status -M "$BASE_SHA...$HEAD_SHA" >"$RUNNER_TEMP/diff"
-            kind=$(.github/scripts/ci-changes.sh <"$RUNNER_TEMP/diff")
+            kind=$(bash .github/scripts/ci-changes.sh <"$RUNNER_TEMP/diff")
           else
             kind=code
           fi
@@ -208,6 +226,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same reason and body as the step in `changes`.
+      - name: Use the base branch's CI scripts
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+          for f in ci-changes.sh ci-ok.sh; do
+            if git cat-file -e "$BASE_SHA:.github/scripts/$f" 2>/dev/null; then
+              git show "$BASE_SHA:.github/scripts/$f" >".github/scripts/$f"
+            fi
+          done
+
       - name: Require the change kind's lane to have passed
         env:
           NEEDS: ${{ toJSON(needs) }}
@@ -218,4 +249,4 @@ jobs:
           else
             required=(changes check check-macos)
           fi
-          .github/scripts/ci-ok.sh "${required[@]}" <<<"$NEEDS"
+          bash .github/scripts/ci-ok.sh "${required[@]}" <<<"$NEEDS"
