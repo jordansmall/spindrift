@@ -141,6 +141,8 @@ func TestSelfUpdateFailureBlocksWithoutHalting(t *testing.T) {
 		t.Run(stage, func(t *testing.T) {
 			dir := t.TempDir()
 			clk := &testClock{}
+			blockedAt := time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC)
+			clk.setNow(blockedAt.Add(-time.Hour))
 			var buf bytes.Buffer
 			tap := newEventTap(&buf, "self_update")
 			var starts int
@@ -149,6 +151,7 @@ func TestSelfUpdateFailureBlocksWithoutHalting(t *testing.T) {
 				selfPaths: []string{selfNew},
 				results:   []ChildResult{{Exit: 0}, {Exit: 5}},
 				onPrebuild: func(context.Context, int, Tip) error {
+					clk.setNow(blockedAt)
 					return &PrebuildError{Stage: PrebuildStage(stage), Err: errors.New("boom")}
 				},
 				// Child 2 starts only after the verdict landed, so the exit 5
@@ -182,7 +185,10 @@ func TestSelfUpdateFailureBlocksWithoutHalting(t *testing.T) {
 			if err != nil || report.Status == nil {
 				t.Fatalf("ReadStatus: %v, %v", report.Status, err)
 			}
-			want := SelfUpdate{Phase: SelfUpdateBlocked, Revision: "rev1", Reason: wantReason}
+			want := SelfUpdate{
+				Phase: SelfUpdateBlocked, Revision: "rev1", Reason: wantReason,
+				Since: blockedAt.Format(time.RFC3339),
+			}
 			if got := report.Status.SelfUpdate; got == nil || *got != want {
 				t.Fatalf("status self_update = %+v, want %+v", got, want)
 			}
@@ -474,9 +480,12 @@ func waitSelfPhase(t *testing.T, dir string, phase SelfUpdatePhase) {
 // slots hold a child, waits for the waiting phase, then frees slot 0 so the
 // pool has a free slot that must not start a child. Slot 1's child stays
 // running and has not reported, which holds the handoff off.
-func inPlaceWaiting(t *testing.T) *handoffRig {
+func inPlaceWaiting(t *testing.T, setup ...func(*handoffRig)) *handoffRig {
 	t.Helper()
 	rig := newHandoffRig(t, 2)
+	for _, f := range setup {
+		f(rig)
+	}
 	// Only slot 0 boxes, which frees the baton for slot 1; slot 1 never
 	// reports, so the handoff stays held off while it runs.
 	rig.r.onStart = func(_ context.Context, req ChildRequest) error {
@@ -515,6 +524,90 @@ func TestSelfUpdateInPlaceWaitsWithoutHaltOrStart(t *testing.T) {
 	su := selfUpdateEvents(events)
 	if len(su) != 1 || su[0].Phase != string(SelfUpdateBuilt) {
 		t.Errorf("self_update events = %+v, want one built", su)
+	}
+}
+
+// selfStatus reads the self_update the status file shows right now.
+func selfStatus(t *testing.T, dir string) SelfUpdate {
+	t.Helper()
+	rep, err := ReadStatus(dir)
+	if err != nil || rep.Status == nil || rep.Status.SelfUpdate == nil {
+		t.Fatalf("ReadStatus = %+v, %v", rep, err)
+	}
+	return *rep.Status.SelfUpdate
+}
+
+var sinceBase = time.Date(2026, 10, 11, 10, 0, 0, 0, time.UTC)
+
+// since is stamped when a real in-place build enters each phase and survives
+// a re-publish within the phase: freeing a slot while waiting republishes the
+// status without restamping.
+func TestSelfUpdateSinceStampedAtEachPhaseKeptAcrossRepublish(t *testing.T) {
+	rig := newHandoffRig(t, 2)
+	rig.clk.setNow(sinceBase)
+	// As in inPlaceWaiting: only slot 0 boxes, so slot 1's unreported child
+	// holds the handoff off and the pool stays in waiting.
+	rig.r.onStart = func(_ context.Context, req ChildRequest) error {
+		if req.Slot == 0 {
+			req.OnRecord(Record{Event: report.EventBox, Key: dispatchkey.Issue("issue-0")})
+		}
+		return nil
+	}
+	rig.run()
+	rig.r.awaitStart(t)
+	rig.r.awaitStart(t)
+
+	waitSelfPhase(t, rig.dir, SelfUpdateBuilding)
+	if got, want := selfStatus(t, rig.dir).Since, sinceBase.Format(time.RFC3339); got != want {
+		t.Fatalf("since at building = %q, want %q", got, want)
+	}
+
+	rig.clk.setNow(sinceBase.Add(time.Minute))
+	close(rig.gate)
+	waitSelfPhase(t, rig.dir, SelfUpdateWaiting)
+	waitingSince := sinceBase.Add(time.Minute).Format(time.RFC3339)
+	if got := selfStatus(t, rig.dir).Since; got != waitingSince {
+		t.Fatalf("since at waiting = %q, want %q", got, waitingSince)
+	}
+
+	rig.clk.setNow(sinceBase.Add(time.Hour))
+	rig.r.releaseSlot(t, 0, ChildResult{Exit: 0})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rep, err := ReadStatus(rig.dir)
+		if err == nil && rep.Status != nil && len(rep.Status.Slots) > 0 && !rep.Status.Slots[0].Busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("status never showed slot 0 freed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := selfStatus(t, rig.dir); got.Phase != SelfUpdateWaiting || got.Since != waitingSince {
+		t.Errorf("self_update after a same-phase re-publish = %+v, want waiting since %s", got, waitingSince)
+	}
+
+	close(rig.stop)
+	rig.r.releaseSlot(t, 1, ChildResult{Exit: 0})
+	rig.wait(t)
+}
+
+// A stop while waiting drops the phase back to built, which is a phase move
+// and so restamps since.
+func TestSelfUpdateInPlaceStopWhileWaitingRestampsSince(t *testing.T) {
+	rig := inPlaceWaiting(t, func(rig *handoffRig) { rig.clk.setNow(sinceBase) })
+	if got, want := selfStatus(t, rig.dir).Since, sinceBase.Format(time.RFC3339); got != want {
+		t.Fatalf("since at waiting = %q, want %q", got, want)
+	}
+
+	rig.clk.setNow(sinceBase.Add(time.Hour))
+	close(rig.stop)
+	rig.r.releaseSlot(t, 1, ChildResult{Exit: 0})
+	rig.wait(t)
+
+	got := selfStatus(t, rig.dir)
+	if want := sinceBase.Add(time.Hour).Format(time.RFC3339); got.Phase != SelfUpdateBuilt || got.Since != want {
+		t.Errorf("self_update = %+v, want built since %s", got, want)
 	}
 }
 
@@ -561,6 +654,7 @@ type handoffRig struct {
 	buf  *bytes.Buffer
 	stop chan struct{}
 	cfg  Config
+	clk  *testClock
 }
 
 // newHandoffRig builds the rig without starting Loop, so a test can adjust
@@ -574,6 +668,7 @@ func newHandoffRig(t *testing.T, slots int) *handoffRig {
 		done: make(chan Halt, 1),
 		buf:  &bytes.Buffer{},
 		stop: make(chan struct{}),
+		clk:  &testClock{},
 	}
 	rig.r.holdSlots(slots)
 	rig.r.onPrebuild = func(ctx context.Context, _ int, _ Tip) error {
@@ -594,7 +689,7 @@ func newHandoffRig(t *testing.T, slots int) *handoffRig {
 
 func (rig *handoffRig) run() {
 	go func() {
-		rig.done <- Loop(context.Background(), rig.cfg, rig.r, newTestEmitter(rig.buf), &testClock{})
+		rig.done <- Loop(context.Background(), rig.cfg, rig.r, newTestEmitter(rig.buf), rig.clk)
 	}()
 }
 

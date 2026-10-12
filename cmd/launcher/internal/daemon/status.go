@@ -70,6 +70,9 @@ type SelfUpdate struct {
 	Revision string `json:"revision"`
 	// Reason is the failure, set only when Phase is SelfUpdateBlocked.
 	Reason string `json:"reason,omitempty"`
+	// Since is RFC3339 UTC: when the Daemon entered Phase. Absent from status
+	// files written before it existed.
+	Since string `json:"since,omitempty"`
 }
 
 // SelfUpdatePhase is a SelfUpdate's stage.

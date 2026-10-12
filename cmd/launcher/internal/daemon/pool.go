@@ -91,6 +91,10 @@ type state struct {
 	// self is the latest self-update attempt; zero until a tip's daemon
 	// build first differs from the running one. See selfUpdate.
 	self SelfUpdate
+	// selfSince is when self.Phase last changed; mutate maintains it, so no
+	// phase assignment site needs to. Kept off self so self's zero test and
+	// equality comparisons ignore it; snapshotLocked publishes it.
+	selfSince time.Time
 
 	// wake is the current wake generation: a parked slot sleeps on a context
 	// derived from it, and wakeParked cancels it and installs a fresh one
@@ -186,6 +190,7 @@ func (p *pool) mutate(f func(s *state) []Event) {
 	p.mu.Lock()
 	before := make([]slotState, len(p.st.slots))
 	copy(before, p.st.slots)
+	selfBefore := p.st.self.Phase
 	evs := f(&p.st)
 	p.commitHandoffIfClean(&p.st)
 	// startChild and finishChild replace a whole slotState, zeroing since, and
@@ -193,6 +198,9 @@ func (p *pool) mutate(f func(s *state) []Event) {
 	// since unless the phase moved keeps both from resetting it. A slot
 	// seated with sincePinned keeps its since across the move that seats it.
 	now := p.clk.Now()
+	if p.st.self.Phase != selfBefore {
+		p.st.selfSince = now
+	}
 	for i := range p.st.slots {
 		switch {
 		case p.st.slots[i].phase == before[i].phase:
@@ -398,6 +406,7 @@ func newPool(ctx context.Context, cfg Config, r Runner, em *Emitter, clk Clock) 
 		demandFlights: make(map[Kind]*demandFlight),
 	}
 	p.st.self = cfg.SelfUpdate
+	p.st.selfSince = clk.Now()
 	// Must precede any slot running, so own starts read the restored gate
 	// generation (gateGenOf) and the restored breaker.
 	if h := cfg.Handoff; h != nil {
@@ -1631,6 +1640,7 @@ func (p *pool) snapshotLocked() Status {
 	var selfUpdate *SelfUpdate
 	if p.st.self != (SelfUpdate{}) {
 		su := p.st.self
+		su.Since = p.st.selfSince.UTC().Format(time.RFC3339)
 		selfUpdate = &su
 	}
 
