@@ -114,10 +114,12 @@ type prReconciler struct {
 // reconcile checks one open issue against live PR state: it closes the issue
 // on a merged landing PR, discovers an unrecorded landing by agent branch,
 // resolves a bare branch landing to its PR, and flags one whose landing PR
-// closed unmerged. A recorded branch landing that resolves to no PR prints the
-// landing-unverifiable line and lets the sweep continue.
+// closed unmerged. A recorded branch landing that resolves to no PR, or only to
+// a closed one, prints the landing-unverifiable line and lets the sweep
+// continue. A PR resolved from a branch is recorded once its state is read.
 func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	landing := iss.Landing
+	bareBranch := ""
 	if landing == "" {
 		if p.lr == nil {
 			return nil
@@ -149,6 +151,7 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 				return nil
 			}
 			landing = url
+			bareBranch = parsed.Branch
 		default:
 			fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! landing does not verify through a PR Code Forge\n", iss.Number, iss.Landing)
 			return nil
@@ -157,6 +160,20 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	state, err := p.pr.PRState(landing)
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: PR state for %s: %w", iss.Number, landing, err)
+	}
+	// No forge call ties a PR to a dispatch attempt (PRForBranch returns a URL
+	// and the agent branch is the same every attempt), so a closed-unmerged PR
+	// under a bare branch can't be told from a prior attempt's (issue #5006).
+	// An open PR is one a new attempt adopts, and a merged prior PR would
+	// already have closed the issue, so only closed is skipped.
+	if bareBranch != "" && state == forge.PRClosed {
+		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! PR %s for branch %s closed unmerged; may be a prior attempt's\n", iss.Number, iss.Landing, landing, bareBranch)
+		return nil
+	}
+	if fromBranch := iss.Landing == "" || bareBranch != ""; fromBranch && p.lr != nil {
+		if err := p.lr.RecordLanding(iss.Number, landing); err != nil {
+			return fmt.Errorf("reconcile issue %s: record landing: %w", iss.Number, err)
+		}
 	}
 	switch state {
 	case forge.PRMerged:
@@ -176,22 +193,13 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	return nil
 }
 
-// resolveBranch finds the PR opened from branch and, when a LandingRecorder is
-// wired, records its URL so the next sweep reads a PR URL, not the branch.
+// resolveBranch finds the PR opened from branch, in any state.
 func (p prReconciler) resolveBranch(num, branch string) (url string, found bool, err error) {
 	url, found, err = p.pr.PRForBranch(branch)
 	if err != nil {
 		return "", false, fmt.Errorf("reconcile issue %s: resolve branch PR: %w", num, err)
 	}
-	if !found {
-		return "", false, nil
-	}
-	if p.lr != nil {
-		if err := p.lr.RecordLanding(num, url); err != nil {
-			return "", false, fmt.Errorf("reconcile issue %s: record landing: %w", num, err)
-		}
-	}
-	return url, true, nil
+	return url, found, nil
 }
 
 // localLandingReconciler bundles the seams the local-landing path needs per
