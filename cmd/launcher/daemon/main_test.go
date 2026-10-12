@@ -3730,43 +3730,84 @@ type inPlaceFixture struct {
 	execErr  error
 }
 
-func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
-	requireInPlaceRestart(t)
+// inPlaceOldSelf is the daemon image an in-place restart starts from.
+const inPlaceOldSelf = "/nix/store/aaa-old/bin/daemon"
+
+// inPlaceNewSelf is the daemon image an in-place restart execs into.
+const inPlaceNewSelf = "/nix/store/bbb-new/bin/daemon"
+
+// inPlaceConsumerT readies a bare-origin Consumer checkout and an input
+// document with DAEMON_SELF_APP set, skipping when the restart cannot run here.
+func inPlaceConsumerT(t *testing.T) (consumer, input, gd string) {
 	t.Helper()
+	requireInPlaceRestart(t)
 	for _, bin := range []string{"git", "/bin/sh"} {
 		if _, err := exec.LookPath(bin); err != nil {
 			t.Skipf("%s not available", bin)
 		}
 	}
-	setSignalSettle(t, 0)
 	clearKnobEnvT(t)
-	consumer := bareOriginConsumerT(t)
+	consumer = bareOriginConsumerT(t)
 	doc := validKnobDocument()
 	doc.Settings["DAEMON_SELF_APP"] = ".#dogfood"
-	f := &inPlaceFixture{
-		input:    writeInputDocument(t, doc),
-		goFile:   filepath.Join(t.TempDir(), "go"),
-		newSelf:  newSelf,
-		stop:     make(chan struct{}),
-		termFile: filepath.Join(t.TempDir(), "term"),
-
-		childCreated: make(chan struct{}),
-	}
-	t.Chdir(consumer)
-	var err error
-	if f.gitDir, err = gitDir(consumer); err != nil {
+	input = writeInputDocument(t, doc)
+	gd, err := gitDir(consumer)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	return consumer, input, gd
+}
 
+// newInPlaceFixture sets exactly the fields stubExternalCommands reads.
+func newInPlaceFixture(goFile, termFile, newSelf string) *inPlaceFixture {
+	return &inPlaceFixture{goFile: goFile, termFile: termFile, newSelf: newSelf, childCreated: make(chan struct{})}
+}
+
+func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
+	t.Helper()
+	consumer, input, gd := inPlaceConsumerT(t)
+	setSignalSettle(t, 0)
+	f := newInPlaceFixture(filepath.Join(t.TempDir(), "go"), filepath.Join(t.TempDir(), "term"), newSelf)
+	f.input, f.gitDir, f.stop = input, gd, make(chan struct{})
+	t.Chdir(consumer)
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", inPlaceOldSelf)
+	f.stubExternalCommands(t)
+	f.stubInProcessSeams(t)
+	return f
+}
+
+// stubInProcessSeams replaces the stop handler and the exec: the two seams a
+// real-exec test keeps real or replaces itself.
+func (f *inPlaceFixture) stubInProcessSeams(t *testing.T) {
+	t.Helper()
+	origInstall, origSelfExec := installStopSignal, runnerSelfExec
+	t.Cleanup(func() { installStopSignal, runnerSelfExec = origInstall, origSelfExec })
+	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
+		f.installs.Add(1)
+		if f.onInstall != nil {
+			return f.onInstall(), make(chan struct{}), func() {}
+		}
+		return f.stop, make(chan struct{}), func() {}
+	}
+	runnerSelfExec = func(path string, argv, env []string) error {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.execs = append(f.execs, selfExecCall{path, slices.Clone(argv), slices.Clone(env)})
+		return f.execErr
+	}
+}
+
+// stubExternalCommands stubs doctor, eval, prebuild and the child exec for the
+// rest of the test.
+func (f *inPlaceFixture) stubExternalCommands(t *testing.T) {
+	t.Helper()
+	newSelf := f.newSelf
 	sh := func(ctx context.Context, script string) *exec.Cmd {
 		return exec.CommandContext(ctx, "/bin/sh", "-c", script)
 	}
-	origInstall, origDoctor, origEval, origPrebuild := installStopSignal, runnerDoctorCommand, runnerEvalCommand, runnerPrebuildCommand
-	origExec, origSelfExec := runnerExecCommand, runnerSelfExec
+	origDoctor, origEval, origPrebuild, origExec := runnerDoctorCommand, runnerEvalCommand, runnerPrebuildCommand, runnerExecCommand
 	t.Cleanup(func() {
-		installStopSignal, runnerDoctorCommand, runnerEvalCommand, runnerPrebuildCommand = origInstall, origDoctor, origEval, origPrebuild
-		runnerExecCommand, runnerSelfExec = origExec, origSelfExec
+		runnerDoctorCommand, runnerEvalCommand, runnerPrebuildCommand, runnerExecCommand = origDoctor, origEval, origPrebuild, origExec
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		for _, c := range f.children {
@@ -3775,13 +3816,6 @@ func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
 			}
 		}
 	})
-	installStopSignal = func() (<-chan struct{}, <-chan struct{}, func()) {
-		f.installs.Add(1)
-		if f.onInstall != nil {
-			return f.onInstall(), make(chan struct{}), func() {}
-		}
-		return f.stop, make(chan struct{}), func() {}
-	}
 	runnerDoctorCommand = func(ctx context.Context, _ string, _ ...string) *exec.Cmd { return sh(ctx, "exit 0") }
 	runnerEvalCommand = func(ctx context.Context, _ string, args ...string) *exec.Cmd {
 		if slices.Contains(args, "--apply") {
@@ -3822,13 +3856,6 @@ while [ ! -e "$1" ]; do sleep 0.02; done`
 		f.childCreatedOnce.Do(func() { close(f.childCreated) })
 		return c
 	}
-	runnerSelfExec = func(path string, argv, env []string) error {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		f.execs = append(f.execs, selfExecCall{path, slices.Clone(argv), slices.Clone(env)})
-		return f.execErr
-	}
-	return f
 }
 
 // start runs mainRun on argv in the background under f.stop.
@@ -3922,13 +3949,12 @@ func assertLockHeld(t *testing.T, gitDirPath string, want bool) {
 // daemon with its child still running and the lock still held; the second,
 // started from the exec's own argv, re-attaches that child and drains it.
 func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
-	const newSelf = "/nix/store/bbb-new/bin/daemon"
-	f := newInPlaceFixtureT(t, newSelf)
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 
 	call, out := f.handOff(t)
 	f.assertGCRoots(t, "after the handoff", "/nix/store/aaa-old", "/nix/store/bbb-new")
-	if call.path != newSelf || call.argv[0] != newSelf {
-		t.Errorf("exec path = %q argv0 = %q, want %q", call.path, call.argv[0], newSelf)
+	if call.path != inPlaceNewSelf || call.argv[0] != inPlaceNewSelf {
+		t.Errorf("exec path = %q argv0 = %q, want %q", call.path, call.argv[0], inPlaceNewSelf)
 	}
 	n := len(call.argv)
 	if n < 3 || call.argv[n-2] != handoffFlag {
@@ -3969,7 +3995,7 @@ func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
 		return stopped
 	}
 	// What the successor's wrapper does: it re-adds --input and exports its own path.
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", newSelf)
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", inPlaceNewSelf)
 	code, out2 := f.start(append([]string{"--input", f.input}, call.argv[1:]...))
 	if got := waitCode(t, code, out2); got != 0 {
 		t.Fatalf("second image exited %d; output:\n%s", got, out2.String())
@@ -3991,7 +4017,7 @@ func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
 	if !ok {
 		t.Fatalf("second image emitted no self_update handoff event; output:\n%s", out2.String())
 	}
-	if ev.FromPath != "/nix/store/aaa-old/bin/daemon" || ev.ToPath != newSelf || ev.Revision == "" || !slices.Equal(ev.Slots, []int{0}) {
+	if ev.FromPath != inPlaceOldSelf || ev.ToPath != inPlaceNewSelf || ev.Revision == "" || !slices.Equal(ev.Slots, []int{0}) {
 		t.Errorf("handoff event = %+v, want from the old to the new path, a revision and slots [0]", ev)
 	}
 	f.mu.Lock()
@@ -4008,7 +4034,7 @@ func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
 // the lock and the children ahead of everything that can fail: with no input
 // document it still keeps the lock until the child it inherited is waited out.
 func TestMainRun_ResumeTakesOverBeforeParsingInput(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	// No way back: a rollback would hand the child on instead of draining it.
 	f.execErr = errors.New("no rollback")
@@ -4043,7 +4069,7 @@ func TestMainRun_ResumeTakesOverBeforeParsingInput(t *testing.T) {
 // a stop that arrives during the wait: the operator's Ctrl-C must still reach
 // them rather than sit in a latch nothing reads.
 func TestMainRun_ResumeThatFailsStartupStillHonoursStop(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	f.execErr = errors.New("no rollback")
 	f.mu.Lock()
@@ -4083,7 +4109,7 @@ func TestMainRun_RestartInPlaceExecFailureKeepsSupervising(t *testing.T) {
 		wantReason string
 		wantExecs  int
 	}{
-		{"exec error", "/nix/store/bbb-new/bin/daemon", errors.New("boom"), "exec: boom", 1},
+		{"exec error", inPlaceNewSelf, errors.New("boom"), "exec: boom", 1},
 		{"target outside the store", "/opt/bbb-new/bin/daemon", nil, "exec: prebuilt daemon path \"/opt/bbb-new/bin/daemon\" is not under /nix/store/", 0},
 	}
 	for _, tt := range tests {
@@ -4127,7 +4153,7 @@ func TestMainRun_RestartInPlaceExecFailureKeepsSupervising(t *testing.T) {
 // restart is strictly opt-in: the same self-change without the flag prebuilds
 // the successor, drains the pool and exits ExitSelfChanged, never exec'ing.
 func TestMainRun_WithoutRestartInPlaceDrainsAndExits10(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 
 	code, out := f.start([]string{"--input", f.input, "dispatch"})
 	waitForEvent(t, out, "self_update", "built")
@@ -4258,14 +4284,13 @@ func (f *inPlaceFixture) execCalls() []selfExecCall {
 // has exited 0, still holding the lock for the third.
 func (f *inPlaceFixture) refuseAndRollBack(t *testing.T) selfExecCall {
 	t.Helper()
-	const newSelf = "/nix/store/bbb-new/bin/daemon"
 	call, _ := f.handOff(t)
 	f.assertGCRoots(t, "after the handoff", "/nix/store/aaa-old", "/nix/store/bbb-new")
 	// The third image must start with a working doctor.
 	prevDoctor := runnerDoctorCommand
 	defer func() { runnerDoctorCommand = prevDoctor }()
 	failDoctor(t)
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", newSelf)
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", inPlaceNewSelf)
 	code, out := f.start(f.resumeArgv(call))
 	if got := waitCode(t, code, out); got != 0 {
 		t.Fatalf("refusing image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
@@ -4276,7 +4301,7 @@ func (f *inPlaceFixture) refuseAndRollBack(t *testing.T) selfExecCall {
 	}
 	back := calls[1]
 	n := len(back.argv)
-	if back.path != "/nix/store/aaa-old/bin/daemon" || back.argv[0] != back.path || n < 3 || back.argv[n-2] != handoffFlag {
+	if back.path != inPlaceOldSelf || back.argv[0] != back.path || n < 3 || back.argv[n-2] != handoffFlag {
 		t.Fatalf("rollback exec = %+v, want the old program with %s <fd>", back, handoffFlag)
 	}
 	assertNoHandoffIn(t, "rollback exec", back.env)
@@ -4297,8 +4322,7 @@ func (f *inPlaceFixture) refuseAndRollBack(t *testing.T) selfExecCall {
 // records the rollback, keeps the inherited child and does not retry the
 // revision it was rolled back from.
 func TestMainRun_ResumedImageThatRefusesToStartRollsBack(t *testing.T) {
-	const newSelf = "/nix/store/bbb-new/bin/daemon"
-	f := newInPlaceFixtureT(t, newSelf)
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	var prebuilds atomic.Int32
 	origPrebuild := runnerPrebuildCommand
 	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
@@ -4322,10 +4346,10 @@ func TestMainRun_ResumedImageThatRefusesToStartRollsBack(t *testing.T) {
 
 	stop := make(chan struct{})
 	f.stop = stop
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", inPlaceOldSelf)
 	code, out := f.start(f.resumeArgv(back))
 	ev := waitForEvent(t, out, "self_update", "rolled-back")
-	if ev.FromPath != newSelf || ev.ToPath != "/nix/store/aaa-old/bin/daemon" || ev.Revision == "" || !slices.Equal(ev.Slots, []int{0}) {
+	if ev.FromPath != inPlaceNewSelf || ev.ToPath != inPlaceOldSelf || ev.Revision == "" || !slices.Equal(ev.Slots, []int{0}) {
 		t.Errorf("rolled-back event = %+v, want from the failed build to the old one, a revision and slots [0]", ev)
 	}
 	if !strings.Contains(ev.Reason, "preflight") {
@@ -4383,7 +4407,7 @@ func TestMainRun_ResumedImageThatRefusesToStartRollsBack(t *testing.T) {
 // rollback exec fails ends the way it did before rollback existed: the
 // inherited child is waited out and the exit code is the refusal's.
 func TestMainRun_RollbackImpossibleDrainsAndExits(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	f.execErr = errors.New("boom")
 	failDoctor(t)
@@ -4408,7 +4432,7 @@ func TestMainRun_RollbackImpossibleDrainsAndExits(t *testing.T) {
 // from a version 1 document, whose writer cannot read the rollback fields,
 // drains its inherited child and exits as if rollback did not exist.
 func TestMainRun_RollbackRefusedForVersion1Predecessor(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	fd, err := strconv.Atoi(call.argv[len(call.argv)-1])
 	if err != nil {
@@ -4445,10 +4469,10 @@ func TestMainRun_RollbackRefusedForVersion1Predecessor(t *testing.T) {
 // back to, if it too refuses to start, drains and exits rather than handing
 // the children back and forth.
 func TestMainRun_RolledBackImageDoesNotRollBackAgain(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	back := f.refuseAndRollBack(t)
 	failDoctor(t)
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", inPlaceOldSelf)
 	code, out := f.start(f.resumeArgv(back))
 	writeFileT(t, f.goFile, "")
 	if got := waitCode(t, code, out); got != daemon.ExitPreflightFailed {
@@ -4464,14 +4488,14 @@ func TestMainRun_RolledBackImageDoesNotRollBackAgain(t *testing.T) {
 // the re-attach rolls back, not only the preflight's: here the new build
 // cannot load its input document.
 func TestMainRun_ConfigRefusalAfterResumeRollsBack(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	code, out := f.start(append([]string{"--input", filepath.Join(t.TempDir(), "missing.json")}, call.argv[1:]...))
 	if got := waitCode(t, code, out); got != 0 {
 		t.Fatalf("image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
 	}
 	calls := f.execCalls()
-	if len(calls) != 2 || calls[1].path != "/nix/store/aaa-old/bin/daemon" {
+	if len(calls) != 2 || calls[1].path != inPlaceOldSelf {
 		t.Fatalf("exec calls = %+v, want the handoff then a rollback to the old program", calls)
 	}
 	assertLockHeld(t, f.gitDir, true)
@@ -4495,14 +4519,14 @@ func (f *inPlaceFixture) kindMismatchArgv(call selfExecCall) []string {
 // refuses like a failed preflight: it rolls back before any halt event, and
 // the previous build keeps supervising the child.
 func TestMainRun_HandoffFitRefusalAfterResumeRollsBack(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	code, out := f.start(f.kindMismatchArgv(call))
 	if got := waitCode(t, code, out); got != 0 {
 		t.Fatalf("image exited %d, want 0 (rolled back); output:\n%s", got, out.String())
 	}
 	calls := f.execCalls()
-	if len(calls) != 2 || calls[1].path != "/nix/store/aaa-old/bin/daemon" {
+	if len(calls) != 2 || calls[1].path != inPlaceOldSelf {
 		t.Fatalf("exec calls = %+v, want the handoff then a rollback to the old program", calls)
 	}
 	if _, ok := findEvent(eventsIn(out), "halt", ""); ok {
@@ -4523,7 +4547,7 @@ func TestMainRun_HandoffFitRefusalAfterResumeRollsBack(t *testing.T) {
 	back[slices.Index(back, "research")] = "dispatch"
 	stop := make(chan struct{})
 	f.stop = stop
-	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", "/nix/store/aaa-old/bin/daemon")
+	t.Setenv("SPINDRIFT_DAEMON_PROGRAM", inPlaceOldSelf)
 	code, out = f.start(back)
 	ev := waitForEvent(t, out, "self_update", "rolled-back")
 	if !strings.Contains(ev.Reason, "config-invalid") {
@@ -4542,7 +4566,7 @@ func TestMainRun_HandoffFitRefusalAfterResumeRollsBack(t *testing.T) {
 // rollback possible the same refusal halts config-invalid (exit 1, not the
 // preflight's 11) and waits out the inherited child with the lock held.
 func TestMainRun_HandoffFitRefusalWithoutRollbackHaltsAndDrains(t *testing.T) {
-	f := newInPlaceFixtureT(t, "/nix/store/bbb-new/bin/daemon")
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	f.execErr = errors.New("boom")
 	code, out := f.start(f.kindMismatchArgv(call))
@@ -4585,7 +4609,7 @@ func TestResumedRollBack_RefusesUnusableFromPath(t *testing.T) {
 				execs.Add(1)
 				return nil
 			}
-			res := &resumed{handoff: daemon.Handoff{V: daemon.HandoffRollbackVersion, FromPath: tt.fromPath, ToPath: "/nix/store/bbb-new/bin/daemon"}}
+			res := &resumed{handoff: daemon.Handoff{V: daemon.HandoffRollbackVersion, FromPath: tt.fromPath, ToPath: inPlaceNewSelf}}
 			err := res.rollBack(nil, nil, "refused")
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("rollBack() = %v, want an error containing %q", err, tt.wantErr)
