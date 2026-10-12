@@ -91,6 +91,10 @@ let
       roster
       ;
     skills = dogfoodSkills;
+    # flake.nix declares the opencode Driver beside claude, so the module
+    # renders the default Harness with harness.<driver>.env layering on.
+    # dogfoodBwrapHarness inherits it, so `.#dogfood-bwrap` layers too.
+    multiDriver = true;
   };
 
   # The dogfood as a direct call, mirroring the `spindrift = { ... }` module
