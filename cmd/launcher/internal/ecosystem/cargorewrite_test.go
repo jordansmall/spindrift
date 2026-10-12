@@ -1,6 +1,7 @@
 package ecosystem
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/url"
 	"testing"
@@ -183,6 +184,122 @@ func TestRewriteCargoDL_LearnedPath(t *testing.T) {
 				t.Errorf("learnedPath = %q, want %q", result.Edits[0].LearnedPath, tc.want)
 			}
 		})
+	}
+}
+
+// Cargo substitutes {crate}, {version}, {prefix}, {lowerprefix} and
+// {sha256-checksum} in dl before fetching, so the rewritten dl must keep them
+// as literal braces and the learned path must stop before the first one: the
+// substituted download paths are what the route has to admit.
+func TestRewriteCargoDL_Markers(t *testing.T) {
+	tests := []struct {
+		name        string
+		dl          string
+		wantTo      string
+		wantLearned string
+		admits      string
+	}{
+		{
+			name:        "marker mid-segment",
+			dl:          "https://crates.example.com/basic/o/r/cargo/{crate}-{version}.crate",
+			wantTo:      "http://127.0.0.1:9999/r0/basic/o/r/cargo/{crate}-{version}.crate",
+			wantLearned: "/basic/o/r/cargo",
+			admits:      "/basic/o/r/cargo/serde-1.0.0.crate",
+		},
+		{
+			name:        "multi-segment template",
+			dl:          "https://crates.example.com/api/v1/crates/{prefix}/{crate}/{version}/{sha256-checksum}",
+			wantTo:      "http://127.0.0.1:9999/r0/api/v1/crates/{prefix}/{crate}/{version}/{sha256-checksum}",
+			wantLearned: "/api/v1/crates",
+			admits:      "/api/v1/crates/se/serde/1.0.0/abc123",
+		},
+		{
+			name:        "escaped segment before a marker",
+			dl:          "https://crates.example.com/a%20b/{crate}",
+			wantTo:      "http://127.0.0.1:9999/r0/a%20b/{crate}",
+			wantLearned: "/a b",
+			admits:      "/a b/serde",
+		},
+		{
+			name:        "markers in the query",
+			dl:          "https://crates.example.com/dl?c={crate}&v={version}",
+			wantTo:      "http://127.0.0.1:9999/r0/dl?c={crate}&v={version}",
+			wantLearned: "/dl",
+			admits:      "/dl",
+		},
+		{
+			name:        "marker in the first segment learns the whole host",
+			dl:          "https://crates.example.com/{crate}/{version}/download",
+			wantTo:      "http://127.0.0.1:9999/r0/{crate}/{version}/download",
+			wantLearned: "/",
+			admits:      "/serde/1.0.0/download",
+		},
+		{
+			name:        "doubled slash before a marker",
+			dl:          "https://crates.example.com/a//{crate}",
+			wantTo:      "http://127.0.0.1:9999/r0/a//{crate}",
+			wantLearned: "/a",
+			admits:      "/a/serde",
+		},
+		{
+			name:        "encoded marker in the query is kept verbatim",
+			dl:          "https://crates.example.com/a/{crate}?q=%7Bcrate%7D",
+			wantTo:      "http://127.0.0.1:9999/r0/a/{crate}?q=%7Bcrate%7D",
+			wantLearned: "/a",
+			admits:      "/a/serde",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			body := []byte(`{"dl":"` + tc.dl + `"}`)
+			rc := cargoRewriteContext
+
+			result := rewriteCargoDL(body, rc)
+
+			if result.Outcome != registryvocab.RewriteApplied {
+				t.Fatalf("outcome = %v, want RewriteApplied", result.Outcome)
+			}
+			if len(result.Edits) != 1 {
+				t.Fatalf("edits = %v, want exactly one", result.Edits)
+			}
+			if result.Edits[0].To != tc.wantTo {
+				t.Errorf("to = %q, want %q", result.Edits[0].To, tc.wantTo)
+			}
+			var out map[string]string
+			if err := json.Unmarshal(result.Body, &out); err != nil {
+				t.Fatalf("body %s: %v", result.Body, err)
+			}
+			if out["dl"] != tc.wantTo {
+				t.Errorf("body dl = %q, want %q", out["dl"], tc.wantTo)
+			}
+			if result.Edits[0].LearnedPath != tc.wantLearned {
+				t.Errorf("learnedPath = %q, want %q", result.Edits[0].LearnedPath, tc.wantLearned)
+			}
+			if !(registryvocab.PathSet{result.Edits[0].LearnedPath}).Admits(tc.admits) {
+				t.Errorf("PathSet{%q} does not admit %q", result.Edits[0].LearnedPath, tc.admits)
+			}
+		})
+	}
+}
+
+// A dl that genuinely spells a marker percent-encoded is not a template and
+// must not be turned into one.
+func TestRewriteCargoDL_EncodedMarkerNotATemplate(t *testing.T) {
+	body := []byte(`{"dl":"https://crates.example.com/x/%7Bcrate%7D"}`)
+
+	result := rewriteCargoDL(body, cargoRewriteContext)
+
+	if result.Outcome != registryvocab.RewriteApplied {
+		t.Fatalf("outcome = %v, want RewriteApplied", result.Outcome)
+	}
+	if len(result.Edits) != 1 {
+		t.Fatalf("edits = %v, want exactly one", result.Edits)
+	}
+	if want := "http://127.0.0.1:9999/r0/x/%7Bcrate%7D"; result.Edits[0].To != want {
+		t.Errorf("to = %q, want %q", result.Edits[0].To, want)
+	}
+	if want := "/x/{crate}"; result.Edits[0].LearnedPath != want {
+		t.Errorf("learnedPath = %q, want %q", result.Edits[0].LearnedPath, want)
 	}
 }
 
