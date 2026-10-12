@@ -305,7 +305,8 @@ If `nix develop` is unavailable or fails, fall back to the baked toolchain —
 so.
 
 The full `nix flake check` — including the image-building checks
-`checks-inbox` skips — is what CI runs pre-dispatch/pre-merge; it isn't the
+`checks-inbox` skips — is what CI runs pre-dispatch/pre-merge (a docs-only
+PR builds just `checks-docs` instead; issue #5155); it isn't the
 in-box gate. Run it in-box only if you touched `nix/checks/image.nix`,
 `lib/image.nix`, or anything else that changes what gets baked into the
 image, since that's the one case the scoped target can't cover:
