@@ -11,6 +11,7 @@
   --running: #34d399;
   --backing_off: #fb923c;
   --ci-wait: #f472b6;
+  --image-build: #38bdf8;
   --working: #34d399;
   --waiting: #60a5fa;
   --jammed: #fbbf24;
@@ -53,6 +54,7 @@ code, time, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; f
 .phase-idle { --c: var(--idle); }
 .ci-wait { --c: var(--ci-wait); }
 .self-update { --c: var(--resolving); }
+.image-build { --c: var(--image-build); }
 .pill { color: var(--c, var(--muted)); }
 
 .banner { border: 1px solid var(--border); border-left-width: 6px; border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1rem; background: var(--panel); }
@@ -100,6 +102,7 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .history .ev-backoff { border-left-color: var(--backing_off); }
 .history .ev-jam { border-left-color: var(--jammed); }
 .history .ev-settled { border-left-color: var(--running); }
+.history .ev-image_build { border-left-color: var(--image-build); }
 .history .evname { font-weight: 600; }
 .history .detail { color: var(--muted); }
 .history .note { color: var(--muted); margin-top: .2rem; white-space: pre-wrap; word-break: break-word; }

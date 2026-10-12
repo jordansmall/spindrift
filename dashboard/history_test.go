@@ -179,6 +179,15 @@ func TestHistoryWithNoDaemon(t *testing.T) {
 	})
 }
 
+func TestHistoryShowsImageBuild(t *testing.T) {
+	ev := `{"time":"2026-10-07T09:00:00Z","event":"child_start","kind":"work","slot":0}` + "\n" +
+		`{"time":"2026-10-07T09:01:00Z","event":"image_build","state":"started","kind":"work","revision":"abcdef1234567","slot":0}` + "\n" +
+		`{"time":"2026-10-07T09:02:00Z","event":"image_build","state":"finished","kind":"work","revision":"abcdef1234567","slot":0}` + "\n" +
+		`{"time":"2026-10-07T09:03:00Z","event":"backoff","kind":"work","wait":"5m0s"}` + "\n"
+	body := getHistory(t, nil, map[string]string{eventsFileName: ev})
+	inOrder(t, body, "2026-10-07T09:03:00Z", "2026-10-07T09:02:00Z", "image_build", "finished", "2026-10-07T09:01:00Z", "image_build", "started", "2026-10-07T09:00:00Z")
+}
+
 func TestHistoryExcludesOtherEventsAndSkipsMalformed(t *testing.T) {
 	ev := `{"time":"2026-10-07T09:00:00Z","event":"heartbeat"}` + "\n" +
 		`not json` + "\n" +
