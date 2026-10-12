@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/landdelta"
 )
 
@@ -71,7 +72,7 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 // FormatSpindriftOp returns a single status line for one orchestrator
 // operation (issue #2027), marked with "○" so it does not read as
 // implementor narration.
-func FormatSpindriftOp(issue string, op SpindriftOp) string {
+func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s \xe2\x97\x8b ", issue)
 	switch op.Op {
@@ -103,7 +104,7 @@ func FormatSpindriftOp(issue string, op SpindriftOp) string {
 		}
 		// Usage is nil for a pass that crashed or emitted no usage events
 		// (issue #3156 AC), so render zero totals rather than dereferencing.
-		var u PassUsage
+		var u hostop.PassUsage
 		if op.Usage != nil {
 			u = *op.Usage
 		}

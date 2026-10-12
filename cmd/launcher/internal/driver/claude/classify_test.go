@@ -9,6 +9,7 @@ import (
 
 	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 var classifyTests = []struct {
@@ -523,9 +524,9 @@ func TestClassify_OversizedLine_ChunkMatchesMarker(t *testing.T) {
 // The host-written dispatch_start stamp carries operator knob values, so a
 // transient marker inside one must not read as the Box's failure.
 func TestClassify_DispatchStartStampIsNotScanned(t *testing.T) {
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{
 		Op:    "dispatch_start",
-		Start: &claude.DispatchStart{Knobs: map[string]string{"BOX_NOTE": "Overloaded; connection refused"}},
+		Start: &hostop.DispatchStart{Knobs: map[string]string{"BOX_NOTE": "Overloaded; connection refused"}},
 	})
 	logPath := claude.WriteLog(t, strings.TrimSuffix(stamp, "\n"))
 
@@ -540,9 +541,9 @@ func TestClassify_DispatchStartStampIsNotScanned(t *testing.T) {
 
 // dispatch_settled carries Box-authored note text, so it is skipped too.
 func TestClassify_DispatchSettledIsNotScanned(t *testing.T) {
-	settled := claude.EncodeSpindriftOp(claude.SpindriftOp{
+	settled := hostop.EncodeSpindriftOp(hostop.SpindriftOp{
 		Op:      "dispatch_settled",
-		Settled: &claude.DispatchSettled{State: "failed", Note: "Overloaded; connection refused"},
+		Settled: &hostop.DispatchSettled{State: "failed", Note: "Overloaded; connection refused"},
 	})
 	logPath := claude.WriteLog(t, strings.TrimSuffix(settled, "\n"))
 

@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -899,12 +900,12 @@ func TestWriterEmitsSpindriftOpVerdict(t *testing.T) {
 // A decision op renders its decision and reason together, and drops the
 // trailing separator when the reason is empty (issue #2027).
 func TestFormatSpindriftOpDecision(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "decision", Decision: "stop", Reason: "max review rounds reached"})
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "decision", Decision: "stop", Reason: "max review rounds reached"})
 	if !strings.Contains(got, "stop: max review rounds reached") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "stop: max review rounds reached")
 	}
 
-	gotNoReason := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "decision", Decision: "continue"})
+	gotNoReason := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "decision", Decision: "continue"})
 	if !strings.Contains(gotNoReason, "continue") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotNoReason, "continue")
 	}
@@ -919,7 +920,7 @@ func TestFormatSpindriftOpDecision(t *testing.T) {
 // way the driver-exec verb's own printed line does -- "rejected (usage):" --
 // so the host log and the agent-visible line never drift apart.
 func TestFormatSpindriftOpSignalUsage(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "signal", Kind: "pr-intent", Decision: "usage", Reason: "flag provided but not defined: -nonce"})
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "signal", Kind: "pr-intent", Decision: "usage", Reason: "flag provided but not defined: -nonce"})
 	want := "signal pr-intent rejected (usage): flag provided but not defined: -nonce"
 	if !strings.Contains(got, want) {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, want)
@@ -930,23 +931,23 @@ func TestFormatSpindriftOpSignalUsage(t *testing.T) {
 // fire and skip cases, rather than falling through to the default arm's bare
 // op-name rendering (issue #3246).
 func TestFormatSpindriftOpDeltaReviewTrigger(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "fire", Reason: "land delta touches lines beyond the reviewer's findings: run.go:42"})
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "delta_review_trigger", Decision: "fire", Reason: "land delta touches lines beyond the reviewer's findings: run.go:42"})
 	if !strings.Contains(got, "fire: land delta touches lines beyond the reviewer's findings: run.go:42") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain the fire decision and reason", got)
 	}
 
-	gotSkip := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "delta_review_trigger", Decision: "skip", Reason: "max slices reached"})
+	gotSkip := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "delta_review_trigger", Decision: "skip", Reason: "max slices reached"})
 	if !strings.Contains(gotSkip, "skip: max slices reached") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain the skip decision and reason", gotSkip)
 	}
 }
 
-// EncodeSpindriftOp produces one newline-terminated stream-json line that the
-// Writer parses back into a status row. That is the seam the orchestrator uses
-// to emit its own operations onto the stdout stream driver-exec's raw output
-// already flows through (issue #2027).
+// hostop.EncodeSpindriftOp produces one newline-terminated stream-json line
+// that the Writer parses back into a status row. That is the seam the
+// orchestrator uses to emit its own operations onto the stdout stream
+// driver-exec's raw output already flows through (issue #2027).
 func TestEncodeSpindriftOpFeedsWriter(t *testing.T) {
-	line := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 3})
+	line := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 3})
 	if !strings.HasSuffix(line, "\n") {
 		t.Fatalf("EncodeSpindriftOp = %q, want a trailing newline", line)
 	}
@@ -980,7 +981,7 @@ func TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines(t *testing.T) {
 
 // A run_state_error op renders its phase and error text (issue #2027).
 func TestFormatSpindriftOpRunStateError(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "write", Error: "permission denied"})
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "run_state_error", Phase: "write", Error: "permission denied"})
 	if !strings.Contains(got, "run-state write failed: permission denied") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "run-state write failed: permission denied")
 	}
@@ -990,7 +991,7 @@ func TestFormatSpindriftOpRunStateError(t *testing.T) {
 // dispositions_budget failed": the tripwire is a loud but non-fatal budget
 // notice, not a run-state read, write, or append failure (issue #2550 AC9).
 func TestFormatSpindriftOpDispositionsBudget(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "dispositions_budget", Error: "round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)"})
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "run_state_error", Phase: "dispositions_budget", Error: "round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)"})
 	if !strings.Contains(got, "dispositions budget: round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "dispositions budget: round 1 mean 283.0/entry (ceiling 40), total 283 tokens (ceiling 400)")
 	}
@@ -1003,7 +1004,7 @@ func TestFormatSpindriftOpDispositionsBudget(t *testing.T) {
 // the "decisions_budget" phase gets its own wording, not "run-state
 // decisions_budget failed" (issue #2695).
 func TestFormatSpindriftOpDecisionsBudget(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{Op: "run_state_error", Phase: "decisions_budget", Error: "round 1 mean 283.0/entry (ceiling 50), total 283 tokens (ceiling 400)"})
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{Op: "run_state_error", Phase: "decisions_budget", Error: "round 1 mean 283.0/entry (ceiling 50), total 283 tokens (ceiling 400)"})
 	if !strings.Contains(got, "decisions budget: round 1 mean 283.0/entry (ceiling 50), total 283 tokens (ceiling 400)") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "decisions budget: round 1 mean 283.0/entry (ceiling 50), total 283 tokens (ceiling 400)")
 	}
@@ -1016,7 +1017,7 @@ func TestFormatSpindriftOpDecisionsBudget(t *testing.T) {
 // tell a mid-turn cutoff after a BLOCK apart from one with no verdict at all
 // (issue #2036).
 func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 3, Verdict: "BLOCK", Reason: "exit 0"})
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_no_outcome", Pass: 3, Verdict: "BLOCK", Reason: "exit 0"})
 	if !strings.Contains(got, "pass 3 ended with no outcome") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 3 ended with no outcome")
 	}
@@ -1024,7 +1025,7 @@ func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want the last verdict named inline", got)
 	}
 
-	gotNoVerdict := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Reason: "exit 137"})
+	gotNoVerdict := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Reason: "exit 137"})
 	if !strings.Contains(gotNoVerdict, "pass 1 ended with no outcome") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", gotNoVerdict, "pass 1 ended with no outcome")
 	}
@@ -1038,7 +1039,7 @@ func TestFormatSpindriftOpPassNoOutcome(t *testing.T) {
 // single-line row (issue #2027 AC: "Operation rows are sanitized to a single
 // line").
 func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "run_state_error", Phase: "read", Error: "bad\x1b[2J\nfake-row"})
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "run_state_error", Phase: "read", Error: "bad\x1b[2J\nfake-row"})
 	if strings.Contains(got, "\n") {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", got)
 	}
@@ -1046,7 +1047,7 @@ func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", got)
 	}
 
-	gotNoOutcome := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Verdict: "bad\x1b[2J\nfake-row", Reason: "bad\x1b[2J\nfake-row"})
+	gotNoOutcome := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Verdict: "bad\x1b[2J\nfake-row", Reason: "bad\x1b[2J\nfake-row"})
 	if strings.Contains(gotNoOutcome, "\n") {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", gotNoOutcome)
 	}
@@ -1054,7 +1055,7 @@ func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded escape sequence", gotNoOutcome)
 	}
 
-	gotBidi := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Verdict: "ok\u202eevil", Reason: "a\u2066b\u2028c"})
+	gotBidi := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_no_outcome", Pass: 1, Verdict: "ok\u202eevil", Reason: "a\u2066b\u2028c"})
 	const wantBidi = "#42 ○ pass 1 ended with no outcome (last verdict okevil, abc)"
 	if gotBidi != wantBidi {
 		t.Errorf("FormatSpindriftOp = %q, want %q", gotBidi, wantBidi)
@@ -1064,7 +1065,7 @@ func TestFormatSpindriftOpSanitizesDynamicFields(t *testing.T) {
 // A pass_start op renders as one status row carrying the issue tag and pass
 // number (issue #2027).
 func TestFormatSpindriftOpPassStart(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2})
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_start", Pass: 2})
 	if !strings.HasPrefix(got, "#42 ") {
 		t.Errorf("FormatSpindriftOp = %q, want it to start with issue tag %q", got, "#42 ")
 	}
@@ -1103,7 +1104,7 @@ func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
 // implement or fix pass. Unlike a legacy single-pass run, either may
 // legitimately end with no SPINDRIFT_OUTCOME of its own.
 func TestFormatSpindriftOpPassStartWithRole(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"})
 	if !strings.Contains(got, "pass 2 (review) started") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 2 (review) started")
 	}
@@ -1266,11 +1267,11 @@ func TestWriterPassStartEmptyRoleDoesNotChangeActiveRole(t *testing.T) {
 // A pass_usage op renders its pass number, role, and aggregate totals as one
 // status row (issue #3156).
 func TestFormatSpindriftOpPassUsage(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:   "pass_usage",
 		Pass: 2,
 		Role: "review",
-		Usage: &claude.PassUsage{
+		Usage: &hostop.PassUsage{
 			APICalls:                 932,
 			UncachedInputTokens:      1200,
 			OutputTokens:             240000,
@@ -1309,10 +1310,10 @@ func TestFormatSpindriftOpPassUsage(t *testing.T) {
 // string: a driver whose report carries whole-pass output (opencode) renders
 // an unqualified out column, or the caveat would understate real data.
 func TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:   "pass_usage",
 		Pass: 2,
-		Usage: &claude.PassUsage{
+		Usage: &hostop.PassUsage{
 			APICalls:     7,
 			OutputTokens: 4242,
 		},
@@ -1329,10 +1330,10 @@ func TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly(t *testing.T) {
 // breakdownByAgentFile sets as main loop first then costliest subagent first,
 // rather than re-sorting it.
 func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:   "pass_usage",
 		Pass: 2,
-		Usage: &claude.PassUsage{
+		Usage: &hostop.PassUsage{
 			Agents: []usage.AgentUsage{
 				{Agent: usage.MainLoopAgent, UncachedInputTokens: 210},
 				{Agent: "worker", UncachedInputTokens: 480},
@@ -1355,7 +1356,7 @@ func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
 // panicking: the case of a pass that crashes or produces no usage events
 // reaching the render path.
 func TestFormatSpindriftOpPassUsageNilUsage(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "pass_usage", Pass: 1})
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "pass_usage", Pass: 1})
 	if !strings.Contains(got, "pass 1 usage") {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain %q", got, "pass 1 usage")
 	}
@@ -1368,10 +1369,10 @@ func TestFormatSpindriftOpPassUsageNilUsage(t *testing.T) {
 // every other dynamic field (issue #2027 AC): agent labels come from a
 // subagent_type field in the Box's own stream, which is untrusted content.
 func TestFormatSpindriftOpPassUsageSanitizesAgentNames(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:   "pass_usage",
 		Pass: 1,
-		Usage: &claude.PassUsage{
+		Usage: &hostop.PassUsage{
 			Agents: []usage.AgentUsage{
 				{Agent: "bad\x1b[2J\nfake-row"},
 			},
@@ -1389,7 +1390,7 @@ func TestFormatSpindriftOpPassUsageSanitizesAgentNames(t *testing.T) {
 // distinct lines: zero is never simply omitted, and an unknown delta names its
 // own Reason (issue #3244).
 func TestFormatSpindriftOpLandDelta(t *testing.T) {
-	counted := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	counted := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:   "land_delta",
 		Pass: 5,
 		Delta: &landdelta.Delta{
@@ -1404,7 +1405,7 @@ func TestFormatSpindriftOpLandDelta(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want %q (must match landdelta.Delta.Summary() -- issue #3244)", counted, want)
 	}
 
-	zero := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	zero := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:    "land_delta",
 		Pass:  5,
 		Delta: &landdelta.Delta{Known: true},
@@ -1413,7 +1414,7 @@ func TestFormatSpindriftOpLandDelta(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want the zero delta stated explicitly", zero)
 	}
 
-	unknown := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	unknown := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:    "land_delta",
 		Pass:  5,
 		Delta: &landdelta.Delta{Known: false, Reason: "no reviewed-commit anchor"},
@@ -1426,7 +1427,7 @@ func TestFormatSpindriftOpLandDelta(t *testing.T) {
 // A land_delta op with a nil Delta degrades to a single line instead of
 // panicking, mirroring TestFormatSpindriftOpPassUsageNilUsage.
 func TestFormatSpindriftOpLandDeltaNilDelta(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{Op: "land_delta", Pass: 5})
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{Op: "land_delta", Pass: 5})
 	if !strings.Contains(got, "unknown") {
 		t.Errorf("FormatSpindriftOp = %q, want a nil Delta to degrade to the unknown case", got)
 	}
@@ -1441,7 +1442,7 @@ func TestFormatSpindriftOpLandDeltaNilDelta(t *testing.T) {
 // A Box-influenced Reason, such as one naming an unresolved base ref, is
 // sanitized like every other dynamic field (issue #2027 AC).
 func TestFormatSpindriftOpLandDeltaSanitizesReason(t *testing.T) {
-	got := claude.FormatSpindriftOp("42", claude.SpindriftOp{
+	got := claude.FormatSpindriftOp("42", hostop.SpindriftOp{
 		Op:    "land_delta",
 		Pass:  5,
 		Delta: &landdelta.Delta{Known: false, Reason: "bad\x1b[2J\nfake-row"},
@@ -1454,14 +1455,15 @@ func TestFormatSpindriftOpLandDeltaSanitizesReason(t *testing.T) {
 	}
 }
 
-// The nested PassUsage and Agents payload survives the same stream-json
-// encode/decode seam every other op kind already does (issue #3156).
+// The nested hostop.PassUsage and Agents payload survives the same
+// stream-json encode/decode seam every other op kind already does (issue
+// #3156).
 func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
-	want := claude.SpindriftOp{
+	want := hostop.SpindriftOp{
 		Op:   "pass_usage",
 		Pass: 2,
 		Role: "review",
-		Usage: &claude.PassUsage{
+		Usage: &hostop.PassUsage{
 			APICalls:                 932,
 			UncachedInputTokens:      1200,
 			OutputTokens:             240000,
@@ -1473,10 +1475,10 @@ func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
 			},
 		},
 	}
-	line := claude.EncodeSpindriftOp(want)
+	line := hostop.EncodeSpindriftOp(want)
 
 	var ev struct {
-		SpindriftOp *claude.SpindriftOp `json:"spindrift_op"`
+		SpindriftOp *hostop.SpindriftOp `json:"spindrift_op"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &ev); err != nil {
 		t.Fatalf("json.Unmarshal(%q) = %v", line, err)
@@ -1493,7 +1495,7 @@ func TestEncodeSpindriftOpPassUsageRoundTrip(t *testing.T) {
 // encode/decode seam TestEncodeSpindriftOpPassUsageRoundTrip covers for
 // pass_usage (issue #3244).
 func TestEncodeSpindriftOpLandDeltaRoundTrip(t *testing.T) {
-	want := claude.SpindriftOp{
+	want := hostop.SpindriftOp{
 		Op:   "land_delta",
 		Pass: 5,
 		Delta: &landdelta.Delta{
@@ -1503,10 +1505,10 @@ func TestEncodeSpindriftOpLandDeltaRoundTrip(t *testing.T) {
 			Deletions:  3,
 		},
 	}
-	line := claude.EncodeSpindriftOp(want)
+	line := hostop.EncodeSpindriftOp(want)
 
 	var ev struct {
-		SpindriftOp *claude.SpindriftOp `json:"spindrift_op"`
+		SpindriftOp *hostop.SpindriftOp `json:"spindrift_op"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &ev); err != nil {
 		t.Fatalf("json.Unmarshal(%q) = %v", line, err)
@@ -1522,7 +1524,7 @@ func TestEncodeSpindriftOpLandDeltaRoundTrip(t *testing.T) {
 // A signal op renders its kind, byte count and content hash on accept, and its
 // kind plus the reject reason on reject (issue #3724).
 func TestFormatSpindriftOpSignal(t *testing.T) {
-	got := claude.FormatSpindriftOp("7", claude.SpindriftOp{
+	got := claude.FormatSpindriftOp("7", hostop.SpindriftOp{
 		Op:       "signal",
 		Kind:     "comment",
 		Size:     412,
@@ -1533,7 +1535,7 @@ func TestFormatSpindriftOpSignal(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want it to contain the accepted kind, size and hash", got)
 	}
 
-	gotReject := claude.FormatSpindriftOp("7", claude.SpindriftOp{
+	gotReject := claude.FormatSpindriftOp("7", hostop.SpindriftOp{
 		Op:       "signal",
 		Kind:     "comment",
 		Size:     70000,
@@ -1548,7 +1550,7 @@ func TestFormatSpindriftOpSignal(t *testing.T) {
 		t.Errorf("FormatSpindriftOp = %q, want no embedded newline", gotReject)
 	}
 
-	gotRead := claude.FormatSpindriftOp("7", claude.SpindriftOp{
+	gotRead := claude.FormatSpindriftOp("7", hostop.SpindriftOp{
 		Op:       "signal",
 		Kind:     "status",
 		Decision: "read",
@@ -1564,14 +1566,14 @@ func TestFormatSpindriftOpSignal(t *testing.T) {
 // The signal op's kind, size, hash and decision survive the same stream-json
 // encode/decode seam every other op kind already does (issue #3724).
 func TestEncodeSpindriftOpSignalRoundTrip(t *testing.T) {
-	want := claude.SpindriftOp{
+	want := hostop.SpindriftOp{
 		Op:       "signal",
 		Kind:     "pr-intent",
 		Size:     412,
 		Hash:     "sha256:9f2c",
 		Decision: "accept",
 	}
-	line := claude.EncodeSpindriftOp(want)
+	line := hostop.EncodeSpindriftOp(want)
 
 	for _, key := range []string{`"kind":"pr-intent"`, `"size":412`, `"hash":"sha256:9f2c"`, `"decision":"accept"`} {
 		if !strings.Contains(line, key) {
@@ -1580,7 +1582,7 @@ func TestEncodeSpindriftOpSignalRoundTrip(t *testing.T) {
 	}
 
 	var ev struct {
-		SpindriftOp *claude.SpindriftOp `json:"spindrift_op"`
+		SpindriftOp *hostop.SpindriftOp `json:"spindrift_op"`
 	}
 	if err := json.Unmarshal([]byte(strings.TrimSuffix(line, "\n")), &ev); err != nil {
 		t.Fatalf("json.Unmarshal(%q) = %v", line, err)

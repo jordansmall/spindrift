@@ -9,8 +9,8 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/settle"
 	"spindrift.dev/launcher/internal/testutil"
@@ -25,7 +25,7 @@ func TestTransitionState_NoteReported(t *testing.T) {
 	read := testutil.InstallPipeReporter(t)
 	fc := forge.NewFake()
 	path := filepath.Join(t.TempDir(), "issue-42.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:42@x"}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:42@x"}})
 	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -54,9 +54,9 @@ func TestTransitionState_NoteReported(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var settled []claude.DispatchSettled
+	var settled []hostop.DispatchSettled
 	for _, line := range strings.Split(string(data), "\n") {
-		var ev claude.Event
+		var ev hostop.Event
 		if json.Unmarshal([]byte(line), &ev) == nil && ev.SpindriftOp != nil && ev.SpindriftOp.Settled != nil {
 			settled = append(settled, *ev.SpindriftOp.Settled)
 		}

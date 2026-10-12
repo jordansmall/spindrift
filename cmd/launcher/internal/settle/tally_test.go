@@ -6,8 +6,8 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -15,7 +15,7 @@ func TestTally_SettledRecordsOutcome(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
 
-	Settled(dispatchkey.Issue("7"), "", claude.DispatchSettled{
+	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{
 		State:  forge.Complete.String(),
 		Reason: ReasonMerged,
 		PRURL:  "https://example.test/pr/1",
@@ -37,9 +37,9 @@ func TestTally_LastWriteWinsKeepingFirstSettledPosition(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
 
-	Settled(dispatchkey.Issue("1"), "", claude.DispatchSettled{State: forge.Failed.String(), Reason: ReasonCIRed})
-	Settled(dispatchkey.Issue("2"), "", claude.DispatchSettled{State: forge.Complete.String(), Reason: ReasonMerged})
-	Settled(dispatchkey.Issue("1"), "", claude.DispatchSettled{State: forge.Complete.String(), Reason: ReasonMerged})
+	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Failed.String(), Reason: ReasonCIRed})
+	Settled(dispatchkey.Issue("2"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: ReasonMerged})
+	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String(), Reason: ReasonMerged})
 
 	got := tally.Outcomes()
 	if len(got) != 2 {
@@ -56,7 +56,7 @@ func TestTally_LastWriteWinsKeepingFirstSettledPosition(t *testing.T) {
 func TestTally_OutcomesReturnsCopy(t *testing.T) {
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
-	Settled(dispatchkey.Issue("1"), "", claude.DispatchSettled{State: forge.Complete.String()})
+	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String()})
 
 	tally.Outcomes()[0].State = "mutated"
 
@@ -68,7 +68,7 @@ func TestTally_OutcomesReturnsCopy(t *testing.T) {
 func TestTally_SettledWithoutInstalledTallyDoesNotPanic(t *testing.T) {
 	t.Cleanup(InstallTally(nil))
 
-	Settled(dispatchkey.Issue("7"), "", claude.DispatchSettled{State: forge.Complete.String()})
+	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{State: forge.Complete.String()})
 }
 
 func TestTally_InstallRestoresPrevious(t *testing.T) {
@@ -77,7 +77,7 @@ func TestTally_InstallRestoresPrevious(t *testing.T) {
 
 	restore := InstallTally(&Tally{})
 	restore()
-	Settled(dispatchkey.Issue("1"), "", claude.DispatchSettled{State: forge.Complete.String()})
+	Settled(dispatchkey.Issue("1"), "", hostop.DispatchSettled{State: forge.Complete.String()})
 
 	if len(outer.Outcomes()) != 1 {
 		t.Fatalf("outer tally not restored: %+v", outer.Outcomes())

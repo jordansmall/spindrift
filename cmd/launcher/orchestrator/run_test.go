@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/passmachine"
 	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/promptassembly"
@@ -119,10 +119,10 @@ func TestPassReportDegradesOnMissingLog(t *testing.T) {
 
 // TestAgentUsagePayloadDegradesOnMissingLog verifies agentUsagePayload's own
 // not-found path (issue #3156), mirroring passReport's: a log path that was
-// never written degrades to the zero claude.PassUsage silently.
+// never written degrades to the zero hostop.PassUsage silently.
 func TestAgentUsagePayloadDegradesOnMissingLog(t *testing.T) {
 	got := agentUsagePayload(passReport(filepath.Join(t.TempDir(), "never-written.log"), "claude"))
-	if !reflect.DeepEqual(got, claude.PassUsage{}) {
+	if !reflect.DeepEqual(got, hostop.PassUsage{}) {
 		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want the zero value for a log that was never written", got)
 	}
 }
@@ -148,7 +148,7 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 
 	got := agentUsagePayload(passReport(logPath, "claude"))
 
-	want := claude.PassUsage{
+	want := hostop.PassUsage{
 		APICalls:                 2,
 		UncachedInputTokens:      30,
 		OutputTokens:             999,
@@ -399,17 +399,17 @@ exit 0
 
 // collectPassUsageOps decodes every pass_usage spindrift_op line in stdout, in
 // emission order (issue #3156 asks for a decode, not a substring match, since
-// PassUsage's field order is not a stable substring). A line that fails to
-// unmarshal is skipped: stdout also carries the fake driver-exec's own raw
-// non-JSON output interleaved with the orchestrator's op lines.
-func collectPassUsageOps(t *testing.T, stdout string) []claude.SpindriftOp {
+// hostop.PassUsage's field order is not a stable substring). A line that
+// fails to unmarshal is skipped: stdout also carries the fake driver-exec's
+// own raw non-JSON output interleaved with the orchestrator's op lines.
+func collectPassUsageOps(t *testing.T, stdout string) []hostop.SpindriftOp {
 	t.Helper()
-	var ops []claude.SpindriftOp
+	var ops []hostop.SpindriftOp
 	for _, line := range strings.Split(strings.TrimRight(stdout, "\n"), "\n") {
 		if line == "" {
 			continue
 		}
-		var ev claude.Event
+		var ev hostop.Event
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
 			continue
 		}
@@ -445,8 +445,8 @@ exit 0
 		}
 
 		got := collectPassUsageOps(t, stdout.String())
-		want := []claude.SpindriftOp{
-			{Op: "pass_usage", Pass: 1, Usage: &claude.PassUsage{}},
+		want := []hostop.SpindriftOp{
+			{Op: "pass_usage", Pass: 1, Usage: &hostop.PassUsage{}},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("pass_usage ops = %+v, want %+v", got, want)
@@ -488,14 +488,14 @@ exit 0
 		}
 
 		got := collectPassUsageOps(t, stdout.String())
-		want := []claude.SpindriftOp{
-			{Op: "pass_usage", Pass: 1, Role: "implement", Usage: &claude.PassUsage{}},
-			{Op: "pass_usage", Pass: 2, Role: "review", Usage: &claude.PassUsage{}},
-			{Op: "pass_usage", Pass: 3, Role: "fix", Usage: &claude.PassUsage{}},
-			{Op: "pass_usage", Pass: 4, Role: "review", Usage: &claude.PassUsage{}},
+		want := []hostop.SpindriftOp{
+			{Op: "pass_usage", Pass: 1, Role: "implement", Usage: &hostop.PassUsage{}},
+			{Op: "pass_usage", Pass: 2, Role: "review", Usage: &hostop.PassUsage{}},
+			{Op: "pass_usage", Pass: 3, Role: "fix", Usage: &hostop.PassUsage{}},
+			{Op: "pass_usage", Pass: 4, Role: "review", Usage: &hostop.PassUsage{}},
 			// The land pass's log ends in a result event, which marks its output
 			// count main-loop-only even with no usage fields.
-			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &claude.PassUsage{OutputIsMainLoopOnly: true}},
+			{Op: "pass_usage", Pass: 5, Role: "land", Usage: &hostop.PassUsage{OutputIsMainLoopOnly: true}},
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("pass_usage ops = %+v, want %+v", got, want)
@@ -1561,7 +1561,7 @@ func TestRunDecisionOpsAlwaysHaveNonEmptyReason(t *testing.T) {
 			if line == "" {
 				continue
 			}
-			var ev claude.Event
+			var ev hostop.Event
 			if err := json.Unmarshal([]byte(line), &ev); err != nil {
 				t.Fatalf("unmarshal stdout line %q: %v", line, err)
 			}

@@ -10,23 +10,23 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
 )
 
-func settledOps(t *testing.T, path string) []claude.DispatchSettled {
+func settledOps(t *testing.T, path string) []hostop.DispatchSettled {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []claude.DispatchSettled
+	var out []hostop.DispatchSettled
 	for _, line := range strings.Split(string(data), "\n") {
-		if !strings.Contains(line, `"`+claude.OpDispatchSettled+`"`) {
+		if !strings.Contains(line, `"`+hostop.OpDispatchSettled+`"`) {
 			continue
 		}
-		var ev claude.Event
+		var ev hostop.Event
 		if json.Unmarshal([]byte(line), &ev) != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
 			t.Fatalf("unparseable settled line %q", line)
 		}
@@ -41,12 +41,12 @@ func settledOps(t *testing.T, path string) []claude.DispatchSettled {
 func TestSettledPrior_FillsRecordIDFromLogStamp(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	path := filepath.Join(t.TempDir(), "issue-7.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:7@x", Kind: "work", DispatchKey: "7"}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:7@x", Kind: "work", DispatchKey: "7"}})
 	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	SettledPrior(dispatchkey.Issue("7"), path, claude.DispatchSettled{State: "complete", Reason: "merged", PRURL: "https://x/pr/1"})
+	SettledPrior(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "complete", Reason: "merged", PRURL: "https://x/pr/1"})
 
 	ops := settledOps(t, path)
 	if len(ops) != 1 || ops[0].RecordID != "work:7@x" || ops[0].State != "complete" || ops[0].PRURL != "https://x/pr/1" {
@@ -67,8 +67,8 @@ func TestSettledPrior_FillsRecordIDFromLogStamp(t *testing.T) {
 func TestSettledBy_EmptyRecordIDLeavesEarlierRecordUntouched(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	path := filepath.Join(t.TempDir(), "issue-7.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:7@x"}})
-	settled := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchSettled, Settled: &claude.DispatchSettled{RecordID: "work:7@x", State: "complete", Reason: "merged"}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:7@x"}})
+	settled := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchSettled, Settled: &hostop.DispatchSettled{RecordID: "work:7@x", State: "complete", Reason: "merged"}})
 	if err := os.WriteFile(path, []byte(stamp+settled), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +94,7 @@ func TestSettledBy_AppendsUnderDispatchRecordID(t *testing.T) {
 
 	SettledBy(&dispatch.Fake{LogPathResult: path, RecordIDResult: "work:7@y"}, dispatchkey.Issue("7"), "failed", ReasonBoxFailed, "boom")
 
-	want := claude.DispatchSettled{RecordID: "work:7@y", State: "failed", Reason: ReasonBoxFailed, Note: "boom"}
+	want := hostop.DispatchSettled{RecordID: "work:7@y", State: "failed", Reason: ReasonBoxFailed, Note: "boom"}
 	if ops := settledOps(t, path); len(ops) != 1 || ops[0] != want {
 		t.Fatalf("settled ops = %+v, want [%+v]", ops, want)
 	}
@@ -104,12 +104,12 @@ func TestSettledBy_AppendsUnderDispatchRecordID(t *testing.T) {
 func TestSettled_EmptyRecordIDAppendsNothing(t *testing.T) {
 	testutil.InstallPipeReporter(t)
 	path := filepath.Join(t.TempDir(), "issue-7.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:7@x"}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:7@x"}})
 	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	Settled(dispatchkey.Issue("7"), path, claude.DispatchSettled{State: "failed"})
+	Settled(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "failed"})
 
 	if ops := settledOps(t, path); len(ops) != 0 {
 		t.Fatalf("settled ops = %+v, want none", ops)
@@ -119,12 +119,12 @@ func TestSettled_EmptyRecordIDAppendsNothing(t *testing.T) {
 func TestSettled_ExplicitRecordIDWinsOverStamp(t *testing.T) {
 	testutil.InstallPipeReporter(t)
 	path := filepath.Join(t.TempDir(), "issue-7.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:7@x"}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:7@x"}})
 	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	Settled(dispatchkey.Issue("7"), path, claude.DispatchSettled{RecordID: "work:7@y", State: "failed"})
+	Settled(dispatchkey.Issue("7"), path, hostop.DispatchSettled{RecordID: "work:7@y", State: "failed"})
 
 	if ops := settledOps(t, path); len(ops) != 1 || ops[0].RecordID != "work:7@y" {
 		t.Fatalf("settled ops = %+v", ops)
@@ -137,8 +137,8 @@ func TestSettled_MissingLogAppendsNothing(t *testing.T) {
 	readRecords := testutil.InstallPipeReporter(t)
 	path := filepath.Join(t.TempDir(), "issue-7.log")
 
-	Settled(dispatchkey.Issue("7"), path, claude.DispatchSettled{RecordID: "work:7@x", State: "failed"})
-	Settled(dispatchkey.Issue("7"), "", claude.DispatchSettled{State: "failed"})
+	Settled(dispatchkey.Issue("7"), path, hostop.DispatchSettled{RecordID: "work:7@x", State: "failed"})
+	Settled(dispatchkey.Issue("7"), "", hostop.DispatchSettled{State: "failed"})
 
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("log stat err = %v, want not exist", err)
@@ -156,7 +156,7 @@ func TestSettled_UnstampedLogAppendsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SettledPrior(dispatchkey.Issue("7"), path, claude.DispatchSettled{State: "failed"})
+	SettledPrior(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "failed"})
 
 	if ops := settledOps(t, path); len(ops) != 0 {
 		t.Fatalf("settled ops = %+v, want none", ops)
@@ -184,12 +184,12 @@ func TestSettled_EchoesStampHostToken(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			testutil.InstallPipeReporter(t)
 			path := filepath.Join(t.TempDir(), "issue-7.log")
-			stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: "work:7@x", Kind: "work", DispatchKey: "7", HostToken: tc.token}})
+			stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: "work:7@x", Kind: "work", DispatchKey: "7", HostToken: tc.token}})
 			if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 				t.Fatal(err)
 			}
 
-			ds := claude.DispatchSettled{State: "complete", Reason: "merged"}
+			ds := hostop.DispatchSettled{State: "complete", Reason: "merged"}
 			if tc.explicitID {
 				ds.RecordID = "work:7@x"
 				Settled(dispatchkey.Issue("7"), path, ds)

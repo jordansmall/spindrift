@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
@@ -20,7 +20,7 @@ import (
 func stampedFake(t *testing.T, recordID string) (*dispatch.Fake, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "issue.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: recordID}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: recordID}})
 	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestSettleAdopted_NilDispatcherAppendsNothing(t *testing.T) {
 	}
 }
 
-func flushLatched(t *testing.T, fc *forge.Fake, reason string) []claude.DispatchSettled {
+func flushLatched(t *testing.T, fc *forge.Fake, reason string) []hostop.DispatchSettled {
 	t.Helper()
 	c := baseConfig()
 	d, path := stampedFake(t, "work:9@x")
@@ -123,7 +123,7 @@ func TestFlushSettled_NotMergedOmitsMergeCommit(t *testing.T) {
 func TestFlushSettled_MergeCommitReadErrorKeepsOutcome(t *testing.T) {
 	fc := forge.NewFake()
 	fc.MergeCommitErr = errors.New("boom")
-	var ops []claude.DispatchSettled
+	var ops []hostop.DispatchSettled
 	stderr := testutil.CaptureStderr(t, func() { ops = flushLatched(t, fc, ReasonMerged) })
 	if len(ops) != 1 || ops[0].State != "complete" || ops[0].Reason != ReasonMerged || ops[0].MergeCommit != "" {
 		t.Fatalf("ops = %+v, want one complete/merged without a merge commit", ops)

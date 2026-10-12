@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/seambundle"
@@ -859,7 +859,7 @@ func TestSettle_GithubReadOnly_ReadyDraftPRCreateFailureParksFailedWithBundlePre
 	if len(lines) != 2 {
 		t.Fatalf("log = %q, want the prior line plus exactly one appended op", raw)
 	}
-	var ev claude.Event
+	var ev hostop.Event
 	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
 		t.Fatalf("appended line %q is not a dispatch_settled op: %v", lines[1], err)
 	}

@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchrecord"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/flock"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -141,7 +141,7 @@ func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now t
 		if state != forge.PRMerged {
 			continue
 		}
-		ds := claude.DispatchSettled{
+		ds := hostop.DispatchSettled{
 			RecordID: r.ID,
 			State:    forge.Complete.String(),
 			Reason:   ReasonMerged,
@@ -150,7 +150,7 @@ func LateMerges(root string, pr forge.PRForge, mc forge.MergeCommitReader, now t
 		}
 		ds.MergeCommit = readMergeCommit(mc, r.ID, r.PRURL, warn)
 		if err := appendSettled(path, ds); err != nil {
-			fmt.Fprintf(warn, "    ?? %s: could not append %s to %s: %v\n", r.ID, claude.OpDispatchSettled, path, err)
+			fmt.Fprintf(warn, "    ?? %s: could not append %s to %s: %v\n", r.ID, hostop.OpDispatchSettled, path, err)
 			continue
 		}
 		merged = append(merged, r.ID)

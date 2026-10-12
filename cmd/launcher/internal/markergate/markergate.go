@@ -10,7 +10,7 @@ import (
 	"fmt"
 	"strings"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/signalwire"
 )
@@ -270,7 +270,7 @@ func Resolve(cfg ResolveConfig) (Resolution, error) {
 		if cfg.SignalCarrier == signalCarrierSocket {
 			reason = "no PR intent on the signal socket status route, handing off blocked"
 		}
-		r.OpLine = claude.EncodeSpindriftOp(claude.SpindriftOp{
+		r.OpLine = hostop.EncodeSpindriftOp(hostop.SpindriftOp{
 			Op:       "decision",
 			Decision: "stop",
 			Reason:   fmt.Sprintf("read-only PR-intent nudge exhausted after %d attempt; %s", cfg.Attempts, reason),

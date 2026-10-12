@@ -11,8 +11,8 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/dispatchkey"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/testutil"
@@ -157,7 +157,7 @@ func TestSettleAdopted_CompleteThenDemoted_EmitsSingleFailedSettledRecord(t *tes
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
-	var ev claude.Event
+	var ev hostop.Event
 	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &ev); err != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
 		t.Fatalf("last log line %q is not a dispatch_settled op: %v", lines[len(lines)-1], err)
 	}
@@ -544,12 +544,12 @@ func TestSettle_FlushSettled_AppendsDispatchSettledToPrimaryLog(t *testing.T) {
 	if len(lines) != 2 || lines[0] != "existing" {
 		t.Fatalf("log = %q, want the prior line plus exactly one appended op", raw)
 	}
-	var ev claude.Event
+	var ev hostop.Event
 	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil || ev.SpindriftOp == nil {
 		t.Fatalf("appended line %q is not a spindrift_op: %v", lines[1], err)
 	}
-	want := claude.DispatchSettled{RecordID: "work:9@t", State: "failed", Reason: "ci-red", Note: "red", PRURL: testPR}
-	if ev.SpindriftOp.Op != claude.OpDispatchSettled || ev.SpindriftOp.Settled == nil || *ev.SpindriftOp.Settled != want {
+	want := hostop.DispatchSettled{RecordID: "work:9@t", State: "failed", Reason: "ci-red", Note: "red", PRURL: testPR}
+	if ev.SpindriftOp.Op != hostop.OpDispatchSettled || ev.SpindriftOp.Settled == nil || *ev.SpindriftOp.Settled != want {
 		t.Errorf("op = %+v, want dispatch_settled %+v", ev.SpindriftOp, want)
 	}
 	recs := readRecords()

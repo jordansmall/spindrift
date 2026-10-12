@@ -11,8 +11,8 @@ import (
 
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatch"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/ledger"
 	"spindrift.dev/launcher/internal/ledger/ledgertest"
 	"spindrift.dev/launcher/internal/report"
@@ -26,7 +26,7 @@ const settledRecordID = "butler:bugs@x"
 func settledFake(t *testing.T) (*dispatch.Fake, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "butler.log")
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{RecordID: settledRecordID}})
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{RecordID: settledRecordID}})
 	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -44,9 +44,9 @@ func requireOneSettled(t *testing.T, path, state, reason string, recs []report.R
 	if err != nil {
 		t.Fatal(err)
 	}
-	var ops []claude.DispatchSettled
+	var ops []hostop.DispatchSettled
 	for _, line := range strings.Split(string(data), "\n") {
-		var ev claude.Event
+		var ev hostop.Event
 		if json.Unmarshal([]byte(line), &ev) == nil && ev.SpindriftOp != nil && ev.SpindriftOp.Settled != nil {
 			ops = append(ops, *ev.SpindriftOp.Settled)
 		}

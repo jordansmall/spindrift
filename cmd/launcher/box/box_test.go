@@ -18,7 +18,7 @@ import (
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/bundleout"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/outcomebackstop"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/readonlyguards"
@@ -2114,10 +2114,10 @@ func TestParseFlagsModelOmitEmpty(t *testing.T) {
 
 // promptHashesOp returns the prompt_hashes op assemblePrompt wrote onto the
 // Pass log, or nil when it wrote none.
-func promptHashesOp(t *testing.T, log string) *claude.PromptHashes {
+func promptHashesOp(t *testing.T, log string) *hostop.PromptHashes {
 	t.Helper()
 	for _, line := range strings.Split(log, "\n") {
-		var ev claude.Event
+		var ev hostop.Event
 		if json.Unmarshal([]byte(line), &ev) == nil && ev.SpindriftOp != nil && ev.SpindriftOp.Op == "prompt_hashes" {
 			return ev.SpindriftOp.PromptHashes
 		}
@@ -2128,7 +2128,7 @@ func promptHashesOp(t *testing.T, log string) *claude.PromptHashes {
 // The hashes cover the templates, not the Dispatch: two Dispatches of the same
 // build report the same per-role hashes under their own Record ID.
 func TestAssemblePrompt_EmitsPromptHashesStableAcrossDispatchFacts(t *testing.T) {
-	var got [2]*claude.PromptHashes
+	var got [2]*hostop.PromptHashes
 	for i := range got {
 		env := coveredWorkEnv()
 		env.RecordID = "rec-1"

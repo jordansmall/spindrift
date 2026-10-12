@@ -16,7 +16,7 @@ import (
 	"spindrift.dev/launcher/internal/chore"
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/registryproxy"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
@@ -144,7 +144,7 @@ type Config struct {
 	// log's dispatch_start stamp (issue #4783): only Revision, RoleModels,
 	// DriverVersion and Knobs are read. The Dispatch fills in the rest (Record
 	// ID, kind, key, claim and log-start times, driver name).
-	Stamp claude.DispatchStart
+	Stamp hostop.DispatchStart
 
 	// SelfContained forwards the research kind's no-repo sub-mode as
 	// SELF_CONTAINED=1 (issue #2202), so box skips the clone and

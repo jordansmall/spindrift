@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -66,8 +66,8 @@ func emitPromptHashes(env promptassembly.Env, reg promptassembly.Registry, w io.
 		fmt.Fprintf(w, "box: prompt template hashes skipped: %v\n", err)
 		return
 	}
-	fmt.Fprint(w, claude.EncodeSpindriftOp(claude.SpindriftOp{
+	fmt.Fprint(w, hostop.EncodeSpindriftOp(hostop.SpindriftOp{
 		Op:           "prompt_hashes",
-		PromptHashes: &claude.PromptHashes{RecordID: env.RecordID, Roles: hashes},
+		PromptHashes: &hostop.PromptHashes{RecordID: env.RecordID, Roles: hashes},
 	}))
 }

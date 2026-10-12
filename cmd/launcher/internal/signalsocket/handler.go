@@ -13,7 +13,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/signalwire"
 )
 
@@ -44,7 +44,7 @@ type opRecordKey struct{}
 
 // opRecord accumulates one request's mirror fields as it moves through
 // routing, decoding and accept. The mirror middleware creates it, stashes it
-// on the request context, and emits it as the request's one claude.SpindriftOp
+// on the request context, and emits it as the request's one hostop.SpindriftOp
 // once the inner handler returns.
 type opRecord struct {
 	kind     string
@@ -184,7 +184,7 @@ func kindForPath(path string) (kind string, isUsage bool) {
 
 // mirror wraps next so every request passes through exactly one emission
 // point: it stashes a fresh opRecord on the request's context, calls next,
-// then writes the one claude.SpindriftOp the record accumulated. This is what
+// then writes the one hostop.SpindriftOp the record accumulated. This is what
 // makes "exactly one event per request" structural rather than a convention
 // each route arm has to remember.
 func (h *handler) mirror(next http.Handler) http.Handler {
@@ -195,7 +195,7 @@ func (h *handler) mirror(next http.Handler) http.Handler {
 		kind, usage := kindForPath(r.URL.Path)
 		rec := &opRecord{kind: kind, usage: usage, decision: "reject"}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), opRecordKey{}, rec)))
-		h.emit(claude.SpindriftOp{
+		h.emit(hostop.SpindriftOp{
 			Op:       "signal",
 			Kind:     rec.kind,
 			Decision: rec.decision,
@@ -206,11 +206,11 @@ func (h *handler) mirror(next http.Handler) http.Handler {
 	})
 }
 
-func (h *handler) emit(op claude.SpindriftOp) {
+func (h *handler) emit(op hostop.SpindriftOp) {
 	if h.logw == nil {
 		return
 	}
-	line := claude.EncodeSpindriftOp(op)
+	line := hostop.EncodeSpindriftOp(op)
 	if line == "" {
 		return
 	}

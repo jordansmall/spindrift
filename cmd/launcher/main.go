@@ -24,11 +24,11 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgejo"
 	"spindrift.dev/launcher/internal/forge/local"
 	"spindrift.dev/launcher/internal/freshness"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/inputdoc"
 	"spindrift.dev/launcher/internal/localloop"
 	"spindrift.dev/launcher/internal/outcome"
@@ -2486,5 +2486,5 @@ func primaryLogPath(num string) string {
 // settles the prior work Dispatch's Record, so the empty RecordID makes
 // settle.SettledPrior read the ID from the primary log's dispatch_start stamp.
 func recoverSettled(num string, state forge.DispatchState, reason, note string) {
-	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), claude.DispatchSettled{State: state.String(), Reason: reason, Note: note})
+	settle.SettledPrior(dispatchkey.Issue(num), primaryLogPath(num), hostop.DispatchSettled{State: state.String(), Reason: reason, Note: note})
 }

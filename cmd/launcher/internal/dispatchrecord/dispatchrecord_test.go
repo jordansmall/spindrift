@@ -13,11 +13,11 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/passmachine"
 )
 
-func opLine(op claude.SpindriftOp) string { return claude.EncodeSpindriftOp(op) }
+func opLine(op hostop.SpindriftOp) string { return hostop.EncodeSpindriftOp(op) }
 
 func assistant(id string) string {
 	return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"m","content":[]}}`+"\n", id)
@@ -56,21 +56,21 @@ func TestParseLog(t *testing.T) {
 			name: "multi-pass work with review BLOCK then APPROVE",
 			file: "issue-42.log",
 			lines: []string{
-				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 				`{"type":"system","timestamp":"2026-10-07T12:34:56.789123Z"}` + "\n",
 				assistant("a"), assistant("a"), assistant("b"),
 				result("2026-10-07T12:35:00Z", 1.5, 7, 4000, 3000, "claude-opus", "claude-haiku"),
-				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
 				assistant("c"),
 				result("2026-10-07T12:36:00Z", 0.5, 2, 1000, 900, "claude-sonnet"),
-				opLine(claude.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}),
-				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
+				opLine(hostop.SpindriftOp{Op: "verdict", Pass: 2, Verdict: "BLOCK"}),
+				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
 				result("2026-10-07T12:37:00Z", 1, 3, 2000, 1500, "claude-opus"),
-				opLine(claude.SpindriftOp{Op: "pass_start", Pass: 4, Role: "review"}),
+				opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 4, Role: "review"}),
 				assistant("d"),
-				opLine(claude.SpindriftOp{Op: "pass_usage", Pass: 4, Usage: &claude.PassUsage{APICalls: 9}}),
+				opLine(hostop.SpindriftOp{Op: "pass_usage", Pass: 4, Usage: &hostop.PassUsage{APICalls: 9}}),
 				result("2026-10-07T12:38:00Z", 0.25, 1, 500, 400, "claude-sonnet"),
-				opLine(claude.SpindriftOp{Op: "verdict", Pass: 4, Verdict: "APPROVE"}),
+				opLine(hostop.SpindriftOp{Op: "verdict", Pass: 4, Verdict: "APPROVE"}),
 			},
 			wantID:   "work:42@2026-10-07T12:34:56.789Z",
 			wantKind: "work",
@@ -125,7 +125,7 @@ func TestParseLog(t *testing.T) {
 		{
 			name:     "prior-run file key",
 			file:     "issue-9.log.prior-run.2",
-			lines:    []string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})},
+			lines:    []string{opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})},
 			wantKind: "work",
 			wantKey:  "9",
 			passes:   []Pass{{Ordinal: 1, Role: "implement", Models: []string{}}},
@@ -162,7 +162,7 @@ func TestParseLog(t *testing.T) {
 }
 
 func TestParseLogCrashFallsBackToMtime(t *testing.T) {
-	p := writeLog(t, "issue-5.log", opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
+	p := writeLog(t, "issue-5.log", opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}))
 	mtime := time.Date(2026, 10, 7, 9, 8, 7, 654_000_000, time.FixedZone("x", 3600))
 	if err := os.Chtimes(p, mtime, mtime); err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestChainKey(t *testing.T) {
 func TestParseLogPassOrdinalsStrictlyIncrease(t *testing.T) {
 	p := writeLog(t, "issue-7.log",
 		result("2026-10-07T12:00:00Z", 1, 1, 10, 5, "opus"),
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		result("2026-10-07T12:01:00Z", 1, 1, 10, 5, "opus"),
 	)
 	rec, _, err := ParseLog(p)
@@ -319,20 +319,20 @@ func TestParseLogReviewEvidence(t *testing.T) {
 		return assistantTool(id, "Write", map[string]string{"file_path": path, "content": content}) + toolResult(id, false)
 	}
 	p := writeLog(t, "issue-9.log",
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}),
 		write("i1", "/tmp/dispositions.md", "implement must not keep this"),
 		resultText(ts, "implement result"),
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 2, Role: "review"}),
 		resultText(ts, "first draft"),
 		resultText(ts, "VERDICT: BLOCK\nfix the thing"),
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 3, Role: "fix"}),
 		write("f1", "/tmp/dispositions.md", "early"),
 		write("f2", "/tmp/other.md", "ignored"),
 		assistantToolUse("f3", "f3a", "Write", map[string]string{"file_path": "/tmp/dispositions.md", "content": "first of shared id"})+toolResult("f3a", false),
 		assistantToolUse("f3", "f3b", "Write", map[string]string{"file_path": "/tmp/dispositions.md", "content": "second of shared id"})+toolResult("f3b", false),
 		assistantTool("f4", "Read", map[string]string{"file_path": "/tmp/dispositions.md", "content": "not a write"}),
 		resultText(ts, "fix result"),
-		opLine(claude.SpindriftOp{Op: "pass_start", Pass: 4, Role: "delta-review"}),
+		opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 4, Role: "delta-review"}),
 		resultText(ts, "VERDICT: APPROVE"),
 	)
 	rec, _, err := ParseLog(p)
@@ -375,7 +375,7 @@ func TestParseLogDispositionsNeedASuccessfulWrite(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			lines := append([]string{opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})}, tt.lines...)
+			lines := append([]string{opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "fix"})}, tt.lines...)
 			rec, _, err := ParseLog(writeLog(t, "issue-9.log", append(lines, resultText("2026-10-07T12:00:00Z", "done"))...))
 			if err != nil {
 				t.Fatal(err)
@@ -392,9 +392,9 @@ func outcomeLine(status string, extra ...string) string {
 }
 
 func TestParseLogKindFromOutcomeStatus(t *testing.T) {
-	start := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
+	start := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"})
 	res := result("2026-10-07T12:35:00Z", 1, 1, 1, 1, "m")
-	roleless := opLine(claude.SpindriftOp{Op: "pass_start", Pass: 1})
+	roleless := opLine(hostop.SpindriftOp{Op: "pass_start", Pass: 1})
 	researching := "==> claude researching issue #42\n"
 	implementing := "==> claude implementing issue #42 on agent/issue-42\n"
 	tests := []struct {

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/hostpaths"
 )
 
@@ -26,7 +26,7 @@ func concurrentLog(t *testing.T, root string, n int) {
 func writeConcurrentLog(root string, n int) error {
 	key := fmt.Sprint(100 + n)
 	claim := stampClaim.Add(time.Duration(n) * time.Minute)
-	stamp := opLine(claude.SpindriftOp{Op: "dispatch_start", Start: &claude.DispatchStart{
+	stamp := opLine(hostop.SpindriftOp{Op: "dispatch_start", Start: &hostop.DispatchStart{
 		RecordID:    RecordID("work", key, claim),
 		Kind:        "work",
 		DispatchKey: key,

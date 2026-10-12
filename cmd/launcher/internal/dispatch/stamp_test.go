@@ -12,7 +12,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchrecord"
 	"spindrift.dev/launcher/internal/driver"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/runner"
 	"spindrift.dev/launcher/internal/testutil"
 )
@@ -20,7 +20,7 @@ import (
 // stampBoxOutput is what each fake Box writes: one pass with a turn and a
 // result, enough for the ingester to count a pass in that log.
 func stampBoxOutput(n int) []byte {
-	return []byte(claude.EncodeSpindriftOp(claude.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
+	return []byte(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "pass_start", Pass: 1, Role: "implement"}) +
 		`{"type":"assistant","message":{"id":"a` + fmt.Sprint(n) + `","model":"m","content":[]}}` + "\n" +
 		`{"type":"result","timestamp":"2026-05-01T09:00:00Z","num_turns":1,"total_cost_usd":1,` +
 		`"usage":{"input_tokens":1,"output_tokens":1},"modelUsage":{"m":{}}}` + "\n")
@@ -35,7 +35,7 @@ func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
 
 	cfg := retryConfig(3, 0, 0)
 	cfg.Kind = "work"
-	cfg.Stamp = claude.DispatchStart{
+	cfg.Stamp = hostop.DispatchStart{
 		Revision:      "abc123",
 		RoleModels:    map[string]string{"main": "opus"},
 		DriverVersion: "9.9.9",
@@ -158,7 +158,7 @@ func TestDispatchStart_ReadOnlyBoxKindStampsEffectiveAccess(t *testing.T) {
 	cfg := retryConfig(1, 0, 0)
 	cfg.Kind = "butler"
 	cfg.BoxForgeAndIssueAccess = "read-write"
-	cfg.Stamp = claude.DispatchStart{Knobs: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write", "MAX_PASSES": "4"}}
+	cfg.Stamp = hostop.DispatchStart{Knobs: map[string]string{"BOX_FORGE_AND_ISSUE_ACCESS": "read-write", "MAX_PASSES": "4"}}
 	d := newTestDispatch(t, cfg, runner.NewFake(), fakeDriver{}, Clock{Now: time.Now, Sleep: func(time.Duration) {}})
 
 	got := d.dispatchStart().Knobs
@@ -188,7 +188,7 @@ func TestDispatchStamp_AdoptedFixContinuesPriorRecord(t *testing.T) {
 	}
 	clock := Clock{Now: func() time.Time { return time.Date(2026, 5, 2, 8, 0, 0, 0, time.UTC) }, Sleep: func(time.Duration) {}}
 	d := newTestDispatch(t, cfg, fr, fakeDriver{}, clock)
-	stamp := claude.EncodeSpindriftOp(claude.SpindriftOp{Op: claude.OpDispatchStart, Start: &claude.DispatchStart{
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
 		RecordID: prior, Kind: "work", DispatchKey: "1", ClaimTime: claim, Started: claim,
 	}})
 	if err := writeFile(d.logPath(), stamp+string(stampBoxOutput(0))); err != nil {

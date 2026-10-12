@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"os"
 
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // dispatchStamp is the deployment facts every Pass log's dispatch_start
@@ -15,7 +15,7 @@ import (
 // schemaFlags, and the explicit skip keeps that true if the generator ever
 // changes. reviewModel is the dispatch-time REVIEW_MODEL, the same value
 // dispatchConfig hands ReviewModelOverride.
-func dispatchStamp(reviewModel string) claude.DispatchStart {
+func dispatchStamp(reviewModel string) hostop.DispatchStart {
 	secret := make(map[string]bool, len(secretKnobs))
 	for _, s := range secretKnobs {
 		secret[s.env] = true
@@ -26,7 +26,7 @@ func dispatchStamp(reviewModel string) claude.DispatchStart {
 			knobs[e.env] = redactUserinfo(getenvSchema(e.env))
 		}
 	}
-	return claude.DispatchStart{
+	return hostop.DispatchStart{
 		Revision:      revision,
 		RoleModels:    stampRoleModels(reviewModel),
 		DriverVersion: docArtifact("DRIVER_VERSION"),
