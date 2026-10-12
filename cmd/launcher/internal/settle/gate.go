@@ -223,6 +223,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		s.postUsageComment(num, d)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=%s\n", num, o.Landing, o.Status)
+		// Never transitions, so Settled never sees this Dispatch. Reason stays
+		// empty: o.Status is Box-controlled and the banner prints only
+		// host-derived values.
+		tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String()})
 		s.postUsageComment(num, d)
 	}
 }
@@ -412,6 +416,7 @@ func Settled(key dispatchkey.Key, logPath string, ds claude.DispatchSettled) {
 		}
 	}
 	report.Settled(key, ds.State, ds.Note, ds.PRURL, ds.RecordID)
+	tallyOutcome(DispatchOutcome{Key: key, State: ds.State, Reason: ds.Reason, PRURL: ds.PRURL})
 }
 
 // ingestSettled ingests the settled Dispatch's own logs so its Record is in the
