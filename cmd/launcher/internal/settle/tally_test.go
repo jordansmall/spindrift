@@ -93,7 +93,7 @@ func settleReadyResult(num, branch string) dispatch.Result {
 
 // blockHandoff never transitions the issue, so Settled never runs; the
 // banner must still see the Dispatch as undelivered (issue #5145).
-func TestTally_ReadOnlyCreateDraftPRFailureRecordsMergeBlocked(t *testing.T) {
+func TestTally_ReadOnlyMissingBundleRecordsMergeBlocked(t *testing.T) {
 	const num = "1919"
 	tally := &Tally{}
 	t.Cleanup(InstallTally(tally))
@@ -101,8 +101,7 @@ func TestTally_ReadOnlyCreateDraftPRFailureRecordsMergeBlocked(t *testing.T) {
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
 	fc.SetIssue(forge.Issue{Number: num, Labels: []string{"agent-in-progress"}})
-	fc.CommitSubjectsResult = []string{"feat: add widget"}
-	fc.CreateDraftPRErr = errors.New("create draft PR: 500")
+	fc.RelayBundleErr = forge.ErrBundleNotFound
 
 	c := baseConfig()
 	c.ReadOnly = true
