@@ -884,3 +884,74 @@ func TestRun_BranchLandingResolvesWithoutLandingRecorder(t *testing.T) {
 		t.Errorf("RecordLandingCalls = %v, want none", f.RecordLandingCalls)
 	}
 }
+
+// A re-dispatch that halted ambiguous opens no new PR, so the bare branch
+// still resolves to a prior attempt's closed-unmerged PR (issue #5006). That
+// stale PR must neither be recorded as this attempt's landing nor flag the
+// issue abandoned.
+func TestRun_BranchLandingWithClosedPRIsUnverifiableAndNotRecorded(t *testing.T) {
+	f := forge.NewFake()
+	f.SetPR("agent/issue-41", forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRClosed)
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Landing: "agent/issue-41"})
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "https://github.com/o/r/pull/1"})
+	f.SetPRState("https://github.com/o/r/pull/1", forge.PRMerged)
+
+	var res reconcile.Result
+	out := testutil.CaptureStdout(t, func() {
+		var err error
+		res, err = reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "#41  landing=agent/issue-41  status=landing-unverifiable  !! PR https://github.com/o/r/pull/7 for branch agent/issue-41 closed unmerged") {
+		t.Errorf("want a landing-unverifiable line for #41; got: %q", out)
+	}
+	if len(res.Abandoned) != 0 {
+		t.Errorf("Abandoned = %v, want none", res.Abandoned)
+	}
+	if len(f.RecordLandingCalls) != 0 {
+		t.Errorf("RecordLandingCalls = %v, want none", f.RecordLandingCalls)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+}
+
+// An open PR under a bare branch is the one a new attempt adopted, so it is
+// recorded and the issue is left open and unflagged.
+func TestRun_BranchLandingWithOpenPRRecordsAndLeavesIssueOpen(t *testing.T) {
+	f := forge.NewFake()
+	f.SetPR("agent/issue-42", forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PROpen)
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen, Landing: "agent/issue-42"})
+
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 0 || len(res.Abandoned) != 0 {
+		t.Errorf("Closed = %v, Abandoned = %v, want neither", res.Closed, res.Abandoned)
+	}
+	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
+		t.Errorf("RecordLandingCalls = %v, want one call recording the open PR", f.RecordLandingCalls)
+	}
+}
+
+// The PR state is read before a branch-resolved landing is recorded, so a
+// failed state read aborts the sweep with nothing recorded and the next sweep
+// resolves the branch afresh.
+func TestRun_BranchResolvedLandingRecordsNothingWhenPRStateFails(t *testing.T) {
+	f := forge.NewFake()
+	f.SetPR("agent/issue-41", forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetIssue(forge.Issue{Number: "41", State: forge.IssueOpen, Landing: "agent/issue-41"})
+	f.PRStateErr = errors.New("boom")
+
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope); err == nil {
+		t.Fatal("Run: want an error from the failed PR state read")
+	}
+	if len(f.RecordLandingCalls) != 0 {
+		t.Errorf("RecordLandingCalls = %v, want none", f.RecordLandingCalls)
+	}
+}
