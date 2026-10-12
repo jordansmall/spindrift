@@ -30,7 +30,8 @@ Agent issues move through these labels (see `.github/workflows/agent-dispatch.ym
 - `agent-failed` — the Box failed or stopped `status=blocked`, or its PR
   could not land (e.g. red CI after the fix passes, a merge-gate failure, no
   PR found), or a read-only Box's host-side bundle relay exhausted its
-  retries on any code forge (the bundle stays in the outbox; `spindrift
+  retries on any code forge, or its relay succeeded but the host-side draft
+  PR create failed (the bundle stays in the outbox; `spindrift
   recover <n>` relays and lands it, clearing this label; on a
   `github`/`forgejo` read-only deployment the daemon's recover kind lands it
   itself when the bundle is relayable, the run self-reported ready, and the

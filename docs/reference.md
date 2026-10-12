@@ -2948,8 +2948,12 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   with a status mapping, a workflow lacking a Failed→Complete transition
   falls back to adding the `agent-complete` label while the native status
   stays Failed (the gap recovering after red CI already has). On the
-  PR-shaped path a missing bundle or a failed draft-PR create still posts
-  "merge blocked" and leaves the issue `agent-in-progress`.
+  PR-shaped path a relay that succeeds but whose host-side draft-PR create
+  then fails parks the issue the same way, with reason `draft-pr-failed` and
+  a `draft PR create failed: <err>` comment (issue #5144); `spindrift recover
+  <n>` opens the PR from the preserved bundle. A missing bundle, a wiring
+  error, or a missing PR intent with no fallback still posts "merge blocked"
+  and leaves the issue `agent-in-progress`.
 - **Red CI self-heals before it fails.** If CI goes genuinely red, the launcher
   dispatches up to `MAX_FIX_ATTEMPTS` fix boxes on the same branch and re-gates
   after each. Only once those are exhausted (or a fix box exits non-zero
@@ -4475,7 +4479,10 @@ still performs the write host-side at settle.
 If the `status=ready` "land the branch" relay still fails after
 `TRANSIENT_RETRY_MAX` retries (any forge, including `local`), the issue parks
 `agent-failed` with the bundle kept in the outbox;
-`spindrift recover <n>` relays and lands it (issue #4651). Bare `spindrift
+`spindrift recover <n>` relays and lands it (issue #4651). On a PR-shaped
+forge a relay that succeeds but whose host-side draft-PR create then fails
+parks the same way, reason `draft-pr-failed`, routed to the same `recover`
+(issue #5144). Bare `spindrift
 recover` finds and lands one such issue itself, moving it `agent-failed` →
 `agent-in-progress` and ending `agent-complete` on a land or back on
 `agent-failed` otherwise (issue #4654). The [daemon](#daemon) runs it as its
@@ -6011,8 +6018,9 @@ so a tokened log it settles (an older `spindrift recover`, say) reads
   (a butler Chore filed its findings), and `recover-declined`;
 - `failed`: `landing-failed`, `gate-terminal`, `ci-red` (CI red with no fix pass
   budget), `fix-exhausted`, `budget-exhausted`, `fix-failed`, `fix-no-op`,
-  `relay-failed` (also recover's park), `blocked`, `no-outcome` (the Box printed
-  no outcome line), `merge-unverified` (a merge `verifyMerged`'s reads
+  `relay-failed` (also recover's park), `draft-pr-failed` (the relay landed,
+  the draft-PR create failed), `blocked`, `no-outcome` (the Box printed no
+  outcome line), `merge-unverified` (a merge `verifyMerged`'s reads
   contradicted; a read that keeps failing never produces it), `no-pr`
   (`status=merged` named a branch with no PR to verify), `box-failed` (the Box
   failed before settle), `research-failed`, `chore-failed`,
