@@ -389,14 +389,11 @@ let
     (mergedDefaults.issueTracker or "github") == "forgejo"
     || (mergedDefaults.codeForge or "github") == "forgejo";
 
-  # Unknown defaults keys are caught at eval time. A typo like `basebranch`
-  # would otherwise be silently ignored and never baked.
-  unknownDefaultKeys = lib.filter (k: !(lib.hasAttr k flakeOptionEntries)) (lib.attrNames defaults);
-  # A removed knob (lib/removed-knobs.nix) gets its own message rather than the
-  # generic unknown-key one, which would not say it once existed.
-  removedKnobs = import ./removed-knobs.nix;
+  defaultsKeyError = import ./defaults-key-error.nix {
+    inherit lib;
+    validKeys = lib.attrNames flakeOptionEntries;
+  } defaults;
   removedFragmentVars = import ./removed-fragment-vars.nix;
-  removedDefaultKeys = lib.filter (k: removedKnobs ? ${k}) unknownDefaultKeys;
 
   # An explicit `roster` always wins; otherwise it resolves from the four
   # deprecated per-agent model knobs (issue #264, lib/roster.nix).
@@ -1792,12 +1789,8 @@ let
     else
       true;
 in
-if removedDefaultKeys != [ ] then
-  throw "mkHarness: defaults.${lib.head removedDefaultKeys}: ${
-    removedKnobs.${lib.head removedDefaultKeys}.message
-  }"
-else if unknownDefaultKeys != [ ] then
-  throw "mkHarness: unknown defaults key(s): ${lib.concatStringsSep ", " unknownDefaultKeys}; valid keys: ${lib.concatStringsSep ", " (lib.attrNames flakeOptionEntries)}"
+if defaultsKeyError != null then
+  throw defaultsKeyError
 else
   assert buildTimeRejectOk;
   assert forbiddenMarkerCheckOk;
