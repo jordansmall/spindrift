@@ -9,6 +9,8 @@
   nixpkgs,
   system,
   flake-parts,
+  checksAt,
+  baselineChecks,
 }:
 let
   buildConstants = import ../../lib/build-constants.nix;
@@ -101,6 +103,7 @@ let
     // (import ./baked-skills.nix common)
     // (import ./seccomp.nix common)
     // (import ./adr-numbers.nix common)
+    // (import ./docs-edit-isolation.nix (common // { inherit checksAt baselineChecks; }))
     // (import ./seam-fixtures.nix common)
     // (import ./event-stream-parity.nix common);
 
@@ -138,6 +141,8 @@ let
   # Linux twin of the host system, so a darwin eval still demands a Linux
   # builder and fails with "Required system: aarch64-linux".
   linuxOnlyCheckNames = batsShardNames ++ [
+    # Evaluates the bats shards, which are Linux-only (issue #5154).
+    "docs-edit-isolation"
     # flake.nix only exposes apps.regen-goldens under isLinux, because it pulls
     # in fixtures.seamFixtures, rendered off the Linux-only batsHarness. On darwin it is absent
     # from config.apps, so this check's own existence assert would throw.
@@ -181,6 +186,11 @@ let
     "versioning-prompt-template-carve-out"
   ];
 
+  # Modules the guard below skips. docs-edit-isolation names docs paths only to
+  # filter them out of a perturbed copy and never reads them; its verdict is
+  # docs-independent unless a pinned file vanishes (its own assert names the fix).
+  docsGuardExemptModules = [ "docs-edit-isolation" ];
+
   docsCheckNames = pkgs.lib.concatMap (
     m: builtins.attrNames (import (./. + "/${m}.nix") common)
   ) docsCheckModules;
@@ -208,14 +218,15 @@ let
         filter (hasSuffix ".nix") (builtins.attrNames (builtins.readDir ./.))
       );
       readsDocs = m: builtins.length (builtins.split docsRef (builtins.readFile (./. + "/${m}.nix"))) > 1;
-      missing = filter (m: readsDocs m && !(builtins.elem m docsCheckModules)) modules;
-      stale = filter (m: !(builtins.elem m modules)) docsCheckModules;
+      missing = filter (
+        m: readsDocs m && !(builtins.elem m docsCheckModules) && !(builtins.elem m docsGuardExemptModules)
+      ) modules;
+      stale = filter (m: !(builtins.elem m modules)) (docsCheckModules ++ docsGuardExemptModules);
     in
     assert assertMsg (missing == [ ])
       "nix/checks module(s) read a docs file but are missing from docsCheckModules in nix/checks/default.nix: ${concatStringsSep ", " missing}";
-    assert assertMsg (
-      stale == [ ]
-    ) "docsCheckModules names a module absent from nix/checks: ${concatStringsSep ", " stale}";
+    assert assertMsg (stale == [ ])
+      "docsCheckModules/docsGuardExemptModules names a module absent from nix/checks: ${concatStringsSep ", " stale}";
     pkgs.runCommand "checks-docs-covers-docs-readers" { } "touch $out";
 
   # Stale-name guard: every linuxOnlyCheckName must name a real source check,

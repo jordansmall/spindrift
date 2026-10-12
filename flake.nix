@@ -98,28 +98,39 @@
             dogfoodSkills = import ./nix/dogfood-skills.nix {
               inherit caveman matt-skills jordan-skills;
             };
-            fixtures = import ./nix/fixtures.nix {
-              inherit
-                pkgs
-                system
-                flake-parts
-                revision
-                caveman
-                matt-skills
-                jordan-skills
-                ;
-              nixpkgs = nixpkgsShared;
-            };
-            checksResult = import ./nix/checks {
-              inherit
-                pkgs
-                config
-                fixtures
-                system
-                flake-parts
-                ;
-              nixpkgs = nixpkgsShared;
-            };
+            # Re-importable from any source tree (issue #5154): the
+            # docs-edit-isolation check evaluates the checkset off a copy of
+            # the repo with docs files removed and compares drvPaths.
+            fixturesAt =
+              root:
+              import (root + "/nix/fixtures.nix") {
+                inherit
+                  pkgs
+                  system
+                  flake-parts
+                  revision
+                  caveman
+                  matt-skills
+                  jordan-skills
+                  ;
+                nixpkgs = nixpkgsShared;
+              };
+            checksAt =
+              root:
+              import (root + "/nix/checks") {
+                inherit
+                  pkgs
+                  config
+                  system
+                  flake-parts
+                  checksAt
+                  ;
+                baselineChecks = checksResult.checks;
+                fixtures = fixturesAt root;
+                nixpkgs = nixpkgsShared;
+              };
+            fixtures = fixturesAt ./.;
+            checksResult = checksAt ./.;
           in
           {
             # The same leaf values feed fixtures.nix's direct mirror
