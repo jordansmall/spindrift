@@ -4646,10 +4646,11 @@ all (loopback is torn down outright, so there is nothing to check);
 socket, where the probe itself fails (it refuses the TCP fallback this mode
 denies) and the row degrades with the probe's error; and an indeterminate
 probe answer. The row's own TCP-under-`no-host-loopback` message is a
-backstop a live probe never reaches — only a replayed cached TCP verdict
-could. Advisory means the row never fails `spindrift doctor`
-itself, it just tells the operator before dispatch what the
-Dispatch-level gate below would otherwise only surface mid-run.
+backstop kept for defence in depth: neither a live probe nor the [probe
+cache](#registry-transport-probe-cache) reaches it (issue #3775).
+Advisory means the row never fails `spindrift doctor` itself, it just
+tells the operator before dispatch what the Dispatch-level gate below
+would otherwise only surface mid-run.
 
 Requesting `socket` where the transport can't work fails closed, never a
 silent fallback to `log`, and an unset knob is such a request: it
@@ -4659,7 +4660,8 @@ startup (the socket transport needs the loopback this mode tears down), and
 `NETWORK_MODE=no-host-loopback` fails when each Dispatch starts, before the
 Box container, because the per-Dispatch transport probe refuses the TCP
 fallback under that mode (the Signal-socket gate on a TCP verdict is a
-backstop for a cached verdict). Both errors name the mode, and the `none`
+backstop kept for defence in depth, which neither a live probe nor the
+probe cache reaches, issue #3775). Both errors name the mode, and the `none`
 startup gate's message names the remedy, `BOX_SIGNAL_CARRIER=log`; the probe
 error under `no-host-loopback` does not, so set it there yourself.
 A Consumer that runs under one of these modes and has not set the knob
