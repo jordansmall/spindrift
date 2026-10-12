@@ -8812,8 +8812,10 @@ live re-render picks it up like any other status field.
 
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
-breaker trips, and halts, read from both generations of the Events file
-(see **Events file** under [Daemon](#daemon)). Other events are left out.
+breaker trips, halts, self-update steps (including an in-place restart's
+handoff) and inherited children, read from both generations of the Events
+file (see **Events file** under [Daemon](#daemon)). Other events are left
+out.
 The timeline shows in every case below, so a stopped or restarted daemon
 still leaves its history on the page. An absent Events file just means no
 history yet; if a generation exists but cannot be read, the page shows
