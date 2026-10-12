@@ -10,9 +10,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"spindrift.dev/launcher/internal/promptassembly"
 )
+
+// SummaryLinePrefix starts every narrated pass-summary line.
+const SummaryLinePrefix = "  | "
 
 // Config is what the decision reads from the Box's environment.
 type Config struct {
@@ -25,10 +29,12 @@ type Config struct {
 
 // Actions are the side effects the decision drives.
 type Actions struct {
-	// RunPass runs the sessionless resolve agent. The agent's own failure is
-	// the caller's to swallow: a non-nil error means the pass could not be set
-	// up (prompt rendering, handoff writing) and aborts the Box.
-	RunPass func() error
+	// RunPass runs the sessionless resolve agent and returns the Driver's
+	// result text (the agent's final message under claude), which Resolve
+	// narrates as the pass summary (empty when there is none). The agent's own failure is the caller's to swallow: a non-nil
+	// error means the pass could not be set up (prompt rendering, handoff
+	// writing) and aborts the Box.
+	RunPass func() (summary string, err error)
 	// RebaseInProgress reports whether a rebase is still unfinished.
 	RebaseInProgress func() bool
 	// Abort reverts in-tree bindings and aborts the rebase, best-effort.
@@ -49,8 +55,14 @@ type Outcome struct {
 func Resolve(cfg Config, a Actions, w io.Writer) (Outcome, error) {
 	if cfg.Conflict {
 		fmt.Fprintln(w, "==> pre-work rebase conflict detected — invoking conflict-resolve agent")
-		if err := a.RunPass(); err != nil {
+		summary, err := a.RunPass()
+		if err != nil {
 			return Outcome{}, err
+		}
+		if summary != "" {
+			// The host scans Box stdout for leading-token SPINDRIFT_ lines (ADR 0055); the
+			// marker on every line keeps an agent-authored summary from forging one.
+			fmt.Fprintf(w, "==> conflict-resolve pass summary:\n%s\n", SummaryLinePrefix+strings.ReplaceAll(summary, "\n", "\n"+SummaryLinePrefix))
 		}
 		if a.RebaseInProgress() {
 			a.Abort()

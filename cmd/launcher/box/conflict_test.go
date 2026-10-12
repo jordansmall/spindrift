@@ -11,6 +11,7 @@ import (
 
 	"spindrift.dev/launcher/internal/branchrecovery"
 	"spindrift.dev/launcher/internal/conflictresolve"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/promptassembly"
 	"spindrift.dev/launcher/internal/testutil/repopath"
 )
@@ -43,6 +44,8 @@ func newCRFixture(t *testing.T) *crFixture {
 			},
 		},
 	}
+	f.target("flake.nix")
+	f.knobs["DEV_SHELL_NAME"], f.knobs["DEV_SHELL_PROBE_TIMEOUT"] = "dev", "300"
 	f.knobs["ISSUE_NUMBER"] = "42"
 	f.knobs["BASE_BRANCH"] = "main"
 	f.knobs["BRANCH"] = "agent/issue-42"
@@ -101,12 +104,45 @@ func (f *crFixture) readCall(argv []string) *orchCall {
 	return call
 }
 
+// passHandoff decodes the recorded pass handoff into the typed Handoff.
+func (f *crFixture) passHandoff(t *testing.T) promptassembly.Handoff {
+	t.Helper()
+	raw, err := json.Marshal(f.pass.handoff)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var h promptassembly.Handoff
+	if err := json.Unmarshal(raw, &h); err != nil {
+		t.Fatal(err)
+	}
+	return h
+}
+
 // finishRebase makes the pass resolve the conflict, as the agent would.
 func (f *crFixture) finishRebase() {
-	f.passFn = func() {
-		if err := os.RemoveAll(filepath.Join(f.in.WorkDir, ".git", "rebase-merge")); err != nil {
-			f.t.Fatal(err)
-		}
+	f.passFn = f.completeRebase
+}
+
+func (f *crFixture) completeRebase() {
+	if err := os.RemoveAll(filepath.Join(f.in.WorkDir, ".git", "rebase-merge")); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+// answer writes the pass's final message into its stream log, as the Driver
+// would, so the Box can read it back as the pass summary.
+func (f *crFixture) answer(text string) {
+	f.t.Helper()
+	d, err := driver.New(f.in.Assembly.Passthrough.Driver)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	ev, err := d.ResultEvent(text)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	if err := os.WriteFile(f.pass.argv["--log-path"], ev, 0o644); err != nil {
+		f.t.Fatal(err)
 	}
 }
 
@@ -156,18 +192,14 @@ func TestConflictResolve_ResolvedRunsOneSessionlessPassThenTheMainRun(t *testing
 	if _, ok := p.argv["--manifest-path"]; ok {
 		t.Errorf("manifest path passed with no outbox mounted: %v", p.argv)
 	}
-	var h promptassembly.Handoff
-	raw, _ := json.Marshal(p.handoff)
-	if err := json.Unmarshal(raw, &h); err != nil {
-		t.Fatal(err)
-	}
+	h := f.passHandoff(t)
 	want := f.in.Assembly.Passthrough
-	want.Devshell, want.DevshellName = false, ""
-	if h.Issue != "42" || h.Devshell || h.DevshellName != "" || h.PromptFile != "" || h.AgentsFile != "" || h.ReviewPromptFile != "" {
+	if h.Issue != "42" || !h.Devshell || h.DevshellName != "dev" || h.PromptFile != "" || h.AgentsFile != "" || h.ReviewPromptFile != "" {
 		t.Errorf("handoff = %+v", h)
 	}
 	got := promptassembly.Passthrough{
 		Model: h.Model, Effort: h.Effort, Driver: h.Driver, DriverBin: h.DriverBin, DriverFlags: h.DriverFlags,
+		Devshell: h.Devshell, DevshellName: h.DevshellName,
 		HeartbeatLog: h.HeartbeatLog, ArgvShape: h.ArgvShape, Caps: h.Caps,
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -309,12 +341,113 @@ func TestConflictResolve_PublishFailureExitsOneBeforeAssembly(t *testing.T) {
 	}
 }
 
+func TestConflictResolve_NoFlakeLeavesTheDevshellOff(t *testing.T) {
+	f := newCRFixture(t)
+	if err := os.Remove(filepath.Join(f.in.WorkDir, "flake.nix")); err != nil {
+		t.Fatal(err)
+	}
+	f.finishRebase()
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	h := f.passHandoff(t)
+	if h.Devshell {
+		t.Errorf("handoff = %+v, want the devShell off without a flake.nix", h)
+	}
+}
+
 func TestConflictResolve_NoPublishWithoutAdoption(t *testing.T) {
 	f := newCRFixture(t)
 	f.finishRebase()
 	f.run()
 	if len(f.publishCfgs) != 0 {
 		t.Errorf("publish configs = %+v", f.publishCfgs)
+	}
+}
+
+// checkedTree is a tree whose "check" is a file that must read "ok". The fake
+// pass writes it, so a test can show publish runs after the pass and sees the
+// working tree the pass left.
+func (f *crFixture) checkedTree() (check func() bool, write func(string)) {
+	path := filepath.Join(f.in.WorkDir, "check.txt")
+	check = func() bool { b, _ := os.ReadFile(path); return string(b) == "ok" }
+	write = func(s string) {
+		if err := os.WriteFile(path, []byte(s), 0o644); err != nil {
+			f.t.Fatal(err)
+		}
+	}
+	return check, write
+}
+
+func TestConflictResolve_PublishesTheTreeThePassLeftAfterRepair(t *testing.T) {
+	f := newCRFixture(t)
+	f.recovery.Adopted = true
+	check, write := f.checkedTree()
+	var checkAtPublish bool
+	publish := f.d.PublishBranch
+	f.d.PublishBranch = func(cfg branchrecovery.Config, w io.Writer) error {
+		checkAtPublish = check()
+		return publish(cfg, w)
+	}
+	f.passFn = func() {
+		h := f.passHandoff(t)
+		if !h.Devshell {
+			t.Error("pass handoff leaves the devShell off")
+		}
+		if !strings.Contains(f.pass.prompt, "run the repo's full check gate") {
+			t.Errorf("prompt does not tell the resolver to run the check: %q", f.pass.prompt)
+		}
+		write("resolved but broken")
+		if check() {
+			t.Error("fixture check passes on a broken tree")
+		}
+		write("ok")
+		f.completeRebase()
+		f.answer("ran check.txt gate: red, repaired, green")
+	}
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if got, want := f.events, []string{"pass", "publish", "assemble", "main-run"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	if !checkAtPublish {
+		t.Error("the published head fails the check")
+	}
+	if !strings.Contains(f.stdout(), "==> conflict-resolve pass summary:\n  | ran check.txt gate: red, repaired, green\n") {
+		t.Errorf("stdout = %q", f.stdout())
+	}
+}
+
+func TestConflictResolve_RedCheckStillPublishesAndTheSummaryNamesIt(t *testing.T) {
+	f := newCRFixture(t)
+	f.recovery.Adopted = true
+	f.passFn = func() {
+		f.completeRebase()
+		f.answer("flakemodule-equivalence red")
+	}
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if got, want := f.events, []string{"pass", "publish", "assemble", "main-run"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	if len(f.aborts) != 0 {
+		t.Errorf("aborted %v on a red check", f.aborts)
+	}
+	if !strings.Contains(f.stdout(), "==> conflict-resolve pass summary:\n  | flakemodule-equivalence red\n") {
+		t.Errorf("stdout = %q", f.stdout())
+	}
+}
+
+func TestConflictResolve_NoResultEventNarratesNoSummary(t *testing.T) {
+	f := newCRFixture(t)
+	f.finishRebase()
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if strings.Contains(f.stdout(), "pass summary") {
+		t.Errorf("stdout = %q", f.stdout())
 	}
 }
 

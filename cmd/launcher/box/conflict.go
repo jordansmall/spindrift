@@ -7,9 +7,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"spindrift.dev/launcher/internal/bindregistry"
 	"spindrift.dev/launcher/internal/conflictresolve"
+	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/promptassembly"
 )
 
@@ -38,17 +41,19 @@ func (r *boxRun) conflictResolve() (conflictresolve.Outcome, error) {
 
 // conflictPass runs the sessionless resolve agent through the orchestrator. Its
 // exit status is not checked: success is read off the rebase state afterwards.
-func (r *boxRun) conflictPass() error {
+// It returns the Driver's result text (the agent's final message under claude),
+// the pass summary.
+func (r *boxRun) conflictPass() (string, error) {
 	reg, err := promptassembly.LoadRegistryFile(r.in.Assembly.RegistryFile)
 	if err != nil {
-		return err
+		return "", err
 	}
 	prompt, err := conflictresolve.RenderPrompt(r.in.Assembly.PromptsDir, r.in.Assembly.SkillsDir, conflictresolve.SubstNames(reg), r.d.Getenv)
 	if err != nil {
-		return err
+		return "", err
 	}
-	// Only the main run enters the devShell, so this pass's handoff leaves
-	// Devshell off.
+	// decideToolchain has already run, so the pass re-checks the repo under
+	// the same devShell as the main run.
 	p := r.in.Assembly.Passthrough
 	handoff, err := json.Marshal(promptassembly.Handoff{
 		Model:        p.Model,
@@ -56,13 +61,15 @@ func (r *boxRun) conflictPass() error {
 		Driver:       p.Driver,
 		DriverBin:    p.DriverBin,
 		DriverFlags:  p.DriverFlags,
+		Devshell:     p.Devshell,
+		DevshellName: p.DevshellName,
 		Issue:        r.env.IssueNumber,
 		HeartbeatLog: p.HeartbeatLog,
 		ArgvShape:    p.ArgvShape,
 		Caps:         p.Caps,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal handoff: %w", err)
+		return "", fmt.Errorf("marshal handoff: %w", err)
 	}
 
 	var files []string
@@ -80,23 +87,43 @@ func (r *boxRun) conflictPass() error {
 	}
 	handoffFile, err := temp("box-cr-handoff-", string(handoff))
 	if err != nil {
-		return err
+		return "", err
 	}
 	promptFile, err := temp("box-cr-prompt-", prompt)
 	if err != nil {
-		return err
+		return "", err
 	}
 	// No session to pin or resume for this pass.
 	sessionFile, err := temp("box-cr-session-", "")
 	if err != nil {
-		return err
+		return "", err
 	}
 	logFile, err := temp("box-cr-log-", "")
 	if err != nil {
-		return err
+		return "", err
 	}
 	_ = r.d.Orchestrate(r.orchestratorArgv(handoffFile, promptFile, sessionFile, logFile))
-	return nil
+	return r.passSummary(p.Driver, logFile), nil
+}
+
+// passSummary reads the Driver's result text (the agent's final message under
+// claude) off its stream log. The pass is advisory — success is the rebase
+// state — so an unreadable log means no summary, never a failed Box.
+func (r *boxRun) passSummary(driverName, streamLog string) string {
+	text, err := resultText(driverName, streamLog)
+	if err != nil {
+		fmt.Fprintf(r.d.Stdout, "==> WARNING: conflict-resolve pass summary unreadable: %v\n", err)
+		return ""
+	}
+	return strings.TrimSpace(outcome.StripResultText(text))
+}
+
+func resultText(driverName, streamLog string) (string, error) {
+	d, err := driver.New(driverName)
+	if err != nil {
+		return "", err
+	}
+	return d.ResultText(streamLog)
 }
 
 func (r *boxRun) rebaseInProgress() bool {
