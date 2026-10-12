@@ -193,7 +193,7 @@ let
   # repo-root path on the ci-changes.sh allowlist: docs/, a root *.md, or the
   # release-please manifest. Blind spots: a path built by string
   # concatenation, a whole-repo source (`../../.`), and a read made inside
-  # lib/ (mkHarness's manifest version and launcherSrc docs copy).
+  # lib/ (mkHarness's manifest version).
   checks-docs-covers-docs-readers =
     let
       inherit (pkgs.lib)

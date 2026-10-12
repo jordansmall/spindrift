@@ -2460,9 +2460,9 @@ in
   # Guards daemonBin's `src` staying docs-free (issue #3621): a docs-only
   # commit must not move the daemon's program path. The positive assertions
   # pin `src` to the module root (cmd/launcher's contents directly), so a
-  # revert to launcherSrc -- whose top level is cmd/launcher/ + docs/ --
-  # fails both the positives and the negative together, not some unrelated
-  # tree that happens to lack a docs/ dir.
+  # revert to a docs-bearing tree (cmd/launcher/ + docs/) fails both the
+  # positives and the negative together, not some unrelated tree that
+  # happens to lack a docs/ dir.
   mkharness-daemon-src-excludes-docs =
     let
       direct1 = import ../../lib/mkHarness.nix { inherit nixpkgs system; };
@@ -2480,13 +2480,14 @@ in
   # the daemon's own Go source changes, or a narrowing that accidentally
   # dropped a real input would leave it reporting the same hash forever.
   # The guard below re-derives the whole-module source here rather than
-  # importing a fileset out of lib/, so it pins daemonSrc's own definition
-  # instead of restating it: `fileset.toSource` is content-addressed, so an
-  # identical tree yields an identical store path, while a narrowing or a
-  # revert to launcherSrc (a bare path copies to `…-launcher`, `toSource`
-  # yields `…-source`) breaks the equality. That rules out a store-path
-  # *name* difference alone passing the sensitivity assertion -- the hole a
-  # narrowing that silently dropped `internal/daemon` would slip through.
+  # importing a fileset out of lib/, so it pins launcherModuleSrc's own
+  # definition instead of restating it: `fileset.toSource` is
+  # content-addressed, so an identical tree yields an identical store path,
+  # while a narrowing or a revert to a plain `src = ../cmd/launcher` copy
+  # (which lands at `…-launcher`, where `toSource` yields `…-source`) breaks
+  # the equality. That rules out a store-path *name* difference alone passing
+  # the sensitivity assertion -- the hole a narrowing that silently dropped
+  # `internal/daemon` would slip through.
   # `overrideAttrs` only swaps the outer derivation's `src`, so the perturbed
   # one is a valid outPath probe but not buildable as a stand-in for
   # "pool.go removed" (mirrors the launcher-currency check's caveat above).
@@ -2510,7 +2511,7 @@ in
     assert assertMsg (builtins.pathExists ../../cmd/launcher/internal/daemon/pool.go)
       "this check perturbs cmd/launcher/internal/daemon/pool.go, which no longer exists: point the perturbation at another file under internal/daemon.";
     assert assertMsg ("${direct1.internals.daemonBin.src}" == "${srcOf ../../cmd/launcher}")
-      "daemonBin's src (${direct1.internals.daemonBin.src}) is no longer the whole-module fileset.toSource of cmd/launcher -- either it was narrowed, dropping a real input such as internal/daemon, or it was reverted to launcherSrc. Either way the sensitivity assertion below would prove nothing.";
+      "daemonBin's src (${direct1.internals.daemonBin.src}) is no longer the whole-module fileset.toSource of cmd/launcher -- either it was narrowed, dropping a real input such as internal/daemon, or it was swapped for a non-fileset copy of cmd/launcher. Either way the sensitivity assertion below would prove nothing.";
     assert assertMsg (direct1.internals.daemonBin.outPath != daemonPerturbed.outPath)
       "daemon outPath must change when daemon source changes: dropping cmd/launcher/internal/daemon/pool.go produced the same outPath (${direct1.internals.daemonBin.outPath})";
     pkgs.runCommand "mkharness-daemon-source-sensitive" { } "touch $out";
