@@ -378,6 +378,19 @@ func goldenCells() []goldenCell {
 			c.bakeSkill("principle-laziness-protocol")
 			c.bakeSkill("principle-redesign-from-first-principles")
 		}},
+		{name: "butler-tuning-filer-on-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
+			// butler-tuning plus a socket filer, so the filer's cite/metric
+			// hand-off renders into .agents.json (issue #5008).
+			c.butler("tuning")
+			c.unset("CHORE_DIFF_RANGE")
+			c.unset("CHORE_SLICE")
+			c.export("CHORE_CLASS_LIST", "cost-waste quality-regression prompt-gap model-fit knob-tuning evidence-gap")
+			c.export("CHORE_INPUT", tuningDigestSample)
+			c.export("AGENTS_JSON_TEMPLATE", rosterWithFiler)
+			c.export("BOX_FILER_ENABLED", "1")
+			c.unset("BOX_OUTBOX_RELAY_CAPABLE")
+			c.export("BOX_SIGNAL_CARRIER", "socket")
+		}},
 		{name: "butler-docs-drift-filer-on-signal-socket", mode: modeInitial, setup: func(c *cellInputs) {
 			c.butler("docs-drift")
 			c.export("AGENTS_JSON_TEMPLATE", rosterWithFiler)
