@@ -162,6 +162,61 @@ let
   portableSourceChecks =
     if pkgs.stdenv.isLinux then sourceChecks else removeAttrs sourceChecks linuxOnlyCheckNames;
 
+  # CI's docs lane (issue #5155) builds only these modules' checks when a PR
+  # touches nothing outside the docs allowlist in .github/scripts/ci-changes.sh.
+  # Whole modules, not single checks: the guard below can tell which module
+  # reads a docs file, not which of its checks does, and a check the docs
+  # change left alone substitutes from main's cache anyway.
+  docsCheckModules = [
+    "adr-numbers"
+    "changelog"
+    "driver-map"
+    "event-stream-parity"
+    "go"
+    "nix-checks-lore-parity"
+    "prompts"
+    "roster"
+    "schema-drift"
+    "versioning-prompt-template-carve-out"
+  ];
+
+  docsCheckNames = pkgs.lib.concatMap (
+    m: builtins.attrNames (import (./. + "/${m}.nix") common)
+  ) docsCheckModules;
+
+  checksDocsSet = builtins.intersectAttrs (pkgs.lib.genAttrs docsCheckNames (_: null)) (
+    removeAttrs portableSourceChecks imageOnlyCheckNames
+  );
+
+  # Coverage guard (issue #5155): a module reads a docs file when it names a
+  # repo-root path on the ci-changes.sh allowlist: docs/, a root *.md, or the
+  # release-please manifest. Blind spots: a path built by string
+  # concatenation, a whole-repo source (`../../.`), and a read made inside
+  # lib/ (mkHarness's manifest version and launcherSrc docs copy).
+  checks-docs-covers-docs-readers =
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        concatStringsSep
+        filter
+        hasSuffix
+        removeSuffix
+        ;
+      docsRef = ''\.\./\.\./(docs([^a-zA-Z0-9_-]|$)|[^/ "}]+\.md|\.release-please-manifest\.json)'';
+      modules = map (removeSuffix ".nix") (
+        filter (hasSuffix ".nix") (builtins.attrNames (builtins.readDir ./.))
+      );
+      readsDocs = m: builtins.length (builtins.split docsRef (builtins.readFile (./. + "/${m}.nix"))) > 1;
+      missing = filter (m: readsDocs m && !(builtins.elem m docsCheckModules)) modules;
+      stale = filter (m: !(builtins.elem m modules)) docsCheckModules;
+    in
+    assert assertMsg (missing == [ ])
+      "nix/checks module(s) read a docs file but are missing from docsCheckModules in nix/checks/default.nix: ${concatStringsSep ", " missing}";
+    assert assertMsg (
+      stale == [ ]
+    ) "docsCheckModules names a module absent from nix/checks: ${concatStringsSep ", " stale}";
+    pkgs.runCommand "checks-docs-covers-docs-readers" { } "touch $out";
+
   # Stale-name guard: every linuxOnlyCheckName must name a real source check,
   # or the darwin drop silently does nothing.
   linux-only-check-names-exist =
@@ -196,7 +251,11 @@ in
     portableSourceChecks
     // imageChecks
     // {
-      inherit checks-inbox-excludes-image-checks linux-only-check-names-exist;
+      inherit
+        checks-inbox-excludes-image-checks
+        linux-only-check-names-exist
+        checks-docs-covers-docs-readers
+        ;
     };
 
   # Scoped in-box gate (issue #581): the source-level checks joined into one
@@ -204,6 +263,15 @@ in
   # of enumerating names.
   checks-inbox = pkgs.runCommand "checks-inbox" { } ''
     ${pkgs.lib.concatMapStringsSep "\n" (p: ": ${p}") (builtins.attrValues checksInboxSet)}
+    touch $out
+  '';
+
+  # CI's docs-only lane (issue #5155): the checks whose modules read docs
+  # files, plus the guard that keeps that membership complete.
+  checks-docs = pkgs.runCommand "checks-docs" { } ''
+    ${pkgs.lib.concatMapStringsSep "\n" (p: ": ${p}") (
+      builtins.attrValues checksDocsSet ++ [ checks-docs-covers-docs-readers ]
+    )}
     touch $out
   '';
 }
