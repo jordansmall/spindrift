@@ -7563,9 +7563,11 @@ a failure; `revision` is the tip it was made at, and `reason` is the
 failure, present only when `phase` is `blocked`. Under the in-place
 restart (ADR 0063), a passed build shows `waiting` instead while the pool
 starts no child and waits for a clean moment, then `restarting` once it
-has handed its running children off; a stop while `waiting` cancels the
-handoff, returns the phase to `built`, and drains. The object is absent until
-a fetched tip's daemon build first differs from the running one. A
+has handed its running children off; any halt while `waiting` (an
+operator stop, a child's halting exit, ...) cancels the handoff and
+returns the phase to `built`, and the pool then drains as for any halt.
+The object is absent until a fetched tip's daemon build first differs
+from the running one. A
 `blocked` entry clears once a resolved tip's self path matches the running
 build again. After a rollback it starts `blocked` at the refused revision
 (`rolled-back` is an event phase only, never a status phase). It is
@@ -8033,8 +8035,9 @@ phase `blocked` with an `exec: ` reason and carries on as if the prebuild
 had failed. A stop signal landing inside the `exec` is dropped, not
 delivered to the new image: Go's runtime unblocks those three signals as
 it starts, so a pending one would otherwise kill the new image before its
-handler exists. The flag is refused at startup anywhere but linux amd64/arm64
-(for one, a macOS host), where the exec path is not built.
+handler exists. The flag is refused at startup, exiting 1, anywhere but
+linux amd64/arm64 (for one, a macOS host), where the exec path is not
+built.
 
 *Rollback.* A resumed image that refuses to start, because its config does
 not validate or its startup preflight (`doctor`) fails, does not drain what
@@ -8050,7 +8053,11 @@ inherited children and exits as before (11 for a preflight refusal, 1 for
 a config error), when the image is itself a rollback, a stop is latched,
 the predecessor wrote handoff document version 1 (a build from before
 rollback existed, which cannot read the version-2 document), the previous
-path is empty or not a clean `/nix/store` path, or the `exec` fails.
+path is empty or not a clean `/nix/store` path, or the `exec` fails. A
+`--handoff-fd` flag with no value, or a handoff document that cannot be
+read (a bad descriptor, a document that does not decode, or a lock that
+cannot be taken over), is a startup failure that exits 1 without rolling
+back; the image has re-attached no child by then, so it drains none.
 
 *GC roots.* Two roots sit in the checkout's git dir, one fixed name per
 role, so they never accumulate. `spindrift-daemon.current` roots the
@@ -8078,12 +8085,14 @@ must not auto-load with nobody awake. The halt carries its own exit code
 (below) precisely so an operator who *does* want self-update can compose it
 with an ordinary service restart policy and get that behaviour by choice,
 not by default: a restart policy that does not exempt exit 10, plus a step
-that advances the checkout before each start (see **Service unit** below
-for the full unit and the exit-code-to-policy mapping, and **Self-update by
-choice** below for why the second half is not optional) — with the
-obvious caveat that under that policy the daemon started next is whatever
-just merged, so a broken merge restarts straight into the broken build,
-which is exactly why this is opt-in rather than the default.
+that advances the checkout before each start (the two drain-mode unit
+edits are in **Self-update by choice** below, which also says why the
+second half is not optional; **Service unit** below has the
+exit-code-to-policy mapping) — with the obvious caveat that under that
+policy the daemon started next is whatever just merged, so a broken merge
+restarts straight into the broken build, which is exactly why this is
+opt-in rather than the default. The documented unit takes the other route,
+`--restart-in-place` (above), which needs neither edit.
 
 What moves the daemon's build: any change under `cmd/launcher`'s Go
 module (`daemonBin`, `lib/mkHarness.nix`). Its source is the whole module
@@ -8109,15 +8118,16 @@ merge, which used to halt a daemon running under the restart-on-exit-10
 policy above for nothing (issue #3621).
 
 Because a release version bump moves the store path, a release commit
-halts the daemon with exit 10 once fetched, under every restart policy,
-even when it changes no code (issue #3702). That halt is expected, not a
-fault; the policy only decides what follows it. Under the **Self-update
-by choice** unit below, systemd restarts the daemon and its
-`ExecStartPre` advances the checkout first, so it starts straight into
-the release. Under the default policy the daemon stays stopped: advance
-the checkout to the fetched tip (`git pull --ff-only origin
-<BASE_BRANCH>`) before restarting it, or it halts again (**Self-update
-by choice** below).
+is a self-change even when it changes no code (issue #3702). Under
+`--restart-in-place` the daemon prebuilds it and restarts into it without
+exiting. Without the flag it halts with exit 10 once fetched, under every
+restart policy; that halt is expected, not a fault, and the policy only
+decides what follows it. Under the drain-mode unit in **Self-update by
+choice** below, systemd restarts the daemon and its `ExecStartPre`
+advances the checkout first, so it starts straight into the release. Under
+the default policy the daemon stays stopped: advance the checkout to the
+fetched tip (`git pull --ff-only origin <BASE_BRANCH>`) before restarting
+it, or it halts again (**Self-update by choice** below).
 
 An evaluation that *fails* — a broken flake, a network blip reaching `nix
 eval` — is not treated as a change: it is the same class of unclassified
@@ -8135,7 +8145,7 @@ the same log:
 | exit | meaning |
 |------|---------|
 | 0    | a clean stop — an operator signal, or a child that drained and reported a signalled stop |
-| 10   | the daemon's own build changed at the fetched tip and it halted at an iteration boundary |
+| 10   | the daemon's own build changed at the fetched tip and it halted at an iteration boundary — drain mode only (`--restart-in-place` execs the new build instead, with no exit) |
 | 11   | the startup preflight refused the start — a Required-tier `doctor` failure (missing triage labels, missing research/butler labels for a selected kind, invalid config) or a seam failure resolving the tip/running doctor at all |
 | 12   | `--feature-branch` disappeared from origin mid-run — the pool stopped claiming and halted once in-flight children finished (**Feature branch** above); a branch already missing at startup exits 11 instead |
 | 1    | anything else: a startup failure (including a refused instance lock), or any other halt — the event stream carries the specific reason |
@@ -8149,14 +8159,15 @@ other when both appear in one log (`ExitSelfChanged`,
 class alone — nothing re-reads the reason string). The three read very
 differently to an operator composing a restart policy, though: 10 is the
 one code this daemon deliberately invites a supervisor to compose with
-`Restart=on-failure` (**Self-change halt** above), since restarting clears
-it by loading whatever just merged — for a unit that also advances the
-checkout before each start (**Self-update by choice** below). 11 and 12
-are not retryable that way — nothing a restart does fixes a missing
-label, an undersized podman machine, or a deleted feature branch, so a
-supervisor must treat either as a standing refusal to fix by hand, not a
-transient fault to bounce past; 12's own fix is an operator restart
-without `--feature-branch`, or with a new one (**Feature branch** above).
+`Restart=on-failure` (**Self-change halt** above) in drain mode, since
+restarting clears it by loading whatever just merged — for a unit that also
+advances the checkout before each start (**Self-update by choice**
+below). 11 and 12 are not retryable that way — nothing a restart does
+fixes a missing label, an undersized podman machine, or a deleted feature
+branch, so a supervisor must treat either as a standing refusal to fix by
+hand, not a transient fault to bounce past; 12's own fix is an operator
+restart without `--feature-branch`, or with a new one (**Feature branch**
+above).
 
 **Halting.** A `SIGINT` or `SIGTERM` to the daemon is the first of two
 signals it consumes, through the same shared relay the launcher itself uses
@@ -8295,9 +8306,10 @@ whether the kernel folded those two `SIGTERM`s into one delivery or kept
 them distinct — the same reason `KillMode=mixed` is the recommended
 setting above.
 
-**Service unit.** The pieces above — the restart-policy composition in
-**Self-change halt**, `KillMode=mixed`, and `TimeoutStopSec` in
-**Halting** — are all one unit in practice. A complete, copyable shape,
+**Service unit.** The pieces above — `--restart-in-place` (**Restart in
+place**), the restart-policy composition in **Self-change halt**,
+`KillMode=mixed`, and `TimeoutStopSec` in **Halting** — are all one unit in
+practice. A complete, copyable shape,
 run as the operator's own user against their own checkout (the daemon
 fetches into and locks that checkout, so `WorkingDirectory` has to be
 it), as a systemd user unit so no `User=` line is needed (and no
@@ -8316,7 +8328,7 @@ Type=simple
 WorkingDirectory=%h/spindrift-checkout
 EnvironmentFile=-/absolute/path/to/spindrift-secrets.env
 Environment=PATH=/absolute/path/to/nix-dir:/absolute/path/to/git-dir:/usr/bin:/bin
-ExecStart=/absolute/path/to/nix run .#daemon
+ExecStart=/absolute/path/to/nix run .#daemon -- --restart-in-place
 KillMode=mixed
 TimeoutStopSec=infinity
 Restart=on-failure
@@ -8331,10 +8343,15 @@ Substitute the checkout path, the directories holding the real `nix` and
 `git` (`command -v nix`, `command -v git` — the `nix` one feeds both
 `Environment=PATH=` and `ExecStart`), and a secrets file for the
 placeholders. `ExecStart` is argv, not a shell line, so it takes no shell
-quoting and no `&&`. `StartLimitIntervalSec`/`StartLimitBurst` are
-`[Unit]` directives, not `[Service]` ones, however much they read like
-part of the restart policy. The [Dashboard](#dashboard) has its own,
-smaller unit, given below as **Dashboard service unit**.
+quoting and no `&&`; its `--` ends `nix run`'s own options, so
+`--restart-in-place` reaches the daemon rather than nix. The unit keeps
+`10` in `RestartPreventExitStatus=` although `--restart-in-place` never
+exits 10: should the flag be dropped from a copy, the daemon then stops at
+a self-change instead of restart-looping without the checkout advance
+**Self-update by choice** below describes. `StartLimitIntervalSec`/`StartLimitBurst` are `[Unit]`
+directives, not `[Service]` ones, however much they read like part of the
+restart policy. The [Dashboard](#dashboard) has its own, smaller unit,
+given below as **Dashboard service unit**.
 
 `Environment=PATH=` matters even with an absolute `ExecStart`, and it is
 the line most easily dropped from a pasted unit. The daemon execs both
@@ -8392,7 +8409,7 @@ means:
 | exit | policy |
 |------|--------|
 | 0    | stop — a clean stop is never worth restarting |
-| 10   | stop — self-update is opt-in, see below to turn it on |
+| 10   | stop — drain mode's self-change halt, which the unit's `--restart-in-place` never exits with (**Self-update by choice** below restarts on it instead) |
 | 11   | stop — a refusal no restart can clear |
 | 12   | stop — the feature branch is gone; no restart clears it either |
 | 1    | restart, rate-limited |
@@ -8409,7 +8426,9 @@ and nothing in the exit code tells those apart — which is what
 `RestartSec=` and the `StartLimit*` pair are for. Five restarts thirty
 seconds apart absorb a transient; a permanent one exhausts the burst and
 systemd parks the unit in `failed`, where `systemctl --user status` shows
-it, rather than looping unwatched until morning.
+it, rather than looping unwatched until morning. Under
+`--restart-in-place` a self-update is no exit at all, so the policy only
+ever meets crashes and refusals.
 
 Size `TimeoutStopSec` against the real drain bound, not the optimistic
 one: the in-flight Box's runtime *plus that Box's settle*, never the Box
@@ -8422,17 +8441,35 @@ An operator unwilling to wait the ceiling out escalates instead of
 shortening the timeout, by the `systemctl kill` route **Halting**
 describes.
 
-**Self-update by choice.** Two edits to the unit above, not one: drop
-`10` from `RestartPreventExitStatus=`, and add a line that advances the
-checkout before each start.
+**Self-update by choice.** The unit above updates the daemon in place. Its
+`--restart-in-place` prebuilds each new build and smoke-tests it, waits for
+a clean moment, and `exec`s it in the same process: running children and
+slots carry over, and a build that refuses to start rolls back (**Restart
+in place** above). There is no exit, so systemd's restart policy never sees
+a self-update, and the checkout's working tree need not move, since the
+exec targets the store path prebuilt from the fetched `BASE_BRANCH` tip.
+After a crash restart, `nix run .#daemon` starts whatever the working tree
+holds; if that differs from the fetched tip's build, the daemon prebuilds
+and restarts in place on its own.
+
+Drain mode, the default without the flag, is the alternative: the daemon
+prebuilds, halts, drains every running child, and exits 10, so self-update
+becomes the restart policy's job. Choose it on a host where the flag is
+refused (anywhere but linux amd64/arm64), or to have each new build start as
+a fresh process under the supervisor. It takes three edits to the unit
+above: drop `--restart-in-place` from `ExecStart`, drop `10` from
+`RestartPreventExitStatus=`, and add a line that advances the checkout
+before each start.
 
 ```
+ExecStart=/absolute/path/to/nix run .#daemon
 ExecStartPre=/absolute/path/to/git pull --ff-only origin main
 RestartPreventExitStatus=11 12
 ```
 
-`RestartPreventExitStatus=11 12` above must *replace* the unit's existing
-`RestartPreventExitStatus=10 11 12` line, not sit alongside it: systemd merges
+`ExecStart=` and `RestartPreventExitStatus=11 12` above must *replace* the
+unit's existing lines, not sit alongside them. For the latter that is easy
+to miss: systemd merges
 repeated assignments of this directive rather than replacing them, so a
 pasted second line leaves `10` still exempted and self-update silently
 never happens (an empty `RestartPreventExitStatus=` assignment is what
@@ -8441,18 +8478,18 @@ resets the list, for a unit that would rather reset than edit in place).
 checkout has to have that branch checked out — on any other branch the
 fast-forward refuses and the unit never starts.
 
-`ExecStartPre` is the half a hand-written unit is likeliest to be missing,
-and without it the composition does not self-update at all: the self-change
-halt compares the running daemon's own build against an evaluation at the
-*fetched* tip, while `ExecStart`'s `.#daemon` builds whatever the
-checkout's working tree holds — and the daemon fetches, never pulls. A
-restart on its own therefore rebuilds the identical store path, mismatches
-the fetched tip again, and exits 10 again having dispatched nothing: a
-restart loop, not an update. The `ExecStartPre` is what moves the tree, so
-the next start is the build that just merged, already prebuilt in the
-store (**Self-change halt** above).
+In drain mode `ExecStartPre` is the half a hand-written unit is likeliest
+to be missing, and without it the composition does not self-update at all:
+the self-change halt compares the running daemon's own build against an
+evaluation at the *fetched* tip, while `ExecStart`'s `.#daemon` builds
+whatever the checkout's working tree holds — and the daemon fetches,
+never pulls. A restart on its own therefore rebuilds the identical store
+path, mismatches the fetched tip again, and exits 10 again having dispatched
+nothing: a restart loop, not an update. The `ExecStartPre` is what moves the
+tree, so the next start is the build that just merged, already prebuilt in
+the store (**Self-change halt** above).
 
-That composition stays opt-in for a second reason beyond the one
+The drain-mode composition stays opt-in for a second reason beyond the one
 **Self-change halt** gives: it needs a checkout the unit owns, and the two
 ways an operator's own checkout breaks it break it differently. Local
 commits make the fast-forward refuse outright, which fails `ExecStartPre`
@@ -8597,7 +8634,7 @@ warning carries no `slot` either: it precedes every slot.
 | `baton_pass` | `time`, `slot`, `reason` | a slot's discovery round ended and it handed the baton on; `slot` is always the passing slot, never the slot about to receive it (see the events prose above) — a single-slot pool (`MAX_PARALLEL=1`, see **Pool** above) emits neither `baton_hold` nor `baton_pass`, since it has no sibling to stagger against. `reason` names whichever release path fired, one of `pool.go`'s `batonPass*` consts: a live claim while the holder's child is still running (`batonPassClaimed`, `"the holder's child announced a Box: discovery is over, passing the baton to the next waiting slot"`, fired the instant the child's `box` record arrives via `OnRecord`, not at child exit), the holder's child returning having announced nothing — queue empty, none dispatchable, an unrecognised exit, or a `StartChild`/`Wait` seam error, so long as that exit does not halt the pool (`batonPassChildEnded`, `"the holder's child ended without announcing a Box: passing the baton to the next waiting slot"`), an unclassified failure reaching `backoffOrHalt` before the holder ever started a child (`batonPassFailed`, `"the holder's round failed before it could start a child: passing the baton rather than holding the pool through its backoff"`) — reachable only for the pre-assigned initial holder's (`leadSlot`) very first round, since the baton is now acquired after the resolve that can produce this failure — the Awake window shutting between the holder's fetch and starting its child (`batonPassWindowClosed`, `"the Awake window closed before the holder could start a child: passing the baton rather than holding the pool through the shut span"`), `pickKind` finding no runnable kind for the holder (`batonPassIdle`, `"no kind is runnable for the holder: passing the baton rather than holding the pool through its idle wait"`) — likewise reachable only for that same initial round, since the baton is acquired after `pickKind` runs —, the holder re-deciding at `startChild` and finding a sibling's result (an exit 2 zeroing a probed kind's count) took away the Start it decided on before blocking on the baton (`batonPassOutpaced`, `"a sibling's result left nothing startable for the holder: passing the baton rather than spawning an empty child"`), or the holder starting a Chore-keyed child, which discovers no tracker issue, so the baton passes at the start rather than at a `box` record (`batonPassChoreKeyed`, `"the holder started a Chore-keyed child, which discovers no tracker issue: passing the baton to the next waiting slot"`), or the holder returning for any reason at all before its round otherwise resolved, including a child exit that halts the pool or trips the breaker, whose pass waits until after the `halt` event so no sibling starts a child on a halting pool (`batonPassStopped`, `"the holder stopped before its discovery round resolved: passing the baton so no sibling waits on a slot that has already exited"`, the deferred catch-all in `runSlot`) |
 | `preflight` | `time`, `revision`, `exit`, `outcome` (`reason` instead of `exit` on the paths with no doctor exit code to report — a seam failure, a gone feature branch, or an operator's stop) | emitted exactly once, at startup, before the first slot, on every path the preflight can take: a pass, a refusal (doctor's verdict or a gone feature branch), a seam failure, or an operator's Ctrl-C — so "ran and was healthy" and "never ran" cannot look identical the morning after; `outcome` is `ClassifyPreflight`'s own `doctor-`-prefixed label (`doctor-healthy`, `doctor-required-labels-missing`, `doctor-config-invalid`, `doctor-connectivity`, `doctor-unclassified`, `doctor-unknown`) or one of the three the daemon itself adds on the paths that never reached a verdict (`doctor-seam-error` for a failure resolving the tip or running doctor at all, `doctor-feature-branch-gone` for a `--feature-branch` naming a branch origin does not have, `doctor-cancelled` for a stop signal during the preflight), never `Interpret`'s child-outcome vocabulary, so it can never be confused with a `child_finish` outcome |
 | `child_start` | `time`, `kind`, `revision`, `slot`, `child_log` | just before a child is launched. `child_log` names the child's **Child log** (below), relative to the checkout; a daemon that predates Child logs omits it. Carries no `issue` or `chore` — the daemon cannot know which issue or chore a freshly started child will work until it reports a `box` record, and waiting on that would either hide the child from the stream for its whole queue scan or, for a child that never claims, emit nothing at all |
-| `child_inherited` | `time`, `kind`, `issue` or `chore`, `revision`, `slot`, `child_log` | once per busy Slot that a daemon resumed from an in-place restart's handoff (ADR 0063) inherits, before any new child starts. It stands where `child_start` would for a child the previous daemon image launched, with the `issue` or `chore` the child had already boxed (omitted if it had not boxed yet). The child's later records and its `child_finish` follow as for any child |
+| `child_inherited` | `time`, `kind`, `issue` or `chore`, `revision`, `slot`, `child_log` | once per busy Slot that a daemon resumed from an in-place restart's handoff (ADR 0063) inherits, before any new child starts. It stands where `child_start` would for a child the previous daemon image launched, with the `issue` or `chore` the child had already boxed (omitted if it had not boxed yet). The child's later records and its `child_finish` follow as for any child; a child that fails to re-attach shows `child_inherited`, then `child_finish` with outcome `error`, then a `backoff` whose reason starts `inherit-child:` |
 | `box` | `time`, `kind`, `issue` or `chore`, `phase`, `pass_log`, `record_id`, `revision`, `slot` | once per Box the child reported over the report pipe (`initial`, `fix-pass-N`, `conflict-resolve`, `recover`) — not once per issue: a fix pass and a conflict-resolve for the same issue each get their own row, distinguished by `phase`, and this is how the revision a given Box ran at is recovered later (`spindrift stats --by revision` reads it for [inferred](#stats) Records). A butler child (ADR 0056, issue #3878) carries no tracker issue at all, so its rows name `chore` instead of `issue` — exactly one of the two is ever set. `pass_log` names the Pass log that phase writes, relative to the checkout (the un-suffixed path, even when a stale log was rotated aside), carried unchanged from the child's record (a later Dispatch of the same issue or Chore reuses the path once the earlier run's copy is moved to `<pass_log>.prior-run.N`, so the path alone does not identify a run); absent for `recover`, which runs no Box. `record_id` is the Dispatch's [Record ID](#stats), the same for every phase of one Dispatch, so unlike `pass_log` it does identify a run; added without a `v` bump, and absent for `recover` |
 | `model` | `time`, `kind`, `issue` or `chore`, `model`, `model_role`, `revision`, `slot` | each time the child reported that the Box's active model changed (the exact model id, plus the optional role, such as a reviewer, that is running it); the record is emitted as it arrives, so the Events file keeps the history a slot's status entry drops. `model_role` is absent when the model has no role |
 | `child_finish` | `time`, `kind`, `issue` or `chore`, `revision`, `exit`, `outcome`, `slot` | after the child exits; `issue` (or, for a butler child, `chore`) is whichever the child last claimed (the last `box` record's), or absent if it claimed none. `outcome` is the same stable label `Interpret` maps the exit code to (`dispatched`, `queue-empty`, `none-dispatchable`, `image-stale`, `host-tainted`, `config-invalid`, `signalled-stop`, `error`). `signalled-stop` is exit 7's label whichever way the pool then acts on it — it no longer by itself implies a halt: the pool halts on it only while the operator's Stop latch was already closed, and otherwise backs that slot off like any other unclassified failure (see **Failures** above). `exit` is omitted on the one path with no exit code to report — the seam itself failing (the child could not be started, or its wait failed with no exit status), which always carries `outcome: "error"` |
@@ -8614,9 +8651,9 @@ warning carries no `slot` either: it precedes every slot.
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out and so resets at least one jammed kind's backoff, or lifts a butler waiting on `on_tip_move` — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. The event is emitted only when that reset actually ended at least one kind's backoff, so `kinds` is never empty, and an ordinary advance of the base branch with nothing jammed emits no `tip_moved` at all — its absence does not mean the tip stood still. One move therefore yields at most one `tip_moved` pool-wide, not one per idling slot: `slot` names whichever slot's resolve observed the move (slots sharing one coalesced fetch all see it, but only the first to report it still finds a jammed kind to reset). `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
-| `self_update` | `time`, `phase`, `revision`, `reason` when blocked or rolled-back, and `from_path`, `to_path`, `slots` when handoff or rolled-back | a daemon self-update prebuild finished (issue #5012, see **Self-change halt** above). `phase` is `built` (the new build passed its smoke test, and the `halt` event with `self-changed: ...` follows), `blocked` (the build or smoke test failed; `reason` is prefixed `build: ` or `smoke-test: `, or `exec: ` when the in-place restart could not proceed: the exec syscall failed, the target was refused, or preparing the handoff or ignoring the stop signals failed; the pool keeps running on its current build), or `handoff` (under `--restart-in-place`, ADR 0063: the new image emits it once it has taken over the lock and the Events file, same pid, so a failed exec leaves none; `from_path` is the old program, `to_path` the one exec'd, `revision` its revision, `slots` the inherited slot numbers), or `rolled-back` (issue #5017: a resumed image refused to start and `exec`d back to the previous build, which emits this instead of `handoff`; `revision` is the refused revision, `reason` the refusal, `from_path` the refused build, `to_path` the build now running, `slots` the inherited slot numbers). `revision` is the tip the build was made at. No event marks a prebuild starting, and a build cancelled by a stop emits none; the status file's `self_update` shows `building` meanwhile |
+| `self_update` | `time`, `phase`, `revision`, `reason` when blocked or rolled-back, and `from_path`, `to_path`, `slots` when handoff or rolled-back | a daemon self-update prebuild finished (issue #5012, see **Self-change halt** above). `phase` is `built` (the new build passed its smoke test; in drain mode the `halt` event with `self-changed: ...` follows, while under `--restart-in-place` the pool waits for a clean moment instead, status `waiting`, then `handoff` from the new image: **Restart in place** above), `blocked` (the build or smoke test failed; `reason` is prefixed `build: ` or `smoke-test: `, or `exec: ` when the in-place restart could not proceed: the exec syscall failed, the target was refused, or preparing the handoff or ignoring the stop signals failed; the pool keeps running on its current build), or `handoff` (under `--restart-in-place`, ADR 0063: the new image emits it once it has taken over the lock and the Events file, same pid, so a failed exec leaves none; `from_path` is the old program, `to_path` the one exec'd, `revision` its revision, `slots` the inherited slot numbers), or `rolled-back` (issue #5017: a resumed image refused to start and `exec`d back to the previous build, which emits this instead of `handoff`; `revision` is the refused revision, `reason` the refusal, `from_path` the refused build, `to_path` the build now running, `slots` the inherited slot numbers). `revision` is the tip the build was made at. No event marks a prebuild starting, and a build cancelled by a stop emits none; the status file's `self_update` shows `building` meanwhile |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
-| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`/`config-invalid:`, never started; `reason` is prefixed by cause, one of `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal carries `context-cancelled: …` instead), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above), `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above), `config-invalid: …` (the daemon's own startup config failed validation — a non-positive slot count, an unknown or duplicate kind, and the like — before any pool existed), `context-cancelled: …` (the operator's stop signal, or a caller's own cancelled context, ended the loop — `context-cancelled: stop requested` for the former, see **Halting** above), `breaker: …` (the pool-wide breaker tripped — see the `breaker_trip` row above and **Failures**), and, with no detail after it, a halt-mapped child outcome: `outcome: host-tainted` (a child exited 5), `outcome: config-invalid` (a child exited 6), or `outcome: signalled-stop` (a child exited 7 once the operator's Stop latch was already closed) — see the exit-code table above **Failures** |
+| `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`/`config-invalid:`, never started; `reason` is prefixed by cause, one of `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal carries `context-cancelled: …` instead), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above; drain mode only, since under `--restart-in-place` a self-change records no halt), `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above), `config-invalid: …` (the daemon's own startup config failed validation — a non-positive slot count, an unknown or duplicate kind, and the like — before any pool existed), `context-cancelled: …` (the operator's stop signal, or a caller's own cancelled context, ended the loop — `context-cancelled: stop requested` for the former, see **Halting** above), `breaker: …` (the pool-wide breaker tripped — see the `breaker_trip` row above and **Failures**), and, with no detail after it, a halt-mapped child outcome: `outcome: host-tainted` (a child exited 5), `outcome: config-invalid` (a child exited 6), or `outcome: signalled-stop` (a child exited 7 once the operator's Stop latch was already closed) — see the exit-code table above **Failures** |
 
 **Events file.** Every line the daemon writes to stdout is also appended,
 unchanged, to `spindrift-daemon.events` beside the status file in the
