@@ -476,52 +476,58 @@ let
       )
     );
 
-  # One named drift check per documentedFacts row (issue #2948). docPath is
-  # read through `../../. + "/<docPath>"` because row.docPath is a runtime
-  # string and Nix path interpolation needs a literal path prefix.
-  documentedFactChecks =
+  # Returns `rows` unchanged, or throws if two share a `name`. The assert sits
+  # at the head of the body so forcing the result to WHNF trips it, which is
+  # all documentedFactChecks' listToAttrs and the guard's tryEval need.
+  assertNoDuplicateRowNames =
+    rows:
     let
       inherit (pkgs.lib) assertMsg concatStringsSep;
-      dupes = duplicateNames (map (row: row.name) documentedFacts);
+      dupes = duplicateNames (map (row: row.name) rows);
     in
     assert assertMsg (dupes == [ ])
       "documented-facts registry (lib/documented-facts.nix) has duplicate row name(s), which builtins.listToAttrs would silently collapse to the first one: ${concatStringsSep ", " dupes}";
-    builtins.listToAttrs (
-      map (row: {
-        name = row.name;
-        value =
-          if (row.postSplice or null) == "gofmt" then
-            documentedFactChecker.assertSplicedSpanOk {
+    rows;
+
+  # One named drift check per documentedFacts row (issue #2948). docPath is
+  # read through `../../. + "/<docPath>"` because row.docPath is a runtime
+  # string and Nix path interpolation needs a literal path prefix.
+  documentedFactChecks = builtins.listToAttrs (
+    map (row: {
+      name = row.name;
+      value =
+        if (row.postSplice or null) == "gofmt" then
+          documentedFactChecker.assertSplicedSpanOk {
+            inherit (row)
+              name
+              blockName
+              sourceDesc
+              beginMarker
+              endMarker
+              generated
+              ;
+            file = ../../. + "/${row.docPath}";
+            gofmt = true;
+          }
+        else
+          let
+            docSrc = builtins.readFile (../../. + "/${row.docPath}");
+          in
+          assert
+            (assertMarkedBlockOk {
               inherit (row)
-                name
                 blockName
                 sourceDesc
                 beginMarker
                 endMarker
+                docPath
                 generated
                 ;
-              file = ../../. + "/${row.docPath}";
-              gofmt = true;
-            }
-          else
-            let
-              docSrc = builtins.readFile (../../. + "/${row.docPath}");
-            in
-            assert
-              (assertMarkedBlockOk {
-                inherit (row)
-                  blockName
-                  sourceDesc
-                  beginMarker
-                  endMarker
-                  docPath
-                  generated
-                  ;
-                inherit docSrc;
-              }) == docSrc;
-            pkgs.runCommand row.name { } "touch $out";
-      }) documentedFacts
-    );
+              inherit docSrc;
+            }) == docSrc;
+          pkgs.runCommand row.name { } "touch $out";
+    }) (assertNoDuplicateRowNames documentedFacts)
+  );
 
   # `//`'s right-hand side silently wins on a key collision, unlike a literal
   # attrset with a duplicate key, which is a hard eval error. This restores
@@ -2680,22 +2686,16 @@ checkedMerge {
       "documented-fact-registry-rejects-duplicate-name-guard: expected duplicateNames to return the offending duplicate name(s) rather than throwing or missing them, got: ${builtins.toJSON result}";
     pkgs.runCommand "documented-fact-registry-rejects-duplicate-name-guard" { } "touch $out";
 
-  # Proves the assert wired into documentedFactChecks throws on duplicate row
-  # names, not just that duplicateNames works in isolation. Uses a synthetic
-  # two-row list so the real registry stays untouched (issue #2948).
+  # Drives assertNoDuplicateRowNames, the same function documentedFactChecks
+  # runs its registry through, on a synthetic two-row list so the real
+  # registry stays untouched (issue #2948).
   documented-fact-checks-throws-on-duplicate-registry-row-name-guard =
     let
       inherit (pkgs.lib) assertMsg;
-      dupes = duplicateNames (
-        map (row: row.name) [
-          { name = "dup"; }
-          { name = "dup"; }
-        ]
-      );
-      result = builtins.tryEval (
-        assert assertMsg (dupes == [ ]) "synthetic duplicate should have been detected";
-        null
-      );
+      result = builtins.tryEval (assertNoDuplicateRowNames [
+        { name = "dup"; }
+        { name = "dup"; }
+      ]);
     in
     assert assertMsg (!result.success)
       "documented-fact-checks-throws-on-duplicate-registry-row-name-guard: expected the duplicate-name assert to throw given two synthetic rows sharing a name, but it evaluated successfully";
