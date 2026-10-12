@@ -9,6 +9,7 @@ let
   structuralPaths = import ./structural-paths.nix;
   byNamePaths = import ./byname-paths.nix;
   nixpath = import ./nixpath.nix;
+  deprecationNote = import ./driver-deprecation-note.nix;
 
   names = rows: builtins.filter (n: rows.${n}.driverValued or false) (builtins.attrNames rows);
   envKeys = names schema;
@@ -18,6 +19,10 @@ let
   # Drop the leading "agents" domain: per-Driver entries nest under
   # agents.drivers.<name>, not under agents.
   agentsRelative = segments: builtins.tail segments;
+
+  # The Driver name generated examples and docs render a Driver-valued setting
+  # under, so no consumer hard-codes a second spelling of it.
+  exampleDriver = "claude";
 
   # Flat schema key (the mkHarness arg) -> path segments under agents.
   paths =
@@ -114,9 +119,52 @@ let
       else
         "${full t.path} is deprecated; use ${moveHintFor name t.path} (ADR 0064)"
     ) topLevel;
+
+  # A Driver-valued setting's full path segments (leading "agents"), placed
+  # under one Driver's entry: agents.<rest> -> agents.drivers.<name>.<rest>.
+  # Generated examples and docs use it so they never hand-type the moved path.
+  underDriver =
+    name: segments:
+    if builtins.head segments != "agents" then
+      throw "lib/driver-map.nix underDriver: expected a path under agents, got ${builtins.concatStringsSep "." segments}"
+    else
+      [
+        "agents"
+        "drivers"
+        name
+      ]
+      ++ builtins.tail segments;
+
+  # Where a flat structural shim's replacement lives: a Driver-valued knob
+  # goes straight to its Driver entry, not via the deprecated top-level path.
+  driverEntryPath =
+    flatName: segments:
+    if
+      segments == [
+        "agents"
+        "driver"
+      ]
+    then
+      [
+        "agents"
+        "drivers"
+        "<name>"
+      ]
+    else if (paths.${flatName} or null) == builtins.tail segments then
+      underDriver "<name>" segments
+    else
+      segments;
 in
 {
-  inherit resolve paths deprecations;
+  inherit
+    resolve
+    paths
+    deprecations
+    exampleDriver
+    deprecationNote
+    underDriver
+    driverEntryPath
+    ;
   # Where the module declares the map and its default-Driver name; read by
   # lib/flakeModule.nix and nix/checks/schema-drift.nix's
   # flake-nixpath-exhaustive-disjoint check, like lib/byname-paths.nix.
