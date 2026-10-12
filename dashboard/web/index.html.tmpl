@@ -50,6 +50,12 @@
   {{- end}}
 {{- else}}
   {{- template "reason" .}}
+  {{- if .SelfBlocked}}
+  <section class="banner blocked">
+    <strong>Next build <code>{{if .SelfUpdateRev}}{{.SelfUpdateRev}}{{else}}unknown revision{{end}}</code> blocked; running the previous build</strong>
+    <p class="reason">{{if .SelfBlockedReason}}{{.SelfBlockedReason}}{{else}}no reason published{{end}}</p>
+  </section>
+  {{- end}}
   <section class="facts">
     <div><span class="label">host</span><span>{{.Host}}</span></div>
     <div><span class="label">pid</span><span>{{.Pid}}</span></div>

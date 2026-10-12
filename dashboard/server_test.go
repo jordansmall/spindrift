@@ -426,13 +426,94 @@ func TestFormatDuration(t *testing.T) {
 	}
 }
 
-// withSelfUpdate adds the Daemon's optional self_update object to a status file.
-func withSelfUpdate(status, phase, rev string) string {
-	su := `"self_update":{"phase":"` + phase + `","revision":"` + rev + `"},`
+// withSelfUpdate adds the Daemon's optional self_update object to a status
+// file; a reason, which only the blocked phase carries, is emitted when given.
+func withSelfUpdate(status, phase, rev string, reason ...string) string {
+	su := `"self_update":{"phase":"` + phase + `","revision":"` + rev + `"`
+	if len(reason) > 0 {
+		su += `,"reason":` + strconv.Quote(reason[0])
+	}
+	su += `},`
 	return strings.Replace(status, `"slots":`, su+`"slots":`, 1)
 }
 
 const selfRev = "0123456789abcdef0123456789abcdef01234567"
+
+func TestSelfUpdateBlockedBanner(t *testing.T) {
+	slots := `[{"slot":0,"phase":"running","busy":true,"kind":"work"}]`
+	for name, tc := range map[string]struct {
+		c      string
+		rev    string
+		reason string
+		halted bool
+	}{
+		"working":     {withSelfUpdate(statusJSON(t, "working", "", slots), "blocked", selfRev, "smoke test failed: exit 1"), "<code>0123456789ab</code>", "smoke test failed: exit 1", false},
+		"halted":      {withSelfUpdate(statusJSON(t, "halted", "boom", slots), "blocked", selfRev, "prebuild failed"), "<code>0123456789ab</code>", "prebuild failed", true},
+		"no reason":   {withSelfUpdate(statusJSON(t, "working", "", slots), "blocked", selfRev, ""), "<code>0123456789ab</code>", "no reason published", false},
+		"no revision": {withSelfUpdate(statusJSON(t, "working", "", slots), "blocked", "", "prebuild failed"), "<code>unknown revision</code>", "prebuild failed", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, body := get(t, &tc.c, "/")
+			for _, want := range []string{
+				`class="banner blocked"`, tc.rev, tc.reason,
+				"running the previous build", `data-slot="0"`,
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing %q", want)
+				}
+			}
+			if strings.Contains(body, "0123456789abcdef") {
+				t.Errorf("banner shows the full revision")
+			}
+			if got := strings.Contains(body, `class="banner halted"`); got != tc.halted {
+				t.Errorf("halted banner present = %v, want %v", got, tc.halted)
+			}
+			if tc.halted {
+				if !strings.Contains(body, "Pool halted") {
+					t.Errorf("halted banner lost its title")
+				}
+				if strings.Contains(body, "draining") {
+					t.Errorf("blocked update rendered as a drain")
+				}
+			} else if !strings.Contains(body, `pill state-working`) {
+				t.Errorf("state pill lost")
+			}
+			if strings.Contains(body, `class="pill self-update"`) {
+				t.Errorf("blocked phase shows a self-update pill")
+			}
+		})
+	}
+}
+
+func TestSelfUpdateBlockedBannerAbsentWhenNotBlocked(t *testing.T) {
+	for name, c := range map[string]string{
+		"building": withSelfUpdate(statusJSON(t, "working", "", `[]`), "building", selfRev),
+		"absent":   statusJSON(t, "working", "", `[]`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, body := get(t, &c, "/")
+			if strings.Contains(body, "banner blocked") {
+				t.Errorf("blocked banner shown without a blocked phase")
+			}
+		})
+	}
+}
+
+func TestDeadPidHidesSelfUpdateBlockedBanner(t *testing.T) {
+	c := `{"pid":` + itoa(goneCommandPid(t)) + `,"host":"` + hostname(t) + `","started":"2026-10-07T10:00:00Z",
+	"time":"2026-10-07T11:59:58Z","kinds":["work"],"state":"working",
+	"self_update":{"phase":"blocked","revision":"` + selfRev + `","reason":"smoke test failed"},
+	"slots":[],"checks":[]}`
+	_, body := get(t, &c, "/")
+	for _, bad := range []string{"banner blocked", "smoke test failed", "running the previous build"} {
+		if strings.Contains(body, bad) {
+			t.Errorf("dead daemon body contains %q", bad)
+		}
+	}
+	if !strings.Contains(body, "no Daemon running") {
+		t.Errorf("dead-pid view lost its banner")
+	}
+}
 
 func TestSelfUpdatePill(t *testing.T) {
 	for name, tc := range map[string]struct{ state, reason, phase, label string }{
@@ -488,14 +569,11 @@ func TestSelfUpdateBuiltUnrelatedHaltIsNotDrain(t *testing.T) {
 
 func TestSelfUpdateNoPillOrDrain(t *testing.T) {
 	for name, tc := range map[string]struct {
-		c      string
-		halted bool
+		c string
 	}{
-		"built not halted": {withSelfUpdate(statusJSON(t, "working", "", `[]`), "built", selfRev), false},
-		"blocked":          {withSelfUpdate(statusJSON(t, "working", "", `[]`), "blocked", selfRev), false},
-		"blocked halted":   {withSelfUpdate(statusJSON(t, "halted", "boom", `[]`), "blocked", selfRev), true},
-		"unknown":          {withSelfUpdate(statusJSON(t, "working", "", `[]`), "mystery", selfRev), false},
-		"absent":           {statusJSON(t, "working", "", `[]`), false},
+		"built not halted": {withSelfUpdate(statusJSON(t, "working", "", `[]`), "built", selfRev)},
+		"unknown":          {withSelfUpdate(statusJSON(t, "working", "", `[]`), "mystery", selfRev)},
+		"absent":           {statusJSON(t, "working", "", `[]`)},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, body := get(t, &tc.c, "/")
@@ -503,9 +581,6 @@ func TestSelfUpdateNoPillOrDrain(t *testing.T) {
 				if strings.Contains(body, bad) {
 					t.Errorf("body contains %q", bad)
 				}
-			}
-			if tc.halted && !strings.Contains(body, "Pool halted") {
-				t.Errorf("plain halt lost its banner")
 			}
 		})
 	}
