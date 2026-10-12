@@ -738,11 +738,55 @@ func RouteLocalURL(prefix string, port int) string {
 	return "http://127.0.0.1:" + strconv.Itoa(port) + "/" + prefix
 }
 
+// cargoDLMarkers are the placeholders cargo substitutes in a registry's dl
+// before fetching a crate.
+var cargoDLMarkers = []string{"{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"}
+
+// restoreCargoDLMarkers undoes what repointRegistryURL's EscapedPath does to a
+// dl template: it percent-encodes the braces in the path, which cargo would
+// then send verbatim instead of substituting. Only the path is touched (the
+// query is copied verbatim), and only markers the original path spells
+// literally are restored: a dl whose path spells no marker literally is left
+// alone. It also narrows edit.LearnedPath to just above the first marker's
+// segment, the subtree every substituted download lives under.
+func restoreCargoDLMarkers(original string, edit registryvocab.RewriteEdit) registryvocab.RewriteEdit {
+	origPath := pathPart(original)
+	toPath := pathPart(edit.To)
+	tail := edit.To[len(toPath):]
+	cut := -1
+	for _, m := range cargoDLMarkers {
+		if !strings.Contains(origPath, m) {
+			continue
+		}
+		toPath = strings.ReplaceAll(toPath, "%7B"+m[1:len(m)-1]+"%7D", m)
+		if i := strings.Index(edit.LearnedPath, m); i >= 0 && (cut < 0 || i < cut) {
+			cut = i
+		}
+	}
+	edit.To = toPath + tail
+	if cut >= 0 {
+		edit.LearnedPath = strings.TrimRight(edit.LearnedPath[:strings.LastIndex(edit.LearnedPath[:cut], "/")], "/")
+		if edit.LearnedPath == "" {
+			edit.LearnedPath = "/"
+		}
+	}
+	return edit
+}
+
+// pathPart returns u up to its first "?" or "#".
+func pathPart(u string) string {
+	if i := strings.IndexAny(u, "?#"); i >= 0 {
+		return u[:i]
+	}
+	return u
+}
+
 // rewriteCargoDL rewrites a cargo sparse-index config.json body's "dl" field to
 // point at the Forwarder with the route's prefix re-inserted, so a later crate
-// download (which cargo builds by joining dl with a crate path) round-trips
-// through the same route instead of going straight upstream. It does no I/O
-// and no logging; the caller logs from and to keyed off outcome.
+// download (which cargo builds by joining dl with a crate path, or by
+// substituting its {crate}-style markers) round-trips through the same route
+// instead of going straight upstream. It does no I/O and no logging; the
+// caller logs from and to keyed off outcome.
 func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
 	obj, ok := decodeOneJSONObject(body)
 	if !ok {
@@ -770,6 +814,7 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 		}
 	}
 
+	edit = restoreCargoDLMarkers(dlStr, edit)
 	obj["dl"] = edit.To
 
 	newBody, err := json.Marshal(obj)
