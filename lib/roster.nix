@@ -5,6 +5,11 @@
 # `reviewEffort` knob (issue #2512) after this function, not through it.
 { lib }:
 rec {
+  # An empty inline prompt satisfies neither Driver, so it must not
+  # short-circuit normalizeRosterResult's missing-promptfile check (issue
+  # #2555 user story 23).
+  hasInlinePrompt = e: (e.prompt or null) != null && e.prompt != "";
+
   # Validates each entry and injects a promptFile default so no Driver
   # re-derives one (issue #2152 slice A, issue #2571). It reports the first
   # violation as `{ ok; value; violation; entryName; message; }` rather than
@@ -107,16 +112,20 @@ rec {
             promptFileIsRegularFile =
               promptFileExists && builtins.readFileType promptFileResolvedPath == "regular";
             promptFileUsable = !promptFileHasTraversal && promptFileIsRegularFile;
-            # An empty inline prompt satisfies neither Driver, so it must not
-            # short-circuit the promptFile check below (issue #2555 user
-            # story 23).
-            hasInlinePrompt = (entry.prompt or null) != null && entry.prompt != "";
           in
-          if !promptFileUsable && !hasInlinePrompt then
+          if !promptFileUsable && !hasInlinePrompt entry then
             acc
             //
               violation "missing-promptfile" e.name
                 "normalizeRoster: entry ${builtins.toJSON e.name} promptFile ${builtins.toJSON entry.promptFile} does not exist under templates/default/prompts and no inline prompt was supplied"
+          # The image build copies the shipped prompt tree read-only (0444),
+          # then writes the inline prompt to the same path, which fails with
+          # `cp: Permission denied` (issue #5035).
+          else if hasInlinePrompt entry && promptFileExists then
+            acc
+            //
+              violation "inline-prompt-shadows-shipped" e.name
+                "normalizeRoster: entry ${builtins.toJSON e.name} sets an inline prompt but promptFile ${builtins.toJSON entry.promptFile} is already shipped under templates/default/prompts and would be shadowed -- override a shipped prompt with the matching mkHarness *Prompt arg or SPINDRIFT_PROMPT_DIR, or pick a promptFile that does not collide"
           else
             {
               seen = acc.seen // {
