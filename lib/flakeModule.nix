@@ -11,6 +11,7 @@
 let
   inherit (lib) mkOption types;
   mkHarness = import ./mkHarness.nix;
+  skillsLib = import ./skills.nix;
   schema = import ./env-schema.nix;
   removedKnobs = import ./removed-knobs.nix;
   resolveNixPath = import ./nixpath.nix;
@@ -176,8 +177,10 @@ let
             types.submodule {
               options = {
                 name = mkOption {
-                  type = types.str;
-                  description = "Skill (directory) name; baked as <name>/SKILL.md.";
+                  type = types.addCheck types.str skillsLib.isValidName // {
+                    description = "string matching the pattern ${skillsLib.namePattern}, other than \".\" or \"..\"";
+                  };
+                  description = "Skill (directory) name; baked as <name>/SKILL.md. Must match ${skillsLib.namePattern} and not be \".\" or \"..\".";
                 };
                 src = mkOption {
                   type = types.str;
