@@ -29,15 +29,14 @@ let
   splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
   resolveNixPath = import ./nixpath.nix;
   inherit (import ./driver-map.nix) underDriver exampleDriver deprecationNote;
+  driverPathNote =
+    segments:
+    deprecationNote "perSystem.spindrift.${builtins.concatStringsSep "." (underDriver "<name>" segments)}";
   # Opens the description of a Driver-valued setting's row in the generated
   # option docs (ADR 0064); `dotted` is its top-level path (agents.<rest>).
   driverValuedNote =
     entry: dotted:
-    if entry.driverValued or false then
-      deprecationNote "perSystem.spindrift.${builtins.concatStringsSep "." (underDriver "<name>" (splitNixPath dotted))}"
-      + " "
-    else
-      "";
+    if entry.driverValued or false then driverPathNote (splitNixPath dotted) + " " else "";
   # A Go `[]string{"a", "b"}` literal's inner comma-joined, quoted contents.
   renderGoStringSlice = items: builtins.concatStringsSep ", " (map (s: "\"${s}\"") items);
   # A whole generated Go file whose body is a single `var X = []string{...}`
@@ -449,7 +448,8 @@ rec {
   # string to lib/structural-paths.nix's `roster` entry so the two cannot drift
   # silently (issue #2436, documentedFact registry by issue #2950).
   renderRosterFlakePathDoc =
-    rosterPath: "`perSystem.spindrift.${builtins.concatStringsSep "." rosterPath}`\n";
+    rosterPath:
+    "`perSystem.spindrift.${builtins.concatStringsSep "." (underDriver "<name>" rosterPath)}`\n";
 
   # docs/reference.md restates rosterDefaults' effort values as prose; this pins
   # that string to the real values (issue #2506, documentedFact registry by issue
@@ -561,8 +561,8 @@ rec {
         | `extraClosures` | `${path "extraClosures" structuralPaths}` | shared     | `pkgs -> [pkg]`         | `[]`               | extra derivations, as a function of the (Linux) `pkgs` (like `packages`), whose closures are baked into the image and registered in the store DB alongside the runtime closure, so in-box nix sees them as already present (ADR 0018) |
         | `nixBuilderImage` | — | **`mkHarness` only** | string        | `"${nixBuilderImage}"` (pinned reference — the real default lives in `lib/build-constants.nix`) | Nix image `spindrift build` uses as a fallback Linux builder when the host can't realize the image; pinned by digest for supply-chain safety (see [Building on macOS](#building-on-macos)) |
         | `imageAttrName` | — | **`mkHarness` only** | string | `"agent-image"` (OCI) / `"agent-closure"` (bwrap) | flake package attribute the image (OCI) or closure (bwrap) is exposed under, and the one the baked freshness probe's `FLAKE_IMAGE_ATTR` names; a second Harness in one flake needs its own so the two do not collide (ADR 0064) |
-        | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | ${deprecationNote "agents.drivers.<name>"} See [Several Drivers side by side](#several-drivers-side-by-side); supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
-        | `byName`    | `${path "byName" extraOptionPaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" extraOptionPaths}`, defaults to `null`) | ${deprecationNote "agents.drivers.<name>"} See [Several Drivers side by side](#several-drivers-side-by-side); name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
+        | `roster`    | `${path "roster" structuralPaths}` | shared         | list of subagent-entry attrs | `lib/roster.nix`'s `defaultRoster` | ${driverPathNote structuralPaths.roster} See [Several Drivers side by side](#several-drivers-side-by-side); supersedes the four legacy model knobs; see [Subagent roster](#subagent-roster) |
+        | `byName`    | `${path "byName" extraOptionPaths}` | shared         | attrset of `{ model?; effort?; }` keyed by roster entry name | `{}` (this row is the `mkHarness` parameter; the flake option, `${dotted "byName" extraOptionPaths}`, defaults to `null`) | ${driverPathNote extraOptionPaths.byName} See [Several Drivers side by side](#several-drivers-side-by-side); name-keyed model/effort shorthand (issue #2560), forwarded into `defaultRoster`; only takes effect when `roster` is unset; no flat `perSystem.spindrift.byName` alias — see [Subagent roster](#subagent-roster) |
         | `drivers`   | `${path "drivers" extraOptionPaths}` | per-Driver map | attrset of Driver entries keyed by Driver name | `{}` | Drivers built side by side (ADR 0064); each entry holds only the Driver-valued settings, at their agents-relative paths; see [Several Drivers side by side](#several-drivers-side-by-side) |
         | `defaultDriver` | `${path "defaultDriver" extraOptionPaths}` | shared | string | `null` | the Driver behind `apps.default` and `apps.daemon`; inferred with one declared Driver, required with several |
       '';

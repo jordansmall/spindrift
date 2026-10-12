@@ -1,5 +1,50 @@
 # Migration Guide
 
+## The single-Driver options give way to `agents.drivers` (issue #5055)
+
+`perSystem.spindrift.agents.driver` and every top-level Driver-valued
+setting are deprecated in favour of the Driver map (ADR 0064). Each one you
+still set raises one evaluation warning naming its new path. The old form
+builds the same Harness as before, so nothing breaks yet; a later minor
+release removes it.
+
+Move each setting under `agents.drivers.<name>`, where `<name>` is the
+Driver (`claude` unless you set `agents.driver`), keeping the rest of its
+path:
+
+| Old option | New option |
+| --- | --- |
+| `perSystem.spindrift.agents.driver = "<name>"` | declare `perSystem.spindrift.agents.drivers.<name>` (the attribute name is the Driver); with several Drivers, set `perSystem.spindrift.agents.defaultDriver = "<name>"` |
+| `perSystem.spindrift.agents.models.default` | `perSystem.spindrift.agents.drivers.<name>.models.default` |
+| `perSystem.spindrift.agents.models.effort` | `perSystem.spindrift.agents.drivers.<name>.models.effort` |
+| `perSystem.spindrift.agents.models.roster` | `perSystem.spindrift.agents.drivers.<name>.models.roster` |
+| `perSystem.spindrift.agents.models.byName` | `perSystem.spindrift.agents.drivers.<name>.models.byName` |
+| `perSystem.spindrift.agents.models.review` | `perSystem.spindrift.agents.drivers.<name>.models.review` |
+| `perSystem.spindrift.agents.models.reviewEffort` | `perSystem.spindrift.agents.drivers.<name>.models.reviewEffort` |
+| `perSystem.spindrift.agents.models.filer` | `perSystem.spindrift.agents.drivers.<name>.models.filer` |
+| `perSystem.spindrift.agents.models.worker` | `perSystem.spindrift.agents.drivers.<name>.models.worker` |
+| `perSystem.spindrift.agents.models.scout` | `perSystem.spindrift.agents.drivers.<name>.models.scout` |
+| `perSystem.spindrift.agents.bashTimeoutMs` | `perSystem.spindrift.agents.drivers.<name>.bashTimeoutMs` |
+
+For example:
+
+```nix
+# was:
+agents.driver = "opencode";
+agents.models.default = "anthropic/claude-sonnet-4-5";
+agents.bashTimeoutMs = 1800000;
+
+# now:
+agents.drivers.opencode = {
+  models.default = "anthropic/claude-sonnet-4-5";
+  bashTimeoutMs = 1800000;
+};
+```
+
+Move every Driver-valued setting in one edit: `agents.drivers` set alongside
+any of the old options fails evaluation. Everything else under `agents`
+(`prompt`, `skills`, `format`, `lint`, `promptDir`, ...) stays where it is.
+
 ## Daemon child output moves off the daemon's stderr (issue #5009)
 
 The daemon no longer echoes each child's stdout and stderr onto its own
