@@ -3784,9 +3784,16 @@ func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
 		}
 		return sh(ctx, "echo "+newSelf)
 	}
-	runnerPrebuildCommand = func(ctx context.Context, name string, _ ...string) *exec.Cmd {
+	// nix build emulates --out-link by creating the symlink: a prebuild
+	// (<drv>^out) links the new build's store path, a rooting links its argument.
+	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "nix" {
-			return sh(ctx, "echo "+filepath.Dir(filepath.Dir(newSelf)))
+			out, target := filepath.Dir(filepath.Dir(newSelf)), args[len(args)-1]
+			if strings.HasSuffix(target, "^out") {
+				target = out
+			}
+			link := args[slices.Index(args, "--out-link")+1]
+			return exec.CommandContext(ctx, "/bin/sh", "-c", `ln -sfn "$1" "$2" && echo "$3"`, "sh", target, link, out)
 		}
 		return sh(ctx, "exit 0")
 	}
@@ -3906,6 +3913,7 @@ func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
 	f := newInPlaceFixtureT(t, newSelf)
 
 	call, out := f.handOff(t)
+	f.assertGCRoots(t, "after the handoff", "/nix/store/aaa-old", "/nix/store/bbb-new")
 	if call.path != newSelf || call.argv[0] != newSelf {
 		t.Errorf("exec path = %q argv0 = %q, want %q", call.path, call.argv[0], newSelf)
 	}
@@ -3953,6 +3961,7 @@ func TestMainRun_RestartInPlaceHandsOffAndReattaches(t *testing.T) {
 	if got := waitCode(t, code, out2); got != 0 {
 		t.Fatalf("second image exited %d; output:\n%s", got, out2.String())
 	}
+	f.assertGCRoots(t, "after the successor started", "/nix/store/bbb-new", "")
 	if b, err := os.ReadFile(f.termFile); err != nil || strings.TrimSpace(string(b)) != "term" {
 		t.Errorf("child term marker = %q (err %v), want \"term\": the stop was not forwarded to the inherited child", b, err)
 	}
@@ -4203,6 +4212,28 @@ func (f *inPlaceFixture) resumeArgv(call selfExecCall) []string {
 	return append([]string{"--input", f.input}, call.argv[1:]...)
 }
 
+// gcRoot is where the named out-link under the state directory points, "" if
+// it is absent.
+func (f *inPlaceFixture) gcRoot(name string) string {
+	target, err := os.Readlink(filepath.Join(f.gitDir, name))
+	if err != nil {
+		return ""
+	}
+	return target
+}
+
+// assertGCRoots checks the two daemon roots: current is the running build or
+// the rollback target, next the prebuilt candidate ("" for none).
+func (f *inPlaceFixture) assertGCRoots(t *testing.T, when, current, next string) {
+	t.Helper()
+	if got := f.gcRoot(currentGCRoot); got != current {
+		t.Errorf("%s: %s -> %q, want %q", when, currentGCRoot, got, current)
+	}
+	if got := f.gcRoot(prebuildGCRoot); got != next {
+		t.Errorf("%s: %s -> %q, want %q", when, prebuildGCRoot, got, next)
+	}
+}
+
 func (f *inPlaceFixture) execCalls() []selfExecCall {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -4216,6 +4247,7 @@ func (f *inPlaceFixture) refuseAndRollBack(t *testing.T) selfExecCall {
 	t.Helper()
 	const newSelf = "/nix/store/bbb-new/bin/daemon"
 	call, _ := f.handOff(t)
+	f.assertGCRoots(t, "after the handoff", "/nix/store/aaa-old", "/nix/store/bbb-new")
 	// The third image must start with a working doctor.
 	prevDoctor := runnerDoctorCommand
 	defer func() { runnerDoctorCommand = prevDoctor }()
@@ -4235,6 +4267,7 @@ func (f *inPlaceFixture) refuseAndRollBack(t *testing.T) selfExecCall {
 		t.Fatalf("rollback exec = %+v, want the old program with %s <fd>", back, handoffFlag)
 	}
 	assertNoHandoffIn(t, "rollback exec", back.env)
+	f.assertGCRoots(t, "after the refusal", "/nix/store/aaa-old", "/nix/store/bbb-new")
 	if _, ok := findEvent(eventsIn(out), "self_update", "rolled-back"); ok {
 		t.Errorf("the refusing image emitted the rolled-back event itself; output:\n%s", out.String())
 	}
@@ -4256,7 +4289,9 @@ func TestMainRun_ResumedImageThatRefusesToStartRollsBack(t *testing.T) {
 	var prebuilds atomic.Int32
 	origPrebuild := runnerPrebuildCommand
 	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		prebuilds.Add(1)
+		if name == "nix" && strings.HasSuffix(args[len(args)-1], "^out") {
+			prebuilds.Add(1)
+		}
 		return origPrebuild(ctx, name, args...)
 	}
 	// One per tip resolution, counted when it starts.
@@ -4287,6 +4322,7 @@ func TestMainRun_ResumedImageThatRefusesToStartRollsBack(t *testing.T) {
 		t.Errorf("the rolled-back image also recorded a handoff; output:\n%s", out.String())
 	}
 	waitForEvent(t, out, "child_inherited", "")
+	f.assertGCRoots(t, "after the rollback", "/nix/store/aaa-old", "")
 
 	var su *daemon.SelfUpdate
 	pollUntil(func() bool {

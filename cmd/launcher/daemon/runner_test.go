@@ -2951,6 +2951,58 @@ func TestPrebuild_Success(t *testing.T) {
 	}
 }
 
+func TestRootSelf_RootsTheRunningBuildAndDropsTheCandidateRoot(t *testing.T) {
+	h := newPrebuildHarness(t, "", "", "")
+	next := filepath.Join(h.stateDir, prebuildGCRoot)
+	if err := os.Symlink("/nix/store/bbb-new", next); err != nil {
+		t.Fatal(err)
+	}
+	var warn bytes.Buffer
+	h.r.rootSelf(context.Background(), "/nix/store/aaa-old/bin/daemon", &warn)
+
+	want := daemon.SelfRootCommand("/nix/store/aaa-old", filepath.Join(h.stateDir, currentGCRoot))[1:]
+	if got := h.read(t, h.buildLog); !reflect.DeepEqual(got, want) {
+		t.Errorf("nix argv = %v, want %v", got, want)
+	}
+	if _, err := os.Lstat(next); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("candidate root still present (err %v), want it removed", err)
+	}
+	if warn.Len() != 0 {
+		t.Errorf("warning = %q, want none", warn.String())
+	}
+}
+
+func TestRootSelf_FailureOnlyWarnsAndKeepsTheCandidateRoot(t *testing.T) {
+	h := newPrebuildHarness(t, "", "echo boom >&2; exit 1", "")
+	next := filepath.Join(h.stateDir, prebuildGCRoot)
+	if err := os.Symlink("/nix/store/bbb-new", next); err != nil {
+		t.Fatal(err)
+	}
+	var warn bytes.Buffer
+	h.r.rootSelf(context.Background(), "/nix/store/bbb-new/bin/daemon", &warn)
+
+	if !strings.Contains(warn.String(), "/nix/store/bbb-new") || !strings.Contains(warn.String(), "boom") {
+		t.Errorf("warning = %q, want it to name the path and the nix failure", warn.String())
+	}
+	if _, err := os.Lstat(next); err != nil {
+		t.Errorf("candidate root = %v, want it kept: it may be the only root of the running build", err)
+	}
+}
+
+func TestRootSelf_OutsideTheStoreRootsNothing(t *testing.T) {
+	for _, program := range []string{"", "/usr/bin/daemon", "/nix/store/a/../b/bin/d", "/nix/store/"} {
+		h := newPrebuildHarness(t, "", "", "")
+		var warn bytes.Buffer
+		h.r.rootSelf(context.Background(), program, &warn)
+		if _, err := os.Stat(h.buildLog); err == nil {
+			t.Errorf("program %q: nix ran, want no rooting", program)
+		}
+		if warn.Len() != 0 {
+			t.Errorf("program %q: warning = %q, want none", program, warn.String())
+		}
+	}
+}
+
 func TestPrebuild_Failures(t *testing.T) {
 	cases := []struct {
 		name                       string
@@ -3796,9 +3848,45 @@ func handoffWithChild(t *testing.T, r *hostRunner) (daemon.Handoff, *hostChildHa
 	return daemon.Handoff{Slots: []daemon.HandoffSlot{{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Child: h.State()}}}, h, lock
 }
 
+// rollbackTargetRooted points the runner's .current root at storePath, as an
+// earlier rootSelf would have.
+func rollbackTargetRooted(t *testing.T, r *hostRunner, storePath string) {
+	t.Helper()
+	if err := os.Symlink(storePath, filepath.Join(r.stateDir, currentGCRoot)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExecSuccessor_RefusesWithoutARootOnTheRollbackTarget(t *testing.T) {
+	requireInPlaceRestart(t)
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, r *hostRunner)
+	}{
+		{"no root", func(*testing.T, *hostRunner) {}},
+		{"root elsewhere", func(t *testing.T, r *hostRunner) { rollbackTargetRooted(t, r, "/nix/store/zzz-other") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := execReadyRunner(t, func(c *hostRunnerConfig) { c.stateDir = t.TempDir() })
+			tc.setup(t, r)
+			ho, _, lock := handoffWithChild(t, r)
+			execed := false
+			stubSelfExec(t, func(string, []string, []string) error { execed = true; return nil })
+			err := r.execSuccessor(ho, lock, nil, "/nix/store/aaa-old/bin/daemon")
+			if err == nil || !strings.Contains(err.Error(), "/nix/store/aaa-old") {
+				t.Fatalf("execSuccessor() = %v, want a refusal naming the unrooted build", err)
+			}
+			if execed {
+				t.Error("exec happened though the rollback target was not rooted")
+			}
+		})
+	}
+}
+
 func TestExecSuccessor_HandsDescriptorsAndDocumentToTheSuccessor(t *testing.T) {
 	requireInPlaceRestart(t)
-	r := execReadyRunner(t, nil)
+	r := execReadyRunner(t, func(c *hostRunnerConfig) { c.stateDir = t.TempDir() })
+	rollbackTargetRooted(t, r, "/nix/store/aaa-old")
 	ho, _, lock := handoffWithChild(t, r)
 	ho.Stop = true
 	if len(r.handles) != 1 {

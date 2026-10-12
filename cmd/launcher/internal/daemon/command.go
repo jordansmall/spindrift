@@ -260,6 +260,12 @@ func SelfBuildCommand(drvPath, outLink string) []string {
 	return []string{"nix", "build", "--out-link", outLink, "--print-out-paths", drvPath + "^out"}
 }
 
+// SelfRootCommand builds the argv that pins the already-built storePath with
+// a GC root at outLink.
+func SelfRootCommand(storePath, outLink string) []string {
+	return []string{"nix", "build", "--out-link", outLink, storePath}
+}
+
 // DoctorSpec is everything one pinned startup-preflight invocation needs.
 type DoctorSpec struct {
 	RepoPath string   // absolute path to the operator's checkout

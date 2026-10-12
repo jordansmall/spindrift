@@ -593,3 +593,11 @@ func TestSelfBuildCommand(t *testing.T) {
 		t.Fatalf("SelfBuildCommand = %v, want %v", got, want)
 	}
 }
+
+func TestSelfRootCommand(t *testing.T) {
+	got := SelfRootCommand("/nix/store/aaa-old", "/git/spindrift-daemon.current")
+	want := []string{"nix", "build", "--out-link", "/git/spindrift-daemon.current", "/nix/store/aaa-old"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("SelfRootCommand = %v, want %v", got, want)
+	}
+}
