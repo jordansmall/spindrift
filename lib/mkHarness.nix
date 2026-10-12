@@ -1343,16 +1343,6 @@ let
     }
   );
 
-  # buildGoModule's checkPhase runs `go test` from within its src, so docs/
-  # must sit alongside cmd/launcher there too, mirroring the repo layout, for
-  # TestReferenceDocLabelSnippetMatchesTriageDefaults's ../../docs/reference.md
-  # path to resolve (#611).
-  launcherSrc = hostPkgs.runCommand "launcher-src" { } ''
-    mkdir -p $out/cmd/launcher
-    cp -r ${../cmd/launcher}/. $out/cmd/launcher/
-    cp -r ${../docs} $out/docs
-  '';
-
   # vendorHash lives in lib/build-constants.nix. Recompute it with
   # pkgs.lib.fakeHash against this recipe's own `src` and commit it alongside
   # go.sum. launcherCurrencyBin, driverExecBin, orchestratorBin and boxBin each vendor
@@ -1361,8 +1351,7 @@ let
   launcherBin = hostPkgs.buildGoModule {
     pname = "spindrift-launcher";
     version = spindriftVersion;
-    src = launcherSrc;
-    modRoot = "cmd/launcher";
+    src = launcherModuleSrc;
     vendorHash = buildConstants.launcherVendorHash;
     subPackages = [ "." ]; # build only the launcher; driver-exec is in-box only
     # nix/checks/go.nix already runs `go test ./...` vendored and offline
@@ -1376,35 +1365,30 @@ let
     meta.license = lib.licenses.mit;
   };
 
-  # daemonBin is one input to the wrapper whose own $0
-  # (SPINDRIFT_DAEMON_PROGRAM) is what runSlot's inline Tip.SelfPath
-  # comparison (cmd/launcher/internal/daemon/loop.go) compares at each
-  # iteration boundary (issue #3543); a mismatch halts a running daemon with
-  # exit 10. src is scoped with lib.fileset, not launcherSrc: launcherSrc
-  # copies ../docs alongside cmd/launcher for launcherBin's checkPhase
-  # (#611), and pulling docs in here would halt a running daemon on a
-  # docs-only commit (issue #3621).
-
-  # The fileset is the whole module, not a narrowed one like
-  # launcherCurrencyFileset below: the launcher's _test.go files pull
-  # test-only deps (github.com/charmbracelet/x/exp/golden, .../teatest) into
-  # go.sum, so trimming them out would vendor differently and force a second
-  # vendorHash. Only docs/ is excluded, so a test-only or sibling-package
-  # commit still moves the daemon's path.
-  daemonSrc = lib.fileset.toSource {
+  # The whole module is the src of both launcherBin and daemonBin, not a
+  # narrowed fileset like launcherCurrencyFileset below: the launcher's
+  # _test.go files pull test-only deps (github.com/charmbracelet/x/exp/golden,
+  # .../teatest) into go.sum, so trimming them out would vendor differently
+  # and force a second vendorHash. docs/ sits outside the root, so a
+  # docs-only commit moves neither src nor daemonBin (which bakes no
+  # revision).
+  launcherModuleSrc = lib.fileset.toSource {
     root = ../cmd/launcher;
     fileset = ../cmd/launcher;
   };
 
+  # daemonBin is one input to the wrapper whose own $0
+  # (SPINDRIFT_DAEMON_PROGRAM) is what runSlot's inline Tip.SelfPath
+  # comparison (cmd/launcher/internal/daemon/loop.go) compares at each
+  # iteration boundary (issue #3543); a mismatch halts a running daemon with
+  # exit 10. Its src is the docs-free module source, so a docs-only commit
+  # cannot halt a running daemon (issue #3621).
   daemonBin = hostPkgs.buildGoModule {
     pname = "spindrift-daemon";
     version = spindriftVersion;
-    src = daemonSrc;
-    # No modRoot here (unlike launcherBin): the fileset's `root` is already
-    # ../cmd/launcher. Only subPackages differs from launcherBin, which per
-    # nix/quickstart.nix's comment does not change vendoring, so the
-    # whole-module fileset still vendors to launcherVendorHash rather than
-    # needing its own the way launcherCurrencyVendorHash does.
+    src = launcherModuleSrc;
+    # Same src and vendorHash as launcherBin; only subPackages differs, and
+    # subPackages does not change the vendored module set.
     vendorHash = buildConstants.launcherVendorHash;
     subPackages = [ "daemon" ];
     doCheck = false;
@@ -1420,10 +1404,8 @@ let
   # revision-only changes, so this one drops that ldflag. It is never
   # invoked; only its store hash is read.
 
-  # src is scoped with lib.fileset, not launcherSrc: launcherSrc copies
-  # ../docs alongside cmd/launcher for launcherBin's checkPhase (#611), and
-  # pulling docs in here would move this hash on a docs-only commit,
-  # defeating the point.
+  # src is scoped with lib.fileset to the launcher's own sources, so a
+  # docs-only commit cannot move this hash.
 
   # The fileset is a directory-level approximation of the launcher's import
   # graph, not the graph itself: it subtracts the driver-exec, orchestrator,
@@ -1458,9 +1440,7 @@ let
     pname = "spindrift-launcher-currency";
     version = spindriftVersion;
     src = launcherCurrencySrc;
-    # No modRoot here (unlike launcherBin): the fileset's `root` is already
-    # ../cmd/launcher, so the src's top level is cmd/launcher's contents.
-    # The narrower fileset also vendors differently off the identical
+    # The narrower fileset vendors differently off the identical
     # go.mod/go.sum (#784), hence its own launcherCurrencyVendorHash rather
     # than launcherVendorHash.
     vendorHash = buildConstants.launcherCurrencyVendorHash;

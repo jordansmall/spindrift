@@ -8194,12 +8194,11 @@ the binary bakes no version in, but the version reaches `daemonBin`'s
 derivation name, and with it its store path. `daemonWrapper`
 interpolates `${daemonBin}/bin/daemon` into its own script, so the
 wrapper's path — the `$0` it exports as `SPINDRIFT_DAEMON_PROGRAM` —
-moves with it. What does not: a commit touching only `docs/`. `daemonBin` builds from a
-file-set source (`daemonSrc`) rooted at `../cmd/launcher` itself, so
-`docs/` sits outside it and it still shares
-`launcherVendorHash` — unlike `launcherBin`, whose own `src`
-(`launcherSrc`) copies `../docs` alongside for its own checkPhase
-(#611). So `daemonBin`'s store path, and with it
+moves with it. What does not: a commit touching only `docs/`.
+`daemonBin` builds from a file-set source (`launcherModuleSrc`,
+shared with `launcherBin`) rooted at `../cmd/launcher` itself, so
+`docs/` sits outside it and it shares `launcherVendorHash` with
+`launcherBin`. So `daemonBin`'s store path, and with it
 `SPINDRIFT_DAEMON_PROGRAM`, no longer moves on a documentation-only
 merge, which used to halt a daemon running under the restart-on-exit-10
 policy above for nothing (issue #3621).
