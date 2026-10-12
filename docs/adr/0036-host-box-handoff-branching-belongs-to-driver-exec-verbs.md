@@ -1,5 +1,14 @@
 # Branching logic at the host/box hand-off belongs to `driver-exec` verbs
 
+> **Superseded in part by [ADR 0058](0058-the-box-main-is-a-go-program-above-a-generated-shim.md).**
+> The `box` binary now runs the read-only guards, marker-gate, and outcome
+> backstop in-process, and calls `internal/bundleout` in-process for
+> bundle-out (issue #4301), so the `bundle-out`, `outcome-backstop`,
+> `marker-gate`, and `readonly-guards` verbs no longer exist (issues #4450,
+> #4454). The rule itself still holds — an in-box decision tree is tested Go,
+> not entrypoint bash — and `assemble-prompt` and `bind-registry` remain
+> `driver-exec` verbs.
+
 ADR 0007 drew the runtime into three tiers: nix computes what is knowable at
 evaluation time, a nix-built Go binary orchestrates live state, and the
 in-container `entrypoint.sh` stays thin generated bash — linear exec glue with
