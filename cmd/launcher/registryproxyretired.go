@@ -145,9 +145,10 @@ func retiredRegistryProxyCredentialStanza(k retiredRegistryProxyKnobs) string {
 		default:
 			// The retired knob no longer validates this value, and an operator
 			// value like "npmrc" is a real routes-file source key with
-			// unrelated semantics (the whole file as a bearer token), so
-			// rendering it as "file" would be wrong in a way that still
-			// parses. Keep "file" so the stanza parses, and flag it.
+			// unrelated semantics (a per-host "//<registry>/:_authToken=" lookup
+			// keyed on the route's match host), so rendering it as "file"
+			// would be wrong in a way that still parses. Keep "file" so the
+			// stanza parses, and flag it.
 			return fmt.Sprintf("credential = { file = %q }\n# unrecognized REGISTRY_PROXY_CREDENTIAL_FILE_FORMAT %q; the retired knob only ever accepted \"raw\", \"netrc\", or \"cargo-credentials\"", file, format)
 		}
 	default:

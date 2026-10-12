@@ -200,7 +200,8 @@ func TestValidateRetiredRegistryProxyKnobs_StanzaRegistryNameAloneStillCargoCred
 }
 
 // The unrecognized format here is a real routes-file source key with different
-// semantics: it sends the whole file as a bearer token. The stanza still
+// semantics: it looks up one host's "//<registry>/:_authToken=" line, keyed on
+// the route's match host, rather than sending the whole file. The stanza still
 // renders a parseable file key, but calls out the mismatch so nobody reads it
 // as a raw file credential.
 func TestValidateRetiredRegistryProxyKnobs_StanzaUnrecognizedFileFormatIsCalledOut(t *testing.T) {
