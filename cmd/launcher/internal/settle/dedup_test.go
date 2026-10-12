@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/jira"
+	"spindrift.dev/launcher/internal/forge/local"
 )
 
 // normalizeDedupKey trims, collapses internal whitespace runs to one space,
@@ -934,6 +937,45 @@ func TestIndexFindingIssues_NotPlannedExpiryFromJiraAdapter(t *testing.T) {
 			defer srv.Close()
 			jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ"})
 			issues, err := jc.(forge.LabeledBacklogLister).ListIssuesWithLabels(forge.IssueClosed, []string{label})
+			if err != nil {
+				t.Fatalf("ListIssuesWithLabels: %v", err)
+			}
+			index := make(map[string]string)
+			indexFindingIssues(index, issues, cutoff)
+			if _, ok := index["k"]; ok != c.covered {
+				t.Errorf("key covered = %v, want %v", ok, c.covered)
+			}
+		})
+	}
+}
+
+// The same cooldown on the local adapter (issue #5028): closedreason and
+// closedat are human-edited frontmatter, and a completed close (no reason)
+// keeps suppressing whatever its age.
+func TestIndexFindingIssues_NotPlannedExpiryFromLocalAdapter(t *testing.T) {
+	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	label := dispatchkind.Butler.FindingLabel
+	marker := buildDedupMarker([]string{"k", tuningChoreTerm})
+	cases := []struct {
+		name    string
+		reason  string
+		closed  string
+		covered bool
+	}{
+		{"not planned inside cooldown", "closedreason: not-planned\n", "2026-09-10T00:00:00Z", true},
+		{"not planned before cutoff", "closedreason: not-planned\n", "2026-08-01T00:00:00Z", false},
+		{"completed before cutoff", "", "2026-08-01T00:00:00Z", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			file := "---\ntitle: F\nlabels: [" + label + "]\ncreated: 2026-07-01T00:00:00Z\nclosed: true\n" +
+				"closedat: " + c.closed + "\n" + c.reason + "---\n" + marker + "\n"
+			if err := os.WriteFile(filepath.Join(dir, "f.md"), []byte(file), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			lt := local.NewLocalTracker(dir, forge.DispatchLabels{})
+			issues, err := lt.ListIssuesWithLabels(forge.IssueClosed, []string{label})
 			if err != nil {
 				t.Fatalf("ListIssuesWithLabels: %v", err)
 			}

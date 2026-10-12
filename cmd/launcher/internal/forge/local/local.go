@@ -17,6 +17,8 @@ import (
 
 const frontmatterDelim = "---"
 
+const notPlannedReason = "not-planned"
+
 // localFrontmatter is the YAML frontmatter block of a local issue file (ADR 0013).
 type localFrontmatter struct {
 	Title   string
@@ -27,6 +29,13 @@ type localFrontmatter struct {
 	// Closed is the local-only open/closed axis (ADR 0029), independent of the
 	// dispatch State marker. Absent or false means open.
 	Closed bool
+	// ClosedAt is the RFC3339 close time feeding the tuning cooldown (issue
+	// #5028). Kept raw so a hand-edited value survives a rewrite; toIssue
+	// parses it leniently.
+	ClosedAt string
+	// ClosedReason is set only by a human edit: "not-planned" marks a
+	// not-planned close, any other value reads as completed.
+	ClosedReason string
 	// Landing is an immutable PR URL or push-only branch ref (ADR 0029), never
 	// a cached merge-state.
 	Landing string
@@ -78,6 +87,10 @@ func parseLocalIssue(data []byte) (localIssue, error) {
 			fm.Parent = unquote(val)
 		case "closed":
 			fm.Closed = unquote(val) == "true"
+		case "closedat":
+			fm.ClosedAt = unquote(val)
+		case "closedreason":
+			fm.ClosedReason = unquote(val)
 		case "landing":
 			fm.Landing = unquote(val)
 		case "landingpass":
@@ -173,18 +186,24 @@ func toIssue(num string, li localIssue) forge.Issue {
 		labels = append(labels, li.frontmatter.State)
 	}
 	state := forge.IssueOpen
+	var closedAt time.Time
+	var notPlanned bool
 	if li.frontmatter.Closed {
 		state = forge.IssueClosed
+		closedAt, _ = time.Parse(time.RFC3339, li.frontmatter.ClosedAt)
+		notPlanned = li.frontmatter.ClosedReason == notPlannedReason
 	}
 	return forge.Issue{
-		Number:    num,
-		Title:     li.frontmatter.Title,
-		Body:      li.body,
-		State:     state,
-		Labels:    labels,
-		Landing:   li.frontmatter.Landing,
-		Abandoned: li.frontmatter.Abandoned,
-		Parent:    li.frontmatter.Parent,
+		Number:           num,
+		Title:            li.frontmatter.Title,
+		Body:             li.body,
+		State:            state,
+		Labels:           labels,
+		Landing:          li.frontmatter.Landing,
+		Abandoned:        li.frontmatter.Abandoned,
+		Parent:           li.frontmatter.Parent,
+		ClosedAt:         closedAt,
+		ClosedNotPlanned: notPlanned,
 	}
 }
 
@@ -449,6 +468,9 @@ func (lt *LocalTracker) CloseIssue(num string) error {
 	if err != nil {
 		return err
 	}
+	if !li.frontmatter.Closed {
+		li.frontmatter.ClosedAt = time.Now().UTC().Format(time.RFC3339)
+	}
 	li.frontmatter.Closed = true
 	return lt.writeIssueFile(num, li)
 }
@@ -587,6 +609,12 @@ func (li localIssue) render() string {
 	}
 	if li.frontmatter.Closed {
 		b.WriteString("closed: true\n")
+		if li.frontmatter.ClosedAt != "" {
+			fmt.Fprintf(&b, "closedat: %s\n", renderScalar(li.frontmatter.ClosedAt))
+		}
+		if li.frontmatter.ClosedReason != "" {
+			fmt.Fprintf(&b, "closedreason: %s\n", renderScalar(li.frontmatter.ClosedReason))
+		}
 	}
 	if li.frontmatter.Landing != "" {
 		fmt.Fprintf(&b, "landing: %s\n", renderScalar(li.frontmatter.Landing))
