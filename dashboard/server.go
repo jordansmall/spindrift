@@ -147,21 +147,22 @@ type kindView struct {
 }
 
 type slotView struct {
-	Slot        int
-	Phase       string
-	Busy        bool
-	Kind        string
-	Subject     []subject
-	Rev         string
-	Elapsed     string
-	ChildStart  string
-	ChildStartN int
-	Pass        string
-	Model       string
-	ModelRole   string
-	CIWait      bool
-	PRURL       string
-	CIRunURL    string
+	Slot              int
+	Phase             string
+	Busy              bool
+	Kind              string
+	Subject           []subject
+	Rev               string
+	Elapsed           string
+	ChildStart        string
+	ChildStartN       int
+	Pass              string
+	Model             string
+	ModelRole         string
+	CIWait            bool
+	PRURL             string
+	CIRunURL          string
+	ImageBuildElapsed string // elapsed in the Box image build, empty when not building
 }
 
 // selfUpdateLabel is the pill text for a self-update phase; every other
@@ -270,6 +271,9 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 		if since, err := time.Parse(time.RFC3339, sl.Since); err == nil {
 			d := now.Sub(since)
 			sv.Elapsed = formatDuration(d)
+		}
+		if since, err := time.Parse(time.RFC3339, sl.ImageBuildSince); err == nil {
+			sv.ImageBuildElapsed = formatDuration(now.Sub(since))
 		}
 		v.Slots = append(v.Slots, sv)
 	}

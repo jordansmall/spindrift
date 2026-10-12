@@ -68,6 +68,12 @@ let
       srcIdent = "HaltSelfChanged";
       srcPattern = haltRowReasonPattern "HaltSelfChanged";
     }
+    {
+      dash = "dashboard/history.go";
+      src = "cmd/launcher/internal/report/report.go";
+      ident = "eventImageBuild";
+      srcIdent = "EventImageBuild";
+    }
   ]
   ++
     map

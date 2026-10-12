@@ -93,6 +93,9 @@ type SlotStatus struct {
 	CIWait   bool   `json:"ci_wait,omitempty"`
 	PRURL    string `json:"pr_url,omitempty"`
 	CIRunURL string `json:"ci_run_url,omitempty"`
+	// ImageBuildSince (RFC3339) is set while the running child builds its Box
+	// image.
+	ImageBuildSince string `json:"image_build_since,omitempty"`
 	// ChildStart is the exact time string of a running slot's child_start event;
 	// ChildStartN counts earlier child_starts on the slot sharing that string.
 	ChildStart  string `json:"child_start,omitempty"`

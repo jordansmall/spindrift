@@ -16,6 +16,9 @@ const (
 // historyLimit caps how many timeline entries one page shows.
 const historyLimit = 200
 
+// eventImageBuild mirrors the launcher report package's EventImageBuild.
+const eventImageBuild = "image_build"
+
 // Event is the subset of an Events-file line the timeline reads. Like Status,
 // it mirrors the wire shape rather than importing the launcher module.
 type Event struct {
@@ -125,6 +128,11 @@ var timeline = map[string]func(ev Event, e *historyEntry, add func(string)){
 	// previous image launched, but claim must not treat it as a new Dispatch:
 	// that image's child_start still owns the slot.
 	"child_inherited": func(Event, *historyEntry, func(string)) {},
+	// A slot event, so claim files it under the slot's Dispatch; State is started
+	// or finished.
+	eventImageBuild: func(ev Event, _ *historyEntry, add func(string)) {
+		add(ev.State)
+	},
 }
 
 func (ev Event) entry() historyEntry {
