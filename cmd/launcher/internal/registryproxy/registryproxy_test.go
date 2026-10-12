@@ -2525,3 +2525,32 @@ func TestNew_ClientAbortLeavesFirstFailureSlotForGenuineFailure(t *testing.T) {
 		t.Errorf("log output = %q, want no transport failure line for a client abort", logged)
 	}
 }
+
+// A row naming neither rewriter would nil-call at request time, and one
+// naming both would silently take the stream path; New refuses both up front.
+func TestNew_RejectsRewriteRowWithoutExactlyOneRewriter(t *testing.T) {
+	noop := func([]byte, registryvocab.RewriteContext) registryvocab.RewriteResult {
+		return registryvocab.RewriteResult{}
+	}
+	stream := func(io.Writer, io.Reader, registryvocab.RewriteContext, func(registryvocab.RewriteEdit)) error {
+		return nil
+	}
+	cases := []struct {
+		name string
+		row  registryvocab.RewriteRow
+	}{
+		{"neither", registryvocab.RewriteRow{Name: "widget neither"}},
+		{"both", registryvocab.RewriteRow{Name: "widget both", Rewrite: noop, RewriteStream: stream}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(AssignPrefixes([]Route{plainRoute("https://registry.example.com")}), []registryvocab.RewriteRow{tc.row})
+			if err == nil {
+				t.Fatal("New succeeded, want an error")
+			}
+			if !strings.Contains(err.Error(), tc.row.Name) {
+				t.Errorf("error = %v, want it to name the row %q", err, tc.row.Name)
+			}
+		})
+	}
+}
