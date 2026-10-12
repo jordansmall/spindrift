@@ -168,3 +168,31 @@ window is dropped. The new image installs its stop latch before it re-attaches
 and restores SIGHUP's default afterwards unless the handoff says it was
 ignored. The new image, not the old, emits the `handoff` `self_update` event, so
 a failed `exec` leaves none.
+
+## Amendment (issue #5017): rollback marks the handoff, starts blocked, and roots two builds
+
+The decision text says a refused new image `exec`s back. Four details it left
+open:
+
+- **The handoff document is version 2.** A rollback is the same document with
+  `rolled_back` and `reason` set, sent in the reverse direction. Readers accept
+  versions 1 and 2, but decoding is strict, so a build that predates rollback
+  would refuse a version-2 document it cannot read, and the children it was
+  handed would be orphaned. An image resumed from a version-1 writer therefore
+  does not roll back; it drains and exits as before.
+- **The rolled-back build starts blocked at the refused revision.** Without
+  that, its next fetch would see the same tip, rebuild the same refused path,
+  and restart in place into it again. It emits `self_update` phase
+  `rolled-back` (revision, reason, both paths, slots) rather than `handoff`,
+  and never rolls back itself, so two refusing builds cannot pass the children
+  back and forth.
+- **Config validation refusals roll back too**, not only a failed startup
+  preflight. Both fail after the children are re-attached and before the pool
+  runs, so they are the same case.
+- **Two fixed GC roots in the checkout's git dir.** `spindrift-daemon.current`
+  roots the running build and `spindrift-daemon.next` the prebuilt successor.
+  An image whose startup succeeds roots itself as `.current` and deletes `.next`.
+  Between a handoff and that point `.current` is the predecessor, the rollback
+  target, so the build rolled back to cannot be collected. A forward `exec` is
+  refused unless `.current` holds the running build. This is the "running build
+  and one predecessor" bound in the consequences.

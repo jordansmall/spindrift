@@ -7560,8 +7560,9 @@ has handed its running children off; a stop while `waiting` cancels the
 handoff, returns the phase to `built`, and drains. The object is absent until
 a fetched tip's daemon build first differs from the running one. A
 `blocked` entry clears once a resolved tip's self path matches the running
-build again. It is additive too, so `schema` does not bump (issues #5012,
-#5014).
+build again. After a rollback it starts `blocked` at the refused revision
+(`rolled-back` is an event phase only, never a status phase). It is
+additive too, so `schema` does not bump (issues #5012, #5014).
 
 **Reservation.** `RESEARCH_RESERVATION` (default 1) is the minimum number
 of research children the pool keeps running out of its `MAX_PARALLEL` slots
@@ -7977,8 +7978,10 @@ the newer, unbuilt path. The prebuild
 eval` of the wrapper's derivation, taken from the context of the program
 string. It runs `nix build` of that derivation with a GC root at
 `spindrift-daemon.next` in the checkout's git dir, beside the status,
-events, and lock files (each prebuild overwrites it). It checks that the
-built output holds the evaluated self path. Then it runs the new self path
+events, and lock files (each prebuild overwrites it; a second root,
+`spindrift-daemon.current`, is described under **Restart in place**). It
+checks that the built output holds the evaluated self path. Then it runs
+the new self path
 with the daemon's own arguments minus the wrapper's `--input` pair, plus
 `--check-only` (**Check only** above), under the daemon's environment and
 working directory, so the new build's own wrapper supplies the input
@@ -8025,6 +8028,32 @@ delivered to the new image: Go's runtime unblocks those three signals as
 it starts, so a pending one would otherwise kill the new image before its
 handler exists. The flag is refused at startup anywhere but linux amd64/arm64
 (for one, a macOS host), where the exec path is not built.
+
+*Rollback.* A resumed image that refuses to start, because its config does
+not validate or its startup preflight (`doctor`) fails, does not drain what
+it inherited. Once it has re-attached the children it `exec`s back to the
+previous build (the handoff's `from_path`, still rooted, below) with the
+same lock, children and handoff document, now marked as a rollback. The
+build it lands on emits `self_update` phase `rolled-back` instead of
+`handoff`, with the refusal as `reason`, and starts with its self-update
+blocked at the refused revision (the status file shows `blocked`), so
+that revision is not rebuilt until the tip moves. A rolled-back image
+never rolls back again. There is no rollback, and the image drains its
+inherited children and exits as before (11 for a preflight refusal, 1 for
+a config error), when the image is itself a rollback, a stop is latched,
+the predecessor wrote handoff document version 1 (a build from before
+rollback existed, which cannot read the version-2 document), the previous
+path is empty or not a clean `/nix/store` path, or the `exec` fails.
+
+*GC roots.* Two roots sit in the checkout's git dir, one fixed name per
+role, so they never accumulate. `spindrift-daemon.current` roots the
+running build: once an image's startup succeeds it roots its own store
+path there (`nix build --out-link`) and deletes `spindrift-daemon.next`,
+which by then is itself, a refused build, or stale. A failed rooting only
+warns and keeps `.next`. Between a handoff and the successor's successful
+start, `.current` is the predecessor (the rollback target) and `.next` the
+successor. A forward `exec` is refused, as a blocked self-update with an
+`exec: ` reason, unless `.current` holds the running build's store path.
 
 A failure does not halt. A failed build or smoke test (the `reason` is
 prefixed `build: ` or `smoke-test: `, with the stderr tail capped at 2000
@@ -8578,7 +8607,7 @@ warning carries no `slot` either: it precedes every slot.
 | `tip_moved` | `time`, `revision`, `slot`, `reason`, `kinds` | any resolve that finds `BASE_BRANCH`'s tip differs from the revision the Runner most recently handed out and so resets at least one jammed kind's backoff, or lifts a butler waiting on `on_tip_move` — the baseline is Runner-global, not per-slot, so it tracks whichever slot resolved last, whichever kind it was running. That resolve can be the ordinary one made after `pickKind` on any iteration, or the opportunistic one made mid-wait during a jammed idle sleep (there is no separate poll — see exit 3's row above); either way the slot reset every currently-jammed kind's backoff, and, on the mid-wait path, started its next iteration at once instead of sleeping out the rest of the wait. The event is emitted only when that reset actually ended at least one kind's backoff, so `kinds` is never empty, and an ordinary advance of the base branch with nothing jammed emits no `tip_moved` at all — its absence does not mean the tip stood still. One move therefore yields at most one `tip_moved` pool-wide, not one per idling slot: `slot` names whichever slot's resolve observed the move (slots sharing one coalesced fetch all see it, but only the first to report it still finds a jammed kind to reset). `kinds` names that reset set; no singular `kind` is stamped, since several kinds can be jammed at once and a moved tip is evidence for all of them, not whichever kind this slot happened to be running when it went to sleep — `reason` carries the prose explanation. `revision` is the new tip, not the stale one the child ran at. Worth reading as the explanation for a `jam` (or `idle`) with a long `wait` immediately followed by a `child_start` well before that wait could have elapsed |
 | `backoff` | `time`, `kind`, `revision`, `slot`, `wait`, `reason` | a slot backing off for `FailureBackoff` after an unclassified failure, before it refills itself; `reason` is prefixed by cause — a failed fetch, a failed child seam, an unrecognised exit code, and now a failed self-build evaluation too (`self-build: …`, see **Self-change halt** above) |
 | `breaker_trip` | `time`, `kind`, `slot`, `failures`, `wait` | the pool-wide breaker reached `BreakerThreshold` unclassified failures within `BreakerWindow`; `slot` names whichever slot's failure crossed the threshold, `failures` is the count that tripped it (always exactly `BreakerThreshold` — only one crossing is ever reported), `wait` carries the breaker window, and a `halt` follows unless a sibling slot had already halted the pool for its own reason |
-| `self_update` | `time`, `phase`, `revision`, `reason` when blocked, and `from_path`, `to_path`, `slots` when handoff | a daemon self-update prebuild finished (issue #5012, see **Self-change halt** above). `phase` is `built` (the new build passed its smoke test, and the `halt` event with `self-changed: ...` follows), `blocked` (the build or smoke test failed; `reason` is prefixed `build: ` or `smoke-test: `, or `exec: ` when the in-place restart could not proceed: the exec syscall failed, the target was refused, or preparing the handoff or ignoring the stop signals failed; the pool keeps running on its current build), or `handoff` (under `--restart-in-place`, ADR 0063: the new image emits it once it has taken over the lock and the Events file, same pid, so a failed exec leaves none; `from_path` is the old program, `to_path` the one exec'd, `revision` its revision, `slots` the inherited slot numbers). `revision` is the tip the build was made at. No event marks a prebuild starting, and a build cancelled by a stop emits none; the status file's `self_update` shows `building` meanwhile |
+| `self_update` | `time`, `phase`, `revision`, `reason` when blocked or rolled-back, and `from_path`, `to_path`, `slots` when handoff or rolled-back | a daemon self-update prebuild finished (issue #5012, see **Self-change halt** above). `phase` is `built` (the new build passed its smoke test, and the `halt` event with `self-changed: ...` follows), `blocked` (the build or smoke test failed; `reason` is prefixed `build: ` or `smoke-test: `, or `exec: ` when the in-place restart could not proceed: the exec syscall failed, the target was refused, or preparing the handoff or ignoring the stop signals failed; the pool keeps running on its current build), or `handoff` (under `--restart-in-place`, ADR 0063: the new image emits it once it has taken over the lock and the Events file, same pid, so a failed exec leaves none; `from_path` is the old program, `to_path` the one exec'd, `revision` its revision, `slots` the inherited slot numbers), or `rolled-back` (issue #5017: a resumed image refused to start and `exec`d back to the previous build, which emits this instead of `handoff`; `revision` is the refused revision, `reason` the refusal, `from_path` the refused build, `to_path` the build now running, `slots` the inherited slot numbers). `revision` is the tip the build was made at. No event marks a prebuild starting, and a build cancelled by a stop emits none; the status file's `self_update` shows `building` meanwhile |
 | `shutdown` | `time`, `reason` | the signal handler consumed a stop signal; `reason` is `signalled stop: forwarding a drain request to every running child` for the first signal and `second signal: forwarding the escalation so every child reaps and releases` for the second — a third and later signal is a no-op the handler never sees, so `shutdown` never appears more than twice in one run |
 | `halt` | `time`, `kind`, `reason`, and `revision` when a child was involved | the process is about to exit — the loop is returning, or, for `instance-lock:`/`preflight:`/`config-invalid:`, never started; `reason` is prefixed by cause, one of `instance-lock: …` (a second daemon found this checkout's lock already held, see **Instance lock** above), `preflight: …` (the startup doctor preflight refused the start, see **Startup preflight** above — a preflight cancelled by an operator signal carries `context-cancelled: …` instead), `self-changed: …` (the daemon's own build changed at the fetched revision, naming both store paths and the revision, see **Self-change halt** above), `feature-branch-gone: …` (`--feature-branch` no longer exists on origin, see **Feature branch** above), `config-invalid: …` (the daemon's own startup config failed validation — a non-positive slot count, an unknown or duplicate kind, and the like — before any pool existed), `context-cancelled: …` (the operator's stop signal, or a caller's own cancelled context, ended the loop — `context-cancelled: stop requested` for the former, see **Halting** above), `breaker: …` (the pool-wide breaker tripped — see the `breaker_trip` row above and **Failures**), and, with no detail after it, a halt-mapped child outcome: `outcome: host-tainted` (a child exited 5), `outcome: config-invalid` (a child exited 6), or `outcome: signalled-stop` (a child exited 7 once the operator's Stop latch was already closed) — see the exit-code table above **Failures** |
 
