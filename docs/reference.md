@@ -7626,6 +7626,12 @@ starts no child and waits for a clean moment, then `restarting` once it
 has handed its running children off; any halt while `waiting` (an
 operator stop, a child's halting exit, ...) cancels the handoff and
 returns the phase to `built`, and the pool then drains as for any halt.
+`since` is the RFC3339 UTC time the daemon entered the current phase: it
+holds across re-publishes within a phase and moves with every phase
+change, a halt's return from `waiting` to `built` included; a phase
+restored at startup (`blocked` after a handoff rollback or exec failure)
+is stamped with the new process's start time. It is
+additive, so a status file from an older daemon omits it.
 The object is absent until a fetched tip's daemon build first differs
 from the running one. A
 `blocked` entry clears once a resolved tip's self path matches the running
@@ -8959,7 +8965,8 @@ with how long the build has run so far, from the slot's `image_build_since`;
 a slot without it shows no pill.
 
 While the Daemon updates itself, the header shows its status file's
-`self_update` beside the state pill, with the short revision:
+`self_update` beside the state pill, with the time in the phase and the
+short revision (`rebuilding · 2m 14s`), ticking with the live re-render:
 `rebuilding` (phase `building`), `waiting to restart` (`waiting`, which
 is why slots sit idle under `--restart-in-place`), or `restarting`
 (`restarting`). Only the self-change halt (reason `self-changed: …`)
@@ -8971,7 +8978,8 @@ warning banner, distinct from the halted banner since the pool keeps working,
 naming the short revision (or `unknown revision`) and the reason (or `no
 reason published`). It clears on the live re-render once the phase moves
 on, and a Daemon that is no longer running never shows it. A status file with no `self_update`, or in any other
-phase, shows nothing extra.
+phase, shows nothing extra; one whose `self_update` has no `since` shows
+the pill without a timer.
 
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
