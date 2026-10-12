@@ -1545,7 +1545,28 @@ rec {
       flakeOptionEntries = filterAttrs (_: e: e.flakeOption or false) schema;
       flakeOptionNames = builtins.attrNames flakeOptionEntries;
       domainKnobs = domain: builtins.filter (n: flakeOptionEntries.${n}.group == domain) flakeOptionNames;
-      renderDefault = entry: if entry ? default then "`${toString entry.default}`" else "—";
+      renderDefault =
+        entry:
+        if entry ? default then
+          let
+            d = entry.default;
+            # toString renders false, null and "" as an empty code span, and
+            # 0.0 as 0.000000 (issue #5036).
+            literal =
+              if builtins.isBool d then
+                (if d then "true" else "false")
+              else if builtins.isFloat d then
+                builtins.toJSON d
+              else if d == null then
+                "null"
+              else if d == "" then
+                ''""''
+              else
+                toString d;
+          in
+          "`${literal}`"
+        else
+          "—";
       renderRow =
         name:
         let
