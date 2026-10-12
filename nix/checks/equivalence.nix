@@ -652,6 +652,11 @@ in
           packages = p: [ p.hello ];
         };
       mkHarnessEvaluates = defaults: (builtins.tryEval ((mkHarnessWith defaults) ? spindrift)).success;
+      # Pins the helper's message choice, not mkHarness's wiring of it.
+      defaultsKeyError = import ../../lib/defaults-key-error.nix {
+        lib = pkgs.lib;
+        validKeys = [ ];
+      };
       pathOf = row: concatStringsSep "." row.flakePath;
       # The module's declared options, not an eval of a Consumer: tryEval cannot
       # tell the hidden removed-knob option from the module system's generic
@@ -729,10 +734,16 @@ in
         assert assertMsg (
           !(mkHarnessEvaluates { ${key} = true; })
         ) "mkHarness defaults.${key} must fail eval (${key} was removed)";
+        # By value, not tryEval: the generic unknown-key throw also fails eval,
+        # so a deleted removed-knob arm would otherwise stay green.
+        assert assertMsg
+          (defaultsKeyError { ${key} = true; } == "mkHarness: defaults.${key}: ${row.message}")
+          "mkHarness defaults.${key} must throw lib/removed-knobs.nix's message, not the generic unknown-key one";
         true;
       schema = import ../../lib/env-schema.nix;
     in
     assert assertMsg (removedKnobs != { }) "lib/removed-knobs.nix must not be empty";
+    assert assertMsg (defaultsKeyError { } == null) "control: no defaults keys must raise no error";
     assert builtins.all (k: perKnob k removedKnobs.${k}) (builtins.attrNames removedKnobs);
     pkgs.runCommand "removed-knob-rejected" { } "touch $out";
 
