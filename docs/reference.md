@@ -8927,6 +8927,16 @@ carries a `ci_run_url` and to the PR otherwise, from the slot's `ci_wait`,
 `pr_url` and `ci_run_url`; a slot carrying no `pr_url` shows no pill. The
 live re-render picks it up like any other status field.
 
+While the Daemon updates itself, the header shows its status file's
+`self_update` beside the state pill, with the short revision:
+`rebuilding` (phase `building`), `waiting to restart` (`waiting`, which
+is why slots sit idle under `--restart-in-place`), or `restarting`
+(`restarting`). Only the self-change halt (reason `self-changed: …`)
+while the phase is `built`, the default drain, titles the halted banner
+as a drain for a self-update instead of `Pool halted`; any other halt
+keeps `Pool halted`. A status file with no `self_update`, or in any other
+phase, shows nothing extra.
+
 Below them is a history timeline, newest first, of the last 200 child
 starts, Box passes, settles (with their outcome and note), backoffs, jams,
 breaker trips, halts, self-update steps (including an in-place restart's
