@@ -278,7 +278,7 @@ func encodeStatsJSON(enc *json.Encoder, records []dispatchrecord.Record, groups 
 	}
 	for _, g := range groups {
 		for _, r := range g.records {
-			if err := enc.Encode(statsGroupedRecord{Group: g.label(), Record: r}); err != nil {
+			if err := enc.Encode(statsGroupedRecord{Group: g.label(), GroupKeys: g.keys, Record: r}); err != nil {
 				return err
 			}
 		}

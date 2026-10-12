@@ -121,7 +121,8 @@ type statsGroup struct {
 	records []dispatchrecord.Record
 }
 
-// label is the group's keys joined in --by order, the JSON "group" value.
+// label is the group's keys joined in --by order, the JSON "group" value: a
+// display label, ambiguous when a key contains ", " (group_keys is not).
 func (g statsGroup) label() string { return strings.Join(g.keys, ", ") }
 
 // groupStats nests the single-dimension groupings in --by order: the first
@@ -199,6 +200,7 @@ func renderStatsGroups(w io.Writer, groups []statsGroup, dims []statsBy) error {
 // statsGroupedRecord is the --json line of a grouped run: the Record plus the
 // group it was counted under.
 type statsGroupedRecord struct {
-	Group string `json:"group"`
+	Group     string   `json:"group"`
+	GroupKeys []string `json:"group_keys"`
 	dispatchrecord.Record
 }
