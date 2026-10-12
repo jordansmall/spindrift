@@ -45,7 +45,11 @@ that rewrote the reviewer prompt would merge itself once green.
    **and** at least `BUTLER_TUNING_MIN_RECORDS` (default 20) new settled
    Records exist. A root with no store is never due. Its findings concern
    the Target repo it clones, limited to what that repo controls. When the
-   cause lives upstream, the finding says so in its body.
+   cause lives upstream, the finding says so in its body. (Amended by issue
+   #4999: an upstream-cause finding is not exempt from the host's
+   `missing-target` check and has no separate target convention. It targets
+   the Target-repo knob, model choice, or prompt override where the symptom
+   shows; with none, the agent files nothing.)
 
 2. **The host renders the digest; the Box interprets it.** Before launch,
    the host renders a fixed digest from the root's Dispatch Records store

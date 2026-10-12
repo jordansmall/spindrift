@@ -5887,6 +5887,12 @@ finding against the stored snapshot and drops it, recording it in the Ledger's
   finding citing only `record:` or `evidence:` anchors drops here. Class
   `evidence-gap` is exempt, since it argues that data is missing.
 
+An upstream cause does not exempt a finding from `missing-target`: it still
+targets the Target-repo knob, model choice, or prompt override where the
+symptom shows and names the upstream cause in its body. With no such target the
+agent files nothing, since filing upstream from a Consumer repo is out of scope
+(PRD #4794, ADR 0062).
+
 Each surviving finding that cites an aggregate row gets a host-appended
 `## Evidence` section that re-renders those rows from the stored snapshot, so
 a reader sees the host's figures rather than the Box's transcription of them.
