@@ -2796,12 +2796,13 @@ a verdict:
   time's "unresolved" state, so it only ever blocks (`exit 1`) or doesn't.
 
 Because these are two hand-written implementations of the same predicate,
-`lib/prompt-contract.nix`'s `parityFixtures` (one record per reject-severity
-row × gate × marker-present combination, each pre-resolved via the real
-`buildTimeRejectVerdicts`) and `parityFold` (`verdict != "reject"`) pin the
-semantic mapping between them: a Nix `reject` verdict must correspond to the
-runtime validator blocking; `ok`/`advise` must both correspond to it not
-blocking. `nix/checks/prompt-contract-parity.nix` asserts the fold holds in
+`lib/prompt-contract.nix`'s `parityFixtures` (one record per `validateMarkers`
+row × gate × marker-present combination) and `parityFold` (`verdict !=
+"reject"`) pin the semantic mapping between them: a Nix `reject` verdict must
+correspond to the runtime validator blocking; `ok`/`advise` must both
+correspond to it not blocking. A reject row's fixtures are pre-resolved via
+the real `buildTimeRejectVerdicts`; a warn row's are fixed at `advise`.
+`nix/checks/prompt-contract-parity.nix` asserts the fold holds in
 pure Nix; `TestValidatorMatchesParityFold`
 (`cmd/launcher/internal/promptassembly/prompt_contract_parity_integration_test.go`)
 drives the same fixtures — rendered to JSON as the seam fixture
