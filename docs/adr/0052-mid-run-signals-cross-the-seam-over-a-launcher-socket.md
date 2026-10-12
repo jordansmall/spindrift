@@ -126,8 +126,10 @@ for exactly the platforms that most need parity; the proxy already made the
 stronger version of this call while holding registry credentials, whereas
 the signal socket only buffers text. The network modes that hard-fail the
 proxy when TCP would be needed (`none`, `no-host-loopback`) hard-fail
-`socket` mode the same way, at startup, capability-style like the read-only
-gate — never a silent fallback.
+`socket` mode the same way — never a silent fallback. `none` fails at
+launcher startup, capability-style like the read-only gate; (amended by
+issue #4993) `no-host-loopback` fails when each Dispatch starts, in the
+transport probe.
 
 The per-run control nonce does **not** become the socket's bearer. The code
 already keeps `RUN_NONCE` and the proxy's TCP secret deliberately distinct
@@ -280,13 +282,14 @@ Removing `log` remains the separate later decision the Rollout section
 describes, on its own boundary.
 
 Unset is treated as an explicit `socket` request, so "One knob, one verb, no
-fallback" holds unchanged: where the transport cannot work — `NETWORK_MODE=none`,
-or `no-host-loopback` where the transport needs TCP — an unset knob fails at
-startup with the existing signal-carrier gate error, which names
-`BOX_SIGNAL_CARRIER=log` as the remedy. There is no mode-dependent default
-and no silent fallback; a Consumer in one of those modes sets `log`
-explicitly. `spindrift doctor` shows the `signal-socket-transport` row for
-an unset knob as it does for `socket`, and omits it under explicit `log`.
+fallback" holds unchanged: an unset knob fails under `NETWORK_MODE=none` at
+launcher startup with the existing signal-carrier gate error, which names
+`BOX_SIGNAL_CARRIER=log` as the remedy, and under `no-host-loopback` where
+the transport needs TCP when each Dispatch starts, with the transport-probe
+error, which does not name it. There is no mode-dependent default and no silent fallback; a Consumer in
+one of those modes sets `log` explicitly. `spindrift doctor` shows the
+`signal-socket-transport` row for an unset knob as it does for `socket`, and
+omits it under explicit `log`.
 
 The Box-side "empty means log" fallbacks (`agent/entrypoint.sh`, and the
 in-Box prompt assembly's gates) are kept on purpose. They cover an older host
