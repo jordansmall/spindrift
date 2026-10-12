@@ -166,7 +166,7 @@ func skillsDirWith(t *testing.T, names ...string) string {
 	return dir
 }
 
-var testNames = append(append([]string{}, BaseVars...), "SKILLS_FOUND", "CAVEMAN_STEP", "SKILL_PREAMBLE", "OTHER")
+var testNames = append(append([]string{}, BaseVars...), "SKILLS_FOUND", "CAVEMAN_STEP", "CHECK_HYGIENE_STEP", "NIX_CHECKS_STEP", "SKILL_PREAMBLE", "OTHER")
 
 func lookup(m map[string]string) func(string) string {
 	return func(k string) string { return m[k] }
@@ -204,13 +204,28 @@ func TestRenderPrompt(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, bad := range []string{"${CAVEMAN_STEP}", "${SKILL_PREAMBLE}", "caveman", "Skills available"} {
+		for _, bad := range []string{"${CAVEMAN_STEP}", "${CHECK_HYGIENE_STEP}", "${NIX_CHECKS_STEP}", "${SKILL_PREAMBLE}", "caveman", "/check-hygiene", "/nix-checks", "Skills available"} {
 			if strings.Contains(got, bad) {
 				t.Errorf("prompt contains %q", bad)
 			}
 		}
 		if !strings.Contains(got, "non-obvious why") {
 			t.Error("prompt missing comment policy")
+		}
+	})
+
+	t.Run("check skills baked", func(t *testing.T) {
+		got, err := RenderPrompt(repopath.PromptsDir(), skillsDirWith(t, "check-hygiene", "nix-checks"), testNames, lookup(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{
+			"Before running the first gate, invoke the `/check-hygiene` skill.",
+			"Before running the first gate in a Nix-based repo, invoke the `/nix-checks` skill.",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("prompt missing %q", want)
+			}
 		}
 	})
 
@@ -231,6 +246,18 @@ func TestRenderPrompt(t *testing.T) {
 			t.Fatalf("err = %v, want one naming fragments/caveman-default.md", err)
 		}
 	})
+
+	for _, tc := range []struct{ fragment, skill string }{
+		{"check-hygiene-default.md", "check-hygiene"},
+		{"nix-checks-default.md", "nix-checks"},
+	} {
+		t.Run("missing "+tc.fragment+" names the path", func(t *testing.T) {
+			_, err := RenderPrompt(t.TempDir(), skillsDirWith(t, tc.skill), testNames, lookup(env))
+			if err == nil || !strings.Contains(err.Error(), filepath.Join("fragments", tc.fragment)) {
+				t.Fatalf("err = %v, want one naming fragments/%s", err, tc.fragment)
+			}
+		})
+	}
 
 	t.Run("allowlist semantics", func(t *testing.T) {
 		prompts := t.TempDir()
@@ -327,16 +354,17 @@ func TestRenderPrompt(t *testing.T) {
 	t.Run("locally computed vars override the environment", func(t *testing.T) {
 		prompts := t.TempDir()
 		if err := os.WriteFile(filepath.Join(prompts, "conflict-resolve-prompt.md"),
-			[]byte("[${SKILLS_FOUND}][${CAVEMAN_STEP}][${SKILL_PREAMBLE}]"), 0o644); err != nil {
+			[]byte("[${SKILLS_FOUND}][${CAVEMAN_STEP}][${CHECK_HYGIENE_STEP}][${NIX_CHECKS_STEP}][${SKILL_PREAMBLE}]"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		got, err := RenderPrompt(prompts, t.TempDir(), testNames, lookup(map[string]string{
-			"SKILLS_FOUND": "stale", "CAVEMAN_STEP": "stale", "SKILL_PREAMBLE": "stale",
+			"SKILLS_FOUND": "stale", "CAVEMAN_STEP": "stale", "CHECK_HYGIENE_STEP": "stale",
+			"NIX_CHECKS_STEP": "stale", "SKILL_PREAMBLE": "stale",
 		}))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got != "[][][]" {
+		if got != "[][][][][]" {
 			t.Errorf("got %q", got)
 		}
 	})

@@ -39,8 +39,60 @@ func TestConflictResolvePromptOperativeContract(t *testing.T) {
 			clause: "Do NOT open a PR or push — the caller handles that",
 		},
 		{
+			name:   "#5096 the Box ships no python",
+			clause: "The Box ships no `python` or `python3`",
+		},
+		{
+			name:   "#5096 resolve hunks with Edit, sed, or git checkout --ours/--theirs",
+			clause: "Resolve hunks with the Edit tool, `sed`, or, to take one whole side of a file, `git checkout --ours <file>` / `git checkout --theirs <file>`",
+		},
+		{
+			name:   "#5096 rebase swaps --ours and --theirs",
+			clause: "`--ours` is the base you are rebasing onto and `--theirs` is the branch's own commit",
+		},
+		{
+			name:   "#5096 grep for leftover conflict markers before rebase --continue",
+			clause: "Grep the tree for leftover conflict markers before continuing, e.g. `git grep -nE '^(<<<<<<<|=======|>>>>>>>)( |$)'`, and resolve every hit that is a conflict marker",
+		},
+		{
+			name:   "#5096 run the full check gate after the rebase finishes",
+			clause: "run the repo's full check gate — the same gate the main run uses (its scoped in-Box form where the repo's docs define one)",
+		},
+		{
+			name:   "#5096 check-skill anchors precede the numbered steps",
+			clause: "${CHECK_HYGIENE_STEP}${NIX_CHECKS_STEP}1. Run `git status`",
+		},
+		{
+			name:   "#5096 fix what the check surfaces and amend into the owning commit",
+			clause: "Fix what it surfaces and amend each fix into the commit it belongs to: `git commit --amend` for the tip commit, or `git commit --fixup=<sha>` then `GIT_SEQUENCE_EDITOR=true git rebase -i --autosquash origin/${BASE_BRANCH}` for an older one",
+		},
+		{
+			name:   "#5096 a stalled autosquash rebase is aborted back to the completed rebase",
+			clause: "If the step 6 autosquash rebase itself stalls on a conflict, run `git rebase --abort`: it restores the completed rebase with the fixup commit on top",
+		},
+		{
+			name:   "#5096 still-red check: finish anyway with the rebase complete",
+			clause: "If the check is still red after your own attempts, finish anyway with the rebase complete",
+		},
+		{
+			name:   "#5096 never leave a rebase in progress to signal a red check",
+			clause: "Never leave a rebase in progress to signal a red check",
+		},
+		{
+			name:   "#5096 the host's post-force-push fix pass owns the remaining repair",
+			clause: "the host's post-force-push fix pass owns the remaining repair",
+		},
+		{
+			name:   "#5096 the final message is full prose for the human reading the Box log",
+			clause: "Write that final message as full, uncompressed prose",
+		},
+		{
+			name:   "#5096 final message is the pass summary naming the check and its color",
+			clause: "one short final message: the check you ran and whether it ended green or red (naming each still-red check)",
+		},
+		{
 			name:   "#3225 no narration between tool calls",
-			clause: "Do not narrate between tool calls; the only text you output is the short explanation described below if the conflict is unresolvable",
+			clause: "Do not narrate between tool calls; the only text you output is one short final message",
 		},
 		{
 			name:   "#3225 rebase complete signal is rebase-merge/rebase-apply gone",

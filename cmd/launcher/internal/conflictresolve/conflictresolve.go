@@ -94,24 +94,34 @@ func SubstNames(reg promptassembly.Registry) []string {
 // RenderPrompt renders conflict-resolve-prompt.md under promptsDir with
 // envsubst semantics: both $NAME and ${NAME} for NAME in names are substituted,
 // each read through lookup (empty when unset), and any other token passes
-// through. SKILLS_FOUND, CAVEMAN_STEP and SKILL_PREAMBLE are computed here from
-// skillsDir and override lookup. A baked caveman skill whose fragment is
-// missing is an error rather than a silently thinner prompt.
+// through. SKILLS_FOUND, SKILL_PREAMBLE and the baked-skill steps
+// (CAVEMAN_STEP, CHECK_HYGIENE_STEP, NIX_CHECKS_STEP) are computed here from
+// skillsDir and override lookup. A baked skill whose fragment is missing is an
+// error rather than a silently thinner prompt.
 func RenderPrompt(promptsDir, skillsDir string, names []string, lookup func(string) string) (string, error) {
-	vars := make(map[string]string, len(names)+3)
+	rows := []struct{ skill, fragment, stepVar string }{
+		{"caveman", "caveman-default.md", "CAVEMAN_STEP"},
+		{"check-hygiene", "check-hygiene-default.md", "CHECK_HYGIENE_STEP"},
+		{"nix-checks", "nix-checks-default.md", "NIX_CHECKS_STEP"},
+	}
+	// The extra 2 are the computed SKILLS_FOUND and SKILL_PREAMBLE.
+	vars := make(map[string]string, len(names)+2+len(rows))
 	for _, n := range names {
 		vars[n] = lookup(n)
 	}
 	vars["SKILLS_FOUND"] = promptassembly.ScanSkillsFound(skillsDir)
-	vars["CAVEMAN_STEP"] = ""
 	vars["SKILL_PREAMBLE"] = ""
 
-	if _, err := os.Stat(filepath.Join(skillsDir, "caveman", "SKILL.md")); err == nil {
-		text, err := render(filepath.Join(promptsDir, "fragments", "caveman-default.md"), vars)
+	for _, s := range rows {
+		vars[s.stepVar] = ""
+		if _, err := os.Stat(filepath.Join(skillsDir, s.skill, "SKILL.md")); err != nil {
+			continue
+		}
+		text, err := render(filepath.Join(promptsDir, "fragments", s.fragment), vars)
 		if err != nil {
 			return "", err
 		}
-		vars["CAVEMAN_STEP"] = text + "\n\n"
+		vars[s.stepVar] = text + "\n\n"
 	}
 	if vars["SKILLS_FOUND"] != "" {
 		text, err := render(filepath.Join(promptsDir, "fragments", "skill-preamble.md"), vars)
