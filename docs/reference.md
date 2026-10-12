@@ -277,8 +277,9 @@ to secrets and internal launcher→Box plumbing from here on; see
 A set-but-empty bool knob (e.g. `--auto-format=false`, or `AUTO_FORMAT=` in the
 env) is an explicit off that beats a document value of on. One rule decides it:
 a knob's empty value counts as set when its kind is bool or its schema entry
-declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`); for every other knob an
-empty env value still means unset (issues #4290, #4398).
+declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`, `MERGE_GUARD_PATHS`); for
+every other knob an empty env value still means unset (issues #4290, #4398,
+#5077).
 `spindrift --help` stays scannable; the full generated table lives in
 `man spindrift` (and `spindrift --help --all` for the same thing in the
 terminal). Bare `spindrift` with no subcommand — or an unrecognized

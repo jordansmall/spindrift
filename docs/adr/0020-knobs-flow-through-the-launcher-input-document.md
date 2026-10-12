@@ -135,5 +135,5 @@ Every other knob still treats an empty env value as unset.
 
 The #4290 relaxation is a single rule, `flagEntry.emptyIsSetting()`: a knob's
 set-but-empty env counts as set when its kind is bool or its schema entry
-declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`). Every other knob still
-treats an empty env value as unset.
+declares `emptyDisables` (`MEMORY_LIMIT`, `PIDS_LIMIT`, `MERGE_GUARD_PATHS`).
+Every other knob still treats an empty env value as unset.
