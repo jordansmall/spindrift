@@ -52,6 +52,7 @@ code, time, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; f
 .phase-backing_off { --c: var(--backing_off); }
 .phase-idle { --c: var(--idle); }
 .ci-wait { --c: var(--ci-wait); }
+.self-update { --c: var(--resolving); }
 .pill { color: var(--c, var(--muted)); }
 
 .banner { border: 1px solid var(--border); border-left-width: 6px; border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1rem; background: var(--panel); }

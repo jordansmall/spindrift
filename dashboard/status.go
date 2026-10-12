@@ -42,7 +42,32 @@ type Status struct {
 	// RepoURL is the Target repo's web URL; absent when the tracker has none
 	// (local, jira), in which case nothing links out to an issue.
 	RepoURL string `json:"repo_url,omitempty"`
+	// SelfUpdate is present only while the Daemon is acting on a changed tip.
+	SelfUpdate *SelfUpdate `json:"self_update,omitempty"`
 }
+
+// SelfUpdate is the Daemon's self-update progress: Phase names the step and
+// Revision the commit being updated to.
+type SelfUpdate struct {
+	Phase    string `json:"phase"`
+	Revision string `json:"revision"`
+	// Reason is held for the `blocked` phase; nothing reads it yet.
+	Reason string `json:"reason,omitempty"`
+}
+
+// The self-update phases the Dashboard acts on, mirroring the daemon's
+// SelfUpdate* constants.
+const (
+	selfUpdateBuilding   = "building"
+	selfUpdateBuilt      = "built"
+	selfUpdateWaiting    = "waiting"
+	selfUpdateRestarting = "restarting"
+)
+
+// haltReasonSelfChanged mirrors the HaltSelfChanged row's reason in the
+// daemon's haltRenderings (halt.go); a halt's status Reason is that text, then
+// ": " and its detail.
+const haltReasonSelfChanged = "self-changed"
 
 // TrackerCheck is one issue tracker's rate-limit state.
 type TrackerCheck struct {
