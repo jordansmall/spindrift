@@ -1,5 +1,20 @@
 # Migration Guide
 
+## Roster inline prompts may not shadow a shipped prompt file (issue #5035)
+
+A roster entry with a non-empty inline `prompt` now fails evaluation
+(`inline-prompt-shadows-shipped`) when its `promptFile` already exists under
+`templates/default/prompts/`. That covers an explicit `promptFile` and the
+auto-derived default, so an inline prompt on an entry named `reviewer`,
+`worker`, `fix`, and so on is rejected. Such an entry never built: the image
+bake failed with `cp: Permission denied`. The error now comes at eval and
+names the entry. Override a shipped prompt through the matching `*Prompt`
+`mkHarness` arg or `SPINDRIFT_PROMPT_DIR`, or point the entry at a
+`promptFile` that does not collide.
+
+An empty-string inline prompt now counts as no inline prompt in the image
+bake too, so such an entry builds with its shipped `promptFile`.
+
 ## Skill content entries must have a safe name (issue #5022)
 
 A `{ name; src; }` entry in `perSystem.spindrift.agents.skills` (or in the
