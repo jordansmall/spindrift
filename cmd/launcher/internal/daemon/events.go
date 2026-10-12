@@ -39,12 +39,13 @@ type Event struct {
 	// "conflict-resolve" or "recover" (report.PhaseRecover, queue-mode
 	// recover's claim) — carried straight from the child's report.Record
 	// (issue #3627); and the self_update event's, "built", "blocked" or
-	// "handoff" (issues #5012, #5016). No other event sets it.
+	// "handoff" or "rolled-back" (issues #5012, #5016, #5017). No other event
+	// sets it.
 	Phase    string `json:"phase,omitempty"`
 	Revision string `json:"revision,omitempty"`
-	// FromPath, ToPath and Slots are the self_update handoff event's own
-	// fields: the running and the exec'd program store paths, and the
-	// inherited slot numbers.
+	// FromPath, ToPath and Slots are the self_update handoff and rolled-back
+	// events' own fields: the running and the exec'd program store paths, and
+	// the inherited slot numbers.
 	FromPath string `json:"from_path,omitempty"`
 	ToPath   string `json:"to_path,omitempty"`
 	Slots    []int  `json:"slots,omitempty"`

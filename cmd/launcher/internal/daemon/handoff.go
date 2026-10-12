@@ -11,12 +11,19 @@ import (
 	"spindrift.dev/launcher/internal/dispatchkey"
 )
 
-// HandoffVersion is the handoff document's version. A reader supports exactly
-// this one: the document is written by one daemon build and read by the next,
-// and a shape the reader was not built for is refused rather than guessed at,
-// since a misread child pid or descriptor would signal or read the wrong
-// process.
-const HandoffVersion = 1
+// HandoffVersion is the version the writer stamps. A reader also accepts
+// handoffMinVersion, so a build still resumes from an older predecessor's
+// document, and refuses every other version: a misread child pid or
+// descriptor would signal or read the wrong process.
+const HandoffVersion = 2
+
+// HandoffRollbackVersion is the first version whose readers know the rollback
+// fields. A successor rolls back only onto a predecessor that wrote at least
+// this, since an older reader refuses the document and orphans the children.
+const HandoffRollbackVersion = 2
+
+// handoffMinVersion is the oldest document version DecodeHandoff still reads.
+const handoffMinVersion = 1
 
 // Handoff is the state a daemon passes to its successor so the successor can
 // adopt the children still running instead of waiting them out (ADR 0063).
@@ -31,6 +38,12 @@ type Handoff struct {
 	FromPath string `json:"from_path,omitempty"`
 	ToPath   string `json:"to_path,omitempty"`
 	Revision string `json:"revision,omitempty"`
+	// RolledBack marks a handoff in the reverse direction: the successor
+	// refused to start after re-attaching and exec'd back to the build it came
+	// from. FromPath is then the refusing build, ToPath the build resumed,
+	// Revision the revision whose build was refused, and Reason the refusal.
+	RolledBack bool   `json:"rolled_back,omitempty"`
+	Reason     string `json:"reason,omitempty"`
 	// Stop and Abort carry the stop latch's state.
 	Stop  bool `json:"stop,omitempty"`
 	Abort bool `json:"abort,omitempty"`
@@ -140,11 +153,11 @@ func EncodeHandoff(w io.Writer, h Handoff) error {
 	return json.NewEncoder(w).Encode(h)
 }
 
-// DecodeHandoff reads one document from r. It refuses any version but
-// HandoffVersion, a missing one included, and any field or trailing data the
-// version does not define. The version is checked before the shape, so a
-// document from another build is reported as such rather than as whichever
-// of its fields this build trips over first.
+// DecodeHandoff reads one document from r. It refuses any version outside
+// handoffMinVersion..HandoffVersion, a missing one included, and any field or
+// trailing data the version does not define. The version is checked before the
+// shape, so a document from another build is reported as such rather than as
+// whichever of its fields this build trips over first.
 func DecodeHandoff(r io.Reader) (Handoff, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -156,8 +169,8 @@ func DecodeHandoff(r io.Reader) (Handoff, error) {
 	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&head); err != nil {
 		return Handoff{}, fmt.Errorf("handoff: decode: %w", err)
 	}
-	if head.V != HandoffVersion {
-		return Handoff{}, fmt.Errorf("handoff: document is version %d, this build supports %d", head.V, HandoffVersion)
+	if head.V < handoffMinVersion || head.V > HandoffVersion {
+		return Handoff{}, fmt.Errorf("handoff: document is version %d, this build supports %d to %d", head.V, handoffMinVersion, HandoffVersion)
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

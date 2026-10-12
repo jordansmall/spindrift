@@ -87,6 +87,9 @@ const (
 	// SelfUpdateHandoff: event only, never a status phase — the successor
 	// records that it took over from an in-place restart.
 	SelfUpdateHandoff SelfUpdatePhase = "handoff"
+	// SelfUpdateRolledBack: event only, like SelfUpdateHandoff — the image
+	// resumed from a rollback records that the new build refused to start.
+	SelfUpdateRolledBack SelfUpdatePhase = "rolled-back"
 )
 
 // Event is the self_update event recording su's verdict. It carries no Slot:
