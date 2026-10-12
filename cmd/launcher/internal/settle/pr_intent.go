@@ -141,6 +141,9 @@ func logBlockedHandoffRelayFailure(num string, err error) {
 func (s *Settle) blockHandoff(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
+	// Never transitions, so Settled never sees this Dispatch, yet the
+	// all-finished banner must not count it delivered (issue #5145).
+	tallyOutcome(DispatchOutcome{Key: s.keyFor(num), State: forge.InProgress.String(), Reason: ReasonMergeBlocked})
 }
 
 // parkRelayFailure fails an issue whose bundle relay failed (issue #4651).
