@@ -2094,20 +2094,19 @@ The gate only compares a candidate against issues already `agent-in-progress`
 touches, neither yet in progress when the check runs, still dispatch
 together.
 
-**Inferred touch-sets (v2, `CODE_FORGE=github` only).** A declared
-`## Touches` section only bounds what its author thought to write down. On
-the `github` Code Forge, the gate augments each in-progress issue's declared
-touch-set with the actual changed files of its open PR (fetched once per
-wave, alongside the declared touches), so a candidate still holds against
+**Inferred touch-sets (v2, `PRForge` backends).** A declared `## Touches`
+section only bounds what its author thought to write down. On a `PRForge`
+backend (`github` or `forgejo`), the gate augments each in-progress issue's
+declared touch-set with the actual changed files of its open PR (fetched once
+per wave, alongside the declared touches), so a candidate still holds against
 files the in-progress issue never declared. An in-progress issue with no open
 PR yet contributes only its declared touch-set — no error, no over-blocking.
-Off `github` — where there is no PR to inspect — and for any in-progress
-issue whose PR-file fetch fails, the gate falls back to declared-only
-behavior exactly as above. Conversely, a failed fetch of an in-progress
-issue's own declared touches (e.g. a transient `gh issue view` error) falls
-back to its open PR's changed files only, printing a diagnostic naming the
-issue so the gap is visible rather than silent — the check itself never
-errors.
+Off a `PRForge` backend (`git` or `local`), and for any in-progress issue
+whose PR-file fetch fails, the gate falls back to declared-only behavior
+exactly as above. Conversely, a failed fetch of an in-progress issue's own
+declared touches (e.g. a transient `gh issue view` error) falls back to its
+open PR's changed files only, printing a diagnostic naming the issue so the
+gap is visible rather than silent — the check itself never errors.
 
 ---
 
