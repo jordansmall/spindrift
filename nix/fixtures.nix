@@ -39,11 +39,17 @@ let
     '';
   };
 
-  batsHarness = import ../lib/mkHarness.nix {
+  batsHarnessArgs = {
     inherit nixpkgs system;
     overlays = [ ghFakeOverlay ];
     packages = p: [ p.hello ];
   };
+
+  batsHarness = import ../lib/mkHarness.nix batsHarnessArgs;
+
+  # batsHarness as a multi-Driver flake renders it (ADR 0064, issue #5053):
+  # the wrapper layers harness.<driver>.env over harness.env.
+  multiDriverBatsHarness = import ../lib/mkHarness.nix (batsHarnessArgs // { multiDriver = true; });
 
   # Rendered artifacts for the Go seam tests (issue #4280).
   seamFixtures = import ./seam-fixtures.nix {
@@ -470,6 +476,7 @@ in
     dogfoodSkills
     ghFakeOverlay
     batsHarness
+    multiDriverBatsHarness
     seamFixtures
     harness
     dogfoodBwrapHarness
