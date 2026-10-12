@@ -4271,8 +4271,15 @@ then closes the issue if that discovered PR already merged; if it's still
 open, reconcile records the landing and leaves the issue for a later sweep.
 When a `landing` PR (recorded or freshly discovered) was closed **without**
 merging, reconcile sets `abandoned: true` instead of closing — a human
-rejected it, so there's no merge left to wait on. Running it twice never
-double-acts: a closed issue drops out of `ListOpenIssues`, and an
+rejected it, so there's no merge left to wait on. The exception is a
+`landing` recorded as a bare branch rather than a PR URL: if the branch's
+PR is closed unmerged, reconcile prints
+`status=landing-unverifiable`, records nothing, and does not flag the
+issue (issue #5006). No forge call ties a PR to a dispatch attempt and the
+agent branch is reused each attempt, so that closed PR may be a prior
+attempt's rather than the latest run's. An open or merged PR under a bare
+branch is still recorded, and a merged one closes the issue. Running it
+twice never double-acts: a closed issue drops out of `ListOpenIssues`, and an
 already-`abandoned` issue is skipped on later sweeps, so neither is ever
 revisited.
 
