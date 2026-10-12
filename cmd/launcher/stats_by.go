@@ -51,32 +51,114 @@ func statsKnobNames() (names, secret []string) {
 	return names, secret
 }
 
+// statsKnobKey keys a Record by the value its dispatch_start stamp recorded for
+// the knob: None when the knob is absent, statsEmpty when it was set to "".
+func statsKnobKey(name string) func(dispatchrecord.Record) string {
+	return func(r dispatchrecord.Record) string {
+		v, ok := r.Knobs[name]
+		switch {
+		case !ok:
+			return recordstats.None
+		case v == "":
+			return statsEmpty
+		}
+		return v
+	}
+}
+
+// statsDimSpec is one row of the --by vocabulary. Parsing, its fallback error
+// and grouping all read one row.
+type statsDimSpec struct {
+	dim statsDim
+	// arg is set for a dimension spelled "dim:<arg>"; nil for a bare one.
+	arg *statsDimArg
+	// group splits Records by this dimension; arg is the validated text after "dim:".
+	group func(records []dispatchrecord.Record, arg string) []recordstats.Group
+}
+
+// statsDimArg is the text a prefixed dimension takes after "dim:".
+type statsDimArg struct {
+	placeholder string // e.g. "<role>"
+	parse       func(string) error
+}
+
+// spelling is the --by form the row accepts: "role", "prompt:<role>".
+func (s statsDimSpec) spelling() string {
+	if s.arg == nil {
+		return string(s.dim)
+	}
+	return string(s.dim) + ":" + s.arg.placeholder
+}
+
+// statsDims is every dimension --by accepts, in the order the fallback error
+// lists them.
+var statsDims = []statsDimSpec{
+	{dim: statsByRole, group: func(records []dispatchrecord.Record, _ string) []recordstats.Group {
+		groups := recordstats.GroupPasses(records, recordstats.RoleKey)
+		recordstats.SortRoleGroups(groups)
+		return groups
+	}},
+	{dim: statsByRevision, group: func(records []dispatchrecord.Record, _ string) []recordstats.Group {
+		return recordstats.GroupRecords(records, recordstats.RevisionKey)
+	}},
+	{dim: statsByModel, group: func(records []dispatchrecord.Record, _ string) []recordstats.Group {
+		return recordstats.GroupPasses(records, recordstats.ModelKey)
+	}},
+	{dim: statsByDriver, group: func(records []dispatchrecord.Record, _ string) []recordstats.Group {
+		return recordstats.GroupRecords(records, recordstats.DriverKey)
+	}},
+	{dim: statsByPrompt,
+		arg: &statsDimArg{placeholder: "<role>", parse: func(role string) error {
+			if roles := recordstats.PromptRoles(); !slices.Contains(roles, role) {
+				return fmt.Errorf("unknown prompt role %q, want one of %s", role, strings.Join(roles, ", "))
+			}
+			return nil
+		}},
+		group: func(records []dispatchrecord.Record, role string) []recordstats.Group {
+			return recordstats.GroupRecords(records, recordstats.PromptKey(role))
+		}},
+	{dim: statsByKnob,
+		arg: &statsDimArg{placeholder: "<NAME>", parse: func(name string) error {
+			known, secret := statsKnobNames()
+			switch {
+			case name == "":
+				return errors.New("knob name is empty")
+			case slices.Contains(secret, name):
+				return fmt.Errorf("knob %s is secret, never recorded", name)
+			case !slices.Contains(known, name):
+				return fmt.Errorf("unknown knob %q", name)
+			}
+			return nil
+		}},
+		group: func(records []dispatchrecord.Record, name string) []recordstats.Group {
+			return recordstats.GroupRecords(records, statsKnobKey(name))
+		}},
+}
+
 // parseStatsBy checks one dimension against those stats can group by; its
 // errors are the reason alone, for the caller to frame with the full --by value.
 func parseStatsBy(by string) (statsBy, error) {
-	switch {
-	case by == string(statsByRole), by == string(statsByRevision), by == string(statsByModel), by == string(statsByDriver):
-		return statsBy{dim: statsDim(by)}, nil
-	case strings.HasPrefix(by, string(statsByPrompt)+":"):
-		role := strings.TrimPrefix(by, string(statsByPrompt)+":")
-		if roles := recordstats.PromptRoles(); !slices.Contains(roles, role) {
-			return statsBy{}, fmt.Errorf("unknown prompt role %q, want one of %s", role, strings.Join(roles, ", "))
+	for _, s := range statsDims {
+		if s.arg == nil {
+			if by == string(s.dim) {
+				return statsBy{dim: s.dim}, nil
+			}
+			continue
 		}
-		return statsBy{dim: statsByPrompt, arg: role}, nil
-	case strings.HasPrefix(by, string(statsByKnob)+":"):
-		name := strings.TrimPrefix(by, string(statsByKnob)+":")
-		known, secret := statsKnobNames()
-		switch {
-		case name == "":
-			return statsBy{}, errors.New("knob name is empty")
-		case slices.Contains(secret, name):
-			return statsBy{}, fmt.Errorf("knob %s is secret, never recorded", name)
-		case !slices.Contains(known, name):
-			return statsBy{}, fmt.Errorf("unknown knob %q", name)
+		// A bare "prompt" or "knob" has no prefix match and takes the generic error.
+		if arg, ok := strings.CutPrefix(by, string(s.dim)+":"); ok {
+			if err := s.arg.parse(arg); err != nil {
+				return statsBy{}, err
+			}
+			return statsBy{dim: s.dim, arg: arg}, nil
 		}
-		return statsBy{dim: statsByKnob, arg: name}, nil
 	}
-	return statsBy{}, errors.New("want role, revision, model, driver, prompt:<role> or knob:<NAME>")
+	spellings := make([]string, len(statsDims))
+	for i, s := range statsDims {
+		spellings[i] = s.spelling()
+	}
+	last := len(spellings) - 1
+	return statsBy{}, errors.New("want " + strings.Join(spellings[:last], ", ") + " or " + spellings[last])
 }
 
 // statsByList is a parsed --by value's dimensions in --by order; empty is no --by.
@@ -146,30 +228,10 @@ func groupStats(records []dispatchrecord.Record, dims []statsBy) []statsGroup {
 // dimension. Groups keep first-appearance order (the pipeline order for role),
 // (none) last; a pass-level dimension (role, model) is split per pass.
 func groupStatsBy(records []dispatchrecord.Record, by statsBy) []recordstats.Group {
-	switch by.dim {
-	case statsByRole:
-		groups := recordstats.GroupPasses(records, recordstats.RoleKey)
-		recordstats.SortRoleGroups(groups)
-		return groups
-	case statsByModel:
-		return recordstats.GroupPasses(records, recordstats.ModelKey)
-	case statsByRevision:
-		return recordstats.GroupRecords(records, recordstats.RevisionKey)
-	case statsByDriver:
-		return recordstats.GroupRecords(records, recordstats.DriverKey)
-	case statsByPrompt:
-		return recordstats.GroupRecords(records, recordstats.PromptKey(by.arg))
-	case statsByKnob:
-		return recordstats.GroupRecords(records, func(r dispatchrecord.Record) string {
-			v, ok := r.Knobs[by.arg]
-			switch {
-			case !ok:
-				return recordstats.None
-			case v == "":
-				return statsEmpty
-			}
-			return v
-		})
+	for _, s := range statsDims {
+		if s.dim == by.dim {
+			return s.group(records, by.arg)
+		}
 	}
 	panic("stats: cannot group by --by " + by.String())
 }
