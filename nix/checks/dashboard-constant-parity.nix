@@ -19,12 +19,15 @@ let
     "dashboard/status.go"
     "dashboard/history.go"
     "cmd/launcher/internal/daemon/status.go"
+    "cmd/launcher/internal/daemon/halt.go"
     "cmd/launcher/internal/daemon/events_file.go"
     "cmd/launcher/internal/report/report.go"
   ] (file: builtins.readFile (../.. + "/${file}"));
 
   # Dashboard side is the mirror; daemon side is the source of truth.
-  # `srcIdent` defaults to `ident`.
+  # `srcIdent` defaults to `ident`. `srcPattern` replaces the source-side
+  # declaration regex for a literal that is a table-row field rather than a
+  # declaration; its first capture group is the literal.
   pairs = [
     {
       dash = "dashboard/status.go";
@@ -58,7 +61,28 @@ let
       ident = "nextDueOnTipMove";
       srcIdent = "NextDueOnTipMove";
     }
-  ];
+    {
+      dash = "dashboard/status.go";
+      src = "cmd/launcher/internal/daemon/halt.go";
+      ident = "haltReasonSelfChanged";
+      srcIdent = "HaltSelfChanged";
+      srcPattern = haltRowReasonPattern "HaltSelfChanged";
+    }
+  ]
+  ++
+    map
+      (phase: {
+        dash = "dashboard/status.go";
+        src = "cmd/launcher/internal/daemon/status.go";
+        ident = "selfUpdate${phase}";
+        srcIdent = "SelfUpdate${phase}";
+      })
+      [
+        "Building"
+        "Built"
+        "Waiting"
+        "Restarting"
+      ];
 
   # Matches a declaration line only (`const x = v`, in-block `x = v`, or typed
   # `X T = v`), so uses of the name elsewhere cannot satisfy it.
@@ -66,19 +90,29 @@ let
     ident:
     "[[:space:]]*(const[[:space:]]+)?${ident}[[:space:]]+([A-Za-z_][A-Za-z0-9_]*[[:space:]]+)?=[[:space:]]*(\"[^\"]*\"|[0-9]+)[[:space:]]*(//.*)?";
 
-  # Returns the literal text assigned to `ident` in `src`. Throws on zero or
-  # several declarations rather than yielding null, which would let two missing
-  # identifiers compare equal.
-  literalOf =
-    file: src: ident:
+  # Matches the `reason:` field of a haltRenderings row (halt.go), a map-table
+  # entry rather than a declaration. The one capture group is the literal.
+  # `detailed: true` is pinned because the Dashboard's `self-changed:` prefix
+  # match only holds while the row renders a detail suffix.
+  haltRowReasonPattern =
+    ident:
+    "[[:space:]]*${ident}:[[:space:]]*\\{name:[[:space:]]*\"${ident}\",[[:space:]]*reason:[[:space:]]*(\"[^\"]*\"),[[:space:]]*detailed:[[:space:]]*true,.*";
+
+  # Returns the literal text captured by `pattern` (group `group`) in `src`.
+  # Throws on zero or several matching lines rather than yielding null, which
+  # would let two missing identifiers compare equal.
+  literalAt =
+    file: src: ident: pattern: group:
     let
-      hits = builtins.filter (m: m != null) (
-        map (builtins.match (declPattern ident)) (splitString "\n" src)
-      );
+      hits = builtins.filter (m: m != null) (map (builtins.match pattern) (splitString "\n" src));
     in
     assert assertMsg (builtins.length hits == 1)
-      "${file}: expected exactly one literal declaration of `${ident}`, found ${toString (builtins.length hits)}";
-    builtins.elemAt (builtins.head hits) 2;
+      "${file}: expected exactly one line matching `${ident}`, found ${toString (builtins.length hits)}";
+    builtins.elemAt (builtins.head hits) group;
+
+  literalOf =
+    file: src: ident:
+    literalAt file src ident (declPattern ident) 2;
 
   # Takes the source table as an argument so the -regression check can feed
   # doctored copies. Returns the list of pinned literals.
@@ -89,7 +123,11 @@ let
       let
         srcIdent = p.srcIdent or p.ident;
         dash = literalOf p.dash srcs.${p.dash} p.ident;
-        src = literalOf p.src srcs.${p.src} srcIdent;
+        src =
+          if p ? srcPattern then
+            literalAt p.src srcs.${p.src} srcIdent p.srcPattern 0
+          else
+            literalOf p.src srcs.${p.src} srcIdent;
       in
       assert assertMsg (dash == src)
         "${p.dash} `${p.ident}` = ${dash} drifted from ${p.src} `${srcIdent}` = ${src}: the Dashboard mirrors the daemon (ADR 0060) and must change with it";
@@ -106,16 +144,17 @@ in
       # Rewrites only the declaration line of `ident`, deriving what it changes
       # from the source itself, so a bump made on both sides keeps every
       # fixture matching.
-      doctor =
-        file: ident: rewrite:
+      doctorMatching =
+        file: pattern: rewrite:
         sources
         // {
           ${file} = concatStringsSep "\n" (
-            map (l: if builtins.match (declPattern ident) l == null then l else rewrite l) (
+            map (l: if builtins.match pattern l == null then l else rewrite l) (
               splitString "\n" sources.${file}
             )
           );
         };
+      doctor = file: ident: doctorMatching file (declPattern ident);
       drift =
         file: ident:
         let
@@ -125,6 +164,10 @@ in
         in
         doctor file ident (replaceStrings [ lit ] [ drifted ]);
       rename = file: ident: doctor file ident (replaceStrings [ ident ] [ "${ident}Renamed" ]);
+      haltRowPair = builtins.head (builtins.filter (p: p ? srcPattern) pairs);
+      haltRowFile = haltRowPair.src;
+      haltRowPattern = haltRowPair.srcPattern;
+      haltRowLiteral = literalAt haltRowFile sources.${haltRowFile} "HaltSelfChanged" haltRowPattern 0;
       fixtures = [
         {
           name = "the Dashboard's statusSchema bumped without the daemon";
@@ -150,6 +193,18 @@ in
           name = "the Dashboard's nextDueOnTipMove renamed (missing identifier)";
           doctored = rename "dashboard/status.go" "nextDueOnTipMove";
           file = "dashboard/status.go";
+        }
+        {
+          name = "the daemon's SelfUpdateWaiting phase changed without the Dashboard";
+          doctored = drift "cmd/launcher/internal/daemon/status.go" "SelfUpdateWaiting";
+          file = "cmd/launcher/internal/daemon/status.go";
+        }
+        {
+          name = "the daemon's HaltSelfChanged row reason changed without the Dashboard";
+          doctored = doctorMatching haltRowFile haltRowPattern (
+            replaceStrings [ haltRowLiteral ] [ "\"drifted-self-changed\"" ]
+          );
+          file = haltRowFile;
         }
       ];
       # A fixture that changes nothing would pass vacuously.
