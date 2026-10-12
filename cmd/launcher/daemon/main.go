@@ -13,12 +13,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -39,6 +43,11 @@ var installStopSignal = stopsignal.Notify
 // inputFlag: mainRun's status-verb check skips leading pairs of it.
 const inputFlag = "--input"
 
+// handoffFlag names the descriptor an in-place restart predecessor left the
+// handoff document on. mainRun strips it before anything else parses argv, and
+// successorArgs never replays it.
+const handoffFlag = "--handoff-fd"
+
 // parsedArgs is the result of parsing argv: `--input <path>` plus an
 // optional positional kind-set selector (dispatch|research|butler|recover,
 // default every kind — see parseArgs) and an optional
@@ -49,11 +58,13 @@ type parsedArgs struct {
 	ExplicitSelector bool   // true when argv named a kind selector; false for the bare "every kind" default (see gateKinds)
 	FeatureBranch    string // empty when --feature-branch is absent; see hostRunner.featureBranch
 	CheckOnly        bool   // --check-only: validate input and config, exit 0 or 1 with the startup diagnostic (see mainRun)
+	RestartInPlace   bool   // --restart-in-place: exec the prebuilt daemon on a self-change, keeping children running (ADR 0063)
 }
 
 // parseArgs parses `daemon --input <path> [--feature-branch <branch>]
-// [--check-only] [dispatch|research|butler|recover]` — --feature-branch and
-// --check-only may appear before or after the positional kind selector. With
+// [--check-only] [--restart-in-place] [dispatch|research|butler|recover]` —
+// --feature-branch, --check-only and --restart-in-place may appear before or
+// after the positional kind selector. With
 // no positional verb the daemon draws from every kind off one pool (issue
 // #3541, #3878) — an operator stops having to choose between advancing work,
 // enriching the backlog, and butler upkeep. `dispatch` alone keeps work-only
@@ -68,7 +79,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 	var inputPath string
 	var havePath bool
 	var featureBranch string
-	var checkOnly bool
+	var checkOnly, restartInPlace bool
 	var positional []string
 	for i := 0; i < len(args); i++ {
 		if args[i] == inputFlag {
@@ -82,6 +93,10 @@ func parseArgs(args []string) (parsedArgs, error) {
 		}
 		if args[i] == "--check-only" {
 			checkOnly = true
+			continue
+		}
+		if args[i] == "--restart-in-place" {
+			restartInPlace = true
 			continue
 		}
 		if args[i] == "--feature-branch" {
@@ -115,7 +130,7 @@ func parseArgs(args []string) (parsedArgs, error) {
 	if err != nil {
 		return parsedArgs{}, err
 	}
-	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch, CheckOnly: checkOnly}, nil
+	return parsedArgs{InputPath: inputPath, Kinds: kinds, ExplicitSelector: explicitSelector, FeatureBranch: featureBranch, CheckOnly: checkOnly, RestartInPlace: restartInPlace}, nil
 }
 
 // errNoOutboxRelay is why a recover kind is disabled: no read-only Box's
@@ -693,6 +708,60 @@ func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds
 // exit code rather than calling os.Exit so tests can drive it repeatedly
 // with different argv (mirrors cmd/launcher/driver-exec/main.go's mainRun).
 func mainRun(argv []string, stdout, stderr io.Writer) int {
+	// Ahead of the status verb and parseArgs: a successor must take over the
+	// lock and the running children before anything below can fail.
+	//
+	// A successor latches stop signals before that: until Notify runs, Go's
+	// own SIGTERM handler is fatal, and a stop arriving from the first
+	// instruction of main must survive until the pool can act on it. A fresh
+	// start installs the latch later, so Ctrl-C during input parsing still
+	// kills it.
+	var (
+		stopSig, abortSig <-chan struct{}
+		stopCleanup       func()
+	)
+	argv, handoffFD, resuming, err := splitHandoffFlag(argv)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	if resuming {
+		stopSig, abortSig, stopCleanup = installStopSignal()
+		defer stopCleanup()
+	}
+	var (
+		lock      *daemon.CheckoutLock
+		inherited map[int]*hostChildHandle
+		r         *hostRunner
+		handedOff bool
+		res       *resumed
+	)
+	if resuming {
+		if res, err = resumeFromHandoff(handoffFD); err != nil {
+			return fail(stderr, err)
+		}
+		lock, inherited = res.lock, res.inherited
+	}
+	// No cleanup on the crash path: the kernel drops the flock when the
+	// holder dies (including SIGKILL), so a deferred Release only needs to
+	// cover the ordinary return path. After an exec the successor holds the
+	// lock through its dup.
+	defer func() {
+		if lock != nil && !handedOff {
+			_ = lock.Release()
+		}
+	}()
+	// Runs before the release above: inherited children the pool never claimed
+	// must not be orphaned, nor the lock dropped while they still run. Reading
+	// stopSig and abortSig here, not at registration, keeps the stop an
+	// operator sends during the wait reaching those children.
+	defer func() {
+		hs := slices.Collect(maps.Values(inherited))
+		if r != nil {
+			hs = r.takeUnclaimed()
+		}
+		waitOut(hs, stopSig, abortSig)
+	}()
+
 	// `status` is dispatched here, ahead of parseArgs, not folded into it:
 	// parseArgs's one positional slot is the kind selector (dispatch |
 	// research, see its own doc), and overloading that same slot with a
@@ -719,6 +788,10 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	args, err := parseArgs(argv)
 	if err != nil {
 		return fail(stderr, err)
+	}
+
+	if args.RestartInPlace && !inPlaceRestartSupported {
+		return fail(stderr, fmt.Errorf("--restart-in-place: %w", errInPlaceUnsupported))
 	}
 
 	doc, err := inputdoc.Load(args.InputPath)
@@ -878,21 +951,27 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	lock, err := daemon.AcquireCheckoutLock(gitDirPath, args.Kinds)
+	if res != nil {
+		err = lock.Claim(gitDirPath)
+	} else {
+		lock, err = daemon.AcquireCheckoutLock(gitDirPath, args.Kinds)
+	}
 	if err != nil {
 		// finish keeps the pre-580296cf halt-event-then-diagnostic order. sw
 		// nil: no status file of ours exists yet.
 		return finish(stderr, em, nil, args.Kinds, daemon.Halt{Class: daemon.HaltInstanceLock, Detail: err.Error()})
 	}
-	// No cleanup on the crash path: the kernel drops the flock when the
-	// holder dies (including SIGKILL), so a deferred Release here only
-	// needs to cover the ordinary return path.
-	defer func() { _ = lock.Release() }()
 
 	// Lock-first, like the status writer below: a refused second daemon must
 	// not append to or rotate the holder's Events file. Before
 	// warnUnprobedKinds, whose events belong in the durable copy too.
 	em.TeeEvents(daemon.NewEventsFile(gitDirPath))
+
+	// Recorded here, once the successor holds the lock and the Events file, so
+	// an exec that failed in the predecessor never leaves a handoff behind.
+	if res != nil {
+		em.Emit(handoffEvent(res.handoff))
+	}
 
 	// After the lock: a refused second daemon schedules nothing, so it must
 	// not announce a fallback scheduler.
@@ -910,7 +989,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	// information a stale read is designed to surface.
 	statusWriter := daemon.NewStatusWriter(gitDirPath, clk.Now)
 
-	r, err := newHostRunner(hostRunnerConfig{
+	r, err = newHostRunner(hostRunnerConfig{
 		repoPath:      repoPath,
 		appAttr:       appAttr,
 		baseBranch:    baseBranch,
@@ -925,6 +1004,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		demand:      demand,
 		stateDir:    gitDirPath,
 		selfArgs:    successorArgs(argv),
+		inherited:   inherited,
 	})
 	if err != nil {
 		return fail(stderr, err)
@@ -943,18 +1023,25 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	preflightCtx, cancelPreflight := context.WithCancel(context.Background())
 	defer cancelPreflight()
 
-	stopSig, abortSig, stopCleanup := installStopSignal()
-	defer stopCleanup()
+	if stopCleanup == nil {
+		stopSig, abortSig, stopCleanup = installStopSignal()
+		defer stopCleanup()
+	}
 	quit := make(chan struct{})
 	defer close(quit)
 	poolStop, poolAbort := announceStop(stopSig, abortSig, quit, cancelPreflight, em)
 
 	// After the signal wiring, so an operator's Ctrl-C during the preflight
 	// is honoured; before Loop, so a refusal happens before any slot, any
-	// claim, any Box. After AcquireCheckoutLock above, so a second daemon
-	// against the same checkout is still refused by the lock's own cheaper
-	// path rather than after a full doctor run.
-	if h := startupPreflight(preflightCtx, r, em); h.Class != daemon.HaltNone {
+	// claim, any Box. After the checkout lock is taken above (acquired, or
+	// inherited from the predecessor on a resume), so a second daemon against
+	// the same checkout is still refused by the lock's own cheaper path
+	// rather than after a full doctor run.
+	//
+	// A resumed image that was stopped during its preflight still runs the
+	// pool: with Stop closed it halts and drains the inherited children
+	// instead of abandoning them.
+	if h := startupPreflight(preflightCtx, r, em); h.Class != daemon.HaltNone && (res == nil || h.Class != daemon.HaltOperatorStop) {
 		// finish keeps the pre-580296cf halt-event-then-diagnostic order.
 		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
@@ -976,29 +1063,68 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		Status:              statusWriter,
 		Stop:                poolStop,
 		Abort:               poolAbort,
+		RestartInPlace:      args.RestartInPlace,
+	}
+	if res != nil {
+		cfg.Handoff = &res.handoff
 	}
 
-	// loopCtx is never cancelled in production — cfg.Stop/cfg.Abort above
-	// are what stop the pool now. A hard-cancel context.Background() here
-	// (rather than a CancelFunc threaded through and left uncalled) keeps
-	// that fact visible at the call site; the only reason Loop still takes
-	// a context at all is for tests and any future embedder (issue #3626).
-	return daemon.Loop(context.Background(), cfg, r, em, clk).ExitCode()
+	var code int
+	code, handedOff = superviseLoop(cfg, r, em, clk, lock, selfProgram)
+	return code
+}
+
+// superviseLoop runs the pool and, each time it commits an in-place restart,
+// execs the prebuilt daemon with the children kept running. handedOff reports
+// that the exec happened (only a test seam returns from one), so the caller
+// must leave the lock for the successor. A stop latched before the exec, or an
+// exec that fails, re-enters the pool with the same handoff document: the
+// first drains, the second keeps supervising under a blocked self-update.
+func superviseLoop(cfg daemon.Config, r *hostRunner, em *daemon.Emitter, clk daemon.Clock, lock *daemon.CheckoutLock, selfProgram string) (code int, handedOff bool) {
+	for {
+		// The context is never cancelled in production — cfg.Stop/cfg.Abort are
+		// what stop the pool now. A hard-cancel context.Background() here
+		// (rather than a CancelFunc threaded through and left uncalled) keeps
+		// that fact visible at the call site; the only reason Loop still takes
+		// a context at all is for tests and any future embedder (issue #3626).
+		h := daemon.Loop(context.Background(), cfg, r, em, clk)
+		if h.Handoff == nil {
+			return h.ExitCode(), false
+		}
+		cfg.Handoff = h.Handoff
+		err := r.execSuccessor(*h.Handoff, lock.File(), cfg.Stop, selfProgram)
+		switch {
+		case err == nil:
+			return 0, true
+		case errors.Is(err, errStopBeforeExec):
+		default:
+			cfg.SelfUpdate = daemon.SelfUpdate{Phase: daemon.SelfUpdateBlocked, Revision: r.prebuiltRevision(), Reason: "exec: " + err.Error()}
+			em.Emit(cfg.SelfUpdate.Event())
+		}
+	}
 }
 
 func main() {
 	os.Exit(mainRun(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// successorArgs is the operator's own argv with every --input pair removed.
+// successorArgs is the operator's own argv with every --input and
+// --handoff-fd pair removed.
 // The `nix run .#daemon` wrapper prepends `--input <doc>` pointing at the
 // running daemon's document; the successor's wrapper supplies its own, and
 // parseArgs lets a later --input win, so replaying the old one would make the
-// smoke test validate the old document instead of the new build's.
+// smoke test validate the old document instead of the new build's. A resumed
+// image's own --handoff-fd names a descriptor it has already consumed.
 func successorArgs(args []string) []string {
+	return dropFlagPairs(args, inputFlag, handoffFlag)
+}
+
+// dropFlagPairs is args without every `flag value` pair for the given flags.
+// A trailing flag with no value is kept, for the parser to reject.
+func dropFlagPairs(args []string, flags ...string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
-		if args[i] == inputFlag && i+1 < len(args) {
+		if slices.Contains(flags, args[i]) && i+1 < len(args) {
 			i++
 			continue
 		}
@@ -1006,3 +1132,83 @@ func successorArgs(args []string) []string {
 	}
 	return out
 }
+
+// handoffEvent is the self_update event an in-place restart records, built
+// from the document the predecessor wrote.
+func handoffEvent(h daemon.Handoff) daemon.Event {
+	var slots []int
+	for _, s := range h.Slots {
+		slots = append(slots, s.Slot)
+	}
+	// A literal, since the handoff's extra fields (FromPath, ToPath, Revision,
+	// Slots) are the ones the event-stream-parity check reads from it.
+	return daemon.Event{Event: "self_update", Phase: string(daemon.SelfUpdateHandoff), Revision: h.Revision, FromPath: h.FromPath, ToPath: h.ToPath, Slots: slots}
+}
+
+// resumed is what a successor image takes over from its predecessor's exec.
+type resumed struct {
+	handoff daemon.Handoff
+	lock    *daemon.CheckoutLock
+	// inherited are the children that validated, by report fd. One that did
+	// not is left for the pool's InheritChild to report.
+	inherited map[int]*hostChildHandle
+}
+
+// splitHandoffFlag strips every --handoff-fd pair from argv, returning the
+// last value and whether the flag was present at all: the one place mainRun
+// learns it is a successor.
+func splitHandoffFlag(argv []string) (rest []string, raw string, found bool, err error) {
+	for i := 0; i < len(argv); i++ {
+		if argv[i] != handoffFlag {
+			continue
+		}
+		if i+1 >= len(argv) {
+			return nil, "", false, fmt.Errorf("flag %s requires a value", handoffFlag)
+		}
+		raw, found = argv[i+1], true
+		i++
+	}
+	return dropFlagPairs(argv, handoffFlag), raw, found, nil
+}
+
+// resumeFromHandoff takes over what the predecessor handed down through the
+// descriptor named by raw — the instance lock and the running children —
+// before anything can fail on the input document and leave them unattended.
+// Any error is a startup failure; a child that does not validate is not.
+func resumeFromHandoff(raw string) (*resumed, error) {
+	fd, err := strconv.Atoi(raw)
+	if err != nil || fd <= syscall.Stderr {
+		return nil, fmt.Errorf("flag %s: %q is not a descriptor", handoffFlag, raw)
+	}
+	f := os.NewFile(uintptr(fd), "handoff document")
+	h, err := daemon.DecodeHandoff(f)
+	_ = f.Close()
+	if err != nil {
+		return nil, err
+	}
+	lock, err := daemon.InheritCheckoutLock(h.LockFD)
+	if err != nil {
+		return nil, err
+	}
+	res := &resumed{handoff: h, lock: lock, inherited: make(map[int]*hostChildHandle, len(h.Slots))}
+	for _, s := range h.Slots {
+		c, err := inheritHandle(s.Child)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "daemon: drop inherited slot %d: %v\n", s.Slot, err)
+			continue
+		}
+		res.inherited[s.Child.ReportFD] = c
+	}
+	// The predecessor ignored SIGHUP, SIGTERM and SIGINT across the exec, and
+	// SIG_IGN survives it. The stop latch already covers the latter two;
+	// SIGHUP is never notified, so put back its default unless the
+	// predecessor's was ignored to begin with.
+	if err := restoreSIGHUP(h.SIGHUPIgnored); err != nil {
+		fmt.Fprintf(os.Stderr, "daemon: restore SIGHUP: %v\n", err)
+	}
+	return res, nil
+}
+
+// errInPlaceUnsupported is returned wherever the exec path is unavailable;
+// restart_other.go's stubs and mainRun's refusal share it.
+var errInPlaceUnsupported = errors.New("in-place restart is supported only on linux amd64/arm64")

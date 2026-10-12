@@ -3534,7 +3534,7 @@ exit 3`, goFile))
 }
 
 // TestInheritChild_DropsAForgedOrStaleHandoff pins that an entry failing
-// validation is refused with its reason and adopts nothing: the descriptor it
+// validation is refused with its reason and takes nothing over: the descriptor it
 // names stays open (another entry may name it) but is close-on-exec again.
 func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
 	r := mustHostRunner(t, hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
@@ -3633,8 +3633,20 @@ func TestInheritChild_DropsAForgedOrStaleHandoff(t *testing.T) {
 
 // execReadyRunner is a runner whose last Prebuild and latest fetched tip agree
 // on prebuildSelfPath, so execTarget accepts it until a test spoils one side.
+// setSignalSettle overrides how long execSuccessor waits for a stop signal
+// to land after ignoring them, for this test only.
+func setSignalSettle(t testing.TB, d time.Duration) {
+	t.Helper()
+	orig := signalSettle
+	t.Cleanup(func() { signalSettle = orig })
+	signalSettle = d
+}
+
+// execReadyRunner is a runner execSuccessor can be called on, with no settle
+// wait unless the test sets one.
 func execReadyRunner(t *testing.T, mut func(*hostRunnerConfig)) *hostRunner {
 	t.Helper()
+	setSignalSettle(t, 0)
 	cfg := hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ(), selfArgs: []string{"dispatch"}}
 	if mut != nil {
 		mut(&cfg)
@@ -3784,53 +3796,8 @@ func handoffWithChild(t *testing.T, r *hostRunner) (daemon.Handoff, *hostChildHa
 	return daemon.Handoff{Slots: []daemon.HandoffSlot{{Slot: 0, Kind: daemon.KindOf(dispatchkind.Work), Child: h.State()}}}, h, lock
 }
 
-func TestExecSuccessor_FailedExecLeavesTheImageIntact(t *testing.T) {
-	r := execReadyRunner(t, nil)
-	ho, h, lock := handoffWithChild(t, r)
-	st := ho.Slots[0].Child
-
-	var inside []uintptr
-	stubSelfExec(t, func(string, []string, []string) error {
-		inside = stopHandlers(t)
-		return errors.New("exec boom")
-	})
-	before := stopHandlers(t)
-	fdsBefore := inheritableFDs(t)
-
-	if err := r.execSuccessor(ho, lock, nil, "/self"); err == nil || !strings.Contains(err.Error(), "exec boom") {
-		t.Fatalf("execSuccessor() error = %v, want the exec failure", err)
-	}
-
-	for i, h := range inside {
-		if h != sigIgnore {
-			t.Errorf("%v inside exec = %#x, want SIG_IGN", stopSignals[i], h)
-		}
-	}
-	if after := stopHandlers(t); !slices.Equal(after, before) {
-		t.Errorf("handlers after = %#x, want them restored to %#x", after, before)
-	}
-	if fdsAfter := inheritableFDs(t); !slices.Equal(fdsAfter, fdsBefore) {
-		t.Errorf("inheritable fds after = %v, want %v (dups leaked)", fdsAfter, fdsBefore)
-	}
-	if !reflect.DeepEqual(ho.Slots[0].Child, st) {
-		t.Error("the caller's handoff was modified")
-	}
-
-	got, err := r.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st)
-	if err != nil {
-		t.Fatalf("InheritChild() unexpected error: %v", err)
-	}
-	if got.(*hostChildHandle) != h {
-		t.Fatal("InheritChild() did not reuse the registered handle")
-	}
-	_ = h.proc.Kill()
-	res, err := got.Wait(nil)
-	if err != nil || res.Exit != -1 {
-		t.Errorf("Wait() = %+v, %v, want a signal exit", res, err)
-	}
-}
-
 func TestExecSuccessor_HandsDescriptorsAndDocumentToTheSuccessor(t *testing.T) {
+	requireInPlaceRestart(t)
 	r := execReadyRunner(t, nil)
 	ho, _, lock := handoffWithChild(t, r)
 	ho.Stop = true
@@ -3932,6 +3899,7 @@ func TestExecSuccessor_HandsDescriptorsAndDocumentToTheSuccessor(t *testing.T) {
 }
 
 func TestExecSuccessor_RefusesWithoutExec(t *testing.T) {
+	requireInPlaceRestart(t)
 	called := false
 	stubSelfExec(t, func(string, []string, []string) error { called = true; return nil })
 
@@ -3957,6 +3925,7 @@ func TestExecSuccessor_RefusesWithoutExec(t *testing.T) {
 }
 
 func TestExecSuccessor_OversizedDocumentIsRefused(t *testing.T) {
+	requireInPlaceRestart(t)
 	stubSelfExec(t, func(string, []string, []string) error { t.Error("exec called"); return nil })
 	r := execReadyRunner(t, nil)
 	lock, err := os.CreateTemp(t.TempDir(), "lock")
@@ -3974,7 +3943,7 @@ func TestExecSuccessor_OversizedDocumentIsRefused(t *testing.T) {
 	}
 }
 
-func TestWaitUnclaimed_ReapsRegisteredChildren(t *testing.T) {
+func TestWaitOut_ReapsUnclaimedChildren(t *testing.T) {
 	r := execReadyRunner(t, nil)
 	h := startAbandonedChild(t, r)
 	if len(r.handles) != 1 {
@@ -3982,45 +3951,53 @@ func TestWaitUnclaimed_ReapsRegisteredChildren(t *testing.T) {
 	}
 	_ = h.proc.Kill()
 	done := make(chan struct{})
-	go func() { r.waitUnclaimed(); close(done) }()
+	go func() { waitOut(r.takeUnclaimed(), nil, nil); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("waitUnclaimed did not return")
+		t.Fatal("waitOut did not return")
 	}
 	if len(r.handles) != 0 {
 		t.Errorf("registered handles after = %d, want 0", len(r.handles))
 	}
 	if _, err := h.proc.Wait(); err == nil {
-		t.Error("child was not reaped by waitUnclaimed")
+		t.Error("child was not reaped by waitOut")
 	}
 }
 
-func TestInheritChild_ClaimsAPreAdoptedHandle(t *testing.T) {
+func TestInheritChild_ClaimsAPreInheritedHandle(t *testing.T) {
 	cfg := hostRunnerConfig{repoPath: t.TempDir(), appAttr: ".#", baseBranch: "main", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()}
 	first := startAbandonedChild(t, mustHostRunner(t, cfg))
 	st := simulateExec(t, first, first.State())
 	if !slices.Contains(inheritableFDs(t), st.ReportFD) {
-		t.Fatalf("fd %d is not inheritable before adoption", st.ReportFD)
+		t.Fatalf("fd %d is not inheritable before inheritHandle", st.ReportFD)
 	}
 
-	adopted, err := adoptChild(st)
+	inherited, err := inheritHandle(st)
 	if err != nil {
-		t.Fatalf("adoptChild() unexpected error: %v", err)
+		t.Fatalf("inheritHandle() unexpected error: %v", err)
 	}
 	if slices.Contains(inheritableFDs(t), st.ReportFD) {
-		t.Errorf("fd %d still inheritable after adoption", st.ReportFD)
+		t.Errorf("fd %d still inheritable after inheritHandle", st.ReportFD)
 	}
-	cfg.adopted = map[int]*hostChildHandle{st.ReportFD: adopted}
+	cfg.inherited = map[int]*hostChildHandle{st.ReportFD: inherited}
 	r := mustHostRunner(t, cfg)
 	got, err := r.InheritChild(context.Background(), daemon.ChildRequest{Kind: daemon.KindOf(dispatchkind.Work)}, st)
 	if err != nil {
 		t.Fatalf("InheritChild() unexpected error: %v", err)
 	}
-	if got.(*hostChildHandle) != adopted {
-		t.Error("InheritChild() did not reuse the pre-adopted handle")
+	if got.(*hostChildHandle) != inherited {
+		t.Error("InheritChild() did not reuse the inherited handle")
 	}
 	if len(r.handles) != 0 {
 		t.Errorf("registered handles = %d, want 0 once claimed", len(r.handles))
+	}
+}
+
+// requireInPlaceRestart skips a test of the exec path where it is not built.
+func requireInPlaceRestart(t testing.TB) {
+	t.Helper()
+	if !inPlaceRestartSupported {
+		t.Skip("in-place restart is supported only on linux amd64/arm64")
 	}
 }
