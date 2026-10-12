@@ -23,11 +23,14 @@ wrapper passes its store path via one flag:
 exec launcher --input /nix/store/…-launcher-input.json "$@"
 ```
 
-The Go struct mirroring the document (`inputDocument`, `cmd/launcher/inputdoc.go`)
-is hand-written: two generic `map[string]string` fields, `Settings` and
-`Artifacts`, keyed by env var name — matching the existing
-`schemaDefaults`/`schemaFlags` table-not-struct pattern rather than a
-per-knob struct. (Amended by issue #813: this ADR originally claimed the
+The Go struct mirroring the document (`inputdoc.Document`,
+`cmd/launcher/internal/inputdoc/inputdoc.go`) is hand-written: two generic
+`map[string]string` fields, `Settings` and `Artifacts`, keyed by env var
+name — matching the existing `schemaDefaults`/`schemaFlags`
+table-not-struct pattern rather than a per-knob struct.
+`cmd/launcher/inputdoc.go` holds the Launcher's adapter (`loadedDoc`, its
+lookup helpers, and the ambient-env warning).
+(Amended by issue #813: this ADR originally claimed the
 struct was nix-generated from the schema under the same golden-diff guard as
 `flagtable_gen.go`; that never shipped. Drift protection here is narrower
 than a generated struct would give: `nix/checks/equivalence.nix`'s
