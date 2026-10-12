@@ -77,21 +77,35 @@ in
   # the template carries whichever of scout/reviewer has a model configured,
   # and is empty only when neither does.
   agents-json-baked = pkgs.runCommand "agents-json-baked" { } ''
-    # Shared shape for the dogfood/bats per-agent entry checks below: extract
-    # the named agent's JSON object out of an AGENTS_JSON_TEMPLATE line,
-    # assert it's present, then assert its model field matches exactly --
-    # anchored on the full `"model":"<value>"` key:value pair (including the
+    # Shared shape for the per-agent entry checks below: extract the named
+    # agent's JSON object out of an AGENTS_JSON_TEMPLATE line, failing if it
+    # is absent, so a field check can't be satisfied by another agent's
+    # equal-valued key on the same line. None of these objects nest braces
+    # (tools is an array), so `[^}]*` can't overrun into the next top-level
+    # key.
+    agent_entry() {
+      local line="$1" name="$2" label="$3"
+      grep -oE "\"$name\":\{[^}]*\}" <<<"$line" \
+        || { echo "$label missing $name entry in baked template" >&2; return 1; }
+    }
+
+    # Anchored on the full `"model":"<value>"` key:value pair (including the
     # closing quote) so a superstring like claude-opus-5-1 can't false-match
-    # a claude-opus-5 expectation. None of these objects nest braces (tools
-    # is an array), so `[^}]*` can't overrun into the next top-level key.
+    # a claude-opus-5 expectation.
     assert_agent_model() {
       local line="$1" name="$2" model="$3" label="$4" mismatch_msg="$5"
       local entry
-      entry=$(grep -oE "\"$name\":\{[^}]*\}" <<<"$line" || true)
-      [ -n "$entry" ] \
-        || { echo "$label missing $name entry in baked template" >&2; exit 1; }
+      entry=$(agent_entry "$line" "$name" "$label") || exit 1
       grep -q "\"model\":\"$model\"" <<<"$entry" \
         || { echo "$label $name entry $mismatch_msg" >&2; exit 1; }
+    }
+
+    assert_agent_effort() {
+      local line="$1" name="$2" effort="$3" label="$4"
+      local entry
+      entry=$(agent_entry "$line" "$name" "$label") || exit 1
+      grep -q "\"effort\":\"$effort\"" <<<"$entry" \
+        || { echo "$label missing default $name effort in baked template" >&2; exit 1; }
     }
 
     ep=${customHarness.internals.agentFiles}/agent/entrypoint.sh
@@ -131,9 +145,11 @@ in
     ! grep -q '"scout"' <<<"$reviewer_line" \
       || { echo "reviewer-only harness unexpectedly bakes a scout entry" >&2; exit 1; }
     # See the scout-only comment above: same roster==null fallback proof, for
-    # reviewer's default effort.
-    grep -q '"effort":"${rosterDefaults.reviewer.effort}"' <<<"$reviewer_line" \
-      || { echo "reviewer-only harness missing default reviewer effort in baked template" >&2; exit 1; }
+    # reviewer's and review-axis's default efforts (this fixture bakes both).
+    assert_agent_effort "$reviewer_line" reviewer "${rosterDefaults.reviewer.effort}" \
+      "reviewer-only harness"
+    assert_agent_effort "$reviewer_line" review-axis "${rosterDefaults."review-axis".effort}" \
+      "reviewer-only harness"
 
     # review-axis tracks the reviewer entry's resolved model (issue #3447,
     # ADR 0049). The eval-level roster checks (nix/checks/roster.nix) already
@@ -149,8 +165,8 @@ in
       "review-axis tracking harness" "missing the byName-configured model"
     # See the scout-only comment above: same roster==null fallback proof, for
     # review-axis's default effort.
-    grep -q '"effort":"${rosterDefaults."review-axis".effort}"' <<<"$axis_line" \
-      || { echo "review-axis tracking harness missing default review-axis effort in baked template" >&2; exit 1; }
+    assert_agent_effort "$axis_line" review-axis "${rosterDefaults."review-axis".effort}" \
+      "review-axis tracking harness"
 
     # Opting the reviewer out through that same surface drops the fan-out
     # entry with it -- no orphaned review-axis agent on a schema default.
