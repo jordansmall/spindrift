@@ -169,6 +169,9 @@
               # skipping the OCI-image realization the full `checks` set above
               # still covers for CI.
               checks-inbox = checksResult.checks-inbox;
+              # CI's docs-only lane (issue #5155): the checks that read docs
+              # files.
+              checks-docs = checksResult.checks-docs;
               # The fixtures directory the Go seam tests build on demand
               # (issue #4280).
               seam-fixtures = fixtures.seamFixtures;
