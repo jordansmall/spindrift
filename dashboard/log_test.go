@@ -821,3 +821,30 @@ func TestLogFinishInferredFromLaterChildStartSupersedesModifiedFile(t *testing.T
 	st.expect(t, "superseded", pass)
 	wantClosed(t, st)
 }
+
+// TestLogInheritedChildLogKeepsStreamingAcrossInPlaceRestart pins that an
+// in-place restart neither finishes nor supersedes the Child log of a Slot
+// the new image inherits: the pre-restart child_start still owns it.
+func TestLogInheritedChildLogKeepsStreamingAcrossInPlaceRestart(t *testing.T) {
+	ts, checkout := logServer(t)
+	p := writeLog(t, checkout, testLogPath, "before restart\n")
+	_, st := openLog(t, ts, testLogPath) // the Child log tab sends no owner
+	collect(t, st, "before restart")
+
+	appendTo(t, eventsOf(checkout),
+		`{"time":"2026-10-07T12:04:00Z","event":"self_update","phase":"handoff","revision":"0123456789abcdef","slots":[0]}`+"\n"+
+			`{"time":"2026-10-07T12:04:01Z","event":"child_inherited","kind":"work","slot":0,"issue":"42","revision":"fedcba9876543210","child_log":"`+testLogPath+`"}`+"\n")
+	appendTo(t, p, "after restart\n")
+	if got := collect(t, st, "after restart"); got != "after restart\n" {
+		t.Fatalf("bytes after the restart = %q", got)
+	}
+	appendTo(t, p, "still going\n")
+	collect(t, st, "still going")
+
+	srv := newServer(checkout, filepath.Join(checkout, ".git", statusFileName))
+	for _, owner := range []*logOwner{nil, {slot: 0, key: dispatchKey{started: olderAt}}} {
+		if ls := srv.logState(testLogPath, owner); !ls.named || ls.finished || ls.superseded {
+			t.Errorf("owner %v: logState = %+v, want named, running, not superseded", owner, ls)
+		}
+	}
+}
