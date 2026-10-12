@@ -536,21 +536,33 @@ in
       twoApps.opencode.program != twoApps.claude.program
       && twoApps.opencode-daemon.program != twoApps.claude-daemon.program
     ) "the second Driver's apps must be its own Harness's, not the default's";
+    # A second Driver turns on harness.<driver>.env layering, which lives in
+    # the wrapper, so the default's apps change; a lone Driver's do not.
     assert assertMsg (
-      programs (appsOf claude) == removeAttrs (programs twoApps) [
-        "opencode"
-        "opencode-daemon"
-      ]
-    ) "the default Driver's apps must not change when another Driver is declared";
+      twoApps.default.program != (appsOf claude).default.program
+      && twoApps.daemon.program != (appsOf claude).daemon.program
+    ) "declaring a second Driver must turn on the default Driver's harness.<driver>.env layering";
+    assert assertMsg (
+      programs (appsOf claude) == programs (appsOf {
+        agents.drivers.claude.models.default = "x";
+      })
+    ) "a one-entry Driver map must not enable harness.<driver>.env layering";
     # Only the image attribute is contributed; base packages stay the default's.
     assert assertMsg
       (
         names twoPkgs == names (onePkgs // pkgs.lib.optionalAttrs isLinux { agent-image-opencode = null; })
       )
       "a non-default Driver must contribute only its image attribute, got ${builtins.toJSON (names twoPkgs)}";
-    assert assertMsg (
-      drvPaths (removeAttrs twoPkgs [ "agent-image-opencode" ]) == drvPaths onePkgs
-    ) "the default Driver's packages must not change when another Driver is declared";
+    assert assertMsg
+      (
+        drvPaths (
+          removeAttrs twoPkgs [
+            "agent-image-opencode"
+            "spindrift"
+          ]
+        ) == drvPaths (removeAttrs onePkgs [ "spindrift" ])
+      )
+      "the default Driver's packages, bar the spindrift wrapper, must not change when another Driver is declared";
     assert assertMsg (
       !isLinux || twoPkgs.agent-image-opencode.drvPath != twoPkgs.agent-image-claude.drvPath
     ) "the two Drivers' images must differ";
@@ -578,6 +590,7 @@ in
       bwrap = recursiveUpdate base { infra.runtime = "bwrap"; };
       ocArgs = {
         driver = "opencode";
+        multiDriver = true;
         defaults = {
           model = "anthropic/claude-sonnet-5";
           daemonApp = ".#opencode";
@@ -599,6 +612,7 @@ in
         defaults:
         direct {
           driver = "claude";
+          multiDriver = true;
           defaults = {
             model = "x";
           }
@@ -621,6 +635,10 @@ in
       {
         ocDoc = oc.internals.runInputDocumentFile;
         bwrapDoc = ocBwrap.internals.runInputDocumentFile;
+        ocProgram = (appsOf base).opencode.program;
+        claudeProgram = (appsOf base).default.program;
+        ocDaemonProgram = (appsOf base).opencode-daemon.program;
+        claudeDaemonProgram = (appsOf base).daemon.program;
         defaultDoc = (claudeDirect { }).internals.runInputDocumentFile;
         customDoc = (claudeDirect { daemonApp = ".#custom"; }).internals.runInputDocumentFile;
       }
@@ -634,6 +652,14 @@ in
         check '.#' DAEMON_APP "$defaultDoc"
         check '.#daemon' DAEMON_SELF_APP "$defaultDoc"
         check '.#custom' DAEMON_APP "$customDoc"
+        for p in "$ocProgram" "$ocDaemonProgram"; do
+          grep -qF '. "$PWD/harness.opencode.env"' "$p" \
+            || { echo "$p does not source harness.opencode.env" >&2; exit 1; }
+        done
+        for p in "$claudeProgram" "$claudeDaemonProgram"; do
+          grep -qF '. "$PWD/harness.claude.env"' "$p" \
+            || { echo "$p does not source harness.claude.env" >&2; exit 1; }
+        done
         touch $out
       '';
 }

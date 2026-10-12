@@ -557,7 +557,10 @@ in
           driver = name;
         }
         // entryValues entry driverValued.structural
-        // lib.optionalAttrs (defaults != { }) { inherit defaults; };
+        // lib.optionalAttrs (defaults != { }) { inherit defaults; }
+        # harness.<driver>.env only means something with several Drivers; a
+        # single-Driver flake must stay equal to a direct mkHarness call.
+        // lib.optionalAttrs (otherDrivers != [ ]) { multiDriver = true; };
 
       harness =
         if removedKnobHits != [ ] then
