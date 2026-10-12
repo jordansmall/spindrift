@@ -86,10 +86,13 @@ tracked target file as `missing-target`.
 
 Every finding must cite the digest anchors it argues from and name the one
 metric it concerns; `driver-exec signal` rejects a finding without both, and
-the host drops one with no cites. Hand the filer
-each anchor and the metric slug (the metric part of an anchor, such as
-`usd-per-record`) with the finding. Give the finding's target file in its
-dedup term, `-dedup <path>:<symbol>`.
+the host drops one with no cites. Hand the filer each anchor and the
+metric slug (the metric part of an anchor, such as `usd-per-record`) with
+the finding; over the Signal socket the filer passes them as `-cite`
+(repeatable) and `-metric`, on top of the flags listed under File findings.
+If the filer reports a rejection for a missing cite or metric, re-delegate the finding with its cited anchors and metric slug; never drop
+it for that. Give the finding's target file in its dedup term,
+`-dedup <path>:<symbol>`.
 
 The host drops a finding that cites an anchor not in the digest, targets a
 file absent at the scanned HEAD, or, unless its class is evidence-gap, has no
