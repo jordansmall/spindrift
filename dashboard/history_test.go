@@ -414,3 +414,128 @@ func TestEventsTailGapFromEmpty(t *testing.T) {
 	appendTo(t, path, evLine("t1", "child_start"))
 	wantGens(t, tailGens(t, tl), "t1@1")
 }
+
+// restartPre, restartHandoff and restartPost span an in-place restart: slots 0
+// and 1 are busy when the handoff lands, and each inherited Slot keeps its
+// pre-restart child_start. Slot 1 then finishes and starts a fresh Dispatch,
+// while slot 0 stays open. The handoff's revision is the new image's tip (the
+// built row's), but a child_inherited row carries the child's own revision, so
+// the two differ. TestEventsDaemonLiveAcrossInPlaceRestart covers the pid.
+const (
+	restartPre = `{"time":"2026-10-07T09:00:00Z","event":"child_start","kind":"work","slot":0,"issue":"42","child_log":"logs/A.log"}
+{"time":"2026-10-07T09:00:05Z","event":"box","slot":0,"phase":"initial","issue":"42","pass_log":"logs/a-initial.log"}
+{"time":"2026-10-07T09:02:00Z","event":"child_start","kind":"work","slot":1,"issue":"43","child_log":"logs/B.log"}
+{"time":"2026-10-07T09:02:05Z","event":"box","slot":1,"phase":"initial","issue":"43","pass_log":"logs/b-initial.log"}
+{"time":"2026-10-07T09:03:00Z","event":"self_update","phase":"built","revision":"0123456789abcdef"}
+`
+	restartHandoff = `{"time":"2026-10-07T09:04:00Z","event":"self_update","phase":"handoff","revision":"0123456789abcdef","from_path":"/a","to_path":"/b","slots":[0,1]}
+{"time":"2026-10-07T09:04:01Z","event":"child_inherited","kind":"work","slot":0,"issue":"42","revision":"fedcba9876543210","child_log":"logs/A.log"}
+{"time":"2026-10-07T09:04:01Z","event":"child_inherited","kind":"work","slot":1,"issue":"43","revision":"fedcba9876543210","child_log":"logs/B.log"}
+`
+	restartPost = `{"time":"2026-10-07T09:05:00Z","event":"box","slot":0,"phase":"fix-pass-1","issue":"42","pass_log":"logs/a-fix.log"}
+{"time":"2026-10-07T09:06:00Z","event":"settled","kind":"work","slot":1,"issue":"43","state":"complete"}
+{"time":"2026-10-07T09:06:01Z","event":"child_finish","kind":"work","slot":1,"issue":"43","exit":0}
+{"time":"2026-10-07T09:07:00Z","event":"child_start","kind":"work","slot":1,"issue":"44","child_log":"logs/C.log"}
+`
+)
+
+// byKey indexes entries by "event@time@slot" ("-" for no slot).
+func byKey(entries []historyEntry) map[string]historyEntry {
+	m := map[string]historyEntry{}
+	for _, e := range entries {
+		slot := e.Slot
+		if slot == "" {
+			slot = "-"
+		}
+		m[e.Event+"@"+e.Time+"@"+slot] = e
+	}
+	return m
+}
+
+// checkRestartAttribution pins that an in-place restart neither splits a
+// slot's Dispatch nor loses a row: child_inherited stands where a child_start
+// would, yet the pre-restart child_start still owns the slot.
+func checkRestartAttribution(t *testing.T, entries []historyEntry) {
+	t.Helper()
+	m := byKey(entries)
+	get := func(key string) historyEntry {
+		t.Helper()
+		e, ok := m[key]
+		if !ok {
+			t.Fatalf("no row %q", key)
+		}
+		return e
+	}
+	owned := func(key, started string, n int) {
+		t.Helper()
+		if e := get(key); e.Started != started || e.StartN != n {
+			t.Errorf("%s owned by %q/%d, want %q/%d", key, e.Started, e.StartN, started, n)
+		}
+	}
+	const (
+		s0, box0a = "2026-10-07T09:00:00Z", "2026-10-07T09:00:05Z"
+		s1, box1a = "2026-10-07T09:02:00Z", "2026-10-07T09:02:05Z"
+		built     = "2026-10-07T09:03:00Z"
+		handoff   = "2026-10-07T09:04:00Z"
+		inherited = "2026-10-07T09:04:01Z"
+		box0b     = "2026-10-07T09:05:00Z"
+		settled1  = "2026-10-07T09:06:00Z"
+		s1b       = "2026-10-07T09:07:00Z"
+	)
+	for _, key := range []string{
+		"child_start@" + s0 + "@0",
+		"box@" + box0a + "@0",
+		"child_inherited@" + inherited + "@0",
+		"box@" + box0b + "@0",
+	} {
+		owned(key, s0, 0)
+	}
+	for _, key := range []string{
+		"child_start@" + s1 + "@1",
+		"box@" + box1a + "@1",
+		"child_inherited@" + inherited + "@1",
+		"settled@" + settled1 + "@1",
+	} {
+		owned(key, s1, 0)
+	}
+	owned("child_start@"+s1b+"@1", s1b, 0)
+
+	if d := get("self_update@" + built + "@-").Detail; d != "built 0123456789ab" {
+		t.Errorf("built detail = %q", d)
+	}
+	if d := get("self_update@" + handoff + "@-").Detail; d != "handoff 0123456789ab" {
+		t.Errorf("handoff detail = %q", d)
+	}
+	if e := get("child_inherited@" + inherited + "@0"); e.Subject.Label != "#42" {
+		t.Errorf("inherited subject = %+v", e.Subject)
+	}
+}
+
+func TestHistoryAcrossInPlaceRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	appendTo(t, path, restartPre+restartHandoff+restartPost)
+	entries, err := readHistory(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRestartAttribution(t, entries)
+
+	body := getHistory(t, nil, map[string]string{eventsFileName: restartPre + restartHandoff + restartPost})
+	for _, want := range []string{"self_update", "child_inherited"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body lacks %q", want)
+		}
+	}
+}
+
+func TestFollowerAttributesRestartEventsAppendedLive(t *testing.T) {
+	path := filepath.Join(t.TempDir(), eventsFileName)
+	appendTo(t, path, restartPre)
+	f, snap := openFollower(t, path)
+	appendTo(t, path, restartHandoff+restartPost)
+	live, err := f.poll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRestartAttribution(t, append(snap, live...))
+}

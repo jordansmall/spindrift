@@ -115,6 +115,16 @@ var timeline = map[string]func(ev Event, e *historyEntry, add func(string)){
 	"halt": func(ev Event, _ *historyEntry, add func(string)) {
 		add(ev.Reason)
 	},
+	// A self-update step carries no slot, so it never touches a Dispatch's owner.
+	"self_update": func(ev Event, _ *historyEntry, add func(string)) {
+		add(ev.Phase)
+		add(shortRev(ev.Revision))
+		add(ev.Reason)
+	},
+	// A child_inherited row stands where child_start would for a child the
+	// previous image launched, but claim must not treat it as a new Dispatch:
+	// that image's child_start still owns the slot.
+	"child_inherited": func(Event, *historyEntry, func(string)) {},
 }
 
 func (ev Event) entry() historyEntry {
