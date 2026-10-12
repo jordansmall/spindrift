@@ -201,7 +201,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentAndRelayFailureParksFailed(t *test
 	if fc.Merged != "" {
 		t.Errorf("Merge must not be called when no PR was ever opened; fc.Merged=%q", fc.Merged)
 	}
-	assertRelayFailureParked(t, fc, issNum)
+	assertOutboxParked(t, fc, issNum)
 }
 
 // The issue #2447 fallback: a status=ready Box with no usable PR-intent line
@@ -397,12 +397,12 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsFromCommits_PostsIssue
 	}
 }
 
-// When reconstruction succeeds but the CreateDraftPR that follows fails,
-// hostMediateDraftPR blocks through the same blockHandoff path a relay failure
-// takes (issue #2447 follow-up). Only the merge-blocked comment may be posted:
-// the reconstructed text never reached any PR, so the reconstructed-hand-off
+// When reconstruction succeeds but the CreateDraftPR that follows fails, the
+// bundle is already relayed, so settle parks the issue agent-failed for
+// `spindrift recover` (issue #5144) instead of the old comment-only block. The
+// reconstructed text never reached any PR, so the reconstructed-hand-off
 // comment must not fire.
-func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsBlocksNoReconstructedComment(t *testing.T) {
+func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsParksNoReconstructedComment(t *testing.T) {
 	const issNum = "1919"
 	branch := "agent/issue-1919"
 
@@ -434,25 +434,7 @@ func TestSettle_GithubReadOnly_MissingPRIntentReconstructsButCreateDraftPRFailsB
 	if fc.Merged != "" {
 		t.Errorf("Merge must not be called when CreateDraftPR itself failed; fc.Merged=%q", fc.Merged)
 	}
-	iss, _ := fc.Issue(issNum)
-	if containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("a blocked draft-PR-create must NOT carry agent-complete — it reads as merged/done (#2046); labels=%v", iss.Labels)
-	}
-	if !containsLabel(iss.Labels, "agent-in-progress") {
-		t.Errorf("a blocked draft-PR-create is left in-progress, visibly not-done; labels=%v", iss.Labels)
-	}
-	if containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("issue must NOT carry agent-failed after a blocked draft-PR-create; labels=%v", iss.Labels)
-	}
-	var blockedCalls []forge.CommentCall
-	for _, c := range fc.CommentCalls {
-		if strings.Contains(c.Body, "merge blocked") {
-			blockedCalls = append(blockedCalls, c)
-		}
-	}
-	if len(blockedCalls) != 1 {
-		t.Fatalf("expected exactly one merge-blocked comment, got %d: %+v", len(blockedCalls), fc.CommentCalls)
-	}
+	assertOutboxParked(t, fc, issNum)
 	for _, c := range fc.CommentCalls {
 		if strings.Contains(c.Body, "reconstructed") {
 			t.Errorf("a failed CreateDraftPR must not get a reconstructed-hand-off comment (the reconstructed text was never applied to any PR), got %+v", fc.CommentCalls)
@@ -822,7 +804,7 @@ func TestSettle_GithubReadOnly_RelayFailureParksFailedBeforeCreatingPR(t *testin
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called when the relay fails, got %+v", fc.CreateDraftPRCalls)
 	}
-	assertRelayFailureParked(t, fc, issNum)
+	assertOutboxParked(t, fc, issNum)
 }
 
 // The read-write path (Config.ReadOnly false) never consults BundleRelay or
@@ -961,4 +943,46 @@ func issueComments(fc *forge.Fake) []string {
 		}
 	}
 	return bodies
+}
+
+// A wiring error from Mediation.Open (here Config.OutboxDir unset) preserves
+// no bundle, so it stays comment-only like blockHandoff's other cases rather
+// than parking on agent-failed (issue #5144).
+func TestSettle_GithubReadOnly_OpenWiringErrorBlocksNotFails(t *testing.T) {
+	const issNum = "5144"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "ready"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = nil
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	captureStdout(t, func() { s.Settle(dispatch.NewFake(), issNum, 0, result) })
+
+	iss, _ := fc.Issue(issNum)
+	if !containsLabel(iss.Labels, "agent-in-progress") {
+		t.Errorf("a wiring error leaves the issue in-progress; labels=%v", iss.Labels)
+	}
+	if containsLabel(iss.Labels, "agent-failed") {
+		t.Errorf("a wiring error must NOT carry agent-failed; labels=%v", iss.Labels)
+	}
+	blocked := false
+	for _, cc := range fc.CommentCalls {
+		if strings.Contains(cc.Body, "merge blocked") && strings.Contains(cc.Body, "OutboxDir is unset") {
+			blocked = true
+		}
+	}
+	if !blocked {
+		t.Errorf("want a merge-blocked comment naming the unset OutboxDir; got %+v", fc.CommentCalls)
+	}
 }

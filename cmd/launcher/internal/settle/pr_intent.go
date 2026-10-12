@@ -42,9 +42,12 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 		if errors.Is(err, errAbandoned) {
 			return "", handoffAbandoned
 		}
-		if relayFailureParkable(err) {
+		switch {
+		case relayFailureParkable(err):
 			s.parkRelayFailure(num, branch, err)
-		} else {
+		case errors.Is(err, errCreateDraftPR):
+			s.parkDraftPRFailure(num, branch, err)
+		default:
 			s.blockHandoff(num, branch, err)
 		}
 		return "", handoffBlocked
@@ -134,10 +137,11 @@ func logBlockedHandoffRelayFailure(num string, err error) {
 }
 
 // blockHandoff posts a merge-blocked comment for a hostMediateDraftPR failure
-// other than an exhausted relay, and leaves the issue in agent-in-progress
-// rather than transitioning it (issue #2046): agent-complete reads as merged
-// and green (issue #2036), and agent-failed would send the operator to
-// `spindrift recover`, which has nothing to relay here (unlike parkRelayFailure).
+// other than an exhausted relay or a draft-PR create failure, and leaves the
+// issue in agent-in-progress rather than transitioning it (issue #2046):
+// agent-complete reads as merged and green (issue #2036), and agent-failed
+// would send the operator to `spindrift recover`, which has no bundle to land
+// here (unlike parkRelayFailure and parkDraftPRFailure).
 func (s *Settle) blockHandoff(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=merge-blocked  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("merge blocked: %v", err))
@@ -152,6 +156,15 @@ func (s *Settle) parkRelayFailure(num, branch string, err error) {
 	fmt.Printf("    #%s  landing=%s  status=relay-failed  !! %v\n", num, branch, err)
 	s.it.Comment(num, fmt.Sprintf("bundle relay failed: %v. The Box's bundle is preserved in the outbox; run `spindrift recover %s` to retry relaying and landing it.", err, num))
 	s.transitionState(num, forge.InProgress, forge.Failed, "bundle relay failed; work preserved in outbox", ReasonRelayFailed)
+}
+
+// parkDraftPRFailure fails an issue whose bundle relayed but whose host-side
+// draft-PR create then failed (issue #5144). The bundle is still in the outbox
+// and the branch already pushed, so `spindrift recover` can open the PR.
+func (s *Settle) parkDraftPRFailure(num, branch string, err error) {
+	fmt.Printf("    #%s  landing=%s  status=draft-pr-failed  !! %v\n", num, branch, err)
+	s.it.Comment(num, fmt.Sprintf("%v. The branch was relayed and the Box's bundle is preserved in the outbox; run `spindrift recover %s` to retry opening and landing the PR.", err, num))
+	s.transitionState(num, forge.InProgress, forge.Failed, "draft PR create failed; work preserved in outbox", ReasonDraftPRFailed)
 }
 
 // closingKeywordPattern matches GitHub's closing keywords (close, fix, resolve

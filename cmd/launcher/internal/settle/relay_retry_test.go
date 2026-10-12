@@ -2,6 +2,7 @@ package settle
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatch"
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/forgetest"
 	"spindrift.dev/launcher/internal/forge/local"
@@ -407,7 +409,7 @@ func TestSettle_GithubReadOnly_ReadyRelayExhaustsRetriesParksFailedWithBundlePre
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not run after an exhausted relay, got %+v", fc.CreateDraftPRCalls)
 	}
-	assertRelayFailureParked(t, fc, issNum)
+	assertOutboxParked(t, fc, issNum)
 	if !strings.Contains(stdout, "status=relay-failed") {
 		t.Errorf("stdout must carry a status=relay-failed line, got:\n%s", stdout)
 	}
@@ -559,7 +561,7 @@ func TestSelfHeal_LocalForge_RelayExhaustedParksFailed(t *testing.T) {
 	if len(fc.TransitionStateCalls) != 1 {
 		t.Errorf("want exactly one transition, got %+v", fc.TransitionStateCalls)
 	}
-	assertRelayFailureParked(t, fc, "1")
+	assertOutboxParked(t, fc, "1")
 }
 
 // Pins issue #4649: a stop during the fix-pass relay's backoff abandons at
@@ -747,20 +749,22 @@ func TestSettle_ReadOnlyBlocked_RelayStoppedDuringBackoff_PostsNoComment(t *test
 	}
 }
 
-// assertRelayFailureParked pins issue #4651: an exhausted host-side relay moves
-// the issue agent-in-progress -> agent-failed with exactly one comment pointing
-// at `spindrift recover`, and never the old merge-blocked comment.
-func assertRelayFailureParked(t *testing.T, fc *forge.Fake, num string) {
+// assertOutboxParked pins issues #4651 (an exhausted host-side relay) and #5144
+// (a draft-PR create failure after a successful relay): the bundle is preserved
+// in the outbox, so the issue moves agent-in-progress -> agent-failed with
+// exactly one comment pointing at `spindrift recover`, and never the old
+// merge-blocked comment.
+func assertOutboxParked(t *testing.T, fc *forge.Fake, num string) {
 	t.Helper()
 	iss, _ := fc.Issue(num)
 	if !containsLabel(iss.Labels, "agent-failed") {
-		t.Errorf("an exhausted relay must park the issue agent-failed; labels=%v", iss.Labels)
+		t.Errorf("an outbox park must park the issue agent-failed; labels=%v", iss.Labels)
 	}
 	if containsLabel(iss.Labels, "agent-in-progress") {
 		t.Errorf("agent-in-progress must be cleared by the transition; labels=%v", iss.Labels)
 	}
 	if containsLabel(iss.Labels, "agent-complete") {
-		t.Errorf("an exhausted relay must NOT carry agent-complete (#2036); labels=%v", iss.Labels)
+		t.Errorf("an outbox park must NOT carry agent-complete (#2036); labels=%v", iss.Labels)
 	}
 	// postUsageComment adds one empty-bodied comment under dispatch.NewFake, so
 	// count CommentCalls directly: the parking comment plus at most that one.
@@ -781,5 +785,94 @@ func assertRelayFailureParked(t *testing.T, fc *forge.Fake, num string) {
 		if !strings.Contains(body, want) {
 			t.Errorf("comment %q must contain %q", body, want)
 		}
+	}
+}
+
+// Pins issue #5144: a status=ready relay that succeeds but whose host-side
+// draft-PR create then fails parks the issue agent-failed under its own reason,
+// leaving the Box's bundle in the outbox for `spindrift recover`.
+func TestSettle_GithubReadOnly_ReadyDraftPRCreateFailureParksFailedWithBundlePreserved(t *testing.T) {
+	const issNum = "5144"
+	outbox := t.TempDir()
+	bundle := filepath.Join(outbox, seambundle.FileName)
+	if err := os.WriteFile(bundle, []byte("bundle-bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRErr = errors.New("HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql)")
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(string) string { return outbox }
+	logPath := filepath.Join(t.TempDir(), "issue-5144.log")
+	if err := os.WriteFile(logPath, []byte("existing\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c.LogPath = func(string) string { return logPath }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	stdout := captureStdout(t, func() { s.Settle(&dispatch.Fake{RecordIDResult: "work:5144@t"}, issNum, 0, result) })
+
+	if len(fc.RelayBundleCalls) != 1 {
+		t.Errorf("RelayBundle calls = %d, want 1 (the relay succeeded)", len(fc.RelayBundleCalls))
+	}
+	assertOutboxParked(t, fc, issNum)
+	parked := false
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "bundle relay failed") {
+			t.Errorf("a draft-PR create failure must not claim the relay failed: %q", c.Body)
+		}
+		if strings.Contains(c.Body, "504 Gateway Timeout") &&
+			strings.Contains(c.Body, "preserved in the outbox") &&
+			strings.Contains(c.Body, "spindrift recover "+issNum) {
+			parked = true
+		}
+	}
+	for _, cc := range fc.CommentCalls {
+		if cc.Body == "" {
+			continue
+		}
+		if !strings.HasPrefix(cc.Body, "draft PR create failed: HTTP 504") {
+			t.Errorf("comment must start with %q, got %q", "draft PR create failed: HTTP 504", cc.Body)
+		}
+		if strings.Contains(cc.Body, "draft PR create failed: draft PR create failed") {
+			t.Errorf("comment repeats the error prefix: %q", cc.Body)
+		}
+	}
+	raw, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSuffix(string(raw), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("log = %q, want the prior line plus exactly one appended op", raw)
+	}
+	var ev claude.Event
+	if err := json.Unmarshal([]byte(lines[1]), &ev); err != nil || ev.SpindriftOp == nil || ev.SpindriftOp.Settled == nil {
+		t.Fatalf("appended line %q is not a dispatch_settled op: %v", lines[1], err)
+	}
+	if got := ev.SpindriftOp.Settled; got.State != forge.Failed.String() || got.Reason != ReasonDraftPRFailed {
+		t.Errorf("settled = %+v, want state=failed reason=%q", got, ReasonDraftPRFailed)
+	}
+	if !parked {
+		t.Errorf("want a comment naming the forge error, the preserved outbox bundle, and `spindrift recover %s`; got %+v", issNum, fc.CommentCalls)
+	}
+	if !strings.Contains(stdout, "status=draft-pr-failed") {
+		t.Errorf("stdout must carry a status=draft-pr-failed line, got:\n%s", stdout)
+	}
+	if got, err := os.ReadFile(bundle); err != nil || string(got) != "bundle-bytes" {
+		t.Errorf("outbox bundle must be preserved untouched, got %q, %v", got, err)
 	}
 }

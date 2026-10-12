@@ -26,6 +26,7 @@ const (
 	ReasonFixFailed          = "fix-failed"
 	ReasonFixNoOp            = "fix-no-op"
 	ReasonRelayFailed        = "relay-failed"
+	ReasonDraftPRFailed      = "draft-pr-failed"
 	ReasonBlocked            = "blocked"
 	ReasonNoOutcome          = "no-outcome"       // the Box printed no outcome line
 	ReasonMergeUnverified    = "merge-unverified" // verifyMerged's successful reads contradicted the merge
