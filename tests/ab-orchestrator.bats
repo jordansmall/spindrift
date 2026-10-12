@@ -22,7 +22,7 @@
   cat >"$log" <<'JSON'
 ==> some non-json narration line
 {"type":"assistant","message":{"model":"claude-sonnet-5","content":[{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}
-{"type":"assistant","message":{"model":"claude-haiku-4-5-20251001","content":[],"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"parent_tool_use_id":"toolu_scout"}
+{"type":"assistant","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":200,"output_tokens":80,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"parent_tool_use_id":"toolu_scout"}
 {"type":"assistant","message":{"model":"claude-sonnet-5","content":[],"usage":{"input_tokens":50,"output_tokens":20,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 {"type":"result","total_cost_usd":0.5,"usage":{"input_tokens":9,"output_tokens":9}}
 JSON
@@ -33,7 +33,7 @@ JSON
   # (150*3 + 70*15 + 10*0.3 + 5*3.75)/1e6 = 0.00152175, rounded to 0.001522.
   echo "$output" | grep -P '^implementor\tclaude-sonnet-5\t10\t5\t150\t70\t0.001522$'
   # The scout price comes from the "claude-haiku" prefix entry: (200*1 + 80*5)/1e6 = 0.000600.
-  echo "$output" | grep -P '^scout\tclaude-haiku-4-5-20251001\t0\t0\t200\t80\t0.000600$'
+  echo "$output" | grep -P '^scout\tclaude-haiku-5-5\t0\t0\t200\t80\t0.000600$'
 }
 
 @test "--breakdown reports zero cost for a model with no pricing-table prefix match" {
@@ -53,13 +53,13 @@ JSON
   local on="$BATS_TEST_TMPDIR/on.tsv"
   printf 'implementor\tclaude-sonnet-5\t10\t5\t150\t70\t0.001522\n' >"$off"
   printf 'implementor\tclaude-sonnet-5\t20\t10\t100\t40\t0.001000\n' >"$on"
-  printf 'scout\tclaude-haiku-4-5-20251001\t0\t0\t200\t80\t0.000600\n' >>"$on"
+  printf 'scout\tclaude-haiku-5-5\t0\t0\t200\t80\t0.000600\n' >>"$on"
 
   run bash "$script" --compare "$off" "$on"
   [ "$status" -eq 0 ]
   echo "$output" | grep -P '^\| off \| implementor \| claude-sonnet-5 \| 10 \| 5 \| 150 \| 70 \| 0.001522 \|$'
-  echo "$output" | grep -P '^\| on \| scout \| claude-haiku-4-5-20251001 \| 0 \| 0 \| 200 \| 80 \| 0.000600 \|$'
-  echo "$output" | grep -P '^\| claude-haiku-4-5-20251001 \| 0.000000 \| 0.000600 \| 0.000600 \|$'
+  echo "$output" | grep -P '^\| on \| scout \| claude-haiku-5-5 \| 0 \| 0 \| 200 \| 80 \| 0.000600 \|$'
+  echo "$output" | grep -P '^\| claude-haiku-5-5 \| 0.000000 \| 0.000600 \| 0.000600 \|$'
   echo "$output" | grep -P '^\| \*\*total\*\* \| 0.001522 \| 0.001600 \| 0.000078 \|$'
 }
 
