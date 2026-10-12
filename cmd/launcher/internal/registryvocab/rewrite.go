@@ -1,6 +1,10 @@
 package registryvocab
 
-import "net/url"
+import (
+	"errors"
+	"io"
+	"net/url"
+)
 
 // RewriteOutcome tells the caller why a RewriteRow's Rewrite did or didn't
 // rewrite a body. RewriteSkippedForeignHost is a deliberate skip, where an
@@ -49,6 +53,14 @@ type RewriteResult struct {
 	Outcome RewriteOutcome
 }
 
+// ErrRewriteAbandoned is what a RewriteStream returns when it stopped
+// interpreting the body partway (malformed JSON, or one token larger than its
+// window) and relayed everything from that point on byte-identical. It is
+// returned, wrapped with the reason, only after the whole remainder of src
+// reached dst, so the client still holds a complete body. Any other non-nil
+// error from a RewriteStream is an I/O failure on src or dst.
+var ErrRewriteAbandoned = errors.New("rewrite abandoned; remainder relayed unchanged")
+
 // RewriteRow binds one request shape (ecosystem, HTTP method, path-shape
 // matcher) to a response-body rewriter. A shape with no matching row is never
 // inspected at all, not even to sniff its Content-Type, so issue #2854's
@@ -59,7 +71,14 @@ type RewriteRow struct {
 	Ecosystem string // an ecosystem.Table row's Name; matched against the route's tagged subtrees
 	Method    string // must be body-bearing; the proxy runs a matching row against a HEAD response's empty body too
 	Matches   func(routeRelativePath, base string) bool
-	Rewrite   func(body []byte, rc RewriteContext) RewriteResult
+	// Exactly one of Rewrite and RewriteStream is set.
+	Rewrite func(body []byte, rc RewriteContext) RewriteResult
+	// RewriteStream, set instead of Rewrite, rewrites src into dst as it
+	// reads, for a document too large to buffer whole (issue #5003). onEdit
+	// runs for each edited value (declined ones too, with an empty To) before
+	// the edited bytes are written to dst, so whatever the caller learns from
+	// an edit is in place before a client can read the value it admits.
+	RewriteStream func(dst io.Writer, src io.Reader, rc RewriteContext, onEdit func(RewriteEdit)) error
 }
 
 // JoinBase joins a route-relative subtree base with a row-relative path.
