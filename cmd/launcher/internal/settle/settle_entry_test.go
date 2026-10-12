@@ -490,38 +490,42 @@ func TestSettle_GitForge_NoOutcome_DemotesToFailed(t *testing.T) {
 	}
 }
 
-// Settle calls the optional LandingRecorder with the parsed outcome's
-// landing ref once a work-kind outcome line is parsed (ADR 0029), exercised
-// here on the simplest "blocked" path.
-func TestSettle_RecordsLanding_WhenTrackerImplementsIt(t *testing.T) {
+// The Box's landing= value is untrusted and reconcile trusts whatever settle
+// records, so a blocked or ambiguous outcome must never persist it (issue #5005).
+func TestSettle_DoesNotRecordBoxLanding_OnNonLandedOutcome(t *testing.T) {
 	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
+	for _, tc := range []struct{ name, status, landing string }{
+		{"blocked branch", "blocked", "integration/foo@abc123"},
+		{"blocked bare integration branch", "blocked", "integration/foo"},
+		{"blocked PR URL", "blocked", "https://github.com/owner/repo/pull/99"},
+		{"ambiguous bare integration branch", "ambiguous", "integration/foo"},
+		{"ambiguous branch", "ambiguous", "integration/foo@abc123"},
+		{"ambiguous PR URL", "ambiguous", "https://github.com/owner/repo/pull/99"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := forge.NewFake()
+			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+			result := dispatch.Result{
+				Resolved: outcome.Resolved{
+					Found:   true,
+					Outcome: outcome.Outcome{Issue: issNum, Landing: tc.landing, Status: tc.status, Note: "n"},
+				},
+			}
 
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
-		},
-	}
+			s := newTestSettle(baseConfig(), fc, fc)
+			s.Settle(dispatch.NewFake(), issNum, 0, result)
 
-	s := newTestSettle(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if len(fc.RecordLandingCalls) != 1 {
-		t.Fatalf("want 1 RecordLanding call, got %d", len(fc.RecordLandingCalls))
-	}
-	call := fc.RecordLandingCalls[0]
-	if call.Num != issNum || call.Landing != prURL {
-		t.Errorf("unexpected call: %+v", call)
+			if len(fc.RecordLandingCalls) != 0 {
+				t.Errorf("want no RecordLanding calls, got %+v", fc.RecordLandingCalls)
+			}
+		})
 	}
 }
 
-// recordLanding sits ahead of the status switch, so "ready" records the
-// landing ref just as "blocked" does.
-func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
+// A ready outcome on a read-write forge must not persist the Box's PR URL
+// either; only host-derived landings are recorded (issue #5005).
+func TestSettle_DoesNotRecordBoxLanding_OnReadyOutcome(t *testing.T) {
 	const issNum = "55"
 	const prURL = "https://github.com/owner/repo/pull/55"
 
@@ -539,12 +543,8 @@ func TestSettle_RecordsLanding_OnReadyOutcome(t *testing.T) {
 	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
-	if len(fc.RecordLandingCalls) != 1 {
-		t.Fatalf("want 1 RecordLanding call, got %d", len(fc.RecordLandingCalls))
-	}
-	call := fc.RecordLandingCalls[0]
-	if call.Num != issNum || call.Landing != prURL {
-		t.Errorf("unexpected call: %+v", call)
+	if got := fc.RecordLandingCalls; len(got) != 0 {
+		t.Errorf("RecordLandingCalls = %+v, want none (the Box's landing= is never recorded)", got)
 	}
 }
 

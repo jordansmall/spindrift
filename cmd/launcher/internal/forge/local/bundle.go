@@ -138,9 +138,9 @@ func landingRef(repoPath, branch string) (string, error) {
 }
 
 // parseLandingRef splits landingRef's "<branch>@<sha>" back into its parts. ok
-// is false for the raw agent-branch name settle records before a merge is
-// attempted (gate.go's early recordLanding call), which has no "@", and for a
-// sha starting with "-", which git could otherwise misread as an option.
+// is false for the raw agent-branch name settle's landPushOnly records before a
+// merge is attempted, which has no "@", and for a sha starting with "-", which
+// git could otherwise misread as an option.
 func parseLandingRef(landing string) (branch, sha string, ok bool) {
 	branch, sha, found := strings.Cut(landing, "@")
 	if !found || branch == "" || sha == "" || strings.HasPrefix(sha, "-") {
