@@ -78,8 +78,11 @@ finding names.
 
 Scope each finding to what the Target repo controls: its knobs, model
 choices, and prompt overrides. When the cause lives upstream, in
-spindrift itself rather than the Target repo's configuration, say so in
-the finding body instead of proposing a repo-side change.
+spindrift itself rather than the Target repo's configuration, still target
+the Target-repo knob, model choice, or prompt override where the symptom
+shows, and name the upstream cause in the finding body. If no Target-repo
+file shows the symptom, file nothing: the host drops a finding with no
+tracked target file as `missing-target`.
 
 Every finding must cite the digest anchors it argues from and name the one
 metric it concerns; `driver-exec signal` rejects a finding without both, and
