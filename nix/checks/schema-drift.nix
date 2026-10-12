@@ -96,6 +96,37 @@ let
       }";
     schema;
 
+  # Throws if the choices-bearing knob set differs from the set pinned here,
+  # else returns the schema unchanged. schema-choices and
+  # schema-choices-knobset-guard both run this path, so dropping the assert
+  # turns the guard red (issue #2519).
+  assertChoiceKnobSetOk =
+    schema:
+    let
+      inherit (pkgs.lib)
+        assertMsg
+        attrNames
+        concatStringsSep
+        filter
+        sort
+        ;
+      choiceKnobNames = sort builtins.lessThan (filter (n: schema.${n} ? choices) (attrNames schema));
+      expectedChoiceKnobNames = sort builtins.lessThan [
+        "mergeMode"
+        "codeForge"
+        "issueTracker"
+        "overlapGate"
+        "mergeMethod"
+        "syncMethod"
+        "boxForgeAndIssueAccess"
+        "networkMode"
+        "signalCarrier"
+      ];
+    in
+    assert assertMsg (choiceKnobNames == expectedChoiceKnobNames)
+      "lib/env-schema.nix: choices-bearing knob set changed — expected exactly [ ${concatStringsSep " " expectedChoiceKnobNames} ], got [ ${concatStringsSep " " choiceKnobNames} ]; pin the new/removed knob's exact choices list in nix/checks/schema-drift.nix's schema-choices check (issue #2519)";
+    schema;
+
   # Marker consistency for lib/env-schema.nix's intKind/hostConfig/hostDerived
   # fields (issue #2363). Factored out so the guard can exercise this exact
   # predicate against an injected schema. "Int member" means an int-typed knob
@@ -1168,29 +1199,9 @@ checkedMerge {
   # declaring `choices` cannot go unpinned silently (issue #2519).
   schema-choices =
     let
-      schema = assertSchemaChoicesOk (import ../../lib/env-schema.nix);
-      inherit (pkgs.lib)
-        assertMsg
-        attrNames
-        filter
-        sort
-        concatStringsSep
-        ;
-      choiceKnobNames = sort builtins.lessThan (filter (n: schema.${n} ? choices) (attrNames schema));
-      expectedChoiceKnobNames = sort builtins.lessThan [
-        "mergeMode"
-        "codeForge"
-        "issueTracker"
-        "overlapGate"
-        "mergeMethod"
-        "syncMethod"
-        "boxForgeAndIssueAccess"
-        "networkMode"
-        "signalCarrier"
-      ];
+      schema = assertChoiceKnobSetOk (assertSchemaChoicesOk (import ../../lib/env-schema.nix));
+      inherit (pkgs.lib) assertMsg;
     in
-    assert assertMsg (choiceKnobNames == expectedChoiceKnobNames)
-      "lib/env-schema.nix: choices-bearing knob set changed — expected exactly [ ${concatStringsSep " " expectedChoiceKnobNames} ], got [ ${concatStringsSep " " choiceKnobNames} ]; pin the new/removed knob's exact choices list in nix/checks/schema-drift.nix's schema-choices check (issue #2519)";
     assert assertMsg (
       schema.mergeMode.choices or [ ] == [
         "immediate"
@@ -1258,17 +1269,12 @@ checkedMerge {
     pkgs.runCommand "schema-choices" { } "touch $out";
 
   # Regression guard (issue #2519): injects a tenth synthetic choices-bearing
-  # knob, so the knob-set assertion above is known to reject one rather than
-  # passing vacuously because the real schema has exactly the nine names.
+  # knob and runs it through assertChoiceKnobSetOk, the same function
+  # schema-choices uses, so the knob-set assertion is known to reject one.
   schema-choices-knobset-guard =
     let
       schema = import ../../lib/env-schema.nix;
-      inherit (pkgs.lib)
-        assertMsg
-        attrNames
-        filter
-        sort
-        ;
+      inherit (pkgs.lib) assertMsg;
       badSchema = schema // {
         extraChoiceKnob = (schema.mergeMode) // {
           choices = [
@@ -1278,24 +1284,7 @@ checkedMerge {
           default = "a";
         };
       };
-      choiceKnobNames = sort builtins.lessThan (
-        filter (n: badSchema.${n} ? choices) (attrNames badSchema)
-      );
-      expectedChoiceKnobNames = sort builtins.lessThan [
-        "mergeMode"
-        "codeForge"
-        "issueTracker"
-        "overlapGate"
-        "mergeMethod"
-        "syncMethod"
-        "boxForgeAndIssueAccess"
-        "networkMode"
-        "signalCarrier"
-      ];
-      result = builtins.tryEval (
-        assert choiceKnobNames == expectedChoiceKnobNames;
-        true
-      );
+      result = builtins.tryEval (assertChoiceKnobSetOk badSchema);
     in
     assert assertMsg (!result.success)
       "schema-choices-knobset-guard: expected the choices-bearing knob-set assertion to reject a schema with an injected tenth choices knob (extraChoiceKnob), but it evaluated successfully";
