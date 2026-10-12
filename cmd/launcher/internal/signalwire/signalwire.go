@@ -96,6 +96,19 @@ type PRIntent struct {
 	Body  string `json:"body"`
 }
 
+// Validate reports why p cannot be accepted, or nil. Dispatch joins the PR
+// text as title+"\n\n"+body and settle cuts the title at the first newline,
+// so a multi-line title accepted here would be split there (issue #5004).
+func (p PRIntent) Validate() *Reject {
+	if rej := CheckFields(Field{"title", p.Title}, Field{"body", p.Body}); rej != nil {
+		return rej
+	}
+	if strings.ContainsAny(p.Title, "\r\n") {
+		return &Reject{Status: "multiline_title", Reason: "title must be a single line", Code: http.StatusBadRequest}
+	}
+	return nil
+}
+
 // IssueIntent is an issue-intent finding's one wire shape, used end to end:
 // driver-exec's client builds it, the socket buffers it, and settle files
 // it. Type is the closed doctor.FindingTypeLabels vocabulary; the host

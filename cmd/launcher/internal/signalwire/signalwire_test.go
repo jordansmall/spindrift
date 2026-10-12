@@ -101,3 +101,37 @@ func TestIssueIntentValidateInvalidClassNamesRule(t *testing.T) {
 		t.Errorf("Reason = %q, want it to contain ClassRule %q", rej.Reason, ClassRule)
 	}
 }
+
+func TestPRIntentValidate(t *testing.T) {
+	cases := []struct {
+		name       string
+		intent     PRIntent
+		wantStatus string // "" means Validate must return nil
+		wantCode   int
+	}{
+		{"single line", PRIntent{Title: "fix: x", Body: "line one\nline two"}, "", 0},
+		{"empty title", PRIntent{Title: "", Body: "b"}, "empty", 400},
+		{"oversize multi-line title", PRIntent{Title: strings.Repeat("a\n", MaxBodyBytes), Body: "b"}, "oversize", 413},
+		{"LF in title", PRIntent{Title: "a\nb", Body: "b"}, "multiline_title", 400},
+		{"leading LF in title", PRIntent{Title: "\na", Body: "b"}, "multiline_title", 400},
+		{"CR in title", PRIntent{Title: "a\rb", Body: "b"}, "multiline_title", 400},
+		{"CRLF in title", PRIntent{Title: "a\r\nb", Body: "b"}, "multiline_title", 400},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rej := tc.intent.Validate()
+			if tc.wantStatus == "" {
+				if rej != nil {
+					t.Fatalf("Validate() = %+v, want nil", *rej)
+				}
+				return
+			}
+			if rej == nil {
+				t.Fatalf("Validate() = nil, want (%q, %d)", tc.wantStatus, tc.wantCode)
+			}
+			if rej.Status != tc.wantStatus || rej.Code != tc.wantCode {
+				t.Fatalf("Validate() = (%q, %d), want (%q, %d): %q", rej.Status, rej.Code, tc.wantStatus, tc.wantCode, rej.Reason)
+			}
+		})
+	}
+}
