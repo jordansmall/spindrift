@@ -1,28 +1,20 @@
 {
   "lastSwept": "7729a8c083d3e0a5e7aac1db1c7dd92428efc0a1",
   "cursor": "nix/checks/scout-rationale-pointer-window.nix",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/5117",
-    "https://github.com/jordansmall/spindrift/issues/5118",
-    "https://github.com/jordansmall/spindrift/issues/5119",
-    "https://github.com/jordansmall/spindrift/issues/5120",
-    "https://github.com/jordansmall/spindrift/issues/5121"
-  ],
-  "promoted": [
-    "https://github.com/jordansmall/spindrift/issues/5117",
-    "https://github.com/jordansmall/spindrift/issues/5118",
-    "https://github.com/jordansmall/spindrift/issues/5119",
-    "https://github.com/jordansmall/spindrift/issues/5120"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-12T04:02:36.337963571-04:00"
+  },
   "usage": {
-    "input_tokens": 38,
-    "output_tokens": 21359,
-    "cache_read_input_tokens": 1010321,
-    "cache_creation_input_tokens": 79905,
-    "total_cost_usd": 13.365094249999984,
-    "duration_ms": 1077614,
-    "duration_api_ms": 1348860,
-    "num_turns": 28
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
