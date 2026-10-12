@@ -807,15 +807,33 @@ in
           };
       subOptions = (eval.options.perSystem.type.getSubOptions [ "perSystem" ]).spindrift;
       structuralPlacements = import ../../lib/structural-paths.nix;
+      # Spelled out rather than derived with driverMap.driverEntryPath, which
+      # the module itself uses to build the description.
+      expectedPath = {
+        driver = "agents.drivers.<name>";
+        prompt = "agents.prompt";
+        skills = "agents.skills";
+        roster = "agents.drivers.<name>.models.roster";
+        runtime = "infra.runtime";
+        packages = "infra.image.packages";
+        prefetch = "infra.image.prefetch";
+        extraClosures = "infra.image.extraClosures";
+        nixInBox = "infra.nix.inBox";
+        nixStoreWritable = "infra.nix.storeWritable";
+        nixpkgs = "infra.nixpkgs";
+        overlays = "infra.overlays";
+        config = "infra.config";
+      };
       expectedDescription =
         flatName:
-        "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${
-          concatStringsSep "." structuralPlacements.${flatName}
-        }.";
+        "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${expectedPath.${flatName}}.";
       mismatches = pkgs.lib.filter (
         flatName: subOptions.${flatName}.description != expectedDescription flatName
       ) (attrNames structuralPlacements);
     in
+    assert assertMsg (
+      attrNames expectedPath == attrNames structuralPlacements
+    ) "expectedPath must cover exactly lib/structural-paths.nix's knobs";
     assert assertMsg (mismatches == [ ])
       "oldFlatShims description mismatch (hand-copy regression) for: ${concatStringsSep ", " mismatches}";
     pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";

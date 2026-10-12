@@ -372,7 +372,7 @@ let
         inherit (opt) type;
         default = null;
         description = "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${
-          lib.concatStringsSep "." structuralPlacements.${flatName}
+          lib.concatStringsSep "." (driverMap.driverEntryPath flatName structuralPlacements.${flatName})
         }.";
       }
       // lib.optionalAttrs (opt ? example) { inherit (opt) example; }
@@ -428,6 +428,19 @@ in
     let
       cfg = config.spindrift;
 
+      # Where the legacy settings shim points: a Driver-valued key goes
+      # straight to its agents.drivers.<name> path, not via the deprecated
+      # top-level one.
+      newPathFor =
+        key: entry:
+        let
+          path = resolveNixPath key entry;
+        in
+        if entry.driverValued or false then
+          lib.concatStringsSep "." (driverMap.underDriver "<name>" (lib.splitString "." path))
+        else
+          path;
+
       # New domain-tree path wins, old settings.<section>.<knob> path is the
       # fallback (ADR 0037 Pass 1, issue #2179). `lib.warn` returns the value
       # unchanged, so a Consumer entirely on old paths still gets
@@ -444,7 +457,7 @@ in
           if newVal != null then
             newVal
           else if oldVal != null then
-            lib.warn "perSystem.spindrift.settings.${sectionAttr}.${key} is deprecated; use perSystem.spindrift.${resolveNixPath key entry}" oldVal
+            lib.warn "perSystem.spindrift.settings.${sectionAttr}.${key} is deprecated; use perSystem.spindrift.${newPathFor key entry}" oldVal
           else
             null
         ) flakeOptionEntries
@@ -461,7 +474,7 @@ in
         if newVal != null then
           newVal
         else if oldVal != null then
-          lib.warn "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${lib.concatStringsSep "." newPath}" oldVal
+          lib.warn "perSystem.spindrift.${flatName} is deprecated; use perSystem.spindrift.${lib.concatStringsSep "." (driverMap.driverEntryPath flatName newPath)}" oldVal
         else
           null
       ) structuralPlacements;
