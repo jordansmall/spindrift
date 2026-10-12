@@ -3720,6 +3720,9 @@ type inPlaceFixture struct {
 	onInstall func() <-chan struct{}
 	// termFile is written by the child when it receives SIGTERM.
 	termFile string
+	// childCreated closes when runnerExecCommand creates the first child.
+	childCreated     chan struct{}
+	childCreatedOnce sync.Once
 
 	mu       sync.Mutex
 	children []*exec.Cmd
@@ -3746,6 +3749,8 @@ func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
 		newSelf:  newSelf,
 		stop:     make(chan struct{}),
 		termFile: filepath.Join(t.TempDir(), "term"),
+
+		childCreated: make(chan struct{}),
 	}
 	t.Chdir(consumer)
 	var err error
@@ -3786,11 +3791,18 @@ func newInPlaceFixtureT(t *testing.T, newSelf string) *inPlaceFixture {
 	}
 	// nix build emulates --out-link by creating the symlink: a prebuild
 	// (<drv>^out) links the new build's store path, a rooting links its argument.
+	// A prebuild waits for the first child: one that beats the slot's first
+	// start puts the pool in the waiting phase, which refuses that start and
+	// hands off with no child to inherit.
 	runnerPrebuildCommand = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		if name == "nix" {
 			out, target := filepath.Dir(filepath.Dir(newSelf)), args[len(args)-1]
 			if strings.HasSuffix(target, "^out") {
 				target = out
+				select {
+				case <-f.childCreated:
+				case <-ctx.Done():
+				}
 			}
 			link := args[slices.Index(args, "--out-link")+1]
 			return exec.CommandContext(ctx, "/bin/sh", "-c", `ln -sfn "$1" "$2" && echo "$3"`, "sh", target, link, out)
@@ -3807,6 +3819,7 @@ while [ ! -e "$1" ]; do sleep 0.02; done`
 		f.mu.Lock()
 		f.children = append(f.children, c)
 		f.mu.Unlock()
+		f.childCreatedOnce.Do(func() { close(f.childCreated) })
 		return c
 	}
 	runnerSelfExec = func(path string, argv, env []string) error {
