@@ -332,9 +332,9 @@ type slotFlight struct {
 	childStart childStartPin
 	// childLog is the child's log path, kept for the handoff.
 	childLog string
-	// reported is set by the child's first record of any kind. The in-place
-	// handoff waits for it, since a child that has said nothing may be
-	// mid-discovery, claiming work the successor could not see.
+	// reported is set by the child's first record other than image_build. The
+	// in-place handoff waits for it, since a child that has said nothing may
+	// be mid-discovery, claiming work the successor could not see.
 	reported bool
 	// pass is the Pass label (Record.Phase) of the child's most recent box
 	// record.
@@ -347,6 +347,9 @@ type slotFlight struct {
 	// ciWait is the child's latest ci_wait record; noteBox and noteSettled
 	// clear it.
 	ciWait ciWait
+	// imageBuildSince is when the child's Box image build started, zero when
+	// none is running; its finished record, noteBox and noteSettled clear it.
+	imageBuildSince time.Time
 }
 
 // ciWait is the state of a child's latest ci_wait record. A run_url-less
@@ -689,6 +692,8 @@ func (p *pool) occupyInherited() {
 				pass: hs.Pass, model: hs.Model, modelRole: hs.ModelRole, childStart: pin,
 				continues: s.continues[hs.Kind], gateGen: hs.GateGen,
 				// Its predecessor required the first report before handing off.
+				// imageBuildSince is not carried: image_build is sent in
+				// bootstrap, before any record that permits a handoff.
 				childLog: hs.ChildLog, reported: true,
 			}}
 			evs = append(evs, Event{Event: "child_inherited", Kind: hs.Kind, Key: hs.Key, Revision: hs.Revision, Slot: intPtr(hs.Slot), ChildLog: hs.ChildLog})
@@ -761,7 +766,7 @@ func (p *pool) noteBox(slot int, kind Kind, revision string, rec Record) {
 		flight.key = rec.Key
 		flight.pass = rec.Phase
 		flight.model, flight.modelRole = "", ""
-		flight.ciWait = ciWait{}
+		flight.clearTransient()
 		if issue, _ := rec.Key.Fields(); issue != "" {
 			seen := false
 			for _, existing := range flight.issues {
@@ -804,6 +809,25 @@ func (p *pool) noteCIWait(slot int, rec Record) {
 	})
 }
 
+// noteImageBuild folds an image_build record into slot's flight and emits it
+// as an image_build event: started stamps the build's start, finished clears
+// it. The record is keyless, so the event carries no key. A no-op if slot is
+// not running: a late record from a child whose slot already cleared.
+func (p *pool) noteImageBuild(slot int, kind Kind, revision string, rec Record) {
+	now := p.clk.Now()
+	p.mutate(func(s *state) []Event {
+		if s.slots[slot].phase != PhaseRunning {
+			return nil
+		}
+		since := time.Time{}
+		if report.ImageBuildState(rec.State) == report.ImageBuildStarted {
+			since = now
+		}
+		s.slots[slot].flight.imageBuildSince = since
+		return []Event{{Event: report.EventImageBuild, Kind: kind, Revision: revision, State: rec.State, Slot: intPtr(slot)}}
+	})
+}
+
 // noteNotDue folds a not_due record into slot's flight, for runSlot to hand
 // the schedule when the child exits empty (flightReport). It touches neither
 // the claim key nor the baton — a not_due Chore was never claimed — and emits
@@ -832,10 +856,17 @@ func (p *pool) noteNotDue(slot int, rec Record) {
 func (p *pool) noteSettled(slot int, kind Kind, revision string, rec Record) {
 	p.mutate(func(s *state) []Event {
 		if s.slots[slot].phase == PhaseRunning {
-			s.slots[slot].flight.ciWait = ciWait{}
+			s.slots[slot].flight.clearTransient()
 		}
 		return []Event{{Event: report.EventSettled, Kind: kind, Revision: revision, Key: rec.Key, State: rec.State, Note: rec.Note, PRURL: rec.PRURL, RecordID: rec.RecordID, Slot: intPtr(slot)}}
 	})
+}
+
+// clearTransient resets the per-child transient indicators that a new Pass or
+// a settle ends.
+func (f *slotFlight) clearTransient() {
+	f.ciWait = ciWait{}
+	f.imageBuildSince = time.Time{}
 }
 
 // flightClaim returns the key slot's child most recently boxed (the value
@@ -1467,6 +1498,9 @@ func (p *pool) snapshotLocked() Status {
 		slots[i].CIWait = ss.flight.ciWait.pr != ""
 		slots[i].PRURL = ss.flight.ciWait.pr
 		slots[i].CIRunURL = ss.flight.ciWait.runURL
+		if !ss.flight.imageBuildSince.IsZero() {
+			slots[i].ImageBuildSince = ss.flight.imageBuildSince.UTC().Format(time.RFC3339)
+		}
 		if len(ss.flight.issues) > 0 {
 			// A snapshot handed to a writer must not alias state this slot
 			// keeps appending to.

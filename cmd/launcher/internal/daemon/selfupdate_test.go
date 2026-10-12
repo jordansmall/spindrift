@@ -780,6 +780,25 @@ func TestSelfUpdateInPlaceUnreportedChildHoldsOffHandoff(t *testing.T) {
 	}
 }
 
+// An image_build record comes from bootstrap, before discovery, so it is not
+// the first report that clears a child to hand off.
+func TestSelfUpdateInPlaceImageBuildDoesNotClearHandoff(t *testing.T) {
+	rig := startHandoffRig(t, 1, false)
+	rig.r.awaitStart(t)
+	close(rig.gate)
+	rig.stillWaiting(t, "the child has not sent its first report")
+
+	rig.r.fireOnRecord(t, 0, Record{Event: report.EventImageBuild, State: string(report.ImageBuildStarted)})
+	rig.stillWaiting(t, "the child has only reported an image build")
+	rig.r.fireOnRecord(t, 0, Record{Event: report.EventImageBuild, State: string(report.ImageBuildFinished)})
+	rig.stillWaiting(t, "the child has only reported an image build")
+
+	rig.r.fireOnRecord(t, 0, Record{Event: report.EventModel, Model: "opus"})
+	if h := rig.wait(t); h.Handoff == nil {
+		t.Fatalf("halt = %+v, want a handoff once a non-image_build record arrived", h)
+	}
+}
+
 // The returned document is one a fresh pool resumes from: the slots seat as
 // inherited children with the key and kind the predecessor tracked.
 func TestSelfUpdateInPlaceHandoffRoundTrips(t *testing.T) {

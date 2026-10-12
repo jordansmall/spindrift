@@ -3077,3 +3077,77 @@ func TestPoolSnapshotPublishesCIRunURL(t *testing.T) {
 	start()
 	want("new child", "")
 }
+
+// TestPoolSnapshotPublishesImageBuild pins that an image_build started record
+// stamps the running slot with the build's start time, that finished, the
+// next box record, a settled record, or the child finishing clears it, and
+// that both states are emitted as image_build events.
+func TestPoolSnapshotPublishesImageBuild(t *testing.T) {
+	clk := &testClock{now: time.Date(2026, 10, 12, 1, 2, 3, 0, time.UTC)}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	work := KindOf(dispatchkind.Work)
+	key := dispatchkey.Issue("123")
+	note := func(state report.ImageBuildState) {
+		p.noteImageBuild(0, work, "rev1", Record{Event: report.EventImageBuild, State: string(state)})
+	}
+	want := func(step, since string) {
+		t.Helper()
+		if got := p.snapshot().Slots[0].ImageBuildSince; got != since {
+			t.Fatalf("%s: ImageBuildSince = %q, want %q", step, got, since)
+		}
+	}
+	start := func() {
+		t.Helper()
+		if _, _, ok := p.startChild(0, work, "rev1"); !ok {
+			t.Fatal("startChild refused the slot")
+		}
+	}
+	const stamp = "2026-10-12T01:02:03Z"
+
+	start()
+	want("before any record", "")
+	note(report.ImageBuildStarted)
+	want("after started", stamp)
+	note(report.ImageBuildFinished)
+	want("after finished", "")
+	note(report.ImageBuildStarted)
+	p.noteBox(0, work, "rev1", Record{Event: report.EventBox, Key: key, Phase: "initial"})
+	want("after box record", "")
+	note(report.ImageBuildStarted)
+	p.noteSettled(0, work, "rev1", Record{Event: report.EventSettled, Key: key, State: "complete"})
+	want("after settled record", "")
+	note(report.ImageBuildStarted)
+	p.finishChild(0)
+	want("after finishChild", "")
+	start()
+	want("new child before its first record", "")
+
+	events := wantEvents(t, &buf, []string{"child_start", "image_build", "image_build", "image_build", "box", "image_build", "settled", "image_build", "child_start"}, "")
+	if ev := events[1]; report.ImageBuildState(ev.State) != report.ImageBuildStarted || ev.Kind != work || ev.Revision != "rev1" || ev.Slot == nil || *ev.Slot != 0 || !ev.Key.IsZero() {
+		t.Errorf("first image_build event = %+v", ev)
+	}
+	if ev := events[2]; report.ImageBuildState(ev.State) != report.ImageBuildFinished {
+		t.Errorf("second image_build event = %+v", ev)
+	}
+}
+
+// TestPoolNoteImageBuildDroppedWhenSlotNotRunning pins noteBox's race guard
+// for image_build records: one reported after the slot cleared changes and
+// emits nothing.
+func TestPoolNoteImageBuildDroppedWhenSlotNotRunning(t *testing.T) {
+	clk := &testClock{}
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	em := newTestEmitter(&buf)
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, em, clk)
+	p.noteImageBuild(0, KindOf(dispatchkind.Work), "rev1", Record{Event: report.EventImageBuild, State: string(report.ImageBuildStarted)})
+	if got := p.snapshot().Slots[0].ImageBuildSince; got != "" {
+		t.Errorf("ImageBuildSince on idle slot = %q, want none", got)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("events = %q, want none", buf.String())
+	}
+}

@@ -773,6 +773,12 @@ func (p *pool) childRequest(slot int, kind Kind, revision, childLog string) Chil
 		Abort:    cfg.Abort,
 		ChildLog: childLog,
 		OnRecord: func(rec Record) {
+			// image_build comes from bootstrap, before discovery, so it must not
+			// count as the report that permits an in-place handoff.
+			if rec.Event == report.EventImageBuild {
+				p.noteImageBuild(slot, kind, revision, rec)
+				return
+			}
 			p.noteReported(slot)
 			switch rec.Event {
 			case report.EventBox:

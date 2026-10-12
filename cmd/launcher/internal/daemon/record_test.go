@@ -350,3 +350,27 @@ func TestParseRecord_OlderChildShapesStillDecode(t *testing.T) {
 		})
 	}
 }
+
+func TestParseRecord_ImageBuild(t *testing.T) {
+	for _, kind := range []Kind{KindOf(dispatchkind.Work), KindOf(dispatchkind.Butler)} {
+		for _, state := range []report.ImageBuildState{report.ImageBuildStarted, report.ImageBuildFinished} {
+			got, ok, err := ParseRecord(`{"event":"image_build","state":"`+string(state)+`"}`, kind)
+			if err != nil || !ok {
+				t.Fatalf("%s %s: ParseRecord = (%v, %v), want an accepted keyless record", kind, state, ok, err)
+			}
+			if want := (Record{Event: report.EventImageBuild, State: string(state)}); got != want {
+				t.Errorf("%s %s: ParseRecord = %+v, want %+v", kind, state, got, want)
+			}
+		}
+		for _, line := range []string{`{"event":"image_build"}`, `{"event":"image_build","state":"building"}`} {
+			if _, ok, err := ParseRecord(line, kind); err == nil || ok {
+				t.Errorf("%s: %s = (%v, %v), want an error", kind, line, ok, err)
+			}
+		}
+	}
+	for _, line := range []string{`{"event":"image_build","issue":"42","state":"started"}`, `{"event":"image_build","chore":"lint","state":"started"}`} {
+		if _, ok, err := ParseRecord(line, KindOf(dispatchkind.Butler)); err == nil || ok {
+			t.Errorf("keyed %s = (%v, %v), want an error", line, ok, err)
+		}
+	}
+}

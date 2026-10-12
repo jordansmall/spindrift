@@ -863,3 +863,22 @@ func TestSlotStatus_CIRunURLMarshalsUnderCIRunURLKeyAndOmitsWhenEmpty(t *testing
 		t.Errorf("marshalled = %s, want no ci_run_url key when empty", data)
 	}
 }
+
+// TestSlotStatus_ImageBuildSinceMarshalsAndOmitsWhenEmpty pins the additive
+// "image_build_since" key, absent unless a Box image build is running.
+func TestSlotStatus_ImageBuildSinceMarshalsAndOmitsWhenEmpty(t *testing.T) {
+	data, err := json.Marshal(SlotStatus{Busy: true, ImageBuildSince: "2026-10-12T00:00:00Z"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if want := `"image_build_since":"2026-10-12T00:00:00Z"`; !strings.Contains(string(data), want) {
+		t.Errorf("marshalled = %s, want it to contain %q", data, want)
+	}
+	data, err = json.Marshal(SlotStatus{Busy: true})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), "image_build") {
+		t.Errorf("marshalled = %s, want no image_build key when empty", data)
+	}
+}

@@ -69,7 +69,8 @@ type Event struct {
 	Wait      string `json:"wait,omitempty"`
 	// State and Note are the settled event's own fields, carried straight
 	// from the child's report.Record — issue's terminal outcome
-	// (complete/failed/recoverable/ambiguous) and any free-text detail.
+	// (complete/failed/recoverable/ambiguous) and any free-text detail. State
+	// is also the keyless image_build event's: "started" or "finished".
 	State string `json:"state,omitempty"`
 	Note  string `json:"note,omitempty"`
 	// PRURL is the settled event's PR link when the issue opened one, carried

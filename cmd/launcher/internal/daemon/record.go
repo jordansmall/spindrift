@@ -49,7 +49,10 @@ var ErrKindMismatch = errors.New("record key does not match child kind")
 // Chore-keyed record from a non-butler child, or an issue-keyed record from
 // a butler child. A not_due record with a missing or unparseable next_due
 // (report.ParseNextDue) is malformed too, as are a model record with no model
-// and a ci_wait record with no pr_url.
+// and a ci_wait record with no pr_url. An image_build record is keyless — the
+// child sends it from bootstrap, before any Dispatch key exists — so it skips
+// the key checks and is malformed if it carries a key or a state other than
+// started or finished.
 func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	if line == "" {
 		return Record{}, false, nil
@@ -60,6 +63,15 @@ func ParseRecord(line string, kind Kind) (Record, bool, error) {
 	}
 	switch rec.Event {
 	case report.EventBox, report.EventSettled, report.EventNotDue, report.EventModel, report.EventCIWait:
+	case report.EventImageBuild:
+		// The wire value is untrusted, so the typed constants don't vouch for it.
+		if state := report.ImageBuildState(rec.State); state != report.ImageBuildStarted && state != report.ImageBuildFinished {
+			return Record{}, false, fmt.Errorf("record: image_build: invalid state %q", rec.State)
+		}
+		if !rec.Key.IsZero() {
+			return Record{}, false, errors.New("record: image_build: carries a key")
+		}
+		return rec, true, nil
 	default:
 		return Record{}, false, nil
 	}
