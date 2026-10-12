@@ -438,3 +438,51 @@ func TestStats_MissingGitWarnsButNonCheckoutStaysQuiet(t *testing.T) {
 		t.Errorf("stdout = %q, want every inferred Record in (none)", out)
 	}
 }
+
+// Keeps lib/cli-flags.nix and docs/reference.md hand-written while making a
+// dimension added to statsDims without documenting it a test failure.
+func TestStats_ByDimensionsDocumented(t *testing.T) {
+	var flagDoc string
+	for _, f := range cliFlags {
+		if f.verb == "stats" && f.flag == "by" {
+			flagDoc = f.doc
+		}
+	}
+	if flagDoc == "" {
+		t.Fatal("cliFlags has no stats --by row")
+	}
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "reference.md"))
+	if err != nil {
+		t.Fatalf("read docs/reference.md: %v", err)
+	}
+	_, rest, ok := strings.Cut(string(raw), "**Grouping.**")
+	if !ok {
+		t.Fatal("docs/reference.md has no **Grouping.** paragraph")
+	}
+	grouping, _, ok := strings.Cut(rest, "**Re-ingest.**")
+	if !ok {
+		t.Fatal("docs/reference.md: **Re-ingest.** does not follow **Grouping.**")
+	}
+	_, afterRoot, ok := strings.Cut(flagDoc, "--root: ")
+	if !ok {
+		t.Fatal(`by flag doc has no "--root: " anchor before its dimension list`)
+	}
+	list, _, ok := strings.Cut(afterRoot, ";")
+	if !ok {
+		t.Fatal(`by flag doc's dimension list has no closing ";"`)
+	}
+	documented := map[string]bool{}
+	for _, item := range strings.Split(list, ", ") {
+		documented[strings.TrimPrefix(item, "or ")] = true
+	}
+	for _, s := range statsDims {
+		sp := s.spelling()
+		if !documented[sp] {
+			t.Errorf("--by dimension %q is missing from the by flag doc: edit lib/cli-flags.nix, then `nix run .#regen`", sp)
+		}
+		// Backticked so a stray English word ("model") cannot satisfy it.
+		if !strings.Contains(grouping, "`"+sp+"`") {
+			t.Errorf("--by dimension %q is missing from the Grouping section of docs/reference.md: add a backticked `%s`", sp, sp)
+		}
+	}
+}
