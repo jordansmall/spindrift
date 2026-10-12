@@ -187,8 +187,8 @@ func TestSelfHeal_LocalForge_UsesPerIssueCodeForgeForMerge(t *testing.T) {
 // LandingRef is a best-effort enrichment: a resolution failure after a
 // successful merge must never turn an actual land into a failure. The seam
 // stays landingMerged and only the richer landing: overwrite is skipped, so
-// RecordLanding keeps what recordLanding wrote earlier from the outcome line's
-// raw landing= field.
+// RecordLanding keeps the host-derived agent branch landPushOnly recorded
+// ahead of the merge.
 func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testing.T) {
 	c := baseConfig()
 	c.MergeMode = "immediate"
@@ -208,8 +208,9 @@ func TestSelfHeal_LocalForge_LandingRefErrorStaysMergedWithoutRecording(t *testi
 	if fc.Merged != branch {
 		t.Errorf("expected Merge(%q) to have succeeded; fc.Merged=%q", branch, fc.Merged)
 	}
-	if len(fc.RecordLandingCalls) != 0 {
-		t.Errorf("expected no RecordLanding overwrite when LandingRef fails, got %+v", fc.RecordLandingCalls)
+	want := forge.RecordLandingCall{Num: "1", Landing: branch}
+	if len(fc.RecordLandingCalls) != 1 || fc.RecordLandingCalls[0] != want {
+		t.Errorf("expected only the placeholder %+v when LandingRef fails, got %+v", want, fc.RecordLandingCalls)
 	}
 }
 
@@ -307,5 +308,36 @@ func TestSettle_LocalForge_HostileLandingIgnored_UsesAgentBranch(t *testing.T) {
 	}
 	if fc.Merged != agentBranch {
 		t.Fatalf("fc.Merged = %q, want %q (never the hostile landing=%s)", fc.Merged, agentBranch, hostileLanding)
+	}
+}
+
+// A merge-blocked ready run on a BundleRelay forge must leave the host-derived
+// agent branch recorded as the landing (so reconcile can report it stuck,
+// issue #1809), never the Box's forged outcome landing.
+func TestSettle_LocalForge_MergeBlocked_RecordsAgentBranchNotOutcomeLanding(t *testing.T) {
+	const issNum = "1"
+
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	agentBranch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = fmt.Errorf("outbox: %w", forge.ErrBundleNotFound)
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "integration/foo@abc", Status: "ready", Note: "ok"},
+		},
+	}
+
+	s := newTestSettle(c, fc, fc.AsLocal())
+	s.Settle(dispatch.NewFake(), issNum, 0, result)
+
+	want := forge.RecordLandingCall{Num: issNum, Landing: agentBranch}
+	if len(fc.RecordLandingCalls) != 1 || fc.RecordLandingCalls[0] != want {
+		t.Fatalf("RecordLandingCalls = %+v, want exactly [%+v]", fc.RecordLandingCalls, want)
 	}
 }

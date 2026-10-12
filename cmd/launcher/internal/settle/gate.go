@@ -63,7 +63,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 
 	o := result.Resolved.Outcome
-	s.recordLanding(num, o.Landing)
+	// Never record o.Landing: it is Box-controlled and reconcile trusts a
+	// recorded landing (issue #5005).
 	s.recordLandingPass(num, o.Landing, result.Passes)
 	// Ahead of the status switch so it runs on every outcome status alike
 	// (issue #2019): a run's own findings are worth tracking whether it landed
@@ -144,9 +145,10 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 				s.postUsageComment(num, d)
 				return
 			}
-			// Upgrade the placeholder branch-name landing recorded above to the
-			// real PR URL. A no-op for every tracker but local's, and local
-			// never reaches this branch (s.pr is nil for its push-only forge).
+			// Record the host-opened PR URL. A no-op for every tracker but
+			// local's; only the local Code Forge never reaches this branch (s.pr
+			// is nil for its push-only forge), not ISSUE_TRACKER=local paired
+			// with a read-only PR forge.
 			s.recordLanding(num, pr)
 		}
 		// A read-write Box opened its PR before printing ready.
@@ -550,11 +552,12 @@ func (s *Settle) recordLanding(num, landing string) {
 	}
 }
 
-// recordLandingPass persists which pass produced the outcome (issue #2983). An
-// empty landing is a no-op, mirroring recordLanding: a blocked run with no
-// landing must never overwrite the pass provenance an earlier genuine landing
-// recorded. Picks the last entry with OutcomeFound true. Best-effort, matching
-// transitionState's log-but-don't-propagate contract.
+// recordLandingPass persists which pass produced the outcome (issue #2983). The
+// landing argument only gates the write: an empty one means the outcome line
+// claimed no landing, and such a run must never overwrite the pass provenance
+// an earlier genuine landing recorded. Picks the last entry with OutcomeFound
+// true. Best-effort, matching transitionState's log-but-don't-propagate
+// contract.
 func (s *Settle) recordLandingPass(num, landing string, passes []passmanifest.Entry) {
 	if s.landingPass == nil || landing == "" || len(passes) == 0 {
 		return

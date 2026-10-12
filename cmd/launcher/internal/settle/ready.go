@@ -379,6 +379,9 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	relayedRef, relayErr := s.relayBoxBundle(num, gen)
 	if relayedRef != "" {
 		branch = relayedRef
+		// Host-derived placeholder the post-merge LandingRef upgrades, so
+		// reconcile can still report a merge-blocked branch stuck (#1809).
+		s.recordLanding(num, relayedRef)
 	}
 	if errors.Is(relayErr, errAbandoned) {
 		return landingAbandoned
@@ -414,9 +417,9 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 		return landingAbandoned
 	}
 	// CODE_FORGE=local needs the resolved Integration ref and commit sha
-	// (ADR 0029/0033), not the raw branch name recordLanding wrote from the
-	// outcome line, so overwrite it now that Merge has landed. Best-effort:
-	// a resolution failure must never turn a successful land into a failure.
+	// (ADR 0029/0033), not the placeholder agent branch recorded above, so
+	// overwrite it now that Merge has landed. Best-effort: a resolution
+	// failure must never turn a successful land into a failure.
 	if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
 		if landing, err := lr.LandingRef(); err == nil {
 			s.recordLanding(num, landing)
