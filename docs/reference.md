@@ -3024,8 +3024,9 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   the opposite of the research lifecycle's `agent-research-reject`, which
   closes an issue as **not planned**. Under `ISSUE_TRACKER=local` settle
   closes the issue itself too, setting the local `closed:` axis directly
-  (issue #4017) — nothing landed for reconcile to observe, so ADR 0029's
-  reconcile-only rule for `closed:` has this one exception. Under
+  and stamping `closedat:` on a first close (issue #4017) — nothing
+  landed for reconcile to observe, so ADR 0029's reconcile-only rule for
+  `closed:` has this one exception. Under
   `ISSUE_TRACKER=jira` settle does not close the issue itself — the Jira
   adapter implements no close — so the issue closes only when the
   `complete` entry of `JIRA_STATUS_MAPPING` moves it to a Done-category
@@ -4225,6 +4226,11 @@ landing: "https://github.com/owner/repo/pull/123"
   landed issue; the one exception is settle closing an already-resolved
   issue directly at settle time, since an already-resolved outcome has
   nothing landed for reconcile to observe (issue #4017).
+- `closedat` (RFC 3339) and `closedreason` record when and why a closed
+  issue closed, for the tuning cooldown (`BUTLER_TUNING_COOLDOWN`). Every
+  close the launcher makes stamps `closedat` and writes no reason, which
+  reads as completed; `closedreason: not-planned` is a human edit. Both are
+  ignored while `closed` is absent or `false`.
 - `landing` is the immutable landing reference (a PR URL, or a push-only
   branch ref under `CODE_FORGE=git`) the launcher writes only from its own
   evidence (a PR it opened or adopted, a merge it performed, a push-only
@@ -5877,8 +5883,8 @@ after the merging Record (the held Record, for a later human merge) as After
 against those settled before it (claimed within 7 days of it) as Before. `n`
 is the after-side count, thin under `BUTLER_TUNING_MIN_SAMPLE`; other states
 carry no Δ. No settle time is stored, so a Dispatch claimed before the merge
-but settled after it counts as after. Closed-not-planned is told apart only on
-the GitHub tracker (`Issue.ClosedNotPlanned`); on `local`, Jira, and Forgejo a
+but settled after it counts as after. Closed-not-planned is told apart on the
+GitHub, Jira, and `local` trackers (`Issue.ClosedNotPlanned`); on Forgejo a
 not-planned close renders `closed-completed`. The tuning Chore's own butler
 Records count in the window like any other kind's, so it can flag its own cost
 as `cost-waste`. A `finding:` anchor is not an aggregate row and never counts
@@ -5908,9 +5914,15 @@ keyed `<class>:<target file>:<metric>`; after it the pattern may be filed
 again. An open or closed-completed match always suppresses, and code Chores
 keep permanent suppression. `0` means a not-planned close never suppresses; a
 negative value is rejected at `spindrift butler` time and by `spindrift
-doctor`. Only GitHub reports a close reason, so on `forgejo`, `jira` and
-`local` every closed tuning finding keeps suppressing permanently. Like the
-digest knobs it is host-only.
+doctor`. GitHub, `jira` and `local` report a close reason and time, so a
+not-planned close there stops suppressing after the cooldown; `forgejo` has
+no close reason, so every closed tuning finding keeps suppressing
+permanently. On `jira` not planned means a Won't Do, Won't Fix or Declined
+resolution. On `local` it is a human edit: add `closedreason: not-planned` to
+the closed issue file (`closedat:` is stamped when settle or reconcile closes
+it; add an RFC3339 `closedat:` to a hand-closed file, since a missing one never
+expires).
+Like the digest knobs it is host-only.
 
 **Snapshot and validation.** The host stores the rendered digest in the Dispatch
 Records store's `tuning_snapshots` table, keyed by the sweep's Record ID, before

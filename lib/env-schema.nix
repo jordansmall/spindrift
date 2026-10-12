@@ -526,7 +526,7 @@ in
     env = "BUTLER_TUNING_COOLDOWN";
     group = "dispatch";
     default = "720h";
-    doc = "a Go time.ParseDuration string (no day unit: 30 days is 720h): how long a tuning finding closed as not planned keeps suppressing a refile of the same pattern, keyed `<class>:<target file>:<metric>` (ADR 0062); after it the pattern may be filed again. An open or closed-completed match always suppresses, and code Chores keep permanent suppression. 0 means a not-planned close never suppresses; negative is rejected. Only GitHub reports a close reason, so on forgejo, jira, and local every closed tuning finding keeps suppressing permanently; host-only -- the Box never sees this value. Validated by the launcher at `spindrift butler` time and by `spindrift doctor`";
+    doc = "a Go time.ParseDuration string (no day unit: 30 days is 720h): how long a tuning finding closed as not planned keeps suppressing a refile of the same pattern, keyed `<class>:<target file>:<metric>` (ADR 0062); after it the pattern may be filed again. An open or closed-completed match always suppresses, and code Chores keep permanent suppression. 0 means a not-planned close never suppresses; negative is rejected. Forgejo reports no close reason, so there every closed tuning finding keeps suppressing permanently; host-only -- the Box never sees this value. Validated by the launcher at `spindrift butler` time and by `spindrift doctor`";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "butler.tuningCooldown";
