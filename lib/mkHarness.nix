@@ -490,9 +490,10 @@ let
   );
 
   # Custom roster entries carrying their own prompt, baked into the image
-  # alongside the fixed prompt files. An entry omitting `prompt` is treated
-  # the same as one setting it to null (issue #264 review finding).
-  customRosterPromptFiles = lib.filter (e: (e.prompt or null) != null) finalRoster;
+  # alongside the fixed prompt files. An entry omitting `prompt`, or setting it
+  # to null or "", is treated as having no inline prompt (issue #264 review
+  # finding); "" in the copy loop would overwrite a read-only shipped prompt.
+  customRosterPromptFiles = lib.filter rosterLib.hasInlinePrompt finalRoster;
 
   # The Driver's in-box half, rendered by the registry (issue #624) into
   # agent/entrypoint.sh's DRIVER_* vars and function definitions (ADR 0009),
