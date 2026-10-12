@@ -5,6 +5,7 @@
   pkgs,
   nixpkgs,
   system,
+  flake-parts,
   ...
 }:
 let
@@ -49,6 +50,28 @@ let
       inherit nixpkgs system skills;
       packages = p: [ p.hello ];
     }).internals.agentFiles.drvPath;
+
+  # flake-parts `debug = true` exposes the per-system module eval, so the
+  # skills option's own type check runs without the mkHarness backstop.
+  optionSkills =
+    skills:
+    (flake-parts.lib.mkFlake
+      {
+        inputs = {
+          inherit nixpkgs;
+          self.outPath = ../../.;
+        };
+      }
+      {
+        systems = [ system ];
+        debug = true;
+        imports = [ ../../lib/flakeModule.nix ];
+        perSystem.spindrift = {
+          packages = p: [ p.hello ];
+          agents.skills = skills;
+        };
+      }
+    ).allSystems.${system}.config.spindrift.agents.skills;
 in
 {
   skills-name-validation =
@@ -57,6 +80,14 @@ in
     assert assertMsg (builtins.all (
       n: (skillsLib.validateSkillsResult [ (entry n) ]).ok
     ) goodNames) "validateSkillsResult must accept safe names";
+    assert assertMsg (
+      !(builtins.any skillsLib.isValidName [
+        ""
+        "."
+        ".."
+      ])
+      && skillsLib.isValidName "caveman"
+    ) "isValidName must reject empty, \".\" and \"..\" and accept a plain name";
     assert assertMsg (skillsLib.validateSkillsResult [ ]).ok "an empty skills list is valid";
     # Path and derivation entries take the other bake branch; only attrset
     # content entries have a name to validate.
@@ -64,7 +95,7 @@ in
       (skillsLib.validateSkillsResult [
         ./.
         "../x"
-        (pkgs.writeText "../x" "")
+        (pkgs.writeText "x" "")
       ]).ok
       "path, string and derivation entries must not be name-checked";
     assert assertMsg (hasInfix "entry 1 "
@@ -98,5 +129,14 @@ in
     assert assertMsg (
       !throws (harnessWith [ (entry "ok") ])
     ) "mkHarness must still evaluate with a safe skill name";
+    assert assertMsg (throws (optionSkills [
+      (entry "..")
+    ])) "the skills option type must reject \"..\"";
+    assert assertMsg (throws (optionSkills [
+      (entry ".")
+    ])) "the skills option type must reject \".\"";
+    assert assertMsg (
+      !throws (optionSkills [ (entry "ok") ])
+    ) "the skills option must accept a safe name";
     pkgs.runCommand "skills-validation-throws" { } "touch $out";
 }

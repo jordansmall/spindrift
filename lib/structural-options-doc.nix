@@ -9,6 +9,7 @@
 # fills the real value in later. byName is the exception: null really is unset.
 let
   deprecationNote = import ./driver-deprecation-note.nix;
+  skillNamePattern = (import ./skills.nix).namePattern;
 in
 {
   driver = {
@@ -24,7 +25,7 @@ in
   };
 
   skills = {
-    doc = "Skills baked into the image at /home/agent/.claude/skills. Each is baked as a <name>/SKILL.md directory — the only layout Claude Code discovers (a flat <name>.md is ignored). An element is a path to a skill directory, or a { name; src; } content entry (name + SKILL.md body) realized with the image's Linux pkgs (issue #597). SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
+    doc = "Skills baked into the image at /home/agent/.claude/skills. Each is baked as a <name>/SKILL.md directory — the only layout Claude Code discovers (a flat <name>.md is ignored). An element is a path to a skill directory, or a { name; src; } content entry (name + SKILL.md body) realized with the image's Linux pkgs (issue #597). A content entry's name must match ${skillNamePattern} and not be \".\" or \"..\", else evaluation fails (issue #5022). SPINDRIFT_SKILLS_DIR at runtime mounts over the same path and takes precedence.";
     docType = "list of path/derivation/`{ name; src; }`";
     docDefault = "`[]`";
   };
