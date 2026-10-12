@@ -660,7 +660,8 @@ dispatch time, no `spindrift build`), adding an arbitrary Nth custom agent
 via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
-concrete `roster` user, naming the Filer, reviewer, and worker:
+concrete `roster` user, naming the Filer, reviewer, and worker under its
+default `agents.drivers.claude` entry:
 
 <!-- BEGIN GENERATED DOGFOOD ROSTER PINS -- nix run .#regen -- DO NOT EDIT -->
 `roster = rosterLib.defaultRoster { models = { filer = "claude-haiku-4-5-20251001"; reviewer = "claude-opus-5-5"; worker = "claude-sonnet-5-5"; }; };`
@@ -954,6 +955,12 @@ default's baked references (`.#` / `.#daemon`, or those top-level `dispatch.*`
 overrides), not `.#<driver>` / `.#<driver>-daemon`; both names resolve to the
 same Harness, so a Daemon never mixes Drivers. The other Harnesses contribute
 just those three outputs.
+
+spindrift's own dogfood declares `claude` (the default) and `opencode`, so
+`nix run .#opencode` and `nix run .#opencode-daemon` dispatch through
+opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
+opencode entry inherits that Driver's limits: no Filer or worker is
+provisioned.
 
 #### Authoring a new Driver
 
