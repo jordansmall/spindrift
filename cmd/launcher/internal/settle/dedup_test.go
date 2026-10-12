@@ -1,7 +1,10 @@
 package settle
 
 import (
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
@@ -9,6 +12,7 @@ import (
 
 	"spindrift.dev/launcher/internal/dispatchkind"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/forge/jira"
 )
 
 // normalizeDedupKey trims, collapses internal whitespace runs to one space,
@@ -895,6 +899,46 @@ func TestIndexFindingIssues_NotPlannedExpiry(t *testing.T) {
 			c.iss.Number, c.iss.Labels = "5", []string{label}
 			index := make(map[string]string)
 			indexFindingIssues(index, []forge.Issue{c.iss}, c.cutoff)
+			if _, ok := index["k"]; ok != c.covered {
+				t.Errorf("key covered = %v, want %v", ok, c.covered)
+			}
+		})
+	}
+}
+
+// The cooldown must hold end to end on jira (issue #5028): a tuning finding the
+// jira adapter reports closed Won't Do inside the cooldown still suppresses,
+// one closed before the cutoff no longer does, and a Duplicate close keeps
+// suppressing whatever its age.
+func TestIndexFindingIssues_NotPlannedExpiryFromJiraAdapter(t *testing.T) {
+	cutoff := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	label := dispatchkind.Butler.FindingLabel
+	body, _ := json.Marshal(buildDedupMarker([]string{"k", tuningChoreTerm}))
+	cases := []struct {
+		name       string
+		resolution string
+		date       string
+		covered    bool
+	}{
+		{"not planned inside cooldown", "Won't Do", "2026-09-10T00:00:00.000+0000", true},
+		{"not planned before cutoff", "Won't Do", "2026-08-01T00:00:00.000+0000", false},
+		{"duplicate before cutoff", "Duplicate", "2026-08-01T00:00:00.000+0000", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(`{"total":1,"issues":[{"key":"PROJ-5","fields":{"description":` + string(body) + `,` +
+					`"status":{"statusCategory":{"key":"done"}},"labels":["` + label + `"],` +
+					`"resolution":{"name":"` + c.resolution + `"},"resolutiondate":"` + c.date + `"}}]}`))
+			}))
+			defer srv.Close()
+			jc := jira.NewJiraClient(jira.JiraConfig{BaseURL: srv.URL, Token: "tok", ProjectKey: "PROJ"})
+			issues, err := jc.(forge.LabeledBacklogLister).ListIssuesWithLabels(forge.IssueClosed, []string{label})
+			if err != nil {
+				t.Fatalf("ListIssuesWithLabels: %v", err)
+			}
+			index := make(map[string]string)
+			indexFindingIssues(index, issues, cutoff)
 			if _, ok := index["k"]; ok != c.covered {
 				t.Errorf("key covered = %v, want %v", ok, c.covered)
 			}

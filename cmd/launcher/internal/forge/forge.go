@@ -110,7 +110,7 @@ type Issue struct {
 	// does not report it.
 	ClosedAt time.Time
 	// ClosedNotPlanned reports the tracker recorded the close as "not planned".
-	// Only github reports a close reason; every other adapter leaves it false.
+	// Only github and jira report a close reason; every other adapter leaves it false.
 	ClosedNotPlanned bool
 }
 
