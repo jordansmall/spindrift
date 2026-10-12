@@ -422,6 +422,46 @@ var runnerPrebuildCommand = exec.CommandContext
 // each prebuild overwrites.
 const prebuildGCRoot = "spindrift-daemon.next"
 
+// currentGCRoot roots the running build, or after a handoff the rollback
+// target, until the successor's startup succeeds and replaces it with itself.
+const currentGCRoot = "spindrift-daemon.current"
+
+// selfRootTimeout bounds the startup rooting `nix build`, which only registers
+// a path already in the store.
+const selfRootTimeout = 2 * time.Minute
+
+// storeRootOf is the store path holding program ("/nix/store/aaa-old/bin/daemon"
+// -> "/nix/store/aaa-old"); ok is false for a program outside the store.
+func storeRootOf(program string) (root string, ok bool) {
+	if validStorePath("program", program) != nil {
+		return "", false
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(program, "/nix/store/"), "/")
+	if name == "" {
+		return "", false
+	}
+	return "/nix/store/" + name, true
+}
+
+// rootSelf pins this image's own build at currentGCRoot once its startup has
+// succeeded, then drops prebuildGCRoot: that link is now this build, the build a
+// rollback refused, or stale. A failed rooting only warns and leaves
+// prebuildGCRoot, which may be the only root of the running build.
+func (r *hostRunner) rootSelf(ctx context.Context, program string, warn io.Writer) {
+	root, ok := storeRootOf(program)
+	if !ok {
+		return
+	}
+	argv := daemon.SelfRootCommand(root, filepath.Join(r.stateDir, currentGCRoot))
+	if _, err := prebuildRun(runnerPrebuildCommand(ctx, argv[0], argv[1:]...)); err != nil {
+		fmt.Fprintf(warn, "daemon: warning: could not root %s: %v\n", root, err)
+		return
+	}
+	if err := os.Remove(filepath.Join(r.stateDir, prebuildGCRoot)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintf(warn, "daemon: warning: could not drop the %s root: %v\n", prebuildGCRoot, err)
+	}
+}
+
 // prebuildStderrTail caps, in bytes, the child stderr embedded in a
 // PrebuildError: a failed nix build's log can run to thousands of lines, and
 // the error lands in the event stream and status file.
@@ -1265,6 +1305,17 @@ func (r *hostRunner) execSuccessor(h daemon.Handoff, lock *os.File, stop <-chan 
 	target, err := r.execTarget()
 	if err != nil {
 		return err
+	}
+	if root, ok := storeRootOf(fromPath); ok {
+		// The rollback target must survive a collection between now and the
+		// successor's startup.
+		got, err := os.Readlink(filepath.Join(r.stateDir, currentGCRoot))
+		if err != nil {
+			return fmt.Errorf("rollback target %s: read %s: %w", root, currentGCRoot, err)
+		}
+		if got != root {
+			return fmt.Errorf("rollback target %s is not rooted at %s", root, currentGCRoot)
+		}
 	}
 	h.FromPath, h.ToPath, h.Revision = fromPath, target.SelfPath, target.Revision
 	if err := execHandoff(h, lock, stop, r.env, r.selfArgs); err != nil {

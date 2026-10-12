@@ -1080,6 +1080,13 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 		return finish(stderr, em, statusWriter, args.Kinds, h)
 	}
 
+	// After the preflight, so a refused start never replaces the rollback
+	// target's root. A fresh context: a stop latched meanwhile cancels
+	// preflightCtx, and the roots must still end up right for the next image.
+	rootCtx, cancelRoot := context.WithTimeout(context.Background(), selfRootTimeout)
+	r.rootSelf(rootCtx, selfProgram, stderr)
+	cancelRoot()
+
 	cfg := daemon.Config{
 		Kinds:               args.Kinds,
 		ResearchReservation: reservation,
