@@ -1024,7 +1024,7 @@ in
     env = "SPINDRIFT_SKILLS_DIR";
     group = "agents";
     flag = "skills-dir";
-    doc = "host directory mounted read-only over /home/agent/.claude/skills so the headless agent can load operator-provided skills";
+    doc = "host directory of operator-provided skills for the headless agent, mounted read-only at /operator-skills and merged over the baked skills in the Driver's skills dir at Box startup, so an operator skill overrides a baked skill of the same name without erasing the rest";
     boxEnv = false;
   };
   autoFormat = {
