@@ -201,7 +201,7 @@ in
   scoutModel = {
     env = "SCOUT_MODEL";
     group = "agents";
-    default = "claude-haiku-4-5-20251001";
+    default = "claude-haiku-5-5";
     doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.scout";
@@ -235,7 +235,7 @@ in
     env = "FILER_MODEL";
     group = "agents";
     default = "";
-    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-4-5-20251001). DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
+    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-5-5). DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.filer";
     driverValued = true;

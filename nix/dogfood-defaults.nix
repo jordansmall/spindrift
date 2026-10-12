@@ -41,7 +41,7 @@ in
   # review pass runs at, so no `reviewEffort` knob is set (issue #2512).
   roster = rosterLib.defaultRoster {
     models = {
-      filer = "claude-haiku-4-5-20251001";
+      filer = "claude-haiku-5-5";
       reviewer = "claude-opus-5-5";
       worker = "claude-sonnet-5-5";
     };

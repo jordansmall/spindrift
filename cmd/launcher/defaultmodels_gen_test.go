@@ -10,7 +10,7 @@ package main
 // dogfood-defaults.nix's roster) with no Go-side consumer.
 var expectedDefaultModels = map[string]string{
 	"MODEL":        "claude-sonnet-5",
-	"SCOUT_MODEL":  "claude-haiku-4-5-20251001",
+	"SCOUT_MODEL":  "claude-haiku-5-5",
 	"REVIEW_MODEL": "claude-opus-5",
 	"FILER_MODEL":  "",
 	"WORKER_MODEL": "claude-sonnet-5",

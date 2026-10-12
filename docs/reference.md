@@ -406,7 +406,7 @@ dispatch.maxJobs       = 0;
 # END GENERATED SETTINGS EXAMPLE CONFIG
 # BEGIN GENERATED SETTINGS EXAMPLE MODELS -- nix run .#regen -- DO NOT EDIT
 agents.drivers.claude.models.default = "claude-sonnet-5";
-agents.drivers.claude.models.scout   = "claude-haiku-4-5-20251001";
+agents.drivers.claude.models.scout   = "claude-haiku-5-5";
 agents.drivers.claude.models.review  = "claude-opus-5";
 agents.drivers.claude.models.filer   = "";
 # END GENERATED SETTINGS EXAMPLE MODELS
@@ -575,7 +575,7 @@ callers directly:
 ```nix
 perSystem.spindrift.agents.drivers.claude.models.byName = {
   filer = {
-    model = "claude-haiku-4-5-20251001";
+    model = "claude-haiku-5-5";
     effort = "high";
   };
 };
@@ -672,7 +672,7 @@ concrete `roster` user, naming the Filer, reviewer, and worker under its
 default `agents.drivers.claude` entry:
 
 <!-- BEGIN GENERATED DOGFOOD ROSTER PINS -- nix run .#regen -- DO NOT EDIT -->
-`roster = rosterLib.defaultRoster { models = { filer = "claude-haiku-4-5-20251001"; reviewer = "claude-opus-5-5"; worker = "claude-sonnet-5-5"; }; };`
+`roster = rosterLib.defaultRoster { models = { filer = "claude-haiku-5-5"; reviewer = "claude-opus-5-5"; worker = "claude-sonnet-5-5"; }; };`
 with `defaults.model = "claude-opus-5-5";` for the coordinator.
 <!-- END GENERATED DOGFOOD ROSTER PINS -->
 
@@ -684,7 +684,7 @@ unmentioned and so inherits its `lib/env-schema.nix` default (issue #2434)
 instead:
 
 <!-- BEGIN GENERATED DOGFOOD MODELS -- nix run .#regen -- DO NOT EDIT -->
-`claude-haiku-4-5-20251001`.
+`claude-haiku-5-5`.
 <!-- END GENERATED DOGFOOD MODELS -->
 
 The dogfood sets the coordinator's `effort` to `high`, but still inherits
@@ -888,9 +888,9 @@ pass-through described earlier in this section.
 | Agent | Default model |
 | --- | --- |
 | `MODEL` (coordinator) | `claude-sonnet-5` |
-| `scout` | `claude-haiku-4-5-20251001` |
+| `scout` | `claude-haiku-5-5` |
 | `reviewer` | `claude-opus-5` |
-| `filer` | *(empty; dogfood pins `claude-haiku-4-5-20251001`)* |
+| `filer` | *(empty; dogfood pins `claude-haiku-5-5`)* |
 | `worker` | `claude-sonnet-5` |
 <!-- END GENERATED DEFAULT MODELS -->
 

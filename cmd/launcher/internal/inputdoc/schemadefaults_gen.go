@@ -65,7 +65,7 @@ var schemaDefaults = map[string]string{
 	"PIDS_LIMIT":                    "512",
 	"RESEARCH_RESERVATION":          "1",
 	"REVIEW_MODEL":                  "claude-opus-5",
-	"SCOUT_MODEL":                   "claude-haiku-4-5-20251001",
+	"SCOUT_MODEL":                   "claude-haiku-5-5",
 	"SYNC_METHOD":                   "rebase",
 	"TRANSIENT_BACKOFF_SECS":        "30",
 	"TRANSIENT_RETRY_MAX":           "3",
