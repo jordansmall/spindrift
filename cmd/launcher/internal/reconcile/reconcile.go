@@ -114,9 +114,10 @@ type prReconciler struct {
 // reconcile checks one open issue against live PR state: it closes the issue
 // on a merged landing PR, discovers an unrecorded landing by agent branch,
 // resolves a bare branch landing to its PR, and flags one whose landing PR
-// closed unmerged. A recorded branch landing that resolves to no PR, or only to
-// a closed one, prints the landing-unverifiable line and lets the sweep
-// continue. A PR resolved from a branch is recorded once its state is read.
+// closed unmerged. A recorded branch landing that names a branch other than the
+// issue's own agent branch, or that resolves to no PR or only to a closed one,
+// prints the landing-unverifiable line and lets the sweep continue. A PR
+// resolved from a branch is recorded once its state is read.
 func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	landing := iss.Landing
 	bareBranch := ""
@@ -140,8 +141,12 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 		case forge.LandingPRURL:
 			landing = parsed.URL
 		case forge.LandingBranchRef:
-			// Settle records a bare branch for ambiguous/blocked runs that opened
-			// no PR (issue #5001), so a miss here is expected, not a sweep error.
+			// The host only ever records cf.AgentBranch as a bare branch, but a
+			// record from before issue #5005 may carry a Box-supplied one, so
+			// trust it only when it names this issue's own agent branch.
+			if !ownsAgentBranch(p.cf, iss, parsed.Branch) {
+				return nil
+			}
 			url, found, err := p.resolveBranch(iss.Number, parsed.Branch)
 			if err != nil {
 				return err
@@ -193,6 +198,17 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 	return nil
 }
 
+// ownsAgentBranch reports whether a recorded bare branch is iss's own agent
+// branch, printing the unverifiable line when it is not (issue #5005).
+func ownsAgentBranch(cf forge.CodeForge, iss forge.Issue, branch string) bool {
+	want := cf.AgentBranch(iss.Number)
+	if branch == want {
+		return true
+	}
+	fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! branch %s is not this issue's agent branch %s\n", iss.Number, iss.Landing, branch, want)
+	return false
+}
+
 // resolveBranch finds the PR opened from branch, in any state.
 func (p prReconciler) resolveBranch(num, branch string) (url string, found bool, err error) {
 	url, found, err = p.pr.PRForBranch(branch)
@@ -219,8 +235,10 @@ type localLandingReconciler struct {
 // reconcile checks one open issue's recorded landing, parsed into a typed
 // forge.Landing (issue #1809) so the switch reads meaning, not string grammar:
 // no landing discovers one by agent branch, an integration ref closes the
-// issue once contained (issue #2151), a branch ref takes the healing path, and
-// any other shape prints a loud unverifiable line, never a not-merged-yet pass.
+// issue once contained (issue #2151), a branch ref naming the issue's own agent
+// branch takes the healing path (any other branch is unverifiable, issue
+// #5005), and any other shape prints a loud unverifiable line, never a
+// not-merged-yet pass.
 func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 	if iss.Landing == "" {
 		return l.discover(res, iss)
@@ -241,6 +259,11 @@ func (l localLandingReconciler) reconcile(res *Result, iss forge.Issue) error {
 		}
 		return l.close(res, iss.Number)
 	case forge.LandingBranchRef:
+		// Same trust rule as the PR path: a foreign branch (even the integration
+		// branch itself, trivially contained) must not close or repair the issue.
+		if !ownsAgentBranch(l.cf, iss, landing.Branch) {
+			return nil
+		}
 		return l.reconcileBranchRef(res, iss, landing)
 	default:
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! landing does not verify through the local Code Forge\n", iss.Number, iss.Landing)
