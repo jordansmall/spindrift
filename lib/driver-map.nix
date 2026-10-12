@@ -53,7 +53,8 @@ let
   full = p: "perSystem.spindrift.${p}";
   fullList = ps: join (map full ps);
   rest = p: builtins.substring (builtins.stringLength "agents.") (builtins.stringLength p) p;
-  moveHint = p: full "agents.drivers.<name>.${rest p}";
+  moveHintFor = name: p: full "agents.drivers.${name}.${rest p}";
+  moveHint = moveHintFor "<name>";
   moveHints = ps: join (map (p: "${full p} -> ${moveHint p}") ps);
   moveClause = ps: if ps == [ ] then "" else " (${moveHints ps})";
 
@@ -101,9 +102,21 @@ let
       fail "perSystem.spindrift.agents.defaultDriver is ${quote defaultDriver}, which is not a declared Driver (${declaredList}) -- declare perSystem.spindrift.agents.drivers.${defaultDriver} or set ${full "agents.defaultDriver"} to one of the declared names"
     else
       ok defaultDriver;
+
+  # One warning per single-Driver setting, naming where it goes now. `name` is
+  # the Driver the shorthand resolves to, so the new path is exact.
+  deprecations =
+    { name, topLevel }:
+    map (
+      t:
+      if t.path == "agents.driver" then
+        "${full t.path} is deprecated; declare ${full "agents.drivers.${name}"} instead (the attribute name is the Driver; with several Drivers also set ${full "agents.defaultDriver"}) (ADR 0064)"
+      else
+        "${full t.path} is deprecated; use ${moveHintFor name t.path} (ADR 0064)"
+    ) topLevel;
 in
 {
-  inherit resolve paths;
+  inherit resolve paths deprecations;
   # Where the module declares the map and its default-Driver name; read by
   # lib/flakeModule.nix and nix/checks/schema-drift.nix's
   # flake-nixpath-exhaustive-disjoint check, like lib/byname-paths.nix.

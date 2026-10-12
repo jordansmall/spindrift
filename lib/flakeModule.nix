@@ -400,6 +400,16 @@ in
       in
       oldFlatShims
       // settingsOption
+      // {
+        # The single-Driver deprecation messages the module warned with; a
+        # check reads it through flake-parts `debug = true`.
+        driverDeprecations = mkOption {
+          type = types.listOf types.str;
+          readOnly = true;
+          internal = true;
+          visible = false;
+        };
+      }
       // (buildTree (
         flakeOptionTreeEntries
         ++ structuralTreeEntries
@@ -559,13 +569,46 @@ in
         // entryValues entry driverValued.structural
         // lib.optionalAttrs (defaults != { }) { inherit defaults; };
 
+      shorthandHarness = mkHarness args;
+
       harness =
         if removedKnobHits != [ ] then
           throw "${(lib.head removedKnobHits).at}: ${(lib.head removedKnobHits).message}"
         else if resolved.error != null then
           throw resolved.error
         else if shorthand then
-          mkHarness args
+          # The list is built in the same fold step as the warn, so dropping
+          # the fold empties it; the lib.warn call itself is not observable
+          # in pure eval.
+          lib.foldl'
+            (
+              acc: msg:
+              lib.warn msg (
+                acc
+                // {
+                  internals = acc.internals // {
+                    driverDeprecations = acc.internals.driverDeprecations ++ [ msg ];
+                  };
+                }
+              )
+            )
+            (
+              shorthandHarness
+              // {
+                internals = shorthandHarness.internals // {
+                  driverDeprecations = [ ];
+                };
+              }
+            )
+            (
+              driverMap.deprecations {
+                name = shorthandHarness.internals.driverEntry.name;
+                # Only paths the Consumer wrote: a legacy shim already warned
+                # with its own message and must not get a second one naming a
+                # top-level path it never set.
+                topLevel = lib.filter (s: lib.attrByPath (lib.splitString "." s.path) null cfg != null) topLevelSet;
+              }
+            )
         else
           mkHarness (argsFor resolved.default);
 
@@ -629,5 +672,6 @@ in
       packages = harness.packages // defaultOutputs.packages // otherOutputs.packages;
       apps = harness.apps // defaultOutputs.apps // otherOutputs.apps;
       formatter = nixfmt;
+      spindrift.driverDeprecations = harness.internals.driverDeprecations or [ ];
     };
 }

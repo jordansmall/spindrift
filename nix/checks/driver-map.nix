@@ -8,6 +8,7 @@
   nixpkgs,
   system,
   flake-parts,
+  config,
   ...
 }:
 let
@@ -85,6 +86,107 @@ let
       }
       // args
     );
+  # flake-parts `debug = true` exposes the per-system module eval, so a check
+  # can read the hidden spindrift.driverDeprecations option a real eval emits.
+  emittedDeprecations =
+    spindrift:
+    (flake-parts.lib.mkFlake
+      {
+        inputs = {
+          inherit nixpkgs;
+          self.outPath = ../../.;
+        };
+      }
+      {
+        systems = [ system ];
+        debug = true;
+        imports = [ ../../lib/flakeModule.nix ];
+        perSystem.spindrift = recursiveUpdate { infra.image.packages = p: [ p.hello ]; } spindrift;
+      }
+    ).allSystems.${system}.config.spindrift.driverDeprecations;
+
+  # The consumer starter's own perSystem eval: its `outputs` is called with a
+  # mkFlake that adds `debug = true`, which exposes the per-system config the
+  # plain outputs attrset hides.
+  templateDeprecations =
+    ((import ../../templates/default/flake.nix).outputs {
+      inherit nixpkgs;
+      flake-parts = flake-parts // {
+        lib = flake-parts.lib // {
+          mkFlake =
+            args: module:
+            flake-parts.lib.mkFlake args {
+              imports = [ module ];
+              debug = true;
+            };
+        };
+      };
+      self.outPath = ../../templates/default;
+      spindrift = {
+        flakeModules.default = ../../lib/flakeModule.nix;
+        lib.mkHarness = import ../../lib/mkHarness.nix;
+      };
+    }).allSystems.${system}.config.spindrift.driverDeprecations;
+
+  # One realistic value per single-Driver option; `set` nests the value at
+  # its path.
+  singleDriverSettings =
+    map
+      (e: {
+        inherit (e) path;
+        set = pkgs.lib.setAttrByPath (pkgs.lib.splitString "." e.path) e.value;
+      })
+      [
+        {
+          path = "agents.driver";
+          value = "claude";
+        }
+        {
+          path = "agents.models.default";
+          value = "x";
+        }
+        {
+          path = "agents.models.worker";
+          value = "x";
+        }
+        {
+          path = "agents.models.scout";
+          value = "x";
+        }
+        {
+          path = "agents.models.review";
+          value = "x";
+        }
+        {
+          path = "agents.models.filer";
+          value = "x";
+        }
+        {
+          path = "agents.models.effort";
+          value = "high";
+        }
+        {
+          path = "agents.models.reviewEffort";
+          value = "high";
+        }
+        {
+          path = "agents.bashTimeoutMs";
+          value = 1000;
+        }
+        {
+          path = "agents.models.roster";
+          value = [
+            {
+              name = "worker";
+              model = "m";
+            }
+          ];
+        }
+        {
+          path = "agents.models.byName";
+          value.scout.model = "y";
+        }
+      ];
   outputs = spindrift: (evalModule spindrift).packages.${system};
   appsOf = spindrift: (evalModule spindrift).apps.${system};
   evaluates = spindrift: (builtins.tryEval (outputs spindrift ? spindrift)).success;
@@ -312,6 +414,54 @@ in
       ];
     pkgs.runCommand "driver-map-resolve" { } "touch $out";
 
+  # The single-Driver form warns once per setting, naming the exact new path.
+  # The text is pinned here; flakemodule-driver-map-deprecations pins that a
+  # real module eval emits exactly these messages, and
+  # flakemodule-driver-map-errors that each setting is accepted alone and
+  # rejected beside a Driver map.
+  driver-map-deprecations =
+    let
+      oldPaths = [
+        "agents.driver"
+      ]
+      ++ map (segs: "agents." + concatStringsSep "." segs) (builtins.attrValues driverMap.paths);
+      msgsFor =
+        topLevel:
+        driverMap.deprecations {
+          name = "opencode";
+          inherit topLevel;
+        };
+      one =
+        p:
+        let
+          msgs = msgsFor (top [ p ]);
+          msg = builtins.head msgs;
+          newPath =
+            "perSystem.spindrift.agents.drivers.opencode"
+            + pkgs.lib.optionalString (p != "agents.driver") ".${pkgs.lib.removePrefix "agents." p}";
+        in
+        assert assertMsg (builtins.length msgs == 1) "deprecations: ${p}: expected exactly one message";
+        assert assertMsg (has msg [
+          "perSystem.spindrift.${p} "
+          newPath
+        ]) "deprecations: ${p}: message must name the old and new path, got ${msg}";
+        assert assertMsg (
+          hasPrefix "perSystem.spindrift." msg && !(hasInfix "\n" msg)
+        ) "deprecations: ${p}: message must be one line starting with perSystem.spindrift.: ${msg}";
+        true;
+    in
+    assert assertMsg (builtins.length oldPaths == 11)
+      "expected 11 single-Driver paths (agents.driver plus the 10 entries in driverMap.paths), got ${toString (builtins.length oldPaths)}";
+    assert assertMsg (builtins.all one oldPaths) "unreachable";
+    assert assertMsg (
+      builtins.length (msgsFor (top oldPaths)) == builtins.length oldPaths
+    ) "deprecations: setting every path must warn once per path";
+    assert assertMsg (msgsFor [ ] == [ ]) "deprecations: no settings, no warnings";
+    assert assertMsg (has (builtins.head (msgsFor (top [ "agents.driver" ]))) [
+      "perSystem.spindrift.agents.defaultDriver"
+    ]) "deprecations: agents.driver must point at agents.defaultDriver for several Drivers";
+    pkgs.runCommand "driver-map-deprecations" { } "touch $out";
+
   # The default Driver's harness is the same whichever form spells it
   # (ADR 0064): a Driver-map entry equals the single-Driver form's top-level
   # settings, and equals the direct mkHarness call carrying the same values.
@@ -443,7 +593,66 @@ in
       agents.defaultDriver = "opencode";
     };
     assert rejects "defaultDriver with an empty map" { agents.defaultDriver = "claude"; };
+    # Every single-Driver setting evaluates alone and conflicts beside a
+    # Driver map. The values are realistic for each option's type.
+    assert builtins.all (
+      s:
+      accepts "the single-Driver setting ${builtins.toJSON s} alone" s
+      && rejects "the single-Driver setting ${builtins.toJSON s} beside agents.drivers" (
+        recursiveUpdate s { agents.drivers.claude = { }; }
+      )
+    ) (map (e: e.set) singleDriverSettings);
     pkgs.runCommand "flakemodule-driver-map-errors" { } "touch $out";
+
+  # A real module eval emits the deprecation text: the single-Driver form
+  # surfaces exactly driverMap.deprecations (one message per setting), the
+  # Driver map and a bare shorthand surface none. Deleting the warn fold in
+  # lib/flakeModule.nix empties the list and fails this.
+  flakemodule-driver-map-deprecations =
+    let
+      expected =
+        paths:
+        driverMap.deprecations {
+          name = "claude";
+          topLevel = top paths;
+        };
+      allPaths = map (e: e.path) singleDriverSettings;
+    in
+    assert assertMsg (builtins.all (
+      e:
+      let
+        got = emittedDeprecations e.set;
+      in
+      assertMsg (
+        got == expected [ e.path ] && builtins.length got == 1
+      ) "${e.path} alone must emit exactly its one deprecation, got ${builtins.toJSON got}"
+    ) singleDriverSettings) "unreachable";
+    assert assertMsg (
+      # The module emits in its own order (env rows, roster, byName), so compare as sets.
+      sort (a: b: a < b) (
+        emittedDeprecations (builtins.foldl' recursiveUpdate { } (map (e: e.set) singleDriverSettings))
+      ) == sort (a: b: a < b) (expected allPaths)
+    ) "every single-Driver setting together must emit one message per setting";
+    assert assertMsg (emittedDeprecations { } == [ ]) "a bare shorthand must emit nothing";
+    # A legacy shim warns with its own message; it must not also earn an ADR
+    # 0064 warning naming a top-level path the Consumer never wrote.
+    assert assertMsg (
+      emittedDeprecations {
+        settings.models.workerModel = "x";
+        driver = "claude";
+      } == [ ]
+    ) "legacy shims must not emit a Driver-map deprecation for a path they did not set";
+    assert assertMsg (
+      emittedDeprecations { agents.drivers.claude.models.default = "x"; } == [ ]
+    ) "a Driver map must emit nothing";
+    # The two Consumer configs spindrift ships must stay on the Driver map (or
+    # bare shorthand) form: the dogfood's own perSystem config, and the
+    # starter template a Consumer copies.
+    assert assertMsg (config.spindrift.driverDeprecations == [ ])
+      "the dogfood flake must emit no Driver-map deprecation, got ${builtins.toJSON config.spindrift.driverDeprecations}";
+    assert assertMsg (templateDeprecations == [ ])
+      "templates/default must emit no Driver-map deprecation, got ${builtins.toJSON templateDeprecations}";
+    pkgs.runCommand "flakemodule-driver-map-deprecations" { } "touch $out";
 
   # agents.drivers.<name> is built from the driverValued marking, not a second
   # hand-kept list: its leaves are exactly lib/driver-map.nix's paths.
