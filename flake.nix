@@ -141,10 +141,18 @@
               forge.boxAccess = dogfoodDefaults.defaults.boxForgeAndIssueAccess;
               agents.format.enable = dogfoodDefaults.defaults.autoFormat;
               agents.lint.enable = dogfoodDefaults.defaults.autoLint;
-              agents.models.roster = dogfoodDefaults.roster;
-              agents.models.default = dogfoodDefaults.defaults.model;
-              agents.models.effort = dogfoodDefaults.defaults.effort;
-              agents.bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
+              # Driver map (ADR 0064, issue #5054); see nix/dogfood-defaults.nix.
+              agents.defaultDriver = "claude";
+              agents.drivers.claude = {
+                models.roster = dogfoodDefaults.roster;
+                models.default = dogfoodDefaults.defaults.model;
+                models.effort = dogfoodDefaults.defaults.effort;
+                bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
+              };
+              agents.drivers.opencode = {
+                models.default = dogfoodDefaults.opencode.model;
+                models.roster = dogfoodDefaults.opencode.roster;
+              };
               dispatch.maxParallel = dogfoodDefaults.defaults.maxParallel;
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
               dispatch.butler.maxPromotionsPerDay = dogfoodDefaults.defaults.butlerMaxPromotionsPerDay;

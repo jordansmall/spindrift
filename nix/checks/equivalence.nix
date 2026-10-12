@@ -137,6 +137,39 @@ in
         touch $out
       '';
 
+  # The dogfood adopts the Driver map (ADR 0064, issue #5054): claude stays the
+  # default Driver, so the unsuffixed apps are the claude ones
+  # (flakemodule-equivalence above pins the Harness itself), and opencode
+  # exposes its own apps and, on Linux, its own image.
+  flakemodule-dogfood-drivers =
+    let
+      inherit (pkgs.lib) assertMsg;
+      names = builtins.toJSON (builtins.attrNames config.apps);
+    in
+    assert assertMsg (
+      config.apps ? claude
+      && config.apps ? claude-daemon
+      && config.apps ? opencode
+      && config.apps ? opencode-daemon
+    ) "dogfood must expose apps.{claude,claude-daemon,opencode,opencode-daemon}, got: ${names}";
+    assert assertMsg (
+      config.apps.claude.program == config.apps.default.program
+    ) "apps.claude must be the default Driver's app (apps.default)";
+    assert assertMsg (
+      config.apps.claude-daemon.program == config.apps.daemon.program
+    ) "apps.claude-daemon must be the default Driver's daemon (apps.daemon)";
+    assert assertMsg (
+      config.apps.opencode.program != config.apps.default.program
+    ) "apps.opencode must run the opencode Harness, not the default one";
+    assert assertMsg (
+      config.apps.opencode-daemon.program != config.apps.daemon.program
+    ) "apps.opencode-daemon must run the opencode Harness, not the default one";
+    assert assertMsg (
+      !pkgs.stdenv.hostPlatform.isLinux
+      || config.packages.agent-image-opencode.drvPath != config.packages.agent-image-claude.drvPath
+    ) "agent-image-opencode must be a distinct image from agent-image-claude";
+    pkgs.runCommand "flakemodule-dogfood-drivers" { } "touch $out";
+
   # A minimal flake-parts consumer that imports the shim evaluates and
   # yields the same outputs as the equivalent direct call (#5).
   flakemodule-fixture =
