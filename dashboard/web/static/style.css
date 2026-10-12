@@ -55,7 +55,7 @@ code, time, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; f
 .ci-wait { --c: var(--ci-wait); }
 .self-update { --c: var(--resolving); }
 .image-build { --c: var(--image-build); }
-.pill { color: var(--c, var(--muted)); }
+.pill, .pill.extlink { color: var(--c, var(--muted)); }
 
 .banner { border: 1px solid var(--border); border-left-width: 6px; border-radius: 6px; padding: .8rem 1rem; margin-bottom: 1rem; background: var(--panel); }
 .banner p { margin: .3rem 0 0; }
@@ -129,9 +129,10 @@ body.disconnected #status .top h1::after { content: " (reconnecting)"; color: va
 .rowlink { color: inherit; text-decoration: none; cursor: pointer; }
 .rowlink::after { content: ""; position: absolute; inset: 0; }
 .history .entry:has(.rowlink):hover, .card:has(.cardlink):hover { border-color: var(--muted); }
-/* Above the stretched drill-in link, so a click on the chip opens the forge. */
+/* Above the stretched drill-in link, so a click on the chip or pill opens the forge. */
 .extlink { position: relative; z-index: 1; color: inherit; text-decoration: none; }
 .extlink:hover { border-color: var(--muted); text-decoration: underline; }
+.pill.extlink:hover { border-color: currentColor; }
 .card { position: relative; }
 .cardlink { color: inherit; text-decoration: none; cursor: pointer; }
 .cardlink::after { content: ""; position: absolute; inset: 0; }

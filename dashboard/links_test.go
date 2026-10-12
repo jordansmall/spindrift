@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -155,4 +156,43 @@ func TestLiveEntryFrameLinks(t *testing.T) {
 	st.expect(t, "history")
 	appendTo(t, st.events(), `{"time":"2026-10-07T11:02:00Z","event":"settled","slot":0,"issue":"22","state":"complete","pr_url":"`+testPRURL+`"}`+"\n")
 	st.expect(t, "entry", issueA, prAnchor)
+}
+
+// The card's .cardlink::after overlay swallows clicks, so every other anchor
+// inside a card must carry extlink to stay clickable.
+func TestSlotCardOutboundLinksCarryExtlink(t *testing.T) {
+	const ciSlots = `[{"slot":0,"phase":"running","busy":true,"kind":"work","since":"2026-10-07T11:00:00Z",` +
+		`"ci_wait":true,"pr_url":"` + testPRURL + `","ci_run_url":"` + testRepoURL + `/actions/runs/99"}]`
+	cases := map[string]struct{ status, want string }{
+		"issue chip": {statusJSONRepo(t, "working", "", linkSlots, testRepoURL), "chip"},
+		"ci wait":    {statusJSONRepo(t, "working", "", ciSlots, testRepoURL), "ci-wait"},
+	}
+	cardRe := regexp.MustCompile(`(?s)<article class="card .*?</article>`)
+	anchorRe := regexp.MustCompile(`<a\s[^>]*>`)
+	classRe := regexp.MustCompile(`\sclass="([^"]*)"`)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, body := get(t, &tc.status, "/")
+			seen := false
+			for _, card := range cardRe.FindAllString(body, -1) {
+				for _, a := range anchorRe.FindAllString(card, -1) {
+					classes := " "
+					for _, m := range classRe.FindAllStringSubmatch(a, -1) {
+						classes += m[1] + " "
+					}
+					hasClass := func(c string) bool { return strings.Contains(classes, " "+c+" ") }
+					if hasClass("cardlink") {
+						continue
+					}
+					if !hasClass("extlink") {
+						t.Errorf("card anchor %s lacks extlink", a)
+					}
+					seen = seen || hasClass(tc.want)
+				}
+			}
+			if !seen {
+				t.Errorf("no outbound %q link seen in cards; test is vacuous:\n%s", tc.want, body)
+			}
+		})
+	}
 }
