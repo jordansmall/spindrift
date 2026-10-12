@@ -419,10 +419,12 @@ let
 in
 {
   # The configured `prompt` is rendered to a store-path directory and, by
-  # default, baked into the image (see agentFiles) rather than mounted; `run`
-  # only bind-mounts a dir under the SPINDRIFT_PROMPT_DIR override.
+  # default, baked into the image (see agentFiles in lib/image.nix) rather
+  # than mounted; `run` only bind-mounts a dir under the SPINDRIFT_PROMPT_DIR
+  # override.
   # Eval/native only: the rendered prompt dir is a host store path, and
-  # prompt-baked-into-image below checks the image bake Linux-side.
+  # prompt-baked-into-image (nix/checks/image.nix) checks the image bake
+  # Linux-side.
   mkharness-prompt = pkgs.runCommand "mkharness-prompt" { } ''
     # The Consumer's prompt text is what lands in the rendered file.
     grep -q 'CONFIGURED-PROMPT-MARKER' \
@@ -1154,9 +1156,10 @@ in
 
   # Grep pin (issue #1653): the launcher gates on CI green itself before
   # flipping the PR ready and merging (issue #1651), so the WATCH CI GraphQL
-  # query must not appear in any prompt source file. fix-prompt.md
-  # legitimately references the unrelated `statusCheckRollup` JSON field, so
-  # the query body, not the field name, is the pin.
+  # query must not appear in any prompt source file.
+  # fragments/fix-ci-read-github.md legitimately references the unrelated
+  # `statusCheckRollup` JSON field, so the query body, not the field name, is
+  # the pin.
   prompt-source-statusCheckRollup-query-absent =
     pkgs.runCommand "prompt-source-statusCheckRollup-query-absent" { }
       ''
