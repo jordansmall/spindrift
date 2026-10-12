@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sort"
 	"strings"
 
 	"spindrift.dev/launcher/internal/registryvocab"
@@ -54,94 +53,15 @@ func isPackageNameSegment(segment string) bool {
 	return true
 }
 
-// rewriteNpmPackument repoints every same-host dist.tarball URL at the
-// Forwarder: pacote fetches the packument's embedded absolute URL verbatim
-// instead of deriving it from the registry env-var binding, so without this
-// the download leaves the proxy (issue #3401). A foreign-host tarball is a
-// declined edit (empty To), not a failure of the whole rewrite.
-func rewriteNpmPackument(body []byte, rc registryvocab.RewriteContext) registryvocab.RewriteResult {
-	obj, ok := decodeOneJSONObject(body)
-	if !ok {
-		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
-	}
-
-	versions, ok := obj["versions"].(map[string]any)
-	if !ok {
-		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
-	}
-
-	// Map iteration order is randomized; sort so the edit list, and the
-	// caller's log lines drawn from it, stay deterministic.
-	names := make([]string, 0, len(versions))
-	for name := range versions {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	var edits []registryvocab.RewriteEdit
-
-	for _, name := range names {
-		version, ok := versions[name].(map[string]any)
-		if !ok {
-			continue
-		}
-		dist, ok := version["dist"].(map[string]any)
-		if !ok {
-			continue
-		}
-		tarballStr, ok := dist["tarball"].(string)
-		if !ok {
-			continue
-		}
-
-		edit, ok := repointRegistryURL(tarballStr, rc)
-		if !ok {
-			// Not an absolute URL: npm never emits this shape, so there is
-			// nothing worth logging a skip for.
-			continue
-		}
-
-		edits = append(edits, edit)
-		if edit.To == "" {
-			// Foreign host (a CDN, a mirror): reported so the caller can log
-			// the skip, but nothing in the body changes for it.
-			continue
-		}
-
-		dist["tarball"] = edit.To
-	}
-
-	applied := false
-	for _, edit := range edits {
-		if edit.To != "" {
-			applied = true
-			break
-		}
-	}
-
-	if !applied {
-		if len(edits) == 0 {
-			return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
-		}
-		// Every edit was declined as foreign-host: still a reportable skip,
-		// not RewriteNone, because there was something recognizable here.
-		return registryvocab.RewriteResult{Body: body, Edits: edits, Outcome: registryvocab.RewriteSkippedForeignHost}
-	}
-
-	newBody, err := json.Marshal(obj)
-	if err != nil {
-		// Unreachable: obj came from a successful decode, so every value in
-		// it is already representable as JSON.
-		return registryvocab.RewriteResult{Body: body, Outcome: registryvocab.RewriteNone}
-	}
-	return registryvocab.RewriteResult{Body: newBody, Edits: edits, Outcome: registryvocab.RewriteApplied}
-}
-
 // npmStreamWindowBytes caps the bytes streamNpmPackument holds unwritten while
-// it tokenizes. npm's registry truncates readme, the largest single token in a
-// packument, far below this, so the window bounds memory without ever binding
-// on a real packument.
+// it tokenizes. Readme is the largest single token in a packument, and the
+// abbreviated document npm requests (application/vnd.npm.install-v1+json)
+// carries none; a token over the window just abandons the rewrite and relays
+// verbatim.
 const npmStreamWindowBytes = 1 << 20
+
+// npmStreamWriteBufferBytes sizes the buffer between the rewriter and dst.
+const npmStreamWriteBufferBytes = 32 << 10
 
 // errNpmStreamWindow is the recorder's "window full" signal to the decoder.
 var errNpmStreamWindow = errors.New("token exceeds the stream window")
@@ -195,16 +115,21 @@ type npmFrame struct {
 // versions, one version, dist.
 const npmTarballDepth = 4
 
-// streamNpmPackument is rewriteNpmPackument for a document too large to
-// buffer: it repoints every same-host versions.*.dist.tarball string at the
-// Forwarder as it tokenizes, holding at most npmStreamWindowBytes, and passes
-// every other byte through verbatim. Edits reach onEdit in document order, each
-// before the bytes it edited reach dst. A body it cannot keep interpreting
-// (malformed JSON, a token over the window) is relayed byte-identical from
-// that point and reported as registryvocab.ErrRewriteAbandoned.
+// streamNpmPackument repoints every same-host versions.*.dist.tarball string at
+// the Forwarder as it tokenizes, holding at most npmStreamWindowBytes, and
+// passes every other byte through verbatim. Pacote fetches the packument's
+// embedded absolute URL verbatim instead of deriving it from the registry
+// env-var binding, so without this the download leaves the proxy (issue
+// #3401). A foreign-host tarball is a declined edit (empty To), not a failure
+// of the whole rewrite. Edits reach onEdit in document order, each before the
+// bytes it edited reach dst. A body it cannot keep interpreting (malformed
+// JSON, a body truncated inside a container, a token over the window) is
+// relayed byte-identical from that point and reported as
+// registryvocab.ErrRewriteAbandoned. Concatenated top-level documents are each
+// rewritten; trailing data after the first is not an abandonment.
 func streamNpmPackument(dst io.Writer, src io.Reader, rc registryvocab.RewriteContext, onEdit func(registryvocab.RewriteEdit)) error {
 	rec := &npmRecorder{src: src}
-	out := bufio.NewWriterSize(dst, 32<<10)
+	out := bufio.NewWriterSize(dst, npmStreamWriteBufferBytes)
 	dec := json.NewDecoder(rec)
 	dec.UseNumber()
 
@@ -214,7 +139,7 @@ func streamNpmPackument(dst io.Writer, src io.Reader, rc registryvocab.RewriteCo
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			return finishNpmStream(out, rec, src, err)
+			return finishNpmStream(out, rec, src, err, len(stack)+extra > 0)
 		}
 		off := dec.InputOffset()
 
@@ -300,11 +225,17 @@ func writeNpmTarball(out *bufio.Writer, rec *npmRecorder, off int64, value strin
 	if !ok {
 		return flushNpmTo(out, rec, off)
 	}
+	// Checked before onEdit so onEdit runs only for a value actually edited or
+	// declined. A string token's segment always holds its opening quote, so
+	// this is defensive.
+	quote := bytes.IndexByte(seg, '"')
+	if quote < 0 {
+		return flushNpmTo(out, rec, off)
+	}
 	if onEdit != nil {
 		onEdit(edit)
 	}
-	quote := bytes.IndexByte(seg, '"')
-	if edit.To == "" || quote < 0 {
+	if edit.To == "" {
 		return flushNpmTo(out, rec, off)
 	}
 	encoded, err := json.Marshal(edit.To)
@@ -320,15 +251,20 @@ func writeNpmTarball(out *bufio.Writer, rec *npmRecorder, off int64, value strin
 	return err
 }
 
-// finishNpmStream ends the stream on a Token error. EOF is the normal end; a
+// finishNpmStream ends the stream on a Token error. EOF with no container open
+// is the normal end (one cut off inside a container is abandoned); a
 // src read failure is returned as itself; anything else (a syntax error, a
 // token over the window) abandons interpretation: the unwritten bytes and the
 // rest of src go through verbatim before the abandonment is reported.
-func finishNpmStream(out *bufio.Writer, rec *npmRecorder, src io.Reader, tokErr error) error {
+func finishNpmStream(out *bufio.Writer, rec *npmRecorder, src io.Reader, tokErr error, open bool) error {
 	if rec.srcErr != nil {
 		return rec.srcErr
 	}
 	_, werr := out.Write(rec.raw[rec.written-rec.base:])
+	if tokErr == io.EOF && open {
+		// The decoder reports a body cut off inside a container as a bare EOF.
+		tokErr = io.ErrUnexpectedEOF
+	}
 	if tokErr == io.EOF {
 		if werr != nil {
 			return werr
@@ -344,5 +280,5 @@ func finishNpmStream(out *bufio.Writer, rec *npmRecorder, src io.Reader, tokErr 
 	if werr != nil {
 		return werr
 	}
-	return fmt.Errorf("%w: %v", registryvocab.ErrRewriteAbandoned, tokErr)
+	return fmt.Errorf("%w: %w", registryvocab.ErrRewriteAbandoned, tokErr)
 }

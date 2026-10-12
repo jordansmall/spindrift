@@ -74,8 +74,10 @@ func TestModifyResponse_NpmPackument_RewritesTarballAndLearnsCredentialedPath(t 
 	if got := packumentRR.Body.String(); got != wantBody {
 		t.Errorf("packument body = %s, want %s", got, wantBody)
 	}
-	if got := packumentRR.Header().Get("Content-Length"); got != strconv.Itoa(len(wantBody)) {
-		t.Errorf("Content-Length = %q, want %q", got, strconv.Itoa(len(wantBody)))
+	// The rewrite changes the length and streams, so the upstream's
+	// Content-Length must not survive: the response goes chunked.
+	if got := packumentRR.Header().Get("Content-Length"); got != "" {
+		t.Errorf("Content-Length = %q, want absent (streamed rewrite goes chunked)", got)
 	}
 
 	postReq := httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-1.0.0.tgz", nil)
@@ -265,5 +267,104 @@ func TestModifyResponse_NpmPackument_NonOKStatusNeverMatches(t *testing.T) {
 	}
 	if logged := logBuf.String(); strings.Contains(logged, "npm packument") {
 		t.Errorf("log output mentioned the npm packument row for a non-200 response: %q", logged)
+	}
+}
+
+// A packument well past the old 1 MiB buffering cap is rewritten whole, not
+// relayed untouched: every same-host tarball is repointed, the credentialed
+// path is learned, and the over-cap line is never logged (issue #5003).
+func TestModifyResponse_NpmPackument_LargePackumentIsStreamedAndRewritten(t *testing.T) {
+	const versions = 2500
+	padding := strings.Repeat("x", 2000)
+	var in, want strings.Builder
+	in.WriteString(`{"name":"big","versions":{`)
+	want.WriteString(`{"name":"big","versions":{`)
+	for i := range versions {
+		if i > 0 {
+			in.WriteString(",")
+			want.WriteString(",")
+		}
+		head := `"1.0.` + strconv.Itoa(i) + `":{"description":"` + padding + `","dist":{"tarball":"`
+		tail := `/downloads/pkg-` + strconv.Itoa(i) + `.tgz"}}`
+		in.WriteString(head + "https://registry.example.com" + tail)
+		want.WriteString(head + "http://forwarder.example:9999/@PREFIX@" + tail)
+	}
+	in.WriteString(`}}`)
+	want.WriteString(`}}`)
+	if in.Len() < 4<<20 {
+		t.Fatalf("fixture is %d bytes, want well above 1 MiB", in.Len())
+	}
+
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/registry/big":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(in.String()))
+		case "/downloads/pkg-7.tgz":
+			_, _ = w.Write([]byte("a tgz"))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+	p, routes := newWithEcosystemRows(t, Route{
+		MatchHost:        "registry.example.com",
+		EnforcedPaths:    []string{"/registry"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "npm", Path: "/registry"}},
+		Upstream:         upstream.URL,
+		Credential:       "sekret",
+	})
+	prefix := routes[0].Prefix
+	logBuf := captureLog(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/registry/big", nil)
+	req.Host = "forwarder.example:9999"
+	rr := serve(p, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if got, wantBody := rr.Body.String(), strings.ReplaceAll(want.String(), "@PREFIX@", prefix); got != wantBody {
+		t.Errorf("body differs from the expected rewrite (len %d vs %d)", len(got), len(wantBody))
+	}
+	if got := rr.Header().Get("Content-Length"); got != "" {
+		t.Errorf("Content-Length = %q, want absent", got)
+	}
+	if logged := logBuf.String(); strings.Contains(logged, "left unchanged") {
+		t.Errorf("log reported a skipped rewrite: %.300q", logged)
+	}
+
+	tarballRR := serve(p, httptest.NewRequest(http.MethodGet, "/"+prefix+"/downloads/pkg-7.tgz", nil))
+	if tarballRR.Code != http.StatusOK {
+		t.Errorf("tarball fetch after the packument: status = %d, want %d (credentialed path must be learned)", tarballRR.Code, http.StatusOK)
+	}
+}
+
+// One string token over the stream window cannot be interpreted: the client
+// still gets the upstream's bytes unchanged and the abandonment is logged once
+// naming the row and path.
+func TestModifyResponse_NpmPackument_OversizedTokenRelayedUnchangedAndLogged(t *testing.T) {
+	packument := `{"readme":"` + strings.Repeat("r", 2<<20) + `","versions":{"1.0.0":{"dist":{"tarball":"https://registry.example.com/downloads/pkg-1.0.0.tgz"}}}}`
+
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(packument))
+	})
+	p, routes := newWithEcosystemRows(t, npmRoute(upstream.URL))
+	prefix := routes[0].Prefix
+	logBuf := captureLog(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/"+prefix+"/pkg", nil)
+	req.Host = "forwarder.example:9999"
+	rr := serve(p, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rr.Code, http.StatusOK)
+	}
+	if rr.Body.String() != packument {
+		t.Errorf("body (len %d) differs from upstream's (len %d), want byte-identical", rr.Body.Len(), len(packument))
+	}
+	want := "registryproxy: npm packument: stopped rewriting /" + prefix + "/pkg partway"
+	if n := strings.Count(logBuf.String(), want); n != 1 {
+		t.Errorf("log has %d %q lines, want exactly 1: %.400q", n, want, logBuf.String())
 	}
 }

@@ -25,11 +25,11 @@ var npmRow = Row{
 	BindingEnvVar:  "npm_config_registry",
 	ConfigParser:   parseNpmRegistryConfig,
 	RewriteRows: []registryvocab.RewriteRow{{
-		Name:      "npm packument",
-		Ecosystem: nameNpm,
-		Method:    http.MethodGet,
-		Matches:   npmPackumentMatches,
-		Rewrite:   rewriteNpmPackument,
+		Name:          "npm packument",
+		Ecosystem:     nameNpm,
+		Method:        http.MethodGet,
+		Matches:       npmPackumentMatches,
+		RewriteStream: streamNpmPackument,
 	}},
 }
 
@@ -89,7 +89,7 @@ var npmFamilyVars = []npmFamilyVar{
 // routes[0], each through its own env var: pnpm no longer honors
 // npm_config_*, and an env var is the only override that beats a Target
 // repo's committed .npmrc. Unscoped registries only; these bind packument
-// requests, and rewriteNpmPackument (#3401) re-points embedded tarball URLs.
+// requests, and streamNpmPackument (#3401) re-points embedded tarball URLs.
 func NpmFamilyBindings(port int, prefix string, routes []registrymanifest.Route) ([]EnvExport, []string) {
 	route := firstRoute(routes)
 

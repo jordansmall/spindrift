@@ -1,12 +1,17 @@
 package registryproxy
 
 import (
+	"bytes"
 	"encoding/json"
+	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/registryvocab"
 )
@@ -423,4 +428,84 @@ func TestFakeRewriteRow_ForeignHostAndNoneBothRelayUntouched(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A client that hangs up mid-stream closes the pipe and the upstream body, so
+// the rewriter fails with a closed-pipe error. That is a routine disconnect,
+// not a rewrite failure, and must not be logged as one.
+func TestStreamRewrite_ClientHangupIsNotLoggedAsFailure(t *testing.T) {
+	rewriterDone := make(chan error, 1)
+	row := registryvocab.RewriteRow{
+		Name:      "widget stream",
+		Ecosystem: "widget",
+		Method:    http.MethodGet,
+		Matches: func(routeRelativePath, base string) bool {
+			return routeRelativePath == registryvocab.JoinBase(base, "/stream.json")
+		},
+		RewriteStream: func(dst io.Writer, src io.Reader, _ registryvocab.RewriteContext, _ func(registryvocab.RewriteEdit)) error {
+			_, err := io.Copy(dst, src)
+			rewriterDone <- err
+			return err
+		},
+	}
+
+	upstream := newUpstream(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("{"))
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	p, routes := newProxy(t, []registryvocab.RewriteRow{row}, []Route{{
+		MatchHost:        "widget.example.com",
+		EnforcedPaths:    []string{"/"},
+		EnforcedSubtrees: []registryvocab.Subtree{{Ecosystem: "widget", Path: "/"}},
+		Upstream:         upstream.URL,
+	}})
+	front := httptest.NewServer(p)
+	t.Cleanup(front.Close)
+	logBuf := &lockedBuffer{}
+	prevOutput := log.Writer()
+	log.SetOutput(logBuf)
+	t.Cleanup(func() { log.SetOutput(prevOutput) })
+
+	resp, err := http.Get(front.URL + "/" + routes[0].Prefix + "/stream.json")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	if _, err := io.ReadFull(resp.Body, make([]byte, 1)); err != nil {
+		t.Fatalf("read first byte: %v", err)
+	}
+	resp.Body.Close()
+
+	select {
+	case err := <-rewriterDone:
+		if err == nil {
+			t.Fatal("rewriter returned nil, want the hangup error")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("rewriter never stopped after the client hung up")
+	}
+	// The failure line, if any, is written right after the rewriter returns.
+	time.Sleep(100 * time.Millisecond)
+	if logged := logBuf.String(); strings.Contains(logged, "failed") {
+		t.Errorf("client hangup logged as a rewrite failure: %q", logged)
+	}
+}
+
+// lockedBuffer is a log sink safe to read while the proxy's rewrite goroutine
+// may still be writing.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

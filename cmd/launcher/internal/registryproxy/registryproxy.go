@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"spindrift.dev/launcher/internal/connlimit"
@@ -266,6 +267,13 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 	if len(routes) == 0 {
 		return nil, errors.New("registryproxy: no routes configured")
 	}
+	for _, row := range rewriteRows {
+		// Checked here, not at request time: a row with neither rewriter would
+		// nil-call, and one with both would silently take the stream path.
+		if (row.Rewrite == nil) == (row.RewriteStream == nil) {
+			return nil, fmt.Errorf("registryproxy: rewrite row %q must set exactly one of Rewrite and RewriteStream", row.Name)
+		}
+	}
 
 	states := make([]routeState, len(routes))
 	seenPrefixes := make(map[string]bool, len(routes))
@@ -410,10 +418,11 @@ func New(routes []Route, rewriteRows []registryvocab.RewriteRow) (http.Handler, 
 }
 
 // maxRewriteBodyBytes caps how much of a response body modifyResponse buffers
-// to run a registryvocab.RewriteRow against. A cargo config.json is a few
-// hundred bytes; a body over the cap is relayed untouched rather than
-// rewritten or truncated, so a hostile upstream cannot make this proxy hold
-// something enormous in memory.
+// to run a buffered registryvocab.RewriteRow (Rewrite) against. A cargo
+// config.json is a few hundred bytes; a body over the cap is relayed untouched
+// rather than rewritten or truncated, so a hostile upstream cannot make this
+// proxy hold something enormous in memory. A streaming row (RewriteStream)
+// never buffers the body, so it needs no cap.
 const maxRewriteBodyBytes = 1 << 20 // 1 MiB
 
 // foreignHostSkipLogFormat is shared by the two sites that report a declined
@@ -421,11 +430,21 @@ const maxRewriteBodyBytes = 1 << 20 // 1 MiB
 // this exact text.
 const foreignHostSkipLogFormat = "registryproxy: %s: %q names a host other than the route's match-host, left unchanged"
 
+// nothingRewritableLogFormat is shared by the buffered and streaming paths for
+// a matched row whose body held nothing to rewrite, so the two read alike.
+const nothingRewritableLogFormat = "registryproxy: %s: matched but body held nothing rewritable on %s, left unchanged"
+
+// requestPath is the client-facing path, route prefix included, for log lines.
+func (sel selectedRoute) requestPath() string {
+	return "/" + sel.rs.prefix + sel.path
+}
+
 // modifyResponse rewrites a response body when a caller-supplied row matches
-// the response's method and route-relative path. A matching row's Rewrite runs
-// unconditionally, so every row must name a body-bearing method: a row naming
-// HEAD would have its return spliced onto an empty HEAD body. None does, so a
-// HEAD response relays by the unrewritable-GET path (issue #2854).
+// the response's method and route-relative path. A matching row's Rewrite (or
+// RewriteStream) runs unconditionally, so every row must name a body-bearing
+// method: a row naming HEAD would have its return spliced onto an empty HEAD
+// body. None does, so a HEAD response relays by the unrewritable-GET path
+// (issue #2854).
 func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	sel, ok := resp.Request.Context().Value(selectedRouteContextKey{}).(selectedRoute)
 	if !ok || sel.forwarder == nil {
@@ -441,6 +460,16 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 		return nil
 	}
 
+	rc := registryvocab.RewriteContext{
+		MatchHost: sel.rs.matchHost,
+		Forwarder: sel.forwarder,
+		Prefix:    sel.rs.prefix,
+	}
+	if row.RewriteStream != nil {
+		h.streamRewrite(resp, row, sel, rc)
+		return nil
+	}
+
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRewriteBodyBytes+1))
 	if err != nil {
 		resp.Body.Close()
@@ -453,17 +482,13 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 		// of the unread remainder instead of buffering the rest too. The cap
 		// exists so an oversized body is never fully held in memory. The line
 		// names the row and request path only, never the body or credential.
-		log.Printf("registryproxy: %s: body over %d bytes on /%s%s, left unchanged", row.Name, maxRewriteBodyBytes, sel.rs.prefix, sel.path)
+		log.Printf("registryproxy: %s: body over %d bytes on %s, left unchanged", row.Name, maxRewriteBodyBytes, sel.requestPath())
 		resp.Body = &bodyWithClose{Reader: io.MultiReader(bytes.NewReader(body), resp.Body), closer: resp.Body}
 		return nil
 	}
 	resp.Body.Close()
 
-	result := row.Rewrite(body, registryvocab.RewriteContext{
-		MatchHost: sel.rs.matchHost,
-		Forwarder: sel.forwarder,
-		Prefix:    sel.rs.prefix,
-	})
+	result := row.Rewrite(body, rc)
 	// Tested for the one outcome that rewrites, not against the ones that do
 	// not, so a rewriter growing another skip outcome later relays untouched
 	// instead of silently taking the rewrite path.
@@ -484,27 +509,17 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 		default:
 			// The shape matched a row but the body held nothing rewritable:
 			// not JSON, no matching field, or still-compressed bytes (issue
-			// #3175). Names the row only, never the body or the credential.
-			log.Printf("registryproxy: %s: matched but body held nothing rewritable, left unchanged", row.Name)
+			// #3175). Names the row and path only, never the body or the
+			// credential.
+			log.Printf(nothingRewritableLogFormat, row.Name, sel.requestPath())
 		}
 		// Byte-identical restore: every header, Content-Length included, is
 		// left exactly as the upstream sent it.
 		resp.Body = io.NopCloser(bytes.NewReader(body))
 		return nil
 	}
-	// From and To are URLs, never the credential, which is off the request and
-	// response by the time this hook runs.
 	for _, edit := range result.Edits {
-		// An empty To declines this one value (a packument tarball naming a
-		// CDN, say) alongside others the row did rewrite. Never learned from,
-		// or its unset LearnedPath would normalize to "/" and admit the whole
-		// host (issue #3401).
-		if edit.To == "" {
-			log.Printf(foreignHostSkipLogFormat, row.Name, edit.From)
-			continue
-		}
-		log.Printf("registryproxy: %s: rewrote %s -> %s", row.Name, edit.From, edit.To)
-		h.learnRewriteBase(sel.rs.prefix, edit.LearnedPath)
+		h.noteEdit(row, sel, edit)
 	}
 	resp.Body = io.NopCloser(bytes.NewReader(result.Body))
 	resp.ContentLength = int64(len(result.Body))
@@ -514,9 +529,84 @@ func (h *routeLogHandler) modifyResponse(resp *http.Response) error {
 	return nil
 }
 
+// noteEdit logs one edit and, unless it was declined, learns its target's
+// subtree. From and To are URLs, never the credential, which is off the
+// request and response by the time modifyResponse runs.
+func (h *routeLogHandler) noteEdit(row *registryvocab.RewriteRow, sel selectedRoute, edit registryvocab.RewriteEdit) {
+	// An empty To declines this one value (a packument tarball naming a CDN,
+	// say) alongside others the row did rewrite. Never learned from, or its
+	// unset LearnedPath would normalize to "/" and admit the whole host
+	// (issue #3401).
+	if edit.To == "" {
+		log.Printf(foreignHostSkipLogFormat, row.Name, edit.From)
+		return
+	}
+	log.Printf("registryproxy: %s: rewrote %s -> %s", row.Name, edit.From, edit.To)
+	h.learnRewriteBase(sel.rs.prefix, edit.LearnedPath)
+}
+
+// streamRewrite replaces resp.Body with the row's RewriteStream output, piped
+// as the upstream body is read, so a document too large to buffer is still
+// rewritten (issue #5003). The length changes, so the response goes chunked.
+// ReverseProxy sends headers before the body is consumed, so a malformed body
+// cannot fall back to passthrough once bytes are out: the rewriter relays the
+// rest verbatim and the abandonment is logged as the stream ends.
+func (h *routeLogHandler) streamRewrite(resp *http.Response, row *registryvocab.RewriteRow, sel selectedRoute, rc registryvocab.RewriteContext) {
+	upstream := resp.Body
+	pr, pw := io.Pipe()
+	var clientGone atomic.Bool
+	panicguard.Go(func() {
+		edits := 0
+		err := row.RewriteStream(pw, upstream, rc, func(edit registryvocab.RewriteEdit) {
+			edits++
+			h.noteEdit(row, sel, edit)
+		})
+		upstream.Close()
+		// Every log line precedes the pipe close, so a reader that has seen
+		// EOF (or the error) can rely on the line already being written.
+		switch {
+		case err == nil:
+			if edits == 0 {
+				log.Printf(nothingRewritableLogFormat, row.Name, sel.requestPath())
+			}
+			pw.Close()
+		case errors.Is(err, registryvocab.ErrRewriteAbandoned):
+			log.Printf("registryproxy: %s: stopped rewriting %s partway (%v), rest left unchanged", row.Name, sel.requestPath(), err)
+			pw.Close()
+		default:
+			// A hangup surfaces here as a closed-pipe, closed-body, or
+			// cancelled-context error depending on which side noticed first,
+			// so key on the cause rather than the error text.
+			if !clientGone.Load() && resp.Request.Context().Err() == nil {
+				// The client sees a truncated body, which ReverseProxy
+				// reports as a copy error.
+				log.Printf("registryproxy: %s: rewriting %s failed: %v", row.Name, sel.requestPath(), err)
+			}
+			pw.CloseWithError(err)
+		}
+	})
+	resp.Body = &bodyWithClose{Reader: pr, closer: closerFunc(func() error {
+		// Closing upstream too frees a goroutine blocked in an upstream Read
+		// when the client hangs up.
+		clientGone.Store(true)
+		pr.Close()
+		return upstream.Close()
+	})}
+	// Content-Length goes even when nothing is edited: the edit count is not
+	// known until the stream ends, after headers are sent. The body of a no-op
+	// is still byte-identical, just chunked.
+	resp.ContentLength = -1
+	resp.Header.Del("Content-Length")
+}
+
+// closerFunc adapts a function to io.Closer.
+type closerFunc func() error
+
+func (f closerFunc) Close() error { return f() }
+
 // bodyWithClose pairs a Reader with the real response body's Close, so
-// modifyResponse's over-cap relay path still closes the upstream connection
-// once ReverseProxy has finished relaying it.
+// modifyResponse's over-cap relay and streaming paths still close the
+// upstream connection once ReverseProxy has finished relaying it.
 type bodyWithClose struct {
 	io.Reader
 	closer io.Closer
