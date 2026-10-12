@@ -121,6 +121,10 @@ type view struct {
 	SelfUpdate    string
 	SelfUpdateRev string
 	SelfDrain     bool
+	// SelfBlocked marks a Daemon deliberately running its old build because its
+	// next one failed prebuild or smoke test; the reason is that failure's text.
+	SelfBlocked       bool
+	SelfBlockedReason string
 
 	History    []historyEntry // newest first; shown in every mode
 	HistoryErr error          // an Events generation that exists but could not be read
@@ -213,6 +217,9 @@ func (s *server) viewFrom(st *Status, raw []byte, err error) view {
 	if su := st.SelfUpdate; su != nil {
 		v.SelfUpdate = selfUpdateLabel(su.Phase)
 		v.SelfUpdateRev = shortRev(su.Revision)
+		if su.Phase == selfUpdateBlocked {
+			v.SelfBlocked, v.SelfBlockedReason = true, su.Reason
+		}
 		// An unrelated halt (breaker, operator stop) can land while the phase is
 		// built (recordHalt also resets waiting to built); only self-changed drains.
 		v.SelfDrain = v.Halted && su.Phase == selfUpdateBuilt &&

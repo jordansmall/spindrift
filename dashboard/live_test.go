@@ -195,6 +195,32 @@ func TestEventsSelfUpdatePhaseChangeSendsFrame(t *testing.T) {
 	st.quiet(t)
 }
 
+func TestEventsBlockedBannerAppearsAndClears(t *testing.T) {
+	st := openStream(t, statusJSON(t, "working", "", noSlots), "")
+	st.expect(t, "status")
+	st.expect(t, "history")
+	st.writeStatus(t, withSelfUpdate(statusJSON(t, "working", "", noSlots), "blocked", selfRev, "prebuild failed"))
+	st.expect(t, "status", "banner blocked", "prebuild failed", "<code>0123456789ab</code>")
+	st.writeStatus(t, withSelfUpdate(statusJSON(t, "working", "", noSlots), "building", selfRev))
+	f := st.expect(t, "status", "rebuilding")
+	if strings.Contains(f.data, "banner blocked") {
+		t.Errorf("banner survived the phase moving on:\n%s", f.data)
+	}
+	st.quiet(t)
+}
+
+func TestEventsBlockedBannerClearsWhenSelfUpdateGoes(t *testing.T) {
+	st := openStream(t, withSelfUpdate(statusJSON(t, "working", "", noSlots), "blocked", selfRev, "prebuild failed"), "")
+	st.expect(t, "status", "banner blocked")
+	st.expect(t, "history")
+	st.writeStatus(t, statusJSON(t, "working", "", noSlots))
+	f := st.expect(t, "status")
+	if strings.Contains(f.data, "banner blocked") {
+		t.Errorf("banner survived self_update going absent:\n%s", f.data)
+	}
+	st.quiet(t)
+}
+
 func TestEventsAppendedEntrySendsOneFrame(t *testing.T) {
 	st := openStream(t, statusJSON(t, "working", "", noSlots), evLine("2026-10-07T11:00:00Z", "child_start"))
 	st.expect(t, "status")

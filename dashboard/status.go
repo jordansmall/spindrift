@@ -51,7 +51,7 @@ type Status struct {
 type SelfUpdate struct {
 	Phase    string `json:"phase"`
 	Revision string `json:"revision"`
-	// Reason is held for the `blocked` phase; nothing reads it yet.
+	// Reason is published only with the `blocked` phase.
 	Reason string `json:"reason,omitempty"`
 }
 
@@ -62,6 +62,7 @@ const (
 	selfUpdateBuilt      = "built"
 	selfUpdateWaiting    = "waiting"
 	selfUpdateRestarting = "restarting"
+	selfUpdateBlocked    = "blocked"
 )
 
 // haltReasonSelfChanged mirrors the HaltSelfChanged row's reason in the
