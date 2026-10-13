@@ -37,3 +37,28 @@ func TestEncodeSpindriftOpWireFormat(t *testing.T) {
 		})
 	}
 }
+
+func TestWireConstants(t *testing.T) {
+	tests := []struct{ name, got, want string }{
+		{"TypeSpindriftOp", hostop.TypeSpindriftOp, "spindrift_op"},
+		{"OpPassStart", hostop.OpPassStart, "pass_start"},
+		{"OpVerdict", hostop.OpVerdict, "verdict"},
+		{"OpPassNoOutcome", hostop.OpPassNoOutcome, "pass_no_outcome"},
+		{"OpDecision", hostop.OpDecision, "decision"},
+		{"OpRunStateError", hostop.OpRunStateError, "run_state_error"},
+		{"OpPassUsage", hostop.OpPassUsage, "pass_usage"},
+		{"OpLandDelta", hostop.OpLandDelta, "land_delta"},
+		{"OpDeltaReviewTrigger", hostop.OpDeltaReviewTrigger, "delta_review_trigger"},
+		{"OpSignal", hostop.OpSignal, "signal"},
+		{"OpDispatchStart", hostop.OpDispatchStart, "dispatch_start"},
+		{"OpPromptHashes", hostop.OpPromptHashes, "prompt_hashes"},
+		{"OpDispatchSettled", hostop.OpDispatchSettled, "dispatch_settled"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != tc.want {
+				t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+			}
+		})
+	}
+}
