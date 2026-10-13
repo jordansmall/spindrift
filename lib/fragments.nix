@@ -214,8 +214,9 @@ let
     # The write-mechanism split (issue #2019): a filer under read-only holds
     # no write token, so its label and file steps emit the host-mediated
     # SPINDRIFT_ISSUE_INTENT relay instead of gh label create/gh issue create.
-    # Only the write mechanism is gated; the filer's authoring judgment stays
-    # in filer-prompt.md's unconditional dedup/title/body steps.
+    # Only the write mechanism is gated here; the filer's authoring judgment
+    # stays in filer-prompt.md's unconditional dedup/title/body steps (the
+    # dedup search commands fork separately on the read axis, below).
 
     # The direct case forks again on ISSUE_TRACKER (issue #1963): fj has no
     # label verb and `fj issue create` has no --label flag, so forgejo renders
@@ -287,6 +288,25 @@ let
       gate = "CHORE_INPUT";
       fragment = "filer-label-relay-butler-records.md";
       var = "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP";
+    }
+    # Step 2's tracker search commands fork on the read axis (issue #5127),
+    # not FILER_FILE_DIRECT_GH: a relay Filer still reads through the tracker.
+    # jira has no read axis (lib/backends/default.nix, no trackerAxisRead), so
+    # it takes the GitHub arm like every other ISSUE_TRACKER_GITHUB fragment.
+    {
+      gate = "ISSUE_TRACKER_GITHUB";
+      fragment = "filer-dedup-search.md";
+      var = "FILER_DEDUP_SEARCH_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_FORGEJO";
+      fragment = "filer-dedup-search-forgejo.md";
+      var = "FILER_DEDUP_SEARCH_FORGEJO_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_LOCAL";
+      fragment = "filer-dedup-search-local.md";
+      var = "FILER_DEDUP_SEARCH_LOCAL_STEP";
     }
     {
       gate = "FILER_FILE_DIRECT_GH";
