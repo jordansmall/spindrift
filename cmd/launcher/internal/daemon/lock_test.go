@@ -89,17 +89,23 @@ func TestAcquireCheckoutLock_SecondAcquireInSameProcessRefused(t *testing.T) {
 
 	// first genuinely holds LOCK_EX for the rest of the test, so the
 	// second acquire must exhaust the retry added for issue #3545 and
-	// still refuse — bound the refusal against acquireGraceTotal itself
-	// (with slack for scheduling), not a magic duration, so the test
-	// keeps tracking whatever the const is tuned to.
-	start := time.Now()
+	// still refuse. Bound the retries by count, not wall clock: each sleep
+	// lasts at least acquireGraceStep, so a loaded CI runner can only
+	// lower the count, never push it past the bound.
+	sleeps := 0
+	acquireSleep = func(d time.Duration) {
+		sleeps++
+		time.Sleep(d)
+	}
+	t.Cleanup(func() { acquireSleep = time.Sleep })
+
 	_, err = AcquireCheckoutLock(dir, []Kind{KindOf(dispatchkind.Research)})
-	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("second AcquireCheckoutLock: want error, got nil")
 	}
-	if elapsed > 3*acquireGraceTotal {
-		t.Fatalf("second AcquireCheckoutLock took %v, want at most ~%v (3x acquireGraceTotal for scheduling slack)", elapsed, 3*acquireGraceTotal)
+	maxSleeps := int(acquireGraceTotal/acquireGraceStep) + 1
+	if sleeps < 1 || sleeps > maxSleeps {
+		t.Fatalf("second AcquireCheckoutLock slept %d times between attempts, want 1..%d (retries until acquireGraceTotal, then refuses)", sleeps, maxSleeps)
 	}
 
 	want := fmt.Sprintf("pid=%d", os.Getpid())
