@@ -3,6 +3,7 @@ package settle
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
@@ -140,6 +141,36 @@ func TestSelfHeal_LocalForge_RelaysBundleBeforeMergeAndRecordsLandingRef(t *test
 	}
 	if got, want := fc.RecordLandingCalls[len(fc.RecordLandingCalls)-1], (forge.RecordLandingCall{Num: "1", Landing: "integration/1694@abc123"}); got != want {
 		t.Errorf("final RecordLanding call = %+v, want %+v", got, want)
+	}
+}
+
+// The post-merge LandingRef upgrade rewrites the landing, so it must carry the
+// run's pass again or the new landing would pair with a cleared pass (issue
+// #5189).
+func TestSelfHeal_LocalForge_LandingRefUpgradeCarriesPass(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "immediate"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	fc.LandingRefValue = "integration/1694@abc123"
+	branch := fc.AgentBranch("1")
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
+	passes := implementThenFixPasses()
+
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
+
+	if landing != landingMerged {
+		t.Fatalf("selfHeal = %v, want landingMerged", landing)
+	}
+	wantLanding := []forge.RecordLandingCall{{Num: "1", Landing: branch}, {Num: "1", Landing: "integration/1694@abc123"}}
+	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
+		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
+	}
+	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "fix"}, {Num: "1", Pass: 2, Kind: "fix"}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
 	}
 }
 

@@ -40,8 +40,9 @@ type localFrontmatter struct {
 	// a cached merge-state.
 	Landing string
 	// LandingPass and LandingPassKind are advisory provenance for Landing
-	// (issue #2983). Zero or empty when never recorded, or when Landing
-	// predates these fields.
+	// (issue #2983). Zero or empty when never recorded, when Landing
+	// predates these fields, or when settle recorded Landing without pass
+	// evidence.
 	LandingPass     int
 	LandingPassKind string
 	// Abandoned means the landing PR closed without merging (ADR 0029).

@@ -248,9 +248,9 @@ type LandingRecorder interface {
 // selection ever reads it. Only the local adapter implements it.
 type LandingPassRecorder interface {
 	// RecordLandingPass persists the 1-indexed pass number and role
-	// ("implement", "review", "fix", "land", ...) of the pass whose log the
-	// settled outcome was parsed from. Best-effort and additive: it never
-	// changes what RecordLanding does.
+	// ("implement", "review", "fix", "land", ...) of the pass that produced
+	// issue num's recorded landing. Best-effort and additive: it never
+	// changes what RecordLanding does. Pass 0 with an empty kind clears it.
 	RecordLandingPass(num string, pass int, kind string) error
 }
 
