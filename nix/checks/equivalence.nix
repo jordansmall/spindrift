@@ -12,6 +12,7 @@
 let
   inherit (fixtures)
     harness
+    dogfoodOpencodeHarness
     nonRustHarness
     leanHarness
     customHarness
@@ -140,7 +141,9 @@ in
   # The dogfood adopts the Driver map (ADR 0064, issue #5054): claude stays the
   # default Driver, so the unsuffixed apps are the claude ones
   # (flakemodule-equivalence above pins the Harness itself), and opencode
-  # exposes its own apps and, on Linux, its own image.
+  # exposes its own apps and, on Linux, its own image, each equal to a direct
+  # opencode mkHarness call so a wrong model, roster, or daemon ref fails here
+  # rather than passing on the image name alone (issue #5090).
   flakemodule-dogfood-drivers =
     let
       inherit (pkgs.lib) assertMsg;
@@ -158,16 +161,18 @@ in
     assert assertMsg (
       config.apps.claude-daemon.program == config.apps.daemon.program
     ) "apps.claude-daemon must be the default Driver's daemon (apps.daemon)";
-    assert assertMsg (
-      config.apps.opencode.program != config.apps.default.program
-    ) "apps.opencode must run the opencode Harness, not the default one";
-    assert assertMsg (
-      config.apps.opencode-daemon.program != config.apps.daemon.program
-    ) "apps.opencode-daemon must run the opencode Harness, not the default one";
-    assert assertMsg (
-      !pkgs.stdenv.hostPlatform.isLinux
-      || config.packages.agent-image-opencode.drvPath != config.packages.agent-image-claude.drvPath
-    ) "agent-image-opencode must be a distinct image from agent-image-claude";
+    assert assertMsg (config.apps.opencode.program == dogfoodOpencodeHarness.apps.default.program)
+      "apps.opencode must be the direct opencode mkHarness call's app (fixtures.dogfoodOpencodeHarness)";
+    assert assertMsg (config.apps.opencode-daemon.program == dogfoodOpencodeHarness.apps.daemon.program)
+      "apps.opencode-daemon must be the direct opencode mkHarness call's daemon (fixtures.dogfoodOpencodeHarness)";
+    assert assertMsg
+      (
+        !pkgs.stdenv.hostPlatform.isLinux
+        ||
+          config.packages.agent-image-opencode.drvPath
+          == dogfoodOpencodeHarness.packages.agent-image-opencode.drvPath
+      )
+      "agent-image-opencode must be the direct opencode mkHarness call's image (fixtures.dogfoodOpencodeHarness)";
     pkgs.runCommand "flakemodule-dogfood-drivers" { } "touch $out";
 
   # A minimal flake-parts consumer that imports the shim evaluates and
