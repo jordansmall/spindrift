@@ -1114,23 +1114,30 @@ in
       '';
 
   # The after-rebase block (fetch / merge-base / rebase plus the After-rebase
-  # rule paragraph) is duplicated in commit-push-git.md and
-  # commit-push-outbox.md; only the git copy's trailing " Then push:" differs.
-  # Nothing structural ties the copies together, so diff them (issue #4412,
-  # found during #4408).
+  # rule paragraph) is duplicated in commit-push-git.md,
+  # commit-push-outbox.md and commit-push-local.md; only the git copy's
+  # trailing " Then push:" and the local copy's missing CI clause (a local
+  # forge has no CI) differ. Nothing structural ties the copies together, so
+  # diff them (issue #4412, found during #4408; local copy issue #5251).
   commit-push-after-rebase-rule-parity = pkgs.runCommand "commit-push-after-rebase-rule-parity" { } ''
     slice() {
-      awk 'prev=="```" && $0=="git fetch origin"{f=1; print prev} f{print} f && /let CI be the final gate\./{exit} {prev=$0}' "$1" > "$2"
-      tail -n 1 "$2" | grep -q 'let CI be the final gate\.' || {
-        echo "$1 yielded no complete after-rebase block -- fence/'git fetch origin'/'let CI be the final gate.' anchors moved?" >&2
+      end="$3" awk 'prev=="```" && $0=="git fetch origin"{f=1; print prev} f{print} f && $0 ~ ENVIRON["end"]{exit} {prev=$0}' "$1" > "$2"
+      tail -n 1 "$2" | grep -q "$3" || {
+        echo "$1 yielded no complete after-rebase block -- fence/'git fetch origin'/end anchors moved?" >&2
         exit 1
       }
     }
-    slice ${../../templates/default/prompts/fragments/commit-push-git.md} git-block.txt
-    slice ${../../templates/default/prompts/fragments/commit-push-outbox.md} outbox-block.txt
+    slice ${../../templates/default/prompts/fragments/commit-push-git.md} git-block.txt 'let CI be the final gate\.'
+    slice ${../../templates/default/prompts/fragments/commit-push-outbox.md} outbox-block.txt 'let CI be the final gate\.'
+    slice ${../../templates/default/prompts/fragments/commit-push-local.md} local-block.txt 'Otherwise skip it\.$'
     sed -i '$ s/ Then push:$//' git-block.txt
     diff git-block.txt outbox-block.txt || {
       echo "commit-push-git.md and commit-push-outbox.md after-rebase blocks have drifted; keep them byte-identical (bar the git copy's trailing ' Then push:')" >&2
+      exit 1
+    }
+    sed '$ s/ and let CI be the final gate\.$/./' outbox-block.txt > outbox-sans-ci.txt
+    diff outbox-sans-ci.txt local-block.txt || {
+      echo "commit-push-local.md's after-rebase block has drifted from commit-push-outbox.md's; keep them byte-identical (bar the CI clause)" >&2
       exit 1
     }
     touch $out

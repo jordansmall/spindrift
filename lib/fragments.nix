@@ -694,9 +694,15 @@ let
     # it. The pre-commit rebase-and-recheck step still renders either way: a
     # stale base is a stale base regardless of write access.
     {
-      gate = "BOX_ACCESS_READ_WRITE";
+      gate = "BOX_PUSH_READ_WRITE";
       fragment = "commit-push-git.md";
       var = "COMMIT_PUSH_READ_WRITE_STEP";
+    }
+    # Host-mediated read-write (issue #5251): the clone source is read-only.
+    {
+      gate = "HOST_MEDIATED_READ_WRITE";
+      fragment = "commit-push-local.md";
+      var = "COMMIT_PUSH_LOCAL_STEP";
     }
     {
       gate = "BOX_ACCESS_READ_ONLY";
@@ -709,9 +715,15 @@ let
     # result of holding no write token, not evidence of a broken or
     # under-scoped one, so it must never be triaged or escalated as such.
     {
-      gate = "BOX_ACCESS_READ_WRITE";
+      gate = "BOX_PUSH_READ_WRITE";
       fragment = "if-blocked-triage-git.md";
       var = "IF_BLOCKED_TRIAGE_READ_WRITE_STEP";
+    }
+    # Host-mediated read-write (issue #5251): no push exists to triage.
+    {
+      gate = "HOST_MEDIATED_READ_WRITE";
+      fragment = "if-blocked-triage-local.md";
+      var = "IF_BLOCKED_TRIAGE_LOCAL_STEP";
     }
     {
       gate = "BOX_ACCESS_READ_ONLY";
@@ -722,9 +734,15 @@ let
     # push-capable token on the failure path either, so "Push what you have"
     # must not attempt a `git push` there.
     {
-      gate = "BOX_ACCESS_READ_WRITE";
+      gate = "BOX_PUSH_READ_WRITE";
       fragment = "if-blocked-push-git.md";
       var = "IF_BLOCKED_PUSH_READ_WRITE_STEP";
+    }
+    # Host-mediated read-write (issue #5251): hand the branch to the harness.
+    {
+      gate = "HOST_MEDIATED_READ_WRITE";
+      fragment = "if-blocked-push-local.md";
+      var = "IF_BLOCKED_PUSH_LOCAL_STEP";
     }
     {
       gate = "BOX_ACCESS_READ_ONLY";
@@ -736,8 +754,8 @@ let
     # SPINDRIFT_PR_INTENT line instead of running `gh pr view`/`gh pr create`.
     # The read-write case forks on CODE_FORGE (issue #5099), as the OPEN A PULL
     # REQUEST create step does: a forgejo Box has no `gh` for the PR check. A
-    # git Box has no PR at all (issue #5233), so it gets a no-PR step in the
-    # same slot.
+    # git or local Box has no PR at all (issue #5233), so it gets a no-PR step
+    # in the same slot.
     {
       gate = "IF_BLOCKED_PR_RW_GH";
       fragment = "if-blocked-pr-git.md";

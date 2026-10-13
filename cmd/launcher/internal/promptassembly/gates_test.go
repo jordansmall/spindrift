@@ -635,3 +635,68 @@ func TestGatesChoreInput(t *testing.T) {
 		})
 	}
 }
+
+// A host-mediated remote (a read-only clone source, ADR 0033) never lets a
+// read-write Box push, so the push gates flip to the host-mediated arm, while
+// the unset relay bit puts its PR step on the no-PR arm (issue #5251).
+func TestGatesHostMediatedReadWrite(t *testing.T) {
+	cases := []struct {
+		name string
+		env  Env
+		want map[string]bool
+	}{
+		{
+			name: "host-mediated read-write",
+			env:  Env{BoxWriteEnabled: true, HostMediatedRemote: true},
+			want: map[string]bool{
+				"BOX_PUSH_READ_WRITE":      false,
+				"HOST_MEDIATED_READ_WRITE": true,
+				"IF_BLOCKED_PR_RW_GH":      false,
+				"NO_PR_FORGE_READ_WRITE":   true,
+			},
+		},
+		{
+			name: "github read-write",
+			env:  Env{BoxWriteEnabled: true, ForgeBackend: "GH", OutboxRelayCapable: true},
+			want: map[string]bool{
+				"BOX_PUSH_READ_WRITE":      true,
+				"HOST_MEDIATED_READ_WRITE": false,
+				"IF_BLOCKED_PR_RW_GH":      true,
+			},
+		},
+		{
+			name: "forgejo read-write",
+			env:  Env{BoxWriteEnabled: true, ForgeBackend: "FORGEJO", OutboxRelayCapable: true},
+			want: map[string]bool{
+				"BOX_PUSH_READ_WRITE":      true,
+				"HOST_MEDIATED_READ_WRITE": false,
+			},
+		},
+		{
+			name: "read-only",
+			env:  Env{BoxWriteEnabled: false},
+			want: map[string]bool{
+				"BOX_PUSH_READ_WRITE":      false,
+				"HOST_MEDIATED_READ_WRITE": false,
+			},
+		},
+		{
+			name: "read-only host-mediated",
+			env:  Env{BoxWriteEnabled: false, HostMediatedRemote: true},
+			want: map[string]bool{
+				"BOX_PUSH_READ_WRITE":      false,
+				"HOST_MEDIATED_READ_WRITE": false,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Gates(tc.env)
+			for k, want := range tc.want {
+				if got[k] != want {
+					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc.env, k, got[k], want)
+				}
+			}
+		})
+	}
+}

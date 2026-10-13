@@ -39,6 +39,14 @@ func accessForgeGates(e Env) map[string]bool {
 	g["IF_BLOCKED_PR_RW_GH"] = g["OPEN_PR_CREATE_RW_GH"] && g["PR_FORGE_READ_WRITE"]
 	g["IF_BLOCKED_PR_RW_FORGEJO"] = g["OPEN_PR_CREATE_RW_FORGEJO"] && g["PR_FORGE_READ_WRITE"]
 
+	// On a host-mediated forge (ADR 0033) the clone source is a read-only
+	// mount and the launcher lands the branch host-side, so a read-write Box
+	// there never pushes (issue #5251); the no-PR gates above already cover
+	// its PR step and landing line. Keyed on the bit, never on the CODE_FORGE
+	// name.
+	g["BOX_PUSH_READ_WRITE"] = e.BoxWriteEnabled && !e.HostMediatedRemote
+	g["HOST_MEDIATED_READ_WRITE"] = e.BoxWriteEnabled && e.HostMediatedRemote
+
 	// The fix-pass CI-read step forks on backend regardless of box access.
 	g["FIX_CI_READ_GH"] = backend == "GH"
 	g["FIX_CI_READ_FORGEJO"] = backend == "FORGEJO"
