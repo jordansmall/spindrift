@@ -1,9 +1,8 @@
 **Always rebase onto the latest base immediately before finishing** — never
 leave the branch on a stale base. This keeps the branch's tested tree current
-with any siblings that landed while you worked: the launcher merges a green PR
-as-is and does not re-rebase it for you, so a fresh base is the branch's
-freshness guarantee (a stale base also produces phantom diffs that trip push
-guards):
+with any siblings that landed while you worked: the launcher does not
+re-rebase a green PR for you, so a fresh base is the branch's freshness
+guarantee (a stale base also produces phantom diffs that trip push guards):
 
 ```
 git fetch origin

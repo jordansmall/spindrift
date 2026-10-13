@@ -140,19 +140,20 @@ the Harness bundles them out of the container after you exit.
    watch, and nothing further for you to do.
 
 **`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
-the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
-0038 + issue #1961): continue with OPEN A PULL REQUEST below.
+the Forgejo CLI and the launcher watches CI and applies its `MERGE_MODE`
+host-side, ADR 0038 + issue #1961): continue with OPEN A PULL REQUEST below.
 
 **`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
 
 # OPEN A PULL REQUEST
 
 ${OPEN_PR_PUSH_READ_WRITE_STEP}${OPEN_PR_PUSH_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_WRITE_STEP}${OPEN_PR_CREATE_READ_WRITE_FORGEJO_STEP}${OPEN_PR_CREATE_READ_ONLY_STEP}${OPEN_PR_CREATE_READ_ONLY_SOCKET_STEP}${PR_BODY_CLOSES_STEP}${PR_BODY_LOCAL_REF_STEP}${PR_BODY_LOCAL_NOREF_STEP}The PR opens as a **draft** and stays a **draft** — the launcher flips it to
-ready once CI reaches green, immediately before it merges (the launcher
-already gates on CI green itself, so there is nothing left for you to watch
-or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
-(outside this container) owns the CI-green decision, the ready flip, the
-rebase-merge, and the complete-label swap.
+ready once CI reaches green (the launcher already gates on CI green itself, so
+there is nothing left for you to watch or confirm here), then applies its
+configured `MERGE_MODE`, subject to its merge guard: it merges the PR, queues
+the forge's auto-merge, or leaves it open for a human to merge. Do NOT merge
+and do NOT flip it yourself; the LAUNCHER (outside this container) owns the
+CI-green decision, the ready flip, any merge, and the complete-label swap.
 
 # OUTCOME
 
