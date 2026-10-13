@@ -1789,10 +1789,10 @@ in
       would not catch this regression.'';
     pkgs.runCommand "consumer-knob-host-realized-derivation-tags-drvpath" { } "touch $out";
 
-  # The `run`/`build` app-style aliases promised gone in v0.2.0 (MIGRATING.md)
-  # must stay gone from the flake outputs: `nix run .#run` should give an
-  # unknown-output error, not a forwarding alias (issue #613). The nix-output
-  # analogue of TestEngageAliasRemoved.
+  # The `run`/`build` app-style aliases removed in v0.5.0 (MIGRATING.md;
+  # promised for v0.2.0, see ADR 0010) must stay gone from the flake outputs:
+  # `nix run .#run` should give an unknown-output error, not a forwarding alias
+  # (issue #613). The nix-output analogue of TestEngageAliasRemoved.
   run-build-aliases-removed =
     let
       inherit (pkgs.lib) assertMsg;
