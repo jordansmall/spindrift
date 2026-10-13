@@ -759,7 +759,7 @@ func TestScheduleDemandFailedRestsProbingKeepingCount(t *testing.T) {
 	}
 }
 
-func TestScheduleObserveWokeOnlyWhenStartableSetGrows(t *testing.T) {
+func TestScheduleObserveWokeOnlyWhenKindBecomesStartableOrProbeDue(t *testing.T) {
 	work := func(r ChildOutcome) ChildDone { return ChildDone{Kind: schedWork, Result: r} }
 	probe := func(k Kind, n int) DemandProbed { return DemandProbed{Kind: k, Ready: n} }
 	probed := func(evs ...SchedEvent) func() Schedule {
@@ -786,6 +786,13 @@ func TestScheduleObserveWokeOnlyWhenStartableSetGrows(t *testing.T) {
 		{"jam-gated kind probed at the jam's count", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 2), false},
 		{"jam-gated kind probed below the jam's count", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 1), false},
 		{"jam-gated kind probed above the jam's count", probed(probe(schedWork, 2), work(ChildJammed)), 0, probe(schedWork, 9), true},
+		{"claim makes a fresh probed kind probe-due", probed(probe(schedWork, 3)), 0, Claimed{Kind: schedWork}, true},
+		{"claim on a kind already probe-due", probed(probe(schedWork, 3)), schedInterval, Claimed{Kind: schedWork}, false},
+		{"second claim on a kind the first made probe-due", probed(probe(schedWork, 3), Claimed{Kind: schedWork}), 0, Claimed{Kind: schedWork}, false},
+		{"claim on a jam-gated kind", probed(probe(schedWork, 2), work(ChildJammed)), 0, Claimed{Kind: schedWork}, false},
+		{"claim on a rate-limit-paused kind",
+			probed(probe(schedWork, 3), DemandRateLimited{Kind: schedWork, Reset: schedAt(time.Minute)}), 0, Claimed{Kind: schedWork}, false},
+		{"claim on an exit-driven kind", probed(), 0, Claimed{Kind: schedButler}, false},
 		{"unstartable kind finishes empty", probed(), 0, work(ChildEmpty), false},
 		{"exit-driven kind's backoff reset by continue",
 			probed(ChildDone{Kind: schedButler, Result: ChildEmpty}), 0, ChildDone{Kind: schedButler, Result: ChildContinue}, true},

@@ -365,7 +365,9 @@ func (s Schedule) Decide(now time.Time, occ Occupancy) Decision {
 }
 
 // Observe folds ev into the schedule at now and returns the updated copy.
-// woke reports that the event made its kind startable when it was not before.
+// woke reports that the event made its kind startable when it was not before,
+// or, for a Claimed, made a probed kind probe-due when it was not before: a
+// sibling parked until the old probe's deadline must re-decide.
 // Only the observed kind changes — except DemandRateLimited, which pauses
 // every kind on its tracker and only ever closes kinds, so woke is false.
 func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
@@ -374,6 +376,8 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 	if !ok {
 		return s, false
 	}
+	before := ks
+	var claimWoke bool
 	switch e := ev.(type) {
 	case DemandRateLimited:
 		return s.rateLimited(now, kind, e.Reset), false
@@ -433,8 +437,9 @@ func (s Schedule) Observe(now time.Time, ev SchedEvent) (Schedule, bool) {
 			ks.readyUnconfirmed = true
 			ks.probedAt = time.Time{} // the claim moved the count; re-probe before the next start
 		}
+		claimWoke = ks.probeDue(now) && !before.probeDue(now)
 	}
-	return s.with(kind, ks), opened(s.state[kind], ks, now)
+	return s.with(kind, ks), claimWoke || opened(before, ks, now)
 }
 
 // rateLimitFallbackIntervals is how many probe intervals a rate limit without
@@ -464,6 +469,15 @@ func (s Schedule) rateLimited(now time.Time, kind Kind, reset time.Time) Schedul
 	}
 	s.state = m
 	return s
+}
+
+// probeDue reports that a probed kind has a probe to run at now: its count is
+// stale and neither a rate-limit pause nor a gate holds it back.
+// Decide's probe set omits the gate term: a gated kind is still probed there,
+// but must not trigger a claim wake, since a woken slot would only re-park on
+// the gate.
+func (k kindSched) probeDue(now time.Time) bool {
+	return k.probed() && !k.paused(now) && !k.gated(now) && k.stale(now)
 }
 
 // opened reports that a kind startable after a change was not before it.

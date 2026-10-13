@@ -251,7 +251,7 @@ func workHoldingBundleLoop(t *testing.T) (r *scriptedRunner, clk *testClock, wor
 	// counted by a probe that predates the claim and so lacks the flight key.
 	r.fireOnIssue(t, workSlot, "7")
 	r.setOutbox(recoverKind, dispatchkey.Issue("7"))
-	clk.awaitSleep(t, 1)
+	r.awaitClaimedSiblingParked(t, clk, workKind, dispatchkey.Issue("7"))
 
 	// The idle slot's next probe is due, with the work child still in flight.
 	clk.advanceBy(10 * time.Second)
@@ -328,7 +328,7 @@ func TestLoopRecoverGrownGateLiftsWithinOneProbeAfterWorkChildLeavesBundle(t *te
 	// Bundle 7 appears only after the claim, as in workHoldingBundleLoop.
 	r.fireOnIssue(t, workSlot, "7")
 	r.setOutbox(recoverKind, dispatchkey.Issue("7"), dispatchkey.Issue("8"))
-	clk.awaitSleep(t, 1)
+	r.awaitClaimedSiblingParked(t, clk, workKind, dispatchkey.Issue("7"))
 
 	// The sibling's probe, with the work child still in flight, sees only
 	// bundle 8: the count stays at the gate's baseline and no child starts.

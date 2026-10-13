@@ -975,6 +975,7 @@ func TestLoopPhaseChangeDoesNotWakeParkedSiblings(t *testing.T) {
 // clock, so only the wake can start them.
 func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 	const slots = 3
+	const interval = time.Hour
 	ctx, clk, r := parkedLoopDoubles(t, slots)
 	// A tracker that drops one ready issue per claim and keeps `slots` blocked
 	// issues: the jam then records `slots`, which every later probe repeats, so
@@ -992,7 +993,7 @@ func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 	// resolve sees it whichever call it lands on.
 	r.moved = []bool{false, false, false, true}
 	var buf bytes.Buffer
-	go Loop(ctx, probedConfig(slots, time.Hour, workKind), r, newTestEmitter(&buf), clk)
+	go Loop(ctx, probedConfig(slots, interval, workKind), r, newTestEmitter(&buf), clk)
 
 	for i := 0; i < slots; i++ {
 		r.awaitStart(t)
@@ -1009,7 +1010,26 @@ func TestLoopJamLiftWakesParkedSiblings(t *testing.T) {
 	for i := 0; i < slots; i++ {
 		r.awaitStart(t)
 	}
-	requireNoRepark(t, clk, slots)
+	requireOnlyProbeIntervalReparks(t, clk, slots, interval)
+}
+
+// requireOnlyProbeIntervalReparks is requireNoRepark for a test whose onStart
+// lowers Demand before announcing: a slot probing in the gap between that
+// label swap and the claim's fold reads the claimed item still in flight and
+// parks for the whole probe interval, which only the claim's wake ends. Any
+// wait past the first slots waits, the jam-backoff parks, must be exactly
+// that interval.
+func requireOnlyProbeIntervalReparks(t *testing.T, clk *testClock, slots int, interval time.Duration) {
+	t.Helper()
+	waits := clk.waits()
+	if len(waits) < slots {
+		t.Fatalf("waits = %v, want at least the %d jam-backoff parks", waits, slots)
+	}
+	for _, w := range waits[slots:] {
+		if w != interval {
+			t.Fatalf("waits = %v: a re-park past the first %d jam-backoff parks must be the %v probe interval, got %v", waits, slots, interval, w)
+		}
+	}
 }
 
 // Demand said there was work and the child exited 2: the next probe skips any
