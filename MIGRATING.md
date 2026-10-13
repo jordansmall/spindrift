@@ -594,6 +594,13 @@ A launcher and Consumer image built from the same revision are unaffected.
 
 ## The issue prompt's coherence gate, COMMS, and OUTCOME sections lost padding; wording only (issue #3224)
 
+> Corrected by issue #5308: the colon form is not invalid. Since issues
+> #1899 and #2012 the launcher accepts `SPINDRIFT_OUTCOME:` as well as
+> `SPINDRIFT_OUTCOME ` before the fields, so the "space-not-colon
+> delimiter" rule named below was no longer enforced when #3224 shipped,
+> and issue #5298 dropped the `SPINDRIFT_OUTCOME:` fragment from the
+> prompt's invalid list. The other two rules below still hold.
+
 This one is editorial, and there is nothing for a Consumer to do. Nothing
 here changes what a Box is told to do, only how many words it takes to say
 it.
