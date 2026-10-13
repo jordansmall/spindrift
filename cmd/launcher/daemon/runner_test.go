@@ -1111,6 +1111,104 @@ func TestResolveTip_CancelledContext(t *testing.T) {
 	}
 }
 
+// helperGitSeam returns a runnerFetchCommand fake whose git subcommand sub
+// runs script, which backgrounds a sleep that keeps the output pipe open the
+// way a git-remote-* helper does, so killing the shell alone does not release
+// Wait. The script runs in its own process group, killed at cleanup, so the
+// sleep does not outlive the test.
+func helperGitSeam(t *testing.T, sub, script string) func(context.Context, string, ...string) *exec.Cmd {
+	t.Helper()
+	return func(ctx context.Context, _ string, args ...string) *exec.Cmd {
+		if len(args) < 3 {
+			// t.Errorf, not t.Fatalf: this runs on fetchRevision's goroutine.
+			t.Errorf("runnerFetchCommand args = %v, want at least 3", args)
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "exit 1")
+		}
+		switch args[2] { // git -C <repo> <sub> ...
+		case sub:
+			cmd := exec.CommandContext(ctx, "/bin/sh", "-c", script)
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			t.Cleanup(func() {
+				if cmd.Process != nil {
+					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
+			})
+			return cmd
+		case "rev-parse":
+			return exec.CommandContext(ctx, "/bin/sh", "-c", "printf 0123456789abcdef0123456789abcdef01234567")
+		default:
+			return exec.CommandContext(ctx, "true")
+		}
+	}
+}
+
+// hangingGitSeam hangs git subcommand sub until its grandchild exits.
+func hangingGitSeam(t *testing.T, sub string) func(context.Context, string, ...string) *exec.Cmd {
+	return helperGitSeam(t, sub, "sleep 30 & wait")
+}
+
+// lingeringGitSeam exits git subcommand sub 0 while its grandchild lingers.
+func lingeringGitSeam(t *testing.T, sub string) func(context.Context, string, ...string) *exec.Cmd {
+	return helperGitSeam(t, sub, "sleep 10 >&2 & exit 0")
+}
+
+// TestFetchRevision_CancelHangingGitReturnsPromptly: a grandchild holding the
+// output pipe must not keep fetchRevision blocked past a cancelled ctx (issue
+// #5278); exec.CommandContext alone kills only the direct child.
+func TestFetchRevision_CancelHangingGitReturnsPromptly(t *testing.T) {
+	for _, sub := range []string{"fetch", "rev-parse", "ls-remote"} {
+		t.Run(sub, func(t *testing.T) {
+			orig := runnerFetchCommand
+			t.Cleanup(func() { runnerFetchCommand = orig })
+			runnerFetchCommand = hangingGitSeam(t, sub)
+
+			r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			time.AfterFunc(200*time.Millisecond, cancel)
+
+			done := make(chan error, 1)
+			go func() {
+				_, err := r.fetchRevision(ctx)
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				if err == nil {
+					t.Error("fetchRevision(cancelled mid-run) error = nil, want non-nil")
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatalf("fetchRevision stuck on a hung git %s after ctx cancel", sub)
+			}
+		})
+	}
+}
+
+// TestFetchRevision_ZeroExitWithLingeringHelperSucceeds pins that a git which
+// exited 0 but left a helper holding its stderr is a success (exec.ErrWaitDelay).
+func TestFetchRevision_ZeroExitWithLingeringHelperSucceeds(t *testing.T) {
+	for _, sub := range []string{"fetch", "ls-remote"} {
+		t.Run(sub, func(t *testing.T) {
+			orig := runnerFetchCommand
+			t.Cleanup(func() { runnerFetchCommand = orig })
+			runnerFetchCommand = lingeringGitSeam(t, sub)
+
+			r := mustHostRunner(t, hostRunnerConfig{repoPath: "/repo", appAttr: ".#", baseBranch: "main", featureBranch: "feature-x", selfAttr: ".#daemon", nixSystem: "x86_64-linux", env: os.Environ()})
+			start := time.Now()
+			rev, err := r.fetchRevision(context.Background())
+			if err != nil {
+				t.Fatalf("fetchRevision error = %v, want nil", err)
+			}
+			if elapsed := time.Since(start); elapsed > 5*time.Second {
+				t.Errorf("fetchRevision took %v, want < 5s despite the lingering helper", elapsed)
+			}
+			if want := "0123456789abcdef0123456789abcdef01234567"; rev != want {
+				t.Errorf("revision = %q, want %q", rev, want)
+			}
+		})
+	}
+}
+
 // waitForArmed polls until every path in armed exists: each is touched only
 // after the corresponding child's `trap` has run, so a signal landing
 // before that finds the default disposition and kills the child outright

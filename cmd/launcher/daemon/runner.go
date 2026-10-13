@@ -162,6 +162,14 @@ func newHostRunner(cfg hostRunnerConfig) (*hostRunner, error) {
 // on the leader actually being in flight, rather than sleeping and hoping.
 var runnerFetchCommand = exec.CommandContext
 
+// fetchWaitDelay bounds how long fetchRevision waits on a git's output pipes
+// once it exits or ctx is cancelled: a remote helper (git-remote-https/ssh)
+// inherits stderr and can outlive a SIGKILLed git, which would otherwise keep
+// Run/Output blocked (issue #5278). exec.ErrWaitDelay only reports on a zero
+// exit, so fetch and ls-remote treat it as success; rev-parse does not, since
+// its captured output may be truncated.
+const fetchWaitDelay = time.Second
+
 // lsRemoteNoMatchExit is the exit status `git ls-remote --exit-code` returns
 // when the given ref does not exist on the remote (its "no matching refs"
 // case), distinct from any other failure (auth, network) that ls-remote
@@ -189,16 +197,21 @@ func redactedStderr(b *bytes.Buffer) string {
 // ResolveTip's single flight the same one check.
 func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 	const remote = "origin" // nothing varies this yet; inline until a caller needs it (issue #3538 review)
-	fetch := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "fetch", remote, r.baseBranch)
+	git := func(args ...string) *exec.Cmd {
+		cmd := runnerFetchCommand(ctx, "git", append([]string{"-C", r.repoPath}, args...)...)
+		cmd.WaitDelay = fetchWaitDelay
+		return cmd
+	}
+	fetch := git("fetch", remote, r.baseBranch)
 	var stderr bytes.Buffer
 	fetch.Stderr = &stderr
-	if err := fetch.Run(); err != nil {
+	if err := fetch.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 		return "", fmt.Errorf("git fetch %s %s: %w: %s", remote, r.baseBranch, err, redactedStderr(&stderr))
 	}
 	// FETCH_HEAD, not the local baseBranch ref: a bare `fetch` never moves
 	// any local branch, and resolving the local ref instead would silently
 	// pin a stale tip whenever the operator's checkout lags origin.
-	out, err := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "rev-parse", "FETCH_HEAD").Output()
+	out, err := git("rev-parse", "FETCH_HEAD").Output()
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse FETCH_HEAD: %w", err)
 	}
@@ -206,10 +219,10 @@ func (r *hostRunner) fetchRevision(ctx context.Context) (string, error) {
 
 	if r.featureBranch != "" {
 		ref := "refs/heads/" + r.featureBranch
-		lsRemote := runnerFetchCommand(ctx, "git", "-C", r.repoPath, "ls-remote", "--exit-code", remote, ref)
+		lsRemote := git("ls-remote", "--exit-code", remote, ref)
 		var lsStderr bytes.Buffer
 		lsRemote.Stderr = &lsStderr
-		if err := lsRemote.Run(); err != nil {
+		if err := lsRemote.Run(); err != nil && !errors.Is(err, exec.ErrWaitDelay) {
 			// Any failure but a definitive "no matching ref" stays an
 			// ordinary error for the breaker.
 			var exitErr *exec.ExitError
