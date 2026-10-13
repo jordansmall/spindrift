@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -29,6 +30,7 @@ func fullHandoff() Handoff {
 				Key:    dispatchkey.Issue("42"),
 				Issues: []string{"42", "43"},
 				Pass:   "fix-pass-1", Model: "claude-x", ModelRole: "fixer",
+				CIWaitPRURL: "https://github.com/o/r/pull/42", CIWaitRunURL: "https://github.com/o/r/actions/runs/7",
 				Child: ChildState{PID: 4242, ReportFD: 7, Partial: []byte("{\"event\":\"caf\xc3"), Discarding: true},
 			},
 			{
@@ -74,7 +76,7 @@ func TestHandoffKeysTravelAsIssueAndChoreFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := buf.String()
-	for _, frag := range []string{`"issue":"42"`, `"chore":"bugs"`, `"v":2`} {
+	for _, frag := range []string{`"issue":"42"`, `"chore":"bugs"`, `"v":3`, `"ci_wait_pr_url":"https://github.com/o/r/pull/42"`} {
 		if !strings.Contains(s, frag) {
 			t.Errorf("document missing %s: %s", frag, s)
 		}
@@ -100,7 +102,7 @@ func TestHandoffDecodeRefuses(t *testing.T) {
 		doc  string
 		want string
 	}{
-		"future version":      {`{"v":3,"lock_fd":3,"newthing":[1]}`, "version 3"},
+		"future version":      {`{"v":4,"lock_fd":3,"newthing":[1]}`, "version 4"},
 		"missing version":     {`{"lock_fd":3}`, "version 0"},
 		"malformed":           {`{"v":1,`, "decode"},
 		"unknown field":       {`{"v":1,"lock_fd":3,"bogus":true}`, "bogus"},
@@ -127,9 +129,25 @@ func TestHandoffDecodeRefuses(t *testing.T) {
 	}
 }
 
+// An older predecessor's document, written before the CI-wait fields, still
+// resumes; only a rollback onto it is refused.
+func TestHandoffDecodeAcceptsOlderVersions(t *testing.T) {
+	for n := handoffMinVersion; n < HandoffRollbackVersion; n++ {
+		v := strconv.Itoa(n)
+		doc := `{"v":` + v + `,"lock_fd":3,"slots":[{"slot":1,"kind":"work","child":{"pid":4,"report_fd":5}}]}`
+		got, err := DecodeHandoff(strings.NewReader(doc))
+		if err != nil {
+			t.Fatalf("v%s: DecodeHandoff: %v", v, err)
+		}
+		if len(got.Slots) != 1 || got.Slots[0].CIWaitPRURL != "" {
+			t.Errorf("v%s: slots = %+v, want one slot with no CI wait", v, got.Slots)
+		}
+	}
+}
+
 func TestHandoffVersionErrorNamesSupported(t *testing.T) {
 	_, err := DecodeHandoff(strings.NewReader(`{"v":7}`))
-	if err == nil || !strings.Contains(err.Error(), "supports 1 to 2") {
+	if err == nil || !strings.Contains(err.Error(), "supports 1 to 3") {
 		t.Errorf("error %v should name the supported version", err)
 	}
 }

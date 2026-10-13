@@ -15,12 +15,14 @@ import (
 // handoffMinVersion, so a build still resumes from an older predecessor's
 // document, and refuses every other version: a misread child pid or
 // descriptor would signal or read the wrong process.
-const HandoffVersion = 2
+const HandoffVersion = 3
 
-// HandoffRollbackVersion is the first version whose readers know the rollback
-// fields. A successor rolls back only onto a predecessor that wrote at least
-// this, since an older reader refuses the document and orphans the children.
-const HandoffRollbackVersion = 2
+// HandoffRollbackVersion is the first version whose readers accept every field
+// a rollback document carries, the slot CI-wait fields included. A successor
+// rolls back only onto a predecessor that wrote at least this: a version 2
+// reader refuses those fields and orphans the children, so an image resumed
+// from an older writer drains instead.
+const HandoffRollbackVersion = 3
 
 // handoffMinVersion is the oldest document version DecodeHandoff still reads.
 const handoffMinVersion = 1
@@ -77,7 +79,12 @@ type HandoffSlot struct {
 	Pass      string          `json:"pass,omitempty"`
 	Model     string          `json:"model,omitempty"`
 	ModelRole string          `json:"model_role,omitempty"`
-	Child     ChildState      `json:"child"`
+	// CIWaitPRURL and CIWaitRunURL are the slot's CI wait (empty PR = not waiting),
+	// carried because the child sends its ci_wait record only once per wait
+	// (#5160).
+	CIWaitPRURL  string     `json:"ci_wait_pr_url,omitempty"`
+	CIWaitRunURL string     `json:"ci_wait_run_url,omitempty"`
+	Child        ChildState `json:"child"`
 }
 
 // ChildState is the runner-level state of one inherited child.
