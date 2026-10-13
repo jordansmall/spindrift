@@ -274,9 +274,14 @@ touches). A rebase that reports the branch already up to date brought in
 nothing. Otherwise skip it and let CI be the final gate. Then push:
 
 ```
-git push --force-with-lease -u origin agent/issue-7   # first push
-git push --force-with-lease                        # subsequent
+git push --force-with-lease --force-if-includes -u origin agent/issue-7   # first push
+git push --force-with-lease --force-if-includes                        # subsequent
 ```
+
+`git fetch origin` above refreshes `origin/agent/issue-7`, so
+`--force-with-lease` alone would overwrite a commit someone else pushed to
+the branch; `--force-if-includes` is what refuses it. Never drop it, and
+never fall back to a bare `--force`.
 
 **If a push is rejected**, do NOT silently strand the commits. Retry exactly
 once:
@@ -285,9 +290,13 @@ once:
 2. `git merge-base HEAD origin/main` — note the SHA it prints.
 3. `git rebase origin/main` — resolve any conflicts, then re-run
    the full check gate only under the same after-rebase rule.
-4. `git push --force-with-lease` — one retry only.
+4. `git push --force-with-lease --force-if-includes` — one retry only.
 
-If the push still fails after the retry, follow IF BLOCKED.
+If the push still fails after the retry, do not overwrite whatever is on
+`origin/agent/issue-7` (no bare `--force`). Follow IF BLOCKED, and if
+`git log HEAD..origin/agent/issue-7` lists commits this run did not write, name
+them — it also lists this run's own earlier pushes as they stood before the
+rebase, which are not someone else's.
 
 # REVIEW
 
@@ -508,7 +517,7 @@ unsure):
 **`CODE_FORGE=git`** (push-only Code Forge — no PR, no CI-watch, no merge
 gate): skip OPEN A PULL REQUEST below entirely.
 
-1. `git push --force-with-lease -u origin agent/issue-7` (if not already pushed).
+1. `git push --force-with-lease --force-if-includes -u origin agent/issue-7` (if not already pushed).
 
 2. Print exactly one line as your final output and stop — raw plain text, not
    wrapped in backticks, a code fence, or any other markdown formatting:
@@ -542,7 +551,7 @@ the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
 
 # OPEN A PULL REQUEST
 
-1. `git push --force-with-lease -u origin agent/issue-7`
+1. `git push --force-with-lease --force-if-includes -u origin agent/issue-7`
 
 2. `gh pr create --draft --base main --head agent/issue-7 --title "<conventional title>" --body "<summary>"`
 
@@ -635,7 +644,9 @@ git diff origin/main -- '.github/workflows/'
 
 Then:
 
-1. Push what you have (or note if even that is impossible).
+1. Push what you have (or note if even that is impossible):
+   `git push --force-with-lease --force-if-includes -u origin agent/issue-7` — never a bare
+   `--force`. If that is rejected, leave the remote commits in place and note it.
 
 2. Check whether a PR already exists on this branch (`gh pr view --json url`).
    If not, open one as a draft (`--draft`). If it does, leave it as-is — the

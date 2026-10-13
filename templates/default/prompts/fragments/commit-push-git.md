@@ -20,9 +20,14 @@ touches). A rebase that reports the branch already up to date brought in
 nothing. Otherwise skip it and let CI be the final gate. Then push:
 
 ```
-git push --force-with-lease -u origin ${BRANCH}   # first push
-git push --force-with-lease                        # subsequent
+git push --force-with-lease --force-if-includes -u origin ${BRANCH}   # first push
+git push --force-with-lease --force-if-includes                        # subsequent
 ```
+
+`git fetch origin` above refreshes `origin/${BRANCH}`, so
+`--force-with-lease` alone would overwrite a commit someone else pushed to
+the branch; `--force-if-includes` is what refuses it. Never drop it, and
+never fall back to a bare `--force`.
 
 **If a push is rejected**, do NOT silently strand the commits. Retry exactly
 once:
@@ -31,6 +36,10 @@ once:
 2. `git merge-base HEAD origin/${BASE_BRANCH}` — note the SHA it prints.
 3. `git rebase origin/${BASE_BRANCH}` — resolve any conflicts, then re-run
    the full check gate only under the same after-rebase rule.
-4. `git push --force-with-lease` — one retry only.
+4. `git push --force-with-lease --force-if-includes` — one retry only.
 
-If the push still fails after the retry, follow IF BLOCKED.
+If the push still fails after the retry, do not overwrite whatever is on
+`origin/${BRANCH}` (no bare `--force`). Follow IF BLOCKED, and if
+`git log HEAD..origin/${BRANCH}` lists commits this run did not write, name
+them — it also lists this run's own earlier pushes as they stood before the
+rebase, which are not someone else's.

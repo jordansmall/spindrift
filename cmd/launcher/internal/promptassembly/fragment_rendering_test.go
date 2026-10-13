@@ -197,7 +197,7 @@ func TestAssembleFragmentRendering(t *testing.T) {
 		{
 			name:    "open-pr push read-write keeps git push",
 			section: [2]string{"# OPEN A PULL REQUEST", "# OUTCOME"},
-			want:    []string{"git push --force-with-lease -u origin"},
+			want:    []string{"git push --force-with-lease --force-if-includes -u origin"},
 			wantNot: []string{"seam.bundle"},
 		},
 		{
@@ -206,7 +206,7 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			section: [2]string{"# OPEN A PULL REQUEST", "# OUTCOME"},
 			want:    []string{"harness relays your committed branch out"},
 			// The COMMIT section carries the same push string, hence the scope.
-			wantNot: []string{"/outbox/seam.bundle", "git push --force-with-lease -u origin"},
+			wantNot: []string{"/outbox/seam.bundle", "git push --force-with-lease"},
 		},
 		{
 			name:    "open-pr create read-write keeps gh pr create",
@@ -240,14 +240,14 @@ func TestAssembleFragmentRendering(t *testing.T) {
 		{
 			name:    "commit push read-write keeps git push and the retry loop",
 			section: [2]string{"# COMMIT", "# REVIEW"},
-			want:    []string{"git push --force-with-lease -u origin", "one retry only"},
+			want:    []string{"git push --force-with-lease --force-if-includes -u origin", "one retry only"},
 		},
 		{
 			name:    "commit push read-only takes no push or retry action",
 			mutate:  []func(*Env){fragReadOnly},
 			section: [2]string{"# COMMIT", "# REVIEW"},
 			want:    []string{"harness relays your committed branch out", "git rebase origin/"},
-			wantNot: []string{"git push --force-with-lease -u origin"},
+			wantNot: []string{"git push --force-with-lease"},
 		},
 		{
 			name:    "if-blocked triage read-write keeps the push-failure triage block",
