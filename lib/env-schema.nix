@@ -8,10 +8,15 @@ let
   backends = import ./backends/default.nix;
   # Shared by the three butler daily budget knobs below (ADR 0056).
   butlerBudgetGateClause = "gates only starting a run, never stopping one; totals are walked from today's Ledger commits across every Chore enabled in BUTLER_CHORES (a Chore dropped from the list stops counting), over a day that runs midnight to midnight in DAEMON_AWAKE_WINDOW's zone (UTC when unset)";
-  # Shared by the scout/filer/worker model knobs; mirrors docs/reference.md.
+  # Shared by the four subagent model knobs; mirrors docs/reference.md.
+  imageTimeRosterClause =
+    subject:
+    "baked into the image's AGENTS_JSON_TEMPLATE at eval time, so a change needs a Consumer config change and a rebuild (spindrift build); a dispatch-time value neither retiers, adds, nor drops the ${subject}";
+  # Only scout/filer/worker carry a prompt-fragment presence signal
+  # (resolveAgentPresenceSignals); the reviewer has none.
   imageTimeModelClause =
     name:
-    "Image-time only: baked into the image's AGENTS_JSON_TEMPLATE at eval time, so a change needs a Consumer config change and a rebuild (spindrift build); a dispatch-time value neither retiers, adds, nor drops the ${name} subagent, though on an image with no loaded input document it still steers which subagent prompt fragments render, so the two can disagree.";
+    "Image-time only: ${imageTimeRosterClause "${name} subagent"}, though on an image with no loaded input document it still steers which subagent prompt fragments render, so the two can disagree.";
   # Single source of the built-in Chore catalog (issue #3991).
   choreCatalog = import ./chore-catalog.nix;
 in
@@ -218,7 +223,7 @@ in
     env = "REVIEW_MODEL";
     group = "agents";
     default = "claude-opus-5";
-    doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED for non-orchestrator use: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md). Under ORCHESTRATOR, the roster reviewer entry is itself superseded by the code-owned review pass, which instead binds its model from this value (captured before the roster entry is deleted, falling back to the coordinator model when unset). An explicit dispatch-time value (REVIEW_MODEL=... / --review-model ...) overrides even that baked extraction on an already-built image, no rebuild needed (issue #3171) -- precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback; unset or empty at dispatch leaves the baked chain unchanged.";
+    doc = "reviewer subagent model tier; empty omits the reviewer entry from --agents; the flag itself is omitted only when no subagent model is set. Its --agents roster entry is image-time only: ${imageTimeRosterClause "reviewer entry"}. DEPRECATED for non-orchestrator use: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md). Under ORCHESTRATOR, the roster reviewer entry is itself superseded by the code-owned review pass, which instead binds its model from this value (captured before the roster entry is deleted, falling back to the coordinator model when unset). An explicit dispatch-time value (REVIEW_MODEL=... / --review-model ...) sets the review pass's model, overriding even that baked extraction, on an already-built image, no rebuild needed (issue #3171) -- precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback; unset or empty at dispatch leaves the baked chain unchanged.";
     flakeOption = true;
     nixSubPath = "models.review";
     driverValued = true;
