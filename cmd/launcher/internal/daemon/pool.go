@@ -1673,7 +1673,7 @@ func (p *pool) publish(seq uint64, s Status) {
 		return
 	}
 	if err := p.cfg.Status.Publish(seq, s); err != nil {
-		p.em.warnf("daemon: status file write failed: %v\n", err)
+		p.em.warnStatusWrite(err)
 	}
 }
 
