@@ -12,8 +12,9 @@ never background it (`&`, detached job, background task) and end your turn
 while it is still pending. Backgrounding a gate means your turn ends before the
 gate finishes, no `SPINDRIFT_OUTCOME` line is ever printed, and the run is lost
 even when the underlying work was green. Wait for the gate to finish before
-moving on, and do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
-(`status=ready` or `status=blocked`) has been printed.
+moving on. Do not stop a pass that reaches OUTCOME, IF BLOCKED, or an earlier
+gate's terminal stop until its `SPINDRIFT_OUTCOME` line has been printed; a
+pass told to stop right after COMMIT prints none unless it hit IF BLOCKED.
 
 If you ever fall back to a background-and-poll pattern for a gate anyway, treat
 a vanished process as a failure, not as still-pending: a build that is killed

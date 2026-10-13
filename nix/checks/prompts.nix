@@ -602,8 +602,17 @@ in
   mkharness-prompt-check-terminal-outcome-inline =
     pkgs.runCommand "mkharness-prompt-check-terminal-outcome-inline" { }
       ''
-        grep -qi 'do not stop this run' ${checkSectionSlices}/issue-check.txt
-        grep -q 'status=blocked' ${checkSectionSlices}/issue-check.txt
+        grep -qF 'until its `SPINDRIFT_OUTCOME` line' ${checkSectionSlices}/issue-check.txt
+        grep -qF 'told to stop right after COMMIT' ${checkSectionSlices}/issue-check.txt
+        # Issue #5129: the mandate is scoped to the owning pass, not "this run".
+        if grep -qi 'do not stop this run' ${checkSectionSlices}/issue-check.txt; then
+          echo "CHECK orders every pass to print a terminal outcome" >&2
+          exit 1
+        fi
+        if grep -qF '(`status=ready` or' ${checkSectionSlices}/issue-check.txt; then
+          echo "CHECK restates the unscoped status=ready/blocked mandate" >&2
+          exit 1
+        fi
         touch $out
       '';
 
@@ -620,6 +629,18 @@ in
         grep -qi 'bound the wait' ${checkHygieneSkill}
         touch $out
       '';
+
+  # Issue #5129: the skill restates CHECK's scoped outcome rule and is also
+  # invoked from the research and conflict-resolve prompts, so pin it too.
+  check-hygiene-skill-outcome-scoped = pkgs.runCommand "check-hygiene-skill-outcome-scoped" { } ''
+    grep -qF 'told to stop right after COMMIT' ${checkHygieneSkill}
+    grep -qF 'until its `SPINDRIFT_OUTCOME` line' ${checkHygieneSkill}
+    if grep -qi 'do not stop this run' ${checkHygieneSkill}; then
+      echo "check-hygiene skill orders every pass to print a terminal outcome" >&2
+      exit 1
+    fi
+    touch $out
+  '';
 
   # Issue #3220: the reduction only holds if the CHECK section still points
   # at the skill the guidance moved into; an anchorless CHECK leaves every

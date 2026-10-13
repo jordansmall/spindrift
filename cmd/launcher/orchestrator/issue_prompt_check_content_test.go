@@ -52,3 +52,30 @@ func TestIssuePromptCodeCommentsPolicyPhrase(t *testing.T) {
 		},
 	})
 }
+
+// Issue #5129: the CHECK block is also baked into fix-prompt.md, and the
+// orchestrator stops implement/fix passes right after COMMIT with no outcome,
+// so the terminal-outcome mandate must be scoped to the pass that owns it.
+func TestIssuePromptCheckOutcomeScopedToOwningPass(t *testing.T) {
+	assertPromptClauses(t, "issue-prompt.md", []promptClause{
+		{
+			name:   "obligation attaches to a pass that reaches a terminal stop",
+			clause: "Do not stop a pass that reaches OUTCOME, IF BLOCKED, or an earlier gate's terminal stop until its `SPINDRIFT_OUTCOME` line has been printed",
+		},
+		{
+			name:   "a pass told to stop after COMMIT prints none unless blocked",
+			clause: "a pass told to stop right after COMMIT prints none unless it hit IF BLOCKED",
+		},
+	})
+
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "issue-prompt.md"))
+	lowered := strings.ToLower(normalized)
+	for _, stale := range []string{
+		"until a terminal `SPINDRIFT_OUTCOME` line (`status=ready` or `status=blocked`)",
+		"do not stop this run",
+	} {
+		if strings.Contains(lowered, strings.ToLower(normalizeWhitespace(stale))) {
+			t.Errorf("issue-prompt.md still carries the unscoped outcome mandate %q", stale)
+		}
+	}
+}
