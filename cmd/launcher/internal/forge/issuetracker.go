@@ -246,6 +246,13 @@ type LandingRecorder interface {
 // that can record which pass produced a landing's outcome (ADR 0029, issue
 // #2983). Advisory provenance only: no settle decision and no Resolved tier
 // selection ever reads it. Only the local adapter implements it.
+//
+// The pass names the in-Box pass that produced the landing ref, recorded at
+// settle's landing write (issue #5272); it does not describe the merged head.
+// Settle-dispatched CI fix passes on a read-only PR-shaped forge move the PR
+// head without re-recording it. Reconcile's later ref upgrades leave it
+// unchanged, and a landing reconcile discovers clears it. On push-only
+// landings there is no fix pass, so it coincides with the merged head.
 type LandingPassRecorder interface {
 	// RecordLandingPass persists the 1-indexed pass number and role
 	// ("implement", "review", "fix", "land", ...) of the pass that produced
