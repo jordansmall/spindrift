@@ -2503,7 +2503,9 @@ func TestAssembleJiraTracker(t *testing.T) {
 
 // Pins issue #2352's acceptance criterion at the Assemble level, not just
 // the gate-map level gates_tracker_test.go already covers: two Envs
-// differing only in IssueTracker must produce byte-identical prompts.
+// differing only in IssueTracker must produce byte-identical prompts. Run
+// read-only, because on a write-capable Box jira's IF BLOCKED comment
+// deliberately diverges from github's gh issue comment (issue #5263).
 func TestAssembleJiraRidesGithubArms(t *testing.T) {
 	reg := loadTestRegistry(t)
 
@@ -2511,6 +2513,8 @@ func TestAssembleJiraRidesGithubArms(t *testing.T) {
 	jiraEnv.IssueTracker = "jira"
 	githubEnv := coveredEnv()
 	githubEnv.IssueTracker = "github"
+	jiraEnv.BoxWriteEnabled = false
+	githubEnv.BoxWriteEnabled = false
 
 	jiraResult, err := Assemble(jiraEnv, reg)
 	if err != nil {
@@ -2523,6 +2527,39 @@ func TestAssembleJiraRidesGithubArms(t *testing.T) {
 
 	if jiraResult.Prompt != githubResult.Prompt {
 		t.Errorf("jira Prompt != github Prompt, want byte-identical (jira rides github's arm end-to-end):\njira:\n%s\n\ngithub:\n%s", jiraResult.Prompt, githubResult.Prompt)
+	}
+}
+
+// The read-write half of the #2352 pin: on a write-capable Box the jira and
+// github prompts may differ only in the IF BLOCKED step 4 comment fragment
+// (issue #5263).
+func TestAssembleJiraRidesGithubArmsReadWrite(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	jiraEnv := coveredEnv()
+	jiraEnv.IssueTracker = "jira"
+	githubEnv := coveredEnv()
+
+	jiraResult, err := Assemble(jiraEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(jira): %v", err)
+	}
+	githubResult, err := Assemble(githubEnv, reg)
+	if err != nil {
+		t.Fatalf("Assemble(github): %v", err)
+	}
+
+	githubStep := strings.ReplaceAll(fragmentText(t, "issue-blocked-comment-github.md"), "${ISSUE_NUMBER}", githubEnv.IssueNumber)
+	jiraStep := fragmentText(t, "issue-blocked-comment-unwritable.md")
+	if !strings.Contains(githubResult.Prompt, githubStep) {
+		t.Fatalf("github read-write prompt lacks its blocked-comment fragment %q", githubStep)
+	}
+	if !strings.Contains(jiraResult.Prompt, jiraStep) {
+		t.Fatalf("jira read-write prompt lacks its blocked-comment fragment %q", jiraStep)
+	}
+	swapped := strings.Replace(githubResult.Prompt, githubStep, jiraStep, 1)
+	if jiraResult.Prompt != swapped {
+		t.Errorf("jira read-write Prompt differs from github beyond the blocked-comment step:\njira:\n%s\n\ngithub (step swapped):\n%s", jiraResult.Prompt, swapped)
 	}
 }
 

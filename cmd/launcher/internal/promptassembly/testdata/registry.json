@@ -403,6 +403,11 @@
     "var": "ISSUE_BLOCKED_COMMENT_LOCAL_STEP"
   },
   {
+    "gate": "ISSUE_TRACKER_UNWRITABLE_READWRITE",
+    "fragment": "issue-blocked-comment-unwritable.md",
+    "var": "ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP"
+  },
+  {
     "gate": "ISSUE_TRACKER_FORGEJO_READWRITE",
     "fragment": "issue-blocked-comment-forgejo.md",
     "var": "ISSUE_BLOCKED_COMMENT_FORGEJO_STEP"

@@ -583,6 +583,13 @@ let
       fragment = "issue-blocked-comment-local.md";
       var = "ISSUE_BLOCKED_COMMENT_LOCAL_STEP";
     }
+    # A tracker the Box reads but cannot write (jira, issue #5263): the same
+    # host-posted note= relay as local, but only on a write-capable Box.
+    {
+      gate = "ISSUE_TRACKER_UNWRITABLE_READWRITE";
+      fragment = "issue-blocked-comment-unwritable.md";
+      var = "ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP";
+    }
     {
       gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
       fragment = "issue-blocked-comment-forgejo.md";

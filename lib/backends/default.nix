@@ -103,8 +103,8 @@
     doctorTokenHint = "JIRA_TOKEN";
     doctorSlugHint = "JIRA_BASE_URL / JIRA_PROJECT_KEY";
     # The Box has no Jira client and JIRA_TOKEN is host-only, so the research
-    # verdict relays through the host (issue #5245; a work run's IF BLOCKED
-    # comment still renders gh issue comment, follow-up #5263).
+    # verdict (issue #5245) and a work run's IF BLOCKED comment (issue #5263)
+    # relay through the host.
     inBoxUnwritableTracker = true;
   }
   {

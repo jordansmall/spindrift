@@ -242,11 +242,14 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			wantNot: []string{"gh issue comment"},
 		},
 		{
-			name:   "blocked-comment jira read-write keeps gh issue comment",
-			mutate: []func(*Env){func(e *Env) { e.IssueTracker = "jira" }},
-			want:   []string{"gh issue comment 2349"},
+			name:    "blocked-comment jira read-write relays through the host",
+			mutate:  []func(*Env){func(e *Env) { e.IssueTracker = "jira" }},
+			want:    []string{"no client that can post a comment to this tracker"},
+			wantNot: []string{"gh issue comment", "GitHub token"},
 		},
 		{
+			// Unreachable in production (main.go checkReadOnlyCapabilityGate
+			// refuses jira read-only); pinned only so the gate cell stays sane.
 			name:    "blocked-comment jira read-only never runs gh issue comment",
 			mutate:  []func(*Env){func(e *Env) { e.IssueTracker = "jira" }, fragReadOnly},
 			want:    []string{"the launcher posts it as the issue comment"},
