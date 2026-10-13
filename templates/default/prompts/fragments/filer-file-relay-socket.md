@@ -44,8 +44,8 @@ SPINDRIFT_SIGNAL_EOF
    (<status>): <reason>` — the intent was NOT taken, so read the reason, fix
    it, and send the command again. A pipe replaces the exit code with the
    last piped command's own, so it looks like acceptance even on rejection.
-   A `(intent_cap)` rejection means this dispatch has already queued its
-   limit of 8 issue intents — the intent is not taken, and sending the same
+   A `(intent_cap)` rejection means this dispatch has already queued as many
+   issue intents as it may — the intent is not taken, and sending the same
    command again will not help; stop filing further issues this run and
    report `FAILED` for each finding you leave unfiled.
 
