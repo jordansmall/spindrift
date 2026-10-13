@@ -428,9 +428,11 @@ func TestApplyInTreeBindingNoopWhenNeitherRouteHostPresent(t *testing.T) {
 
 // Issue #3142's overlap defect: "registry.example.com" and
 // "registry.example.com:8443" share a prefix, so a rewrite loop running in
-// caller order, shorter host first, would replace the bare host inside the
-// longer host's own URL and corrupt it. The rewrites below are listed
-// shorter-host-first deliberately, to prove Apply reorders by host length.
+// caller order, shorter host first, would once have replaced the bare host
+// inside the longer host's own URL. The host boundary (#5311) now prevents
+// that, so this pins longest-first ordering as a safeguard. The rewrites
+// below are listed shorter-host-first deliberately, to prove Apply reorders by
+// host length.
 func TestApplyInTreeBindingOverlappingHostsRewriteLongestFirst(t *testing.T) {
 	dir := newTestRepo(t)
 	content := "short = \"https://registry.example.com/index/\"\nlong = \"https://registry.example.com:8443/index/\"\n"
@@ -1667,5 +1669,81 @@ func TestRevertInTreeBindingsNarratesAndContinuesPastFailure(t *testing.T) {
 	out.Reset()
 	if RevertInTreeBindings(dir, []ecosystem.Row{cargoBinding}, "who", &out) || out.Len() != 0 {
 		t.Errorf("second revert: failed or wrote %q, want a silent no-op", out.String())
+	}
+}
+
+// Issue #5311: a portless route's host must end at a URL boundary, so a
+// look-alike (explicit port, longer hostname) is neither rewritten nor enough
+// to trip the presence gate.
+func TestApplyInTreeBindingHostBoundary(t *testing.T) {
+	const local = "http://127.0.0.1:27182/r0"
+	rewrites := []HostRewrite{{UpstreamHost: "nexus.corp", LocalURL: local}}
+	for _, scheme := range []string{"https", "http", "HTTPS"} {
+		lookalikes := scheme + "://nexus.corp:8081/repository/npm/\n" +
+			scheme + "://Nexus.Corp.mirror.net/npm/\n"
+
+		t.Run(scheme+" lookalikes only", func(t *testing.T) {
+			dir := newTestRepo(t)
+			writeConfig(t, dir, npmBinding.InTreeConfigPath, lookalikes, true)
+			reason, err := ApplyInTreeBinding(dir, npmBinding, rewrites)
+			if err != nil {
+				t.Fatalf("ApplyInTreeBinding: %v", err)
+			}
+			if reason != ApplyNoopContent {
+				t.Errorf("reason = %v, want %v", reason, ApplyNoopContent)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != lookalikes {
+				t.Errorf("content = %q, want unchanged %q", got, lookalikes)
+			}
+			if skipWorktreeSet(t, dir, npmBinding.InTreeConfigPath) {
+				t.Error("skip-worktree set on a config with nothing rewritten")
+			}
+		})
+
+		t.Run(scheme+" genuine alongside lookalikes", func(t *testing.T) {
+			dir := newTestRepo(t)
+			content := lookalikes + scheme + "://NEXUS.corp/repository/npm/\n"
+			writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
+			reason, err := ApplyInTreeBinding(dir, npmBinding, rewrites)
+			if err != nil {
+				t.Fatalf("ApplyInTreeBinding: %v", err)
+			}
+			if reason != ApplyApplied {
+				t.Errorf("reason = %v, want %v", reason, ApplyApplied)
+			}
+			got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := lookalikes + local + "/repository/npm/\n"
+			if string(got) != want {
+				t.Errorf("content = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// A look-alike must not shadow a genuine match later on the same line, and a
+// host at EOF with no trailing newline still ends at a boundary. YAML flow
+// syntax ('}', ']', ',') ends a host too, as in a .yarnrc.yml flow mapping.
+func TestApplyInTreeBindingHostBoundaryRescansAndEOF(t *testing.T) {
+	dir := newTestRepo(t)
+	content := "a=https://nexus.corp:8081/x https://nexus.corp/y\n{npmRegistryServer: https://nexus.corp}\n[https://nexus.corp, https://nexus.corp:8081]\nregistry=https://nexus.corp"
+	writeConfig(t, dir, npmBinding.InTreeConfigPath, content, true)
+	rewrites := []HostRewrite{{UpstreamHost: "nexus.corp", LocalURL: "http://127.0.0.1:27182/r0"}}
+	if _, err := ApplyInTreeBinding(dir, npmBinding, rewrites); err != nil {
+		t.Fatalf("ApplyInTreeBinding: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, npmBinding.InTreeConfigPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "a=https://nexus.corp:8081/x http://127.0.0.1:27182/r0/y\n{npmRegistryServer: http://127.0.0.1:27182/r0}\n[http://127.0.0.1:27182/r0, https://nexus.corp:8081]\nregistry=http://127.0.0.1:27182/r0"
+	if string(got) != want {
+		t.Errorf("content = %q, want %q", got, want)
 	}
 }
