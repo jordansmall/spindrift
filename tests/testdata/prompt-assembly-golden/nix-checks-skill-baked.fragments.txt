@@ -15,6 +15,8 @@ issue-blocked-comment-github.md
 issue-read-github.md
 land-git-push-git.md
 land-git-stop-read-write.md
+land-pass-order-finish-no-filer.md
+land-pass-order-gate-default-no-filer.md
 land-pass-order-orchestrator.md
 nix-checks-default.md
 open-pr-create-git.md
@@ -22,6 +24,7 @@ open-pr-push-git.md
 outcome-landing-git.md
 outcome-ready-means-git.md
 pr-body-closes.md
+review-loop-orchestrator-no-filer.md
 review-loop-orchestrator.md
 scout-delegate.md
 scout-issue-read-github.md

@@ -487,13 +487,28 @@ func TestAssembleStepRendering(t *testing.T) {
 		review bool
 	}{
 		{
-			name:    "FILE ISSUES off",
-			wantNot: []string{"# FILE ISSUES"},
+			name: "FILE ISSUES off names no FILE ISSUES step anywhere (issue #5300)",
+			// The bare string, not "# FILE ISSUES": the land pass and review
+			// loop name the step in prose, and a step named with no section
+			// behind it is one the agent cannot find.
+			wantNot: []string{"FILE ISSUES", "file, don't fix"},
+			want: []string{
+				"4. Finish the pass: LAND THE CHANGE, OUTCOME.",
+				"The default for gate-discovered work is report, don't fix.",
+				"Do not run LAND THE CHANGE, OPEN A",
+				"then continue straight into LAND THE CHANGE,",
+			},
 		},
 		{
 			name:   "FILE ISSUES on",
 			mutate: []func(*Env){fragFiler},
-			want:   []string{"# FILE ISSUES"},
+			want: []string{
+				"# FILE ISSUES",
+				"4. Finish the pass: FILE ISSUES, LAND THE CHANGE, OUTCOME.",
+				"The default for gate-discovered work is file, don't fix.",
+				"Do not run FILE ISSUES, LAND THE\n  CHANGE,",
+				"then continue straight into FILE ISSUES,\n  LAND THE CHANGE, OPEN A PULL REQUEST, and OUTCOME.",
+			},
 		},
 		{
 			name:    "AUTO-FORMAT off",

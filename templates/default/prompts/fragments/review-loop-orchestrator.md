@@ -3,19 +3,7 @@ Review is handled by the orchestrator as a separate, code-owned pass (issue
 blocking findings in this turn. Look for a "## Run-state handoff" section
 below, seeded from a prior pass in this run.
 
-- **No handoff yet, or its `Last reviewer verdict:` line is not `APPROVE`
-  (including a `BLOCK` line, with a `Reviewer findings:` block to fix):**
-  Stop your turn now, right after COMMIT. Do not run FILE ISSUES, LAND THE
-  CHANGE, OPEN A PULL REQUEST, or OUTCOME below — a fresh review pass runs
-  next automatically, and the orchestrator invokes you again afterward,
-  seeded with its verdict (and findings, if it blocked).
-- **`Last reviewer verdict:` is `APPROVE`:** The review pass already
-  reviewed this branch and found nothing blocking. Triage any findings the
-  handoff's `Reviewer findings:` block lists under `## Non-blocking` exactly
-  as the loop below describes, then continue straight into FILE ISSUES,
-  LAND THE CHANGE, OPEN A PULL REQUEST, and OUTCOME.
-
-When a check surfaces a failure you want to set aside as pre-existing
+${REVIEW_LOOP_FILER_STEP}${REVIEW_LOOP_NO_FILER_STEP}When a check surfaces a failure you want to set aside as pre-existing
 rather than fix, prove it against a genuinely clean checkout of
 `origin/${BASE_BRANCH}` first — a cleaning step that reports nothing to
 clean is an unmet precondition, not proof, so do not go on to claim

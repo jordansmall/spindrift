@@ -8,7 +8,9 @@
 # is ungated and renders unconditionally; the export normalizes it to "".
 
 # `extraSubstVars` (default []) lists allowlist entries a fragment's own body
-# interpolates; every other fragment is static prose once its gate is on.
+# interpolates; every other fragment is static prose once its gate is on,
+# except for parents splicing in the `var` of a row above them (see the
+# Filer twin rows below).
 # `inverseOf` (issue #3219) declares this row's gate the boolean inverse of
 # the named on-gate; fragment-pairs.nix's `validate` asserts those pairs at
 # the end of this file, before an image can bake from a malformed one.
@@ -146,6 +148,45 @@ let
       gate = "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_BAKED";
       fragment = "principle-redesign-from-first-principles-default.md";
       var = "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP";
+    }
+    # The FILE ISSUES step exists only with a Filer (issue #5300), so the
+    # prose naming it forks too, as twin sub-fragments the two parent rows
+    # below splice in. A fragment may reference only the `var` of a row ABOVE
+    # it: rows render in order, so a later row's var is still unset and the
+    # literal ${VAR} leaks into the prompt. promptassembly's
+    # TestFragmentsReferenceOnlyRowsAbove pins this.
+    {
+      gate = "FILER_ENABLED";
+      fragment = "review-loop-orchestrator-filer.md";
+      var = "REVIEW_LOOP_FILER_STEP";
+    }
+    {
+      gate = "FILER_ABSENT";
+      fragment = "review-loop-orchestrator-no-filer.md";
+      var = "REVIEW_LOOP_NO_FILER_STEP";
+      inverseOf = "FILER_ENABLED";
+    }
+    {
+      gate = "FILER_ENABLED";
+      fragment = "land-pass-order-finish-filer.md";
+      var = "LAND_PASS_FINISH_FILER_STEP";
+    }
+    {
+      gate = "FILER_ABSENT";
+      fragment = "land-pass-order-finish-no-filer.md";
+      var = "LAND_PASS_FINISH_NO_FILER_STEP";
+      inverseOf = "FILER_ENABLED";
+    }
+    {
+      gate = "FILER_ENABLED";
+      fragment = "land-pass-order-gate-default-filer.md";
+      var = "LAND_PASS_GATE_DEFAULT_FILER_STEP";
+    }
+    {
+      gate = "FILER_ABSENT";
+      fragment = "land-pass-order-gate-default-no-filer.md";
+      var = "LAND_PASS_GATE_DEFAULT_NO_FILER_STEP";
+      inverseOf = "FILER_ENABLED";
     }
     # The REVIEW section (issue #2037, ADR 0035): the orchestrator drives the
     # review as its own pass, so each pass's prompt stops after COMMIT unless a

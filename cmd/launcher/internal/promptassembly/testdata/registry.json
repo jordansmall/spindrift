@@ -80,6 +80,39 @@
     "var": "PRINCIPLE_REDESIGN_FROM_FIRST_PRINCIPLES_STEP"
   },
   {
+    "gate": "FILER_ENABLED",
+    "fragment": "review-loop-orchestrator-filer.md",
+    "var": "REVIEW_LOOP_FILER_STEP"
+  },
+  {
+    "gate": "FILER_ABSENT",
+    "fragment": "review-loop-orchestrator-no-filer.md",
+    "var": "REVIEW_LOOP_NO_FILER_STEP",
+    "inverseOf": "FILER_ENABLED"
+  },
+  {
+    "gate": "FILER_ENABLED",
+    "fragment": "land-pass-order-finish-filer.md",
+    "var": "LAND_PASS_FINISH_FILER_STEP"
+  },
+  {
+    "gate": "FILER_ABSENT",
+    "fragment": "land-pass-order-finish-no-filer.md",
+    "var": "LAND_PASS_FINISH_NO_FILER_STEP",
+    "inverseOf": "FILER_ENABLED"
+  },
+  {
+    "gate": "FILER_ENABLED",
+    "fragment": "land-pass-order-gate-default-filer.md",
+    "var": "LAND_PASS_GATE_DEFAULT_FILER_STEP"
+  },
+  {
+    "gate": "FILER_ABSENT",
+    "fragment": "land-pass-order-gate-default-no-filer.md",
+    "var": "LAND_PASS_GATE_DEFAULT_NO_FILER_STEP",
+    "inverseOf": "FILER_ENABLED"
+  },
+  {
     "gate": "",
     "fragment": "review-loop-orchestrator.md",
     "var": "REVIEW_LOOP_ORCHESTRATOR_STEP"
