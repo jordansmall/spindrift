@@ -137,3 +137,27 @@ func TestReviewAnchorGating(t *testing.T) {
 		})
 	}
 }
+
+// A deployment with no Filer renders no FILE ISSUES section, and the handoff
+// is built from one RunState on host and Box alike (issue #5300), so it must
+// not name a section the prompt may lack.
+func TestHandoffNamesNoFileIssuesSection(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "findings.md")
+	if err := os.WriteFile(log, []byte("## Round 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := Handoff(runstate.RunState{
+		FindingsLogPath: log,
+		TerminalLand:    true,
+		CapFired:        "the cap fired",
+	})
+	for _, want := range []string{"Findings log: " + log, "terminal pass"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("Handoff = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Contains(got, "FILE ISSUES") {
+		t.Errorf("Handoff = %q, must not name FILE ISSUES", got)
+	}
+}
