@@ -415,6 +415,19 @@ let
     ''
       slice_defined_once ${pkgs.lib.escapeShellArg what} ${pkgs.lib.escapeShellArg (half1 + half2)}
     '';
+
+  # Shell function for merge-mode-clause-stated-once and its negative test:
+  # `scan DIR` fails unless only the two land-git-stop fragments name MERGE_MODE.
+  mergeModeScan = ''
+    scan() {
+      got=$(cd "$1" && grep -l 'MERGE_MODE' -- *.md | LC_ALL=C sort)
+      want=$(printf '%s\n' land-git-stop-read-only.md land-git-stop-read-write.md)
+      [ "$got" = "$want" ] || {
+        echo "fragments naming MERGE_MODE: '$got', want '$want'; point at OPEN A PULL REQUEST instead of restating it (issue #5312)" >&2
+        return 1
+      }
+    }
+  '';
 in
 {
   # The configured `prompt` is rendered to a store-path directory and, by
@@ -1827,6 +1840,33 @@ in
           echo "open-pr-create-forgejo.md invokes gh pr create (issues #1963, #5066)" >&2
           exit 1
         }
+        touch $out
+      '';
+
+  # The post-green MERGE_MODE clause is stated once, in issue-prompt.md's OPEN
+  # A PULL REQUEST paragraph (issue #5312); the forgejo create step and the
+  # outcome-ready fragments point at it. Only the two land-git-stop fragments
+  # name MERGE_MODE, for the different CODE_FORGE=git push-mode clause. The
+  # scan covers only fragments/, and a copy worded without the token still
+  # slips past it.
+  merge-mode-clause-stated-once = pkgs.runCommand "merge-mode-clause-stated-once" { } ''
+    ${mergeModeScan}
+    scan ${../../templates/default/prompts/fragments}
+    touch $out
+  '';
+
+  # Negative test: the scan must fail on a planted restatement.
+  merge-mode-clause-stated-once-catches-copy =
+    pkgs.runCommand "merge-mode-clause-stated-once-catches-copy" { }
+      ''
+        ${mergeModeScan}
+        cp -r ${../../templates/default/prompts/fragments} frags
+        chmod -R u+w frags
+        echo 'Honour MERGE_MODE here.' >> frags/outcome-ready-means-git.md
+        if (scan frags) 2>/dev/null; then
+          echo "scan passed despite a MERGE_MODE copy in outcome-ready-means-git.md" >&2
+          exit 1
+        fi
         touch $out
       '';
 
