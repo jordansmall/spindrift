@@ -219,7 +219,7 @@ func TestDriverCorpusGoldens(t *testing.T) {
 }
 
 // TestDriverCorpusHasNoCredentials rejects any committed corpus file, log or
-// golden, holding a credential-shaped string.
+// golden, holding a credential-shaped string, an email or a host home path.
 func TestDriverCorpusHasNoCredentials(t *testing.T) {
 	violations, err := corpus.Scan(corpusRoot)
 	if err != nil {

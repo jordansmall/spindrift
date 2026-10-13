@@ -14,7 +14,8 @@ import (
 func plantedLog() string {
 	return `{"a":"` + "gh" + "p_" + strings.Repeat("a", 36) + `"}` + "\n" +
 		`{"b":"` + "AK" + "IA" + strings.Repeat("A", 16) + `"}` + "\n" +
-		`{"c":"` + "gh" + "o_" + strings.Repeat("b", 36) + `"}` + "\n"
+		`{"c":"` + "gh" + "o_" + strings.Repeat("b", 36) + `"}` + "\n" +
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":"private"}]}}` + "\n"
 }
 
 func TestRunStdinToStdout(t *testing.T) {
@@ -26,7 +27,7 @@ func TestRunStdinToStdout(t *testing.T) {
 		if f := corpus.Find(stdout.Bytes()); len(f) != 0 {
 			t.Errorf("run(%v): output still holds findings %v", args, f)
 		}
-		want := "redacted 1 aws-access-key-id\nredacted 2 github-token\n"
+		want := "redacted 1 aws-access-key-id\nredacted 2 github-token\nredacted 1 tool-output\n"
 		if stderr.String() != want {
 			t.Errorf("run(%v) stderr = %q, want %q", args, stderr.String(), want)
 		}

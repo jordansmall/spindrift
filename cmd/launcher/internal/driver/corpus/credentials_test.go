@@ -28,6 +28,8 @@ var plantedShapes = []struct {
 	{"google-api-key", "AI" + "za", "g", "", 35},
 	{"slack-token", "xo" + "xb-", "1", "", 12},
 	{"npm-token", "npm" + "_", "h", "", 36},
+	{"email", "", "u", "@example.com", 12},
+	{"home-path", "/home/", "j", "/src/main.go", 8},
 }
 
 func shapeBody(filler string, count int) string {
@@ -76,6 +78,9 @@ func TestFindIgnoresBenignText(t *testing.T) {
 		"/nix/store/10dxp0qxqxxsyiljrh2kp0xqhz6arhcx-bash-5.3p15/bin/bash",
 		"please ask-the-reviewer-to-run-the-full-gate-now",
 		"/tmp/disk-usage-report-for-the-nightly-build-x",
+		"/home/agent/workspace/cmd/main.go is the Box's own home",
+		"pinned lodash@4.17.21 and golang.org/x/mod@v0.20.0",
+		"ssh to admin@localhost, no domain",
 	}, "\n")
 	if got := Find([]byte(benign)); len(got) != 0 {
 		t.Errorf("Find(benign) = %+v, want none", got)
@@ -182,7 +187,7 @@ func TestScanReportsPlantedTokenAndPassesOnceScrubbed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{path + ":2: credential-shaped github-token"}; !reflect.DeepEqual(got, want) {
+	if want := []string{path + ":2: unscrubbed github-token"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Scan = %q, want %q", got, want)
 	}
 	for _, v := range got {
@@ -295,6 +300,36 @@ func TestScrubHidesButtedTogetherCredentialsWithDifferentBodies(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			assertNothingSurvives(t, c.in, c.markers...)
 		})
+	}
+}
+
+func TestScrubRedactsWholeHostHomePath(t *testing.T) {
+	cases := map[string]string{
+		"linux":          `"cwd":"/home/someone/dev/acme-private/src"`,
+		"macos":          `"cwd":"/Users/someone/clients/acme/x.go"`,
+		"after box home": `"/home/agent/x /home/someone/acme"`,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := string(Scrub([]byte(in)))
+			for _, leak := range []string{"someone", "acme"} {
+				if strings.Contains(got, leak) {
+					t.Errorf("Scrub(%q) = %q, left %q in clear", in, got, leak)
+				}
+			}
+			if !strings.Contains(got, "[REDACTED:home-path]") {
+				t.Errorf("Scrub(%q) = %q, want a home-path placeholder", in, got)
+			}
+		})
+	}
+}
+
+func TestScrubKeepsJSONStructureAroundEmailAndPath(t *testing.T) {
+	in := `{"author":"someone@example.com","cwd":"/home/someone/acme","n":1}`
+	got := string(Scrub([]byte(in)))
+	want := `{"author":"[REDACTED:email]","cwd":"[REDACTED:home-path]","n":1}`
+	if got != want {
+		t.Errorf("Scrub = %q, want %q", got, want)
 	}
 }
 

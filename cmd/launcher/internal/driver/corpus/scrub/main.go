@@ -30,10 +30,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return err
 	}
 
-	counts := map[string]int{}
-	for _, f := range corpus.Find(in) {
-		counts[f.Pattern]++
-	}
+	counts := corpus.Tally(in)
 	names := make([]string, 0, len(counts))
 	for n := range counts {
 		names = append(names, n)

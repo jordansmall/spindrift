@@ -1,6 +1,8 @@
 // Package corpus is the credential guard and scrubber for the per-Driver
-// Pass-log corpus (issue #5180). Find reports credential-shaped strings in a
-// corpus file; Scrub redacts them so a maintainer can prepare an entry.
+// Pass-log corpus (issue #5180). Find reports credential-shaped strings,
+// emails and host home paths in a corpus file; Scrub redacts them, and also
+// blanks the tool output, file bodies and agent prose that hold repo content
+// (issue #5181), so a maintainer can prepare an entry.
 package corpus
 
 import (
@@ -32,7 +34,8 @@ type pattern struct {
 	valid func(match []byte) bool
 }
 
-// patterns is the single source of truth for what counts as a credential.
+// patterns is the single source of truth for what the guard rejects:
+// credentials, plus emails and host home paths.
 // No pattern is anchored (\b) or fixed-length: a match depends on no byte
 // outside itself, and every unbounded body class is greedy (private-key-block
 // ends at its END line or end of input), so a neighbouring credential can
@@ -51,6 +54,15 @@ var patterns = []pattern{
 	{name: "google-api-key", re: regexp.MustCompile(`AIza[0-9A-Za-z_-]{35,}`)},
 	{name: "slack-token", re: regexp.MustCompile(`xox[baprs]-[A-Za-z0-9-]{10,}`)},
 	{name: "npm-token", re: regexp.MustCompile(`npm_[A-Za-z0-9]{36,}`)},
+	// Not credentials, but they name a person or their machine.
+	{name: "email", re: regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)},
+	{name: "home-path", re: regexp.MustCompile(`/(?:home|Users)/[A-Za-z0-9._-]+(?:/[A-Za-z0-9._+-]+)*`), valid: notBoxHome},
+}
+
+// notBoxHome spares /home/agent, the Box user's home, which names no one.
+func notBoxHome(match []byte) bool {
+	user, _, _ := bytes.Cut(match[bytes.IndexByte(match[1:], '/')+2:], []byte("/"))
+	return string(user) != "agent"
 }
 
 // hasDigitOrUpper rejects kebab-case prose that fits the OpenAI shape: a real
@@ -112,9 +124,11 @@ func Find(data []byte) []Finding {
 	return out
 }
 
-// Scrub replaces each credential-shaped string with [REDACTED:<pattern>].
-// Its output has no Find hits, so Scrub is idempotent.
+// Scrub blanks JSON bodies (see redactBodies), then replaces each pattern
+// match with [REDACTED:<pattern>]. Its output has no Find hits and no bodies
+// left to blank, so Scrub is idempotent.
 func Scrub(data []byte) []byte {
+	data, _ = redactBodies(data)
 	// One round already redacts every span; the loop keeps idempotence true by
 	// construction should a pattern ever regain context dependence. It ends
 	// because "[", ":" and "]" sit in no pattern's character class, so a
@@ -128,6 +142,15 @@ func Scrub(data []byte) []byte {
 	}
 }
 
+// Tally counts what Scrub would redact, keyed by placeholder name.
+func Tally(data []byte) map[string]int {
+	out, counts := redactBodies(data)
+	for _, f := range Find(out) {
+		counts[f.Pattern]++
+	}
+	return counts
+}
+
 func redact(data []byte, ss []span) []byte {
 	var out []byte
 	pos := 0
@@ -139,7 +162,7 @@ func redact(data []byte, ss []span) []byte {
 	return append(out, data[pos:]...)
 }
 
-// Scan walks root and returns one "<path>:<line>: credential-shaped <pattern>"
+// Scan walks root and returns one "<path>:<line>: unscrubbed <pattern>"
 // violation per hit across every file beneath it. Violations name the pattern,
 // never the secret.
 func Scan(root string) ([]string, error) {
@@ -153,7 +176,7 @@ func Scan(root string) ([]string, error) {
 			return err
 		}
 		for _, f := range Find(data) {
-			out = append(out, fmt.Sprintf("%s:%d: credential-shaped %s", path, f.Line, f.Pattern))
+			out = append(out, fmt.Sprintf("%s:%d: unscrubbed %s", path, f.Line, f.Pattern))
 		}
 		return nil
 	})
