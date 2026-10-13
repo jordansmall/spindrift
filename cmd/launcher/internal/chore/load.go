@@ -51,12 +51,14 @@ type Knobs struct {
 // Otherwise every problem is returned together via errors.Join, each
 // prefixed with its knob. A knob's grammar reports only its first fault,
 // since its parser stops there; the cross-checks report every offender,
-// once per offender. A BUTLER_CHORE_CLASSES entry may name a built-in
-// Chore that is not enabled: the schema default lists every built-in, so
-// such an entry is inert rather than a typo. A BUTLER_PATCH_CLASSES entry
-// has no such exemption: it must name an enabled Chore, and each of its
-// classes must be on that Chore's resolved BUTLER_CHORE_CLASSES allow-list
-// (skipped when BUTLER_CHORE_CLASSES itself failed to parse).
+// once per offender. A BUTLER_CHORE_CLASSES entry may name a
+// code-scanning built-in Chore that is not enabled: the schema default
+// names each of them, so such an entry is inert rather than a typo; one
+// naming the records-scoped tuning Chore is rejected, enabled or not. A
+// BUTLER_PATCH_CLASSES entry has no such exemption: it must name an
+// enabled Chore, and each of its classes must be on that Chore's resolved
+// BUTLER_CHORE_CLASSES allow-list (skipped when BUTLER_CHORE_CLASSES
+// itself failed to parse).
 func Load(k Knobs) ([]Chore, error) {
 	names := choreNames(k.Chores)
 	if len(names) == 0 {
