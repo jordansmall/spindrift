@@ -174,8 +174,9 @@ type Descriptor struct {
 	Labels         LabelFamily
 	Prompts        Prompts
 	Settle         Settle
-	AdviseOnly     bool // read-only posture: never lands code (no branch/PR/merge); ignores blockers
-	ReadOnlyBox    bool // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
+	AdviseOnly     bool   // read-only posture: never lands code (no branch/PR/merge); ignores blockers
+	CompleteBanner string // all-delivered banner phrase for run/runContinuousDispatch (the butler and recover print none); "" = the Code Forge's landing wording
+	ReadOnlyBox    bool   // Box always runs read-only (guards, outbox relay), regardless of BOX_FORGE_AND_ISSUE_ACCESS
 	DaemonPriority DaemonPriority
 	DemandSource   DemandSource
 	FindingLabel   string          // provenance label settle applies to a filed finding
@@ -219,6 +220,7 @@ var (
 		},
 		Settle:         SettleVerdict,
 		AdviseOnly:     true,
+		CompleteBanner: "verdicts posted",
 		DaemonPriority: PriorityReserved,
 		Enablement:     EnabledAlways,
 		DemandSource:   DemandTrackerProbe,
@@ -249,6 +251,7 @@ var (
 		},
 		Settle:         SettleLedger,
 		AdviseOnly:     true,
+		CompleteBanner: "findings filed",
 		ReadOnlyBox:    true, // issue #3906
 		DaemonPriority: PriorityIdle,
 		Enablement:     EnabledByChores,

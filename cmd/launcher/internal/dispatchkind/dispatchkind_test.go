@@ -129,6 +129,11 @@ func TestEveryAxisSetForEveryKind(t *testing.T) {
 		if d.AnnounceVerb == "" {
 			t.Fatalf("%s: AnnounceVerb unset", d.Name)
 		}
+		// An advise-only kind's Complete is a verdict or a filing, not a landing,
+		// so it must not inherit the Code Forge's landing banner (issue #5164).
+		if d.AdviseOnly && d.CompleteBanner == "" {
+			t.Fatalf("%s: advise-only kind with no CompleteBanner", d.Name)
+		}
 		if d.Enablement == 0 {
 			t.Fatalf("%s: Enablement unset", d.Name)
 		}
