@@ -54,8 +54,14 @@ func (s *Settle) hostMediateDraftPR(num string, gen uint64, result dispatch.Resu
 	}
 	// created is false when Open adopted a pre-existing box-authored PR (issue
 	// #2407), which never received the reconstructed title and body, so
-	// announcing a reconstructed hand-off there would be false.
-	if source == TextSourceReconstructed && created {
+	// announcing a reconstructed hand-off there would be false. It is also false
+	// when the retry wrapper adopted the host's own earlier attempt (issue
+	// #5173), which did carry that text. Residual edge: any failed first attempt
+	// that did not itself create a PR (pre-POST connection error, 5xx, rate-limit
+	// 403, timeout) followed by adopting a PR already open on the branch (box-
+	// authored, or a prior dispatch's) is misread as the host's own; an
+	// OpenPRForBranch before every first attempt isn't worth that.
+	if source == TextSourceReconstructed && (created || m.adoptedOwn) {
 		fmt.Printf("    #%s  landing=%s  status=reconstructed  note=no PR-intent line found in the box's log; description derived host-side from the relayed branch's commits\n", num, branch)
 		// An operator reading only the issue, never the launcher's stdout,
 		// must still see that the box's hand-off was incomplete (issue #2447,

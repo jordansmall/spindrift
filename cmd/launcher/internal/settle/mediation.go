@@ -62,6 +62,11 @@ type Mediation struct {
 	// its source for every hand-off path. Nil outside mediationFor.
 	onOpen func(url string)
 
+	// adoptedOwn is set when Open returned created=false for a PR the host's own
+	// earlier create attempt made, not a pre-existing one (issue #5173). Never
+	// reset: a Mediation is single-use (mediationFor builds a fresh one per Open).
+	adoptedOwn bool
+
 	br  forge.BundleRelay
 	dpc forge.DraftPRCreator
 	bcs forge.BundleCommitSubjects
@@ -82,7 +87,7 @@ func (s *Settle) mediationFor(num string, gen uint64) (branch string, m *Mediati
 	// push-only relay share the one retry policy (issue #4649), and the draft-PR
 	// create retries the same way (issue #5146).
 	m.br = s.retryingRelay(num, gen, m.br)
-	m.dpc = s.retryingDraftPR(num, gen, m.dpc, caps.PRForge)
+	m.dpc = s.retryingDraftPR(num, gen, m.dpc, caps.PRForge, func() { m.adoptedOwn = true })
 	m.onOpen = func(url string) { s.latchPR(num, url) }
 	return cf.AgentBranch(num), m
 }

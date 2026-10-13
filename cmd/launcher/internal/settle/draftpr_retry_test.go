@@ -50,7 +50,7 @@ func draftPRRetryFixture(t *testing.T, maxRetries int, clock dispatch.Clock) (*S
 
 func TestRetryingDraftPR_NilInnerStaysNil(t *testing.T) {
 	s := newRetrySettle(dispatch.Clock{})
-	if got := s.retryingDraftPR("7", 0, nil, nil); got != nil {
+	if got := s.retryingDraftPR("7", 0, nil, nil, nil); got != nil {
 		t.Errorf("retryingDraftPR(nil) = %v, want nil", got)
 	}
 }
@@ -217,7 +217,7 @@ func createViaRetry(t *testing.T, s *Settle, fc *forge.Fake) (url string, create
 func createViaRetryGen(t *testing.T, s *Settle, fc *forge.Fake, gen uint64) (url string, created bool, stdout string, err error) {
 	t.Helper()
 	stdout = captureStdout(t, func() {
-		url, created, err = s.retryingDraftPR(draftPRRetryIssue, gen, fc.AsGithubReadOnly().(forge.DraftPRCreator), fc).
+		url, created, err = s.retryingDraftPR(draftPRRetryIssue, gen, fc.AsGithubReadOnly().(forge.DraftPRCreator), fc, nil).
 			CreateDraftPR("t", "b", "main", "b")
 	})
 	return url, created, stdout, err
@@ -266,6 +266,117 @@ func TestSettle_GithubReadOnly_DraftPRCreateStoppedDuringBackoff_PostsNothing(t 
 	if len(fc.CreateDraftPRCalls) != 1 {
 		t.Errorf("CreateDraftPR calls = %d, want 1 (no re-create after the stop)", len(fc.CreateDraftPRCalls))
 	}
+}
+
+// reconstructedComments counts the host-side reconstructed-hand-off comments.
+func reconstructedComments(fc *forge.Fake) int {
+	n := 0
+	for _, c := range fc.CommentCalls {
+		if strings.Contains(c.Body, "This PR was reconstructed host-side") {
+			n++
+		}
+	}
+	return n
+}
+
+// withoutPRIntent makes result reconstruct its PR text host-side from the
+// relayed branch's commits.
+func withoutPRIntent(fc *forge.Fake, result dispatch.Result) dispatch.Result {
+	result.PRIntent, result.PRIntentFound = "", false
+	fc.CommitSubjectsResult = []string{"feat: add widget"}
+	return result
+}
+
+// A PR the host made itself with reconstructed text and then adopted after a
+// failed attempt carries the reconstructed text, so the hand-off is announced
+// (issue #5173); created stays false.
+func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedAfterTimeoutIsAnnounced(t *testing.T) {
+	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
+	result = withoutPRIntent(fc, result)
+	fc.CreateDraftPRErrs = []error{errDraftPR504}
+	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
+	tally := installGreenCIAndTally(t, fc)
+
+	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+
+	if !strings.Contains(stdout, "status=reconstructed") {
+		t.Errorf("stdout must carry status=reconstructed, got:\n%s", stdout)
+	}
+	if n := reconstructedComments(fc); n != 1 {
+		t.Errorf("reconstructed comments = %d, want 1: %+v", n, fc.CommentCalls)
+	}
+	assertDraftPRHandedOff(t, fc, tally, stdout)
+}
+
+// Same, when the lookup fails and the adapter's already-exists backstop adopts
+// the PR on the re-create.
+func TestSettle_GithubReadOnly_ReconstructedDraftPRAdoptedByBackstopIsAnnounced(t *testing.T) {
+	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
+	result = withoutPRIntent(fc, result)
+	fc.CreateDraftPRErrs = []error{errDraftPR504}
+	fc.OpenPRForBranchErrs = []error{errors.New("lookup blip")}
+	fc.CreateDraftPRAdoptHead = fc.AgentBranch("5146")
+	fc.CreateDraftPRAdoptedURL = draftPRRetryURL
+	tally := installGreenCIAndTally(t, fc)
+
+	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+
+	if !strings.Contains(stdout, "status=reconstructed") {
+		t.Errorf("stdout must carry status=reconstructed, got:\n%s", stdout)
+	}
+	if n := reconstructedComments(fc); n != 1 {
+		t.Errorf("reconstructed comments = %d, want 1: %+v", n, fc.CommentCalls)
+	}
+	assertDraftPRHandedOff(t, fc, tally, stdout)
+}
+
+// A PR-intent hand-off adopted after a retry has nothing to announce.
+func TestSettle_GithubReadOnly_PRIntentDraftPRAdoptedAfterTimeoutIsNotAnnounced(t *testing.T) {
+	s, fc, result := draftPRRetryFixture(t, 3, dispatch.Clock{})
+	fc.CreateDraftPRErrs = []error{errDraftPR504}
+	fc.CreateDraftPROnCall = func(head string) { fc.SetPR(head, forge.PR{URL: draftPRRetryURL}) }
+	installGreenCIAndTally(t, fc)
+
+	stdout := captureStdout(t, func() { s.Settle(dispatch.NewFake(), "5146", 0, result) })
+
+	if n := reconstructedComments(fc); n != 0 || strings.Contains(stdout, "status=reconstructed") {
+		t.Errorf("want no reconstructed note, got %d comments; stdout:\n%s", n, stdout)
+	}
+}
+
+// The own-adoption hook fires only after an earlier attempt of this wrapper
+// failed; a first-attempt created=false is a pre-existing PR and must not fire it.
+func TestRetryingDraftPR_OnAdoptOwnFiresOnlyAfterAFailedAttempt(t *testing.T) {
+	t.Run("lookup adoption", func(t *testing.T) {
+		s, fc, _ := draftPRRetryFixture(t, 3, dispatch.Clock{})
+		fc.CreateDraftPRErrs = []error{errDraftPR504}
+		fc.SetPR("b", forge.PR{URL: draftPRRetryURL})
+		fired := 0
+		captureStdout(t, func() {
+			s.retryingDraftPR("5146", 0, fc.AsGithubReadOnly().(forge.DraftPRCreator), fc, func() { fired++ }).
+				CreateDraftPR("t", "b", "main", "b")
+		})
+		if fired != 1 {
+			t.Errorf("hook fired %d times, want 1", fired)
+		}
+	})
+	t.Run("first-attempt created=false", func(t *testing.T) {
+		s, fc, _ := draftPRRetryFixture(t, 3, dispatch.Clock{})
+		fc.CreateDraftPRAdoptHead, fc.CreateDraftPRAdoptedURL = "b", draftPRRetryURL
+		fired := 0
+		var created bool
+		var err error
+		captureStdout(t, func() {
+			_, created, err = s.retryingDraftPR("5146", 0, fc.AsGithubReadOnly().(forge.DraftPRCreator), fc, func() { fired++ }).
+				CreateDraftPR("t", "b", "main", "b")
+		})
+		if err != nil {
+			t.Fatalf("CreateDraftPR: %v", err)
+		}
+		if fired != 0 || created {
+			t.Errorf("hook fired %d times created=%v, want 0 and false", fired, created)
+		}
+	})
 }
 
 // installGreenCIAndTally scripts green CI on the opened PR and installs a

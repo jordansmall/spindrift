@@ -11,7 +11,7 @@ import (
 // retry-with-backoff seam. A nil dpc stays nil, so callers' nil checks keep
 // meaning "no creator". A non-nil dpc comes with a non-nil prs: every real
 // DraftPRCreator adapter is also a PRForge (see forge.DraftPRCreator).
-func (s *Settle) retryingDraftPR(num string, gen uint64, dpc forge.DraftPRCreator, prs forge.PRForge) forge.DraftPRCreator {
+func (s *Settle) retryingDraftPR(num string, gen uint64, dpc forge.DraftPRCreator, prs forge.PRForge, onAdoptOwn func()) forge.DraftPRCreator {
 	if dpc == nil {
 		return nil
 	}
@@ -22,6 +22,7 @@ func (s *Settle) retryingDraftPR(num string, gen uint64, dpc forge.DraftPRCreato
 		num:        num,
 		inner:      dpc,
 		prs:        prs,
+		onAdoptOwn: onAdoptOwn,
 	}
 }
 
@@ -32,6 +33,10 @@ type retryingDraftPRCreator struct {
 	num        string // log lines only
 	inner      forge.DraftPRCreator
 	prs        forge.PRForge
+	// onAdoptOwn fires when a result with created=false follows a failed attempt of
+	// this wrapper, i.e. the PR is the host's own earlier attempt (issue #5173).
+	// Nil-safe.
+	onAdoptOwn func()
 }
 
 // CreateDraftPR retries every failure whatever its class. The create POST is
@@ -48,6 +53,9 @@ func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (
 	for attempt := 1; ; attempt++ {
 		url, created, err := r.inner.CreateDraftPR(title, body, base, head)
 		if err == nil {
+			if !created && attempt > 1 {
+				r.fireOnAdoptOwn()
+			}
 			return url, created, err
 		}
 		final := attempt > r.maxRetries
@@ -66,10 +74,17 @@ func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (
 			fmt.Printf("    #%s  landing=%s  status=draft-pr-lookup-failed  !! %v\n", r.num, head, lerr)
 		} else if ok {
 			fmt.Printf("    #%s  landing=%s  status=draft-pr-adopted  %s\n", r.num, head, pr.URL)
+			r.fireOnAdoptOwn()
 			return pr.URL, false, nil
 		}
 		if final {
 			return url, created, err
 		}
+	}
+}
+
+func (r *retryingDraftPRCreator) fireOnAdoptOwn() {
+	if r.onAdoptOwn != nil {
+		r.onAdoptOwn()
 	}
 }
