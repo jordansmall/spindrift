@@ -46,7 +46,7 @@ setup_dispatch_env() {
   export FAKE_GH_ISSUES=$'1\tFirst issue\n2\tSecond issue'
   # Bound the merge gate's poll loop (issue #2424): a test that reaches it
   # without its own values would inherit the production defaults (3600s
-  # timeout, 180s interval) and really sleep, as CI did on PR #2410. Interval 0
+  # timeout, 30s interval) and really sleep, as CI did on PR #2410. Interval 0
   # keeps iterations instant; a small nonzero timeout still lets it iterate once.
   export MERGE_POLL_INTERVAL=0
   export MERGE_POLL_TIMEOUT=2
