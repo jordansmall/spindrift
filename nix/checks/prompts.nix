@@ -99,10 +99,9 @@ let
   # still present, but with research-verdict-github-readonly.md swapped for a
   # copy missing the required SPINDRIFT_COMMENT marker.
   brokenResearchVerdictFragmentBody = ''
-    Your GitHub token is read-only here -- you cannot comment on the issue
-    yourself. Print the verdict as a single line on stdout instead -- the
-    launcher finds it by this run's nonce, decodes it, and posts it to the
-    issue, host-side, once you exit.
+    On this run you do not comment on the issue yourself. Print the verdict as
+    a single line on stdout instead -- the launcher finds it by this run's
+    nonce, decodes it, and posts it to the issue, host-side, once you exit.
 
     This fixture deliberately omits the required marker line.
   '';

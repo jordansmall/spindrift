@@ -1,7 +1,7 @@
-Your Forgejo token is read-only here — you cannot comment on the issue
-yourself. Send the verdict over the Signal socket instead, so the launcher
-posts it host-side once you exit. Send it in one call, the body on stdin —
-never write the body to a file in one call and send it in the next:
+On this run you do not comment on the issue yourself. Send the verdict
+over the Signal socket instead, so the launcher posts it host-side once
+you exit. Send it in one call, the body on stdin — never write the body to
+a file in one call and send it in the next:
 
 ```sh
 driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
