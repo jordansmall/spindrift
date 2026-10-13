@@ -271,7 +271,7 @@ func Resolve(cfg ResolveConfig) (Resolution, error) {
 			reason = "no PR intent on the signal socket status route, handing off blocked"
 		}
 		r.OpLine = hostop.EncodeSpindriftOp(hostop.SpindriftOp{
-			Op:       "decision",
+			Op:       hostop.OpDecision,
 			Decision: "stop",
 			Reason:   fmt.Sprintf("read-only PR-intent nudge exhausted after %d attempt; %s", cfg.Attempts, reason),
 		})

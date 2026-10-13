@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/hostop"
 )
 
 // Writer parses stream-json output, forwarding every byte to raw unchanged and
@@ -184,7 +185,7 @@ func (w *Writer) parseLine(line string) {
 		}
 		w.emit()
 		return
-	case "spindrift_op":
+	case hostop.TypeSpindriftOp:
 		if ev.SpindriftOp != nil {
 			fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.SpindriftOp))
 			w.activeTopLevelRole = nextActiveTopLevelRole(w.activeTopLevelRole, ev.SpindriftOp)

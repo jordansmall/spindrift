@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
@@ -33,7 +34,7 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 		if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr != nil {
 			return
 		}
-		if ev.Type == "spindrift_op" {
+		if ev.Type == hostop.TypeSpindriftOp {
 			activeTopLevelRole = nextActiveTopLevelRole(activeTopLevelRole, ev.SpindriftOp)
 			return
 		}

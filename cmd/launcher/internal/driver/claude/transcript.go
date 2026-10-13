@@ -129,7 +129,7 @@ func AttributionRoleForPass(passRole string) string {
 // nextActiveTopLevelRole returns the top-level attribution role in effect after
 // op (issue #2382). An op that maps to no role leaves current unchanged.
 func nextActiveTopLevelRole(current string, op *hostop.SpindriftOp) string {
-	if op == nil || op.Op != "pass_start" {
+	if op == nil || op.Op != hostop.OpPassStart {
 		return current
 	}
 	if role := AttributionRoleForPass(op.Role); role != "" {
