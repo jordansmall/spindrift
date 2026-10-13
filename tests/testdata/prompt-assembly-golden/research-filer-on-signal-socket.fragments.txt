@@ -5,6 +5,7 @@ filer-file-relay-socket.md
 filer-label-relay-research.md
 research-file-issues-relay-socket.md
 research-issue-read-github.md
+research-outcome-landing-relayed-socket.md
 research-verdict-github-readonly-socket.md
 scout-issue-read-github.md
 skill-preamble.md

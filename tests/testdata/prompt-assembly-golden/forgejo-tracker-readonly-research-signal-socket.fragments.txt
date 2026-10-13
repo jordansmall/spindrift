@@ -1,4 +1,5 @@
 caveman-default-research.md
 check-hygiene-default.md
 research-issue-read-forgejo.md
+research-outcome-landing-relayed-socket.md
 research-verdict-forgejo-readonly-socket.md

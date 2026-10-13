@@ -58,6 +58,13 @@ func fragReadOnly(e *Env) { e.BoxWriteEnabled = false }
 
 func fragResearch(e *Env) { e.DispatchKind = "research" }
 
+func fragSocket(e *Env) { e.SignalCarrier = "socket" }
+
+var (
+	relayedWant    = []string{"always use `landing=none`", "relayed verdict is a delivered verdict"}
+	relayedWantNot = []string{"gh issue comment", "fj issue comment", "comment you just posted"}
+)
+
 func fragFiler(e *Env) {
 	e.FilerEnabled = true
 	e.AgentsJSONTemplate = fragFilerRoster
@@ -155,6 +162,62 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			mutate:  []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly},
 			want:    []string{"SPINDRIFT_COMMENT " + fragNonce},
 			wantNot: []string{"fj issue comment 2349"},
+		},
+		{
+			name:    "research outcome github read-write keeps the gh issue comment landing hint",
+			mutate:  []func(*Env){fragResearch},
+			section: [2]string{"# OUTCOME", ""},
+			want:    []string{"`landing` is the URL of the comment you just posted", "`gh issue comment` prints it"},
+			wantNot: []string{"landing=none`", "relayed verdict is a delivered verdict", "fj issue comment"},
+		},
+		{
+			name:    "research outcome github read-write with the Filer is relayed, never gh issue comment",
+			mutate:  []func(*Env){fragResearch, fragFiler},
+			section: [2]string{"# OUTCOME", ""},
+			want:    append([]string{"Nothing acknowledges a relay on the `log` carrier"}, relayedWant...),
+			wantNot: append([]string{"signal comment accepted"}, relayedWantNot...),
+		},
+		{
+			name:    "research outcome github read-write with the Filer on the socket carrier is relayed and acknowledged",
+			mutate:  []func(*Env){fragResearch, fragFiler, fragSocket},
+			section: [2]string{"# OUTCOME", ""},
+			want:    append([]string{"`driver-exec signal comment` exits zero"}, relayedWant...),
+			wantNot: append([]string{"Nothing acknowledges a relay"}, relayedWantNot...),
+		},
+		{
+			name:    "research outcome github read-only is relayed",
+			mutate:  []func(*Env){fragResearch, fragReadOnly},
+			section: [2]string{"# OUTCOME", ""},
+			want:    relayedWant,
+			wantNot: relayedWantNot,
+		},
+		{
+			name:    "research outcome local is relayed",
+			mutate:  []func(*Env){fragResearch, fragLocalTracker},
+			section: [2]string{"# OUTCOME", ""},
+			want:    relayedWant,
+			wantNot: relayedWantNot,
+		},
+		{
+			name:    "research outcome forgejo read-write names fj issue comment, never gh",
+			mutate:  []func(*Env){fragResearch, fragForgejoTracker},
+			section: [2]string{"# OUTCOME", ""},
+			want:    []string{"posted with `fj issue comment`", "`landing=none` if it printed no URL"},
+			wantNot: []string{"gh issue comment", "relayed verdict is a delivered verdict"},
+		},
+		{
+			name:    "research outcome forgejo read-only is relayed",
+			mutate:  []func(*Env){fragResearch, fragForgejoTracker, fragReadOnly},
+			section: [2]string{"# OUTCOME", ""},
+			want:    relayedWant,
+			wantNot: relayedWantNot,
+		},
+		{
+			name:    "research outcome blocked hatch does not catch a successful relay",
+			mutate:  []func(*Env){fragResearch, fragReadOnly},
+			section: [2]string{"# OUTCOME", ""},
+			want:    []string{"or the verdict was never delivered, use", "The relay failed\nonly if the guard kept reporting over budget"},
+			wantNot: []string{"or the comment cannot be posted", "relay failed as described above"},
 		},
 		{
 			name: "blocked-comment github read-write keeps gh issue comment",

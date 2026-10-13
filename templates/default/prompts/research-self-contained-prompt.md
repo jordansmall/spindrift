@@ -45,19 +45,16 @@ Comments only.
 
 # OUTCOME
 
-Once the comment is posted, print exactly one line as your final output —
-raw plain text, not wrapped in backticks, a code fence, or any other
-markdown formatting:
+Once the verdict comment is posted or relayed, print exactly one line as your
+final output — raw plain text, not wrapped in backticks, a code fence, or any
+other markdown formatting:
 
-SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<verdict-comment-url> status=<${RESEARCH_STATUS_ENUM}> note=<one-line rationale>
+SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=<landing> status=<${RESEARCH_STATUS_ENUM}> note=<one-line rationale>
 
 This must be the literal final message — nothing after it, no prose summary.
-For github, `landing` is the URL of the comment you just posted
-(`gh issue comment` prints it). For local, nothing was posted from in-box —
-use `landing=none`. `status` carries the verdict, not a work-style
-ready/blocked.
+${RESEARCH_OUTCOME_LANDING_GITHUB_STEP}${RESEARCH_OUTCOME_LANDING_FORGEJO_STEP}${RESEARCH_OUTCOME_LANDING_RELAYED_STEP}${RESEARCH_OUTCOME_LANDING_RELAYED_SOCKET_STEP}`status` carries the verdict, not a work-style ready/blocked.
 
-If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
-as the escape hatch instead — same raw plain text requirement:
+If you cannot reach a verdict, or the verdict was never delivered, use
+`blocked` as the escape hatch instead — same raw plain text requirement:
 
 SPINDRIFT_OUTCOME issue=${ISSUE_NUMBER} landing=none status=blocked note=<short reason>
