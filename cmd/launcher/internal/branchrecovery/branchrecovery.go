@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 
 	"spindrift.dev/launcher/internal/bundleout"
 )
@@ -53,7 +54,21 @@ type Outcome struct {
 func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, error) {
 	var out Outcome
 	base := "origin/" + cfg.BaseBranch
-	fresh := func() error { return cfg.git(w, "checkout", "-b", cfg.Branch, base) }
+	if err := cfg.seedRemoteReflog(w); err != nil {
+		return out, err
+	}
+	// A leftover origin/<branch> is recorded in the new branch's reflog before
+	// the reset: the push's --force-if-includes refuses a remote tip the local
+	// reflog never held.
+	fresh := func() error {
+		if cfg.git(io.Discard, "rev-parse", "--verify", "--quiet", "refs/remotes/origin/"+cfg.Branch) != nil {
+			return cfg.git(w, "checkout", "-b", cfg.Branch, base)
+		}
+		if err := cfg.git(w, "branch", "--no-track", cfg.Branch, "origin/"+cfg.Branch); err != nil {
+			return err
+		}
+		return cfg.git(w, "checkout", "-B", cfg.Branch, base)
+	}
 
 	switch {
 	case !cfg.QueryOpenPR:
@@ -108,7 +123,7 @@ func Recover(cfg Config, openPR func() (bool, error), w io.Writer) (Outcome, err
 // else the outbox bundle (issue #1808), which no-ops with no commits ahead.
 func Publish(cfg Config, w io.Writer) error {
 	if cfg.Push {
-		return cfg.git(w, "push", "--force-with-lease", "origin", cfg.Branch)
+		return cfg.git(w, "push", "--force-with-lease", "--force-if-includes", "origin", cfg.Branch)
 	}
 	return bundleout.Run(bundleout.Config{
 		Repo:      cfg.WorkDir,
@@ -116,6 +131,27 @@ func Publish(cfg Config, w io.Writer) error {
 		Branch:    cfg.Branch,
 		OutboxDir: cfg.OutboxDir,
 	}, w)
+}
+
+// seedRemoteReflog gives a cloned origin/<branch> the reflog entry clone never
+// writes. --force-if-includes stops its walk of the local reflog at the
+// remote-tracking ref's newest entry, and with no entry that cutoff is an
+// uninitialized stack value (git remote.c is_reachable_in_reflog), so the push
+// is refused at random — reliably on aarch64. The seed predates every local
+// branch entry, so the walk always reaches them.
+func (cfg Config) seedRemoteReflog(w io.Writer) error {
+	ref := "refs/remotes/origin/" + cfg.Branch
+	if cfg.git(io.Discard, "reflog", "exists", ref) == nil {
+		return nil
+	}
+	cmd := exec.Command("git", "rev-parse", "--verify", "--quiet", ref)
+	cmd.Dir = cfg.WorkDir
+	tip, err := cmd.Output()
+	if err != nil {
+		return nil // no remote branch, so no lease to check
+	}
+	oid := strings.TrimSpace(string(tip))
+	return cfg.git(w, "reflog", "write", ref, oid, oid, "branchrecovery: observed at clone")
 }
 
 func (cfg Config) git(w io.Writer, args ...string) error {

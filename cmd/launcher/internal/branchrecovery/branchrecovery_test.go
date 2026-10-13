@@ -3,6 +3,7 @@ package branchrecovery_test
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -323,6 +324,81 @@ func TestRecoverWithoutOpenPRQueryStartsFresh(t *testing.T) {
 	}
 	if want := "CODE_FORGE=github: starting " + branch + " fresh from origin/main"; !strings.Contains(w.String(), want) {
 		t.Errorf("narration missing %q: %s", want, w.String())
+	}
+}
+
+// The agent's later `git push --force-with-lease --force-if-includes` refuses a
+// remote tip that never appears in the local branch's reflog, so a fresh start
+// over a leftover remote branch must have recorded that tip.
+func TestRecoverFreshOverRemoteBranchAllowsForceIfIncludesPush(t *testing.T) {
+	push := func(t *testing.T, f *fixture) error {
+		t.Helper()
+		git(t, f.work, "fetch", "-q", "origin")
+		out, err := exec.Command("git", "-C", f.work, "push", "--force-with-lease", "--force-if-includes", "-u", "origin", branch).CombinedOutput()
+		if err != nil {
+			t.Logf("push: %s", out)
+		}
+		return err
+	}
+	recoverFresh := func(t *testing.T) *fixture {
+		t.Helper()
+		f := newFixture(t)
+		f.cfg.QueryOpenPR = false
+		f.withPriorBranch(t, "prior.txt", "prior\n")
+		if _, err := branchrecovery.Recover(f.cfg, never(t), &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		return f
+	}
+
+	t.Run("supersedes the stale tip", func(t *testing.T) {
+		f := recoverFresh(t)
+		commit(t, f.work, "work.txt", "work\n")
+		if err := push(t, f); err != nil {
+			t.Fatalf("push rejected: %v", err)
+		}
+		if got, want := f.originRef(t, "refs/heads/"+branch), git(t, f.work, "rev-parse", "HEAD"); got != want {
+			t.Errorf("origin branch = %s, want local tip %s", got, want)
+		}
+	})
+
+	t.Run("still rejects a foreign commit pushed afterwards", func(t *testing.T) {
+		f := recoverFresh(t)
+		other := filepath.Join(t.TempDir(), "other")
+		git(t, filepath.Dir(other), "clone", "-q", "-b", branch, f.origin, other)
+		git(t, other, "config", "user.name", "Test")
+		git(t, other, "config", "user.email", "t@example.com")
+		commit(t, other, "foreign.txt", "f\n")
+		git(t, other, "push", "-q", "origin", branch)
+		foreign := f.originRef(t, "refs/heads/"+branch)
+
+		commit(t, f.work, "work.txt", "work\n")
+		if err := push(t, f); err == nil {
+			t.Fatal("push succeeded over a foreign commit")
+		}
+		if got := f.originRef(t, "refs/heads/"+branch); got != foreign {
+			t.Errorf("foreign commit clobbered: %s -> %s", foreign, got)
+		}
+	})
+}
+
+// A clone leaves origin/<branch> without a reflog, which leaves git's
+// --force-if-includes cutoff uninitialized; Recover must seed one.
+func TestRecoverSeedsTheRemoteTrackingReflog(t *testing.T) {
+	for _, queryOpenPR := range []bool{true, false} {
+		t.Run(fmt.Sprintf("QueryOpenPR=%t", queryOpenPR), func(t *testing.T) {
+			f := newFixture(t)
+			f.cfg.QueryOpenPR = queryOpenPR
+			f.withPriorBranch(t, "prior.txt", "prior\n")
+			ref := "refs/remotes/origin/" + branch
+			git(t, f.work, "reflog", "drop", ref)
+			if _, err := branchrecovery.Recover(f.cfg, func() (bool, error) { return true, nil }, &bytes.Buffer{}); err != nil {
+				t.Fatal(err)
+			}
+			if err := exec.Command("git", "-C", f.work, "reflog", "exists", ref).Run(); err != nil {
+				t.Errorf("%s has no reflog after Recover", ref)
+			}
+		})
 	}
 }
 
