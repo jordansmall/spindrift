@@ -6,6 +6,12 @@
    SPINDRIFT_PR_INTENT ${RUN_NONCE} <base64-encoded title, a blank line,
    then the body>
 
+   The first field after `SPINDRIFT_PR_INTENT` must be exactly this run's
+   nonce, `${RUN_NONCE}` (issue #1938): it lets the host tell a line this run
+   genuinely wrote from one an untrusted issue or comment author echoed into
+   the log, so a line with the nonce missing or wrong is silently dropped
+   (issue #1939).
+
    Build the payload by joining the PR title, a blank line, and the PR body,
    then base64-encoding the result into one unbroken token with no embedded
    newlines or spaces (e.g. `printf '%s\n\n%s' "<conventional title>"

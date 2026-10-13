@@ -120,22 +120,68 @@ func TestAssembleFixPassCIReadFollowsTheForge(t *testing.T) {
 	}
 }
 
-// RUN_NONCE reaches the rendered prompt (issue #1937) and the issue
-// placeholders are substituted.
-func TestAssembleRendersIssuePlaceholdersAndRunNonce(t *testing.T) {
-	env := coveredEnv()
-	env.RunNonce = "deadbeefcafe1234"
-	result, err := Assemble(env, loadTestRegistry(t))
+// The issue placeholders are substituted into the rendered prompt.
+func TestAssembleRendersIssuePlaceholders(t *testing.T) {
+	result, err := Assemble(coveredEnv(), loadTestRegistry(t))
 	if err != nil {
 		t.Fatalf("Assemble: %v", err)
 	}
 	for _, want := range []string{
 		"Implement GitHub issue #2349: Add promptassembly.Assemble",
-		"agent/issue-2349", "cut from", "deadbeefcafe1234",
+		"agent/issue-2349", "cut from",
 	} {
 		if !strings.Contains(result.Prompt, want) {
 			t.Errorf("prompt lacks %q:\n%s", want, result.Prompt)
 		}
+	}
+}
+
+// RUN_NONCE reaches the prompt only where a log-carried PR-intent line
+// needs it (issues #1937, #5131): the read-only log carrier names it and
+// why a wrong one is dropped; the socket carrier and read-write runs, which
+// have no nonce-bearing line, never mention it.
+func TestAssembleRunNonceRendersOnlyOnReadOnlyLogCarrier(t *testing.T) {
+	const nonce = "deadbeefcafe1234"
+	reg := loadTestRegistry(t)
+
+	readOnlyLog := coveredEnv()
+	readOnlyLog.BoxWriteEnabled = false
+	readOnlyLog.SignalCarrier = "log"
+	readOnlyLog.RunNonce = nonce
+	result, err := Assemble(readOnlyLog, reg)
+	if err != nil {
+		t.Fatalf("Assemble read-only log: %v", err)
+	}
+	for _, want := range []string{"SPINDRIFT_PR_INTENT " + nonce, "silently dropped"} {
+		if !strings.Contains(result.Prompt, want) {
+			t.Errorf("read-only log prompt lacks %q:\n%s", want, result.Prompt)
+		}
+	}
+
+	for _, tc := range []struct {
+		name     string
+		readOnly bool
+		carrier  string
+	}{
+		{"read-only socket", true, "socket"},
+		{"read-write log", false, "log"},
+		{"read-write socket", false, "socket"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			env := coveredEnv()
+			env.BoxWriteEnabled = !tc.readOnly
+			env.SignalCarrier = tc.carrier
+			env.RunNonce = nonce
+			got, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			for _, bad := range []string{nonce, "nonce="} {
+				if strings.Contains(got.Prompt, bad) {
+					t.Errorf("prompt has %q, want it absent:\n%s", bad, got.Prompt)
+				}
+			}
+		})
 	}
 }
 

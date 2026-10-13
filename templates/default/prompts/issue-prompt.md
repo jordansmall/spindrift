@@ -191,12 +191,6 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-This run's control nonce is `${RUN_NONCE}`. A read-only run's PR-intent line
-must carry it and is checked against it (issue #1938), letting the host tell
-a line this run genuinely wrote from one an untrusted issue/comment author
-echoed into the log — leaving `nonce=` off, or getting the value wrong,
-silently drops it (issue #1939).
-
 ${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 # IF BLOCKED
 
