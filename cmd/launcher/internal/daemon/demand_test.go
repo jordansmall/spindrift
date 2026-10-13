@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
 )
 
@@ -1029,6 +1030,59 @@ func requireOnlyProbeIntervalReparks(t *testing.T, clk *testClock, slots int, in
 		if w != interval {
 			t.Fatalf("waits = %v: a re-park past the first %d jam-backoff parks must be the %v probe interval, got %v", waits, slots, interval, w)
 		}
+	}
+}
+
+// The window: a sibling's probe lands after a slot's tracker-side claim (the
+// label swap) but before the claim is folded into the schedule. It reads the
+// claimed item still in flight (ready == starting) and parks for the whole
+// probe interval, so the fold must wake it. The clock is neither advanced nor
+// released after the park, so only that wake can start the second child.
+func TestLoopClaimAfterLabelSwapWakesParkedSibling(t *testing.T) {
+	const interval = time.Hour
+	ctx, clk, r := parkedLoopDoubles(t, 2)
+	// No announce on start: a slot stays between its start and its claim.
+	r.onStart = nil
+	cfg := probedConfig(2, interval, workKind)
+	cfg.IdleFloor, cfg.IdleCap = 2*interval, 3*interval
+	r.setDemand(workKind, 1)
+	var buf bytes.Buffer
+	go Loop(ctx, cfg, r, newTestEmitter(&buf), clk)
+
+	// One slot claims the only item; the other probes the emptied tracker and
+	// parks.
+	first := r.awaitStart(t)
+	r.setDemand(workKind, 0)
+	r.fireOnIssue(t, first, "7")
+	r.awaitClaimedSiblingParked(t, clk, workKind, dispatchkey.Issue("7"))
+
+	// A new item appears, the parked slot's probe finds it and starts a child
+	// that has not yet claimed it.
+	r.setDemand(workKind, 1)
+	clk.advanceBy(interval)
+	clk.releaseOne(t)
+	second := r.awaitStart(t)
+	if second == first {
+		t.Fatalf("slot %d started both children", second)
+	}
+
+	// The first slot's child ends, and its probe now reads Ready=1 with the
+	// second child still starting: it parks for the full interval.
+	r.releaseSlot(t, first, ChildResult{})
+	clk.awaitSleepers(t, 1)
+	waits := clk.waits()
+	if got := waits[len(waits)-1]; got != interval {
+		t.Fatalf("park wait = %v, want %v", got, interval)
+	}
+
+	// The second child claims; the tracker already shows a further item.
+	r.fireOnIssue(t, second, "2")
+
+	if got := r.awaitStart(t); got != first {
+		t.Fatalf("started slot %d, want the parked slot %d", got, first)
+	}
+	if got := clk.waitCount(); got != len(waits) {
+		t.Fatalf("sleeps = %d, want %d: the clock must not have released the parked slot", got, len(waits))
 	}
 }
 
