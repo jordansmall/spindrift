@@ -3264,6 +3264,8 @@ For the REST surface `fj` lacks — attaching a label at issue-create time —
 the filer fragments (`filer-file-direct-forgejo.md`,
 `filer-label-direct-forgejo.md`) fall back to a `curl` call against the
 Forgejo REST API directly rather than an `fj` porcelain command.
+`filer-dedup-search-forgejo.md` likewise searches over REST
+(`GET .../issues`), since `fj` has no confirmed issue-search verb.
 
 #### Forgejo integration harness
 
@@ -3795,7 +3797,8 @@ own search matches them — a permanent, bounded gap, not a transition period,
 and deliberately not backfilled (a guessed key could skip a new finding
 without filing anything a human would triage). The marker records the folded form (e.g.
 `pkg:file:go:type:field`), so a literal body search for the raw site key
-— the Filer prompt's own `gh issue list --search` pre-check — may not
+— the Filer prompt's own body search (`gh issue list --search` on GitHub and jira, the REST
+`q=` issue search on Forgejo, none on `local`) — may not
 match the marker text; the Launcher's host-side dedup is the backstop.
 The Launcher appends that marker line to every issue it files,
 empty (`<!-- spindrift-dedup:  -->`, which reads back as no keys) when
@@ -3850,7 +3853,8 @@ only when none exists.
 
 The two direct filing paths (`gh`, Forgejo) never reach the Launcher,
 so their dedup stays entirely the Filer's own: it runs the open-issue
-search above itself, keyed on the finding's site rather than its prose,
+search above itself (`gh issue list` or the Forgejo REST issue search,
+forked on the tracker), keyed on the finding's site rather than its prose,
 and appends the same marker line to the body it files, keeping the
 marker format identical across both write mechanisms.
 
