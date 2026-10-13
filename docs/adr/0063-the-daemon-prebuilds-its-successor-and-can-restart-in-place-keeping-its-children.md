@@ -174,12 +174,14 @@ a failed `exec` leaves none.
 The decision text says a refused new image `exec`s back. Four details it left
 open:
 
-- **The handoff document is version 2.** A rollback is the same document with
+- **The handoff document is version 3.** A rollback is the same document with
   `rolled_back` and `reason` set, sent in the reverse direction. Readers accept
-  versions 1 and 2, but decoding is strict, so a build that predates rollback
-  would refuse a version-2 document it cannot read, and the children it was
-  handed would be orphaned. An image resumed from a version-1 writer therefore
-  does not roll back; it drains and exits as before.
+  versions 1 to 3, but decoding is strict, so a build that predates a field
+  would refuse a document carrying it, and the children it was handed would be
+  orphaned. Amended by issue #5160: version 3 added the slot's CI-wait
+  fields, raising the rollback floor from version 2 to 3, so an image resumed
+  from a version-1 or version-2 writer does not roll back; it drains and exits
+  as before.
 - **The rolled-back build starts blocked at the refused revision.** Without
   that, its next fetch would see the same tip, rebuild the same refused path,
   and restart in place into it again. It emits `self_update` phase

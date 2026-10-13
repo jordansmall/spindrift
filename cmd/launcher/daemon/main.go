@@ -1246,7 +1246,7 @@ func (res *resumed) rollBack(stop <-chan struct{}, selfArgs []string, reason str
 	case h.Stop:
 		return errStopBeforeExec
 	case h.V < daemon.HandoffRollbackVersion:
-		return fmt.Errorf("the previous daemon wrote handoff version %d, which cannot read a rollback", h.V)
+		return fmt.Errorf("the previous daemon wrote handoff version %d, which cannot read a version-%d document", h.V, daemon.HandoffVersion)
 	case h.FromPath == "":
 		return errors.New("no previous daemon")
 	}

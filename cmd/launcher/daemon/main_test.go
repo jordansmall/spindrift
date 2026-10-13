@@ -4428,10 +4428,18 @@ func TestMainRun_RollbackImpossibleDrainsAndExits(t *testing.T) {
 	assertLockHeld(t, f.gitDir, false)
 }
 
-// TestMainRun_RollbackRefusedForVersion1Predecessor pins that an image resumed
-// from a version 1 document, whose writer cannot read the rollback fields,
-// drains its inherited child and exits as if rollback did not exist.
-func TestMainRun_RollbackRefusedForVersion1Predecessor(t *testing.T) {
+// TestMainRun_RollbackRefusedForOlderPredecessor pins that an image resumed
+// from a version 1 or 2 document, whose writer cannot read every rollback
+// field, drains its inherited child and exits as if rollback did not exist.
+func TestMainRun_RollbackRefusedForOlderPredecessor(t *testing.T) {
+	for n := 1; n < daemon.HandoffRollbackVersion; n++ {
+		v := strconv.Itoa(n)
+		t.Run("v"+v, func(t *testing.T) { rollbackRefusedForVersion(t, v) })
+	}
+}
+
+func rollbackRefusedForVersion(t *testing.T, v string) {
+	t.Helper()
 	f := newInPlaceFixtureT(t, inPlaceNewSelf)
 	call, _ := f.handOff(t)
 	fd, err := strconv.Atoi(call.argv[len(call.argv)-1])
@@ -4442,15 +4450,15 @@ func TestMainRun_RollbackRefusedForVersion1Predecessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Contains(raw, []byte(`"v":2`)) {
-		t.Fatalf("handoff document is not version 2: %s", raw)
+	if !bytes.Contains(raw, []byte(`"v":3`)) {
+		t.Fatalf("handoff document is not version 3: %s", raw)
 	}
-	v1fd, err := handoffDocPipe(bytes.Replace(raw, []byte(`"v":2`), []byte(`"v":1`), 1))
+	olderFD, err := handoffDocPipe(bytes.Replace(raw, []byte(`"v":3`), []byte(`"v":`+v), 1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	call.argv = slices.Clone(call.argv)
-	call.argv[len(call.argv)-1] = strconv.Itoa(v1fd)
+	call.argv[len(call.argv)-1] = strconv.Itoa(olderFD)
 
 	failDoctor(t)
 	code, out := f.start(f.resumeArgv(call))
@@ -4460,7 +4468,7 @@ func TestMainRun_RollbackRefusedForVersion1Predecessor(t *testing.T) {
 		t.Fatalf("image exited %d, want %d; output:\n%s", got, daemon.ExitPreflightFailed, out.String())
 	}
 	if n := len(f.execCalls()); n != 1 {
-		t.Errorf("exec calls = %d, want 1: no rollback exec for a version 1 predecessor", n)
+		t.Errorf("exec calls = %d, want 1: no rollback exec for a version %s predecessor", n, v)
 	}
 	assertLockHeld(t, f.gitDir, false)
 }

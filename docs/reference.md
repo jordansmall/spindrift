@@ -8261,13 +8261,14 @@ that revision is not rebuilt until the tip moves. A rolled-back image
 never rolls back again. There is no rollback, and the image drains its
 inherited children and exits as before (11 for a preflight refusal, 1 for
 a config error), when the image is itself a rollback, a stop is latched,
-the predecessor wrote handoff document version 1 (a build from before
-rollback existed, which cannot read the version-2 document), the previous
-path is empty or not a clean `/nix/store` path, or the `exec` fails. A
-`--handoff-fd` flag with no value, or a handoff document that cannot be
-read (a bad descriptor, a document that does not decode, or a lock that
-cannot be taken over), is a startup failure that exits 1 without rolling
-back; the image has re-attached no child by then, so it drains none.
+the predecessor wrote handoff document version 1 or 2 (a build from before
+rollback existed or before the CI wait was carried, which cannot read the
+version-3 document), the previous path is empty or not a clean `/nix/store`
+path, or the `exec` fails. A `--handoff-fd` flag with no value, or a
+handoff document that cannot be read (a bad descriptor, a document that
+does not decode, or a lock that cannot be taken over), is a startup failure
+that exits 1 without rolling back; the image has re-attached no child by
+then, so it drains none.
 
 *GC roots.* Two roots sit in the checkout's git dir, one fixed name per
 role, so they never accumulate. `spindrift-daemon.current` roots the
