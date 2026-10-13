@@ -29,15 +29,20 @@ let
   # into its dot-separated segments. ADR 0037.
   splitNixPath = path: builtins.filter builtins.isString (builtins.split "\\." path);
   resolveNixPath = import ./nixpath.nix;
-  inherit (import ./driver-map.nix) underDriver exampleDriver deprecationNote;
+  inherit (import ./driver-map.nix)
+    underDriver
+    isDriverValued
+    placeEntry
+    exampleDriver
+    deprecationNote
+    ;
   driverPathNote =
     segments:
     deprecationNote "perSystem.spindrift.${builtins.concatStringsSep "." (underDriver "<name>" segments)}";
   # Opens the description of a Driver-valued setting's row in the generated
   # option docs (ADR 0064); `dotted` is its top-level path (agents.<rest>).
   driverValuedNote =
-    entry: dotted:
-    if entry.driverValued or false then driverPathNote (splitNixPath dotted) + " " else "";
+    entry: dotted: if isDriverValued entry then driverPathNote (splitNixPath dotted) + " " else "";
   # A Go `[]string{"a", "b"}` literal's inner comma-joined, quoted contents.
   renderGoStringSlice = items: builtins.concatStringsSep ", " (map (s: "\"${s}\"") items);
   # A whole generated Go file whose body is a single `var X = []string{...}`
@@ -202,11 +207,9 @@ rec {
       schemaDomainTree = builtins.foldl' (
         acc: key:
         let
-          segs = splitNixPath (resolveNixPath key flakeOptionEntries.${key});
+          entry = flakeOptionEntries.${key};
         in
-        insertLeaf acc (
-          if flakeOptionEntries.${key}.driverValued or false then underDriver exampleDriver segs else segs
-        ) flakeOptionEntries.${key}
+        insertLeaf acc (placeEntry exampleDriver entry (splitNixPath (resolveNixPath key entry))) entry
       ) { } (builtins.attrNames flakeOptionEntries);
       # Structural examples are not env-schema.nix knobs, so they carry their own
       # hand-given path instead of a resolveNixPath call.
@@ -466,8 +469,7 @@ rec {
   # docs/reference.md lists the Driver-valued settings an agents.drivers.<name>
   # entry accepts; this renders them from lib/driver-map.nix's `paths` (flat
   # key -> agents-relative segments) so the list cannot drift from the
-  # `driverValued` marks (ADR 0064). Takes the paths as an argument rather than
-  # importing driver-map.nix, which imports lib/structural-options-doc.nix.
+  # `driverValued` marks (ADR 0064).
   renderDriverValuedPathsDoc =
     paths:
     builtins.concatStringsSep "" (
@@ -630,7 +632,7 @@ rec {
       # check stays green (issue #2557 review finding).
       item = key: value: {
         path = builtins.concatStringsSep "." (
-          underDriver exampleDriver (splitNixPath (resolveNixPath key schema.${key}))
+          placeEntry exampleDriver schema.${key} (splitNixPath (resolveNixPath key schema.${key}))
         );
         inherit value;
       };
