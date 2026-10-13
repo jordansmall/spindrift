@@ -33,7 +33,8 @@ func accessForgeGates(e Env) map[string]bool {
 	// with PRs has (issue #5233). OutboxRelayCapable stands in for that: only
 	// the github/forgejo forge rows set it, while git and local do not, and
 	// git resolves to the GH backend so OPEN_PR_CREATE_RW_GH alone cannot
-	// tell them apart.
+	// tell them apart. backend.Descriptor.OutboxRelayCapable names the test
+	// that ties the bit to a forge with PRs.
 	g["PR_FORGE_READ_WRITE"] = e.BoxWriteEnabled && e.OutboxRelayCapable
 	g["NO_PR_FORGE_READ_WRITE"] = e.BoxWriteEnabled && !e.OutboxRelayCapable
 	g["IF_BLOCKED_PR_RW_GH"] = g["OPEN_PR_CREATE_RW_GH"] && g["PR_FORGE_READ_WRITE"]
