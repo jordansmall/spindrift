@@ -41,22 +41,50 @@ jobs:
           # Never a shallow fetch here: a shallow base has no parents, so the
           # BASE...HEAD diff below finds no merge base once main moves on.
           git fetch origin "$BASE_SHA"
-          for f in ci-changes.sh ci-ok.sh; do
+          for f in ci-changes.sh ci-ok.sh ci-go-tokens.go ci-comment-readers; do
             if git cat-file -e "$BASE_SHA:.github/scripts/$f" 2>/dev/null; then
               git show "$BASE_SHA:.github/scripts/$f" >".github/scripts/$f"
             fi
           done
 
+      # The classifier parses a modified .go or .nix file to tell a
+      # comment-only edit from a code one (issue #5158); without the tool
+      # it falls to `code`, so each is installed only when the diff needs it.
+      - name: Diff against the PR base
+        id: diff
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git diff --name-status -M "$BASE_SHA...$HEAD_SHA" >"$RUNNER_TEMP/diff"
+          echo "merge-base=$(git merge-base "$BASE_SHA" "$HEAD_SHA")" >>"$GITHUB_OUTPUT"
+          for ext in go nix; do
+            if grep -qE "^M"$'\t'".*\.$ext\$" "$RUNNER_TEMP/diff"; then
+              echo "$ext=true" >>"$GITHUB_OUTPUT"
+            fi
+          done
+
+      - name: Install Go
+        if: steps.diff.outputs.go == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Install Nix
+        if: steps.diff.outputs.nix == 'true'
+        uses: DeterminateSystems/nix-installer-action@v16
+
       - name: Classify the diff against the PR base
         id: classify
         env:
           EVENT: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE: ${{ steps.diff.outputs.merge-base }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           if [ "$EVENT" = pull_request ]; then
-            git diff --name-status -M "$BASE_SHA...$HEAD_SHA" >"$RUNNER_TEMP/diff"
-            kind=$(bash .github/scripts/ci-changes.sh <"$RUNNER_TEMP/diff")
+            kind=$(bash .github/scripts/ci-changes.sh "$MERGE_BASE" "$HEAD_SHA" <"$RUNNER_TEMP/diff")
           else
             kind=code
           fi
