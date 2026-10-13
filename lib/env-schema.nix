@@ -8,6 +8,10 @@ let
   backends = import ./backends/default.nix;
   # Shared by the three butler daily budget knobs below (ADR 0056).
   butlerBudgetGateClause = "gates only starting a run, never stopping one; totals are walked from today's Ledger commits across every Chore enabled in BUTLER_CHORES (a Chore dropped from the list stops counting), over a day that runs midnight to midnight in DAEMON_AWAKE_WINDOW's zone (UTC when unset)";
+  # Shared by the scout/filer/worker model knobs; mirrors docs/reference.md.
+  imageTimeModelClause =
+    name:
+    "Image-time only: baked into the image's AGENTS_JSON_TEMPLATE at eval time, so a change needs a Consumer config change and a rebuild (spindrift build); a dispatch-time value neither retiers, adds, nor drops the ${name} subagent, though on an image with no loaded input document it still steers which subagent prompt fragments render, so the two can disagree.";
   # Single source of the built-in Chore catalog (issue #3991).
   choreCatalog = import ./chore-catalog.nix;
 in
@@ -203,7 +207,7 @@ in
     env = "SCOUT_MODEL";
     group = "agents";
     default = "claude-haiku-5-5";
-    doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
+    doc = "scout subagent model tier; empty omits the scout entry from --agents; the flag itself is omitted only when no subagent model is set. ${imageTimeModelClause "scout"} DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.scout";
     driverValued = true;
@@ -236,7 +240,7 @@ in
     env = "FILER_MODEL";
     group = "agents";
     default = "";
-    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-5-5). DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
+    doc = "filer subagent model tier; empty (default) omits the filer entry from --agents and means the filer is not provisioned at all — setting a model is the opt-in (recommended: claude-haiku-5-5). ${imageTimeModelClause "filer"} DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.filer";
     driverValued = true;
@@ -247,7 +251,7 @@ in
     env = "WORKER_MODEL";
     group = "agents";
     default = "claude-sonnet-5";
-    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents. When set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to this subagent (fragments/coordinator.md). DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
+    doc = "implement-capable worker subagent model tier; empty omits the worker entry from --agents. When set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to this subagent (fragments/coordinator.md). ${imageTimeModelClause "worker"} DEPRECATED: superseded by the byName/roster options (agents.drivers.<name>.models.byName for a one-agent override, agents.drivers.<name>.models.roster for the full list; see docs/reference.md); these per-agent knobs still work but will be removed.";
     flakeOption = true;
     nixSubPath = "models.worker";
     driverValued = true;
