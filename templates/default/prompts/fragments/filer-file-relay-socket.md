@@ -1,4 +1,4 @@
-3. Your token is read-only — you cannot file issues yourself. Instead, for
+3. Never file issues yourself, even if your token can. Instead, for
    each issue to file, send it in one call, the body on stdin — never write
    the body to a file in one call and send it in the next:
 
