@@ -3304,8 +3304,9 @@ pinned by the prompt eval-checks the same way the `gh` family is:
   github trackers do.
 - **Open PR** (`fj pr create --base … --head … --body … "WIP: …"`) — the
   read-write `CODE_FORGE=forgejo` create step; the `WIP: ` prefix opens a
-  draft the launcher flips ready on CI green, then handles under its
-  configured `MERGE_MODE` (the forgejo PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
+  draft the launcher flips ready on CI green, then handles per
+  [`MERGE_MODE`](#runtime-configuration) and the [merge guard](#merge-guard)
+  (the forgejo PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
 
 For the REST surface `fj` lacks — attaching a label at issue-create time —
 the filer fragments (`filer-file-direct-forgejo.md`,
