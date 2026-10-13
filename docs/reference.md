@@ -981,7 +981,11 @@ spindrift's own dogfood declares `claude` (the default) and `opencode`, so
 `nix run .#opencode` and `nix run .#opencode-daemon` dispatch through
 opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
 opencode entry inherits that Driver's limits: no Filer or worker is
-provisioned.
+provisioned. Running both Drivers' Daemons at once (`nix run .#daemon` and
+`nix run .#opencode-daemon`) needs two checkouts, for example two
+`git worktree`s, because both take the same per-checkout **Instance lock**
+(see [Daemon](#daemon)); from one checkout the second halts (`halt` event
+reason `instance-lock`).
 
 Runtime env. With several Drivers declared, each Driver's apps (`.#<driver>`,
 `.#<driver>-daemon`, and for the default Driver `apps.default` and
@@ -7245,12 +7249,15 @@ itself per-checkout for a linked `git worktree`, exactly the granularity
 "one daemon per checkout" means. Two daemons against one checkout would
 each hold `MAX_PARALLEL` slots, doubling the real concurrency and making
 the `MEMORY_LIMIT` × `MAX_PARALLEL` sizing above a lie; the lock is what
-keeps that arithmetic honest. It covers every Dispatch kind — two separate
-daemons, say one `dispatch` and one `research`, against the same checkout is
-exactly the doubled concurrency the lock refuses. Running multiple kinds
-against one checkout is what a single multi-kind daemon drawing from one
-pool (**Reservation** below) already does; two daemon processes still mean
-two checkouts.
+keeps that arithmetic honest. It covers every Dispatch kind and every
+Driver — two separate daemons against the same checkout, say one `dispatch`
+and one `research`, or `.#daemon` and `.#opencode-daemon`, is exactly the
+doubled concurrency the lock refuses. Running multiple kinds against one
+checkout is what a single multi-kind daemon drawing from one pool
+(**Reservation** below) already does; two daemon processes still mean two
+checkouts. Drivers have no such single-process alternative, since each
+`.#<driver>-daemon` runs exactly one Driver's Harness and child Dispatch
+target.
 
 The lock never blocks: a second instance finds it already held and exits
 at once rather than waiting, so an operator sees "already running"
