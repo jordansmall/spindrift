@@ -28,7 +28,7 @@ func TestSelfHeal_BudgetExhaustedTokens_StopsBeforeFixPass(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{InputTokens: 150}
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed (budget exhausted)", landing)
@@ -58,7 +58,7 @@ func TestSelfHeal_BudgetExhaustedUSD_StopsBeforeFixPass(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{TotalCostUSD: 4.44}
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed (budget exhausted)", landing)
@@ -81,7 +81,7 @@ func TestSelfHeal_UnderBudget_FixProceeds(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{InputTokens: 100, TotalCostUSD: 0.50}
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged (under budget)", landing)
@@ -103,7 +103,7 @@ func TestSelfHeal_BudgetUnset_NoEnforcement(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.CumulativeUsageResult = usage.Usage{InputTokens: 999999999, TotalCostUSD: 999999.0}
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged (no budget cap set)", landing)

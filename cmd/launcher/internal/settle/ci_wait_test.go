@@ -61,7 +61,7 @@ func TestSettle_CIWait_EmitsOneRecordPerWaitEntered(t *testing.T) {
 			if tc.viaMerge {
 				_ = s.mergeImmediate("1", 0, testPR, nil)
 			} else {
-				s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+				s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 			}
 
 			var waits []report.Record
@@ -135,7 +135,7 @@ func TestSettle_CIWait_ReemitsWhenRunURLAppearsOrChanges(t *testing.T) {
 			fc.SetRunURLs(testPR, tc.urls)
 			s := newTestSettle(c, fc, fc)
 
-			s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+			s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 			var got []string
 			for _, r := range readRecords() {

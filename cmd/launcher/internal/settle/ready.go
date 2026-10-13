@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/doctor"
 	"spindrift.dev/launcher/internal/forge"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/report"
 	"spindrift.dev/launcher/internal/retry"
 	"spindrift.dev/launcher/internal/runner"
@@ -40,8 +41,8 @@ var errForcePushRed = fmt.Errorf("%w: CI went red", errLandingNeverGreen)
 // still-green PR stays agent-complete (ADR 0012). A force-pushed head that goes
 // red gets a fix pass from the same MaxFixAttempts budget (issue #5095); one that
 // never re-confirms green demotes to agent-failed instead (issue #758).
-func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string) {
-	return s.selfHealGate(d, num, gen, pr, false)
+func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr string, passes []passmanifest.Entry) (landingResult, string) {
+	return s.selfHealGate(d, num, gen, pr, false, passes)
 }
 
 // selfHealAdopted is selfHeal's counterpart for a PR discovered independently
@@ -50,15 +51,17 @@ func (s *Settle) selfHeal(d dispatch.Dispatcher, num string, gen uint64, pr stri
 // evidence this run's checks registered before trusting a SUCCESS rollup,
 // within a bounded window (issues #1652, #2475).
 func (s *Settle) selfHealAdopted(d dispatch.Dispatcher, num string, gen uint64, pr string) (landingResult, string) {
-	return s.selfHealGate(d, num, gen, pr, true)
+	return s.selfHealGate(d, num, gen, pr, true, nil)
 }
 
 // selfHealGate is selfHeal and selfHealAdopted's shared implementation.
 // requireRegistration guards only the loop's first attempt, because a fix-pass
-// retry always follows a push d.Fix just made in this process.
-func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool) (landingResult, string) {
+// retry always follows a push d.Fix just made in this process. passes is the
+// run's pass manifest, which landPushOnly records alongside its landing; nil
+// (selfHealAdopted has no pass evidence) clears the recorded pass.
+func (s *Settle) selfHealGate(d dispatch.Dispatcher, num string, gen uint64, pr string, requireRegistration bool, passes []passmanifest.Entry) (landingResult, string) {
 	if s.pr == nil {
-		return s.landPushOnly(num, gen, pr), ""
+		return s.landPushOnly(num, gen, pr, passes), ""
 	}
 	// forcePushFixes counts the fix passes run on the current force-pushed
 	// head, so the failure comment can name what that head consumed. It is
@@ -364,7 +367,7 @@ func mergedLanding(reason string) landingResult {
 // and returns landingFailed, the transition and comment already done. An
 // immediate merge drops the landed bundle here, since verifyMerged never runs
 // without a PR.
-func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResult {
+func (s *Settle) landPushOnly(num string, gen uint64, branch string, passes []passmanifest.Entry) landingResult {
 	// No CI watch here, so this is the only checkpoint before landing —
 	// an aborted run must not merge or commit Complete (issue #3523).
 	if s.terminated(num, gen) {
@@ -381,7 +384,7 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 		branch = relayedRef
 		// Host-derived placeholder the post-merge LandingRef upgrades, so
 		// reconcile can still report a merge-blocked branch stuck (#1809).
-		s.recordLanding(num, relayedRef)
+		s.recordLanding(num, relayedRef, passes)
 	}
 	if errors.Is(relayErr, errAbandoned) {
 		return landingAbandoned
@@ -422,7 +425,9 @@ func (s *Settle) landPushOnly(num string, gen uint64, branch string) landingResu
 	// failure must never turn a successful land into a failure.
 	if lr, ok := s.cfForNum(num).(forge.LandingRef); ok {
 		if landing, err := lr.LandingRef(); err == nil {
-			s.recordLanding(num, landing)
+			// Re-recording passes is deliberate: it keeps the pair with the
+			// upgraded landing.
+			s.recordLanding(num, landing, passes)
 		} else {
 			fmt.Printf("    #%s  landing=%s  status=landing-ref-unresolved  !! %v\n", num, branch, err)
 		}

@@ -40,7 +40,7 @@ func TestSelfHeal_ForwardsFailureDetailToFix(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged after one fix pass", landing)
@@ -61,7 +61,7 @@ func TestSelfHeal_EmptyFailureDetailFallsBackWithNoError(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v; a FailureDetail fetch error must not block the fix pass", landing)
@@ -79,7 +79,7 @@ func TestSelfHeal_SuccessFirstTry(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged on first-try SUCCESS", landing)
@@ -103,7 +103,7 @@ func TestSelfHeal_GenuineRedMaxZero(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed (maxFixAttempts=0)", landing)
@@ -132,7 +132,7 @@ func TestSelfHeal_GenuineRedFixSucceeds(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged after one fix pass", landing)
@@ -163,7 +163,7 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBundleBeforeRecheck(t *testing.T) {
 	s := newTestSettle(c, fc, cf)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged after one fix pass", landing)
@@ -199,7 +199,7 @@ func TestSelfHeal_ReadOnlyFixPassRelaysBeforeNoOpCheck(t *testing.T) {
 	s := newTestSettle(c, fc, cf)
 
 	d := dispatch.NewFake()
-	s.selfHeal(d, "1", 0, testPR)
+	s.selfHeal(d, "1", 0, testPR, nil)
 
 	if len(fc.RelayBundleCalls) != 1 {
 		t.Fatalf("RelayBundle called %d times, want 1 — it must run every read-only fix pass regardless of the no-op check's own head-SHA snapshot, or a genuine fix's PR head would never actually move", len(fc.RelayBundleCalls))
@@ -224,7 +224,7 @@ func TestSelfHeal_ReadOnlyFixPassRelayFailureIsNonFatal(t *testing.T) {
 	var landing landingResult
 	var reason string
 	out := testutil.CaptureStdout(t, func() {
-		landing, reason = s.selfHeal(d, "1", 0, testPR)
+		landing, reason = s.selfHeal(d, "1", 0, testPR, nil)
 	})
 
 	if landing != landingFailed {
@@ -253,7 +253,7 @@ func TestSelfHeal_ExhaustsAllPasses(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed after exhausting all fix passes", landing)
@@ -297,7 +297,7 @@ func TestSelfHeal_FixFailureStopsImmediately(t *testing.T) {
 	var landing landingResult
 	var reason string
 	stderr := testutil.CaptureStderr(t, func() {
-		landing, reason = s.selfHeal(d, "1", 0, testPR)
+		landing, reason = s.selfHeal(d, "1", 0, testPR, nil)
 	})
 
 	if landing != landingFailed {
@@ -334,7 +334,7 @@ func TestSelfHeal_FixAlreadyInFlightLeavesIssueUntouched(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.FixResult = dispatch.Skipped()
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -369,7 +369,7 @@ func TestSelfHeal_FixFailureWithErrSurfacesReason(t *testing.T) {
 	var landing landingResult
 	var reason string
 	stderr := testutil.CaptureStderr(t, func() {
-		landing, reason = s.selfHeal(d, "1", 0, testPR)
+		landing, reason = s.selfHeal(d, "1", 0, testPR, nil)
 	})
 
 	if landing != landingFailed {
@@ -404,7 +404,7 @@ func TestSelfHeal_FixNoOpUnchangedHead(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed after a no-op fix pass", landing)
@@ -440,7 +440,7 @@ func TestSelfHeal_FixAdvanceConfirmedAfterTransientSameRead(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged (a transient same-read must not abort as no-op)", landing)
@@ -459,7 +459,7 @@ func TestSelfHeal_ErrorStateTriggersFixPass(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingMerged {
 		t.Errorf("selfHeal = %v, want landingMerged after ERROR then SUCCESS with fix pass", landing)
@@ -481,7 +481,7 @@ func TestSelfHeal_PendingTimeoutNoFix(t *testing.T) {
 	s := newTestSettle(c, fc, fc)
 
 	d := dispatch.NewFake()
-	landing, reason := s.selfHeal(d, "1", 0, testPR)
+	landing, reason := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed on PENDING timeout", landing)
@@ -522,7 +522,7 @@ func TestSelfHeal_FixPassWarningsAreRecorded(t *testing.T) {
 		Warnings:             []string{"pass-manifest scan: boom"},
 		IssueIntentsRejected: outcome.Rejections{Malformed: 2},
 	})
-	stderr := testutil.CaptureStderr(t, func() { s.selfHeal(d, "1", 0, testPR) })
+	stderr := testutil.CaptureStderr(t, func() { s.selfHeal(d, "1", 0, testPR, nil) })
 
 	rejection := "fix pass 1: 2 malformed issue-intent line(s) rejected"
 	want := [][]string{{"fix pass 1: pass-manifest scan: boom", rejection}}
@@ -548,7 +548,7 @@ func TestSelfHeal_CleanFixPassRecordsNothing(t *testing.T) {
 
 	d := dispatch.NewFake()
 	d.FixResult = dispatch.Failed(dispatch.Result{})
-	testutil.CaptureStderr(t, func() { s.selfHeal(d, "1", 0, testPR) })
+	testutil.CaptureStderr(t, func() { s.selfHeal(d, "1", 0, testPR, nil) })
 
 	if len(d.RecordedWarnings) != 0 {
 		t.Errorf("RecordedWarnings = %q, want none", d.RecordedWarnings)

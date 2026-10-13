@@ -10,6 +10,7 @@ import (
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 	"spindrift.dev/launcher/internal/seambundle"
 )
 
@@ -80,8 +81,8 @@ func (s *Settle) adoptAndGate(d dispatch.Dispatcher, num string, gen uint64, res
 	}
 
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, pr, note)
-	s.recordLanding(num, pr)
-	landing, reason := s.selfHeal(d, num, gen, pr)
+	s.recordLanding(num, pr, result.Passes)
+	landing, reason := s.selfHeal(d, num, gen, pr, result.Passes)
 	switch landing {
 	case landingMerged:
 		// recover runs read-write, so s.pr may be nil here for a push-only Code
@@ -116,10 +117,10 @@ func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint
 	cf := s.cfForNum(num)
 	if _, ok := cf.(forge.BundleRelay); ok && s.pr == nil {
 		if sit.SelfReportSuccess {
-			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed"), nil
+			return s.landRelayedBranchPushOnly(d, num, gen, "genuine success self-report; relayed branch landed", result.Passes), nil
 		}
 		if sit.BundlePresent {
-			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed"), nil
+			return s.landRelayedBranchPushOnly(d, num, gen, "bundle present in outbox; relayed branch landed", result.Passes), nil
 		}
 		return false, nil
 	}
@@ -133,11 +134,11 @@ func (s *Settle) SettleRelayedBranch(d dispatch.Dispatcher, num string, gen uint
 // push-only counterpart to adoptAndGate. The branch comes from the issue's own
 // derived agent branch, never an outcome-line field (issue #1949): there may
 // be no parsed outcome line at all on this path. note is printed verbatim.
-func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64, note string) bool {
+func (s *Settle) landRelayedBranchPushOnly(d dispatch.Dispatcher, num string, gen uint64, note string, passes []passmanifest.Entry) bool {
 	branch := s.cfForNum(num).AgentBranch(num)
 	fmt.Printf("    #%s  landing=%s  status=adopted  note=%s\n", num, branch, note)
-	s.recordLanding(num, branch)
-	landing, reason := s.selfHeal(d, num, gen, branch)
+	s.recordLanding(num, branch, passes)
+	landing, reason := s.selfHeal(d, num, gen, branch, passes)
 	switch landing {
 	case landingFailed:
 		fmt.Printf("    #%s  landing=%s  status=failed  !! %s\n", num, branch, reason)

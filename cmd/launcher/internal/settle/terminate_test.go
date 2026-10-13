@@ -360,7 +360,7 @@ func TestSelfHeal_TerminatedDuringFixPass_StopsRetryLoop(t *testing.T) {
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -386,7 +386,7 @@ func TestSelfHeal_TerminatedDuringRewaitAfterForcePush_ReportsAbandoned(t *testi
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -410,7 +410,7 @@ func TestSelfHeal_TerminatedFixPassReaped_ReportsAbandonedNotFailed(t *testing.T
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: fk, reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -433,7 +433,7 @@ func TestSelfHeal_TerminatedDuringFixNoOpConfirmSleep_ReportsAbandoned(t *testin
 	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
 	s = newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -453,7 +453,7 @@ func TestSelfHeal_TerminatedGateTerminal_ReportsAbandonedNotFailed(t *testing.T)
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -474,7 +474,7 @@ func TestSelfHeal_TerminatedRedRetryFixExhausted_ReportsAbandonedNotFailed(t *te
 	tf.reg = s.Registry()
 
 	d := dispatch.NewFake()
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -500,7 +500,7 @@ func TestSelfHeal_TerminatedFixPassSucceeded_SkipsRelay(t *testing.T) {
 	reg := s.Registry()
 	d := terminatingDispatcher{Fake: dispatch.NewFake(), reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -633,7 +633,7 @@ func TestSelfHeal_ConflictResolveBoxReaped_ReportsAbandonedNotFailed(t *testing.
 	reg := s.Registry()
 	d := terminatingConflictResolver{Fake: fk, reg: reg, num: "1"}
 
-	landing, _ := s.selfHeal(d, "1", 0, testPR)
+	landing, _ := s.selfHeal(d, "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -691,7 +691,7 @@ func TestSelfHeal_TerminatedDuringSuccessConfirmSleep_ManualMode_ReportsAbandone
 	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
 	s = newTestSettle(c, fc, fc)
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -730,7 +730,7 @@ func TestSelfHeal_TerminatedDuringMarkReady_ReportsAbandoned(t *testing.T) {
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -773,7 +773,7 @@ func TestSelfHeal_TerminatedDuringMergeGuardHit_ReportsAbandoned(t *testing.T) {
 	s := newTestSettle(c, tf, tf)
 	tf.reg = s.Registry()
 
-	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR)
+	landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, testPR, nil)
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -824,7 +824,7 @@ func TestSelfHeal_LandPushOnly_TerminatedSkipsCompleteAndMerge(t *testing.T) {
 	s := newTestSettle(c, fc, fc.AsPushOnly())
 	s.Registry().Mark("1")
 
-	got := s.landPushOnly("1", 0, branch)
+	got := s.landPushOnly("1", 0, branch, nil)
 
 	if got != landingAbandoned {
 		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
@@ -854,7 +854,7 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMergeBackoff_ReportsAbandoned(t *
 	c.Clock = dispatch.Clock{Now: time.Now, Sleep: func(time.Duration) { s.Registry().Mark("1") }}
 	s = newTestSettle(c, fc, fc.AsPushOnly())
 
-	got := s.landPushOnly("1", 0, "agent/issue-1")
+	got := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
 	if got != landingAbandoned {
 		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
@@ -905,7 +905,7 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringMerge_ReportsAbandoned(t *testing
 			s := newTestSettle(c, fc, wrapper)
 			wrapper.s = s
 
-			got := s.landPushOnly("1", 0, "agent/issue-1")
+			got := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
 			if got != landingAbandoned {
 				t.Errorf("landPushOnly = %v, want landingAbandoned", got)
@@ -947,7 +947,7 @@ func TestSelfHeal_LandPushOnly_TerminatedDuringRelay_ReportsAbandoned(t *testing
 	s := newTestSettle(c, fc, wrapper)
 	wrapper.s = s
 
-	got := s.landPushOnly("1", 0, "agent/issue-1")
+	got := s.landPushOnly("1", 0, "agent/issue-1", nil)
 
 	if got != landingAbandoned {
 		t.Errorf("landPushOnly = %v, want landingAbandoned", got)
