@@ -29,19 +29,98 @@ setup() {
   [[ "$output" == *"Bash"* ]]
 }
 
-@test "tool_result event is rendered with a dim connector and the content" {
+@test "tool_result with string content in a user event is rendered with a dim connector" {
   run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
-    <<< '{"type":"tool_result","tool_use_id":"t1","content":"result output here"}'
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"result output here"}]}}'
   [ "$status" -eq 0 ]
   [[ "$output" == *"result output here"* ]]
   [[ "$output" == *"└─"* ]]
 }
 
-@test "tool_result with array content is rendered" {
+@test "tool_result with array content renders its text entries and ignores non-text ones" {
   run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
-    <<< '{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"array output"}]}'
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":[{"type":"text","text":"array output"},{"type":"image","source":{"data":"AAAA"}}]}]}}'
   [ "$status" -eq 0 ]
   [[ "$output" == *"array output"* ]]
+  [[ "$output" != *"image"* ]]
+  [[ "$output" != *"AAAA"* ]]
+}
+
+@test "a user event with two tool_result blocks renders two connector lines" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"first"},{"type":"tool_result","tool_use_id":"t2","content":"second"}]}}'
+  [ "$status" -eq 0 ]
+  [ "$(printf '%s\n' "$output" | grep -c '└─')" -eq 2 ]
+  [[ "$output" == *"first"* ]]
+  [[ "$output" == *"second"* ]]
+}
+
+@test "a user event with only a text block produces no output" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":[{"type":"text","text":"a prompt"}]}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a user event with string message content produces no output" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":"a plain prompt"}}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a top-level tool_result event is not a Claude Code shape and produces no output" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"tool_result","tool_use_id":"t1","content":"result output here"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+@test "a long tool_result is truncated to at most 120 chars of content" {
+  local long
+  long="$(printf 'y%.0s' {1..300})"
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"tool_use_id\":\"t1\",\"content\":\"${long}\"}]}}"
+  [ "$status" -eq 0 ]
+  [ "${#output}" -lt 160 ]
+  [[ "$output" == *"…"* ]]
+}
+
+@test "a multi-line tool_result stays on its connector line" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"l1\nl2\nl3\n"}]}}'
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]
+  [[ "$output" == *"└─ l1 l2 l3"* ]]
+}
+
+@test "a tool_result's control characters are not passed to the terminal" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a\u001b]0;pwned\u0007b"}]}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"pwned"$'\a'* ]]
+  [[ "$output" == *"a ]0;pwned b"* ]]
+}
+
+@test "an empty tool_result still renders a connector line" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":""}]}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"└─ (empty result)"* ]]
+}
+
+@test "an is_error tool_result is prefixed with error:" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"exit 1"}]}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"└─ error: exit 1"* ]]
+}
+
+@test "a non-object entry in user content does not drop its sibling tool_results" {
+  run bash "$FORMAT_TRANSCRIPT_SCRIPT" \
+    <<< '{"type":"user","message":{"content":["stray",{"type":"tool_result","tool_use_id":"t1","content":["stray",{"type":"text","text":"kept"}]}]}}'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"└─ kept"* ]]
 }
 
 @test "result event renders a summary line with turn count" {
