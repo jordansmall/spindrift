@@ -86,9 +86,9 @@ func Handoff(state runstate.RunState) string {
 	// (AC4): skip the bullet rather than point the land pass at a file that
 	// isn't there.
 	if state.FindingsLogPath != "" && pathExists(state.FindingsLogPath) {
-		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when you reach FILE ISSUES, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding an earlier round's fix pass already fixed inline, already dropped, or already escalated, is resolved, not re-filed)\n", state.FindingsLogPath)
+		fmt.Fprintf(&b, "- Findings log: %s (every review round's own findings, one \"## Round N\" section per round -- when the land pass triages non-blocking findings, read this file and run the same non-blocking triage from REVIEW over the union of every round's non-blocking findings, not just this round's Reviewer findings above; a finding an earlier round's fix pass already fixed inline, already dropped, or already escalated, is resolved, not re-escalated)\n", state.FindingsLogPath)
 	}
-	// A land pass reaching FILE ISSUES needs a prior pass's escalated
+	// A land pass escalating findings needs a prior pass's escalated
 	// dispositions, or it re-escalates a finding already queued (issue
 	// #4108).
 	if state.DispositionsLogPath != "" && pathExists(state.DispositionsLogPath) {
@@ -107,10 +107,10 @@ func Handoff(state runstate.RunState) string {
 		b.WriteString("committed to this one last implement/fix pass instead of stopping\n")
 		b.WriteString("outcome-less. This overrides review-loop-orchestrator.md's \"stop your\n")
 		b.WriteString("turn now, right after COMMIT\" instruction for a non-APPROVE-seeded\n")
-		b.WriteString("pass -- on this pass, proceed through FILE ISSUES, LAND THE CHANGE,\n")
-		b.WriteString("OPEN A PULL REQUEST, and OUTCOME regardless of verdict. If blocking\n")
-		b.WriteString("review findings remain unresolved, land anyway and report that\n")
-		b.WriteString("plainly in the OUTCOME note as a real status, not a bare success.\n")
+		b.WriteString("pass -- on this pass, proceed past COMMIT through every remaining\n")
+		b.WriteString("section to OUTCOME regardless of verdict. If blocking review findings\n")
+		b.WriteString("remain unresolved, land anyway and report that plainly in the OUTCOME\n")
+		b.WriteString("note as a real status, not a bare success.\n")
 	}
 	return b.String()
 }
