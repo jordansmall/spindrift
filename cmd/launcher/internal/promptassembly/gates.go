@@ -81,6 +81,7 @@ func Gates(e Env) map[string]bool {
 		"ISSUE_TRACKER_FORGEJO_READONLY",
 		"BOX_ACCESS_READ_ONLY",
 		"FILER_FILE_RELAY",
+		"RESEARCH_VERDICT_RELAYED",
 	} {
 		g[base+"_LOG"] = g[base] && !socket
 		g[base+"_SOCKET"] = g[base] && socket

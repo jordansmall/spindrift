@@ -1,6 +1,9 @@
 package promptassembly
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // TestGatesIssueTrackerReadAxis covers the issue-read step gate: exactly one of
 // ISSUE_TRACKER_GITHUB/ISSUE_TRACKER_LOCAL/ISSUE_TRACKER_FORGEJO is ever on,
@@ -565,5 +568,119 @@ func TestGatesPRBodyReference(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestGatesResearchVerdictRelayed pins that RESEARCH_VERDICT_RELAYED is the
+// union of the paths that render a relayed research-verdict step (a read-only
+// github/forgejo Box, a local tracker, a Filer-forced relay), scoped to the
+// verdict contract (ContractVerdict; issue #5130).
+func TestGatesResearchVerdictRelayed(t *testing.T) {
+	cases := []struct {
+		name         string
+		kind         string
+		filerEnabled bool
+		read, write  string
+		boxWrite     bool
+		want         bool
+	}{
+		{"github read-write", "research", false, "GITHUB", "GITHUB", true, false},
+		{"github read-only", "research", false, "GITHUB", "GITHUB", false, true},
+		{"github read-write forced relay by Filer", "research", true, "GITHUB", "GITHUB", true, true},
+		{"forgejo read-write", "research", false, "FORGEJO", "FORGEJO", true, false},
+		{"forgejo read-only", "research", false, "FORGEJO", "FORGEJO", false, true},
+		{"forgejo read-write forced relay by Filer", "research", true, "FORGEJO", "FORGEJO", true, true},
+		{"local", "research", false, "LOCAL", "", true, true},
+		{"work github read-only", "work", false, "GITHUB", "GITHUB", false, false},
+		{"work local", "work", false, "LOCAL", "", true, false},
+		{"butler github read-only", "butler", false, "GITHUB", "GITHUB", false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := Env{
+				DispatchKind:     tc.kind,
+				FilerEnabled:     tc.filerEnabled,
+				TrackerAxisRead:  tc.read,
+				TrackerAxisWrite: tc.write,
+				BoxWriteEnabled:  tc.boxWrite,
+			}
+			if got := Gates(env)["RESEARCH_VERDICT_RELAYED"]; got != tc.want {
+				t.Errorf("Gates(%+v)[RESEARCH_VERDICT_RELAYED] = %v, want %v", env, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGatesResearchVerdictRelayedCarrierSplit pins that the relayed gate
+// splits into exactly one of _LOG/_SOCKET by Signal carrier, and that
+// neither half is on when the base gate is off.
+func TestGatesResearchVerdictRelayedCarrierSplit(t *testing.T) {
+	cases := []struct {
+		name            string
+		carrier         string
+		boxWrite        bool
+		wantLog, wantSk bool
+	}{
+		{"log carrier", "log", false, true, false},
+		{"empty carrier means log", "", false, true, false},
+		{"socket carrier", "socket", false, false, true},
+		{"socket carrier, relay off", "socket", true, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := Gates(Env{
+				DispatchKind:     "research",
+				SignalCarrier:    tc.carrier,
+				TrackerAxisRead:  "GITHUB",
+				TrackerAxisWrite: "GITHUB",
+				BoxWriteEnabled:  tc.boxWrite,
+			})
+			if g["RESEARCH_VERDICT_RELAYED_LOG"] != tc.wantLog || g["RESEARCH_VERDICT_RELAYED_SOCKET"] != tc.wantSk {
+				t.Errorf("_LOG/_SOCKET = %v/%v, want %v/%v", g["RESEARCH_VERDICT_RELAYED_LOG"], g["RESEARCH_VERDICT_RELAYED_SOCKET"], tc.wantLog, tc.wantSk)
+			}
+		})
+	}
+}
+
+// TestGatesResearchVerdictRelayedMatchesRegistry guards against drift between
+// the hand-listed RESEARCH_VERDICT_RELAYED union and the research-verdict-*
+// registry rows: it must equal the OR of every non-READWRITE row's gate.
+func TestGatesResearchVerdictRelayedMatchesRegistry(t *testing.T) {
+	var relayedGates []string
+	for _, row := range loadTestRegistry(t).Rows {
+		if strings.HasPrefix(row.Fragment, "research-verdict-") && !strings.HasSuffix(row.Gate, "_READWRITE") {
+			relayedGates = append(relayedGates, row.Gate)
+		}
+	}
+	if len(relayedGates) == 0 {
+		t.Fatal("no relayed research-verdict-* rows found in testdata/registry.json")
+	}
+	for _, tracker := range []string{"GITHUB", "FORGEJO", "LOCAL"} {
+		write := tracker
+		if tracker == "LOCAL" {
+			write = ""
+		}
+		for _, boxWrite := range []bool{true, false} {
+			for _, filer := range []bool{true, false} {
+				for _, carrier := range []string{"log", "socket"} {
+					env := Env{
+						DispatchKind:     "research",
+						FilerEnabled:     filer,
+						SignalCarrier:    carrier,
+						TrackerAxisRead:  tracker,
+						TrackerAxisWrite: write,
+						BoxWriteEnabled:  boxWrite,
+					}
+					g := Gates(env)
+					want := false
+					for _, name := range relayedGates {
+						want = want || g[name]
+					}
+					if g["RESEARCH_VERDICT_RELAYED"] != want {
+						t.Errorf("Gates(%+v)[RESEARCH_VERDICT_RELAYED] = %v, registry gates OR to %v", env, g["RESEARCH_VERDICT_RELAYED"], want)
+					}
+				}
+			}
+		}
 	}
 }

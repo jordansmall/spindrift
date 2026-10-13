@@ -4,6 +4,7 @@ filer-file-relay.md
 filer-label-relay-research.md
 research-file-issues-relay.md
 research-issue-read-github.md
+research-outcome-landing-relayed.md
 research-verdict-github-readonly.md
 scout-issue-read-github.md
 skill-preamble.md

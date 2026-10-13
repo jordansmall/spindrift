@@ -541,6 +541,33 @@ let
       var = "RESEARCH_VERDICT_FORGEJO_READONLY_SOCKET_STEP";
       signalChannel = "comment";
     }
+    # The research OUTCOME's `landing` guidance (issue #5130): only a
+    # write-capable Box posts the comment itself and sees a URL; every
+    # relayed path (read-only, local, Filer-forced) reports landing=none.
+    {
+      gate = "ISSUE_TRACKER_GITHUB_READWRITE";
+      fragment = "research-outcome-landing-github.md";
+      var = "RESEARCH_OUTCOME_LANDING_GITHUB_STEP";
+    }
+    {
+      gate = "ISSUE_TRACKER_FORGEJO_READWRITE";
+      fragment = "research-outcome-landing-forgejo.md";
+      var = "RESEARCH_OUTCOME_LANDING_FORGEJO_STEP";
+    }
+    # The relayed variant forks on carrier: only the socket acknowledges a
+    # relay (`signal comment accepted`), so the log wording says what counts.
+    {
+      gate = "RESEARCH_VERDICT_RELAYED_LOG";
+      fragment = "research-outcome-landing-relayed.md";
+      var = "RESEARCH_OUTCOME_LANDING_RELAYED_STEP";
+      signalChannel = "comment";
+    }
+    {
+      gate = "RESEARCH_VERDICT_RELAYED_SOCKET";
+      fragment = "research-outcome-landing-relayed-socket.md";
+      var = "RESEARCH_OUTCOME_LANDING_RELAYED_SOCKET_STEP";
+      signalChannel = "comment";
+    }
     {
       gate = "ISSUE_TRACKER_GITHUB_READWRITE";
       fragment = "issue-blocked-comment-github.md";

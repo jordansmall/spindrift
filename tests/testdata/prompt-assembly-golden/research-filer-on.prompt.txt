@@ -164,19 +164,26 @@ Comments only.
 
 # OUTCOME
 
-Once the comment is posted, print exactly one line as your final output —
-raw plain text, not wrapped in backticks, a code fence, or any other
-markdown formatting:
+Once the verdict comment is posted or relayed, print exactly one line as your
+final output — raw plain text, not wrapped in backticks, a code fence, or any
+other markdown formatting:
 
-SPINDRIFT_OUTCOME issue=7 landing=<verdict-comment-url> status=<recommend|reject|unclear> note=<one-line rationale>
+SPINDRIFT_OUTCOME issue=7 landing=<landing> status=<recommend|reject|unclear> note=<one-line rationale>
 
 This must be the literal final message — nothing after it, no prose summary.
-For github, `landing` is the URL of the comment you just posted
-(`gh issue comment` prints it). For local, nothing was posted from in-box —
-use `landing=none`. `status` carries the verdict, not a work-style
-ready/blocked.
+You never post the verdict comment yourself here: the launcher posts your
+relayed verdict host-side once you exit, so you never learn its URL and must
+always use `landing=none`. Nothing acknowledges a relay on the `log` carrier:
+once your guarded command ran without an over-budget report, the verdict is
+relayed, even though its `SPINDRIFT_COMMENT` line is absent from what you read
+back. Report the verdict in `status` as usual; a
+relayed verdict is a delivered verdict, never `blocked`. The relay failed
+only if the guard kept reporting over budget and you could not shorten the
+verdict under it.
 
-If you cannot reach a verdict, or the comment cannot be posted, use `blocked`
-as the escape hatch instead — same raw plain text requirement:
+`status` carries the verdict, not a work-style ready/blocked.
+
+If you cannot reach a verdict, or the verdict was never delivered, use
+`blocked` as the escape hatch instead — same raw plain text requirement:
 
 SPINDRIFT_OUTCOME issue=7 landing=none status=blocked note=<short reason>

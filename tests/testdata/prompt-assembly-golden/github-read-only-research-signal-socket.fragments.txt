@@ -1,4 +1,5 @@
 caveman-default-research.md
 check-hygiene-default.md
 research-issue-read-github.md
+research-outcome-landing-relayed-socket.md
 research-verdict-github-readonly-socket.md
