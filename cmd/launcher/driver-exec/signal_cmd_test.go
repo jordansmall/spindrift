@@ -963,9 +963,10 @@ func lastNonEmptyLine(s string) string {
 // TestRunSignal_UsageFailureRejectedLine pins issue #3867's client-side
 // contract: every usage failure's last line is "signal <kind> rejected
 // (usage): <reason>", in the same shape as a server rejection, whatever kind
-// word (or none, or an unrecognised one) the agent gave.
+// word (or none, or an unrecognised one) the agent gave -- and no usage
+// failure buffers an intent.
 func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
-	startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
+	srv := startSignalServer(t, "unix", signalsocket.Config{Consumes: allKinds()})
 
 	cases := []struct {
 		name string
@@ -1003,6 +1004,21 @@ func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
 			want: "signal issue-intent rejected (usage): -type is required",
 		},
 		{
+			name: "issue-intent stray positional before later flags",
+			args: []string{"issue-intent", "-title", "t", "-type", "bug", "stray", "-dedup", "a.go:Sym"},
+			want: `signal issue-intent rejected (usage): unexpected argument "stray": this verb takes no positional arguments; quote a multi-word flag value`,
+		},
+		{
+			name: "issue-intent unquoted multi-word title",
+			args: []string{"issue-intent", "-title", "Fix", "race", "-type", "bug"},
+			want: `signal issue-intent rejected (usage): unexpected argument "race": this verb takes no positional arguments; quote a multi-word flag value`,
+		},
+		{
+			name: "status stray positional",
+			args: []string{"status", "stray"},
+			want: `signal status rejected (usage): unexpected argument "stray": this verb takes no positional arguments`,
+		},
+		{
 			name: "no args",
 			args: nil,
 			want: "signal rejected (usage): want one of comment, pr-intent, issue-intent, status",
@@ -1023,6 +1039,15 @@ func TestRunSignal_UsageFailureRejectedLine(t *testing.T) {
 				t.Fatalf("last line = %q, want %q (full out=%q)", got, tc.want, out)
 			}
 		})
+	}
+	if got := srv.buf.IssueIntents(); len(got) != 0 {
+		t.Fatalf("usage failures buffered %d issue intents, want 0", len(got))
+	}
+	if _, ok := srv.buf.PRIntent(); ok {
+		t.Fatal("usage failures buffered a PR intent")
+	}
+	if _, ok := srv.buf.Comment(); ok {
+		t.Fatal("usage failures buffered a comment")
 	}
 }
 
