@@ -23,10 +23,7 @@ type Event struct {
 // same stdout that carries driver-exec's forwarded lines, so the heartbeat
 // Writer can show it live.
 type SpindriftOp struct {
-	// Op names the operation kind: "pass_start", "verdict", "pass_no_outcome",
-	// "decision", "run_state_error", "pass_usage", "land_delta",
-	// "delta_review_trigger", "signal", "dispatch_start", "prompt_hashes", or
-	// OpDispatchSettled (Settled carries its payload).
+	// Op names the operation kind, one of the Op* constants.
 	Op   string `json:"op"`
 	Pass int    `json:"pass,omitempty"`
 	// Role names the pass's own role on a pass_start op (issue #2037):
@@ -89,11 +86,36 @@ type PromptHashes struct {
 	Roles    map[string]string `json:"roles"`
 }
 
-// OpDispatchSettled is the SpindriftOp.Op of the host's terminal-state record.
-const OpDispatchSettled = "dispatch_settled"
+// TypeSpindriftOp is the Event.Type of every host op line.
+const TypeSpindriftOp = "spindrift_op"
 
-// OpDispatchStart is the SpindriftOp.Op of the Dispatch identity stamp.
-const OpDispatchStart = "dispatch_start"
+// The SpindriftOp.Op operation kinds.
+const (
+	// OpPassStart marks the start of a pass; Role names the pass's role.
+	OpPassStart = "pass_start"
+	// OpVerdict records a pass's verdict.
+	OpVerdict = "verdict"
+	// OpPassNoOutcome records a pass that ended without a usable outcome.
+	OpPassNoOutcome = "pass_no_outcome"
+	// OpDecision records a continue/stop decision; Decision names it.
+	OpDecision = "decision"
+	// OpRunStateError records a run-state read or write failure; Phase names it.
+	OpRunStateError = "run_state_error"
+	// OpPassUsage carries a pass's end-of-pass token accounting.
+	OpPassUsage = "pass_usage"
+	// OpLandDelta carries the land pass's post-approval tree delta.
+	OpLandDelta = "land_delta"
+	// OpDeltaReviewTrigger records whether the delta-review pass fires or skips.
+	OpDeltaReviewTrigger = "delta_review_trigger"
+	// OpSignal records the host's handling of a Box signal; Decision names it.
+	OpSignal = "signal"
+	// OpDispatchStart is the Dispatch identity stamp.
+	OpDispatchStart = "dispatch_start"
+	// OpPromptHashes carries the Box's per-role prompt template hashes.
+	OpPromptHashes = "prompt_hashes"
+	// OpDispatchSettled is the host's terminal-state record.
+	OpDispatchSettled = "dispatch_settled"
+)
 
 // DispatchSettled is the payload of a "dispatch_settled" SpindriftOp (issue
 // #4785), appended by the host to the primary Pass log when settle flushes the
@@ -157,7 +179,7 @@ type PassUsage struct {
 // as a synthetic "spindrift_op" event (issue #2027), ready to write onto the
 // same stdout driver-exec's raw output flows through.
 func EncodeSpindriftOp(op SpindriftOp) string {
-	b, err := json.Marshal(Event{Type: "spindrift_op", SpindriftOp: &op})
+	b, err := json.Marshal(Event{Type: TypeSpindriftOp, SpindriftOp: &op})
 	if err != nil {
 		// Every field is a string, number, time, or a map/struct of those,
 		// so json.Marshal cannot practically fail. This is an observability
