@@ -37,6 +37,22 @@ _render_content_block() {
       local line="${name}(${input_str})"
       printf '%s\xe2\x8f\xba %s%s\n' "$BOLD" "$(_trunc "$line" 120)" "$RESET"
       ;;
+    tool_result)
+      # Mirrors summarizeResult in cmd/launcher/internal/driver/claude/
+      # transcript_render.go. Collapsing control characters keeps the result
+      # on one line and stops untrusted tool output driving the terminal.
+      local content=""
+      content="$(printf '%s' "$block" | jq -r '
+        (if (.content | type) == "array" then
+          [.content[] | objects | select(.type == "text") | .text] | join(" ")
+        elif (.content | type) == "string" then .content
+        else ""
+        end
+        | gsub("[[:cntrl:]]+"; " ") | sub("^ +"; "") | sub(" +$"; "")
+        | if . == "" then "(empty result)" else . end) as $text
+        | if .is_error == true then "error: \($text)" else $text end' 2>/dev/null)" || return 0
+      printf '  %s\xe2\x94\x94\xe2\x94\x80 %s%s\n' "$DIM" "$(_trunc "$content" 120)" "$RESET"
+      ;;
   esac
 }
 
@@ -59,16 +75,19 @@ _render_event() {
         _render_content_block "$block" || true
       done
       ;;
-    tool_result)
-      local content=""
-      content="$(printf '%s' "$line" | jq -r '
-        if (.content | type) == "array" then
-          [.content[] | select(.type == "text") | .text] | join(" ")
-        elif (.content | type) == "string" then .content
+    user)
+      # Claude Code delivers tool results as tool_result blocks inside user
+      # events, never as a top-level event; other user content is the prompt.
+      local block="" blocks=""
+      blocks="$(printf '%s' "$line" | jq -c '
+        if (.message.content | type) == "array" then
+          .message.content[] | objects | select(.type == "tool_result")
         else empty
         end' 2>/dev/null)" || return 0
-      [ -n "$content" ] || return 0
-      printf '  %s\xe2\x94\x94\xe2\x94\x80 %s%s\n' "$DIM" "$(_trunc "$content" 120)" "$RESET"
+      while IFS= read -r block; do
+        [ -n "$block" ] || continue
+        _render_content_block "$block" || true
+      done <<< "$blocks"
       ;;
     result)
       local summary=""
