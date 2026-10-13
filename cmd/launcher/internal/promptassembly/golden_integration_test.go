@@ -220,6 +220,14 @@ func goldenCells() []goldenCell {
 			c.forgejoForge()
 			c.forgejoTracker()
 		}},
+		{name: "jira-research", mode: modeInitial, setup: func(c *cellInputs) {
+			c.dispatch("research")
+			c.export("ISSUE_TRACKER", "jira")
+		}, check: func(t *testing.T, prompt string) {
+			if strings.Contains(prompt, "gh issue comment") {
+				t.Error("jira research prompt contains `gh issue comment`")
+			}
+		}},
 		{name: "self-contained-research", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
 			c.export("SELF_CONTAINED", "1")

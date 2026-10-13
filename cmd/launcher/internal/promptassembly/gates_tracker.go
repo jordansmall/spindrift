@@ -1,6 +1,9 @@
 package promptassembly
 
-import "spindrift.dev/launcher/internal/dispatchkind"
+import (
+	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/dispatchkind"
+)
 
 // trackerGates computes the Issue-Tracker gate family: the tracker
 // read/write/filer descriptor gates and the PR-body ticket-reference gates.
@@ -18,12 +21,19 @@ func trackerGates(e Env) map[string]bool {
 		itRead, itWrite, itFiler = issueTrackerAxisFallback(e.IssueTracker)
 	}
 
-	// ADR 0041 / issue #2593: a research dispatch with the Filer provisioned
-	// always uses the relay form, regardless of BOX_WRITE_ENABLED. Env
-	// forwards DispatchKind as the empty string by default, so the comparison
-	// has to resolve that default the same way every other reader of the field
-	// does.
-	researchForceRelay := e.descriptor().AdviseOnly && e.FilerEnabled
+	// ADR 0041 / issue #2593: an advise-only dispatch with the Filer provisioned
+	// always uses the relay form, regardless of BOX_WRITE_ENABLED. So does a
+	// research verdict on a tracker the Box cannot write (jira, issue #5245): it
+	// rides the GITHUB axis for reads, but has no in-box write path. The butler
+	// posts no verdict, so that term is scoped to ContractVerdict. Env forwards
+	// IssueTracker as the empty string by default; resolve it to the default.
+	trackerName := e.IssueTracker
+	if trackerName == "" {
+		trackerName = defaultIssueTracker
+	}
+	d := e.descriptor()
+	researchForceRelay := (d.AdviseOnly && e.FilerEnabled) ||
+		(d.Contract == dispatchkind.ContractVerdict && backend.ResearchVerdictRelayed(trackerName, e.FilerEnabled))
 
 	// Exactly one of these three ever fires.
 	g["ISSUE_TRACKER_GITHUB"] = itRead == "GITHUB"
@@ -81,14 +91,10 @@ func trackerGates(e Env) map[string]bool {
 
 	// Exactly one of these is ever on, picked from ISSUE_TRACKER crossed with
 	// LOCAL_ISSUE_REFERENCE. jira falls into the same else branch as github.
-	tracker := e.IssueTracker
-	if tracker == "" {
-		tracker = defaultIssueTracker
-	}
 	prBodyLocalRef := false
 	prBodyLocalNoref := false
 	prBodyCloses := false
-	if tracker == "local" {
+	if trackerName == "local" {
 		if e.LocalIssueReference {
 			prBodyLocalRef = true
 		} else {
