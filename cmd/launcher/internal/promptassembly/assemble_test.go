@@ -2648,6 +2648,15 @@ func TestAssembleLandPassOrderOrchestratorFragment(t *testing.T) {
 	if !strings.Contains(result.Prompt, marker) {
 		t.Errorf("Prompt missing land-pass-order-orchestrator.md fragment text:\n%s", result.Prompt)
 	}
+
+	// The fragment is ungated, so it must not quote wording only one gated
+	// COMMIT arm renders (issue #5132).
+	body := fragmentText(t, "land-pass-order-orchestrator.md")
+	for _, armOnly := range []string{"immediately before finishing", "immediately before every push"} {
+		if strings.Contains(body, armOnly) {
+			t.Errorf("land-pass-order-orchestrator.md quotes single-arm COMMIT wording %q", armOnly)
+		}
+	}
 }
 
 // With no reviewer key in the template, ReviewModel and ReviewEffort stay
