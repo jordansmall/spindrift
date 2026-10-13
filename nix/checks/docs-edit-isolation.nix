@@ -1,8 +1,9 @@
 # Issue #5154: a docs-only edit must rebuild only the checks that read that
-# doc. Re-evaluates the checkset off a copy of the repo minus two docs files
+# doc. Re-evaluates the checkset off a copy of the repo minus three docs files
 # and asserts the narrowed checks keep their drvPaths. Subtree copies are
 # content-addressed, so a check moves only if it really consumes a perturbed
-# file or stringifies the whole source root (the leak this pins).
+# file or stringifies the whole source root (the leak this pins). A second
+# copy minus only README.md proves README.md itself still reaches its reader.
 {
   pkgs,
   checksAt,
@@ -23,8 +24,8 @@ let
     attrValues
     ;
 
-  # README.md is left out: go.nix copies it as a single file, so removing it
-  # makes launcher-go-test throw at eval instead of moving.
+  readme = toString ../../README.md;
+
   # Any ADR would do; picking one from the directory survives an ADR rename.
   adrDir = ../../docs/adr;
   adrName = head (
@@ -34,17 +35,26 @@ let
   );
   perturbedPaths = [
     (toString ../../docs/reference.md)
+    readme
     "${toString adrDir}/${adrName}"
   ];
   missing = filter (p: !builtins.pathExists p) perturbedPaths;
 
-  perturbedRoot = builtins.path {
-    path = ../..;
-    name = "source";
-    filter = path: _type: !(builtins.elem path perturbedPaths);
-  };
+  checksWithout =
+    paths:
+    (checksAt (
+      builtins.path {
+        path = ../..;
+        name = "source";
+        filter = path: _type: !(builtins.elem path paths);
+      }
+    )).checks;
 
-  perturbed = (checksAt perturbedRoot).checks;
+  perturbed = checksWithout perturbedPaths;
+
+  # docs/reference.md alone moves docsReaderControl, so a README-only
+  # regression would hide behind it; this root removes only README.md.
+  readmeOnly = checksWithout [ readme ];
 
   families = {
     "bats-shard-*" = hasPrefix "bats-shard-";
@@ -59,8 +69,8 @@ let
   mustNotMove = filter (n: any (f: f n) (attrValues families)) baselineNames;
   movers = filter (n: baselineChecks.${n}.drvPath != perturbed.${n}.drvPath) mustNotMove;
 
-  # Genuine reader of docs/ (nix/checks/go.nix); if it does not move, the
-  # perturbation never reached the checkset and the pin is vacuous.
+  # Genuine reader of docs/ and README.md (nix/checks/go.nix); if it does not
+  # move, the perturbation never reached the checkset and the pin is vacuous.
   docsReaderControl = "launcher-go-test";
 in
 {
@@ -74,6 +84,9 @@ in
     assert assertMsg (
       baselineChecks.${docsReaderControl}.drvPath != perturbed.${docsReaderControl}.drvPath
     ) "${docsReaderControl} did not move under the docs perturbation -- the perturbation is vacuous";
+    assert assertMsg
+      (baselineChecks.${docsReaderControl}.drvPath != readmeOnly.${docsReaderControl}.drvPath)
+      "${docsReaderControl} did not move when only README.md was removed -- README.md no longer reaches it";
     assert assertMsg (emptyFamilies == [ ])
       "docs-edit-isolation matched no checks for: ${concatStringsSep ", " emptyFamilies} -- the prefixes are stale";
     pkgs.runCommand "docs-edit-isolation" { } "touch $out";
