@@ -247,7 +247,7 @@ func ReadStamp(path string) (hostop.DispatchStart, bool) {
 		if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type == "" {
 			continue
 		}
-		if op := ev.SpindriftOp; ev.Type == "spindrift_op" && op != nil && op.Op == hostop.OpDispatchStart && op.Start != nil {
+		if op := ev.SpindriftOp; ev.Type == hostop.TypeSpindriftOp && op != nil && op.Op == hostop.OpDispatchStart && op.Start != nil {
 			if op.Start.RecordID == "" {
 				return hostop.DispatchStart{}, false
 			}
@@ -321,7 +321,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			return
 		}
 		if !strings.Contains(s, `"timestamp"`) && !strings.Contains(s, `"type":"result"`) &&
-			!strings.Contains(s, `"type":"assistant"`) && !strings.Contains(s, `"spindrift_op"`) &&
+			!strings.Contains(s, `"type":"assistant"`) && !strings.Contains(s, `"`+hostop.TypeSpindriftOp+`"`) &&
 			!strings.Contains(s, `"tool_result"`) {
 			return
 		}
@@ -333,7 +333,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		sawEvent = true
 		// The host appends only dispatch_settled ops after the Box exits, so
 		// anything else after a settled op means the Box printed it.
-		if ev.Type != "spindrift_op" || ev.SpindriftOp == nil || ev.SpindriftOp.Op != hostop.OpDispatchSettled {
+		if ev.Type != hostop.TypeSpindriftOp || ev.SpindriftOp == nil || ev.SpindriftOp.Op != hostop.OpDispatchSettled {
 			settled = nil
 		}
 		if ev.Timestamp != "" && !haveTS {
@@ -342,7 +342,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 			}
 		}
 		switch ev.Type {
-		case "spindrift_op":
+		case hostop.TypeSpindriftOp:
 			op := ev.SpindriftOp
 			if op == nil {
 				return
@@ -352,7 +352,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 				if first && op.Start != nil && op.Start.RecordID != "" {
 					stamp = op.Start
 				}
-			case "prompt_hashes":
+			case hostop.OpPromptHashes:
 				if h := op.PromptHashes; h != nil {
 					if hashes[h.RecordID] == nil {
 						hashes[h.RecordID] = map[string]string{}
@@ -370,7 +370,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 					(stamp.HostToken == "" || op.Settled.HostToken == stamp.HostToken) {
 					settled = op.Settled
 				}
-			case "pass_start":
+			case hostop.OpPassStart:
 				if !sawStart {
 					firstRole = op.Role
 				}
@@ -388,9 +388,9 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 					ordinal = last + 1
 				}
 				cur = newPass(ordinal, op.Role, true)
-			case "verdict":
+			case hostop.OpVerdict:
 				cur.Verdict = op.Verdict
-			case "pass_usage":
+			case hostop.OpPassUsage:
 				if op.Usage != nil {
 					cur.opCalls = op.Usage.APICalls
 				}

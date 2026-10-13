@@ -67,7 +67,7 @@ func emitPromptHashes(env promptassembly.Env, reg promptassembly.Registry, w io.
 		return
 	}
 	fmt.Fprint(w, hostop.EncodeSpindriftOp(hostop.SpindriftOp{
-		Op:           "prompt_hashes",
+		Op:           hostop.OpPromptHashes,
 		PromptHashes: &hostop.PromptHashes{RecordID: env.RecordID, Roles: hashes},
 	}))
 }

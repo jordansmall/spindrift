@@ -76,27 +76,27 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s \xe2\x97\x8b ", issue)
 	switch op.Op {
-	case "pass_start":
+	case hostop.OpPassStart:
 		if op.Role != "" {
 			fmt.Fprintf(&sb, "pass %d (%s) started", op.Pass, driverkit.SanitizeLine(op.Role))
 		} else {
 			fmt.Fprintf(&sb, "pass %d started", op.Pass)
 		}
-	case "verdict":
+	case hostop.OpVerdict:
 		fmt.Fprintf(&sb, "verdict: %s", driverkit.SanitizeLine(op.Verdict))
-	case "pass_no_outcome":
+	case hostop.OpPassNoOutcome:
 		if op.Verdict != "" {
 			fmt.Fprintf(&sb, "pass %d ended with no outcome (last verdict %s, %s)", op.Pass, driverkit.SanitizeLine(op.Verdict), driverkit.SanitizeLine(op.Reason))
 		} else {
 			fmt.Fprintf(&sb, "pass %d ended with no outcome (%s)", op.Pass, driverkit.SanitizeLine(op.Reason))
 		}
-	case "decision":
+	case hostop.OpDecision:
 		if op.Reason != "" {
 			fmt.Fprintf(&sb, "%s: %s", driverkit.SanitizeLine(op.Decision), driverkit.SanitizeLine(op.Reason))
 		} else {
 			sb.WriteString(driverkit.SanitizeLine(op.Decision))
 		}
-	case "pass_usage":
+	case hostop.OpPassUsage:
 		if op.Role != "" {
 			fmt.Fprintf(&sb, "pass %d (%s) usage: ", op.Pass, driverkit.SanitizeLine(op.Role))
 		} else {
@@ -126,7 +126,7 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 			}
 			fmt.Fprintf(&sb, " · %s", strings.Join(parts, ", "))
 		}
-	case "land_delta":
+	case hostop.OpLandDelta:
 		// Delta is nil on a marshaled-but-degraded op, so render the zero
 		// Delta rather than dereferencing. Summary() owns the counted, zero
 		// and unknown wording (issue #3244) and the PR body renders the same
@@ -140,7 +140,7 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 			d.Reason = "no delta reported"
 		}
 		sb.WriteString(driverkit.SanitizeLine(d.Summary()))
-	case "signal":
+	case hostop.OpSignal:
 		// A reject's Reason is the whole point of the line, so it stands in
 		// for the size/hash detail an accept carries (issue #3724).
 		switch op.Decision {
@@ -153,7 +153,7 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 		default:
 			fmt.Fprintf(&sb, "signal %s accepted \xc2\xb7 %d bytes \xc2\xb7 %s", driverkit.SanitizeLine(op.Kind), op.Size, driverkit.SanitizeLine(op.Hash))
 		}
-	case "delta_review_trigger":
+	case hostop.OpDeltaReviewTrigger:
 		// The Reason is the whole point of this op (issue #3246) and must show
 		// even on the common "skip" path, so this mirrors the "decision" case
 		// rather than the default arm's bare op name.
@@ -162,7 +162,7 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 		} else {
 			fmt.Fprintf(&sb, "delta review %s", driverkit.SanitizeLine(op.Decision))
 		}
-	case "run_state_error":
+	case hostop.OpRunStateError:
 		// dispositions_budget (issue #2550 AC9) and decisions_budget (issue
 		// #2695) are loud, non-fatal tripwires, not a run-state disk failure,
 		// so each gets its own wording.

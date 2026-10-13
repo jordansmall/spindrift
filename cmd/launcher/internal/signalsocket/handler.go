@@ -196,7 +196,7 @@ func (h *handler) mirror(next http.Handler) http.Handler {
 		rec := &opRecord{kind: kind, usage: usage, decision: "reject"}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), opRecordKey{}, rec)))
 		h.emit(hostop.SpindriftOp{
-			Op:       "signal",
+			Op:       hostop.OpSignal,
 			Kind:     rec.kind,
 			Decision: rec.decision,
 			Reason:   rec.reason,
