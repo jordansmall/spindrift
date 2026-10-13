@@ -228,6 +228,13 @@ func TestRewriteCargoDL_Markers(t *testing.T) {
 			admits:      "/dl",
 		},
 		{
+			name:        "escaped fragment is copied verbatim",
+			dl:          "https://crates.example.com/a/{crate}#%41",
+			wantTo:      "http://127.0.0.1:9999/r0/a/{crate}#%41",
+			wantLearned: "/a",
+			admits:      "/a/serde",
+		},
+		{
 			name:        "marker in the first segment learns the whole host",
 			dl:          "https://crates.example.com/{crate}/{version}/download",
 			wantTo:      "http://127.0.0.1:9999/r0/{crate}/{version}/download",
@@ -240,6 +247,34 @@ func TestRewriteCargoDL_Markers(t *testing.T) {
 			wantTo:      "http://127.0.0.1:9999/r0/a//{crate}",
 			wantLearned: "/a",
 			admits:      "/a/serde",
+		},
+		{
+			name:        "encoded slash before a marker keeps its escape",
+			dl:          "https://crates.example.com/a%2Fb/{crate}",
+			wantTo:      "http://127.0.0.1:9999/r0/a%2Fb/{crate}",
+			wantLearned: "/a/b",
+			admits:      "/a/b/serde",
+		},
+		{
+			name:        "encoded marker beside a literal one",
+			dl:          "https://crates.example.com/x/%7Bcrate%7D/{crate}",
+			wantTo:      "http://127.0.0.1:9999/r0/x/%7Bcrate%7D/{crate}",
+			wantLearned: "/x/{crate}",
+			admits:      "/x/{crate}/serde",
+		},
+		{
+			name:        "unreserved escape before a marker is not normalised",
+			dl:          "https://crates.example.com/a%41b/{crate}",
+			wantTo:      "http://127.0.0.1:9999/r0/a%41b/{crate}",
+			wantLearned: "/aAb",
+			admits:      "/aAb/serde",
+		},
+		{
+			name:        "bare space before a marker is copied verbatim",
+			dl:          "https://crates.example.com/a b/{crate}",
+			wantTo:      "http://127.0.0.1:9999/r0/a b/{crate}",
+			wantLearned: "/a b",
+			admits:      "/a b/serde",
 		},
 		{
 			name:        "encoded marker in the query is kept verbatim",
