@@ -171,8 +171,9 @@ func commitCount(git func(args ...string) (string, string, error), base, branch 
 }
 
 // pushWithRetry best-effort pushes Branch with bounded retry-with-backoff on a
-// transient failure (issue #2095), appending a "push failed" note only once
-// every attempt is exhausted; a successful push adds no note.
+// transient failure (issue #2095), appending a "push failed" note once every
+// attempt is exhausted, or at once on a lease refusal no retry can clear; a
+// successful push adds no note.
 func pushWithRetry(git func(args ...string) (string, string, error), clock retry.Clock, cfg Config, note string) (string, bool) {
 	attempts := cfg.MaxAttempts
 	if attempts < 1 {
@@ -181,15 +182,26 @@ func pushWithRetry(git func(args ...string) (string, string, error), clock retry
 	b := retry.LinearBackoff{Unit: cfg.Backoff, Jitter: cfg.Jitter, Clock: clock}
 
 	for attempt := 1; ; attempt++ {
-		_, stderr, err := git("push", "--force-with-lease", "origin", cfg.Branch)
+		// The agent's own fetches re-arm a bare lease, making it a plain
+		// --force; --force-if-includes refuses a remote tip never integrated.
+		_, stderr, err := git("push", "--force-with-lease", "--force-if-includes", "origin", cfg.Branch)
 		if err == nil {
 			return note, true
 		}
-		if attempt >= attempts {
+		if attempt >= attempts || leaseRejected(stderr) {
 			return note + fmt.Sprintf("; push failed after %d attempt(s): %s", attempt, lastLine(stderr)), false
 		}
 		b.Do(attempt)
 	}
+}
+
+// leaseRejected reports a --force-with-lease / --force-if-includes refusal:
+// the remote tip is not one this run integrated, so a retry cannot succeed.
+// Both strings are git's push status text (transport.c), which git does not
+// translate; a miss only falls back to the ordinary retry loop.
+func leaseRejected(stderr string) bool {
+	return strings.Contains(stderr, "(remote ref updated since checkout)") ||
+		strings.Contains(stderr, "(stale info)")
 }
 
 func lastLine(s string) string {

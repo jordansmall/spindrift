@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -245,6 +246,14 @@ func TestRun_WritablePushSuccess(t *testing.T) {
 	if git.countCalls("push") != 1 {
 		t.Fatalf("expected exactly one push, got %v", git.calls)
 	}
+	want := []string{"push", "--force-with-lease", "--force-if-includes", "origin", "agent/issue-42"}
+	for _, c := range git.calls {
+		if len(c) > 0 && c[0] == "push" {
+			if !reflect.DeepEqual(c, want) {
+				t.Fatalf("push args = %v, want %v", c, want)
+			}
+		}
+	}
 	if strings.Contains(line, "push failed") {
 		t.Fatalf("unexpected push failure note: %q", line)
 	}
@@ -283,6 +292,36 @@ func TestRun_PushFailsEveryAttempt(t *testing.T) {
 	}
 	if len(clk.slept) != 1 {
 		t.Fatalf("expected exactly one sleep between the two attempts, got %v", clk.slept)
+	}
+}
+
+func TestRun_PushLeaseRejectionFailsFast(t *testing.T) {
+	for _, reason := range []string{"remote ref updated since checkout", "stale info"} {
+		t.Run(reason, func(t *testing.T) {
+			rejected := " ! [rejected]        agent/issue-42 -> agent/issue-42 (" + reason + ")\n"
+			git := &fakeGit{responses: map[string]fakeResult{
+				"rev-list": {stdout: "1\n"},
+				"push":     {stderr: "To origin\n" + rejected, err: fmt.Errorf("exit status 1")},
+			}}
+			clk := &fakeClock{}
+			cfg := baseConfig(git, clk)
+			cfg.WriteEnabled = true
+			cfg.MaxAttempts = 3
+
+			var buf bytes.Buffer
+			if err := Run(cfg, &buf); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if n := git.countCalls("push"); n != 1 {
+				t.Fatalf("expected exactly one push, got %d: %v", n, git.calls)
+			}
+			if len(clk.slept) != 0 {
+				t.Fatalf("expected no backoff sleep, got %v", clk.slept)
+			}
+			if !strings.Contains(buf.String(), "push failed after 1 attempt(s): ") || !strings.Contains(buf.String(), reason) {
+				t.Fatalf("unexpected note: %q", buf.String())
+			}
+		})
 	}
 }
 
