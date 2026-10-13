@@ -1,4 +1,4 @@
-3. Your token is read-only — you cannot file issues yourself. Instead print
+3. Never file issues yourself, even if your token can. Instead print
    one `SPINDRIFT_ISSUE_INTENT ${RUN_NONCE} <base64-payload>` line per issue
    to file — the launcher finds each line by this run's nonce, decodes it,
    and files the issue host-side once you exit. Build each payload by
