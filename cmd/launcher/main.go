@@ -681,18 +681,12 @@ func newCodeForge(c config, parent local.SanitizedParent, it forge.IssueTracker)
 // forge-neutral line: a merge-blocked dispatch may or may not have pushed a
 // branch or opened a PR, so only its status says what happened (issue #5145).
 // Dispatches the tally never sees (reclaimed mid-run or abandoned) are not
-// counted.
+// counted. A kind whose descriptor sets CompleteBanner uses that wording
+// rather than the Code Forge's landing claim (issue #5164).
 func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) string {
-	var allLandedLine string
-	switch c.codeForge {
-	case "git", "forgejo":
-		allLandedLine = fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
-	case "local":
-		allLandedLine = "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
-	default:
-		// validate restricts c.codeForge to git, local, forgejo, or github, so
-		// a future forge fails loud there rather than inheriting this wording.
-		allLandedLine = fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	allLandedLine := forgeLandedLine(c)
+	if phrase := c.kind().CompleteBanner; phrase != "" {
+		allLandedLine = "==> all agents finished — " + phrase + ".\n"
 	}
 	var missed []string
 	for _, o := range outcomes {
@@ -713,6 +707,20 @@ func dispatchCompletionBanner(c config, outcomes []settle.DispatchOutcome) strin
 		return allLandedLine
 	}
 	return fmt.Sprintf("==> all agents finished — %d of %d dispatches did not deliver: %s.\n", len(missed), len(outcomes), strings.Join(missed, ", "))
+}
+
+// forgeLandedLine is the all-delivered banner for a kind that lands code.
+func forgeLandedLine(c config) string {
+	switch c.codeForge {
+	case "git", "forgejo":
+		return fmt.Sprintf("==> all agents finished — branches pushed on %s.\n", c.repoSlug)
+	case "local":
+		return "==> all agents finished — seams landed host-side into their own Integration branches in the Accumulation repo.\n"
+	default:
+		// validate restricts c.codeForge to git, local, forgejo, or github, so
+		// a future forge fails loud there rather than inheriting this wording.
+		return fmt.Sprintf("==> all agents finished — branches pushed and PRs opened on %s.\n", c.repoSlug)
+	}
 }
 
 // delivered reports whether o earns the all-delivered banner line. Only a
