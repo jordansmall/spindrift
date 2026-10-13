@@ -522,6 +522,76 @@ func TestGatesCodeForgeBackend(t *testing.T) {
 	}
 }
 
+// A git Code Forge has no PR, so a read-write git Box must not be told to run
+// `gh pr view` or report landing=<pr-url> on the IF BLOCKED path (issue
+// #5233). OutboxRelayCapable stands in for "this forge has PRs".
+func TestGatesIfBlockedPRForkOnForgeHavingPRs(t *testing.T) {
+	cases := []struct {
+		name string
+		env  Env
+		want map[string]bool
+	}{
+		{
+			name: "github read-write",
+			env:  Env{ForgeBackend: "GH", BoxWriteEnabled: true, OutboxRelayCapable: true},
+			want: map[string]bool{
+				"IF_BLOCKED_PR_RW_GH": true, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": true, "NO_PR_FORGE_READ_WRITE": false,
+				"OPEN_PR_CREATE_RW_GH": true,
+			},
+		},
+		{
+			name: "forgejo read-write",
+			env:  Env{ForgeBackend: "FORGEJO", BoxWriteEnabled: true, OutboxRelayCapable: true},
+			want: map[string]bool{
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": true, "PR_FORGE_READ_WRITE": true, "NO_PR_FORGE_READ_WRITE": false,
+			},
+		},
+		{
+			// The git forge resolves to the GH backend upstream, so
+			// OPEN_PR_CREATE_RW_GH stays true; only the IF BLOCKED gates
+			// split on OutboxRelayCapable.
+			name: "git read-write",
+			env:  Env{ForgeBackend: "GH", CodeForge: "git", BoxWriteEnabled: true},
+			want: map[string]bool{
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": true,
+				"OPEN_PR_CREATE_RW_GH": true,
+			},
+		},
+		{
+			name: "forgejo read-write without relay bit",
+			env:  Env{ForgeBackend: "FORGEJO", BoxWriteEnabled: true},
+			want: map[string]bool{
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": true,
+			},
+		},
+		{
+			name: "github read-only",
+			env:  Env{ForgeBackend: "GH", OutboxRelayCapable: true},
+			want: map[string]bool{
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": false,
+			},
+		},
+		{
+			name: "git read-only",
+			env:  Env{ForgeBackend: "GH", CodeForge: "git"},
+			want: map[string]bool{
+				"IF_BLOCKED_PR_RW_GH": false, "IF_BLOCKED_PR_RW_FORGEJO": false, "PR_FORGE_READ_WRITE": false, "NO_PR_FORGE_READ_WRITE": false,
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			got := Gates(tc.env)
+			for k, want := range tc.want {
+				if got[k] != want {
+					t.Errorf("Gates(%+v)[%q] = %v, want %v", tc.env, k, got[k], want)
+				}
+			}
+		})
+	}
+}
+
 // CHORE_PATCH_CLASSES is a presence-is-the-gate fact, same shape as
 // CI_FAILURE_SUMMARY (ADR 0057, issue #4073): the host only forwards it for a
 // butler Chore with the patch rung on and today's patch room left, so an

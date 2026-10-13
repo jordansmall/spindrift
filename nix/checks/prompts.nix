@@ -1825,7 +1825,7 @@ in
       '';
 
   # The IF BLOCKED draft-PR step forks on CODE_FORGE (issue #5099,
-  # OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO): the github fragment keeps
+  # IF_BLOCKED_PR_RW_GH/IF_BLOCKED_PR_RW_FORGEJO): the github fragment keeps
   # `gh pr view` and never invokes `fj pr`, and the forgejo fragment never
   # invokes `gh pr` and opens the draft with `fj pr create` and a positional `WIP: ` title. fj has no
   # `--title` flag (issue #5098), so the forgejo fragment must not use it.

@@ -198,6 +198,9 @@ it never learns. Settle's `blocked` outcome case now also relays that bundle
 `hostMediateDraftPR` does for `ready` — without this, a blocked-but-real
 bundle/PR-intent the Box left behind would be silently dropped the moment the
 container exits, rather than reaching the host at all.
+(Amended by issue #5233: a read-write Box on a Code Forge with no pull
+requests — `git`, `local` — also reports the branch name, and its `IF BLOCKED`
+PR step opens none.)
 
 ## Amendment (issue #1951): the Box-side gate fails closed
 

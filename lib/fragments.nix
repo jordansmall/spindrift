@@ -735,16 +735,23 @@ let
     # no PR-create-capable token on the failure path either, so it emits a
     # SPINDRIFT_PR_INTENT line instead of running `gh pr view`/`gh pr create`.
     # The read-write case forks on CODE_FORGE (issue #5099), as the OPEN A PULL
-    # REQUEST create step does: a forgejo Box has no `gh` for the PR check.
+    # REQUEST create step does: a forgejo Box has no `gh` for the PR check. A
+    # git Box has no PR at all (issue #5233), so it gets a no-PR step in the
+    # same slot.
     {
-      gate = "OPEN_PR_CREATE_RW_GH";
+      gate = "IF_BLOCKED_PR_RW_GH";
       fragment = "if-blocked-pr-git.md";
       var = "IF_BLOCKED_PR_READ_WRITE_STEP";
     }
     {
-      gate = "OPEN_PR_CREATE_RW_FORGEJO";
+      gate = "IF_BLOCKED_PR_RW_FORGEJO";
       fragment = "if-blocked-pr-forgejo.md";
       var = "IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP";
+    }
+    {
+      gate = "NO_PR_FORGE_READ_WRITE";
+      fragment = "if-blocked-pr-none.md";
+      var = "IF_BLOCKED_NO_PR_STEP";
     }
     # Same carrier fork (issue #3726) on the IF BLOCKED path's PR-intent send.
     {
@@ -761,11 +768,17 @@ let
     }
     # The IF BLOCKED section's closing SPINDRIFT_OUTCOME line (issue #1933): a
     # read-only Box never opens a PR on the blocked path either, so it never
-    # learns a URL and must report the branch name instead.
+    # learns a URL and must report the branch name instead. So does a
+    # read-write Box on a PR-less forge (issue #5233).
     {
-      gate = "BOX_ACCESS_READ_WRITE";
+      gate = "PR_FORGE_READ_WRITE";
       fragment = "if-blocked-outcome-landing-git.md";
       var = "IF_BLOCKED_OUTCOME_LANDING_READ_WRITE_STEP";
+    }
+    {
+      gate = "NO_PR_FORGE_READ_WRITE";
+      fragment = "if-blocked-outcome-landing-branch.md";
+      var = "IF_BLOCKED_OUTCOME_LANDING_BRANCH_STEP";
     }
     {
       gate = "BOX_ACCESS_READ_ONLY";

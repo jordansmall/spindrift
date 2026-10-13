@@ -48,6 +48,12 @@ func fragForgejoForge(e *Env) {
 	e.ForgeBackend = "FORGEJO"
 }
 
+// A git Code Forge has no PR and no outbox relay (issue #5233).
+func fragGitForge(e *Env) {
+	e.CodeForge = "git"
+	e.OutboxRelayCapable = false
+}
+
 func fragLocalTracker(e *Env) {
 	e.IssueTracker = "local"
 	e.TrackerAxisRead = "LOCAL"
@@ -346,6 +352,20 @@ func TestAssembleFragmentRendering(t *testing.T) {
 			section: [2]string{"# IF BLOCKED", ""},
 			want:    []string{"gh pr view --json url"},
 			wantNot: []string{"SPINDRIFT_PR_INTENT"},
+		},
+		{
+			name:    "if-blocked PR git forge opens no PR and keeps the step numbering",
+			mutate:  []func(*Env){fragGitForge},
+			section: [2]string{"# IF BLOCKED", ""},
+			want:    []string{"2. Open no pull request", "3. Leave the issue in-progress"},
+			wantNot: []string{"gh pr view", "--draft", "SPINDRIFT_PR_INTENT"},
+		},
+		{
+			name:    "if-blocked outcome line git forge reports the branch, no pr-url",
+			mutate:  []func(*Env){fragGitForge},
+			section: [2]string{"# IF BLOCKED", ""},
+			want:    []string{"landing=agent/issue-2349 status=blocked"},
+			wantNot: []string{"landing=<pr-url>"},
 		},
 		{
 			name:    "if-blocked PR read-only emits a nonce-guarded SPINDRIFT_PR_INTENT line",
