@@ -177,6 +177,9 @@ let
   # change left alone substitutes from main's cache anyway.
   docsCheckModules = [
     "adr-numbers"
+    # Reads no docs, but scans every nix/checks/*.nix, which a comment-only
+    # edit (issue #5158) can reach.
+    "bare-bang-guard"
     "changelog"
     "driver-map"
     "event-stream-parity"
@@ -231,6 +234,105 @@ let
       "docsCheckModules/docsGuardExemptModules names a module absent from nix/checks: ${concatStringsSep ", " stale}";
     pkgs.runCommand "checks-docs-covers-docs-readers" { } "touch $out";
 
+  # Coverage guard (issue #5158): a comment-only .go/.nix edit takes the docs
+  # lane, so each such file a module outside docsCheckModules names (other
+  # than to import it) must match .github/scripts/ci-comment-readers, and each
+  # named source tree must be reviewed into commentTreeReaders. Blind spots:
+  # as checks-docs-covers-docs-readers.
+  commentTreeReaders = {
+    "bats:.github/scripts" = "the classifier suite builds ci-go-tokens.go";
+    "baked-skills:cmd/launcher" = "spliced and built; its marker files are under promptassembly/";
+    "dashboard-js:dashboard" = "a fileset root over the JS tree only";
+    "default:." = "the coverage guards' path probes";
+    "default:cmd/launcher" = "launcherGoModules' vendor source";
+    "default:nix/checks" = "the coverage guards, both in checks-docs";
+    "doctor-report-routing:cmd/launcher" = "greps internal/doctor/*.go and launchgates.go";
+    "equivalence:." = "harness flake fixtures' outPath";
+    "equivalence:cmd/launcher" = "source-identity filesets";
+    "promptassembly:cmd/launcher/internal/promptassembly" = "greps its *.go";
+    "quickstart-golden:." = "a flake fixture's outPath";
+    "skills:." = "a harness flake fixture's outPath";
+    "skills:nix/checks" = "a path value the skills validator must accept";
+  };
+
+  ci-comment-readers-cover-checks =
+    let
+      inherit (pkgs.lib)
+        any
+        assertMsg
+        attrNames
+        concatMap
+        concatStringsSep
+        elem
+        elemAt
+        filter
+        hasPrefix
+        hasSuffix
+        isList
+        pathIsDirectory
+        removeSuffix
+        splitString
+        unique
+        ;
+      inherit (pkgs.lib.filesystem) listFilesRecursive;
+      globs = filter (l: l != "" && !(hasPrefix "#" l)) (
+        splitString "\n" (builtins.readFile ../../.github/scripts/ci-comment-readers)
+      );
+      covered =
+        p: any (g: builtins.match (builtins.replaceStrings [ "." "*" ] [ "\\." ".*" ] g) p != null) globs;
+      refRe = ''(^|[^./A-Za-z0-9_-])(import[[:space:]]+|callPackage[[:space:]]+|imports[[:space:]]*=[[:space:]]*\[[[:space:]]*)?(\.\./\.\./|\./)([A-Za-z0-9_.-][A-Za-z0-9_./-]*)'';
+      modules = filter (m: !(elem m docsCheckModules)) (
+        map (removeSuffix ".nix") (filter (hasSuffix ".nix") (attrNames (builtins.readDir ./.)))
+      );
+      relOf =
+        g:
+        let
+          base = if elemAt g 2 == "./" then "nix/checks" else ".";
+          p = removeSuffix "/" (elemAt g 3);
+        in
+        if p == "." then
+          base
+        else if base == "." then
+          p
+        else
+          "${base}/${p}";
+      reads =
+        m:
+        map
+          (g: {
+            inherit m;
+            rel = relOf g;
+          })
+          (
+            filter (g: isList g && elemAt g 1 == null) (
+              builtins.split refRe (builtins.readFile (./. + "/${m}.nix"))
+            )
+          );
+      allReads = unique (concatMap reads modules);
+      isSource = p: hasSuffix ".go" p || hasSuffix ".nix" p;
+      holdsSource =
+        rel:
+        let
+          path = ../../. + "/${rel}";
+        in
+        rel == "."
+        || (
+          builtins.pathExists path
+          && pathIsDirectory path
+          && any (f: isSource (toString f)) (listFilesRecursive path)
+        );
+      uncovered = filter (r: isSource r.rel && !(covered r.rel)) allReads;
+      unreviewedTrees = filter (
+        r: !(isSource r.rel) && holdsSource r.rel && !(commentTreeReaders ? "${r.m}:${r.rel}")
+      ) allReads;
+      show = rs: concatStringsSep ", " (map (r: "${r.m}:${r.rel}") rs);
+    in
+    assert assertMsg (uncovered == [ ])
+      "nix/checks module(s) outside docsCheckModules read a .go/.nix file that .github/scripts/ci-comment-readers does not match, so a comment edit to it would skip the check: ${show uncovered}";
+    assert assertMsg (unreviewedTrees == [ ])
+      "nix/checks module(s) outside docsCheckModules name a .go/.nix tree absent from commentTreeReaders in nix/checks/default.nix; list any file in it the module reads as text in .github/scripts/ci-comment-readers, then add the tree: ${show unreviewedTrees}";
+    pkgs.runCommand "ci-comment-readers-cover-checks" { } "touch $out";
+
   # Stale-name guard: every linuxOnlyCheckName must name a real source check,
   # or the darwin drop silently does nothing.
   linux-only-check-names-exist =
@@ -269,6 +371,7 @@ in
         checks-inbox-excludes-image-checks
         linux-only-check-names-exist
         checks-docs-covers-docs-readers
+        ci-comment-readers-cover-checks
         ;
     };
 
@@ -281,10 +384,15 @@ in
   '';
 
   # CI's docs-only lane (issue #5155): the checks whose modules read docs
-  # files, plus the guard that keeps that membership complete.
+  # files, plus the guards that keep that membership and the comment-only
+  # reader list (issue #5158) complete.
   checks-docs = pkgs.runCommand "checks-docs" { } ''
     ${pkgs.lib.concatMapStringsSep "\n" (p: ": ${p}") (
-      builtins.attrValues checksDocsSet ++ [ checks-docs-covers-docs-readers ]
+      builtins.attrValues checksDocsSet
+      ++ [
+        checks-docs-covers-docs-readers
+        ci-comment-readers-cover-checks
+      ]
     )}
     touch $out
   '';
