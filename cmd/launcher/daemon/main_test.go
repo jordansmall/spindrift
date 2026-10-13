@@ -4210,6 +4210,74 @@ func TestMainRun_RestartInPlaceExecFailureKeepsSupervising(t *testing.T) {
 	}
 }
 
+// shutdownStallWriter passes writes through to out, except that once both the
+// self_update built event and the child's first box report are written (the
+// last two before the commit, in either order) it latches stop, and every
+// shutdown event then stalls for hold, as a slow stdout consumer would. The
+// Emitter serializes writes, so the flags need no lock of their own.
+type shutdownStallWriter struct {
+	out             *lockedBuffer
+	stop            chan struct{}
+	hold            time.Duration
+	release         chan struct{}
+	built, reported bool
+	latched         bool
+}
+
+func (w *shutdownStallWriter) Write(p []byte) (int, error) {
+	ev, _ := mergedEvent(strings.TrimSpace(string(p)))
+	if ev.Event == "shutdown" && w.latched {
+		<-w.release
+	}
+	n, err := w.out.Write(p)
+	w.built = w.built || (ev.Event == "self_update" && ev.Phase == "built")
+	w.reported = w.reported || ev.Event == "box"
+	if w.built && w.reported && !w.latched {
+		w.latched = true
+		close(w.stop)
+		time.AfterFunc(w.hold, func() { close(w.release) })
+	}
+	return n, err
+}
+
+// A SIGTERM latched just before the exec must refuse it even while the
+// shutdown event is stuck in a stalled Emit, which holds the pool's own Stop
+// open: the pre-exec re-check has to read the raw latch (issue #5279).
+func TestMainRun_StopLatchedBeforeExecRefusesWhileShutdownEmitStalls(t *testing.T) {
+	f := newInPlaceFixtureT(t, inPlaceNewSelf)
+	setSignalSettle(t, 20*time.Millisecond)
+	stop := make(chan struct{})
+	f.stop = stop
+	out := &lockedBuffer{}
+	// hold is well past the settle, so an exec the stall failed to prevent has
+	// run by the time the shutdown event lands.
+	w := &shutdownStallWriter{out: out, stop: stop, hold: 500 * time.Millisecond, release: make(chan struct{})}
+
+	code := make(chan int, 1)
+	go func() { code <- mainRun([]string{"--input", f.input, "--restart-in-place", "dispatch"}, w, out) }()
+	if got := waitCode(t, code, out); got != 0 {
+		t.Fatalf("mainRun exited %d, want 0; output:\n%s", got, out.String())
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.execs) != 0 {
+		t.Errorf("exec calls = %d, want 0: the stop was latched before the exec; output:\n%s", len(f.execs), out.String())
+	}
+	evs := eventsIn(out)
+	if _, ok := findEvent(evs, "shutdown", ""); !ok {
+		t.Errorf("no shutdown event; output:\n%s", out.String())
+	}
+	builds := 0
+	for _, ev := range evs {
+		if ev.Event == "self_update" && ev.Phase == "built" {
+			builds++
+		}
+	}
+	if builds != 1 {
+		t.Errorf("built events = %d, want 1: the refused handoff was recommitted; output:\n%s", builds, out.String())
+	}
+}
+
 // TestMainRun_WithoutRestartInPlaceDrainsAndExits10 pins that the in-place
 // restart is strictly opt-in: the same self-change without the flag prebuilds
 // the successor, drains the pool and exits ExitSelfChanged, never exec'ing.

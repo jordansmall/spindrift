@@ -1120,7 +1120,7 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 	cancelRoot()
 
 	var code int
-	code, handedOff = superviseLoop(cfg, r, em, clk, lock, selfProgram)
+	code, handedOff = superviseLoop(cfg, stopSig, r, em, clk, lock, selfProgram)
 	return code
 }
 
@@ -1130,7 +1130,9 @@ func mainRun(argv []string, stdout, stderr io.Writer) int {
 // must leave the lock for the successor. A stop latched before the exec, or an
 // exec that fails, re-enters the pool with the same handoff document: the
 // first drains, the second keeps supervising under a blocked self-update.
-func superviseLoop(cfg daemon.Config, r *hostRunner, em *daemon.Emitter, clk daemon.Clock, lock *daemon.CheckoutLock, selfProgram string) (code int, handedOff bool) {
+// stopSig is the raw stop latch the pre-exec check reads: cfg.Stop closes only
+// after the shutdown event is emitted, which a stalled consumer can delay.
+func superviseLoop(cfg daemon.Config, stopSig <-chan struct{}, r *hostRunner, em *daemon.Emitter, clk daemon.Clock, lock *daemon.CheckoutLock, selfProgram string) (code int, handedOff bool) {
 	for {
 		// The context is never cancelled in production — cfg.Stop/cfg.Abort are
 		// what stop the pool now. A hard-cancel context.Background() here
@@ -1142,11 +1144,14 @@ func superviseLoop(cfg daemon.Config, r *hostRunner, em *daemon.Emitter, clk dae
 			return h.ExitCode(), false
 		}
 		cfg.Handoff = h.Handoff
-		err := r.execSuccessor(*h.Handoff, lock.File(), cfg.Stop, selfProgram)
+		err := r.execSuccessor(*h.Handoff, lock.File(), stopSig, selfProgram)
 		switch {
 		case err == nil:
 			return 0, true
 		case errors.Is(err, errStopBeforeExec):
+			// Re-entering at once is safe: Loop restarts outside SelfUpdateWaiting,
+			// so it cannot recommit before a fresh prebuild, and it drains once the
+			// latched stop reaches cfg.Stop.
 		default:
 			cfg.SelfUpdate = daemon.SelfUpdate{Phase: daemon.SelfUpdateBlocked, Revision: r.prebuiltRevision(), Reason: "exec: " + err.Error()}
 			em.Emit(cfg.SelfUpdate.Event())
