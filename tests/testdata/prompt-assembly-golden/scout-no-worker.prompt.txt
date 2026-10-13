@@ -265,15 +265,15 @@ below, seeded from a prior pass in this run.
 
 - **No handoff yet, or its `Last reviewer verdict:` line is not `APPROVE`
   (including a `BLOCK` line, with a `Reviewer findings:` block to fix):**
-  Stop your turn now, right after COMMIT. Do not run FILE ISSUES, LAND THE
-  CHANGE, OPEN A PULL REQUEST, or OUTCOME below — a fresh review pass runs
-  next automatically, and the orchestrator invokes you again afterward,
-  seeded with its verdict (and findings, if it blocked).
+  Stop your turn now, right after COMMIT. Do not run LAND THE CHANGE, OPEN A
+  PULL REQUEST, or OUTCOME below — a fresh review pass runs next
+  automatically, and the orchestrator invokes you again afterward, seeded
+  with its verdict (and findings, if it blocked).
 - **`Last reviewer verdict:` is `APPROVE`:** The review pass already
   reviewed this branch and found nothing blocking. Triage any findings the
   handoff's `Reviewer findings:` block lists under `## Non-blocking` exactly
-  as the loop below describes, then continue straight into FILE ISSUES,
-  LAND THE CHANGE, OPEN A PULL REQUEST, and OUTCOME.
+  as the loop below describes, then continue straight into LAND THE CHANGE,
+  OPEN A PULL REQUEST, and OUTCOME.
 
 When a check surfaces a failure you want to set aside as pre-existing
 rather than fix, prove it against a genuinely clean checkout of
@@ -421,7 +421,7 @@ ordering.
    the commit it logically belongs to exactly as the COMMIT section's own
    fold-into-logical-commits mechanism already describes.
 3. Run the repo's full check gate once, over the resulting tree.
-4. Finish the pass: FILE ISSUES, LAND THE CHANGE, OUTCOME.
+4. Finish the pass: LAND THE CHANGE, OUTCOME.
 
 Two kinds of edit surface across those steps, and step 2 covers only
 one of them. Folds are the reviewer's own listed non-blocking
@@ -437,13 +437,14 @@ in place, and stays proportional to the change it documents — a two-line
 reword earns no ten-line rationale header above it. A prose fold owes no
 declaration.
 
-The default for gate-discovered work is file, don't fix. When step 3's
+The default for gate-discovered work is report, don't fix. When step 3's
 failure is proven pre-existing on the base — the REVIEW section's own
-clean-checkout proof, not a guess — file it through the FILE ISSUES step
-and say so plainly in the outcome note, then leave the change out of the
-landing. A tree the reviewer approved is what lands; a pre-existing
-failure belongs to whichever branch introduced it, not to this one to
-absorb silently.
+clean-checkout proof, not a guess — name it plainly in the outcome note
+and, when the run opens one, the PR body, then leave the change out of the
+landing: no Filer is provisioned this run, so those are where a human finds
+it. A tree the reviewer approved is what lands; a pre-existing failure
+belongs to whichever branch introduced it, not to this one to absorb
+silently.
 
 Fixing gate-discovered work inline is sometimes unavoidable — the gate
 will not go green otherwise — but doing so owes a declaration, not a

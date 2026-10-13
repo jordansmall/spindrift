@@ -77,15 +77,53 @@ func TestLandPassOrderOrchestratorFragmentDistinguishesFoldsFromGateDiscovered(t
 	})
 }
 
+const (
+	landPassGateDefaultFilerFragment   = "fragments/land-pass-order-gate-default-filer.md"
+	landPassGateDefaultNoFilerFragment = "fragments/land-pass-order-gate-default-no-filer.md"
+	landPassFinishFilerFragment        = "fragments/land-pass-order-finish-filer.md"
+	landPassFinishNoFilerFragment      = "fragments/land-pass-order-finish-no-filer.md"
+)
+
 // Content-invariant guard for issue #3245. A gate failure proven pre-existing
 // on the base must default to filing it through FILE ISSUES and reporting it
 // in the outcome note, not fixing it inline and leaving no trace of the
-// decision. That is the gap issue #3221's land pass fell into.
+// decision. That is the gap issue #3221's land pass fell into. The default
+// lives in a Filer-gated twin (issue #5300), so it is read from there.
 func TestLandPassOrderOrchestratorFragmentFileDontFixDefault(t *testing.T) {
-	assertPromptClauses(t, landPassOrderFragment, []promptClause{
+	assertPromptClauses(t, landPassGateDefaultFilerFragment, []promptClause{
 		{name: "default rule", clause: "file, don't fix"},
 		{name: "pre-existing proof", clause: "pre-existing"},
 		{name: "filing step", clause: "FILE ISSUES"},
+		{name: "outcome note", clause: "outcome note"},
+	})
+}
+
+// Issue #5300. With no Filer there is no FILE ISSUES step to file through, so
+// the twin must keep the pre-existing proof and the leave-it-out rule but
+// route the report to the outcome note and PR body, and never name the step.
+func TestLandPassOrderOrchestratorFragmentNoFilerDefaultReportsInstead(t *testing.T) {
+	assertPromptClauses(t, landPassGateDefaultNoFilerFragment, []promptClause{
+		{name: "default rule", clause: "report, don't fix"},
+		{name: "pre-existing proof", clause: "pre-existing"},
+		{name: "outcome note", clause: "outcome note"},
+		{name: "PR body", clause: "PR body"},
+		{name: "leave out of landing", clause: "leave the change out of the landing"},
+	})
+	for _, f := range []string{landPassGateDefaultNoFilerFragment, landPassFinishNoFilerFragment} {
+		if strings.Contains(readPromptFile(t, repoRoot, f), "FILE ISSUES") {
+			t.Errorf("%s names FILE ISSUES, but renders only when no Filer is provisioned", f)
+		}
+	}
+}
+
+// Issue #5300. Step 4 names FILE ISSUES only when a Filer is provisioned, so
+// each finish twin carries its own step order.
+func TestLandPassOrderOrchestratorFragmentFinishStepOrder(t *testing.T) {
+	assertPromptClauses(t, landPassFinishFilerFragment, []promptClause{
+		{name: "filer step order", clause: "4. Finish the pass: FILE ISSUES, LAND THE CHANGE, OUTCOME."},
+	})
+	assertPromptClauses(t, landPassFinishNoFilerFragment, []promptClause{
+		{name: "no-filer step order", clause: "4. Finish the pass: LAND THE CHANGE, OUTCOME."},
 	})
 }
 
@@ -104,21 +142,28 @@ func TestLandPassOrderOrchestratorFragmentRequiresFixDeclaration(t *testing.T) {
 }
 
 // Pins the reading order for issue #3245. The fold-vs-gate-discovered
-// distinction must come before the file-don't-fix default, which must in turn
+// distinction must come before the gate-discovered default, which must in turn
 // precede the fix-declaration requirement, since each rule presupposes the one
 // before it.
 func TestLandPassOrderOrchestratorFragmentDistinctionPrecedesDefaults(t *testing.T) {
 	content := normalizeWhitespace(readPromptFile(t, repoRoot, landPassOrderFragment))
 
 	distinctionIdx := landPassOrderIndex(t, content, "Gate-discovered work")
-	fileDontFixIdx := landPassOrderIndex(t, content, "file, don't fix")
+	// The default itself lives in the Filer-gated twins; the parent splices
+	// them in at these placeholders, so both must sit between the rules.
+	gateDefaultIdxs := []int{
+		landPassOrderIndex(t, content, "${LAND_PASS_GATE_DEFAULT_FILER_STEP}"),
+		landPassOrderIndex(t, content, "${LAND_PASS_GATE_DEFAULT_NO_FILER_STEP}"),
+	}
 	declarationIdx := landPassOrderIndex(t, content, "/tmp/decisions.md")
 
-	if distinctionIdx > fileDontFixIdx {
-		t.Errorf("distinction (offset %d) must precede the file-don't-fix default (offset %d)", distinctionIdx, fileDontFixIdx)
-	}
-	if fileDontFixIdx > declarationIdx {
-		t.Errorf("file-don't-fix default (offset %d) must precede the fix-declaration requirement (offset %d)", fileDontFixIdx, declarationIdx)
+	for _, gateDefaultIdx := range gateDefaultIdxs {
+		if distinctionIdx > gateDefaultIdx {
+			t.Errorf("distinction (offset %d) must precede the gate-discovered default (offset %d)", distinctionIdx, gateDefaultIdx)
+		}
+		if gateDefaultIdx > declarationIdx {
+			t.Errorf("gate-discovered default (offset %d) must precede the fix-declaration requirement (offset %d)", gateDefaultIdx, declarationIdx)
+		}
 	}
 }
 
@@ -155,6 +200,30 @@ func TestLandPassOrderOrchestratorFragmentHasNoForbiddenMarkers(t *testing.T) {
 	for _, marker := range forbidden {
 		if strings.Contains(content, marker) {
 			t.Errorf("%s contains forbidden marker %q", landPassOrderFragment, marker)
+		}
+	}
+}
+
+// The Filer and no-Filer review-loop twins differ only in the FILE ISSUES
+// mentions (issue #5300); a rewording must land in both, and this fails when
+// one is edited alone.
+func TestReviewLoopOrchestratorTwinsDifferOnlyInFileIssues(t *testing.T) {
+	filer := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator-filer.md"))
+	noFiler := normalizeWhitespace(readPromptFile(t, repoRoot, "fragments/review-loop-orchestrator-no-filer.md"))
+
+	if got := strings.ReplaceAll(filer, "FILE ISSUES, ", ""); got != noFiler {
+		t.Errorf("review-loop twins diverge beyond FILE ISSUES mentions:\nfiler minus FILE ISSUES:\n%s\nno-filer:\n%s", got, noFiler)
+	}
+}
+
+// The gate-default twins differ in how a pre-existing failure is reported but
+// share the closing rule on what lands; reword it in both or neither.
+func TestLandPassGateDefaultTwinsShareClosingSentence(t *testing.T) {
+	const closing = "A tree the reviewer approved is what lands; a pre-existing failure belongs to whichever branch introduced it, not to this one to absorb silently."
+
+	for _, f := range []string{landPassGateDefaultFilerFragment, landPassGateDefaultNoFilerFragment} {
+		if !strings.Contains(normalizeWhitespace(readPromptFile(t, repoRoot, f)), closing) {
+			t.Errorf("%s missing the shared closing sentence %q", f, closing)
 		}
 	}
 }

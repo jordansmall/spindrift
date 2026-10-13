@@ -14,9 +14,7 @@ ordering.
    the commit it logically belongs to exactly as the COMMIT section's own
    fold-into-logical-commits mechanism already describes.
 3. Run the repo's full check gate once, over the resulting tree.
-4. Finish the pass: FILE ISSUES, LAND THE CHANGE, OUTCOME.
-
-Two kinds of edit surface across those steps, and step 2 covers only
+${LAND_PASS_FINISH_FILER_STEP}${LAND_PASS_FINISH_NO_FILER_STEP}Two kinds of edit surface across those steps, and step 2 covers only
 one of them. Folds are the reviewer's own listed non-blocking
 findings, plus the mechanical churn a rebase conflict or a
 formatter/linter run leaves behind. Gate-discovered work is anything
@@ -30,15 +28,7 @@ in place, and stays proportional to the change it documents — a two-line
 reword earns no ten-line rationale header above it. A prose fold owes no
 declaration.
 
-The default for gate-discovered work is file, don't fix. When step 3's
-failure is proven pre-existing on the base — the REVIEW section's own
-clean-checkout proof, not a guess — file it through the FILE ISSUES step
-and say so plainly in the outcome note, then leave the change out of the
-landing. A tree the reviewer approved is what lands; a pre-existing
-failure belongs to whichever branch introduced it, not to this one to
-absorb silently.
-
-Fixing gate-discovered work inline is sometimes unavoidable — the gate
+${LAND_PASS_GATE_DEFAULT_FILER_STEP}${LAND_PASS_GATE_DEFAULT_NO_FILER_STEP}Fixing gate-discovered work inline is sometimes unavoidable — the gate
 will not go green otherwise — but doing so owes a declaration, not a
 silent commit. Record it in both the outcome note and this pass's own
 `/tmp/decisions.md` — the decisions record the REVIEW section already

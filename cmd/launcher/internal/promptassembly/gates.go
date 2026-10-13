@@ -41,6 +41,7 @@ func Gates(e Env) map[string]bool {
 	// rendered output (issue #2533); SCOUT_PROVISIONED keys off roster
 	// membership instead — see lib/mkHarness.nix's scoutProvisioned comment.
 	g["FILER_ENABLED"] = e.FilerEnabled
+	g["FILER_ABSENT"] = !e.FilerEnabled
 	g["WORKER_PROVISIONED"] = e.WorkerProvisioned
 	g["SCOUT_PROVISIONED"] = e.ScoutProvisioned
 

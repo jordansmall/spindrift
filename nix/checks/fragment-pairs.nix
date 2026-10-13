@@ -132,11 +132,15 @@ in
             off = "CODE_REVIEW_UNBAKED";
           }
           {
+            on = "FILER_ENABLED";
+            off = "FILER_ABSENT";
+          }
+          {
             on = "SCOUT_PROVISIONED";
             off = "SCOUT_ABSENT";
           }
         ]
       )
-      "lib/fragments.nix must declare exactly the TDD_BAKED/TDD_UNBAKED, COMMIT_BAKED/COMMIT_UNBAKED, CODE_REVIEW_BAKED/CODE_REVIEW_UNBAKED, and SCOUT_PROVISIONED/SCOUT_ABSENT pairs";
+      "lib/fragments.nix must declare exactly the TDD_BAKED/TDD_UNBAKED, COMMIT_BAKED/COMMIT_UNBAKED, CODE_REVIEW_BAKED/CODE_REVIEW_UNBAKED, FILER_ENABLED/FILER_ABSENT, and SCOUT_PROVISIONED/SCOUT_ABSENT pairs";
     pkgs.runCommand "fragment-pairs-real-registry-declares-declared-pairs" { } "touch $out";
 }

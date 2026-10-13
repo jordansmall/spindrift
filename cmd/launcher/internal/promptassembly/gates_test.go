@@ -700,3 +700,17 @@ func TestGatesHostMediatedReadWrite(t *testing.T) {
 		})
 	}
 }
+
+// FILER_ABSENT is the exact complement of FILER_ENABLED (issue #5300). The
+// land pass and review loop name the FILE ISSUES step through twin
+// sub-fragments, so exactly one gate must be on or the prose names a step the
+// prompt has no section for, or drops the name where the section exists.
+func TestGatesFilerAbsent(t *testing.T) {
+	for _, filerEnabled := range []bool{false, true} {
+		env := Env{FilerEnabled: filerEnabled}
+		got := Gates(env)
+		if got["FILER_ABSENT"] != !filerEnabled {
+			t.Errorf("Gates(%+v)[\"FILER_ABSENT\"] = %v, want %v", env, got["FILER_ABSENT"], !filerEnabled)
+		}
+	}
+}
