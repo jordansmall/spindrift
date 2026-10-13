@@ -507,6 +507,10 @@ func parseFlags(args []string) ([]string, error) {
 	return remaining, nil
 }
 
+// claudeCredentialPair is the Claude Driver's either-or credential in fetch
+// order: OAuth first as the documented primary, API key as the fallback.
+var claudeCredentialPair = []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
+
 // globalSecretCmdTemplate is the --secret-cmd/SECRET_CMD fallback captured by
 // parseFlags and consumed by applySecretCmdFallback. A package var, not a
 // parseFlags return value, so the fallback can run later in main() without
@@ -527,13 +531,33 @@ func applySecretCmdFallback() error {
 		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env) {
 			continue
 		}
-		cmd := strings.ReplaceAll(globalSecretCmdTemplate, "{name}", toKebab(knob.env))
-		value, err := resolveSecretCmd(knob.env, cmd)
-		if err != nil {
-			return err
+		// The Claude pair is one unit: either satisfies validate(), so an
+		// OAuth-only vault must not abort on a missing ANTHROPIC_API_KEY item.
+		// The non-primary row always defers to the pair's first row.
+		envs := []string{knob.env}
+		if slices.Contains(claudeCredentialPair, knob.env) {
+			if knob.env != claudeCredentialPair[0] {
+				continue
+			}
+			envs = claudeCredentialPair
 		}
-		if err := os.Setenv(knob.env, value); err != nil {
-			return err
+		var errs []error
+		fetched := false
+		for _, env := range envs {
+			cmd := strings.ReplaceAll(globalSecretCmdTemplate, "{name}", toKebab(env))
+			value, err := resolveSecretCmd(env, cmd)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if err := os.Setenv(env, value); err != nil {
+				return err
+			}
+			fetched = true
+			break
+		}
+		if !fetched {
+			return errors.Join(errs...)
 		}
 	}
 	return nil
@@ -554,10 +578,14 @@ func secretRequiredThisRun(env string) bool {
 		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
 	case "JIRA_TOKEN", "FORGEJO_TOKEN":
 		return forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env
-	case "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY":
+	case claudeCredentialPair[0], claudeCredentialPair[1]:
 		// Either one satisfies validate(), so try the template only when
-		// neither already has a value.
-		return os.Getenv("CLAUDE_CODE_OAUTH_TOKEN") == "" && os.Getenv("ANTHROPIC_API_KEY") == ""
+		// neither already has a value, and only under the claude Driver: the
+		// pair means nothing to opencode. The driver warning is main's to emit.
+		if driver, _ := resolveDriver(); driver != "" && driver != "claude" {
+			return false
+		}
+		return !slices.ContainsFunc(claudeCredentialPair, func(e string) bool { return os.Getenv(e) != "" })
 	default:
 		// BOX_GH_TOKEN (ADR 0016) is opt-in with no requiredness signal of
 		// its own, so the template never sources it.
