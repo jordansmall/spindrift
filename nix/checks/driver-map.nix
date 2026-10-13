@@ -87,6 +87,18 @@ let
       }
       // args
     );
+  # The opencode Harness of the two-Driver config, shared by the outputs and
+  # baked checks.
+  ocArgs = {
+    driver = "opencode";
+    multiDriver = true;
+    defaults = {
+      model = "anthropic/claude-sonnet-5";
+      daemonApp = ".#opencode";
+      daemonSelfApp = ".#opencode-daemon";
+    };
+  };
+  oc = direct (ocArgs // { imageAttrName = "agent-image-opencode"; });
   # flake-parts `debug = true` exposes the per-system module eval, so a check
   # can read the hidden spindrift.driverDeprecations option a real eval emits.
   emittedDeprecations =
@@ -780,9 +792,9 @@ in
         ) == drvPaths (removeAttrs onePkgs [ "spindrift" ])
       )
       "the default Driver's packages, bar the spindrift wrapper, must not change when another Driver is declared";
-    assert assertMsg (
-      !isLinux || twoPkgs.agent-image-opencode.drvPath != twoPkgs.agent-image-claude.drvPath
-    ) "the two Drivers' images must differ";
+    assert assertMsg
+      (!isLinux || twoPkgs.agent-image-opencode.drvPath == oc.packages.agent-image-opencode.drvPath)
+      "agent-image-opencode must be a direct opencode mkHarness call's image, not merely differ from claude's";
     assert assertMsg (
       !isLinux
       || (
@@ -805,16 +817,6 @@ in
       };
       withTop = recursiveUpdate base { dispatch.daemonApp = ".#custom"; };
       bwrap = recursiveUpdate base { infra.runtime = "bwrap"; };
-      ocArgs = {
-        driver = "opencode";
-        multiDriver = true;
-        defaults = {
-          model = "anthropic/claude-sonnet-5";
-          daemonApp = ".#opencode";
-          daemonSelfApp = ".#opencode-daemon";
-        };
-      };
-      oc = direct (ocArgs // { imageAttrName = "agent-image-opencode"; });
       ocBwrap = direct (
         ocArgs
         // {
