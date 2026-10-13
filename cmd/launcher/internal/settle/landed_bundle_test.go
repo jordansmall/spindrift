@@ -202,7 +202,7 @@ func TestSelfHeal_LocalPushOnly_BundleRemovedOnlyWhenMerged(t *testing.T) {
 			fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
 			s := newTestSettle(c, fc, fc.AsLocal())
 
-			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"))
+			landing, _ := s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"), nil)
 
 			if landing != tc.want {
 				t.Fatalf("selfHeal = %v, want %v", landing, tc.want)

@@ -149,11 +149,11 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 			// local's; only the local Code Forge never reaches this branch (s.pr
 			// is nil for its push-only forge), not ISSUE_TRACKER=local paired
 			// with a read-only PR forge.
-			s.recordLanding(num, pr)
+			s.recordLanding(num, pr, result.Passes)
 		}
 		// A read-write Box opened its PR before printing ready.
 		s.latchBranchPR(num)
-		landing, reason := s.selfHeal(d, num, gen, pr)
+		landing, reason := s.selfHeal(d, num, gen, pr, result.Passes)
 		switch landing {
 		case landingMerged:
 			// verifyMerged reads PR state, which a push-only Code Forge does
@@ -543,7 +543,7 @@ func (s *Settle) postBlockedNoteComment(num, note string) {
 // LandingRecorder interface (ADR 0029). An empty landing is a no-op: a blank
 // write must never clear an already-recorded ref. Best-effort, matching
 // transitionState's log-but-don't-propagate contract.
-func (s *Settle) recordLanding(num, landing string) {
+func (s *Settle) recordLanding(num, landing string, passes []passmanifest.Entry) {
 	if s.landing == nil || landing == "" {
 		return
 	}

@@ -276,7 +276,7 @@ func TestSelfHeal_LocalForge_RelayRetriesTransientFailureThenMerges(t *testing.T
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	var landing landingResult
-	stdout := captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, branch) })
+	stdout := captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, branch, nil) })
 
 	if landing != landingMerged {
 		t.Fatalf("selfHeal = %v, want landingMerged", landing)
@@ -492,7 +492,7 @@ func TestSelfHeal_ConflictResolveRelayStoppedDuringBackoff_Abandons(t *testing.T
 
 	var landing landingResult
 	var reason string
-	captureStdout(t, func() { landing, reason = s.selfHeal(dispatch.NewFake(), "1", gen, testPR) })
+	captureStdout(t, func() { landing, reason = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil) })
 
 	if landing != landingAbandoned || reason != "" {
 		t.Errorf("selfHeal = (%v, %q), want (landingAbandoned, \"\")", landing, reason)
@@ -520,7 +520,7 @@ func TestSelfHeal_LocalForge_RelayStoppedDuringBackoff_AbandonsWithoutComplete(t
 	gen := s.term.Begin("1")
 
 	var landing landingResult
-	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", gen, fc.AgentBranch("1")) })
+	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", gen, fc.AgentBranch("1"), nil) })
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
@@ -547,7 +547,7 @@ func TestSelfHeal_LocalForge_RelayExhaustedParksFailed(t *testing.T) {
 	s := newTestSettle(c, fc, fc.AsLocal())
 
 	var landing landingResult
-	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1")) })
+	captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", 0, fc.AgentBranch("1"), nil) })
 
 	if landing != landingFailed {
 		t.Errorf("selfHeal = %v, want landingFailed", landing)
@@ -583,7 +583,7 @@ func TestSelfHeal_FixPassRelayStoppedDuringBackoff_AbandonsWithoutConfirmSleep(t
 	gen := s.term.Begin("1")
 
 	var landing landingResult
-	out := captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", gen, testPR) })
+	out := captureStdout(t, func() { landing, _ = s.selfHeal(dispatch.NewFake(), "1", gen, testPR, nil) })
 
 	if landing != landingAbandoned {
 		t.Errorf("selfHeal = %v, want landingAbandoned", landing)
