@@ -2974,14 +2974,15 @@ ready-for-agent ──dispatch──▶ agent-in-progress ───landing settl
   closes the issue whenever the PR merges.
   (Dependency ordering keys off the PR actually being merged, not this label —
   see [`Readiness.Ready`](../cmd/launcher/internal/waves/blocker.go).)
-  The conflict-resolve box runs under the repo's devShell when it has one and,
-  after `git rebase --continue`, runs the scoped in-Box check and fixes what it
-  surfaces (issue #5096). It publishes even if a check is still red — only an
-  unfinished rebase aborts — and narrates the agent's final message, naming
-  any still-red check, into the Box log as `==> conflict-resolve pass
-  summary:` (each line prefixed `  | `, so no summary line can forge a
-  host-scanned `SPINDRIFT_` line); the post-force-push fix pass owns
-  whatever repair remains.
+  The conflict-resolve box runs under the repo's devShell when the
+  still-conflicted tree evaluates one (the main run re-probes the resolved
+  tree, issue #5115) and, after `git rebase --continue`, runs the scoped
+  in-Box check and fixes what it surfaces (issue #5096). It publishes even
+  if a check is still red — only an unfinished rebase aborts — and narrates
+  the agent's final message, naming any still-red check, into the Box log as
+  `==> conflict-resolve pass summary:` (each line prefixed `  | `, so no
+  summary line can forge a host-scanned `SPINDRIFT_` line); the
+  post-force-push fix pass owns whatever repair remains.
 - **A relay that exhausts its retries parks the issue.** When a read-only Box
   prints `status=ready` but the Launcher's host-side bundle relay still fails
   (anything but a missing bundle) after `TRANSIENT_RETRY_MAX` retries, settle
