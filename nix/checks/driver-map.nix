@@ -290,6 +290,36 @@ in
         ]
       && builtins.length envPaths == 8
     ) "lib/driver-map.nix: paths must give each Driver-valued key's agents-relative segments";
+    # placeEntry keys on the entry's own flag, not on a path table.
+    assert assertMsg (
+      driverMap.placeEntry "claude" { driverValued = true; } [
+        "agents"
+        "models"
+        "default"
+      ] == [
+        "agents"
+        "drivers"
+        "claude"
+        "models"
+        "default"
+      ]
+      &&
+        driverMap.placeEntry "claude" { driverValued = false; } [
+          "agents"
+          "prompt"
+        ] == [
+          "agents"
+          "prompt"
+        ]
+      &&
+        driverMap.placeEntry "claude" { } [
+          "infra"
+          "runtime"
+        ] == [
+          "infra"
+          "runtime"
+        ]
+    ) "lib/driver-map.nix: placeEntry must place only driverValued entries under the Driver";
     pkgs.runCommand "driver-valued-marking" { } "touch $out";
 
   driver-map-resolve =

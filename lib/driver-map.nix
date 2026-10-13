@@ -122,7 +122,7 @@ let
 
   # A Driver-valued setting's full path segments (leading "agents"), placed
   # under one Driver's entry: agents.<rest> -> agents.drivers.<name>.<rest>.
-  # Generated examples and docs use it so they never hand-type the moved path.
+  # Callers holding a schema entry go through placeEntry instead.
   underDriver =
     name: segments:
     if builtins.head segments != "agents" then
@@ -134,6 +134,14 @@ let
         name
       ]
       ++ builtins.tail segments;
+
+  isDriverValued = entry: entry.driverValued or false;
+
+  # Places a path by its schema entry's driverValued mark: Driver-valued rows
+  # move under the Driver, every other row keeps its path.
+  placeEntry =
+    driverName: entry: segments:
+    if isDriverValued entry then underDriver driverName segments else segments;
 
   # Where a flat structural shim's replacement lives: a Driver-valued knob
   # goes straight to its Driver entry, not via the deprecated top-level path.
@@ -150,10 +158,8 @@ let
         "drivers"
         "<name>"
       ]
-    else if (paths.${flatName} or null) == builtins.tail segments then
-      underDriver "<name>" segments
     else
-      segments;
+      placeEntry "<name>" (structuralDoc.${flatName} or { }) segments;
 in
 {
   inherit
@@ -163,6 +169,8 @@ in
     exampleDriver
     deprecationNote
     underDriver
+    isDriverValued
+    placeEntry
     driverEntryPath
     ;
   # Where the module declares the map and its default-Driver name; read by
