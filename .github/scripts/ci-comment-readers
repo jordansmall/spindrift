@@ -1,0 +1,35 @@
+# Go and Nix files whose text a check outside CI's docs lane reads, comments
+# included (issue #5158). ci-changes.sh never lets a comment edit to one of
+# these take the docs lane. One bash glob per line; `*` crosses `/`. The
+# ci-comment-readers-cover-checks guard in nix/checks/default.nix fails when a
+# module outside docsCheckModules names a .go/.nix file not matched here.
+.github/scripts/ci-go-tokens.go
+cmd/launcher/doctor.go
+cmd/launcher/driver-exec/assembleprompt_cmd.go
+cmd/launcher/flags.go
+cmd/launcher/launchgates.go
+cmd/launcher/main.go
+cmd/launcher/main_test.go
+cmd/launcher/removedknobs.go
+cmd/launcher/internal/daemon/pool.go
+cmd/launcher/internal/dispatchkind/dispatchkind.go
+cmd/launcher/internal/doctor/*.go
+cmd/launcher/internal/forge/jira/jira.go
+cmd/launcher/internal/promptassembly/*.go
+cmd/launcher/quickstart/testdata/golden/*/flake.nix
+flake.nix
+lib/flakeModule.nix
+lib/image.nix
+lib/mkHarness.nix
+lib/structural-paths.nix
+nix/checks/equivalence.nix
+nix/dogfood-defaults.nix
+nix/fixtures.nix
+# dashboard-constant-parity builds these paths by concatenation, which the
+# guard cannot see.
+cmd/launcher/internal/daemon/events_file.go
+cmd/launcher/internal/daemon/halt.go
+cmd/launcher/internal/daemon/status.go
+cmd/launcher/internal/report/report.go
+dashboard/history.go
+dashboard/status.go
