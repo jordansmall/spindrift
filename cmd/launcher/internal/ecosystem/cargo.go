@@ -742,35 +742,47 @@ func RouteLocalURL(prefix string, port int) string {
 // before fetching a crate.
 var cargoDLMarkers = []string{"{crate}", "{version}", "{prefix}", "{lowerprefix}", "{sha256-checksum}"}
 
-// restoreCargoDLMarkers undoes what repointRegistryURL's EscapedPath does to a
-// dl template: it percent-encodes the braces in the path, which cargo would
-// then send verbatim instead of substituting. Only the path is touched (the
-// query is copied verbatim), and only markers the original path spells
-// literally are restored: a dl whose path spells no marker literally is left
-// alone. It also narrows edit.LearnedPath to just above the first marker's
-// segment, the subtree every substituted download lives under.
-func restoreCargoDLMarkers(original string, edit registryvocab.RewriteEdit) registryvocab.RewriteEdit {
-	origPath := pathPart(original)
-	toPath := pathPart(edit.To)
-	tail := edit.To[len(toPath):]
+// spliceCargoDLRawPath re-splices a dl template's path from the original's raw
+// bytes: url.Parse drops RawPath for a path with a literal brace, so
+// repointRegistryURL's re-encoding would escape the braces (cargo would then
+// send them unsubstituted) and normalise other escapes. Only a dl spelling a
+// marker literally is touched; query, fragment and bytes like a bare space are
+// copied verbatim, as cargo sends them upstream. LearnedPath narrows to just
+// above the first marker's segment.
+func spliceCargoDLRawPath(original string, edit registryvocab.RewriteEdit, rc registryvocab.RewriteContext) registryvocab.RewriteEdit {
+	rawPath := rawPathOf(pathPart(original))
 	cut := -1
 	for _, m := range cargoDLMarkers {
-		if !strings.Contains(origPath, m) {
-			continue
-		}
-		toPath = strings.ReplaceAll(toPath, "%7B"+m[1:len(m)-1]+"%7D", m)
-		if i := strings.Index(edit.LearnedPath, m); i >= 0 && (cut < 0 || i < cut) {
+		if i := strings.Index(rawPath, m); i >= 0 && (cut < 0 || i < cut) {
 			cut = i
 		}
 	}
-	edit.To = toPath + tail
-	if cut >= 0 {
-		edit.LearnedPath = strings.TrimRight(edit.LearnedPath[:strings.LastIndex(edit.LearnedPath[:cut], "/")], "/")
-		if edit.LearnedPath == "" {
-			edit.LearnedPath = "/"
+	if cut < 0 {
+		return edit
+	}
+
+	tail := original[len(pathPart(original)):]
+	edit.To = rc.Forwarder.Scheme + "://" + rc.Forwarder.Host + "/" + rc.Prefix + rawPath + tail
+
+	// url.Parse already validated every escape in rawPath, so an unescape
+	// error is unreachable; keep repointRegistryURL's learned path if it hits.
+	i := strings.LastIndex(rawPath[:cut], "/")
+	if learned, err := url.PathUnescape(strings.TrimRight(rawPath[:i], "/")); err == nil {
+		if learned == "" {
+			learned = "/"
 		}
+		edit.LearnedPath = learned
 	}
 	return edit
+}
+
+// rawPathOf strips the scheme and authority from an absolute URL's path part.
+func rawPathOf(u string) string {
+	_, rest, _ := strings.Cut(u, "://")
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return rest[i:]
+	}
+	return ""
 }
 
 // pathPart returns u up to its first "?" or "#".
@@ -814,7 +826,7 @@ func rewriteCargoDL(body []byte, rc registryvocab.RewriteContext) registryvocab.
 		}
 	}
 
-	edit = restoreCargoDLMarkers(dlStr, edit)
+	edit = spliceCargoDLRawPath(dlStr, edit, rc)
 	obj["dl"] = edit.To
 
 	newBody, err := json.Marshal(obj)
