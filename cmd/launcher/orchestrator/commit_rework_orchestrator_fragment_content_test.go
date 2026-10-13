@@ -20,11 +20,17 @@ func TestCommitReworkOrchestratorFragmentInstructsFolding(t *testing.T) {
 		"Last reviewer verdict:",
 		"git commit --amend",
 		"autosquash fixup",
-		"force-pushes",
+		"rewriting that history here is expected",
 		"small focused commits",
 	} {
 		if !strings.Contains(content, want) {
 			t.Errorf("commit-rework-orchestrator.md missing %q", want)
 		}
+	}
+
+	// Issue #5285: the fragment is ungated, and a host-mediated local Box
+	// relays a bundle rather than force-pushing.
+	if strings.Contains(content, "force-push") {
+		t.Error("commit-rework-orchestrator.md must stay forge-neutral: no force-push prose")
 	}
 }

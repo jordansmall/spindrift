@@ -788,7 +788,7 @@ rec {
         "git commit --amend"
         "fold"
         "fixup"
-        "force-pushes"
+        "rewriting that history here is expected"
       ];
     }
     {

@@ -192,9 +192,8 @@ verdict:` line the REVIEW section below reads.
   `agent/issue-7` is this run's own automated work on this issue — including
   any a prior, crashed run of this same automated attempt already
   committed — so all of them are fair game to amend or fixup
-  (`git log origin/main..agent/issue-7` lists them).
-
-  The branch force-pushes, so rewriting that history here is expected.
+  (`git log origin/main..agent/issue-7` lists them), and
+  rewriting that history here is expected.
 
 **Always rebase onto the latest base immediately before finishing** — never
 leave the branch on a stale base. This keeps the branch's tested tree current
@@ -540,8 +539,8 @@ or `gh pr merge`.
 
 # IF BLOCKED
 
-If you can't finish (review never clears, CI stays red after repeated fixes,
-push still fails after the one retry, or any other blocker):
+If you can't finish (review never clears, checks stay red after repeated fixes,
+or any other blocker):
 
 **There is no push to fail here.** The repo you cloned from is mounted
 read-only and the harness bundles your committed branch out after you exit, so

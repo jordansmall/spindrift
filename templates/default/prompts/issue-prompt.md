@@ -194,8 +194,8 @@ it is missing, the run is wasted.
 ${OUTCOME_READY_MEANS_READ_WRITE_STEP}${OUTCOME_READY_MEANS_READ_ONLY_STEP}
 # IF BLOCKED
 
-If you can't finish (review never clears, CI stays red after repeated fixes,
-push still fails after the one retry, or any other blocker):
+If you can't finish (review never clears, checks stay red after repeated fixes,
+or any other blocker):
 
 ${IF_BLOCKED_TRIAGE_READ_WRITE_STEP}${IF_BLOCKED_TRIAGE_LOCAL_STEP}${IF_BLOCKED_TRIAGE_READ_ONLY_STEP}Then:
 

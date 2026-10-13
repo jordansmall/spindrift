@@ -79,3 +79,23 @@ func TestIssuePromptCheckOutcomeScopedToOwningPass(t *testing.T) {
 		}
 	}
 }
+
+// Issue #5285: the IF BLOCKED intro is ungated, so it must not name a push
+// retry a CODE_FORGE=local read-write Box never performs. The push case lives
+// in the gated fragments/if-blocked-triage-git.md.
+func TestIssuePromptIfBlockedIntroIsPushNeutral(t *testing.T) {
+	repoRoot := filepath.Join("..", "..", "..")
+	normalized := normalizeWhitespace(readPromptFile(t, repoRoot, "issue-prompt.md"))
+
+	start := strings.Index(normalized, "# IF BLOCKED")
+	if start < 0 {
+		t.Fatal("issue-prompt.md has no # IF BLOCKED heading")
+	}
+	end := strings.Index(normalized[start:], "${IF_BLOCKED_")
+	if end < 0 {
+		t.Fatal("issue-prompt.md has no ${IF_BLOCKED_ placeholder after # IF BLOCKED")
+	}
+	if intro := normalized[start : start+end]; strings.Contains(strings.ToLower(intro), "push") {
+		t.Errorf("issue-prompt.md IF BLOCKED intro must not mention a push; got %q", intro)
+	}
+}
