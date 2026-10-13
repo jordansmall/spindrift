@@ -578,7 +578,7 @@ host-side, ADR 0038 + issue #1961): continue with OPEN A PULL REQUEST below.
 
 1. `git push --force-with-lease --force-if-includes -u origin agent/issue-7`
 
-2. `fj pr create --base main --head agent/issue-7 --body "<summary>" "WIP: <conventional title>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green; any merge after that follows the launcher's configured `MERGE_MODE` (it watches CI host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.
+2. `fj pr create --base main --head agent/issue-7 --body "<summary>" "WIP: <conventional title>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green (it watches CI host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.
 
 3. Body MUST contain `Closes #7`. Summarize what changed and
    flag anything a reviewer should know.
@@ -631,9 +631,8 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-`status=ready` = branch pushed, PR open, left in draft. The launcher flips it
-to ready once CI reaches green; any merge after that follows the launcher's
-configured `MERGE_MODE`.
+`status=ready` = branch pushed, PR open, left in draft; the launcher takes it
+from there as OPEN A PULL REQUEST above describes.
 Do NOT run `gh pr ready`, `gh issue edit ... --add-label agent-complete`,
 or `gh pr merge`.
 

@@ -639,11 +639,11 @@ it is missing, the run is wasted.
 
 `status=ready` = your branch is written to the outbox and your PR-intent
 line above is ready to open — not that a PR already exists. The launcher
-relays your branch, opens the draft PR from your PR-intent line, and flips
-it to ready once CI reaches green; any merge after that follows the
-launcher's configured `MERGE_MODE`. You never run `gh pr create`,
-`gh pr ready`, `gh issue edit ... --add-label agent-complete`, or
-`gh pr merge` — your token cannot.
+relays your branch, opens the draft PR from your PR-intent line, then takes
+it from there as OPEN A PULL REQUEST above describes. You never run
+`gh pr create`, `gh pr ready`,
+`gh issue edit ... --add-label agent-complete`, or `gh pr merge` — your
+token cannot.
 
 
 # IF BLOCKED
