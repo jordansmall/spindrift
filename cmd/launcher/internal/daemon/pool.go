@@ -702,6 +702,7 @@ func (p *pool) occupyInherited() {
 				kind: hs.Kind, revision: hs.Revision, issues: slices.Clone(hs.Issues), key: hs.Key,
 				pass: hs.Pass, model: hs.Model, modelRole: hs.ModelRole, childStart: pin,
 				continues: s.continues[hs.Kind], gateGen: hs.GateGen,
+				ciWait: ciWait{pr: hs.CIWaitPRURL, runURL: hs.CIWaitRunURL},
 				// Its predecessor required the first report before handing off.
 				// imageBuildSince is not carried: image_build is sent in
 				// bootstrap, before any record that permits a handoff.
