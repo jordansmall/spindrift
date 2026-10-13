@@ -12,7 +12,8 @@ import (
 // relayCapabilityViolations builds each CODE_FORGE-valid row's read-only forge
 // the way production does (newCodeForge, so local, which has no
 // newReadOnlyCodeForge, is covered too) and reports every disagreement between
-// the row's RelayCapable bit and the interfaces that forge implements.
+// the row's RelayCapable and OutboxRelayCapable bits and the interfaces that
+// forge implements.
 func relayCapabilityViolations() []string {
 	var out []string
 	for _, row := range backendRows {
@@ -37,14 +38,21 @@ func relayCapabilityViolations() []string {
 		if (draft || subjects) && !row.RelayCapable {
 			out = append(out, fmt.Sprintf("%s: read-only forge %T implements a PR capability but RelayCapable=false", row.Name, cf))
 		}
+		// The IF BLOCKED PR gates read OutboxRelayCapable as "this forge has pull
+		// requests", so it must track DraftPRCreator, not RelayCapable (local is
+		// RelayCapable without PRs).
+		if draft != row.OutboxRelayCapable {
+			out = append(out, fmt.Sprintf("%s: OutboxRelayCapable=%v but read-only forge %T implements DraftPRCreator=%v", row.Name, row.OutboxRelayCapable, cf, draft))
+		}
 	}
 	return out
 }
 
 // TestRelayCapableMatchesReadOnlyForgeInterfaces checks the registry's
-// RelayCapable bit against what each row's live read-only forge implements:
-// BundleRelay iff RelayCapable, DraftPRCreator iff BundleCommitSubjects, and
-// no PR capability without RelayCapable.
+// RelayCapable and OutboxRelayCapable bits against what each row's live
+// read-only forge implements: BundleRelay iff RelayCapable, DraftPRCreator iff
+// BundleCommitSubjects, no PR capability without RelayCapable, and
+// OutboxRelayCapable iff DraftPRCreator.
 // Read-only is the only scope that holds: since issue #4071 the read-write
 // github and forgejo adapters implement DraftPRCreator without a bundle relay,
 // so probing them would flag both rows. A nix-only row with no Go row is
@@ -52,7 +60,7 @@ func relayCapabilityViolations() []string {
 // backend-registry-gen.
 func TestRelayCapableMatchesReadOnlyForgeInterfaces(t *testing.T) {
 	if v := relayCapabilityViolations(); len(v) > 0 {
-		t.Errorf("RelayCapable disagrees with the read-only forge's interfaces:\n%s", strings.Join(v, "\n"))
+		t.Errorf("RelayCapable or OutboxRelayCapable disagrees with the read-only forge's interfaces:\n%s", strings.Join(v, "\n"))
 	}
 }
 
@@ -86,20 +94,31 @@ func (prPairForge) CommitSubjects(outboxDir, base, ref string) ([]string, error)
 	return nil, nil
 }
 
+// relayPRPairForge is a full read-only PR forge: BundleRelay plus both PR
+// capabilities.
+type relayPRPairForge struct{ relayDraftForge }
+
+func (relayPRPairForge) CommitSubjects(outboxDir, base, ref string) ([]string, error) {
+	return nil, nil
+}
+
 // TestRelayCapabilityViolations_ReportsLyingRows swaps one lying row per rule
 // into backendRows, each fixture tripping only the rule it names, so a check
 // loosened to one direction or dropped outright fails here.
 func TestRelayCapabilityViolations_ReportsLyingRows(t *testing.T) {
 	tests := []struct {
-		name         string
-		relayCapable bool
-		newForge     func() forge.CodeForge
-		want         string
+		name               string
+		relayCapable       bool
+		outboxRelayCapable bool
+		newForge           func() forge.CodeForge
+		want               string
 	}{
-		{"relay bit without BundleRelay", true, func() forge.CodeForge { return bareForge{forge.NewFake()} }, "RelayCapable=true but"},
-		{"BundleRelay without relay bit", false, func() forge.CodeForge { return relayOnlyForge{forge.NewFake()} }, "RelayCapable=false but"},
-		{"PR pair split", true, func() forge.CodeForge { return relayDraftForge{relayOnlyForge{forge.NewFake()}} }, "must move together"},
-		{"PR capability without relay bit", false, func() forge.CodeForge { return prPairForge{draftOnlyForge{forge.NewFake()}} }, "implements a PR capability but RelayCapable=false"},
+		{name: "relay bit without BundleRelay", relayCapable: true, newForge: func() forge.CodeForge { return bareForge{forge.NewFake()} }, want: "RelayCapable=true but"},
+		{name: "BundleRelay without relay bit", newForge: func() forge.CodeForge { return relayOnlyForge{forge.NewFake()} }, want: "RelayCapable=false but"},
+		{name: "PR pair split", relayCapable: true, outboxRelayCapable: true, newForge: func() forge.CodeForge { return relayDraftForge{relayOnlyForge{forge.NewFake()}} }, want: "must move together"},
+		{name: "PR capability without relay bit", outboxRelayCapable: true, newForge: func() forge.CodeForge { return prPairForge{draftOnlyForge{forge.NewFake()}} }, want: "implements a PR capability but RelayCapable=false"},
+		{name: "outbox bit without pull requests", outboxRelayCapable: true, newForge: func() forge.CodeForge { return bareForge{forge.NewFake()} }, want: "OutboxRelayCapable=true but"},
+		{name: "pull requests without outbox bit", relayCapable: true, newForge: func() forge.CodeForge { return relayPRPairForge{relayDraftForge{relayOnlyForge{forge.NewFake()}}} }, want: "OutboxRelayCapable=false but"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -107,6 +126,7 @@ func TestRelayCapabilityViolations_ReportsLyingRows(t *testing.T) {
 			defer func() { backendRows = original }()
 			row := fakeGitlabRow()
 			row.RelayCapable = tc.relayCapable
+			row.OutboxRelayCapable = tc.outboxRelayCapable
 			row.newCodeForge = func(config, local.SanitizedParent, forge.IssueTracker) forge.CodeForge { return tc.newForge() }
 			backendRows = []backendRow{row}
 
