@@ -31,6 +31,11 @@ type Descriptor struct {
 	// the outbox mount/relay treatment under read-only (issue #1918).
 	// Consumers read this field rather than asserting a backend name (#2947),
 	// which is what let #2927 close forgejo's asymmetry with a one-field flip.
+	// The bit also means "this forge has pull requests": the promptassembly IF
+	// BLOCKED PR gates read it that way, read-write Boxes included (issue
+	// #5276). TestRelayCapableMatchesReadOnlyForgeInterfaces (cmd/launcher)
+	// fails when it diverges from the read-only forge implementing
+	// DraftPRCreator.
 	OutboxRelayCapable bool
 
 	// InBoxOpenPRQueryable is true only for a CODE_FORGE whose open PRs the Box
@@ -68,7 +73,8 @@ type Descriptor struct {
 	// seam needed under BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay
 	// always, plus draft-PR-create and commit-subjects when the backend has a
 	// PR concept. True for github, forgejo, local; false for git. Wider than
-	// OutboxRelayCapable (#1918/#2267/#2927), which is the outbox mount alone.
+	// OutboxRelayCapable (#1918/#2267/#2927), which is the outbox mount plus
+	// "this forge has pull requests" (#5276).
 	// cmd/launcher's TestRelayCapableMatchesReadOnlyForgeInterfaces checks the
 	// bit against the interfaces each row's read-only forge implements
 	// (issue #2628).

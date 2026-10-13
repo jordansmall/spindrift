@@ -45,8 +45,10 @@
 # see the adapters, so cmd/launcher's
 # TestRelayCapableMatchesReadOnlyForgeInterfaces checks each row's bit against
 # the interfaces its read-only forge implements (issue #2628).
-# outboxRelayCapable is narrower: it covers only the outbox mount and relay
-# treatment (issues #1918, #2267, #2927).
+# outboxRelayCapable is narrower: it covers the outbox mount and relay
+# treatment (issues #1918, #2267, #2927), and also stands for "this forge has
+# pull requests" in the prompt's IF BLOCKED PR gates, read-write Boxes included
+# (issue #5276). The same Go test enforces it against DraftPRCreator.
 
 # inBoxOpenPRQueryable marks a CODE_FORGE whose open PRs the Box can query
 # itself (in-box client plus token), which branch recovery needs before
