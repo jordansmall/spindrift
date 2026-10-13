@@ -545,12 +545,6 @@ This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
-This run's control nonce is `test-run-nonce-0001`. A read-only run's PR-intent line
-must carry it and is checked against it (issue #1938), letting the host tell
-a line this run genuinely wrote from one an untrusted issue/comment author
-echoed into the log — leaving `nonce=` off, or getting the value wrong,
-silently drops it (issue #1939).
-
 `status=ready` = branch pushed, PR open, left in draft. The launcher flips it
 to ready once CI reaches green, immediately before it merges.
 Do NOT run `gh pr ready`, `gh issue edit ... --add-label agent-complete`,

@@ -199,8 +199,10 @@ Run every check or build gate in the foreground and block on it yourself —
 never background it (`&`, detached job, background task) and end your turn
 while it is still pending: the turn ends before the gate finishes, so no
 `SPINDRIFT_OUTCOME` line is ever printed and the run is lost even when the
-work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
-(`status=ready` or `status=blocked`) has been printed.
+work was green. Do not stop a pass that reaches OUTCOME, IF BLOCKED, or an
+earlier gate's terminal stop until its `SPINDRIFT_OUTCOME` line has been
+printed; a pass told to stop right after COMMIT prints none unless it hit
+IF BLOCKED.
 
 Before running the first gate, invoke the `/check-hygiene` skill.
 
@@ -571,6 +573,12 @@ the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
    SPINDRIFT_PR_INTENT test-run-nonce-0001 <base64-encoded title, a blank line,
    then the body>
 
+   The first field after `SPINDRIFT_PR_INTENT` must be exactly this run's
+   nonce, `test-run-nonce-0001` (issue #1938): it lets the host tell a line this run
+   genuinely wrote from one an untrusted issue or comment author echoed into
+   the log, so a line with the nonce missing or wrong is silently dropped
+   (issue #1939).
+
    Build the payload by joining the PR title, a blank line, and the PR body,
    then base64-encoding the result into one unbroken token with no embedded
    newlines or spaces (e.g. `printf '%s\n\n%s' "<conventional title>"
@@ -633,12 +641,6 @@ whole line worth copying:
 This must be the literal final message — nothing after it, no prose summary,
 no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
-
-This run's control nonce is `test-run-nonce-0001`. A read-only run's PR-intent line
-must carry it and is checked against it (issue #1938), letting the host tell
-a line this run genuinely wrote from one an untrusted issue/comment author
-echoed into the log — leaving `nonce=` off, or getting the value wrong,
-silently drops it (issue #1939).
 
 `status=ready` = your branch is written to the outbox and your PR-intent
 line above is ready to open — not that a PR already exists. The launcher
