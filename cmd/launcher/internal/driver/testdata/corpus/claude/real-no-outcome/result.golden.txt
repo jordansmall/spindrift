@@ -1,0 +1,8 @@
+The rebase of `agent/issue-5263` onto `main` is finished, and the `nix build .#checks-inbox -L` gate passed.
+
+Two files had conflicts in the first commit. Both needed changes from each side kept:
+
+- **`templates/default/prompts/issue-prompt.md`**: The IF BLOCKED step list now has `main`'s new `${IF_BLOCKED_PUSH_LOCAL_STEP}` and this branch's new `${ISSUE_BLOCKED_COMMENT_UNWRITABLE_STEP}`.
+- **`cmd/launcher/internal/promptassembly/registry_test.go`**: I set `wantRows` to 109. Before either change it was 105; `main` added three fragment rows and this branch added one. The 109 rows in `testdata/registry.json` confirm the count.
+
+The other two commits applied cleanly. No conflict markers are left, and nothing has been pushed.

@@ -1,0 +1,61 @@
+{
+  "EarliestEventMs": 1791562656837,
+  "Found": true,
+  "HasEventSpan": true,
+  "LatestEventMs": 1791563519204,
+  "OutputIsMainLoopOnly": true,
+  "SummedByAgent": [
+    {
+      "APICalls": 37,
+      "Agent": "main",
+      "CacheCreationInputTokens": 166943,
+      "CacheReadInputTokens": 1315002,
+      "OutputTokens": 16556,
+      "UncachedInputTokens": 74
+    },
+    {
+      "APICalls": 13,
+      "Agent": "review-axis",
+      "CacheCreationInputTokens": 49856,
+      "CacheReadInputTokens": 120352,
+      "OutputTokens": 0,
+      "UncachedInputTokens": 26
+    },
+    {
+      "APICalls": 1,
+      "Agent": "worker",
+      "CacheCreationInputTokens": 12773,
+      "CacheReadInputTokens": 0,
+      "OutputTokens": 0,
+      "UncachedInputTokens": 2
+    }
+  ],
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 1435354,
+      "CacheWrite1hTokens": 166943,
+      "CacheWrite5mTokens": 49856,
+      "Model": "claude-opus-5-5",
+      "OutputTokens": 1645,
+      "UncachedInputTokens": 100
+    },
+    {
+      "CacheReadInputTokens": 0,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 12773,
+      "Model": "claude-sonnet-5-5",
+      "OutputTokens": 16,
+      "UncachedInputTokens": 2
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 166943,
+    "cache_read_input_tokens": 1315002,
+    "duration_api_ms": 244536,
+    "duration_ms": 862367,
+    "input_tokens": 74,
+    "num_turns": 46,
+    "output_tokens": 16556,
+    "total_cost_usd": 2.4543703
+  }
+}

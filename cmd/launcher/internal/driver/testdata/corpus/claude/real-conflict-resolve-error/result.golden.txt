@@ -1,0 +1,7 @@
+The rebase is finished. `agent/issue-5009` now sits on `074e916e` with your two commits on top, and nothing was pushed.
+
+There was one conflict, in `docs/adr/0053-child-run-records-cross-the-seam-over-a-private-report-pipe.md`. Both sides had added an "Amended by" note saying a child's output now goes straight to its Child log. Main's note links ADR 0063, and your branch's note cites issue #5009 and says the report pipe is unchanged. I merged them into one note that keeps both.
+
+**A mistake I fixed:** my first attempt at the edit failed because `python3` isn't installed here, and I didn't notice before continuing the rebase. So the conflict markers went into the commit. I then fixed the file and amended that commit (now `57ca2f64`). A search of the committed files finds no conflict markers left.
+
+Your local branch and `origin/agent/issue-5009` now show as diverged. That's expected after a rebase, so the push will need to be a force push.

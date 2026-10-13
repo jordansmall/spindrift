@@ -1,0 +1,32 @@
+[implementor] Skill()
+[implementor]   -> [REDACTED:tool-output]
+[implementor] Bash(git log --oneline -3 && git log --oneline --all | grep -iE "golden|0f01175f" | head -20; git log -1 --format=%H 0f01175f 2>&1 | head -2; ls tests/testdata/prompt-assembly-golden/ | grep -E "forgejo-readonly-orchestrator-filer-on|local-tracker-orchestrator-filer-on")
+[implementor]   -> [REDACTED:tool-output]
+[implementor] Skill()
+[implementor]   -> [REDACTED:tool-output]
+[implementor] Bash(git show --stat 578a370d | head -30; git show --stat 57643e01 | head -30; git merge-base --is-ancestor 28891c1f HEAD 2>&1 && echo anc; git log --oneline 28891c1f..HEAD 2>&1 | head; grep -c "Do not stop a pass that reaches OUTCOME" tests/testdata/prompt-assembly-golden/{forgejo-readonly,local-tracker}-orchestrator-filer-on.prompt.txt; grep -l "Do not stop this run until a terminal" tests/testdata/prompt-assembly-golden/* | head)
+[implementor]   -> [REDACTED:tool-output]
+[implementor] Fix looks landed already (57643e01, Refs #5141). Confirming with the seam test.
+[implementor] Bash(git merge-base --is-ancestor 578a370d HEAD && echo 578-anc; git log --oneline 28891c1f..HEAD | wc -l; timeout 1500 nix build .#checks.x86_64-linux.launcher-go-seam-test -L >"$TMPDIR/seam.log" 2>&1; echo "exit=$?"; grep -nE -- '--- FAIL|^FAIL|error:' "$TMPDIR/seam.log" | head; tail -n 5 "$TMPDIR/seam.log")
+[implementor] Bash(gh issue view 5141 --repo jordansmall/spindrift --json number,title,state,closedAt --jq '.' 2>&1 | head; gh search issues --repo jordansmall/spindrift "regenerate goldens filer-on" --json number,title,state 2>&1 | head -20)
+[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> [REDACTED:tool-output]
+[implementor] Bash(gh search issues --repo jordansmall/spindrift "TestPromptAssemblyGoldens" --json number,title,state 2>&1 | head -20; gh search prs --repo jordansmall/spindrift "pass-scoped CHECK stop rule" --json number,title,state 2>&1 | head)
+[implementor]   -> [REDACTED:tool-output]
+[implementor] Already fixed on main by 57643e01. Seam test green at HEAD 201f2944. Posting reject.
+[implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
+<!-- spindrift-research -->
+## Verdict: `reject`
+
+Already resolved on the default branch. Commit 57643e01 ("test(goldens): pick up the pass-scoped CHECK stop rule") landed on `main` after 28891c1f, the commit this issue was reproduced on, and regenerated exactly the two goldens named here with `nix run .#regen-goldens`. The seam test is green on current `main`, so there is no remaining work.
+
+## Context for a worker
+
+- **The fix on main:** 57643e01 touches only `tests/testdata/prompt-assembly-golden/forgejo-readonly-orchestrator-filer-on.prompt.txt` and `tests/testdata/prompt-assembly-golden/local-tracker-orchestrator-filer-on.prompt.txt` (+4/−2 each), so no unrelated golden drift came along with it. Its commit message gives the same root cause this issue does: the two filer-on goldens were rendered before 0f01175f rescoped CHECK's outcome rule, and the two changes landed on `main` independently.
+- **Verified state:** On `main` at 201f2944, both goldens carry the new wording ("Do not stop a pass that reaches OUTCOME, IF BLOCKED, or an …"). No golden under `tests/testdata/prompt-assembly-golden/` still contains the old "Do not stop this run until a terminal" sentence.
+- **Repro of the fix:** `nix build .#checks.x86_64-linux.launcher-go-seam-test -L` exits 0 on 201f2944, and `spindrift.dev/launcher/internal/promptassembly` passes.
+- **Side note:** The equivalent commit 578a370d ("test(promptassembly): regenerate the orchestrator filer-on goldens") exists on a branch but is not on `main`. If that branch is still open, it will now conflict trivially with 57643e01, or end up as a no-op, on rebase.
+- This issue can be closed as completed (already resolved). If its branch was cut before 57643e01, rebasing `agent/issue-5130` onto current `main` clears the inherited red gate.
+SPINDRIFT_SIGNAL_EOF)
+[implementor]   -> [REDACTED:tool-output]
+[implementor] SPINDRIFT_OUTCOME issue=5246 landing=none status=reject note=already resolved on main by 57643e01, which regenerated both filer-on goldens; seam test green at 201f2944

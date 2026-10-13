@@ -1,0 +1,1 @@
+SPINDRIFT_OUTCOME issue=4994 landing=none status=recommend note=Still accurate on main: docs/reference.md:4628-4630 and 4641-4642 name a cached TCP verdict reaching the backstop, but registryprobecache.go:86-90 refuses that replay (#3775); docs-only fix, line numbers refreshed
