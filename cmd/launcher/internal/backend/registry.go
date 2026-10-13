@@ -60,7 +60,8 @@ type Descriptor struct {
 	// no in-box write path into ("jira"); "local" is covered by
 	// InBoxUnreachableTracker and its empty write axis instead. The jira row
 	// still carries TrackerAxisWrite="GITHUB" for its other arms; this bit
-	// overrides that only for the research verdict, which always relays (#5245).
+	// overrides that for the research verdict (#5245) and the work IF BLOCKED
+	// comment (#5263), which both relay through the host.
 	InBoxUnwritableTracker bool
 
 	// RelayCapable is true for a CODE_FORGE backend with every host-mediation

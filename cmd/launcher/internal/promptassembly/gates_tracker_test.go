@@ -613,7 +613,7 @@ func TestGatesResearchVerdictRelayed(t *testing.T) {
 
 // TestGatesJiraResearchAlwaysRelays pins that a jira research dispatch uses the
 // relayed verdict form with the Filer off or on (issue #5245), while jira stays
-// on the GITHUB read/write axis, and a jira work dispatch is untouched.
+// on the GITHUB read/write axis, and a jira work dispatch is not relayed.
 func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -641,8 +641,8 @@ func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
 			if g["ISSUE_TRACKER_GITHUB_READONLY"] != tc.wantReadOnly {
 				t.Errorf("ISSUE_TRACKER_GITHUB_READONLY = %v, want %v", g["ISSUE_TRACKER_GITHUB_READONLY"], tc.wantReadOnly)
 			}
-			if g["ISSUE_TRACKER_GITHUB_READWRITE"] == tc.wantReadOnly {
-				t.Errorf("ISSUE_TRACKER_GITHUB_READWRITE = %v, want %v", g["ISSUE_TRACKER_GITHUB_READWRITE"], !tc.wantReadOnly)
+			if g["ISSUE_TRACKER_GITHUB_READWRITE"] {
+				t.Error("ISSUE_TRACKER_GITHUB_READWRITE = true, want false (no in-box jira write path)")
 			}
 			if g["RESEARCH_VERDICT_RELAYED"] != tc.wantRelayed {
 				t.Errorf("RESEARCH_VERDICT_RELAYED = %v, want %v", g["RESEARCH_VERDICT_RELAYED"], tc.wantRelayed)
@@ -652,8 +652,8 @@ func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
 }
 
 // TestAssembleJiraResearchRendersRelayedVerdict pins the rendered prompt: a jira
-// research run has no `gh issue comment` guidance, Filer off or on, while a jira
-// work run keeps its existing gh arm (issue #5245).
+// research run has no `gh issue comment` guidance, Filer off or on (issue
+// #5245).
 func TestAssembleJiraResearchRendersRelayedVerdict(t *testing.T) {
 	reg := loadTestRegistry(t)
 	for _, selfContained := range []bool{false, true} {
@@ -676,15 +676,71 @@ func TestAssembleJiraResearchRendersRelayedVerdict(t *testing.T) {
 			}
 		}
 	}
+}
 
+// TestAssembleJiraWorkHasNoGhIssueComment pins the rendered jira work prompt
+// (issue #5263): the IF BLOCKED step relays through the host, never
+// `gh issue comment`.
+func TestAssembleJiraWorkHasNoGhIssueComment(t *testing.T) {
+	reg := loadTestRegistry(t)
 	env := coveredEnv()
 	env.IssueTracker = "jira"
 	result, err := Assemble(env, reg)
 	if err != nil {
 		t.Fatalf("work: Assemble: %v", err)
 	}
-	if !strings.Contains(result.Prompt, "gh issue comment") {
-		t.Errorf("jira work prompt lost its gh issue comment arm:\n%s", result.Prompt)
+	if strings.Contains(result.Prompt, "gh issue comment") {
+		t.Errorf("jira work prompt contains `gh issue comment`:\n%s", result.Prompt)
+	}
+}
+
+// TestGatesUnwritableReadWrite pins ISSUE_TRACKER_UNWRITABLE_READWRITE (issue
+// #5263): true only where the Box has a write token that cannot reach the
+// tracker, and exactly one blocked-comment gate fires per cell. The research
+// cell stays off: its forced relay takes the _READONLY arm.
+func TestGatesUnwritableReadWrite(t *testing.T) {
+	cases := []struct {
+		name     string
+		kind     string
+		tracker  string
+		read     string
+		write    string
+		boxWrite bool
+		want     bool
+	}{
+		{"jira read-write", "work", "jira", "GITHUB", "GITHUB", true, true},
+		{"jira research read-write", "research", "jira", "GITHUB", "GITHUB", true, false},
+		{"jira read-only", "work", "jira", "GITHUB", "GITHUB", false, false},
+		{"github read-write", "work", "github", "GITHUB", "GITHUB", true, false},
+		{"forgejo read-write", "work", "forgejo", "FORGEJO", "FORGEJO", true, false},
+		{"local", "work", "local", "LOCAL", "", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := Gates(Env{
+				DispatchKind:     tc.kind,
+				IssueTracker:     tc.tracker,
+				TrackerAxisRead:  tc.read,
+				TrackerAxisWrite: tc.write,
+				BoxWriteEnabled:  tc.boxWrite,
+			})
+			if g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] != tc.want {
+				t.Errorf("ISSUE_TRACKER_UNWRITABLE_READWRITE = %v, want %v", g["ISSUE_TRACKER_UNWRITABLE_READWRITE"], tc.want)
+			}
+			n := 0
+			for _, k := range []string{
+				"ISSUE_TRACKER_GITHUB_READWRITE", "ISSUE_TRACKER_GITHUB_READONLY",
+				"ISSUE_TRACKER_LOCAL", "ISSUE_TRACKER_FORGEJO_READWRITE",
+				"ISSUE_TRACKER_FORGEJO_READONLY", "ISSUE_TRACKER_UNWRITABLE_READWRITE",
+			} {
+				if g[k] {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("%d blocked-comment gates true, want exactly 1", n)
+			}
+		})
 	}
 }
 

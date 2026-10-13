@@ -45,7 +45,14 @@ func trackerGates(e Env) map[string]bool {
 	// write step always goes through the relay. These gates also drive the
 	// research-verdict fragments, so researchForceRelay flips a would-be
 	// _READWRITE case to its _READONLY sibling (ADR 0041, issue #2593).
-	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay
+	// A tracker with InBoxUnwritableTracker (jira) borrows the GITHUB write
+	// axis but no write token reaches it, so its read-write arm is
+	// ISSUE_TRACKER_UNWRITABLE_READWRITE, not _GITHUB_READWRITE: the work IF
+	// BLOCKED comment relays through the host's note= field (issue #5263).
+	row, _ := backend.ByName(trackerName)
+	unwritable := row.InBoxUnwritableTracker
+	g["ISSUE_TRACKER_GITHUB_READWRITE"] = itWrite == "GITHUB" && e.BoxWriteEnabled && !researchForceRelay && !unwritable
+	g["ISSUE_TRACKER_UNWRITABLE_READWRITE"] = unwritable && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_GITHUB_READONLY"] = itWrite == "GITHUB" && (!e.BoxWriteEnabled || researchForceRelay)
 	g["ISSUE_TRACKER_FORGEJO_READWRITE"] = itWrite == "FORGEJO" && e.BoxWriteEnabled && !researchForceRelay
 	g["ISSUE_TRACKER_FORGEJO_READONLY"] = itWrite == "FORGEJO" && (!e.BoxWriteEnabled || researchForceRelay)

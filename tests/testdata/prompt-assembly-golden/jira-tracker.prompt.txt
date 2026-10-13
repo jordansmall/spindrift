@@ -595,8 +595,10 @@ Then:
    nothing to revert.
 
 3. Leave the issue in-progress — do NOT close it.
-4. Comment on the issue with what's done and what remains:
-   `gh issue comment 7 --body "<what's done, what remains>"`.
+4. You have no client that can post a comment to this tracker. Do nothing
+   here — the launcher posts the SPINDRIFT_OUTCOME `note=` field below as
+   the issue comment, host-side, once you exit. Put what's done and what
+   remains in that field.
 
 5. Print exactly one line and stop — raw plain text, not wrapped in
    backticks, a code fence, or any other markdown formatting:
