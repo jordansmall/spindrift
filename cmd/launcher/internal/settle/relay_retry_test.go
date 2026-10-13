@@ -46,11 +46,13 @@ func newRetrySettle(clock dispatch.Clock) *Settle {
 // stop func that never fires unless the test swaps it.
 func newRelay(inner forge.BundleRelay, clock dispatch.Clock, maxRetries int) *retryingBundleRelay {
 	return &retryingBundleRelay{
-		backoff:    retry.LinearBackoff{Unit: time.Second, Clock: clock},
-		maxRetries: maxRetries,
-		stopped:    func() bool { return false },
-		num:        "7",
-		inner:      inner,
+		retryLoop: retryLoop{
+			backoff:    retry.LinearBackoff{Unit: time.Second, Clock: clock},
+			maxRetries: maxRetries,
+			stopped:    func() bool { return false },
+			num:        "7",
+		},
+		inner: inner,
 	}
 }
 
