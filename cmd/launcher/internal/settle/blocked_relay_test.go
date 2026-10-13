@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
@@ -283,10 +284,19 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 		PRIntentFound: true,
 	}
 
+	row, ok := backend.ByName("github")
+	if !ok || row.InBoxUnwritableTracker {
+		t.Fatalf("github registry row must exist without InBoxUnwritableTracker, got %+v ok=%v", row, ok)
+	}
+
 	c := baseConfig() // Config.ReadOnly defaults false
 	c.OutboxDir = func(num string) string { return "/outbox/" + num }
 	c.BaseBranch = "main"
-	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+	it, cf := fc.AsNoLandingRecorder(), fc.AsGithubReadOnly()
+	// Use the real github row: newTestSettle's zeroed descriptors would not
+	// notice InBoxUnwritableTracker being set on it.
+	c.Capabilities = forge.ResolveCapabilities(cf, it, backend.Descriptor{}, row)
+	s := New(c, it, cf)
 	s.Settle(d, issNum, 0, result)
 
 	if len(fc.RelayBundleCalls) != 0 {
@@ -294,6 +304,12 @@ func TestSettle_GithubReadWrite_BlockedUnaffectedByHostMediation(t *testing.T) {
 	}
 	if len(fc.CreateDraftPRCalls) != 0 {
 		t.Errorf("CreateDraftPR must not be called under read-write, got %+v", fc.CreateDraftPRCalls)
+	}
+	// The read-write Box commented in-box, so the host must not double-post.
+	for _, call := range fc.CommentCalls {
+		if call.Body == "push rejected" {
+			t.Errorf("blocked note must not be host-posted under github read-write, got %+v", call)
+		}
 	}
 }
 
@@ -555,5 +571,92 @@ func TestSettle_GithubReadOnly_BlockedDraftPRFailureStillReportsBlocked(t *testi
 	}
 	if strings.Contains(stderr, "<nil>") {
 		t.Errorf("stderr must not print <nil> in place of the real create-draft-PR error, got: %s", stderr)
+	}
+}
+
+// Issue #5263: a tracker the Box cannot write (jira) has no in-box comment
+// path, so the host posts the blocked note even on a read-write run. Pairs with
+// the github test above, which asserts the host does not double-post.
+func TestSettle_InBoxUnwritableTracker_ReadWriteBlockedPostsNote(t *testing.T) {
+	const issNum = "5263"
+	const note = "stopped after the migration; tests still red"
+
+	row, ok := backend.ByName("jira")
+	if !ok || !row.InBoxUnwritableTracker {
+		t.Fatalf("jira registry row must carry InBoxUnwritableTracker, got %+v ok=%v", row, ok)
+	}
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Status: "blocked", Note: note},
+		},
+	}
+
+	c := baseConfig() // Config.ReadOnly defaults false
+	it, cf := fc.AsNoLandingRecorder(), fc.AsGithubReadOnly()
+	// newTestSettle zeroes the descriptors, so build the Settle directly.
+	c.Capabilities = forge.ResolveCapabilities(cf, it, backend.Descriptor{}, row)
+	s := New(c, it, cf)
+	s.Settle(d, issNum, 0, result)
+
+	var noteCalls []forge.CommentCall
+	for _, call := range fc.CommentCalls {
+		if call.Body == note {
+			noteCalls = append(noteCalls, call)
+		}
+	}
+	if len(noteCalls) != 1 {
+		t.Fatalf("want 1 comment posting the blocked note, got %d (all calls: %+v)", len(noteCalls), fc.CommentCalls)
+	}
+	if noteCalls[0].Num != issNum {
+		t.Errorf("note posted on #%s, want #%s", noteCalls[0].Num, issNum)
+	}
+}
+
+// The demotedResolved branch posts via s.it.Comment directly; an unwritable
+// tracker must still see exactly one note, not one from each path.
+func TestSettle_InBoxUnwritableTracker_DemotedResolvedPostsNoteOnce(t *testing.T) {
+	const issNum = "5263"
+	const note = "agent reported already-resolved but 2 commits exist on agent/issue-5263; treating as blocked"
+
+	row, ok := backend.ByName("jira")
+	if !ok || !row.InBoxUnwritableTracker {
+		t.Fatalf("jira registry row must carry InBoxUnwritableTracker, got %+v ok=%v", row, ok)
+	}
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+
+	d := dispatch.NewFake()
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:           true,
+			Provenance:      outcome.ProvenanceSynthetic,
+			Outcome:         outcome.Outcome{Issue: issNum, Status: outcome.StatusBlocked, Note: note},
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusAlreadyResolved},
+		},
+	}
+
+	c := baseConfig()
+	it, cf := fc.AsNoLandingRecorder(), fc.AsGithubReadOnly()
+	c.Capabilities = forge.ResolveCapabilities(cf, it, backend.Descriptor{}, row)
+	s := New(c, it, cf)
+	s.Settle(d, issNum, 0, result)
+
+	var noteCalls []forge.CommentCall
+	for _, call := range fc.CommentCalls {
+		if call.Body == note {
+			noteCalls = append(noteCalls, call)
+		}
+	}
+	if len(noteCalls) != 1 {
+		t.Fatalf("want exactly 1 comment carrying the demotion note, got %d (all calls: %+v)", len(noteCalls), fc.CommentCalls)
 	}
 }
