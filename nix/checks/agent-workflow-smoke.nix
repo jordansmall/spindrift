@@ -25,6 +25,7 @@
 let
   inherit (pkgs.lib)
     assertMsg
+    concatMap
     concatStringsSep
     filter
     findFirst
@@ -32,6 +33,7 @@ let
     hasSuffix
     removeSuffix
     replaceStrings
+    splitString
     sublist
     trim
     ;
@@ -202,6 +204,35 @@ let
     );
   }) commentRows;
   commentMismatches = filter (p: p.ghNorm != p.fjNorm) commentPairs;
+
+  # agent-setup freezes the initial installation token into GH_TOKEN for every
+  # later step; the refresher only updates a file (issue #5259), so a shell
+  # step that runs `gh` must re-read that file first. Scans workflow text only:
+  # the gh calls inside the agent-setup composite run on the fresh token.
+  # Steps are split on the `- name:` marker.
+  rereadLine = ''GH_TOKEN=$(cat "$GH_TOKEN_REFRESH_FILE")'';
+  isGhCall = line: builtins.match "[[:space:]]*gh [a-z].*" line != null;
+  staleTokenSteps =
+    concatMap
+      (
+        name:
+        map (step: "${name}: ${trim (builtins.head (splitString "\n" step))}") (
+          filter (
+            step:
+            let
+              lines = splitString "\n" step;
+              ghIdx = findFirstIndex isGhCall null lines;
+              rereadIdx = findFirstIndex (hasInfix rereadLine) null lines;
+            in
+            ghIdx != null && (rereadIdx == null || rereadIdx > ghIdx)
+          ) (splitString "- name:" githubWorkflows.${name})
+        )
+      )
+      (
+        filter (name: hasInfix "gh-token-refresher" githubWorkflows.${name}) (
+          builtins.attrNames githubWorkflows
+        )
+      );
 in
 {
   agent-workflows-control-plane-wiring =
@@ -245,4 +276,9 @@ in
       )
     );
     pkgs.runCommand "agent-workflows-comment-parity" { } "touch $out";
+
+  agent-workflows-refresh-reread =
+    assert assertMsg (staleTokenSteps == [ ])
+      "GitHub agent workflow step(s) run `gh` without first re-reading $GH_TOKEN_REFRESH_FILE — agent-setup froze GH_TOKEN at job start, so once the ~1h installation token expires the call 401s (issue #5259): ${concatStringsSep ", " staleTokenSteps}";
+    pkgs.runCommand "agent-workflows-refresh-reread" { } "touch $out";
 }
