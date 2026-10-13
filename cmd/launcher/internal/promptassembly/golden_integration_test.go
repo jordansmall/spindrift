@@ -125,6 +125,13 @@ func (c *cellInputs) readOnly() { c.unset("BOX_WRITE_ENABLED") }
 
 func (c *cellInputs) forgejoForge() { c.export("CODE_FORGE", "forgejo") }
 
+// gitForge mirrors a git dispatch: the launcher sets BOX_OUTBOX_RELAY_CAPABLE
+// only for relay-capable rows (github, forgejo), which defaultCell assumes.
+func (c *cellInputs) gitForge() {
+	c.export("CODE_FORGE", "git")
+	c.unset("BOX_OUTBOX_RELAY_CAPABLE")
+}
+
 func (c *cellInputs) forgejoTracker() { c.export("ISSUE_TRACKER", "forgejo") }
 
 func (c *cellInputs) localTracker() { c.export("ISSUE_TRACKER", "local") }
@@ -230,6 +237,28 @@ func goldenCells() []goldenCell {
 		}},
 		{name: "forgejo-read-write", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoForge()
+		}},
+		{name: "git-read-write", mode: modeInitial, setup: func(c *cellInputs) {
+			c.gitForge()
+		}, check: func(t *testing.T, prompt string) {
+			// A git Box has no PR to view or draft: IF BLOCKED must land the
+			// branch, not a pull-request URL. Scoped to that section because
+			// OPEN A PULL REQUEST still prints gh text for the other forges.
+			_, blocked, ok := strings.Cut(prompt, "# IF BLOCKED")
+			if !ok {
+				t.Fatal("prompt lacks an IF BLOCKED section")
+			}
+			if !strings.Contains(blocked, "Open no pull request") {
+				t.Errorf("IF BLOCKED lacks the no-PR step")
+			}
+			if !strings.Contains(blocked, "landing=agent/issue-7 status=blocked") {
+				t.Errorf("IF BLOCKED outcome line does not land the branch")
+			}
+			for _, bad := range []string{"gh pr view", "--draft", "<pr-url>"} {
+				if strings.Contains(blocked, bad) {
+					t.Errorf("IF BLOCKED names %q for a git Box", bad)
+				}
+			}
 		}},
 		{name: "forgejo-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoForge()
