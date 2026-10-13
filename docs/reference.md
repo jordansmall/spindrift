@@ -1226,9 +1226,17 @@ The opencode cases `rate-limit-reset`, `recovered-error`, and `unsupported-flag`
 opencode v1.18.35's source (`run.ts` `emit()` and the yargs fail handler), and
 a scrubbed real capture should replace them when one exists.
 
-To add a log, scrub a raw capture, then review it by hand for private repo
-content the scrubber cannot recognise (it redacts only credential-shaped
-strings):
+To add a log, scrub a raw capture, then review it by hand. The scrubber
+redacts credential-shaped strings, emails and host home paths (anything under
+`/home/<user>` or `/Users/<user>` except the Box's `/home/agent`). It also
+blanks the JSON values that carry repo content: tool results and their
+output, file bodies in tool inputs (`content`, `old_string`/`new_string` and
+the like, plus a subagent's `prompt`), thinking text, subagent task text,
+and `opencode` tool output. It keeps what the readers use, such as
+`file_path`, `command` and `subagent_type`, so only the Transcript golden
+shows the blanks. Assistant text, Bash commands and result text stay as
+written, because the outcome line and heartbeat depend on them. Read those
+for private content before committing.
 
 ```sh
 cd cmd/launcher
@@ -1242,7 +1250,9 @@ Then write its goldens with `nix run .#regen-goldens`, or, from
 that deliberately alters a reader's output (a behaviour fix), never in a
 Driver's switch to the shared readers (issue #4944), where an unchanged golden
 is the proof the switch preserved behaviour. `TestDriverCorpusHasNoCredentials`
-rejects any credential-shaped string in the corpus, in CI and the in-box gate.
+rejects any credential-shaped string, email or host home path in the corpus,
+in CI and the in-box gate. It cannot recognise repo content, so it does not
+check that bodies were blanked.
 
 #### Loop/background affordances are stripped, not merely discouraged
 
