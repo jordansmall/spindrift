@@ -116,9 +116,9 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// A read-write Box may have opened its draft PR before stopping.
 		s.latchBranchPR(num)
 		if demotedResolved {
-			// postBlockedNoteComment skips read-write on the assumption the
-			// Box commented itself, but an agent that believed it was done
-			// never did.
+			// postBlockedNoteComment skips a writable tracker's read-write run
+			// on the assumption the Box commented itself, but an agent that
+			// believed it was done never did, so post directly.
 			if err := s.it.Comment(num, o.Note); err != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post already-resolved-demoted comment: %v\n", num, err)
 			}
@@ -196,7 +196,8 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 		// scouting (issue #2275). This is a successful, non-crash stop, so it
 		// must never fall through to agent-failed. The Box has no fragment to
 		// post this comment in-box, so settle always posts o.Note host-side,
-		// unlike postBlockedNoteComment's landing/readOnly-gated relay.
+		// unlike postBlockedNoteComment's relay, gated on landing, readOnly
+		// and InBoxUnwritableTracker.
 		if o.Note != "" {
 			if err := s.it.Comment(num, o.Note); err != nil {
 				fmt.Fprintf(os.Stderr, "    ?? #%s: could not post ambiguous-spec comment: %v\n", num, err)
@@ -524,11 +525,13 @@ func (s *Settle) latchBranchPR(num string) {
 }
 
 // postBlockedNoteComment posts note when the Box had no way to post it in-box:
-// the local content plane (ADR 0032, issue #1692) or a read-only github/jira
-// Box stripped of its write token (issue #1917). Best-effort, matching
-// postUsageComment's log-but-don't-propagate contract.
+// the local content plane (ADR 0032, issue #1692), a read-only github/jira
+// Box stripped of its write token (issue #1917), or a tracker the Box can never
+// write even read-write (InBoxUnwritableTracker, jira; issue #5263).
+// Best-effort, matching postUsageComment's log-but-don't-propagate contract.
 func (s *Settle) postBlockedNoteComment(num, note string) {
-	if (s.landing == nil && !s.readOnly) || note == "" {
+	inBoxUnwritable := s.cfg.Capabilities.TrackerDescriptor.InBoxUnwritableTracker
+	if (s.landing == nil && !s.readOnly && !inBoxUnwritable) || note == "" {
 		return
 	}
 	if err := s.it.Comment(num, note); err != nil {
