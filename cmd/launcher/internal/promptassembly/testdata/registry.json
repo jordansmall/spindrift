@@ -168,6 +168,21 @@
     "var": "FILER_LABEL_RELAY_BUTLER_RECORDS_STEP"
   },
   {
+    "gate": "ISSUE_TRACKER_GITHUB",
+    "fragment": "filer-dedup-search.md",
+    "var": "FILER_DEDUP_SEARCH_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_FORGEJO",
+    "fragment": "filer-dedup-search-forgejo.md",
+    "var": "FILER_DEDUP_SEARCH_FORGEJO_STEP"
+  },
+  {
+    "gate": "ISSUE_TRACKER_LOCAL",
+    "fragment": "filer-dedup-search-local.md",
+    "var": "FILER_DEDUP_SEARCH_LOCAL_STEP"
+  },
+  {
     "gate": "FILER_FILE_DIRECT_GH",
     "fragment": "filer-file-direct.md",
     "var": "FILER_FILE_DIRECT_STEP"

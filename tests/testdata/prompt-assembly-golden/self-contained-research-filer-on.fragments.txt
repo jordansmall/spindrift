@@ -1,4 +1,5 @@
 caveman-default-research.md
+filer-dedup-search.md
 filer-file-relay.md
 filer-label-relay-research.md
 research-file-issues-relay.md

@@ -1,5 +1,6 @@
 caveman-default-research.md
 check-hygiene-default.md
+filer-dedup-search.md
 filer-file-relay-socket.md
 filer-label-relay-research.md
 research-file-issues-relay-socket.md

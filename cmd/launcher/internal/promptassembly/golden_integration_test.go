@@ -367,6 +367,19 @@ func goldenCells() []goldenCell {
 			c.forgejoTracker()
 			c.filerOn()
 		}},
+		{name: "forgejo-readonly-orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
+			// A relay Filer still reads through the tracker: the Forgejo dedup
+			// search renders even though the write mechanism is the relay.
+			c.forgejoForge()
+			c.forgejoTracker()
+			c.filerOn()
+			c.readOnly()
+		}},
+		{name: "local-tracker-orchestrator-filer-on", mode: modeInitial, review: true, setup: func(c *cellInputs) {
+			c.localTracker()
+			c.filerOn()
+			c.readOnly()
+		}},
 		{name: "forgejo-fix-pass", mode: modeResume, setup: func(c *cellInputs) {
 			c.export("FIX_PASS", "1")
 			c.forgejoForge()

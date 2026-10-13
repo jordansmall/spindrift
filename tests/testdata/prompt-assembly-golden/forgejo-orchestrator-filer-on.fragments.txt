@@ -8,6 +8,7 @@ commit-rework-orchestrator.md
 coordinator-scout-brief.md
 coordinator.md
 file-issues-direct.md
+filer-dedup-search-forgejo.md
 filer-file-direct-forgejo.md
 filer-label-direct-forgejo.md
 if-blocked-outcome-landing-git.md

@@ -2,6 +2,7 @@ butler-file-issues-relay.md
 butler-patch.md
 butler-review-patch.md
 caveman-default.md
+filer-dedup-search.md
 filer-file-relay.md
 filer-label-relay-butler.md
 scout-issue-read-github.md

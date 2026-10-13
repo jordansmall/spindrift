@@ -1226,14 +1226,14 @@ in
   filer-prompt-dedup-searches-all-open-issues =
     pkgs.runCommand "filer-prompt-dedup-searches-all-open-issues" { }
       ''
-        grep -q -- '--state open' ${../../templates/default/prompts/filer-prompt.md}
+        grep -q -- '--state open' ${../../templates/default/prompts/fragments/filer-dedup-search.md}
         old=$(grep -c -- '--label agent-review-finding --state all' \
-          ${../../templates/default/prompts/filer-prompt.md} || true)
+          ${../../templates/default/prompts/fragments/filer-dedup-search.md} || true)
         [ "$old" -eq 0 ] || {
           echo "expected the old --label agent-review-finding --state all query gone, found $old occurrence(s)" >&2
           exit 1
         }
-        bad=$(grep -- '--state open' ${../../templates/default/prompts/filer-prompt.md} \
+        bad=$(grep -- '--state open' ${../../templates/default/prompts/fragments/filer-dedup-search.md} \
           | grep -c -- '--label' || true)
         [ "$bad" -eq 0 ] || {
           echo "expected the --state open dedup search to carry no --label flag, $bad line(s) did" >&2
@@ -1295,7 +1295,7 @@ in
   filer-prompt-dedup-names-research-reject =
     pkgs.runCommand "filer-prompt-dedup-names-research-reject" { }
       ''
-        grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/filer-prompt.md}
+        grep -q -- '--label agent-research-reject --state closed' ${../../templates/default/prompts/fragments/filer-dedup-search.md}
         touch $out
       '';
 

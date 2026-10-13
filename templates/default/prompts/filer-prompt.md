@@ -38,28 +38,7 @@ ${FILER_LABEL_DIRECT_STEP}${FILER_LABEL_DIRECT_FORGEJO_STEP}${FILER_LABEL_RELAY_
      differently, so only the site is stable across them — never key on
      wording. One key per finding; add a second only when a finding
      genuinely spans two sites.
-   - Search for the site key over open issues first — the most reliable
-     check, since it matches the stable key rather than prose:
-       gh issue list --state open --search '"<site key>" in:body'
-   - Search ALL open issues, regardless of label — an open issue describing
-     the same problem means it's already tracked, whether human-filed,
-     `ready-for-agent`, filed via `/to-tickets`, or from a prior Filer run:
-       gh issue list --state open --search "<terms>"
-   - Search closed issues carrying `agent-review-finding`,
-     `agent-research-reject`, `agent-research-finding`, OR
-     `agent-butler-finding` — all four mark a deliberate triage decision, and
-     none of them is ever refiled:
-       gh issue list --label agent-review-finding --state closed --search "<terms>"
-       gh issue list --label agent-research-reject --state closed --search "<terms>"
-       gh issue list --label agent-research-finding --state closed --search "<terms>"
-       gh issue list --label agent-butler-finding --state closed --search "<terms>"
-   - A plain closed issue carrying none of these labels does NOT suppress
-     filing — a problem that was fixed and later regressed can still be
-     refiled.
-   Skip any finding that matches an existing issue in any search, by site
-   key or by subject.
-
-${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
+${FILER_DEDUP_SEARCH_STEP}${FILER_DEDUP_SEARCH_FORGEJO_STEP}${FILER_DEDUP_SEARCH_LOCAL_STEP}${FILER_FILE_DIRECT_STEP}${FILER_FILE_DIRECT_FORGEJO_STEP}${FILER_FILE_RELAY_STEP}${FILER_FILE_RELAY_SOCKET_STEP}4. Each filed issue:
    - Title: a conventional-commit-style title scoped to the fix itself (e.g.
      `fix(auth): validate token expiry before use`) — never a meta-title like
      "review finding".

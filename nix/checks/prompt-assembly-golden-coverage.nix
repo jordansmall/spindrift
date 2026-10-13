@@ -50,8 +50,6 @@ let
     "auto-lint.md" =
       "assemble_test.go TestAssembleAutoLintGate; fragment_rendering_test.go TestAssembleStepRendering/AUTO-LINT_on_points_at_the_skill,_no_inline_linter_procedure";
     "ci-failure.md" = "assemble_test.go TestAssembleCIFailureSummaryGate";
-    "issue-blocked-comment-forgejo-readonly.md" =
-      "fragment_rendering_test.go TestAssembleFragmentRendering/blocked-comment_forgejo_read-only_never_runs_fj_issue_comment";
     "research-verdict-forgejo.md" =
       "fragment_rendering_test.go TestAssembleFragmentRendering/research_verdict_forgejo_read-write_keeps_fj_issue_comment";
     "research-verdict-forgejo-readonly.md" =
