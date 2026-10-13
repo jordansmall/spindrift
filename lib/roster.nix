@@ -126,11 +126,36 @@ rec {
             //
               violation "inline-prompt-shadows-shipped" e.name
                 "normalizeRoster: entry ${builtins.toJSON e.name} sets an inline prompt but promptFile ${builtins.toJSON entry.promptFile} is already shipped under templates/default/prompts and would be shadowed -- override a shipped prompt with the matching mkHarness *Prompt arg or SPINDRIFT_PROMPT_DIR, or pick a promptFile that does not collide"
+          # The bake copies inline prompts flat into the prompt dir and
+          # creates no subdirectory (issue #5203).
+          else if hasInlinePrompt entry && lib.hasInfix "/" entry.promptFile then
+            acc
+            //
+              violation "nested-inline-promptfile" e.name
+                "normalizeRoster: entry ${builtins.toJSON e.name} sets an inline prompt but promptFile ${builtins.toJSON entry.promptFile} contains a \"/\" -- the image bake copies inline prompts flat into the prompt dir and creates no subdirectory, so pick a bare filename"
+          # A second copy of one promptFile hits the first's read-only (0444)
+          # file (issue #5203).
+          else if hasInlinePrompt entry && acc.inlineFiles ? ${entry.promptFile} then
+            let
+              prior = acc.inlineFiles.${entry.promptFile};
+            in
+            acc
+            //
+              violation "duplicate-inline-promptfile" e.name
+                "normalizeRoster: duplicate inline promptFile ${builtins.toJSON entry.promptFile} on ${builtins.toJSON prior.name} and ${builtins.toJSON e.name} at entries ${toString prior.idx} and ${toString idx} --the image bake would write the second copy over the first's read-only (0444) file, so give each inline prompt its own promptFile"
           else
             {
               seen = acc.seen // {
                 ${e.name} = idx;
               };
+              inlineFiles =
+                acc.inlineFiles
+                // lib.optionalAttrs (hasInlinePrompt entry) {
+                  ${entry.promptFile} = {
+                    name = e.name;
+                    inherit idx;
+                  };
+                };
               out = acc.out ++ [ entry ];
               violation = null;
             };
@@ -138,6 +163,7 @@ rec {
       # the fold's base case returns [] without throwing.
       result = foldl' step {
         seen = { };
+        inlineFiles = { };
         out = [ ];
         violation = null;
       } (imap0 (idx: e: { inherit idx e; }) roster);

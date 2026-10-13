@@ -805,6 +805,113 @@ in
       "an inline prompt on a promptFile that is not shipped must stay accepted";
     pkgs.runCommand "roster-normalize-inline-prompt-shadowing-shipped" { } "touch $out";
 
+  # Issue #5203: the image bake copies inline prompts flat into the prompt dir
+  # and creates no subdirectory, so an inline entry's promptFile must be a bare
+  # filename. A nested path without an inline prompt is still missing-promptfile.
+  roster-normalize-inline-prompt-nested-promptfile =
+    let
+      resultFor =
+        extra:
+        rosterLib.normalizeRosterResult [
+          (
+            {
+              name = "mine";
+              model = "m";
+              mode = "subagent";
+              description = "d";
+              tools = [ ];
+              prompt = "Custom prompt";
+            }
+            // extra
+          )
+        ];
+      check =
+        promptFile:
+        let
+          r = resultFor { inherit promptFile; };
+        in
+        assert assertMsg (
+          !r.ok && r.violation == "nested-inline-promptfile" && r.entryName == "mine"
+        ) "${promptFile}: expected nested-inline-promptfile for mine, got: ${builtins.toJSON r}";
+        assert assertMsg (
+          hasInfix "mine" r.message && hasInfix (builtins.toJSON promptFile) r.message
+        ) "${promptFile}: message must name mine and the promptFile, got: ${builtins.toJSON r.message}";
+        assert assertMsg (hasInfix "bare filename" r.message)
+          "${promptFile}: message must say to pick a bare filename, got: ${builtins.toJSON r.message}";
+        true;
+      emptyPrompt = resultFor {
+        promptFile = "custom/x.md";
+        prompt = "";
+      };
+    in
+    assert check "custom/x.md";
+    assert check "../x.md";
+    assert check "/abs/x.md";
+    # normalizeRoster runs before dropOptedOut, so an opted-out entry is still
+    # checked (consistent with inline-prompt-shadows-shipped, issue #5035).
+    assert assertMsg (
+      let
+        r = resultFor {
+          model = "";
+          promptFile = "custom/x.md";
+        };
+      in
+      !r.ok && r.violation == "nested-inline-promptfile"
+    ) "an opted-out inline-prompt entry with a nested promptFile must still be rejected";
+    assert assertMsg (!emptyPrompt.ok && emptyPrompt.violation == "missing-promptfile")
+      "an empty prompt with a nested promptFile must stay missing-promptfile, got: ${builtins.toJSON emptyPrompt}";
+    assert assertMsg
+      (resultFor {
+        promptFile = "x.md";
+      }).ok
+      "an inline prompt on a bare filename must stay accepted";
+    pkgs.runCommand "roster-normalize-inline-prompt-nested-promptfile" { } "touch $out";
+
+  # Issue #5203: a second inline entry reusing an earlier inline entry's
+  # promptFile would hit the first copy's read-only (0444) file in the bake.
+  roster-normalize-inline-prompt-duplicate-promptfile =
+    let
+      entry =
+        name: extra:
+        {
+          inherit name;
+          model = "m";
+          mode = "subagent";
+          description = "d";
+          tools = [ ];
+          prompt = "Custom prompt";
+        }
+        // extra;
+      dup = rosterLib.normalizeRosterResult [
+        (entry "first" { promptFile = "shared.md"; })
+        (entry "second" { promptFile = "shared.md"; })
+      ];
+      distinct = rosterLib.normalizeRosterResult [
+        (entry "first" { promptFile = "one.md"; })
+        (entry "second" { promptFile = "two.md"; })
+      ];
+      sharedShipped = rosterLib.normalizeRosterResult [
+        (entry "first" { promptFile = "shared.md"; })
+        (entry "second" {
+          promptFile = "review-prompt.md";
+          prompt = "";
+        })
+        (entry "third" {
+          promptFile = "review-prompt.md";
+          prompt = "";
+        })
+      ];
+    in
+    assert assertMsg (
+      !dup.ok && dup.violation == "duplicate-inline-promptfile" && dup.entryName == "second"
+    ) "expected duplicate-inline-promptfile for second, got: ${builtins.toJSON dup}";
+    assert assertMsg
+      (hasInfix "duplicate inline promptFile \"shared.md\" on \"first\" and \"second\" at entries 0 and 1" dup.message)
+      "message must name both entries, their indices and shared.md, got: ${builtins.toJSON dup.message}";
+    assert assertMsg distinct.ok "inline entries with distinct promptFiles must stay accepted";
+    assert assertMsg sharedShipped.ok "entries without an inline prompt may share a shipped promptFile";
+    pkgs.runCommand "roster-normalize-inline-prompt-duplicate-promptfile" { } "touch $out";
+
   # Issue #2571 review fix (Finding C): "reviewer" is the one agent name whose
   # injected promptFile default does not follow the "<name>-prompt.md"
   # convention. Its template is templates/default/prompts/review-prompt.md;
