@@ -9,6 +9,53 @@ depending on how you use spindrift; it won't affect everyone.
 
 ---
 
+## 0.26.0 — 2026-10-13
+
+Mostly bug fixes, plus a pass over the agent prompts so they only tell a
+Box what's actually true for its setup.
+
+**⚠ Breaking changes** this release: skill names with unsafe characters
+now fail evaluation.
+
+- **Prompts without the mixed signals.** A lot of prompt text assumed one
+  setup and confused agents running another. A local read-write Box is no
+  longer told to push, `MERGE_MODE=manual` no longer promises a merge, and
+  a Box with the Filer off no longer sees "FILE ISSUES" steps. The IF
+  BLOCKED steps now match the forge (no PR step where there are no PRs, a
+  working `fj pr create` on Forgejo). On Jira, research verdicts and
+  blocked notes go through the host instead of a `gh` command that can't
+  work there, and a research run whose verdict never arrives fails instead
+  of passing silently.
+- **A failed draft PR create no longer strands the issue.** The host now
+  retries the create, adopts a PR the forge made anyway, and if it still
+  fails, parks the issue on `agent-failed` instead of leaving it stuck in
+  progress. The end-of-dispatch banner names any run that didn't deliver,
+  and research and butler runs get wording that fits them.
+- **Safer landings.** Reconcile only trusts a branch landing for the
+  issue's own branch and ignores closed PRs behind it. The agent's
+  pre-push fetch no longer defeats the force-push lease, and the backstop
+  push refuses to overwrite a branch tip it doesn't recognize.
+- **Daemon fixes.** An in-place restart keeps a slot's "waiting on CI"
+  state, and rolls back if the new build's config refuses the handoff.
+  The self-update prebuild and its git fetches now have time limits, so a
+  hung `nix` or `git` can't stall the daemon. Parked slots wake up when a
+  claim makes their kind due for another look.
+- **⚠ Breaking: skill names are checked.** A `skills` entry whose name has
+  a character outside `A-Z a-z 0-9 . _ -` (for example `foo+bar`) now
+  fails evaluation. Rename it to upgrade. Other config mistakes are caught
+  at eval too: duplicate, nested, or shadowing inline prompt files, and
+  non-string `JIRA_STATUS_MAPPING` values. An empty `MERGE_GUARD_PATHS`
+  now turns the merge guard off.
+- **Registry proxy handles big npm packages.** Package metadata is
+  rewritten as a stream instead of in memory, and cargo download URLs with
+  markers keep their original bytes.
+- **Launcher fixes.** Dispatching an unlabeled issue without a terminal
+  now stops and asks for `--yes` instead of reading stdin, so a script
+  piping `yes |` into `spindrift dispatch` should pass `--yes` instead.
+  The `SECRET_CMD` template now works with only an OAuth token in the
+  vault: it tries `CLAUDE_CODE_OAUTH_TOKEN` first and falls back to
+  `ANTHROPIC_API_KEY`, and skips both under a non-Claude Driver.
+
 ## 0.25.0 — 2026-10-12
 
 The Daemon can update itself without dropping its work, and one flake can
