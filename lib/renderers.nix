@@ -877,6 +877,7 @@ rec {
         (optional "doctorSlugHint" "DoctorSlugHint" "")
         (optional "hostMediatedRemote" "HostMediatedRemote" false)
         (optional "inBoxUnreachableTracker" "InBoxUnreachableTracker" false)
+        (optional "inBoxUnwritableTracker" "InBoxUnwritableTracker" false)
         (optional "outboxRelayCapable" "OutboxRelayCapable" false)
         (optional "inBoxOpenPRQueryable" "InBoxOpenPRQueryable" false)
         (optional "inBoxGHCredentialHelper" "InBoxGHCredentialHelper" false)

@@ -56,6 +56,13 @@ type Descriptor struct {
 	// compensate.
 	InBoxUnreachableTracker bool
 
+	// InBoxUnwritableTracker is true only for a tracker the Box reads but has
+	// no in-box write path into ("jira"); "local" is covered by
+	// InBoxUnreachableTracker and its empty write axis instead. The jira row
+	// still carries TrackerAxisWrite="GITHUB" for its other arms; this bit
+	// overrides that only for the research verdict, which always relays (#5245).
+	InBoxUnwritableTracker bool
+
 	// RelayCapable is true for a CODE_FORGE backend with every host-mediation
 	// seam needed under BOX_FORGE_AND_ISSUE_ACCESS=read-only: bundle relay
 	// always, plus draft-PR-create and commit-subjects when the backend has a
@@ -199,4 +206,14 @@ func OutboxRelayBackends() []string {
 func RelaysOutbox(codeForge, boxAccess string) bool {
 	d, ok := ByName(codeForge)
 	return ok && d.OutboxRelayCapable && boxAccess == "read-only"
+}
+
+// ResearchVerdictRelayed reports whether a research run's verdict is posted
+// host-side rather than by the Box: the Filer is provisioned, or the tracker
+// has no in-box write path (issue #5245). The prompt gates and the research
+// settle must agree on it, so both call this. An unregistered or empty
+// issueTracker reads as the zero Descriptor and so contributes false.
+func ResearchVerdictRelayed(issueTracker string, filerEnabled bool) bool {
+	row, _ := ByName(issueTracker)
+	return filerEnabled || row.InBoxUnwritableTracker
 }

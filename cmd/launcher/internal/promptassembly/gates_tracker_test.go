@@ -611,6 +611,83 @@ func TestGatesResearchVerdictRelayed(t *testing.T) {
 	}
 }
 
+// TestGatesJiraResearchAlwaysRelays pins that a jira research dispatch uses the
+// relayed verdict form with the Filer off or on (issue #5245), while jira stays
+// on the GITHUB read/write axis, and a jira work dispatch is untouched.
+func TestGatesJiraResearchAlwaysRelays(t *testing.T) {
+	cases := []struct {
+		name         string
+		kind         string
+		filerEnabled bool
+		wantReadOnly bool
+		wantRelayed  bool
+	}{
+		{"research, Filer off", "research", false, true, true},
+		{"research, Filer on", "research", true, true, true},
+		{"work, Filer off", "work", false, false, false},
+		{"butler, Filer off", "butler", false, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := Gates(Env{
+				DispatchKind:    tc.kind,
+				IssueTracker:    "jira",
+				FilerEnabled:    tc.filerEnabled,
+				BoxWriteEnabled: true,
+			})
+			if !g["ISSUE_TRACKER_GITHUB"] {
+				t.Error("ISSUE_TRACKER_GITHUB = false, want true (jira stays on the GITHUB axis)")
+			}
+			if g["ISSUE_TRACKER_GITHUB_READONLY"] != tc.wantReadOnly {
+				t.Errorf("ISSUE_TRACKER_GITHUB_READONLY = %v, want %v", g["ISSUE_TRACKER_GITHUB_READONLY"], tc.wantReadOnly)
+			}
+			if g["ISSUE_TRACKER_GITHUB_READWRITE"] == tc.wantReadOnly {
+				t.Errorf("ISSUE_TRACKER_GITHUB_READWRITE = %v, want %v", g["ISSUE_TRACKER_GITHUB_READWRITE"], !tc.wantReadOnly)
+			}
+			if g["RESEARCH_VERDICT_RELAYED"] != tc.wantRelayed {
+				t.Errorf("RESEARCH_VERDICT_RELAYED = %v, want %v", g["RESEARCH_VERDICT_RELAYED"], tc.wantRelayed)
+			}
+		})
+	}
+}
+
+// TestAssembleJiraResearchRendersRelayedVerdict pins the rendered prompt: a jira
+// research run has no `gh issue comment` guidance, Filer off or on, while a jira
+// work run keeps its existing gh arm (issue #5245).
+func TestAssembleJiraResearchRendersRelayedVerdict(t *testing.T) {
+	reg := loadTestRegistry(t)
+	for _, selfContained := range []bool{false, true} {
+		for _, filer := range []bool{false, true} {
+			env := coveredEnv()
+			env.IssueTracker = "jira"
+			env.DispatchKind = "research"
+			env.SelfContained = selfContained
+			env.FilerEnabled = filer
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("selfContained=%v filer=%v: Assemble: %v", selfContained, filer, err)
+			}
+			if strings.Contains(result.Prompt, "gh issue comment") {
+				t.Errorf("selfContained=%v filer=%v: jira research prompt contains `gh issue comment`:\n%s", selfContained, filer, result.Prompt)
+			}
+			const relayed = "the launcher posts your\nrelayed verdict host-side once you exit"
+			if !strings.Contains(result.Prompt, relayed) {
+				t.Errorf("selfContained=%v filer=%v: jira research prompt lacks the relayed landing=none outcome %q", selfContained, filer, relayed)
+			}
+		}
+	}
+
+	env := coveredEnv()
+	env.IssueTracker = "jira"
+	result, err := Assemble(env, reg)
+	if err != nil {
+		t.Fatalf("work: Assemble: %v", err)
+	}
+	if !strings.Contains(result.Prompt, "gh issue comment") {
+		t.Errorf("jira work prompt lost its gh issue comment arm:\n%s", result.Prompt)
+	}
+}
+
 // TestGatesResearchVerdictRelayedCarrierSplit pins that the relayed gate
 // splits into exactly one of _LOG/_SOCKET by Signal carrier, and that
 // neither half is on when the base gate is off.

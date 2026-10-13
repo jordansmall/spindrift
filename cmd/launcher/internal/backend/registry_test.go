@@ -235,3 +235,26 @@ func TestRelaysOutbox(t *testing.T) {
 		}
 	}
 }
+
+func TestResearchVerdictRelayed(t *testing.T) {
+	cases := []struct {
+		tracker string
+		filer   bool
+		want    bool
+	}{
+		{"github", false, false},
+		{"github", true, true},
+		{"forgejo", false, false},
+		{"local", false, false},
+		{"jira", false, true},
+		{"jira", true, true},
+		{"", false, false},
+		{"", true, true},
+		{"nonesuch", false, false},
+	}
+	for _, tc := range cases {
+		if got := ResearchVerdictRelayed(tc.tracker, tc.filer); got != tc.want {
+			t.Errorf("ResearchVerdictRelayed(%q, %v) = %v, want %v", tc.tracker, tc.filer, got, tc.want)
+		}
+	}
+}
