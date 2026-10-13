@@ -36,18 +36,28 @@ type retryingDraftPRCreator struct {
 
 // CreateDraftPR retries every failure whatever its class. The create POST is
 // not idempotent and a gateway timeout can fire after the forge made the PR
-// (#4994's 504), so before each retry the branch is looked up and an
-// open PR there is adopted rather than duplicated; the adapters' own
-// adopt-on-already-exists stays the backstop when the lookup itself fails. An
-// operator stop during a backoff returns errAbandoned wrapping the last error.
+// (#4994's 504), so after every failed attempt, the last included, the
+// branch is looked up and an open PR there is adopted rather than duplicated
+// or parked. When a non-final lookup itself fails, the next attempt's
+// adapter-side adopt-on-already-exists is the backstop; after a failed final
+// lookup only a later `spindrift recover` is. A full backoff precedes the
+// final lookup too, so Policy.Max=0 still waits one backoff before returning.
+// An operator stop during a backoff returns errAbandoned wrapping the last
+// error.
 func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (string, bool, error) {
 	for attempt := 1; ; attempt++ {
 		url, created, err := r.inner.CreateDraftPR(title, body, base, head)
-		if err == nil || attempt > r.maxRetries {
+		if err == nil {
 			return url, created, err
 		}
-		fmt.Printf("    #%s  landing=%s  status=draft-pr-retry  attempt=%d/%d  !! %v\n",
-			r.num, head, attempt, r.maxRetries, err)
+		final := attempt > r.maxRetries
+		if final {
+			fmt.Printf("    #%s  landing=%s  status=draft-pr-final-lookup  attempt=%d/%d  !! %v\n",
+				r.num, head, attempt, r.maxRetries+1, err)
+		} else {
+			fmt.Printf("    #%s  landing=%s  status=draft-pr-retry  attempt=%d/%d  !! %v\n",
+				r.num, head, attempt, r.maxRetries, err)
+		}
 		if r.backoff.DoUnless(attempt, r.stopped) {
 			return "", false, fmt.Errorf("%w: %w", errAbandoned, err)
 		}
@@ -57,6 +67,9 @@ func (r *retryingDraftPRCreator) CreateDraftPR(title, body, base, head string) (
 		} else if ok {
 			fmt.Printf("    #%s  landing=%s  status=draft-pr-adopted  %s\n", r.num, head, pr.URL)
 			return pr.URL, false, nil
+		}
+		if final {
+			return url, created, err
 		}
 	}
 }

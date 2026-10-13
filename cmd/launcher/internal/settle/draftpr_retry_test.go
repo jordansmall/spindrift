@@ -12,7 +12,10 @@ import (
 	"spindrift.dev/launcher/internal/retry"
 )
 
-const draftPRRetryURL = "https://github.com/owner/repo/pull/5146"
+const (
+	draftPRRetryIssue = "5146"
+	draftPRRetryURL   = "https://github.com/owner/repo/pull/5146"
+)
 
 var errDraftPR504 = errors.New("HTTP 504: 504 Gateway Timeout (https://api.github.com/graphql)")
 
@@ -20,15 +23,14 @@ var errDraftPR504 = errors.New("HTTP 504: 504 Gateway Timeout (https://api.githu
 // ready hand-off reaches the host-side draft PR create (issue #5146).
 func draftPRRetryFixture(t *testing.T, maxRetries int, clock dispatch.Clock) (*Settle, *forge.Fake, dispatch.Result) {
 	t.Helper()
-	const issNum = "5146"
 	fc := forge.NewFake(testDispatchLabels)
 	fc.BranchPrefix = "agent/issue-"
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.SetIssue(forge.Issue{Number: draftPRRetryIssue, Labels: []string{"agent-in-progress"}})
 	fc.CreateDraftPRURL = draftPRRetryURL
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: fc.AgentBranch(issNum), Status: "ready"},
+			Outcome: outcome.Outcome{Issue: draftPRRetryIssue, Landing: fc.AgentBranch(draftPRRetryIssue), Status: "ready"},
 		},
 		PRIntent:      "feat: add widget\n\nAdds a widget.",
 		PRIntentFound: true,
@@ -118,14 +120,90 @@ func TestRetryingDraftPR_LookupErrorFallsThroughToRecreate(t *testing.T) {
 	}
 }
 
-func TestRetryingDraftPR_ZeroMaxIsSingleAttempt(t *testing.T) {
+func TestRetryingDraftPR_ZeroMaxIsSingleAttemptThenLookup(t *testing.T) {
 	s, fc, _ := draftPRRetryFixture(t, 0, dispatch.Clock{})
 	fc.CreateDraftPRErrs = []error{errDraftPR504}
+	fc.OpenPRForBranchErrs = []error{nil}
 
 	_, _, _, err := createViaRetry(t, s, fc)
 
 	if !errors.Is(err, errDraftPR504) || len(fc.CreateDraftPRCalls) != 1 {
 		t.Errorf("err=%v calls=%d, want the 504 after exactly 1 call", err, len(fc.CreateDraftPRCalls))
+	}
+	// The fake drains one OpenPRForBranchErrs entry per lookup.
+	if got := len(fc.OpenPRForBranchErrs); got != 0 {
+		t.Errorf("unrun lookups = %d, want 0: the final lookup must run even with Policy.Max=0", got)
+	}
+}
+
+// A stop during the backoff before the final lookup abandons with no lookup
+// or adoption (#5172).
+func TestRetryingDraftPR_StopBeforeFinalLookupAbandons(t *testing.T) {
+	for _, maxRetries := range []int{0, 2} {
+		s, fc, _ := draftPRRetryFixture(t, maxRetries, dispatch.Clock{})
+		fc.CreateDraftPRErr = errDraftPR504
+		// The final create makes the PR and the stop lands before its backoff.
+		fc.CreateDraftPROnCall = func(head string) {
+			if len(fc.CreateDraftPRCalls) == maxRetries+1 {
+				fc.SetPR(head, forge.PR{URL: draftPRRetryURL})
+				s.term.Mark(draftPRRetryIssue)
+			}
+		}
+		// One tripwire entry per lookup, drained one per lookup run.
+		fc.OpenPRForBranchErrs = make([]error, maxRetries+1)
+		gen := s.term.Begin(draftPRRetryIssue)
+
+		url, created, stdout, err := createViaRetryGen(t, s, fc, gen)
+
+		if !errors.Is(err, errAbandoned) || !errors.Is(err, errDraftPR504) || url != "" || created {
+			t.Errorf("maxRetries=%d: got (%q, %v, %v), want errAbandoned wrapping the 504", maxRetries, url, created, err)
+		}
+		if got := len(fc.CreateDraftPRCalls); got != maxRetries+1 {
+			t.Errorf("maxRetries=%d: CreateDraftPR calls = %d, want %d", maxRetries, got, maxRetries+1)
+		}
+		if got := len(fc.OpenPRForBranchErrs); got != 1 {
+			t.Errorf("maxRetries=%d: unrun lookups = %d, want 1: the final lookup ran after the stop", maxRetries, got)
+		}
+		if strings.Contains(stdout, "status=draft-pr-adopted") {
+			t.Errorf("maxRetries=%d: must not adopt after the stop, got:\n%s", maxRetries, stdout)
+		}
+	}
+}
+
+// A 504 on the final attempt can still have made the PR (#5172): the lookup
+// after the last failure must adopt it rather than let the caller park.
+func TestRetryingDraftPR_AdoptsPRCreatedByFinalAttempt(t *testing.T) {
+	const maxRetries = 2
+	s, fc, _ := draftPRRetryFixture(t, maxRetries, dispatch.Clock{})
+	fc.CreateDraftPRErr = errDraftPR504
+	fc.CreateDraftPROnCall = func(head string) {
+		if len(fc.CreateDraftPRCalls) == maxRetries+1 {
+			fc.SetPR(head, forge.PR{URL: draftPRRetryURL})
+		}
+	}
+
+	url, created, stdout, err := createViaRetry(t, s, fc)
+
+	if err != nil || created || url != draftPRRetryURL || len(fc.CreateDraftPRCalls) != maxRetries+1 {
+		t.Errorf("got (%q, %v, %v) after %d calls, want the adopted URL after %d", url, created, err, len(fc.CreateDraftPRCalls), maxRetries+1)
+	}
+	if !strings.Contains(stdout, "status=draft-pr-adopted") {
+		t.Errorf("stdout must log the adoption, got:\n%s", stdout)
+	}
+}
+
+func TestRetryingDraftPR_FinalLookupFailureReturnsCreateError(t *testing.T) {
+	s, fc, _ := draftPRRetryFixture(t, 0, dispatch.Clock{})
+	fc.CreateDraftPRErr = errDraftPR504
+	fc.OpenPRForBranchErr = errors.New("lookup blip")
+
+	url, created, stdout, err := createViaRetry(t, s, fc)
+
+	if !errors.Is(err, errDraftPR504) || url != "" || created || len(fc.CreateDraftPRCalls) != 1 {
+		t.Errorf("got (%q, %v, %v) after %d calls, want the create's own (\"\", false, 504) after 1", url, created, err, len(fc.CreateDraftPRCalls))
+	}
+	if !strings.Contains(stdout, "status=draft-pr-final-lookup  attempt=1/1") || !strings.Contains(stdout, "status=draft-pr-lookup-failed") {
+		t.Errorf("stdout must log the failed final lookup, got:\n%s", stdout)
 	}
 }
 
@@ -133,8 +211,13 @@ func TestRetryingDraftPR_ZeroMaxIsSingleAttempt(t *testing.T) {
 // and returns what it logged.
 func createViaRetry(t *testing.T, s *Settle, fc *forge.Fake) (url string, created bool, stdout string, err error) {
 	t.Helper()
+	return createViaRetryGen(t, s, fc, 0)
+}
+
+func createViaRetryGen(t *testing.T, s *Settle, fc *forge.Fake, gen uint64) (url string, created bool, stdout string, err error) {
+	t.Helper()
 	stdout = captureStdout(t, func() {
-		url, created, err = s.retryingDraftPR("5146", 0, fc.AsGithubReadOnly().(forge.DraftPRCreator), fc).
+		url, created, err = s.retryingDraftPR(draftPRRetryIssue, gen, fc.AsGithubReadOnly().(forge.DraftPRCreator), fc).
 			CreateDraftPR("t", "b", "main", "b")
 	})
 	return url, created, stdout, err
