@@ -152,6 +152,6 @@ tool_input_json() {
 
   summary="$(echo "$output" | jq -r '.hookSpecificOutput.updatedToolOutput')"
   [ -n "$summary" ]
-  ! echo "$summary" | grep -q 'SPINDRIFT_COMMENT'
+  [[ "$summary" != *"SPINDRIFT_COMMENT"* ]]
   echo "$summary" | tail -n1 | grep -qE '^[A-Za-z0-9+/]+=$'
 }
