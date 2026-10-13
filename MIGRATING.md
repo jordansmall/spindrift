@@ -1,5 +1,18 @@
 # Migration Guide
 
+## Roster inline prompts need a unique, bare promptFile (issue #5203)
+
+A roster entry with a non-empty inline `prompt` now fails evaluation when its
+`promptFile` contains a `/` (`nested-inline-promptfile`, e.g. `custom/x.md`,
+`../x.md`, `/abs/x.md`), or when another inline-prompt entry uses the same
+`promptFile` (`duplicate-inline-promptfile`). Such rosters never built: the
+image bake copies inline prompts flat into the prompt directory, so it failed
+with a bare `cp` error that named no entry. The error now comes at eval and
+names the entry. The only rosters that built before and now fail are those whose
+only offending entry is opted out (`model = ""`), since the bake never copied
+it. Give each inline prompt its own bare filename. Entries without an inline
+prompt are unaffected.
+
 ## Roster inline prompts may not shadow a shipped prompt file (issue #5035)
 
 A roster entry with a non-empty inline `prompt` now fails evaluation

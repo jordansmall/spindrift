@@ -556,6 +556,15 @@ file lives only in a runtime prompt-dir override must instead supply an
 inline `prompt` (or ship a real file under the checked-in
 `templates/default/prompts/`) to pass eval.
 
+The image bake copies inline prompts flat into the prompt directory, so two
+more shapes are rejected at eval. An inline prompt whose `promptFile` contains
+a `/` (`custom/x.md`, `../x.md`, `/abs/x.md`) throws
+`nested-inline-promptfile`, since the bake creates no subdirectory. Two entries
+with inline prompts sharing one `promptFile` throw
+`duplicate-inline-promptfile`, since the second copy would hit the first's
+read-only file. Give each inline prompt its own bare filename. Entries without
+an inline prompt are unaffected.
+
 `defaultRoster`'s own roster-native surface for setting models is its
 `models` argument (issue #2426): an attrset keyed by roster entry name
 (`scout`/`reviewer`/`filer`/`worker`/`review-axis`), e.g. `defaultRoster {
