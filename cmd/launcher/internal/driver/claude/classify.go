@@ -68,7 +68,9 @@ var transientExtras = []driverkit.Pattern{
 var terminalExtras = []driverkit.Pattern{
 	// A claude-code build predating the --agents flag rejects it outright
 	// (issue #1552). Naming that instead of the generic TaskFailed bucket tells
-	// the operator to bump claude-code, or blank SCOUT_MODEL/REVIEW_MODEL,
+	// the operator to bump claude-code (the Consumer's nixpkgs input), or blank
+	// every subagent model knob (agents.drivers.<name>.models.scout/review/
+	// filer/worker, or the roster) in the Consumer config and rebuild the image,
 	// rather than retry.
 	{Substr: "unknown option '--agents'", Reason: driverkit.UnsupportedFlag},
 }
