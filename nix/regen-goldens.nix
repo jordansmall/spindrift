@@ -41,18 +41,18 @@ pkgs.writeShellApplication {
     export TMPDIR="$scratch"
 
     # The vendor tree has to sit inside the module, and the invoking checkout
-    # has none, so run the test from a copy of the module. The test finds the
-    # goldens and the raw prompt templates at ../../tests and ../../templates
-    # relative to the module, so those two are symlinks back into the checkout,
-    # as are the module's own testdata/golden and the Driver corpus
-    # (internal/driver/testdata/corpus): goldens written through them land in
-    # the repo.
+    # has none, so run the test from a copy of the module. The tests read
+    # ../../tests, ../../templates, and ../../docs relative to the module, so
+    # those three are symlinks back into the checkout. So are the module's own
+    # testdata/golden and the Driver corpus (internal/driver/testdata/corpus),
+    # so goldens written through them land in the repo.
     mkdir -p "$scratch/src/cmd"
     cp -r "$root/cmd/launcher" "$scratch/src/cmd/launcher"
     chmod -R +w "$scratch/src"
     cp -r ${launcherGoModules} "$scratch/src/cmd/launcher/vendor"
     ln -s "$root/tests" "$scratch/src/tests"
     ln -s "$root/templates" "$scratch/src/templates"
+    ln -s "$root/docs" "$scratch/src/docs"
     rm -rf "$scratch/src/cmd/launcher/testdata/golden"
     ln -s "$root/cmd/launcher/testdata/golden" "$scratch/src/cmd/launcher/testdata/golden"
     rm -rf "$scratch/src/cmd/launcher/internal/driver/testdata/corpus"
@@ -65,7 +65,9 @@ pkgs.writeShellApplication {
     cd "$scratch/src/cmd/launcher"
     go test -count=1 -tags integration -run '^TestPromptAssemblyGoldens$' ./internal/promptassembly
     # Selects by name: a new statsGolden caller must end in Golden or start
-    # with By, or update mode silently skips it (issue #4861).
+    # with By, or update mode silently skips it (issue #4861). The By prefix
+    # also matches TestStats_ByDimensionsDocumented, which reads ../../docs,
+    # hence the docs link above (issue #5248).
     go test -count=1 -run '^TestStats_(.*Golden|By.*)$' .
     go test -count=1 -run '^TestDriverCorpusGoldens$' ./internal/driver
   '';
