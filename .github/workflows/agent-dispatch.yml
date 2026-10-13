@@ -49,10 +49,12 @@ jobs:
           app-id: ${{ vars.SPINDRIFT_AGENT_WORKER_APP_ID }}
           private-key: ${{ secrets.SPINDRIFT_AGENT_WORKER_APP_PRIVATE_KEY }}
 
-      # Keeps GH_TOKEN current for the rest of the job: the App private key
-      # stays in this backgrounded loop's memory (never reaching the
+      # Keeps the token file current for the rest of the job: the App private
+      # key stays in this backgrounded loop's memory (never reaching the
       # launcher or the Box); only the resulting short-lived tokens land on
-      # disk, at the path exported as GH_TOKEN_REFRESH_FILE below.
+      # disk, at the path exported as GH_TOKEN_REFRESH_FILE below. It cannot
+      # update the GH_TOKEN agent-setup froze, so later shell gh steps re-read
+      # that file themselves.
       - name: GH token refresher
         uses: ./.github/actions/gh-token-refresher
         with:
@@ -107,6 +109,9 @@ jobs:
         if: always()
         run: |
           [ -f .spindrift/logs/blocked.txt ] || exit 0
+          # agent-setup froze GH_TOKEN at job start; it may have expired by now.
+          GH_TOKEN=$(cat "$GH_TOKEN_REFRESH_FILE")
+          export GH_TOKEN
           blockers=$(cat .spindrift/logs/blocked.txt)
           gh issue comment "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \

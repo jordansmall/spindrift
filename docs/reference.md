@@ -5027,7 +5027,11 @@ calls (merge, label edits, the final comment) draw on whatever the refresher
 most recently minted rather than the token captured at job start. The knob is
 optional and off by default — an unset `GH_TOKEN_REFRESH_FILE` leaves `GH_TOKEN`
 static for the whole run, as before (the fine-grained-PAT path, and any
-deployment that doesn't wire up a refresher, are unaffected).
+deployment that doesn't wire up a refresher, are unaffected). Only the
+launcher polls the file: `agent-setup` freezes the initial token into
+`GH_TOKEN` for every later step, so the workflows' own shell `gh` steps after
+the launcher (the dispatch blocked-release, the recover park) re-read
+`$GH_TOKEN_REFRESH_FILE` before calling `gh` (issue #5259).
 
 **Interval registry.** Two intervals drive the refresher loop, and both are
 picked against the ~1h installation-token lifetime it exists to stay ahead of.
