@@ -1595,9 +1595,13 @@ per-secret `_CMD` example above in one line. A per-secret `<SECRET>_CMD`
 The template is attempted only for a secret this run actually needs — e.g.
 `JIRA_TOKEN` only when `ISSUE_TRACKER=jira`, and never for the opt-in
 `BOX_GH_TOKEN` (ADR 0016) — so an operator who doesn't use those features
-never gets an unwanted vault lookup for them. When a vault's naming isn't
-uniform, fall back to the per-secret `<SECRET>_CMD` forms above for the
-exceptions.
+never gets an unwanted vault lookup for them. The
+`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` pair is fetched as a unit,
+and only under the `claude` Driver: `CLAUDE_CODE_OAUTH_TOKEN` first, then
+`ANTHROPIC_API_KEY` only if that fetch fails, so an OAuth-only (or
+API-key-only) vault works; it is an error only when both fetches fail.
+When a vault's naming isn't uniform, fall back to the per-secret
+`<SECRET>_CMD` forms above for the exceptions.
 
 | var                       | default                | meaning                                  |
 | ------------------------- | ---------------------- | ---------------------------------------- |
