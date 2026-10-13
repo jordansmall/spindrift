@@ -439,10 +439,7 @@ in
         let
           path = resolveNixPath key entry;
         in
-        if entry.driverValued or false then
-          lib.concatStringsSep "." (driverMap.underDriver "<name>" (lib.splitString "." path))
-        else
-          path;
+        lib.concatStringsSep "." (driverMap.placeEntry "<name>" entry (lib.splitString "." path));
 
       # New domain-tree path wins, old settings.<section>.<knob> path is the
       # fallback (ADR 0037 Pass 1, issue #2179). `lib.warn` returns the value
