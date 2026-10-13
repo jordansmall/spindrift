@@ -280,9 +280,12 @@ review-loop prompt fragment was removed.
 - **⚠ Breaking: the Signal socket is the default carrier.** Comments, PR
   intent and issue intent now cross into the launcher over its socket
   unless you set `BOX_SIGNAL_CARRIER=log`. If you run with
-  `NETWORK_MODE=none` (or `no-host-loopback` without TCP) and never set
-  the knob, dispatch now stops at startup and tells you to set it to
-  `log`. The log carrier is still selectable through the 0.22 releases.
+  `NETWORK_MODE=none` and never set the knob, the launcher now stops at
+  startup and tells you to set it to `log`. On
+  `NETWORK_MODE=no-host-loopback`, where your runtime can only reach the
+  socket over TCP, each dispatch fails as it starts with a transport-probe
+  error that doesn't name the knob; setting `BOX_SIGNAL_CARRIER=log` fixes
+  that too. The log carrier is still selectable through the 0.22 releases.
 - **⚠ Breaking: one prompt fragment is gone.**
   `fragments/review-loop-inline.md` and its `REVIEW_LOOP_INLINE_STEP` var
   were deleted with the direct path. Overrides that reference the other
