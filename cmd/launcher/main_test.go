@@ -4144,6 +4144,35 @@ func TestNewSettle_ResearchReadOnly_RelaysVerdictComment(t *testing.T) {
 	}
 }
 
+// A Jira research run with the Filer off still relays its verdict (the Box
+// cannot write the tracker, issue #5245), so newSettle must build a settle
+// that fails a run whose relayed comment never arrived.
+func TestNewSettle_ResearchJiraFilerOff_MissingCommentFails(t *testing.T) {
+	t.Setenv("FILER_MODEL", "")
+	c := minimalValidConfig()
+	c.dispatchKind = dispatchkind.Research
+	c.issueTracker = "jira"
+
+	fc := forge.NewFake(forge.ResearchDispatchLabels())
+	fc.VerdictLabels = forge.ResearchVerdictLabels()
+	fc.SetIssue(forge.Issue{Number: "42", Labels: []string{"agent-research-in-progress"}})
+
+	s := newSettle(c, fc.AsNoLandingRecorder(), nil, nil, forge.Capabilities{})
+	s.Settle(dispatch.NewFake(), "42", 0, dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
+	})
+
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no verdict applied without a relayed comment, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 1 || fc.TransitionStateCalls[0].To != forge.Failed {
+		t.Fatalf("want 1 TransitionState to Failed, got %+v", fc.TransitionStateCalls)
+	}
+}
+
 // settleConfig wires Config.CodeForgeForIssue so mergeImmediate lands each
 // dispatched issue through its own resolved parent's CodeForge instance
 // (ADR 0033, issue #1734): a mixed-parent batch must never collapse onto one
