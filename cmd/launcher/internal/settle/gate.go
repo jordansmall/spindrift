@@ -562,7 +562,8 @@ func (s *Settle) recordLanding(num, landing string, passes []passmanifest.Entry)
 // else the last entry. With no manifest evidence it clears the recorded pass, so a
 // landing written without pass evidence (e.g. `spindrift recover`) never
 // inherits an earlier run's pass. Best-effort, matching transitionState's
-// log-but-don't-propagate contract.
+// log-but-don't-propagate contract. Fix passes that settle dispatches later
+// never call it (see forge.LandingPassRecorder).
 func (s *Settle) recordLandingPass(num string, passes []passmanifest.Entry) {
 	if s.landingPass == nil {
 		return
