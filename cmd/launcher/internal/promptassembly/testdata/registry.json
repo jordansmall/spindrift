@@ -473,9 +473,14 @@
     "var": "IF_BLOCKED_PUSH_READ_ONLY_STEP"
   },
   {
-    "gate": "BOX_ACCESS_READ_WRITE",
+    "gate": "OPEN_PR_CREATE_RW_GH",
     "fragment": "if-blocked-pr-git.md",
     "var": "IF_BLOCKED_PR_READ_WRITE_STEP"
+  },
+  {
+    "gate": "OPEN_PR_CREATE_RW_FORGEJO",
+    "fragment": "if-blocked-pr-forgejo.md",
+    "var": "IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP"
   },
   {
     "gate": "BOX_ACCESS_READ_ONLY_LOG",

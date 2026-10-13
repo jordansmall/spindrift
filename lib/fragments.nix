@@ -687,10 +687,17 @@ let
     # The IF BLOCKED PR check/create step (issue #1933): a read-only Box holds
     # no PR-create-capable token on the failure path either, so it emits a
     # SPINDRIFT_PR_INTENT line instead of running `gh pr view`/`gh pr create`.
+    # The read-write case forks on CODE_FORGE (issue #5099), as the OPEN A PULL
+    # REQUEST create step does: a forgejo Box has no `gh` for the PR check.
     {
-      gate = "BOX_ACCESS_READ_WRITE";
+      gate = "OPEN_PR_CREATE_RW_GH";
       fragment = "if-blocked-pr-git.md";
       var = "IF_BLOCKED_PR_READ_WRITE_STEP";
+    }
+    {
+      gate = "OPEN_PR_CREATE_RW_FORGEJO";
+      fragment = "if-blocked-pr-forgejo.md";
+      var = "IF_BLOCKED_PR_READ_WRITE_FORGEJO_STEP";
     }
     # Same carrier fork (issue #3726) on the IF BLOCKED path's PR-intent send.
     {
