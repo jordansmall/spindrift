@@ -124,6 +124,31 @@ let
     }
   );
 
+  # The opencode Driver's Harness as flake.nix declares it and the module's
+  # otherHarness renders it, so the equivalence check can pin its content, not
+  # just that it differs from claude's. A non-default Driver never inherits
+  # the default entry's Driver-valued env keys (effort, driverBashTimeoutMs).
+  # The list is hand-written on purpose, independent of driver-map.nix's
+  # driverValued.env, so a new top-level Driver-valued default must join it.
+  dogfoodOpencodeHarness = import ../lib/mkHarness.nix (
+    dogfoodHarnessArgs
+    // {
+      driver = "opencode";
+      roster = dogfoodDefaults.opencode.roster;
+      imageAttrName = "agent-image-opencode";
+      defaults =
+        removeAttrs dogfoodHarnessArgs.defaults [
+          "effort"
+          "driverBashTimeoutMs"
+        ]
+        // {
+          model = dogfoodDefaults.opencode.model;
+          daemonApp = ".#opencode";
+          daemonSelfApp = ".#opencode-daemon";
+        };
+    }
+  );
+
   # Used by template-fixture: the template module consumer has a stub self with
   # no shortRev, so its revision is "unknown" and this call must match by
   # leaving `revision` unset.
@@ -484,6 +509,7 @@ in
     seamFixtures
     harness
     dogfoodBwrapHarness
+    dogfoodOpencodeHarness
     nonRustHarness
     leanHarness
     nixStoreWritableHarness

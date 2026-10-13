@@ -1,8 +1,9 @@
 # The dogfood's tuned leaf values, defined once and consumed by both flake.nix's
 # `spindrift` module config and nix/fixtures.nix's direct mkHarness mirror, so
-# the flakemodule-equivalence check compares two wiring paths rather than two
-# hand-copied value sets (issue #459). The `opencode` block alone feeds
-# flake.nix only; the mirror covers the default (claude) Harness.
+# the equivalence checks compare two wiring paths rather than two hand-copied
+# value sets (issue #459): flakemodule-equivalence for the default (claude)
+# Harness from the top-level values, flakemodule-dogfood-drivers for the
+# opencode one from the `opencode` block.
 { system, lib }:
 let
   isLinux = builtins.match ".*-linux" system != null;
