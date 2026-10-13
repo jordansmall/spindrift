@@ -1,0 +1,37 @@
+{
+  "EarliestEventMs": 1791735096183,
+  "Found": true,
+  "HasEventSpan": true,
+  "LatestEventMs": 1791735115756,
+  "OutputIsMainLoopOnly": true,
+  "SummedByAgent": [
+    {
+      "APICalls": 7,
+      "Agent": "main",
+      "CacheCreationInputTokens": 18894,
+      "CacheReadInputTokens": 167274,
+      "OutputTokens": 2220,
+      "UncachedInputTokens": 14
+    }
+  ],
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 167274,
+      "CacheWrite1hTokens": 18894,
+      "CacheWrite5mTokens": 0,
+      "Model": "claude-opus-5-5",
+      "OutputTokens": 118,
+      "UncachedInputTokens": 14
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 18894,
+    "cache_read_input_tokens": 167274,
+    "duration_api_ms": 21285,
+    "duration_ms": 21897,
+    "input_tokens": 14,
+    "num_turns": 7,
+    "output_tokens": 2220,
+    "total_cost_usd": 0.2290628
+  }
+}

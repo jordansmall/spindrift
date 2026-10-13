@@ -1,0 +1,174 @@
+{
+  "lines": [
+    "#42 ○ dispatch_start",
+    "#42 ○ prompt_hashes",
+    "#42 ○ pass 1 (implement) started",
+    "#42 ── implementor · opus ──────────",
+    "#42 [git] Not resolved on origin/main (HEAD == origin/main, stale comment present).",
+    "#42 [git] · 1 bash",
+    "#42 [explore] · 1 subagent",
+    "#42 ── worker · sonnet ─────────────",
+    "#42 worker [edit] · 1 edit",
+    "#42 worker [test] · 1 bash",
+    "#42 ── implementor · opus ──────────",
+    "#42 [git] Diff good; gofmt clean, vet ok, waves tests pass.",
+    "#42 [git] · 1 bash",
+    "#42 [explore] checks-inbox exit=0.",
+    "#42 [explore] · 1 bash",
+    "#42 [explore] · 1 skill",
+    "#42 [commit] · 1 bash",
+    "#42 [test] I fixed the stale comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` and committed it as e8680316 on `...",
+    "#42 [test] · 1 bash",
+    "#42 [test] · 9 turns",
+    "#42 ○ pass 1 (implement) usage: 9 calls, 18 in, 3522 out (main loop), 307602 cache read, 48430 cache write · main 346797, worker 12775",
+    "#42 ○ pass 1 ended with no outcome (exit 0)",
+    "#42 ○ continue: no cap fired, entering review pass",
+    "#42 ○ pass 2 (review) started",
+    "#42 ── reviewer · opus ─────────────",
+    "#42 reviewer [git] · 1 bash",
+    "#42 reviewer [explore] · 1 skill",
+    "#42 reviewer [review] · 1 subagent",
+    "#42 ── review-axis · opus ──────────",
+    "#42 review-axis [git] · 1 bash",
+    "#42 review-axis [explore] · 2 reads",
+    "#42 ── reviewer · opus ─────────────",
+    "#42 reviewer [review] · 1 subagent",
+    "#42 ── review-axis · opus ──────────",
+    "#42 review-axis [git] · 1 bash",
+    "#42 review-axis [test] · 1 bash",
+    "#42 review-axis [explore] · 1 bash",
+    "#42 review-axis [git] · 1 bash",
+    "#42 review-axis [explore] · 3 bashs",
+    "#42 ── reviewer · opus ─────────────",
+    "#42 [git] Both review axes are back.",
+    "#42 reviewer [git] · 2 bashs",
+    "#42 [git] VERDICT: BLOCK",
+    "#42 reviewer [git] · 1 bash",
+    "#42 reviewer [git] · 9 turns",
+    "#42 ○ pass 2 (review) usage: 14 calls, 28 in, 3766 out (main loop), 271457 cache read, 54205 cache write · main 235169, review-axis 94287",
+    "#42 ○ verdict: BLOCK",
+    "#42 ○ continue: blocked, running another fix pass",
+    "#42 ○ pass 3 (fix) started",
+    "#42 ── implementor · opus ──────────",
+    "#42 [git] · 1 bash",
+    "#42 [explore] · 2 bashs",
+    "#42 [edit] · 1 edit",
+    "#42 [test] · 1 bash",
+    "#42 [explore] Retyping commit to `test(waves)` and amending in the comment fix.",
+    "#42 [explore] · 1 skill",
+    "#42 [commit] · 1 bash",
+    "#42 [test] I fixed the blocking review finding: the commit is now typed `test(waves)` instead of `fix(waves)`.",
+    "#42 [test] · 1 bash",
+    "#42 [test] · 10 turns",
+    "#42 ○ pass 3 (fix) usage: 8 calls, 16 in, 3384 out (main loop), 311321 cache read, 36448 cache write · main 351169",
+    "#42 ○ pass 3 ended with no outcome (exit 0)",
+    "#42 ○ continue: no cap fired, entering review pass",
+    "#42 ○ pass 4 (review) started",
+    "#42 ── reviewer · opus ─────────────",
+    "#42 reviewer [git] · 2 bashs",
+    "#42 reviewer [explore] · 1 bash, 1 skill",
+    "#42 reviewer [review] · 1 subagent",
+    "#42 ── review-axis · opus ──────────",
+    "#42 review-axis [git] · 1 bash",
+    "#42 review-axis [explore] · 1 bash",
+    "#42 ── reviewer · opus ─────────────",
+    "#42 reviewer [review] · 1 subagent",
+    "#42 ── review-axis · opus ──────────",
+    "#42 review-axis [explore] · 1 bash",
+    "#42 review-axis [git] · 1 bash",
+    "#42 review-axis [test] · 1 bash",
+    "#42 review-axis [explore] · 2 bashs",
+    "#42 review-axis [git] · 1 bash",
+    "#42 ── reviewer · opus ─────────────",
+    "#42 [review] VERDICT: APPROVE",
+    "#42 reviewer [review] · 8 turns",
+    "#42 ○ pass 4 (review) usage: 12 calls, 24 in, 3186 out (main loop), 221862 cache read, 52688 cache write · main 201813, review-axis 75947",
+    "#42 ○ verdict: APPROVE",
+    "#42 ○ continue: approved, running the land pass",
+    "#42 ○ pass 5 (land) started",
+    "#42 ── implementor · opus ──────────",
+    "#42 [git] Rebase: up to date.",
+    "#42 [git] · 1 bash",
+    "#42 [test] No python; use Edit.",
+    "#42 [test] · 1 bash",
+    "#42 [edit] · 1 edit",
+    "#42 [explore] · 1 skill",
+    "#42 [test] Gate green (exit=0).",
+    "#42 [test] · 1 bash",
+    "#42 [git] · 1 bash",
+    "#42 ○ signal pr-intent accepted · 1152 bytes · sha256:25bbf8235424c5ba6fcea3f140d168f06b5031f488f4023d685d93f03c14f93f",
+    "#42 [test] · 1 bash",
+    "#42 [explore] SPINDRIFT_OUTCOME issue=4940 landing=agent/issue-4940 status=ready note=Reworded the session_test.",
+    "#42 [explore] · 1 bash",
+    "#42 [explore] · 10 turns",
+    "#42 ○ decisions budget: round 3 mean 55.0/entry (ceiling 50), total 55 tokens (ceiling 400)",
+    "#42 ○ pass 5 (land) usage: 8 calls, 16 in, 2698 out (main loop), 323112 cache read, 37801 cache write · main 363627",
+    "#42 ○ post-approval land delta: 1 files changed, 1 insertions(+), 0 deletions(-)",
+    "#42 ○ stop: outcome reached",
+    "#42 ○ delta review skip: land delta is confined to what the reviewer's findings already covered",
+    "#42 ○ signal status read",
+    "#42 ○ dispatch_settled"
+  ],
+  "onModel": [
+    {
+      "model": "claude-opus-5-5",
+      "role": "implementor"
+    },
+    {
+      "model": "claude-sonnet-5-5",
+      "role": "worker"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "implementor"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "reviewer"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "review-axis"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "reviewer"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "review-axis"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "reviewer"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "implementor"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "reviewer"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "review-axis"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "reviewer"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "review-axis"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "reviewer"
+    },
+    {
+      "model": "claude-opus-5-5",
+      "role": "implementor"
+    }
+  ]
+}

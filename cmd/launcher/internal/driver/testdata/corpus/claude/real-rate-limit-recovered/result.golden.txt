@@ -1,0 +1,1 @@
+SPINDRIFT_OUTCOME issue=4423 landing=none status=recommend note=Reproduced on main: bare 429/529 substrings matched against the whole error line flip a context-overflow error and a 429-bearing timestamp to Transient; anchor the markers and match only the error payload.

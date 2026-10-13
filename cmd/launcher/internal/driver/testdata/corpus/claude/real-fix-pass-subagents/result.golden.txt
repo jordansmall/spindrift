@@ -1,0 +1,43 @@
+I fixed the stale comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` and committed it as e8680316 on `agent/issue-4940`. Gofmt, vet, the waves tests and the full `checks-inbox` gate all passed.
+
+- **The change:** the comment at `cmd/launcher/internal/waves/session_test.go:10-13` no longer says headless call sites pass a nil Session. It now says a nil Session, or a nil `Session.Limiter` (what headless callers pass), falls back to a fixed limiter built from `cfg.MaxParallel`. The test's name and body are unchanged.
+- **Already resolved?** No. The branch is the same commit as `origin/main` (e5fccdca), and the old comment was still there. Rebasing onto `origin/main` found nothing new.
+- **Process:** I skipped the scout because the issue already cited the exact lines. A worker subagent made the edit.
+
+I stopped after the commit because no review has run on this branch yet. There's no PR request and no `SPINDRIFT_OUTCOME` line yet; those come in the land pass after the review approves. Run-state notes for the next pass are in `/tmp/pass-summary.md` and `/tmp/decisions.md`. `/tmp/dispositions.md` is empty because there were no review findings to address.
+VERDICT: BLOCK
+
+## Blocking
+- e8680316 (commit subject) — The commit is typed `fix(waves)`, but the change only rewords one doc comment in a `_test.go` file. CONTRIBUTING.md "Commits & releases" says "the type prefix isn't cosmetic", because release-please builds CHANGELOG.md and the version bump from it. `.release-please-config.json` maps `fix` to "Bug Fixes", so the next release notes would list "waves: stop calling headless Session nil" as a user-facing bug fix when no behaviour changed. Repo precedent for this exact kind of edit uses `docs`/`test`: d9662b94 "docs(terminate,waves): retire headless nil claim" and 3265a2a7 "test(outcome): name classifySignalLine in stale test comments". Retype it as `docs(waves): …` or `test(waves): …`.
+
+## Non-blocking
+- cmd/launcher/internal/waves/session_test.go:11-13 — The parenthetical "(what headless callers pass)" repeats a list of callers outside this package, and the `Session` type doc at session.go:5-16 already records the same fact. That kind of claim is what went stale and caused this issue. Pointing at the field doc instead (e.g. "see Session.Limiter") would stay accurate longer.
+- cmd/launcher/internal/waves/session_test.go:11-13 — The comment now describes the non-nil Session with a nil Limiter path as "the same fallback", but the test only calls `RunContinuous(c, nil, …)`. A reader could assume this test pins the headless path too. The statement is true from continuous.go:197-206, and the issue says a second case is optional, so this is a suggestion only.
+- cmd/launcher/internal/waves/continuous.go:203 — "Headless (CONTINUOUS_DISPATCH) and every nil-Session call site" is still accurate, because headless callers reach this branch through a nil Limiter. But it is a third copy of the same caller inventory and can go stale the same way. It is out of scope for this issue, so it's a possible follow-up.
+I fixed the blocking review finding: the commit is now typed `test(waves)` instead of `fix(waves)`. Release notes will list it under "Tests" rather than "Bug Fixes", which matches the earlier `test(outcome)` commit for stale test comments. The branch is still one commit (`2170066e`) and was already up to date with `origin/main` (e5fccdca), so the rebase changed nothing.
+
+I also folded two of the reviewer's non-blocking points into the same commit. The comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` in `cmd/launcher/internal/waves/session_test.go` now:
+- says the test only pins the nil-Session case;
+- points at `Session.Limiter` for the nil-Limiter path headless callers take.
+
+I kept the "(what headless callers pass)" wording because the issue's acceptance criteria require it. I dropped the third point, the caller list in the `continuous.go:203` comment. That comment is still accurate and this branch doesn't touch that file.
+
+Checks: `gofmt` is clean, and `go vet` plus the targeted `go test` on `./internal/waves` pass. I did not re-run the full `checks-inbox` gate. Only a comment and the commit message changed since it passed in the first pass.
+
+Nothing is pushed, no PR intent is sent and there's no outcome line yet; the next review pass runs before landing.
+VERDICT: APPROVE
+
+## Blocking
+- none
+
+## Non-blocking
+- cmd/launcher/internal/waves/session_test.go:13 — The phrase "(what headless callers pass)" is broader than the path it describes. Two of the three headless call sites (main.go:1712 and selective.go:68) call `waves.Dispatch`, and the Session.Limiter doc (session.go:13-15) says Dispatch never reads that field, so only the headless `RunContinuous` caller (main.go:1927) actually takes this fallback. Writing "headless RunContinuous callers" would be more precise, though the comment sits on a RunContinuous test, so in context it reads correctly.
+
+## Probed (APPROVE only)
+- Prior-round claims: the branch was rewritten into one commit, 2170066e. It is now typed `test(waves)`, and `.release-please-config.json` maps that type to the "Tests" section with no version bump, so the round-one Blocking finding is fixed. The comment now adds "see Session.Limiter" and states that "this test pins only the nil-Session case", which resolves both round-one Non-blocking comment findings. The won't-fix on the continuous.go:203 comment is acceptable: the issue lists it as out of scope, it is still accurate, and the branch does not touch it.
+- Spec: the old "every headless dispatch call site" wording is gone. The comment now covers both the nil-Session case and the non-nil Session with a nil Limiter case, each falling back to `cfg.MaxParallel`. The test name and body are unchanged, and only session_test.go changed (+4/−3).
+- Correctness: I checked each claim in the comment against the code. continuous.go:197-206 leaves the limiter nil when the Session is nil and then calls NewLimiter(cfg.MaxParallel). The Session.Limiter doc in session.go:9-11 says "Nil means a fixed cap built fresh from cfg.MaxParallel". The headless callers pass `&waves.Session{Terminated: terminated}` with no Limiter. `gofmt -l` printed nothing, and `go test ./internal/waves/ -run TestRunContinuous_NilSession` exited 0.
+- Security: the diff changes only a comment. It adds no executable code, external input handling, secrets, or commands.
+- Standards: the commit follows Conventional Commits with a hard-wrapped body, `Closes #4940`, and the attribution trailer. The comment length fits the size of the change, and none of the Fowler baseline smells apply to a prose-only edit. Both `/code-review` axis subagents (Standards and Spec) came back with no blocking findings.
+- Full-diff re-skim: I checked the `git diff origin/main...HEAD --stat` output from end to end. It is one file, and that is the whole hunk I reviewed.
+SPINDRIFT_OUTCOME issue=4940 landing=agent/issue-4940 status=ready note=Reworded the session_test.go comment so it no longer says headless callers pass a nil Session; it now says a nil Session or a nil Session.Limiter (what headless RunContinuous callers pass) falls back to a fixed limiter from cfg.MaxParallel. The round-2 wording nit is folded into commit 068f4c72, checks-inbox is green, and no findings were left to file.
