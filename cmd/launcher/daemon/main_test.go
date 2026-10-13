@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -3444,6 +3445,97 @@ func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
 				}
 			} else if strings.TrimSpace(strings.Join(trailing, "")) != "" {
 				t.Errorf("trailing = %q, want none", trailing)
+			}
+		})
+	}
+}
+
+// TestInvalidConfigHaltParity pins issue #5207: daemon.Loop's config-invalid
+// rejection and finish both publish the halt through the one shared
+// Emitter.PublishHalted, so for the same Halt they emit the same halt event,
+// write the same halted status, and warn identically when the status write
+// fails. finish's stderr diagnostic is its alone and is not compared.
+func TestInvalidConfigHaltParity(t *testing.T) {
+	kinds := []daemon.Kind{daemon.KindOf(dispatchkind.Work)}
+	clock := func() time.Time { return time.Unix(0, 0).UTC() }
+
+	tmpSuffix := regexp.MustCompile(`tmp-\d+`)
+	type outcome struct {
+		events, warn string
+		status       *daemon.Status
+	}
+	// run gives each path its own Emitter and StatusWriter; dir is fresh per
+	// path so a finish that skipped its write could not pass on Loop's file.
+	run := func(dir string, halt func(em *daemon.Emitter, sw *daemon.StatusWriter) daemon.Halt) (outcome, daemon.Halt) {
+		var out, errW bytes.Buffer
+		em := daemon.NewEmitter(&out, &errW, clock)
+		h := halt(em, daemon.NewStatusWriter(dir, clock))
+		// The temp file name carries a random suffix.
+		o := outcome{events: out.String(), warn: tmpSuffix.ReplaceAllString(errW.String(), "tmp-N")}
+		if report, err := daemon.ReadStatus(dir); err == nil {
+			o.status = report.Status
+		}
+		return o, h
+	}
+
+	for _, tt := range []struct {
+		name        string
+		statusDirs  func(t *testing.T) [2]string
+		wantWarning bool
+	}{
+		{name: "status written", statusDirs: func(t *testing.T) [2]string {
+			return [2]string{t.TempDir(), t.TempDir()}
+		}},
+		{name: "status write fails", statusDirs: func(t *testing.T) [2]string {
+			// A path under a regular file can never be created. Both paths
+			// share it because the warning names the path.
+			file := filepath.Join(t.TempDir(), "file")
+			if err := os.WriteFile(file, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(file, "dir")
+			return [2]string{dir, dir}
+		}, wantWarning: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dirs := tt.statusDirs(t)
+
+			// Slots <= 0 is rejected before any pool or Runner is touched.
+			viaLoop, h := run(dirs[0], func(em *daemon.Emitter, sw *daemon.StatusWriter) daemon.Halt {
+				return daemon.Loop(context.Background(), daemon.Config{Kinds: kinds, Status: sw}, nil, em, hostClock{})
+			})
+			if h.Class != daemon.HaltInvalidConfig {
+				t.Fatalf("Loop halt class = %v, want HaltInvalidConfig", h.Class)
+			}
+			viaFinish, _ := run(dirs[1], func(em *daemon.Emitter, sw *daemon.StatusWriter) daemon.Halt {
+				finish(io.Discard, em, sw, kinds, h)
+				return h
+			})
+
+			if viaLoop.events != viaFinish.events {
+				t.Errorf("halt events differ:\nLoop:   %q\nfinish: %q", viaLoop.events, viaFinish.events)
+			}
+			if viaLoop.warn != viaFinish.warn {
+				t.Errorf("warnings differ:\nLoop:   %q\nfinish: %q", viaLoop.warn, viaFinish.warn)
+			}
+			if tt.wantWarning {
+				if !strings.HasPrefix(viaLoop.warn, "daemon: status file write failed: ") {
+					t.Errorf("warning = %q, want the status-write warning", viaLoop.warn)
+				}
+				return
+			}
+			if viaLoop.warn != "" {
+				t.Errorf("Loop warning = %q, want none", viaLoop.warn)
+			}
+			if viaFinish.warn != "" {
+				t.Errorf("finish warning = %q, want none", viaFinish.warn)
+			}
+			if viaLoop.status == nil || viaFinish.status == nil {
+				t.Fatalf("status missing: Loop %v, finish %v", viaLoop.status, viaFinish.status)
+			}
+			l, f := viaLoop.status, viaFinish.status
+			if l.State != f.State || l.Reason != f.Reason || !slices.Equal(l.Kinds, f.Kinds) {
+				t.Errorf("status differs:\nLoop:   %+v\nfinish: %+v", l, f)
 			}
 		})
 	}
