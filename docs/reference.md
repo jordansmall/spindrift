@@ -4837,7 +4837,8 @@ command's exit code is the acceptance: exit 0 prints a receipt —
 is taken; a non-zero exit
 prints `signal <kind> rejected (<status>): <reason>` and the signal was
 NOT taken, so the agent can never mistake a rejection for success. A
-usage failure the verb catches itself — an unknown flag, a missing
+usage failure the verb catches itself — an unknown flag, a stray
+positional argument, a missing
 `-title` or `-type` — ends on that same shape, `signal <kind> rejected
 (usage): <reason>`, after any usage dump, so it survives a truncating
 pipe; the verb also reports it on the socket's diagnostics-only
