@@ -113,16 +113,18 @@ rec {
       # Capability signals resolved by lib/mkHarness.nix from the backend
       # descriptor registry for the active CODE_FORGE/ISSUE_TRACKER pairing
       # (issue #2527 slice 1). Rendered below as the literal strings
-      # "true"/"false": Go's getenvArtifact returns map[string]string, and
-      # callers compare against the literal string "true".
+      # "true"/"false": inputdoc.Document.Artifacts is a map[string]string,
+      # and the launcher compares docArtifact(...) against the literal "true".
       hostMediatedRemote,
       outboxRelayCapable,
       inBoxUnreachableTracker,
       fullyLocal,
       # Facts resolved by lib/mkHarness.nix from mergedDefaults/finalRoster
-      # (issue #2533, scoutProvisioned added by #3157) so promptassembly's Env
-      # reads them via CLI flags fed from getenvArtifact instead of re-deriving
-      # them in the Box.
+      # (issue #2533, scoutProvisioned added by #3157). The launcher reads
+      # them from the document's artifacts (deriving them host-side when a key
+      # is missing or the CODE_FORGE/ISSUE_TRACKER pairing mismatches) and
+      # forwards them as BOX_* env; promptassembly.EnvFromEnviron reads that
+      # env in the Box instead of re-deriving them there.
       trackerAxisRead,
       trackerAxisWrite,
       trackerAxisFiler,
