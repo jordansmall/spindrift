@@ -497,6 +497,15 @@ rec {
   # by issue #2950). The pinned agents are renderDogfoodRosterPinsDoc's.
   renderDogfoodModelsDoc = fixture: "`${fixture.schemaDefaults.scoutModel}`.\n";
 
+  # docs/reference.md's byName example (issue #5141). The entry's lines[0] is the
+  # bare `byName = {` opener, so the full flake path replaces it.
+  renderByNameExampleDoc =
+    entry:
+    let
+      opener = "perSystem.spindrift.${builtins.concatStringsSep "." entry.path} = {";
+    in
+    "```nix\n${builtins.concatStringsSep "\n" ([ opener ] ++ builtins.tail entry.lines)}\n```\n";
+
   # Data rows of a rendered option-surface table as `{ name; domainPath; }`, the
   # two cells callers key on. The header and separator lines have no backticked
   # first cell, so they drop out. The combined scoutPrompt / reviewPrompt /
