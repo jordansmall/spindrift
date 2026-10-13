@@ -134,7 +134,34 @@ func asciiLower(s string) string {
 	return string(b)
 }
 
-// replaceAllFold is strings.ReplaceAll with ASCII case-insensitive matching.
+// indexHostFold returns the first index >= from where needle occurs in folded
+// and ends at a host boundary (EOF or a URL/quote/whitespace/YAML-flow
+// terminator), or -1.
+// ':' is deliberately not a terminator: a port follows, so a portless route must
+// not match "host:8081", nor "host.mirror.net" (issue #5311). folded and needle
+// must already be asciiLower'd.
+func indexHostFold(folded, needle string, from int) int {
+	for from <= len(folded) {
+		i := strings.Index(folded[from:], needle)
+		if i < 0 {
+			return -1
+		}
+		i += from
+		end := i + len(needle)
+		if end == len(folded) {
+			return i
+		}
+		switch folded[end] {
+		case '/', '?', '#', '"', '\'', '}', ']', ',', ' ', '\t', '\n', '\r', '\f', '\v':
+			return i
+		}
+		from = i + 1
+	}
+	return -1
+}
+
+// replaceAllFold is strings.ReplaceAll with ASCII case-insensitive matching,
+// accepting only matches that end at a host boundary (see indexHostFold).
 // Bytes outside a matched span, such as an uppercase path, stay untouched.
 // Relies on asciiLower being length-preserving (ASCII-only) so indexes into the
 // folded copy align with s; old must be non-empty (callers prepend a scheme).
@@ -143,11 +170,10 @@ func replaceAllFold(s, old, repl string) string {
 	var out strings.Builder
 	last := 0
 	for {
-		i := strings.Index(foldedS[last:], foldedOld)
+		i := indexHostFold(foldedS, foldedOld, last)
 		if i < 0 {
 			break
 		}
-		i += last
 		out.WriteString(s[last:i])
 		out.WriteString(repl)
 		last = i + len(old)
@@ -249,7 +275,7 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	anyHostPresent := false
 	for _, rw := range rewrites {
 		host := FoldHost(rw.UpstreamHost)
-		if strings.Contains(foldedContent, "https://"+host) || strings.Contains(foldedContent, "http://"+host) {
+		if indexHostFold(foldedContent, "https://"+host, 0) >= 0 || indexHostFold(foldedContent, "http://"+host, 0) >= 0 {
 			anyHostPresent = true
 			break
 		}
@@ -274,9 +300,9 @@ func ApplyInTreeBinding(repoDir string, row ecosystem.Row, rewrites []HostRewrit
 	}
 
 	// Longest host first, on a copy because the caller's slice order must
-	// survive: two hosts can overlap by prefix ("registry.example.com" and
-	// "registry.example.com:8443"), and replacing the shorter one first would
-	// also match inside the longer host's own URL and corrupt it. Longest-first
+	// survive. Hosts can overlap by prefix ("registry.example.com" and
+	// "registry.example.com:8443"); the host boundary already stops the shorter
+	// one matching inside the longer, so this is a safeguard. Longest-first
 	// also keeps a shorter host out of an already-rewritten LocalURL.
 	ordered := append([]HostRewrite(nil), rewrites...)
 	sort.SliceStable(ordered, func(i, j int) bool {
