@@ -816,14 +816,17 @@ exemption (`fragments/caveman-default.md` exempts commit messages, always
 full human-quality prose — irrelevant here since a research dispatch never
 commits). It does name `SPINDRIFT_COMMENT` explicitly, where the base
 fragment only reaches it generically, as one instance of "any host-relay
-signal line such as `SPINDRIFT_PR_INTENT`": on a read-only dispatch
-(`BoxWriteEnabled=false`) the box can't post the verdict comment directly,
-and independently, whenever the issue tracker is a local tracker there is no
-tracker client to post through at all — either way it relays that comment
-through a single `SPINDRIFT_COMMENT` host-relay stdout line instead, making
-it the sole carrier of the verdict on that path
-(`fragments/research-verdict-local.md`). A Consumer that never bakes the
-skill gets a prompt with zero mention of it.
+signal line such as `SPINDRIFT_PR_INTENT`": whenever the verdict is relayed
+(`RESEARCH_VERDICT_RELAYED`) — a read-only dispatch (`BoxWriteEnabled=false`),
+a local tracker (no tracker client at all), a tracker the Box cannot write
+in-box (Jira), or a Filer-on run, where the verdict relays even from a
+read-write Box (ADR 0041) — the box posts nothing itself and relays the
+comment through a single `SPINDRIFT_COMMENT` host-relay stdout line under
+the log carrier (the socket carrier relays it through the signal socket
+instead), making it the sole carrier of the verdict on that path (the
+`fragments/research-verdict-*-readonly*.md` and
+`fragments/research-verdict-local*.md` fragments). A Consumer that never bakes the skill gets a prompt with zero
+mention of it.
 
 A fix box (dispatched when CI comes back red — see [Runtime flow](#how-a-run-works))
 receives `FIX_PASS` and runs `prompts/fix-prompt.md` instead: the branch is
