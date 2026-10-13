@@ -123,6 +123,9 @@ func TestRun_DiscoversMergedLandingByBranchAndCloses(t *testing.T) {
 	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
 		t.Errorf("RecordLandingCalls = %v, want one call recording the discovered PR", f.RecordLandingCalls)
 	}
+	if len(f.RecordLandingPassCalls) != 1 || f.RecordLandingPassCalls[0] != (forge.RecordLandingPassCall{Num: "42"}) {
+		t.Errorf("RecordLandingPassCalls = %v, want one clearing call (pass 0, empty kind)", f.RecordLandingPassCalls)
+	}
 
 	iss, err := f.Issue("42")
 	if err != nil {
@@ -396,6 +399,9 @@ func TestRun_HealsBranchRefLandingWhenAncestorOfIntegration(t *testing.T) {
 	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "integration/42@abc123"}) {
 		t.Errorf("RecordLandingCalls = %v, want one call upgrading to the IntegrationRef", f.RecordLandingCalls)
 	}
+	if len(f.RecordLandingPassCalls) != 0 {
+		t.Errorf("RecordLandingPassCalls = %v, want none: an upgrade re-keys the same landing", f.RecordLandingPassCalls)
+	}
 
 	iss, err := f.Issue("42")
 	if err != nil {
@@ -497,6 +503,9 @@ func TestRun_DiscoversLocalLandingByBranchAndCloses(t *testing.T) {
 	}
 	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "integration/42@abc123"}) {
 		t.Errorf("RecordLandingCalls = %v, want one call recording the discovered landing", f.RecordLandingCalls)
+	}
+	if len(f.RecordLandingPassCalls) != 1 || f.RecordLandingPassCalls[0] != (forge.RecordLandingPassCall{Num: "42"}) {
+		t.Errorf("RecordLandingPassCalls = %v, want one clearing call (pass 0, empty kind)", f.RecordLandingPassCalls)
 	}
 
 	iss, err := f.Issue("42")
@@ -844,6 +853,9 @@ func TestRun_BranchLandingResolvesMergedPRAndCloses(t *testing.T) {
 	if len(f.RecordLandingCalls) != 1 || f.RecordLandingCalls[0] != (forge.RecordLandingCall{Num: "42", Landing: "https://github.com/o/r/pull/7"}) {
 		t.Errorf("RecordLandingCalls = %v, want one call recording the resolved PR", f.RecordLandingCalls)
 	}
+	if len(f.RecordLandingPassCalls) != 0 {
+		t.Errorf("RecordLandingPassCalls = %v, want none: an upgrade re-keys the same landing", f.RecordLandingPassCalls)
+	}
 }
 
 // An integration-ref landing cannot verify through a PR Code Forge; it prints
@@ -1033,5 +1045,62 @@ func TestRun_BranchLandingNamingForeignBranchIsUnverifiableOnLocalForge(t *testi
 				t.Errorf("LandingContainedCalls = %v, want none (foreign branch is never queried)", f.LandingContainedCalls)
 			}
 		})
+	}
+}
+
+// The pass clear is advisory provenance: a failing RecordLandingPass must not
+// stop the sweep from closing the issue whose landing was just recorded.
+func TestRun_DiscoveryPassClearFailureStillCloses(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	f.SetPR(f.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
+	f.RecordLandingPassErr = errors.New("disk full")
+
+	res, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+}
+
+// The local discovery path treats a failing pass clear the same way.
+func TestRun_LocalDiscoveryPassClearFailureStillCloses(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	f.BranchPrefix = "agent/issue-"
+	f.SetLandingContained(f.AgentBranch("42"), "42", true, nil)
+	f.SetIntegrationTip("42", "integration/42@abc123")
+	f.RecordLandingPassErr = errors.New("disk full")
+	cf := f.AsLocal()
+
+	res, err := reconcile.Run(f, cf, fakeLiveness{}, capsFor(f, cf), selfScope)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Closed) != 1 || res.Closed[0] != "42" {
+		t.Errorf("Closed = %v, want [42]", res.Closed)
+	}
+	if len(f.RecordLandingPassCalls) != 1 {
+		t.Errorf("RecordLandingPassCalls = %v, want the one failed clearing call", f.RecordLandingPassCalls)
+	}
+}
+
+// A failed landing write skips the pass clear: the old pass still describes
+// whatever landing is recorded.
+func TestRun_FailedLandingWriteSkipsPassClear(t *testing.T) {
+	f := forge.NewFake()
+	f.SetIssue(forge.Issue{Number: "42", State: forge.IssueOpen})
+	f.SetPR(f.AgentBranch("42"), forge.PR{URL: "https://github.com/o/r/pull/7"})
+	f.SetPRState("https://github.com/o/r/pull/7", forge.PRMerged)
+	f.RecordLandingErr = errors.New("disk full")
+
+	if _, err := reconcile.Run(f, f, fakeLiveness{}, capsFor(f, f), selfScope); err == nil {
+		t.Fatal("Run: want the landing write error")
+	}
+	if len(f.RecordLandingPassCalls) != 0 {
+		t.Errorf("RecordLandingPassCalls = %v, want none after a failed landing write", f.RecordLandingPassCalls)
 	}
 }

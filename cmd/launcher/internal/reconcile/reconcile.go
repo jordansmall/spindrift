@@ -6,6 +6,7 @@ package reconcile
 
 import (
 	"fmt"
+	"os"
 
 	"spindrift.dev/launcher/internal/forge"
 )
@@ -56,6 +57,7 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 		return Result{}, nil
 	}
 	lr := caps.LandingRecorder
+	lpr := caps.LandingPassRecorder
 	flagger := caps.AbandonedFlagger
 	repair := caps.LandingRepair
 
@@ -65,8 +67,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, lp LivenessProbe, caps forge
 	}
 
 	var res Result
-	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, flagger: flagger}
-	llc := localLandingReconciler{closer: closer, container: container, repair: repair, lr: lr, cf: cf, scopeFor: scopeFor}
+	prc := prReconciler{closer: closer, pr: pr, cf: cf, lr: lr, lpr: lpr, flagger: flagger}
+	llc := localLandingReconciler{closer: closer, container: container, repair: repair, lr: lr, lpr: lpr, cf: cf, scopeFor: scopeFor}
 	for _, iss := range issues {
 		if pr != nil {
 			if err := prc.reconcile(&res, iss); err != nil {
@@ -108,6 +110,7 @@ type prReconciler struct {
 	pr      forge.PRForge
 	cf      forge.CodeForge
 	lr      forge.LandingRecorder
+	lpr     forge.LandingPassRecorder
 	flagger forge.AbandonedFlagger
 }
 
@@ -175,9 +178,15 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 		fmt.Printf("    #%s  landing=%s  status=landing-unverifiable  !! PR %s for branch %s closed unmerged; may be a prior attempt's\n", iss.Number, iss.Landing, landing, bareBranch)
 		return nil
 	}
-	if fromBranch := iss.Landing == "" || bareBranch != ""; fromBranch && p.lr != nil {
+	// Upgrading a bare branch re-keys the landing its recorded pass produced, so
+	// only a discovery (no prior landing) clears the pass.
+	discovered := iss.Landing == ""
+	if fromBranch := discovered || bareBranch != ""; fromBranch && p.lr != nil {
 		if err := p.lr.RecordLanding(iss.Number, landing); err != nil {
 			return fmt.Errorf("reconcile issue %s: record landing: %w", iss.Number, err)
+		}
+		if discovered {
+			clearLandingPass(p.lpr, iss.Number)
 		}
 	}
 	switch state {
@@ -196,6 +205,18 @@ func (p prReconciler) reconcile(res *Result, iss forge.Issue) error {
 		res.Abandoned = append(res.Abandoned, iss.Number)
 	}
 	return nil
+}
+
+// clearLandingPass drops any pass recorded for a landing reconcile has just
+// discovered: with no prior landing, a surviving pass (a pre-#5189 file) was
+// recorded for no landing. Advisory, so a failure is logged, never returned.
+func clearLandingPass(lpr forge.LandingPassRecorder, num string) {
+	if lpr == nil {
+		return
+	}
+	if err := lpr.RecordLandingPass(num, 0, ""); err != nil {
+		fmt.Fprintf(os.Stderr, "    ?? #%s: could not clear landing pass: %v\n", num, err)
+	}
 }
 
 // ownsAgentBranch reports whether a recorded bare branch is iss's own agent
@@ -228,6 +249,7 @@ type localLandingReconciler struct {
 	container forge.LandingContainmentQuery
 	repair    forge.LandingRepair
 	lr        forge.LandingRecorder
+	lpr       forge.LandingPassRecorder
 	cf        forge.CodeForge
 	scopeFor  func(num string) forge.SeedScope
 }
@@ -306,6 +328,7 @@ func (l localLandingReconciler) reconcileBranchRef(res *Result, iss forge.Issue,
 	if err != nil {
 		return fmt.Errorf("reconcile issue %s: resolve integration tip for %s: %w", iss.Number, scope.Parent(), err)
 	}
+	// The pass is left alone: this re-keys the landing it was recorded for.
 	if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
 		return fmt.Errorf("reconcile issue %s: record repaired landing: %w", iss.Number, err)
 	}
@@ -339,6 +362,7 @@ func (l localLandingReconciler) discover(res *Result, iss forge.Issue) error {
 	if err := l.lr.RecordLanding(iss.Number, tip); err != nil {
 		return fmt.Errorf("reconcile issue %s: record discovered landing: %w", iss.Number, err)
 	}
+	clearLandingPass(l.lpr, iss.Number)
 	fmt.Printf("    #%s  landing=%s  status=landing-discovered  discovered-landing=%s\n", iss.Number, branch, tip)
 	return l.close(res, iss.Number)
 }

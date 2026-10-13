@@ -1023,6 +1023,43 @@ func TestLocalTracker_RecordLandingPass_EmptyKindOmitsLandingPassKindLine(t *tes
 	}
 }
 
+// reconcile clears a stale landing pass with RecordLandingPass(num, 0, "");
+// render must then drop both lines rather than leave the old pass behind.
+func TestLocalTracker_RecordLandingPass_ZeroPassEmptyKindClearsRecordedPass(t *testing.T) {
+	dir := t.TempDir()
+	labels := testLabels
+	writeLocalIssue(t, dir, "fix-thing", localIssue{frontmatter: localFrontmatter{
+		Title: "Fix thing", State: labels.InProgress, Created: "2026-07-09T12:00:00Z",
+	}})
+
+	lt := NewLocalTracker(dir, labels)
+	if err := lt.RecordLandingPass("fix-thing", 2, "fix"); err != nil {
+		t.Fatalf("RecordLandingPass(2, fix): %v", err)
+	}
+	if err := lt.RecordLandingPass("fix-thing", 0, ""); err != nil {
+		t.Fatalf("RecordLandingPass(0, \"\"): %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "fix-thing.md"))
+	if err != nil {
+		t.Fatalf("read issue file: %v", err)
+	}
+	if strings.Contains(string(data), "landingpass") {
+		t.Errorf("expected no landingpass lines after clearing, got:\n%s", data)
+	}
+
+	li, err := parseLocalIssue(data)
+	if err != nil {
+		t.Fatalf("parseLocalIssue: %v", err)
+	}
+	if li.frontmatter.LandingPass != 0 {
+		t.Errorf("LandingPass = %d, want 0", li.frontmatter.LandingPass)
+	}
+	if li.frontmatter.LandingPassKind != "" {
+		t.Errorf("LandingPassKind = %q, want empty", li.frontmatter.LandingPassKind)
+	}
+}
+
 // forge.IssueCloser is optional (ADR 0029): only the local adapter has a
 // native closed: axis for reconcile to flip.
 func TestLocalTracker_ImplementsIssueCloser(t *testing.T) {
