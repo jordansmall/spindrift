@@ -722,3 +722,121 @@ func TestLoopFirstStatusShowsInheritedSlotsBeforeAnyStartChild(t *testing.T) {
 		t.Errorf("slot 2 = %+v, want busy butler on chore sweep", s2)
 	}
 }
+
+const (
+	ciWaitPRURL  = "https://github.com/o/r/pull/7"
+	ciWaitRunURL = "https://github.com/o/r/actions/runs/9"
+)
+
+// startLoop runs Loop in the background; the returned channel yields its Halt.
+func startLoop(cfg Config, r *scriptedRunner) <-chan Halt {
+	var buf bytes.Buffer
+	done := make(chan Halt, 1)
+	go func() { done <- Loop(context.Background(), cfg, r, newTestEmitter(&buf), &testClock{}) }()
+	return done
+}
+
+// onlySlotStatus reads the status file and returns its one slot.
+func onlySlotStatus(t *testing.T, dir string) SlotStatus {
+	t.Helper()
+	rep, err := ReadStatus(dir)
+	if err != nil || rep.Status == nil || len(rep.Status.Slots) != 1 {
+		t.Fatalf("ReadStatus = %+v, %v", rep, err)
+	}
+	return rep.Status.Slots[0]
+}
+
+func TestInheritRestoresTheCIWait(t *testing.T) {
+	tests := []struct {
+		name     string
+		prURL    string
+		runURL   string
+		wantWait bool
+	}{
+		{"pr with run url", ciWaitPRURL, ciWaitRunURL, true},
+		{"pr without run url", ciWaitPRURL, "", true},
+		{"no ci wait", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := testConfig(2)
+			dir := t.TempDir()
+			cfg.Status = NewStatusWriter(dir, time.Now)
+			hs := inheritedWork(0, 100)
+			hs.CIWaitPRURL, hs.CIWaitRunURL = tt.prURL, tt.runURL
+			cfg.Handoff = handoffOf(hs)
+			r := &scriptedRunner{revisions: []string{"rev1"}}
+			r.holdSlots(2)
+			var atStart *Status
+			r.onStart = func(context.Context, ChildRequest) error {
+				if rep, err := ReadStatus(dir); err == nil && atStart == nil {
+					atStart = rep.Status
+				}
+				return nil
+			}
+			done := startLoop(cfg, r)
+			for range 2 {
+				r.awaitStart(t)
+			}
+			r.releaseSlot(t, 0, ChildResult{Exit: 5})
+			r.releaseSlot(t, 1, ChildResult{Exit: 5})
+			<-done
+
+			if atStart == nil || len(atStart.Slots) != 2 {
+				t.Fatalf("status at the first StartChild = %+v, want 2 slots", atStart)
+			}
+			got := atStart.Slots[0]
+			if got.CIWait != tt.wantWait || got.PRURL != tt.prURL || got.CIRunURL != tt.runURL {
+				t.Errorf("slot = ci_wait %v pr_url %q ci_run_url %q, want %v %q %q",
+					got.CIWait, got.PRURL, got.CIRunURL, tt.wantWait, tt.prURL, tt.runURL)
+			}
+		})
+	}
+}
+
+// A ci_wait record from the inherited child still lands on the restored wait.
+func TestInheritedCIWaitRecordUpdatesTheRunURL(t *testing.T) {
+	cfg := testConfig(1)
+	dir := t.TempDir()
+	cfg.Status = NewStatusWriter(dir, time.Now)
+	hs := inheritedWork(0, 100)
+	hs.CIWaitPRURL = ciWaitPRURL
+	cfg.Handoff = handoffOf(hs)
+	r := &scriptedRunner{revisions: []string{"rev1"}}
+	r.holdSlots(1)
+	done := startLoop(cfg, r)
+	r.awaitStart(t)
+
+	if got := onlySlotStatus(t, dir); !got.CIWait || got.PRURL != ciWaitPRURL || got.CIRunURL != "" {
+		t.Errorf("restored slot = %+v, want ci_wait on %q with no run URL yet", got, ciWaitPRURL)
+	}
+
+	r.fireOnRecord(t, 0, Record{Event: report.EventCIWait, Key: dispatchkey.Issue("42"), PRURL: ciWaitPRURL, RunURL: ciWaitRunURL})
+	if got := onlySlotStatus(t, dir); !got.CIWait || got.PRURL != ciWaitPRURL || got.CIRunURL != ciWaitRunURL {
+		t.Errorf("slot = %+v, want ci_wait on %q with run %q", got, ciWaitPRURL, ciWaitRunURL)
+	}
+	r.releaseSlot(t, 0, ChildResult{Exit: 5})
+	<-done
+}
+
+func TestCommittedHandoffCarriesTheCIWait(t *testing.T) {
+	cfg := testConfig(1)
+	var buf bytes.Buffer
+	p, _ := newPool(context.Background(), cfg, &scriptedRunner{}, newTestEmitter(&buf), &testClock{})
+	defer p.cancel()
+	handed := ChildState{PID: 100}
+	p.st.slots[0] = slotState{phase: PhaseRunning, handed: &handed, flight: slotFlight{
+		kind: workKind, key: dispatchkey.Issue("42"),
+		ciWait: ciWait{pr: ciWaitPRURL, runURL: ciWaitRunURL},
+	}}
+	p.st.self.Phase = SelfUpdateRestarting
+
+	h := p.committedHandoff()
+
+	if h == nil || len(h.Slots) != 1 {
+		t.Fatalf("handoff = %+v, want one slot", h)
+	}
+	if got := h.Slots[0]; got.CIWaitPRURL != ciWaitPRURL || got.CIWaitRunURL != ciWaitRunURL {
+		t.Errorf("slot = %+v, want the CI wait carried", got)
+	}
+}

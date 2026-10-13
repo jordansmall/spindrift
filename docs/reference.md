@@ -7657,9 +7657,11 @@ of the PR's head commit) and is set from the same record's `run_url`, so it
 appears only on a `github` Code Forge and only once the PR's checks register;
 each new wait starts without it, and a `forgejo` slot never shows it. The
 next `box` record or the `settled` record clears all three, and they never
-carry to the next child. Only a Code Forge with PRs (`github`, `forgejo`)
-enters a CI wait, so a `git` or `local` slot never shows them. They are
-additive and omitted when empty, so `schema` does not bump.
+carry to the next child, though an in-place restart (`--restart-in-place`,
+see **Restart in place**) keeps them on an inherited slot. Only a Code Forge
+with PRs (`github`, `forgejo`) enters a CI wait, so a `git` or `local` slot
+never shows them. They are additive and omitted when empty, so `schema` does
+not bump.
 `image_build_since` can be present only on a `running` slot while its child
 builds or realises its Box image, and is when the child's latest
 `image_build` record with `state` `started` arrived (RFC3339 UTC; see

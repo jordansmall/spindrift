@@ -117,6 +117,7 @@ func (p *pool) committedHandoff() *Handoff {
 			ChildStart: f.childStart.time, ChildStartN: f.childStart.n, ChildLog: f.childLog,
 			GateGen: f.gateGen, Key: f.key, Issues: slices.Clone(f.issues),
 			Pass: f.pass, Model: f.model, ModelRole: f.modelRole,
+			CIWaitPRURL: f.ciWait.pr, CIWaitRunURL: f.ciWait.runURL,
 			Child: *sl.handed,
 		})
 	}
