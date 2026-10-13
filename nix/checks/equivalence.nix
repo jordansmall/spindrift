@@ -1113,6 +1113,7 @@ in
   # `mkHarness` call with the same `roster`.
   flakemodule-roster =
     let
+      # Arbitrary sample IDs: leave them literal when the default model is bumped (issue #5141).
       testRoster = [
         {
           name = "scout";

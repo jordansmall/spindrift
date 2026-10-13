@@ -1,5 +1,9 @@
 #!/usr/bin/env bats
 # The harness varies --worker-model between arms (issue #2057 slice 1).
+# Model IDs here are arbitrary sample data, not the default model: leave them
+# literal when the default model is bumped (issue #5141). The priced
+# --breakdown test's haiku ID must keep the "claude-haiku" prefix its
+# AB_PRICES keys on.
 
 @test "dry-run: off arm omits worker model, on arm sets it, the rest of the command is shared" {
   run env -i \
