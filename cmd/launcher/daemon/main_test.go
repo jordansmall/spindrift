@@ -2027,37 +2027,6 @@ func (f *fakePreflightRunner) calls() int {
 	return f.doctorCalls
 }
 
-// TestPublishHaltedStatus pins what mainRun's preflight-refusal branch relies
-// on: with no pool yet to snapshot through, a direct Write still lands a
-// StateHalted status naming the same reason and kinds the caller passed.
-func TestPublishHaltedStatus(t *testing.T) {
-	dir := t.TempDir()
-	sw := daemon.NewStatusWriter(dir, func() time.Time { return time.Unix(0, 0).UTC() })
-	var stderr bytes.Buffer
-
-	publishHaltedStatus(&stderr, sw, []daemon.Kind{daemon.KindOf(dispatchkind.Work)}, "preflight: doctor-config-invalid")
-
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty on a successful write", stderr.String())
-	}
-	report, err := daemon.ReadStatus(dir)
-	if err != nil {
-		t.Fatalf("ReadStatus: %v", err)
-	}
-	if report.Status == nil {
-		t.Fatal("status file missing after publishHaltedStatus")
-	}
-	if report.Status.State != daemon.StateHalted {
-		t.Errorf("state = %q, want %q", report.Status.State, daemon.StateHalted)
-	}
-	if report.Status.Reason != "preflight: doctor-config-invalid" {
-		t.Errorf("reason = %q, want %q", report.Status.Reason, "preflight: doctor-config-invalid")
-	}
-	if len(report.Status.Kinds) != 1 || report.Status.Kinds[0] != daemon.KindOf(dispatchkind.Work) {
-		t.Errorf("kinds = %v, want [dispatch]", report.Status.Kinds)
-	}
-}
-
 // decodePreflightEvents parses buf's JSON-lines stream, one daemon.Event per
 // non-empty line, in emitted order.
 func decodePreflightEvents(t *testing.T, buf *bytes.Buffer) []daemon.Event {
@@ -3458,7 +3427,7 @@ func TestFinish_StatusWriteWarningTrailsDiagnostic(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var merged lockedBuffer
 			clock := func() time.Time { return time.Unix(0, 0).UTC() }
-			em := daemon.NewEmitter(&merged, io.Discard, clock)
+			em := daemon.NewEmitter(&merged, &merged, clock)
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			h := startupPreflight(ctx, &fakePreflightRunner{}, em)

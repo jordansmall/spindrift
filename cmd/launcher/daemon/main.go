@@ -665,23 +665,13 @@ func preflightRefusal(em *daemon.Emitter, revision, outcome string, h daemon.Hal
 	return h
 }
 
-// publishHaltedStatus writes a StateHalted status naming reason directly to
-// sw, for a caller with no pool yet to snapshot through — the preflight
-// refusal below, before daemon.Loop (and therefore any pool) ever exists. A
-// write failure is reported to stderr and otherwise ignored, matching
-// pool.publish's own advisory-only handling.
-func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daemon.Kind, reason string) {
-	if err := sw.Write(daemon.Status{Kinds: kinds, State: daemon.StateHalted, Reason: reason}); err != nil {
-		fmt.Fprintf(stderr, "daemon: status file write failed: %v\n", err)
-	}
-}
-
 // finish is mainRun's one path from a pre-loop Halt to a return value: emit
 // the halt event, print "daemon: " + h.Diagnostic() to stderr, publish the
 // halted status, and derive the exit code. That order is load-bearing: a merged
 // stdout+stderr stream must read halt event, diagnostic, then any
-// publishHaltedStatus write-failure warning, byte-identical to the output
-// before 580296cf. The per-class text lives in Halt.Diagnostic, so no
+// Emitter.PublishHalted write-failure warning (when em's errW is that same
+// stderr, as NewEmitter(stdout, stderr, ...) wires it), byte-identical to the
+// output before 580296cf. The per-class text lives in Halt.Diagnostic, so no
 // caller can print text that disagrees with h. sw == nil is
 // deliberate, not a missing argument: it is the instance-lock refusal,
 // where the status file belongs to the daemon that actually holds the
@@ -690,16 +680,14 @@ func publishHaltedStatus(stderr io.Writer, sw *daemon.StatusWriter, kinds []daem
 // after the lock acquire below succeeds).
 //
 // An in-loop halt never comes through here for the emit/publish half:
-// pool.halt (and invalidConfig) have already emitted the halt event and
-// published the status by the time Loop returns its Halt, so mainRun ends
-// on h.ExitCode() alone for that path — that asymmetry is intentional, not
-// a gap to "fix" by double-emitting.
+// pool.halt (and invalidConfig, via Emitter.PublishHalted) have already
+// emitted the halt event and published the status by the time Loop returns
+// its Halt, so mainRun ends on h.ExitCode() alone for that path — that
+// asymmetry is intentional, not a gap to "fix" by double-emitting.
 func finish(stderr io.Writer, em *daemon.Emitter, sw *daemon.StatusWriter, kinds []daemon.Kind, h daemon.Halt) int {
 	em.Emit(h.Event())
 	fmt.Fprintf(stderr, "daemon: %s\n", h.Diagnostic())
-	if sw != nil {
-		publishHaltedStatus(stderr, sw, kinds, h.String())
-	}
+	em.PublishHalted(sw, kinds, h.String())
 	return h.ExitCode()
 }
 

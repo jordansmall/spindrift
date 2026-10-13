@@ -529,26 +529,23 @@ func validateHandoff(cfg Config) string {
 	return ""
 }
 
+// sortedKeys returns m's kinds in order, so config validation reports the same
+// offender every run.
+func sortedKeys[V any](m map[Kind]V) []Kind { return slices.Sorted(maps.Keys(m)) }
+
 // invalidConfig emits and returns a Halt of class HaltInvalidConfig carrying
 // detail, the shape shared by every cfg field Loop rejects before starting a
 // pool.
+//
 // No Kind is stamped on the halt event: this rejection happens before any
 // pool exists to have picked one. It also publishes a StateHalted status
 // directly, bypassing pool.snapshot (there is no pool yet to snapshot): cfg
 // is otherwise unvalidated at this point, so cfg.Kinds is copied over as
 // given rather than assumed well-formed.
-// sortedKeys returns m's kinds in order, so config validation reports the same
-// offender every run.
-func sortedKeys[V any](m map[Kind]V) []Kind { return slices.Sorted(maps.Keys(m)) }
-
 func invalidConfig(em *Emitter, cfg Config, detail string) Halt {
 	h := Halt{Class: HaltInvalidConfig, Detail: detail}
 	em.Emit(h.Event())
-	if cfg.Status != nil {
-		if err := cfg.Status.Write(Status{Kinds: cfg.Kinds, State: StateHalted, Reason: h.String()}); err != nil {
-			em.warnf("daemon: status file write failed: %v\n", err)
-		}
-	}
+	em.PublishHalted(cfg.Status, cfg.Kinds, h.String())
 	return h
 }
 

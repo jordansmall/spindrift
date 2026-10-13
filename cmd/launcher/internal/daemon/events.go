@@ -172,6 +172,25 @@ func (e *Emitter) warnf(format string, args ...any) {
 	fmt.Fprintf(e.errW, format, args...)
 }
 
+// warnStatusWrite is the one home of the advisory status-write warning, shared
+// by PublishHalted and pool.publish.
+func (e *Emitter) warnStatusWrite(err error) {
+	e.warnf("daemon: status file write failed: %v\n", err)
+}
+
+// PublishHalted writes a StateHalted status naming reason directly to sw, for
+// a caller with no pool to snapshot through. A nil sw is a silent no-op: the
+// instance-lock refusal must not stomp the live holder's status file. A write
+// failure is advisory only.
+func (e *Emitter) PublishHalted(sw *StatusWriter, kinds []Kind, reason string) {
+	if sw == nil {
+		return
+	}
+	if err := sw.Write(Status{Kinds: kinds, State: StateHalted, Reason: reason}); err != nil {
+		e.warnStatusWrite(err)
+	}
+}
+
 // Emit writes ev as one JSON line. It is safe to call concurrently — each slot
 // goroutine emits from its child's OnRecord callback while other slots and
 // the loop goroutine emit their own events. A caller-preset ev.Time is kept;

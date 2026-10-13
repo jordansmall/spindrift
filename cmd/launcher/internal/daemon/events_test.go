@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -302,4 +304,67 @@ func TestEventHandoffFieldsRoundTrip(t *testing.T) {
 	if out.FromPath != in.FromPath || out.ToPath != in.ToPath || len(out.Slots) != 2 || out.Slots[1] != 2 {
 		t.Errorf("round trip = %+v, want %+v", out, in)
 	}
+}
+
+// TestEmitterPublishHalted pins the shared pre-pool halt publisher: it lands a
+// StateHalted status naming the caller's reason and kinds, warns on errW when
+// the write fails, and is a silent no-op for a nil writer (the instance-lock
+// refusal must never touch the live holder's file).
+func TestEmitterPublishHalted(t *testing.T) {
+	clock := func() time.Time { return time.Unix(0, 0).UTC() }
+	kinds := []Kind{KindOf(dispatchkind.Work)}
+
+	t.Run("written", func(t *testing.T) {
+		dir := t.TempDir()
+		var errW bytes.Buffer
+		em := NewEmitter(&bytes.Buffer{}, &errW, clock)
+
+		em.PublishHalted(NewStatusWriter(dir, clock), kinds, "preflight: doctor-config-invalid")
+
+		if errW.Len() != 0 {
+			t.Fatalf("errW = %q, want empty on a successful write", errW.String())
+		}
+		report, err := ReadStatus(dir)
+		if err != nil {
+			t.Fatalf("ReadStatus: %v", err)
+		}
+		if report.Status == nil {
+			t.Fatal("status file missing after PublishHalted")
+		}
+		if report.Status.State != StateHalted {
+			t.Errorf("state = %q, want %q", report.Status.State, StateHalted)
+		}
+		if report.Status.Reason != "preflight: doctor-config-invalid" {
+			t.Errorf("reason = %q, want %q", report.Status.Reason, "preflight: doctor-config-invalid")
+		}
+		if len(report.Status.Kinds) != 1 || report.Status.Kinds[0] != kinds[0] {
+			t.Errorf("kinds = %v, want %v", report.Status.Kinds, kinds)
+		}
+	})
+
+	t.Run("write failure warns", func(t *testing.T) {
+		file := filepath.Join(t.TempDir(), "file")
+		if err := os.WriteFile(file, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var errW bytes.Buffer
+		em := NewEmitter(&bytes.Buffer{}, &errW, clock)
+
+		em.PublishHalted(NewStatusWriter(filepath.Join(file, "dir"), clock), kinds, "x")
+
+		if !strings.HasPrefix(errW.String(), "daemon: status file write failed: ") {
+			t.Errorf("errW = %q, want the status-write warning", errW.String())
+		}
+	})
+
+	t.Run("nil writer is silent", func(t *testing.T) {
+		var errW bytes.Buffer
+		em := NewEmitter(&bytes.Buffer{}, &errW, clock)
+
+		em.PublishHalted(nil, kinds, "x")
+
+		if errW.Len() != 0 {
+			t.Errorf("errW = %q, want empty", errW.String())
+		}
+	})
 }

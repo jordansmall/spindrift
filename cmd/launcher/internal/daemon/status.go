@@ -277,8 +277,8 @@ func NewStatusWriter(dir string, now func() time.Time) *StatusWriter {
 }
 
 // Write publishes s at seq 0, the unsequenced pre-pool path: it is called
-// only before any pool exists to allocate a real seq (invalidConfig, and
-// the daemon's preflight refusal) and by tests. lastSeq starts at 0 and the
+// only before any pool exists to allocate a real seq (via
+// Emitter.PublishHalted) and by tests. lastSeq starts at 0 and the
 // drop rule is strictly-older, so seq 0 always writes until the pool's
 // first sequenced Publish call takes over.
 func (w *StatusWriter) Write(s Status) error {
