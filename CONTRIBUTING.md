@@ -27,9 +27,14 @@ nix develop                     # host-side dev shell: git, gh, jq, and the spin
 
 CI (`.github/workflows/ci.yml`) runs `nix flake check --print-build-logs` and
 then realises the Linux image on every push and PR, except a PR touching only
-`docs/`, root `*.md`, or the release-please manifest: that builds just
-`.#checks-docs`, the checks that read docs files. The `ci-ok` job is the one
-required status check either way. **Before opening a PR,
+`docs/`, root `*.md`, or the release-please manifest, or editing only comments
+in `.go`/`.nix` files: that builds just `.#checks-docs`, the checks that read
+docs files (and gofmt, nixfmt and the Go tests). A comment edit still runs the
+full matrix when it touches a directive (`//go:build`, `//nolint`, a
+shellcheck or `GENERATED` marker) or a file listed in
+`.github/scripts/ci-comment-readers`, whose text a check outside that set
+reads. The `ci-ok` job is the one required status check either way. **Before
+opening a PR,
 `nix flake check` must be green**, and new behavior needs a test — a bats case
 for bash changes, a Go test for launcher and `box` changes, or a nix fixture
 check for the declarative surface.

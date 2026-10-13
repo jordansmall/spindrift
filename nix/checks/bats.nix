@@ -41,6 +41,9 @@ let
     pkgs.gnugrep
     pkgs.gnused
     pkgs.jq
+    # ci-changes.sh's comment-only parsers (issue #5158).
+    pkgs.go
+    pkgs.nix
   ];
 
   batsEnv = {
@@ -72,8 +75,9 @@ let
     # tests/agent-dispatch-blocked-step.bats (issue #5257) runs the Forgejo
     # dispatch workflow's "Detect a blocked marker" step body.
     FORGEJO_AGENT_DISPATCH_YML = ../../.forgejo/workflows/agent-dispatch.yml;
-    # CI's change classifier and required-check verdict (issue #5155).
-    CI_CHANGES_SH = ../../.github/scripts/ci-changes.sh;
+    # CI's change classifier and required-check verdict (issue #5155). The
+    # classifier reads its Go helper and reader list beside it (issue #5158).
+    CI_CHANGES_SH = "${../../.github/scripts}/ci-changes.sh";
     CI_OK_SH = ../../.github/scripts/ci-ok.sh;
     PROMPTS_DIR = ../../templates/default/prompts;
     # The rendered contracts, driver/agent-paths preambles and fragment
