@@ -1278,6 +1278,90 @@ in
         touch $out
       '';
 
+  # Grep pins for the Forgejo sibling of the filer dedup step (issue #5127):
+  # same bullet structure as filer-dedup-search.md, over the REST issue
+  # search. The all-open search must carry no `labels=` (it covers
+  # human-filed issues), all four provenance labels must be searched closed,
+  # and `gh` must never appear (it would query the wrong tracker).
+  filer-prompt-dedup-forgejo-searches = pkgs.runCommand "filer-prompt-dedup-forgejo-searches" { } ''
+    f=${../../templates/default/prompts/fragments/filer-dedup-search-forgejo.md}
+    # Each search spans several lines, so judge it as one curl..jq block: emit
+    # one "<state> <labels> <jq>" record per curl, flushed at its jq line (or
+    # at the next curl / EOF when the jq pipe is missing).
+    awk '
+      function flush() {
+        if (!on) return
+        s = (b ~ /state=open/) ? "open" : (b ~ /state=closed/) ? "closed" : "none"
+        l = match(b, /labels=[a-z-]+/) ? substr(b, RSTART + 7, RLENGTH - 7) : "-"
+        print s, l, (b ~ /jq -r/) ? "jq" : "nojq"
+        on = 0; b = ""
+      }
+      /curl /{flush(); on = 1}
+      on {b = b $0}
+      /jq -r/{flush()}
+      END{flush()}
+    ' "$f" >blocks
+    total=$(wc -l <blocks)
+    [ "$total" -eq 6 ] || {
+      echo "expected 6 curl searches (site key, all-open, 4 closed), found $total" >&2
+      exit 1
+    }
+    if grep -qv ' jq$' blocks; then
+      echo "expected every curl search to pipe through jq -r" >&2
+      exit 1
+    fi
+    # The site-key and all-open searches are open and carry no labels= filter
+    # (the latter covers human-filed issues).
+    open=$(grep -c '^open - ' blocks || true)
+    [ "$open" -eq 2 ] || {
+      echo "expected 2 open searches without labels=, found $open" >&2
+      exit 1
+    }
+    for l in agent-review-finding agent-research-reject agent-research-finding agent-butler-finding; do
+      grep -q "^closed $l jq\$" blocks || {
+        echo "expected a closed-issue dedup search for labels=$l" >&2
+        exit 1
+      }
+    done
+    gh=$(grep -c 'gh issue' "$f" || true)
+    [ "$gh" -eq 0 ] || {
+      echo "expected no gh issue command in the Forgejo dedup fragment, found $gh" >&2
+      exit 1
+    }
+    touch $out
+  '';
+
+  # The golden filer prompts are verified against a real assembly by the
+  # promptassembly Go test, so asserting on them is asserting on the render:
+  # neither the Forgejo nor the local-tracker filer prompt may carry a
+  # `gh issue` command (issue #5127).
+  filer-prompt-rendered-dedup-per-tracker =
+    pkgs.runCommand "filer-prompt-rendered-dedup-per-tracker"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+      }
+      ''
+        g=${../../tests/testdata/prompt-assembly-golden}
+        for cell in forgejo-orchestrator-filer-on forgejo-readonly-orchestrator-filer-on local-tracker-orchestrator-filer-on; do
+          jq -r '.filer.prompt // empty' "$g/$cell.agents.json" >"$cell.txt"
+          [ -s "$cell.txt" ] || {
+            echo "$cell: no filer prompt in the golden agents.json" >&2
+            exit 1
+          }
+          if grep -q 'gh issue' "$cell.txt"; then
+            echo "$cell: rendered filer prompt carries a gh issue command" >&2
+            exit 1
+          fi
+        done
+        for cell in forgejo-orchestrator-filer-on forgejo-readonly-orchestrator-filer-on; do
+          grep -q 'state=open' "$cell.txt" || {
+            echo "$cell: filer prompt lost its REST dedup search" >&2
+            exit 1
+          }
+        done
+        touch $out
+      '';
+
   # Grep pin (issue #3226 slice 3, extended by issue #3652): the filer's
   # issue-authoring obligations are contract, not coaching -- the work-path
   # backlink shape (PR form, and since #3652 the now-primary branch form,
