@@ -591,12 +591,10 @@ multi-pass loop to single-pass.
 
 Invalid — the smallest fragment that identifies each failure, never a
 whole line worth copying:
-- `SPINDRIFT_OUTCOME:` — a trailing colon, not a space, after the token;
-  this never matches, so the launcher sees no outcome and treats the run
-  as lost.
 - `Done — SPINDRIFT_OUTCOME …` — a prefix before the token; text before
-  it hides the line the same way, losing the run. Print the line on its
-  own, starting at column one, nothing before it.
+  it hides the line, so the launcher sees no outcome and treats the run
+  as lost. Print the line on its own, starting at column one, nothing
+  before it.
 - `status=SUCCESS` — an out-of-enum status; `ready` and `blocked` are the
   only accepted values, but a value like this still parses, so it's
   silently wrong rather than lost outright, and the launcher never flips

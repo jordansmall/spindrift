@@ -419,18 +419,16 @@ func TestPromptBytes_OutcomeStatesExactGrammarAndStatusValues(t *testing.T) {
 	pbMatchFold(t, section, `already-resolved`, `ALREADY RESOLVED gate`)
 }
 
-// issue #1901: SPINDRIFT_OUTCOME: (colon, not space) fails the parser's
-// literal prefix match, so the prompt must warn against it explicitly. issue
-// #3224 reshaped it to a bare token+colon fragment, not a whole copyable line,
-// to cut the parrot risk.
-func TestPromptBytes_OutcomeMarksTrailingColonFragmentInvalid(t *testing.T) {
+// issue #2012, #5298: the parser tolerates a colon after the token, so the
+// prompt must not list it as an invalid (lost) form.
+func TestPromptBytes_OutcomeNeverShowsColonForm(t *testing.T) {
 	section := pbOutcomeSection(t)
-	pbContains(t, section, "SPINDRIFT_OUTCOME:")
-	pbMatchFold(t, section, `trailing colon`)
+	pbNoContains(t, section, "SPINDRIFT_OUTCOME:")
+	pbNoMatchFold(t, section, `trailing colon`)
 }
 
 // issue #1901: LastInLog only recognizes a line that *starts* with the prefix,
-// so text before the token hides the whole line the same way. issue #3224
+// so text before the token hides the whole line. issue #3224
 // reshaped the example to a truncated prefix fragment, so this pins the rule's
 // own wording plus the column-one consequence.
 func TestPromptBytes_OutcomeMarksTokenPrecededByTextInvalid(t *testing.T) {
@@ -440,7 +438,7 @@ func TestPromptBytes_OutcomeMarksTokenPrecededByTextInvalid(t *testing.T) {
 
 // issue #1901: Parse() does not enforce a status enum, so ready/blocked is a
 // prompt-level contract and the prompt must call out that a value like SUCCESS
-// is wrong. Unlike the colon/prefix variants this one does parse, so the prompt
+// is wrong. Unlike the prefix variant this one does parse, so the prompt
 // must not claim it is lost; issue #3224 renamed the wording but not the rule.
 func TestPromptBytes_OutcomeMarksOutOfEnumStatusInvalidNotLost(t *testing.T) {
 	section := pbOutcomeSection(t)
