@@ -199,8 +199,7 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	}
 
 	// Branch recovery comes before everything else that touches the tree: the
-	// registry's in-tree rewrite must not dirty it ahead of the rebase and the
-	// devShell probe must see the rebased tree.
+	// registry's in-tree rewrite must not dirty it ahead of the rebase.
 	if err := r.recoverBranch(); err != nil {
 		return 0, phaseErr("branch-recovery", err)
 	}
@@ -210,7 +209,10 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	defer r.bindRegistry()()
 
 	// The toolchain decision comes next: the home layout and everything after
-	// it run on the devShell choice it records (issue #4297).
+	// it run on the devShell choice it records (issue #4297). On a conflict the
+	// rebase is still unfinished here, so the choice reflects the conflicted
+	// tree: only the conflict pass runs on it, and the main run on a second
+	// decision taken once the pass resolves the tree.
 	r.decideToolchain()
 
 	// HOME must be laid out before the conflict-resolve pass (issue #2706) and
@@ -226,6 +228,11 @@ func run(in inputs, env promptassembly.Env, d deps) (int, error) {
 	}
 	if !cr.Continue {
 		return cr.ExitCode, nil
+	}
+	if r.recovery.Conflict {
+		// A conflicted flake file fails the first probe; the resolved tree may
+		// not, and the main run must not lose nix develop to the stale answer.
+		r.decideToolchain()
 	}
 
 	handoff, err := d.Assemble(r.in.Assembly, env, d.Stdout)
@@ -651,7 +658,8 @@ func (r *boxRun) strippedHandoff(raw []byte) (string, error) {
 // and warms dependencies with the prefetch hook, then records whether the
 // Driver runs inside nix develop on the assembly inputs. A self-contained
 // dispatch has no clone, so all three are skipped. A prefetch failure is a
-// warning: the Driver still runs on whatever the hook warmed.
+// warning: the Driver still runs on whatever the hook warmed. Running it again
+// is safe: it resets the recorded choice, then re-probes and re-prefetches.
 func (r *boxRun) decideToolchain() {
 	p := &r.in.Assembly.Passthrough
 	p.Devshell, p.DevshellName = false, "default"
