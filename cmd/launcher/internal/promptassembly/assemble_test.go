@@ -37,6 +37,7 @@ func coveredEnv() Env {
 		CodeForge:            "github",
 		ForgeBackend:         "GH",
 		BoxWriteEnabled:      true,
+		OutboxRelayCapable:   true,
 		DispatchKind:         "work",
 		FixPass:              0,
 		SkillsFound:          "caveman, tdd, commit, code-review",
