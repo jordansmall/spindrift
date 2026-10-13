@@ -1719,6 +1719,32 @@ in
         touch $out
       '';
 
+  # The IF BLOCKED draft-PR step forks on CODE_FORGE (issue #5099,
+  # OPEN_PR_CREATE_RW_GH/OPEN_PR_CREATE_RW_FORGEJO): the github fragment keeps
+  # `gh pr view` and never invokes `fj pr`, and the forgejo fragment never
+  # invokes `gh pr` and opens the draft with `fj pr create` and a positional `WIP: ` title. fj has no
+  # `--title` flag (issue #5098), so the forgejo fragment must not use it.
+  if-blocked-pr-fragments-fork-forge-on-read-write =
+    pkgs.runCommand "if-blocked-pr-fragments-fork-forge-on-read-write" { }
+      ''
+        grep -q 'gh pr view' ${../../templates/default/prompts/fragments/if-blocked-pr-git.md}
+        ! grep -q 'fj pr' ${../../templates/default/prompts/fragments/if-blocked-pr-git.md} || {
+          echo "if-blocked-pr-git.md invokes fj pr (issue #5099)" >&2
+          exit 1
+        }
+        ! grep -q 'gh pr' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md} || {
+          echo "if-blocked-pr-forgejo.md invokes gh pr (issue #5099)" >&2
+          exit 1
+        }
+        grep -q 'fj pr create' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md}
+        grep -q 'WIP: ' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md}
+        ! grep -q -e '--title' ${../../templates/default/prompts/fragments/if-blocked-pr-forgejo.md} || {
+          echo "if-blocked-pr-forgejo.md uses --title; fj takes the title positionally (issue #5098)" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The fix-pass CONTEXT CI-read step forks on CODE_FORGE (issue #1963,
   # FIX_CI_READ_GH/FIX_CI_READ_FORGEJO computed in promptassembly): the github
   # fragment keeps `gh pr view` and never invokes `fj pr status`, and the
