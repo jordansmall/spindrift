@@ -1,7 +1,6 @@
-Your GitHub token is read-only here — you cannot comment on the issue
-yourself. Print the verdict as a single line on stdout instead — the
-launcher finds it by this run's nonce, decodes it, and posts it to the
-issue, host-side, once you exit:
+On this run you do not comment on the issue yourself. Print the verdict as
+a single line on stdout instead — the launcher finds it by this run's
+nonce, decodes it, and posts it to the issue, host-side, once you exit:
 
 SPINDRIFT_COMMENT ${RUN_NONCE} <base64-encoded verdict comment body,
 structured per below>
