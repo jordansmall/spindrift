@@ -208,6 +208,11 @@ func goldenCells() []goldenCell {
 			c.dispatch("research")
 			c.filerOn()
 		}},
+		{name: "forgejo-research", mode: modeInitial, setup: func(c *cellInputs) {
+			c.dispatch("research")
+			c.forgejoForge()
+			c.forgejoTracker()
+		}},
 		{name: "self-contained-research", mode: modeInitial, setup: func(c *cellInputs) {
 			c.dispatch("research")
 			c.export("SELF_CONTAINED", "1")
