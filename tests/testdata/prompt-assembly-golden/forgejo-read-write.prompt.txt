@@ -489,7 +489,7 @@ the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
 
 1. `git push --force-with-lease -u origin agent/issue-7`
 
-2. `fj pr create --base main --head agent/issue-7 --title "WIP: <conventional title>" --body "<summary>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green, then merges (it watches CI and merges host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.
+2. `fj pr create --base main --head agent/issue-7 --body "<summary>" "WIP: <conventional title>"` — the `WIP: ` prefix opens it as a draft; the launcher strips it and flips the PR ready once CI is green, then merges (it watches CI and merges host-side via the forgejo PRForge, so there is nothing left for you to watch here). Do NOT run `gh pr create`.
 
 3. Body MUST contain `Closes #7`. Summarize what changed and
    flag anything a reviewer should know.
