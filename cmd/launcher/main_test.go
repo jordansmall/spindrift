@@ -3201,6 +3201,41 @@ func TestDispatchCompletionBanner_AllDelivered(t *testing.T) {
 	}
 }
 
+// An advise-only kind's Complete gets its wording from its descriptor, never the
+// Code Forge's landing claim, on every forge (issue #5164).
+func TestDispatchCompletionBanner_AdviseOnlyKindsUseDescriptorWording(t *testing.T) {
+	complete := forge.Complete.String()
+	for _, tc := range []struct {
+		kind   *dispatchkind.Descriptor
+		reason string
+		want   string
+	}{
+		{dispatchkind.Research, settle.ReasonVerdict, "==> all agents finished — verdicts posted.\n"},
+		{dispatchkind.Butler, settle.ReasonFindingsFiled, "==> all agents finished — findings filed.\n"},
+	} {
+		for _, codeForge := range []string{"github", "forgejo", "git", "local"} {
+			t.Run(tc.kind.Name+"/"+codeForge, func(t *testing.T) {
+				c := applyDispatchKind(minimalValidConfig(), tc.kind)
+				c.codeForge = codeForge
+				c.repoSlug = "owner/repo"
+				outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: complete, Reason: tc.reason}}
+				if got := dispatchCompletionBanner(c, outcomes); got != tc.want {
+					t.Errorf("dispatchCompletionBanner = %q, want %q", got, tc.want)
+				}
+			})
+		}
+	}
+}
+
+func TestDispatchCompletionBanner_ResearchFailureStillNamed(t *testing.T) {
+	c := applyDispatchKind(minimalValidConfig(), dispatchkind.Research)
+	outcomes := []settle.DispatchOutcome{{Key: dispatchkey.Issue("11"), State: forge.Failed.String(), Reason: settle.ReasonResearchFailed}}
+	want := "==> all agents finished — 1 of 1 dispatches did not deliver: #11 (research-failed).\n"
+	if got := dispatchCompletionBanner(c, outcomes); got != want {
+		t.Errorf("dispatchCompletionBanner = %q, want %q", got, want)
+	}
+}
+
 // mixedOutcomes is one delivered dispatch plus a representative mix of ways a
 // dispatch can fail to deliver, each shaped as settle really records it: an
 // InProgress merge-blocked
