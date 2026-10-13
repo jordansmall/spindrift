@@ -121,9 +121,11 @@ func (s *state) wakeParked() {
 }
 
 // observe folds ev into the schedule and, when Schedule.Observe reports it
-// grew the startable set, wakes every parked slot. Only that result decides a
-// wake: a phase change or a kind going unstartable cannot grow the set, so
-// slots never wake one another in a ring.
+// grew the startable set or a claim made a kind probe-due, wakes every parked
+// slot. Only that result decides a wake: a phase change or a kind going
+// unstartable cannot grow the set, a claim on an already probe-due kind reports
+// no wake, and a wake never itself produces a Claimed event, so slots never wake
+// one another in a ring.
 func (s *state) observe(now time.Time, ev SchedEvent) {
 	var woke bool
 	s.sched, woke = s.sched.Observe(now, ev)

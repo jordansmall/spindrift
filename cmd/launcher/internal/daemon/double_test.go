@@ -819,6 +819,30 @@ func (c *testClock) awaitSleep(t *testing.T, n int) {
 	}
 }
 
+// awaitSleepers waits until exactly n Sleep calls are parked, then discards
+// the sleep-entry signals buffered so far so a later awaitSleep counts only
+// parks made after this point. Unlike awaitSleep it observes the parked set
+// itself, so it is not fooled by a signal from a park that a wake has since
+// ended.
+func (c *testClock) awaitSleepers(t *testing.T, n int) {
+	t.Helper()
+	pollUntil(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		if len(c.sleepers) != n {
+			return false
+		}
+		for drained := false; !drained; {
+			select {
+			case <-c.sleepSignal:
+			default:
+				drained = true
+			}
+		}
+		return true
+	}, fmt.Sprintf("exactly %d parked sleepers", n))
+}
+
 func (c *testClock) Now() time.Time {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -838,16 +862,17 @@ func (c *testClock) Sleep(ctx context.Context, d time.Duration) {
 		release = make(chan struct{})
 		c.sleepers = append(c.sleepers, release)
 	}
-	sig := c.sleepSignal
-	onSleep := c.onSleep
-	c.mu.Unlock()
-
-	if sig != nil {
+	// Sent under mu so a sleeper listed in c.sleepers has already attempted to signal,
+	// which awaitSleepers relies on when it drains the signals.
+	if c.sleepSignal != nil {
 		select {
-		case sig <- struct{}{}:
+		case c.sleepSignal <- struct{}{}:
 		default:
 		}
 	}
+	onSleep := c.onSleep
+	c.mu.Unlock()
+
 	if onSleep != nil {
 		onSleep()
 	}
@@ -1403,6 +1428,44 @@ func (r *scriptedRunner) demandInFlightCalls(kind Kind) []dispatchkey.Set {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return slices.Clone(r.demandInFlight[kind])
+}
+
+// awaitDemandInFlight waits for a Demand call on kind whose inFlight holds key.
+func (r *scriptedRunner) awaitDemandInFlight(t *testing.T, kind Kind, key dispatchkey.Key) {
+	t.Helper()
+	pollUntil(t, func() bool {
+		for _, set := range r.demandInFlightCalls(kind) {
+			if set[key] {
+				return true
+			}
+		}
+		return false
+	}, fmt.Sprintf("a %v Demand call with %v in flight", kind, key))
+}
+
+// awaitClaimedSiblingParked waits out the claim of key (of kind) in a
+// two-slot pool whose other slot was parked: fireOnIssue folds the claim
+// synchronously and wakes that slot, whose re-probe of kind then holds the
+// flight key, after which it parks again. Waiting on both leaves one parked
+// sleeper and no stale park signal for a later awaitSleep to mistake for a
+// fresh park.
+func (r *scriptedRunner) awaitClaimedSiblingParked(t *testing.T, clk *testClock, kind Kind, key dispatchkey.Key) {
+	t.Helper()
+	r.awaitDemandInFlight(t, kind, key)
+	clk.awaitSleepers(t, 1)
+}
+
+// pollUntil polls cond every millisecond until it holds, failing the test
+// naming what after waitForLineTimeout.
+func pollUntil(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(waitForLineTimeout)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out after %v waiting for %s", waitForLineTimeout, what)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // pickKind is the test view of decide: the kind a free slot would start now.
