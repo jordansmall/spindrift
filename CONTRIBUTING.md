@@ -95,10 +95,12 @@ in-box as `/caveman`. It compresses agent narration ~65% in output tokens
 while leaving code, commands, and error messages untouched — worth having
 given how much of an agent's output in this Box is narration. The pin lives
 in `flake.nix`'s `caveman` input (`flake = false`; the rev is owned by
-`flake.lock`, never a floating fetch); `nix/dogfood-skills.nix` renames
-upstream's `skills/caveman/SKILL.md` to the `caveman.md` basename the
-skill-discovery loop in `box` (`cmd/launcher/box`) keys off of. This is
-dogfood-only — the generic harness keeps its empty `skills` default.
+`flake.lock`, never a floating fetch); `nix/dogfood-skills.nix` declares
+upstream's `skills/caveman/SKILL.md` unchanged, and `lib/image.nix` bakes
+it under its own `caveman/SKILL.md` directory — the layout the
+`agents.skills` row in [flake options](docs/flake-options.md) says the
+Drivers discover. This is dogfood-only — the generic harness keeps its
+empty `skills` default.
 
 After editing `lib/env-schema.nix`, regenerate the artifacts it drives —
 `templates/default/harness.env.example`, `cmd/launcher/flagtable_gen.go`,
@@ -200,7 +202,8 @@ and in the in-box `box` program; the only bash left is the generated shim that
   ([ADR 0058](docs/adr/0058-the-box-main-is-a-go-program-above-a-generated-shim.md),
   building on [ADR 0005](docs/adr/0005-nix-computes-generated-bash-executes.md)).
   Keep it that way — reach for nix-generated config or Go over more shell.
-- **`nix/`** — `checks.nix` (the flake-check suite), `fixtures.nix` (the
+- **`nix/`** — `checks/` (the flake-check suite; `checks/default.nix`
+  defines `checks`, `checks-inbox`, and `checks-docs`), `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), and `regen-goldens.nix` (`nix run
   .#regen-goldens`, which reruns the Go golden test
