@@ -33,6 +33,5 @@ verdict:` line the REVIEW section below reads.
   `${BRANCH}` is this run's own automated work on this issue — including
   any a prior, crashed run of this same automated attempt already
   committed — so all of them are fair game to amend or fixup
-  (`git log origin/${BASE_BRANCH}..${BRANCH}` lists them).
-
-  The branch force-pushes, so rewriting that history here is expected.
+  (`git log origin/${BASE_BRANCH}..${BRANCH}` lists them), and
+  rewriting that history here is expected.
