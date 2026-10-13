@@ -1,19 +1,20 @@
 {
   "lastSwept": "4de5f0c42e85ff81f1e4b913660ea540ec15397f",
   "cursor": "tests/testdata/prompt-assembly-golden/butler-docs-drift.prompt.txt",
-  "phase": "done",
-  "filed": [
-    "https://github.com/jordansmall/spindrift/issues/5260",
-    "https://github.com/jordansmall/spindrift/issues/5261"
-  ],
+  "phase": "claimed",
+  "claimedBy": {
+    "host": "game-rig",
+    "slot": 0,
+    "start": "2026-10-13T03:37:58.977977661-04:00"
+  },
   "usage": {
-    "input_tokens": 80,
-    "output_tokens": 10990,
-    "cache_read_input_tokens": 2503919,
-    "cache_creation_input_tokens": 81965,
-    "total_cost_usd": 1.381625905,
-    "duration_ms": 140866,
-    "duration_api_ms": 141740,
-    "num_turns": 43
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "total_cost_usd": 0,
+    "duration_ms": 0,
+    "duration_api_ms": 0,
+    "num_turns": 0
   }
 }
