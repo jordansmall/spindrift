@@ -5,7 +5,7 @@ commit-push-git.md
 commit-rework-orchestrator.md
 fix-ci-read-forgejo.md
 if-blocked-outcome-landing-git.md
-if-blocked-pr-git.md
+if-blocked-pr-forgejo.md
 if-blocked-push-git.md
 if-blocked-triage-git.md
 issue-blocked-comment-github.md

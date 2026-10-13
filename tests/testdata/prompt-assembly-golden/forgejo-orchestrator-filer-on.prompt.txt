@@ -662,10 +662,12 @@ Then:
 
 1. Push what you have (or note if even that is impossible).
 
-2. Check whether a PR already exists on this branch (`gh pr view --json url`).
-   If not, open one as a draft (`--draft`). If it does, leave it as-is — the
-   Driver never flips a PR to ready, so it is already draft and there is
-   nothing to revert.
+2. Check whether a PR already exists on this branch (`fj pr status`). If not,
+   open one as a draft with `fj pr create --base main --head agent/issue-7 --body "<summary>" "WIP: <conventional title>"`
+   (the title is positional and last; the `WIP: ` prefix is what opens it as
+   a draft). If it does, leave it as-is — the Driver never flips a PR to
+   ready, so it is already draft and there is nothing to revert. Do NOT run
+   `gh`.
 
 3. Leave the issue in-progress — do NOT close it.
 4. Comment on the issue with what's done and what remains:

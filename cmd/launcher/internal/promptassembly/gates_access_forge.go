@@ -24,8 +24,9 @@ func accessForgeGates(e Env) map[string]bool {
 		}
 	}
 
-	// The create step's read-write fork. Read-only stays forge-agnostic, with
-	// no gate here at all.
+	// The read-write fork for the OPEN A PULL REQUEST create step and the IF
+	// BLOCKED draft-PR step (issue #5099). Read-only stays forge-agnostic,
+	// with no gate here at all.
 	g["OPEN_PR_CREATE_RW_GH"] = backend == "GH" && e.BoxWriteEnabled
 	g["OPEN_PR_CREATE_RW_FORGEJO"] = backend == "FORGEJO" && e.BoxWriteEnabled
 
