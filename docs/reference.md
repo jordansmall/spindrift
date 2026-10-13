@@ -3210,6 +3210,15 @@ generated `flake.nix`.
   tracker maps research states the same way it maps work states, through
   its frontmatter `state` field.
 
+  A research verdict on Jira is always host-posted. The Box has no Jira
+  client and `JIRA_TOKEN` never reaches it, so even under `read-write`
+  and with the Filer off the verdict relays through the Launcher
+  (`SPINDRIFT_COMMENT`, OUTCOME `landing=none`) rather than
+  `gh issue comment`, and a run whose relayed verdict is missing fails to
+  `agent-research-failed` instead of applying a bare verdict label (issue
+  #5245). The backend row's `inBoxUnwritableTracker` bit drives both
+  halves.
+
 - **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
   self-hosted Forgejo/Gitea instance just re-points it). `FORGEJO_TOKEN` is a
