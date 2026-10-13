@@ -118,7 +118,10 @@ jobs:
             {
               echo "blocked=true"
               echo "blockers<<EOF"
-              cat .spindrift/logs/blocked.txt
+              # blocked.txt has no trailing newline; without one the closing EOF
+              # lands on the last blocker's line and the runner drops all outputs.
+              # $(cat) strips any newline it does have, so exactly one is added.
+              printf '%s\n' "$(cat .spindrift/logs/blocked.txt)"
               echo "EOF"
             } >> "$GITHUB_OUTPUT"
           else
