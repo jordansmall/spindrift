@@ -12,7 +12,7 @@
 let
   inherit (fixtures) harness;
   renderers = import ../../lib/renderers.nix;
-  inherit (import ../../lib/driver-map.nix) underDriver exampleDriver;
+  inherit (import ../../lib/driver-map.nix) placeEntry exampleDriver;
   schema = import ../../lib/env-schema.nix;
   # Shared with nix/regen.nix's marker-splice loop so a block's marker
   # literals and renderer call are typed exactly once (issue #2948).
@@ -429,10 +429,7 @@ let
         let
           resolved = resolveNixPath key schema.${key};
         in
-        if schema.${key}.driverValued or false then
-          concatStringsSep "." (underDriver exampleDriver (splitString "." resolved))
-        else
-          resolved;
+        concatStringsSep "." (placeEntry exampleDriver schema.${key} (splitString "." resolved));
       missing = filter (key: !(builtins.elem (expectedPath key) actualPaths)) keys;
     in
     if missing == [ ] then
