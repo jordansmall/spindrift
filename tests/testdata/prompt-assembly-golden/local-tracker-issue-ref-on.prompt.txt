@@ -143,8 +143,10 @@ Run every check or build gate in the foreground and block on it yourself —
 never background it (`&`, detached job, background task) and end your turn
 while it is still pending: the turn ends before the gate finishes, so no
 `SPINDRIFT_OUTCOME` line is ever printed and the run is lost even when the
-work was green. Do not stop this run until a terminal `SPINDRIFT_OUTCOME` line
-(`status=ready` or `status=blocked`) has been printed.
+work was green. Do not stop a pass that reaches OUTCOME, IF BLOCKED, or an
+earlier gate's terminal stop until its `SPINDRIFT_OUTCOME` line has been
+printed; a pass told to stop right after COMMIT prints none unless it hit
+IF BLOCKED.
 
 Before running the first gate, invoke the `/check-hygiene` skill.
 

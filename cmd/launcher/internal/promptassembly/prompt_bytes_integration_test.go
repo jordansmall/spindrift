@@ -279,8 +279,10 @@ func TestPromptBytes_CheckSectionAnchorsCheckHygieneWithoutRestatingSkill(t *tes
 	pbContains(t, pbPrompt(t, fragment), "/check-hygiene")
 	// The dispatcher parses SPINDRIFT_OUTCOME, so the terminal-outcome mandate
 	// must not depend on the agent having read an on-demand skill body.
-	pbMatchFold(t, check, `do not stop this run`)
-	pbContains(t, check, "status=blocked")
+	// Issue #5129: scoped to the owning pass, so the implement/fix passes the
+	// orchestrator stops after COMMIT are not ordered to print an outcome.
+	pbContains(t, check, "until its `SPINDRIFT_OUTCOME` line", "told to stop right after COMMIT")
+	pbNoMatchFold(t, check, `do not stop this run`, "\\(`status=ready` or `status=blocked`\\)")
 	pbNoMatchFold(t, check, `vanished`, "never `cat`")
 }
 
