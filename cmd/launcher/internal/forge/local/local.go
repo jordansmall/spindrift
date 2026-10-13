@@ -41,8 +41,9 @@ type localFrontmatter struct {
 	Landing string
 	// LandingPass and LandingPassKind are advisory provenance for Landing
 	// (issue #2983). Zero or empty when never recorded, when Landing
-	// predates these fields, or when settle recorded Landing without pass
-	// evidence.
+	// predates these fields, when settle recorded Landing without pass
+	// evidence, or when reconcile discovered Landing itself (re-keying a
+	// branch landing keeps the pass).
 	LandingPass     int
 	LandingPassKind string
 	// Abandoned means the landing PR closed without merging (ADR 0029).
