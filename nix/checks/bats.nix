@@ -69,6 +69,9 @@ let
     # straight out of the composite action's `run:` block, so it tracks the
     # real body rather than a hand-copied stand-in.
     GH_TOKEN_REFRESHER_ACTION_YML = ../../.github/actions/gh-token-refresher/action.yml;
+    # tests/agent-dispatch-blocked-step.bats (issue #5257) runs the Forgejo
+    # dispatch workflow's "Detect a blocked marker" step body.
+    FORGEJO_AGENT_DISPATCH_YML = ../../.forgejo/workflows/agent-dispatch.yml;
     # CI's change classifier and required-check verdict (issue #5155).
     CI_CHANGES_SH = ../../.github/scripts/ci-changes.sh;
     CI_OK_SH = ../../.github/scripts/ci-ok.sh;
