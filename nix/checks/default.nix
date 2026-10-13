@@ -106,7 +106,8 @@ let
     // (import ./adr-numbers.nix common)
     // (import ./docs-edit-isolation.nix (common // { inherit checksAt baselineChecks; }))
     // (import ./seam-fixtures.nix common)
-    // (import ./event-stream-parity.nix common);
+    // (import ./event-stream-parity.nix common)
+    // (import ./bare-bang-guard.nix common);
 
   imageChecks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux (import ./image.nix common);
 
