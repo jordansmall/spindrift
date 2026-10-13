@@ -1708,6 +1708,10 @@ in
           exit 1
         }
         grep -q 'fj pr create' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md}
+        ! grep -qE -e 'fj pr create[^`]*--title' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md} || {
+          echo "open-pr-create-forgejo.md passes --title to fj pr create, which takes the title positionally (issue #5098)" >&2
+          exit 1
+        }
         ! grep -q 'gh pr create --' ${../../templates/default/prompts/fragments/open-pr-create-forgejo.md} || {
           echo "open-pr-create-forgejo.md invokes gh pr create (issues #1963, #5066)" >&2
           exit 1
