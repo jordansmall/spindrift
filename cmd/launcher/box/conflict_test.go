@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -170,6 +171,32 @@ func TestConflictResolve_NoConflictRunsNoPass(t *testing.T) {
 	}
 	if strings.Contains(f.stdout(), "conflict") {
 		t.Errorf("stdout narrates a conflict: %q", f.stdout())
+	}
+}
+
+func TestConflictResolve_MainRunRedecidesTheDevshellOnTheResolvedTree(t *testing.T) {
+	f := newCRFixture(t)
+	f.nixErr = errors.New("exit status 1") // the conflicted flake.lock fails the probe
+	f.knobs["PREFETCH"] = "go mod download"
+	f.passFn = func() {
+		f.nixErr = nil
+		f.completeRebase()
+	}
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if h := f.passHandoff(t); h.Devshell {
+		t.Errorf("pass handoff Devshell = true, want false (probe failed on the conflicted tree)")
+	}
+	if len(f.nixCalls) != 2 {
+		t.Fatalf("nix ran %d times, want 2 (conflicted tree, then resolved tree)", len(f.nixCalls))
+	}
+	if len(f.prefetched) != 2 {
+		t.Errorf("prefetched %d times, want 2 (conflicted tree, then resolved tree)", len(f.prefetched))
+	}
+	// "dev" is newCRFixture's DEV_SHELL_NAME.
+	if p := f.assembledIn[0].Passthrough; !p.Devshell || p.DevshellName != "dev" {
+		t.Errorf("main run Devshell, DevshellName = %v, %q; want true, dev", p.Devshell, p.DevshellName)
 	}
 }
 

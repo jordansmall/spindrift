@@ -52,8 +52,9 @@ func (r *boxRun) conflictPass() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// decideToolchain has already run, so the pass re-checks the repo under
-	// the same devShell as the main run.
+	// The pass inherits the decision made on the still-conflicted tree, so it
+	// runs without the devShell when a conflicted flake file fails the probe;
+	// the main run re-decides once the rebase is done.
 	p := r.in.Assembly.Passthrough
 	handoff, err := json.Marshal(promptassembly.Handoff{
 		Model:        p.Model,
