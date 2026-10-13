@@ -3250,7 +3250,7 @@ pinned by the prompt eval-checks the same way the `gh` family is:
   both host-side (a nonce-guarded `SPINDRIFT_COMMENT` line and the
   `SPINDRIFT_OUTCOME` `note=` field) exactly as the local and read-only
   github trackers do.
-- **Open PR** (`fj pr create --base … --head … --title "WIP: …"`) — the
+- **Open PR** (`fj pr create --base … --head … --body … "WIP: …"`) — the
   read-write `CODE_FORGE=forgejo` create step; the `WIP: ` prefix opens a
   draft the launcher flips ready on CI green before it merges (the forgejo
   PRForge surface, [ADR 0038](../docs/adr/0038-the-forgejo-backend-decision-set.md)).
