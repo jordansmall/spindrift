@@ -1018,11 +1018,11 @@ func newSettle(c config, it forge.IssueTracker, lw *localloop.Wired, cf forge.Co
 	switch c.kind().Settle {
 	case dispatchkind.SettleVerdict:
 		vl := researchVerdictLabels(c)
-		filerEnabled := resolveAgentPresenceSignals(c.driver).filerEnabled
+		verdictRelayed := backend.ResearchVerdictRelayed(c.issueTracker, resolveAgentPresenceSignals(c.driver).filerEnabled)
 		if c.boxForgeAndIssueAccess == "read-only" {
-			return settle.NewResearchSettleReadOnly(it, vl, filerEnabled)
+			return settle.NewResearchSettleReadOnly(it, vl, verdictRelayed)
 		}
-		return settle.NewResearchSettle(it, vl, filerEnabled)
+		return settle.NewResearchSettle(it, vl, verdictRelayed)
 	}
 	return settle.New(settleConfig(c, lw, cf, caps), it, cf)
 }

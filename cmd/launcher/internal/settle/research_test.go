@@ -367,6 +367,29 @@ func TestResearchSettle_GithubReadWriteFilerEnabled_MissingCommentBlockTreatedAs
 	}
 }
 
+// Issue #5245: a tracker the Box cannot write (Jira) forces the verdict relay
+// with the Filer off, and is neither a LandingRecorder nor read-only. A missing
+// relayed comment must fail the run, not apply a bare verdict label.
+func TestResearchSettle_UnwritableTrackerRelayed_MissingCommentFails(t *testing.T) {
+	fc := newResearchFake("42")
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: "42", Landing: "none", Status: "recommend", Note: "grounded in code"},
+		},
+	}
+
+	s := NewResearchSettle(fc.AsNoLandingRecorder(), researchVerdictLabels, true)
+	s.Settle(dispatch.NewFake(), "42", 0, result)
+
+	if len(fc.CompleteVerdictCalls) != 0 {
+		t.Errorf("want no verdict applied, got %+v", fc.CompleteVerdictCalls)
+	}
+	if len(fc.TransitionStateCalls) != 1 || fc.TransitionStateCalls[0].To != forge.Failed {
+		t.Fatalf("want 1 TransitionState to Failed, got %+v", fc.TransitionStateCalls)
+	}
+}
+
 func TestResearchSettle_Blocked(t *testing.T) {
 	fc := newResearchFake("9")
 	result := dispatch.Result{
