@@ -261,10 +261,9 @@ verdict:` line the REVIEW section below reads.
 
 **Always rebase onto the latest base immediately before every push** — never
 push from a stale base. This keeps the branch's tested tree current with any
-siblings that landed while you worked: the launcher merges a green PR as-is and
-does not re-rebase it for you, so a fresh base at push time is the branch's
-freshness guarantee (a stale base also produces phantom diffs that trip push
-guards):
+siblings that landed while you worked: the launcher does not re-rebase a green
+PR for you, so a fresh base at push time is the branch's freshness guarantee
+(a stale base also produces phantom diffs that trip push guards):
 
 ```
 git fetch origin
@@ -552,8 +551,8 @@ the Harness bundles them out of the container after you exit.
    watch, and nothing further for you to do.
 
 **`CODE_FORGE=forgejo`** (Forgejo/Gitea Code Forge — the Box opens the PR via
-the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
-0038 + issue #1961): continue with OPEN A PULL REQUEST below.
+the Forgejo CLI and the launcher watches CI and applies its `MERGE_MODE`
+host-side, ADR 0038 + issue #1961): continue with OPEN A PULL REQUEST below.
 
 **`CODE_FORGE=github`** (default): continue with OPEN A PULL REQUEST below.
 
@@ -567,11 +566,12 @@ the Forgejo CLI and the launcher watches CI and merges it host-side, ADR
    flag anything a reviewer should know.
 
 The PR opens as a **draft** and stays a **draft** — the launcher flips it to
-ready once CI reaches green, immediately before it merges (the launcher
-already gates on CI green itself, so there is nothing left for you to watch
-or confirm here). Do NOT merge and do NOT flip it yourself; the LAUNCHER
-(outside this container) owns the CI-green decision, the ready flip, the
-rebase-merge, and the complete-label swap.
+ready once CI reaches green (the launcher already gates on CI green itself, so
+there is nothing left for you to watch or confirm here), then applies its
+configured `MERGE_MODE`, subject to its merge guard: it merges the PR, queues
+the forge's auto-merge, or leaves it open for a human to merge. Do NOT merge
+and do NOT flip it yourself; the LAUNCHER (outside this container) owns the
+CI-green decision, the ready flip, any merge, and the complete-label swap.
 
 # OUTCOME
 
@@ -614,7 +614,8 @@ no background task. The launcher parses this one line to learn your PR; if
 it is missing, the run is wasted.
 
 `status=ready` = branch pushed, PR open, left in draft. The launcher flips it
-to ready once CI reaches green, immediately before it merges.
+to ready once CI reaches green; any merge after that follows the launcher's
+configured `MERGE_MODE`.
 Do NOT run `gh pr ready`, `gh issue edit ... --add-label agent-complete`,
 or `gh pr merge`.
 
