@@ -136,6 +136,14 @@ func (c *cellInputs) forgejoTracker() { c.export("ISSUE_TRACKER", "forgejo") }
 
 func (c *cellInputs) localTracker() { c.export("ISSUE_TRACKER", "local") }
 
+// localForge mirrors the env dispatch.go forwards for the local forge row: a
+// host-mediated remote that is not outbox-relay-capable.
+func (c *cellInputs) localForge() {
+	c.export("CODE_FORGE", "local")
+	c.export("BOX_HOST_MEDIATED_REMOTE", "1")
+	c.unset("BOX_OUTBOX_RELAY_CAPABLE")
+}
+
 // butler mirrors setup_butler_env: the butler is keyed by Chore name, never a
 // tracker issue.
 func (c *cellInputs) butler(chore string) {
@@ -267,6 +275,10 @@ func goldenCells() []goldenCell {
 					t.Errorf("IF BLOCKED names %q for a git Box", bad)
 				}
 			}
+		}},
+		{name: "local-forge-read-write", mode: modeInitial, setup: func(c *cellInputs) {
+			c.localForge()
+			c.localTracker()
 		}},
 		{name: "forgejo-read-only", mode: modeInitial, setup: func(c *cellInputs) {
 			c.forgejoForge()
