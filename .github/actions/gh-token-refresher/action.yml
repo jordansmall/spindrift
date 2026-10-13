@@ -4,7 +4,9 @@ description: >-
   token every 45 minutes for the rest of the job and writes it to a file,
   exporting GH_TOKEN_REFRESH_FILE so the launcher (via its
   --gh-token-refresh-file flag) can poll the file and keep GH_TOKEN current
-  past the ~1h installation-token lifetime (issue #1027). The App private
+  past the ~1h installation-token lifetime (issue #1027). GH_TOKEN in
+  GITHUB_ENV stays the initial token, so later shell steps must re-read the
+  file themselves before calling gh (issue #5259). The App private
   key lives only in this backgrounded process's memory and a runner-temp
   file removed when the job ends — it never reaches the launcher process
   or the Box.
