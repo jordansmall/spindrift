@@ -5,12 +5,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/dispatch"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/outcome"
+	"spindrift.dev/launcher/internal/passmanifest"
 )
 
 // Issue #2224: a read-only github run whose authoritative outcome degraded to
@@ -752,6 +754,111 @@ func TestSettle_SettleRelayedBranch_AdoptsSuccessSelfReport(t *testing.T) {
 	}
 	if containsLabel(iss.Labels, "agent-failed") {
 		t.Errorf("issue must not carry agent-failed after an adopted-and-merged landing; labels=%v", iss.Labels)
+	}
+}
+
+// adoptAndGate persists the adopted PR and the run's pass together (issue
+// #5189), over a tracker that records both.
+func TestSettle_SettleRelayedBranch_AdoptRecordsPassWithAdoptedPR(t *testing.T) {
+	const issNum = "5189"
+	const prURL = "https://github.com/owner/repo/pull/5189"
+
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = prURL
+	fc.SetCheckStates(prURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
+		},
+		Passes: implementThenFixPasses(),
+	}
+
+	c := baseConfig()
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsGithubReadOnly())
+
+	sit := s.situationFor(issNum, false, result)
+	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+	}
+
+	wantLanding := []forge.RecordLandingCall{{Num: issNum, Landing: prURL}}
+	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
+		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
+	}
+	wantPass := []forge.RecordLandingPassCall{{Num: issNum, Pass: 2, Kind: "fix"}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
+	}
+}
+
+// landRelayedBranchPushOnly threads the run's passes to the host-derived
+// landing it writes (issue #5189); recover's Result carries none, so it
+// clears the recorded pass instead of leaving an earlier run's pass attached.
+func TestSettle_SettleRelayedBranch_PushOnlyRecordsPassOrClearsIt(t *testing.T) {
+	const issNum = "5189"
+
+	cases := []struct {
+		name   string
+		passes []passmanifest.Entry
+		want   forge.RecordLandingPassCall
+	}{
+		{
+			name:   "success self-report with passes",
+			passes: implementThenFixPasses(),
+			want:   forge.RecordLandingPassCall{Num: issNum, Pass: 2, Kind: "fix"},
+		},
+		{
+			name: "recover-shaped result without passes clears the pass",
+			want: forge.RecordLandingPassCall{Num: issNum},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fc := forge.NewFake(testDispatchLabels)
+			fc.BranchPrefix = "agent/issue-"
+			fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+			branch := fc.AgentBranch(issNum)
+
+			c := baseConfig()
+			c.MergeMode = "manual"
+			c.OutboxDir = func(num string) string { return "/outbox/" + num }
+			s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
+
+			result := dispatch.Result{
+				Resolved: outcome.Resolved{
+					SelfReportFound: true,
+					SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
+				},
+				Passes: tc.passes,
+			}
+			sit := s.situationFor(issNum, false, result)
+			if got, err := s.SettleRelayedBranch(dispatch.NewFake(), issNum, 0, sit, result); !got || err != nil {
+				t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+			}
+
+			if len(fc.RecordLandingCalls) == 0 {
+				t.Fatal("expected the host-derived landing to be recorded")
+			}
+			for _, call := range fc.RecordLandingCalls {
+				if call != (forge.RecordLandingCall{Num: issNum, Landing: branch}) {
+					t.Errorf("RecordLanding call = %+v, want landing %q", call, branch)
+				}
+			}
+			if len(fc.RecordLandingPassCalls) != len(fc.RecordLandingCalls) {
+				t.Fatalf("RecordLandingPass calls = %+v, want one per landing write %+v", fc.RecordLandingPassCalls, fc.RecordLandingCalls)
+			}
+			for _, call := range fc.RecordLandingPassCalls {
+				if call != tc.want {
+					t.Errorf("RecordLandingPass call = %+v, want %+v", call, tc.want)
+				}
+			}
+		})
 	}
 }
 

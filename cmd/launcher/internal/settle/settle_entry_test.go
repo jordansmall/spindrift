@@ -572,36 +572,79 @@ func TestSettle_RecordLanding_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
 	}
 }
 
-// The optional LandingPassRecorder gets the last Passes entry whose
-// OutcomeFound is true (issue #2983): the pass whose own log the settled
-// outcome was parsed from, not merely the last pass that ran.
-func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
+// hostLandedIssue is the issue number the host-landed fixtures settle.
+const hostLandedIssue = "42"
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+// hostLandedPassFixture builds a read-only Settle whose ready hand-off opens a
+// host-side draft PR, the host-derived landing recordLanding persists (issue
+// #5189), over a local-shaped tracker that implements both LandingRecorder and
+// LandingPassRecorder. It returns the Settle and the run's Result carrying
+// passes.
+func hostLandedPassFixture(t *testing.T, fc *forge.Fake, passes []passmanifest.Entry) (*Settle, dispatch.Result) {
+	t.Helper()
+	return hostLandedPassFixtureOver(t, fc, fc.AsLocalShaped(), passes)
+}
 
+// hostLandedPassFixtureOver is hostLandedPassFixture over a caller-chosen
+// tracker, for shapes the Fake has no view of.
+func hostLandedPassFixtureOver(t *testing.T, fc *forge.Fake, tracker forge.IssueTracker, passes []passmanifest.Entry) (*Settle, dispatch.Result) {
+	t.Helper()
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: hostLandedIssue, Labels: []string{"agent-in-progress"}})
+	fc.CreateDraftPRURL = draftPRRetryURL
+	fc.SetCheckStates(draftPRRetryURL, []forge.RollupState{forge.StateSuccess, forge.StateSuccess})
+	t.Cleanup(InstallTally(&Tally{}))
+
+	c := baseConfig()
+	c.ReadOnly = true
+	c.OutboxDir = func(string) string { return t.TempDir() }
+	c.BaseBranch = "main"
+	_, c.Clock = recordingClock()
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
+			Outcome: outcome.Outcome{Issue: hostLandedIssue, Landing: fc.AgentBranch(hostLandedIssue), Status: "ready"},
 		},
-		Passes: []passmanifest.Entry{
-			{Pass: 1, Kind: "implement", OutcomeFound: false},
-			{Pass: 2, Kind: "fix", OutcomeFound: true},
-		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+		Passes:        passes,
 	}
+	return newTestSettle(c, tracker, fc.AsGithubReadOnly()), result
+}
 
-	s := newTestSettle(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if len(fc.RecordLandingPassCalls) != 1 {
-		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
+// settleHostLanded settles a host-landed run over passes and returns the Fake
+// with that run's RecordLanding and RecordLandingPass calls recorded.
+func settleHostLanded(t *testing.T, passes []passmanifest.Entry) *forge.Fake {
+	t.Helper()
+	fc := forge.NewFake(testDispatchLabels)
+	s, result := hostLandedPassFixture(t, fc, passes)
+	captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
+	if len(fc.RecordLandingCalls) == 0 {
+		t.Fatal("fixture must record a host-derived landing")
 	}
-	call := fc.RecordLandingPassCalls[0]
-	if call.Num != issNum || call.Pass != 2 || call.Kind != "fix" {
-		t.Errorf("unexpected call: %+v, want {Num: %q, Pass: 2, Kind: fix}", call, issNum)
+	return fc
+}
+
+// implementThenFixPasses is the manifest of a run whose implement pass printed
+// no outcome and whose fix pass did.
+func implementThenFixPasses() []passmanifest.Entry {
+	return []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: false},
+		{Pass: 2, Kind: "fix", OutcomeFound: true},
+	}
+}
+
+// The optional LandingPassRecorder gets the last Passes entry whose
+// OutcomeFound is true (issue #2983): the pass whose own log the settled
+// outcome was parsed from, not merely the last pass that ran. It is written
+// alongside the host-derived landing, never off the Box's outcome line (issue
+// #5189).
+func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
+	fc := settleHostLanded(t, implementThenFixPasses())
+
+	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 2, Kind: "fix"}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, want) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, want)
 	}
 }
 
@@ -610,33 +653,15 @@ func TestSettle_RecordsLandingPass_PicksLastOutcomeFoundEntry(t *testing.T) {
 // the settled outcome came from the synthetic-backstop tier rather than a
 // genuine in-pass marker.
 func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
+	fc := settleHostLanded(t, []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: false},
+		{Pass: 2, Kind: "fix", OutcomeFound: false},
+		{Pass: 3, Kind: "verify", OutcomeFound: false},
+	})
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
-		},
-		Passes: []passmanifest.Entry{
-			{Pass: 1, Kind: "implement", OutcomeFound: false},
-			{Pass: 2, Kind: "fix", OutcomeFound: false},
-			{Pass: 3, Kind: "verify", OutcomeFound: false},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if len(fc.RecordLandingPassCalls) != 1 {
-		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
-	}
-	call := fc.RecordLandingPassCalls[0]
-	if call.Num != issNum || call.Pass != 3 || call.Kind != "verify" {
-		t.Errorf("unexpected call: %+v, want {Num: %q, Pass: 3, Kind: verify}", call, issNum)
+	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 3, Kind: "verify"}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, want) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, want)
 	}
 }
 
@@ -645,32 +670,14 @@ func TestSettle_RecordsLandingPass_FallsBackToLastEntryWhenNoneHasOutcomeFound(t
 // Kind == "", e.g. from an older manifest.json, is local.render's job to
 // degrade gracefully, not settle's to paper over.
 func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
+	fc := settleHostLanded(t, []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: false},
+		{Pass: 2, Kind: "", OutcomeFound: true},
+	})
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
-		},
-		Passes: []passmanifest.Entry{
-			{Pass: 1, Kind: "implement", OutcomeFound: false},
-			{Pass: 2, Kind: "", OutcomeFound: true},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
-	if len(fc.RecordLandingPassCalls) != 1 {
-		t.Fatalf("want 1 RecordLandingPass call, got %d: %+v", len(fc.RecordLandingPassCalls), fc.RecordLandingPassCalls)
-	}
-	call := fc.RecordLandingPassCalls[0]
-	if call.Num != issNum || call.Pass != 2 || call.Kind != "" {
-		t.Errorf("unexpected call: %+v, want {Num: %q, Pass: 2, Kind: \"\"}", call, issNum)
+	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 2, Kind: ""}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, want) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, want)
 	}
 }
 
@@ -678,28 +685,16 @@ func TestSettle_RecordsLandingPass_PassesThroughEmptyKind(t *testing.T) {
 // tracker's RecordLandingPass call (issue #2983): best-effort bookkeeping
 // must never fail settling itself.
 func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
 	sentinel := fmt.Errorf("some tracker failure")
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc := forge.NewFake(testDispatchLabels)
 	fc.RecordLandingPassErr = sentinel
-
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
-		},
-		Passes: []passmanifest.Entry{
-			{Pass: 1, Kind: "implement", OutcomeFound: true},
-		},
-	}
-
-	s := newTestSettle(baseConfig(), fc, fc)
+	s, result := hostLandedPassFixture(t, fc, []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: true},
+	})
 
 	stderr := captureStderr(t, func() {
-		s.Settle(dispatch.NewFake(), issNum, 0, result)
+		captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
 	})
 
 	if len(fc.RecordLandingPassCalls) != 1 {
@@ -708,42 +703,52 @@ func TestSettle_RecordLandingPass_LogsErrorOnFailure(t *testing.T) {
 	if !strings.Contains(stderr, sentinel.Error()) {
 		t.Errorf("want stderr to contain %q, got %q", sentinel.Error(), stderr)
 	}
-	if !strings.Contains(stderr, issNum) {
-		t.Errorf("want stderr to name the issue %q, got %q", issNum, stderr)
+	if !strings.Contains(stderr, "#42") {
+		t.Errorf("want stderr to name the issue #42, got %q", stderr)
 	}
 }
 
-// With no manifest evidence in result.Passes (issue #2983), e.g. a Box that
-// wrote no manifest file to its outbox, Settle makes no RecordLandingPass
-// call and still settles without error.
-func TestSettle_RecordLandingPass_NoOpWhenPassesEmpty(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
+// A failed RecordLanding write skips the pass write (issue #5189): a pass
+// recorded against a landing that never persisted would be orphaned provenance.
+func TestSettle_RecordLandingPass_SkippedWhenRecordLandingFails(t *testing.T) {
+	sentinel := fmt.Errorf("landing write failed")
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc := forge.NewFake(testDispatchLabels)
+	fc.RecordLandingErr = sentinel
+	s, result := hostLandedPassFixture(t, fc, []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: true},
+	})
 
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
-		},
+	stderr := captureStderr(t, func() {
+		captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
+	})
+
+	if len(fc.RecordLandingCalls) == 0 {
+		t.Fatal("fixture must attempt a host-derived landing write")
 	}
-
-	s := newTestSettle(baseConfig(), fc, fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
 	if len(fc.RecordLandingPassCalls) != 0 {
-		t.Errorf("want no RecordLandingPass calls with no Passes evidence, got %+v", fc.RecordLandingPassCalls)
+		t.Errorf("RecordLandingPass must not run after a failed RecordLanding, got %+v", fc.RecordLandingPassCalls)
+	}
+	if !strings.Contains(stderr, sentinel.Error()) {
+		t.Errorf("want stderr to contain %q, got %q", sentinel.Error(), stderr)
 	}
 }
 
-// A blank landing must never clear an already-recorded ref (issue #2983),
-// mirroring recordLanding's own guard. Without it, a later blocked run with
-// manifest evidence but no landing would overwrite the pass provenance of a
-// PR landed by an earlier run, attributing it to a pass that produced no
-// landing at all.
-func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
+// A host landing written with no manifest evidence (issue #5189), e.g. from
+// spindrift recover, whose Result carries no Passes, clears the recorded pass
+// rather than leaving an earlier run's pass attached to the new landing.
+func TestSettle_RecordLandingPass_ClearsPassWhenPassesEmpty(t *testing.T) {
+	fc := settleHostLanded(t, nil)
+
+	want := []forge.RecordLandingPassCall{{Num: hostLandedIssue, Pass: 0, Kind: ""}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, want) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, want)
+	}
+}
+
+// A blocked run records no landing, so it records no pass either, however
+// its Box-controlled outcome line fills in landing= (issue #5189).
+func TestSettle_RecordLandingPass_NoOpWhenNoHostLanding(t *testing.T) {
 	const issNum = "42"
 
 	fc := forge.NewFake()
@@ -752,7 +757,7 @@ func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
 	result := dispatch.Result{
 		Resolved: outcome.Resolved{
 			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: "", Status: "blocked", Note: "tests failing"},
+			Outcome: outcome.Outcome{Issue: issNum, Landing: "x", Status: "blocked", Note: "tests failing"},
 		},
 		Passes: []passmanifest.Entry{
 			{Pass: 1, Kind: "implement", OutcomeFound: true},
@@ -762,34 +767,135 @@ func TestSettle_RecordLandingPass_NoOpWhenLandingEmpty(t *testing.T) {
 	s := newTestSettle(baseConfig(), fc, fc)
 	s.Settle(dispatch.NewFake(), issNum, 0, result)
 
-	if len(fc.RecordLandingPassCalls) != 0 {
-		t.Errorf("want no RecordLandingPass calls when landing is empty, got %+v", fc.RecordLandingPassCalls)
+	if len(fc.RecordLandingPassCalls) != 0 || len(fc.RecordLandingCalls) != 0 {
+		t.Errorf("want no landing or pass writes, got landing=%+v pass=%+v", fc.RecordLandingCalls, fc.RecordLandingPassCalls)
 	}
 }
 
-// A tracker without LandingPassRecorder, matching the github/jira adapters'
-// shape, must settle normally even when result.Passes carries manifest
-// evidence.
+// Regression for issue #5189: a later blocked run that prints landing=x at an
+// earlier pass must not overwrite the pass provenance of the push-only
+// placeholder an earlier run landed.
+func TestSettle_RecordLandingPass_LaterBlockedRunDoesNotOverwriteLandedPass(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "manual"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: hostLandedIssue, Labels: []string{"agent-in-progress"}})
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
+	landed := dispatch.Result{
+		Resolved: outcome.Resolved{
+			SelfReportFound: true,
+			SelfReport:      outcome.SelfReport{Status: outcome.StatusReady},
+		},
+		Passes: []passmanifest.Entry{{Pass: 2, Kind: "fix", OutcomeFound: true}},
+	}
+	sit := s.situationFor(hostLandedIssue, false, landed)
+	if got, err := s.SettleRelayedBranch(dispatch.NewFake(), hostLandedIssue, 0, sit, landed); !got || err != nil {
+		t.Fatalf("SettleRelayedBranch = %v, %v; want true, nil", got, err)
+	}
+	landings, passWrites := len(fc.RecordLandingCalls), len(fc.RecordLandingPassCalls)
+	if landings == 0 {
+		t.Fatal("fixture must record the push-only placeholder landing")
+	}
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: hostLandedIssue, Landing: "x", Status: "blocked", Note: "tests failing"},
+		},
+		Passes: []passmanifest.Entry{
+			{Pass: 1, Kind: "implement", OutcomeFound: true},
+		},
+	}
+	s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result)
+
+	if len(fc.RecordLandingPassCalls) != passWrites {
+		t.Errorf("blocked run must not write a pass, got %+v", fc.RecordLandingPassCalls)
+	}
+	for _, call := range fc.RecordLandingPassCalls {
+		if want := (forge.RecordLandingPassCall{Num: hostLandedIssue, Pass: 2, Kind: "fix"}); call != want {
+			t.Errorf("RecordLandingPass call = %+v, want only the landed run's %+v", call, want)
+		}
+	}
+	if len(fc.RecordLandingCalls) != landings {
+		t.Errorf("blocked run must not record a landing, got %+v", fc.RecordLandingCalls)
+	}
+}
+
+// landPushOnly records the pass alongside the host-derived placeholder branch
+// it writes after the relay (issue #5189).
+func TestSelfHeal_PushOnlyLanding_RecordsPassWithPlaceholder(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "manual"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	branch := fc.AgentBranch("1")
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
+	passes := implementThenFixPasses()
+
+	s.selfHeal(dispatch.NewFake(), "1", 0, branch, passes)
+
+	wantLanding := []forge.RecordLandingCall{{Num: "1", Landing: branch}}
+	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
+		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
+	}
+	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 2, Kind: "fix"}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
+	}
+}
+
+// SettleAdopted has no pass evidence, so on a push-only forge it records the
+// placeholder landing and clears the recorded pass rather than leaving an
+// earlier run's attached (issue #5189).
+func TestSettleAdopted_PushOnlyLanding_ClearsRecordedPass(t *testing.T) {
+	c := baseConfig()
+	c.MergeMode = "manual"
+	c.OutboxDir = func(num string) string { return "/outbox/" + num }
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	fc.SetIssue(forge.Issue{Number: "1", Labels: []string{"agent-in-progress"}})
+	branch := fc.AgentBranch("1")
+	s := newTestSettle(c, fc.AsLocalShaped(), fc.AsLocal())
+
+	captureStdout(t, func() { s.SettleAdopted(dispatch.NewFake(), "1", 0, branch) })
+
+	wantLanding := []forge.RecordLandingCall{{Num: "1", Landing: branch}}
+	if !reflect.DeepEqual(fc.RecordLandingCalls, wantLanding) {
+		t.Errorf("RecordLanding calls = %+v, want %+v", fc.RecordLandingCalls, wantLanding)
+	}
+	wantPass := []forge.RecordLandingPassCall{{Num: "1", Pass: 0, Kind: ""}}
+	if !reflect.DeepEqual(fc.RecordLandingPassCalls, wantPass) {
+		t.Errorf("RecordLandingPass calls = %+v, want %+v", fc.RecordLandingPassCalls, wantPass)
+	}
+}
+
+// landingOnlyTracker implements LandingRecorder but, unlike the local adapter,
+// not LandingPassRecorder; embedding the interfaces hides the Fake's other
+// methods.
+type landingOnlyTracker struct {
+	forge.IssueTracker
+	forge.LandingRecorder
+}
+
+// A tracker with LandingRecorder but without LandingPassRecorder must still
+// record the landing, skipping only the pass write, even when result.Passes
+// carries manifest evidence.
 func TestSettle_RecordLandingPass_NoOpWhenTrackerDoesNotImplementIt(t *testing.T) {
-	const issNum = "42"
-	const prURL = "https://github.com/owner/repo/pull/99"
+	fc := forge.NewFake(testDispatchLabels)
+	tracker := landingOnlyTracker{IssueTracker: fc.AsLocalShaped(), LandingRecorder: fc}
+	s, result := hostLandedPassFixtureOver(t, fc, tracker, []passmanifest.Entry{
+		{Pass: 1, Kind: "implement", OutcomeFound: true},
+	})
 
-	fc := forge.NewFake()
-	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	captureStdout(t, func() { s.Settle(dispatch.NewFake(), hostLandedIssue, 0, result) })
 
-	result := dispatch.Result{
-		Resolved: outcome.Resolved{
-			Found:   true,
-			Outcome: outcome.Outcome{Issue: issNum, Landing: prURL, Status: "blocked", Note: "tests failing"},
-		},
-		Passes: []passmanifest.Entry{
-			{Pass: 1, Kind: "implement", OutcomeFound: true},
-		},
+	if len(fc.RecordLandingCalls) == 0 {
+		t.Error("want the host-derived landing recorded")
 	}
-
-	s := newTestSettle(baseConfig(), fc.AsNoLandingRecorder(), fc)
-	s.Settle(dispatch.NewFake(), issNum, 0, result)
-
 	if len(fc.RecordLandingPassCalls) != 0 {
 		t.Errorf("want no RecordLandingPass calls against a tracker that doesn't implement it, got %+v", fc.RecordLandingPassCalls)
 	}

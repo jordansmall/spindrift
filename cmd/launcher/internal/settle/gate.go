@@ -63,9 +63,6 @@ func (s *Settle) Settle(d dispatch.Dispatcher, num string, gen uint64, result di
 	}
 
 	o := result.Resolved.Outcome
-	// Never record o.Landing: it is Box-controlled and reconcile trusts a
-	// recorded landing (issue #5005).
-	s.recordLandingPass(num, o.Landing, result.Passes)
 	// Ahead of the status switch so it runs on every outcome status alike
 	// (issue #2019): a run's own findings are worth tracking whether it landed
 	// ready or blocked. Best-effort, so a filing failure never changes the
@@ -540,29 +537,37 @@ func (s *Settle) postBlockedNoteComment(num, note string) {
 }
 
 // recordLanding persists landing onto the tracker issue via the optional
-// LandingRecorder interface (ADR 0029). An empty landing is a no-op: a blank
-// write must never clear an already-recorded ref. Best-effort, matching
-// transitionState's log-but-don't-propagate contract.
+// LandingRecorder interface (ADR 0029), then the pass that produced it. An
+// empty landing is a no-op: a blank write must never clear an already-recorded
+// ref. Best-effort, matching transitionState's log-but-don't-propagate
+// contract. A failed landing write skips the pass write so the pair never
+// disagrees.
 func (s *Settle) recordLanding(num, landing string, passes []passmanifest.Entry) {
 	if s.landing == nil || landing == "" {
 		return
 	}
 	if err := s.landing.RecordLanding(num, landing); err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: could not record landing: %v\n", num, err)
-	}
-}
-
-// recordLandingPass persists which pass produced the outcome (issue #2983). The
-// landing argument only gates the write: an empty one means the outcome line
-// claimed no landing, and such a run must never overwrite the pass provenance
-// an earlier genuine landing recorded. Picks the last entry with OutcomeFound
-// true. Best-effort, matching transitionState's log-but-don't-propagate
-// contract.
-func (s *Settle) recordLandingPass(num, landing string, passes []passmanifest.Entry) {
-	if s.landingPass == nil || landing == "" || len(passes) == 0 {
 		return
 	}
-	entry := passes[len(passes)-1]
+	s.recordLandingPass(num, passes)
+}
+
+// recordLandingPass persists which pass produced the landing just recorded
+// (issue #2983). It runs only from recordLanding, never off the Box-controlled
+// outcome line (issue #5189). Picks the last entry with OutcomeFound true,
+// else the last entry. With no manifest evidence it clears the recorded pass, so a
+// landing written without pass evidence (e.g. `spindrift recover`) never
+// inherits an earlier run's pass. Best-effort, matching transitionState's
+// log-but-don't-propagate contract.
+func (s *Settle) recordLandingPass(num string, passes []passmanifest.Entry) {
+	if s.landingPass == nil {
+		return
+	}
+	var entry passmanifest.Entry
+	if len(passes) > 0 {
+		entry = passes[len(passes)-1]
+	}
 	for i := len(passes) - 1; i >= 0; i-- {
 		if passes[i].OutcomeFound {
 			entry = passes[i]
