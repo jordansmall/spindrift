@@ -466,8 +466,11 @@ regardless of `git.merge.policy` when it touches a guarded path;
 implementor agent runs, threaded into the container as `MODEL` so `MODEL=...`
 switches models at runtime with no image rebuild. `agents.drivers.<name>.models.scout`/
 `agents.drivers.<name>.models.review` tier the read-only scout and reviewer
-subagents the same way; each is composed into `--agents` independently by its
-own knob, so emptying one drops only that subagent, never both.
+subagents, but are baked into the image (a change needs a rebuild; only the
+code-owned review pass has a per-run override, see [In-box
+orchestrator](#in-box-orchestrator)); each is composed into `--agents`
+independently by its own knob, so emptying one drops only that subagent, never
+both.
 `agents.drivers.<name>.models.filer` is the same shape but opt-in — empty by
 default, so the filer is not provisioned at all until a model is set; see
 [Filer](#filer). The top-level spellings (`agents.models.default`,
@@ -673,10 +676,15 @@ still work — the default roster derives from them unchanged, as a fallback
 under `models` — but a `nix eval` warning fires whenever any of them is set,
 whether via the `mkHarness` `defaults` argument or a Consumer's
 `agents.drivers.<name>.models.*` (the top-level `agents.models.*` is the
-deprecated single-Driver form), pointing at this section. Unlike those knobs, which
-retier or add/drop a subagent with no image rebuild (`SCOUT_MODEL=...` at
-dispatch time, no `spindrift build`), adding an arbitrary Nth custom agent
-via `roster` is a `mkHarness`/image-time decision and requires a rebuild.
+deprecated single-Driver form), pointing at this section. Like adding an
+arbitrary Nth custom agent via `roster`, those knobs are a
+`mkHarness`/image-time decision: the scout, filer, and worker models are baked
+into the image's `AGENTS_JSON_TEMPLATE` at eval time, so setting
+`SCOUT_MODEL`/`FILER_MODEL`/`WORKER_MODEL` at dispatch time neither retiers
+nor adds/drops that subagent, and changing one needs a rebuild (`spindrift
+build`). The one exception is the code-owned review pass: a dispatch-time
+`REVIEW_MODEL`/`REVIEW_EFFORT` overrides its baked model and effort per run
+with no rebuild (issue #3171; see [In-box orchestrator](#in-box-orchestrator)).
 
 spindrift's own dogfood Consumer config (`nix/dogfood-defaults.nix`) is a
 concrete `roster` user, naming the Filer, reviewer, and worker under its
@@ -1610,17 +1618,21 @@ exceptions.
 | `MODEL`                   | (baked; see [Default models](#default-models)) | main/coordinator Claude model the in-container agent runs (worker-tier defaults are unaffected) |
 | `EFFORT`                  | — (empty, no baked default) | main/coordinator reasoning-effort level, passed straight through to the Driver with no normalization — the value must be valid for the active `DRIVER`: on `claude` it becomes `--effort <level>` (`low`/`medium`/`high`/`xhigh`/`max`), on `opencode` it becomes `--variant <level>` (opencode's cross-provider variant selector); unset emits no flag either way, so the Driver's own default effort applies |
 | `DRIVER_BASH_TIMEOUT_MS`  | — (empty, no baked default) | per-call Bash timeout in milliseconds (flake option `agents.drivers.<name>.bashTimeoutMs`, issue #4409; the top-level `agents.bashTimeoutMs` is deprecated), exported in the Box under the env var names the active `DRIVER`'s registry entry declares in `bashTimeoutEnv` — on `claude`, `BASH_DEFAULT_TIMEOUT_MS` and `BASH_MAX_TIMEOUT_MS`; `opencode` declares none and ignores it. Unset exports nothing, so the Driver keeps its own limits (Claude Code: 10 minutes); a value that is not a positive integer is skipped with a warning in the Box log |
-| `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty drops the reviewer entry from `--agents`). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset); an explicit dispatch-time `REVIEW_MODEL=...`/`--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback |
+| `SCOUT_MODEL`             | (baked; see [Default models](#default-models)) | scout subagent model tier (empty drops the scout entry from `--agents`); image-time only — a change needs a rebuild, and a dispatch-time value neither retiers nor drops the baked scout. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `REVIEW_MODEL`            | (baked; see [Default models](#default-models)) | reviewer subagent model tier (empty at image time drops the reviewer entry from `--agents`; empty at dispatch sets no override and leaves the baked roster unchanged). **Deprecated for non-orchestrator use** — superseded by the [`roster`](#subagent-roster) option. Under `ORCHESTRATOR`, the roster reviewer entry is itself superseded by the code-owned review pass, which binds its model from this value instead (falling back to the coordinator model when unset); an explicit dispatch-time `REVIEW_MODEL=...`/`--review-model ...` overrides the baked roster value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator-model fallback |
 | `REVIEW_EFFORT`           | — (empty, no baked default) | value for the code-owned review pass's own effort argument to the Driver; pass-through only, no normalization, same accepted values as `EFFORT` for the active Driver. Reaches the review pass via the handoff document's `ReviewEffort` field (issue #2975), not a direct flag — `driver-exec assemble-prompt` extracts it from the roster's `reviewer` entry, and `driver-exec` applies it only on the reviewer-role pass (see the code-owned review pass discussion under [In-box orchestrator](#in-box-orchestrator)). Overrides the roster reviewer entry's own effort (`rosterDefaults.reviewer.effort` by default) the same way `REVIEW_MODEL` overrides the reviewer's model — empty means follow the roster, a non-empty value overrides it. Meaningful only under `ORCHESTRATOR`. Like `REVIEW_MODEL`, an explicit dispatch-time `REVIEW_EFFORT=...`/`--review-effort ...` overrides the baked value per run, no rebuild needed (issue #3171) — precedence is dispatch-time env > baked roster reviewer entry > coordinator fallback; unset or empty at dispatch leaves the baked chain unchanged |
-| `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
-| `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `FILER_MODEL`             | (baked; see [Default models](#default-models)) | filer subagent model tier; empty (default) means the filer is not provisioned — setting a model is the opt-in (recommended: the same model as the `scout` default, see [Default models](#default-models)); see [Filer](#filer). Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked filer. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
+| `WORKER_MODEL`            | (baked; see [Default models](#default-models)) | implement-capable worker subagent model tier (empty drops the worker entry from `--agents`); when set, the implementor runs IMPLEMENT as a coordinator and delegates one slice at a time to it. Image-time only — a change needs a rebuild, and a dispatch-time value neither provisions, retiers, nor drops the baked worker. **Deprecated** — superseded by the [`roster`](#subagent-roster) option |
 | `IMAGE`                   | `spindrift:latest`     | image tag to run                         |
 | `SPINDRIFT_PROMPT_DIR`    | baked prompt store path | host directory mounted over `/agent/prompts` for zero-rebuild prompt iteration; declaratively configurable via the `perSystem.spindrift.agents.promptDir` flake option or `settings`, or hot-overridden at dispatch time via `--prompt-dir` / the env var. The knob itself is a versioned surface; the template an override directory replaces is not — see [`VERSIONING.md`](../VERSIONING.md)'s prompt-template carve-out |
 | `SPINDRIFT_SKILLS_DIR`    | baked skills store path | hot-override skills at dispatch time: mounted to `/operator-skills` and merged over the baked `/agent/skills` set at box startup (not bakeable) |
 
 Every `settings`-baked knob above can be re-pointed at dispatch time with its
-`--flag` (see `spindrift --help --all` / `man spindrift`); a knob env var
+`--flag` (see `spindrift --help --all` / `man spindrift`) — except
+`SCOUT_MODEL`/`FILER_MODEL`/`WORKER_MODEL`, whose models are baked into the
+image's subagent roster and need a rebuild (on an image with no loaded input
+document, a dispatch-time value still steers which subagent prompt fragments
+render, so they can disagree with the baked roster); a knob env var
 still wins over the flake setting this release, but is deprecated and warns
 (ADR 0020) — see [`MIGRATING.md`](../MIGRATING.md) for the flag/settings
 equivalents. `(baked)` marks knobs whose defaults are baked into the Launcher
@@ -1643,8 +1655,10 @@ exits rather than committing under an arbitrary identity.
 > classifies that failure as `reason=unsupportedFlag` (not the generic
 > `taskFailed`) so the dispatch log names the cause. The fix: bump the
 > Consumer's `nixpkgs` input so `pkgs.claude-code` is current, or blank the
-> subagent model knobs (set `SCOUT_MODEL=`/`REVIEW_MODEL=`, etc.) to drop the
-> roster and stop emitting `--agents`.
+> subagent model knobs (`models.scout`/`models.review`, etc., or the `roster`)
+> in the Consumer config and rebuild (`spindrift build`) to drop the roster and
+> stop emitting `--agents`. Blanking `SCOUT_MODEL=`/`REVIEW_MODEL=` at dispatch
+> time does not: the roster is baked into the image.
 
 ### opencode Driver: github-copilot Provider credential
 
