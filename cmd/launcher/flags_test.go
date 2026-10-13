@@ -1607,6 +1607,113 @@ func TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback(t
 	}
 }
 
+// An OAuth-only vault has no anthropic-api-key item. The pair is one unit, so
+// a failed ANTHROPIC_API_KEY fetch must not abort before the OAuth item is
+// tried, and a failed first half must not report when the second succeeds.
+func TestApplySecretCmdFallback_ClaudePair(t *testing.T) {
+	const tmpl = "rbw get spindrift-{name}"
+	tests := []struct {
+		name       string
+		driver     string
+		docDriver  string
+		failItems  []string
+		wantOAuth  string
+		wantAPIKey string
+		wantCalls  []string
+		wantErr    bool
+	}{
+		{
+			name:      "OAuth-only vault",
+			failItems: []string{"anthropic-api-key"},
+			wantOAuth: "value-claude-code-oauth-token",
+			wantCalls: []string{"rbw get spindrift-claude-code-oauth-token"},
+		},
+		{
+			name:       "API-key-only vault",
+			failItems:  []string{"claude-code-oauth-token"},
+			wantAPIKey: "value-anthropic-api-key",
+			wantCalls: []string{
+				"rbw get spindrift-claude-code-oauth-token",
+				"rbw get spindrift-anthropic-api-key",
+			},
+		},
+		{
+			name:      "both fail",
+			failItems: []string{"claude-code-oauth-token", "anthropic-api-key"},
+			wantCalls: []string{
+				"rbw get spindrift-claude-code-oauth-token",
+				"rbw get spindrift-anthropic-api-key",
+			},
+			wantErr: true,
+		},
+		{
+			name:      "both present fetches only OAuth",
+			wantOAuth: "value-claude-code-oauth-token",
+			wantCalls: []string{"rbw get spindrift-claude-code-oauth-token"},
+		},
+		{
+			name:      "non-claude driver sources neither",
+			driver:    "opencode",
+			wantCalls: []string{},
+		},
+		{
+			name:      "non-claude driver set only in the document sources neither",
+			docDriver: "opencode",
+			wantCalls: []string{},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			orig := secretCmdRunner
+			t.Cleanup(func() { secretCmdRunner = orig })
+			var calls []string
+			secretCmdRunner = func(cmd string) (string, error) {
+				calls = append(calls, cmd)
+				for _, item := range tc.failItems {
+					if strings.HasSuffix(cmd, "-"+item) {
+						return "", errors.New("exit status 1")
+					}
+				}
+				return "value-" + strings.TrimPrefix(cmd, "rbw get spindrift-"), nil
+			}
+			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("GH_TOKEN", "already-set")
+			t.Setenv("DRIVER", tc.driver)
+			if tc.docDriver != "" {
+				t.Cleanup(func() { loadedDoc = nil })
+				loadedDoc = &inputdoc.Document{Artifacts: map[string]string{"DRIVER": tc.docDriver}}
+			}
+			err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", tmpl})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if err != nil {
+				for _, want := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"} {
+					if !strings.Contains(err.Error(), want) {
+						t.Errorf("error %q does not name %s", err, want)
+					}
+				}
+				if strings.Contains(err.Error(), "rbw get") {
+					t.Errorf("error %q leaks the command string", err)
+				}
+				if !strings.Contains(err.Error(), secretCmdUnlockHint) {
+					t.Errorf("error %q lacks the unlock hint", err)
+				}
+			}
+			if !slices.Equal(calls, tc.wantCalls) {
+				t.Errorf("runner calls = %q, want %q", calls, tc.wantCalls)
+			}
+			if got := os.Getenv("CLAUDE_CODE_OAUTH_TOKEN"); got != tc.wantOAuth {
+				t.Errorf("CLAUDE_CODE_OAUTH_TOKEN = %q, want %q", got, tc.wantOAuth)
+			}
+			if got := os.Getenv("ANTHROPIC_API_KEY"); got != tc.wantAPIKey {
+				t.Errorf("ANTHROPIC_API_KEY = %q, want %q", got, tc.wantAPIKey)
+			}
+		})
+	}
+}
+
 func TestParseFlags_GlobalSecretCmd_FailureIsError(t *testing.T) {
 	orig := secretCmdRunner
 	t.Cleanup(func() { secretCmdRunner = orig })
