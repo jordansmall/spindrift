@@ -3219,6 +3219,12 @@ generated `flake.nix`.
   #5245). The backend row's `inBoxUnwritableTracker` bit drives both
   halves.
 
+  A blocked work run's progress comment is host-posted on Jira for the
+  same reason: under `read-write` the IF BLOCKED step tells the agent to
+  put what's done and what remains in the `SPINDRIFT_OUTCOME` `note=`
+  field instead of running `gh issue comment`, and settle posts that note
+  to the Jira issue (issue #5263). The same bit drives both halves.
+
 - **`forgejo`** — a Forgejo/Gitea REST API adapter; Codeberg is the default
   instance, set via `FORGEJO_BASE_URL` (default `https://codeberg.org`, so a
   self-hosted Forgejo/Gitea instance just re-points it). `FORGEJO_TOKEN` is a
