@@ -78,7 +78,7 @@ cd "$cwd"
 cat >"$log" <<EOF
 {"type":"assistant","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
 {"type":"result","total_cost_usd":0.25,"num_turns":3,"duration_ms":60000,"usage":{"input_tokens":1000,"output_tokens":100}}
-SPINDRIFT_OUTCOME status=ready landing=$prefix$slug
+SPINDRIFT_OUTCOME status=${FAKE_STATUS:-ready} landing=$prefix$slug
 EOF
 FAKE
   chmod +x "$T/bin/nix"
@@ -183,6 +183,37 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
   [ ! -e "$FAKE_LOG" ]
 }
 
+@test "run: an arm named twice is an error before anything is dispatched" {
+  cd "$T/cwd"
+  run bench run t1 good good
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"good"*"twice"* ]]
+  [ ! -e "$FAKE_LOG" ]
+}
+
+@test "run: a rep left half-written by an interrupt is cleared and redone" {
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  # Interrupted after the key row but before the metrics row, with the
+  # grading worktree still registered.
+  git -C "$T/out/work.git" worktree add -q --detach "$T/out/runs/good/r1/tree" HEAD
+  head -1 "$T/out/metrics.tsv" >"$T/m" && mv "$T/m" "$T/out/metrics.tsv"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  rows | awk -F'\t' -v p="$(col rep)" -v r="$(col resolved)" '{print $p, $r}' | grep -x '1 1'
+  [ "$(wc -l <"$T/out/judging/KEY.tsv")" -eq 1 ]
+  [ "$(find "$T/out/judging" -name '*.patch' | wc -l)" -eq 1 ]
+}
+
+@test "summary: outcomes beyond ready, blocked, failed and none are counted as other" {
+  cd "$T/cwd"
+  FAKE_STATUS=ambiguous BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  grep -F '| ready | blocked | failed | none | other |' "$T/out/summary.md"
+  grep -E '^\| good \| 1 \| 1/1 \| [0-9]+ \| 0 \| 0 \| 0 \| 0 \| 1 \|' "$T/out/summary.md"
+}
+
 @test "validate: a task whose hidden test fails on BASE and passes on FIX is valid" {
   run bench validate t1
   [ "$status" -eq 0 ]
@@ -265,6 +296,32 @@ JSON
   # prompt is the first turn's 100+10+5.
   echo "$output" | grep -P '^implementor\tclaude-sonnet-5\t10\t5\t150\t70\t0.001522\t115$'
   echo "$output" | grep -P '^scout\tclaude-haiku-5-5\t0\t0\t200\t80\t0.000600\t200$'
+}
+
+@test "--breakdown reads a real Box log: deduped ids, Agent spawns, review passes, cache TTLs, session output" {
+  local log="$T/real.log"
+  cat >"$log" <<'JSON'
+{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}
+{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":100,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":40,"cache_creation":{"ephemeral_5m_input_tokens":40,"ephemeral_1h_input_tokens":0}}}}
+{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","content":[{"type":"tool_use","id":"toolu_w","name":"Agent","input":{"subagent_type":"worker"}}],"usage":{"input_tokens":100,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":40,"cache_creation":{"ephemeral_5m_input_tokens":40,"ephemeral_1h_input_tokens":0}}}}
+{"type":"assistant","message":{"id":"m2","model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"toolu_s","name":"Agent","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":200,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":10,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":10}}},"parent_tool_use_id":"toolu_w"}
+{"type":"assistant","message":{"id":"m3","model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":300,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}},"parent_tool_use_id":"toolu_s"}
+{"type":"result","total_cost_usd":1,"usage":{"output_tokens":7},"modelUsage":{"claude-opus-5-5":{"outputTokens":50},"claude-haiku-5-5":{"outputTokens":400}}}
+{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}
+{"type":"assistant","message":{"id":"m4","model":"claude-opus-5-5","content":[],"usage":{"input_tokens":10,"output_tokens":1,"cache_read_input_tokens":0,"cache_creation_input_tokens":8}}}
+{"type":"result","total_cost_usd":1,"usage":{"output_tokens":3},"modelUsage":{"claude-opus-5-5":{"outputTokens":30}}}
+JSON
+  run env BENCH_PRICES='{"claude-opus":[10,100,1,20],"claude-haiku":[1,10,0.1,2]}' \
+    bash "${BENCH_SH:-$BATS_TEST_DIRNAME/../bench.sh}" --breakdown "$log"
+  [ "$status" -eq 0 ]
+  # m1 once, its 5m write at 1.25x input: (100*10 + 50*100 + 40*12.5)/1e6.
+  echo "$output" | grep -P '^implementor\tclaude-opus-5-5\t0\t40\t100\t50\t0.006500\t140$'
+  # A session's per-model output splits over that model's messages in it.
+  echo "$output" | grep -P '^worker\tclaude-haiku-5-5\t0\t10\t200\t200\t0.002220\t210$'
+  echo "$output" | grep -P '^scout\tclaude-haiku-5-5\t0\t0\t300\t200\t0.002300\t300$'
+  # An un-split cache write is 5m, as the launcher assumes.
+  echo "$output" | grep -P '^reviewer\tclaude-opus-5-5\t0\t8\t10\t30\t0.003200\t18$'
+  [ "$(wc -l <<<"$output")" -eq 4 ]
 }
 
 @test "--breakdown prices a turn past a model's prompt threshold at the higher tier" {

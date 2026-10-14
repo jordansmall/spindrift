@@ -75,7 +75,7 @@ parse_passes()  { jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" an
 parse_verdicts(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="verdict")|.spindrift_op.verdict)|join(",")' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 parse_decision(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="decision")|"\(.spindrift_op.decision):\(.spindrift_op.reason)")|last // ""' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 
-parse_outcome() { # Prints ready, blocked, failed, or none.
+parse_outcome() { # Prints the last SPINDRIFT_OUTCOME status, or none.
   local line
   line="$(grep -a '^SPINDRIFT_OUTCOME ' "$1" 2>/dev/null | tail -1 || true)"
   if [ -z "$line" ]; then echo none; return; fi
@@ -87,18 +87,18 @@ parse_outcome() { # Prints ready, blocked, failed, or none.
 # (longest match wins); each value is [input, output, cache_read, cache_write]
 # in $/MTok, optionally followed by [prompt_threshold, input, output,
 # cache_read, cache_write] for a turn whose whole prompt (fresh + cache read +
-# cache write) exceeds the threshold. cache_write is the 1h rate (2x input),
-# since dispatches cache for 1h. Haiku 5.5's long-prompt cache rates assume
+# cache write) exceeds the threshold. cache_write is the 1h rate (2x input);
+# 5m writes cost 1.25x input. Haiku 5.5's long-prompt cache rates assume
 # the same 5x step as its input. A model with no matching prefix costs 0, but
 # its tokens are still reported.
 BENCH_DEFAULT_PRICES='{"claude-opus-5-5":[4,20,0.2,8],"claude-opus":[5,25,0.5,10],"claude-sonnet-5":[2,10,0.2,4],"claude-haiku-5-5":[0.1,0.5,0.01,0.2,100000,0.5,2.5,0.05,1],"claude-haiku":[1,5,0.1,2]}'
 
 # Per-role/model token and effective-cost TSV from a stream-json Box log (issue
-# #2057), mirroring breakdownByRoleFile in the launcher's claude/usage.go: pass
-# 1 maps each implementor-issued Task tool_use id to its subagent_type, pass 2
-# attributes each assistant message to implementor (no parent_tool_use_id) or
-# its parent's role. Each message is priced on its own, since a tier applies
-# per turn, and the last column is the largest single-turn prompt.
+# #2057), following the launcher's claude/usage.go: one pass dedups by
+# message.id, maps each Task/Agent spawn id to its subagent_type, and
+# attributes a top-level message to implementor or reviewer by the latest
+# pass_start. Each message is priced on its own, since a tier applies per
+# turn, and the last column is the largest single-turn prompt.
 cmd_breakdown() {
   local log="$1"
   local prices_json="${BENCH_PRICES:-$BENCH_DEFAULT_PRICES}"
@@ -132,35 +132,60 @@ cmd_breakdown() {
       | ($micros - ($whole * 1000000)) as $frac
       | "\($whole).\($frac | tostring | if length < 6 then ("0" * (6 - length)) + . else . end)";
 
-    [inputs | fromjson?] as $all
-    | ($all | map(select(.type == "assistant"))) as $asst
-    | (reduce ($asst[] | select((.parent_tool_use_id // "") == "")) as $ev ({};
-        reduce ($ev.message.content // [])[] as $b (.;
-          if ($b.type == "tool_use" and $b.name == "Task" and (($b.id // "") != "")) then
-            (($b.input.subagent_type // "") as $st
-              | .[$b.id] = (if $st == "" then "subagent" else $st end))
-          else . end)
-      )) as $taskRole
-    | ($asst | map(
-        (.parent_tool_use_id // "") as $parent
-        | (if $parent == "" then "implementor" else ($taskRole[$parent] // "subagent") end) as $role
-        | (.message.model // "unknown") as $model
-        | (.message.usage.cache_read_input_tokens // 0) as $cr
-        | (.message.usage.cache_creation_input_tokens // 0) as $cw
-        | (.message.usage.input_tokens // 0) as $in
-        | (.message.usage.output_tokens // 0) as $out
-        | ($in + $cr + $cw) as $prompt
-        | rate_for($model; $prompt) as $r
-        | { role: $role, model: $model, cache_read: $cr, cache_write: $cw,
-            fresh_input: $in, output: $out, prompt: $prompt,
-            cost: ((($in * $r[0]) + ($out * $r[1]) + ($cr * $r[2]) + ($cw * $r[3])) / 1000000) }
+    # Per-message output_tokens is a ~100x-low placeholder (#3183); the
+    # modelUsage on the result event ending the session is the real count,
+    # split evenly over the messages of that model in the session.
+    def settle(mu):
+      mu as $mu
+      | (map(.model) | group_by(.) | map({key: .[0], value: length}) | from_entries) as $n
+      | map(if $mu[.model].outputTokens != null
+            then .output = ($mu[.model].outputTokens / $n[.model]) else . end);
+
+    reduce (inputs | fromjson? | objects) as $ev (
+      {top: "implementor", task: {}, seen: {}, cur: [], done: []};
+      if $ev.type == "spindrift_op" and $ev.spindrift_op.op == "pass_start" then
+        ($ev.spindrift_op.role // "") as $p
+        | if $p == "review" or $p == "delta-review" then .top = "reviewer"
+          elif $p == "implement" or $p == "fix" or $p == "land" then .top = "implementor"
+          else . end
+      elif $ev.type == "result" then
+        .done += (.cur | settle($ev.modelUsage // {})) | .cur = []
+      elif $ev.type == "assistant" and $ev.message != null then
+        # Spawns are collected before the dedup: a repeated message id may
+        # carry the tool_use block its first copy lacked.
+        reduce ($ev.message.content // [] | .[] | objects
+            | select(.type == "tool_use" and (.name == "Task" or .name == "Agent") and ((.id // "") != ""))) as $b (.;
+          .task[$b.id] = (($b.input.subagent_type // "") | if . == "" then "subagent" else . end))
+        | ($ev.message.id // "") as $id
+        | if $id != "" and .seen[$id] then .
+          else
+            (if $id != "" then .seen[$id] = true else . end)
+            | ($ev.parent_tool_use_id // "") as $parent
+            | ($ev.message.usage // {}) as $u
+            | $u.cache_creation as $cc
+            | .cur += [{
+                role: (if $parent == "" then .top else (.task[$parent] // "subagent") end),
+                model: ($ev.message.model // "unknown"),
+                fresh_input: ($u.input_tokens // 0),
+                cache_read: ($u.cache_read_input_tokens // 0),
+                cw5: (if $cc != null then ($cc.ephemeral_5m_input_tokens // 0) else ($u.cache_creation_input_tokens // 0) end),
+                cw1: (if $cc != null then ($cc.ephemeral_1h_input_tokens // 0) else 0 end),
+                output: ($u.output_tokens // 0) }]
+          end
+      else . end)
+    | (.done + .cur | map(
+        (.fresh_input + .cache_read + .cw5 + .cw1) as $prompt
+        | rate_for(.model; $prompt) as $r
+        | { role, model, cache_read, cache_write: (.cw5 + .cw1), fresh_input, output, prompt: $prompt,
+            cost: (((.fresh_input * $r[0]) + (.output * $r[1]) + (.cache_read * $r[2])
+              + (.cw5 * $r[0] * 1.25) + (.cw1 * $r[3])) / 1000000) }
       )) as $rows
     | ($rows | group_by([.role, .model]) | map({
         role: .[0].role, model: .[0].model,
         cache_read:  (map(.cache_read)  | add),
         cache_write: (map(.cache_write) | add),
         fresh_input: (map(.fresh_input) | add),
-        output:      (map(.output)      | add),
+        output:      (map(.output)      | add | round),
         cost:        (map(.cost)        | add),
         max_prompt:  (map(.prompt)      | max)
       }))
@@ -273,7 +298,10 @@ prepare_tree() {
   fi
 }
 
-drop_tree() { git -C "$1" worktree remove --force "$2" 2>/dev/null || rm -rf "$2"; }
+drop_tree() {
+  git -C "$1" worktree remove --force "$2" 2>/dev/null || rm -rf "$2"
+  git -C "$1" worktree prune
+}
 
 run_in() { (cd "$1" && bash -c "$2") >"$3" 2>&1; }
 
@@ -416,6 +444,20 @@ next_rep() {
   awk -F'\t' -v a="$1" 'NR > 1 && $2 == a && $3 + 0 > m { m = $3 + 0 } END { print m + 0 }' "$OUT/metrics.tsv"
 }
 
+# next_rep hands an interrupted rep's number out again, so drop what that
+# attempt left: its grading worktree, its run dir, and any key row and patch.
+clear_stale_rep() {
+  local arm="$1" rep="$2" rundir="$3" key="$OUT/judging/KEY.tsv" id
+  [ -d "$OUT/work.git" ] && drop_tree "$OUT/work.git" "$rundir/tree"
+  rm -rf "$rundir"
+  [ -f "$key" ] || return 0
+  while IFS=$'\t' read -r id _; do
+    rm -f "$OUT/judging/$id.patch"
+  done < <(awk -F'\t' -v a="$arm" -v r="$rep" '$2 == a && $3 == r' "$key")
+  awk -F'\t' -v a="$arm" -v r="$rep" '!($2 == a && $3 == r)' "$key" >"$key.tmp"
+  mv "$key.tmp" "$key"
+}
+
 new_blind_id() {
   local id
   while :; do
@@ -441,6 +483,7 @@ run_one() {
   local -a extra=() nb=()
   read -ra extra <<<"$flags"
   [ "$BENCH_NO_BUILD" = "1" ] && nb=(--no-build)
+  clear_stale_rep "$arm" "$rep" "$rundir"
   mkdir -p "$rundir/issues"
   cp "$TASK_DIR/issue.md" "$rundir/issues/$task.md"
 
@@ -519,6 +562,7 @@ cmd_run() {
   else
     for a in "$@"; do
       i="$(arm_index "$a")" || die "no arm '$a' in $BENCH_ARMS_FILE (have: ${ARM_NAMES[*]})"
+      [[ " ${picked[*]} " != *" $i "* ]] || die "arm '$a' named twice; use BENCH_REPS for more runs"
       picked+=("$i")
     done
   fi
@@ -606,8 +650,8 @@ summarize() {
     echo "BASE \`${BASE:0:10}\` · FIX \`${FIX:0:10}\` · $(($(wc -l <"$m") - 1)) run(s). Resolved means the hidden tests"
     echo "pass and CHECK_CMD (if set) does too. Cost is the Driver's own total_cost_usd."
     echo
-    echo '| arm | runs | resolved | checks pass | ready | blocked | failed | none | cost $ mean | cost $ sd | minutes mean | out tok mean | passes mean |'
-    echo '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'
+    echo '| arm | runs | resolved | checks pass | ready | blocked | failed | none | other | cost $ mean | cost $ sd | minutes mean | out tok mean | passes mean |'
+    echo '| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |'
     awk -F'\t' -v order="${order[*]}" '
       BEGIN { k = split(order, ord, " ") }
       NR == 1 { next }
@@ -620,8 +664,9 @@ summarize() {
         for (i = 1; i <= k; i++) {
           a = ord[i]; mean = c[a] / n[a]
           sd = n[a] > 1 ? sqrt((c2[a] - n[a] * mean * mean) / (n[a] - 1)) : 0
-          printf "| %s | %d | %d/%d | %d | %d | %d | %d | %d | %.2f | %.2f | %.1f | %.0f | %.1f |\n", \
+          printf "| %s | %d | %d/%d | %d | %d | %d | %d | %d | %d | %.2f | %.2f | %.1f | %.0f | %.1f |\n", \
             a, n[a], res[a], n[a], ck[a], o[a, "ready"], o[a, "blocked"], o[a, "failed"], o[a, "none"], \
+            n[a] - o[a, "ready"] - o[a, "blocked"] - o[a, "failed"] - o[a, "none"], \
             mean, sd, dur[a] / n[a] / 60000, out[a] / n[a], ps[a] / n[a]
         }
       }' "$m"
