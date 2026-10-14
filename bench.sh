@@ -441,6 +441,7 @@ reset_remote() {
 }
 
 next_rep() {
+  [ -f "$OUT/metrics.tsv" ] || { echo 0; return; }
   awk -F'\t' -v a="$1" 'NR > 1 && $2 == a && $3 + 0 > m { m = $3 + 0 } END { print m + 0 }' "$OUT/metrics.tsv"
 }
 
@@ -483,14 +484,13 @@ run_one() {
   local -a extra=() nb=()
   read -ra extra <<<"$flags"
   [ "$BENCH_NO_BUILD" = "1" ] && nb=(--no-build)
-  clear_stale_rep "$arm" "$rep" "$rundir"
-  mkdir -p "$rundir/issues"
-  cp "$TASK_DIR/issue.md" "$rundir/issues/$task.md"
+  local issues="$rundir/issues"
+  [[ "$issues" = /* ]] || issues="$PWD/$issues"
 
   local -a cmd=(
     "$BENCH_NIX" run "$app" -- dispatch "${nb[@]}" --yes
     --repo-slug "$BENCH_REPO_SLUG"
-    --tracker local --local-dir "$(cd "$rundir/issues" && pwd)"
+    --tracker local --local-dir "$issues"
     --forge-backend git --remote-url "$BENCH_REMOTE"
     --base-branch main --branch-prefix "$prefix"
     --merge-policy manual
@@ -505,6 +505,9 @@ run_one() {
     return 0
   fi
 
+  clear_stale_rep "$arm" "$rep" "$rundir"
+  mkdir -p "$issues"
+  cp "$TASK_DIR/issue.md" "$issues/$task.md"
   info "$task [$arm r$rep] $app${flags:+ $flags}"
   reset_remote
   local host_log=".spindrift/logs/issue-$task.log" fx rc=0
@@ -603,10 +606,12 @@ EOF
     [ "$reply" = "yes" ] || die "aborted"
   fi
 
-  mkdir -p "$OUT/runs" "$OUT/judging" "$OUT/logs"
-  [ -f "$OUT/metrics.tsv" ] || printf '%s\n' "$METRICS_HEADER" >"$OUT/metrics.tsv"
-  cp "$TASK_DIR/issue.md" "$OUT/judging/ISSUE.md"
-  [ -n "${BENCH_DRY_RUN:-}" ] || ensure_grading_repo "$OUT/work.git"
+  if [ -z "${BENCH_DRY_RUN:-}" ]; then
+    mkdir -p "$OUT/runs" "$OUT/judging" "$OUT/logs"
+    [ -f "$OUT/metrics.tsv" ] || printf '%s\n' "$METRICS_HEADER" >"$OUT/metrics.tsv"
+    cp "$TASK_DIR/issue.md" "$OUT/judging/ISSUE.md"
+    ensure_grading_repo "$OUT/work.git"
+  fi
 
   if [ "$BENCH_NO_BUILD" = "1" ] && [ -z "${BENCH_DRY_RUN:-}" ]; then
     for i in "${picked[@]}"; do
@@ -629,7 +634,8 @@ EOF
   done
   for a in "${plan[@]}"; do run_one "$task" "${a%%:*}" "${a#*:}"; done
 
-  [ -n "${BENCH_DRY_RUN:-}" ] || summarize "$task"
+  [ -z "${BENCH_DRY_RUN:-}" ] || return 0
+  summarize "$task"
   info "done — $OUT/summary.md (judge $OUT/judging/*.patch before reading KEY.tsv)"
 }
 

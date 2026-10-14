@@ -206,6 +206,34 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
   [ "$(find "$T/out/judging" -name '*.patch' | wc -l)" -eq 1 ]
 }
 
+@test "run: a dry run prints every planned dispatch and writes nothing" {
+  cd "$T/cwd"
+  BENCH_DRY_RUN=1 BENCH_REPS=2 run bench run t1 good bad
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'DRY-RUN:' <<<"$output")" -eq 4 ]
+  grep -F -- "--local-dir $T/out/runs/good/r2/issues" <<<"$output"
+  [[ "$output" != *summary.md* ]]
+  [ ! -e "$T/out" ]
+  [ ! -e "$FAKE_LOG" ]
+  [ ! -e .spindrift ]
+  git ls-remote --heads "$T/remote.git" | grep -q refs/heads/stale
+}
+
+@test "run: a dry run leaves an interrupted rep's leftovers for the real run to clear" {
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  git -C "$T/out/work.git" worktree add -q --detach "$T/out/runs/good/r1/tree" HEAD
+  head -1 "$T/out/metrics.tsv" >"$T/m" && mv "$T/m" "$T/out/metrics.tsv"
+  snapshot() { (cd "$T/out" && find . -path ./work.git -prune -o -type f -print0 | sort -z | xargs -0 sha256sum); }
+  before="$(snapshot)"
+  BENCH_DRY_RUN=1 BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  grep -F -- '--branch-prefix bench/good/r1/' <<<"$output"
+  [ "$(snapshot)" = "$before" ]
+  [ -d "$T/out/runs/good/r1/tree" ]
+}
+
 @test "summary: outcomes beyond ready, blocked, failed and none are counted as other" {
   cd "$T/cwd"
   FAKE_STATUS=ambiguous BENCH_REPS=1 run bench run t1 good
