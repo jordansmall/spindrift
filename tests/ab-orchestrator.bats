@@ -1,23 +1,45 @@
 #!/usr/bin/env bats
-# The harness varies --worker-model between arms (issue #2057 slice 1).
-# Model IDs here are arbitrary sample data, not the default model: leave them
-# literal when the default model is bumped (issue #5141). The priced
-# --breakdown test's haiku ID must keep the "claude-haiku" prefix its
-# AB_PRICES keys on.
+# The harness runs each issue through a control and a variant app (issue
+# #2057's harness, re-pointed at image-baked model tiers). Model IDs here are
+# arbitrary sample data, not the default model: leave them literal when the
+# default model is bumped (issue #5141). The priced --breakdown test's haiku
+# ID must keep the "claude-haiku" prefix its AB_PRICES keys on.
 
-@test "dry-run: off arm omits worker model, on arm sets it, the rest of the command is shared" {
+ab_dry_run() {
   run env -i \
     PATH="$PATH" \
     AB_DRY_RUN=1 AB_CONFIRM=1 \
     AB_REMOTE="git@github.com:acme/mirror.git" \
     AB_REPO_SLUG="acme/mirror" \
-    AB_MODEL="claude-sonnet-5" \
     AB_OUTDIR="$BATS_TEST_TMPDIR/ab-out" \
+    "$@" \
     bash "${AB_ORCHESTRATOR_SH:-$BATS_TEST_DIRNAME/../ab-orchestrator.sh}" 123
+}
+
+# Prints one arm's DRY-RUN command with the app and branch prefix blanked,
+# so the two arms can be compared for everything else.
+arm_rest() {
+  grep -F -- "--branch-prefix $1" <<<"$output" \
+    | sed -e 's/nix run [^ ]* --/nix run APP --/' -e "s#--branch-prefix $1#--branch-prefix P#"
+}
+
+@test "dry-run: control runs the default app, variant runs .#ab-variant, and no model is re-tiered at dispatch" {
+  ab_dry_run
   [ "$status" -eq 0 ]
-  echo "$output" | grep -- "--worker-model ''"
-  # The on arm uses AB_WORKER_ON, which defaults to AB_MODEL.
-  echo "$output" | grep -- "--worker-model claude-sonnet-5"
+  echo "$output" | grep -F -- "DRY-RUN: nix run .# -- dispatch"
+  echo "$output" | grep -F -- "DRY-RUN: nix run .#ab-variant -- dispatch"
+  # The worker tier is image-time (#5254); a dispatch-time --model would also
+  # override both images' baked coordinator.
+  [[ "$output" != *"-model "* ]]
+  [ "$(arm_rest ab-control/issue-)" = "$(arm_rest ab-variant/issue-)" ]
+}
+
+@test "dry-run: AB_APP_* pick each arm's app and AB_MODEL reaches both arms" {
+  ab_dry_run AB_APP_CONTROL=".#ctl" AB_APP_VARIANT=".#var" AB_MODEL="claude-sonnet-5"
+  [ "$status" -eq 0 ]
+  echo "$output" | grep -F -- "DRY-RUN: nix run .#ctl -- dispatch"
+  echo "$output" | grep -F -- "DRY-RUN: nix run .#var -- dispatch"
+  [ "$(echo "$output" | grep -c -- "--model claude-sonnet-5")" -eq 2 ]
 }
 
 @test "--breakdown attributes tokens per role+model with injected pricing" {
@@ -61,8 +83,8 @@ JSON
 
   run bash "$script" --compare "$off" "$on"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -P '^\| off \| implementor \| claude-sonnet-5 \| 10 \| 5 \| 150 \| 70 \| 0.001522 \|$'
-  echo "$output" | grep -P '^\| on \| scout \| claude-haiku-5-5 \| 0 \| 0 \| 200 \| 80 \| 0.000600 \|$'
+  echo "$output" | grep -P '^\| control \| implementor \| claude-sonnet-5 \| 10 \| 5 \| 150 \| 70 \| 0.001522 \|$'
+  echo "$output" | grep -P '^\| variant \| scout \| claude-haiku-5-5 \| 0 \| 0 \| 200 \| 80 \| 0.000600 \|$'
   echo "$output" | grep -P '^\| claude-haiku-5-5 \| 0.000000 \| 0.000600 \| 0.000600 \|$'
   echo "$output" | grep -P '^\| \*\*total\*\* \| 0.001522 \| 0.001600 \| 0.000078 \|$'
 }
@@ -93,8 +115,9 @@ JSON
 
   run bash "$script" --compare "$off_tsv" "$on_tsv"
   [ "$status" -eq 0 ]
-  echo "$output" | grep -P '^\| on \| worker \| claude-sonnet-5 \| 0 \| 0 \| 400 \| 200 \| 0.004200 \|$'
-  echo "$output" | grep -P '^\| on \| implementor \| claude-sonnet-5 \| 0 \| 0 \| 300 \| 100 \| 0.002400 \|$'
-  echo "$output" | grep -P '^\| off \| implementor \| claude-sonnet-5 \| 0 \| 0 \| 1000 \| 500 \| 0.010500 \|$'
-  echo "$output" | grep -P '^\| \*\*total\*\* \| 0.010500 \| 0.006600 \| -0.003900 \|$'
+  # Default price table, claude-sonnet-5 at $2/$10 per MTok.
+  echo "$output" | grep -P '^\| variant \| worker \| claude-sonnet-5 \| 0 \| 0 \| 400 \| 200 \| 0.002800 \|$'
+  echo "$output" | grep -P '^\| variant \| implementor \| claude-sonnet-5 \| 0 \| 0 \| 300 \| 100 \| 0.001600 \|$'
+  echo "$output" | grep -P '^\| control \| implementor \| claude-sonnet-5 \| 0 \| 0 \| 1000 \| 500 \| 0.007000 \|$'
+  echo "$output" | grep -P '^\| \*\*total\*\* \| 0.007000 \| 0.004400 \| -0.002600 \|$'
 }

@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 
-# Paired A/B experiment for the worker/coordinator split (issue #2057).
-# Dispatches the same issue twice against one pinned image, varying only
-# --worker-model (empty on OFF, $AB_WORKER_ON on ON), so a difference is
-# attributable to the worker knob rather than to drift. Arm order is
-# randomised per issue.
+# Paired A/B experiment between two Harness apps (issue #2057's harness).
+# Dispatches the same issue once through $AB_APP_CONTROL (default `.#`, the
+# dogfood) and once through $AB_APP_VARIANT (default `.#ab-variant`, the
+# dogfood with a haiku-5-5 worker and a sonnet-5-5 reviewer), both built from
+# one parked commit, so a difference is attributable to what the two images
+# bake rather than to drift. Subagent models are image-time (#5254), which is
+# why the arms are separate apps rather than one image with a dispatch flag.
+# Arm order is randomised per issue.
 
 # Each arm runs the full implement/review loop but opens no PR and merges
 # nothing (CODE_FORGE=git + MERGE_MODE=manual); it only pushes its branch. The
@@ -17,7 +20,8 @@
 # throwaway mirror repo, or set ISSUE_TRACKER=local.
 
 # Run this from a checkout parked at the commit you want to measure and do not
-# pull between runs: the image is built once up front and reused (--no-build).
+# pull between runs: each arm's image is built once up front and reused
+# (--no-build).
 
 # The launcher resolves its secrets (GH_TOKEN[_CMD], CLAUDE_CODE_OAUTH_TOKEN[_CMD]
 # or ANTHROPIC_API_KEY, GIT_USER_NAME, GIT_USER_EMAIL) from the environment, so
@@ -30,12 +34,14 @@ warn() { printf '!! %s\n' "$*" >&2; }
 die()  { printf '!! %s\n' "$*" >&2; exit 1; }
 
 AB_BASE="${AB_BASE:-main}"
-AB_MODEL="${AB_MODEL:-claude-sonnet-5}"
-AB_PREFIX_OFF="${AB_PREFIX_OFF:-ab-off/issue-}"
-AB_PREFIX_ON="${AB_PREFIX_ON:-ab-on/issue-}"
+# Empty keeps each image's baked coordinator; a value overrides both arms.
+AB_MODEL="${AB_MODEL:-}"
+AB_APP_CONTROL="${AB_APP_CONTROL:-.#}"
+AB_APP_VARIANT="${AB_APP_VARIANT:-.#ab-variant}"
+AB_PREFIX_CONTROL="${AB_PREFIX_CONTROL:-ab-control/issue-}"
+AB_PREFIX_VARIANT="${AB_PREFIX_VARIANT:-ab-variant/issue-}"
 AB_NO_BUILD="${AB_NO_BUILD:-1}"
 AB_OUTDIR="${AB_OUTDIR:-./ab-results/$(date +%Y%m%d-%H%M%S)}"
-AB_WORKER_ON="${AB_WORKER_ON:-$AB_MODEL}"
 
 # Sum every "type":"result" event: the orchestrator emits one per pass and the
 # launcher's own comment keeps only the last, so summing is the honest total.
@@ -54,17 +60,18 @@ parse_usage() {
     | @tsv' "$1" 2>/dev/null || printf '0\t0\t0\t0\t0\t0\t0'
 }
 
-# Orchestrator heartbeat ops (#2027); empty on the OFF arm.
+# Orchestrator heartbeat ops (#2027).
 parse_passes()  { jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="pass_start"))|length' "$1" 2>/dev/null || echo 0; }
 parse_verdicts(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="verdict")|.spindrift_op.verdict)|join(",")' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 parse_decision(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" and .spindrift_op.op=="decision")|"\(.spindrift_op.decision):\(.spindrift_op.reason)")|last // ""' "$1" 2>/dev/null | tr -d '"' || echo ""; }
 
-# Public Claude list prices per MTok as of 2026-07; override via AB_PRICES.
+# Public Claude list prices per MTok as of 2026-10; override via AB_PRICES.
 # Keys are model-name prefixes matched against a message's "model" field
 # (longest match wins); each value is [input, output, cache_read, cache_write]
-# in $/MTok. A model with no matching prefix costs 0, but its tokens are still
+# in $/MTok. cache_write is the 1h rate (2x input), since dispatches cache
+# for 1h. A model with no matching prefix costs 0, but its tokens are still
 # reported.
-AB_DEFAULT_PRICES='{"claude-sonnet-5":[3,15,0.3,3.75],"claude-opus":[15,75,1.5,18.75],"claude-haiku":[0.8,4,0.08,1]}'
+AB_DEFAULT_PRICES='{"claude-opus-5-5":[4,20,0.2,8],"claude-opus":[5,25,0.5,10],"claude-sonnet-5":[2,10,0.2,4],"claude-haiku-5-5":[0.1,0.5,0.01,0.2],"claude-haiku":[1,5,0.1,2]}'
 
 # Per-role/model token and effective-cost TSV from a stream-json Box log (issue
 # #2057), mirroring breakdownByRoleFile in the launcher's claude/usage.go: pass
@@ -142,14 +149,14 @@ cmd_breakdown() {
 
 # Side-by-side per-role/model breakdown diff between two --breakdown TSVs
 # (issue #2057): a markdown table with both arms' rows for every (role, model)
-# key seen, plus a per-model and total effective-$ delta (ON - OFF).
+# key seen, plus a per-model and total effective-$ delta (variant - control).
 cmd_compare() {
-  local off="$1" on="$2"
-  [ -f "$off" ] || off=/dev/null
-  [ -f "$on" ] || on=/dev/null
-  awk -F'\t' -v offf="$off" -v onf="$on" '
+  local control="$1" variant="$2"
+  [ -f "$control" ] || control=/dev/null
+  [ -f "$variant" ] || variant=/dev/null
+  awk -F'\t' -v controlf="$control" -v variantf="$variant" '
     {
-      arm = (FILENAME == offf) ? "off" : "on"
+      arm = (FILENAME == controlf) ? "control" : "variant"
       key = $1 SUBSEP $2
       if (!(key in seen)) {
         seen[key] = 1
@@ -176,7 +183,7 @@ cmd_compare() {
       for (i = 1; i <= n; i++) {
         key = order[i]
         for (j = 1; j <= 2; j++) {
-          arm = (j == 1) ? "off" : "on"
+          arm = (j == 1) ? "control" : "variant"
           printf "| %s | %s | %s | %d | %d | %d | %d | %.6f |\n", \
             arm, role[key], model[key], \
             cache_read[arm, key] + 0, cache_write[arm, key] + 0, \
@@ -185,21 +192,21 @@ cmd_compare() {
         }
       }
       print ""
-      print "## Effective-$ delta (ON - OFF)"
+      print "## Effective-$ delta (variant - control)"
       print ""
-      print "| model | OFF $ | ON $ | delta $ |"
+      print "| model | control $ | variant $ | delta $ |"
       print "| --- | --- | --- | --- |"
       for (i = 1; i <= m; i++) {
         mo = morder[i]
-        off_c = mcost["off", mo] + 0
-        on_c  = mcost["on", mo] + 0
-        printf "| %s | %.6f | %.6f | %.6f |\n", mo, off_c, on_c, on_c - off_c
+        control_c = mcost["control", mo] + 0
+        variant_c = mcost["variant", mo] + 0
+        printf "| %s | %.6f | %.6f | %.6f |\n", mo, control_c, variant_c, variant_c - control_c
       }
-      off_t = total["off"] + 0
-      on_t  = total["on"] + 0
-      printf "| **total** | %.6f | %.6f | %.6f |\n", off_t, on_t, on_t - off_t
+      control_t = total["control"] + 0
+      variant_t = total["variant"] + 0
+      printf "| **total** | %.6f | %.6f | %.6f |\n", control_t, variant_t, variant_t - control_t
     }
-  ' "$off" "$on"
+  ' "$control" "$variant"
 }
 
 parse_outcome() { # Prints ready, blocked, failed, or none.
@@ -210,8 +217,7 @@ parse_outcome() { # Prints ready, blocked, failed, or none.
 }
 
 run_arm() {
-  local issue="$1" arm="$2" prefix="$3"
-  local wm="$4"
+  local issue="$1" arm="$2" prefix="$3" app="$4"
   local armdir="$AB_OUTDIR/$issue/$arm"
   mkdir -p "$armdir"
   local host_log=".spindrift/logs/issue-${issue}.log"
@@ -219,25 +225,25 @@ run_arm() {
   rm -f "$host_log"
 
   local -a nb=(); [ "$AB_NO_BUILD" = "1" ] && nb=(--no-build)
+  local -a model=(); [ -n "$AB_MODEL" ] && model=(--model "$AB_MODEL")
 
-  info "issue #$issue [$arm] worker-model='${wm}' prefix='$prefix'"
+  info "issue #$issue [$arm] app='$app' prefix='$prefix'"
   # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
   # before the launcher's ambient-knob check, so they beat whatever harness.env
   # exported, which is how a stray REPO_SLUG would otherwise leak in.
   # --box-forge-and-issue-access read-write is forced for the same reason, since
   # a read-only harness.env is incompatible with CODE_FORGE=git.
   local -a cmd=(
-    nix run ".#" -- dispatch "${nb[@]}" --yes
+    nix run "$app" -- dispatch "${nb[@]}" --yes
     --repo-slug "$AB_REPO_SLUG"
     --code-forge git
     --code-forge-remote-url "$AB_REMOTE"
     --base-branch "$AB_BASE"
     --branch-prefix "$prefix"
     --merge-mode manual
-    --model "$AB_MODEL"
+    "${model[@]}"
     --issue-tracker "$tracker"
     --box-forge-and-issue-access read-write
-    --worker-model "$wm"
     "$issue"
   )
   if [ -n "${AB_DRY_RUN:-}" ]; then
@@ -329,11 +335,13 @@ main() {
 
   cat >&2 <<EOF
 
-  A/B experiment — worker OFF vs ON
-  ---------------------------------
+  A/B experiment — control vs variant
+  -----------------------------------
   issues        : ${issues[*]}
   base          : $AB_BASE
-  model         : $AB_MODEL
+  control app   : $AB_APP_CONTROL
+  variant app   : $AB_APP_VARIANT
+  model         : ${AB_MODEL:-baked per image}
   push remote   : $AB_REMOTE
   repo slug     : $AB_REPO_SLUG
   issue tracker : $tracker
@@ -360,29 +368,31 @@ EOF
   printf 'issue\tarm\toutcome\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create\tturns\tduration_ms\tpasses\tverdicts\tdecision\n' >"$summary_tsv"
 
   if [ "$AB_NO_BUILD" = "1" ] && [ -z "${AB_DRY_RUN:-}" ]; then
-    info "building the image once so both arms share it (pins the experiment)"
-    nix run ".#" -- build >"$AB_OUTDIR/logs/build.log" 2>&1 \
-      || die "up-front build failed; see $AB_OUTDIR/logs/build.log"
+    info "building each arm's image once so every issue reuses it (pins the experiment)"
+    nix run "$AB_APP_CONTROL" -- build >"$AB_OUTDIR/logs/build-control.log" 2>&1 \
+      || die "up-front control build failed; see $AB_OUTDIR/logs/build-control.log"
+    nix run "$AB_APP_VARIANT" -- build >"$AB_OUTDIR/logs/build-variant.log" 2>&1 \
+      || die "up-front variant build failed; see $AB_OUTDIR/logs/build-variant.log"
   fi
 
   local issue jdir v1 v2
   for issue in "${issues[@]}"; do
     # Randomise arm order per issue for cache hygiene.
     if [ $((RANDOM % 2)) -eq 0 ]; then
-      run_arm "$issue" off "$AB_PREFIX_OFF" ""
-      run_arm "$issue" on  "$AB_PREFIX_ON"  "$AB_WORKER_ON"
+      run_arm "$issue" control "$AB_PREFIX_CONTROL" "$AB_APP_CONTROL"
+      run_arm "$issue" variant "$AB_PREFIX_VARIANT" "$AB_APP_VARIANT"
     else
-      run_arm "$issue" on  "$AB_PREFIX_ON"  "$AB_WORKER_ON"
-      run_arm "$issue" off "$AB_PREFIX_OFF" ""
+      run_arm "$issue" variant "$AB_PREFIX_VARIANT" "$AB_APP_VARIANT"
+      run_arm "$issue" control "$AB_PREFIX_CONTROL" "$AB_APP_CONTROL"
     fi
 
-    # Blind judging bundle: neutral variant names and a separate un-blinding key.
+    # Blind judging bundle: neutral candidate names and a separate un-blinding key.
     jdir="$AB_OUTDIR/judging/$issue"
     mkdir -p "$jdir"
-    if [ $((RANDOM % 2)) -eq 0 ]; then v1=off; v2=on; else v1=on; v2=off; fi
-    cp "$AB_OUTDIR/$issue/$v1/diff.patch" "$jdir/variant-1.patch" 2>/dev/null || true
-    cp "$AB_OUTDIR/$issue/$v2/diff.patch" "$jdir/variant-2.patch" 2>/dev/null || true
-    printf '%s\tvariant-1\t%s\n%s\tvariant-2\t%s\n' "$issue" "$v1" "$issue" "$v2" >>"$AB_OUTDIR/judging/KEY.tsv"
+    if [ $((RANDOM % 2)) -eq 0 ]; then v1=control; v2=variant; else v1=variant; v2=control; fi
+    cp "$AB_OUTDIR/$issue/$v1/diff.patch" "$jdir/candidate-1.patch" 2>/dev/null || true
+    cp "$AB_OUTDIR/$issue/$v2/diff.patch" "$jdir/candidate-2.patch" 2>/dev/null || true
+    printf '%s\tcandidate-1\t%s\n%s\tcandidate-2\t%s\n' "$issue" "$v1" "$issue" "$v2" >>"$AB_OUTDIR/judging/KEY.tsv"
     # Stage the issue text so the judge has acceptance criteria to score against.
     if command -v gh >/dev/null; then
       gh issue view "$issue" --repo "$AB_REPO_SLUG" --json title,body \
@@ -392,9 +402,9 @@ EOF
   done
 
   {
-    echo "# Worker A/B — OFF vs ON"
+    echo "# Model A/B — control vs variant"
     echo
-    echo "Base: \`$AB_BASE\` · Model: \`$AB_MODEL\` · Issues: ${issues[*]}"
+    echo "Base: \`$AB_BASE\` · Control: \`$AB_APP_CONTROL\` · Variant: \`$AB_APP_VARIANT\` · Model: \`${AB_MODEL:-baked}\` · Issues: ${issues[*]}"
     echo
     echo '| issue | arm | outcome | cost $ | out tok | passes | verdicts | final decision |'
     echo '| --- | --- | --- | --- | --- | --- | --- | --- |'
@@ -406,19 +416,19 @@ EOF
     tail -n +2 "$summary_tsv" | awk -F'\t' '$3=="none"{c[$2]++} END{for(a in c) printf "- %s: %d\n",a,c[a]; if(length(c)==0) print "- none"}'
     echo
 
-    echo "## Per-model token + effective-cost breakdown, with delta (ON - OFF)"
+    echo "## Per-model token + effective-cost breakdown, with delta (variant - control)"
     for issue in "${issues[@]}"; do
-      offbd="$AB_OUTDIR/$issue/off/breakdown.tsv"
-      onbd="$AB_OUTDIR/$issue/on/breakdown.tsv"
-      if [ -s "$offbd" ] || [ -s "$onbd" ]; then
+      controlbd="$AB_OUTDIR/$issue/control/breakdown.tsv"
+      variantbd="$AB_OUTDIR/$issue/variant/breakdown.tsv"
+      if [ -s "$controlbd" ] || [ -s "$variantbd" ]; then
         echo
         echo "### issue #$issue"
-        cmd_compare "$offbd" "$onbd"
+        cmd_compare "$controlbd" "$variantbd"
       fi
     done
     echo
 
-    echo "Blind judging: score \`judging/<issue>/variant-{1,2}.patch\` against \`ISSUE.md\`"
+    echo "Blind judging: score \`judging/<issue>/candidate-{1,2}.patch\` against \`ISSUE.md\`"
     echo "WITHOUT reading \`judging/KEY.tsv\`, then un-blind with KEY.tsv."
   } >"$AB_OUTDIR/summary.md"
 
