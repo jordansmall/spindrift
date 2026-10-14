@@ -12,23 +12,7 @@
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Code read. Now running throwaway repro test.
 [implementor] Bash(cd /work/cmd/launcher && cat > internal/driver/opencode/zz_repro_test.go <<'EOF'
-package opencode_test
-
-import (
-	"testing"
-
-	"spindrift.dev/launcher/internal/driver/opencode"
-)
-
-func TestZZRepro(t *testing.T) {
-	for _, l := range []string{
-		`{"type":"error","error":"prompt is too long: 205290 tokens > 200000 maximum"}`,
-		`{"type":"error","timestamp":1759542912345,"error":{"name":"UnknownError","data":{"message":"boom"}}}`,
-	} {
-		got, err := opencode.Classify(opencode.WriteLog(t, l))
-		t.Logf("%s/%s err=%v <- %s", got.Class, got.Reason, err, l)
-	}
-}
+[REDACTED:inline-code]
 EOF
 go test ./internal/driver/opencode/ -run ZZRepro -v >"$TMPDIR/repro.log" 2>&1; echo "exit=$?"; grep -E 'zz_repro|ok|FAIL' "$TMPDIR/repro.log"; rm internal/driver/opencode/zz_repro_test.go)
 [implementor]   -> [REDACTED:tool-output]
@@ -37,55 +21,7 @@ go test ./internal/driver/opencode/ -run ZZRepro -v >"$TMPDIR/repro.log" 2>&1; e
 [implementor] Bash(grep -rn '529' --include=*.sh --include=*.bash --include=*.nix --include=*.md . 2>/dev/null | grep -iv 'adr/\|CHANGELOG' | grep -i 'opencode\|overload' | head; sed -n 38,50p cmd/launcher/internal/dispatch/retry.go)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
-<!-- spindrift-research -->
-## Research verdict: `recommend`
-
-The bug is real and reproduces on `main` (0aa1ca0f). Both examples in the issue misclassify a deterministic failure as transient, so the launcher retries it.
-
-## Context for a worker
-
-**Where the bug is**
-
-- `cmd/launcher/internal/driver/opencode/classify.go:20-26`: `transientExtras` lists the bare markers `{Substr: "429", Reason: RateLimit}` and `{Substr: "529", Reason: Overloaded}`.
-- `cmd/launcher/internal/driver/opencode/classify.go:50`: the extract hook returns `ScanDecision{Text: s}`, where `s` is the whole trimmed JSON line. That means `timestamp`, `sessionID`, and any other metadata are matched too, not just the error.
-- `cmd/launcher/internal/driver/driverkit/classify.go:47` sends that text to `MatchTransient`. `driverkit/patterns.go:38-44` matches with plain `strings.Contains` and has no anchoring.
-- `cmd/launcher/internal/dispatch/retry.go:44`: a `Transient` class keeps the retry loop going, so a deterministic failure uses up the retry budget before it reaches `agent-failed`.
-- For comparison, the claude driver (`cmd/launcher/internal/driver/claude/classify.go:46-62`) already uses phrase markers (`"429 Too Many Requests"`, `"529 Overloaded"`). Its comment says why: "so they do not match ordinary log content that happens to contain digit sequences". opencode is the only driver with bare numeric markers.
-
-**Repro (throwaway test in `package opencode_test`, using the existing `opencode.WriteLog` helper)**
-
-```
-{"type":"error","error":"prompt is too long: 205290 tokens > 200000 maximum"}
-  -> transient/overloaded
-{"type":"error","timestamp":1759542912345,"error":{"name":"UnknownError","data":{"message":"boom"}}}
-  -> transient/rateLimit
-```
-
-Both lines should classify as `terminal/taskFailed`.
-
-**Things to watch**
-
-- **Error shape.** The existing tests write `error` as a plain string. Real `opencode run --format json` error events most likely carry an object (a NamedError-style `{"name":…,"data":{"message":…,"statusCode":…}}`) next to top-level `timestamp` and `sessionID`. Please confirm the shape against opencode's `run` command source or a captured log before choosing what to decode. Whatever you extract needs to handle both the string form and the object form.
-- **Pin the precedence.** `TestClassify_ErrorEvent_LooseDigit429BeatsOverloaded` (`classify_test.go:55-72`) checks that `"overloaded_error: upstream returned status 429"` classifies as RateLimit (issue #2149). An anchored marker such as `status 429` or a digit-boundary match keeps this passing. If the fix changes that behaviour, update the test on purpose rather than by accident.
-- **Choose an anchoring approach.** `driverkit.Pattern` only supports substrings. You have two options:
-  - (a) Use phrase markers the way claude does, for example `429 Too Many Requests`, `status 429`, `"statusCode":429`, and the 529 equivalents.
-  - (b) Add digit-boundary matching to the opencode extract or match step, for example `(^|[^0-9])429([^0-9]|$)`.
-
-  Option (a) keeps driverkit untouched. Avoid widening driverkit's shared API unless a second driver needs it.
-
-**Acceptance criteria**
-
-1. Only the error payload is matched, not the whole line. Event metadata such as `timestamp` and `sessionID` can no longer produce a transient match.
-2. The numeric 429/529 markers are anchored, so a digit run like `205290` or `1759542912345` does not match.
-3. New tests cover both repro lines above and expect `Terminal/TaskFailed`. They cover the string and object `error` shapes, and a timestamp that contains `429`.
-4. The existing opencode classify tests stay green, including the RateLimit-over-overloaded precedence test and the last-error-event-wins test.
-5. The `transientExtras` doc comment (`classify.go:16-19`) is updated, since it currently justifies the bare markers.
-
-**Related issues**
-
-- #2149: the precedence pin.
-- #2251 / #2269: the driverkit extraction that produced this shape.
-- I found no duplicate open or closed issue.
+[REDACTED:inline-code]
 SPINDRIFT_SIGNAL_EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=4423 landing=none status=recommend note=Reproduced on main: bare 429/529 substrings matched against the whole error line flip a context-overflow error and a 429-bearing timestamp to Transient; anchor the markers and match only the error payload.

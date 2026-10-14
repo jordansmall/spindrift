@@ -5,31 +5,7 @@
 [implementor] Bash(sed -n 4624,4645p docs/reference.md; echo ---; sed -n 78,92p cmd/launcher/internal/runner/registryprobecache.go; echo ---; grep -n "3775" cmd/launcher/signalsockettransport_doctor_checks.go cmd/launcher/internal/dispatch/signal_socket.go cmd/launcher/internal/dispatch/box.go; grep -n "is a miss\|cache.*miss" docs/reference.md | head)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
-<!-- spindrift-research -->
-## Verdict: `recommend`
-
-This is a re-run. The prior research comment of 2026-10-11 (`recommend`) still holds on current `main` (`8db2704d`). Both stale clauses are still in `docs/reference.md`, and the probe cache still refuses to replay a `tcp` verdict under a mode that denies host loopback. This pass only refreshes the line numbers, which have drifted again. Read the prior comment for the full code pointers and related issues.
-
-## Context for a worker
-
-**Updated doc sites** (current `main`):
-
-- `docs/reference.md:4628-4630` (the `signal-socket-transport` doctor row): "The row's own TCP-under-`no-host-loopback` message is a backstop a live probe never reaches — only a replayed cached TCP verdict could."
-- `docs/reference.md:4641-4642` (Dispatch-level gate paragraph): "(the Signal-socket gate on a TCP verdict is a backstop for a cached verdict)".
-- `docs/reference.md:6554-6559` (probe cache section) already says that a `tcp` entry under `no-host-loopback` or `none` is a miss. The two sites above contradict it.
-
-**Code, re-checked and unchanged:**
-
-- `cmd/launcher/internal/runner/registryprobecache.go:86-90`: the `case "tcp":` arm returns a miss when `entry.NetworkMode.DeniesHostLoopback()`.
-- Backstop comments that already match the intended wording: `cmd/launcher/signalsockettransport_doctor_checks.go:58`, `cmd/launcher/internal/dispatch/signal_socket.go:49`, and `cmd/launcher/internal/dispatch/box.go:572`.
-
-**Acceptance criteria** (unchanged from the prior pass):
-
-- `grep -n "replayed cached TCP verdict\|backstop for a cached verdict" docs/reference.md` returns nothing.
-- Both sites say that neither a live probe nor the probe cache (#3775) reaches the TCP backstop, and that the backstop stays as defence in depth. Reword the sentences rather than delete them.
-- Docs-only. No Go, bats, or Nix change is needed.
-
-`docs/adr/0044-private-registry-credentials-live-in-a-launcher-side-proxy.md:947` still carries the hypothetical "a replayed cached one, say (#3775)". That is optional and out of scope, as the prior comment explains.
+[REDACTED:inline-code]
 SPINDRIFT_SIGNAL_EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=4994 landing=none status=recommend note=Still accurate on main: docs/reference.md:4628-4630 and 4641-4642 name a cached TCP verdict reaching the backstop, but registryprobecache.go:86-90 refuses that replay (#3775); docs-only fix, line numbers refreshed

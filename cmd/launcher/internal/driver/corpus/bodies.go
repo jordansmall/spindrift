@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"regexp"
 	"strings"
 )
 
@@ -13,9 +14,10 @@ const (
 	toolOutput = "tool-output"
 	fileBody   = "file-body"
 	agentText  = "agent-text"
+	inlineCode = "inline-code"
 )
 
-var bodyNames = []string{toolOutput, fileBody, agentText}
+var bodyNames = []string{toolOutput, fileBody, agentText, inlineCode}
 
 // fileBodyKeys are the tool-input keys that carry file contents or a free-form
 // brief. The readers key off file_path, command, pattern, url, query and
@@ -36,8 +38,8 @@ var taskTextKeys = []string{"prompt", "summary", "patch"}
 
 // redactBodies blanks, line by line, the JSON values that hold repo content:
 // claude tool_result content and tool_use_result, file-body tool inputs,
-// thinking text and subagent task text, and opencode tool state output and
-// metadata. A line that is not one JSON object, or has nothing to blank,
+// heredoc bodies in tool commands, thinking text and subagent task text, and
+// opencode tool state output and metadata. A line that is not one JSON object, or has nothing to blank,
 // passes through byte for byte; a blanked line is re-encoded compactly, with
 // sorted keys and numbers kept verbatim.
 func redactBodies(data []byte) ([]byte, map[string]int) {
@@ -139,6 +141,14 @@ func (r *redactor) inputs(v any) {
 				r.blank(x, k, fileBody)
 				continue
 			}
+			if cmd, ok := e.(string); ok && k == "command" {
+				if out, n := blankHeredocs(cmd); n > 0 {
+					x[k] = out
+					r.counts[inlineCode] += n
+					r.n += n
+				}
+				continue
+			}
 			r.inputs(e)
 		}
 	}
@@ -158,4 +168,74 @@ func (r *redactor) blank(m map[string]any, key, name string) {
 	m[key] = p
 	r.counts[name]++
 	r.n++
+}
+
+// heredocOpener matches a here-document redirection and its tag. A "<<" that
+// follows another "<" is a here-string, which openers skips.
+var heredocOpener = regexp.MustCompile(`<<(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z_][A-Za-z0-9_]*))`)
+
+type heredoc struct {
+	tag   string
+	strip bool // <<- also ends on a tab-indented tag
+}
+
+// blankHeredocs replaces each heredoc body in a shell command with one
+// placeholder line, keeping the opener and terminator, so the command still
+// reads as what it ran (git commit, go test) without the source, file or
+// message it fed in. It returns how many bodies it blanked. An unterminated
+// body runs to the end of the command.
+func blankHeredocs(cmd string) (string, int) {
+	p := "[REDACTED:" + inlineCode + "]"
+	lines := strings.SplitAfter(cmd, "\n")
+	var out strings.Builder
+	n := 0
+	for i := 0; i < len(lines); i++ {
+		out.WriteString(lines[i])
+		for _, h := range openers(lines[i]) {
+			end := i + 1
+			for end < len(lines) && !h.ends(lines[end]) {
+				end++
+			}
+			body := lines[i+1 : end]
+			if len(body) == 0 || len(body) == 1 && strings.TrimSuffix(body[0], "\n") == p {
+				out.WriteString(strings.Join(body, ""))
+			} else {
+				out.WriteString(p)
+				if end < len(lines) {
+					out.WriteString("\n")
+				}
+				n++
+			}
+			if end < len(lines) {
+				out.WriteString(lines[end])
+			}
+			i = end
+		}
+	}
+	return out.String(), n
+}
+
+func openers(line string) []heredoc {
+	var hs []heredoc
+	for _, m := range heredocOpener.FindAllStringSubmatchIndex(line, -1) {
+		if m[0] > 0 && line[m[0]-1] == '<' {
+			continue
+		}
+		h := heredoc{strip: m[3] > m[2]}
+		for g := 2; g <= 4; g++ {
+			if m[2*g] >= 0 {
+				h.tag = line[m[2*g]:m[2*g+1]]
+			}
+		}
+		hs = append(hs, h)
+	}
+	return hs
+}
+
+func (h heredoc) ends(line string) bool {
+	line = strings.TrimSuffix(line, "\n")
+	if h.strip {
+		line = strings.TrimLeft(line, "\t")
+	}
+	return line == h.tag
 }

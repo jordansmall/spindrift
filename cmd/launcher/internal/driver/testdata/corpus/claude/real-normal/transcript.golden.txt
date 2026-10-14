@@ -15,18 +15,7 @@
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Already fixed on main by 57643e01. Seam test green at HEAD 201f2944. Posting reject.
 [implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
-<!-- spindrift-research -->
-## Verdict: `reject`
-
-Already resolved on the default branch. Commit 57643e01 ("test(goldens): pick up the pass-scoped CHECK stop rule") landed on `main` after 28891c1f, the commit this issue was reproduced on, and regenerated exactly the two goldens named here with `nix run .#regen-goldens`. The seam test is green on current `main`, so there is no remaining work.
-
-## Context for a worker
-
-- **The fix on main:** 57643e01 touches only `tests/testdata/prompt-assembly-golden/forgejo-readonly-orchestrator-filer-on.prompt.txt` and `tests/testdata/prompt-assembly-golden/local-tracker-orchestrator-filer-on.prompt.txt` (+4/−2 each), so no unrelated golden drift came along with it. Its commit message gives the same root cause this issue does: the two filer-on goldens were rendered before 0f01175f rescoped CHECK's outcome rule, and the two changes landed on `main` independently.
-- **Verified state:** On `main` at 201f2944, both goldens carry the new wording ("Do not stop a pass that reaches OUTCOME, IF BLOCKED, or an …"). No golden under `tests/testdata/prompt-assembly-golden/` still contains the old "Do not stop this run until a terminal" sentence.
-- **Repro of the fix:** `nix build .#checks.x86_64-linux.launcher-go-seam-test -L` exits 0 on 201f2944, and `spindrift.dev/launcher/internal/promptassembly` passes.
-- **Side note:** The equivalent commit 578a370d ("test(promptassembly): regenerate the orchestrator filer-on goldens") exists on a branch but is not on `main`. If that branch is still open, it will now conflict trivially with 57643e01, or end up as a no-op, on rebase.
-- This issue can be closed as completed (already resolved). If its branch was cut before 57643e01, rebasing `agent/issue-5130` onto current `main` clears the inherited red gate.
+[REDACTED:inline-code]
 SPINDRIFT_SIGNAL_EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=5246 landing=none status=reject note=already resolved on main by 57643e01, which regenerated both filer-on goldens; seam test green at 201f2944
