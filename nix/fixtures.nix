@@ -89,6 +89,7 @@ let
       nixStoreWritable
       extraClosures
       roster
+      autoCompactWindows
       ;
     skills = dogfoodSkills;
     # flake.nix declares the opencode Driver beside claude, so the module
@@ -171,6 +172,8 @@ let
     // {
       driver = "opencode";
       roster = dogfoodDefaults.opencode.roster;
+      # Driver-valued and claude-only; flake.nix sets it on claude's entry.
+      autoCompactWindows = null;
       imageAttrName = "agent-image-opencode";
       defaults =
         removeAttrs dogfoodHarnessArgs.defaults [

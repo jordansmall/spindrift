@@ -156,6 +156,7 @@
               agents.defaultDriver = "claude";
               agents.drivers.claude = {
                 models.roster = dogfoodDefaults.roster;
+                autoCompactWindows = dogfoodDefaults.autoCompactWindows;
                 models.default = dogfoodDefaults.defaults.model;
                 models.effort = dogfoodDefaults.defaults.effort;
                 bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;

@@ -803,7 +803,7 @@ in
       "removed_vars.go's rows (${concatStringsSep ", " goRows}) differ from lib/removed-fragment-vars.nix's (${concatStringsSep ", " registryRows})";
     pkgs.runCommand "removed-fragment-var-parity" { } "touch $out";
 
-  # ADR 0037 (issue #2522): the 13 flat legacy shim options (oldFlatShims) must
+  # ADR 0037 (issue #2522): the 14 flat legacy shim options (oldFlatShims) must
   # be generated from the same structuralOptions declaration as the domain-tree
   # entries, not hand-copied, and each description is a one-line rename pointer.
   # Expected strings come from lib/structural-paths.nix, the same source
@@ -843,6 +843,7 @@ in
         nixpkgs = "infra.nixpkgs";
         overlays = "infra.overlays";
         config = "infra.config";
+        autoCompactWindows = "agents.drivers.<name>.autoCompactWindows";
       };
       expectedDescription =
         flatName:
@@ -858,7 +859,7 @@ in
       "oldFlatShims description mismatch (hand-copy regression) for: ${concatStringsSep ", " mismatches}";
     pkgs.runCommand "flakemodule-legacy-shim-description-generated" { } "touch $out";
 
-  # Issue #2572: every one of the 13 structural knobs (lib/structural-paths.nix)
+  # Issue #2572: every one of the 14 structural knobs (lib/structural-paths.nix)
   # plus byName and the driver map's drivers/defaultDriver (lib/byname-paths.nix,
   # lib/driver-map.nix) needs a non-empty string doc/docType/docDefault entry in
   # lib/structural-options-doc.nix, which lib/renderers.nix's
@@ -1247,7 +1248,7 @@ in
 
   # Issue #2560: the name-keyed `byName` shorthand reaches mkHarness via
   # `agents.models.byName`, byte-identical to a direct mkHarness `byName` call.
-  # Unlike the 13 structural knobs, `byName` has no old flat path to fall back
+  # Unlike the 14 structural knobs, `byName` has no old flat path to fall back
   # on (see flakemodule-byname-no-legacy-flat-alias below), so only the new path
   # is exercised.
   flakemodule-byname =
@@ -1884,6 +1885,78 @@ in
         esac
         touch $out
       '';
+
+  # autoCompactWindows lands in the Box's Claude Code settings.json as
+  # modelSettings.<model>.autoCompactWindow, beside the security hooks rather
+  # than instead of them, and is absent when unset.
+  mkharness-auto-compact-windows =
+    let
+      set = import ../../lib/mkHarness.nix (
+        ociHarnessArgs // { autoCompactWindows."claude-haiku-5-5" = 100000; }
+      );
+      unset = import ../../lib/mkHarness.nix ociHarnessArgs;
+      settings = h: "${h.internals.homeLayoutDir}/home/agent/.claude/settings.json";
+    in
+    pkgs.runCommand "mkharness-auto-compact-windows" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      jq -e '.modelSettings == {"claude-haiku-5-5": {"autoCompactWindow": 100000}}' ${settings set} >/dev/null \
+        || { echo "set harness: modelSettings missing or wrong" >&2; exit 1; }
+      jq -e '.hooks.PreToolUse | length > 0' ${settings set} >/dev/null \
+        || { echo "set harness: hooks lost" >&2; exit 1; }
+      jq -e 'has("modelSettings") | not' ${settings unset} >/dev/null \
+        || { echo "unset harness bakes modelSettings" >&2; exit 1; }
+      touch $out
+    '';
+
+  # Claude Code accepts 100000-1000000 tokens and clamps anything else, so an
+  # out-of-range or non-integer window is a typo; opencode has no equivalent.
+  mkharness-auto-compact-windows-rejects =
+    let
+      fails =
+        extra:
+        # Any attribute forces mkHarness's assert chain; deepSeq over the
+        # derivations would recurse through their whole pkgs graph.
+        !(builtins.tryEval
+          (import ../../lib/mkHarness.nix (ociHarnessArgs // extra)).internals.imageAttrName
+        ).success;
+      cases = {
+        tooSmall.autoCompactWindows.m = 99999;
+        tooBig.autoCompactWindows.m = 1000001;
+        notInt.autoCompactWindows.m = "100k";
+        opencode = {
+          driver = "opencode";
+          autoCompactWindows.m = 100000;
+        };
+      };
+      accepted = builtins.attrNames (pkgs.lib.filterAttrs (_: c: !(fails c)) cases);
+    in
+    # Without this the cases would also "fail" for an unknown argument.
+    assert pkgs.lib.assertMsg (
+      !(fails {
+        autoCompactWindows.m = 100000;
+      })
+    ) "a valid autoCompactWindows must evaluate";
+    assert pkgs.lib.assertMsg (
+      accepted == [ ]
+    ) "autoCompactWindows accepted invalid case(s): ${builtins.toJSON accepted}";
+    pkgs.runCommand "mkharness-auto-compact-windows-rejects" { } "touch $out";
+
+  # Every claude dogfood image, the bench arms included, compacts Haiku 5.5 at
+  # 100K, below its long-prompt price tier.
+  dogfood-haiku-auto-compact =
+    let
+      harnesses = [ harness ] ++ builtins.attrValues dogfoodAbArmHarnesses;
+    in
+    pkgs.runCommand "dogfood-haiku-auto-compact" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      for f in ${
+        pkgs.lib.concatMapStringsSep " " (
+          h: "${h.internals.homeLayoutDir}/home/agent/.claude/settings.json"
+        ) harnesses
+      }; do
+        jq -e '.modelSettings."claude-haiku-5-5".autoCompactWindow == 100000' "$f" >/dev/null \
+          || { echo "$f: no 100000 window for claude-haiku-5-5" >&2; exit 1; }
+      done
+      touch $out
+    '';
 
   # A second Harness in one flake needs its own output attribute (ADR 0064,
   # issue #5049); the baked freshness probe must follow that name, never the

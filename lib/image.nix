@@ -160,68 +160,73 @@ let
 
   # Rendered with builtins.toJSON rather than a hand-built string so the
   # settings.json is always valid JSON (ADR 0007 tier-1).
-  boxSettings = builtins.toJSON {
-    hooks = {
-      PreToolUse = [
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/reject-background-bash.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Read";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/credential-deny.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/credential-deny.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/env-credential-scrub.sh";
-            }
-          ];
-        }
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/bash-output-tee.sh";
-            }
-          ];
-        }
-      ];
-      PostToolUse = [
-        {
-          matcher = "Bash";
-          hooks = [
-            {
-              type = "command";
-              command = "/home/agent/.claude/hooks/bash-output-summary.sh";
-            }
-          ];
-        }
-      ];
-    };
-  };
+  boxSettings = builtins.toJSON (
+    {
+      hooks = {
+        PreToolUse = [
+          {
+            matcher = "Bash";
+            hooks = [
+              {
+                type = "command";
+                command = "/home/agent/.claude/hooks/reject-background-bash.sh";
+              }
+            ];
+          }
+          {
+            matcher = "Read";
+            hooks = [
+              {
+                type = "command";
+                command = "/home/agent/.claude/hooks/credential-deny.sh";
+              }
+            ];
+          }
+          {
+            matcher = "Bash";
+            hooks = [
+              {
+                type = "command";
+                command = "/home/agent/.claude/hooks/credential-deny.sh";
+              }
+            ];
+          }
+          {
+            matcher = "Bash";
+            hooks = [
+              {
+                type = "command";
+                command = "/home/agent/.claude/hooks/env-credential-scrub.sh";
+              }
+            ];
+          }
+          {
+            matcher = "Bash";
+            hooks = [
+              {
+                type = "command";
+                command = "/home/agent/.claude/hooks/bash-output-tee.sh";
+              }
+            ];
+          }
+        ];
+        PostToolUse = [
+          {
+            matcher = "Bash";
+            hooks = [
+              {
+                type = "command";
+                command = "/home/agent/.claude/hooks/bash-output-summary.sh";
+              }
+            ];
+          }
+        ];
+      };
+    }
+    // lib.optionalAttrs (agents.autoCompactWindows != { }) {
+      modelSettings = lib.mapAttrs (_: w: { autoCompactWindow = w; }) agents.autoCompactWindows;
+    }
+  );
 
   # Everything under /agent is baked into the image rather than bind-mounted:
   # there is no working tree once spindrift is a store path, and a macOS podman

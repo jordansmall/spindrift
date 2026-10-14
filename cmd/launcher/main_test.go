@@ -5639,6 +5639,7 @@ var flatShimGeneralizedMarkers = []struct {
 	{"config", "infra."},
 	{"nixInBox", ""},
 	{"nixStoreWritable", ""},
+	{"autoCompactWindows", "agents."},
 }
 
 // flatShimDeliberateCollisions lists flat marker names kept out of
