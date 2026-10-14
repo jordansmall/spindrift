@@ -124,6 +124,21 @@ let
     }
   );
 
+  # ab-orchestrator.sh's variant arm. Its own imageAttrName keeps the two
+  # arms' images and freshness probes apart; daemonApp/daemonSelfApp point at
+  # its own attrs so nothing it bakes re-invokes the control Harness.
+  dogfoodAbVariantHarness = import ../lib/mkHarness.nix (
+    dogfoodHarnessArgs
+    // {
+      roster = dogfoodDefaults.abVariant.roster;
+      imageAttrName = "agent-image-ab-variant";
+      defaults = dogfoodHarnessArgs.defaults // {
+        daemonApp = ".#ab-variant";
+        daemonSelfApp = ".#ab-variant-daemon";
+      };
+    }
+  );
+
   # The opencode Driver's Harness as flake.nix declares it and the module's
   # otherHarness renders it, so the equivalence check can pin its content, not
   # just that it differs from claude's. A non-default Driver never inherits
@@ -510,6 +525,7 @@ in
     harness
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
+    dogfoodAbVariantHarness
     nonRustHarness
     leanHarness
     nixStoreWritableHarness

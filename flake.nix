@@ -194,6 +194,11 @@
             # on aarch64-darwin that harness has none and the access would throw.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
+            }
+            # The ab-variant Harness's baked FLAKE_IMAGE_ATTR names this
+            # top-level attr, same reasoning as agent-closure above.
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodAbVariantHarness.packages ? agent-image-ab-variant) {
+              agent-image-ab-variant = fixtures.dogfoodAbVariantHarness.packages.agent-image-ab-variant;
             };
 
             apps = {
@@ -243,6 +248,12 @@
               # drives a bwrap Box rather than the podman one apps.daemon
               # (off the default harness) would.
               dogfood-bwrap-daemon = fixtures.dogfoodBwrapHarness.apps.daemon;
+            }
+            # ab-orchestrator.sh's variant arm (haiku worker, sonnet reviewer)
+            # beside the default dogfood CLI as its control arm.
+            // pkgs.lib.optionalAttrs (fixtures.dogfoodAbVariantHarness.packages ? agent-image-ab-variant) {
+              ab-variant = fixtures.dogfoodAbVariantHarness.apps.default;
+              ab-variant-daemon = fixtures.dogfoodAbVariantHarness.apps.daemon;
             };
 
             devShells = {

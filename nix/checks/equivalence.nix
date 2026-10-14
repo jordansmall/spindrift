@@ -13,6 +13,7 @@ let
   inherit (fixtures)
     harness
     dogfoodOpencodeHarness
+    dogfoodAbVariantHarness
     nonRustHarness
     leanHarness
     customHarness
@@ -1571,6 +1572,35 @@ in
       effortMismatches == { }
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
+
+  # The ab-orchestrator.sh variant arm: only the worker and reviewer models
+  # move, and its image gets its own attr so the control image's freshness
+  # probe never realizes it. Literals are hand-typed for the same
+  # anti-vacuity reason as expectedModels above.
+  dogfood-ab-variant-harness =
+    let
+      inherit (pkgs.lib) assertMsg filterAttrs;
+      variant = dogfoodAbVariantHarness.internals;
+      control = harness.internals;
+      expected = {
+        worker = "claude-haiku-5-5";
+        reviewer = "claude-sonnet-5-5";
+        filer = defaultModelFixture.dogfoodPins.filer;
+        scout = defaultModelFixture.schemaDefaults.scoutModel;
+      };
+      mismatches = filterAttrs (name: model: modelOf name variant.roster != model) expected;
+      withoutModels = map (e: removeAttrs e [ "model" ]);
+    in
+    assert assertMsg (
+      mismatches == { }
+    ) "ab-variant roster model mismatch(es): ${builtins.toJSON mismatches}";
+    assert assertMsg (
+      withoutModels variant.roster == withoutModels control.roster
+    ) "ab-variant roster differs from the dogfood roster beyond its models";
+    assert assertMsg (
+      variant.imageAttrName == "agent-image-ab-variant"
+    ) "ab-variant imageAttrName ${variant.imageAttrName} != agent-image-ab-variant";
+    pkgs.runCommand "dogfood-ab-variant-harness" { } "touch $out";
 
   # AC1 (issue #2435): the dogfood roster must name exactly the agents
   # defaultModelFixture.dogfoodPins lists, besides the Filer. The resolved
