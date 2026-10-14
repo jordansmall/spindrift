@@ -195,11 +195,14 @@
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
             }
-            # The ab-variant Harness's baked FLAKE_IMAGE_ATTR names this
+            # Each bench arm Harness's baked FLAKE_IMAGE_ATTR names its own
             # top-level attr, same reasoning as agent-closure above.
-            // pkgs.lib.optionalAttrs (fixtures.dogfoodAbVariantHarness.packages ? agent-image-ab-variant) {
-              agent-image-ab-variant = fixtures.dogfoodAbVariantHarness.packages.agent-image-ab-variant;
-            };
+            // pkgs.lib.concatMapAttrs (
+              name: h:
+              pkgs.lib.optionalAttrs (h.packages ? "agent-image-ab-${name}") {
+                "agent-image-ab-${name}" = h.packages."agent-image-ab-${name}";
+              }
+            ) fixtures.dogfoodAbArmHarnesses;
 
             apps = {
               # Repo-internal dev tooling, not for consumers (issue #402). It
@@ -249,12 +252,15 @@
               # (off the default harness) would.
               dogfood-bwrap-daemon = fixtures.dogfoodBwrapHarness.apps.daemon;
             }
-            # ab-orchestrator.sh's variant arm (haiku worker, sonnet reviewer)
-            # beside the default dogfood CLI as its control arm.
-            // pkgs.lib.optionalAttrs (fixtures.dogfoodAbVariantHarness.packages ? agent-image-ab-variant) {
-              ab-variant = fixtures.dogfoodAbVariantHarness.apps.default;
-              ab-variant-daemon = fixtures.dogfoodAbVariantHarness.apps.daemon;
-            };
+            # bench.sh's image-time arms (nix/ab-arms.nix), beside the default
+            # dogfood CLI as their control.
+            // pkgs.lib.concatMapAttrs (
+              name: h:
+              pkgs.lib.optionalAttrs (h.packages ? "agent-image-ab-${name}") {
+                "ab-${name}" = h.apps.default;
+                "ab-${name}-daemon" = h.apps.daemon;
+              }
+            ) fixtures.dogfoodAbArmHarnesses;
 
             devShells = {
               # For hacking on the harness itself, host-side.

@@ -66,18 +66,6 @@ in
       };
     };
   };
-  # The ab-orchestrator.sh variant arm, exposed as `.#ab-variant`: the worker
-  # model is baked at image time, so comparing it needs a second Harness rather
-  # than a dispatch-time flag. Coordinator, efforts, and everything else stay
-  # the dogfood's own. Must stay below claude's `models` block for the same
-  # reason as opencode's above.
-  abVariant.roster = rosterLib.defaultRoster {
-    models = {
-      filer = "claude-haiku-5-5";
-      reviewer = "claude-sonnet-5-5";
-      worker = "claude-haiku-5-5";
-    };
-  };
   defaults = {
     repoSlug = "jordansmall/spindrift";
     model = "claude-opus-5-5";

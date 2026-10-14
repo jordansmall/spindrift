@@ -13,7 +13,8 @@ let
   inherit (fixtures)
     harness
     dogfoodOpencodeHarness
-    dogfoodAbVariantHarness
+    dogfoodAbArmHarnesses
+    abArms
     nonRustHarness
     leanHarness
     customHarness
@@ -1573,34 +1574,51 @@ in
     ) "dogfood roster per-agent effort mismatch(es): ${builtins.toJSON effortMismatches}";
     pkgs.runCommand "dogfood-roster-and-review-effort" { } "touch $out";
 
-  # The ab-orchestrator.sh variant arm: only the worker and reviewer models
-  # move, and its image gets its own attr so the control image's freshness
-  # probe never realizes it. Literals are hand-typed for the same
-  # anti-vacuity reason as expectedModels above.
-  dogfood-ab-variant-harness =
+  # bench.sh's image-time arms (nix/ab-arms.nix): each arm's roster differs
+  # from the dogfood's only in the model/effort fields it names, and each
+  # image gets its own attr so no arm's freshness probe realizes another's.
+  dogfood-ab-arm-harnesses =
     let
-      inherit (pkgs.lib) assertMsg filterAttrs;
-      variant = dogfoodAbVariantHarness.internals;
-      control = harness.internals;
-      expected = {
-        worker = "claude-haiku-5-5";
-        reviewer = "claude-sonnet-5-5";
-        filer = defaultModelFixture.dogfoodPins.filer;
-        scout = defaultModelFixture.schemaDefaults.scoutModel;
-      };
-      mismatches = filterAttrs (name: model: modelOf name variant.roster != model) expected;
-      withoutModels = map (e: removeAttrs e [ "model" ]);
+      inherit (pkgs.lib)
+        assertMsg
+        attrNames
+        concatMap
+        ;
+      control = harness.internals.roster;
+      expectedEntry =
+        arm: e:
+        e
+        // pkgs.lib.optionalAttrs ((arm.models or { }) ? ${e.name}) { model = arm.models.${e.name}; }
+        // pkgs.lib.optionalAttrs ((arm.efforts or { }) ? ${e.name}) { effort = arm.efforts.${e.name}; };
+      problems = concatMap (
+        name:
+        let
+          arm = abArms.${name};
+          got = dogfoodAbArmHarnesses.${name}.internals;
+        in
+        pkgs.lib.optional (got.roster != map (expectedEntry arm) control) "${name}: roster"
+        ++ pkgs.lib.optional (got.imageAttrName != "agent-image-ab-${name}") "${name}: imageAttrName"
+      ) (attrNames abArms);
+      # The override must reach the baked roster, or every arm would pass
+      # trivially as a copy of the control.
+      variantWorker = modelOf "worker" dogfoodAbArmHarnesses.variant.internals.roster;
     in
+    assert assertMsg (abArms ? variant) "nix/ab-arms.nix must keep the `variant` arm";
     assert assertMsg (
-      mismatches == { }
-    ) "ab-variant roster model mismatch(es): ${builtins.toJSON mismatches}";
-    assert assertMsg (
-      withoutModels variant.roster == withoutModels control.roster
-    ) "ab-variant roster differs from the dogfood roster beyond its models";
-    assert assertMsg (
-      variant.imageAttrName == "agent-image-ab-variant"
-    ) "ab-variant imageAttrName ${variant.imageAttrName} != agent-image-ab-variant";
-    pkgs.runCommand "dogfood-ab-variant-harness" { } "touch $out";
+      variantWorker == abArms.variant.models.worker
+    ) "variant arm worker ${variantWorker} != ${abArms.variant.models.worker}";
+    assert assertMsg (problems == [ ]) "ab arm mismatch(es): ${builtins.toJSON problems}";
+    pkgs.runCommand "dogfood-ab-arm-harnesses" { } "touch $out";
+
+  # An arm naming an agent the dogfood roster lacks is a typo, not a no-op.
+  dogfood-ab-arm-unknown-agent-throws =
+    let
+      attempt = builtins.tryEval (
+        builtins.deepSeq (fixtures.mkAbArmRoster "typo" { models.wroker = "x"; }) true
+      );
+    in
+    assert pkgs.lib.assertMsg (!attempt.success) "an arm naming unknown agent `wroker` must throw";
+    pkgs.runCommand "dogfood-ab-arm-unknown-agent-throws" { } "touch $out";
 
   # AC1 (issue #2435): the dogfood roster must name exactly the agents
   # defaultModelFixture.dogfoodPins lists, besides the Filer. The resolved

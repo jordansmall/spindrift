@@ -124,20 +124,41 @@ let
     }
   );
 
-  # ab-orchestrator.sh's variant arm. Its own imageAttrName keeps the two
+  # bench.sh's image-time arms (nix/ab-arms.nix), each the dogfood Harness
+  # with only its named roster fields changed. Its own imageAttrName keeps the
   # arms' images and freshness probes apart; daemonApp/daemonSelfApp point at
   # its own attrs so nothing it bakes re-invokes the control Harness.
-  dogfoodAbVariantHarness = import ../lib/mkHarness.nix (
-    dogfoodHarnessArgs
-    // {
-      roster = dogfoodDefaults.abVariant.roster;
-      imageAttrName = "agent-image-ab-variant";
-      defaults = dogfoodHarnessArgs.defaults // {
-        daemonApp = ".#ab-variant";
-        daemonSelfApp = ".#ab-variant-daemon";
-      };
-    }
-  );
+  abArms = import ./ab-arms.nix;
+  mkAbArmRoster =
+    name: arm:
+    let
+      known = map (e: e.name) dogfoodDefaults.roster;
+      named = builtins.attrNames (arm.models or { }) ++ builtins.attrNames (arm.efforts or { });
+      unknown = builtins.filter (n: !(builtins.elem n known)) named;
+    in
+    if unknown != [ ] then
+      throw "nix/ab-arms.nix: arm ${name} names unknown agent(s) ${builtins.toJSON unknown} -- expected one of ${builtins.toJSON known}"
+    else
+      map (
+        e:
+        e
+        // pkgs.lib.optionalAttrs ((arm.models or { }) ? ${e.name}) { model = arm.models.${e.name}; }
+        // pkgs.lib.optionalAttrs ((arm.efforts or { }) ? ${e.name}) { effort = arm.efforts.${e.name}; }
+      ) dogfoodDefaults.roster;
+  dogfoodAbArmHarnesses = builtins.mapAttrs (
+    name: arm:
+    import ../lib/mkHarness.nix (
+      dogfoodHarnessArgs
+      // {
+        roster = mkAbArmRoster name arm;
+        imageAttrName = "agent-image-ab-${name}";
+        defaults = dogfoodHarnessArgs.defaults // {
+          daemonApp = ".#ab-${name}";
+          daemonSelfApp = ".#ab-${name}-daemon";
+        };
+      }
+    )
+  ) abArms;
 
   # The opencode Driver's Harness as flake.nix declares it and the module's
   # otherHarness renders it, so the equivalence check can pin its content, not
@@ -525,7 +546,9 @@ in
     harness
     dogfoodBwrapHarness
     dogfoodOpencodeHarness
-    dogfoodAbVariantHarness
+    abArms
+    mkAbArmRoster
+    dogfoodAbArmHarnesses
     nonRustHarness
     leanHarness
     nixStoreWritableHarness
