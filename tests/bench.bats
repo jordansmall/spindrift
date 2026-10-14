@@ -53,9 +53,9 @@ if [ "$1" = build ]; then echo "build $app" >>"$FAKE_LOG"; exit 0; fi
 shift
 echo "$app $*" >>"$FAKE_LOG"
 args=("$@"); slug="${args[-1]}"
+remote="$FAKE_REMOTE"
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[i]}" in
-    --remote-url) remote="${args[i+1]}" ;;
     --branch-prefix) prefix="${args[i+1]}" ;;
     --base-branch) base="${args[i+1]}" ;;
     --local-dir) dir="${args[i+1]}" ;;
@@ -82,7 +82,11 @@ SPINDRIFT_OUTCOME status=${FAKE_STATUS:-ready} landing=$prefix$slug
 EOF
 FAKE
   chmod +x "$T/bin/nix"
+  # Answers bench.sh's Actions check on the bench repo.
+  printf '#!%s\necho "${FAKE_ACTIONS:-false}"\n' "$BASH" >"$T/bin/gh"
+  chmod +x "$T/bin/gh"
 
+  export FAKE_REMOTE="file://$T/remote.git" BENCH_GH="$T/bin/gh"
   export BENCH_NIX="$T/bin/nix" BENCH_SRC="$T/src" BENCH_TASKS_DIR="$T/tasks" \
     BENCH_ARMS_FILE="$T/arms" BENCH_REMOTE="file://$T/remote.git" \
     BENCH_PUSH_URL="file://$T/remote.git" BENCH_REPO_SLUG=acme/bench \
@@ -116,23 +120,34 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
   [ "$(git ls-remote "$T/remote.git" refs/heads/main | cut -f1)" = "$BASE" ]
 }
 
-@test "run: dispatches through the local tracker and push-only git forge, plus the arm's own flags" {
+@test "run: dispatches read-only through the GitHub forge like dogfood, plus the arm's own flags" {
   cd "$T/cwd"
   BENCH_REPS=1 run bench run t1 good bad
   [ "$status" -eq 0 ]
   local good bad
   good=$(grep '^\.#good ' "$FAKE_LOG")
   bad=$(grep '^\.#bad ' "$FAKE_LOG")
-  for f in "--no-build" "--yes" "--tracker local" "--forge-backend git" \
-    "--remote-url file://$T/remote.git" "--base-branch main" \
-    "--merge-policy manual" "--box-access read-write" "--repo-slug acme/bench"; do
+  for f in "--no-build" "--yes" "--tracker local" "--forge-backend github" \
+    "--base-branch main" "--merge-policy manual" "--max-fix-attempts 0" \
+    "--merge-poll-timeout 60" "--repo-slug acme/bench"; do
     [[ "$good" == *" $f "* ]] || { echo "missing $f in: $good"; false; }
   done
+  [[ "$good" != *"--box-access"* ]]
+  [[ "$good" != *"--remote-url"* ]]
   [[ "$good" == *"--branch-prefix bench/good/r1/ "* ]]
   [[ "$good" == *" t1" ]]
   [[ "$bad" == *"--effort low"* ]]
   [[ "$good" != *"--effort"* ]]
   [ "$(grep -c '^build ' "$FAKE_LOG")" -eq 2 ]
+}
+
+@test "run: refuses while Actions is on for the bench repo, before anything is dispatched" {
+  cd "$T/cwd"
+  FAKE_ACTIONS=true BENCH_REPS=1 run bench run t1 good
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"actions/permissions"* ]]
+  [ ! -e "$FAKE_LOG" ]
+  git ls-remote --heads "$T/remote.git" | grep -q refs/heads/stale
 }
 
 @test "run: a later invocation appends, numbering reps after the existing ones" {
@@ -208,7 +223,7 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
 
 @test "run: a dry run prints every planned dispatch and writes nothing" {
   cd "$T/cwd"
-  BENCH_DRY_RUN=1 BENCH_REPS=2 run bench run t1 good bad
+  FAKE_ACTIONS=true BENCH_DRY_RUN=1 BENCH_REPS=2 run bench run t1 good bad
   [ "$status" -eq 0 ]
   [ "$(grep -c 'DRY-RUN:' <<<"$output")" -eq 4 ]
   grep -F -- "--local-dir $T/out/runs/good/r2/issues" <<<"$output"
