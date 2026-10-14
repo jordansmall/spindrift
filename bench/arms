@@ -1,0 +1,9 @@
+# bench.sh arms: <name> <flake app> [dispatch flags...]
+# The first arm is the summary's delta baseline. Subagent models and efforts
+# are image-time, so they need a `.#ab-<name>` app from nix/ab-arms.nix;
+# coordinator --model/--effort and --review-model/--review-effort work on any
+# app. Renaming an arm starts a fresh series; changing its spec under the same
+# name gets flagged in the summary.
+control  .#
+variant  .#ab-variant
+# variant-medium  .#ab-variant  --effort medium

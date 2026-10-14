@@ -65,9 +65,9 @@ let
     BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
     BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
     # Issue #2057. tests/ is copied into the sandbox but its parent
-    # ab-orchestrator.sh is not, so tests/ab-orchestrator.bats resolves the
+    # bench.sh is not, so tests/bench.bats resolves the
     # script through this var rather than $BATS_TEST_DIRNAME/../.
-    AB_ORCHESTRATOR_SH = ../../ab-orchestrator.sh;
+    BENCH_SH = ../../bench.sh;
     # tests/gh-token-refresher.bats (issue #3940) extracts mint_token
     # straight out of the composite action's `run:` block, so it tracks the
     # real body rather than a hand-copied stand-in.
@@ -165,7 +165,7 @@ in
           ${../../agent/env-credential-scrub.sh} \
           ${../../agent/bash-output-tee.sh} \
           ${../../agent/bash-output-summary.sh} \
-          ${../../ab-orchestrator.sh} \
+          ${../../bench.sh} \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
           ${../../.github/scripts/ci-changes.sh} \
