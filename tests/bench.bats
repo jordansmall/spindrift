@@ -237,7 +237,10 @@ FAKE
   [ "$status" -eq 0 ]
   # shellcheck disable=SC1091
   . "$T/tasks/t7/task.env"
-  [ "$GRADE_CMD" = "nix develop -c bash -c '(cd mod && go test ./pkg ./pkg/inner) && bats tests/s.bats'" ]
+  [ "$GRADE_CMD" = 'nix develop -c bash -c "(cd mod && go test ./pkg ./pkg/inner) && bats tests/s.bats"' ]
+  # task.env is edited by hand, so values are plain single-quoted strings.
+  grep -Fx "GRADE_CMD='nix develop -c bash -c \"(cd mod && go test ./pkg ./pkg/inner) && bats tests/s.bats\"'" "$T/tasks/t7/task.env"
+  grep -Fx "CHECK_CMD='nix build .#checks-inbox'" "$T/tasks/t7/task.env"
 }
 
 @test "new-task: a numeric task name is refused, since a numeric slug reaches a real issue" {

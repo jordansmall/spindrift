@@ -327,7 +327,13 @@ guess_grade_cmd() {
   [ ${#parts[@]} -eq 0 ] && return 0
   local joined="${parts[0]}" part
   for part in "${parts[@]:1}"; do joined+=" && $part"; done
-  printf "nix develop -c bash -c '%s'" "$joined"
+  printf 'nix develop -c bash -c "%s"' "$joined"
+}
+
+# One task.env assignment, single-quoted when it can be so it stays readable
+# for hand edits; %q only for a value holding a single quote.
+env_line() {
+  if [[ "$2" == *"'"* ]]; then printf '%s=%q\n' "$1" "$2"; else printf "%s='%s'\n" "$1" "$2"; fi
 }
 
 cmd_new_task() {
@@ -367,9 +373,9 @@ cmd_new_task() {
     echo "# bench.sh new-task from $BENCH_SOURCE_SLUG#$issue. Review, then run: bench.sh validate $name"
     echo "BASE=$base"
     echo "FIX=$fix"
-    printf 'TEST_PATHS=%q\n' "${tests[*]}"
-    printf 'GRADE_CMD=%q\n' "$(guess_grade_cmd "$fix" "${tests[@]}")"
-    printf 'CHECK_CMD=%q\n' "nix build .#checks-inbox"
+    env_line TEST_PATHS "${tests[*]}"
+    env_line GRADE_CMD "$(guess_grade_cmd "$fix" "${tests[@]}")"
+    env_line CHECK_CMD "nix build .#checks-inbox"
   } >"$dir/task.env"
   info "wrote $dir (BASE ${base:0:10}, FIX ${fix:0:10}, ${#tests[@]} hidden test path(s))"
   [ ${#tests[@]} -gt 0 ] || warn "no test files changed in BASE..FIX: set TEST_PATHS and GRADE_CMD by hand"
