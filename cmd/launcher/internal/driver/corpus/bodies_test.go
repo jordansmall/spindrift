@@ -125,6 +125,57 @@ func TestScrubBlanksOpencodeToolParts(t *testing.T) {
 	}
 }
 
+func TestBlankHeredocs(t *testing.T) {
+	const p = "[REDACTED:inline-code]"
+	cases := []struct {
+		name, in, want string
+	}{
+		{"quoted tag", "cat > a_test.go <<'EOF'\npackage private\nfunc f() {}\nEOF\ngo test ./...",
+			"cat > a_test.go <<'EOF'\n" + p + "\nEOF\ngo test ./..."},
+		{"double-quoted tag", "python3 - <<\"PY\"\nprivate()\nPY", "python3 - <<\"PY\"\n" + p + "\nPY"},
+		{"bare tag", "git commit -F - <<MSG\nprivate msg\nMSG\n", "git commit -F - <<MSG\n" + p + "\nMSG\n"},
+		{"dash strips tabs", "cat <<-EOF\n\tprivate\n\tEOF\necho ok", "cat <<-EOF\n" + p + "\n\tEOF\necho ok"},
+		{"two on one line", "paste <<A <<'B'\nprivate a\nA\nprivate b\nB", "paste <<A <<'B'\n" + p + "\nA\n" + p + "\nB"},
+		{"tag text inside body", "cat <<EOF\nnot EOF yet\nEOF", "cat <<EOF\n" + p + "\nEOF"},
+		{"unterminated", "cat <<EOF\nprivate\nmore private", "cat <<EOF\n" + p},
+		{"empty body", "cat <<EOF\nEOF", "cat <<EOF\nEOF"},
+		{"here-string", "grep x <<<\"$s\"", "grep x <<<\"$s\""},
+		{"shift", "echo $((1<<3))", "echo $((1<<3))"},
+		{"no heredoc", "go test ./...", "go test ./..."},
+		{"already blanked", "cat <<EOF\n" + p + "\nEOF", "cat <<EOF\n" + p + "\nEOF"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, _ := blankHeredocs(c.in)
+			if got != c.want {
+				t.Errorf("blankHeredocs(%q)\n got: %q\nwant: %q", c.in, got, c.want)
+			}
+		})
+	}
+}
+
+func TestScrubBlanksInlineCodeInCommands(t *testing.T) {
+	in := `{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"cat > a.go <<'EOF'\npackage private\nEOF\ngit commit -q","description":"write file"}}]}}` + "\n" +
+		`{"type":"tool_use","part":{"type":"tool","tool":"bash","callID":"c1","state":{"status":"completed","input":{"command":"python3 - <<'PY'\nprivate()\nPY"}}}}` + "\n"
+	out := Scrub([]byte(in))
+	if bytes.Contains(out, []byte("private")) {
+		t.Errorf("Scrub left inline code: %s", out)
+	}
+	lines := bytes.SplitAfter(out, []byte("\n"))
+	if c := at(decode(t, lines[0]), "message", "content", 0, "input", "command"); c != "cat > a.go <<'EOF'\n[REDACTED:inline-code]\nEOF\ngit commit -q" {
+		t.Errorf("claude command = %q, want the heredoc body blanked and the rest kept", c)
+	}
+	if c := at(decode(t, lines[1]), "part", "state", "input", "command"); c != "python3 - <<'PY'\n[REDACTED:inline-code]\nPY" {
+		t.Errorf("opencode command = %q, want the heredoc body blanked", c)
+	}
+	if got := Tally([]byte(in))[inlineCode]; got != 2 {
+		t.Errorf("Tally[%s] = %d, want 2", inlineCode, got)
+	}
+	if twice := Scrub(out); !bytes.Equal(twice, out) {
+		t.Errorf("Scrub is not idempotent over inline code:\nfirst:  %q\nsecond: %q", out, twice)
+	}
+}
+
 func TestScrubLeavesLinesWithoutBodiesByteIdentical(t *testing.T) {
 	in := strings.Join([]string{
 		`{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}`,

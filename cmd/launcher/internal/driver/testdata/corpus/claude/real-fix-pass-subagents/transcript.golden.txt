@@ -16,33 +16,16 @@
 [implementor] Skill()
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(git add cmd/launcher/internal/waves/session_test.go && git commit -q -F - <<'EOF'
-fix(waves): stop calling headless Session nil
-
-The comment on TestRunContinuous_NilSession_FallsBackToFixedLimiter
-still said every headless dispatch call site passes a nil Session.
-They all pass a non-nil Session with only Terminated set now, so the
-fallback they actually hit is a nil Session.Limiter. Reword the
-comment to say both cases build a fixed limiter from cfg.MaxParallel.
-
-Closes #4940
-
-Co-Authored-By: Claude Opus 5.5 <[REDACTED:email]>
+[REDACTED:inline-code]
 EOF
 git log -n 1 --oneline; git fetch origin -q; git merge-base HEAD origin/main; git rebase origin/main 2>&1 | tail -1)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(cat > /tmp/pass-summary.md <<'EOF'
-Pass 1 (no handoff): issue #4940 comment-only fix. Reworded
-cmd/launcher/internal/waves/session_test.go:10-13 so it no longer claims
-headless callers pass a nil Session; now says nil Session and nil
-Session.Limiter (headless) both fall back to fixed limiter from
-cfg.MaxParallel. Test name/body unchanged. Commit e8680316. gofmt clean,
-go vet + go test ./internal/waves ok, nix build .#checks-inbox exit=0.
-Rebased on origin/main e5fccdca (up to date). Remaining: review pass,
-then land (PR intent + OUTCOME).
+[REDACTED:inline-code]
 EOF
 : > /tmp/dispositions.md
 cat > /tmp/decisions.md <<'EOF'
-session_test.go:10-13 comment -> chose reword-only, rejected test rename / extra nil-Limiter case -- issue AC marks both optional; laziness
+[REDACTED:inline-code]
 EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] I fixed the stale comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` and committed it as e8680316 on `agent/issue-4940`. Gofmt, vet, the waves tests and the full `checks-inbox` gate all passed.
@@ -110,38 +93,18 @@ I stopped after the commit because no review has run on this branch yet. There's
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Retyping commit to `test(waves)` and amending in the comment fix.
 [implementor] Bash(cd /work && git add cmd/launcher/internal/waves/session_test.go && git commit -q --amend -F - <<'EOF'
-test(waves): stop calling headless Session nil
-
-The comment on TestRunContinuous_NilSession_FallsBackToFixedLimiter
-still said every headless dispatch call site passes a nil Session.
-They all pass a non-nil Session with only Terminated set now, so the
-fallback they actually hit is a nil Session.Limiter. Reword the
-comment to say that path takes the same fixed-limiter fallback, and
-that the test itself only pins the nil-Session case.
-
-Closes #4940
-
-Co-Authored-By: Claude Opus 5.5 <[REDACTED:email]>
+[REDACTED:inline-code]
 EOF
 git fetch -q origin; git merge-base HEAD origin/main; git rebase origin/main 2>&1 | tail -1; git log --oneline origin/main..HEAD)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(cat >/tmp/pass-summary.md <<'EOF'
-Pass 2 (round 1 BLOCK fix): retyped commit fix(waves) -> test(waves) per
-blocking finding; amended session_test.go:10-14 comment to say the test pins
-only the nil-Session case and point at Session.Limiter. Single commit
-2170066e on origin/main e5fccdca (up to date). Narrow checks: gofmt clean,
-go vet + go test ./internal/waves ok. Full gate not re-run (comment-only fold;
-pass 1 gate green). Remaining: review pass, then land (PR intent + OUTCOME).
+[REDACTED:inline-code]
 EOF
 cat >/tmp/dispositions.md <<'EOF'
-e8680316 typed fix(waves) for comment-only change -> fixed in commit 2170066e (retyped test(waves))
-session_test.go:11-13 "(what headless callers pass)" duplicates caller inventory -> fixed in commit 2170066e (added "see Session.Limiter"; parenthetical kept because issue #4940 AC requires it)
-session_test.go:11-13 implies test pins headless nil-Limiter path -> fixed in commit 2170066e (comment now says test pins only nil-Session case)
-continuous.go:203 third copy of caller inventory -> won't-fix: out of scope, surface untouched by branch, still accurate (dropped)
+[REDACTED:inline-code]
 EOF
 cat >/tmp/decisions.md <<'EOF'
-commit type -> chose test(waves), rejected docs(waves) -- edit is in a _test.go file; precedent 3265a2a7 test(outcome) for stale test comments
-session_test.go comment -> kept "(what headless callers pass)", rejected dropping caller mention entirely -- issue #4940 AC requires it; added "see Session.Limiter" pointer instead
+[REDACTED:inline-code]
 EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] I fixed the blocking review finding: the commit is now typed `test(waves)` instead of `fix(waves)`. Release notes will list it under "Tests" rather than "Bug Fixes", which matches the earlier `test(outcome)` commit for stale test comments. The branch is still one commit (`2170066e`) and was already up to date with `origin/main` (e5fccdca), so the rebase changed nothing.
@@ -202,17 +165,7 @@ Nothing is pushed, no PR intent is sent and there's no outcome line yet; the nex
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Rebase: up to date. Non-blocking round-2 finding: cheap, in-scope → fix inline (reword to "headless RunContinuous callers").
 [implementor] Bash(python3 - <<'EOF'
-p='cmd/launcher/internal/waves/session_test.go'
-s=open(p).read()
-old="""// matching the pre-#1547 behaviour of a zero-value Config.Limiter. A non-nil
-// Session with a nil Limiter (what headless callers pass) takes the same
-// fallback (see Session.Limiter); this test pins only the nil-Session case."""
-new="""// matching the pre-#1547 behaviour of a zero-value Config.Limiter. A non-nil
-// Session with a nil Limiter (what headless RunContinuous callers pass) takes
-// the same fallback (see Session.Limiter); this test pins only the nil-Session
-// case."""
-assert old in s
-open(p,'w').write(s.replace(old,new))
+[REDACTED:inline-code]
 EOF
 gofmt -l cmd/launcher/internal/waves/; cd cmd/launcher && go vet ./internal/waves/ >"$TMPDIR/v.log" 2>&1; echo vet=$?; go test ./internal/waves/ >"$TMPDIR/t.log" 2>&1; echo test=$?; tail -3 "$TMPDIR/t.log")
 [implementor]   -> [REDACTED:tool-output]
@@ -227,27 +180,17 @@ gofmt -l cmd/launcher/internal/waves/; cd cmd/launcher && go vet ./internal/wave
 [implementor] Bash(git fetch origin >/dev/null 2>&1; git rebase origin/main 2>&1 | tail -1; echo CODE_FORGE=$CODE_FORGE; git log -1 --format=%B)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(driver-exec signal pr-intent -title 'test(waves): stop calling headless Session nil' <<'SPINDRIFT_SIGNAL_EOF'
-The doc comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` (`cmd/launcher/internal/waves/session_test.go`) still said that a nil `*Session` is what every headless dispatch call site passes. That is no longer true: every production caller passes `&waves.Session{Terminated: terminated}`, and the `Session` type doc already says a nil Session is tests-only.
-
-This rewords the comment. A nil Session falls back to a fixed limiter built from `cfg.MaxParallel`. A non-nil Session with a nil `Limiter` takes the same fallback, and that is what headless `RunContinuous` callers pass. The comment points at `Session.Limiter` for the details and says this test pins only the nil-Session case.
-
-The change is comment-only. The test name and body are unchanged. Narrow checks (`gofmt`, `go vet`, `go test ./internal/waves/`) and the full `checks-inbox` gate are green.
-
-Review note: the comment at `continuous.go:203` also lists callers, but it is still accurate and the issue marks it out of scope, so it is left alone.
-
-Closes #4940
-
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+[REDACTED:inline-code]
 SPINDRIFT_SIGNAL_EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] Bash(cat >/tmp/pass-summary.md <<'EOF'
-Pass 3 (land, round 2 APPROVE): rebase up to date on origin/main e5fccdca. Folded round-2 non-blocking finding (narrow "headless callers" -> "headless RunContinuous callers") into single commit 068f4c72. checks-inbox green. No findings survived triage to file. PR intent sent. Outcome ready.
+[REDACTED:inline-code]
 EOF
 cat >/tmp/dispositions.md <<'EOF'
-session_test.go:13 "(what headless callers pass)" broader than RunContinuous path -> fixed in commit 068f4c72
+[REDACTED:inline-code]
 EOF
 cat >/tmp/decisions.md <<'EOF'
-session_test.go:13 wording -> chose "headless RunContinuous callers", rejected dropping caller mention -- issue #4940 AC requires naming what headless callers pass; Dispatch never reads Session.Limiter (session.go:13-15)
+[REDACTED:inline-code]
 EOF)
 [implementor]   -> [REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=4940 landing=agent/issue-4940 status=ready note=Reworded the session_test.go comment so it no longer says headless callers pass a nil Session; it now says a nil Session or a nil Session.Limiter (what headless RunContinuous callers pass) falls back to a fixed limiter from cfg.MaxParallel. The round-2 wording nit is folded into commit 068f4c72, checks-inbox is green, and no findings were left to file.

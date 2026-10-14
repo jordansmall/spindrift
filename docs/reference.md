@@ -1231,12 +1231,16 @@ redacts credential-shaped strings, emails and host home paths (anything under
 `/home/<user>` or `/Users/<user>` except the Box's `/home/agent`). It also
 blanks the JSON values that carry repo content: tool results and their
 output, file bodies in tool inputs (`content`, `old_string`/`new_string` and
-the like, plus a subagent's `prompt`), thinking text, subagent task text,
-and `opencode` tool output. It keeps what the readers use, such as
-`file_path`, `command` and `subagent_type`, so only the Transcript golden
-shows the blanks. Assistant text, Bash commands and result text stay as
-written, because the outcome line and heartbeat depend on them. Read those
-for private content before committing.
+the like, plus a subagent's `prompt`), heredoc bodies inside a tool's
+`command` (the inline code, file or message a command fed in, keeping the
+opener and terminator lines), thinking text, subagent task text, and
+`opencode` tool output. It keeps what the readers use, such as `file_path`,
+the rest of `command` and `subagent_type`, so the blanks show mainly in the
+Transcript golden. A heartbeat phase can also move when a heredoc body was
+the only place a phase word like `go test` appeared. Assistant text, the
+command lines themselves and result text stay as written, because the
+outcome line and heartbeat depend on them. Read those for private content
+before committing.
 
 ```sh
 cd cmd/launcher

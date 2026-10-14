@@ -1,8 +1,8 @@
 // Package corpus is the credential guard and scrubber for the per-Driver
 // Pass-log corpus (issue #5180). Find reports credential-shaped strings,
 // emails and host home paths in a corpus file; Scrub redacts them, and also
-// blanks the tool output, file bodies and agent prose that hold repo content
-// (issue #5181), so a maintainer can prepare an entry.
+// blanks the tool output, file bodies, inline code and agent prose that hold
+// repo content (issue #5181), so a maintainer can prepare an entry.
 package corpus
 
 import (
