@@ -1602,12 +1602,17 @@ in
       ) (attrNames abArms);
       # The override must reach the baked roster, or every arm would pass
       # trivially as a copy of the control.
-      variantWorker = modelOf "worker" dogfoodAbArmHarnesses.variant.internals.roster;
+      canary = pkgs.lib.findFirst (
+        n: (abArms.${n}.models.worker or null) != modelOf "worker" control
+      ) null (attrNames abArms);
+      canaryWorker = modelOf "worker" dogfoodAbArmHarnesses.${canary}.internals.roster;
     in
-    assert assertMsg (abArms ? variant) "nix/ab-arms.nix must keep the `variant` arm";
     assert assertMsg (
-      variantWorker == abArms.variant.models.worker
-    ) "variant arm worker ${variantWorker} != ${abArms.variant.models.worker}";
+      canary != null
+    ) "nix/ab-arms.nix must keep an arm whose worker model differs from the dogfood's";
+    assert assertMsg (
+      canaryWorker == abArms.${canary}.models.worker
+    ) "${canary} arm worker ${canaryWorker} != ${abArms.${canary}.models.worker}";
     assert assertMsg (problems == [ ]) "ab arm mismatch(es): ${builtins.toJSON problems}";
     pkgs.runCommand "dogfood-ab-arm-harnesses" { } "touch $out";
 
