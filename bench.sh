@@ -12,9 +12,16 @@
 # running GRADE_CMD, then CHECK_CMD if set. Results accumulate in BENCH_OUT
 # across invocations, so more reps or arms can be added later.
 #
+# A task's optional hidden/ tree (repo-relative paths) is overlaid after FIX's
+# tests and wins on a shared path: FIX's tests often pin details the issue
+# never states, such as exact message wording, which no other correct fix
+# matches. `regrade` re-grades every stored run against the task's current
+# grader without dispatching anything.
+#
 #   bench.sh new-task --issue N --fix SHA [--base SHA] [--name NAME]
 #   bench.sh validate TASK
 #   bench.sh run TASK [ARM...]
+#   bench.sh regrade TASK
 #   bench.sh summarize TASK
 #   bench.sh --breakdown BOX_LOG
 #   bench.sh --compare [LABEL=]TSV...
@@ -293,13 +300,19 @@ ensure_grading_repo() {
   [ -d "$1" ] || git clone -q --bare --shared "$BENCH_SRC" "$1"
 }
 
-# Checks out REV into a fresh worktree DIR and overlays FIX's hidden tests.
+# Checks out REV into a fresh worktree DIR and overlays FIX's hidden tests,
+# then the task's own hidden/ tree. The overlay is staged, since a flake only
+# sees tracked files.
 prepare_tree() {
   local repo="$1" rev="$2" dir="$3"
   git -C "$repo" worktree add -q --detach "$dir" "$rev"
   if [ -n "$TEST_PATHS" ]; then
     # shellcheck disable=SC2086 # TEST_PATHS is a space-separated list
     git -C "$dir" checkout -q "$FIX" -- $TEST_PATHS
+  fi
+  if [ -d "$TASK_DIR/hidden" ]; then
+    cp -R "$TASK_DIR/hidden/." "$dir/"
+    git -C "$dir" add -A
   fi
 }
 
@@ -308,7 +321,23 @@ drop_tree() {
   git -C "$1" worktree prune
 }
 
-run_in() { (cd "$1" && bash -c "$2") >"$3" 2>&1; }
+run_in() { (cd "$1" && bash -c "$2") </dev/null >"$3" 2>&1; }
+
+# Grades REF in a fresh tree under RUNDIR, leaving grade.log (and checks.log)
+# there. Prints "GRADE CHECKS".
+grade_ref() {
+  local ref="$1" rundir="$2" grade=fail checks=skip
+  rm -f "$rundir/grade.log" "$rundir/checks.log"
+  prepare_tree "$OUT/work.git" "$ref" "$rundir/tree"
+  if run_in "$rundir/tree" "$GRADE_CMD" "$rundir/grade.log"; then
+    grade=pass
+    if [ -n "$CHECK_CMD" ]; then
+      if run_in "$rundir/tree" "$CHECK_CMD" "$rundir/checks.log"; then checks=pass; else checks=fail; fi
+    fi
+  fi
+  drop_tree "$OUT/work.git" "$rundir/tree"
+  echo "$grade $checks"
+}
 
 cmd_validate() {
   [ $# -eq 1 ] || die "usage: bench.sh validate TASK"
@@ -323,7 +352,7 @@ cmd_validate() {
     rc=1
   fi
   if [ "$rc" -eq 0 ]; then
-    git -C "$tmp/repo.git" worktree add -q --detach "$tmp/fix" "$FIX"
+    prepare_tree "$tmp/repo.git" "$FIX" "$tmp/fix"
     if ! run_in "$tmp/fix" "$GRADE_CMD" "$tmp/fix.log"; then
       tail -n 20 "$tmp/fix.log" >&2
       warn "GRADE_CMD fails on FIX, so no run could pass it"
@@ -537,16 +566,7 @@ run_one() {
   fi
   if [ -n "$got" ]; then
     git -C "$OUT/work.git" diff "$BASE" "$ref" >"$rundir/diff.patch"
-    prepare_tree "$OUT/work.git" "$ref" "$rundir/tree"
-    if run_in "$rundir/tree" "$GRADE_CMD" "$rundir/grade.log"; then
-      grade=pass
-      if [ -n "$CHECK_CMD" ]; then
-        if run_in "$rundir/tree" "$CHECK_CMD" "$rundir/checks.log"; then checks=pass; else checks=fail; fi
-      fi
-    else
-      grade=fail
-    fi
-    drop_tree "$OUT/work.git" "$rundir/tree"
+    read -r grade checks < <(grade_ref "$ref" "$rundir")
   else
     : >"$rundir/diff.patch"
   fi
@@ -716,6 +736,38 @@ summarize() {
   } >"$OUT/summary.md"
 }
 
+# Re-grades each metrics row from its stored refs/runs/<arm>/r<rep> and
+# rewrites only that row's resolved, grade and checks columns. A row with no
+# stored ref (nobranch) keeps what it has.
+cmd_regrade() {
+  [ $# -eq 1 ] || die "usage: bench.sh regrade TASK"
+  load_task "$1"
+  OUT="${BENCH_OUT:-bench/results/$1}"
+  local m="$OUT/metrics.tsv"
+  [ -f "$m" ] || die "no results at $m"
+  local -a runs=()
+  mapfile -t runs < <(awk -F'\t' 'NR > 1 { print $2 "\t" $3 }' "$m")
+  local graded="$OUT/regrade.tsv" run arm rep ref grade checks
+  : >"$graded"
+  for run in "${runs[@]}"; do
+    arm="${run%%$'\t'*}" rep="${run#*$'\t'}" ref="refs/runs/$arm/r$rep"
+    git -C "$OUT/work.git" rev-parse -q --verify "$ref" >/dev/null || continue
+    read -r grade checks < <(grade_ref "$ref" "$OUT/runs/$arm/r$rep")
+    info "$1 [$arm r$rep] grade=$grade checks=$checks"
+    printf '%s\t%s\t%s\t%s\n' "$arm" "$rep" "$grade" "$checks" >>"$graded"
+  done
+  awk -F'\t' -v OFS='\t' '
+    NR == FNR { g[$1, $2] = $3; c[$1, $2] = $4; next }
+    FNR > 1 && (($2, $3) in g) {
+      $7 = g[$2, $3]; $8 = c[$2, $3]; $6 = ($7 == "pass" && $8 != "fail") ? 1 : 0
+    }
+    { print }' "$graded" "$m" >"$m.tmp"
+  mv "$m.tmp" "$m"
+  rm -f "$graded"
+  summarize "$1"
+  info "wrote $m and $OUT/summary.md"
+}
+
 cmd_summarize() {
   [ $# -eq 1 ] || die "usage: bench.sh summarize TASK"
   load_task "$1"
@@ -731,8 +783,9 @@ main() {
     new-task) shift; cmd_new_task "$@" ;;
     validate) shift; cmd_validate "$@" ;;
     run) shift; cmd_run "$@" ;;
+    regrade) shift; cmd_regrade "$@" ;;
     summarize) shift; cmd_summarize "$@" ;;
-    *) sed -n '15,20p' "${BASH_SOURCE[0]}" | sed 's/^#  //' >&2; exit 2 ;;
+    *) sed -n '21,27p' "${BASH_SOURCE[0]}" | sed 's/^#  //' >&2; exit 2 ;;
   esac
 }
 

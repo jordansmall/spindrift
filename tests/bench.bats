@@ -307,6 +307,60 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
   [[ "$output" == *"fails on FIX"* ]]
 }
 
+@test "validate: FIX is graded with the task's hidden/ overlay too" {
+  mkdir -p "$T/tasks/t1/hidden/tests"
+  echo 'grep -qx never value.txt' >"$T/tasks/t1/hidden/tests/check.sh"
+  run bench validate t1
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"fails on FIX"* ]]
+}
+
+# An overlay that accepts any edit to value.txt, as a behavioural rewrite of a
+# FIX test that pinned one exact answer would.
+loosen_hidden_test() {
+  mkdir -p "$T/tasks/t1/hidden/tests"
+  printf '%s\n' 'git ls-files --error-unmatch tests/extra.sh >/dev/null' \
+    'grep -qxE "fixed|wrong" value.txt' >"$T/tasks/t1/hidden/tests/check.sh"
+  echo true >"$T/tasks/t1/hidden/tests/extra.sh"
+}
+
+@test "run: a task's hidden/ overlay replaces FIX's test at the same path, staged so a flake sees it" {
+  loosen_hidden_test
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good bad
+  [ "$status" -eq 0 ]
+  [ "$(rows | awk -F'\t' -v r="$(col resolved)" '$r == 1' | wc -l)" -eq 2 ]
+}
+
+@test "regrade: re-grades every stored run against the task's current grader, dispatching nothing" {
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good bad crash
+  [ "$status" -eq 0 ]
+  local before
+  before="$(cut -f1-5,9- "$T/out/metrics.tsv")"
+  : >"$FAKE_LOG"
+  loosen_hidden_test
+  run bench regrade t1
+  [ "$status" -eq 0 ]
+  [ ! -s "$FAKE_LOG" ]
+  [ "$(rows | awk -F'\t' -v a="$(col arm)" -v g="$(col grade)" -v r="$(col resolved)" '{print $a, $g, $r}' | sort)" \
+    = "$(printf 'bad pass 1\ncrash nobranch 0\ngood pass 1')" ]
+  [ "$(cut -f1-5,9- "$T/out/metrics.tsv")" = "$before" ]
+  grep -F '| bad | 1 | 1/1 |' "$T/out/summary.md"
+  [ "$(git -C "$T/out/work.git" worktree list | wc -l)" -eq 1 ]
+}
+
+@test "regrade: a CHECK_CMD that now fails leaves the run unresolved" {
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  sed -i 's/^CHECK_CMD=.*/CHECK_CMD="false"/' "$T/tasks/t1/task.env"
+  run bench regrade t1
+  [ "$status" -eq 0 ]
+  rows | awk -F'\t' -v g="$(col grade)" -v c="$(col checks)" -v r="$(col resolved)" '{print $g, $c, $r}' | grep -x 'pass fail 0'
+  [ -f "$T/out/runs/good/r1/checks.log" ]
+}
+
 @test "new-task: snapshots the issue and takes BASE and hidden tests from the fix" {
   printf '#!%s\n' "$BASH" >"$T/bin/gh"
   cat >>"$T/bin/gh" <<'FAKE'
