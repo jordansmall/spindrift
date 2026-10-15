@@ -23,6 +23,8 @@
 #   bench.sh run TASK [ARM...]
 #   bench.sh regrade TASK
 #   bench.sh summarize TASK
+#   bench.sh judge TASK
+#   bench.sh analyze TASK...
 #   bench.sh --breakdown BOX_LOG
 #   bench.sh --compare [LABEL=]TSV...
 #
@@ -62,6 +64,13 @@ BENCH_REPO_SLUG="${BENCH_REPO_SLUG:-$(sed -E 's#^(git@github\.com:|https?://gith
 BENCH_SOURCE_SLUG="${BENCH_SOURCE_SLUG:-jordansmall/spindrift}"
 BENCH_REPS="${BENCH_REPS:-1}"
 BENCH_NO_BUILD="${BENCH_NO_BUILD:-1}"
+
+# Subcommands that live in their own files (judge, analyze), so each can grow
+# without touching the dispatch core.
+for lib in "$(dirname "${BASH_SOURCE[0]}")"/bench/lib/*.sh; do
+  # shellcheck disable=SC1090
+  . "$lib"
+done
 
 METRICS_HEADER=$'task\tarm\trep\tblind\toutcome\tresolved\tgrade\tchecks\tcost_usd\tin_tok\tout_tok\tcache_read\tcache_create\tturns\tduration_ms\tpasses\tverdicts\tdecision\tharness\tspec'
 
@@ -785,7 +794,9 @@ main() {
     run) shift; cmd_run "$@" ;;
     regrade) shift; cmd_regrade "$@" ;;
     summarize) shift; cmd_summarize "$@" ;;
-    *) sed -n '21,27p' "${BASH_SOURCE[0]}" | sed 's/^#  //' >&2; exit 2 ;;
+    judge) shift; cmd_judge "$@" ;;
+    analyze) shift; cmd_analyze "$@" ;;
+    *) sed -n '21,29p' "${BASH_SOURCE[0]}" | sed 's/^#  //' >&2; exit 2 ;;
   esac
 }
 
