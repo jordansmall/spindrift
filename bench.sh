@@ -512,18 +512,30 @@ run_one() {
   cp "$TASK_DIR/issue.md" "$issues/$task.md"
   info "$task [$arm r$rep] $app${flags:+ $flags}"
   reset_remote
-  local host_log=".spindrift/logs/issue-$task.log" fx rc=0
-  rm -f "$host_log" .spindrift/logs/issue-"$task"-*.log
+  local host_log=".spindrift/logs/issue-$task.log" outbox=".spindrift/outbox/$task" fx rc=0
+  # A stale bundle would carry this rep's branch name if the rep is a rerun.
+  rm -rf "$host_log" .spindrift/logs/issue-"$task"-*.log "$outbox"
   "${cmd[@]}" >"$rundir/dispatch.out" 2>&1 || rc=$?
   info "$task [$arm r$rep] launcher exit=$rc"
   [ -f "$host_log" ] && cp "$host_log" "$rundir/box.log"
   for fx in .spindrift/logs/issue-"$task"-*.log; do
     [ -e "$fx" ] && cp "$fx" "$rundir/"
   done
+  [ -f "$outbox/seam.bundle" ] && cp "$outbox/seam.bundle" "$rundir/"
+  rm -rf "$outbox"
 
-  local grade=nobranch checks=skip
+  # The remote branch comes first: CI fix passes land there after the
+  # read-only Box's bundle handoff. The bundle covers a failed relay push.
+  local grade=nobranch checks=skip got=""
   if git -C "$OUT/work.git" fetch -q "$BENCH_PUSH_URL" "+refs/heads/$branch:$ref" 2>/dev/null; then
     git -C "$BENCH_SRC" push -q --no-verify "$BENCH_PUSH_URL" --delete "$branch" 2>/dev/null || true
+    got=remote
+  elif [ -f "$rundir/seam.bundle" ] \
+    && git -C "$OUT/work.git" fetch -q "$(cd "$rundir" && pwd)/seam.bundle" "+refs/heads/$branch:$ref" 2>/dev/null; then
+    info "$task [$arm r$rep] branch never reached the remote; grading the outbox bundle"
+    got=bundle
+  fi
+  if [ -n "$got" ]; then
     git -C "$OUT/work.git" diff "$BASE" "$ref" >"$rundir/diff.patch"
     prepare_tree "$OUT/work.git" "$ref" "$rundir/tree"
     if run_in "$rundir/tree" "$GRADE_CMD" "$rundir/grade.log"; then

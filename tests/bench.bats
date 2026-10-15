@@ -73,7 +73,20 @@ cd "$work"
 git checkout -q -b "$prefix$slug" "origin/$base"
 case "$app" in .#good) echo fixed >value.txt ;; *) echo wrong >value.txt ;; esac
 git -c user.name=t -c user.email=t@t commit -qam work
-git push -q origin HEAD
+# A read-only Box always leaves its bundle in the outbox; the host then
+# relays it. fail: the relay push failed. fixpass: a CI fix pass repaired the
+# branch after the handoff. none: nothing got out at all.
+if [ "${FAKE_PUSH:-ok}" != none ]; then
+  mkdir -p "$cwd/.spindrift/outbox/$slug"
+  git bundle create "$cwd/.spindrift/outbox/$slug/seam.bundle" "origin/$base..$prefix$slug" 2>/dev/null
+fi
+case "${FAKE_PUSH:-ok}" in
+  ok) git push -q origin HEAD ;;
+  fixpass)
+    echo fixed >value.txt
+    git -c user.name=t -c user.email=t@t commit -qam fix-pass
+    git push -q origin HEAD ;;
+esac
 cd "$cwd"
 cat >"$log" <<EOF
 {"type":"assistant","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
@@ -166,6 +179,38 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
   BENCH_REPS=1 run bench run t1 crash
   [ "$status" -eq 0 ]
   rows | awk -F'\t' -v g="$(col grade)" -v o="$(col outcome)" -v r="$(col resolved)" '{print $g, $o, $r}' | grep -x 'nobranch none 0'
+}
+
+@test "run: a branch the host failed to push is graded from the Box's outbox bundle" {
+  cd "$T/cwd"
+  FAKE_PUSH=fail BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  rows | awk -F'\t' -v g="$(col grade)" -v r="$(col resolved)" '{print $g, $r}' | grep -x 'pass 1'
+  grep -q '^+fixed' "$T/out/runs/good/r1/diff.patch"
+  [ -f "$T/out/runs/good/r1/seam.bundle" ]
+  [ ! -e .spindrift/outbox/t1 ]
+}
+
+@test "run: the pushed branch outranks the outbox bundle, since fix passes land after the handoff" {
+  cd "$T/cwd"
+  FAKE_PUSH=fixpass BENCH_REPS=1 run bench run t1 bad
+  [ "$status" -eq 0 ]
+  rows | awk -F'\t' -v g="$(col grade)" -v r="$(col resolved)" '{print $g, $r}' | grep -x 'pass 1'
+  [ -f "$T/out/runs/bad/r1/seam.bundle" ]
+  [ ! -e .spindrift/outbox/t1 ]
+}
+
+@test "run: an outbox bundle left by an interrupted attempt is never graded" {
+  cd "$T/cwd"
+  FAKE_PUSH=fail BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  head -1 "$T/out/metrics.tsv" >"$T/m" && mv "$T/m" "$T/out/metrics.tsv"
+  mkdir -p .spindrift/outbox/t1
+  cp "$T/out/runs/good/r1/seam.bundle" .spindrift/outbox/t1/
+  FAKE_PUSH=none BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  rows | awk -F'\t' -v p="$(col rep)" -v g="$(col grade)" '{print $p, $g}' | grep -x '1 nobranch'
+  [ ! -s "$T/out/runs/good/r1/diff.patch" ]
 }
 
 @test "run: diffs are staged under blind ids with a separate key" {
