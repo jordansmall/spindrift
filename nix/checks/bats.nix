@@ -12,6 +12,15 @@ let
   # and @test count run once per eval, not once per consumer.
   inherit (batsShards) shardFiles shardNames;
 
+  # bench.sh sources bench/lib/*.sh beside itself, so it travels with bench/.
+  benchSrc = pkgs.lib.fileset.toSource {
+    root = ../..;
+    fileset = pkgs.lib.fileset.unions [
+      ../../bench.sh
+      ../../bench
+    ];
+  };
+
   # The bats-shard-N derivations (issue #2648) export the rendered
   # lib/fragments.nix JSON that entrypoint.sh hands box, the same bytes
   # nix/checks/promptassembly.nix reads.
@@ -67,7 +76,7 @@ let
     # Issue #2057. tests/ is copied into the sandbox but its parent
     # bench.sh is not, so tests/bench.bats resolves the
     # script through this var rather than $BATS_TEST_DIRNAME/../.
-    BENCH_SH = ../../bench.sh;
+    BENCH_SH = "${benchSrc}/bench.sh";
     # tests/gh-token-refresher.bats (issue #3940) extracts mint_token
     # straight out of the composite action's `run:` block, so it tracks the
     # real body rather than a hand-copied stand-in.
@@ -165,7 +174,8 @@ in
           ${../../agent/env-credential-scrub.sh} \
           ${../../agent/bash-output-tee.sh} \
           ${../../agent/bash-output-summary.sh} \
-          ${../../bench.sh} \
+          ${benchSrc}/bench.sh \
+          ${benchSrc}/bench/lib/*.sh \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
           ${../../.github/scripts/ci-changes.sh} \
