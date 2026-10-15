@@ -31,7 +31,9 @@
 # Boxes run read-only through the GitHub forge, as dogfood does: the Box
 # clones with BOX_GH_TOKEN[_CMD] (read-only, distinct from GH_TOKEN) and hands
 # back a bundle, which the host pushes as the run's branch and opens a draft
-# PR for with GH_TOKEN[_CMD]. Both tokens must reach the bench repo. The
+# PR for with GH_TOKEN[_CMD]. The host then waits on the bench repo's CI and
+# runs fix passes on red, so the branch graded is the one dogfood would have
+# landed. Both tokens must reach the bench repo. The
 # launcher reads them, plus CLAUDE_CODE_OAUTH_TOKEN[_CMD] or ANTHROPIC_API_KEY,
 # GIT_USER_NAME and GIT_USER_EMAIL, from the environment: source harness.env
 # or point BENCH_ENV_FILE at it.
@@ -497,10 +499,6 @@ run_one() {
     --forge-backend github
     --base-branch main --branch-prefix "$prefix"
     --merge-policy manual
-    # The bench repo runs no CI (cmd_run refuses while Actions is on), so the
-    # host's CI wait can only time out; keep it short, and never let a fix
-    # pass rewrite the branch being graded.
-    --max-fix-attempts 0 --merge-poll-timeout 60
     "${extra[@]}"
     "$task"
   )
@@ -584,12 +582,7 @@ cmd_run() {
     command -v jq >/dev/null || die "jq not found on PATH"
     command -v git >/dev/null || die "git not found on PATH"
     command -v "$BENCH_NIX" >/dev/null || die "$BENCH_NIX not found on PATH"
-    command -v "$BENCH_GH" >/dev/null || die "$BENCH_GH not found on PATH"
     [ -e flake.nix ] || die "run this from the repo root (flake.nix not found in $PWD)"
-    local actions
-    actions="$("$BENCH_GH" api "repos/$BENCH_REPO_SLUG/actions/permissions" --jq .enabled)" \
-      || die "could not read Actions settings for $BENCH_REPO_SLUG"
-    [ "$actions" = false ] || die "Actions is on for $BENCH_REPO_SLUG, so every reset and draft PR would run its workflows; turn it off with: $BENCH_GH api -X PUT repos/$BENCH_REPO_SLUG/actions/permissions -F enabled=false"
   fi
 
   OUT="${BENCH_OUT:-bench/results/$task}"
