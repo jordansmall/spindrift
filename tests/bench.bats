@@ -52,26 +52,40 @@ app="$2"; shift 3
 if [ "$1" = build ]; then echo "build $app" >>"$FAKE_LOG"; exit 0; fi
 shift
 echo "$app $*" >>"$FAKE_LOG"
+# Lane tests: FAKE_TRACE brackets each dispatch with +/- to measure overlap,
+# FAKE_PIDS lists dispatch pids, FAKE_SLEEP holds a dispatch open.
+if [ -n "${FAKE_TRACE:-}" ]; then
+  echo + >>"$FAKE_TRACE"
+  trap 'echo - >>"$FAKE_TRACE"' EXIT
+fi
+if [ -n "${FAKE_PIDS:-}" ]; then echo $$ >>"$FAKE_PIDS"; fi
 args=("$@"); slug="${args[-1]}"
-remote="$FAKE_REMOTE"
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[i]}" in
     --branch-prefix) prefix="${args[i+1]}" ;;
     --base-branch) base="${args[i+1]}" ;;
     --local-dir) dir="${args[i+1]}" ;;
+    --repo-slug) repo="${args[i+1]}" ;;
   esac
 done
+# As the real launcher reaches the forge by --repo-slug: FAKE_REMOTES maps
+# slug=url pairs, else every slug is FAKE_REMOTE.
+remote="$FAKE_REMOTE"
+for pair in ${FAKE_REMOTES:-}; do
+  if [ "${pair%%=*}" = "$repo" ]; then remote="${pair#*=}"; fi
+done
+if [ -n "${FAKE_LANES:-}" ]; then echo "$repo $prefix $PWD" >>"$FAKE_LANES"; fi
 git ls-remote --heads "$remote" | awk '{printf "%s ", $2} END {print ""}' >>"$FAKE_SEEN"
 [ -f "$dir/$slug.md" ] || { echo "issue not staged" >&2; exit 9; }
 cwd=$PWD
 mkdir -p .spindrift/logs
 log=".spindrift/logs/issue-$slug.log"
-[ "$app" = ".#crash" ] && { echo '==> box died' >"$log"; exit 1; }
+case "$app" in *#crash) echo '==> box died' >"$log"; exit 1 ;; esac
 work=$(mktemp -d)
 git clone -q "$remote" "$work"
 cd "$work"
 git checkout -q -b "$prefix$slug" "origin/$base"
-case "$app" in .#good) echo fixed >value.txt ;; *) echo wrong >value.txt ;; esac
+case "$app" in *#good) echo fixed >value.txt ;; *) echo wrong >value.txt ;; esac
 git -c user.name=t -c user.email=t@t commit -qam work
 # A read-only Box always leaves its bundle in the outbox; the host then
 # relays it. fail: the relay push failed. fixpass: a CI fix pass repaired the
@@ -87,6 +101,13 @@ case "${FAKE_PUSH:-ok}" in
     git -c user.name=t -c user.email=t@t commit -qam fix-pass
     git push -q origin HEAD ;;
 esac
+# FAKE_BREAK=slug=path: that slug's dispatch deletes path (its lane's remote)
+# and returns at once, so the lane's next reset fails mid-benchmark.
+if [ -n "${FAKE_BREAK:-}" ] && [ "${FAKE_BREAK%%=*}" = "$repo" ]; then
+  rm -rf "${FAKE_BREAK#*=}"
+else
+  sleep "${FAKE_SLEEP:-0}"
+fi
 cd "$cwd"
 cat >"$log" <<EOF
 {"type":"assistant","message":{"model":"claude-haiku-5-5","content":[],"usage":{"input_tokens":1000,"output_tokens":100,"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}
@@ -288,6 +309,242 @@ col() { head -1 "$T/out/metrics.tsv" | tr '\t' '\n' | grep -nx "$1" | cut -d: -f
   [ "$status" -eq 0 ]
   grep -F '| ready | blocked | failed | none | other |' "$T/out/summary.md"
   grep -E '^\| good \| 1 \| 1/1 \| [0-9]+ \| 0 \| 0 \| 0 \| 0 \| 1 \|' "$T/out/summary.md"
+}
+
+# Three lanes over three bench remotes, each seeded with the answer like the
+# first, and a clean committed harness checkout as cwd.
+lanes_setup() {
+  git init -q -b main "$T/cwd"
+  git_q -C "$T/cwd" add -A
+  git_q -C "$T/cwd" commit -qm harness
+  local i slugs="acme/bench" pushes="file://$T/remote.git" map="acme/bench=file://$T/remote.git"
+  for i in 2 3; do
+    git init -q --bare "$T/remote-$i.git"
+    git -C "$T/src" push -q "$T/remote-$i.git" "$FIX:refs/heads/main" "$FIX:refs/heads/stale"
+    slugs+=" acme/bench-$i" pushes+=" file://$T/remote-$i.git" map+=" acme/bench-$i=file://$T/remote-$i.git"
+  done
+  export BENCH_LANE_SLUGS="$slugs" BENCH_LANE_PUSH_URLS="$pushes" FAKE_REMOTES="$map" \
+    FAKE_LANES="$T/lanes.log" FAKE_TRACE="$T/trace.log" FAKE_PIDS="$T/pids.log"
+}
+
+remote_git() { [ "$1" = 1 ] && echo "$T/remote.git" || echo "$T/remote-$1.git"; }
+
+@test "lanes: N lanes run every planned rep in parallel, each on its own remote" {
+  lanes_setup
+  cd "$T/cwd"
+  BENCH_LANES=3 FAKE_SLEEP=0.5 BENCH_REPS=3 run bench run t1 good bad
+  [ "$status" -eq 0 ]
+  # Every run graded, well-formed, numbered 1..3 per arm.
+  [ "$(rows | wc -l)" -eq 6 ]
+  awk -F'\t' 'NR == 1 { n = NF } NF != n { exit 1 }' "$T/out/metrics.tsv"
+  local a r g p b h
+  a=$(col arm) r=$(col resolved) g=$(col grade) p=$(col rep) b=$(col blind) h=$(col harness)
+  [ "$(rows | awk -F'\t' -v a="$a" -v r="$r" -v g="$g" '$a=="good" && $r==1 && $g=="pass"' | wc -l)" -eq 3 ]
+  [ "$(rows | awk -F'\t' -v a="$a" -v r="$r" -v g="$g" '$a=="bad" && $r==0 && $g=="fail"' | wc -l)" -eq 3 ]
+  [ "$(rows | awk -F'\t' -v a="$a" -v p="$p" '{print $a, $p}' | sort | tr '\n' ,)" = "bad 1,bad 2,bad 3,good 1,good 2,good 3," ]
+  # Blind ids are unique and KEY.tsv names exactly the metrics rows.
+  [ -z "$(rows | cut -f"$b" | sort | uniq -d)" ]
+  [ "$(sort "$T/out/judging/KEY.tsv")" = "$(rows | awk -F'\t' -v a="$a" -v p="$p" -v b="$b" -v OFS='\t' '{print $b, $a, $p}' | sort)" ]
+  [ "$(find "$T/out/judging" -name '*.patch' | wc -l)" -eq 6 ]
+  # Lanes ran the pinned harness commit, and did overlap.
+  [ "$(rows | cut -f"$h" | sort -u)" = "$(git -C "$T/cwd" rev-parse --short HEAD)" ]
+  [ "$(awk '{ c += ($1 == "+") ? 1 : -1; if (c > m) m = c } END { print m }' "$T/trace.log")" -ge 2 ]
+  # Each dispatch saw only main, from its own lane dir, on its lane's remote.
+  [ "$(wc -l <"$FAKE_SEEN")" -eq 6 ]
+  [ "$(sort -u "$FAKE_SEEN")" = "refs/heads/main " ]
+  local repo prefix dir lane arm rep
+  while read -r repo prefix dir; do
+    arm=${prefix#bench/} arm=${arm%%/*} rep=${prefix#bench/"$arm"/r} rep=${rep%/}
+    lane=1
+    [[ "$repo" == acme/bench-* ]] && lane=${repo##*-}
+    [ "$dir" = "$T/out/lanes/$lane" ] || { echo "dispatch $prefix ran in $dir, not lane $lane"; false; }
+    grep -F "t1 [$arm r$rep] lane $lane ($repo)" <<<"$output"
+  done <"$FAKE_LANES"
+  [ "$(cut -d' ' -f1 "$FAKE_LANES" | sort -u | wc -l)" -ge 2 ]
+  # Branches came off the lane's remote, never the bundle fallback, and every
+  # remote ends holding only main at BASE.
+  [[ "$output" != *"never reached the remote"* ]]
+  local i
+  for i in 1 2 3; do
+    [ "$(git ls-remote --heads --tags "$(remote_git "$i")" | awk '{print $2}')" = "refs/heads/main" ]
+    [ "$(git ls-remote "$(remote_git "$i")" refs/heads/main | cut -f1)" = "$BASE" ]
+  done
+  [ "$(git -C "$T/out/work.git" worktree list | wc -l)" -eq 1 ]
+  # Lanes evaluate the pinned commit, not the live tree.
+  grep -c "^git+file://$T/cwd?rev=$(git -C "$T/cwd" rev-parse HEAD)#good " "$FAKE_LOG" | grep -x 3
+  grep -F '| good | 3 | 3/3 |' "$T/out/summary.md"
+}
+
+@test "lanes: one lane (the default) runs in place exactly as before" {
+  lanes_setup
+  cd "$T/cwd"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  BENCH_LANES=1 BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/out/lanes" ]
+  [ "$(grep -c '^\.#good ' "$FAKE_LOG")" -eq 2 ]
+  [ "$(cut -d' ' -f1,3 "$FAKE_LANES" | sort -u)" = "acme/bench $T/cwd" ]
+  [ ! -e .spindrift/outbox/t1 ]
+}
+
+@test "lanes: more than one lane refuses a dirty or non-git harness tree" {
+  lanes_setup
+  cd "$T/cwd"
+  echo '# edited' >>flake.nix
+  BENCH_LANES=2 BENCH_REPS=1 run bench run t1 good
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"uncommitted"* ]]
+  [ ! -e "$FAKE_LOG" ]
+  [ ! -e "$T/out" ]
+  rm -rf .git
+  BENCH_LANES=2 BENCH_REPS=1 run bench run t1 good
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"git checkout"* ]]
+  [ ! -e "$T/out" ]
+}
+
+@test "lanes: a dry run prints every planned dispatch and writes nothing" {
+  lanes_setup
+  cd "$T/cwd"
+  BENCH_DRY_RUN=1 BENCH_LANES=3 BENCH_REPS=2 run bench run t1 good bad
+  [ "$status" -eq 0 ]
+  [ "$(grep -c 'DRY-RUN' <<<"$output")" -eq 4 ]
+  [ "$(grep -c 'DRY-RUN (lane auto)' <<<"$output")" -eq 4 ]
+  grep -F -- "--local-dir $T/out/runs/good/r2/issues" <<<"$output"
+  [ ! -e "$T/out" ]
+  [ ! -e "$FAKE_LOG" ]
+  [ ! -e .spindrift ]
+  local i
+  for i in 1 2 3; do git ls-remote --heads "$(remote_git "$i")" | grep -q refs/heads/stale; done
+}
+
+@test "lanes: lane i defaults to the bench repo with -i appended, or takes BENCH_LANE_* lists" {
+  lanes_setup
+  unset BENCH_LANE_SLUGS BENCH_LANE_PUSH_URLS
+  cd "$T/cwd"
+  BENCH_DRY_RUN=1 BENCH_LANES=3 BENCH_REMOTE=https://github.com/acme/ab.git \
+    BENCH_PUSH_URL=git@github.com:acme/ab.git run env -u BENCH_REPO_SLUG \
+    bash "${BENCH_SH:-$BATS_TEST_DIRNAME/../bench.sh}" run t1 good
+  [ "$status" -eq 0 ]
+  grep -F 'lane 1      : acme/ab (reset via git@github.com:acme/ab.git)' <<<"$output"
+  grep -F 'lane 2      : acme/ab-2 (reset via git@github.com:acme/ab-2.git)' <<<"$output"
+  grep -F 'lane 3      : acme/ab-3 (reset via git@github.com:acme/ab-3.git)' <<<"$output"
+  BENCH_DRY_RUN=1 BENCH_LANES=2 BENCH_LANE_REMOTES="https://github.com/o/x.git https://github.com/o/y.git" \
+    BENCH_LANE_PUSH_URLS="git@github.com:o/x.git git@github.com:o/y.git" run bench run t1 good
+  [ "$status" -eq 0 ]
+  grep -F 'lane 2      : o/y (reset via git@github.com:o/y.git)' <<<"$output"
+  BENCH_DRY_RUN=1 BENCH_LANES=3 BENCH_LANE_SLUGS="a/b c/d" run bench run t1 good
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BENCH_LANE_SLUGS"*"3"* ]]
+  BENCH_LANES=0 run bench run t1 good
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"BENCH_LANES"* ]]
+}
+
+# True once every pid in FILE has exited.
+all_dead() { local p; while read -r p; do ! kill -0 "$p" 2>/dev/null || return 1; done <"$1"; }
+
+@test "lanes: a lane that fails stops the others at once" {
+  lanes_setup
+  cd "$T/cwd"
+  local t0=$SECONDS
+  FAKE_BREAK="acme/bench-2=$T/remote-2.git" BENCH_LANES=3 FAKE_SLEEP=30 BENCH_REPS=3 \
+    run bench run t1 good bad
+  [ "$status" -ne 0 ]
+  [ $((SECONDS - t0)) -lt 20 ]
+  [[ "$output" == *"lane"*"failed"* ]]
+  # Lanes 1 and 3 were mid-dispatch when lane 2 died.
+  [ "$(wc -l <"$T/pids.log")" -ge 3 ]
+  all_dead "$T/pids.log"
+}
+
+@test "lanes: an interrupt stops every lane, and a rerun clears the half-written reps" {
+  lanes_setup
+  cd "$T/cwd"
+  # bench.sh itself, not the bench() wrapper, so $! is the script's pid.
+  FAKE_SLEEP=30 BENCH_LANES=3 BENCH_REPS=3 \
+    bash "${BENCH_SH:-$BATS_TEST_DIRNAME/../bench.sh}" run t1 good bad >"$T/int.out" 2>&1 &
+  local pid=$! n=0
+  until [ "$(cat "$T/trace.log" 2>/dev/null | grep -c '^+')" -ge 3 ]; do
+    sleep 0.2; n=$((n + 1)); [ "$n" -lt 100 ] || { cat "$T/int.out"; false; }
+  done
+  kill -TERM "$pid"
+  local rc=0
+  wait "$pid" || rc=$?
+  [ "$rc" -ne 0 ]
+  all_dead "$T/pids.log"
+  [ ! -s "$T/out/metrics.tsv" ] || [ "$(rows | wc -l)" -eq 0 ]
+  BENCH_LANES=3 BENCH_REPS=2 run bench run t1 good bad
+  [ "$status" -eq 0 ]
+  [ "$(rows | wc -l)" -eq 4 ]
+  local a p b
+  a=$(col arm) p=$(col rep) b=$(col blind)
+  [ "$(sort "$T/out/judging/KEY.tsv")" = "$(rows | awk -F'\t' -v a="$a" -v p="$p" -v b="$b" -v OFS='\t' '{print $b, $a, $p}' | sort)" ]
+  [ "$(find "$T/out/judging" -name '*.patch' | wc -l)" -eq 4 ]
+  [ "$(find "$T/out/runs" -mindepth 2 -maxdepth 2 -type d | wc -l)" -eq 4 ]
+  [ "$(git -C "$T/out/work.git" worktree list | wc -l)" -eq 1 ]
+}
+
+@test "lanes: a rep stranded below the highest finished rep is swept on the next run" {
+  cd "$T/cwd"
+  BENCH_REPS=2 run bench run t1 good
+  [ "$status" -eq 0 ]
+  # Lane-style interrupt: r1 lost its metrics row while r2 finished.
+  awk -F'\t' -v p="$(col rep)" 'NR == 1 || $p != 1' "$T/out/metrics.tsv" >"$T/m" && mv "$T/m" "$T/out/metrics.tsv"
+  BENCH_REPS=1 run bench run t1 good
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/out/runs/good/r1" ]
+  [ "$(rows | awk -F'\t' -v p="$(col rep)" '{print $p}' | sort | tr '\n' ' ')" = "2 3 " ]
+  [ "$(wc -l <"$T/out/judging/KEY.tsv")" -eq 2 ]
+  [ "$(find "$T/out/judging" -name '*.patch' | wc -l)" -eq 2 ]
+}
+
+# Runs bench.sh's own functions in a fresh shell with PATH set to $1.
+bench_fn() {
+  local path="$1"; shift
+  # shellcheck disable=SC2016 # expanded by the inner shell
+  run env PATH="$path" "$BASH" -c '. "$1"; shift; eval "$*"' _ "${BENCH_SH:-$BATS_TEST_DIRNAME/../bench.sh}" "$@"
+}
+
+# A read-sleep-write counter, which loses updates unless serialized.
+# shellcheck disable=SC2016 # expanded by the bench_fn shell
+locked_counter_script='
+  incr() { local n; n=$(<"$T/n"); sleep 0.05; echo $((n + 1)) >"$T/n"; }
+  echo 0 >"$T/n"
+  for i in 1 2 3 4 5 6 7 8; do locked "$T/c.lock" incr & done
+  wait
+  cat "$T/n"'
+
+@test "locked: serializes concurrent critical sections with flock" {
+  # The Nix bats sandbox carries no util-linux, so there the mkdir path runs.
+  command -v flock >/dev/null || skip "flock not on PATH"
+  export T
+  bench_fn "$PATH" "$locked_counter_script"
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = 8 ]
+}
+
+@test "locked: falls back to a mkdir lock when flock is missing" {
+  mkdir "$T/noflock"
+  local tool
+  for tool in sleep mkdir rmdir cat dirname; do ln -s "$(command -v "$tool")" "$T/noflock/$tool"; done
+  export T
+  bench_fn "$T/noflock" "command -v flock && exit 7; $locked_counter_script"
+  [ "$status" -eq 0 ]
+  [ "${lines[-1]}" = 8 ]
+}
+
+@test "reserve_blind: concurrent lanes drawing the same random sequence still get unique ids" {
+  mkdir -p "$T/o/judging"
+  export T
+  # shellcheck disable=SC2016 # expanded by the bench_fn shell
+  bench_fn "$PATH" 'OUT=$T/o
+    for i in 1 2 3 4 5 6 7 8; do ( RANDOM=42; reserve_blind arm "$i" >/dev/null ) & done
+    wait'
+  [ "$status" -eq 0 ]
+  [ "$(wc -l <"$T/o/judging/KEY.tsv")" -eq 8 ]
+  [ -z "$(cut -f1 "$T/o/judging/KEY.tsv" | sort | uniq -d)" ]
 }
 
 @test "validate: a task whose hidden test fails on BASE and passes on FIX is valid" {

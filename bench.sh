@@ -46,6 +46,17 @@
 # launcher reads them, plus CLAUDE_CODE_OAUTH_TOKEN[_CMD] or ANTHROPIC_API_KEY,
 # GIT_USER_NAME and GIT_USER_EMAIL, from the environment: source harness.env
 # or point BENCH_ENV_FILE at it.
+#
+# BENCH_LANES=N (default 1) runs N Boxes at once. Every lane needs a bench
+# repo of its own, since each run resets its remote: lane 1 is BENCH_REMOTE /
+# BENCH_PUSH_URL / BENCH_REPO_SLUG, and lane i defaults to the same with -i
+# appended to the repo name (spindrift-ab-2, spindrift-ab-3, ...). Override
+# them with space-separated BENCH_LANE_SLUGS, BENCH_LANE_REMOTES (a slug is
+# derived from each) and BENCH_LANE_PUSH_URLS, one entry per lane starting
+# at lane 1. Each lane's repo must already exist with CI set up like the
+# first, and both tokens must reach it. Lanes pull runs from the one
+# shuffled plan as they free up, and run the harness's committed HEAD (a
+# dirty tree is refused), so harness_rev stays true while you keep editing.
 
 set -euo pipefail
 
@@ -60,10 +71,12 @@ BENCH_TASKS_DIR="${BENCH_TASKS_DIR:-bench/tasks}"
 BENCH_ARMS_FILE="${BENCH_ARMS_FILE:-bench/arms}"
 BENCH_REMOTE="${BENCH_REMOTE:-https://github.com/jordansmall/spindrift-ab.git}"
 BENCH_PUSH_URL="${BENCH_PUSH_URL:-git@github.com:jordansmall/spindrift-ab.git}"
-BENCH_REPO_SLUG="${BENCH_REPO_SLUG:-$(sed -E 's#^(git@github\.com:|https?://github\.com/)##; s#\.git$##' <<<"$BENCH_REMOTE")}"
+slug_of() { sed -E 's#^(git@github\.com:|https?://github\.com/)##; s#\.git$##' <<<"$1"; }
+BENCH_REPO_SLUG="${BENCH_REPO_SLUG:-$(slug_of "$BENCH_REMOTE")}"
 BENCH_SOURCE_SLUG="${BENCH_SOURCE_SLUG:-jordansmall/spindrift}"
 BENCH_REPS="${BENCH_REPS:-1}"
 BENCH_NO_BUILD="${BENCH_NO_BUILD:-1}"
+BENCH_LANES="${BENCH_LANES:-1}"
 
 # Subcommands that live in their own files (judge, analyze), so each can grow
 # without touching the dispatch core.
@@ -303,6 +316,25 @@ load_task() {
     || die "task '$task' must set BASE, FIX and GRADE_CMD in task.env"
 }
 
+# Runs CMD... holding the lock LOCK, so lanes can share metrics.tsv, KEY.tsv
+# and the grading repo. flock is released by the kernel when a killed lane's
+# fd closes; the mkdir fallback (macOS ships no flock) can be left behind by
+# a kill, so cmd_run clears stale *.lock.d dirs before any lane starts.
+locked() {
+  local lock="$1"; shift
+  if command -v flock >/dev/null; then
+    { flock 9; "$@"; } 9>"$lock"
+  else
+    until mkdir "$lock.d" 2>/dev/null; do sleep 0.1; done
+    local rc=0
+    "$@" || rc=$?
+    rmdir "$lock.d"
+    return "$rc"
+  fi
+}
+
+append_line() { printf '%s\n' "$2" >>"$1"; }
+
 # A bare clone sharing BENCH_SRC's objects, so worktrees can check out BASE,
 # FIX and fetched run branches without copying history.
 ensure_grading_repo() {
@@ -314,7 +346,7 @@ ensure_grading_repo() {
 # sees tracked files.
 prepare_tree() {
   local repo="$1" rev="$2" dir="$3"
-  git -C "$repo" worktree add -q --detach "$dir" "$rev"
+  locked "$repo.lock" git -C "$repo" worktree add -q --detach "$dir" "$rev"
   if [ -n "$TEST_PATHS" ]; then
     # shellcheck disable=SC2086 # TEST_PATHS is a space-separated list
     git -C "$dir" checkout -q "$FIX" -- $TEST_PATHS
@@ -325,7 +357,8 @@ prepare_tree() {
   fi
 }
 
-drop_tree() {
+drop_tree() { locked "$1.lock" drop_tree_unlocked "$@"; }
+drop_tree_unlocked() {
   git -C "$1" worktree remove --force "$2" 2>/dev/null || rm -rf "$2"
   git -C "$1" worktree prune
 }
@@ -473,14 +506,47 @@ arm_index() {
   return 1
 }
 
-# Leaves BENCH_PUSH_URL holding main at BASE and nothing else, so a Box's full
+# Leaves push URL $1 holding main at BASE and nothing else, so a Box's full
 # clone carries neither the fix nor another run's branch.
 reset_remote() {
-  git -C "$BENCH_SRC" push -q --no-verify --force "$BENCH_PUSH_URL" "$BASE:refs/heads/main"
+  local url="$1"
+  git -C "$BENCH_SRC" push -q --no-verify --force "$url" "$BASE:refs/heads/main"
   local -a stale=()
-  mapfile -t stale < <(git ls-remote --heads --tags "$BENCH_PUSH_URL" \
+  mapfile -t stale < <(git ls-remote --heads --tags "$url" \
     | awk '$2 != "refs/heads/main" && $2 !~ /\^\{\}$/ { print $2 }')
-  [ ${#stale[@]} -eq 0 ] || git -C "$BENCH_SRC" push -q --no-verify "$BENCH_PUSH_URL" --delete "${stale[@]}"
+  [ ${#stale[@]} -eq 0 ] || git -C "$BENCH_SRC" push -q --no-verify "$url" --delete "${stale[@]}"
+}
+
+# repo with -N before any .git: acme/ab -> acme/ab-2, .../ab.git -> .../ab-2.git
+lane_suffixed() { sed -E "s#(\\.git)?\$#-$2\\1#" <<<"$1"; }
+
+# Fills LANE_SLUG and LANE_PUSH (indexed from 1) from BENCH_LANES and the
+# BENCH_LANE_* lists; see the header.
+load_lanes() {
+  [[ "$BENCH_LANES" =~ ^[1-9][0-9]*$ ]] || die "BENCH_LANES must be a positive integer"
+  local -a slugs=() remotes=() pushes=()
+  read -ra slugs <<<"${BENCH_LANE_SLUGS:-}"
+  read -ra remotes <<<"${BENCH_LANE_REMOTES:-}"
+  read -ra pushes <<<"${BENCH_LANE_PUSH_URLS:-}"
+  local v n
+  for v in SLUGS REMOTES PUSH_URLS; do
+    case "$v" in SLUGS) n=${#slugs[@]} ;; REMOTES) n=${#remotes[@]} ;; *) n=${#pushes[@]} ;; esac
+    [ "$n" -eq 0 ] || [ "$n" -ge "$BENCH_LANES" ] \
+      || die "BENCH_LANE_$v has $n entries, fewer than BENCH_LANES=$BENCH_LANES"
+  done
+  LANE_SLUG=() LANE_PUSH=() LANE_DIR=()
+  local l slug push
+  for ((l = 1; l <= BENCH_LANES; l++)); do
+    if [ "$l" -eq 1 ]; then
+      slug="$BENCH_REPO_SLUG" push="$BENCH_PUSH_URL"
+    else
+      slug="$BENCH_REPO_SLUG-$l" push="$(lane_suffixed "$BENCH_PUSH_URL" "$l")"
+    fi
+    [ ${#remotes[@]} -eq 0 ] || slug="$(slug_of "${remotes[l - 1]}")"
+    [ ${#slugs[@]} -eq 0 ] || slug="${slugs[l - 1]}"
+    [ ${#pushes[@]} -eq 0 ] || push="${pushes[l - 1]}"
+    LANE_SLUG[l]="$slug" LANE_PUSH[l]="$push" LANE_DIR[l]=.
+  done
 }
 
 next_rep() {
@@ -491,15 +557,35 @@ next_rep() {
 # next_rep hands an interrupted rep's number out again, so drop what that
 # attempt left: its grading worktree, its run dir, and any key row and patch.
 clear_stale_rep() {
-  local arm="$1" rep="$2" rundir="$3" key="$OUT/judging/KEY.tsv" id
+  local arm="$1" rep="$2" rundir="$3" key="$OUT/judging/KEY.tsv"
   [ -d "$OUT/work.git" ] && drop_tree "$OUT/work.git" "$rundir/tree"
   rm -rf "$rundir"
   [ -f "$key" ] || return 0
+  locked "$OUT/judging.lock" drop_key_rows "$arm" "$rep"
+}
+
+drop_key_rows() {
+  local arm="$1" rep="$2" key="$OUT/judging/KEY.tsv" id
   while IFS=$'\t' read -r id _; do
     rm -f "$OUT/judging/$id.patch"
   done < <(awk -F'\t' -v a="$arm" -v r="$rep" '$2 == a && $3 == r' "$key")
   awk -F'\t' -v a="$arm" -v r="$rep" '!($2 == a && $3 == r)' "$key" >"$key.tmp"
   mv "$key.tmp" "$key"
+}
+
+# Lanes finish out of order, so an interrupt can strand a half-written rep
+# below the highest finished one, where next_rep never hands it out again.
+# Clears every run dir with no metrics row.
+clear_stranded_reps() {
+  local dir arm rep
+  for dir in "$OUT"/runs/*/r*; do
+    [ -d "$dir" ] || continue
+    rep="${dir##*/r}" arm="${dir%/r*}"
+    arm="${arm##*/}"
+    [[ "$rep" =~ ^[0-9]+$ ]] || continue
+    awk -F'\t' -v a="$arm" -v r="$rep" 'NR > 1 && $2 == a && $3 == r { f = 1 } END { exit !f }' "$OUT/metrics.tsv" \
+      || clear_stale_rep "$arm" "$rep" "$dir"
+  done
 }
 
 new_blind_id() {
@@ -511,6 +597,17 @@ new_blind_id() {
   echo "$id"
 }
 
+# Picks a blind id, stages PATCH under it and records it in KEY.tsv, as one
+# locked step so two lanes can never claim the same id. Prints the id.
+reserve_blind() { locked "$OUT/judging.lock" reserve_blind_unlocked "$@"; }
+reserve_blind_unlocked() {
+  local arm="$1" rep="$2" patch="${3:-/dev/null}" id
+  id="$(new_blind_id)"
+  cp "$patch" "$OUT/judging/$id.patch"
+  printf '%s\t%s\t%s\n' "$id" "$arm" "$rep" >>"$OUT/judging/KEY.tsv"
+  echo "$id"
+}
+
 harness_rev() {
   local rev
   rev="$(git rev-parse --short HEAD 2>/dev/null)" || { echo unknown; return; }
@@ -518,12 +615,30 @@ harness_rev() {
   echo "$rev"
 }
 
+# Lanes (BENCH_LANES>1) run the arm's flake at the harness's committed HEAD,
+# pinned by rev, so edits made to the checkout mid-benchmark never reach a
+# Box. A non-local app (github:..., path:...) is left as written.
+lane_app() {
+  if [ -n "$LANE_REV" ] && [[ "$1" == . || "$1" == .#* ]]; then
+    echo "git+file://$PWD?rev=$LANE_REV${1#.}"
+  else
+    echo "$1"
+  fi
+}
+
+# Runs one rep on LANE (1-based), or plans it for any lane when LANE is auto
+# (a dry run with lanes). The launcher reads and writes .spindrift/ under its
+# cwd, so the dispatch runs in the lane's dir; grading stays in this shell.
 run_one() {
-  local task="$1" i="$2" rep="$3"
+  local task="$1" i="$2" rep="$3" lane="$4"
   local arm="${ARM_NAMES[i]}" app="${ARM_APPS[i]}" flags="${ARM_FLAGS[i]}"
   local rundir="$OUT/runs/$arm/r$rep"
   local prefix="bench/$arm/r$rep/"
   local branch="$prefix$task" ref="refs/runs/$arm/r$rep"
+  local slug=@lane push="" dir=.
+  if [ "$lane" != auto ]; then
+    slug="${LANE_SLUG[lane]}" push="${LANE_PUSH[lane]}" dir="${LANE_DIR[lane]}"
+  fi
   local -a extra=() nb=()
   read -ra extra <<<"$flags"
   [ "$BENCH_NO_BUILD" = "1" ] && nb=(--no-build)
@@ -531,8 +646,8 @@ run_one() {
   [[ "$issues" = /* ]] || issues="$PWD/$issues"
 
   local -a cmd=(
-    "$BENCH_NIX" run "$app" -- dispatch "${nb[@]}" --yes
-    --repo-slug "$BENCH_REPO_SLUG"
+    "$BENCH_NIX" run "$(lane_app "$app")" -- dispatch "${nb[@]}" --yes
+    --repo-slug "$slug"
     --tracker local --local-dir "$issues"
     --forge-backend github
     --base-branch main --branch-prefix "$prefix"
@@ -541,7 +656,8 @@ run_one() {
     "$task"
   )
   if [ -n "${BENCH_DRY_RUN:-}" ]; then
-    printf '   DRY-RUN:' >&2; printf ' %q' "${cmd[@]}" >&2; printf '\n' >&2
+    if [ "$lane" = auto ]; then printf '   DRY-RUN (lane auto):' >&2; else printf '   DRY-RUN:' >&2; fi
+    printf ' %q' "${cmd[@]}" >&2; printf '\n' >&2
     return 0
   fi
 
@@ -549,14 +665,16 @@ run_one() {
   mkdir -p "$issues"
   cp "$TASK_DIR/issue.md" "$issues/$task.md"
   info "$task [$arm r$rep] $app${flags:+ $flags}"
-  reset_remote
-  local host_log=".spindrift/logs/issue-$task.log" outbox=".spindrift/outbox/$task" fx rc=0
+  info "$task [$arm r$rep] lane $lane ($slug)"
+  reset_remote "$push"
+  local logs="$dir/.spindrift/logs"
+  local host_log="$logs/issue-$task.log" outbox="$dir/.spindrift/outbox/$task" fx rc=0
   # A stale bundle would carry this rep's branch name if the rep is a rerun.
-  rm -rf "$host_log" .spindrift/logs/issue-"$task"-*.log "$outbox"
-  "${cmd[@]}" >"$rundir/dispatch.out" 2>&1 || rc=$?
+  rm -rf "$host_log" "$logs/issue-$task"-*.log "$outbox"
+  (cd "$dir" && exec "${cmd[@]}") >"$rundir/dispatch.out" 2>&1 || rc=$?
   info "$task [$arm r$rep] launcher exit=$rc"
   [ -f "$host_log" ] && cp "$host_log" "$rundir/box.log"
-  for fx in .spindrift/logs/issue-"$task"-*.log; do
+  for fx in "$logs/issue-$task"-*.log; do
     [ -e "$fx" ] && cp "$fx" "$rundir/"
   done
   [ -f "$outbox/seam.bundle" ] && cp "$outbox/seam.bundle" "$rundir/"
@@ -564,12 +682,12 @@ run_one() {
 
   # The remote branch comes first: CI fix passes land there after the
   # read-only Box's bundle handoff. The bundle covers a failed relay push.
-  local grade=nobranch checks=skip got=""
-  if git -C "$OUT/work.git" fetch -q "$BENCH_PUSH_URL" "+refs/heads/$branch:$ref" 2>/dev/null; then
-    git -C "$BENCH_SRC" push -q --no-verify "$BENCH_PUSH_URL" --delete "$branch" 2>/dev/null || true
+  local grade=nobranch checks=skip got="" work="$OUT/work.git"
+  if locked "$work.lock" git -C "$work" fetch -q "$push" "+refs/heads/$branch:$ref" 2>/dev/null; then
+    git -C "$BENCH_SRC" push -q --no-verify "$push" --delete "$branch" 2>/dev/null || true
     got=remote
   elif [ -f "$rundir/seam.bundle" ] \
-    && git -C "$OUT/work.git" fetch -q "$(cd "$rundir" && pwd)/seam.bundle" "+refs/heads/$branch:$ref" 2>/dev/null; then
+    && locked "$work.lock" git -C "$work" fetch -q "$(cd "$rundir" && pwd)/seam.bundle" "+refs/heads/$branch:$ref" 2>/dev/null; then
     info "$task [$arm r$rep] branch never reached the remote; grading the outbox bundle"
     got=bundle
   fi
@@ -584,16 +702,68 @@ run_one() {
 
   local log="$rundir/box.log"
   [ -f "$log" ] || log=/dev/null
-  local blind
-  blind="$(new_blind_id)"
-  cp "$rundir/diff.patch" "$OUT/judging/$blind.patch"
-  printf '%s\t%s\t%s\n' "$blind" "$arm" "$rep" >>"$OUT/judging/KEY.tsv"
+  local blind row
+  blind="$(reserve_blind "$arm" "$rep" "$rundir/diff.patch")"
   cmd_breakdown "$log" >"$rundir/breakdown.tsv" 2>/dev/null || : >"$rundir/breakdown.tsv"
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  row="$(printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
     "$task" "$arm" "$rep" "$blind" "$(parse_outcome "$log")" "$resolved" "$grade" "$checks" \
     "$(parse_usage "$log")" "$(parse_passes "$log")" "$(parse_verdicts "$log")" \
-    "$(parse_decision "$log")" "$(harness_rev)" "$app${flags:+ $flags}" >>"$OUT/metrics.tsv"
+    "$(parse_decision "$log")" "${HARNESS_REV:-$(harness_rev)}" "$app${flags:+ $flags}")"
+  locked "$OUT/metrics.tsv.lock" append_line "$OUT/metrics.tsv" "$row"
   info "$task [$arm r$rep] grade=$grade checks=$checks resolved=$resolved"
+}
+
+# Each lane takes the next unclaimed plan entry; mkdir is the atomic claim.
+lane_worker() {
+  local task="$1" lane="$2" claims="$3" k
+  for k in "${!plan[@]}"; do
+    mkdir "$claims/$k" 2>/dev/null || continue
+    run_one "$task" "${plan[k]%%:*}" "${plan[k]#*:}" "$lane"
+  done
+}
+
+# Stops every lane's process group: the lane shell, and the launcher and
+# grader it is running. It waits for the whole group, not just the lane
+# shell, so a rerun never races a launcher still tearing its Box down; one
+# that outlasts 60s is killed.
+stop_lanes() {
+  local p n
+  for p in "${LANE_PIDS[@]}"; do
+    kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null || true
+  done
+  wait 2>/dev/null || true
+  for p in "${LANE_PIDS[@]}"; do
+    for ((n = 0; n < 600; n++)); do
+      kill -0 -- "-$p" 2>/dev/null || continue 2
+      sleep 0.1
+    done
+    kill -KILL -- "-$p" 2>/dev/null || true
+  done
+}
+
+run_lanes() {
+  local task="$1" claims="$2" l failed=0
+  LANE_PIDS=()
+  trap 'stop_lanes; exit 130' INT
+  trap 'stop_lanes; exit 143' TERM
+  # Job control gives each lane its own process group for stop_lanes, and
+  # keeps a Ctrl-C at the terminal from reaching the lanes directly: this
+  # shell's trap stops them instead. stdin is /dev/null so a background lane
+  # can never stop on a terminal read.
+  set -m
+  for ((l = 1; l <= BENCH_LANES; l++)); do
+    lane_worker "$task" "$l" "$claims" </dev/null &
+    LANE_PIDS+=("$!")
+  done
+  set +m
+  for ((l = 1; l <= BENCH_LANES; l++)); do
+    wait -n && continue
+    failed=1
+    break
+  done
+  [ "$failed" -eq 0 ] || stop_lanes
+  trap - INT TERM
+  [ "$failed" -eq 0 ] || die "a lane failed (see above), so every lane was stopped; rerun to redo the reps they left unfinished"
 }
 
 cmd_run() {
@@ -613,6 +783,16 @@ cmd_run() {
     done
   fi
   [[ "$BENCH_REPS" =~ ^[1-9][0-9]*$ ]] || die "BENCH_REPS must be a positive integer"
+  load_lanes
+  LANE_REV="" HARNESS_REV=""
+  if [ "$BENCH_LANES" -gt 1 ]; then
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+      || die "BENCH_LANES>1 needs the harness to be a git checkout: lanes run its committed HEAD"
+    git diff --quiet HEAD \
+      || die "BENCH_LANES>1 refuses uncommitted changes to tracked files: lanes run the committed HEAD, so metrics would record code that never ran; commit or stash them first"
+    LANE_REV="$(git rev-parse HEAD)"
+    HARNESS_REV="$(git rev-parse --short HEAD)"
+  fi
 
   if [ -n "${BENCH_ENV_FILE:-}" ]; then
     [ -f "$BENCH_ENV_FILE" ] || die "BENCH_ENV_FILE '$BENCH_ENV_FILE' not found"
@@ -627,22 +807,33 @@ cmd_run() {
   fi
 
   OUT="${BENCH_OUT:-bench/results/$task}"
-  local names=""
+  local names="" l
   for i in "${picked[@]}"; do names+=" ${ARM_NAMES[i]}"; done
-  cat >&2 <<EOF
-
-  Benchmark — $task
-  ---------------------------
-  base / fix  : ${BASE:0:10} / ${FIX:0:10}
-  arms        :$names
-  reps        : $BENCH_REPS per arm
-  bench repo  : $BENCH_REPO_SLUG (reset via $BENCH_PUSH_URL)
-  out dir     : $OUT
-
-  Each run is a real Box (real spend) and opens a draft PR on the bench repo.
-  Before every run $BENCH_PUSH_URL is force-reset: main becomes BASE and
-  every other branch and tag is DELETED.
-EOF
+  {
+    echo
+    echo "  Benchmark — $task"
+    echo "  ---------------------------"
+    echo "  base / fix  : ${BASE:0:10} / ${FIX:0:10}"
+    echo "  arms        :$names"
+    echo "  reps        : $BENCH_REPS per arm"
+    if [ "$BENCH_LANES" -eq 1 ]; then
+      echo "  bench repo  : ${LANE_SLUG[1]} (reset via ${LANE_PUSH[1]})"
+    else
+      echo "  lanes       : $BENCH_LANES, running harness ${HARNESS_REV}"
+      for ((l = 1; l <= BENCH_LANES; l++)); do
+        printf '  %-12s: %s (reset via %s)\n' "lane $l" "${LANE_SLUG[l]}" "${LANE_PUSH[l]}"
+      done
+    fi
+    echo "  out dir     : $OUT"
+    echo
+    echo "  Each run is a real Box (real spend) and opens a draft PR on the bench repo."
+    if [ "$BENCH_LANES" -eq 1 ]; then
+      echo "  Before every run ${LANE_PUSH[1]} is force-reset: main becomes BASE and"
+    else
+      echo "  Before every run its lane's push URL is force-reset: main becomes BASE and"
+    fi
+    echo "  every other branch and tag is DELETED."
+  } >&2
   if [ -z "${BENCH_CONFIRM:-}" ] && [ -z "${BENCH_DRY_RUN:-}" ]; then
     local reply
     printf '\n  Type "yes" to proceed: ' >&2
@@ -655,6 +846,8 @@ EOF
     [ -f "$OUT/metrics.tsv" ] || printf '%s\n' "$METRICS_HEADER" >"$OUT/metrics.tsv"
     cp "$TASK_DIR/issue.md" "$OUT/judging/ISSUE.md"
     ensure_grading_repo "$OUT/work.git"
+    rm -rf "$OUT"/*.lock.d
+    clear_stranded_reps
   fi
 
   if [ "$BENCH_NO_BUILD" = "1" ] && [ -z "${BENCH_DRY_RUN:-}" ]; then
@@ -676,7 +869,32 @@ EOF
     r=$((RANDOM % (j + 1)))
     tmp="${plan[j]}" plan[j]="${plan[r]}" plan[r]="$tmp"
   done
-  for a in "${plan[@]}"; do run_one "$task" "${a%%:*}" "${a#*:}"; done
+  if [ -n "${BENCH_DRY_RUN:-}" ] && [ "$BENCH_LANES" -gt 1 ]; then
+    for a in "${plan[@]}"; do run_one "$task" "${a%%:*}" "${a#*:}" auto; done
+  elif [ "$BENCH_LANES" -eq 1 ]; then
+    for a in "${plan[@]}"; do run_one "$task" "${a%%:*}" "${a#*:}" 1; done
+  else
+    # A lane dir per lane, since the launcher keeps its logs, outbox and
+    # records under its cwd and the wrapper sources ./harness*.env. The flake
+    # comes from the pinned rev (lane_app), so a plain dir is enough; a
+    # prebuilt bwrap store snapshot is shared from the harness root, where
+    # the build step wrote it.
+    local lanes="$OUT/lanes" f
+    [[ "$lanes" = /* ]] || lanes="$PWD/$lanes"
+    rm -rf "$lanes"
+    mkdir -p "$lanes/claims"
+    for ((l = 1; l <= BENCH_LANES; l++)); do
+      LANE_DIR[l]="$lanes/$l"
+      mkdir -p "${LANE_DIR[l]}/.spindrift"
+      for f in "$PWD"/harness.env "$PWD"/harness.*.env; do
+        [ -f "$f" ] && ln -s "$f" "${LANE_DIR[l]}/"
+      done
+      if [ "$BENCH_NO_BUILD" = "1" ] && [ -d "$PWD/.spindrift/nix-var-snapshot" ]; then
+        ln -s "$PWD/.spindrift/nix-var-snapshot" "${LANE_DIR[l]}/.spindrift/nix-var-snapshot"
+      fi
+    done
+    run_lanes "$task" "$lanes/claims"
+  fi
 
   [ -z "${BENCH_DRY_RUN:-}" ] || return 0
   summarize "$task"
