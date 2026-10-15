@@ -77,6 +77,17 @@ let
     # bench.sh is not, so tests/bench.bats resolves the
     # script through this var rather than $BATS_TEST_DIRNAME/../.
     BENCH_SH = "${benchSrc}/bench.sh";
+    # tests/bench-design.bats runs the generator and --checks the committed
+    # files it writes, none of which tests/ carries.
+    BENCH_DESIGN_SH = ../../bench/design.sh;
+    BENCH_DESIGN_ROOT = pkgs.lib.fileset.toSource {
+      root = ../..;
+      fileset = pkgs.lib.fileset.unions [
+        ../../bench/design.tsv
+        ../../bench/arms
+        ../../nix/ab-arms.nix
+      ];
+    };
     # tests/gh-token-refresher.bats (issue #3940) extracts mint_token
     # straight out of the composite action's `run:` block, so it tracks the
     # real body rather than a hand-copied stand-in.
