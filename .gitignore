@@ -17,6 +17,7 @@ harness.env
 
 # ab-orchestrator.sh experiment output (issue #2057)
 ab-results/
+bench/results/
 
 # OS
 .DS_Store

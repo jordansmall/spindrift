@@ -41,6 +41,7 @@ let
     "workerModel"
   ];
   expectedStructural = [
+    "autoCompactWindows"
     "byName"
     "roster"
   ];
@@ -496,8 +497,8 @@ in
         ) "deprecations: ${p}: message must be one line starting with perSystem.spindrift.: ${msg}";
         true;
     in
-    assert assertMsg (builtins.length oldPaths == 11)
-      "expected 11 single-Driver paths (agents.driver plus the 10 entries in driverMap.paths), got ${toString (builtins.length oldPaths)}";
+    assert assertMsg (builtins.length oldPaths == 12)
+      "expected 12 single-Driver paths (agents.driver plus the 11 entries in driverMap.paths), got ${toString (builtins.length oldPaths)}";
     assert assertMsg (builtins.all one oldPaths) "unreachable";
     assert assertMsg (
       builtins.length (msgsFor (top oldPaths)) == builtins.length oldPaths

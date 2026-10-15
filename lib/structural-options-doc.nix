@@ -52,6 +52,21 @@ in
     driverValued = true;
   };
 
+  autoCompactWindows = {
+    doc = ''
+      Per-model auto-compact windows in tokens, keyed by model ID, e.g.
+      `{ "claude-haiku-5-5" = 100000; }`. Baked into the Box's Claude Code
+      settings.json as `modelSettings.<model>.autoCompactWindow` (Claude Code
+      2.1.288+), so a cheap model can compact below a long-prompt price tier
+      while the coordinator keeps its full window. claude Driver only; each
+      value must be an integer from 100000 to 1000000, Claude Code's accepted
+      range. Image-time: a change needs a rebuild.
+    '';
+    docType = "null or attrset of integers keyed by model ID";
+    docDefault = "`null`";
+    driverValued = true;
+  };
+
   runtime = {
     doc = "Runner the launcher commands drive: OCI runtimes (podman/docker/rancher, the last an alias for Rancher Desktop's nerdctl) or the daemonless bubblewrap runner (bwrap, Linux-only).";
     docType = ''`"podman"` | `"docker"` | `"rancher"` | `"bwrap"`'';
@@ -148,8 +163,9 @@ in
       name (a lib/drivers/ registry name: claude, opencode). Each entry
       holds only the Driver-valued settings, at the same agents-relative
       paths as their top-level spelling: models.default, models.effort,
-      models.roster, models.byName, the per-agent models.* overrides, and
-      bashTimeoutMs. Everything else stays shared at the top level. Setting
+      models.roster, models.byName, the per-agent models.* overrides,
+      autoCompactWindows, and bashTimeoutMs. Everything else stays shared at
+      the top level. Setting
       this alongside agents.driver or any top-level Driver-valued setting
       fails evaluation, as does a top-level Driver-valued setting with
       several Drivers declared.

@@ -156,6 +156,7 @@
               agents.defaultDriver = "claude";
               agents.drivers.claude = {
                 models.roster = dogfoodDefaults.roster;
+                autoCompactWindows = dogfoodDefaults.autoCompactWindows;
                 models.default = dogfoodDefaults.defaults.model;
                 models.effort = dogfoodDefaults.defaults.effort;
                 bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
@@ -194,7 +195,15 @@
             # on aarch64-darwin that harness has none and the access would throw.
             // pkgs.lib.optionalAttrs (fixtures.dogfoodBwrapHarness.packages ? agent-closure) {
               agent-closure = fixtures.dogfoodBwrapHarness.packages.agent-closure;
-            };
+            }
+            # Each bench arm Harness's baked FLAKE_IMAGE_ATTR names its own
+            # top-level attr, same reasoning as agent-closure above.
+            // pkgs.lib.concatMapAttrs (
+              name: h:
+              pkgs.lib.optionalAttrs (h.packages ? "agent-image-ab-${name}") {
+                "agent-image-ab-${name}" = h.packages."agent-image-ab-${name}";
+              }
+            ) fixtures.dogfoodAbArmHarnesses;
 
             apps = {
               # Repo-internal dev tooling, not for consumers (issue #402). It
@@ -243,7 +252,16 @@
               # drives a bwrap Box rather than the podman one apps.daemon
               # (off the default harness) would.
               dogfood-bwrap-daemon = fixtures.dogfoodBwrapHarness.apps.daemon;
-            };
+            }
+            # bench.sh's image-time arms (nix/ab-arms.nix), beside the default
+            # dogfood CLI as their control.
+            // pkgs.lib.concatMapAttrs (
+              name: h:
+              pkgs.lib.optionalAttrs (h.packages ? "agent-image-ab-${name}") {
+                "ab-${name}" = h.apps.default;
+                "ab-${name}-daemon" = h.apps.daemon;
+              }
+            ) fixtures.dogfoodAbArmHarnesses;
 
             devShells = {
               # For hacking on the harness itself, host-side.

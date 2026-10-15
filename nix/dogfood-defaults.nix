@@ -66,6 +66,12 @@ in
       };
     };
   };
+  # Haiku 5.5 bills a prompt past 100K at five times the rate, so its
+  # sessions (filer, scout, a haiku worker) compact before crossing it; the
+  # opus coordinator keeps its full window. claude Driver only.
+  autoCompactWindows = {
+    "claude-haiku-5-5" = 100000;
+  };
   defaults = {
     repoSlug = "jordansmall/spindrift";
     model = "claude-opus-5-5";

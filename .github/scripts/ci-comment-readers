@@ -22,6 +22,7 @@ lib/flakeModule.nix
 lib/image.nix
 lib/mkHarness.nix
 lib/structural-paths.nix
+nix/ab-arms.nix
 nix/checks/equivalence.nix
 nix/dogfood-defaults.nix
 nix/fixtures.nix

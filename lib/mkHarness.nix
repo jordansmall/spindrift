@@ -101,6 +101,11 @@
   # exposed under, and the one the baked freshness probe realizes. A second
   # Harness in one flake needs its own name (ADR 0064, issue #5049).
   imageAttrName ? (if runtime == "bwrap" then "agent-closure" else "agent-image"),
+  # Per-model auto-compact windows in tokens, keyed by model ID, baked into the
+  # Box's Claude Code settings.json as modelSettings.<model>.autoCompactWindow
+  # (Claude Code 2.1.288+). Lets a cheap model compact below a long-prompt
+  # price tier without compacting the coordinator. claude Driver only.
+  autoCompactWindows ? null,
   # The agent CLI Driver (ADR 0009, issues #261/#262): selects one entry from
   # the lib/drivers/ registry, baked into the image (in-box half) and threaded
   # to the Go launcher as DRIVER (host-side half). "claude" and "opencode".
@@ -1058,7 +1063,9 @@ let
       ;
     # Validated here so both bake sites (skillsDir below, lib/image.nix) inherit it.
     skills = skillsLib.validateSkills skills;
+    autoCompactWindows = resolvedAutoCompactWindows;
   };
+  resolvedAutoCompactWindows = if autoCompactWindows == null then { } else autoCompactWindows;
   imageContracts = {
     inherit
       agentPaths
@@ -1791,6 +1798,19 @@ let
       throw "mkHarness: imageAttrName '${imageAttrName}' collides with the built-in package of the same name; pick a name outside: ${lib.concatStringsSep ", " (lib.attrNames basePackages)}"
     else
       true;
+  # Claude Code clamps a window outside 100000-1000000, so one is a typo.
+  autoCompactWindowsOk =
+    let
+      bad = lib.filterAttrs (
+        _: w: !(builtins.isInt w) || w < 100000 || w > 1000000
+      ) resolvedAutoCompactWindows;
+    in
+    if resolvedAutoCompactWindows != { } && driver != "claude" then
+      throw "mkHarness: autoCompactWindows is a claude Driver setting (Claude Code's modelSettings); the ${driver} Driver has no equivalent"
+    else if bad != { } then
+      throw "mkHarness: autoCompactWindows values must be integers from 100000 to 1000000 tokens (Claude Code's accepted range), got ${builtins.toJSON bad}"
+    else
+      true;
 in
 if defaultsKeyError != null then
   throw defaultsKeyError
@@ -1807,6 +1827,7 @@ else
   assert daemonAwakeWindowOk;
   assert butlerChoresPromptOk;
   assert imageAttrNameOk;
+  assert autoCompactWindowsOk;
   warnAll {
     inherit
       image

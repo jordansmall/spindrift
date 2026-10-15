@@ -61,4 +61,8 @@
     "infra"
     "config"
   ];
+  autoCompactWindows = [
+    "agents"
+    "autoCompactWindows"
+  ];
 }

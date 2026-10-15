@@ -201,6 +201,12 @@ let
       description = structuralOptionsDoc.roster.doc;
     };
 
+    autoCompactWindows = mkOption {
+      type = types.nullOr (types.attrsOf types.int);
+      default = null;
+      description = structuralOptionsDoc.autoCompactWindows.doc;
+    };
+
     runtime = mkOption {
       type = types.nullOr (types.enum runtimeValues);
       default = null;
@@ -306,6 +312,7 @@ let
   # options; the entry has no Driver field, the attribute name is the Driver.
   structuralEntryOptions = {
     roster = structuralOptions.roster;
+    autoCompactWindows = structuralOptions.autoCompactWindows;
     byName = byNameOption;
   };
   driverEntryOptions = buildTree (

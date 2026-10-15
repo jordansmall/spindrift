@@ -88,6 +88,7 @@ path:
 | `perSystem.spindrift.agents.models.default` | `perSystem.spindrift.agents.drivers.<name>.models.default` |
 | `perSystem.spindrift.agents.models.effort` | `perSystem.spindrift.agents.drivers.<name>.models.effort` |
 | `perSystem.spindrift.agents.models.roster` | `perSystem.spindrift.agents.drivers.<name>.models.roster` |
+| `perSystem.spindrift.agents.autoCompactWindows` | `perSystem.spindrift.agents.drivers.<name>.autoCompactWindows` |
 | `perSystem.spindrift.agents.models.byName` | `perSystem.spindrift.agents.drivers.<name>.models.byName` |
 | `perSystem.spindrift.agents.models.review` | `perSystem.spindrift.agents.drivers.<name>.models.review` |
 | `perSystem.spindrift.agents.models.reviewEffort` | `perSystem.spindrift.agents.drivers.<name>.models.reviewEffort` |
