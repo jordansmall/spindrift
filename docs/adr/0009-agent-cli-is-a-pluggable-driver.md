@@ -375,6 +375,9 @@ package (0.99.2):
   shared with `claude`.
 - **Subagent capability.** The `opencode`-only branch that disables the Filer
   and worker becomes a Driver capability, "hosts subagents". `pi` declares
-  it; `opencode` does not.
+  it; `opencode` does not. (Amended by issue #5330: that branch now
+  disables only the worker. Filer presence follows the roster under every
+  Driver, since `opencode` renders the Filer as an on-disk agent file, so
+  the capability gates the worker alone.)
 
 Full findings and the testing plan live on issue #4945.
