@@ -63,7 +63,7 @@ outcome nudge and backstop, the same recovery claude gets.
 - The hardcoded `scoutModel`/`reviewModel` pair is a special case of a general **N-agent roster** (a list of `{name, model, prompt, mode}` helper agents), which both Drivers render — claude to `--agents` JSON, opencode to `agents/*.md`. That generalization has since shipped in `lib/roster.nix`, configured through the `agents.models.roster`/`agents.models.byName` flake-module options (`lib/flakeModule.nix`; `roster` is a structural option, `byName` is deliberately declared outside that set, but neither has an env var of its own). They supersede the per-agent model knobs — `scoutModel`, `filerModel`, and `workerModel` outright, and `reviewModel` only for non-orchestrator use; the `ORCHESTRATOR` carve-out and its precedence chain are stated in `lib/env-schema.nix`'s `reviewModel` and `reviewEffort` docs, and in `docs/reference.md`.
 - A one-time human step is required to mint Copilot credentials (`opencode auth login` on a host), analogous to `claude setup-token`; the device flow cannot run in the Box.
 - opencode already reads `.claude/skills/` and falls back to `CLAUDE.md` when no `AGENTS.md` exists, so baked skills and a target repo's `CLAUDE.md` are honored without extra wiring; generating `AGENTS.md` is only needed when we want it to win over an existing `CLAUDE.md`.
-- The Driver seam also owns **session pin/resume** (issue #427): a fix box resumes the Driver session the initial run used rather than cold-starting one, via an ephemeral per-issue host directory the launcher mounts writable over the Box's home. The launcher's half is Driver-agnostic — create/mount/evict an opaque directory, keyed strictly per issue — but the pin/resume *verb* is each Driver's own: claude pins a deterministic session id via `--session-id` and resumes it via `--resume`, falling back cleanly to a cold context when no session is found; opencode's half shipped as a deliberate no-op — it wires no resumable session state, so the launcher creates no per-issue cache for it, needing no launcher change, exactly as predicted (`lib/drivers/opencode.nix`).
+- The Driver seam also owns **session pin/resume** (issue #427): a fix box resumes the Driver session the initial run used rather than cold-starting one, via an ephemeral per-issue host directory the launcher mounts writable over the Box's home. The launcher's half is Driver-agnostic — create/mount/evict an opaque directory, keyed strictly per issue — but the pin/resume *verb* is each Driver's own: claude pins a deterministic session id via `--session-id` and resumes it via `--resume`, falling back cleanly to a cold context when no session is found; opencode's half shipped as a deliberate no-op — it wires no resumable session state, so the launcher creates no per-issue cache for it, needing no launcher change, exactly as predicted (`lib/drivers/opencode.nix`). (Amended by issue #5349: opencode now pins and resumes a session; see the amendment below.)
 
 ## Amendment (issue #260): Copilot auth is env-native `OPENCODE_AUTH_CONTENT`, not `{env:}` config
 
@@ -388,3 +388,27 @@ package (0.99.2):
   the capability gates the worker alone.)
 
 Full findings and the testing plan live on issue #4945.
+
+## Amendment (issue #5349): opencode corrective resumes continue the pinned session
+
+opencode's session half is no longer a no-op. It cannot pin a session id at
+creation: `opencode run --session <id>` only continues an existing
+opencode-generated `ses_…` id, and an unknown one exits 1 ("Session not
+found"). So the initial pass pins a deterministic **title** instead, `--title
+spindrift-<32 hex of sha256("spindrift-session:" + REPO_SLUG + ":" +
+ISSUE_NUMBER)>`, recomputable from the same two env vars the claude id uses.
+
+opencode's store is SQLite. `envCommon.OPENCODE_DB` relocates it to
+`/home/agent/.local/share/opencode/spindrift-session/opencode.db`, and
+`sessionCacheDirRelative = ".local/share/opencode/spindrift-session"` in
+`lib/drivers/opencode.nix` makes the launcher mount a per-issue cache there,
+as it does for claude's `.claude/projects`. The subdirectory is dedicated so
+the mount never shadows `~/.local/share/opencode/auth.json`.
+
+On a resume (the outcome nudge, the PR-intent nudge, and the fix box)
+`cmd/launcher/internal/driver/opencode/session.go` reads that store for the
+newest root, non-archived session carrying the pinned title and renders
+`--session <id>`. A missing store, no match, or any read error renders nothing
+and the pass runs cold, the same fallback as claude. `--continue` is never
+used: it picks the last session, not this issue's. The launcher's half is
+unchanged, as the original design predicted.
