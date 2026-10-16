@@ -45,7 +45,7 @@ The checks `spindrift doctor` runs, grouped by what it probes.
   `dispatch` gates on (issue #2559) — one status line per check, plus a
   remedy line for a failing one, unless its remedy just repeats the error.
 - Passed `--butler`, doctor additionally validates the butler's own config
-  (a Filer, `DRIVER` not `opencode`, a `CODE_FORGE` with a Ledger,
+  (a Filer, a `CODE_FORGE` with a Ledger,
   `BUTLER_CHORE_CLASSES`, the sweep-vs-day cap relationship, `BUTLER_EVERY`,
   `BUTLER_CLAIM_TIMEOUT`, `DAEMON_AWAKE_WINDOW`), failing with exit 2 like
   any other required check (issue #3920).
@@ -1002,7 +1002,7 @@ just those three outputs.
 spindrift's own dogfood declares `claude` (the default) and `opencode`, so
 `nix run .#opencode` and `nix run .#opencode-daemon` dispatch through
 opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
-opencode entry inherits that Driver's limits: no Filer or worker is
+opencode entry inherits that Driver's limits: no worker is
 provisioned. Running both Drivers' Daemons at once (`nix run .#daemon` and
 `nix run .#opencode-daemon`) needs two checkouts, for example two
 `git worktree`s, because both take the same per-checkout **Instance lock**
@@ -5557,7 +5557,7 @@ change), so such a run keeps the old stale-claim behavior until the
 wrapper is regenerated.
 
 Every butler config failure exits 6 (config-invalid): a missing Filer, a
-`DRIVER=opencode` (never provisions one), a `CODE_FORGE` with no Ledger, a
+`CODE_FORGE` with no Ledger, a
 malformed `BUTLER_CHORE_CLASSES`, a sweep cap above the day cap, a malformed
 `BUTLER_EVERY`/`BUTLER_CLAIM_TIMEOUT`/`DAEMON_AWAKE_WINDOW`, and the
 prompt-file check above. `spindrift doctor --butler` runs the same checks
@@ -7474,7 +7474,7 @@ gets the same `--base-branch` flag every child does. When the butler kind
 survived `gateKinds` (**Daemon** above) — a bare invocation with a
 non-empty `BUTLER_CHORES`, or an explicit `butler` selector — doctor's argv
 also gets `--butler`, so the preflight validates the butler's own config
-(a Filer, `DRIVER` not `opencode`, a `CODE_FORGE` with a Ledger,
+(a Filer, a `CODE_FORGE` with a Ledger,
 `BUTLER_CHORE_CLASSES`, the sweep-vs-day cap relationship, `BUTLER_EVERY`)
 up front; a butler that cannot run then refuses daemon startup as a
 preflight halt instead of halting the pool on its first butler slot (exit
