@@ -68,11 +68,11 @@ let
   pointerSites = [
     {
       name = "main-go";
-      label = "cmd/launcher/main.go's opencode driver branch";
+      label = "cmd/launcher/main.go's provider-namespaced worker branch";
       file = "cmd/launcher/main.go";
       path = ../../cmd/launcher/main.go;
       prefix = "//";
-      anchor = "if driver == \"opencode\" {";
+      anchor = "if driver.ProviderNamespacedModels(driverName) {";
     }
     {
       name = "main-test-go";
