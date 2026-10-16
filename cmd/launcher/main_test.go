@@ -2096,19 +2096,20 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 	}
 }
 
-// The version-skew fallback is driver-aware (issue #2533 review):
+// The version-skew fallback is driver-aware (issue #2533 review, #5330):
 // lib/drivers/opencode.nix's agentsJsonTemplate always renders "", so nix
-// always bakes FILER_ENABLED=WORKER_PROVISIONED=false for the opencode Driver
-// even with models configured. A driver-blind fallback would report both true.
-func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallsBackFalse(t *testing.T) {
+// always bakes WORKER_PROVISIONED=false for the opencode Driver even with a
+// WORKER_MODEL configured. The Filer is provisioned from on-disk agent files
+// there, so FILER_ENABLED follows FILER_MODEL like every other Driver.
+func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFilerFromModelWorkerFalse(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
 	t.Setenv("FILER_MODEL", "haiku")
 	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
 
 	presence := resolveAgentPresenceSignals("opencode")
-	if presence.filerEnabled {
-		t.Errorf("filerEnabled = true, want false (opencode Driver always bakes FILER_ENABLED=false regardless of FILER_MODEL)")
+	if !presence.filerEnabled {
+		t.Errorf("filerEnabled = false, want true (opencode provisions the Filer from FILER_MODEL like every other Driver)")
 	}
 	if presence.workerProvisioned {
 		t.Errorf("workerProvisioned = true, want false (opencode Driver always bakes WORKER_PROVISIONED=false regardless of WORKER_MODEL)")
@@ -2194,10 +2195,10 @@ func TestResolveAgentPresenceSignals_ScoutMissingArtifactKeyFallsBackIndependent
 	}
 }
 
-// Scout is decoupled from the filer/worker opencode=false rule — see
+// Scout is decoupled from the worker opencode=false rule — see
 // lib/mkHarness.nix's scoutProvisioned comment — so opencode's fallback tracks
-// SCOUT_MODEL like every other driver even while filerEnabled and
-// workerProvisioned stay false.
+// SCOUT_MODEL like every other driver even while workerProvisioned stays
+// false.
 func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToScoutModel(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
@@ -2209,8 +2210,8 @@ func TestResolveAgentPresenceSignals_ScoutNoDocumentOpencodeDriverFallsBackToSco
 	if !presence.scoutProvisioned {
 		t.Errorf("scoutProvisioned = false, want true (SCOUT_MODEL is set, no document)")
 	}
-	if presence.filerEnabled || presence.workerProvisioned {
-		t.Errorf("filerEnabled=%v workerProvisioned=%v, want both false (opencode Driver always bakes these false)", presence.filerEnabled, presence.workerProvisioned)
+	if presence.workerProvisioned {
+		t.Errorf("workerProvisioned = true, want false (opencode Driver always bakes the worker false)")
 	}
 }
 

@@ -496,7 +496,7 @@ func TestCmdButler_FreshConsumerNeverStartsRun(t *testing.T) {
 // syntax, the BUTLER_PATCH_CLASSES cross-checks (ADR 0057, only when
 // butlerMaxPatchesPerDay > 0), and the Filer gate in that order, before
 // cmdButler ever claims a Ledger -- in particular a chore run with no
-// provisioned Filer (DRIVER=opencode, or FILER_MODEL="") must be refused up
+// provisioned Filer (FILER_MODEL="") must be refused up
 // front rather than sweep and silently drop findings.
 func TestButlerPreflight(t *testing.T) {
 	cases := []struct {
