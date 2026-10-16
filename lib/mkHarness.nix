@@ -423,6 +423,18 @@ let
   # downstream consumer of finalRoster sees the roster (issue #2571).
   keptRoster = rosterLib.dropOptedOut resolvedRoster;
 
+  # A provisioned worker makes the coordinator delegate every IMPLEMENT slice
+  # to it, so a worker on a model the Provider cannot serve breaks the whole
+  # implement phase. Under a Driver with Provider-namespaced model ids, drop a
+  # worker that lacks the "/" so neither the bake nor WORKER_PROVISIONED
+  # claims it (issue #5331).
+  bareWorker = e: e.name == "worker" && !(lib.hasInfix "/" e.model);
+  rosterWithoutBareWorker =
+    if driverEntry.providerNamespacedModels or false then
+      lib.filter (e: !bareWorker e) keptRoster
+    else
+      keptRoster;
+
   # reviewEffort (issue #2512) is the one legacy knob that overrides an
   # already-resolved roster's reviewer entry whatever the roster's source,
   # unlike the four model knobs above. Applied post-normalize so it reaches
@@ -432,9 +444,11 @@ let
       reviewEffort = mergedDefaults.reviewEffort or "";
     in
     if reviewEffort == "" then
-      keptRoster
+      rosterWithoutBareWorker
     else
-      map (e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e) keptRoster;
+      map (
+        e: if e.name == "reviewer" then e // { effort = reviewEffort; } else e
+      ) rosterWithoutBareWorker;
 
   # --agents JSON, rendered by the selected Driver (ADR 0009) so a Driver with
   # a different agent-config shape (opencode's agents/*.md) can supply its own
@@ -445,21 +459,15 @@ let
   # FILER_ENABLED / WORKER_PROVISIONED / SCOUT_PROVISIONED (issues #2533,
   # #3157), so the Go side reads them from the document instead of
   # re-deriving roster membership itself.
-  agentsJsonAttrs = if agentsJsonTemplate == "" then { } else builtins.fromJSON agentsJsonTemplate;
-
-  # workerProvisioned keys off agentsJsonTemplate's rendered output, not
-  # finalRoster: opencode's agentsJsonTemplate always returns "" and
-  # provisions subagents through driverAgentFiles instead, so a roster-only
-  # check would wrongly report WORKER_PROVISIONED true for an opencode box
-  # (issue #2533 review).
-  workerProvisioned = agentsJsonAttrs ? worker;
-
-  # scoutProvisioned and filerEnabled key off finalRoster instead of
-  # agentsJsonAttrs, the mirror image of workerProvisioned above: opencode
-  # provisions scout and filer through driverAgentFiles (rendered by
-  # lib/drivers/opencode.nix's agentFilesTemplate), so agentsJsonAttrs would
-  # wrongly read false for an opencode box that does carry them (issue #5330).
+  #
+  # All three key off finalRoster rather than agentsJsonTemplate's parsed
+  # output: opencode's agentsJsonTemplate always returns "" and provisions
+  # subagents through driverAgentFiles (rendered by lib/drivers/opencode.nix's
+  # agentFilesTemplate), so a check keyed off that JSON would wrongly read
+  # false for an opencode box that does carry them (issues #5330, #5331). The
+  # bake and the flag therefore cannot disagree under any Driver.
   scoutProvisioned = lib.any (e: e.name == "scout") finalRoster;
+  workerProvisioned = lib.any (e: e.name == "worker") finalRoster;
   filerEnabled = lib.any (e: e.name == "filer") finalRoster;
 
   # Stamped onto every Pass log's dispatch_start (issue #4783). The Launcher
@@ -1675,9 +1683,21 @@ let
     && !(lib.any (e: e.name == "review-axis") finalRoster);
   missingReviewAxisMsg = "spindrift: the explicit `roster` carries a `reviewer` entry but no `review-axis` entry, so the /code-review fan-out runs on the Driver's ungoverned `general-purpose` default instead of a rostered agent (issue #3447); compose the roster from `rosterLib.defaultRoster { }`, or add a `review-axis` entry to it by hand.";
 
-  # The same warning as data, so a check can assert on it without
+  # Under a Driver with Provider-namespaced model ids, a bare worker model the
+  # Consumer set on purpose, via `roster` or the legacy `defaults.workerModel`
+  # knob, is otherwise dropped silently (issue #5331). The inherited schema
+  # default is not warned: that drop is the expected path. Worker names are
+  # unique (normalizeRoster rejects duplicates), so at most one entry drops.
+  droppedBareWorkers = lib.optionals (
+    (roster != null || defaults ? workerModel) && (driverEntry.providerNamespacedModels or false)
+  ) (lib.filter bareWorker keptRoster);
+  droppedBareWorkerMsg = "spindrift: the worker model ${builtins.toJSON (lib.head droppedBareWorkers).model} is not a `<provider>/<model>` id, which this Driver requires, so the worker is not provisioned (issue #5331).";
+
+  # The same warnings as data, so a check can assert on them without
   # capturing stderr.
-  rosterWarnings = lib.optional explicitRosterMissingReviewAxis missingReviewAxisMsg;
+  rosterWarnings =
+    lib.optional explicitRosterMissingReviewAxis missingReviewAxisMsg
+    ++ lib.optional (droppedBareWorkers != [ ]) droppedBareWorkerMsg;
 
   # Every eval-time warning, applied to the outputs attrset in one fold: a
   # nested `lib.warnIf` per warning would re-indent that whole attrset each

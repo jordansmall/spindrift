@@ -156,8 +156,8 @@ let
       slug = "driver-agent-files";
     }
     {
-      ident = "agentsJsonAttrs";
-      slug = "agents-json-attrs";
+      ident = "agentsJsonTemplate";
+      slug = "agents-json-template";
     }
   ];
 

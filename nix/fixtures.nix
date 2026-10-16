@@ -267,6 +267,36 @@ let
     packages = p: [ p.hello ];
   };
 
+  # Explicit opencode roster holding only a worker, bare and namespaced
+  # (issue #5331). Eval-only, consumed by the roster-opencode-*-worker checks.
+  opencodeWorkerRosterHarness =
+    model:
+    import ../lib/mkHarness.nix {
+      inherit nixpkgs system;
+      driver = "opencode";
+      roster = [
+        {
+          name = "worker";
+          inherit model;
+          mode = "subagent";
+          description = "fixture worker description";
+          tools = [ ];
+        }
+      ];
+      packages = p: [ p.hello ];
+    };
+  opencodeBareWorkerRosterHarness = opencodeWorkerRosterHarness "gpt-4o";
+  opencodeNamespacedWorkerRosterHarness = opencodeWorkerRosterHarness "openai/gpt-4o";
+
+  # The legacy `defaults.workerModel` knob set bare under opencode (issue
+  # #5331); no roster, so the drop must still warn.
+  opencodeLegacyBareWorkerHarness = import ../lib/mkHarness.nix {
+    inherit nixpkgs system;
+    driver = "opencode";
+    defaults.workerModel = "gpt-4o";
+    packages = p: [ p.hello ];
+  };
+
   # Proves the opt-in, default-empty filer model composes on its own rather
   # than needing scout or reviewer set. Eval-only, consumed by
   # agents-json-baked.
@@ -519,6 +549,10 @@ in
     reviewAxisTracksReviewerHarness
     reviewAxisOptOutHarness
     legacyFourEntryRosterHarness
+    opencodeBareWorkerRosterHarness
+    opencodeNamespacedWorkerRosterHarness
+    opencodeLegacyBareWorkerHarness
+    opencodeWorkerRosterHarness
     filerOnlyHarness
     workerOnlyHarness
     forgejoHarness
