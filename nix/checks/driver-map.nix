@@ -9,6 +9,7 @@
   system,
   flake-parts,
   config,
+  fixtures,
   ...
 }:
 let
@@ -61,6 +62,22 @@ let
   has = msg: needles: builtins.all (n: hasInfix n msg) needles;
   lacks = msg: needles: !(builtins.any (n: hasInfix n msg) needles);
   entry = { };
+  # opencode rejects the schema's bare claude ids (issue #5355), so every
+  # opencode Driver here names its models; the worker is opted out, as in the
+  # dogfood.
+  ocDefaultModel = fixtures.opencodeDefaultModel;
+  ocRoster = (import ../../lib/roster.nix { inherit (pkgs) lib; }).defaultRoster {
+    models = {
+      scout = fixtures.opencodeNamespacedDefaults.scoutModel;
+      filer = fixtures.opencodeNamespacedDefaults.filerModel;
+      reviewer = fixtures.opencodeNamespacedDefaults.reviewModel;
+      worker = "";
+    };
+  };
+  ocModels = {
+    models.default = ocDefaultModel;
+    models.roster = ocRoster;
+  };
   resolve = args: driverMap.resolve ({ topLevel = [ ]; } // args);
   top = paths: map (path: { inherit path; }) paths;
 
@@ -92,8 +109,9 @@ let
   ocArgs = {
     driver = "opencode";
     multiDriver = true;
+    roster = ocRoster;
     defaults = {
-      model = "anthropic/claude-sonnet-5";
+      model = ocDefaultModel;
       daemonApp = ".#opencode";
       daemonSelfApp = ".#opencode-daemon";
     };
@@ -616,7 +634,7 @@ in
     assert accepts "one Driver, inferred" { agents.drivers.claude.models.default = "x"; };
     assert accepts "two Drivers with defaultDriver" {
       agents.drivers.claude = { };
-      agents.drivers.opencode = { };
+      agents.drivers.opencode = ocModels;
       agents.defaultDriver = "opencode";
     };
     assert accepts "the shorthand" { agents.models.default = "x"; };
@@ -631,12 +649,12 @@ in
     assert rejects "several Drivers beside a top-level agents.models.default" {
       agents.models.default = "x";
       agents.drivers.claude = { };
-      agents.drivers.opencode = { };
+      agents.drivers.opencode = ocModels;
       agents.defaultDriver = "claude";
     };
     assert rejects "several Drivers without defaultDriver" {
       agents.drivers.claude = { };
-      agents.drivers.opencode = { };
+      agents.drivers.opencode = ocModels;
     };
     assert rejects "an undeclared defaultDriver" {
       agents.drivers.claude = { };
@@ -768,7 +786,7 @@ in
         agents.defaultDriver = "claude";
       };
       two = recursiveUpdate claude {
-        agents.drivers.opencode.models.default = "anthropic/claude-sonnet-5";
+        agents.drivers.opencode = ocModels;
       };
       names = x: sort builtins.lessThan (attrNames x);
       twoApps = appsOf two;
@@ -843,7 +861,7 @@ in
       base = {
         agents.drivers.claude.models.default = "x";
         agents.defaultDriver = "claude";
-        agents.drivers.opencode.models.default = "anthropic/claude-sonnet-5";
+        agents.drivers.opencode = ocModels;
       };
       withTop = recursiveUpdate base { dispatch.daemonApp = ".#custom"; };
       bwrap = recursiveUpdate base { infra.runtime = "bwrap"; };

@@ -267,6 +267,27 @@ let
     packages = p: [ p.hello ];
   };
 
+  # Provider-namespaced ids for the opencode Harnesses that inherit schema
+  # defaults, which are bare claude ids and fail eval under opencode (issue
+  # #5355). workerModel is left to the inherited bare default on purpose: the
+  # worker drop (issue #5331) is silent and many fixtures exercise it.
+  opencodeDefaultModel = "anthropic/claude-sonnet-5";
+  opencodeNamespacedDefaults = {
+    model = opencodeDefaultModel;
+    scoutModel = "anthropic/claude-haiku-5";
+    reviewModel = "anthropic/claude-opus-5";
+    filerModel = "anthropic/claude-haiku-5";
+  };
+  # An opencode Harness over the given `defaults`, for the eval-level checks
+  # that probe the namespaced-model rule (issue #5355).
+  opencodeHarnessWith =
+    defaults:
+    import ../lib/mkHarness.nix {
+      inherit nixpkgs system defaults;
+      driver = "opencode";
+      packages = p: [ p.hello ];
+    };
+
   # Explicit opencode roster holding only a worker, bare and namespaced
   # (issue #5331). Eval-only, consumed by the roster-opencode-*-worker checks.
   opencodeWorkerRosterHarness =
@@ -274,6 +295,7 @@ let
     import ../lib/mkHarness.nix {
       inherit nixpkgs system;
       driver = "opencode";
+      defaults.model = opencodeDefaultModel;
       roster = [
         {
           name = "worker";
@@ -293,7 +315,9 @@ let
   opencodeLegacyBareWorkerHarness = import ../lib/mkHarness.nix {
     inherit nixpkgs system;
     driver = "opencode";
-    defaults.workerModel = "gpt-4o";
+    defaults = opencodeNamespacedDefaults // {
+      workerModel = "gpt-4o";
+    };
     packages = p: [ p.hello ];
   };
 
@@ -344,6 +368,7 @@ let
     inherit nixpkgs system;
     driver = "opencode";
     defaults = {
+      model = opencodeDefaultModel;
       scoutModel = "anthropic/claude-x";
       reviewModel = "anthropic/claude-y";
       filerModel = "";
@@ -549,6 +574,9 @@ in
     reviewAxisTracksReviewerHarness
     reviewAxisOptOutHarness
     legacyFourEntryRosterHarness
+    opencodeDefaultModel
+    opencodeNamespacedDefaults
+    opencodeHarnessWith
     opencodeBareWorkerRosterHarness
     opencodeNamespacedWorkerRosterHarness
     opencodeLegacyBareWorkerHarness

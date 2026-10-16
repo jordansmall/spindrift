@@ -2320,7 +2320,7 @@ in
       roster = [
         {
           name = "filer";
-          model = "m";
+          model = "anthropic/m";
           mode = "subagent";
           description = "";
           tools = [ ];
@@ -2337,6 +2337,7 @@ in
         inherit nixpkgs system;
         packages = p: [ p.hello ];
         driver = "opencode";
+        defaults.model = fixtures.opencodeDefaultModel;
         inherit roster;
       };
     in
@@ -2368,6 +2369,7 @@ in
         inherit nixpkgs system;
         packages = p: [ p.hello ];
         driver = "opencode";
+        defaults.model = fixtures.opencodeDefaultModel;
         inherit roster;
       };
     in
@@ -2408,6 +2410,7 @@ in
         inherit nixpkgs system;
         packages = p: [ p.hello ];
         driver = "opencode";
+        defaults = fixtures.opencodeNamespacedDefaults;
       };
     in
     assert assertMsg (all (e: e.name != "worker") direct.internals.roster)
@@ -2429,7 +2432,7 @@ in
       roster = [
         {
           name = "filer";
-          model = "m";
+          model = "anthropic/m";
           mode = "subagent";
           description = "";
           tools = [ ];
@@ -2443,7 +2446,7 @@ in
         }
         {
           name = "scout";
-          model = "m";
+          model = "anthropic/m";
           mode = "subagent";
           description = "";
           tools = [ ];
@@ -2453,6 +2456,7 @@ in
         inherit nixpkgs system;
         packages = p: [ p.hello ];
         driver = "opencode";
+        defaults.model = fixtures.opencodeDefaultModel;
         inherit roster;
       };
     in
@@ -2501,7 +2505,7 @@ in
         inherit nixpkgs system;
         packages = p: [ p.hello ];
         driver = "opencode";
-        defaults = {
+        defaults = fixtures.opencodeNamespacedDefaults // {
           scoutModel = "";
         };
       };
