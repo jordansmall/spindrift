@@ -352,11 +352,11 @@ func floatNonnegSchema(key string) float64 {
 // GIT_USER_EMAIL) via the normal document/flag/env chain, falling back to the
 // host git config when none of those supply a value. The wrapper exports no
 // knob env at all (ADR 0020), so this fallback has to live in process.
-func gitIdentityField(env, gitConfigKey string) string {
+func gitIdentityField(env string) string {
 	if v := getenvSchema(env); v != "" {
 		return v
 	}
-	return gitConfigLookup(gitConfigKey)
+	return hostGitConfigFallback(env)
 }
 
 func loadConfig() config {
@@ -364,8 +364,8 @@ func loadConfig() config {
 	image := getenvArtifact("IMAGE", imageTag)
 
 	sc := loadSchemaConfig()
-	sc.gitUserName = gitIdentityField("GIT_USER_NAME", "user.name")
-	sc.gitUserEmail = gitIdentityField("GIT_USER_EMAIL", "user.email")
+	sc.gitUserName = gitIdentityField("GIT_USER_NAME")
+	sc.gitUserEmail = gitIdentityField("GIT_USER_EMAIL")
 	sc.codeForgeAccumulationRepoDir = absCodeForgeAccumulationRepoDir(sc.codeForge, getenvSchema("CODE_FORGE_ACCUMULATION_REPO_DIR"))
 
 	runtime := getenvArtifact("RUNTIME", "")

@@ -1577,18 +1577,10 @@ func TestAtoiNonnegSchema(t *testing.T) {
 // document, flag and env chain supplies nothing: the in-process replacement
 // for the wrapper's retired `${VAR:-$(git config ...)}` fallback (ADR 0020).
 func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
-	t.Setenv("GIT_USER_NAME", "")
-	os.Unsetenv("GIT_USER_NAME")
-	orig := gitConfigLookup
-	t.Cleanup(func() { gitConfigLookup = orig })
-	gitConfigLookup = func(key string) string {
-		if key == "user.name" {
-			return "Host Git User"
-		}
-		return ""
-	}
+	unsetEnvForTest(t, "GIT_USER_NAME")
+	fakeHostGitConfig(t, map[string]string{"user.name": "Host Git User"})
 
-	if got := gitIdentityField("GIT_USER_NAME", "user.name"); got != "Host Git User" {
+	if got := gitIdentityField("GIT_USER_NAME"); got != "Host Git User" {
 		t.Errorf("gitIdentityField = %q, want Host Git User", got)
 	}
 }
@@ -1597,15 +1589,13 @@ func TestGitIdentityField_FallsBackToHostGitConfig(t *testing.T) {
 // config fallback.
 func TestGitIdentityField_ExplicitValueSkipsGitConfig(t *testing.T) {
 	t.Setenv("GIT_USER_NAME", "Explicit Name")
-	orig := gitConfigLookup
-	t.Cleanup(func() { gitConfigLookup = orig })
-	gitConfigLookup = func(string) string {
-		t.Fatal("gitConfigLookup should not be called when an explicit value is set")
-		return ""
-	}
+	calls := fakeHostGitConfig(t, nil)
 
-	if got := gitIdentityField("GIT_USER_NAME", "user.name"); got != "Explicit Name" {
+	if got := gitIdentityField("GIT_USER_NAME"); got != "Explicit Name" {
 		t.Errorf("gitIdentityField = %q, want Explicit Name", got)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("gitConfigLookup called %v, want no calls when an explicit value is set", *calls)
 	}
 }
 
@@ -3789,6 +3779,26 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 
 	if got := cfg.ResolveEnv("42", "BASE_BRANCH"); got != "release" {
 		t.Errorf("ResolveEnv(42, BASE_BRANCH) = %q, want %q", got, "release")
+	}
+}
+
+// The wired dispatch resolver chain delivers the host git identity to the Box env (issue #5329).
+func TestDispatchConfig_ResolveEnv_GitIdentityFallsBackToHostGitConfig(t *testing.T) {
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	cf := forge.NewFake()
+
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
+	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
+
+	if got := cfg.ResolveEnv("42", "GIT_USER_NAME"); got != "Host Name" {
+		t.Errorf("ResolveEnv(42, GIT_USER_NAME) = %q, want %q", got, "Host Name")
+	}
+	if got := cfg.ResolveEnv("42", "GIT_USER_EMAIL"); got != "host@example.com" {
+		t.Errorf("ResolveEnv(42, GIT_USER_EMAIL) = %q, want %q", got, "host@example.com")
 	}
 }
 
