@@ -1505,17 +1505,26 @@ bakes a plugin instead (issue #5346): `agent/opencode-guards.js`, placed at
 `~/.config/opencode/plugins/spindrift-guards.js`, which opencode registers on
 its own — no `opencode.json` entry. It is absent from the `claude` image. Its
 `tool.execute.before` hook runs the same baked scripts on every `bash` call,
-`reject-background-bash.sh` then `env-credential-scrub.sh`, so their logic,
+`reject-background-bash.sh`, `env-credential-scrub.sh`, then
+`bash-output-tee.sh` (last, wrapping the scrubbed command), so their logic,
 messages, and the shared credential list stay single-sourced. A hook deny
 throws the hook's own message, refusing the call; the scrub's `unset` rewrite
 is applied to the command. A hook that cannot run or answer refuses the call
-rather than letting it through with its credentials intact.
+rather than letting it through with its credentials intact or without the
+tee's log.
 
-The plugin does not run `credential-deny.sh` (the opencode credential deny
-config above stands in for it) or the `bash-output-tee.sh` / summary hooks, so
-under `opencode` the captured-output tee is not in force. The plugin is plain
-ESM with `node:` builtins only, since opencode's background `npm install` into
-its directory fails offline.
+Its `tool.execute.after` hook runs `bash-output-summary.sh` on the same
+rewritten arguments and replaces the tool output with the script's
+`updatedToolOutput`, so the [Bash command-output
+interceptor](#bash-command-output-interceptor) bound holds under `opencode` too
+(issue #5358), keeping opencode's trailing `<shell_metadata>` block (the timeout
+or user-abort notice) after the summary. Unlike a before hook, a failing
+summary hook leaves the result unchanged, since the call has already run.
+
+The plugin does not run `credential-deny.sh`; the opencode credential deny
+config above stands in for it. The plugin is plain ESM with `node:` builtins
+only, since opencode's background `npm install` into its directory fails
+offline.
 
 ### Cold-run toolchain nudge
 
@@ -2256,6 +2265,10 @@ credential `unset` rewrite silently losing to
 this one, `bash-output-tee.sh` duplicates that same `unset` as the first line
 inside its own wrapped command — redundant if both hooks' rewrites do compose,
 but correct either way.
+
+Under the `opencode` Driver the [guard
+plugin](#the-opencode-driver-guards-bash-through-a-plugin) runs the same two
+scripts, so the tail bound (`BASH_OUTPUT_SUMMARY_TAIL_BYTES`) is the same.
 
 ### Declared touch-set overlap
 

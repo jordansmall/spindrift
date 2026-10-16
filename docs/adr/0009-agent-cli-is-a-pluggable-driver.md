@@ -380,8 +380,9 @@ package (0.99.2):
   tool. The script list is generated from the same data as `claude`'s hook
   settings. pi therefore keeps credential deny, the environment credential
   scrub, background-Bash rejection and the Bash output tee; `opencode`'s
-  guard plugin (issue #5346) keeps only the scrub and background-Bash
-  rejection, beside its baked credential deny config (issue #5345).
+  guard plugin (issue #5346) keeps the scrub, background-Bash rejection and
+  the Bash output tee (issue #5358), beside its baked credential deny config
+  (issue #5345).
 - **Project trust.** `--no-approve` ignores the Target repo's `.pi/`
   settings, extensions, MCP servers, skills and prompts, so nothing from the
   repository runs beside the hook bridge. pi still reads `CLAUDE.md` and
