@@ -1,5 +1,17 @@
 # Migration Guide
 
+## opencode subagents get only their roster tools (issue #5347)
+
+Under `DRIVER=opencode`, a roster entry's `tools` list now becomes a
+`permission` map on its agent file, so a subagent is denied any mapped tool
+its entry does not list: the default reviewer, scout, Filer and review-axis
+can no longer edit files. A roster entry naming a tool the opencode Driver
+cannot map (such as `NotebookEdit`) now fails evaluation, naming the agent
+and the tool, where it used to evaluate and grant the full tool set. Drop the
+unmapped name, or omit `tools` to keep opencode's full tool set. An explicit
+`tools = [ ]` now denies every mapped tool. Rosters under claude are
+unaffected.
+
 ## The opencode Driver now enables the Filer its roster provisions (issue #5330)
 
 Under `DRIVER=opencode`, Filer presence now follows the roster (and
