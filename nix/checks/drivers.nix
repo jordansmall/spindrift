@@ -67,6 +67,30 @@ let
     filerModel = "filer-m";
     workerModel = "worker-m";
   };
+  # Shared opencode agentFilesTemplate fixtures (issue #5347, following the
+  # #3348 shared-fixture pattern): a roster entry without `tools`, which each
+  # permission check extends, and the permission-line parse. The no-tools check
+  # uses the entry bare.
+  opencodeFixtureEntry = {
+    name = "fixture";
+    model = "fixture-model";
+    mode = "subagent";
+    description = "fixture description";
+    promptFile = "fixture-prompt.md";
+    prompt = null;
+  };
+  opencodePermissionLineOf =
+    file: pkgs.lib.findFirst (pkgs.lib.hasPrefix "permission: ") null (splitString "\n" file);
+  opencodePermissionOf =
+    rendered: agent:
+    let
+      file = rendered.".config/opencode/agents/${agent}.md" or "";
+      line = opencodePermissionLineOf file;
+    in
+    if line == null then
+      throw "opencode ${agent}.md carries no permission line, got: ${file}"
+    else
+      builtins.fromJSON (pkgs.lib.removePrefix "permission: " line);
 in
 {
   drivers-assert-shape-missing-attribute-throws =
@@ -385,6 +409,115 @@ in
     assert assertMsg (hasInfix "fixture scout description" scoutFile)
       "opencode agentFilesTemplate's scout.md must carry the scout description, got: ${scoutFile}";
     pkgs.runCommand "drivers-opencode-agent-files-scout-frontmatter" { } "touch $out";
+
+  # Issue #5347: opencode subagents default to the full tool set, so each
+  # roster entry's `tools` list must render as an explicit `permission` map;
+  # a reviewer holding no Edit/Write must therefore render `edit: deny`.
+  drivers-opencode-agent-files-default-roster-permissions =
+    let
+      rendered = driverRegistry.entries.opencode.agentFilesTemplate { roster = defaultRosterFixture; };
+      expectedEdit = {
+        reviewer = "deny";
+        scout = "deny";
+        filer = "deny";
+        review-axis = "deny";
+        worker = "allow";
+      };
+    in
+    assert builtins.all (
+      agent:
+      let
+        permission = opencodePermissionOf rendered agent;
+      in
+      assertMsg (permission.edit == expectedEdit.${agent})
+        "opencode ${agent} agent must render edit: ${expectedEdit.${agent}}, got: ${builtins.toJSON permission}"
+    ) (builtins.attrNames expectedEdit);
+    pkgs.runCommand "drivers-opencode-agent-files-default-roster-permissions" { } "touch $out";
+
+  # An explicit tool list maps to exactly the allow set; every other mapped
+  # opencode key is denied because opencode treats an unset key as allow.
+  drivers-opencode-agent-files-permission-map =
+    let
+      rendered = driverRegistry.entries.opencode.agentFilesTemplate {
+        roster = [
+          (
+            opencodeFixtureEntry
+            // {
+              tools = [
+                "Read"
+                "Agent"
+              ];
+            }
+          )
+        ];
+      };
+      parsed = opencodePermissionOf rendered "fixture";
+      expected = {
+        read = "allow";
+        task = "allow";
+        edit = "deny";
+        bash = "deny";
+        glob = "deny";
+        grep = "deny";
+        webfetch = "deny";
+        websearch = "deny";
+        todowrite = "deny";
+        skill = "deny";
+      };
+    in
+    assert assertMsg (parsed == expected)
+      "opencode permission map for [Read Agent] must allow only read/task, got: ${builtins.toJSON parsed}";
+    pkgs.runCommand "drivers-opencode-agent-files-permission-map" { } "touch $out";
+
+  # A tool name with no opencode mapping must fail the render rather than be
+  # dropped, which would silently widen or narrow the subagent's grant.
+  drivers-opencode-agent-files-unmapped-tool-throws =
+    let
+      rendered = driverRegistry.entries.opencode.agentFilesTemplate {
+        roster = [
+          (
+            opencodeFixtureEntry
+            // {
+              tools = [
+                "Read"
+                "NotebookEdit"
+              ];
+            }
+          )
+        ];
+      };
+      result = builtins.tryEval (builtins.deepSeq rendered rendered);
+      # Same fixture minus the unmapped tool: it must render, so the failure
+      # above is attributable to NotebookEdit and not a fixture typo.
+      control =
+        let
+          ok = driverRegistry.entries.opencode.agentFilesTemplate {
+            roster = [ (opencodeFixtureEntry // { tools = [ "Read" ]; }) ];
+          };
+        in
+        builtins.tryEval (builtins.deepSeq ok ok);
+    in
+    assert assertMsg control.success
+      "opencode agentFilesTemplate control (tools = [ Read ]) must render";
+    assert assertMsg (
+      !result.success
+    ) "opencode agentFilesTemplate must throw on a tool name with no opencode permission mapping";
+    pkgs.runCommand "drivers-opencode-agent-files-unmapped-tool-throws" { } "touch $out";
+
+  # An entry without `tools` keeps opencode's full tool set, so it must render
+  # no permission line at all.
+  drivers-opencode-agent-files-no-tools-no-permission =
+    let
+      rendered = driverRegistry.entries.opencode.agentFilesTemplate {
+        roster = [ opencodeFixtureEntry ];
+      };
+      file = rendered.".config/opencode/agents/fixture.md" or "";
+    in
+    assert assertMsg (file != "") "opencode fixture.md must render for an entry without tools";
+    assert assertMsg (
+      opencodePermissionLineOf file == null
+    ) "opencode entry without tools must render no permission line, got: ${file}";
+    pkgs.runCommand "drivers-opencode-agent-files-no-tools-no-permission" { } "touch $out";
 
   # The empty-model-entry-dropped invariant (#392) lives at the dropOptedOut
   # layer, in nix/checks/roster.nix, not here.
