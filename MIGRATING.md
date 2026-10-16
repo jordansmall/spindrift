@@ -1,5 +1,16 @@
 # Migration Guide
 
+## The opencode Driver now enables the Filer its roster provisions (issue #5330)
+
+Under `DRIVER=opencode`, Filer presence now follows the roster (and
+`FILER_MODEL` when no input document is loaded) as it does under claude, so
+an opencode Box with a Filer hands it non-blocking findings and the host
+files them. On a read-only opencode deployment with a Filer, `spindrift
+doctor` now requires the `agent-review-finding` label, so a doctor run that
+passed before can fail until you create it. An opencode butler daemon that
+refused to start for want of a provisioned Filer now starts. To keep the
+Filer off, opt it out of the roster (`model = ""`).
+
 ## Roster inline prompts need a unique, bare promptFile (issue #5203)
 
 A roster entry with a non-empty inline `prompt` now fails evaluation when its
