@@ -232,7 +232,7 @@ let
       + "\n"
     )
     # Symmetric with DRIVER_AGENT_FILES_DIR above (issue #2843): the var stays
-    # unset, not empty, for opencode, which has no resumable session state.
+    # unset, not empty, for a Driver with no resumable session state.
     # lib/preambles.nix's renderDriverMountPreamble renders a same-named var for
     # the host-side launcher process, a separate consumer.
     + lib.optionalString (driverEntry ? sessionCacheDirRelative) (

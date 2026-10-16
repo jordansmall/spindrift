@@ -57,6 +57,29 @@ let
     else
       pin;
   pinnedMaxMcpOutputTokens = 2000;
+  mountpointBaked =
+    name: h:
+    let
+      relPath = h.internals.driverEntry.sessionCacheDirRelative;
+      bakedPath = "home/agent/${relPath}";
+      awkPattern = pkgs.lib.replaceStrings [ "/" "." ] [ "\\/" "\\." ] bakedPath;
+    in
+    pkgs.runCommand name { nativeBuildInputs = [ pkgs.jq ]; } ''
+      mkdir img && tar -xf ${h.image} -C img
+      layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
+      uid=$(tar --numeric-owner -tvf "img/$layer" \
+        | awk '/${awkPattern}\/?$/ { split($2,a,"/"); print a[1]; exit }' \
+        || true)
+      [ -n "$uid" ] || {
+        echo "${bakedPath} not found in the image's top (customisation) layer" >&2
+        exit 1
+      }
+      [ "$uid" = "1000" ] || {
+        echo "${bakedPath} is not owned by uid 1000 (got: '$uid')" >&2
+        exit 1
+      }
+      touch $out
+    '';
 in
 {
   # The baked entrypoint must carry a store-path shebang, not the source's
@@ -831,28 +854,10 @@ in
   # fabricating root-owned parent dirs at mount time (issue #447). The path
   # comes from driverEntry (issue #448), and only the top layer carries that
   # ownership, because fakeRootCommands' chown runs there.
-  projects-mountpoint-baked =
-    let
-      relPath = nonRustHarness.internals.driverEntry.sessionCacheDirRelative;
-      bakedPath = "home/agent/${relPath}";
-      awkPattern = pkgs.lib.replaceStrings [ "/" "." ] [ "\\/" "\\." ] bakedPath;
-    in
-    pkgs.runCommand "projects-mountpoint-baked" { nativeBuildInputs = [ pkgs.jq ]; } ''
-      mkdir img && tar -xf ${nonRustHarness.image} -C img
-      layer="$(jq -r '.[0].Layers[-1]' img/manifest.json)"
-      uid=$(tar --numeric-owner -tvf "img/$layer" \
-        | awk '/${awkPattern}\/?$/ { split($2,a,"/"); print a[1]; exit }' \
-        || true)
-      [ -n "$uid" ] || {
-        echo "${bakedPath} not found in the image's top (customisation) layer" >&2
-        exit 1
-      }
-      [ "$uid" = "1000" ] || {
-        echo "${bakedPath} is not owned by uid 1000 (got: '$uid')" >&2
-        exit 1
-      }
-      touch $out
-    '';
+  projects-mountpoint-baked = mountpointBaked "projects-mountpoint-baked" nonRustHarness;
+
+  # opencode's session cache dir (issue #5349) needs the same uid-1000 bake.
+  session-cache-mountpoint-baked-opencode = mountpointBaked "session-cache-mountpoint-baked-opencode" opencodeHarness;
 
   # nix/var must be owned by uid 1000 so the non-root agent can lock the
   # SQLite store DB inside the unprivileged container (issue #356).
