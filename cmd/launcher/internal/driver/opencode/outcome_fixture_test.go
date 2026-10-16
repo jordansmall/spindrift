@@ -80,7 +80,7 @@ func TestResultText_Envelope(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if want := "one\ntwo\n"; got != want {
+		if want := "two\n"; got != want { // ID-less events are separate messages
 			t.Errorf("ResultText = %q, want %q", got, want)
 		}
 	})
@@ -93,6 +93,65 @@ func TestResultText_Envelope(t *testing.T) {
 			t.Fatal(err)
 		}
 		if want := "kept\n"; got != want {
+			t.Errorf("ResultText = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestResultText_LastMessageOnly(t *testing.T) {
+	text := func(msg, s string) string {
+		return fmt.Sprintf(`{"type":"text","part":{"messageID":%q,"text":%q}}`, msg, s)
+	}
+	ev := func(typ, msg string) string {
+		return fmt.Sprintf(`{"type":%q,"part":{"messageID":%q}}`, typ, msg)
+	}
+	const decoy = "SPINDRIFT_OUTCOME issue=1 landing=x status=ready note=mid"
+
+	t.Run("mid-pass outcome line does not survive", func(t *testing.T) {
+		path := WriteLog(t, text("msg_1", decoy), ev("step_finish", "msg_1"), text("msg_2", "all done, no outcome yet"))
+		got, err := ResultText(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "all done, no outcome yet\n"; got != want {
+			t.Errorf("ResultText = %q, want %q", got, want)
+		}
+		if line := outcome.ExtractOutcomeLine(outcome.StripResultText(got)); line != "" {
+			t.Errorf("ExtractOutcomeLine = %q, want none", line)
+		}
+	})
+	t.Run("textless final message yields empty", func(t *testing.T) {
+		path := WriteLog(t, text("msg_1", decoy), ev("tool_use", "msg_1"), ev("step_finish", "msg_1"),
+			ev("step_start", "msg_2"), ev("step_finish", "msg_2"))
+		got, err := ResultText(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "" {
+			t.Errorf("ResultText = %q, want \"\"", got)
+		}
+	})
+	t.Run("parts of the last message join across interleaved events", func(t *testing.T) {
+		path := WriteLog(t, text("msg_1", "first"), text("msg_2", "a"), ev("step_finish", "msg_2"), text("msg_2", "b"))
+		got, err := ResultText(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "a\nb\n"; got != want {
+			t.Errorf("ResultText = %q, want %q", got, want)
+		}
+	})
+	t.Run("synthetic ResultEvent stays the final message", func(t *testing.T) {
+		syn, err := ResultEvent("BLOCK: nope")
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := WriteLog(t, text("msg_1", "first"), strings.TrimSuffix(string(syn), "\n"))
+		got, err := ResultText(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "BLOCK: nope\n"; got != want {
 			t.Errorf("ResultText = %q, want %q", got, want)
 		}
 	})

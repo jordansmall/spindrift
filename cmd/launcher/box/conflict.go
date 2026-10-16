@@ -107,9 +107,9 @@ func (r *boxRun) conflictPass() (string, error) {
 	return r.passSummary(p.Driver, logFile), nil
 }
 
-// passSummary reads the Driver's result text (the agent's final message under
-// claude) off its stream log. The pass is advisory — success is the rebase
-// state — so an unreadable log means no summary, never a failed Box.
+// passSummary reads the Driver's result text (the agent's final message) off
+// its stream log. The pass is advisory — success is the rebase state — so an
+// unreadable log means no summary, never a failed Box.
 func (r *boxRun) passSummary(driverName, streamLog string) string {
 	text, err := resultText(driverName, streamLog)
 	if err != nil {

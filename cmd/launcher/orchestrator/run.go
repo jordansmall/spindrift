@@ -663,7 +663,8 @@ func runDeltaReviewGate(cfg config, state *runstate.RunState, passLandDelta *lan
 	// A BLOCK here contradicts the land pass's claimed status=ready, so append
 	// a corrective status=blocked result event to the land pass's log, where
 	// box's last-match-wins scan (outcome.ExtractOutcomeLine) finds it after the
-	// ready line. Not echoed to stdout: box prints the extracted line itself.
+	// ready line under claude, and as the whole final message under opencode.
+	// Not echoed to stdout: box prints the extracted line itself.
 	// Issue and Landing carry over verbatim.
 	if passmachine.Verdict(deltaVerdict) == passmachine.VerdictBlock {
 		blocked := landOutcome
