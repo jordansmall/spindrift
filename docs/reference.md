@@ -1227,8 +1227,9 @@ opencode v1.18.35's source (`run.ts` `emit()` and the yargs fail handler), and
 a scrubbed real capture should replace them when one exists.
 
 To add a log, scrub a raw capture, then review it by hand. The scrubber
-redacts credential-shaped strings, emails and host home paths (anything under
-`/home/<user>` or `/Users/<user>` except the Box's `/home/agent`). It also
+redacts credential-shaped strings, emails, host home paths (anything under
+`/home/<user>` or `/Users/<user>` except the Box's `/home/agent`) and the
+`GIT_USER_NAME` value in the `dispatch_start` knobs. It also
 blanks the JSON values that carry repo content: tool results and their
 output, file bodies in tool inputs (`content`, `old_string`/`new_string` and
 the like, plus a subagent's `prompt`), heredoc bodies inside a tool's
@@ -1254,8 +1255,8 @@ Then write its goldens with `nix run .#regen-goldens`, or, from
 that deliberately alters a reader's output (a behaviour fix), never in a
 Driver's switch to the shared readers (issue #4944), where an unchanged golden
 is the proof the switch preserved behaviour. `TestDriverCorpusHasNoCredentials`
-rejects any credential-shaped string, email or host home path in the corpus,
-in CI and the in-box gate. It cannot recognise repo content, so it does not
+rejects any credential-shaped string, email, host home path or
+`GIT_USER_NAME` value in the corpus, in CI and the in-box gate. It cannot recognise repo content, so it does not
 check that bodies were blanked.
 
 #### Loop/background affordances are stripped, not merely discouraged
