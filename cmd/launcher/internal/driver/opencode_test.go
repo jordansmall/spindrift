@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
 
@@ -344,4 +345,30 @@ func TestOpencodeSessionFlags(t *testing.T) {
 			}
 		}
 	})
+}
+
+// The registered opencode Driver carries the error event's reset time to the
+// retry hold, the same way claude's resetsAt does.
+func TestOpencodeDriverClassifyTransientCarriesResetAt(t *testing.T) {
+	d, err := New("opencode")
+	if err != nil {
+		t.Fatalf("New(opencode): %v", err)
+	}
+	logPath := filepath.Join(t.TempDir(), "box.log")
+	line := `{"type":"error","timestamp":1760610000000,"error":{"name":"APIError","data":{"statusCode":429,"responseHeaders":{"retry-after":"3600"}}}}` + "\n"
+	if err := os.WriteFile(logPath, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.ClassifyTransient(logPath)
+	if err != nil {
+		t.Fatalf("ClassifyTransient: %v", err)
+	}
+	if got.Class != Transient || got.Reason != RateLimit {
+		t.Fatalf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, Transient, RateLimit)
+	}
+	want := time.UnixMilli(1760610000000).Add(time.Hour).UTC()
+	if got.ResetAt == nil || !got.ResetAt.Equal(want) {
+		t.Errorf("ResetAt: got %v, want %v", got.ResetAt, want)
+	}
 }

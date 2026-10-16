@@ -1,8 +1,10 @@
 package opencode_test
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/driver/opencode"
@@ -183,4 +185,68 @@ func TestClassify_NonJSONLines_OnlyTerminalMarkersCount(t *testing.T) {
 		{"plain 429 stderr", []string{"request failed with status 429"}, driverkit.Terminal, driverkit.TaskFailed},
 		{"usage dump after progress", []string{`{"type":"text","part":{"text":"hi"}}`, "opencode run [message..]"}, driverkit.Terminal, driverkit.UnsupportedFlag},
 	})
+}
+
+// apiError builds an opencode APIError event as run.ts emits it: the event
+// timestamp is epoch milliseconds and the response headers are lowercased.
+func apiError(ts int64, status int, headers string) string {
+	return fmt.Sprintf(`{"type":"error","timestamp":%d,"sessionID":"ses_x","error":{"name":"APIError","data":{"message":"x","statusCode":%d,"isRetryable":true,"responseHeaders":{%s}}}}`, ts, status, headers)
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func TestClassify_ResetAt(t *testing.T) {
+	const ts = 1760610000000 // 2025-10-16T10:20:00Z
+	base := time.UnixMilli(ts).UTC()
+	httpDate := time.Date(2025, 10, 16, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name   string
+		lines  []string
+		reason driverkit.Reason
+		want   *time.Time
+	}{
+		{"retry-after seconds", []string{apiError(ts, 429, `"retry-after":"3600"`)}, driverkit.RateLimit, ptr(base.Add(time.Hour))},
+		{"fractional seconds", []string{apiError(ts, 429, `"retry-after":"1.5"`)}, driverkit.RateLimit, ptr(base.Add(1500 * time.Millisecond))},
+		{"mixed-case header name", []string{apiError(ts, 429, `"Retry-After":"60"`)}, driverkit.RateLimit, ptr(base.Add(time.Minute))},
+		{"retry-after-ms preferred", []string{apiError(ts, 429, `"retry-after":"3600","retry-after-ms":"2500"`)}, driverkit.RateLimit, ptr(base.Add(2500 * time.Millisecond))},
+		{"HTTP date", []string{apiError(ts, 429, `"retry-after":"Thu, 16 Oct 2025 12:00:00 GMT"`)}, driverkit.RateLimit, ptr(httpDate)},
+		{"HTTP date needs no timestamp", []string{apiError(0, 429, `"retry-after":"Thu, 16 Oct 2025 12:00:00 GMT"`)}, driverkit.RateLimit, ptr(httpDate)},
+		{"relative without timestamp", []string{apiError(0, 429, `"retry-after":"60"`)}, driverkit.RateLimit, nil},
+		{"unparseable header", []string{apiError(ts, 429, `"retry-after":"soon"`)}, driverkit.RateLimit, nil},
+		{"no headers", []string{apiError(ts, 429, ``)}, driverkit.RateLimit, nil},
+		{"overloaded ignores header", []string{apiError(ts, 529, `"retry-after":"60"`)}, driverkit.Overloaded, nil},
+		{"string error", []string{`{"type":"error","timestamp":1,"error":"rate_limit_error"}`}, driverkit.RateLimit, nil},
+		{"progress clears the latch", []string{
+			apiError(ts, 429, `"retry-after":"60"`),
+			`{"type":"step_start"}`,
+			apiError(ts, 429, ``),
+		}, driverkit.RateLimit, nil},
+		{"later non-matching error keeps reset", []string{
+			apiError(ts, 429, `"retry-after":"60"`),
+			`{"type":"error","timestamp":1760610001000,"error":"something unrelated"}`,
+		}, driverkit.RateLimit, ptr(base.Add(time.Minute))},
+		{"later transient error replaces reset", []string{
+			apiError(ts, 429, `"retry-after":"60"`),
+			apiError(ts, 529, `"retry-after":"60"`),
+		}, driverkit.Overloaded, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := opencode.Classify(opencode.WriteLog(t, tc.lines...))
+			if err != nil {
+				t.Fatalf("Classify: %v", err)
+			}
+			if got.Class != driverkit.Transient || got.Reason != tc.reason {
+				t.Fatalf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Transient, tc.reason)
+			}
+			switch {
+			case tc.want == nil && got.ResetAt != nil:
+				t.Errorf("ResetAt: got %v, want nil", *got.ResetAt)
+			case tc.want != nil && got.ResetAt == nil:
+				t.Errorf("ResetAt: got nil, want %v", *tc.want)
+			case tc.want != nil && !got.ResetAt.Equal(*tc.want):
+				t.Errorf("ResetAt: got %v, want %v", *got.ResetAt, *tc.want)
+			}
+		})
+	}
 }
