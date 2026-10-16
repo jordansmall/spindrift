@@ -152,8 +152,8 @@ func main() {
 }
 
 // resolveExit asks the Driver for the final exit code (issue #2263); each
-// Driver weighs the process exit code against the log's outcome markers
-// itself, so this call site carries no per-Driver knowledge. A ResolveExit
+// Driver applies its own exit-code correction itself,
+// so this call site carries no per-Driver knowledge. A ResolveExit
 // error degrades to rc rather than masking a possibly successful run behind a
 // resolution failure.
 func resolveExit(d driver.Driver, rc int, logPath string) int {

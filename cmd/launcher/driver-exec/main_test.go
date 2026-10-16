@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -219,18 +220,12 @@ func TestMainRunPromptFileRequiredWhenBothEmpty(t *testing.T) {
 	}
 }
 
-// TestResolveExitUsesSynthesizedExitForOpencode pins issue #2263: opencode's
-// own process exit code is not trustworthy (see
-// driver/opencode/exitsynth.go), so driver-exec must apply the Driver's
-// ResolveExit result after run returns.
-func TestResolveExitUsesSynthesizedExitForOpencode(t *testing.T) {
-	dir := t.TempDir()
-	logPath := filepath.Join(dir, "stream.log")
-	// A valid outcome line with no error event synthesizes to 0, distinct
-	// from the child rc the test passes in, so a pass proves the synthesized
-	// value replaced that rc rather than coincidentally matching it.
-	content := `{"type":"result","status":"ready"}` + "\n"
-	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+// TestResolveExitAppliesOpencodeErrorEvent pins issue #2263: opencode exits 0
+// after a mid-run error, so driver-exec must apply the Driver's ResolveExit
+// result after run returns.
+func TestResolveExitAppliesOpencodeErrorEvent(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "stream.log")
+	if err := os.WriteFile(logPath, []byte(`{"type":"error","error":"boom"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -239,9 +234,11 @@ func TestResolveExitUsesSynthesizedExitForOpencode(t *testing.T) {
 		t.Fatalf("driver.New(opencode): %v", err)
 	}
 
-	got := resolveExit(d, 7, logPath)
-	if got == 7 {
-		t.Errorf("resolveExit = %d, want it to replace the child rc (7) with the synthesized exit code", got)
+	if got := resolveExit(d, 0, logPath); got != 1 {
+		t.Errorf("resolveExit = %d, want 1 (error event behind exit 0)", got)
+	}
+	if got := resolveExit(d, 7, logPath); got != 7 {
+		t.Errorf("resolveExit = %d, want 7 (non-zero rc kept)", got)
 	}
 }
 
@@ -259,22 +256,20 @@ func TestResolveExitLeavesClaudeExitCodeUntouched(t *testing.T) {
 	}
 }
 
-// TestResolveExitOnErrorKeepsOriginalRC pins that a ResolveExit failure
-// degrades to the original child rc instead of masking a real failure behind
-// a resolution failure.
-func TestResolveExitOnErrorKeepsOriginalRC(t *testing.T) {
-	d, err := driver.New("opencode")
-	if err != nil {
-		t.Fatalf("driver.New(opencode): %v", err)
-	}
+// errResolveDriver is a Driver whose ResolveExit always fails.
+type errResolveDriver struct{ driver.Driver }
 
-	// SynthesizeExit tolerates a missing log (see driver/opencode's
-	// TestSynthesizeExit_MissingFile_IsNonZero), so this reaches the fallback
-	// path indirectly: a missing file still yields a non-error, non-zero
-	// synthesized code that must replace the child rc.
-	got := resolveExit(d, 0, filepath.Join(t.TempDir(), "does-not-exist.log"))
-	if got == 0 {
-		t.Errorf("resolveExit = %d, want a non-zero synthesized exit for a missing/invalid log", got)
+func (errResolveDriver) ResolveExit(string, int) (int, error) {
+	return 99, errors.New("resolve failed")
+}
+
+// A ResolveExit error must degrade to the child's own rc, not mask a possibly
+// successful run behind the resolution failure.
+func TestResolveExitDegradesToRCOnDriverError(t *testing.T) {
+	for _, rc := range []int{0, 3} {
+		if got := resolveExit(errResolveDriver{}, rc, "unused.log"); got != rc {
+			t.Errorf("resolveExit(rc=%d) = %d, want the original rc", rc, got)
+		}
 	}
 }
 
