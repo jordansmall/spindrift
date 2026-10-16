@@ -17,6 +17,7 @@ import (
 	"spindrift.dev/launcher/internal/driver/corpus"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/golden"
+	"spindrift.dev/launcher/internal/passmachine"
 )
 
 const corpusRoot = "testdata/corpus"
@@ -37,12 +38,13 @@ type modelCall struct {
 // heartbeat feeds log through the Driver's heartbeat writer in the given
 // chunk sizes (cycled), returning the raw bytes forwarded, the lines written,
 // and the OnModel calls. Slices are never nil so they marshal as [].
-func heartbeat(t *testing.T, d driver.Driver, log []byte, chunks func() int) (raw []byte, lines []string, models []modelCall) {
+func heartbeat(t *testing.T, d driver.Driver, log []byte, role string, chunks func() int) (raw []byte, lines []string, models []modelCall) {
 	t.Helper()
 	var rawBuf, out bytes.Buffer
 	models = []modelCall{}
 	w := d.NewHeartbeatWriter(&rawBuf, heartbeatIssue, &out, driverkit.RenderOptions{
-		OnModel: func(model, role string) { models = append(models, modelCall{model, role}) },
+		TopLevelRole: role,
+		OnModel:      func(model, role string) { models = append(models, modelCall{model, role}) },
 	})
 	for rest := log; len(rest) > 0; {
 		n := min(chunks(), len(rest))
@@ -139,11 +141,36 @@ func TestDriverCorpusGoldens(t *testing.T) {
 				}
 				check("usage.golden.json", marshal(t, report))
 
-				transcript, err := d.RenderTranscript(logPath, driverkit.RenderOptions{})
+				// An absent render.json renders under the Driver's default role.
+				var opts driverkit.RenderOptions
+				if b, err := os.ReadFile(filepath.Join(dir, "render.json")); err == nil {
+					var cfg struct {
+						TopLevelRole string `json:"topLevelRole"`
+					}
+					dec := json.NewDecoder(bytes.NewReader(b))
+					dec.DisallowUnknownFields()
+					if err := dec.Decode(&cfg); err != nil {
+						t.Fatalf("render.json: %v", err)
+					}
+					if cfg.TopLevelRole == "" {
+						t.Fatal("render.json: topLevelRole is empty")
+					}
+					opts.TopLevelRole = cfg.TopLevelRole
+				} else if !errors.Is(err, fs.ErrNotExist) {
+					t.Fatal(err)
+				}
+
+				transcript, err := d.RenderTranscript(logPath, opts)
 				if err != nil {
 					t.Fatalf("RenderTranscript: %v", err)
 				}
 				check("transcript.golden.txt", []byte(transcript))
+
+				if opts.TopLevelRole == driverkit.ReviewerRole {
+					check("verdict.golden.json", marshal(t, passmachine.Scan(transcript, passmachine.KindReview)))
+				} else if err := golden.RemoveIfUpdate(filepath.Join(dir, "verdict.golden.json"), update); err != nil {
+					t.Error(err)
+				}
 
 				result, err := d.ResultText(logPath)
 				if err != nil {
@@ -161,7 +188,7 @@ func TestDriverCorpusGoldens(t *testing.T) {
 				}
 				check("resolve-exit.golden.json", marshal(t, exits))
 
-				raw, lines, models := heartbeat(t, d, log, func() int { return len(log) })
+				raw, lines, models := heartbeat(t, d, log, opts.TopLevelRole, func() int { return len(log) })
 				if !bytes.Equal(raw, log) {
 					t.Errorf("single-write heartbeat forwarded %d bytes, want the %d-byte log unchanged", len(raw), len(log))
 				}
@@ -175,7 +202,7 @@ func TestDriverCorpusGoldens(t *testing.T) {
 					splits["random-seed-"+strconv.FormatInt(seed, 10)] = func() int { return 1 + rng.Intn(maxChunk) }
 				}
 				for label, chunks := range splits {
-					gotRaw, gotLines, gotModels := heartbeat(t, d, log, chunks)
+					gotRaw, gotLines, gotModels := heartbeat(t, d, log, opts.TopLevelRole, chunks)
 					if !bytes.Equal(gotRaw, log) {
 						t.Errorf("%s: forwarded bytes differ from the input", label)
 					}

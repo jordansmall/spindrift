@@ -1,0 +1,13 @@
+{
+  "lines": [
+    "#42 ── reviewer · sonnet ───────────",
+    "#42 · VERDICT: BLOCK",
+    "#42 reviewer · 1 turn"
+  ],
+  "onModel": [
+    {
+      "model": "claude-sonnet-5",
+      "role": "reviewer"
+    }
+  ]
+}
