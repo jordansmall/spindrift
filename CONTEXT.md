@@ -740,25 +740,30 @@ one Issue Tracker stores them: `Dispatchable` (a human marked the issue ready �
 the launch button) → `InProgress` (a Box has been dispatched; re-runs skip it) →
 `Complete` (the agent has nothing left to do — its landing path has settled:
 a merged/handed-off PR on `github`, a landed branch when the Code Forge is
-push-only/absent, or a posted verdict for a research dispatch) or `Failed`
+push-only/absent, or a posted verdict for a research dispatch), `Failed`
 (the Box crashed, never reached green past MAX_FIX_ATTEMPTS, or — on `github`
 — a force-pushed head from rebase-retry or an agent conflict-resolve box
-could not be brought back to green; human triage, re-transition to retry). Each
-Issue Tracker adapter maps these states to its native mechanism:
+could not be brought back to green; human triage, re-transition to retry),
+`Recoverable` (stranded but salvageable work on a push-only `local` Code
+Forge; see [[Recoverable]]), or `Ambiguous` (a work Box stopped
+`status=ambiguous` because the pre-implement gate found the spec
+contradictory; never `Failed` — a human resolves the spec and re-triggers).
+Each Issue Tracker adapter maps these states to its native mechanism:
 
 - `github` — labels (`ready-for-agent` → `agent-in-progress` →
-  `agent-complete`/`agent-failed`), swapped atomically. This is the original,
-  unchanged mechanism.
+  `agent-complete`/`agent-failed`, or `agent-ambiguous-spec` for `Ambiguous`),
+  swapped atomically. This is the original, unchanged mechanism.
 - `jira` — a configurable status mapping (state → that project's workflow status
   name/id), since there is no universal Jira workflow to assume; when a state is
   unmapped, or the mapped transition isn't available on the issue's current
   workflow, falls back to swapping a Jira label for that state (mirroring
   `github`'s labels) so the lifecycle always makes progress.
 - `local` — a `state:` field in the issue file (frontmatter), rewritten in
-  place. Independently, a local issue also carries a native open/closed axis (a
-  `closed:` field, absent = open), the same way a GitHub issue is open/closed
-  independent of its dispatch labels; it is driven not by the launcher's
-  lifecycle but by Reconcile (ADR 0029).
+  place; it is also where [[Recoverable]] lives, as a frontmatter marker rather
+  than a real label. Independently, a local issue also carries a native
+  open/closed axis (a `closed:` field, absent = open), the same way a GitHub
+  issue is open/closed independent of its dispatch labels; it is driven not by
+  the launcher's lifecycle but by Reconcile (ADR 0029).
 
 On `github`, `Complete` is swapped once the landing path settles, not at first
 green: `immediate` mode can still do real agent work after green (rebase-retry,
