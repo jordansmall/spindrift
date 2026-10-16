@@ -93,12 +93,15 @@ type Handoff struct {
 	ReviewPromptFile string
 	// ReviewModel is extracted from AgentsJSONTemplate's "reviewer" key
 	// regardless of dispatch kind or FixPass. It stays empty when the template
-	// has no reviewer model, mirroring jq's `.reviewer.model // empty`. An explicit
-	// dispatch-time REVIEW_MODEL (issue #3171) binds over it last.
+	// has no reviewer model, mirroring jq's `.reviewer.model // empty`. Under
+	// opencode (DRIVER_AGENT_FILES_DIR) the baked reviewer.md `model:` overwrites
+	// it (issue #5350). An explicit dispatch-time REVIEW_MODEL (issue #3171)
+	// binds over both last.
 	ReviewModel string
 	// ReviewEffort mirrors ReviewModel, from the same reviewer key's "effort"
-	// field under the same condition, and is likewise overridden last by an
-	// explicit dispatch-time REVIEW_EFFORT (issue #3171).
+	// field under the same condition, is likewise overwritten by reviewer.md's
+	// `reasoningEffort:` under opencode (issue #5350), and is overridden last by
+	// an explicit dispatch-time REVIEW_EFFORT (issue #3171).
 	ReviewEffort string
 	// AdvisoryReviewer is true when the kind supplies its own reviewer prompt
 	// (butler, ADR 0056): its inline reviewer only
@@ -642,10 +645,11 @@ func Assemble(e Env, reg Registry) (Result, error) {
 	// The on-disk agent-file rewrite is the twin of the --agents JSON loop
 	// above, for a Driver (opencode) whose subagents use baked agent files.
 	// It must run after that loop: an existing reviewer.md's frontmatter
-	// model overwrites whatever the JSON path set in ReviewModel, and a
-	// missing reviewer.md leaves the JSON-path value unchanged.
+	// model and effort overwrite whatever the JSON path set in ReviewModel
+	// and ReviewEffort, and a missing reviewer.md leaves the JSON-path
+	// values unchanged.
 	if e.DriverAgentFilesDir != "" {
-		if err := rewriteAgentFiles(e, bodies.vars, &removed, &result.Handoff.ReviewModel, bodies.kind.Prompts.Reviewer); err != nil {
+		if err := rewriteAgentFiles(e, bodies.vars, &removed, &result.Handoff.ReviewModel, &result.Handoff.ReviewEffort, bodies.kind.Prompts.Reviewer); err != nil {
 			return Result{}, err
 		}
 	}
@@ -816,14 +820,15 @@ func frontmatterOf(data []byte) string {
 	return strings.TrimRight(string(data), "\n")
 }
 
-// reviewerModelFrontmatter extracts the `model:` YAML scalar from a baked
-// opencode reviewer.md's frontmatter. The baked shape is always a
-// double-quoted scalar, e.g. `model: "opus"`, so a prefix cut plus a quote
-// trim replaces the original's jq unwrap without a JSON parse. Returns ""
-// when the frontmatter has no `model:` line.
-func reviewerModelFrontmatter(frontmatter string) string {
+// frontmatterScalar extracts the `key:` YAML scalar (`model`,
+// `reasoningEffort`) from a baked opencode reviewer.md's frontmatter. The baked
+// shape is always a double-quoted scalar, e.g. `model: "opus"`, so a prefix cut
+// plus a quote trim replaces the original's jq unwrap without a JSON parse.
+// Returns "" when the frontmatter has no such line.
+func frontmatterScalar(frontmatter, key string) string {
+	prefix := key + ": "
 	for _, line := range strings.Split(frontmatter, "\n") {
-		if v, ok := strings.CutPrefix(line, "model: "); ok {
+		if v, ok := strings.CutPrefix(line, prefix); ok {
 			return strings.Trim(v, `"`)
 		}
 	}
@@ -832,18 +837,21 @@ func reviewerModelFrontmatter(frontmatter string) string {
 
 // rewriteAgentFiles is renderAgentsJSON's twin for a Driver (opencode) whose
 // subagents use on-disk agent files. Call it only when DriverAgentFilesDir is
-// set. reviewer.md's `model:` scalar overwrites
-// *reviewModel and the file is removed; a missing one leaves it untouched. A
-// kind with its own reviewer prompt (reviewerPrompt != "") keeps reviewer.md
+// set. reviewer.md's `model:` and `reasoningEffort:` scalars overwrite
+// *reviewModel and *reviewEffort (each "" when its key is absent) and the file
+// is removed; a missing one leaves both untouched. A kind with its own
+// reviewer prompt (reviewerPrompt != "") keeps reviewer.md
 // instead, since it never gets the code-owned review pass this removal makes
 // room for — the rewrite loop below then rewrites it from that kind's prompt
 // like any other agent file. Names are rewritten in sorted order, so Go map
 // order cannot vary results.
-func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, reviewModel *string, reviewerPrompt string) error {
+func rewriteAgentFiles(e Env, vars map[string]body, removed *removedVarScan, reviewModel, reviewEffort *string, reviewerPrompt string) error {
 	if reviewerPrompt == "" {
 		reviewerPath := filepath.Join(e.DriverAgentFilesDir, "reviewer.md")
 		if data, err := os.ReadFile(reviewerPath); err == nil {
-			*reviewModel = reviewerModelFrontmatter(frontmatterOf(data))
+			fm := frontmatterOf(data)
+			*reviewModel = frontmatterScalar(fm, "model")
+			*reviewEffort = frontmatterScalar(fm, "reasoningEffort")
 			if err := os.Remove(reviewerPath); err != nil {
 				return fmt.Errorf("remove %s: %w", reviewerPath, err)
 			}

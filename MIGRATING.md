@@ -1,5 +1,15 @@
 # Migration Guide
 
+## The opencode review pass runs at the roster reviewer's effort (issue #5350)
+
+Under `DRIVER=opencode`, the code-owned review pass now runs at the roster
+`reviewer` entry's effort (baked as `reasoningEffort:` in `reviewer.md`,
+`rosterDefaults.reviewer.effort`, `"high"` by default, passed as `--variant`)
+instead of the coordinator's own effort, as under claude. Every Consumer whose
+coordinator runs below `high` sees its review pass cost rise unless it pins
+`perSystem.spindrift.agents.models.reviewEffort` (or the roster's `reviewer`
+entry) explicitly. A dispatch-time `REVIEW_EFFORT` still wins.
+
 ## opencode subagents get only their roster tools (issue #5347)
 
 Under `DRIVER=opencode`, a roster entry's `tools` list now becomes a
@@ -1609,12 +1619,12 @@ Handoff. Set `perSystem.spindrift.agents.models.reviewEffort` in your
 Consumer flake (or the roster's `reviewer` entry directly) and rebuild
 (`spindrift build`) instead.
 
-Under `DRIVER=opencode` specifically, the review pass's effort now always
-falls back to the coordinator's own `--effort`: opencode's `agentsJsonTemplate`
-never renders a `reviewer` key, so there is no roster value for the Handoff
-to extract — the same fallback `REVIEW_MODEL` already has on that Driver.
-`perSystem.spindrift.agents.models.reviewEffort` has no effect under
-`DRIVER=opencode` for this reason.
+Until issue #5350, under `DRIVER=opencode` specifically, the review pass's
+effort always fell back to the coordinator's own `--effort`: opencode's
+`agentsJsonTemplate` never renders a `reviewer` key, so there was no roster
+value for the Handoff to extract, and
+`perSystem.spindrift.agents.models.reviewEffort` had no effect. The Handoff
+now reads `reviewer.md`'s `reasoningEffort:` instead.
 
 This is also a default-behavior change, not just a removed override: with
 `REVIEW_EFFORT` unset, the review pass previously fell back to the
@@ -1627,7 +1637,7 @@ roster's `reviewer` entry) explicitly.
 
 | Removed capability | Replacement |
 |---|---|
-| Dispatch-time `REVIEW_EFFORT=...` / `--review-effort ...` override | `perSystem.spindrift.agents.models.reviewEffort` in your Consumer flake under `DRIVER=claude` (image rebuild required); no effect under `DRIVER=opencode` |
+| Dispatch-time `REVIEW_EFFORT=...` / `--review-effort ...` override | `perSystem.spindrift.agents.models.reviewEffort` in your Consumer flake under `DRIVER=claude` (image rebuild required), and under `DRIVER=opencode` too since issue #5350 |
 
 ## `nix run .#run` / `nix run .#build` (removed in v0.5.0)
 
