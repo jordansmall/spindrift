@@ -639,11 +639,22 @@ sees the roster rather than inside each Driver's own render function.
 `lib/drivers/claude.nix` renders the roster it's handed into the `--agents`
 JSON flag; `lib/drivers/opencode.nix` renders it into
 `.config/opencode/agents/<name>.md` files instead, one per entry, each with
-`description`/`mode`/`model` frontmatter. opencode model ids are
-Provider-namespaced (`<provider>/<model>`), so under opencode a worker whose
-model has no `/` (such as the inherited schema default) is dropped: it is
-neither baked nor offered to the coordinator. An explicit namespaced worker
-model provisions it (issue #5331).
+`description`/`mode`/`model` frontmatter plus a `permission:` line derived from
+the entry's `tools` list. That line is a one-line JSON map over every
+permission key the `rosterToolPermissions` table (top of
+`lib/drivers/opencode.nix`) can produce: a key is `"allow"` when any of the
+entry's tools maps to it and `"deny"` otherwise, since opencode treats an unset
+key as allow (`Edit`/`Write`/`MultiEdit` share opencode's single `edit` key).
+Permission keys outside the table keep opencode's defaults, so the restriction
+covers the mapped tools only. An entry without `tools` gets no `permission:`
+line and keeps opencode's full tool set, whereas an explicit empty `tools = [ ]`
+denies every mapped key (`claude.nix` renders an omitted list as `[ ]`, so only
+opencode distinguishes the two); a tool name the table does not map fails
+evaluation, naming the agent and the tool, rather than being dropped. opencode
+model ids are Provider-namespaced (`<provider>/<model>`), so under opencode a
+worker whose model has no `/` (such as the inherited schema default) is
+dropped: it is neither baked nor offered to the coordinator. An explicit
+namespaced worker model provisions it (issue #5331).
 
 An entry may also set `effort` (issue #2242), a pass-through, driver-specific
 effort/reasoning-level string — spindrift does not normalize it, so the value
