@@ -56,15 +56,21 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   `GH_TOKEN_CMD="rbw get spindrift-pat"`) is the preferred way to supply
   every secret — it fetches from an operator-controlled command
   at launch and holds the value only in Launcher memory, so `harness.env` is
-  expected to hold fetch recipes rather than live credentials. Two always-on,
-  Harness-enforced `PreToolUse` hooks then close the loop inside the Box, not
-  operator configuration: one rewrites every Bash call to `unset`
-  `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs, so a
-  spawned subprocess never inherits either credential in the first place,
-  and the other denies any `Read`/`Bash` call targeting a known credential
-  path (`~/.claude/.credentials.json`, `**/.env`, `~/.config/gh/hosts.yml`)
-  — both enforced independently of `--dangerously-skip-permissions`. See
-  [Secret exposure model](docs/reference.md#secret-exposure-model).
+  expected to hold fetch recipes rather than live credentials. Under
+  the claude Driver, two always-on `PreToolUse` hooks then close the loop
+  inside the Box, not operator configuration: one rewrites every Bash call
+  to `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
+  so a spawned subprocess never inherits either credential in the first
+  place, and the other denies any `Read`/`Bash` call targeting a known
+  credential path (`~/.claude/.credentials.json`, `**/.env`,
+  `~/.config/gh/hosts.yml`) — both enforced independently of
+  `--dangerously-skip-permissions`. The opencode Driver never reads Claude
+  Code's hooks, so it gets a baked opencode permission config denying the
+  same paths plus opencode's own auth store instead; it has no
+  env-credential scrub, a Target repo's own opencode config can widen
+  the deny, and it misses redirects on compound commands, bare
+  `$(<file)`, and a glob next to the path (`cat .env*`). See [Secret exposure
+  model](docs/reference.md#secret-exposure-model).
 
 The secrets bullet above targets a different threat than the first two:
 **self-inflicted context contamination**, not adversarial exfiltration. The

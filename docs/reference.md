@@ -1044,7 +1044,10 @@ so a child of a multi-Driver Daemon prints the warning too.
 `lib/drivers/default.nix` is the registry: the deep module that both
 validates and renders every `lib/drivers/` entry (see `claude.nix`), so a
 per-Driver file (`claude.nix` itself, and any future sibling) stays pure
-data with no validation or rendering logic of its own (issue #624). A new
+data with no validation or rendering logic of its own (issue #624), except
+that a Driver may render its own `configFiles` content from shared registry
+data (`opencode.nix` expands `lib/credential-paths.nix` and calls
+`builtins.toJSON`). A new
 Driver entry declares:
 
 - `name`, `package`, `bin`, `flagsCommon`, `agentsJsonTemplate` — the
@@ -1073,6 +1076,11 @@ Driver entry declares:
   resumable session state (see above). When present it must be a non-empty
   `$HOME`-relative path with no leading, trailing or doubled slash and no
   `.`/`..` segment, checked at eval time by `assertShape`.
+- `configFiles` — an attrset of `$HOME`-relative path → file content baked
+  into the image's home (issue #5345). Optional and unvalidated; a Driver
+  whose config lives in hooks (`claude`) omits it. `lib/image.nix` fails the
+  build if a path collides with an `agentFilesTemplate` path. opencode uses
+  it for `.config/opencode/opencode.json`, its credential deny rules.
 - `argvShape` (ADR 0009, issue #2534) — the Driver's CLI argv-assembly
   shape, an attrset the Go/bash side walks to build the CLI invocation:
   `promptStyle` (`"flag"` or `"positional"`); `promptFlag` (required only
@@ -1301,15 +1309,17 @@ trailing `&`, `nohup`, `setsid`, `coproc`), a vector
 `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS` doesn't reach since it only ever
 governs the structured `run_in_background` parameter.
 
-#### Self-inflicted secret reads are structurally blocked
+#### Self-inflicted secret reads are denied per Driver
 
 Spec #1907's problem statement: an operator's direct experience is that the
 Driver has read secret-bearing files into its own context despite being told
 not to, and once a secret is in the transcript there is no output redaction
 — it's effectively leaked into per-issue logs, PR bodies, and issue comments.
-Issue #1909 closes this with two Harness-enforced, always-on defaults inside
-the Box — no operator configuration, no opt-out. Issue #1927 replaces the
-first of the two after a production regression:
+Issue #1909 closes this, for the claude Driver, with two Harness-enforced,
+always-on defaults inside the Box — no operator configuration, no opt-out.
+Issue #1927 replaces the first of the two after a production regression. The
+opencode Driver never reads Claude Code's `settings.json`, so neither hook
+runs under it; its own control is the last bullet below (issue #5345):
 
 - **Env-credential scrub hook (issue #1927; supersedes the
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` approach below).** Issue #1909
@@ -1378,8 +1388,41 @@ first of the two after a production regression:
   is: the Box invokes the Driver with `--dangerously-skip-permissions`,
   which bypasses the permission-rule system entirely, but hooks are their
   own enforcement layer and still fire under that flag.
+- **opencode credential deny config (issue #5345).** Under the opencode
+  Driver the two hooks above do not run. The Driver entry
+  (`lib/drivers/opencode.nix`) instead bakes
+  `~/.config/opencode/opencode.json` with `permission.read` and
+  `permission.bash` rules, all literal `"deny"`, generated from
+  `lib/credential-paths.nix` (the hook's paths, pinned to it by a parity
+  check) plus opencode's own auth store
+  (`.local/share/opencode/auth.json`). The Box runs opencode with
+  `--auto`, which approves only asks that no rule denies, and a deny wins
+  over opencode's built-in read defaults because its permission evaluation
+  takes the last matching rule and user config follows its defaults. Read
+  rules match the worktree-relative path (`P` and `*/P`); bash rules match
+  each parsed command's text, with the hook's lead/trail boundary classes
+  enumerated character by character (a check sweeps each one against the real
+  hook), so `config.env`, `.envrc`, and `printenv` stay allowed. Residuals
+  stay open, and opencode is not at parity with the hook:
+  - Like the hook, it is a text match: a path split across arguments or
+    built from a variable escapes it.
+  - opencode builds bash patterns only from simple commands (a command's own
+    text, or its enclosing redirect), so a redirect on a compound command,
+    subshell, loop, or `if` never reaches the matcher: `{ cat; } < .env`,
+    `( cat ) < .env`, and `while read l; do echo $l; done < .env` read a
+    credential the claude hook refuses, as does a bare `x=$(<.env)`, which
+    has no command node and triggers no permission check.
+  - A `*` or `?` directly next to the path (`cat .env*`) cannot be written as
+    a literal boundary, so it is not matched.
+  - opencode merges a Target repo's own project config (`opencode.json`,
+    `.opencode/`) after the global file, and the last matching rule wins, so
+    a Target repo can add an allow rule that widens the deny. The Claude
+    hook, by contrast, is home-wide and not overridable from the repo.
+  - There is no env-credential scrub equivalent: that hook is claude-only,
+    so a spawned subprocess under opencode still inherits the Box's
+    environment.
 
-None of the three controls break legitimate agent work: `gh`, `git`, and the
+None of these controls break legitimate agent work: `gh`, `git`, and the
 Driver authenticate via environment variables already forwarded into the
 Box, so they never need to *read* these files or *dump* their own
 environment.
@@ -2072,8 +2115,8 @@ threshold, and what they leave is the start of the output — the wrong end
 for a build error. Issue #1988 adds a uniform, error-oriented interceptor
 on top: a PreToolUse/PostToolUse hook pair, baked
 into the image alongside `reject-background-bash.sh` and the other hooks
-described in [Self-inflicted secret reads are structurally
-blocked](#self-inflicted-secret-reads-are-structurally-blocked), that applies
+described in [Self-inflicted secret reads are denied per
+Driver](#self-inflicted-secret-reads-are-denied-per-driver), that applies
 to *every* Bash call, not just the ones that overflow, and hands back a **tail**
 of the output rather than a head — build/test failures sit near the end.
 
@@ -4929,15 +4972,19 @@ boundary does and does not promise.
    (e.g. `rbw unlock`) and re-run"); the command string, its captured
    stdout, and its captured stderr never appear in that message or in a
    log.
-2. **The Box can't read its own credentials.** A `PreToolUse` hook
-   (`env-credential-scrub.sh`, issue #1927) rewrites every Bash call to
-   `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
-   so a spawned subprocess never inherits either credential, and a second
-   `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash` call
-   targeting a known credential path. Both are always-on Harness defaults,
-   no operator configuration — see [Self-inflicted secret reads are
-   structurally
-   blocked](#self-inflicted-secret-reads-are-structurally-blocked).
+2. **The Box can't read its own credentials (per Driver).** Under the claude Driver, a
+   `PreToolUse` hook (`env-credential-scrub.sh`, issue #1927) rewrites every
+   Bash call to `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`
+   before it runs, so a spawned subprocess never inherits either
+   credential, and a second `PreToolUse` hook (`credential-deny.sh`) denies
+   any `Read`/`Bash` call targeting a known credential path. Both are
+   always-on Harness defaults, no operator configuration. The opencode
+   Driver runs neither hook; it gets a baked opencode permission config
+   denying the same paths plus its own auth store (issue #5345), with no
+   env scrub, a Target repo's own opencode config able to widen the
+   deny, and redirects on compound commands, bare `$(<file)`, and a glob
+   next to the path (`cat .env*`) slipping past it — see [Self-inflicted secret reads are denied per
+   Driver](#self-inflicted-secret-reads-are-denied-per-driver).
 3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
    like any other secret (point 1 above), but sourcing only controls how it
    *reaches* the Box — once there, it stays a live environment variable for
