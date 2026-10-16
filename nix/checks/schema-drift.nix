@@ -561,6 +561,26 @@ checkedMerge {
         touch $out
       '';
 
+  # Regenerate with `nix run .#regen` when lib/drivers/default.nix changes
+  # (issue #5338).
+  provider-namespaced-drivers-gen =
+    let
+      driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+      generated = pkgs.writeText "providernamespaced_gen.go.generated" (
+        renderers.renderProviderNamespacedDriversGo driverRegistry.entries
+      );
+    in
+    pkgs.runCommand "provider-namespaced-drivers-gen"
+      {
+        inherit generated;
+        committed = ../../cmd/launcher/internal/driver/providernamespaced_gen.go;
+      }
+      ''
+        diff "$generated" "$committed" \
+          || { echo "cmd/launcher/internal/driver/providernamespaced_gen.go is out of sync with lib/drivers/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        touch $out
+      '';
+
   # Regenerate with `nix run .#regen` when lib/chore-catalog.nix changes
   # (issue #3991).
   chore-builtins-gen =
