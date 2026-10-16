@@ -500,7 +500,7 @@ on a surface the branch never touched arrives here at every round instead:
 fixing it inline was never an available outcome. If none survived, skip this
 step; do not re-file what you just fixed or dropped.
 
-It is pre-provisioned via --agents; pass it the surviving findings verbatim,
+It is pre-provisioned; pass it the surviving findings verbatim,
 the issue number, and the branch for provenance.
 Your token is read-only, so the filer cannot file issues itself — it emits
 `SPINDRIFT_ISSUE_INTENT` lines instead, and the launcher files each one
