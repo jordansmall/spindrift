@@ -1330,7 +1330,8 @@ Issue #1909 closes this, for the claude Driver, with two Harness-enforced,
 always-on defaults inside the Box — no operator configuration, no opt-out.
 Issue #1927 replaces the first of the two after a production regression. The
 opencode Driver never reads Claude Code's `settings.json`, so neither hook
-runs under it; its own control is the last bullet below (issue #5345):
+runs under it directly; its own controls are the last bullet below (issue #5345)
+and the guard plugin described after this list (issue #5346):
 
 - **Env-credential scrub hook (issue #1927; supersedes the
   `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` approach below).** Issue #1909
@@ -1357,8 +1358,9 @@ runs under it; its own control is the last bullet below (issue #5345):
   `hookSpecificOutput.updatedInput` — a documented PreToolUse capability,
   independent of `permissionDecision` in Claude Code's own hook-output
   schema, that lets a hook replace a tool call's input before it runs — to
-  `unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` ahead of the Driver's
-  original command, and asserts no `permissionDecision` of its own on that
+  `unset` every variable in the shared credential list (`ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`; see below) ahead of the
+  Driver's original command, and asserts no `permissionDecision` of its own on that
   path (the same silent, no-explicit-opinion posture `reject-background-bash.sh`
   and `credential-deny.sh` use for a call they don't deny — three hooks
   share the `Bash` matcher, and an explicit `allow` here could read as this
@@ -1429,14 +1431,40 @@ runs under it; its own control is the last bullet below (issue #5345):
     `.opencode/`) after the global file, and the last matching rule wins, so
     a Target repo can add an allow rule that widens the deny. The Claude
     hook, by contrast, is home-wide and not overridable from the repo.
-  - There is no env-credential scrub equivalent: that hook is claude-only,
-    so a spawned subprocess under opencode still inherits the Box's
-    environment.
+  - The env-credential scrub has no permission-config equivalent; the guard
+    plugin below runs the scrub hook itself on each opencode Bash call.
 
 None of these controls break legitimate agent work: `gh`, `git`, and the
 Driver authenticate via environment variables already forwarded into the
 Box, so they never need to *read* these files or *dump* their own
 environment.
+
+The variables the Bash tool must never inherit live in one baked file,
+`/home/agent/.claude/hooks/credential-vars` (`ANTHROPIC_API_KEY`,
+`CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`), read by both
+`env-credential-scrub.sh` and `bash-output-tee.sh` so the two `unset` lists
+cannot drift. The `CREDENTIAL_VARS_FILE` environment variable overrides the
+path. A missing or empty list fails closed: the scrub hook denies the Bash
+call and the tee hook exits 2.
+
+#### The opencode Driver guards Bash through a plugin
+
+opencode never runs Claude Code's `PreToolUse` hooks, so the `opencode` Driver
+bakes a plugin instead (issue #5346): `agent/opencode-guards.js`, placed at
+`~/.config/opencode/plugins/spindrift-guards.js`, which opencode registers on
+its own — no `opencode.json` entry. It is absent from the `claude` image. Its
+`tool.execute.before` hook runs the same baked scripts on every `bash` call,
+`reject-background-bash.sh` then `env-credential-scrub.sh`, so their logic,
+messages, and the shared credential list stay single-sourced. A hook deny
+throws the hook's own message, refusing the call; the scrub's `unset` rewrite
+is applied to the command. A hook that cannot run or answer refuses the call
+rather than letting it through with its credentials intact.
+
+The plugin does not run `credential-deny.sh` (the opencode credential deny
+config above stands in for it) or the `bash-output-tee.sh` / summary hooks, so
+under `opencode` the captured-output tee is not in force. The plugin is plain
+ESM with `node:` builtins only, since opencode's background `npm install` into
+its directory fails offline.
 
 ### Cold-run toolchain nudge
 
@@ -2161,7 +2189,7 @@ One other PreToolUse hook already shares the `Bash` matcher and rewrites
 only ever denies, it never rewrites). Claude Code does not document how
 multiple hooks' `updatedInput` responses for the same call compose when more
 than one rewrites it, so rather than risk `env-credential-scrub.sh`'s own
-`unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN` rewrite silently losing to
+credential `unset` rewrite silently losing to
 this one, `bash-output-tee.sh` duplicates that same `unset` as the first line
 inside its own wrapped command — redundant if both hooks' rewrites do compose,
 but correct either way.
@@ -4985,16 +5013,18 @@ boundary does and does not promise.
    log.
 2. **The Box can't read its own credentials (per Driver).** Under the claude Driver, a
    `PreToolUse` hook (`env-credential-scrub.sh`, issue #1927) rewrites every
-   Bash call to `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN`
-   before it runs, so a spawned subprocess never inherits either
-   credential, and a second `PreToolUse` hook (`credential-deny.sh`) denies
-   any `Read`/`Bash` call targeting a known credential path. Both are
-   always-on Harness defaults, no operator configuration. The opencode
-   Driver runs neither hook; it gets a baked opencode permission config
-   denying the same paths plus its own auth store (issue #5345), with no
-   env scrub, a Target repo's own opencode config able to widen the
-   deny, and redirects on compound commands, bare `$(<file)`, and a glob
-   next to the path (`cat .env*`) slipping past it — see [Self-inflicted secret reads are denied per
+   Bash call to `unset` every variable in the shared credential list
+   (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `OPENCODE_AUTH_CONTENT`)
+   before it runs, so a spawned subprocess never inherits a credential, and
+   a second `PreToolUse` hook (`credential-deny.sh`) denies any `Read`/`Bash`
+   call targeting a known credential path. Both are always-on Harness
+   defaults, no operator configuration. The opencode Driver runs neither
+   hook; a baked plugin runs the same env scrub on its Bash calls (issue
+   #5346), and a baked opencode permission config denies the same paths plus
+   its own auth store (issue #5345), with a Target repo's own opencode config
+   able to widen the deny, and redirects on compound commands, bare
+   `$(<file)`, and a glob next to the path (`cat .env*`) slipping past it —
+   see [Self-inflicted secret reads are denied per
    Driver](#self-inflicted-secret-reads-are-denied-per-driver).
 3. **`GH_TOKEN` is the accepted residual.** `GH_TOKEN` is vault-sourceable
    like any other secret (point 1 above), but sourcing only controls how it
