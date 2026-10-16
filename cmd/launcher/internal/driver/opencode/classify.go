@@ -8,7 +8,11 @@ package opencode
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/logscan"
@@ -56,8 +60,49 @@ var agentProgressTypes = map[string]bool{
 // use) or a NamedError-style object such as
 // {"name":"APIError","data":{"statusCode":429,...}}.
 type event struct {
-	Type  string          `json:"type"`
-	Error json.RawMessage `json:"error"`
+	Type      string          `json:"type"`
+	Timestamp int64           `json:"timestamp"` // epoch milliseconds
+	Error     json.RawMessage `json:"error"`
+}
+
+// resetFrom derives the rate-limit reset time from the response headers of a
+// NamedError payload, in the order opencode's own session/retry.ts reads them:
+// retry-after-ms, then retry-after as seconds, then retry-after as an HTTP date.
+// A relative delay is anchored to the event timestamp rather than a wall clock,
+// so the result is deterministic; a relative delay with no timestamp yields nil.
+func resetFrom(raw json.RawMessage, timestampMs int64) *time.Time {
+	var payload struct {
+		Data struct {
+			ResponseHeaders map[string]string `json:"responseHeaders"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+	headers := map[string]string{}
+	for k, v := range payload.Data.ResponseHeaders {
+		headers[strings.ToLower(k)] = strings.TrimSpace(v)
+	}
+	relative := func(value string, unit time.Duration) *time.Time {
+		// MaxInt32 keeps n*unit inside time.Duration's int64 range for either unit.
+		n, err := strconv.ParseFloat(value, 64)
+		if err != nil || !(n >= 0 && n <= math.MaxInt32) || timestampMs <= 0 {
+			return nil
+		}
+		t := time.UnixMilli(timestampMs).Add(time.Duration(n * float64(unit))).UTC()
+		return &t
+	}
+	if t := relative(headers["retry-after-ms"], time.Millisecond); t != nil {
+		return t
+	}
+	if t := relative(headers["retry-after"], time.Second); t != nil {
+		return t
+	}
+	if t, err := http.ParseTime(headers["retry-after"]); err == nil {
+		t = t.UTC()
+		return &t
+	}
+	return nil
 }
 
 // errorText returns the string payload unquoted, or any other payload in
@@ -85,6 +130,8 @@ func errorText(raw json.RawMessage) string {
 // whose error text carries no known marker, classifies as Terminal/TaskFailed,
 // as does a missing log file.
 func Classify(logPath string) (driverkit.Classification, error) {
+	// resetAt is the reset of the latched error, so it moves only with the latch.
+	var resetAt *time.Time
 	cl, found, err := driverkit.ClassifyScan(logPath, logscan.SkipOversized, func(chunk string) driverkit.ScanDecision {
 		s := strings.TrimSpace(chunk)
 		if s == "" {
@@ -98,18 +145,26 @@ func Classify(logPath string) (driverkit.Classification, error) {
 			return driverkit.ScanDecision{Skip: true}
 		}
 		if agentProgressTypes[ev.Type] {
+			resetAt = nil
 			return driverkit.ScanDecision{Reset: true, Skip: true}
 		}
 		if ev.Type != "error" {
 			return driverkit.ScanDecision{Skip: true}
 		}
-		return driverkit.ScanDecision{Text: errorText(ev.Error), Overwrite: true}
+		text := errorText(ev.Error)
+		if _, ok := driverkit.MatchTransient(text, transientExtras); ok {
+			resetAt = resetFrom(ev.Error, ev.Timestamp)
+		}
+		return driverkit.ScanDecision{Text: text, Overwrite: true}
 	}, transientExtras, terminalExtras)
 	if err != nil {
 		return driverkit.Classification{}, err
 	}
 	if !found {
 		return driverkit.Classification{Class: driverkit.Terminal, Reason: driverkit.TaskFailed}, nil
+	}
+	if cl.Reason == driverkit.RateLimit {
+		cl.ResetAt = resetAt
 	}
 	return cl, nil
 }
