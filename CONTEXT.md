@@ -858,23 +858,26 @@ ready), Wave is launch-time scheduling (what actually launches together).
 The wave engine's work-supply seam (`cmd/launcher/internal/waves/queue.go`,
 issues #2937/#2938/#2939): where dispatchable work comes from, how it's
 claimed, how many candidates remain queued, and where a finished stale-drain
-report goes. Four methods, each with a fuller doc comment on the interface
+report goes. Five methods, each with a fuller doc comment on the interface
 itself: `Discover` returns the current dispatchable [[Batch]]; `Claim`
 (embedded via the one-method `Claimer` interface, so the one-shot `Dispatch`
 entry point can take just that subset) marks an issue claimed immediately
 before dispatch; `Pending` is a quiet, side-effect-free count of how many
 candidates remain queued, taking the caller's own claimed set as a
 parameter (issue #3035); `ReportStaleDrain` delivers a finished stale-drain
-report to wherever an implementation's operator watches. Two real
+report to wherever an implementation's operator watches; `EnsureLogDirExists`
+idempotently makes the on-disk log directory the Queue writes to, a documented
+no-op for an implementation with none (issue #3036). Two real
 implementations: the headless adapter (`NewHeadlessQueue`, same file)
-performs the real `Dispatchable`→`InProgress` claim and owns the
-operator-facing stale-drain stdout print plus log-file append; the Console
-adapter (`runContinuousQueue`, `cmd/launcher/internal/console/launcher.go`)
-has a no-op `Claim` (Console's own `Queue.Discover`, `console/queue.go`,
-already claims as a side effect of discovering a ready pick), reads the
-session queue's own still-queued depth for `Pending`, and routes
-`ReportStaleDrain` to the session banner. Distinct from the Console's own
-session `Queue` (`console/queue.go`, holding
+performs the real `Dispatchable`→`InProgress` claim, creates the
+`.spindrift/logs` directory, and owns the operator-facing stale-drain stdout
+print plus log-file append; the Console adapter (`runContinuousQueue`,
+`cmd/launcher/internal/console/launcher.go`) has a no-op `Claim` (Console's
+own `Queue.Discover`, `console/queue.go`, already claims as a side effect of
+discovering a ready pick), reads the session queue's own still-queued depth
+for `Pending`, routes `ReportStaleDrain` in memory to the session banner, and
+so has a no-op `EnsureLogDirExists`, never touching the filesystem.
+Distinct from the Console's own session `Queue` (`console/queue.go`, holding
 `Pick`s): that is one implementation's backing store, not the seam itself.
 _Was_: the per-caller Config closures `PreResolved`, `PendingCount`,
 `DiscoverReporting`, `OnStaleDrainReport`, and the label-zeroing convention
