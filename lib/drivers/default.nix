@@ -165,8 +165,8 @@ let
   # bashTimeoutEnv (issue #4409) is plain data, not an export: the Consumer's
   # timeout value is only known at run time, so the box program
   # (cmd/launcher/box) exports it under each name listed here. Absent renders
-  # no line, so a Driver with no such env vars (opencode) ignores the knob
-  # without any branch on its name.
+  # no line, so a Driver with no such env vars ignores the knob without any
+  # branch on its name.
   renderBashTimeoutEnv =
     driverEntry:
     lib.optionalString (driverEntry ? bashTimeoutEnv) (
