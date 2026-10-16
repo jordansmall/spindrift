@@ -63,9 +63,8 @@ type Driver interface {
 	ResultEvent(text string) ([]byte, error)
 
 	// SessionFlags renders the CLI's session flags for mode. "initial" pins the
-	// session, "resume" resumes it only when its transcript exists under
-	// home, and any other mode renders nothing. A Driver that wires no
-	// session resume (opencode) always renders "".
+	// session, "resume" resumes it only when its session store under home
+	// holds it, and any other mode renders nothing.
 	SessionFlags(mode, repoSlug, issue, home string) string
 }
 

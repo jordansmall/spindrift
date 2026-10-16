@@ -2,13 +2,17 @@ package driver
 
 import (
 	"bytes"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	_ "modernc.org/sqlite"
+
 	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/testutil"
 )
 
 func TestNewSelectsOpencodeByName(t *testing.T) {
@@ -192,14 +196,152 @@ func TestOpencodeDriverRenderTranscript(t *testing.T) {
 	}
 }
 
-func TestOpencodeSessionFlagsAlwaysEmpty(t *testing.T) {
+// openOpencodeStore creates the per-issue session store under home with the
+// given CREATE TABLE statement and returns it open.
+func openOpencodeStore(t *testing.T, home, create string) *sql.DB {
+	t.Helper()
+	path := filepath.Join(home, ".local/share/opencode/spindrift-session/opencode.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if _, err := db.Exec(create); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// seedOpencodeStore creates the per-issue session store under home with rows.
+func seedOpencodeStore(t *testing.T, home string, rows [][5]any) {
+	t.Helper()
+	db := openOpencodeStore(t, home, `CREATE TABLE session (id text PRIMARY KEY, parent_id text, title text NOT NULL, time_created integer NOT NULL, time_archived integer)`)
+	for _, r := range rows {
+		if _, err := db.Exec(`INSERT INTO session VALUES (?, ?, ?, ?, ?)`, r[0], r[1], r[2], r[3], r[4]); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestOpencodeSessionFlags(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
 		t.Fatalf("New(opencode): %v", err)
 	}
-	for _, mode := range []string{"initial", "resume", ""} {
-		if got := d.SessionFlags(mode, "owner/repo", "7", t.TempDir()); got != "" {
-			t.Errorf("SessionFlags(%q) = %q; want empty", mode, got)
+	title := func(t *testing.T, slug, issue string) string {
+		t.Helper()
+		got := d.SessionFlags("initial", slug, issue, t.TempDir())
+		v, ok := strings.CutPrefix(got, "--title ")
+		if !ok || v == "" || strings.ContainsAny(v, " \t'\"") {
+			t.Fatalf("initial = %q; want --title <single token>", got)
 		}
+		return v
 	}
+
+	t.Run("initial pins a stable per-issue title", func(t *testing.T) {
+		a := title(t, "owner/repo", "7")
+		if a != title(t, "owner/repo", "7") {
+			t.Error("title not stable for the same slug/issue")
+		}
+		if a == title(t, "owner/repo", "8") || a == title(t, "other/repo", "7") {
+			t.Error("title does not differ across issues/repos")
+		}
+	})
+
+	t.Run("resume with no store is cold", func(t *testing.T) {
+		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+			t.Errorf("got %q; want empty", got)
+		}
+	})
+
+	t.Run("resume picks the newest matching root session", func(t *testing.T) {
+		home := t.TempDir()
+		want := title(t, "owner/repo", "7")
+		seedOpencodeStore(t, home, [][5]any{
+			{"ses_old", nil, want, 100, nil},
+			{"ses_new", nil, want, 300, nil},
+			{"ses_child", "ses_old", want, 400, nil},
+			{"ses_archived", nil, want, 500, 600},
+			{"ses_other", nil, title(t, "owner/repo", "8"), 700, nil},
+		})
+		if got := d.SessionFlags("resume", "owner/repo", "7", home); got != "--session ses_new" {
+			t.Errorf("got %q; want --session ses_new", got)
+		}
+	})
+
+	t.Run("resume with a store but no match is cold", func(t *testing.T) {
+		home := t.TempDir()
+		seedOpencodeStore(t, home, [][5]any{
+			{"ses_other", nil, title(t, "owner/repo", "8"), 100, nil},
+			{"ses_child", "ses_other", title(t, "owner/repo", "7"), 200, nil},
+		})
+		if got := d.SessionFlags("resume", "owner/repo", "7", home); got != "" {
+			t.Errorf("got %q; want empty", got)
+		}
+	})
+
+	t.Run("resume with a malformed newest id is cold", func(t *testing.T) {
+		home := t.TempDir()
+		seedOpencodeStore(t, home, [][5]any{
+			{"ses_old", nil, title(t, "owner/repo", "7"), 100, nil},
+			{"ses_a --share", nil, title(t, "owner/repo", "7"), 200, nil},
+		})
+		var got string
+		stderr := testutil.CaptureStderr(t, func() {
+			got = d.SessionFlags("resume", "owner/repo", "7", home)
+		})
+		if got != "" {
+			t.Errorf("got %q; want empty", got)
+		}
+		if !strings.Contains(stderr, "malformed session id") || strings.Contains(stderr, "--share") {
+			t.Errorf("stderr = %q; want a malformed-id WARNING without the id", stderr)
+		}
+	})
+
+	t.Run("resume warns on a query error but stays cold", func(t *testing.T) {
+		home := t.TempDir()
+		openOpencodeStore(t, home, `CREATE TABLE session (id text PRIMARY KEY)`)
+		var got string
+		stderr := testutil.CaptureStderr(t, func() {
+			got = d.SessionFlags("resume", "owner/repo", "7", home)
+		})
+		if got != "" {
+			t.Errorf("got %q; want empty", got)
+		}
+		if !strings.Contains(stderr, "WARNING") {
+			t.Errorf("stderr = %q; want a WARNING", stderr)
+		}
+	})
+
+	t.Run("resume with no match stays silent", func(t *testing.T) {
+		home := t.TempDir()
+		seedOpencodeStore(t, home, nil)
+		stderr := testutil.CaptureStderr(t, func() {
+			d.SessionFlags("resume", "owner/repo", "7", home)
+		})
+		if stderr != "" {
+			t.Errorf("stderr = %q; want empty", stderr)
+		}
+	})
+
+	t.Run("resume does not create the store", func(t *testing.T) {
+		home := t.TempDir()
+		d.SessionFlags("resume", "owner/repo", "7", home)
+		if _, err := os.Stat(filepath.Join(home, ".local")); !os.IsNotExist(err) {
+			t.Errorf("resume created state under home: %v", err)
+		}
+	})
+
+	t.Run("unknown modes render nothing", func(t *testing.T) {
+		home := t.TempDir()
+		seedOpencodeStore(t, home, [][5]any{{"ses_a", nil, title(t, "owner/repo", "7"), 100, nil}})
+		for _, mode := range []string{"", "continue", "bogus"} {
+			if got := d.SessionFlags(mode, "owner/repo", "7", home); got != "" {
+				t.Errorf("SessionFlags(%q) = %q; want empty", mode, got)
+			}
+		}
+	})
 }
