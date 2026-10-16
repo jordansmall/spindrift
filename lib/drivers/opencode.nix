@@ -26,6 +26,12 @@ let
 
   permissionKeys = lib.unique (lib.attrValues rosterToolPermissions);
 
+  # opencode's SQLite session store lives here instead of beside auth.json: the
+  # launcher mounts a writable per-issue host directory over this path, which
+  # would shadow auth.json were it ~/.local/share/opencode itself. Must match
+  # sessionStore in cmd/launcher/internal/driver/opencode/session.go.
+  sessionCacheDirRelative = ".local/share/opencode/spindrift-session";
+
   # opencode treats an unset permission key as allow, so an entry's tools list
   # restricts nothing until every other mapped key is explicitly denied. An
   # unmapped tool throws rather than being dropped, which would silently change
@@ -74,12 +80,15 @@ in
   # has nothing to rewrite.
   agentFilesDirRelative = ".config/opencode/agents";
 
-  # sessionCacheDirRelative is deliberately omitted: opencode wires no resumable
-  # session state, so the launcher creates no per-issue cache and the runner
-  # adapters add no mount for it.
+  # Issue #5349, ADR 0009: the launcher mounts a per-issue host directory over
+  # this so a corrective resume continues the initial run's pinned session.
+  inherit sessionCacheDirRelative;
 
-  # envCommon is deliberately omitted: opencode has no env vars to export into
-  # the child process environment.
+  # OPENCODE_DB (an absolute path, used verbatim) relocates the store into the
+  # mounted directory above; derived from it so the two cannot drift.
+  envCommon = {
+    OPENCODE_DB = "/home/agent/${sessionCacheDirRelative}/opencode.db";
+  };
 
   # opencode composes subagents from the on-disk files agentFilesTemplate below
   # bakes, not a CLI flag, so this always returns "". It keeps claude.nix's

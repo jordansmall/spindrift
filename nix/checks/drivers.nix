@@ -846,10 +846,24 @@ in
       "renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the claude Driver entry's sessionCacheDirRelative under /home/agent, got: ${out}";
     pkgs.runCommand "drivers-render-preamble-session-cache-dir" { } "touch $out";
 
+  # Issue #5349: opencode's corrective resume reads its SQLite store from a
+  # dedicated subdir (so the per-issue mount cannot shadow auth.json); the
+  # baked preamble must carry both the mount path and the OPENCODE_DB export.
+  drivers-render-preamble-session-cache-dir-opencode =
+    let
+      out = driverRegistry.renderPreamble driverRegistry.entries.opencode;
+    in
+    assert assertMsg
+      (hasInfix "DRIVER_SESSION_CACHE_DIR=/home/agent/.local/share/opencode/spindrift-session" out)
+      "renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the opencode Driver entry's sessionCacheDirRelative under /home/agent, got: ${out}";
+    assert assertMsg
+      (hasInfix "export OPENCODE_DB=/home/agent/.local/share/opencode/spindrift-session/opencode.db" out)
+      "renderPreamble must export OPENCODE_DB inside the opencode session cache dir, got: ${out}";
+    pkgs.runCommand "drivers-render-preamble-session-cache-dir-opencode" { } "touch $out";
+
   # A Driver entry that declares no sessionCacheDirRelative (every stub
-  # fixture here, and opencode.nix in production) must render no
-  # DRIVER_SESSION_CACHE_DIR line at all, symmetric with the agent-files-dir
-  # omission check above.
+  # fixture here) must render no DRIVER_SESSION_CACHE_DIR line at all,
+  # symmetric with the agent-files-dir omission check above.
   drivers-render-preamble-omits-session-cache-dir-when-absent =
     let
       out = driverRegistry.renderPreamble stubDriverBase;
@@ -859,7 +873,8 @@ in
     pkgs.runCommand "drivers-render-preamble-omits-session-cache-dir-when-absent" { } "touch $out";
 
   # Issue #3348: assertShape also validates sessionCacheDirRelative's shape
-  # when present (absence stays valid -- opencode omits it): a non-empty
+  # when present (absence stays valid -- a Driver with no resumable session
+  # state omits it): a non-empty
   # relative path with no empty, "." or ".." segment (so no leading/
   # trailing/doubled slash either). tryEval can't report which condition
   # fired, so one list of malformed values, each spliced onto an otherwise-
@@ -908,17 +923,29 @@ in
     ) "assertShape must return the Driver entry unchanged when sessionCacheDirRelative is well-formed";
     pkgs.runCommand "drivers-assert-shape-succeeds-with-session-cache-dir-relative" { } "touch $out";
 
-  # Pins that opencode's real entry still has no sessionCacheDirRelative
-  # (claude's ".claude/projects" end-to-end value is already pinned by
-  # drivers-render-preamble-session-cache-dir).
-  drivers-session-cache-dir-relative-opencode-absent =
+  # Pins opencode's sessionCacheDirRelative (issue #5349) and that OPENCODE_DB
+  # sits inside it. The Go half's sessionStore in
+  # cmd/launcher/internal/driver/opencode/session.go must name the same
+  # directory. Claude's ".claude/projects" value is pinned by
+  # drivers-render-preamble-session-cache-dir.
+  drivers-session-cache-dir-relative-opencode =
     let
       opencodeEntry = driverRegistry.entries.opencode;
     in
-    assert assertMsg (
-      !(opencodeEntry ? sessionCacheDirRelative)
-    ) "opencode Driver entry must have no sessionCacheDirRelative attribute";
-    pkgs.runCommand "drivers-session-cache-dir-relative-opencode-absent" { } "touch $out";
+    assert assertMsg
+      ((opencodeEntry.sessionCacheDirRelative or null) == ".local/share/opencode/spindrift-session")
+      "opencode Driver entry's sessionCacheDirRelative must be .local/share/opencode/spindrift-session, got: ${
+        builtins.toJSON (opencodeEntry.sessionCacheDirRelative or null)
+      }";
+    assert assertMsg
+      (
+        (opencodeEntry.envCommon.OPENCODE_DB or null)
+        == "/home/agent/${opencodeEntry.sessionCacheDirRelative}/opencode.db"
+      )
+      "opencode Driver entry's OPENCODE_DB must sit inside its sessionCacheDirRelative, got: ${
+        builtins.toJSON (opencodeEntry.envCommon or null)
+      }";
+    pkgs.runCommand "drivers-session-cache-dir-relative-opencode" { } "touch $out";
 
   # Issue #2152 slice C: claude's agentsJsonTemplate builds an attrset and
   # returns builtins.toJSON over the whole thing, so every scalar is encoded,
