@@ -1548,7 +1548,7 @@ func TestSecretRequiredThisRun_GhTokenFollowsPairing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("CODE_FORGE", tc.forge)
 			t.Setenv("ISSUE_TRACKER", tc.tracker)
-			if got := secretRequiredThisRun("GH_TOKEN"); got != tc.want {
+			if got := secretRequiredThisRun("GH_TOKEN", nil); got != tc.want {
 				t.Errorf("secretRequiredThisRun(GH_TOKEN) with %s/%s = %v, want %v", tc.forge, tc.tracker, got, tc.want)
 			}
 		})
@@ -1607,20 +1607,27 @@ func TestParseFlags_GlobalSecretCmd_ExplicitClaudeCmdPreemptsAnthropicFallback(t
 	}
 }
 
-// An OAuth-only vault has no anthropic-api-key item. The pair is one unit, so
-// a failed ANTHROPIC_API_KEY fetch must not abort before the OAuth item is
-// tried, and a failed first half must not report when the second succeeds.
-func TestApplySecretCmdFallback_ClaudePair(t *testing.T) {
+// An OAuth-only vault has no anthropic-api-key item. The Claude pair is one
+// unit, so a failed ANTHROPIC_API_KEY fetch must not abort before the OAuth
+// item is tried, and a failed first half must not report when the second
+// succeeds. Under opencode the template always tries OPENCODE_AUTH_CONTENT but
+// a miss errors only when a visible tier (MODEL or a per-tier *_MODEL) is
+// github-copilot/.
+func TestApplySecretCmdFallback_DriverCredentials(t *testing.T) {
 	const tmpl = "rbw get spindrift-{name}"
+	claudePairNames := []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
 	tests := []struct {
-		name       string
-		driver     string
-		docDriver  string
-		failItems  []string
-		wantOAuth  string
-		wantAPIKey string
-		wantCalls  []string
-		wantErr    bool
+		name          string
+		driver        string
+		docDriver     string
+		model         string
+		tiers         map[string]string
+		failItems     []string
+		wantOAuth     string
+		wantAPIKey    string
+		wantOpencode  string
+		wantCalls     []string
+		wantErrNaming []string
 	}{
 		{
 			name:      "OAuth-only vault",
@@ -1644,7 +1651,7 @@ func TestApplySecretCmdFallback_ClaudePair(t *testing.T) {
 				"rbw get spindrift-claude-code-oauth-token",
 				"rbw get spindrift-anthropic-api-key",
 			},
-			wantErr: true,
+			wantErrNaming: claudePairNames,
 		},
 		{
 			name:      "both present fetches only OAuth",
@@ -1652,14 +1659,98 @@ func TestApplySecretCmdFallback_ClaudePair(t *testing.T) {
 			wantCalls: []string{"rbw get spindrift-claude-code-oauth-token"},
 		},
 		{
-			name:      "non-claude driver sources neither",
-			driver:    "opencode",
-			wantCalls: []string{},
+			name:      "claude never fetches the opencode credential even when the vault lacks it",
+			failItems: []string{"opencode-auth-content"},
+			wantOAuth: "value-claude-code-oauth-token",
+			wantCalls: []string{"rbw get spindrift-claude-code-oauth-token"},
 		},
 		{
-			name:      "non-claude driver set only in the document sources neither",
-			docDriver: "opencode",
-			wantCalls: []string{},
+			name:         "opencode github-copilot sources only the auth content",
+			driver:       "opencode",
+			model:        "github-copilot/gpt-5",
+			wantOpencode: "value-opencode-auth-content",
+			wantCalls:    []string{"rbw get spindrift-opencode-auth-content"},
+		},
+		{
+			name:         "opencode set only in the document sources only the auth content",
+			docDriver:    "opencode",
+			model:        "github-copilot/gpt-5",
+			wantOpencode: "value-opencode-auth-content",
+			wantCalls:    []string{"rbw get spindrift-opencode-auth-content"},
+		},
+		{
+			name:          "opencode github-copilot vault miss is an error",
+			driver:        "opencode",
+			model:         "github-copilot/gpt-5",
+			failItems:     []string{"opencode-auth-content"},
+			wantCalls:     []string{"rbw get spindrift-opencode-auth-content"},
+			wantErrNaming: []string{"OPENCODE_AUTH_CONTENT"},
+		},
+		{
+			name:         "opencode with a non-copilot model still sources the auth content best-effort",
+			driver:       "opencode",
+			model:        "anthropic/claude-sonnet-5",
+			wantOpencode: "value-opencode-auth-content",
+			wantCalls:    []string{"rbw get spindrift-opencode-auth-content"},
+		},
+		{
+			name:      "opencode with a non-copilot model skips a vault miss silently",
+			driver:    "opencode",
+			model:     "anthropic/claude-sonnet-5",
+			failItems: []string{"opencode-auth-content", "claude-code-oauth-token", "anthropic-api-key"},
+			wantCalls: []string{"rbw get spindrift-opencode-auth-content"},
+		},
+		{
+			name:         "opencode set only in the document with a non-copilot model sources best-effort",
+			docDriver:    "opencode",
+			model:        "anthropic/claude-sonnet-5",
+			wantOpencode: "value-opencode-auth-content",
+			wantCalls:    []string{"rbw get spindrift-opencode-auth-content"},
+		},
+		{
+			name:         "opencode with a copilot reviewer tier sources the auth content",
+			driver:       "opencode",
+			model:        "anthropic/claude-sonnet-5",
+			tiers:        map[string]string{"REVIEW_MODEL": "github-copilot/gpt-5"},
+			failItems:    []string{"claude-code-oauth-token", "anthropic-api-key"},
+			wantOpencode: "value-opencode-auth-content",
+			wantCalls:    []string{"rbw get spindrift-opencode-auth-content"},
+		},
+		{
+			name:          "opencode with a copilot reviewer tier and a vault miss is an error",
+			driver:        "opencode",
+			model:         "anthropic/claude-sonnet-5",
+			tiers:         map[string]string{"REVIEW_MODEL": "github-copilot/gpt-5"},
+			failItems:     []string{"opencode-auth-content"},
+			wantCalls:     []string{"rbw get spindrift-opencode-auth-content"},
+			wantErrNaming: []string{"OPENCODE_AUTH_CONTENT"},
+		},
+		{
+			name:          "opencode with a copilot worker tier and a vault miss is an error",
+			driver:        "opencode",
+			model:         "anthropic/claude-sonnet-5",
+			tiers:         map[string]string{"WORKER_MODEL": "github-copilot/gpt-5"},
+			failItems:     []string{"opencode-auth-content"},
+			wantCalls:     []string{"rbw get spindrift-opencode-auth-content"},
+			wantErrNaming: []string{"OPENCODE_AUTH_CONTENT"},
+		},
+		{
+			name:          "opencode with a copilot scout tier and a vault miss is an error",
+			driver:        "opencode",
+			model:         "anthropic/claude-sonnet-5",
+			tiers:         map[string]string{"SCOUT_MODEL": "github-copilot/gpt-5"},
+			failItems:     []string{"opencode-auth-content"},
+			wantCalls:     []string{"rbw get spindrift-opencode-auth-content"},
+			wantErrNaming: []string{"OPENCODE_AUTH_CONTENT"},
+		},
+		{
+			name:          "opencode with a copilot filer tier and a vault miss is an error",
+			driver:        "opencode",
+			model:         "anthropic/claude-sonnet-5",
+			tiers:         map[string]string{"FILER_MODEL": "github-copilot/gpt-5"},
+			failItems:     []string{"opencode-auth-content"},
+			wantCalls:     []string{"rbw get spindrift-opencode-auth-content"},
+			wantErrNaming: []string{"OPENCODE_AUTH_CONTENT"},
 		},
 	}
 	for _, tc := range tests {
@@ -1678,18 +1769,28 @@ func TestApplySecretCmdFallback_ClaudePair(t *testing.T) {
 			}
 			t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "")
 			t.Setenv("ANTHROPIC_API_KEY", "")
+			t.Setenv("OPENCODE_AUTH_CONTENT", "")
 			t.Setenv("GH_TOKEN", "already-set")
 			t.Setenv("DRIVER", tc.driver)
+			t.Setenv("MODEL", tc.model)
+			// Pin every tier so schema defaults never decide the verdict.
+			for _, tier := range []string{"REVIEW_MODEL", "WORKER_MODEL", "SCOUT_MODEL", "FILER_MODEL"} {
+				v, ok := tc.tiers[tier]
+				if !ok {
+					v = "anthropic/claude-sonnet-5"
+				}
+				t.Setenv(tier, v)
+			}
 			if tc.docDriver != "" {
 				t.Cleanup(func() { loadedDoc = nil })
 				loadedDoc = &inputdoc.Document{Artifacts: map[string]string{"DRIVER": tc.docDriver}}
 			}
 			err := resolveGlobalSecretCmd(t, []string{"--secret-cmd", tmpl})
-			if (err != nil) != tc.wantErr {
-				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			if (err != nil) != (len(tc.wantErrNaming) > 0) {
+				t.Fatalf("err = %v, want error naming %v", err, tc.wantErrNaming)
 			}
 			if err != nil {
-				for _, want := range []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"} {
+				for _, want := range tc.wantErrNaming {
 					if !strings.Contains(err.Error(), want) {
 						t.Errorf("error %q does not name %s", err, want)
 					}
@@ -1709,6 +1810,9 @@ func TestApplySecretCmdFallback_ClaudePair(t *testing.T) {
 			}
 			if got := os.Getenv("ANTHROPIC_API_KEY"); got != tc.wantAPIKey {
 				t.Errorf("ANTHROPIC_API_KEY = %q, want %q", got, tc.wantAPIKey)
+			}
+			if got := os.Getenv("OPENCODE_AUTH_CONTENT"); got != tc.wantOpencode {
+				t.Errorf("OPENCODE_AUTH_CONTENT = %q, want %q", got, tc.wantOpencode)
 			}
 		})
 	}

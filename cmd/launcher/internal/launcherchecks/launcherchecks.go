@@ -8,6 +8,7 @@ package launcherchecks
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"spindrift.dev/launcher/internal/backend"
@@ -132,17 +133,14 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 			Tier:   doctor.Required,
 			Remedy: "set the credential required by DRIVER (CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY for claude, OPENCODE_AUTH_CONTENT for the opencode github-copilot Provider), or fix a typo'd DRIVER value",
 			Probe: func() (any, error) {
+				missing := credentialsMissing(c)
 				switch c.Driver {
 				case "", "claude":
-					if c.ClaudeOAuthToken == "" && c.AnthropicAPIKey == "" {
+					if missing {
 						return nil, fmt.Errorf("set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY")
 					}
 				case "opencode":
-					// The github-copilot Provider is OAuth-only (ADR 0009
-					// amendment, #260) and reads the credential from
-					// OPENCODE_AUTH_CONTENT. Other opencode Providers carry
-					// their own apiKey via the {env:} config leg.
-					if strings.HasPrefix(c.Model, "github-copilot/") && c.OpencodeAuthContent == "" {
+					if missing {
 						return nil, fmt.Errorf("set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver")
 					}
 				default:
@@ -160,6 +158,49 @@ func RequiredKnobChecks(c Config, d Deps) []doctor.Check {
 		},
 		doctor.RuntimeCheck(c.Runtime),
 	}
+}
+
+// DriverCredentials returns the env names the Driver can draw its credential
+// from, as an either-or set in fetch order, and whether this run requires one
+// of them given the models in play. The doctor probe and the --secret-cmd
+// fallback share this table, so they agree on which credential a Driver uses;
+// requiredness depends on the models each passes (doctor the top-level MODEL,
+// the fallback every tier). names is nil for an unrecognised Driver.
+func DriverCredentials(driver string, models ...string) (names []string, required bool) {
+	switch driver {
+	case "", "claude":
+		// OAuth first as the documented primary, API key as the fallback.
+		return []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}, true
+	case "opencode":
+		// The github-copilot Provider is OAuth-only (ADR 0009 amendment, #260)
+		// and reads the credential from OPENCODE_AUTH_CONTENT. Other opencode
+		// Providers carry their own apiKey via the {env:} config leg, so the
+		// credential is required only when some given model is Copilot.
+		return []string{"OPENCODE_AUTH_CONTENT"}, slices.ContainsFunc(models, func(m string) bool {
+			return strings.HasPrefix(m, "github-copilot/")
+		})
+	}
+	return nil, false
+}
+
+// credentialsMissing reports whether this run requires a Driver credential and
+// none of its either-or set has a value. It checks the top-level MODEL only.
+func credentialsMissing(c Config) bool {
+	creds, required := DriverCredentials(c.Driver, c.Model)
+	if !required {
+		return false
+	}
+	values := map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": c.ClaudeOAuthToken,
+		"ANTHROPIC_API_KEY":       c.AnthropicAPIKey,
+		"OPENCODE_AUTH_CONTENT":   c.OpencodeAuthContent,
+	}
+	for _, env := range creds {
+		if values[env] != "" {
+			return false
+		}
+	}
+	return true
 }
 
 // crossKnobSpec describes one cross-knob row. rowName carries the "-config"
