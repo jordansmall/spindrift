@@ -48,7 +48,7 @@ func TestOpencodeDriverHeartbeatWriterForwardsRaw(t *testing.T) {
 	}
 }
 
-// opencode's transcript carries no role attribution, so topLevelRole must
+// opencode's heartbeat carries no role attribution, so topLevelRole must
 // change nothing (issue #2092).
 func TestOpencodeDriverHeartbeatWriterIgnoresTopLevelRole(t *testing.T) {
 	d, err := New("opencode")
@@ -186,7 +186,7 @@ func TestOpencodeDriverRenderTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
-	want := "Investigating the issue.\nFiled a fix."
+	want := "[implementor] Investigating the issue.\n[implementor] Filed a fix."
 	if got != want {
 		t.Errorf("RenderTranscript = %q, want %q", got, want)
 	}

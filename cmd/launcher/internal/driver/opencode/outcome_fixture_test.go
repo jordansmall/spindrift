@@ -21,7 +21,7 @@ const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	got, err := RenderTranscript(path)
+	got, err := RenderTranscript(path, "")
 	if err != nil {
 		t.Fatalf("RenderTranscript(%s): %v", path, err)
 	}

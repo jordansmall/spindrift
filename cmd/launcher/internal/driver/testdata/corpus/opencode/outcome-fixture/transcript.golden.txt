@@ -1,4 +1,4 @@
-Looking into issue #42.
-Reading main.go and applying a fix.
-Fixed the issue and verified the tests pass.
+[implementor] Looking into issue #42.
+[implementor] Reading main.go and applying a fix.
+[implementor] Fixed the issue and verified the tests pass.
 SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture

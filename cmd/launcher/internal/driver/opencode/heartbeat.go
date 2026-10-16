@@ -38,7 +38,7 @@ func New(raw io.Writer, issue string, out io.Writer) *Writer {
 }
 
 // OnModel registers fn to be called with each new model id a step_finish event
-// names, and an empty role (opencode's transcript carries no role
+// names, and an empty role (opencode's heartbeat carries no role
 // attribution). It returns w for chaining; nil means no one listens.
 func (w *Writer) OnModel(fn func(model, role string)) *Writer {
 	w.onModel = fn

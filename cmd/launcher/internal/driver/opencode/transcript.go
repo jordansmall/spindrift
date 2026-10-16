@@ -17,13 +17,19 @@ type textEvent struct {
 	} `json:"part"`
 }
 
-// RenderTranscript returns each type:"text" event's part.text from the box log
-// at logPath (one JSON object per line, per opencode's `--format json`), joined
-// by "\n" in log order. It keeps each event's text verbatim, because the
-// orchestrator scans this rendering for the agent's verdict line and the review
-// findings that follow it; the outcome line is read from ResultText instead.
-// Returns ("", nil) when logPath does not exist, as the claude Driver does.
-func RenderTranscript(logPath string) (string, error) {
+// RenderTranscript returns each non-empty type:"text" event's part.text from
+// the box log at logPath (one JSON object per line, per opencode's `--format
+// json`), joined by "\n" in log order. The first physical line of each event is
+// prefixed "[role] " (topLevelRole, defaulting to driverkit.ImplementorRole),
+// because the orchestrator's verdict scan counts only "[role]"-prefixed lines
+// and slices the review findings from the lines that follow; embedded newlines
+// stay verbatim so continuation lines remain bare. The outcome line is read
+// from ResultText instead. Returns ("", nil) when logPath does not exist, as
+// the claude Driver does.
+func RenderTranscript(logPath, topLevelRole string) (string, error) {
+	if topLevelRole == "" {
+		topLevelRole = driverkit.ImplementorRole
+	}
 	var texts []string
 	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
 		s := strings.TrimSpace(line)
@@ -37,7 +43,13 @@ func RenderTranscript(logPath string) (string, error) {
 		if ev.Type != "text" {
 			return
 		}
-		texts = append(texts, ev.Part.Text)
+		// Trimmed so a leading newline cannot push a VERDICT: line off the
+		// prefixed first line.
+		text := strings.TrimSpace(ev.Part.Text)
+		if text == "" {
+			return
+		}
+		texts = append(texts, "["+topLevelRole+"] "+text)
 	})
 	if err != nil {
 		return "", err

@@ -2,8 +2,9 @@ package driverkit
 
 // RenderOptions controls role attribution for a Driver's heartbeat-writer
 // and transcript-render output. Both operations share one options value so
-// an implementor that doesn't attribute roles (e.g. opencode) just ignores
-// a field, not a positional argument (issue #2263).
+// an implementor that ignores a field in one of them (e.g. opencode's
+// heartbeat, which attributes no role) skips it by name, not by a positional
+// argument (issue #2263).
 type RenderOptions struct {
 	// TopLevelRole is the role attributed to top-level (empty
 	// parent_tool_use_id) messages; empty means the implementor's own
