@@ -1167,8 +1167,15 @@ Driver over each log and compares its output to goldens beside it:
 `usage.golden.json` (token and cost report),
 `heartbeat.golden.json` (heartbeat lines and `OnModel` calls),
 `transcript.golden.txt` and `result.golden.txt` (the rendered transcript and
-final result), and `resolve-exit.golden.json` (exit-code resolution). The test
-fails until a newly registered Driver has at least one `<case>` log.
+final result), `resolve-exit.golden.json` (exit-code resolution), and, for a
+reviewer-role case only, `verdict.golden.json` (what the review verdict scan
+returns for the transcript). The test fails until a newly registered Driver
+has at least one `<case>` log.
+
+The transcript and heartbeat render under the default `implementor` role. A
+review-pass case opts in to the reviewer role with a `render.json` beside its
+log (`{"topLevelRole":"reviewer"}`, issue #5336), so its transcript golden
+shows the `[reviewer]` prefix the verdict scan reads.
 
 To add a log, scrub a raw capture, then review it by hand for private repo
 content the scrubber cannot recognise (it redacts only credential-shaped
