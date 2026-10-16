@@ -220,23 +220,6 @@ func (o Outcome) Line() string {
 		Token, o.Issue, o.Landing, o.Status, o.Note)
 }
 
-// ParseAnywhere finds the SPINDRIFT_OUTCOME token anywhere in line, not only
-// as a leading prefix, and parses from there. The claude Driver's
-// RenderTranscript prefixes every line with a "[role] " tag (issue #1998), so
-// Parse alone would always report ErrNearMiss on a rendered pass log. Returns
-// false when the token is absent or the text from that point on fails to parse.
-func ParseAnywhere(line string) (Outcome, bool) {
-	idx := tokenIndex(line, Token)
-	if idx < 0 {
-		return Outcome{}, false
-	}
-	o, err := Parse(line[idx:])
-	if err != nil {
-		return Outcome{}, false
-	}
-	return o, true
-}
-
 // lastInLog parses, via Parse, the last line in the file at path that leads
 // with the SPINDRIFT_OUTCOME token, so a mid-JSON echo of the token (e.g. a
 // tool_result of issue text) is never a candidate. A missing file is not found
