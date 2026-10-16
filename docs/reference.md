@@ -1665,8 +1665,8 @@ from one flake, each Driver's apps also read an optional
 side](#several-drivers-side-by-side).
 
 Every secret knob (`GH_TOKEN`, `BOX_GH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`,
-`ANTHROPIC_API_KEY`, `JIRA_TOKEN`) can also be sourced from an external
-command instead of a plaintext value — **the preferred, highly encouraged
+`ANTHROPIC_API_KEY`, `OPENCODE_AUTH_CONTENT`, `JIRA_TOKEN`) can also be
+sourced from an external command instead of a plaintext value — **the preferred, highly encouraged
 way to supply secrets**, since it keeps live credentials out of any file at
 rest on the host. Set `<SECRET>_CMD` (e.g. `GH_TOKEN_CMD="rbw get
 spindrift-gh-token"`) in `harness.env`, your shell, or direnv, or pass a
@@ -1706,14 +1706,26 @@ precedence fallback for any secret above that has none of the four forms set.
 `gh-token`), so `SECRET_CMD="rbw get spindrift-{name}"` reproduces every
 per-secret `_CMD` example above in one line. A per-secret `<SECRET>_CMD`
 (env or flag), file flag, or direct env value still wins over the template.
-The template is attempted only for a secret this run actually needs — e.g.
-`JIRA_TOKEN` only when `ISSUE_TRACKER=jira`, and never for the opt-in
-`BOX_GH_TOKEN` (ADR 0016) — so an operator who doesn't use those features
-never gets an unwanted vault lookup for them. The
-`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY` pair is fetched as a unit,
-and only under the `claude` Driver: `CLAUDE_CODE_OAUTH_TOKEN` first, then
-`ANTHROPIC_API_KEY` only if that fetch fails, so an OAuth-only (or
-API-key-only) vault works; it is an error only when both fetches fail.
+With one exception (the `opencode` bullet below), the template is attempted
+only for a secret this run actually needs — e.g. `JIRA_TOKEN` only when
+`ISSUE_TRACKER=jira`, and never for the opt-in `BOX_GH_TOKEN` (ADR 0016) — so
+an operator who doesn't use those features never gets an unwanted vault
+lookup for them. The active Driver's credential is likewise the only one
+fetched; a credential outside the Driver's set is never looked up, so a
+vault missing it is never an error:
+
+- `claude` (also an empty or default `DRIVER`): `CLAUDE_CODE_OAUTH_TOKEN`
+  and `ANTHROPIC_API_KEY`, fetched as a unit —
+  `CLAUDE_CODE_OAUTH_TOKEN` first, then `ANTHROPIC_API_KEY` only if that
+  fetch fails, so an OAuth-only (or API-key-only) vault works; it is an
+  error only when both fetches fail.
+- `opencode`: `OPENCODE_AUTH_CONTENT`. A miss is an error only when `MODEL`
+  or a per-tier `*_MODEL` (`REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
+  `FILER_MODEL`) is `github-copilot/<model>`. When no tier visibly needs it
+  the lookup still runs (a tier baked into the image may select
+  github-copilot), a miss is ignored, and a hit is passed into the Box
+  anyway; a locked vault on a TTY may prompt for unlock.
+
 When a vault's naming isn't uniform, fall back to the per-secret
 `<SECRET>_CMD` forms above for the exceptions.
 
