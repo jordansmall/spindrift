@@ -1,6 +1,10 @@
 package console
 
-import "testing"
+import (
+	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // dispatchKey (tea.go) dispatches a keypress by calling the Action on the
 // entry naming its (mode, key), so an entry with no Action never fires and
@@ -36,5 +40,32 @@ func TestKeymapUniqueness(t *testing.T) {
 				seen[p] = i
 			}
 		}
+	}
+}
+
+// Backspace in ModeFilterEdit trims the last rune, not the last byte: a byte
+// trim leaves invalid UTF-8 behind on any multi-byte rune (issue #5321).
+func TestDispatchKey_FilterEditBackspace_TrimsLastRune(t *testing.T) {
+	cases := []struct {
+		name, typed, want string
+	}{
+		{"multi-byte rune", "🐛", ""},
+		{"ascii then multi-byte rune", "a🐛", "a"},
+		{"multi-byte then ascii", "🐛a", "🐛"},
+		{"empty filter", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := NewModel()
+			m = Update(m, FilterEditStartMsg{})
+			tm := teaModel{m: m}
+			if tc.typed != "" {
+				tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tc.typed)})
+			}
+			tm, _ = tm.handleKey(tea.KeyMsg{Type: tea.KeyBackspace})
+			if tm.m.Filter != tc.want {
+				t.Errorf("Filter = %q, want %q", tm.m.Filter, tc.want)
+			}
+		})
 	}
 }
