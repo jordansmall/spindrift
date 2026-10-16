@@ -699,6 +699,7 @@ in
     flakeOption = true;
     hostDerived = true;
     nixSubPath = "user.name";
+    hostGitConfigKey = "user.name";
     boxEnv = true;
   };
   gitUserEmail = {
@@ -710,6 +711,7 @@ in
     flakeOption = true;
     hostDerived = true;
     nixSubPath = "user.email";
+    hostGitConfigKey = "user.email";
     boxEnv = true;
   };
   codeForge = {

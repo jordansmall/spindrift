@@ -1318,6 +1318,9 @@ rec {
       # Mirrors flagEntry.boxHostDerived in cmd/launcher/flags.go.
       flagBoxHostDerived =
         e: if (e.hostDerived or false) && (e.boxEnv or false) then ", boxHostDerived: true" else "";
+      # Mirrors flagEntry.hostGitConfigKey in cmd/launcher/flags.go.
+      flagHostGitConfigKey =
+        e: if e ? hostGitConfigKey then ", hostGitConfigKey: ${builtins.toJSON e.hostGitConfigKey}" else "";
       # Every non-secret knob must declare a group so the full reference can file
       # it under a heading. A missing group is a schema error, not a silent "".
       ungrouped = mapAttrsToList (k: _: k) (filterAttrs (_: e: !(e ? group)) nonSecretSchema);
@@ -1328,7 +1331,7 @@ rec {
           concatStrings (
             mapAttrsToList (
               key: e:
-              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagBoxHostDerived e}${flagChoices e}},\n"
+              "\t{env: \"${e.env}\", flag: \"${flagName e}\", group: \"${e.group}\"${flagAlias e}${flagDeprecatedAlias e}, kind: \"${flagKind e}\", doc: \"${e.doc}\", dflt: \"${flagDflt e}\", settingsPath: \"${flagSettingsPath key e}\"${flagLauncherIgnores e}${flagEmptyDisables e}${flagBoxHostDerived e}${flagHostGitConfigKey e}${flagChoices e}},\n"
             ) nonSecretSchema
           );
       secretRows = concatStrings (
