@@ -1735,6 +1735,84 @@ in
     ) "a namespaced opencode worker must produce no roster warning, got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-opencode-namespaced-worker-does-not-warn" { } "touch $out";
 
+  # Issue #5355: under a Driver with Provider-namespaced model ids, every
+  # roster entry and the default model must be `<provider>/<model>`. The
+  # worker keeps its #5331 drop (warned when set explicitly) and is covered
+  # above. Each failing Harness differs from a passing one by a single model,
+  # so the failure is that model's, not some unrelated throw in mkHarness.
+  roster-opencode-bare-inherited-roster-model-fails-eval =
+    let
+      evals = d: (builtins.tryEval (builtins.seq (fixtures.opencodeHarnessWith d) true)).success;
+    in
+    assert assertMsg (evals fixtures.opencodeNamespacedDefaults)
+      "the namespaced opencode defaults must evaluate";
+    assert assertMsg (
+      !(evals (removeAttrs fixtures.opencodeNamespacedDefaults [ "scoutModel" ]))
+    ) "an opencode harness inheriting the bare scout default must fail eval";
+    pkgs.runCommand "roster-opencode-bare-inherited-roster-model-fails-eval" { } "touch $out";
+
+  roster-opencode-bare-default-model-fails-eval =
+    let
+      evals = d: (builtins.tryEval (builtins.seq (fixtures.opencodeHarnessWith d) true)).success;
+    in
+    assert assertMsg (evals fixtures.opencodeNamespacedDefaults)
+      "the namespaced opencode defaults must evaluate";
+    assert assertMsg (
+      !(evals (fixtures.opencodeNamespacedDefaults // { model = "claude-sonnet-5"; }))
+    ) "an opencode harness with a bare default model must fail eval";
+    pkgs.runCommand "roster-opencode-bare-default-model-fails-eval" { } "touch $out";
+
+  # Opt-outs and an empty default model (opencode uses its own default) pass.
+  roster-opencode-namespaced-and-opted-out-models-eval =
+    let
+      h = fixtures.opencodeHarnessWith (
+        fixtures.opencodeNamespacedDefaults
+        // {
+          model = "";
+          filerModel = "";
+        }
+      );
+    in
+    assert assertMsg (builtins.tryEval (builtins.seq h true)).success
+      "namespaced ids plus \"\" opt-outs and an empty default model must evaluate under opencode";
+    pkgs.runCommand "roster-opencode-namespaced-and-opted-out-models-eval" { } "touch $out";
+
+  roster-claude-bare-models-still-eval =
+    assert assertMsg (builtins.tryEval (builtins.seq fixtures.minimalDirect true)).success
+      "bare model ids must keep evaluating under the claude Driver";
+    pkgs.runCommand "roster-claude-bare-models-still-eval" { } "touch $out";
+
+  # builtins.tryEval cannot read a throw's message, so the message is pinned
+  # on the pure function mkHarness throws it from.
+  roster-provider-namespaced-models-message-names-role-and-id =
+    let
+      nsLib = import ../../lib/provider-namespaced-models.nix { inherit (pkgs) lib; };
+      offenders = nsLib.offenders {
+        roster = [
+          (entryFor "scout" (rosterLib.defaultRoster { scoutModel = "gpt-4o"; }))
+          (entryFor "reviewer" (rosterLib.defaultRoster { reviewModel = "openai/gpt-4o"; }))
+        ];
+        defaultModel = "claude-sonnet-5";
+      };
+      messages = map nsLib.message offenders;
+      none = nsLib.offenders {
+        roster = [ ];
+        defaultModel = "";
+      };
+    in
+    assert assertMsg (
+      builtins.length offenders == 2
+    ) "exactly the bare scout and the bare default must offend, got: ${builtins.toJSON offenders}";
+    assert assertMsg (
+      hasInfix "scout" (builtins.elemAt messages 0) && hasInfix "gpt-4o" (builtins.elemAt messages 0)
+    ) "the roster message must name the role and the id, got: ${builtins.toJSON messages}";
+    assert assertMsg (
+      hasInfix "default" (builtins.elemAt messages 1)
+      && hasInfix "claude-sonnet-5" (builtins.elemAt messages 1)
+    ) "the default-model message must name `default` and the id, got: ${builtins.toJSON messages}";
+    assert assertMsg (none == [ ]) "an empty roster and an empty default must not offend";
+    pkgs.runCommand "roster-provider-namespaced-models-message-names-role-and-id" { } "touch $out";
+
   # Fixture rosters must not copy a live defaultRoster description (#3463,
   # #4165, #4166). Fixtures test rendering and escaping, not roster wording, so
   # a copied description rots silently on every roster edit. Use an obviously

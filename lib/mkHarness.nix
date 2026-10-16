@@ -428,12 +428,30 @@ let
   # implement phase. Under a Driver with Provider-namespaced model ids, drop a
   # worker that lacks the "/" so neither the bake nor WORKER_PROVISIONED
   # claims it (issue #5331).
-  bareWorker = e: e.name == "worker" && !(lib.hasInfix "/" e.model);
+  providerNamespacedModelsLib = import ./provider-namespaced-models.nix { inherit lib; };
+  bareWorker = e: e.name == "worker" && !(providerNamespacedModelsLib.namespaced e.model);
   rosterWithoutBareWorker =
     if driverEntry.providerNamespacedModels or false then
       lib.filter (e: !bareWorker e) keptRoster
     else
       keptRoster;
+
+  # Every other model, the default included, must be namespaced too: the
+  # inherited claude ids are bare and opencode would reject them at run time,
+  # so a bare one fails the build (issue #5355). The worker is exempt above.
+  bareModelOffenders =
+    if driverEntry.providerNamespacedModels or false then
+      providerNamespacedModelsLib.offenders {
+        roster = rosterWithoutBareWorker;
+        defaultModel = mergedDefaults.model or "";
+      }
+    else
+      [ ];
+  bareModelCheckOk =
+    if bareModelOffenders == [ ] then
+      true
+    else
+      throw (lib.concatMapStringsSep "\n" providerNamespacedModelsLib.message bareModelOffenders);
 
   # reviewEffort (issue #2512) is the one legacy knob that overrides an
   # already-resolved roster's reviewer entry whatever the roster's source,
@@ -1820,6 +1838,7 @@ if defaultsKeyError != null then
   throw defaultsKeyError
 else
   assert buildTimeRejectOk;
+  assert bareModelCheckOk;
   assert forbiddenMarkerCheckOk;
   assert removedFragmentVarCheckOk;
   assert researchDirectFileCheckOk;

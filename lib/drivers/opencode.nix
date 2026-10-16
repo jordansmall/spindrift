@@ -61,7 +61,8 @@ in
 
   # opencode model ids are `<provider>/<model>`; lib/mkHarness.nix drops a
   # worker whose model lacks the "/" rather than bake an id opencode would
-  # reject (issue #5331). Optional: claude's ids are bare.
+  # reject (issue #5331), and fails eval on any other bare roster or default
+  # model (issue #5355). Optional: claude's ids are bare.
   providerNamespacedModels = true;
 
   # Only the flags shared by every invocation. driver-exec assembles the rest
