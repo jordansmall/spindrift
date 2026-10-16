@@ -59,16 +59,17 @@ rationale is in [`docs/reference.md`](docs/reference.md#threat-model).
   expected to hold fetch recipes rather than live credentials. Under
   the claude Driver, two always-on `PreToolUse` hooks then close the loop
   inside the Box, not operator configuration: one rewrites every Bash call
-  to `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` before it runs,
-  so a spawned subprocess never inherits either credential in the first
-  place, and the other denies any `Read`/`Bash` call targeting a known
-  credential path (`~/.claude/.credentials.json`, `**/.env`,
-  `~/.config/gh/hosts.yml`) — both enforced independently of
-  `--dangerously-skip-permissions`. The opencode Driver never reads Claude
-  Code's hooks, so it gets a baked opencode permission config denying the
-  same paths plus opencode's own auth store instead; it has no
-  env-credential scrub, a Target repo's own opencode config can widen
-  the deny, and it misses redirects on compound commands, bare
+  to `unset` `ANTHROPIC_API_KEY` / `CLAUDE_CODE_OAUTH_TOKEN` /
+  `OPENCODE_AUTH_CONTENT` before it runs, so a spawned subprocess never
+  inherits a credential in the first place, and the other denies any
+  `Read`/`Bash` call targeting a known credential path
+  (`~/.claude/.credentials.json`, `**/.env`, `~/.config/gh/hosts.yml`) —
+  both enforced independently of `--dangerously-skip-permissions`. The
+  opencode Driver never reads Claude Code's hooks; a baked plugin runs the
+  same env-credential scrub on its Bash calls, and a baked opencode
+  permission config denies the same paths plus opencode's own auth store
+  instead of the path hook. A Target repo's own opencode config can widen
+  that deny, and it misses redirects on compound commands, bare
   `$(<file)`, and a glob next to the path (`cat .env*`). See [Secret exposure
   model](docs/reference.md#secret-exposure-model).
 

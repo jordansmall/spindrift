@@ -363,9 +363,10 @@ package (0.99.2):
   unchanged. A deny becomes a block, a rewritten input feeds the next script,
   and a replaced output replaces the result. A script failure blocks the
   tool. The script list is generated from the same data as `claude`'s hook
-  settings. Unlike `opencode`, pi therefore keeps credential deny, the
-  environment credential scrub, background-Bash rejection and the Bash
-  output tee.
+  settings. pi therefore keeps credential deny, the environment credential
+  scrub, background-Bash rejection and the Bash output tee; `opencode`'s
+  guard plugin (issue #5346) keeps only the scrub and background-Bash
+  rejection, beside its baked credential deny config (issue #5345).
 - **Project trust.** `--no-approve` ignores the Target repo's `.pi/`
   settings, extensions, MCP servers, skills and prompts, so nothing from the
   repository runs beside the hook bridge. pi still reads `CLAUDE.md` and
