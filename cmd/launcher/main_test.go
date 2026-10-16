@@ -2097,9 +2097,9 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 }
 
 // The version-skew fallback is driver-aware (issue #2533 review, #5330,
-// #5331): under opencode the worker follows the roster, but lib/mkHarness.nix
-// drops a model that is not Provider-namespaced (no "/"), so a driver-blind
-// fallback would report it provisioned. The Filer is provisioned from on-disk
+// #5331, #5338): opencode is a provider-namespaced Driver, so lib/mkHarness.nix
+// drops a worker model that is not Provider-namespaced (no "/"), and a
+// driver-blind fallback would report it provisioned. The Filer is provisioned from on-disk
 // agent files there, so FILER_ENABLED follows FILER_MODEL like every other
 // Driver.
 func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing.T) {
@@ -2123,6 +2123,22 @@ func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing
 			}
 			if presence.workerProvisioned != tc.wantWorker {
 				t.Errorf("workerProvisioned = %v, want %v", presence.workerProvisioned, tc.wantWorker)
+			}
+		})
+	}
+}
+
+// A Driver without provider-namespaced model ids keeps a bare WORKER_MODEL in
+// the no-document fallback (issues #5331, #5338).
+func TestResolveAgentPresenceSignals_NoDocumentNonNamespacedDriverKeepsBareWorker(t *testing.T) {
+	for _, name := range []string{"claude", ""} {
+		t.Run("driver="+name, func(t *testing.T) {
+			t.Cleanup(func() { loadedDoc = nil })
+			loadedDoc = nil
+			t.Setenv("WORKER_MODEL", "claude-sonnet-5")
+
+			if !resolveAgentPresenceSignals(name).workerProvisioned {
+				t.Errorf("workerProvisioned = false, want true (bare WORKER_MODEL is provisioned without provider-namespaced ids)")
 			}
 		})
 	}

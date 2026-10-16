@@ -489,7 +489,7 @@ type agentPresence struct {
 // resolveAgentPresenceSignals returns the roster and orchestration gate
 // signals for this run, with independent trust gates rather than one spanning
 // all three (issue #2527, #2533): the gates differ in override semantics.
-func resolveAgentPresenceSignals(driver string) agentPresence {
+func resolveAgentPresenceSignals(driverName string) agentPresence {
 	var filerEnabled, workerProvisioned, scoutProvisioned bool
 	filerModel := getenvSchema("FILER_MODEL")
 	workerModel := getenvSchema("WORKER_MODEL")
@@ -497,13 +497,15 @@ func resolveAgentPresenceSignals(driver string) agentPresence {
 
 	filerEnabled = filerModel != ""
 
-	// Under opencode the worker mirrors lib/mkHarness.nix's rosterWithoutBareWorker
-	// drop: a WORKER_MODEL without a "/" (not Provider-namespaced) is not
-	// provisioned (issue #5331). The Filer and scout skip this branch because
-	// opencode provisions them like any Driver, so a non-empty FILER_MODEL or
-	// SCOUT_MODEL decides their fallback (issue #5330) — see lib/mkHarness.nix's
-	// scoutProvisioned comment.
-	if driver == "opencode" {
+	// A Driver with provider-namespaced model ids (driver.ProviderNamespacedModels,
+	// generated from the Nix Driver fact) drops a WORKER_MODEL without a "/" the
+	// way lib/mkHarness.nix's rosterWithoutBareWorker drops a bare worker (issues
+	// #5331, #5338). This no-document fallback sees WORKER_MODEL alone because no
+	// roster reaches Go without the document. The Filer and scout skip this branch
+	// because such a Driver provisions them like any other, so a non-empty
+	// FILER_MODEL or SCOUT_MODEL decides their fallback (issue #5330) — see
+	// lib/mkHarness.nix's scoutProvisioned comment.
+	if driver.ProviderNamespacedModels(driverName) {
 		workerProvisioned = strings.Contains(workerModel, "/")
 	} else {
 		workerProvisioned = workerModel != ""
