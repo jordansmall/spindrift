@@ -1,0 +1,11 @@
+{
+  "lines": [
+    "#42 · VERDICT: BLOCK"
+  ],
+  "onModel": [
+    {
+      "model": "claude-sonnet-4",
+      "role": ""
+    }
+  ]
+}
