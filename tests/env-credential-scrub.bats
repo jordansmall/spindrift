@@ -9,13 +9,13 @@ setup() {
   : "${ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT:?ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT must be set}"
 }
 
-@test "rewrites an ordinary Bash command to unset both credential vars first" {
+@test "rewrites an ordinary Bash command to unset every credential var first" {
   run bash "$ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
   [ "$status" -eq 0 ]
   echo "$output" | jq -e '.hookSpecificOutput.hookEventName == "PreToolUse"' >/dev/null
   echo "$output" | jq -e '.hookSpecificOutput | has("permissionDecision") | not' >/dev/null
   new_command="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
-  [[ "$new_command" == *"unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN"* ]]
+  [[ "$new_command" == *"unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT;"* ]]
   [[ "$new_command" == *"echo hello"* ]]
 }
 
@@ -94,6 +94,7 @@ setup() {
   exec_output_file="$(mktemp)"
   ANTHROPIC_API_KEY="leaked-api-key-value" \
     CLAUDE_CODE_OAUTH_TOKEN="leaked-oauth-token-value" \
+    OPENCODE_AUTH_CONTENT="leaked-opencode-auth-value" \
     bash -c "$new_command" >"$exec_output_file" 2>&1
   exec_status=$?
   exec_output="$(cat "$exec_output_file")"
@@ -104,8 +105,10 @@ setup() {
   [[ "$exec_output" == *"done"* ]]
   [[ "$exec_output" != *"leaked-api-key-value"* ]]
   [[ "$exec_output" != *"leaked-oauth-token-value"* ]]
+  [[ "$exec_output" != *"leaked-opencode-auth-value"* ]]
   [[ "$exec_output" != *"ANTHROPIC_API_KEY"* ]]
   [[ "$exec_output" != *"CLAUDE_CODE_OAUTH_TOKEN"* ]]
+  [[ "$exec_output" != *"OPENCODE_AUTH_CONTENT"* ]]
 }
 
 # `set`, `export -p`, `declare -p`, command substitution, and `&&`-chaining
@@ -137,4 +140,30 @@ setup() {
       false
     }
   done
+}
+
+# Fail closed: a non-zero exit is a non-blocking hook error under Claude Code
+# and would let the call run with its credentials intact.
+@test "denies a Bash call when the credential list file is missing" {
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/absent" \
+    run bash "$ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "denies a Bash call when the credential list file names no variables" {
+  printf '# only a comment\n\n' >"$BATS_TEST_TMPDIR/empty"
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/empty" \
+    run bash "$ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}
+
+@test "unsets every name in an overridden credential list file, skipping comments" {
+  printf '# header\nFOO_SECRET\n\nBAR_SECRET\n' >"$BATS_TEST_TMPDIR/vars"
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/vars" \
+    run bash "$ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+  [ "$status" -eq 0 ]
+  new_command="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
+  [ "$new_command" = "unset FOO_SECRET BAR_SECRET; echo hello" ]
 }

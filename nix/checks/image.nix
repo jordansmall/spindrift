@@ -682,8 +682,7 @@ in
         touch $out
       '';
 
-  # ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN must not be inherited into
-  # a spawned Bash subprocess's environment even under
+  # No variable agent/credential-vars names may be inherited into a spawned Bash subprocess's environment even under
   # --dangerously-skip-permissions (issue #1927, spec #1907), so
   # env-credential-scrub.sh is registered for the Bash matcher.
   env-credential-scrub-hook-baked-into-image =
@@ -692,6 +691,11 @@ in
         hook=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/env-credential-scrub.sh
         [ -x "$hook" ] || {
           echo "env-credential-scrub.sh missing or not executable at $hook" >&2
+          exit 1
+        }
+        vars=${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks/credential-vars
+        grep -qx OPENCODE_AUTH_CONTENT "$vars" || {
+          echo "credential-vars missing or not naming OPENCODE_AUTH_CONTENT at $vars" >&2
           exit 1
         }
         settings=${nonRustHarness.internals.agentFiles}/home/agent/.claude/settings.json

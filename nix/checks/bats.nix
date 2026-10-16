@@ -60,6 +60,9 @@ let
     # Baked at /home/agent/.claude/hooks/env-credential-scrub.sh
     # (issue #1927), same reasoning.
     ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = ../../agent/env-credential-scrub.sh;
+    # The scrub hooks find credential-vars beside themselves in the image
+    # (issue #5346); a lone store path has no sibling.
+    CREDENTIAL_VARS_FILE = ../../agent/credential-vars;
     # Baked at /home/agent/.claude/hooks/bash-output-{tee,summary}.sh
     # (issue #1988), same reasoning.
     BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;

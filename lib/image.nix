@@ -146,8 +146,8 @@ let
   # entry pointing at the same script, because the PreToolUse matcher is
   # per-tool.
 
-  # env-credential-scrub.sh (issue #1927, spec #1907) unsets ANTHROPIC_API_KEY
-  # and CLAUDE_CODE_OAUTH_TOKEN for every Bash call and denies any reference to
+  # env-credential-scrub.sh (issue #1927, spec #1907) unsets every variable
+  # agent/credential-vars names for every Bash call and denies any reference to
   # /proc/<pid>/environ. Claude Code's own CLAUDE_CODE_SUBPROCESS_ENV_SCRUB
   # cannot do this job: it forces the Driver's permission mode to `default` and
   # nests a bwrap sandbox that cannot mount /proc inside the Box's own (#1926).
@@ -264,6 +264,7 @@ let
     chmod +x $out/home/agent/.claude/hooks/credential-deny.sh
     cp ${../agent/env-credential-scrub.sh} $out/home/agent/.claude/hooks/env-credential-scrub.sh
     chmod +x $out/home/agent/.claude/hooks/env-credential-scrub.sh
+    cp ${../agent/credential-vars} $out/home/agent/.claude/hooks/credential-vars
     cp ${../agent/bash-output-tee.sh} $out/home/agent/.claude/hooks/bash-output-tee.sh
     chmod +x $out/home/agent/.claude/hooks/bash-output-tee.sh
     cp ${../agent/bash-output-summary.sh} $out/home/agent/.claude/hooks/bash-output-summary.sh
