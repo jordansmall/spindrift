@@ -46,15 +46,16 @@ setup() {
 }
 
 @test "unsets the credential env vars itself, independent of env-credential-scrub.sh" {
-  run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"[$ANTHROPIC_API_KEY][$CLAUDE_CODE_OAUTH_TOKEN]\""}}'
+  run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo \"[$ANTHROPIC_API_KEY][$CLAUDE_CODE_OAUTH_TOKEN][$OPENCODE_AUTH_CONTENT]\""}}'
   [ "$status" -eq 0 ]
 
   rewritten="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
 
   ANTHROPIC_API_KEY=leaked-key CLAUDE_CODE_OAUTH_TOKEN=leaked-token \
+    OPENCODE_AUTH_CONTENT=leaked-opencode \
     run bash -c "$rewritten"
   [ "$status" -eq 0 ]
-  [ "$output" = "[][]" ]
+  [ "$output" = "[][][]" ]
 }
 
 @test "handles a command whose last line ends in a line-continuation backslash" {
@@ -77,4 +78,10 @@ setup() {
   run bash -c "$rewritten"
   [ "$status" -eq 0 ]
   [ "$output" = "hi" ]
+}
+
+@test "blocks a Bash call when the credential list file is missing" {
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/absent" \
+    run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
+  [ "$status" -eq 2 ]
 }

@@ -5,10 +5,10 @@
 # BASH_MAX_OUTPUT_LENGTH overflow case (issue #1987).
 set -euo pipefail
 
-# env-credential-scrub.sh (issue #1927) unsets these when it rewrites the same
-# call, but Claude Code does not document how two hooks' updatedInput compose,
+# env-credential-scrub.sh (issue #1927) unsets the credential-vars list when it
+# rewrites the same call, but Claude Code does not document how two hooks' updatedInput compose,
 # so this hook repeats the unset instead of trusting that one to survive.
-CREDENTIAL_VARS="ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN"
+CREDENTIAL_VARS_FILE="${CREDENTIAL_VARS_FILE:-$(dirname "${BASH_SOURCE[0]}")/credential-vars}"
 
 input="$(cat)"
 
@@ -23,6 +23,13 @@ command="$(jq -r '.tool_input.command // empty' 2>/dev/null <<<"$input" || true)
 
 if [ -z "$tool_input" ] || [ -z "$command" ]; then
   exit 0
+fi
+
+# Exit 2 blocks the call, so a lost list never lets it run unscrubbed.
+CREDENTIAL_VARS="$(grep -vE '^[[:space:]]*(#|$)' "$CREDENTIAL_VARS_FILE" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)"
+if [ -z "$CREDENTIAL_VARS" ]; then
+  echo "bash-output-tee.sh: credential variable list $CREDENTIAL_VARS_FILE is missing or empty" >&2
+  exit 2
 fi
 
 log_dir="${BASH_OUTPUT_TEE_DIR:-/tmp/spindrift-bash-output}"
