@@ -1708,6 +1708,13 @@ exit 0
 // finding text varies per round so issue #2552 can tell both rounds' text apart
 // from one round's twice; call3Body is the fix pass's own shell command.
 func fakeReviewDriverBody(callLog, blockFinding, round1NonBlocking, round2NonBlocking, call3Body string) string {
+	return reviewLoopDriverBody(callLog, streamJSONOutcomeLine, streamJSONFinalResult, blockFinding, round1NonBlocking, round2NonBlocking, call3Body)
+}
+
+// reviewLoopDriverBody is fakeReviewDriverBody with the Driver's log shape
+// left to the caller: reviewLine renders each review pass's text and finalLine
+// the land pass's outcome, so a non-claude Driver can drive the same loop.
+func reviewLoopDriverBody(callLog string, reviewLine, finalLine func(string) string, blockFinding, round1NonBlocking, round2NonBlocking, call3Body string) string {
 	if call3Body == "" {
 		call3Body = ":"
 	}
@@ -1721,10 +1728,10 @@ case "$n" in
 esac
 exit 0
 `, callLog,
-		streamJSONOutcomeLine("VERDICT: BLOCK\\n\\n## Blocking\\n- "+blockFinding+"\\n\\n## Non-blocking\\n- "+round1NonBlocking),
+		reviewLine("VERDICT: BLOCK\\n\\n## Blocking\\n- "+blockFinding+"\\n\\n## Non-blocking\\n- "+round1NonBlocking),
 		call3Body,
-		streamJSONOutcomeLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- "+round2NonBlocking),
-		streamJSONFinalResult("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
+		reviewLine("VERDICT: APPROVE\\n\\n## Blocking\\n- none\\n\\n## Non-blocking\\n- "+round2NonBlocking),
+		finalLine("SPINDRIFT_OUTCOME issue=7 landing=agent/issue-7 status=ready note=done nonce=abc"))
 }
 
 // reviewPassFakeDriverBody is fakeReviewDriverBody with a blocking round-1
