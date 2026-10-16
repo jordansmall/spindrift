@@ -489,3 +489,26 @@ func TestConflictResolve_SetupFailureIsAPhaseError(t *testing.T) {
 		t.Errorf("events = %v, want none", f.events)
 	}
 }
+
+func TestConflictResolve_OpencodeSummaryIsTheFinalMessageOnly(t *testing.T) {
+	f := newCRFixture(t)
+	f.in.Assembly.Passthrough.Driver = "opencode"
+	f.passFn = func() {
+		f.completeRebase()
+		log := `{"type":"text","part":{"messageID":"msg_1","text":"mid-pass chatter"}}` + "\n" +
+			`{"type":"step_finish","part":{"messageID":"msg_1"}}` + "\n" +
+			`{"type":"text","part":{"messageID":"msg_2","text":"rebased, check green"}}` + "\n"
+		if err := os.WriteFile(f.pass.argv["--log-path"], []byte(log), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if rc := f.run(); rc != 0 {
+		t.Fatalf("rc = %d", rc)
+	}
+	if !strings.Contains(f.stdout(), "==> conflict-resolve pass summary:\n  | rebased, check green\n") {
+		t.Errorf("stdout = %q", f.stdout())
+	}
+	if strings.Contains(f.stdout(), "mid-pass chatter") {
+		t.Errorf("summary leaked a non-final message: %q", f.stdout())
+	}
+}
