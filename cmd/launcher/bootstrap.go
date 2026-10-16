@@ -202,9 +202,12 @@ func seedAccumulationRepoIfHostMediated(c config, pwd string) (*local.Accumulati
 
 // researchLaunchStack builds the research-kind tracker, dispatch factory, and
 // settle the Console wires in alongside lc's work-kind stack (issue #1708, ADR
-// 0022). A second bootstrap() call would repeat the readiness check and the
-// driver-cache watch goroutine for an already-ready runner. The returned Factory
-// owns its own driver-cache root, so the caller must call its Cleanup.
+// 0022). A second bootstrap() call would not merely repeat work: depending on
+// config it would fail validation on registry credential env vars the first
+// resolution already unset, fail on the run's own Accumulation-repo lock, or
+// start a second GH_TOKEN refresh watcher and repeat the readiness check. The
+// returned Factory owns its own driver-cache root, so the caller must call its
+// Cleanup.
 func researchLaunchStack(lc *launchContext) (forge.IssueTracker, *dispatch.Factory, settle.Settler) {
 	rc := applyDispatchKind(lc.config, dispatchkind.Research)
 	it := newIssueTracker(rc)
