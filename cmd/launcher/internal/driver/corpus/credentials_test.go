@@ -30,6 +30,7 @@ var plantedShapes = []struct {
 	{"npm-token", "npm" + "_", "h", "", 36},
 	{"email", "", "u", "@example.com", 12},
 	{"home-path", "/home/", "j", "/src/main.go", 8},
+	{"git-user-name", `"GIT_USER_NAME":"`, "Ada Lovelace", `"`, 12},
 }
 
 func shapeBody(filler string, count int) string {
@@ -81,6 +82,8 @@ func TestFindIgnoresBenignText(t *testing.T) {
 		"/home/agent/workspace/cmd/main.go is the Box's own home",
 		"pinned lodash@4.17.21 and golang.org/x/mod@v0.20.0",
 		"ssh to admin@localhost, no domain",
+		"box: env-guards: GIT_USER_NAME is required",
+		`{"GIT_USER_NAME":"","GIT_USER_EMAIL":""}`,
 	}, "\n")
 	if got := Find([]byte(benign)); len(got) != 0 {
 		t.Errorf("Find(benign) = %+v, want none", got)
@@ -330,6 +333,22 @@ func TestScrubKeepsJSONStructureAroundEmailAndPath(t *testing.T) {
 	want := `{"author":"[REDACTED:email]","cwd":"[REDACTED:home-path]","n":1}`
 	if got != want {
 		t.Errorf("Scrub = %q, want %q", got, want)
+	}
+}
+
+func TestScrubRedactsGitUserNameKnob(t *testing.T) {
+	cases := map[string]struct{ in, want string }{
+		"knobs":         {`{"GIT_USER_NAME":"Ada Lovelace","HOLD":"5"}`, `{"GIT_USER_NAME":"[REDACTED:git-user-name]","HOLD":"5"}`},
+		"spaced":        {`{"GIT_USER_NAME": "Ada Lovelace"}`, `{"GIT_USER_NAME": "[REDACTED:git-user-name]"}`},
+		"escaped":       {`"{\"GIT_USER_NAME\":\"Ada Lovelace\"}"`, `"{\"GIT_USER_NAME\":\"[REDACTED:git-user-name]\"}"`},
+		"empty is kept": {`{"GIT_USER_NAME":""}`, `{"GIT_USER_NAME":""}`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := string(Scrub([]byte(c.in))); got != c.want {
+				t.Errorf("Scrub(%q) = %q, want %q", c.in, got, c.want)
+			}
+		})
 	}
 }
 

@@ -2,11 +2,11 @@
 
 Cases named `real-*` are real dogfood Pass logs, scrubbed with
 `internal/driver/corpus/scrub` and reviewed by hand (issue #5181). Scrubbing
-removes emails and host home paths, and blanks tool output, file bodies,
-heredoc bodies in commands, thinking text and subagent task text. The rest
-are the synthetic seed fixtures (issue #5180). Goldens for the real cases were
-generated from the pre-canonical readers, before any Driver switched to the
-shared readers (issue #4944).
+removes emails, host home paths and the commit author name, and blanks tool
+output, file bodies, heredoc bodies in commands, thinking text and subagent
+task text. The rest are the synthetic seed fixtures (issue #5180). Goldens
+for the real cases were generated from the pre-canonical readers, before any
+Driver switched to the shared readers (issue #4944).
 
 ## claude
 
