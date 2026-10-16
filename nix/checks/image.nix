@@ -664,6 +664,24 @@ in
         touch $out
       '';
 
+  # opencode has no PreToolUse hook, so its Box refuses credential paths
+  # through a baked config of deny rules (issue #5345), rendered from
+  # lib/credential-paths.nix. The claude Box bakes no such file.
+  opencode-credential-deny-config-baked-into-image =
+    pkgs.runCommand "opencode-credential-deny-config-baked-into-image" { }
+      ''
+        cfg=${opencodeHarness.internals.agentFiles}/home/agent/.config/opencode/opencode.json
+        [ -f "$cfg" ] || {
+          echo "opencode agentFiles missing opencode.json" >&2
+          exit 1
+        }
+        [ ! -e ${nonRustHarness.internals.agentFiles}/home/agent/.config/opencode/opencode.json ] || {
+          echo "claude agentFiles unexpectedly carries opencode.json" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # ANTHROPIC_API_KEY and CLAUDE_CODE_OAUTH_TOKEN must not be inherited into
   # a spawned Bash subprocess's environment even under
   # --dangerously-skip-permissions (issue #1927, spec #1907), so
