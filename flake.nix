@@ -163,6 +163,7 @@
               agents.drivers.opencode = {
                 models.default = dogfoodDefaults.opencode.model;
                 models.roster = dogfoodDefaults.opencode.roster;
+                bashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
               };
               dispatch.maxParallel = dogfoodDefaults.defaults.maxParallel;
               dispatch.butler.chores = dogfoodDefaults.defaults.butlerChores;
