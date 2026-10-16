@@ -1221,6 +1221,11 @@ review-pass case opts in to the reviewer role with a `render.json` beside its
 log (`{"topLevelRole":"reviewer"}`, issue #5336), so its transcript golden
 shows the `[reviewer]` prefix the verdict scan reads.
 
+The opencode cases `rate-limit-reset`, `recovered-error`, and `unsupported-flag`
+(issue #5353) are synthetic, with no real log yet: their shapes come from
+opencode v1.18.35's source (`run.ts` `emit()` and the yargs fail handler), and
+a scrubbed real capture should replace them when one exists.
+
 To add a log, scrub a raw capture, then review it by hand for private repo
 content the scrubber cannot recognise (it redacts only credential-shaped
 strings):
