@@ -447,19 +447,20 @@ let
   # re-deriving roster membership itself.
   agentsJsonAttrs = if agentsJsonTemplate == "" then { } else builtins.fromJSON agentsJsonTemplate;
 
-  # These two key off agentsJsonTemplate's rendered output, not finalRoster:
-  # opencode's agentsJsonTemplate always returns "" and provisions subagents
-  # through driverAgentFiles instead, so a roster-only check would wrongly
-  # report WORKER_PROVISIONED true for an opencode box (issue #2533 review).
-  filerEnabled = agentsJsonAttrs ? filer;
+  # workerProvisioned keys off agentsJsonTemplate's rendered output, not
+  # finalRoster: opencode's agentsJsonTemplate always returns "" and
+  # provisions subagents through driverAgentFiles instead, so a roster-only
+  # check would wrongly report WORKER_PROVISIONED true for an opencode box
+  # (issue #2533 review).
   workerProvisioned = agentsJsonAttrs ? worker;
 
-  # scoutProvisioned keys off finalRoster instead of agentsJsonAttrs, the
-  # mirror image of filerEnabled/workerProvisioned above: opencode provisions
-  # scout through driverAgentFiles (rendered by lib/drivers/opencode.nix's
-  # agentFilesTemplate), so agentsJsonAttrs would wrongly read false for an
-  # opencode box that does carry scout.
+  # scoutProvisioned and filerEnabled key off finalRoster instead of
+  # agentsJsonAttrs, the mirror image of workerProvisioned above: opencode
+  # provisions scout and filer through driverAgentFiles (rendered by
+  # lib/drivers/opencode.nix's agentFilesTemplate), so agentsJsonAttrs would
+  # wrongly read false for an opencode box that does carry them (issue #5330).
   scoutProvisioned = lib.any (e: e.name == "scout") finalRoster;
+  filerEnabled = lib.any (e: e.name == "filer") finalRoster;
 
   # Stamped onto every Pass log's dispatch_start (issue #4783). The Launcher
   # overlays the runtime-switchable "main" and reviewer models itself.

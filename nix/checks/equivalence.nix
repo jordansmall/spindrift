@@ -2307,11 +2307,13 @@ in
       touch $out
     '';
 
-  # Issue #2533: the opencode Driver's agentsJsonTemplate always returns "" and
-  # provisions subagents from on-disk agents/*.md instead, so a finalRoster-only
-  # presence check would report WORKER_PROVISIONED=true here. Pins the opencode
-  # cell directly; mkharness-filer-worker-agree above only exercises claude.
-  mkharness-filer-worker-false-for-opencode-driver =
+  # Issues #2533, #5330: the opencode Driver's agentsJsonTemplate always returns
+  # "" and provisions subagents from on-disk agents/*.md instead, so a
+  # finalRoster-only presence check would report WORKER_PROVISIONED=true here.
+  # FILER_ENABLED is the opposite: it follows roster membership under every
+  # Driver. Pins the opencode cell directly; mkharness-filer-worker-agree above
+  # only exercises claude.
+  mkharness-worker-false-filer-follows-roster-for-opencode-driver =
     let
       roster = [
         {
@@ -2336,18 +2338,46 @@ in
         inherit roster;
       };
     in
-    pkgs.runCommand "mkharness-filer-worker-false-for-opencode-driver" { } ''
+    pkgs.runCommand "mkharness-worker-false-filer-follows-roster-for-opencode-driver" { } ''
       runDoc=${direct.internals.runInputDocumentFile}
 
-      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+      grep -q '"FILER_ENABLED":"true"' "$runDoc"
       grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
 
       touch $out
     '';
 
-  # Scout diverges from the opencode=false rule pinned above (#3157 review):
-  # see lib/mkHarness.nix's scoutProvisioned comment for why. FILER_ENABLED
-  # and WORKER_PROVISIONED stay false here.
+  # The other half of #5330: an opencode roster that names no filer must not
+  # enable the Filer, since FILER_ENABLED tracks roster membership alone.
+  mkharness-filer-false-for-opencode-roster-without-filer =
+    let
+      roster = [
+        {
+          name = "worker";
+          model = "m";
+          mode = "subagent";
+          description = "";
+          tools = [ ];
+        }
+      ];
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driver = "opencode";
+        inherit roster;
+      };
+    in
+    pkgs.runCommand "mkharness-filer-false-for-opencode-roster-without-filer" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+
+      touch $out
+    '';
+
+  # Scout diverges from the opencode=false worker rule pinned above (#3157
+  # review): see lib/mkHarness.nix's scoutProvisioned comment for why.
+  # WORKER_PROVISIONED stays false here; FILER_ENABLED follows the roster.
   mkharness-scout-provisioned-true-for-opencode-driver =
     let
       roster = [
@@ -2384,7 +2414,7 @@ in
       runDoc=${direct.internals.runInputDocumentFile}
 
       grep -q '"SCOUT_PROVISIONED":"true"' "$runDoc"
-      grep -q '"FILER_ENABLED":"false"' "$runDoc"
+      grep -q '"FILER_ENABLED":"true"' "$runDoc"
       grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
 
       touch $out
