@@ -639,7 +639,11 @@ sees the roster rather than inside each Driver's own render function.
 `lib/drivers/claude.nix` renders the roster it's handed into the `--agents`
 JSON flag; `lib/drivers/opencode.nix` renders it into
 `.config/opencode/agents/<name>.md` files instead, one per entry, each with
-`description`/`mode`/`model` frontmatter.
+`description`/`mode`/`model` frontmatter. opencode model ids are
+Provider-namespaced (`<provider>/<model>`), so under opencode a worker whose
+model has no `/` (such as the inherited schema default) is dropped: it is
+neither baked nor offered to the coordinator. An explicit namespaced worker
+model provisions it (issue #5331).
 
 An entry may also set `effort` (issue #2242), a pass-through, driver-specific
 effort/reasoning-level string — spindrift does not normalize it, so the value
@@ -1002,12 +1006,13 @@ just those three outputs.
 spindrift's own dogfood declares `claude` (the default) and `opencode`, so
 `nix run .#opencode` and `nix run .#opencode-daemon` dispatch through
 opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
-opencode entry inherits that Driver's limits: no worker is
-provisioned. Running both Drivers' Daemons at once (`nix run .#daemon` and
-`nix run .#opencode-daemon`) needs two checkouts, for example two
-`git worktree`s, because both take the same per-checkout **Instance lock**
-(see [Daemon](#daemon)); from one checkout the second halts (`halt` event
-reason `instance-lock`).
+opencode entry inherits that Driver's limits: a worker is provisioned only
+when the roster names a Provider-namespaced worker model (an inherited
+non-namespaced default is dropped). Running both Drivers' Daemons at once
+(`nix run .#daemon` and `nix run .#opencode-daemon`) needs two checkouts,
+for example two `git worktree`s, because both take the same per-checkout
+**Instance lock** (see [Daemon](#daemon)); from one checkout the second
+halts (`halt` event reason `instance-lock`).
 
 Runtime env. With several Drivers declared, each Driver's apps (`.#<driver>`,
 `.#<driver>-daemon`, and for the default Driver `apps.default` and
@@ -1081,6 +1086,10 @@ Driver entry declares:
   omitted. See `claude.nix`'s (flag-style, with `--agents`) and
   `opencode.nix`'s (positional-style, without `--agents`) own `argvShape`
   blocks for the two worked examples.
+- `providerNamespacedModels` (bool, default `false`) — set when the Driver's
+  model ids are `<provider>/<model>`. Optional; today `lib/mkHarness.nix`
+  only uses it to drop a worker whose model lacks the `/` (issue #5331) —
+  scout and reviewer entries are not filtered.
 
 The registry validates every entry against this required-attribute list at
 eval time (`assertShape` in `lib/drivers/default.nix`): an entry missing one
@@ -1088,8 +1097,9 @@ of the required fields above fails the build with a message naming the
 Driver and the missing attribute, before an image is ever produced.
 `sessionCacheDirRelative` and, within `argvShape`, `promptFlag`/`agentsFlag`
 are the fields this check treats as optional (`argvShape` itself is still a
-required top-level attribute). When `sessionCacheDirRelative` is present,
-the same check also validates its shape (above). Cross-half parity
+required top-level attribute); `providerNamespacedModels` is optional too,
+and `assertShape` does not check it. When `sessionCacheDirRelative` is
+present, the same check also validates its shape (above). Cross-half parity
 with the Go registry (`cmd/launcher/internal/driver`) stays name-only
 by design (ADR 0009) — each half enforces its own entries'
 completeness independently.
@@ -2744,11 +2754,12 @@ reference to a brief that was never written:
 - `scoutProvisioned = lib.any (e: e.name == "scout") finalRoster`
   (`lib/mkHarness.nix`) is forwarded to the Box as `BOX_SCOUT_PROVISIONED`,
   read into `Env.ScoutProvisioned` (`cmd/launcher/internal/promptassembly`).
-  Unlike `WORKER_PROVISIONED`, this reads `finalRoster` directly rather than
-  `agentsJsonAttrs`'s parsed keys: opencode provisions scout via
-  `agentFilesTemplate`, not `agentsJsonTemplate` (which stays `""` for
-  opencode regardless of roster), so an `agentsJsonAttrs`-keyed check would
-  wrongly read false for an opencode box that does carry scout.
+  Like `FILER_ENABLED` and `WORKER_PROVISIONED`, this reads `finalRoster`
+  directly rather than `agentsJsonTemplate`'s parsed keys: opencode
+  provisions scout via `agentFilesTemplate`, not `agentsJsonTemplate` (which
+  stays `""` for opencode regardless of roster), so a check keyed off the
+  parsed JSON would wrongly read false for an opencode box that does carry
+  scout.
 - The `# SCOUT` section's `SCOUT_PROVISIONED` gate and its paired
   `SCOUT_ABSENT` arm (`fragments/scout-absent.md`) are mutually exclusive: off,
   the implementor is told to map the repo itself, and no prompt anywhere
