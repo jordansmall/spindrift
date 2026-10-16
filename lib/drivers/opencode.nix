@@ -11,6 +11,11 @@
 
   bin = "opencode";
 
+  # opencode model ids are `<provider>/<model>`; lib/mkHarness.nix drops a
+  # worker whose model lacks the "/" rather than bake an id opencode would
+  # reject (issue #5331). Optional: claude's ids are bare.
+  providerNamespacedModels = true;
+
   # Only the flags shared by every invocation. driver-exec assembles the rest
   # of opencode's argv (positional prompt, -m, no --agents) around them.
   flagsCommon = "run --format json --auto";

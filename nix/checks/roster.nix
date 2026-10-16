@@ -1707,6 +1707,34 @@ in
     ) "the #392 reviewer opt-out must produce no roster warning, got: ${builtins.toJSON warnings}";
     pkgs.runCommand "roster-reviewer-opt-out-does-not-warn" { } "touch $out";
 
+  # Issue #5331: an explicit opencode roster whose worker model lacks the "/"
+  # loses the worker, and the warning says why. A namespaced worker and the
+  # inherited default (roster-default-roster-does-not-warn) stay silent.
+  roster-opencode-bare-worker-warns =
+    let
+      warnings = fixtures.opencodeBareWorkerRosterHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (builtins.any (w: hasInfix "gpt-4o" w && hasInfix "<provider>/<model>" w) warnings)
+      "a dropped bare opencode worker must produce a warning naming it, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-opencode-bare-worker-warns" { } "touch $out";
+
+  roster-opencode-legacy-bare-worker-warns =
+    let
+      warnings = fixtures.opencodeLegacyBareWorkerHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (builtins.any (w: hasInfix "gpt-4o" w && hasInfix "<provider>/<model>" w) warnings)
+      "a bare worker set via the legacy workerModel knob must produce a warning naming it, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-opencode-legacy-bare-worker-warns" { } "touch $out";
+
+  roster-opencode-namespaced-worker-does-not-warn =
+    let
+      warnings = fixtures.opencodeNamespacedWorkerRosterHarness.internals.rosterWarnings;
+    in
+    assert assertMsg (
+      warnings == [ ]
+    ) "a namespaced opencode worker must produce no roster warning, got: ${builtins.toJSON warnings}";
+    pkgs.runCommand "roster-opencode-namespaced-worker-does-not-warn" { } "touch $out";
+
   # Fixture rosters must not copy a live defaultRoster description (#3463,
   # #4165, #4166). Fixtures test rendering and escaping, not roster wording, so
   # a copied description rots silently on every roster edit. Use an obviously

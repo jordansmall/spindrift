@@ -2307,14 +2307,16 @@ in
       touch $out
     '';
 
-  # Issues #2533, #5330: the opencode Driver's agentsJsonTemplate always returns
-  # "" and provisions subagents from on-disk agents/*.md instead, so a
-  # finalRoster-only presence check would report WORKER_PROVISIONED=true here.
-  # FILER_ENABLED is the opposite: it follows roster membership under every
-  # Driver. Pins the opencode cell directly; mkharness-filer-worker-agree above
-  # only exercises claude.
+  # Issues #2533, #5330, #5331: both flags follow roster membership under every
+  # Driver, but opencode model ids are Provider-namespaced, so a worker whose
+  # model is not (here "m", as the inherited schema default would be) is
+  # dropped from the opencode roster and nothing bakes worker.md or reports
+  # WORKER_PROVISIONED. The filer is kept, so FILER_ENABLED is true. Pins the
+  # opencode cell directly; mkharness-filer-worker-agree above only exercises
+  # claude.
   mkharness-worker-false-filer-follows-roster-for-opencode-driver =
     let
+      inherit (pkgs.lib) assertMsg all;
       roster = [
         {
           name = "filer";
@@ -2338,6 +2340,8 @@ in
         inherit roster;
       };
     in
+    assert assertMsg (all (e: e.name != "worker") direct.internals.roster)
+      "a non-Provider-namespaced worker must be dropped from the opencode roster: ${builtins.toJSON direct.internals.roster}";
     pkgs.runCommand "mkharness-worker-false-filer-follows-roster-for-opencode-driver" { } ''
       runDoc=${direct.internals.runInputDocumentFile}
 
@@ -2375,9 +2379,51 @@ in
       touch $out
     '';
 
-  # Scout diverges from the opencode=false worker rule pinned above (#3157
-  # review): see lib/mkHarness.nix's scoutProvisioned comment for why.
-  # WORKER_PROVISIONED stays false here; FILER_ENABLED follows the roster.
+  # Issue #5331: the positive cell. A Provider-namespaced worker survives the
+  # opencode filter, so worker.md is baked and WORKER_PROVISIONED is true.
+  # The bake itself is pinned by image.nix's opencode-agent-files: agentFiles
+  # is a Linux-only Box derivation, and this file also evaluates on Darwin.
+  mkharness-worker-provisioned-true-for-opencode-namespaced-model =
+    let
+      inherit (pkgs.lib) assertMsg any;
+      direct = fixtures.opencodeWorkerRosterHarness "anthropic/claude-sonnet-5";
+    in
+    assert assertMsg (any (e: e.name == "worker") direct.internals.roster)
+      "a Provider-namespaced worker must survive in the opencode roster: ${builtins.toJSON direct.internals.roster}";
+    pkgs.runCommand "mkharness-worker-provisioned-true-for-opencode-namespaced-model" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"WORKER_PROVISIONED":"true"' "$runDoc"
+
+      touch $out
+    '';
+
+  # Issue #5331: the inherited schema default (workerModel claude-sonnet-5) is
+  # not Provider-namespaced, so a default-roster opencode Harness provisions no
+  # worker.
+  mkharness-worker-provisioned-false-for-opencode-inherited-default =
+    let
+      inherit (pkgs.lib) assertMsg all;
+      direct = import ../../lib/mkHarness.nix {
+        inherit nixpkgs system;
+        packages = p: [ p.hello ];
+        driver = "opencode";
+      };
+    in
+    assert assertMsg (all (e: e.name != "worker") direct.internals.roster)
+      "the inherited non-namespaced worker default must be dropped from the opencode roster: ${builtins.toJSON direct.internals.roster}";
+    pkgs.runCommand "mkharness-worker-provisioned-false-for-opencode-inherited-default" { } ''
+      runDoc=${direct.internals.runInputDocumentFile}
+
+      grep -q '"WORKER_PROVISIONED":"false"' "$runDoc"
+
+      touch $out
+    '';
+
+  # Scout is provisioned under opencode (#3157 review) while FILER_ENABLED
+  # follows the roster and the non-namespaced worker is dropped
+  # (WORKER_PROVISIONED false, issue #5331). See lib/mkHarness.nix's
+  # scoutProvisioned comment for why.
   mkharness-scout-provisioned-true-for-opencode-driver =
     let
       roster = [
@@ -2445,9 +2491,9 @@ in
 
   # The intersection of the two fixtures above, an opted-out scout under the
   # opencode Driver (#3157). See lib/mkHarness.nix's scoutProvisioned comment
-  # for why membership in finalRoster is what decides. WORKER_PROVISIONED is
-  # false for every opencode roster, so the scout-only assertion reads
-  # direct.internals.roster rather than a sibling gate in the run doc.
+  # for why membership in finalRoster is what decides. The scout-only
+  # assertion reads direct.internals.roster, with reviewer as the survivor
+  # (the inherited worker default is dropped under opencode, issue #5331).
   mkharness-scout-provisioned-false-for-opencode-opted-out-scout =
     let
       inherit (pkgs.lib) assertMsg any all;
@@ -2462,8 +2508,8 @@ in
     in
     assert assertMsg (all (e: e.name != "scout") direct.internals.roster)
       "opted-out scout must not survive dropOptedOut in the opencode roster: ${builtins.toJSON direct.internals.roster}";
-    assert assertMsg (any (e: e.name == "worker") direct.internals.roster)
-      "worker must survive dropOptedOut untouched -- otherwise this check can't tell scout-only opt-out from the whole roster vanishing: ${builtins.toJSON direct.internals.roster}";
+    assert assertMsg (any (e: e.name == "reviewer") direct.internals.roster)
+      "reviewer must survive dropOptedOut untouched -- otherwise this check can't tell scout-only opt-out from the whole roster vanishing: ${builtins.toJSON direct.internals.roster}";
     pkgs.runCommand "mkharness-scout-provisioned-false-for-opencode-opted-out-scout" { } ''
       runDoc=${direct.internals.runInputDocumentFile}
 
