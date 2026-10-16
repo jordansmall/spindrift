@@ -1,7 +1,6 @@
 package opencode_test
 
 import (
-	"strings"
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/opencode"
@@ -19,29 +18,46 @@ func TestRenderTranscript_SurfacesTextEvents(t *testing.T) {
 		`{"type":"text","part":{"text":"SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"}}`,
 	)
 
-	got, err := opencode.RenderTranscript(logPath)
+	got, err := opencode.RenderTranscript(logPath, "")
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
-	if !strings.Contains(got, "Investigating the issue.") {
-		t.Errorf("missing first text event's prose: %q", got)
-	}
-	if !strings.Contains(got, "VERDICT: APPROVE") {
-		t.Errorf("missing VERDICT line: %q", got)
-	}
-	if !strings.Contains(got, "SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done") {
-		t.Errorf("missing SPINDRIFT_OUTCOME line verbatim: %q", got)
+	want := "[implementor] Investigating the issue.\n" +
+		"[implementor] VERDICT: APPROVE\n" +
+		"[implementor] SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
 // TestRenderTranscript_MissingFile verifies the missing-log-file contract
 // shared with the claude Driver's RenderTranscript.
 func TestRenderTranscript_MissingFile(t *testing.T) {
-	got, err := opencode.RenderTranscript("/does/not/exist.log")
+	got, err := opencode.RenderTranscript("/does/not/exist.log", "")
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
 	if got != "" {
 		t.Errorf("got %q, want empty string for missing file", got)
+	}
+}
+
+// TestRenderTranscript_AttributesRole pins the "[role] " prefix on only the
+// first physical line of each text event, which is what the verdict scan and
+// the findings slice key on (issue #5332). A leading newline is trimmed so it
+// cannot hide a VERDICT: first line, and empty events are skipped.
+func TestRenderTranscript_AttributesRole(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"text","part":{"text":"\n\nVERDICT: BLOCK\n- finding one\n- finding two\n"}}`,
+		`{"type":"text","part":{"text":"  \n"}}`,
+	)
+
+	got, err := opencode.RenderTranscript(logPath, "reviewer")
+	if err != nil {
+		t.Fatalf("RenderTranscript: %v", err)
+	}
+	want := "[reviewer] VERDICT: BLOCK\n- finding one\n- finding two"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }

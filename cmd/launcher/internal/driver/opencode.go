@@ -20,7 +20,7 @@ func (opencodeDriver) ClassifyTransient(logPath string) (Classification, error) 
 	return opencode.Classify(logPath)
 }
 
-// NewHeartbeatWriter ignores opts.TopLevelRole (opencode's transcript carries no
+// NewHeartbeatWriter ignores opts.TopLevelRole (opencode's heartbeat carries no
 // role attribution, issue #2092) but forwards opts.OnModel, reporting the model
 // with no role.
 func (opencodeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
@@ -31,10 +31,10 @@ func (opencodeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return opencode.ExtractUsage(logPath)
 }
 
-// RenderTranscript ignores opts.TopLevelRole: opencode's transcript carries no
-// role attribution (issue #2092).
+// RenderTranscript attributes every text event to opts.TopLevelRole (opencode's
+// log has no sub-agent attribution, so there is no other role).
 func (opencodeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
-	return opencode.RenderTranscript(logPath)
+	return opencode.RenderTranscript(logPath, opts.TopLevelRole)
 }
 
 // ResolveExit ignores exitCode and derives the exit from the log: the opencode
