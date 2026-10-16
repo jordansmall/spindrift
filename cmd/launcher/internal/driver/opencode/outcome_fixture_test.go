@@ -105,30 +105,44 @@ func TestResultText_LastMessageOnly(t *testing.T) {
 	ev := func(typ, msg string) string {
 		return fmt.Sprintf(`{"type":%q,"part":{"messageID":%q}}`, typ, msg)
 	}
-	const decoy = "SPINDRIFT_OUTCOME issue=1 landing=x status=ready note=mid"
 
-	t.Run("mid-pass outcome line does not survive", func(t *testing.T) {
-		path := WriteLog(t, text("msg_1", decoy), ev("step_finish", "msg_1"), text("msg_2", "all done, no outcome yet"))
-		got, err := ResultText(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if want := "all done, no outcome yet\n"; got != want {
-			t.Errorf("ResultText = %q, want %q", got, want)
-		}
-		if line := outcome.ExtractOutcomeLine(outcome.StripResultText(got)); line != "" {
-			t.Errorf("ExtractOutcomeLine = %q, want none", line)
-		}
-	})
-	t.Run("textless final message yields empty", func(t *testing.T) {
-		path := WriteLog(t, text("msg_1", decoy), ev("tool_use", "msg_1"), ev("step_finish", "msg_1"),
-			ev("step_start", "msg_2"), ev("step_finish", "msg_2"))
-		got, err := ResultText(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got != "" {
-			t.Errorf("ResultText = %q, want \"\"", got)
+	// The Box's ExtractOutcomeLine wants the token leading, so only a leading
+	// line in the final message counts.
+	const valid = "SPINDRIFT_OUTCOME issue=1 landing=x status=ready note=n"
+	for _, tc := range []struct {
+		name      string
+		lines     []string
+		wantText  string
+		wantFound bool
+	}{
+		{"mid-pass line does not survive", []string{text("msg_1", valid), ev("step_finish", "msg_1"), text("msg_2", "all done")}, "all done\n", false},
+		{"mid-line token in final message", []string{text("msg_1", "x"), text("msg_2", "done: "+valid)}, "done: " + valid + "\n", false},
+		{"leading line in final message", []string{text("msg_1", "x"), text("msg_2", valid)}, valid + "\n", true},
+		{"textless final message yields empty", []string{
+			text("msg_1", valid), ev("tool_use", "msg_1"), ev("step_finish", "msg_1"),
+			ev("step_start", "msg_2"), ev("step_finish", "msg_2"),
+		}, "", false},
+		{"ID-less non-text event keeps the final text", []string{
+			text("msg_1", "x"), text("msg_2", valid), `{"type":"error","error":{"name":"X"}}`,
+		}, valid + "\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ResultText(WriteLog(t, tc.lines...))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.wantText {
+				t.Errorf("ResultText = %q, want %q", got, tc.wantText)
+			}
+			if line := outcome.ExtractOutcomeLine(outcome.StripResultText(got)); (line != "") != tc.wantFound {
+				t.Errorf("ExtractOutcomeLine = %q, wantFound %v", line, tc.wantFound)
+			}
+		})
+	}
+	t.Run("exit resolution applies no outcome rule", func(t *testing.T) {
+		path := WriteLog(t, text("msg_1", "no outcome line here"))
+		if rc, err := ResolveExit(path, 0); err != nil || rc != 0 {
+			t.Errorf("ResolveExit = %d, %v, want 0", rc, err)
 		}
 	})
 	t.Run("parts of the last message join across interleaved events", func(t *testing.T) {
