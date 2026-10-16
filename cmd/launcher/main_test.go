@@ -3882,19 +3882,21 @@ func TestDispatchConfig_ResolveEnv_EmptyGitIdentityStaysEmpty(t *testing.T) {
 // knob of that kind cannot skip gitIdentityResolver.
 func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testing.T) {
 	lookups := map[string]string{}
-	for _, key := range hostGitConfigKeys {
-		lookups[key] = "host:" + key
+	for _, e := range schemaFlags {
+		if e.hostGitConfigKey != "" {
+			lookups[e.hostGitConfigKey] = "host:" + e.hostGitConfigKey
+		}
 	}
 	c, _ := snapshotGitIdentityConfig(t, lookups)
 	cf := forge.NewFake()
 	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
-	found := map[string]bool{}
+	found := 0
 	for _, e := range schemaFlags {
 		if !e.boxHostDerived {
 			continue
 		}
-		found[e.env] = true
+		found++
 		got := cfg.ResolveEnv("42", e.env)
 		if got == "" {
 			t.Errorf("%s: ResolveEnv is empty, want the host-resolved value", e.env)
@@ -3903,13 +3905,8 @@ func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testin
 			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.env, got, want)
 		}
 	}
-	if len(found) == 0 {
+	if found == 0 {
 		t.Fatal("no schemaFlags row has boxHostDerived; the generated field is not rendering")
-	}
-	for name := range hostGitConfigKeys {
-		if !found[name] {
-			t.Errorf("hostGitConfigKeys has %s, but its schemaFlags row is not boxHostDerived", name)
-		}
 	}
 }
 

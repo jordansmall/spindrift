@@ -76,14 +76,6 @@ var gitConfigLookup = func(key string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// hostGitConfigKeys maps each host-derived env name to its host git config
-// key. It is the one place that mapping lives, so the launcher's startup
-// snapshot (which the Box env reuses) reads the same keys (issues #5329, #5333).
-var hostGitConfigKeys = map[string]string{
-	"GIT_USER_NAME":  "user.name",
-	"GIT_USER_EMAIL": "user.email",
-}
-
 // resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: ambient env
 // first (parseFlags lands an explicit flag there via os.Setenv), then the
 // document's settings or artifacts, then the schema default, because the
