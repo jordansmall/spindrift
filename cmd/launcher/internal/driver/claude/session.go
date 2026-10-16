@@ -1,9 +1,9 @@
 package claude
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"path/filepath"
+
+	"spindrift.dev/launcher/internal/driver/driverkit"
 )
 
 // SessionFlags renders the claude CLI's session flags. The session id is
@@ -12,8 +12,7 @@ import (
 // home's projects directory (an evicted cache, or a first fix pass after a
 // crash), and the caller falls back to the cold-context fix flow.
 func SessionFlags(mode, repoSlug, issue, home string) string {
-	sum := sha256.Sum256([]byte("spindrift-session:" + repoSlug + ":" + issue))
-	h := hex.EncodeToString(sum[:])[:32]
+	h := driverkit.SessionKey(repoSlug, issue)
 	id := h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 	switch mode {
 	case "initial":

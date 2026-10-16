@@ -52,7 +52,7 @@ func (opencodeDriver) ResultEvent(text string) ([]byte, error) {
 }
 
 func (opencodeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
-	return ""
+	return opencode.SessionFlags(mode, repoSlug, issue, home)
 }
 
 func init() {
