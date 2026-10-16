@@ -238,6 +238,16 @@ let
     src = builtins.readFile (../templates/default/skills + "/${s.name}/SKILL.md");
   }) (builtins.filter (s: s.harnessOwned or false) bakedSkills);
 
+  # A configFiles path that collides with an agentFiles path would silently
+  # replace the rendered subagent file under `//`.
+  driverFileCollisions = lib.attrNames (
+    lib.intersectAttrs driver.driverAgentFiles driver.driverConfigFiles
+  );
+  allDriverFiles =
+    assert lib.assertMsg (driverFileCollisions == [ ])
+      "Driver ${driver.driverEntry.name}: configFiles paths collide with agentFilesTemplate paths: ${lib.concatStringsSep ", " driverFileCollisions}";
+    driver.driverAgentFiles // driver.driverConfigFiles;
+
   # The /agent/skills and /home/agent slice of agentFiles, written with the
   # given pkgs: agentFiles passes the Linux pkgs, and homeLayoutFor realizes the
   # same tree on the host for the Go seam test's fixture (issue #4296).
@@ -283,7 +293,7 @@ let
       lib.mapAttrsToList (relPath: content: ''
         mkdir -p "$(dirname $out/home/agent/${relPath})"
         cp ${p.writeText (baseNameOf relPath) content} $out/home/agent/${relPath}
-      '') driver.driverAgentFiles
+      '') allDriverFiles
     )}
   '';
 

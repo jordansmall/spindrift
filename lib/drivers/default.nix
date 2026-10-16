@@ -9,6 +9,8 @@ let
   # session state omits it (see lib/preambles.nix's renderDriverMountPreamble).
   # When present, assertShape checks its shape: a non-empty relative path with
   # no empty, "." or ".." segment (so no leading/trailing/doubled slash either).
+  # configFiles (home-relative path -> content, baked by lib/image.nix) is
+  # optional and unvalidated.
   requiredAttrs = [
     "name"
     "package"
