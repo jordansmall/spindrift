@@ -384,3 +384,41 @@ func TestResolveBoxEnvVar_NonHostDerivedNameNeverReadsGitConfig(t *testing.T) {
 		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
 	}
 }
+
+// Every knob the schema declares both host-derived and forwarded to the Box
+// must get its host-resolved value in the Box too (#5329), so a future knob of
+// that kind cannot regress by lacking a hostGitConfigKeys entry.
+func TestResolveBoxEnvVar_EveryBoxHostDerivedKnobGetsHostValue(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+
+	lookups := map[string]string{}
+	for _, key := range hostGitConfigKeys {
+		lookups[key] = "host:" + key
+	}
+	fakeHostGitConfig(t, lookups)
+
+	found := map[string]bool{}
+	for _, e := range schemaFlags {
+		if !e.boxHostDerived {
+			continue
+		}
+		found[e.env] = true
+		unsetEnvForTest(t, e.env)
+		got := resolveBoxEnvVar(e.env)
+		if got == "" {
+			t.Errorf("%s: resolveBoxEnvVar is empty, want the host-resolved value", e.env)
+		}
+		if want := gitIdentityField(e.env); got != want {
+			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.env, got, want)
+		}
+	}
+	if len(found) == 0 {
+		t.Fatal("no schemaFlags row has boxHostDerived; the generated field is not rendering")
+	}
+	for name := range hostGitConfigKeys {
+		if !found[name] {
+			t.Errorf("hostGitConfigKeys has %s, but its schemaFlags row is not boxHostDerived", name)
+		}
+	}
+}

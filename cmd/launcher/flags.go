@@ -150,6 +150,11 @@ type flagEntry struct {
 	// emptyDisables marks a string knob whose doc gives "" its own meaning
 	// (e.g. disables the limit); see emptyIsSetting.
 	emptyDisables bool
+	// boxHostDerived marks a knob the schema declares both hostDerived and
+	// boxEnv (issue #5329). A test-only parity marker: no production path
+	// reads it; TestResolveBoxEnvVar_EveryBoxHostDerivedKnobGetsHostValue pins
+	// it, and runtime forwarding reads BOX_ENV_VARS.
+	boxHostDerived bool
 }
 
 // emptyIsSetting is the one rule for whether an empty env value is a real
