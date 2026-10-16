@@ -90,6 +90,11 @@ in
     OPENCODE_DB = "/home/agent/${sessionCacheDirRelative}/opencode.db";
   };
 
+  # Issue #5351: opencode's bash tool defaults to a 2-minute timeout. This sets
+  # that default only; a model-set per-call `timeout` overrides it and opencode
+  # applies no maximum. It has no config-file key, so env is the only route.
+  bashTimeoutEnv = [ "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS" ];
+
   # opencode composes subagents from the on-disk files agentFilesTemplate below
   # bakes, not a CLI flag, so this always returns "". It keeps claude.nix's
   # roster argument (issue #264) only to give mkHarness.nix one call site.

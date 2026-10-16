@@ -216,7 +216,7 @@ in
     ) "renderPreamble must reject a bashTimeoutEnv name that isn't a valid shell identifier";
     pkgs.runCommand "drivers-render-preamble-bash-timeout-env-rejects-bad-name" { } "touch $out";
 
-  drivers-claude-declares-bash-timeout-env =
+  drivers-declare-bash-timeout-env =
     let
       claudeEntry = driverRegistry.entries.claude;
       opencodeEntry = driverRegistry.entries.opencode;
@@ -231,10 +231,17 @@ in
       "claude Driver's bashTimeoutEnv must name BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, got: ${
         builtins.toJSON (claudeEntry.bashTimeoutEnv or null)
       }";
-    assert assertMsg (
-      !(opencodeEntry ? bashTimeoutEnv)
-    ) "opencode Driver entry must declare no bashTimeoutEnv (it has no Bash-timeout env vars)";
-    pkgs.runCommand "drivers-claude-declares-bash-timeout-env" { } "touch $out";
+    assert assertMsg
+      ((opencodeEntry.bashTimeoutEnv or null) == [ "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS" ])
+      "opencode Driver's bashTimeoutEnv must name OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS, got: ${
+        builtins.toJSON (opencodeEntry.bashTimeoutEnv or null)
+      }";
+    assert assertMsg
+      (hasInfix "DRIVER_BASH_TIMEOUT_ENV=OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS\n" (
+        driverRegistry.renderPreamble opencodeEntry
+      ))
+      "renderPreamble must bake opencode's DRIVER_BASH_TIMEOUT_ENV";
+    pkgs.runCommand "drivers-declare-bash-timeout-env" { } "touch $out";
 
   drivers-assert-shape-succeeds =
     let
@@ -357,6 +364,34 @@ in
           echo "pinned claude-code no longer references ${envVarName} -- lib/drivers/claude.nix's envCommon relies on it to omit run_in_background from the Bash/Agent/Task/PowerShell tool schemas (issue #2011); re-verify against the new build and update the Driver" >&2
           exit 1
         fi
+      '';
+
+  # Issue #5351: opencode's Bash-timeout env is an EXPERIMENTAL-prefixed flag
+  # a nixpkgs bump could rename or drop, silently restoring the 2-minute
+  # default. The built binary holds no plain-text copy of the name, so this
+  # greps the pinned source for the env read and the default it overrides.
+  drivers-opencode-src-reads-bash-timeout-env =
+    let
+      opencodeEntry = driverRegistry.entries.opencode;
+      src = (opencodeEntry.package pkgs).src;
+      envVarName = builtins.head opencodeEntry.bashTimeoutEnv;
+      # Joined to the field name, so an env read into some other field fails.
+      envRead = ''bashDefaultTimeoutMs: positiveInteger("${envVarName}")'';
+      defaultFallback = "flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000";
+    in
+    pkgs.runCommand "drivers-opencode-src-reads-bash-timeout-env"
+      { nativeBuildInputs = [ pkgs.gnugrep ]; }
+      ''
+        pkg=${src}/packages/opencode/src
+        if ! grep -qF ${escapeShellArg envRead} "$pkg/effect/runtime-flags.ts"; then
+          echo "pinned opencode no longer reads ${envVarName} in effect/runtime-flags.ts -- lib/drivers/opencode.nix's bashTimeoutEnv relies on it (issue #5351); re-verify against the new source and update the Driver" >&2
+          exit 1
+        fi
+        if ! grep -qF ${escapeShellArg defaultFallback} "$pkg/tool/shell.ts"; then
+          echo "pinned opencode's tool/shell.ts no longer defaults the bash timeout via bashDefaultTimeoutMs -- lib/drivers/opencode.nix's bashTimeoutEnv may be inert (issue #5351); re-verify against the new source and update the Driver" >&2
+          exit 1
+        fi
+        touch $out
       '';
 
   # Issue #262 slice 5 (AC4): opencode has no --agents JSON flag, so it
