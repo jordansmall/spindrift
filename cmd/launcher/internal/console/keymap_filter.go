@@ -1,6 +1,8 @@
 package console
 
 import (
+	"unicode/utf8"
+
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -14,8 +16,8 @@ var filterBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			switch msg.Type {
 			case tea.KeyBackspace:
-				if n := len(t.m.Filter); n > 0 {
-					t = t.apply(FilterChangedMsg{Filter: t.m.Filter[:n-1]})
+				if _, size := utf8.DecodeLastRuneInString(t.m.Filter); size > 0 {
+					t = t.apply(FilterChangedMsg{Filter: t.m.Filter[:len(t.m.Filter)-size]})
 				}
 			case tea.KeyRunes, tea.KeySpace:
 				t = t.apply(FilterChangedMsg{Filter: t.m.Filter + msg.String()})
