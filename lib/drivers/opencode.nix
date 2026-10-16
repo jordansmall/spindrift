@@ -4,6 +4,48 @@
 # byte-identical to the baked one, before exec-ing the entrypoint, so the suite
 # exercises the same bytes (issue #433).
 { lib }:
+let
+  # Claude Code roster tool names to opencode permission keys, the one home of
+  # the mapping (issue #5347). Edit, Write and MultiEdit all land on opencode's
+  # single `edit` key, so granting any of them grants all three.
+  rosterToolPermissions = {
+    Read = "read";
+    Edit = "edit";
+    Write = "edit";
+    MultiEdit = "edit";
+    Bash = "bash";
+    Glob = "glob";
+    Grep = "grep";
+    WebFetch = "webfetch";
+    WebSearch = "websearch";
+    Agent = "task";
+    Task = "task";
+    TodoWrite = "todowrite";
+    Skill = "skill";
+  };
+
+  permissionKeys = lib.unique (lib.attrValues rosterToolPermissions);
+
+  # opencode treats an unset permission key as allow, so an entry's tools list
+  # restricts nothing until every other mapped key is explicitly denied. An
+  # unmapped tool throws rather than being dropped, which would silently change
+  # what the subagent may do. Only the table's keys are set; keys it never
+  # produces (list, lsp, question, external_directory, doom_loop, MCP/custom
+  # tools) keep opencode's defaults. An explicit `tools = [ ]` denies every
+  # mapped key, read included, unlike an omitted `tools`.
+  permissionLineFor =
+    e:
+    let
+      unmapped = lib.filter (t: !(rosterToolPermissions ? ${t})) e.tools;
+      allowed = map (t: rosterToolPermissions.${t}) e.tools;
+    in
+    if unmapped != [ ] then
+      throw "opencode Driver: roster agent '${e.name}' lists tools with no opencode permission mapping: ${lib.concatStringsSep ", " unmapped}"
+    else
+      "permission: ${
+        builtins.toJSON (lib.genAttrs permissionKeys (k: if lib.elem k allowed then "allow" else "deny"))
+      }\n";
+in
 {
   name = "opencode";
 
@@ -49,6 +91,8 @@
   # drops empty-model entries upstream, so e.model needs no fallback and reaches
   # driver-exec verbatim. Every frontmatter scalar is JSON-encoded (issue #2152
   # slice C) so a newline or colon cannot inject a second YAML key.
+  # An entry with a `tools` list also gets a `permission` map; one without keeps
+  # opencode's full tool set.
   agentFilesTemplate =
     { roster }:
     lib.listToAttrs (
@@ -59,7 +103,9 @@
           description: ${builtins.toJSON (e.description or "")}
           mode: ${builtins.toJSON (e.mode or "subagent")}
           model: ${builtins.toJSON e.model}
-          ${lib.optionalString ((e.effort or "") != "") "reasoningEffort: ${builtins.toJSON e.effort}\n"}---
+          ${lib.optionalString (e ? tools) (permissionLineFor e)}${
+            lib.optionalString ((e.effort or "") != "") "reasoningEffort: ${builtins.toJSON e.effort}\n"
+          }---
           ${e.description or ""}
         '';
       }) roster
