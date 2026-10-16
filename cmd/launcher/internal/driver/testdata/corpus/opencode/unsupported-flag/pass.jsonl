@@ -1,0 +1,10 @@
+opencode run [message..]
+
+run opencode with a message
+
+Positionals:
+  message  message to send                                  [array] [default: []]
+
+Options:
+  -h, --help     show help                                             [boolean]
+  -m, --model    model to use in the format of provider/model           [string]

@@ -1,0 +1,2 @@
+{"type":"step_start","timestamp":1790000000000,"sessionID":"ses_5353a","part":{"messageID":"msg_1"}}
+{"type":"error","timestamp":1790000004000,"sessionID":"ses_5353a","error":{"name":"APIError","data":{"message":"rate_limit_error: This request would exceed your account rate limit.","statusCode":429,"isRetryable":true,"responseHeaders":{"retry-after":"3600"},"responseBody":"{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account rate limit.\"}}"}}}

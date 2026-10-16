@@ -1,0 +1,5 @@
+{"type":"step_start","timestamp":1000,"sessionID":"ses_5353b","part":{"messageID":"msg_1"}}
+{"type":"error","timestamp":4000,"sessionID":"ses_5353b","error":{"name":"APIError","data":{"message":"rate_limit_error: This request would exceed your account rate limit.","statusCode":429,"isRetryable":true,"responseHeaders":{"retry-after":"3600"},"responseBody":"{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_error\",\"message\":\"This request would exceed your account rate limit.\"}}"}}}
+{"type":"step_start","timestamp":9000,"sessionID":"ses_5353b","part":{"messageID":"msg_2"}}
+{"type":"text","timestamp":9100,"sessionID":"ses_5353b","part":{"messageID":"msg_2","text":"Retried after the rate limit and carried on."}}
+{"type":"step_finish","timestamp":9500,"sessionID":"ses_5353b","part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":90,"output":20,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0.003}}
