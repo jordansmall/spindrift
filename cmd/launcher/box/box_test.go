@@ -71,6 +71,9 @@ type fixture struct {
 	resumes   []resumeScript
 	calls     []orchCall
 	ranFirst  bool
+	// driverName is the Driver the handoff names; its real ResolveExit turns
+	// each scripted pass's process exit code into the rc the Box's gates read.
+	driverName string
 
 	assembled   int
 	assembleErr error
@@ -122,7 +125,7 @@ func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("TMPDIR", dir)
-	f := &fixture{t: t, dir: dir, backstopOut: syntheticLine + "\n"}
+	f := &fixture{t: t, dir: dir, driverName: "claude", backstopOut: syntheticLine + "\n"}
 	f.knobs = map[string]string{
 		"MAX_REBASE_ATTEMPTS": "3", "TRANSIENT_BACKOFF_SECS": "2", "HOLD_JITTER_SECS": "1",
 		"REPO_SLUG": "owner/repo", "HOME": filepath.Join(dir, "home"),
@@ -254,6 +257,24 @@ func (f *fixture) transcript() {
 	f.write(filepath.Join(dir, f.sessionID()+".jsonl"), "")
 }
 
+// useDriver points the handoff at name, so passes are logged in that Driver's
+// stream format and settled by its ResolveExit.
+func (f *fixture) useDriver(name string) {
+	f.t.Helper()
+	raw, err := os.ReadFile(f.handoffFile)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	const claudeLiteral = `"Driver":"claude"`
+	if !strings.Contains(string(raw), claudeLiteral) {
+		f.t.Fatalf("handoff lacks %s; useDriver(%q) would silently run as claude", claudeLiteral, name)
+	}
+	f.write(f.handoffFile, strings.Replace(string(raw), claudeLiteral, `"Driver":`+strconv.Quote(name), 1))
+	f.driverName = name
+}
+
+// sessionID stays claude's: it names the transcript file transcript() places
+// under claude's .claude/projects, and opencode pins no session id.
 func (f *fixture) sessionID() string {
 	d, err := driver.New("claude")
 	if err != nil {
@@ -304,8 +325,21 @@ func (f *fixture) orchestrate(argv []string) int {
 		s = f.resumes[0]
 		f.resumes = f.resumes[1:]
 	}
-	f.write(call.argv["--log-path"], resultEvent(s.result)+strings.Join(s.rawLines, "\n")+"\n")
-	return s.rc
+	d, err := driver.New(f.driverName)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	event, err := d.ResultEvent(s.result)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	logPath := call.argv["--log-path"]
+	f.write(logPath, string(event)+strings.Join(s.rawLines, "\n")+"\n")
+	rc, err := d.ResolveExit(logPath, s.rc)
+	if err != nil {
+		f.t.Fatalf("ResolveExit: %v", err)
+	}
+	return rc
 }
 
 func (f *fixture) run() int {
@@ -2160,5 +2194,115 @@ func TestAssemblePrompt_NoPromptHashesWithoutRecordID(t *testing.T) {
 	}
 	if op := promptHashesOp(t, w.String()); op != nil {
 		t.Errorf("emitted %+v with no Record ID", op)
+	}
+}
+
+// --- exit resolution joined to the recovery gates (issue #5348) ---
+//
+// The fixture's passes settle through each Driver's real ResolveExit, so these
+// cover the seam between a Driver's rc and the gates that read it.
+
+const opencodeErrorEvent = `{"type":"error","error":"boom"}`
+
+func TestRecoveryGates_CleanExitNoOutcome_NudgeThenBackstop(t *testing.T) {
+	for _, name := range []string{"claude", "opencode"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.useDriver(name)
+			f.firstRun("all finished\n", 0)
+			f.resumes = []resumeScript{{result: "still no marker\n"}}
+			f.backstopOut = blockedLine + "\n"
+
+			if rc := f.run(); rc != 0 {
+				t.Fatalf("rc = %d, want 0", rc)
+			}
+			if len(f.calls) != 1 {
+				t.Fatalf("orchestrator calls = %d, want 1 (the nudge)", len(f.calls))
+			}
+			if len(f.backstopCfgs) != 1 || !f.backstopCfgs[0].RecoveryAttempted {
+				t.Fatalf("backstop cfgs = %+v, want exactly one with RecoveryAttempted", f.backstopCfgs)
+			}
+			if !strings.Contains(f.stdout(), "==> driver produced no SPINDRIFT_OUTCOME line — emitting synthetic backstop\n"+blockedLine+"\n") {
+				t.Errorf("stdout lacks the backstop banner + blocked line:\n%s", f.stdout())
+			}
+			if strings.Contains(f.stdout(), "status=ready") {
+				t.Errorf("stdout carries a ready outcome, want only the backstop's blocked one:\n%s", f.stdout())
+			}
+		})
+	}
+}
+
+func TestRecoveryGates_OpencodeNonZeroResolution_SkipsNudgeAndBackstop(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result string
+		raw    []string
+		exit   int
+		wantRC int
+	}{
+		{"error event, no outcome line", "working\n", []string{opencodeErrorEvent}, 0, 1},
+		{"error event after an outcome line", readyLine + "\n", []string{opencodeErrorEvent}, 0, 1},
+		{"crash keeps its exit code", "working\n", nil, 3, 3},
+		{"crash after an outcome line keeps its exit code", readyLine + "\n", nil, 3, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.useDriver("opencode")
+			f.firstRun(tc.result, tc.exit, tc.raw...)
+
+			if rc := f.run(); rc != tc.wantRC {
+				t.Fatalf("rc = %d, want %d", rc, tc.wantRC)
+			}
+			if len(f.calls) != 0 || len(f.backstopCfgs) != 0 {
+				t.Fatalf("calls=%d backstops=%d, want neither on a non-zero exit", len(f.calls), len(f.backstopCfgs))
+			}
+		})
+	}
+}
+
+func TestRecoveryGates_PRIntentNudgeFiresOnReadyWithoutIntent(t *testing.T) {
+	for _, name := range []string{"claude", "opencode"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.useDriver(name)
+			prIntentGateMissing(f)
+			f.resumes = []resumeScript{{result: readyLine + "\n", rawLines: []string{prIntentLine}}}
+
+			if rc := f.run(); rc != 0 {
+				t.Fatalf("rc = %d, want 0", rc)
+			}
+			if len(f.calls) != 1 {
+				t.Fatalf("calls = %d, want the PR-intent nudge", len(f.calls))
+			}
+			if !strings.Contains(f.stdout(), "==> PR-intent marker missing — resuming the session once with a nudge\n") {
+				t.Errorf("banner missing:\n%s", f.stdout())
+			}
+			if !strings.Contains(f.calls[0].prompt, readyLine) {
+				t.Errorf("nudge prompt does not carry the ready line:\n%s", f.calls[0].prompt)
+			}
+		})
+	}
+}
+
+// Ready reached only through the backstop depends on the clean exit surviving
+// its outcome-less first pass.
+func TestRecoveryGates_PRIntentNudgeFiresOnBackstopReady(t *testing.T) {
+	for _, name := range []string{"claude", "opencode"} {
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			f.useDriver(name)
+			f.readOnlyRelay()
+			f.firstRun("done\n", 0)
+			f.resumes = []resumeScript{{result: "done\n"}, {result: syntheticLine + "\n", rawLines: []string{prIntentLine}}}
+
+			f.run()
+
+			if len(f.calls) != 2 {
+				t.Fatalf("calls = %d, want the outcome nudge then the PR-intent nudge", len(f.calls))
+			}
+			if !strings.Contains(f.calls[1].prompt, syntheticLine) {
+				t.Errorf("PR-intent nudge did not carry the backstop line:\n%s", f.calls[1].prompt)
+			}
+		})
 	}
 }
