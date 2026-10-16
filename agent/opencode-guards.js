@@ -10,16 +10,22 @@ import { execFileSync } from "node:child_process";
 // Baked for every Driver by lib/image.nix's homeLayoutScript.
 const HOOKS_DIR = "/home/agent/.claude/hooks";
 
-// Order matters only for which denial wins; neither hook reads the other's
-// rewrite. `rewrites`: the hook must answer a non-empty command with a rewrite
-// (silence would let the call run with credentials intact), unlike the reject
-// hook, where silence means allow.
+// Order matters: each hook sees the args the earlier ones rewrote, so the tee
+// must stay last to wrap the scrubbed command. `rewrites`: silence from the
+// scrub or tee on a non-empty command is a failure, not "allow".
 const HOOKS = [
   { script: "reject-background-bash.sh", rewrites: false },
   { script: "env-credential-scrub.sh", rewrites: true },
+  { script: "bash-output-tee.sh", rewrites: true },
 ];
+const SUMMARY_HOOK = "bash-output-summary.sh";
+// opencode appends a block opened by this and closed by SHELL_METADATA_CLOSE to
+// a result it cut short (timeout, user abort); the summary replaces the whole
+// output, so the notice is carried over.
+const SHELL_METADATA_OPEN = "\n\n<shell_metadata>\n";
+const SHELL_METADATA_CLOSE = "</shell_metadata>";
 
-function runHook(script, args) {
+function runHook(script, args, onFailure = "") {
   const payload = JSON.stringify({ tool_name: "Bash", tool_input: args });
   let out;
   let parsed;
@@ -31,9 +37,7 @@ function runHook(script, args) {
     });
     parsed = out.trim() === "" ? {} : JSON.parse(out);
   } catch (err) {
-    // Fail closed: a hook that cannot run or answer must not wave the call
-    // through with its credentials intact.
-    throw new Error(`Bash guard ${script} failed, refusing the call: ${err.message}`);
+    throw new Error(`Bash hook ${script} failed: ${err.message}${onFailure}`);
   }
   return parsed.hookSpecificOutput ?? {};
 }
@@ -42,7 +46,9 @@ export const SpindriftGuards = async () => ({
   "tool.execute.before": async (input, output) => {
     if (input.tool !== "bash") return;
     for (const { script, rewrites } of HOOKS) {
-      const decision = runHook(script, output.args);
+      // Fail closed: a hook that cannot run or answer must not wave the call
+      // through with its credentials intact or without the log the tee keeps.
+      const decision = runHook(script, output.args, ", refusing the call");
       if (decision.permissionDecision === "deny") {
         throw new Error(decision.permissionDecisionReason ?? `Bash guard ${script} denied the call`);
       }
@@ -50,9 +56,29 @@ export const SpindriftGuards = async () => ({
       if (typeof decision.updatedInput?.command === "string") {
         output.args.command = decision.updatedInput.command;
       } else if (rewrites && typeof output.args.command === "string" && output.args.command !== "") {
-        // The scrub hook exits silently for an empty command only.
+        // The rewriting hooks exit silently for an empty command only.
         throw new Error(`Bash guard ${script} returned no rewrite, refusing the call`);
       }
+    }
+  },
+  // The summary hook owns the output bound (BASH_OUTPUT_SUMMARY_TAIL_BYTES); a
+  // short result passes through untouched. input.args is the object the before
+  // hook rewrote, so it still carries the tee wrapper the summary parses.
+  "tool.execute.after": async (input, output) => {
+    if (input.tool !== "bash") return;
+    try {
+      const updated = runHook(SUMMARY_HOOK, input.args).updatedToolOutput;
+      if (typeof updated === "string") {
+        // The last opener, anchored at the end: an earlier one is command output.
+        const text = String(output.output);
+        const at = text.lastIndexOf(SHELL_METADATA_OPEN);
+        const notice = at >= 0 && text.endsWith(SHELL_METADATA_CLOSE) ? text.slice(at) : "";
+        output.output = updated + notice;
+      }
+    } catch (err) {
+      // Fail open: the call already ran; failing it would discard its result,
+      // and the full output stays reachable unsummarised.
+      console.error(`spindrift-guards: ${SUMMARY_HOOK} failed, output left unchanged: ${err.message}`);
     }
   },
 });
