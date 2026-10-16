@@ -41,6 +41,15 @@ var claudeArgvShape = promptassembly.ArgvShape{
 	Order:       []string{"prompt", "model", "agents", "session", "driverFlags", "effort"},
 }
 
+// opencodeArgvShape mirrors the argv shape lib/drivers/opencode.nix declares.
+var opencodeArgvShape = promptassembly.ArgvShape{
+	PromptStyle:    "positional",
+	ModelFlag:      "-m",
+	ModelOmitEmpty: true,
+	EffortFlag:     "--variant",
+	Order:          []string{"driverFlags", "model", "effort", "session", "prompt"},
+}
+
 // TestMainRunHandoffFileReproducesClaudeShape pins issue #2975 slice 3: the
 // handoff's ArgvShape, not driver-exec, decides the driver's argv shape.
 func TestMainRunHandoffFileReproducesClaudeShape(t *testing.T) {
@@ -162,6 +171,48 @@ func TestMainRunRoleAwareModelEffort(t *testing.T) {
 				t.Errorf("driver argv = %q, want it to contain \"--effort %s\"", got, tc.wantEffort)
 			}
 		})
+	}
+}
+
+// TestMainRunReviewerEffortOpencodeShape pins issue #5350's driver-exec half:
+// the reviewer role carries ReviewEffort through opencode's `--variant`.
+func TestMainRunReviewerEffortOpencodeShape(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("do it"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	callLog := filepath.Join(dir, "calls.log")
+	driverBin := writeFakeDriver(t, dir, "fake-driver", "echo \"$@\" >> "+callLog+"\nexit 0\n")
+
+	handoffPath := writeHandoffFile(t, promptassembly.Handoff{
+		PromptFile:   promptFile,
+		DriverBin:    driverBin,
+		Model:        "anthropic/opus",
+		Effort:       "high",
+		ReviewModel:  "anthropic/sonnet",
+		ReviewEffort: "low",
+		ArgvShape:    opencodeArgvShape,
+	})
+
+	var stdout, stderr bytes.Buffer
+	rc := mainRun([]string{
+		"-handoff-file", handoffPath,
+		"-log-path", filepath.Join(dir, "stream.log"),
+		"-top-level-role", driverkit.ReviewerRole,
+	}, &stdout, &stderr)
+	if rc != 0 {
+		t.Fatalf("mainRun exit code = %d, want 0 (stderr: %q)", rc, stderr.String())
+	}
+	calls, err := os.ReadFile(callLog)
+	if err != nil {
+		t.Fatalf("read callLog: %v", err)
+	}
+	got := strings.TrimSpace(string(calls))
+	for _, want := range []string{"-m anthropic/sonnet", "--variant low"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("driver argv = %q, want it to contain %q", got, want)
+		}
 	}
 }
 

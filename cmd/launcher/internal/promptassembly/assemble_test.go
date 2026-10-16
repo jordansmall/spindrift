@@ -3006,10 +3006,18 @@ func TestAssembleOrchestratorResearchCovered(t *testing.T) {
 // distinguishable from any real rendered prompt.
 func writeAgentFile(t *testing.T, path, desc string) {
 	t.Helper()
+	writeAgentFileFrontmatter(t, path, desc, "")
+}
+
+// writeAgentFileFrontmatter is writeAgentFile with extra frontmatter lines
+// (each newline-terminated) inserted after the `model:` line.
+func writeAgentFileFrontmatter(t *testing.T, path, desc, extra string) {
+	t.Helper()
 	content := "---\n" +
 		"description: \"" + desc + "\"\n" +
 		"mode: \"subagent\"\n" +
 		"model: \"opus\"\n" +
+		extra +
 		"---\n" +
 		"placeholder body for " + desc + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
@@ -3322,6 +3330,65 @@ func TestAssembleDriverAgentFilesReviewModelPrecedence(t *testing.T) {
 	})
 }
 
+// Issue #5350: both Drivers surface the roster reviewer's model and effort on
+// the Handoff. Claude reads them from the --agents JSON entry; opencode only
+// has the baked reviewer.md frontmatter (`model:` / `reasoningEffort:`).
+func TestAssembleReviewerModelAndEffortExtraction(t *testing.T) {
+	reg := loadTestRegistry(t)
+
+	tests := []struct {
+		name          string
+		opencode      bool   // false: claude, reading jsonTemplate
+		jsonTemplate  string // claude path: AgentsJSONTemplate
+		reviewerExtra string // opencode path: extra reviewer.md frontmatter
+		wantModel     string
+		wantEffort    string
+	}{
+		{
+			name:         "claude: JSON reviewer entry",
+			jsonTemplate: `{"reviewer":{"model":"json-model","effort":"json-effort"}}`,
+			wantModel:    "json-model",
+			wantEffort:   "json-effort",
+		},
+		{
+			name:          "opencode: reviewer.md model and reasoningEffort",
+			opencode:      true,
+			reviewerExtra: "reasoningEffort: \"high\"\n",
+			wantModel:     "opus",
+			wantEffort:    "high",
+		},
+		{
+			name:       "opencode: reviewer.md without reasoningEffort leaves effort empty",
+			opencode:   true,
+			wantModel:  "opus",
+			wantEffort: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env := coveredEnv()
+			if tt.opencode {
+				dir := t.TempDir()
+				writeAgentFileFrontmatter(t, filepath.Join(dir, "reviewer.md"), "reviewer", tt.reviewerExtra)
+				env.DriverAgentFilesDir = dir
+			} else {
+				env.AgentsJSONTemplate = tt.jsonTemplate
+			}
+
+			result, err := Assemble(env, reg)
+			if err != nil {
+				t.Fatalf("Assemble: %v", err)
+			}
+			if result.Handoff.ReviewModel != tt.wantModel {
+				t.Errorf("Handoff.ReviewModel = %q, want %q", result.Handoff.ReviewModel, tt.wantModel)
+			}
+			if result.Handoff.ReviewEffort != tt.wantEffort {
+				t.Errorf("Handoff.ReviewEffort = %q, want %q", result.Handoff.ReviewEffort, tt.wantEffort)
+			}
+		})
+	}
+}
+
 // The dispatch-time review override channel (issue #3171). The overrides
 // bind last: over the AgentsJSONTemplate extraction, over the reviewer.md
 // rewrite, and even with the reviewer opted out of the roster. The
@@ -3385,12 +3452,13 @@ func TestAssembleReviewOverrides(t *testing.T) {
 
 	t.Run("override wins over the reviewer.md agent-file rewrite", func(t *testing.T) {
 		dir := t.TempDir()
-		writeAgentFile(t, filepath.Join(dir, "reviewer.md"), "reviewer")
+		writeAgentFileFrontmatter(t, filepath.Join(dir, "reviewer.md"), "reviewer", "reasoningEffort: \"high\"\n")
 
 		env := coveredEnv()
 		env.DriverAgentFilesDir = dir
 		env.AgentsJSONTemplate = `{"reviewer":{"model":"haiku"}}`
 		env.ReviewModelOverride = "env-model"
+		env.ReviewEffortOverride = "env-effort"
 
 		result, err := Assemble(env, reg)
 		if err != nil {
@@ -3398,6 +3466,9 @@ func TestAssembleReviewOverrides(t *testing.T) {
 		}
 		if result.Handoff.ReviewModel != "env-model" {
 			t.Errorf("Handoff.ReviewModel = %q, want %q (dispatch env wins over the file path's frontmatter model)", result.Handoff.ReviewModel, "env-model")
+		}
+		if result.Handoff.ReviewEffort != "env-effort" {
+			t.Errorf("Handoff.ReviewEffort = %q, want %q (dispatch env wins over the file path's reasoningEffort)", result.Handoff.ReviewEffort, "env-effort")
 		}
 	})
 }
@@ -3498,9 +3569,10 @@ func TestAssembleDriverAgentFilesFrontmatterFallbackTrimsTrailingNewlines(t *tes
 	}
 }
 
-// reviewerModelFrontmatter's no-`model:`-line fallback, where
+// The missing-`model:` case of frontmatterScalar's missing-key fallback, where
 // entrypoint.sh's `sed -n 's/^model: //p'` found no match:
-// Handoff.ReviewModel stays empty.
+// Handoff.ReviewModel stays empty. The effort key's case lives in
+// TestAssembleReviewerModelAndEffortExtraction.
 func TestAssembleDriverAgentFilesReviewerModelMissingFallback(t *testing.T) {
 	reg := loadTestRegistry(t)
 	dir := t.TempDir()
