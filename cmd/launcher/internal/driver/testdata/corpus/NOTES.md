@@ -37,10 +37,24 @@ local issue tracker and a local Code Forge, working a toy Python project.
 | --- | --- | --- |
 | `real-normal` | a merged run: an implement pass with no outcome line, a review pass, then a land pass that reached the outcome | `issue-longest-line.log` |
 | `real-box-failed` | a Box that failed its env guards before `opencode` started, so the log has no Driver events | `issue-longest-line.log.prior-run.1` |
+| `real-single-pass` | a merged run whose implement pass reached the outcome itself | `issue-stdin.log` |
+| `real-review-block-ignored` | a review pass that printed `VERDICT: BLOCK`, captured before #5332, so the host read it as no verdict and the land pass merged it | `issue-missing-file.log` |
+| `real-blocked` | an implement pass that stopped with `status=blocked` on a contradictory spec | `issue-word-rules.log` |
+
+`real-review-block-ignored` renders under the reviewer role so its verdict
+golden pins the real `BLOCK` line. The log holds the whole run, so its
+implement and land lines carry `[reviewer]` too.
 
 Missing:
 
-- A fix pass, a Box killed mid-pass, a whole run with no outcome, and a
-  transient failure. No real log of any has been captured yet.
-- A resumed session. The `opencode` Driver does not resume sessions, so this
-  case does not apply.
+- A fix pass. Until #5332 the `opencode` Transcript dropped the
+  `[reviewer]` prefix, so the host never saw a review verdict and never ran
+  one. Every log here predates that fix; capture one from a fresh dispatch.
+- A resumed session. Until #5349 the `opencode` Driver did not resume
+  sessions; capture a corrective resume from a fresh dispatch.
+- A worker subagent. Until #5331 the `opencode` Box never enabled one.
+- A Box killed mid-pass and a transient failure. None happened in the
+  captured runs; the synthetic cases cover a rate-limit reset and a
+  recovered error (#5353).
+- A whole run with no outcome. Five of the seven runs ended their implement
+  pass without one, but the land pass recovered every time.

@@ -1,0 +1,8 @@
+{
+  "lines": [
+    "#42 · Branch exists already; check it.",
+    "#42 · Already on it, no commits.",
+    "#42 · The change is committed on `agent/issue-stdin` and ready for review."
+  ],
+  "onModel": []
+}

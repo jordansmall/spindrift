@@ -1,0 +1,10 @@
+{
+  "lines": [
+    "#42 · Already on the branch.",
+    "#42 · Committed; stopping for review pass.",
+    "#42 · Small diff; reading it in full.",
+    "#42 · VERDICT: BLOCK",
+    "#42 · SPINDRIFT_OUTCOME issue=missing-file landing=agent/issue-missing-file status=ready note=Missing files now print \"tall..."
+  ],
+  "onModel": []
+}
