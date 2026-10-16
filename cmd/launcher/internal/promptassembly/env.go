@@ -44,8 +44,8 @@ type Env struct {
 	AgentsJSONTemplate string // $AGENTS_JSON_TEMPLATE
 
 	// FilerEnabled, WorkerProvisioned, and ScoutProvisioned are true when the
-	// roster nix bakes into AgentsJSONTemplate carries that entry. nix resolves
-	// all three at eval time so no Box reparses the template (issue #2533).
+	// roster nix bakes carries that entry. nix resolves all three at eval time
+	// so no Box reparses the template (issue #2533).
 	FilerEnabled      bool
 	WorkerProvisioned bool
 	ScoutProvisioned  bool

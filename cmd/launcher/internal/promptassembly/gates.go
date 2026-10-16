@@ -37,10 +37,9 @@ func Gates(e Env) map[string]bool {
 	// hunt every dimension solo (issue #3222).
 	g["CODE_REVIEW_UNBAKED"] = !e.CodeReviewSkillBaked
 
-	// WORKER_PROVISIONED comes from agentsJsonTemplate's rendered output
-	// (issue #2533); FILER_ENABLED (issue #5330) and SCOUT_PROVISIONED key off
-	// roster membership instead — see lib/mkHarness.nix's scoutProvisioned
-	// comment.
+	// FILER_ENABLED, WORKER_PROVISIONED, and SCOUT_PROVISIONED all key off
+	// roster membership (issues #5330, #5331) — see lib/mkHarness.nix's
+	// scoutProvisioned comment.
 	g["FILER_ENABLED"] = e.FilerEnabled
 	g["FILER_ABSENT"] = !e.FilerEnabled
 	g["WORKER_PROVISIONED"] = e.WorkerProvisioned

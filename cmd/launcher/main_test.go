@@ -2096,23 +2096,35 @@ func TestResolveAgentPresenceSignals_WorkerModelOverride_DocumentArtifactStillTr
 	}
 }
 
-// The version-skew fallback is driver-aware (issue #2533 review, #5330):
-// lib/drivers/opencode.nix's agentsJsonTemplate always renders "", so nix
-// always bakes WORKER_PROVISIONED=false for the opencode Driver even with a
-// WORKER_MODEL configured. The Filer is provisioned from on-disk agent files
-// there, so FILER_ENABLED follows FILER_MODEL like every other Driver.
-func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFilerFromModelWorkerFalse(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	t.Setenv("FILER_MODEL", "haiku")
-	t.Setenv("WORKER_MODEL", "claude-sonnet-5")
-
-	presence := resolveAgentPresenceSignals("opencode")
-	if !presence.filerEnabled {
-		t.Errorf("filerEnabled = false, want true (opencode provisions the Filer from FILER_MODEL like every other Driver)")
+// The version-skew fallback is driver-aware (issue #2533 review, #5330,
+// #5331): under opencode the worker follows the roster, but lib/mkHarness.nix
+// drops a model that is not Provider-namespaced (no "/"), so a driver-blind
+// fallback would report it provisioned. The Filer is provisioned from on-disk
+// agent files there, so FILER_ENABLED follows FILER_MODEL like every other
+// Driver.
+func TestResolveAgentPresenceSignals_NoDocumentOpencodeDriverFallback(t *testing.T) {
+	cases := []struct {
+		name, workerModel string
+		wantWorker        bool
+	}{
+		{"non-namespaced worker model is dropped", "claude-sonnet-5", false},
+		{"namespaced worker model is provisioned", "anthropic/claude-sonnet-5", true},
 	}
-	if presence.workerProvisioned {
-		t.Errorf("workerProvisioned = true, want false (opencode Driver always bakes WORKER_PROVISIONED=false regardless of WORKER_MODEL)")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Cleanup(func() { loadedDoc = nil })
+			loadedDoc = nil
+			t.Setenv("FILER_MODEL", "haiku")
+			t.Setenv("WORKER_MODEL", tc.workerModel)
+
+			presence := resolveAgentPresenceSignals("opencode")
+			if !presence.filerEnabled {
+				t.Errorf("filerEnabled = false, want true (opencode provisions the Filer from FILER_MODEL like every other Driver)")
+			}
+			if presence.workerProvisioned != tc.wantWorker {
+				t.Errorf("workerProvisioned = %v, want %v", presence.workerProvisioned, tc.wantWorker)
+			}
+		})
 	}
 }
 

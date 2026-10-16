@@ -493,14 +493,14 @@ func resolveAgentPresenceSignals(driver string) agentPresence {
 
 	filerEnabled = filerModel != ""
 
-	// opencode provisions subagents from on-disk agents/*.md rather than
-	// agentsJsonTemplate, so nix bakes only the worker false for that Driver
-	// whatever WORKER_MODEL says (issue #2533). The Filer and scout skip this
-	// branch because opencode does provision them, so a non-empty FILER_MODEL
-	// or SCOUT_MODEL decides their fallback under every Driver (issue #5330)
-	// — see lib/mkHarness.nix's scoutProvisioned comment.
+	// Under opencode the worker mirrors lib/mkHarness.nix's rosterWithoutBareWorker
+	// drop: a WORKER_MODEL without a "/" (not Provider-namespaced) is not
+	// provisioned (issue #5331). The Filer and scout skip this branch because
+	// opencode provisions them like any Driver, so a non-empty FILER_MODEL or
+	// SCOUT_MODEL decides their fallback (issue #5330) — see lib/mkHarness.nix's
+	// scoutProvisioned comment.
 	if driver == "opencode" {
-		workerProvisioned = false
+		workerProvisioned = strings.Contains(workerModel, "/")
 	} else {
 		workerProvisioned = workerModel != ""
 	}
