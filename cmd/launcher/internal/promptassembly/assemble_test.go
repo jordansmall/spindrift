@@ -3085,6 +3085,35 @@ func TestAssembleDriverAgentFilesRewrite(t *testing.T) {
 	}
 }
 
+// Issue #5330: an opencode Box whose roster carries the Filer bakes filer.md,
+// and the rewrite must give it the real filer prompt rather than leave the
+// placeholder body.
+func TestAssembleDriverAgentFilesRewritesFilerBody(t *testing.T) {
+	reg := loadTestRegistry(t)
+	dir := t.TempDir()
+	writeAgentFile(t, filepath.Join(dir, "filer.md"), "filer")
+	frontmatterBefore := agentFileFrontmatter(t, filepath.Join(dir, "filer.md"))
+
+	env := coveredEnv()
+	env.DriverAgentFilesDir = dir
+	env.AgentsPromptFiles = `{"filer":"filer-prompt.md"}`
+
+	if _, err := Assemble(env, reg); err != nil {
+		t.Fatalf("Assemble: %v", err)
+	}
+
+	body := agentFileBody(t, filepath.Join(dir, "filer.md"))
+	if strings.Contains(body, "placeholder body") {
+		t.Errorf("filer.md body not rewritten: %q", body)
+	}
+	if !strings.Contains(body, "turn the review findings the work loop escalated") {
+		t.Errorf("filer.md body missing the filer prompt text: %q", body)
+	}
+	if agentFileFrontmatter(t, filepath.Join(dir, "filer.md")) != frontmatterBefore {
+		t.Errorf("filer.md frontmatter changed, want unchanged")
+	}
+}
+
 // Issue #2706's second, independent render path: rewriteAgentFiles' on-disk
 // worker.md rewrite must reach the same result for worker-prompt.md as
 // TestAssembleWorkerPromptNoCavemanWithSkillPreamble's renderAgentsJSON path.
