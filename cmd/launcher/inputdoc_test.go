@@ -301,3 +301,86 @@ func TestMainRun_AmbientDriverMismatch_WarnedMarkerSuppresses(t *testing.T) {
 		})
 	}
 }
+
+func fakeHostGitConfig(t *testing.T, vals map[string]string) *[]string {
+	t.Helper()
+	orig := gitConfigLookup
+	t.Cleanup(func() { gitConfigLookup = orig })
+	var calls []string
+	gitConfigLookup = func(key string) string {
+		calls = append(calls, key)
+		return vals[key]
+	}
+	return &calls
+}
+
+func unsetEnvForTest(t *testing.T, names ...string) {
+	t.Helper()
+	for _, n := range names {
+		t.Setenv(n, "")
+		os.Unsetenv(n)
+	}
+}
+
+// The Box must see the same host git identity the launcher resolves (#5329):
+// with no env or document value, resolveBoxEnvVar falls back to host git config.
+func TestResolveBoxEnvVar_GitIdentityFallsBackToHostGitConfig(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
+	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
+
+	if got := resolveBoxEnvVar("GIT_USER_NAME"); got != "Host Name" {
+		t.Errorf("GIT_USER_NAME = %q, want Host Name", got)
+	}
+	if got := resolveBoxEnvVar("GIT_USER_EMAIL"); got != "host@example.com" {
+		t.Errorf("GIT_USER_EMAIL = %q, want host@example.com", got)
+	}
+}
+
+func TestResolveBoxEnvVar_ExplicitGitIdentitySkipsHostGitConfig(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
+
+	t.Setenv("GIT_USER_NAME", "Env Name")
+	unsetEnvForTest(t, "GIT_USER_EMAIL")
+	loadedDoc = &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}}
+
+	if got := resolveBoxEnvVar("GIT_USER_NAME"); got != "Env Name" {
+		t.Errorf("GIT_USER_NAME = %q, want Env Name", got)
+	}
+	if got := resolveBoxEnvVar("GIT_USER_EMAIL"); got != "doc@example.com" {
+		t.Errorf("GIT_USER_EMAIL = %q, want doc@example.com", got)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
+	}
+}
+
+// An empty host identity stays empty so the Box's GIT_USER_NAME guard still fires.
+func TestResolveBoxEnvVar_EmptyHostGitConfigStaysEmpty(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
+	fakeHostGitConfig(t, nil)
+
+	if got := resolveBoxEnvVar("GIT_USER_NAME"); got != "" {
+		t.Errorf("GIT_USER_NAME = %q, want empty", got)
+	}
+	if got := resolveBoxEnvVar("GIT_USER_EMAIL"); got != "" {
+		t.Errorf("GIT_USER_EMAIL = %q, want empty", got)
+	}
+}
+
+func TestResolveBoxEnvVar_NonHostDerivedNameNeverReadsGitConfig(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	loadedDoc = nil
+	unsetEnvForTest(t, "GH_TOKEN", "BASE_BRANCH")
+	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name"})
+
+	resolveBoxEnvVar("GH_TOKEN")
+	resolveBoxEnvVar("BASE_BRANCH")
+	if len(*calls) != 0 {
+		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
+	}
+}
