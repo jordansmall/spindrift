@@ -2,6 +2,7 @@ package launcherchecks
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -515,5 +516,33 @@ func TestSignalsFromRegistry(t *testing.T) {
 	}
 	if got := SignalsFromRegistry("github", "github"); got.InBoxUnreachableTracker {
 		t.Errorf("SignalsFromRegistry(github, github).InBoxUnreachableTracker = true, want false")
+	}
+}
+
+func TestDriverCredentials(t *testing.T) {
+	claude := []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
+	opencode := []string{"OPENCODE_AUTH_CONTENT"}
+	tests := []struct {
+		driver       string
+		models       []string
+		want         []string
+		wantRequired bool
+	}{
+		{"", []string{"claude-sonnet-5"}, claude, true},
+		{"claude", []string{"github-copilot/gpt-5"}, claude, true},
+		{"claude", nil, claude, true},
+		{"opencode", []string{"github-copilot/gpt-5"}, opencode, true},
+		{"opencode", []string{"anthropic/claude-sonnet-5"}, opencode, false},
+		{"opencode", []string{""}, opencode, false},
+		{"opencode", nil, opencode, false},
+		{"opencode", []string{"claude-sonnet-5"}, opencode, false},
+		{"opencode", []string{"anthropic/claude-sonnet-5", "", "github-copilot/gpt-5"}, opencode, true},
+		{"typo", []string{"github-copilot/gpt-5"}, nil, false},
+	}
+	for _, tc := range tests {
+		got, required := DriverCredentials(tc.driver, tc.models...)
+		if !slices.Equal(got, tc.want) || required != tc.wantRequired {
+			t.Errorf("DriverCredentials(%q, %q) = %v, %v, want %v, %v", tc.driver, tc.models, got, required, tc.want, tc.wantRequired)
+		}
 	}
 }

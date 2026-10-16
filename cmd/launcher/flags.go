@@ -518,10 +518,6 @@ func parseFlags(args []string) ([]string, error) {
 	return remaining, nil
 }
 
-// claudeCredentialPair is the Claude Driver's either-or credential in fetch
-// order: OAuth first as the documented primary, API key as the fallback.
-var claudeCredentialPair = []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
-
 // globalSecretCmdTemplate is the --secret-cmd/SECRET_CMD fallback captured by
 // parseFlags and consumed by applySecretCmdFallback. A package var, not a
 // parseFlags return value, so the fallback can run later in main() without
@@ -537,20 +533,22 @@ func applySecretCmdFallback() error {
 	if globalSecretCmdTemplate == "" {
 		return nil
 	}
+	creds, credsRequired := driverCredentials()
 	for i := range secretKnobs {
 		knob := &secretKnobs[i]
-		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env) {
+		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env, creds) {
 			continue
 		}
-		// The Claude pair is one unit: either satisfies validate(), so an
-		// OAuth-only vault must not abort on a missing ANTHROPIC_API_KEY item.
-		// The non-primary row always defers to the pair's first row.
+		// The Driver's credentials are one unit: any one satisfies validate(),
+		// so an OAuth-only vault must not abort on a missing ANTHROPIC_API_KEY
+		// item (Claude's pair). The non-primary rows defer to the set's first.
 		envs := []string{knob.env}
-		if slices.Contains(claudeCredentialPair, knob.env) {
-			if knob.env != claudeCredentialPair[0] {
+		driverCred := slices.Contains(creds, knob.env)
+		if driverCred {
+			if knob.env != creds[0] {
 				continue
 			}
-			envs = claudeCredentialPair
+			envs = creds
 		}
 		var errs []error
 		fetched := false
@@ -567,19 +565,41 @@ func applySecretCmdFallback() error {
 			fetched = true
 			break
 		}
-		if !fetched {
+		// A Driver credential no visible tier needs is best-effort: another
+		// Provider needs nothing from the environment.
+		if !fetched && (credsRequired || !driverCred) {
 			return errors.Join(errs...)
 		}
 	}
 	return nil
 }
 
-// secretRequiredThisRun gates applySecretCmdFallback so the global template
-// never forces a vault lookup for a secret this run does not use. Cases are
-// hardcoded per env name because no uniform "required" rule covers these five
-// secrets. Reads CODE_FORGE and ISSUE_TRACKER through getenvSchema, not
-// os.Getenv, so a value set only in the Consumer flake is seen (ADR 0020).
-func secretRequiredThisRun(env string) bool {
+// driverCredentials is the active Driver's either-or credential set and
+// whether this run requires one. DRIVER and every visible model tier go
+// through resolveDriver/getenvSchema so a document- or flake-only value is
+// seen (ADR 0020).
+func driverCredentials() ([]string, bool) {
+	driver, _ := resolveDriver()
+	return launcherchecks.DriverCredentials(driver,
+		getenvSchema("MODEL"), getenvSchema("REVIEW_MODEL"), getenvSchema("WORKER_MODEL"),
+		getenvSchema("SCOUT_MODEL"), getenvSchema("FILER_MODEL"))
+}
+
+// secretRequiredThisRun gates whether applySecretCmdFallback tries the global
+// template for env, so it never forces a vault lookup for a secret this run
+// does not use. creds is the active Driver's credential set: it is tried
+// whenever none has a value, even when no visible tier requires it (a tier
+// baked into the image can select github-copilot invisibly to the launcher);
+// applySecretCmdFallback tolerates that miss. Reads CODE_FORGE and
+// ISSUE_TRACKER through getenvSchema, not os.Getenv, so a value set only in
+// the Consumer flake is seen (ADR 0020).
+func secretRequiredThisRun(env string, creds []string) bool {
+	// Any one of the Driver's credentials satisfies validate(), so try the
+	// template only when none already has a value. The driver warning is
+	// main's to emit.
+	if slices.Contains(creds, env) {
+		return !slices.ContainsFunc(creds, func(e string) bool { return os.Getenv(e) != "" })
+	}
 	codeForge, issueTracker := getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER")
 	forgeRow, _ := backendByName(codeForge)
 	trackerRow, _ := backendByName(issueTracker)
@@ -589,14 +609,6 @@ func secretRequiredThisRun(env string) bool {
 		return !sig.fullyLocal && backend.NeedsGHToken(forgeRow.Descriptor, trackerRow.Descriptor)
 	case "JIRA_TOKEN", "FORGEJO_TOKEN":
 		return forgeRow.TokenEnvVar == env || trackerRow.TokenEnvVar == env
-	case claudeCredentialPair[0], claudeCredentialPair[1]:
-		// Either one satisfies validate(), so try the template only when
-		// neither already has a value, and only under the claude Driver: the
-		// pair means nothing to opencode. The driver warning is main's to emit.
-		if driver, _ := resolveDriver(); driver != "" && driver != "claude" {
-			return false
-		}
-		return !slices.ContainsFunc(claudeCredentialPair, func(e string) bool { return os.Getenv(e) != "" })
 	default:
 		// BOX_GH_TOKEN (ADR 0016) is opt-in with no requiredness signal of
 		// its own, so the template never sources it.
