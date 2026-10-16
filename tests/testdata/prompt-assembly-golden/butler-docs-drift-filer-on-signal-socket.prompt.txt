@@ -113,7 +113,7 @@ first — the launcher may refuse or drop any beyond that.
 
 **File findings.** Hand every finding worth tracking to the filer subagent:
 a bug, a missing feature, a perf chore your sweep surfaced. It is
-pre-provisioned via --agents; pass it each finding verbatim. This dispatch
+pre-provisioned; pass it each finding verbatim. This dispatch
 carries no tracker issue number for provenance — instead, give the filer the
 finding's dedup/site key (`path/to/file.go:Symbol`, where Symbol is the
 symbol it names or else the nearest enclosing one, or `path/to/file.go:<line>`

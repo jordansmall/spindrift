@@ -126,9 +126,8 @@ never edit a predecessor research comment, even on a re-run.
 
 **File findings.** Hand any finding worth tracking as follow-up work —
 beyond the issue's own verdict — to the filer subagent: a bug, a missing
-feature, a perf chore your exploration surfaced. It is pre-provisioned via
---agents; pass it each finding verbatim, plus this issue's number for
-provenance.
+feature, a perf chore your exploration surfaced. It is pre-provisioned;
+pass it each finding verbatim, plus this issue's number for provenance.
 
 Research never writes to the Issue Tracker itself — the filer is relay-only
 here. It sends each one over the Signal socket via
