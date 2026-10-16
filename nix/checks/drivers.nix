@@ -20,6 +20,9 @@ let
     escapeShellArg
     all
     generators
+    hasSuffix
+    removeSuffix
+    stringToCharacters
     ;
   # Shared stub-cli fixture (issue #1144): drivers-render-preamble-shape uses
   # it as-is; stubDriverComplete below adds the four attrs renderPreamble
@@ -1381,4 +1384,205 @@ in
       ]
     ) "opencode Driver's argvShape.order must stay pinned, got: ${builtins.toJSON shape.order}";
     pkgs.runCommand "drivers-opencode-argv-shape-pinned" { } "touch $out";
+
+  # Pins the baked opencode config (issue #5345): a Box must refuse a Read or
+  # Bash call naming a credential path, as the claude Box does through
+  # credential-deny.sh. The shape is pinned first; the behavioural half then
+  # re-implements opencode's Wildcard.match (util/wildcard.ts) in Nix and
+  # replays real tool inputs against the rendered rules.
+  drivers-opencode-credential-deny-config =
+    let
+      configFiles = driverRegistry.entries.opencode.configFiles or { };
+      configPath = ".config/opencode/opencode.json";
+      config = builtins.fromJSON configFiles.${configPath};
+      regexSpecials = [
+        "."
+        "+"
+        "^"
+        "$"
+        "{"
+        "}"
+        "("
+        ")"
+        "|"
+        "["
+        "]"
+        "\\"
+      ];
+      # `*` crosses `/`, `?` is one char, and a trailing " *" makes that tail
+      # optional, so `cat *` also matches a bare `cat`.
+      wildcardRegex =
+        pat:
+        let
+          esc =
+            builtins.replaceStrings
+              (
+                regexSpecials
+                ++ [
+                  "*"
+                  "?"
+                ]
+              )
+              (
+                map (
+                  c:
+                  if c == "]" then
+                    "[]]"
+                  else if c == "}" then
+                    "[}]"
+                  else
+                    "\\" + c
+                ) regexSpecials
+                ++ [
+                  ".*"
+                  "."
+                ]
+              )
+              pat;
+        in
+        if hasSuffix " .*" esc then removeSuffix " .*" esc + "( .*)?" else esc;
+      denied =
+        rules: input:
+        builtins.any (pat: builtins.match (wildcardRegex pat) input != null) (builtins.attrNames rules);
+      expect =
+        rules: want: inputs:
+        all (
+          input:
+          assertMsg (denied rules input == want)
+            "opencode ${if want then "must deny" else "must allow"} ${builtins.toJSON input}"
+        ) inputs;
+      readRules = config.permission.read;
+      bashRules = config.permission.bash;
+      # opencode matches each command node's text, or its enclosing
+      # redirected_statement's, so every input below is a whole such string.
+      separatorFormsDeny = [
+        "cat .env>/tmp/ocx"
+        "head -1\t.env"
+        "echo $(cat .env)"
+        "cat .env;"
+        "cat .env|wc"
+        "cat <.env"
+        "cat .env&&true"
+      ];
+      # Newline is left out: builtins.match's newline handling is unreliable.
+      # Keep the excluded chars (* ? \) in step with boundaryChars in
+      # lib/drivers/opencode.nix.
+      sweepChars =
+        filter (c: c != "*" && c != "?" && c != "\\") (
+          stringToCharacters " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        )
+        ++ [ "\t" ];
+      hookCases = map (input: {
+        inherit input;
+        deny = denied bashRules input;
+      }) (map (c: "x${c}.env") sweepChars ++ map (c: "cat .env${c}x") sweepChars ++ separatorFormsDeny);
+    in
+    assert assertMsg (builtins.attrNames configFiles == [ configPath ])
+      "opencode configFiles must carry exactly ${configPath}, got: ${builtins.toJSON (builtins.attrNames configFiles)}";
+    assert assertMsg (builtins.attrNames config == [ "permission" ])
+      "opencode.json top-level keys must be exactly [permission], got: ${builtins.toJSON (builtins.attrNames config)}";
+    assert assertMsg
+      (
+        builtins.attrNames config.permission == [
+          "bash"
+          "read"
+        ]
+      )
+      "opencode.json permission keys must be exactly [bash read], got: ${builtins.toJSON (builtins.attrNames config.permission)}";
+    # --auto only approves asks, so anything but a literal deny leaves the
+    # credential readable.
+    assert assertMsg (
+      readRules != { }
+      && bashRules != { }
+      && all (v: v == "deny") (builtins.attrValues (readRules // bashRules))
+    ) "every opencode.json permission rule must be a literal \"deny\"";
+    assert assertMsg (
+      !(driverRegistry.entries.claude ? configFiles)
+    ) "the claude Driver must not carry configFiles";
+    assert expect readRules true [
+      ".env"
+      "sub/.env.local"
+      ".env.example"
+      "../../home/agent/.config/gh/hosts.yml"
+      "../../home/agent/.claude/.credentials.json"
+      "../../home/agent/.local/share/opencode/auth.json"
+    ];
+    assert expect readRules false [
+      "config.env"
+      ".envrc"
+      "src/main.go"
+    ];
+    assert expect bashRules true [
+      "cat ~/.config/gh/hosts.yml"
+      "cat .env"
+      "source .env.local"
+      "cp /home/agent/.claude/.credentials.json /tmp/x"
+      ''cat "$HOME/.config/gh/hosts.yml"''
+      "cat ~/.local/share/opencode/auth.json"
+      "env --file=.env"
+    ];
+    assert expect bashRules false [
+      "printenv"
+      "cat config.env"
+      "ls .envrc"
+      "go test ./..."
+    ];
+    assert expect bashRules true separatorFormsDeny;
+    # The hook is the reference, so each sweep verdict (opencode's, computed
+    # above) must equal what the real hook answers; the lists cannot drift
+    # into asserting only what opencode.nix happens to emit.
+    pkgs.runCommand "drivers-opencode-credential-deny-config" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      cases=${pkgs.writeText "opencode-hook-cases.json" (builtins.toJSON hookCases)}
+      for i in $(seq 0 $(($(jq length "$cases") - 1))); do
+        want=$(jq -r ".[$i].deny" "$cases")
+        got=false
+        jq -c ".[$i] | {tool_name:\"Bash\",tool_input:{command:.input}}" "$cases" \
+          | bash ${../../agent/credential-deny.sh} \
+          | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null && got=true
+        [ "$got" = "$want" ] || {
+          echo "credential-deny.sh denies=$got but opencode denies=$want for: $(jq -c ".[$i].input" "$cases")" >&2
+          exit 1
+        }
+      done
+      touch $out
+    '';
+
+  # The shared credential-paths list feeds opencode's rules; the claude hook is
+  # the reference for what counts as a credential. Parity runs both ways: the
+  # hook denies every listed path, and every path the hook names is listed.
+  drivers-credential-paths-hook-parity =
+    let
+      credentialPaths = import ../../lib/credential-paths.nix;
+      paths = map (builtins.replaceStrings [ "*" ] [ "local" ]) credentialPaths;
+      listed = pkgs.writeText "credential-paths.txt" (concatStringsSep "\n" credentialPaths);
+    in
+    pkgs.runCommand "drivers-credential-paths-hook-parity" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      hookPaths=$(sed -n '/^targets_credential_path()/,/^}/p' ${../../agent/credential-deny.sh} \
+        | sed -nE 's/.*\(\^\|\$lead\)([^(]+)\(.*/\1/p' | sed 's/\\\././g')
+      [ -n "$hookPaths" ] || {
+        echo "extracted no paths from credential-deny.sh's targets_credential_path" >&2
+        exit 1
+      }
+      while IFS= read -r hp; do
+        grep -qxF -- "$hp" ${listed} || {
+          echo "credential-deny.sh denies $hp, but lib/credential-paths.nix does not list it" >&2
+          exit 1
+        }
+      done <<<"$hookPaths"
+      for p in ${concatStringsSep " " (map escapeShellArg paths)}; do
+        for tool in Read Bash; do
+          if [ "$tool" = Read ]; then
+            input=$(jq -nc --arg p "/home/agent/$p" '{tool_name:"Read",tool_input:{file_path:$p}}')
+          else
+            input=$(jq -nc --arg c "cat /home/agent/$p" '{tool_name:"Bash",tool_input:{command:$c}}')
+          fi
+          verdict=$(printf '%s' "$input" | bash ${../../agent/credential-deny.sh})
+          printf '%s' "$verdict" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null || {
+            echo "credential-deny.sh lets $tool of $p through, but lib/credential-paths.nix lists it" >&2
+            exit 1
+          }
+        done
+      done
+      touch $out
+    '';
 }
