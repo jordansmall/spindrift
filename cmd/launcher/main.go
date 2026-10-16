@@ -351,16 +351,18 @@ func floatNonnegSchema(key string) float64 {
 // gitIdentityField resolves a commit-identity knob (GIT_USER_NAME/
 // GIT_USER_EMAIL) via the normal document/flag/env chain, falling back to the
 // host git config when none of those supply a value. The wrapper exports no
-// knob env at all (ADR 0020), so this fallback has to live in process.
+// knob env at all (ADR 0020), so this fallback has to live in process. The
+// schema row's hostGitConfigKey is the one place the key lives, so the
+// launcher's startup snapshot (which the Box env reuses) reads the same keys
+// (issues #5329, #5333).
 func gitIdentityField(env string) string {
 	if v := getenvSchema(env); v != "" {
 		return v
 	}
-	key, ok := hostGitConfigKeys[env]
-	if !ok {
-		return ""
+	if e, ok := schemaFlag(env); ok && e.hostGitConfigKey != "" {
+		return gitConfigLookup(e.hostGitConfigKey)
 	}
-	return gitConfigLookup(key)
+	return ""
 }
 
 func loadConfig() config {
