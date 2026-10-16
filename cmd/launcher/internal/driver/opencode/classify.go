@@ -169,23 +169,46 @@ func Classify(logPath string) (driverkit.Classification, error) {
 	return cl, nil
 }
 
-// ResultText returns the text of every NDJSON text event in the log at
-// logPath, one value per line: the Go twin of the in-box
-// `jq -r 'select(.type == "text") | .part.text // empty'`. Non-string text is
-// dropped; it can never carry an outcome line.
+// ResultText returns the text of the last assistant message in the log at
+// logPath, one text part per line, as claude's result is its final message
+// only: an outcome-looking line in mid-pass prose must not end the run (issue
+// #5354). Any event whose part.messageID differs from the current one starts a
+// new message, so a textless final message yields "" like claude's empty
+// result; that also covers an oversized final text line skipped under
+// SkipOversized, whose step events still carry the new ID. A text event with
+// no messageID also starts a new message, so the ID-less synthetic ResultEvent
+// stays the final one; other ID-less events do not. Empty text is dropped, and
+// a line that fails to decode (non-string text included) is skipped whole, its
+// messageID too.
 func ResultText(logPath string) (string, error) {
-	return driverkit.ResultText(logPath, func(line string) (string, bool) {
+	var b strings.Builder
+	var curID string
+	err := driverkit.ScanLog(logPath, logscan.SkipOversized, func(line string) {
 		var ev struct {
 			Type string `json:"type"`
 			Part struct {
-				Text string `json:"text"`
+				MessageID string `json:"messageID"`
+				Text      string `json:"text"`
 			} `json:"part"`
 		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "text" {
-			return "", false
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			return
 		}
-		return ev.Part.Text, true
+		id := ev.Part.MessageID
+		isText := ev.Type == "text"
+		if (id != "" && id != curID) || (isText && id == "") {
+			b.Reset()
+			curID = id
+		}
+		if isText && ev.Part.Text != "" {
+			b.WriteString(ev.Part.Text)
+			b.WriteByte('\n')
+		}
 	})
+	if err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
 // ResultEvent encodes text as one newline-terminated NDJSON text event, the
