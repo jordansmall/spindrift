@@ -322,103 +322,18 @@ func unsetEnvForTest(t *testing.T, names ...string) {
 	}
 }
 
-// The Box must see the same host git identity the launcher resolves (#5329):
-// with no env or document value, resolveBoxEnvVar falls back to host git config.
-func TestResolveBoxEnvVar_GitIdentityFallsBackToHostGitConfig(t *testing.T) {
+// The host git config is snapshotted once at loadConfig (issue #5333), so the
+// per-dispatch resolver never reads it, whatever the name.
+func TestResolveBoxEnvVar_NeverReadsGitConfig(t *testing.T) {
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
-	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
-	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
-
-	if got := resolveBoxEnvVar("GIT_USER_NAME"); got != "Host Name" {
-		t.Errorf("GIT_USER_NAME = %q, want Host Name", got)
-	}
-	if got := resolveBoxEnvVar("GIT_USER_EMAIL"); got != "host@example.com" {
-		t.Errorf("GIT_USER_EMAIL = %q, want host@example.com", got)
-	}
-}
-
-func TestResolveBoxEnvVar_ExplicitGitIdentitySkipsHostGitConfig(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
+	unsetEnvForTest(t, "GH_TOKEN", "BASE_BRANCH", "GIT_USER_NAME", "GIT_USER_EMAIL")
 	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
 
-	t.Setenv("GIT_USER_NAME", "Env Name")
-	unsetEnvForTest(t, "GIT_USER_EMAIL")
-	loadedDoc = &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}}
-
-	if got := resolveBoxEnvVar("GIT_USER_NAME"); got != "Env Name" {
-		t.Errorf("GIT_USER_NAME = %q, want Env Name", got)
-	}
-	if got := resolveBoxEnvVar("GIT_USER_EMAIL"); got != "doc@example.com" {
-		t.Errorf("GIT_USER_EMAIL = %q, want doc@example.com", got)
+	for _, name := range []string{"GH_TOKEN", "BASE_BRANCH", "GIT_USER_NAME", "GIT_USER_EMAIL"} {
+		resolveBoxEnvVar(name)
 	}
 	if len(*calls) != 0 {
 		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
-	}
-}
-
-// An empty host identity stays empty so the Box's GIT_USER_NAME guard still fires.
-func TestResolveBoxEnvVar_EmptyHostGitConfigStaysEmpty(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
-	fakeHostGitConfig(t, nil)
-
-	if got := resolveBoxEnvVar("GIT_USER_NAME"); got != "" {
-		t.Errorf("GIT_USER_NAME = %q, want empty", got)
-	}
-	if got := resolveBoxEnvVar("GIT_USER_EMAIL"); got != "" {
-		t.Errorf("GIT_USER_EMAIL = %q, want empty", got)
-	}
-}
-
-func TestResolveBoxEnvVar_NonHostDerivedNameNeverReadsGitConfig(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-	unsetEnvForTest(t, "GH_TOKEN", "BASE_BRANCH")
-	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name"})
-
-	resolveBoxEnvVar("GH_TOKEN")
-	resolveBoxEnvVar("BASE_BRANCH")
-	if len(*calls) != 0 {
-		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
-	}
-}
-
-// Every knob the schema declares both host-derived and forwarded to the Box
-// must get its host-resolved value in the Box too (#5329), so a future knob of
-// that kind cannot regress by lacking a hostGitConfigKeys entry.
-func TestResolveBoxEnvVar_EveryBoxHostDerivedKnobGetsHostValue(t *testing.T) {
-	t.Cleanup(func() { loadedDoc = nil })
-	loadedDoc = nil
-
-	lookups := map[string]string{}
-	for _, key := range hostGitConfigKeys {
-		lookups[key] = "host:" + key
-	}
-	fakeHostGitConfig(t, lookups)
-
-	found := map[string]bool{}
-	for _, e := range schemaFlags {
-		if !e.boxHostDerived {
-			continue
-		}
-		found[e.env] = true
-		unsetEnvForTest(t, e.env)
-		got := resolveBoxEnvVar(e.env)
-		if got == "" {
-			t.Errorf("%s: resolveBoxEnvVar is empty, want the host-resolved value", e.env)
-		}
-		if want := gitIdentityField(e.env); got != want {
-			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.env, got, want)
-		}
-	}
-	if len(found) == 0 {
-		t.Fatal("no schemaFlags row has boxHostDerived; the generated field is not rendering")
-	}
-	for name := range hostGitConfigKeys {
-		if !found[name] {
-			t.Errorf("hostGitConfigKeys has %s, but its schemaFlags row is not boxHostDerived", name)
-		}
 	}
 }

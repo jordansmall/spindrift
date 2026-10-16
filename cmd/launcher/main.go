@@ -356,7 +356,11 @@ func gitIdentityField(env string) string {
 	if v := getenvSchema(env); v != "" {
 		return v
 	}
-	return hostGitConfigFallback(env)
+	key, ok := hostGitConfigKeys[env]
+	if !ok {
+		return ""
+	}
+	return gitConfigLookup(key)
 }
 
 func loadConfig() config {
@@ -871,6 +875,24 @@ func localBaseBranchResolver(c config, it forge.IssueTracker, lw *localloop.Wire
 	}
 }
 
+// gitIdentityResolver wraps next, answering the Box's GIT_USER_NAME /
+// GIT_USER_EMAIL from the identity loadConfig snapshotted at startup. The
+// snapshot is deliberate (issue #5333): Box commits and host-side commits
+// carry one identity for the process's lifetime, rather than re-reading host
+// git config per dispatch (fix passes, multi-job waves). An empty snapshot
+// stays empty, so the Box's GIT_USER_NAME guard still fires.
+func gitIdentityResolver(c config, next func(num, name string) string) func(num, name string) string {
+	return func(num, name string) string {
+		switch name {
+		case "GIT_USER_NAME":
+			return c.gitUserName
+		case "GIT_USER_EMAIL":
+			return c.gitUserEmail
+		}
+		return next(num, name)
+	}
+}
+
 // boxTokenResolver wraps next, overriding a Box's bearer-token env var with
 // the operator's BOX_<X>_TOKEN when the owning backend row sets one (ADR 0016
 // two-actor separation, issue #380; ADR 0038 backend-prefixed knobs). The
@@ -912,7 +934,7 @@ func dispatchConfig(c config, it forge.IssueTracker, lw *localloop.Wired, cf for
 	reviewModel := os.Getenv("REVIEW_MODEL")
 	return dispatch.Config{
 		BoxEnvVars: c.boxEnvVars,
-		ResolveEnv: boxTokenResolver(localBaseBranchResolver(c, it, lw, cf, caps)),
+		ResolveEnv: boxTokenResolver(gitIdentityResolver(c, localBaseBranchResolver(c, it, lw, cf, caps))),
 		// Raw os.Getenv, not getenvSchema (issue #3171): these two carry only
 		// what the operator set at dispatch time. The document/schema-default
 		// chain must stay out, since those values already reached the baked

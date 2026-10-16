@@ -152,8 +152,8 @@ type flagEntry struct {
 	emptyDisables bool
 	// boxHostDerived marks a knob the schema declares both hostDerived and
 	// boxEnv (issue #5329). A test-only parity marker: no production path
-	// reads it; TestResolveBoxEnvVar_EveryBoxHostDerivedKnobGetsHostValue pins
-	// it, and runtime forwarding reads BOX_ENV_VARS.
+	// reads it; TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot
+	// pins it, and runtime forwarding reads BOX_ENV_VARS.
 	boxHostDerived bool
 }
 

@@ -77,29 +77,21 @@ var gitConfigLookup = func(key string) string {
 }
 
 // hostGitConfigKeys maps each host-derived env name to its host git config
-// key. It is the one place that mapping lives, so the launcher's own
-// resolution and the Box env's cannot diverge (issue #5329).
+// key. It is the one place that mapping lives, so the launcher's startup
+// snapshot (which the Box env reuses) reads the same keys (issues #5329, #5333).
 var hostGitConfigKeys = map[string]string{
 	"GIT_USER_NAME":  "user.name",
 	"GIT_USER_EMAIL": "user.email",
 }
 
-// hostGitConfigFallback returns the host git config value for a host-derived
-// env name, or "" for any other name without consulting git.
-func hostGitConfigFallback(name string) string {
-	key, ok := hostGitConfigKeys[name]
-	if !ok {
-		return ""
-	}
-	return gitConfigLookup(key)
-}
-
 // resolveBoxEnvVar resolves one BOX_ENV_VARS forwarding name: ambient env
 // first (parseFlags lands an explicit flag there via os.Setenv), then the
 // document's settings or artifacts, then the schema default, because the
-// wrapper no longer pre-populates env with baked defaults (ADR 0020). A
-// knob in hostGitConfigKeys still empty after all of that falls back to the
-// host git config, matching the launcher (issue #5329).
+// wrapper no longer pre-populates env with baked defaults (ADR 0020). The
+// host-derived commit identity is not resolved here: gitIdentityResolver
+// answers it from the launcher's startup snapshot, not re-read per dispatch,
+// so Box and host commits carry one identity for the process's lifetime
+// (issue #5333).
 // Secrets such as GH_TOKEN have no entry, so this reduces to os.Getenv (#625).
 // An empty value wins over the document and schema default only per
 // ambientSetting, like getenvSchema.
@@ -115,10 +107,7 @@ func resolveBoxEnvVar(name string) string {
 			return v
 		}
 	}
-	if v := schemaDefault(name); v != "" {
-		return v
-	}
-	return hostGitConfigFallback(name)
+	return schemaDefault(name)
 }
 
 // warnAmbientKnobEnv prints one deprecation warning per non-secret schema knob

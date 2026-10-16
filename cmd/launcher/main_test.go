@@ -3795,24 +3795,123 @@ func TestDispatchConfig_NonLocal_ResolveEnv_PassesThroughUnchanged(t *testing.T)
 	}
 }
 
-// The wired dispatch resolver chain delivers the host git identity to the Box env (issue #5329).
-func TestDispatchConfig_ResolveEnv_GitIdentityFallsBackToHostGitConfig(t *testing.T) {
+// The identity is a startup snapshot (issue #5333): a host git config change
+// after loadConfig must not reach later Box env builds, and they must not
+// shell out to git at all.
+func TestDispatchConfig_ResolveEnv_GitIdentityIsStartupSnapshot(t *testing.T) {
+	vals := map[string]string{"user.name": "Before", "user.email": "before@example.com"}
+	c, calls := snapshotGitIdentityConfig(t, vals)
+	cf := forge.NewFake()
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
+
+	want := map[string]string{"GIT_USER_NAME": "Before", "GIT_USER_EMAIL": "before@example.com"}
+	for name, w := range want {
+		if got := cfg.ResolveEnv("42", name); got != w {
+			t.Fatalf("ResolveEnv(%s) before flip = %q, want %q", name, got, w)
+		}
+	}
+	vals["user.name"] = "After"
+	vals["user.email"] = "after@example.com"
+	for name, w := range want {
+		if got := cfg.ResolveEnv("42", name); got != w {
+			t.Errorf("ResolveEnv(%s) after host config flip = %q, want %q", name, got, w)
+		}
+	}
+	if len(*calls) != 0 {
+		t.Errorf("gitConfigLookup called with %v after the snapshot, want no calls", *calls)
+	}
+}
+
+// An explicit env or document identity wins over the host git config, which is
+// then never consulted.
+func TestDispatchConfig_ResolveEnv_ExplicitGitIdentitySkipsHostGitConfig(t *testing.T) {
+	t.Cleanup(func() { loadedDoc = nil })
+	calls := fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
+	t.Setenv("GIT_USER_NAME", "Env Name")
+	unsetEnvForTest(t, "GIT_USER_EMAIL")
+	loadedDoc = &inputdoc.Document{Settings: map[string]string{"GIT_USER_EMAIL": "doc@example.com"}}
+	snap := loadConfig()
 	c := minimalValidConfig()
 	c.codeForge = "github"
+	c.gitUserName, c.gitUserEmail = snap.gitUserName, snap.gitUserEmail
 	cf := forge.NewFake()
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
 
+	if got := cfg.ResolveEnv("42", "GIT_USER_NAME"); got != "Env Name" {
+		t.Errorf("GIT_USER_NAME = %q, want Env Name", got)
+	}
+	if got := cfg.ResolveEnv("42", "GIT_USER_EMAIL"); got != "doc@example.com" {
+		t.Errorf("GIT_USER_EMAIL = %q, want doc@example.com", got)
+	}
+	if len(*calls) != 0 {
+		t.Errorf("gitConfigLookup called with %v, want no calls", *calls)
+	}
+}
+
+// An empty snapshot stays empty so the Box's GIT_USER_NAME guard still fires.
+func TestDispatchConfig_ResolveEnv_EmptyGitIdentityStaysEmpty(t *testing.T) {
+	c, _ := snapshotGitIdentityConfig(t, nil)
+	cf := forge.NewFake()
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
+
+	for _, name := range []string{"GIT_USER_NAME", "GIT_USER_EMAIL"} {
+		if got := cfg.ResolveEnv("42", name); got != "" {
+			t.Errorf("ResolveEnv(42, %s) = %q, want empty", name, got)
+		}
+	}
+}
+
+// Every knob the schema declares both host-derived and forwarded to the Box
+// must carry the launcher's snapshot into the Box (#5329, #5333), so a future
+// knob of that kind cannot skip gitIdentityResolver.
+func TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot(t *testing.T) {
+	lookups := map[string]string{}
+	for _, key := range hostGitConfigKeys {
+		lookups[key] = "host:" + key
+	}
+	c, _ := snapshotGitIdentityConfig(t, lookups)
+	cf := forge.NewFake()
+	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
+
+	found := map[string]bool{}
+	for _, e := range schemaFlags {
+		if !e.boxHostDerived {
+			continue
+		}
+		found[e.env] = true
+		got := cfg.ResolveEnv("42", e.env)
+		if got == "" {
+			t.Errorf("%s: ResolveEnv is empty, want the host-resolved value", e.env)
+		}
+		if want := gitIdentityField(e.env); got != want {
+			t.Errorf("%s: Box resolves %q, launcher resolves %q", e.env, got, want)
+		}
+	}
+	if len(found) == 0 {
+		t.Fatal("no schemaFlags row has boxHostDerived; the generated field is not rendering")
+	}
+	for name := range hostGitConfigKeys {
+		if !found[name] {
+			t.Errorf("hostGitConfigKeys has %s, but its schemaFlags row is not boxHostDerived", name)
+		}
+	}
+}
+
+// snapshotGitIdentityConfig fakes the host git config and returns a config
+// carrying the identity a real loadConfig snapshots from it, plus the lookup
+// calls made since that snapshot.
+func snapshotGitIdentityConfig(t *testing.T, vals map[string]string) (config, *[]string) {
+	t.Helper()
 	t.Cleanup(func() { loadedDoc = nil })
 	loadedDoc = nil
 	unsetEnvForTest(t, "GIT_USER_NAME", "GIT_USER_EMAIL")
-	fakeHostGitConfig(t, map[string]string{"user.name": "Host Name", "user.email": "host@example.com"})
-	cfg := dispatchConfig(c, cf, testWired(forge.NewFake()), cf, forge.Capabilities{})
-
-	if got := cfg.ResolveEnv("42", "GIT_USER_NAME"); got != "Host Name" {
-		t.Errorf("ResolveEnv(42, GIT_USER_NAME) = %q, want %q", got, "Host Name")
-	}
-	if got := cfg.ResolveEnv("42", "GIT_USER_EMAIL"); got != "host@example.com" {
-		t.Errorf("ResolveEnv(42, GIT_USER_EMAIL) = %q, want %q", got, "host@example.com")
-	}
+	calls := fakeHostGitConfig(t, vals)
+	snap := loadConfig()
+	*calls = nil
+	c := minimalValidConfig()
+	c.codeForge = "github"
+	c.gitUserName, c.gitUserEmail = snap.gitUserName, snap.gitUserEmail
+	return c, calls
 }
 
 // Opt-in two-actor separation (ADR 0016, issue #380): with BOX_GH_TOKEN set,
