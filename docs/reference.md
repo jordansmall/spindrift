@@ -868,9 +868,10 @@ instead of cold-starting a fresh one: the launcher creates an ephemeral,
 process-lifetime, per-issue host directory and mounts it writable over the
 Driver's declared session-cache dir — `sessionCacheDirRelative` in its
 `lib/drivers/` entry (`/home/agent/.claude/projects` for claude, where its
-session transcripts live), narrow enough that it can never shadow the baked
-skills dir above (the only writable host mount the runner seam has — the
-prompt/skills mounts above are read-only). A Driver that omits
+session transcripts live; `/home/agent/.local/share/opencode/spindrift-session`
+for opencode, which holds its relocated session database), narrow enough that
+it can never shadow the baked skills dir above (the only writable host mount
+the runner seam has — the prompt/skills mounts above are read-only). A Driver that omits
 `sessionCacheDirRelative` has no resumable session state: the launcher
 creates no per-issue cache directory and the runner adapters add no mount on
 either backend, the same "no cache, cold-start, never an error" degradation
@@ -900,6 +901,20 @@ under the mounted directory. When it is not — the cache was evicted, this is
 the first fix pass after a crash, or the branch was rebased out from under
 the session — the fix box falls back cleanly to the cold-context fix flow
 above, with no error.
+
+opencode cannot pin a session id at creation (`opencode run --session <id>`
+only continues an existing opencode-generated `ses_…` id), so its initial run
+pins a deterministic *title* instead — `--title spindrift-<32 hex of
+sha256("spindrift-session:" + REPO_SLUG + ":" + ISSUE_NUMBER)>`. opencode's
+session store is a SQLite database, relocated by `OPENCODE_DB` to
+`opencode.db` inside the mounted directory (a dedicated
+`spindrift-session` subdirectory, so the mount never shadows the sibling
+`auth.json`). On a resume — the outcome nudge, the PR-intent nudge, and the
+fix box — the Box reads that database for the newest root, non-archived
+session carrying the pinned title and renders `--session <id>`. A missing
+database, no matching session, or any read error renders nothing and the pass
+runs cold, with no error; `--continue` is never used, since it resumes the
+last session rather than this issue's.
 
 ##### Role capability profiles
 
