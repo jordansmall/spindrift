@@ -376,11 +376,14 @@ func (l *Launcher) refreshChan() chan struct{} {
 // for TakePendingSnapshot to deliver, called after every write this session
 // makes to the tracker or queue (#647 AC4, issue #1542). The wake is a
 // non-blocking one-slot send; pendingSnapshot always holds the most recent
-// snapshot, so a burst of writes can only deliver the latest state.
+// snapshot, so a burst of writes can only deliver the latest state. The
+// snapshot is taken under l.mu so snapshot order matches store order: taken
+// outside, a slower earlier snapshot could overwrite a later one. queueRef
+// stays outside the lock because it takes l.mu itself.
 func (l *Launcher) signalRefresh() {
-	picks := l.queueRef().Snapshot()
+	q := l.queueRef()
 	l.mu.Lock()
-	l.pendingSnapshot = picks
+	l.pendingSnapshot = q.Snapshot()
 	l.hasPending = true
 	l.mu.Unlock()
 
