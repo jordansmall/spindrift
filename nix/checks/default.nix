@@ -89,6 +89,7 @@ let
     // (import ./gh-token-intervals.nix common)
     // (import ./dashboard-constant-parity.nix common)
     // (import ./dashboard-js.nix common)
+    // (import ./opencode-guards.nix common)
     // (import ./doctor-report-routing.nix common)
     // (import ./agent-workflow-smoke.nix common)
     // (import ./nix-cache-key.nix common)
