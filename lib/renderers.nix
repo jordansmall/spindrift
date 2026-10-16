@@ -727,6 +727,29 @@ rec {
       items = names;
     };
 
+  # cmd/launcher/internal/driver/providernamespaced_gen.go content (issue #5338).
+  # The Go mirror of the `providerNamespacedModels` fact lib/mkHarness.nix's
+  # rosterWithoutBareWorker reads; entries that omit it default to false.
+  renderProviderNamespacedDriversGo =
+    driverEntries:
+    let
+      names = builtins.sort builtins.lessThan (
+        builtins.filter (n: driverEntries.${n}.providerNamespacedModels or false) (
+          builtins.attrNames driverEntries
+        )
+      );
+    in
+    renderGoStringSliceFile {
+      generator = "nix/regen.nix";
+      source = "lib/drivers/*.nix";
+      package = "driver";
+      varName = "nixProviderNamespacedDrivers";
+      docLines = [
+        "nixProviderNamespacedDrivers lists the Drivers whose entry sets providerNamespacedModels."
+      ];
+      items = names;
+    };
+
   # cmd/launcher/internal/chore/builtins_gen.go content (issues #3991, #4766).
   # choreCatalog is lib/chore-catalog.nix's export. Names are sorted so a
   # catalog reorder (which is load-bearing for classesDefault's byte layout)

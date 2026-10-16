@@ -1,6 +1,9 @@
 package driver
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // TestNewDefaultsToClaude verifies that an empty DRIVER value resolves to the
 // "claude" strategy, matching the nix side's default (ADR 0009).
@@ -19,5 +22,30 @@ func TestNewDefaultsToClaude(t *testing.T) {
 func TestNewUnknownDriverErrors(t *testing.T) {
 	if _, err := New("bogus"); err == nil {
 		t.Fatal("New(\"bogus\"): expected error, got nil")
+	}
+}
+
+// TestProviderNamespacedModels pins the Go mirror of the Nix
+// providerNamespacedModels fact, including names New would reject.
+func TestProviderNamespacedModels(t *testing.T) {
+	for name, want := range map[string]bool{
+		"opencode": true,
+		"claude":   false,
+		"":         false,
+		"nope":     false,
+	} {
+		if got := ProviderNamespacedModels(name); got != want {
+			t.Errorf("ProviderNamespacedModels(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+// TestProviderNamespacedDriversAreRegistered keeps the generated list a subset
+// of the generated Driver names.
+func TestProviderNamespacedDriversAreRegistered(t *testing.T) {
+	for _, n := range nixProviderNamespacedDrivers {
+		if !slices.Contains(nixDriverNames, n) {
+			t.Errorf("%q is in nixProviderNamespacedDrivers but not nixDriverNames", n)
+		}
 	}
 }
