@@ -186,7 +186,7 @@ func butlerPreflight(cfg config, choreName string, filerEnabled bool, catalog ch
 		}
 	}
 	if !filerEnabled {
-		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL; DRIVER=opencode never provisions one)")
+		return nil, fmt.Errorf("butler: needs a provisioned Filer to relay findings (set FILER_MODEL)")
 	}
 	if err := butlerBudgets(cfg).Validate(); err != nil {
 		return nil, err

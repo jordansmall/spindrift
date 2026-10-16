@@ -314,10 +314,11 @@ func TestDoctorReport_Butler_OptInValidatesButlerConfig(t *testing.T) {
 // into configErr, so each of butlerPreflight's guards must actually reach
 // exit 2 through doctorReport, not just through a direct butlerPreflight
 // call. The "healthy" row proves the baseline config clears every guard on
-// its own, so each mutated row below fails for its own reason rather than
-// one the baseline never cleared. "opencode driver" drives through the real
-// config.driver field into resolveAgentPresenceSignals rather than a literal
-// filerEnabled bool, so a mis-wired driver arg would show up here.
+// its own, so each failing row below fails for its own reason rather than
+// one the baseline never cleared. The DRIVER=opencode row drives the real
+// config.driver field through resolveAgentPresenceSignals and must still
+// clear the Filer guard (issue #5330), so re-gating the Filer on the Driver
+// would show up here.
 func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 	newHealthyConfig := func(t *testing.T) config {
 		t.Helper()
@@ -350,11 +351,11 @@ func TestDoctorReport_Butler_MisconfigExitsConfigInvalid(t *testing.T) {
 			wantErr: "needs a provisioned Filer",
 		},
 		{
-			name: "DRIVER=opencode never provisions a filer",
+			name: "DRIVER=opencode provisions a filer from FILER_MODEL",
 			mutate: func(t *testing.T, c *config) {
-				c.driver = "opencode" // resolveAgentPresenceSignals forces filerEnabled false here
+				c.driver = "opencode"
 			},
-			wantErr: "needs a provisioned Filer",
+			wantErr: "",
 		},
 		{
 			name: "non-ledger CODE_FORGE",
@@ -699,7 +700,7 @@ func TestRequiredLabels(t *testing.T) {
 	}{
 		{"no flags, read-write", doctorOptions{}, mk("github", "read-write", "", 0, patchCaps), nil},
 		{"read-only with filer", doctorOptions{}, mk("github", "read-only", "claude", 0, patchCaps), []string{"agent-review-finding"}},
-		{"read-only, opencode has no filer", doctorOptions{}, mk("github", "read-only", "opencode", 0, patchCaps), nil},
+		{"read-only with filer, opencode", doctorOptions{}, mk("github", "read-only", "opencode", 0, patchCaps), []string{"agent-review-finding"}},
 		{"butler, patches off", doctorOptions{butler: true}, mk("github", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
 		{"butler, patches on", doctorOptions{butler: true}, mk("github", "read-write", "", 2, patchCaps), []string{"agent-butler-finding", "agent-butler-patch"}},
 		{"butler, patches on but no patch forge", doctorOptions{butler: true}, mk("github", "read-write", "", 2, forge.Capabilities{}), []string{"agent-butler-finding"}},

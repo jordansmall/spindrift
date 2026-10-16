@@ -491,26 +491,28 @@ func resolveAgentPresenceSignals(driver string) agentPresence {
 	workerModel := getenvSchema("WORKER_MODEL")
 	scoutModel := getenvSchema("SCOUT_MODEL")
 
+	filerEnabled = filerModel != ""
+
 	// opencode provisions subagents from on-disk agents/*.md rather than
-	// agentsJsonTemplate, so nix bakes both false for that Driver whatever the
-	// configured models say (issue #2533). Scout skips this branch because
-	// opencode does provision it too, so a non-empty SCOUT_MODEL decides
-	// scout's fallback under every Driver — see lib/mkHarness.nix's
-	// scoutProvisioned comment.
+	// agentsJsonTemplate, so nix bakes only the worker false for that Driver
+	// whatever WORKER_MODEL says (issue #2533). The Filer and scout skip this
+	// branch because opencode does provision them, so a non-empty FILER_MODEL
+	// or SCOUT_MODEL decides their fallback under every Driver (issue #5330)
+	// — see lib/mkHarness.nix's scoutProvisioned comment.
 	if driver == "opencode" {
-		filerEnabled, workerProvisioned = false, false
+		workerProvisioned = false
 	} else {
-		filerEnabled, workerProvisioned = filerModel != "", workerModel != ""
+		workerProvisioned = workerModel != ""
 	}
 	scoutProvisioned = scoutModel != ""
 	if loadedDoc != nil {
 		_, filerOK := loadedDoc.Artifacts["FILER_ENABLED"]
 		_, workerOK := loadedDoc.Artifacts["WORKER_PROVISIONED"]
 		if filerOK && workerOK {
-			// Both come from agentsJsonTemplate, a fixed eval-time bake, so a
-			// dispatch-time FILER_MODEL/WORKER_MODEL override cannot change the
-			// roster the box actually gets. Trust them whenever present, without
-			// checking the live models against the document's baked Settings.
+			// Both are fixed eval-time bakes of the roster, so a dispatch-time
+			// FILER_MODEL/WORKER_MODEL override cannot change the roster the box
+			// actually gets. Trust them whenever present, without checking the
+			// live models against the document's baked Settings.
 			filerEnabled = docArtifact("FILER_ENABLED") == "true"
 			workerProvisioned = docArtifact("WORKER_PROVISIONED") == "true"
 		}
