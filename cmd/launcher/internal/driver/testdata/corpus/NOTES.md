@@ -29,7 +29,18 @@ Missing:
 
 ## opencode
 
-There are no real `opencode` Pass logs yet. The dogfood Daemon has only ever
-run the `claude` Driver, so every case, from a normal run to a transient
-failure, is still missing. Add real logs from dispatches under
-`nix run .#opencode` before the `opencode` switch (issue #5182) relies on them.
+The dogfood Daemon has only ever run the `claude` Driver, so the real
+`opencode` logs come from a scratch Consumer on GitHub Copilot models, with a
+local issue tracker and a local Code Forge, working a toy Python project.
+
+| Case | Covers | Source log |
+| --- | --- | --- |
+| `real-normal` | a merged run: an implement pass with no outcome line, a review pass, then a land pass that reached the outcome | `issue-longest-line.log` |
+| `real-box-failed` | a Box that failed its env guards before `opencode` started, so the log has no Driver events | `issue-longest-line.log.prior-run.1` |
+
+Missing:
+
+- A fix pass, a Box killed mid-pass, a whole run with no outcome, and a
+  transient failure. No real log of any has been captured yet.
+- A resumed session. The `opencode` Driver does not resume sessions, so this
+  case does not apply.

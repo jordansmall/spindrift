@@ -1,0 +1,11 @@
+{
+  "lines": [
+    "#42 · Branch exists already; check it.",
+    "#42 · Branch is at main.",
+    "#42 · Committed b205d52 on `agent/issue-longest-line`: `Counts` now has a `longest` field, and `python -m tally` prints it...",
+    "#42 · Small diff; reading it whole.",
+    "#42 · VERDICT: APPROVE",
+    "#42 · SPINDRIFT_OUTCOME issue=longest-line landing=agent/issue-longest-line status=ready note=Counts."
+  ],
+  "onModel": []
+}
