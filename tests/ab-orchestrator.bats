@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# The harness varies --worker-model between arms (issue #2057 slice 1).
+# The harness passes a different dispatch-time --worker-model per arm (issue
+# #2057 slice 1); that flag is a no-op under nix run .#, see the script header.
 # Model IDs here are arbitrary sample data, not the default model: leave them
 # literal when the default model is bumped (issue #5141). The priced
 # --breakdown test's haiku ID must keep the "claude-haiku" prefix its
