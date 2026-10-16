@@ -72,10 +72,10 @@ parse_decision(){ jq -Rn '[inputs|fromjson?]|map(select(.type=="spindrift_op" an
 AB_DEFAULT_PRICES='{"claude-sonnet-5":[3,15,0.3,3.75],"claude-opus":[15,75,1.5,18.75],"claude-haiku":[0.8,4,0.08,1]}'
 
 # Per-role/model token and effective-cost TSV from a stream-json Box log (issue
-# #2057), mirroring breakdownByRoleFile in the launcher's claude/usage.go: pass
-# 1 maps each implementor-issued Task tool_use id to its subagent_type, pass 2
-# attributes each assistant message to implementor (no parent_tool_use_id) or
-# its parent's role. It also buckets by model, since pricing varies by model.
+# #2057): pass 1 maps each implementor-issued Task tool_use id to its
+# subagent_type, pass 2 attributes each assistant message to implementor (no
+# parent_tool_use_id) or its parent's role. It also buckets by model, since
+# pricing varies by model.
 cmd_breakdown() {
   local log="$1"
   local prices_json="${AB_PRICES:-$AB_DEFAULT_PRICES}"
@@ -207,7 +207,7 @@ cmd_compare() {
   ' "$off" "$on"
 }
 
-parse_outcome() { # Prints ready, blocked, failed, or none.
+parse_outcome() { # Prints the status= of the last SPINDRIFT_OUTCOME line, or none.
   local line
   line="$(grep -a '^SPINDRIFT_OUTCOME ' "$1" 2>/dev/null | tail -1 || true)"
   if [ -z "$line" ]; then echo none; return; fi
