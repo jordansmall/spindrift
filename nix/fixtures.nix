@@ -127,7 +127,8 @@ let
   # The opencode Driver's Harness as flake.nix declares it and the module's
   # otherHarness renders it, so the equivalence check can pin its content, not
   # just that it differs from claude's. A non-default Driver never inherits
-  # the default entry's Driver-valued env keys (effort, driverBashTimeoutMs).
+  # the default entry's Driver-valued env keys (effort, driverBashTimeoutMs);
+  # flake.nix sets opencode's own bashTimeoutMs, so it is re-added below.
   # The list is hand-written on purpose, independent of driver-map.nix's
   # driverValued.env, so a new top-level Driver-valued default must join it.
   dogfoodOpencodeHarness = import ../lib/mkHarness.nix (
@@ -143,6 +144,7 @@ let
         ]
         // {
           model = dogfoodDefaults.opencode.model;
+          driverBashTimeoutMs = dogfoodDefaults.defaults.driverBashTimeoutMs;
           daemonApp = ".#opencode";
           daemonSelfApp = ".#opencode-daemon";
         };
