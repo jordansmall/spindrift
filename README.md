@@ -162,7 +162,8 @@ perSystem = { config, pkgs, ... }: {
     git.merge.policy = "immediate";   # manual (default) | immediate | auto
     dispatch.maxParallel = 3;         # Boxes at once
     infra.runtime = "podman";         # podman | docker | rancher | bwrap
-    # agents.drivers.opencode = { };  # default: claude
+    # agents.drivers.opencode = { models = ...; };  # default: claude; opencode
+    #   needs every model id as <provider>/<model>; see docs/reference.md
   };
 
   devShells.default = pkgs.mkShell {

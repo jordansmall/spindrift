@@ -654,7 +654,9 @@ evaluation, naming the agent and the tool, rather than being dropped. opencode
 model ids are Provider-namespaced (`<provider>/<model>`), so under opencode a
 worker whose model has no `/` (such as the inherited schema default) is
 dropped: it is neither baked nor offered to the coordinator. An explicit
-namespaced worker model provisions it (issue #5331).
+namespaced worker model provisions it (issue #5331). Every other entry, and
+the default model, must be namespaced too: a non-empty model with no `/` fails
+evaluation naming the role (`""` opts an entry out; issue #5355).
 
 An entry may also set `effort` (issue #2242), a pass-through, driver-specific
 effort/reasoning-level string — spindrift does not normalize it, so the value
@@ -968,7 +970,13 @@ top level:
 perSystem.spindrift.agents = {
   defaultDriver = "claude";
   drivers.claude.models.default = "claude-sonnet-5";
-  drivers.opencode.models.default = "anthropic/claude-sonnet-4-5";
+  drivers.opencode.models = {
+    default = "anthropic/claude-sonnet-4-5";
+    byName = {
+      scout.model = "anthropic/claude-haiku-4-5";
+      reviewer.model = "anthropic/claude-sonnet-4-5";
+    };
+  };
 };
 ```
 
@@ -1034,7 +1042,8 @@ spindrift's own dogfood declares `claude` (the default) and `opencode`, so
 opencode while `nix run .`, `nix run .#daemon` and CI stay on claude. The
 opencode entry inherits that Driver's limits: a worker is provisioned only
 when the roster names a Provider-namespaced worker model (an inherited
-non-namespaced default is dropped). Running both Drivers' Daemons at once
+non-namespaced default is dropped); every other model must be namespaced
+or evaluation fails. Running both Drivers' Daemons at once
 (`nix run .#daemon` and `nix run .#opencode-daemon`) needs two checkouts,
 for example two `git worktree`s, because both take the same per-checkout
 **Instance lock** (see [Daemon](#daemon)); from one checkout the second
@@ -1122,8 +1131,9 @@ Driver entry declares:
   blocks for the two worked examples.
 - `providerNamespacedModels` (bool, default `false`) — set when the Driver's
   model ids are `<provider>/<model>`. Optional; today `lib/mkHarness.nix`
-  only uses it to drop a worker whose model lacks the `/` (issue #5331) —
-  scout and reviewer entries are not filtered.
+  uses it to drop a worker whose model lacks the `/` (issue #5331) and to
+  fail evaluation on any other non-empty roster or default model that lacks
+  it (issue #5355).
 
 The registry validates every entry against this required-attribute list at
 eval time (`assertShape` in `lib/drivers/default.nix`): an entry missing one

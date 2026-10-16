@@ -137,9 +137,13 @@ agents.driver = "opencode";
 agents.models.default = "anthropic/claude-sonnet-4-5";
 agents.bashTimeoutMs = 1800000;
 
-# now:
+# now (opencode needs every model Provider-namespaced, issue #5355):
 agents.drivers.opencode = {
-  models.default = "anthropic/claude-sonnet-4-5";
+  models = {
+    default = "anthropic/claude-sonnet-4-5";
+    byName.scout.model = "anthropic/claude-haiku-4-5";
+    byName.reviewer.model = "anthropic/claude-sonnet-4-5";
+  };
   bashTimeoutMs = 1800000;
 };
 ```
