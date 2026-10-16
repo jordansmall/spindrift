@@ -708,6 +708,46 @@ in
         touch $out
       '';
 
+  # The opencode Driver bakes the guard plugin (issue #5346) where opencode
+  # auto-registers plugins, and opencode itself must list it as discovered.
+  # `debug info` lists a plugin even if it throws at import; opencode-guards-test
+  # proves the import. This realizes only agentFiles, not the image.
+  opencode-guards-plugin-baked-into-image =
+    pkgs.runCommand "opencode-guards-plugin-baked-into-image" { }
+      ''
+        home=$TMPDIR/home
+        mkdir -p $home/work
+        cp -r ${opencodeHarness.internals.agentFiles}/home/agent/. $home/
+        chmod -R u+w $home
+        [ -f $home/.config/opencode/plugins/spindrift-guards.js ] || {
+          echo "opencode agentFiles missing plugins/spindrift-guards.js" >&2
+          exit 1
+        }
+        cd $home/work
+        HOME=$home XDG_CONFIG_HOME=$home/.config ${pkgs.opencode}/bin/opencode debug info >$TMPDIR/info.txt 2>&1 || {
+          cat $TMPDIR/info.txt >&2
+          exit 1
+        }
+        grep -q 'plugins/spindrift-guards.js' $TMPDIR/info.txt || {
+          echo "opencode did not list plugins/spindrift-guards.js as discovered:" >&2
+          cat $TMPDIR/info.txt >&2
+          exit 1
+        }
+        touch $out
+      '';
+
+  # The claude Driver has its own PreToolUse hooks, so its image must not
+  # carry the opencode plugin (issue #5346).
+  claude-image-has-no-opencode-guards-plugin =
+    pkgs.runCommand "claude-image-has-no-opencode-guards-plugin" { }
+      ''
+        ! [ -e ${nonRustHarness.internals.agentFiles}/home/agent/.config/opencode/plugins ] || {
+          echo "claude agentFiles carries an opencode plugins dir" >&2
+          exit 1
+        }
+        touch $out
+      '';
+
   # The Bash command-output interceptor (issue #1988) is a pair:
   # bash-output-tee.sh tees each Bash call's output to a per-command log, and
   # bash-output-summary.sh replaces the tool result with a bounded tail once

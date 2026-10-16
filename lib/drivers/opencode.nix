@@ -95,7 +95,14 @@ in
   # opencode's full tool set.
   agentFilesTemplate =
     { roster }:
-    lib.listToAttrs (
+    {
+      # The claude PreToolUse Bash hooks never run under opencode, so this
+      # plugin (auto-registered from ~/.config/opencode/plugins/) runs the same
+      # baked hooks for opencode's bash tool (issue #5346). It is not a
+      # subagent file, so the rewrite loop in promptassembly never touches it.
+      ".config/opencode/plugins/spindrift-guards.js" = builtins.readFile ../../agent/opencode-guards.js;
+    }
+    // lib.listToAttrs (
       map (e: {
         name = ".config/opencode/agents/${e.name}.md";
         value = ''

@@ -1014,7 +1014,8 @@ in
 
   # Issue #2152 slice C: an empty roster (`roster = []`) is a deliberate
   # agent-less image, so claude's agentsJsonTemplate returns "" and
-  # opencode's agentFilesTemplate returns {}.
+  # opencode's agentFilesTemplate returns no agent file, only the guard
+  # plugin (issue #5346), which is not roster-derived.
   drivers-render-empty-roster =
     let
       claudeEntry = driverRegistry.entries.claude;
@@ -1025,8 +1026,9 @@ in
     assert assertMsg (
       claudeRendered == ""
     ) "claude agentsJsonTemplate must return \"\" for an empty roster, got: ${claudeRendered}";
-    assert assertMsg (opencodeRendered == { })
-      "opencode agentFilesTemplate must return {} for an empty roster, got: ${builtins.toJSON opencodeRendered}";
+    assert assertMsg
+      (builtins.attrNames opencodeRendered == [ ".config/opencode/plugins/spindrift-guards.js" ])
+      "opencode agentFilesTemplate must return only the guard plugin for an empty roster, got keys: ${builtins.toJSON (builtins.attrNames opencodeRendered)}";
     pkgs.runCommand "drivers-render-empty-roster" { } "touch $out";
 
   # Issue #2152 slice C: one multi-agent roster (a built-in scout plus a

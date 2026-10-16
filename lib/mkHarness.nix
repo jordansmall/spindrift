@@ -479,9 +479,10 @@ let
   );
   driverVersion = (driverEntry.package pkgs).version or "";
 
-  # On-disk subagent files, rendered by the selected Driver. A Driver with no
-  # on-disk agent-config mechanism (claude.nix) returns { } here; its
-  # subagents ride agentsJsonTemplate's --agents JSON flag instead.
+  # On-disk files rendered by the selected Driver: subagent files and, for
+  # opencode, the Bash guard plugin (issue #5346). A Driver with no on-disk
+  # agent-config mechanism (claude.nix) returns { } here; its subagents ride
+  # agentsJsonTemplate's --agents JSON flag instead.
   driverAgentFiles = driverEntry.agentFilesTemplate { roster = finalRoster; };
   driverConfigFiles = driverEntry.configFiles or { };
 
