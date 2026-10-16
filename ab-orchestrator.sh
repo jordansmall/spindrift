@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 
-# Paired A/B experiment for the worker/coordinator split (issue #2057).
-# Dispatches the same issue twice against one pinned image, varying only
-# --worker-model (empty on OFF, $AB_WORKER_ON on ON), so a difference is
-# attributable to the worker knob rather than to drift. Arm order is
-# randomised per issue.
+# Paired dispatch of the same issue twice against one pinned image, intended
+# for the worker/coordinator split (issue #2057). The arms pass different
+# dispatch-time --worker-model values (empty on OFF, $AB_WORKER_ON on ON), but
+# under `nix run .#` that flag is a no-op: WORKER_MODEL is image-time only, the
+# flake wrapper always passes --input, and the launcher prefers the document's
+# baked WORKER_PROVISIONED (current images carry it) to the live value. Both
+# arms therefore run the same baked worker roster, so the pair is a same-config
+# noise baseline and any OFF/ON difference is run-to-run variance. Measuring
+# the worker needs two images with different rosters, one per arm. Arm order
+# is randomised per issue.
 
 # Each arm runs the full implement/review loop but opens no PR and merges
 # nothing (CODE_FORGE=git + MERGE_MODE=manual); it only pushes its branch. The
@@ -220,7 +225,7 @@ run_arm() {
 
   local -a nb=(); [ "$AB_NO_BUILD" = "1" ] && nb=(--no-build)
 
-  info "issue #$issue [$arm] worker-model='${wm}' prefix='$prefix'"
+  info "issue #$issue [$arm] worker-model='${wm}' (no-op) prefix='$prefix'"
   # Pass every knob as a --flag, not an env var: flags are set via os.Setenv
   # before the launcher's ambient-knob check, so they beat whatever harness.env
   # exported, which is how a stray REPO_SLUG would otherwise leak in.
@@ -329,8 +334,8 @@ main() {
 
   cat >&2 <<EOF
 
-  A/B experiment — worker OFF vs ON
-  ---------------------------------
+  A/B experiment — paired noise baseline (worker flag is a no-op)
+  ---------------------------------------------------------------
   issues        : ${issues[*]}
   base          : $AB_BASE
   model         : $AB_MODEL
@@ -342,6 +347,9 @@ main() {
   Each issue runs TWICE (2 real Boxes = real spend). Branches are pushed to the
   remote above. No PR is opened and nothing is merged (CODE_FORGE=git,
   MERGE_MODE=manual).
+
+  NOTE: --worker-model is a no-op under nix run .#, so both arms run the
+  image's baked worker roster; treat the pair as a noise baseline.
 EOF
   if [ "$tracker" = "github" ]; then
     warn "ISSUE_TRACKER=github: every run will swap this issue's labels and post a"
