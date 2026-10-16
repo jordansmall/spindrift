@@ -153,8 +153,14 @@ type flagEntry struct {
 	// boxHostDerived marks a knob the schema declares both hostDerived and
 	// boxEnv (issue #5329). A test-only parity marker: no production path
 	// reads it; TestDispatchConfig_ResolveEnv_EveryBoxHostDerivedKnobGetsSnapshot
-	// pins it, and runtime forwarding reads BOX_ENV_VARS.
+	// pins it, and runtime forwarding reads BOX_ENV_VARS. Schema-drift's
+	// hostGitConfigKeyMismatch makes it equivalent to hostGitConfigKey != "";
+	// it stays as defence in depth, so that test still catches a keyless
+	// host-derived row in a regen that never ran schema-drift.
 	boxHostDerived bool
+	// hostGitConfigKey is the host git config key (git config --get) a
+	// boxHostDerived knob falls back to; read by gitIdentityField.
+	hostGitConfigKey string
 }
 
 // emptyIsSetting is the one rule for whether an empty env value is a real

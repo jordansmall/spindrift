@@ -170,6 +170,12 @@ let
       hostDerivedExcluded = filter (
         e: (e.hostDerived or false) && ((e.secret or false) || (e.boxEnvOnly or false))
       ) entries;
+      # hostGitConfigKey names the host git config key a knob falls back to,
+      # which only a knob the Box also receives (hostDerived and boxEnv) has;
+      # such a knob must declare it, and no other knob may carry it.
+      hostGitConfigKeyMismatch = filter (
+        e: ((e.hostDerived or false) && (e.boxEnv or false)) != (e ? hostGitConfigKey)
+      ) entries;
       # emptyDisables is string-knobs-only and nothing else enforces that: on a
       # bool knob it is redundant with the bool rule, and on an
       # int/float/secret/hostDerived knob flagEmptyDisables still emits it, so
@@ -217,6 +223,10 @@ let
     assert assertMsg (issues.hostDerivedExcluded == [ ])
       "lib/env-schema.nix: hostDerived implies host-config membership — must not also be secret or boxEnvOnly: ${
         concatStringsSep ", " (map (e: e.env) issues.hostDerivedExcluded)
+      }";
+    assert assertMsg (issues.hostGitConfigKeyMismatch == [ ])
+      "lib/env-schema.nix: hostGitConfigKey must be declared on exactly the hostDerived members that are also boxEnv: ${
+        concatStringsSep ", " (map (e: e.env) issues.hostGitConfigKeyMismatch)
       }";
     assert assertMsg (issues.emptyDisablesOnNonString == [ ])
       "lib/env-schema.nix: emptyDisables must only appear on string-typed members: ${
@@ -2924,6 +2934,18 @@ checkedMerge {
           boxEnvOnly = true;
         };
       };
+      # gitUserName is a real hostDerived and boxEnv member, so dropping its
+      # hostGitConfigKey must be caught by hostGitConfigKeyMismatch.
+      missingHostGitConfigKeySchema = schema // {
+        gitUserName = builtins.removeAttrs schema.gitUserName [ "hostGitConfigKey" ];
+      };
+      # label is not hostDerived, so an injected hostGitConfigKey must be
+      # caught by hostGitConfigKeyMismatch's other direction.
+      strayHostGitConfigKeySchema = schema // {
+        label = schema.label // {
+          hostGitConfigKey = "user.name";
+        };
+      };
       # intKind is an enum of exactly "positive" or "nonneg", so a typo like
       # "positve" must be caught by badIntKindValue.
       badIntKindValueSchema = schema // {
@@ -2959,6 +2981,12 @@ checkedMerge {
       missingIntKindResult = builtins.tryEval (assertMarkerConsistencyOk missingIntKindSchema);
       intKindOnNonIntResult = builtins.tryEval (assertMarkerConsistencyOk intKindOnNonIntSchema);
       hostDerivedExcludedResult = builtins.tryEval (assertMarkerConsistencyOk hostDerivedExcludedSchema);
+      missingHostGitConfigKeyResult = builtins.tryEval (
+        assertMarkerConsistencyOk missingHostGitConfigKeySchema
+      );
+      strayHostGitConfigKeyResult = builtins.tryEval (
+        assertMarkerConsistencyOk strayHostGitConfigKeySchema
+      );
       badIntKindValueResult = builtins.tryEval (assertMarkerConsistencyOk badIntKindValueSchema);
       emptyDisablesOnNonStringResult = builtins.tryEval (
         assertMarkerConsistencyOk emptyDisablesOnNonStringSchema
@@ -2972,6 +3000,10 @@ checkedMerge {
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject label decorated with an injected intKind, but it evaluated successfully";
     assert assertMsg (!hostDerivedExcludedResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject gitUserName (hostDerived) decorated with an injected boxEnvOnly, but it evaluated successfully";
+    assert assertMsg (!missingHostGitConfigKeyResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject gitUserName (hostDerived and boxEnv) with hostGitConfigKey removed, but it evaluated successfully";
+    assert assertMsg (!strayHostGitConfigKeyResult.success)
+      "marker-consistency-guard: expected assertMarkerConsistencyOk to reject label (not hostDerived) decorated with an injected hostGitConfigKey, but it evaluated successfully";
     assert assertMsg (!badIntKindValueResult.success)
       "marker-consistency-guard: expected assertMarkerConsistencyOk to reject maxParallel with intKind mistyped as \"positve\", but it evaluated successfully";
     assert assertMsg (!emptyDisablesOnNonStringResult.success)
