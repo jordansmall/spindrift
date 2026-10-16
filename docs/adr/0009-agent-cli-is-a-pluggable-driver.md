@@ -48,6 +48,15 @@ non-zero process exit as-is and turns a clean exit into `1` only when the
 stream carries an `error` event. A missing outcome line is left to the Box's
 outcome nudge and backstop, the same recovery claude gets.
 
+*Amended by issue #5354:* opencode's `ResultText` now selects only the last
+assistant message's text parts (any event with a new `part.messageID`
+starts a message, so a textless final step yields no text), matching
+claude's final-message `result`, so a mid-pass outcome-looking line no
+longer counts. This supersedes the earlier amendment's
+"opencode each `text` event's `.part.text`". With exit synthesis gone (#5348),
+`ExtractOutcomeLine`'s leading-token rule is the only outcome-line rule over
+result text.
+
 **Provider** is a new axis distinct from Driver: the model backend a Driver talks to (Anthropic, GitHub Copilot, OpenAI). "Add GitHub Copilot" is *not* a new Driver — it is the opencode Driver pointed at the `github-copilot` provider, with `MODEL` provider-namespaced (`github-copilot/…`). Credentials go two ways, mirroring the baked-default/runtime-override pattern already used for prompts: the primary path is a **nix-generated `opencode.json` with `{env:VAR}` placeholders** (documented for apiKey providers; keeps the "secrets are env, never host files" model), with a **materialized/mounted `auth.json`** fallback for Copilot's OAuth device-flow, whose headless credential path is undocumented and must be resolved by an empirical spike before the auth design is finalized.
 
 ## Considered Options
