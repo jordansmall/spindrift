@@ -44,10 +44,10 @@ type Driver interface {
 	RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error)
 
 	// ResolveExit returns the exit code the launcher should treat as
-	// authoritative. A Driver whose own exit code is trustworthy (claude)
-	// returns exitCode unchanged; one whose exit code is not (opencode exits
-	// 0 even on a mid-run error) derives a replacement from the log
-	// (issue #2263).
+	// authoritative. A non-zero exitCode is never resolved to 0. claude returns
+	// exitCode unchanged; opencode exits 0 even on a mid-run error, so it
+	// turns a clean exit into 1 when the log carries an error event
+	// (issue #2263). Outcome-line absence is not judged here.
 	ResolveExit(logPath string, exitCode int) (int, error)
 
 	// ResultText returns the Driver's final-message text from the raw stream

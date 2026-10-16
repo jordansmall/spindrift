@@ -96,9 +96,9 @@ func TestOpencodeDriverHeartbeatWriterForwardsOnModel(t *testing.T) {
 	}
 }
 
-// The passed-in exitCode is deliberately non-zero: opencode's own exit code
-// is never trustworthy, so only the log decides (issue #2263).
-func TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero(t *testing.T) {
+// A non-zero exitCode is never resolved to 0, even when the log carries a
+// valid outcome line (crash after the agent wrote its outcome).
+func TestOpencodeDriverResolveExitNonZeroRC_KeptDespiteOutcome(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
 		t.Fatalf("New(opencode): %v", err)
@@ -115,13 +115,13 @@ func TestOpencodeDriverResolveExitValidOutcomeNoError_IsZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveExit: %v", err)
 	}
-	if got != 0 {
-		t.Errorf("ResolveExit: got %d, want 0", got)
+	if got != 17 {
+		t.Errorf("ResolveExit: got %d, want 17", got)
 	}
 }
 
 // opencode exits 0 even on a mid-run error, so the passed-in exitCode is 0
-// here and the log is the only trustworthy source (issue #2263).
+// here and the log's error event turns it into a failure (issue #2263).
 func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
@@ -147,7 +147,7 @@ func TestOpencodeDriverResolveExitErrorEvent_IsNonZero(t *testing.T) {
 	}
 }
 
-func TestOpencodeDriverResolveExitMissingLog_IsNonZero(t *testing.T) {
+func TestOpencodeDriverResolveExitMissingLog_PassesRCThrough(t *testing.T) {
 	d, err := New("opencode")
 	if err != nil {
 		t.Fatalf("New(opencode): %v", err)
@@ -158,8 +158,8 @@ func TestOpencodeDriverResolveExitMissingLog_IsNonZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveExit: %v", err)
 	}
-	if got == 0 {
-		t.Errorf("ResolveExit: got 0, want non-zero")
+	if got != 0 {
+		t.Errorf("ResolveExit: got %d, want 0", got)
 	}
 }
 

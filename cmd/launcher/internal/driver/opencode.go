@@ -37,10 +37,10 @@ func (opencodeDriver) RenderTranscript(logPath string, opts driverkit.RenderOpti
 	return opencode.RenderTranscript(logPath, opts.TopLevelRole)
 }
 
-// ResolveExit ignores exitCode and derives the exit from the log: the opencode
-// CLI exits 0 even on a mid-run error (issue #2263).
+// ResolveExit keeps a non-zero exitCode and surfaces a mid-run error event the
+// opencode CLI hides behind exit 0 (issue #2263).
 func (opencodeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
-	return opencode.SynthesizeExit(logPath)
+	return opencode.ResolveExit(logPath, exitCode)
 }
 
 func (opencodeDriver) ResultText(logPath string) (string, error) {
