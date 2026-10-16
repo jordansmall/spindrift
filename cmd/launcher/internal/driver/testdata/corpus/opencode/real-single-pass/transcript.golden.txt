@@ -1,0 +1,13 @@
+[implementor] Branch exists already; check it.
+[implementor] Already on it, no commits. Test first.
+[implementor] The change is committed on `agent/issue-stdin` and ready for review. The full test suite passes (`python -m unittest discover -s tests -t .`, 4 tests). I also ran `printf 'a b\n' | python -m tally`, which printed `1 2 4` with no path column.
+
+The branch already existed with no commits ahead of `main`, so I used it as is. I skipped the scout step because the change touches a single small module.
+
+- **No arguments:** `python -m tally` now reads standard input instead of printing usage and exiting 2.
+- **`-` argument:** a lone `-`, or `-` mixed with file names, reads stdin for that entry and the files for the rest. Stdin results print without a path column; file results still print the path.
+- **Tests:** the new `tests/test_main.py` covers the no-argument case and the `-` plus file case. The no-argument test failed before the change (the other new test errored), then passed after.
+
+The edit is in `tally/__main__.py`, which I also updated the usage docstring in. I did not run the full check gate beyond that unittest command or rebase onto `origin/main` before committing.
+
+SPINDRIFT_OUTCOME issue=stdin landing=agent/issue-stdin status=ready note=stdin support for no-args and '-' added in c1e3b93 with tests; unittest discover passes
