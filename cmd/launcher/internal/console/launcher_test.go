@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -508,5 +509,42 @@ func TestLauncher_TryLaunch_RacingAddNeverStrands(t *testing.T) {
 			time.Sleep(time.Millisecond)
 		}
 		factory.Cleanup()
+	}
+}
+
+// Two writers each settle a row then signalRefresh; whichever signals last must
+// leave a snapshot holding both settles (issue #5320). A statistical guard: with
+// the snapshot taken outside l.mu, -cpu 4,8 runs lost an update within 1,354 to
+// 38,752 iterations, so 300000 leaves wide margin.
+func TestLauncher_SignalRefresh_SnapshotNeverStale(t *testing.T) {
+	if testing.Short() {
+		t.Skip("statistical race guard")
+	}
+	numbers := []string{"1", "2"}
+	for i := 0; i < 300000; i++ {
+		q := NewQueue()
+		for _, n := range numbers {
+			q.Add(Pick{Number: n, Kind: KindWork, State: PickRunning})
+		}
+		l := &Launcher{queue: q}
+		var wg sync.WaitGroup
+		for _, n := range numbers {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				q.setState(n, KindWork, PickSettled, "")
+				l.signalRefresh()
+			}()
+		}
+		wg.Wait()
+		picks, ok := l.TakePendingSnapshot()
+		if !ok {
+			t.Fatalf("iteration %d: no pending snapshot", i)
+		}
+		for _, p := range picks {
+			if p.State != PickSettled {
+				t.Fatalf("iteration %d: stale snapshot, pick %s is %v", i, p.Number, p.State)
+			}
+		}
 	}
 }
