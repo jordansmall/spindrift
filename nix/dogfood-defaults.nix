@@ -53,10 +53,10 @@ in
   # them there; dogfood-roster-names-only-pins reads the first `models`
   # attrset in this file, so this one must stay below claude's. github-copilot
   # is opencode's supported Provider, so ids are Provider-namespaced. The
-  # worker is never provisioned under opencode and is opted out (`""`) so the
-  # schema's non-namespaced default stays out of the baked agent files. A
-  # roster, not the legacy per-agent knobs, so the flake trips no deprecation
-  # warning.
+  # worker is opted out (`""`) explicitly: an inherited non-namespaced default
+  # would be dropped anyway, so this just states intent, and a namespaced
+  # worker model would provision it. A roster, not the legacy per-agent knobs,
+  # so the flake trips no deprecation warning.
   opencode = {
     model = "github-copilot/claude-opus-4.5";
     roster = rosterLib.defaultRoster {
