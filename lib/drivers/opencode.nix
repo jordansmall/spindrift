@@ -65,6 +65,71 @@
       }) roster
     );
 
+  # Files baked under /home/agent, path -> content (issue #5345). Optional: a
+  # Driver whose config lives in hooks (claude) bakes none here. opencode has no
+  # PreToolUse hook, so its Box refuses credential paths through deny rules
+  # instead. They must be a literal "deny": the Box runs with --auto
+  # (flagsCommon), which approves every ask. opencode globs have no character
+  # classes, so the bash boundaries enumerate credential-deny.sh's lead and
+  # trail classes char by char, minus `*` and `?` (wildcards here, so a literal
+  # one cannot be written) and `\` (opencode rewrites it to `/`).
+  configFiles =
+    let
+      paths = (import ../credential-paths.nix) ++ [ ".local/share/opencode/auth.json" ];
+      # The hook's classes negate [:alnum:] plus the excluded chars. Keep the
+      # always-excluded `* ? \` in step with sweepChars in nix/checks/drivers.nix.
+      boundaryChars =
+        excluded:
+        lib.subtractLists (
+          excluded
+          ++ [
+            "*"
+            "?"
+            "\\"
+          ]
+        ) (lib.stringToCharacters " \t\n!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~");
+      leads = [
+        ""
+      ]
+      ++ boundaryChars [
+        "_"
+        "."
+        "-"
+      ];
+      trails = [
+        ""
+      ]
+      ++ map (c: "${c}*") (boundaryChars [
+        "_"
+        "."
+        "-"
+        "/"
+      ]);
+      deny = patterns: lib.genAttrs (lib.unique patterns) (_: "deny");
+    in
+    {
+      ".config/opencode/opencode.json" = builtins.toJSON {
+        permission = {
+          # Read matches the path relative to the worktree, so a credential
+          # under $HOME arrives as ../../home/agent/...
+          read = deny (
+            lib.concatMap (p: [
+              p
+              "*/${p}"
+            ]) paths
+          );
+          bash = deny (
+            lib.concatMap (
+              p:
+              lib.concatMap (
+                lead: map (trail: if lead == "" then p + trail else "*${lead}${p}${trail}") trails
+              ) leads
+            ) paths
+          );
+        };
+      };
+    };
+
   # opencode's CLI argv shape (ADR 0009, issue #2534). It has no --agents
   # equivalent, so agentsFlag is deliberately omitted: the nullable slot's
   # absent case.

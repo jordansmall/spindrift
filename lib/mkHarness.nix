@@ -483,6 +483,7 @@ let
   # on-disk agent-config mechanism (claude.nix) returns { } here; its
   # subagents ride agentsJsonTemplate's --agents JSON flag instead.
   driverAgentFiles = driverEntry.agentFilesTemplate { roster = finalRoster; };
+  driverConfigFiles = driverEntry.configFiles or { };
 
   # Name to prompt-file map (issue #264), read at runtime by the per-agent
   # prompt injection in cmd/launcher/internal/promptassembly so a custom
@@ -1057,6 +1058,7 @@ let
       boxBin
       driverPreamble
       driverAgentFiles
+      driverConfigFiles
       ;
   };
   imageAgents = {
