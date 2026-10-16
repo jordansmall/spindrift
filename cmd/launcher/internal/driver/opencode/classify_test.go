@@ -133,3 +133,54 @@ func TestClassify_MissingFile_IsTerminal(t *testing.T) {
 		t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, driverkit.Terminal, driverkit.TaskFailed)
 	}
 }
+
+type classCase struct {
+	name       string
+	lines      []string
+	wantClass  driverkit.Class
+	wantReason driverkit.Reason
+}
+
+func runClassCases(t *testing.T, cases []classCase) {
+	t.Helper()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := opencode.Classify(opencode.WriteLog(t, tc.lines...))
+			if err != nil {
+				t.Fatalf("Classify: %v", err)
+			}
+			if got.Class != tc.wantClass || got.Reason != tc.wantReason {
+				t.Errorf("Class/Reason: got %s/%s, want %s/%s", got.Class, got.Reason, tc.wantClass, tc.wantReason)
+			}
+		})
+	}
+}
+
+// An error followed by agent progress was recovered from, so it must not
+// classify as the failure cause: the self-poison guard claude's Classify has.
+func TestClassify_ErrorThenProgress_IsRecovered(t *testing.T) {
+	const rateLimit = `{"type":"error","error":"rate_limit_error: 429 Too Many Requests"}`
+	runClassCases(t, []classCase{
+		{"error then text", []string{rateLimit, `{"type":"text","part":{"text":"carrying on"}}`}, driverkit.Terminal, driverkit.TaskFailed},
+		{"error then reasoning", []string{rateLimit, `{"type":"reasoning","part":{"text":"hmm"}}`}, driverkit.Terminal, driverkit.TaskFailed},
+		{"error then tool_use", []string{rateLimit, `{"type":"tool_use","part":{}}`}, driverkit.Terminal, driverkit.TaskFailed},
+		{"error then step_start", []string{rateLimit, `{"type":"step_start","part":{}}`}, driverkit.Terminal, driverkit.TaskFailed},
+		{"error then step_finish only", []string{rateLimit, `{"type":"step_finish","part":{}}`}, driverkit.Transient, driverkit.RateLimit},
+		{"error alone", []string{rateLimit}, driverkit.Transient, driverkit.RateLimit},
+		{"error, step_start, error", []string{rateLimit, `{"type":"step_start","part":{}}`, `{"type":"error","error":"overloaded_error: busy"}`}, driverkit.Transient, driverkit.Overloaded},
+		{"progress before error", []string{`{"type":"text","part":{"text":"working"}}`, rateLimit}, driverkit.Transient, driverkit.RateLimit},
+	})
+}
+
+// A harness argv rejection is plain non-JSON stderr, and only a terminal
+// marker makes such a line count; stderr noise never reads as transient.
+func TestClassify_NonJSONLines_OnlyTerminalMarkersCount(t *testing.T) {
+	runClassCases(t, []classCase{
+		{"usage dump", []string{"opencode run [message..]", "", "run opencode with a message", "", "Options:", "  -h, --help  show help"}, driverkit.Terminal, driverkit.UnsupportedFlag},
+		{"yargs wording", []string{"Unknown argument: variant"}, driverkit.Terminal, driverkit.UnsupportedFlag},
+		{"yargs plural wording", []string{"Unknown arguments: variant, foo"}, driverkit.Terminal, driverkit.UnsupportedFlag},
+		{"plain Overloaded stderr", []string{"upstream Overloaded, retrying"}, driverkit.Terminal, driverkit.TaskFailed},
+		{"plain 429 stderr", []string{"request failed with status 429"}, driverkit.Terminal, driverkit.TaskFailed},
+		{"usage dump after progress", []string{`{"type":"text","part":{"text":"hi"}}`, "opencode run [message..]"}, driverkit.Terminal, driverkit.UnsupportedFlag},
+	})
+}
