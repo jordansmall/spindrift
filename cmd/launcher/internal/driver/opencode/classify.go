@@ -32,6 +32,26 @@ var transientExtras = []driverkit.Pattern{
 	{Substr: "Overloaded", Reason: driverkit.Overloaded},
 }
 
+// terminalExtras holds markers for non-retryable harness argv rejections. opencode
+// rejects an unknown flag (the harness passes effort as --variant) through
+// yargs .strict() with a custom fail handler that prints the `run` usage dump
+// instead of yargs' "Unknown argument" line, then exits 1; "Unknown argument"
+// stays as a guard for an opencode that stops swallowing that message. The
+// usage banner also fires on yargs' sibling rejections ("Not enough non-option
+// arguments", "Invalid values:"), all of which are argv faults a retry cannot
+// fix.
+var terminalExtras = []driverkit.Pattern{
+	{Substr: "opencode run [message..]", Reason: driverkit.UnsupportedFlag},
+	{Substr: "Unknown argument", Reason: driverkit.UnsupportedFlag},
+}
+
+// agentProgressTypes are the event types that show the agent kept working after
+// an error, so that error was recovered from. step_finish is absent on purpose:
+// it can close the very step whose error was just emitted.
+var agentProgressTypes = map[string]bool{
+	"text": true, "reasoning": true, "tool_use": true, "step_start": true,
+}
+
 // event's Error is either a plain string (the form this package's fixtures
 // use) or a NamedError-style object such as
 // {"name":"APIError","data":{"statusCode":429,...}}.
@@ -57,10 +77,13 @@ func errorText(raw json.RawMessage) string {
 
 // Classify scans the box log at logPath and reports whether the failure is
 // transient (retryable) or terminal. Only the error payload of type:"error"
-// lines is scanned, so a marker quoted in the agent's own type:"text" prose is
-// not attributed as the cause. A log with no error event, or whose error text
-// carries no known marker, classifies as Terminal/TaskFailed, as does a missing
-// log file.
+// lines is scanned for transient markers, so a marker quoted in the agent's own
+// type:"text" prose is not attributed as the cause. An error followed by an
+// agentProgressTypes event was recovered from and is dropped; the last
+// unrecovered error wins. Non-JSON lines (stderr shares the log) count only
+// when they match a terminalExtras marker. A log with no unrecovered error, or
+// whose error text carries no known marker, classifies as Terminal/TaskFailed,
+// as does a missing log file.
 func Classify(logPath string) (driverkit.Classification, error) {
 	cl, found, err := driverkit.ClassifyScan(logPath, logscan.SkipOversized, func(chunk string) driverkit.ScanDecision {
 		s := strings.TrimSpace(chunk)
@@ -69,13 +92,19 @@ func Classify(logPath string) (driverkit.Classification, error) {
 		}
 		var ev event
 		if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr != nil {
+			if _, ok := driverkit.MatchExtras(s, terminalExtras); ok {
+				return driverkit.ScanDecision{Text: s}
+			}
 			return driverkit.ScanDecision{Skip: true}
+		}
+		if agentProgressTypes[ev.Type] {
+			return driverkit.ScanDecision{Reset: true, Skip: true}
 		}
 		if ev.Type != "error" {
 			return driverkit.ScanDecision{Skip: true}
 		}
 		return driverkit.ScanDecision{Text: errorText(ev.Error), Overwrite: true}
-	}, transientExtras, nil)
+	}, transientExtras, terminalExtras)
 	if err != nil {
 		return driverkit.Classification{}, err
 	}
