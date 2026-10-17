@@ -2,13 +2,9 @@ package claude
 
 import (
 	"encoding/json"
-	"errors"
-	"os"
 	"strings"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
-	"spindrift.dev/launcher/internal/hostop"
-	"spindrift.dev/launcher/internal/logscan"
 )
 
 // RenderTranscript renders the box log at logPath as readable assistant turns
@@ -23,67 +19,11 @@ func RenderTranscript(logPath string) (string, error) {
 // renders as something other than implementation (issue #2092). An empty
 // topLevelRole keeps the ImplementorRole default.
 func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
-	var lines []string
-	taskRole := make(map[string]string)
-	activeTopLevelRole := topLevelRole
-	err := logscan.ForEachLine(logPath, logscan.SkipOversized, func(line string) {
-		s := strings.TrimSpace(line)
-		if s == "" {
-			return
-		}
-		var ev Event
-		if jsonErr := json.Unmarshal([]byte(s), &ev); jsonErr != nil {
-			return
-		}
-		if ev.Type == hostop.TypeSpindriftOp {
-			activeTopLevelRole = nextActiveTopLevelRole(activeTopLevelRole, ev.SpindriftOp)
-			return
-		}
-		if ev.Message == nil {
-			return
-		}
-		switch ev.Type {
-		case "assistant":
-			CollectTaskRoles(ev, taskRole)
-			role := ResolveRole(ev, taskRole, activeTopLevelRole)
-			for _, block := range ev.Message.Content {
-				switch block.Type {
-				case "text":
-					if text := strings.TrimSpace(block.Text); text != "" {
-						lines = append(lines, "["+role+"] "+text)
-					}
-				case "tool_use":
-					lines = append(lines, "["+role+"] "+formatToolUse(block.Name, block.Input))
-				}
-			}
-		case "user":
-			role := ResolveRole(ev, taskRole, activeTopLevelRole)
-			for _, block := range ev.Message.Content {
-				if block.Type != "tool_result" {
-					continue
-				}
-				summary := driverkit.SummarizeToolOutput(resultText(block.Content), block.IsError)
-				// Key on block.ToolUseID, not the event's own
-				// parent_tool_use_id used for role above: a subagent's final
-				// report answers its own spawn ID, which taskRole records.
-				// Any other tool_result misses the map and renders unprefixed.
-				if subagentRole, ok := taskRole[block.ToolUseID]; ok {
-					summary = "[" + subagentRole + "] " + summary
-				}
-				lines = append(lines, "["+role+"]   -> "+summary)
-			}
-		}
-	})
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", nil
-		}
+	out, err := driverkit.RenderTranscript(logPath, NewDecoder, topLevelRole)
+	if err != nil || out == "" {
 		return "", err
 	}
-	if len(lines) == 0 {
-		return "", nil
-	}
-	return strings.Join(lines, "\n") + "\n", nil
+	return out + "\n", nil
 }
 
 // resultText decodes a tool_result block's content field, which the Claude API
@@ -111,13 +51,9 @@ func resultText(raw json.RawMessage) string {
 	return string(raw)
 }
 
-func formatToolUse(name string, input json.RawMessage) string {
-	return name + "(" + toolTarget(name, input) + ")"
-}
-
 // toolTarget picks the input field that best identifies what a tool call acted
-// on. An unrecognized tool or missing field yields "", which formatToolUse
-// renders as a bare "Name()".
+// on. An unrecognized tool or missing field yields "", which the renderer
+// shows as a bare "Name()".
 func toolTarget(name string, input json.RawMessage) string {
 	if len(input) == 0 {
 		return ""

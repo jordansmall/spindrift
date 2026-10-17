@@ -93,6 +93,11 @@ func TestDecodeSyntheticAssistantIsErrorNotProgress(t *testing.T) {
 	}
 }
 
+func TestDecodeMistypedAssistantEnvelopeYieldsNoContentOrUsage(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":"5","output_tokens":7}}}`)
+	wantKinds(t, evs, driverkit.KindStart)
+}
+
 func TestDecodeResultEchoLatchSpansInterveningLines(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	d(`{"type":"assistant","message":{"content":[{"type":"text","text":"429 Too Many Requests"}]}}`)
@@ -192,10 +197,14 @@ func TestDecodeResultCarriesSessionTotals(t *testing.T) {
 }
 
 func TestDecodeMistypedResultFieldContributesNoTotals(t *testing.T) {
-	// One mistyped field fails the whole line's decode: it is still an error
-	// candidate, but carries no session totals.
+	// One mistyped total fails the totals decode as a whole: the result keeps
+	// its text, carries no totals, and the usage reader skips it.
 	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"done","num_turns":"3","total_cost_usd":0.25,"usage":{"input_tokens":1}}`)
-	wantKinds(t, evs, driverkit.KindError)
+	wantKinds(t, evs, driverkit.KindResult, driverkit.KindError)
+	want := driverkit.Event{Kind: driverkit.KindResult, Text: "done", NoTotals: true}
+	if !reflect.DeepEqual(evs[0], want) {
+		t.Errorf("result = %+v, want %+v", evs[0], want)
+	}
 }
 
 func TestDecodeTimestampIsTopLevelOnly(t *testing.T) {
@@ -223,5 +232,57 @@ func TestDecodeTimestampIsTopLevelOnly(t *testing.T) {
 				t.Errorf("%s: %s timestamp = %d, want 0", name, ev.Kind, ev.Timestamp)
 			}
 		}
+	}
+}
+
+func TestDecodeToolFields(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	evs := d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"reviewer"}},{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"ls"}}]}}`)
+	if evs[1].ToolTarget != "reviewer" || evs[2].ToolTarget != "ls" {
+		t.Errorf("tool targets = %q, %q", evs[1].ToolTarget, evs[2].ToolTarget)
+	}
+	evs = d(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"done"},{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":[{"type":"text","text":"boom"}]}]}}`)
+	if evs[1].ToolOutput != "done" || evs[1].Subagent != "reviewer" || evs[1].IsError {
+		t.Errorf("spawn result = output %q subagent %q error %v", evs[1].ToolOutput, evs[1].Subagent, evs[1].IsError)
+	}
+	if evs[2].ToolOutput != "boom" || evs[2].Subagent != "" || !evs[2].IsError {
+		t.Errorf("ordinary result = output %q subagent %q error %v", evs[2].ToolOutput, evs[2].Subagent, evs[2].IsError)
+	}
+}
+
+func TestDecodeToolBlocksOnlyInTheirOwnTurnType(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	evs := d(`{"type":"user","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"reviewer"}}]}}`)
+	wantKinds(t, evs, driverkit.KindStart)
+	evs = d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindUsage)
+	// The user-turn spawn recorded no role, so a later result is not a subagent report.
+	evs = d(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindToolResult)
+	if evs[1].Subagent != "" {
+		t.Errorf("subagent = %q, want none", evs[1].Subagent)
+	}
+}
+
+func TestDecodeUserTextBlocksAreNotTranscriptText(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"user","parent_tool_use_id":"t1","message":{"content":[{"type":"text","text":"do the thing"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart)
+}
+
+func TestDecodeMistypedTotalsKeepTextAndEchoLatch(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	d(`{"type":"assistant","message":{"content":[{"type":"text","text":"API Error: 529 overloaded_error"}]}}`)
+	evs := d(`{"type":"result","result":"API Error: 529 overloaded_error","num_turns":"3"}`)
+	wantKinds(t, evs, driverkit.KindResult)
+	if evs[0].Text != "API Error: 529 overloaded_error" || !evs[0].NoTotals {
+		t.Errorf("result = %+v", evs[0])
+	}
+	// A mistyped is_error is no echo (the old envelope failed to decode), but
+	// the text and totals survive.
+	d(`{"type":"assistant","message":{"content":[{"type":"text","text":"API Error: 529 overloaded_error"}]}}`)
+	evs = d(`{"type":"result","result":"API Error: 529 overloaded_error","is_error":"no","num_turns":3}`)
+	wantKinds(t, evs, driverkit.KindResult, driverkit.KindError)
+	if evs[0].NumTurns != 3 || evs[0].NoTotals {
+		t.Errorf("result = %+v", evs[0])
 	}
 }

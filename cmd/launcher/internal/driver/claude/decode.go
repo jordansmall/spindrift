@@ -103,41 +103,48 @@ func (d *decoder) decodeLine(line string) []driverkit.Event {
 		return append([]driverkit.Event{d.errorEvent(line)}, d.contentEvents(line, true)...)
 	}
 
-	var res struct {
-		Type          string          `json:"type"`
-		IsError       bool            `json:"is_error"`
-		Result        json.RawMessage `json:"result"`
-		NumTurns      int             `json:"num_turns"`
-		TotalCostUSD  float64         `json:"total_cost_usd"`
-		DurationMs    int64           `json:"duration_ms"`
-		DurationAPIMs int64           `json:"duration_api_ms"`
-		Usage         TokenUsage      `json:"usage"`
+	// A type error anywhere fails the whole Unmarshal, so the text, is_error and
+	// totals decode separately, as the pre-decoder readers did: a mistyped total
+	// must not cost the result text or the echo check, and a mistyped is_error
+	// must cost neither the text nor the totals.
+	var env struct {
+		Type   string          `json:"type"`
+		Result json.RawMessage `json:"result"`
 	}
-	// A mistyped field leaves the rest of res filled, so a line that fails to
-	// decode contributes no totals at all, as before the decoder.
-	if json.Unmarshal([]byte(line), &res) != nil || res.Type != "result" {
+	if json.Unmarshal([]byte(line), &env) != nil || env.Type != "result" {
 		return []driverkit.Event{d.errorEvent(line)}
 	}
 	var text string
-	textOK := len(res.Result) == 0 || json.Unmarshal(res.Result, &text) == nil
-	// A result's usage header carries only the flat cache_creation_input_tokens
-	// total, so it lands in the 5m bucket like a pre-split assistant message.
-	out := []driverkit.Event{{
-		Kind: driverkit.KindResult,
-		Text: text,
-		Tokens: driverkit.Tokens{
-			Input:        res.Usage.InputTokens,
-			Output:       res.Usage.OutputTokens,
-			CacheRead:    res.Usage.CacheReadInputTokens,
-			CacheWrite5m: res.Usage.CacheCreationInputTokens,
-			CostUSD:      res.TotalCostUSD,
-		},
-		DurationMs:    res.DurationMs,
-		DurationAPIMs: res.DurationAPIMs,
-		NumTurns:      res.NumTurns,
-	}}
+	textOK := len(env.Result) == 0 || json.Unmarshal(env.Result, &text) == nil
+	var flags struct {
+		IsError bool `json:"is_error"`
+	}
+	notError := json.Unmarshal([]byte(line), &flags) == nil && !flags.IsError
+	var tot struct {
+		NumTurns      int        `json:"num_turns"`
+		TotalCostUSD  float64    `json:"total_cost_usd"`
+		DurationMs    int64      `json:"duration_ms"`
+		DurationAPIMs int64      `json:"duration_api_ms"`
+		Usage         TokenUsage `json:"usage"`
+	}
+	result := driverkit.Event{Kind: driverkit.KindResult, Text: text}
+	if json.Unmarshal([]byte(line), &tot) == nil {
+		// A result's usage header carries only the flat cache_creation_input_tokens
+		// total, so it lands in the 5m bucket like a pre-split assistant message.
+		result.Tokens = driverkit.Tokens{
+			Input:        tot.Usage.InputTokens,
+			Output:       tot.Usage.OutputTokens,
+			CacheRead:    tot.Usage.CacheReadInputTokens,
+			CacheWrite5m: tot.Usage.CacheCreationInputTokens,
+			CostUSD:      tot.TotalCostUSD,
+		}
+		result.DurationMs, result.DurationAPIMs, result.NumTurns = tot.DurationMs, tot.DurationAPIMs, tot.NumTurns
+	} else {
+		result.NoTotals = true
+	}
+	out := []driverkit.Event{result}
 	// An is_error result is a genuine failure, never an echo of preceding content.
-	if d.echoPending && textOK && !res.IsError {
+	if d.echoPending && textOK && notError {
 		d.echoPending = false
 		if reason, _, matched := matchMarker(text); matched && reason == d.echoReason {
 			return out
@@ -160,10 +167,13 @@ type decodedBlock struct {
 	Thinking  string          `json:"thinking"`
 	ToolUseID string          `json:"tool_use_id"`
 	IsError   bool            `json:"is_error"`
+	Content   json.RawMessage `json:"content"`
 }
 
 // contentEvents decodes an assistant or user line: its content blocks, then
-// for an assistant line one KindUsage. It is lenient: a user turn whose content
+// for an assistant line one KindUsage. The envelope is strict: a type error in it
+// (a mistyped usage field, say) yields no events, as the pre-decoder readers
+// dropped such a line. Only the content is lenient: a user turn whose content
 // is a string, or a block that fails to unmarshal, yields no events for that
 // part rather than losing the line. Task spawns are recorded here and nothing
 // is deduplicated; the usage reader dedups by MessageID.
@@ -178,7 +188,9 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 			Usage   TokenUsage      `json:"usage"`
 		} `json:"message"`
 	}
-	_ = json.Unmarshal([]byte(line), &env)
+	if json.Unmarshal([]byte(line), &env) != nil {
+		return nil
+	}
 	if env.Message == nil {
 		return nil
 	}
@@ -196,7 +208,9 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 		blocks = append(blocks, b)
 		spawn = append(spawn, ContentBlock{Type: b.Type, ID: b.ID, Name: b.Name, Input: b.Input})
 	}
-	CollectTaskRoles(Event{Message: &Message{Content: spawn}}, d.taskRole)
+	if env.Type == "assistant" {
+		CollectTaskRoles(Event{Message: &Message{Content: spawn}}, d.taskRole)
+	}
 
 	subagent := env.ParentToolUseID != ""
 	role := d.topRole
@@ -206,17 +220,36 @@ func (d *decoder) contentEvents(line string, synthetic bool) []driverkit.Event {
 
 	var out []driverkit.Event
 	for _, b := range blocks {
-		ev := driverkit.Event{MessageID: env.Message.ID, Role: role}
+		ev := driverkit.Event{MessageID: env.Message.ID, Role: role, Synthetic: synthetic}
 		switch b.Type {
 		case "text":
-			ev.Kind, ev.Text, ev.Synthetic = driverkit.KindText, b.Text, synthetic
+			// The transcript lists the agent's prose, not the user turns
+			// (subagent prompts) that also carry text blocks.
+			if env.Type != "assistant" {
+				continue
+			}
+			ev.Kind, ev.Text = driverkit.KindText, b.Text
 		case "thinking":
 			ev.Kind, ev.Text = driverkit.KindReasoning, b.Thinking
 		case "tool_use":
+			// A call lives in an assistant turn and its result in the user turn
+			// after it; a block in the other turn type was never rendered.
+			if env.Type != "assistant" {
+				continue
+			}
 			d.toolNames[b.ID] = b.Name
 			ev.Kind, ev.ToolID, ev.ToolName, ev.ToolInput = driverkit.KindToolCall, b.ID, b.Name, b.Input
+			ev.ToolTarget = toolTarget(b.Name, b.Input)
 		case "tool_result":
+			if env.Type != "user" {
+				continue
+			}
 			ev.Kind, ev.ToolID, ev.ToolName, ev.IsError = driverkit.KindToolResult, b.ToolUseID, d.toolNames[b.ToolUseID], b.IsError
+			ev.ToolOutput = resultText(b.Content)
+			// Key on the block's tool_use_id, not the event's parent: a subagent's
+			// final report answers its own spawn ID, which taskRole records, and
+			// any other result misses the map.
+			ev.Subagent = d.taskRole[b.ToolUseID]
 		default:
 			continue
 		}

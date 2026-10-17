@@ -99,3 +99,17 @@ func TestResultText_Envelope(t *testing.T) {
 		}
 	})
 }
+
+func TestResultText_MistypedTotalsKeepText(t *testing.T) {
+	path := WriteLog(t,
+		`{"type":"result","result":"SPINDRIFT_OUTCOME status=done","num_turns":"3"}`,
+		`{"type":"result","result":"second","duration_ms":12.5}`,
+	)
+	got, err := ResultText(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "SPINDRIFT_OUTCOME status=done\nsecond\n"; got != want {
+		t.Errorf("ResultText = %q, want %q", got, want)
+	}
+}

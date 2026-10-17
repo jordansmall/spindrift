@@ -129,6 +129,18 @@ var classifyTests = []struct {
 		wantResetAt: nil,
 	},
 	{
+		// A mistyped total on the echoing result line must not turn the echo
+		// into a fresh signal.
+		name: "Terminal_SelfPoisoning_OverloadedMarkerEchoedWithMistypedTotals",
+		lines: []string{
+			`{"type":"assistant","message":{"model":"claude-sonnet-4-6","content":[{"type":"text","text":"API Error: 529 overloaded_error"}]}}`,
+			`{"type":"result","is_error":false,"result":"API Error: 529 overloaded_error","num_turns":"3"}`,
+		},
+		wantClass:   driverkit.Terminal,
+		wantReason:  driverkit.TaskFailed,
+		wantResetAt: nil,
+	},
+	{
 		// A type:"system" heartbeat line (see heartbeat_test.go) can land
 		// between the genuine assistant turn and the echoing result line. It
 		// must not consume the pending echo, so the guard has to see past it
@@ -546,6 +558,38 @@ func TestClassify_DispatchSettledIsNotScanned(t *testing.T) {
 		Settled: &hostop.DispatchSettled{State: "failed", Note: "Overloaded; connection refused"},
 	})
 	logPath := claude.WriteLog(t, strings.TrimSuffix(settled, "\n"))
+
+	c, err := claude.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != driverkit.Terminal || c.Reason != driverkit.TaskFailed {
+		t.Errorf("Classify() = %+v, want Terminal/TaskFailed", c)
+	}
+}
+
+// A synthetic terminator's thinking block is the CLI's own content, so it must
+// not recover the line's own error.
+func TestClassify_SyntheticThinkingBlockDoesNotClearItsOwnError(t *testing.T) {
+	logPath := claude.WriteLog(t,
+		`{"type":"assistant","message":{"model":"<synthetic>","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":"API Error: rate_limit_error"}]},"error":"rate_limit"}`)
+
+	c, err := claude.Classify(logPath)
+	if err != nil {
+		t.Fatalf("Classify() error: %v", err)
+	}
+	if c.Class != driverkit.Transient || c.Reason != driverkit.RateLimit {
+		t.Errorf("Classify() = %+v, want Transient/RateLimit", c)
+	}
+}
+
+// Every spindrift_op line is host-written, not just dispatch_start and
+// dispatch_settled, so marker text in any op's fields is never scanned.
+func TestClassify_AnyHostOpIsNotScanned(t *testing.T) {
+	op := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: "run_state_error", Error: "rate_limit_error"})
+	logPath := claude.WriteLog(t,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"working"}]}}`,
+		strings.TrimSuffix(op, "\n"))
 
 	c, err := claude.Classify(logPath)
 	if err != nil {
