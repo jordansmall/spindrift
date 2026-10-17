@@ -14,7 +14,7 @@ func TestRenderTranscript_AssistantNarration_RendersImplementorLine(t *testing.T
 	line := `{"type":"assistant","message":{"content":[{"type":"text","text":"Investigating the failing test."}]}}`
 	path := claude.WriteLog(t, line)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestRenderTranscript_ToolUse_RendersNameAndTarget(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"main.go"}}]}}`
 	path := claude.WriteLog(t, line)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestRenderTranscript_ToolResult_RendersSummarizedResult(t *testing.T) {
 	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"ok, file updated"}]}}`
 	path := claude.WriteLog(t, line)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestRenderTranscript_ToolResult_TruncatesOnRuneBoundary(t *testing.T) {
 	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + long + `"}]}}`
 	path := claude.WriteLog(t, line)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestRenderTranscript_ToolResult_TruncatesOnRuneBoundary_FourByteRune(t *tes
 	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"` + long + `"}]}}`
 	path := claude.WriteLog(t, line)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestRenderTranscript_ToolResultError_PrefixesError(t *testing.T) {
 	line := `{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"toolu_1","content":"file not found","is_error":true}]}}`
 	path := claude.WriteLog(t, line)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestRenderTranscript_SubagentNarration_PrefixesSubagentRole(t *testing.T) {
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestRenderTranscript_SubagentNarration_AgentToolName_PrefixesReviewerRole(t
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestRenderTranscript_NestedSubagent_PrefixesOwnRole(t *testing.T) {
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestRenderTranscript_TaskToolResult_TagsWithSubagentRole(t *testing.T) {
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestRenderTranscript_OrdinaryToolResult_NoSubagentTag(t *testing.T) {
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestRenderTranscript_WithRole_TopLevelEventsUseGivenRole(t *testing.T) {
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: "reviewer"})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: "reviewer"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestRenderTranscript_WithRole_PassStartSwitchesActiveRole(t *testing.T) {
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: ""})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -239,7 +239,7 @@ func TestRenderTranscript_WithRole_PassStartSequence_ImplementReviewFix(t *testi
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: ""})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestRenderTranscript_WithRole_PassStartWithEmptyRole_LeavesActiveRoleUnchan
 	}
 	path := claude.WriteLog(t, lines...)
 
-	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: ""})
+	got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: ""})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestRenderTranscript_WithRole_PassStartWithEmptyRole_LeavesActiveRoleUnchan
 }
 
 func TestRenderTranscript_MissingFile_ReturnsEmpty(t *testing.T) {
-	got, err := newDriver(t).RenderTranscript(filepath.Join(t.TempDir(), "missing.log"), driverkit.RenderOptions{})
+	got, err := newDriver().RenderTranscript(filepath.Join(t.TempDir(), "missing.log"), driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

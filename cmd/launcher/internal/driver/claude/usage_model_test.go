@@ -12,7 +12,7 @@ import (
 // at path; the Report carries none unless the log has a result event.
 func modelBreakdownAt(t *testing.T, path string) []usage.ModelUsage {
 	t.Helper()
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)
 	}

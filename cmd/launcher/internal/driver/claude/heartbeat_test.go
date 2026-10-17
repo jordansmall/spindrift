@@ -20,7 +20,7 @@ import (
 // newHeartbeat is the claude Driver's heartbeat writer over raw, reporting to out.
 func newHeartbeat(t *testing.T, raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
 	t.Helper()
-	return newDriver(t).NewHeartbeatWriter(raw, issue, out, opts)
+	return newDriver().NewHeartbeatWriter(raw, issue, out, opts)
 }
 
 func newWriter(t *testing.T, issue string, status *bytes.Buffer) io.Writer {

@@ -64,7 +64,7 @@ func TestTranscriptRoleAttribution(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := claude.WriteLog(t, tc.lines...)
-			got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: tc.topLevelRole})
+			got, err := newDriver().RenderTranscript(path, driverkit.RenderOptions{TopLevelRole: tc.topLevelRole})
 			if err != nil {
 				t.Fatalf("RenderTranscript: %v", err)
 			}

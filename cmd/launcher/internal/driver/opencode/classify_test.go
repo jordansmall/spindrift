@@ -15,7 +15,7 @@ func TestClassify_ErrorEvent_RateLimit_IsTransient(t *testing.T) {
 		`{"type":"error","error":"rate_limit_error: 429 Too Many Requests"}`,
 	)
 
-	got, err := newDriver(t).ClassifyTransient(logPath)
+	got, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestClassify_TextEvent_QuotingRateLimit_IsNotAttributed(t *testing.T) {
 		`{"type":"text","part":{"text":"I hit a rate_limit_error while testing."}}`,
 	)
 
-	got, err := newDriver(t).ClassifyTransient(logPath)
+	got, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestClassify_NoErrorEvent_IsTerminal(t *testing.T) {
 		`{"type":"text","part":{"text":"Investigating the issue."}}`,
 	)
 
-	got, err := newDriver(t).ClassifyTransient(logPath)
+	got, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestClassify_ErrorEvent_StatusMarkers(t *testing.T) {
 		{"status code 529", `{"type":"error","error":"Request failed with status code 529"}`, driverkit.Transient, driverkit.Overloaded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := newDriver(t).ClassifyTransient(opencode.WriteLog(t, tc.line))
+			got, err := newDriver().ClassifyTransient(opencode.WriteLog(t, tc.line))
 			if err != nil {
 				t.Fatalf("Classify: %v", err)
 			}
@@ -96,7 +96,7 @@ func TestClassify_ErrorEvent_Status429BeatsOverloaded(t *testing.T) {
 		`{"type":"error","error":"overloaded_error: upstream returned status 429"}`,
 	)
 
-	got, err := newDriver(t).ClassifyTransient(logPath)
+	got, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestClassify_LastErrorEventWins(t *testing.T) {
 		`{"type":"error","error":"overloaded_error: upstream unavailable"}`,
 	)
 
-	got, err := newDriver(t).ClassifyTransient(logPath)
+	got, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestClassify_LastErrorEventWins(t *testing.T) {
 func TestClassify_MissingFile_IsTerminal(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "does-not-exist.log")
 
-	got, err := newDriver(t).ClassifyTransient(logPath)
+	got, err := newDriver().ClassifyTransient(logPath)
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
@@ -147,7 +147,7 @@ func runClassCases(t *testing.T, cases []classCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := newDriver(t).ClassifyTransient(opencode.WriteLog(t, tc.lines...))
+			got, err := newDriver().ClassifyTransient(opencode.WriteLog(t, tc.lines...))
 			if err != nil {
 				t.Fatalf("Classify: %v", err)
 			}
@@ -232,7 +232,7 @@ func TestClassify_ResetAt(t *testing.T) {
 		}, driverkit.Overloaded, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := newDriver(t).ClassifyTransient(opencode.WriteLog(t, tc.lines...))
+			got, err := newDriver().ClassifyTransient(opencode.WriteLog(t, tc.lines...))
 			if err != nil {
 				t.Fatalf("Classify: %v", err)
 			}

@@ -20,7 +20,7 @@ import (
 func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 	path := filepath.Join("testdata", "multi-session-2058.jsonl")
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}
@@ -87,7 +87,7 @@ func TestExtractUsage_OutputTokenPlaceholderFixture(t *testing.T) {
 			naiveSum, resultOutputTokens)
 	}
 
-	report, err := newDriver(t).ExtractUsage(path)
+	report, err := newDriver().ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}
