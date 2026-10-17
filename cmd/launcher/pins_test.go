@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+// conformanceKit is the kit's directory under cmd/launcher. The Box-construction
+// pin exempts it and TestConformanceKitNotImportedByRuntime justifies the
+// exemption, so both read this one path.
+const conformanceKit = "internal/driver/driverkit/conformance"
+
 // Every gh API call must stay behind the forge seam, so no file outside
 // internal/forge may shell out to gh directly.
 func TestNoGhExecOutsideForge(t *testing.T) {
@@ -173,7 +178,11 @@ func TestNoBoxConstructionOutsideDispatchPackage(t *testing.T) {
 		// driver-exec's own os.Create writes its teed stream log (issue #626), a
 		// different file in a different process from the launcher's per-issue
 		// Box log this guard polices.
-		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") {
+		//
+		// The conformance kit classifies corpus logs from Driver packages'
+		// tests (issue #5506); nothing in the launcher's runtime imports it.
+		if strings.HasPrefix(filepath.ToSlash(path), "driver-exec") ||
+			strings.HasPrefix(filepath.ToSlash(path), conformanceKit) {
 			if info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -360,6 +369,38 @@ func TestNoMergeGateOutsideSettlePackage(t *testing.T) {
 			if strings.Contains(content, needle) {
 				t.Errorf("%s: contains %q — the merge gate must live in internal/settle only (issue #442)", path, needle)
 			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+}
+
+// The conformance kit classifies corpus logs and so trips the Box-construction
+// pin above; that exemption holds only while no runtime file imports it
+// (issue #5506). Driver packages reach it from _test.go files alone.
+func TestConformanceKitNotImportedByRuntime(t *testing.T) {
+	needle := "/" + conformanceKit + `"`
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			if filepath.ToSlash(path) == conformanceKit {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), needle) {
+			t.Errorf("%s: imports the conformance kit — only _test.go files may", path)
 		}
 		return nil
 	})
