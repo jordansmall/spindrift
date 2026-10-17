@@ -36,7 +36,10 @@ var opencodeUsageByModel = func(p string) ([]usage.ModelUsage, error) {
 // no subagent roles, so SummedByAgent is the one usage.MainLoopAgent row; its
 // APICalls is what `spindrift stats --by role` reads for an opencode pass.
 func (opencodeDriver) ExtractUsage(logPath string) (usage.Report, error) {
-	return driverkit.ExtractUsage(logPath, opencode.NewDecoder, opencodeUsageByModel)
+	return driverkit.ExtractUsage(logPath, opencode.NewDecoder, driverkit.PerCallTotals, opencodeUsageByModel,
+		func(p string) ([]usage.AgentUsage, error) {
+			return driverkit.UsageByAgent(p, opencode.NewDecoder, driverkit.PerCallTotals)
+		})
 }
 
 // RenderTranscript attributes every event without a role to opts.TopLevelRole

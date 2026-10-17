@@ -243,7 +243,7 @@ func TestExtractUsageSumsEveryEventAndSpans(t *testing.T) {
 		usageEv("m1", "a", 2000, Tokens{Input: 1, Output: 2, CacheRead: 3, CacheWrite5m: 4, CostUSD: 0.5}),
 		usageEv("m1", "a", 3000, Tokens{Input: 10, Output: 20, CacheRead: 30, CacheWrite5m: 40, CacheWrite1h: 5, CostUSD: 0.25}),
 	)
-	r, err := ExtractUsage(path, nd, byModelOf(nd))
+	r, err := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,7 +273,7 @@ func TestExtractUsageSumsEveryEventAndSpans(t *testing.T) {
 func TestExtractUsageSummedByAgent(t *testing.T) {
 	roleEv := func(role, id string, tok Tokens) Event {
 		ev := usageEv(id, "m", 1, tok)
-		ev.Role = role
+		ev.Role, ev.InSubagent = role, role != ""
 		return ev
 	}
 	path, nd := evLines(t,
@@ -286,7 +286,7 @@ func TestExtractUsageSummedByAgent(t *testing.T) {
 		roleEv("auditor", "a1", Tokens{Input: 55, Output: 50}), // ties scout on 105: name breaks it
 		roleEv("tiny", "x1", Tokens{Input: 1}),
 	)
-	r, err := ExtractUsage(path, nd, byModelOf(nd))
+	r, err := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +301,7 @@ func TestExtractUsageSummedByAgent(t *testing.T) {
 	}
 	// A subagent outweighing the main loop still sorts after it.
 	path, nd = evLines(t, roleEv("scout", "s1", Tokens{Input: 999}), roleEv("", "t1", Tokens{Input: 1}))
-	r, _ = ExtractUsage(path, nd, byModelOf(nd))
+	r, _ = ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
 	if len(r.SummedByAgent) != 2 || r.SummedByAgent[0].Agent != usage.MainLoopAgent {
 		t.Errorf("main loop must sort first: %+v", r.SummedByAgent)
 	}
@@ -309,7 +309,7 @@ func TestExtractUsageSummedByAgent(t *testing.T) {
 
 func TestExtractUsageNoStartLeavesSpanUnset(t *testing.T) {
 	path, nd := evLines(t, usageEv("", "", 5000, Tokens{Input: 1}))
-	r, _ := ExtractUsage(path, nd, byModelOf(nd))
+	r, _ := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd))
 	if !r.Found || r.Totals.DurationMs != 0 || r.HasEventSpan || r.EarliestEventMs != 0 || r.LatestEventMs != 0 {
 		t.Errorf("report = %+v", r)
 	}
@@ -317,17 +317,17 @@ func TestExtractUsageNoStartLeavesSpanUnset(t *testing.T) {
 
 func TestExtractUsageNotFound(t *testing.T) {
 	path, nd := evLines(t, Event{Kind: KindStart, Timestamp: 1}, Event{Kind: KindText})
-	if r, err := ExtractUsage(path, nd, byModelOf(nd)); err != nil || r.Found {
+	if r, err := ExtractUsage(path, nd, PerCallTotals, byModelOf(nd), byAgentOf(nd)); err != nil || r.Found {
 		t.Errorf("no usage events: %+v, %v", r, err)
 	}
-	if r, err := ExtractUsage(missingLog(t), fakeDecoder(nil), byModelOf(fakeDecoder(nil))); err != nil || r.Found {
+	if r, err := ExtractUsage(missingLog(t), fakeDecoder(nil), PerCallTotals, byModelOf(fakeDecoder(nil)), byAgentOf(fakeDecoder(nil))); err != nil || r.Found {
 		t.Errorf("missing log: %+v, %v", r, err)
 	}
 }
 
 func TestExtractUsageByModelErrorDegrades(t *testing.T) {
 	path, nd := evLines(t, usageEv("m", "a", 1, Tokens{Input: 7}))
-	r, err := ExtractUsage(path, nd, func(string) ([]usage.ModelUsage, error) { return nil, io.ErrUnexpectedEOF })
+	r, err := ExtractUsage(path, nd, PerCallTotals, func(string) ([]usage.ModelUsage, error) { return nil, io.ErrUnexpectedEOF }, byAgentOf(nd))
 	if err != nil || !r.Found || r.Totals.InputTokens != 7 || r.SummedByModel != nil {
 		t.Errorf("report = %+v, err = %v", r, err)
 	}
