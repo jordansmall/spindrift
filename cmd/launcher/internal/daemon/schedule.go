@@ -70,12 +70,13 @@ type kindSched struct {
 	idsAtJam []string
 
 	// readyUnconfirmed is set while ready carries an adjustment no accepted
-	// probe has confirmed: a Claimed's decrement or a child's exit 2 zeroing it.
+	// probe has confirmed: a Claimed's decrement, a child's exit 2 zeroing it,
+	// or a restore, which carries no count.
 	readyUnconfirmed bool
 	// jamBaselinePending is set when a jam was recorded while readyUnconfirmed,
 	// so readyAtJam waits for the next accepted probe instead of taking ready.
-	// An upper-bound kind's no-work baseline never sets it: that baseline is
-	// taken from counted at once.
+	// An upper-bound kind's no-work baseline is taken from counted at once, so
+	// only restore holds that baseline pending: a carried gate has none.
 	jamBaselinePending bool
 
 	// counted is the tracker's last probed count, set only by DemandProbed.
@@ -518,6 +519,12 @@ func (k kindSched) childDone(now time.Time, r ChildOutcome, nd NextDue, gateGen 
 		if k.counted > 0 {
 			k.fresh = true
 		}
+		if k.upperBound && k.jamBaselinePending && k.counted == 0 {
+			// No probe has counted since the baseline went pending (as after a
+			// restore): grow the gate, and leave the baseline for that probe to take.
+			k.gate = k.gate.markNoWorkUnder(now, false /* jammed */, gateGen)
+			break
+		}
 		if k.upperBound && k.counted > 0 {
 			// A count with nothing landable behind it would restart a child every
 			// interval; back off, lifting only on an item not in this count.
@@ -667,8 +674,12 @@ func (ks kindSched) view(now time.Time) KindView {
 // resumes the gates, backoff step, reported due and rate-limit pause its
 // predecessor had instead of re-probing every queue cold. The backoff's floor
 // and cap stay the new config's: a changed knob takes effect on restart, so a
-// carried step is clamped into the new range. An entry for a kind s does not
-// hold is skipped (Loop's validateHandoff has already refused one).
+// carried step is clamped into the new range. A carried jam, or an upper-bound
+// kind's gate, holds its baseline pending for the successor's first probe (a
+// zero baseline would lift the gate and drop the carried step), and a carried
+// kind's ready stays unconfirmed until then, so an inherited child's exit
+// cannot take a zero baseline. An entry for a kind s does not hold is skipped
+// (Loop's validateHandoff has already refused one).
 func (s Schedule) restore(kinds []HandoffKind) Schedule {
 	for _, hk := range kinds {
 		ks, ok := s.state[hk.Kind]
@@ -679,6 +690,8 @@ func (s Schedule) restore(kinds []HandoffKind) Schedule {
 			ks.gate.b.cur = min(max(hk.BackoffCur, ks.gate.b.floor), ks.gate.b.cap)
 		}
 		ks.gate.until, ks.gate.jammed, ks.gate.gen = hk.Until, hk.Jammed, hk.Gen
+		ks.jamBaselinePending = ks.probed() && !hk.Until.IsZero() && (hk.Jammed || ks.upperBound)
+		ks.readyUnconfirmed = ks.probed()
 		ks.due = NextDue{At: hk.DueAt, OnTipMove: hk.DueOnTipMove}
 		ks.limitedUntil = hk.LimitedUntil
 		s = s.with(hk.Kind, ks)
