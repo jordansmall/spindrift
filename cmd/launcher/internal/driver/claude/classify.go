@@ -153,30 +153,6 @@ func isAgentContentEvent(chunk string) bool {
 	return content
 }
 
-// resultEventEnvelope is the minimal envelope for a stream-json type:"result"
-// line, whose "result" field mirrors the preceding assistant turn on an
-// ordinary completion. IsError marks a genuine terminating API error, whose
-// text is not an echo and must not be suppressed as one.
-type resultEventEnvelope struct {
-	Type    string `json:"type"`
-	Result  string `json:"result"`
-	IsError bool   `json:"is_error"`
-}
-
-// resultEventText returns the "result" text of an ordinary-completion
-// stream-json result line. It returns false when is_error is true, because that
-// text is a genuine error, not an echo of preceding content.
-func resultEventText(chunk string) (string, bool) {
-	var ev resultEventEnvelope
-	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
-		return "", false
-	}
-	if ev.Type != "result" || ev.IsError {
-		return "", false
-	}
-	return ev.Result, true
-}
-
 // extractResetsAt parses the first "resetsAt":UNIX_TIMESTAMP in content as a
 // UTC time, falling back to parseResetsAtText when that field is absent or its
 // value is not an integer. It returns nil if neither form matches.
@@ -268,7 +244,7 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 // ResultText returns the final-message text of every stream-json result event
 // in the log at logPath, one value per line: the Go twin of the in-box
 // `jq -r 'select(.type == "result") | .result // empty'`. Unlike
-// resultEventText it keeps an is_error result. Non-string results are
+// the decoder's echo check it keeps an is_error result. Non-string results are
 // dropped; they can never carry an outcome line.
 func ResultText(logPath string) (string, error) {
 	return driverkit.ResultText(logPath, func(line string) (string, bool) {

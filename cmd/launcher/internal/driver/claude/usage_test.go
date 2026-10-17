@@ -358,7 +358,7 @@ func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
 
 // A "timestamp" nested inside a tool_result dump, on a line that does carry a
 // top-level "type" (unlike the stray-line case above), must still not widen the
-// span, because json.Unmarshal into timestampedEvent only ever reads the
+// span, because the decoder's topLevelTimestamp only ever reads the
 // top-level "timestamp" key, never one buried inside message.content.
 func TestSumInLog_NestedTimestampInToolResultIgnoredInSpan(t *testing.T) {
 	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
