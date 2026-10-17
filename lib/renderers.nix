@@ -725,17 +725,39 @@ rec {
       rowFields = [
         (required "name" "Name")
         (optional "providerNamespacedModels" "ProviderNamespacedModels" false)
+        (required "credentials" "Credentials")
       ];
+      goStrings = items: "[]string{${builtins.concatStringsSep ", " (map builtins.toJSON items)}}";
+      # Optional rule keys render only when present, like empty scalar fields.
+      credentialRuleLiteral =
+        rule:
+        "\t\t{"
+        + builtins.concatStringsSep ", " (
+          [ "Env: ${goStrings rule.env}" ]
+          ++ (if rule ? modelPrefix then [ "ModelPrefix: ${builtins.toJSON rule.modelPrefix}" ] else [ ])
+          ++ [ "Remedy: ${builtins.toJSON rule.remedy}" ]
+          ++ (if rule ? setupCommand then [ "SetupCommand: ${goStrings rule.setupCommand}" ] else [ ])
+        )
+        + "},\n";
       fieldLine =
-        goName: value:
-        if builtins.isBool value then
+        attr: goName: value:
+        if attr == "credentials" then
+          (
+            if value == [ ] then
+              ""
+            else
+              "\t${goName}: []CredentialRule{\n" + concatStrings (map credentialRuleLiteral value) + "\t},\n"
+          )
+        else if builtins.isList value then
+          throw "lib/renderers.nix: renderDriverDescriptorsGo has no Go rendering for list-valued field '${attr}'"
+        else if builtins.isBool value then
           (if value then "\t${goName}: true,\n" else "")
         else if value == "" then
           ""
         else
           "\t${goName}: ${builtins.toJSON value},\n";
       rowFieldLine =
-        row: f: fieldLine f.go (if f ? default then row.${f.attr} or f.default else row.${f.attr});
+        row: f: fieldLine f.attr f.go (if f ? default then row.${f.attr} or f.default else row.${f.attr});
       renderRow = row: "{\n" + concatStrings (map (rowFieldLine row) rowFields) + "},\n";
       # Go looks a Driver up by its rendered Name and Nix by its registry key,
       # so a row whose name disagrees with its key must fail, not render.
