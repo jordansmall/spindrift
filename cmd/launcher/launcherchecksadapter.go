@@ -17,11 +17,17 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 		GitUserEmail: c.gitUserEmail,
 		GHToken:      c.ghToken,
 
-		Driver:              c.driver,
-		Model:               c.model,
-		ClaudeOAuthToken:    c.claudeOAuthToken,
-		AnthropicAPIKey:     c.anthropicAPIKey,
-		OpencodeAuthContent: c.opencodeAuthContent,
+		Driver: c.driver,
+		// The per-tier models are read from getenvSchema, as the --secret-cmd
+		// fallback reads them, so the probe and the fallback agree on which
+		// tiers can select a credential-gated Provider.
+		Models: modelTiers(func(env string) string {
+			if env == "MODEL" {
+				return c.model
+			}
+			return getenvSchema(env)
+		}),
+		Credentials: launcherCredentials(c),
 
 		Runtime: c.runtime,
 
@@ -30,6 +36,17 @@ func launcherCheckConfig(c config) launcherchecks.Config {
 
 		ResearchDispatch: c.kind().Tracker == dispatchkind.TrackerResearch,
 		SelfContained:    c.selfContained,
+	}
+}
+
+// launcherCredentials is the credential env name -> value map launcherchecks
+// evaluates Driver credential rules against. Every env var a Driver's rules
+// name needs an entry (TestLauncherCredentialsCoverDriverRules).
+func launcherCredentials(c config) map[string]string {
+	return map[string]string{
+		"CLAUDE_CODE_OAUTH_TOKEN": c.claudeOAuthToken,
+		"ANTHROPIC_API_KEY":       c.anthropicAPIKey,
+		"OPENCODE_AUTH_CONTENT":   c.opencodeAuthContent,
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"spindrift.dev/launcher/internal/backend"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/launcherchecks"
 )
 
@@ -533,22 +534,22 @@ func applySecretCmdFallback() error {
 	if globalSecretCmdTemplate == "" {
 		return nil
 	}
-	creds, credsRequired := driverCredentials()
+	rules, models := activeCredentialRules()
 	for i := range secretKnobs {
 		knob := &secretKnobs[i]
-		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env, creds) {
+		if os.Getenv(knob.env) != "" || !secretRequiredThisRun(knob.env, rules) {
 			continue
 		}
-		// The Driver's credentials are one unit: any one satisfies validate(),
+		// A Driver rule's variables are one unit: any one satisfies validate(),
 		// so an OAuth-only vault must not abort on a missing ANTHROPIC_API_KEY
-		// item (Claude's pair). The non-primary rows defer to the set's first.
+		// item (Claude's pair). The non-first variables defer to the rule's first.
 		envs := []string{knob.env}
-		driverCred := slices.Contains(creds, knob.env)
-		if driverCred {
-			if knob.env != creds[0] {
+		rule, isRuleVar := credentialRuleFor(rules, knob.env)
+		if isRuleVar {
+			if knob.env != rule.Env[0] {
 				continue
 			}
-			envs = creds
+			envs = rule.Env
 		}
 		var errs []error
 		fetched := false
@@ -567,38 +568,56 @@ func applySecretCmdFallback() error {
 		}
 		// A Driver credential no visible tier needs is best-effort: another
 		// Provider needs nothing from the environment.
-		if !fetched && (credsRequired || !driverCred) {
+		if !fetched && (!isRuleVar || rule.AppliesTo(models...)) {
 			return errors.Join(errs...)
 		}
 	}
 	return nil
 }
 
-// driverCredentials is the active Driver's either-or credential set and
-// whether this run requires one. DRIVER and every visible model tier go
-// through resolveDriver/getenvSchema so a document- or flake-only value is
-// seen (ADR 0020).
-func driverCredentials() ([]string, bool) {
-	driver, _ := resolveDriver()
-	return launcherchecks.DriverCredentials(driver,
-		getenvSchema("MODEL"), getenvSchema("REVIEW_MODEL"), getenvSchema("WORKER_MODEL"),
-		getenvSchema("SCOUT_MODEL"), getenvSchema("FILER_MODEL"))
+// activeCredentialRules is the active Driver's credential rules and every
+// visible model tier. DRIVER and the tiers go through resolveDriver/
+// getenvSchema so a document- or flake-only value is seen (ADR 0020). An
+// unrecognised Driver has no rules; main emits the warning.
+func activeCredentialRules() ([]driver.CredentialRule, []string) {
+	name, _ := resolveDriver()
+	rules, _ := driver.CredentialRules(name)
+	return rules, modelTiers(getenvSchema)
+}
+
+// modelTiers is every model tier a run can use, read through lookup by env
+// name. The credential probe and the --secret-cmd fallback both build their
+// tier list here.
+func modelTiers(lookup func(env string) string) []string {
+	return []string{
+		lookup("MODEL"), lookup("REVIEW_MODEL"), lookup("WORKER_MODEL"),
+		lookup("SCOUT_MODEL"), lookup("FILER_MODEL"),
+	}
+}
+
+// credentialRuleFor returns the rule that lists env among its variables.
+func credentialRuleFor(rules []driver.CredentialRule, env string) (driver.CredentialRule, bool) {
+	for _, r := range rules {
+		if slices.Contains(r.Env, env) {
+			return r, true
+		}
+	}
+	return driver.CredentialRule{}, false
 }
 
 // secretRequiredThisRun gates whether applySecretCmdFallback tries the global
 // template for env, so it never forces a vault lookup for a secret this run
-// does not use. creds is the active Driver's credential set: it is tried
-// whenever none has a value, even when no visible tier requires it (a tier
-// baked into the image can select github-copilot invisibly to the launcher);
-// applySecretCmdFallback tolerates that miss. Reads CODE_FORGE and
-// ISSUE_TRACKER through getenvSchema, not os.Getenv, so a value set only in
-// the Consumer flake is seen (ADR 0020).
-func secretRequiredThisRun(env string, creds []string) bool {
-	// Any one of the Driver's credentials satisfies validate(), so try the
-	// template only when none already has a value. The driver warning is
-	// main's to emit.
-	if slices.Contains(creds, env) {
-		return !slices.ContainsFunc(creds, func(e string) bool { return os.Getenv(e) != "" })
+// does not use. rules are the active Driver's credential rules: a rule's
+// variables are tried whenever none has a value, even when no visible tier
+// applies the rule (a tier baked into the image can select github-copilot
+// invisibly to the launcher); applySecretCmdFallback tolerates that miss.
+// Reads CODE_FORGE and ISSUE_TRACKER through getenvSchema, not os.Getenv, so a
+// value set only in the Consumer flake is seen (ADR 0020).
+func secretRequiredThisRun(env string, rules []driver.CredentialRule) bool {
+	// Any one of a rule's variables satisfies validate(), so try the template
+	// only when none already has a value. The driver warning is main's to emit.
+	if rule, ok := credentialRuleFor(rules, env); ok {
+		return !rule.Satisfied(os.Getenv)
 	}
 	codeForge, issueTracker := getenvSchema("CODE_FORGE"), getenvSchema("ISSUE_TRACKER")
 	forgeRow, _ := backendByName(codeForge)
