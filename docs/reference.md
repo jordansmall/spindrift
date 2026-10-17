@@ -1513,17 +1513,24 @@ bakes a plugin instead (issue #5346): `agent/opencode-guards.js`, placed at
 `~/.config/opencode/plugins/spindrift-guards.js`, which opencode registers on
 its own — no `opencode.json` entry. It is absent from the `claude` image. Its
 `tool.execute.before` hook runs the same baked scripts on every `bash` call,
-`reject-background-bash.sh`, `env-credential-scrub.sh`, then
-`bash-output-tee.sh` (last, wrapping the scrubbed command), so their logic,
-messages, and the shared credential list stay single-sourced. A hook deny
-throws the hook's own message, refusing the call; the scrub's `unset` rewrite
-is applied to the command. A hook that cannot run or answer refuses the call
-rather than letting it through with its credentials intact or without the
-tee's log.
+in this order:
 
-Its `tool.execute.after` hook runs `bash-output-summary.sh` on the same
-rewritten arguments and replaces the tool output with the script's
-`updatedToolOutput`, so the [Bash command-output
+<!-- BEGIN GENERATED OPENCODE HOOK ORDER -- nix run .#regen -- DO NOT EDIT -->
+1. `reject-background-bash.sh`
+2. `env-credential-scrub.sh`
+3. `bash-output-tee.sh`
+<!-- END GENERATED OPENCODE HOOK ORDER -->
+
+Running the baked scripts keeps their logic, messages, and the shared
+credential list single-sourced. Each hook sees the arguments the hooks above it
+rewrote. A hook deny throws the hook's own message, refusing the call; the
+scrub's `unset` rewrite is applied to the command. A hook that cannot run or
+answer refuses the call rather than letting it through with its credentials
+intact or without the tee's log.
+
+Its `tool.execute.after` hook runs the summary hook (the `PostToolUse` row of
+`lib/bash-hooks.nix`) on the same rewritten arguments and replaces the tool output
+with the script's `updatedToolOutput`, so the [Bash command-output
 interceptor](#bash-command-output-interceptor) bound holds under `opencode` too
 (issue #5358), keeping opencode's trailing `<shell_metadata>` block (the timeout
 or user-abort notice) after the summary. Unlike a before hook, a failing

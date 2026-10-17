@@ -10,15 +10,15 @@ import { execFileSync } from "node:child_process";
 // Baked for every Driver by lib/image.nix's homeLayoutScript.
 const HOOKS_DIR = "/home/agent/.claude/hooks";
 
-// Order matters: each hook sees the args the earlier ones rewrote, so the tee
-// must stay last to wrap the scrubbed command. `rewrites`: silence from the
-// scrub or tee on a non-empty command is a failure, not "allow".
+// Generated from lib/bash-hooks.nix, which documents the run order and `rewrites`.
+// BEGIN GENERATED OPENCODE HOOKS -- nix run .#regen -- DO NOT EDIT
 const HOOKS = [
   { script: "reject-background-bash.sh", rewrites: false },
   { script: "env-credential-scrub.sh", rewrites: true },
   { script: "bash-output-tee.sh", rewrites: true },
 ];
 const SUMMARY_HOOK = "bash-output-summary.sh";
+// END GENERATED OPENCODE HOOKS
 // opencode appends a block opened by this and closed by SHELL_METADATA_CLOSE to
 // a result it cut short (timeout, user abort); the summary replaces the whole
 // output, so the notice is carried over.

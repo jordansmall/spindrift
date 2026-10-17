@@ -1,17 +1,21 @@
-# The Bash hook table (issue #5408): the one place a Bash hook script is named.
+# The Bash hook table (issue #5408): the one place the Bash hook list is named.
 # lib/image.nix renders the claude settings.json hooks from it and
-# lib/agent-hooks.nix bakes the ~/.claude/hooks files from it;
+# lib/agent-hooks.nix bakes the ~/.claude/hooks files from it (the image and
+# the opencode-guards check both use that directory); `nix run .#regen` renders
+# the opencode plugin's hook list and its docs/reference.md copy;
 # nix/checks/bats.nix's shellcheck lints `scripts`.
 #
 # Row order is load-bearing: it is the claude settings.json order within an
-# event, and (for rows with an `opencode` attr) the opencode plugin's run
-# order, which decides whose denial wins.
+# event, and the opencode plugin's run order, where each hook sees the args the
+# earlier ones rewrote (the tee must stay last to wrap the scrubbed command).
 #
 # A row with an `opencode` attr is run by the opencode plugin
-# (agent/opencode-guards.js); `rewrites` marks a hook that rewrites the
-# command rather than only allowing or denying it. A row without one has no
-# plugin counterpart: credential-deny.sh is stood in for by opencode's own
-# deny config (lib/drivers/opencode.nix).
+# (agent/opencode-guards.js): a PreToolUse row in its tool.execute.before
+# HOOKS, where `rewrites` marks a hook whose silence on a non-empty command is
+# a failure rather than "allow", and the one PostToolUse row as its
+# tool.execute.after SUMMARY_HOOK. A row without one has no plugin
+# counterpart: credential-deny.sh is stood in for by opencode's own deny config
+# (lib/drivers/opencode.nix).
 rec {
   hooks = [
     # reject-background-bash.sh (issue #1609): --disallowedTools strips whole
@@ -57,15 +61,32 @@ rec {
       script = "bash-output-tee.sh";
       event = "PreToolUse";
       matchers = [ "Bash" ];
+      opencode.rewrites = true;
     }
     {
       script = "bash-output-summary.sh";
       event = "PostToolUse";
       matchers = [ "Bash" ];
+      opencode = { };
     }
   ];
 
   scripts = map (r: r.script) hooks;
+
+  # The opencode plugin runs exactly one PostToolUse hook and needs `rewrites`
+  # on every PreToolUse one; checked here so every renderer sees a valid table.
+  opencodeHooks =
+    let
+      rows = builtins.filter (r: r ? opencode) hooks;
+      after = builtins.filter (r: r.event == "PostToolUse") rows;
+      unset = builtins.filter (r: r.event == "PreToolUse" && !(r.opencode ? rewrites)) rows;
+    in
+    if builtins.length after != 1 then
+      throw "lib/bash-hooks.nix: the opencode plugin runs exactly one PostToolUse hook, got ${toString (builtins.length after)} -- give exactly one PostToolUse row an opencode attr"
+    else if unset != [ ] then
+      throw "lib/bash-hooks.nix: ${(builtins.head unset).script}: a PreToolUse opencode row has no opencode.rewrites -- set it true when the hook rewrites the command"
+    else
+      rows;
 
   # Non-script files baked beside the hooks (read by both Drivers).
   dataFiles = [ "credential-vars" ];

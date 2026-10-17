@@ -8,6 +8,7 @@ let
   cliFlags = import ./cli-flags.nix;
   skillNamePattern = (import ./skills.nix).namePattern;
   hasShort = e: (e.short or null) != null;
+  opencodePreToolUse = builtins.filter (r: r ? opencode && r.event == "PreToolUse");
   inherit (builtinsCompat) concatStrings mapAttrsToList oneLine;
   filterAttrs =
     pred: attrs:
@@ -837,6 +838,36 @@ rec {
         s:
         "\t${s.goVar} := fs.Bool(\"${s.name}-skill-baked\", false, \"true when DRIVER_SKILLS_DIR/${s.name}/SKILL.md was baked\")\n"
       ) bakedSkills
+    );
+
+  # agent/opencode-guards.js's generated HOOKS and SUMMARY_HOOK (issue #5408):
+  # the opencode rows of lib/bash-hooks.nix (whose opencodeHooks validates them),
+  # HOOKS in table order because each hook sees the args the earlier ones
+  # rewrote.
+  renderOpencodeHooksJs =
+    rows:
+    "const HOOKS = [\n"
+    + concatStrings (
+      map (
+        r: "  { script: \"${r.script}\", rewrites: ${if r.opencode.rewrites then "true" else "false"} },\n"
+      ) (opencodePreToolUse rows)
+    )
+    + "];\n"
+    + "const SUMMARY_HOOK = \"${
+      (builtins.head (builtins.filter (r: r.event == "PostToolUse") rows)).script
+    }\";\n";
+
+  # docs/reference.md's opencode tool.execute.before run order (issue #5408):
+  # the same HOOKS as renderOpencodeHooksJs, as a numbered list.
+  renderOpencodeHookOrderDoc =
+    rows:
+    let
+      before = opencodePreToolUse rows;
+    in
+    concatStrings (
+      builtins.genList (i: "${toString (i + 1)}. `${(builtins.elemAt before i).script}`\n") (
+        builtins.length before
+      )
     );
 
   # cmd/launcher/driver-exec/assembleprompt_cmd.go's generated skill-baked
