@@ -254,7 +254,7 @@ func TestResultText_DropsMalformedLineWhole(t *testing.T) {
 		`{"type":"text","part":{"messageID":"m1","text":"SPINDRIFT_OUTCOME status=complete"}}`,
 		`{"type":"text","part":{"messageID":"m2","text":7}}`,
 	)
-	got, err := opencode.ResultText(path)
+	got, err := newDriver(t).ResultText(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestResultText_DropsMalformedLineWhole(t *testing.T) {
 
 func TestExtractUsage_DropsMalformedStepFinishWhole(t *testing.T) {
 	path := writeLog(t, `{"type":"step_finish","part":{"messageID":"m","cost":"x","tokens":{"input":3}}}`)
-	rep, err := opencode.ExtractUsage(path)
+	rep, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatal(err)
 	}
