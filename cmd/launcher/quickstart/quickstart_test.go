@@ -14,6 +14,7 @@ import (
 
 	"spindrift.dev/launcher/internal/backend"
 	"spindrift.dev/launcher/internal/doctor"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/forge"
 	"spindrift.dev/launcher/internal/forge/rest"
 )
@@ -2058,13 +2059,13 @@ func TestRunQuickstart_FailsAfterWrite_NamesWrittenFilesAndRerunCommand(t *testi
 
 func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 	a := answers{
-		repoSlug:         "jordansmall/spindrift",
-		runtime:          "podman",
-		gitUserName:      "Ada Lovelace",
-		gitUserEmail:     "ada@example.com",
-		tracker:          trackerSettings{issueTracker: "github"},
-		token:            "ghp_faketoken",
-		claudeOAuthToken: "claude-oauth-faketoken",
+		repoSlug:     "jordansmall/spindrift",
+		runtime:      "podman",
+		gitUserName:  "Ada Lovelace",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "github"},
+		token:        "ghp_faketoken",
+		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
 	files := render(a)
@@ -2114,13 +2115,13 @@ func TestRender_HappyPath_ReturnsFourFiles(t *testing.T) {
 
 func TestRender_ForgejoCodeberg_ConfiguresBothSeamsOmitsDefaultBaseURL(t *testing.T) {
 	a := answers{
-		repoSlug:         "owner/repo",
-		runtime:          "podman",
-		gitUserName:      "Ada",
-		gitUserEmail:     "ada@example.com",
-		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"},
-		token:            "forgejo-faketoken",
-		claudeOAuthToken: "claude-oauth-faketoken",
+		repoSlug:     "owner/repo",
+		runtime:      "podman",
+		gitUserName:  "Ada",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://codeberg.org"},
+		token:        "forgejo-faketoken",
+		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
 	files := render(a)
@@ -2165,13 +2166,13 @@ func flakeNixFor(t *testing.T, files []scaffoldFile) string {
 
 func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 	a := answers{
-		repoSlug:         "owner/repo",
-		runtime:          "podman",
-		gitUserName:      "Ada",
-		gitUserEmail:     "ada@example.com",
-		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
-		token:            "forgejo-faketoken",
-		claudeOAuthToken: "claude-oauth-faketoken",
+		repoSlug:     "owner/repo",
+		runtime:      "podman",
+		gitUserName:  "Ada",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
+		token:        "forgejo-faketoken",
+		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
 	files := render(a)
@@ -2189,13 +2190,13 @@ func TestRender_ForgejoSelfHosted_EmitsBaseURL(t *testing.T) {
 // stay in sync with what that check expects to evaluate cleanly.
 func TestRender_Github_Golden(t *testing.T) {
 	a := answers{
-		repoSlug:         "jordansmall/spindrift-consumer-example",
-		runtime:          "podman",
-		gitUserName:      "Ada Lovelace",
-		gitUserEmail:     "ada@example.com",
-		tracker:          trackerSettings{issueTracker: "github"},
-		token:            "ghp_faketoken",
-		claudeOAuthToken: "claude-oauth-faketoken",
+		repoSlug:     "jordansmall/spindrift-consumer-example",
+		runtime:      "podman",
+		gitUserName:  "Ada Lovelace",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "github"},
+		token:        "ghp_faketoken",
+		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
 	files := render(a)
@@ -2216,13 +2217,13 @@ func TestRender_Github_Golden(t *testing.T) {
 // exercises the issues.forgejo.baseURL line too.
 func TestRender_Forgejo_Golden(t *testing.T) {
 	a := answers{
-		repoSlug:         "jordansmall/spindrift-consumer-example",
-		runtime:          "podman",
-		gitUserName:      "Ada Lovelace",
-		gitUserEmail:     "ada@example.com",
-		tracker:          trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
-		token:            "forgejo-faketoken",
-		claudeOAuthToken: "claude-oauth-faketoken",
+		repoSlug:     "jordansmall/spindrift-consumer-example",
+		runtime:      "podman",
+		gitUserName:  "Ada Lovelace",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "forgejo", forgejoBaseURL: "https://git.example.com"},
+		token:        "forgejo-faketoken",
+		credentials:  []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}},
 	}
 
 	files := render(a)
@@ -2346,13 +2347,13 @@ func TestGoldenBroken_MatchesGithubExceptKnownDiffs(t *testing.T) {
 
 func TestRender_AnthropicAPIKey_WrittenWhenNoOAuthToken(t *testing.T) {
 	a := answers{
-		repoSlug:        "jordansmall/spindrift",
-		runtime:         "podman",
-		gitUserName:     "Ada Lovelace",
-		gitUserEmail:    "ada@example.com",
-		tracker:         trackerSettings{issueTracker: "github"},
-		token:           "ghp_faketoken",
-		anthropicAPIKey: "sk-ant-faketoken",
+		repoSlug:     "jordansmall/spindrift",
+		runtime:      "podman",
+		gitUserName:  "Ada Lovelace",
+		gitUserEmail: "ada@example.com",
+		tracker:      trackerSettings{issueTracker: "github"},
+		token:        "ghp_faketoken",
+		credentials:  []credential{{env: "ANTHROPIC_API_KEY", value: "sk-ant-faketoken"}},
 	}
 
 	var harnessEnv string
@@ -2484,7 +2485,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 	})
 	defer func() { backend.Registry = original }()
 
-	out := renderHarnessEnv("gitlab", "gitlab-faketoken", "claude-oauth-faketoken", "")
+	out := renderHarnessEnv("gitlab", "gitlab-faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
 	if !strings.Contains(out, "GITLAB_TOKEN=gitlab-faketoken") {
 		t.Errorf("expected harness.env to contain GITLAB_TOKEN, got:\n%s", out)
@@ -2498,7 +2499,7 @@ func TestRenderHarnessEnv_RegistryDriven(t *testing.T) {
 // documenting the <NAME>_CMD vault-indirection convention from
 // templates/default/harness.env.example, not just the bare plaintext line.
 func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
-	out := renderHarnessEnv("github", "ghp_faketoken", "claude-oauth-faketoken", "")
+	out := renderHarnessEnv("github", "ghp_faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
 	if !strings.Contains(out, `GH_TOKEN_CMD="rbw get spindrift-gh-token"`) {
 		t.Errorf("expected harness.env to document GH_TOKEN_CMD indirection, got:\n%s", out)
@@ -2520,7 +2521,7 @@ func TestRenderHarnessEnv_DocumentsCommandFormIndirection(t *testing.T) {
 // docs/reference.md's precedence, the plaintext value the wizard always writes
 // wins too, so SECRET_CMD is a no-op until the operator removes that value.
 func TestRenderHarnessEnv_FileLevelPreamble(t *testing.T) {
-	out := renderHarnessEnv("github", "ghp_faketoken", "claude-oauth-faketoken", "")
+	out := renderHarnessEnv("github", "ghp_faketoken", []credential{{env: "CLAUDE_CODE_OAUTH_TOKEN", value: "claude-oauth-faketoken"}})
 
 	if !strings.Contains(out, "SECRET_CMD") {
 		t.Errorf("expected harness.env to mention the SECRET_CMD fallback, got:\n%s", out)
@@ -3352,5 +3353,106 @@ func TestMergeGitignore_CRLFKeepsLineEndings(t *testing.T) {
 	}
 	if again := mergeGitignore("node_modules/\r\n" + suffix); again != "" {
 		t.Errorf("CRLF merge not idempotent, got %q", again)
+	}
+}
+
+func TestRunQuickstart_OpencodeDriver_PrintsRemedyAndRunsNoCommand(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	stdin := strings.NewReader(strings.Join([]string{
+		"jordansmall/spindrift",
+		"podman",
+		"Ada Lovelace",
+		"ada@example.com",
+		"ghp_faketoken",
+	}, "\n") + "\n")
+	runner := &fakeCommandRunner{}
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, env: map[string]string{"DRIVER": "opencode"}}
+
+	if err := runQuickstart(dir, env, runner, fakeForgeBuilder(passingForge()), &out, stdin, true, false); err != nil {
+		t.Fatalf("runQuickstart: %v", err)
+	}
+
+	if !strings.Contains(out.String(), "OPENCODE_AUTH_CONTENT") || !strings.Contains(out.String(), "needed only when a model starts with github-copilot/") {
+		t.Errorf("expected the opencode remedy in the transcript, got:\n%s", out.String())
+	}
+	if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != strings.Join(spindriftBuildArgs, " ") {
+		t.Errorf("expected only the finish-line spindrift build call, got: %v", runner.calls)
+	}
+	harnessEnv, err := os.ReadFile(filepath.Join(dir, "harness.env"))
+	if err != nil {
+		t.Fatalf("read harness.env: %v", err)
+	}
+	if strings.Contains(string(harnessEnv), "CLAUDE_CODE_OAUTH_TOKEN") || strings.Contains(string(harnessEnv), "ANTHROPIC_API_KEY") {
+		t.Errorf("expected no claude credential lines under DRIVER=opencode, got:\n%s", harnessEnv)
+	}
+}
+
+func TestRunQuickstart_UnknownDriver_FailsBeforeWriting(t *testing.T) {
+	dir := t.TempDir()
+	var out bytes.Buffer
+	env := fakeEnvironment{runtimes: map[string]bool{"podman": true}, env: map[string]string{"DRIVER": "nope"}}
+
+	err := runQuickstart(dir, env, &fakeCommandRunner{}, fakeForgeBuilder(passingForge()), &out, strings.NewReader(""), true, false)
+	if err == nil || !strings.Contains(err.Error(), `unknown DRIVER "nope"`) {
+		t.Fatalf("expected an unknown DRIVER error, got: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "harness.env")); !os.IsNotExist(statErr) {
+		t.Errorf("expected no harness.env, stat error: %v", statErr)
+	}
+}
+
+func scriptedPrompts(answers ...string) func(string) string {
+	return func(string) string {
+		if len(answers) == 0 {
+			return ""
+		}
+		a := answers[0]
+		answers = answers[1:]
+		return a
+	}
+}
+
+func TestGatherCredentials_DeclinedSetupWithNoFallbackPrintsRemedy(t *testing.T) {
+	rules := []driver.CredentialRule{{
+		Env:          []string{"SYNTH_TOKEN"},
+		Remedy:       "run synth login",
+		SetupCommand: []string{"synth", "login"},
+	}}
+	var out bytes.Buffer
+	runner := &fakeCommandRunner{}
+
+	creds, err := gatherCredentials(fakeEnvironment{}, rules, &out, scriptedPrompts("n"), scriptedPrompts(), runner)
+	if err != nil {
+		t.Fatalf("gatherCredentials: %v", err)
+	}
+	if want := []credential{{env: "SYNTH_TOKEN"}}; !slices.Equal(creds, want) {
+		t.Errorf("expected a blank SYNTH_TOKEN placeholder, got %v", creds)
+	}
+	if len(runner.calls) != 0 {
+		t.Errorf("expected the declined setup command not to run, got %v", runner.calls)
+	}
+	if !strings.Contains(out.String(), "run synth login") {
+		t.Errorf("expected the rule's Remedy in the transcript, got:\n%s", out.String())
+	}
+}
+
+func TestGatherCredentials_BlankFallbacksLeaveLastVariablePlaceholder(t *testing.T) {
+	rules := []driver.CredentialRule{{
+		Env:          []string{"SYNTH_TOKEN", "SYNTH_KEY_A", "SYNTH_KEY_B"},
+		Remedy:       "run synth login",
+		SetupCommand: []string{"synth", "login"},
+	}}
+	var out bytes.Buffer
+
+	creds, err := gatherCredentials(fakeEnvironment{}, rules, &out, scriptedPrompts("n"), scriptedPrompts("", ""), &fakeCommandRunner{})
+	if err != nil {
+		t.Fatalf("gatherCredentials: %v", err)
+	}
+	if want := []credential{{env: "SYNTH_KEY_B"}}; !slices.Equal(creds, want) {
+		t.Errorf("expected only a blank SYNTH_KEY_B placeholder, got %v", creds)
+	}
+	if !strings.Contains(out.String(), "run synth login") {
+		t.Errorf("expected the rule's Remedy when nothing was supplied, got:\n%s", out.String())
 	}
 }
