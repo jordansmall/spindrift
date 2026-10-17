@@ -883,7 +883,11 @@ fabricating root-owned parent dirs when the volume is mounted; the bwrap
 adapter additionally emits `--dir` on the declared dir's parent before the
 bind so it is agent-owned in the tmpfs. The launcher only creates, mounts,
 and evicts that directory — it never reads, copies, parses, or chmods its
-contents, and the persisted session never leaves the host (it is not pushed
+contents. The one mode it sets is on the per-issue directory itself, forced
+to `0777` regardless of umask so the Box's uid-1000 user can write it under
+rootless uid remapping; the cache root stays `0700`, private to the invoking
+user.
+The persisted session never leaves the host (it is not pushed
 to the remote or attached to the PR). The cache is keyed strictly
 `<cache>/<issue>`, so a session can only ever be resumed within its own
 issue's trust domain; it is evicted as soon as that issue reaches a terminal
