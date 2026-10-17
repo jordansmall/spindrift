@@ -6,17 +6,12 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path/filepath"
 	"regexp"
 
 	_ "modernc.org/sqlite"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 )
-
-// sessionStore is the per-issue opencode database, relative to home. The Box
-// points OPENCODE_DB at it so it is cached apart from other state.
-const sessionStore = ".local/share/opencode/spindrift-session/opencode.db"
 
 // sessionID is the only shape of id rendered into argv. The store is
 // agent-writable and driver-exec splits the flags on whitespace, so an
@@ -26,17 +21,19 @@ var sessionID = regexp.MustCompile(`^ses_[A-Za-z0-9]+$`)
 // SessionFlags renders the opencode CLI's session flags. opencode generates
 // its own session ids, so no id can be pinned at creation: "initial" pins a
 // title derived from repoSlug and issue instead, and "resume" looks up the
-// newest root session carrying that title in the store under home. A missing
-// store, a failed query, or no match renders nothing and the caller falls back
-// to the cold-context fix flow. Never --continue: it names the last session
-// globally, not this issue's.
-func SessionFlags(mode, repoSlug, issue, home string) string {
+// newest root session carrying that title in the store at OPENCODE_DB, the
+// exact file the Box points opencode at. A missing store, a failed query, or
+// no match renders nothing and the caller falls back to the cold-context fix
+// flow. An unset OPENCODE_DB has no fallback: opencode would then write its
+// default store, not the per-issue one. Never --continue: it names the last
+// session globally, not this issue's.
+func SessionFlags(mode, repoSlug, issue, _ string) string {
 	title := "spindrift-" + driverkit.SessionKey(repoSlug, issue)
 	switch mode {
 	case "initial":
 		return "--title " + title
 	case "resume":
-		if id := lookupSession(filepath.Join(home, sessionStore), title); id != "" {
+		if id := lookupSession(os.Getenv("OPENCODE_DB"), title); id != "" {
 			return "--session " + id
 		}
 	}

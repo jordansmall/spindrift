@@ -197,14 +197,12 @@ func TestOpencodeDriverRenderTranscript(t *testing.T) {
 	}
 }
 
-// openOpencodeStore creates the per-issue session store under home with the
-// given CREATE TABLE statement and returns it open.
-func openOpencodeStore(t *testing.T, home, create string) *sql.DB {
+// openOpencodeStore creates a session store in a fresh temp dir, points
+// OPENCODE_DB at it for the test, and returns it open.
+func openOpencodeStore(t *testing.T, create string) *sql.DB {
 	t.Helper()
-	path := filepath.Join(home, ".local/share/opencode/spindrift-session/opencode.db")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	t.Setenv("OPENCODE_DB", path)
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -216,17 +214,17 @@ func openOpencodeStore(t *testing.T, home, create string) *sql.DB {
 	return db
 }
 
-// seedOpencodeStore creates the per-issue session store under home from the
-// committed opencode schema fixture and inserts rows. Seeding from the real
-// DDL, not a hand-written stub, is what makes a column lookupSession queries
-// going missing from opencode's schema fail a test.
-func seedOpencodeStore(t *testing.T, home string, rows [][5]any) *sql.DB {
+// seedOpencodeStore creates the session store from the committed opencode
+// schema fixture and inserts rows. Seeding from the real DDL, not a
+// hand-written stub, is what makes a column lookupSession queries going
+// missing from opencode's schema fail a test.
+func seedOpencodeStore(t *testing.T, rows [][5]any) *sql.DB {
 	t.Helper()
 	ddl, err := os.ReadFile(filepath.Join("opencode", "testdata", "session-schema.sql"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := openOpencodeStore(t, home, string(ddl))
+	db := openOpencodeStore(t, string(ddl))
 	// The NOT NULL columns lookupSession never reads still need values.
 	if _, err := db.Exec(`INSERT INTO project (id, worktree, time_created, time_updated, sandboxes) VALUES ('prj', '/w', 0, 0, '[]')`); err != nil {
 		t.Fatal(err)
@@ -242,7 +240,7 @@ func seedOpencodeStore(t *testing.T, home string, rows [][5]any) *sql.DB {
 // The columns lookupSession queries (opencode/session.go) must exist in the
 // fixture schema.
 func TestOpencodeSchemaFixtureHasLookupColumns(t *testing.T) {
-	db := seedOpencodeStore(t, t.TempDir(), nil)
+	db := seedOpencodeStore(t, nil)
 	rows, err := db.Query(`SELECT name FROM pragma_table_info('session')`)
 	if err != nil {
 		t.Fatal(err)
@@ -292,46 +290,44 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	})
 
 	t.Run("resume with no store is cold", func(t *testing.T) {
+		t.Setenv("OPENCODE_DB", filepath.Join(t.TempDir(), "opencode.db"))
 		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
 			t.Errorf("got %q; want empty", got)
 		}
 	})
 
 	t.Run("resume picks the newest matching root session", func(t *testing.T) {
-		home := t.TempDir()
 		want := title(t, "owner/repo", "7")
-		seedOpencodeStore(t, home, [][5]any{
+		seedOpencodeStore(t, [][5]any{
 			{"ses_old", nil, want, 100, nil},
 			{"ses_new", nil, want, 300, nil},
 			{"ses_child", "ses_old", want, 400, nil},
 			{"ses_archived", nil, want, 500, 600},
 			{"ses_other", nil, title(t, "owner/repo", "8"), 700, nil},
 		})
-		if got := d.SessionFlags("resume", "owner/repo", "7", home); got != "--session ses_new" {
+		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "--session ses_new" {
 			t.Errorf("got %q; want --session ses_new", got)
 		}
 	})
 
 	t.Run("resume with a store but no match is cold", func(t *testing.T) {
-		home := t.TempDir()
-		seedOpencodeStore(t, home, [][5]any{
+		seedOpencodeStore(t, [][5]any{
 			{"ses_other", nil, title(t, "owner/repo", "8"), 100, nil},
 			{"ses_child", "ses_other", title(t, "owner/repo", "7"), 200, nil},
 		})
-		if got := d.SessionFlags("resume", "owner/repo", "7", home); got != "" {
+		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
 			t.Errorf("got %q; want empty", got)
 		}
 	})
 
 	t.Run("resume with a malformed newest id is cold", func(t *testing.T) {
-		home := t.TempDir()
-		seedOpencodeStore(t, home, [][5]any{
+		seedOpencodeStore(t, [][5]any{
 			{"ses_old", nil, title(t, "owner/repo", "7"), 100, nil},
 			{"ses_a --share", nil, title(t, "owner/repo", "7"), 200, nil},
 		})
 		var got string
 		stderr := testutil.CaptureStderr(t, func() {
-			got = d.SessionFlags("resume", "owner/repo", "7", home)
+			got = d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
 		})
 		if got != "" {
 			t.Errorf("got %q; want empty", got)
@@ -342,11 +338,10 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	})
 
 	t.Run("resume warns on a query error but stays cold", func(t *testing.T) {
-		home := t.TempDir()
-		openOpencodeStore(t, home, `CREATE TABLE session (id text PRIMARY KEY)`)
+		openOpencodeStore(t, `CREATE TABLE session (id text PRIMARY KEY)`)
 		var got string
 		stderr := testutil.CaptureStderr(t, func() {
-			got = d.SessionFlags("resume", "owner/repo", "7", home)
+			got = d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
 		})
 		if got != "" {
 			t.Errorf("got %q; want empty", got)
@@ -357,10 +352,9 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	})
 
 	t.Run("resume with no match stays silent", func(t *testing.T) {
-		home := t.TempDir()
-		seedOpencodeStore(t, home, nil)
+		seedOpencodeStore(t, nil)
 		stderr := testutil.CaptureStderr(t, func() {
-			d.SessionFlags("resume", "owner/repo", "7", home)
+			d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
 		})
 		if stderr != "" {
 			t.Errorf("stderr = %q; want empty", stderr)
@@ -368,18 +362,37 @@ func TestOpencodeSessionFlags(t *testing.T) {
 	})
 
 	t.Run("resume does not create the store", func(t *testing.T) {
-		home := t.TempDir()
-		d.SessionFlags("resume", "owner/repo", "7", home)
-		if _, err := os.Stat(filepath.Join(home, ".local")); !os.IsNotExist(err) {
-			t.Errorf("resume created state under home: %v", err)
+		dir := filepath.Join(t.TempDir(), "session")
+		t.Setenv("OPENCODE_DB", filepath.Join(dir, "opencode.db"))
+		d.SessionFlags("resume", "owner/repo", "7", t.TempDir())
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("resume created state at OPENCODE_DB: %v", err)
+		}
+	})
+
+	t.Run("resume reads OPENCODE_DB, not a path under home", func(t *testing.T) {
+		seedOpencodeStore(t, [][5]any{{"ses_env", nil, title(t, "owner/repo", "7"), 100, nil}})
+		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "--session ses_env" {
+			t.Errorf("got %q; want --session ses_env", got)
+		}
+	})
+
+	t.Run("resume with OPENCODE_DB unset or empty is cold", func(t *testing.T) {
+		seedOpencodeStore(t, [][5]any{{"ses_a", nil, title(t, "owner/repo", "7"), 100, nil}})
+		t.Setenv("OPENCODE_DB", "")
+		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+			t.Errorf("empty: got %q; want empty", got)
+		}
+		os.Unsetenv("OPENCODE_DB")
+		if got := d.SessionFlags("resume", "owner/repo", "7", t.TempDir()); got != "" {
+			t.Errorf("unset: got %q; want empty", got)
 		}
 	})
 
 	t.Run("unknown modes render nothing", func(t *testing.T) {
-		home := t.TempDir()
-		seedOpencodeStore(t, home, [][5]any{{"ses_a", nil, title(t, "owner/repo", "7"), 100, nil}})
+		seedOpencodeStore(t, [][5]any{{"ses_a", nil, title(t, "owner/repo", "7"), 100, nil}})
 		for _, mode := range []string{"", "continue", "bogus"} {
-			if got := d.SessionFlags(mode, "owner/repo", "7", home); got != "" {
+			if got := d.SessionFlags(mode, "owner/repo", "7", t.TempDir()); got != "" {
 				t.Errorf("SessionFlags(%q) = %q; want empty", mode, got)
 			}
 		}
