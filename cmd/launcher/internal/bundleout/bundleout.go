@@ -1,6 +1,8 @@
-// Package bundleout is the harness-owned code-out step for CODE_FORGE=local
-// (ADR 0033, issue #1808): it bundles the base..branch commit range into the
-// outbox instead of asking the Agent to run `git bundle create` itself.
+// Package bundleout is the harness-owned code-out step (ADR 0033, issues
+// #1808, #2082) for a Box whose outbox is mounted host-side —
+// CODE_FORGE=local, or a read-only relay: it bundles the base..branch commit
+// range into the outbox instead of asking the Agent to run `git bundle
+// create` itself.
 package bundleout
 
 import (
