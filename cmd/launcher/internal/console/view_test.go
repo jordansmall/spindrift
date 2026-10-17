@@ -771,7 +771,11 @@ func TestView_Header_BranchSwitchNotice_StyledWithGlyph(t *testing.T) {
 
 // A failed refresh surfaces its error text so the operator sees why the list went stale.
 func TestView_RefreshError_Surfaced(t *testing.T) {
-	m := Update(NewModel(), IssuesLoadedMsg{Err: errBoom})
+	// Sized first: the error line clips to m.Width, and an unsized model
+	// (Width 0, below the 1-column floor) has no room for the text; Bubble Tea
+	// sends a WindowSizeMsg at startup, so that frame is transient.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 20})
+	m = Update(m, IssuesLoadedMsg{Err: errBoom})
 
 	out := View(m)
 	if !strings.Contains(out, errBoom.Error()) {
@@ -3756,6 +3760,110 @@ func TestView_LongBacklog_WithRefreshError_HeaderStaysPinned(t *testing.T) {
 	}
 	if !strings.Contains(out, "running 0/0") {
 		t.Errorf("View() = %q, want the header status line present", out)
+	}
+}
+
+// seedIssues returns n distinct backlog issues; 20 fills the body budget of
+// every terminal size these tests use.
+func seedIssues(n int) []forge.Issue {
+	issues := make([]forge.Issue, n)
+	for i := range issues {
+		issues[i] = forge.Issue{Number: fmt.Sprintf("%d", i), Title: fmt.Sprintf("issue %d", i)}
+	}
+	return issues
+}
+
+// Issue #5393: the refresh-error line owns exactly the one row bodyBudget
+// reserves for it, however many lines or columns the error carries. The
+// exact-equality check includes View's guaranteed trailing "\n" row (#1825).
+func TestView_RefreshError_ClippedToOneReservedRow(t *testing.T) {
+	cases := map[string]string{
+		"multi-line":    "a\nb\nc",
+		"long one-line": strings.Repeat("x", 300),
+	}
+	for name, msg := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+			m = Update(m, IssuesLoadedMsg{Issues: seedIssues(20)})
+			m = Update(m, IssuesLoadedMsg{Err: errors.New(msg)})
+
+			out := View(m)
+			if got := len(strings.Split(out, "\n")); got != m.Height {
+				t.Errorf("View() rendered %d lines, want exactly Height (%d): %q", got, m.Height, out)
+			}
+			// A line wider than Width wraps in the terminal, which a newline
+			// count cannot see.
+			var errLine string
+			for _, line := range strings.Split(out, "\n") {
+				if strings.HasPrefix(line, refreshErrPrefix) {
+					errLine = line
+				}
+			}
+			if errLine == "" {
+				t.Fatalf("View() = %q, want the refresh-failed line present", out)
+			}
+			if w := lipgloss.Width(errLine); w > m.Width {
+				t.Errorf("refresh-failed line is %d columns, want <= Width (%d): %q", w, m.Width, errLine)
+			}
+		})
+	}
+}
+
+// Issue #5393: beside a docked sidebar the refresh-error line gets its own row
+// rather than gluing onto the panels' bottom border.
+func TestView_SidebarDocked_RefreshError_OwnRow(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: sidebarMinListWidth + sidebarWidth + dockedBorderCols, Height: 12})
+	m = Update(m, IssuesLoadedMsg{Issues: seedIssues(20)})
+	m = Update(m, SidebarLoadedMsg{Number: "42", Activity: []ActivityLine{{Text: "#42 · hi"}}})
+	m = Update(m, IssuesLoadedMsg{Err: errors.New("a\nb\nc")})
+
+	out := View(m)
+	// At most, not exactly, Height: the docked render already under-fills
+	// Height by a height-dependent amount. The per-line width check below is
+	// what catches the error line gluing onto the bottom border.
+	if got := len(strings.Split(out, "\n")); got > m.Height {
+		t.Errorf("View() rendered %d lines, want at most Height (%d): %q", got, m.Height, out)
+	}
+	var found bool
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w > m.Width {
+			t.Errorf("line %d is %d columns, want <= Width (%d): %q", i, w, m.Width, line)
+		}
+		if strings.HasPrefix(line, refreshErrPrefix) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("View() = %q, want a line starting with the refresh-failed text", out)
+	}
+}
+
+// Issue #5393: bodyBudget reserves one row for the error line, matching the
+// one row viewBody renders for it.
+func TestBodyBudget_RefreshError_ReservesOneRow(t *testing.T) {
+	// Pins only bodyBudget's side; viewBody's agreement is pinned by the
+	// exact-Height assertion in TestView_RefreshError_ClippedToOneReservedRow.
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	withErr := Update(m, IssuesLoadedMsg{Err: errors.New("boom")})
+	if got, want := bodyBudget(withErr), bodyBudget(m)-1; got != want {
+		t.Errorf("bodyBudget with a refresh error = %d, want %d", got, want)
+	}
+}
+
+// Issue #5393: control sequences in a refresh error never reach the terminal.
+func TestView_RefreshError_StripsControlSequences(t *testing.T) {
+	m := Update(NewModel(), SizeChangedMsg{Width: 80, Height: 10})
+	m = Update(m, IssuesLoadedMsg{Err: errors.New("bad \x1b]0;pwn\x07thing \x1b[31mred")})
+
+	// Compared as a whole line, not by searching View() for "\x1b[31m": on
+	// a color-capable TERM the view's own chrome emits SGR codes too.
+	const want = refreshErrPrefix + "bad thing red"
+	out := View(m)
+	if !strings.Contains(out, "\n"+want+"\n") {
+		t.Errorf("View() = %q, want the refresh error rendered as %q", out, want)
+	}
+	if strings.Contains(out, "\x1b]0;pwn") || strings.Contains(out, "\x07") {
+		t.Errorf("View() = %q, want the OSC sequence stripped", out)
 	}
 }
 
