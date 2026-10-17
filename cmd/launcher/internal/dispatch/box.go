@@ -224,10 +224,10 @@ func (d *Dispatch) Run() Disposition {
 			// neither a rename nor a marker). Unconditional otherwise: a
 			// fresh Run() makes any marker on disk stale.
 			if err := quarantinePriorRunLogs(d.pwd, d.number, d.runner); err != nil {
-				return quarantineErr{err: fmt.Errorf("quarantine prior-run logs: %w", err)}
+				return preDispatchErr{err: fmt.Errorf("quarantine prior-run logs: %w", err)}
 			}
 			if err := markRunLineage(d.pwd, d.number); err != nil {
-				return quarantineErr{err: fmt.Errorf("mark run lineage: %w", err)}
+				return preDispatchErr{err: fmt.Errorf("mark run lineage: %w", err)}
 			}
 		}
 		env, err := d.boxEnv(0, "")
@@ -444,7 +444,7 @@ func (d *Dispatch) runOnce(logPath string, env map[string]string, driverCacheDir
 	}
 
 	if err := rotateStaleLog(logPath); err != nil {
-		return fmt.Errorf("rotate stale log: %w", err)
+		return preDispatchErr{err: fmt.Errorf("rotate stale log: %w", err)}
 	}
 
 	logFile, err := os.Create(logPath)
@@ -804,31 +804,47 @@ func mkdirBoxWritable(dir string) error {
 
 // rotateStaleLog renames an existing file at logPath aside to the first
 // available logPath.N suffix, so a subsequent os.Create(logPath) starts
-// clean without destroying it. A missing logPath is a no-op.
+// clean without destroying it. A missing logPath is a no-op; a stat failure
+// on a candidate slot is returned as an error.
 func rotateStaleLog(logPath string) error {
 	if _, err := os.Stat(logPath); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
-		return err
+		return fmt.Errorf("stat %s: %w", logPath, err)
 	}
+	return renameToFirstFreeSuffix(logPath, "")
+}
+
+// renameToFirstFreeSuffix renames path to the first destination
+// "<path><stem>.<n>" that does not exist yet. A stat failure other
+// than not-found (EACCES on the log dir, ENAMETOOLONG, ELOOP) never yields
+// os.IsNotExist, so treating it as a free slot would spin this uncapped loop
+// (issues #2575, #5444).
+func renameToFirstFreeSuffix(path, stem string) error {
 	for n := 1; ; n++ {
-		candidate := fmt.Sprintf("%s.%d", logPath, n)
-		if _, err := os.Stat(candidate); os.IsNotExist(err) {
-			return os.Rename(logPath, candidate)
+		dest := fmt.Sprintf("%s%s.%d", path, stem, n)
+		_, err := os.Stat(dest)
+		if err == nil {
+			continue
 		}
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("stat %s: %w", dest, err)
+		}
+		return os.Rename(path, dest)
 	}
 }
 
-// quarantineErr wraps a quarantinePriorRunLogs failure so dispatchWithRetry
-// (retry.go) can tell it apart from other once() failures via errors.As:
-// nothing this run produced is necessarily at logPath yet, so the caller must
-// not consult settledOutcome or ClassifyTransient against it, since either
-// could settle on the prior-run content quarantine failed to move (#2575).
-type quarantineErr struct{ err error }
+// preDispatchErr marks an attempt that failed before writing a log of its own
+// (Run()'s quarantine and run-lineage steps, issue #2575; runOnce's stale-log
+// rotation, issue #5444), so
+// dispatchWithRetry (retry.go) can tell it apart from other once() failures
+// via errors.As: logPath may still hold earlier content, so the caller must
+// not consult settledOutcome or ClassifyTransient against it.
+type preDispatchErr struct{ err error }
 
-func (e quarantineErr) Error() string { return e.err.Error() }
-func (e quarantineErr) Unwrap() error { return e.err }
+func (e preDispatchErr) Error() string { return e.err.Error() }
+func (e preDispatchErr) Unwrap() error { return e.err }
 
 // quarantinePriorRunLogs renames every attempt log AllAttemptLogPaths finds
 // for this issue to "<path>.prior-run.N", a suffix its own "<path>.N" probe
@@ -844,22 +860,8 @@ func quarantinePriorRunLogs(pwd, number string, r runner.Runner) error {
 		return nil
 	}
 	for _, pl := range AllAttemptLogPaths(pwd, number) {
-		for n := 1; ; n++ {
-			dest := fmt.Sprintf("%s.prior-run.%d", pl.Path, n)
-			_, err := os.Stat(dest)
-			if err == nil {
-				continue
-			}
-			// A stat failure other than not-found (EACCES on the log dir,
-			// ENAMETOOLONG) never yields os.IsNotExist, so treating it as
-			// a free slot would spin this n++ loop without a cap (#2575).
-			if !os.IsNotExist(err) {
-				return fmt.Errorf("stat %s: %w", dest, err)
-			}
-			if err := os.Rename(pl.Path, dest); err != nil {
-				return err
-			}
-			break
+		if err := renameToFirstFreeSuffix(pl.Path, ".prior-run"); err != nil {
+			return err
 		}
 	}
 	return nil
