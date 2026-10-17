@@ -7,15 +7,36 @@ import "fmt"
 // than one pick transitions within a single snapshot, the last one in next's
 // order wins (iteration order, not arrival time — next carries no
 // timestamps to order by).
+//
+// Only the newest row per (Number, kind) is compared, and only when the key
+// has the same row count in both snapshots: picks only append (re-pick) or
+// are removed (unpick), so a count change means the newest rows are
+// different logical rows, not one row transitioning (issue #5392). The
+// trade-off: a re-pick whose Queued row the Model never saw (a coalesced
+// refresh) gets no "started" toast, like a first-time pick.
 func pickTransitionToast(old, next []Pick) string {
-	prior := make(map[string]PickState, len(old))
-	for _, p := range old {
-		prior[p.Number] = p.State
+	type rows struct {
+		count  int
+		newest int // index of the newest row
 	}
+	index := func(picks []Pick) map[pickKey]rows {
+		m := make(map[pickKey]rows, len(picks))
+		for i, p := range picks {
+			k := p.pickKey()
+			m[k] = rows{m[k].count + 1, i}
+		}
+		return m
+	}
+	prior, current := index(old), index(next)
 	toast := ""
-	for _, p := range next {
-		was, ok := prior[p.Number]
-		if !ok || was == p.State {
+	for i, p := range next {
+		k := p.pickKey()
+		cur := current[k]
+		if cur.newest != i {
+			continue
+		}
+		was, ok := prior[k]
+		if !ok || was.count != cur.count || old[was.newest].State == p.State {
 			continue
 		}
 		title := SanitizeControlSequences(p.Title)
