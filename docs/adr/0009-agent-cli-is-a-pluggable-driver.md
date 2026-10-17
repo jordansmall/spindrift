@@ -427,3 +427,8 @@ newest root, non-archived session carrying the pinned title and renders
 and the pass runs cold, the same fallback as claude. `--continue` is never
 used: it picks the last session, not this issue's. The launcher's half is
 unchanged, as the original design predicted.
+
+Issue #5378 later moved the lookup off a hand-built path: `session.go` reads
+the store path from `OPENCODE_DB` itself rather than rebuilding it from
+`$HOME`, so the Go and Nix halves cannot drift. An unset or empty
+`OPENCODE_DB` renders nothing.
