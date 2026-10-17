@@ -27,6 +27,12 @@ var ErrMergeBlockedByChecks = errors.New("merge blocked by checks")
 // wrap it. Callers may retry a bounded number of times.
 var ErrTransientPushFailure = errors.New("transient push failure")
 
+// ErrWorkflowPermissionDenied is returned when GitHub refuses a push because it
+// creates or updates a `.github/workflows/*` file and the credential lacks
+// Workflows permission. Permanent: no retry can succeed, so it never wraps
+// ErrTransientPushFailure.
+var ErrWorkflowPermissionDenied = errors.New("workflow permission denied")
+
 // ErrMergeTransient is returned by Merge when the merge call fails for a
 // transient transport or server reason rather than a genuine rejection
 // (conflict, blocked by checks, branch protection). Callers may retry with

@@ -230,40 +230,43 @@ func TestGitForcePush_MissingRepositoryIsPermanent(t *testing.T) {
 
 func TestWrapForcePushError_Classification(t *testing.T) {
 	cases := []struct {
-		name   string
-		stderr string
-		want   bool
+		name         string
+		stderr       string
+		want         bool
+		wantWorkflow bool
 	}{
-		{"connection reset", "fatal: unable to access 'https://github.com/o/r.git/': Recv failure: Connection reset by peer", true},
-		{"connection refused", "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443 after 3 ms: Connection refused", true},
-		{"timeout", "fatal: unable to access 'https://github.com/o/r.git/': Operation timed out after 300000 milliseconds", true},
-		{"http 502", "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly", true},
-		{"http 503", "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 503", true},
-		{"remote hung up", "fatal: the remote end hung up unexpectedly", true},
-		{"unexpected disconnect", "error: RPC failed; curl 56 GnuTLS recv error (-110): The TLS connection was non-properly terminated.\nfatal: unexpected disconnect while reading sideband packet", true},
-		{"early eof", "error: 1234 bytes of body are still expected\nfatal: early EOF\nfatal: fetch-pack: invalid index-pack output", true},
-		{"network unreachable", "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443: Network is unreachable", true},
-		{"i/o timeout", "fatal: unable to access 'https://github.com/o/r.git/': Get \"https://github.com/\": dial tcp 140.82.112.3:443: i/o timeout", true},
-		{"internal server error", "remote: Internal Server Error\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
-		{"bad gateway", "remote: Bad Gateway\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
-		{"service unavailable", "remote: Service Unavailable\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
-		{"gateway timeout", "remote: Gateway Timeout\nfatal: unable to access 'https://git.example.com/o/r.git/'", true},
-		{"ssh kex exchange", "kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.", true},
-		{"broken pipe", "error: send-pack: Broken pipe\nfatal: the remote end hung up unexpectedly", true},
-		{"gnutls handshake", "fatal: unable to access 'https://git.example.com/o/r.git/': gnutls_handshake() failed: The TLS connection was non-properly terminated.", true},
-		{"ssl error syscall", "fatal: unable to access 'https://git.example.com/o/r.git/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104", true},
-		{"http 429", "error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429\nfatal: the remote end hung up unexpectedly", true},
-		{"http 403 then hung up", "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nfatal: the remote end hung up unexpectedly", false},
-		{"http 413 then hung up", "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\nfatal: the remote end hung up unexpectedly", false},
-		{"dns", "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com", true},
-		{"ssh permission denied", "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.", false},
-		{"https auth failed", "fatal: Authentication failed for 'https://github.com/o/r.git/'", false},
-		{"http 403", "remote: Permission to o/r.git denied to bot.\nfatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403", false},
-		{"repo not found", "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found", false},
-		{"unrecognised", "fatal: something unexpected", false},
-		{"empty stderr", "", false},
-		{"stale info", "! [rejected] main -> main (stale info)\nerror: failed to push some refs", false},
-		{"non-fast-forward", "! [rejected] main -> main (non-fast-forward)", false},
+		{"connection reset", "fatal: unable to access 'https://github.com/o/r.git/': Recv failure: Connection reset by peer", true, false},
+		{"connection refused", "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443 after 3 ms: Connection refused", true, false},
+		{"timeout", "fatal: unable to access 'https://github.com/o/r.git/': Operation timed out after 300000 milliseconds", true, false},
+		{"http 502", "error: RPC failed; HTTP 502 curl 22 The requested URL returned error: 502\nfatal: the remote end hung up unexpectedly", true, false},
+		{"http 503", "fatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 503", true, false},
+		{"remote hung up", "fatal: the remote end hung up unexpectedly", true, false},
+		{"unexpected disconnect", "error: RPC failed; curl 56 GnuTLS recv error (-110): The TLS connection was non-properly terminated.\nfatal: unexpected disconnect while reading sideband packet", true, false},
+		{"early eof", "error: 1234 bytes of body are still expected\nfatal: early EOF\nfatal: fetch-pack: invalid index-pack output", true, false},
+		{"network unreachable", "fatal: unable to access 'https://github.com/o/r.git/': Failed to connect to github.com port 443: Network is unreachable", true, false},
+		{"i/o timeout", "fatal: unable to access 'https://github.com/o/r.git/': Get \"https://github.com/\": dial tcp 140.82.112.3:443: i/o timeout", true, false},
+		{"internal server error", "remote: Internal Server Error\nfatal: unable to access 'https://git.example.com/o/r.git/'", true, false},
+		{"bad gateway", "remote: Bad Gateway\nfatal: unable to access 'https://git.example.com/o/r.git/'", true, false},
+		{"service unavailable", "remote: Service Unavailable\nfatal: unable to access 'https://git.example.com/o/r.git/'", true, false},
+		{"gateway timeout", "remote: Gateway Timeout\nfatal: unable to access 'https://git.example.com/o/r.git/'", true, false},
+		{"ssh kex exchange", "kex_exchange_identification: Connection closed by remote host\nfatal: Could not read from remote repository.", true, false},
+		{"broken pipe", "error: send-pack: Broken pipe\nfatal: the remote end hung up unexpectedly", true, false},
+		{"gnutls handshake", "fatal: unable to access 'https://git.example.com/o/r.git/': gnutls_handshake() failed: The TLS connection was non-properly terminated.", true, false},
+		{"ssl error syscall", "fatal: unable to access 'https://git.example.com/o/r.git/': OpenSSL SSL_read: SSL_ERROR_SYSCALL, errno 104", true, false},
+		{"http 429", "error: RPC failed; HTTP 429 curl 22 The requested URL returned error: 429\nfatal: the remote end hung up unexpectedly", true, false},
+		{"http 403 then hung up", "error: RPC failed; HTTP 403 curl 22 The requested URL returned error: 403\nfatal: the remote end hung up unexpectedly", false, false},
+		{"http 413 then hung up", "error: RPC failed; HTTP 413 curl 22 The requested URL returned error: 413\nfatal: the remote end hung up unexpectedly", false, false},
+		{"dns", "fatal: unable to access 'https://github.com/o/r.git/': Could not resolve host: github.com", true, false},
+		{"ssh permission denied", "git@github.com: Permission denied (publickey).\nfatal: Could not read from remote repository.\n\nPlease make sure you have the correct access rights\nand the repository exists.", false, false},
+		{"https auth failed", "fatal: Authentication failed for 'https://github.com/o/r.git/'", false, false},
+		{"http 403", "remote: Permission to o/r.git denied to bot.\nfatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403", false, false},
+		{"repo not found", "remote: Repository not found.\nfatal: repository 'https://github.com/o/r.git/' not found", false, false},
+		{"unrecognised", "fatal: something unexpected", false, false},
+		{"empty stderr", "", false, false},
+		{"stale info", "! [rejected] main -> main (stale info)\nerror: failed to push some refs", false, false},
+		{"non-fast-forward", "! [rejected] main -> main (non-fast-forward)", false, false},
+		{"workflow scope", "! [remote rejected] agent/issue-1 -> agent/issue-1 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/agent-dispatch.yml` without `workflow` scope)", false, true},
+		{"workflows permission", "! [remote rejected] agent/issue-1 -> agent/issue-1 (refusing to allow a GitHub App to create or update workflow `.github/workflows/ci.yml` without `workflows` permission)", false, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -273,6 +276,9 @@ func TestWrapForcePushError_Classification(t *testing.T) {
 			}
 			if !tc.want && strings.Contains(err.Error(), "transient") {
 				t.Fatalf("permanent error mentions transient: %v", err)
+			}
+			if got := errors.Is(err, forge.ErrWorkflowPermissionDenied); got != tc.wantWorkflow {
+				t.Fatalf("errors.Is(ErrWorkflowPermissionDenied) = %v, want %v: %v", got, tc.wantWorkflow, err)
 			}
 		})
 	}
