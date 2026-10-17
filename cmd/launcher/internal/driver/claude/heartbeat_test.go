@@ -101,10 +101,10 @@ func TestWriterToolCountsShowKind(t *testing.T) {
 	}
 }
 
-// Pins the shared count formatter's fixed kind order and the "searches" plural.
+// Pins claude's KindOrder and "searches" plural as the writer renders them.
 // Tools arrive out of display order so the ordering is proven; a phase change
-// flushes the counts, so kinds that share a phase share a line (edit, search
-// and explore never do, hence three lines).
+// flushes the counts, so only tools in one phase share a line (the explore,
+// search and edit phases never do, hence three lines).
 func TestWriterToolCountsExactLines(t *testing.T) {
 	var status bytes.Buffer
 	w := newWriter(t, "7", &status)
@@ -541,7 +541,7 @@ func TestFormatCountLineShape(t *testing.T) {
 		{"9", "scout", "explore", map[string]int{"read": 1}, []string{"#9", "scout", "[explore]", "1 read"}},
 	}
 	for _, tc := range cases {
-		got := driverkit.FormatCountLine(tc.issue, tc.role, tc.phase, tc.counts)
+		got := claude.HeartbeatTracking.FormatCountLine(tc.issue, tc.role, tc.phase, tc.counts)
 		for _, sub := range tc.wantSubs {
 			if !strings.Contains(got, sub) {
 				t.Errorf("FormatCountLine(%q,%q,%q,%v) = %q, missing %q",
@@ -551,10 +551,32 @@ func TestFormatCountLineShape(t *testing.T) {
 	}
 }
 
+func TestHeartbeatTrackingFormatCountLineExact(t *testing.T) {
+	counts := map[string]int{"skill": 1, "subagent": 1, "bash": 1, "search": 2, "grep": 3, "edit": 1, "read": 2}
+	want := "#7 [explore] \xc2\xb7 2 reads, 1 edit, 3 greps, 2 searches, 1 bash, 1 subagent, 1 skill"
+	if got := claude.HeartbeatTracking.FormatCountLine("7", "", "explore", counts); got != want {
+		t.Errorf("FormatCountLine = %q, want %q", got, want)
+	}
+}
+
+// Every bucket claude's Kind gives a built-in tool must be in KindOrder, or it
+// silently drops into the sorted extras.
+func TestHeartbeatTrackingKindOrderCoversKinds(t *testing.T) {
+	ordered := make(map[string]bool)
+	for _, kind := range claude.HeartbeatTracking.KindOrder {
+		ordered[kind] = true
+	}
+	for _, tool := range []string{"Read", "Edit", "Write", "NotebookEdit", "Grep", "Glob", "WebSearch", "WebFetch", "Bash", "Task", "Agent"} {
+		if kind := claude.HeartbeatTracking.Kind(tool); !ordered[kind] {
+			t.Errorf("Kind(%q) = %q, not in KindOrder %v", tool, kind, claude.HeartbeatTracking.KindOrder)
+		}
+	}
+}
+
 // A control character, newline, or CSI/OSC escape in role must not break the
 // single-line count row.
 func TestFormatCountLineSanitizesRole(t *testing.T) {
-	got := driverkit.FormatCountLine("42", "scout\x1b]0;pwn\x07\nfake-row", "explore", map[string]int{"read": 1})
+	got := claude.HeartbeatTracking.FormatCountLine("42", "scout\x1b]0;pwn\x07\nfake-row", "explore", map[string]int{"read": 1})
 	want := "#42 scoutfake-row [explore] \xc2\xb7 1 read"
 	if got != want {
 		t.Errorf("FormatCountLine role not sanitized, got %q, want %q", got, want)

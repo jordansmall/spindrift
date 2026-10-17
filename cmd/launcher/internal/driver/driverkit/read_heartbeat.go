@@ -51,6 +51,11 @@ type HeartbeatTracking struct {
 	Phase func(tool string, input json.RawMessage) string
 	// Kind maps a tool call to the bucket its count line tallies it under.
 	Kind func(tool string) string
+	// KindOrder lists the kinds a count line names first, in this order; the
+	// rest follow sorted.
+	KindOrder []string
+	// KindPlurals maps a kind to its irregular plural; others append "s".
+	KindPlurals map[string]string
 	// Family maps a model id to the label a switch header shows. The live
 	// heartbeat groups by this coarse label, not the exact id OnModel reports.
 	Family func(model string) string
@@ -232,7 +237,7 @@ func (w *HeartbeatWriter) flushRole(phase string) {
 		return
 	}
 	w.header()
-	fmt.Fprintln(w.out, FormatCountLine(w.issue, role, phase, counts))
+	fmt.Fprintln(w.out, w.track.FormatCountLine(w.issue, role, phase, counts))
 	clearCounts(counts)
 }
 

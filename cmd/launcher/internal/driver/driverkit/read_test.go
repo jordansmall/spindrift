@@ -516,3 +516,26 @@ func TestHeartbeatWriterTrackingGroupsByLineNotBlockOrder(t *testing.T) {
 		t.Errorf("out = %q, want %q", out.String(), want)
 	}
 }
+
+func TestHeartbeatTrackingFormatCountLineHonorsOrderAndPlurals(t *testing.T) {
+	counts := map[string]int{"zap": 2, "apple": 3, "mango": 1, "kiwi": 2}
+	tr := HeartbeatTracking{
+		KindOrder:   []string{"zap", "apple", "absent"},
+		KindPlurals: map[string]string{"apple": "apples!"},
+	}
+	want := "#7 [explore] \xc2\xb7 2 zaps, 3 apples!, 2 kiwis, 1 mango"
+	if got := tr.FormatCountLine("7", "", "explore", counts); got != want {
+		t.Errorf("ordered = %q, want %q", got, want)
+	}
+}
+
+func TestFormatCountLineZeroTrackingSortsEveryKind(t *testing.T) {
+	counts := map[string]int{"read": 1, "search": 2, "bash": 3}
+	want := "#7 \xc2\xb7 3 bashs, 1 read, 2 searchs"
+	if got := FormatCountLine("7", "", "", counts); got != want {
+		t.Errorf("FormatCountLine = %q, want %q", got, want)
+	}
+	if got := (HeartbeatTracking{}).FormatCountLine("7", "", "", counts); got != want {
+		t.Errorf("zero tracking = %q, want %q", got, want)
+	}
+}
