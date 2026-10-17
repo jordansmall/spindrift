@@ -541,7 +541,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 	}
 
 	it, cf := forgeBuilder(repoSlug, tracker, a.token)
-	tokenHint, slugHint := doctorHints(tracker.issueTracker)
+	tokenHint, slugHint, noLabelRegistry := doctorHints(tracker.issueTracker)
 	// doctor.Config.Runtime below already reports runtime validity, so the
 	// extraChecks rows must be runtime-stripped or the row reports twice.
 	launcherRows := launcherchecks.WithoutRuntime(launcherchecks.All(quickstartCheckConfig(a, backendName), quickstartCheckDeps(a)))
@@ -552,6 +552,7 @@ func runQuickstart(dir string, env Environment, cmdRunner CommandRunner, forgeBu
 		IssueTracker:    tracker.issueTracker,
 		TokenHint:       tokenHint,
 		SlugHint:        slugHint,
+		NoLabelRegistry: noLabelRegistry,
 		Label:           defaultDispatchLabels.Dispatchable,
 		InProgressLabel: defaultDispatchLabels.InProgress,
 		FailedLabel:     defaultDispatchLabels.Failed,
@@ -842,14 +843,15 @@ flake.nix.bak*
 
 const quickstartEnvrc = "use flake\n"
 
-// doctorHints resolves doctor.Config's TokenHint and SlugHint. Empty values
-// mean "use doctor.Run's github-shaped default".
-func doctorHints(issueTracker string) (tokenHint, slugHint string) {
+// doctorHints resolves doctor.Config's TokenHint, SlugHint, and NoLabelRegistry.
+// Empty hints mean "use doctor.Run's github-shaped default"; an unknown
+// tracker keeps the label check.
+func doctorHints(issueTracker string) (tokenHint, slugHint string, noLabelRegistry bool) {
 	row, ok := backend.ByName(issueTracker)
 	if !ok {
-		return "", ""
+		return "", "", false
 	}
-	return row.DoctorTokenHint, row.DoctorSlugHint
+	return row.DoctorTokenHint, row.DoctorSlugHint, !row.LabelRegistry
 }
 
 // trackerSettings holds the fields buildForge needs to construct an Issue

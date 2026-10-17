@@ -184,6 +184,12 @@ func RuntimeCheck(runtime string) Check {
 type Config struct {
 	IssueTracker string
 
+	// NoLabelRegistry marks a tracker that can neither list nor create a label
+	// ahead of time (local, jira): a label is only seen once applied. Run skips
+	// the whole label section rather than require labels it could never see.
+	// Inverted so the zero value keeps the label check for every other caller.
+	NoLabelRegistry bool
+
 	// RequiredLabels are label names, beyond the four work-tier labels, whose
 	// absence fails the run like a work-tier label — whether or not they belong to
 	// an advisory tier. The daemon preflight names the labels of each kind it
@@ -352,6 +358,11 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		rep.Finding(Advisory, "runtime %q not ready: %v — does not fail this check", c.Runtime, rerr)
 	} else {
 		rep.Success("runtime %q found on PATH", c.Runtime)
+	}
+
+	if c.NoLabelRegistry {
+		rep.Success("label check skipped: ISSUE_TRACKER=%s has no label registry, labels appear on first use", c.IssueTracker)
+		return nil
 	}
 
 	// A missing row's prefix mirrors its tier's exit-code weight: MISSING for the

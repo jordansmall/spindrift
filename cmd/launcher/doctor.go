@@ -45,9 +45,9 @@ type doctorOptions struct {
 // tier only while that Chore is in BUTLER_CHORES.
 func requiredLabels(opts doctorOptions, rc readContext) []string {
 	c := rc.config
-	// local and jira have no label registry to list or create from: a Required
-	// label there could never be seen present, so the preflight would exit 4
-	// forever. The label springs into existence on first filing instead.
+	// local and jira have no label registry to list or create from, so doctor.Run
+	// skips the label section there (NoLabelRegistry, issue #5460); adding none
+	// keeps this answer honest for any caller that reads it directly.
 	if row, _ := backendByName(c.issueTracker); !row.LabelRegistry {
 		return nil
 	}
@@ -141,6 +141,7 @@ func runDoctor(it forge.IssueTracker, cf forge.CodeForge, c config, rep *doctor.
 	row, _ := backendByName(c.issueTracker)
 	if err := doctor.Run(it, cf, doctor.Config{
 		IssueTracker:    c.issueTracker,
+		NoLabelRegistry: !row.LabelRegistry,
 		RequiredLabels:  requiredLabels,
 		TokenHint:       row.DoctorTokenHint,
 		SlugHint:        row.DoctorSlugHint,
