@@ -95,8 +95,9 @@ type Result struct {
 	Warnings []string
 
 	// Err is the error once() returned on a Terminal classification whose log
-	// came back empty, meaning the box never launched (issue #3119). Nil for
-	// every other failed path: those settled on a genuine outcome or
+	// came back empty, meaning the box never launched (issue #3119), or the
+	// last pre-dispatch failure once its retry cap ran out (issue #5444). Nil
+	// for every other failed path: those settled on a genuine outcome or
 	// already printed their own explanation.
 	Err error
 }
@@ -166,7 +167,8 @@ func Route[T any](d Disposition, onSkip func() T, onFailure func(Result) T, onSu
 
 // ReportFailureReason prints r.Err, if set, on stderr next to the terse
 // failure line a caller already printed. r.Err is only ever set for a box that
-// never launched (retry.go, issue #3119), so this is a no-op elsewhere.
+// never launched (retry.go, issues #3119 and #5444), so this is a no-op
+// elsewhere.
 func (r Result) ReportFailureReason(num string) {
 	if r.Err != nil {
 		fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", num, r.Err)

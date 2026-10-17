@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -309,6 +310,53 @@ func TestRun_QuarantineFailureRetriesWithBackoffBeforeGivingUp(t *testing.T) {
 	}
 }
 
+// TestRun_RotateFailureRetriesWithoutClassifyingStaleLog verifies a stale-log
+// rotation failure on a retry attempt is routed like a quarantine failure
+// (issue #5444): attempt 2 never wrote a log of its own, so logPath still holds
+// attempt 1's transient-looking content and must not be classified again. The
+// run retries with backoff, then ends with the rotate error on Result.Err.
+func TestRun_RotateFailureRetriesWithoutClassifyingStaleLog(t *testing.T) {
+	var d *Dispatch
+	fr := runner.NewFake()
+	fr.RunFunc = func(runner.Box) error {
+		// Quarantine runs on the first attempt only, so plant the blocker
+		// after attempt 1 has dispatched: a self-referential symlink makes
+		// os.Stat(logPath.1) fail with ELOOP on every later rotation.
+		blocker := d.logPath() + ".1"
+		if err := os.Symlink(filepath.Base(blocker), blocker); err != nil {
+			t.Errorf("plant blocker: %v", err)
+		}
+		return boxErr
+	}
+	classified := 0
+	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+		classified++
+		return driver.Classification{Class: driver.Transient, Reason: driver.Network}, nil
+	}}
+	var sleeps []time.Duration
+	d = newTestDispatch(t, retryConfig(3, 5, 0), fr, drv, fakeClock(time.Now(), &sleeps))
+
+	result := d.Run()
+
+	if result.ok() {
+		t.Errorf("Run: want failed once the retry cap is exhausted, got %+v", result)
+	}
+	if len(fr.RunCalls) != 1 {
+		t.Errorf("runner.Run: want exactly 1 call (attempt 2 must not dispatch), got %d", len(fr.RunCalls))
+	}
+	if classified != 1 {
+		t.Errorf("ClassifyTransient calls = %d, want 1 (attempt 1 only; the stale log must not be reclassified)", classified)
+	}
+	// The transient cap is shared: attempt 1's own backoff plus the rotate
+	// failures' retries add up to Policy.Max.
+	if len(sleeps) != 3 {
+		t.Errorf("Sleep calls = %d, want 3 (Policy.Max)", len(sleeps))
+	}
+	if res := result.result; res.Err == nil || !strings.Contains(res.Err.Error(), "rotate stale log") {
+		t.Errorf("Result.Err = %v, want it to name the rotate stale log failure", res.Err)
+	}
+}
+
 // TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError verifies the
 // free-suffix probe returns a real error instead of looping forever when
 // os.Stat(dest) fails with something other than "not found" (issue #2575).
@@ -327,16 +375,23 @@ func TestQuarantinePriorRunLogs_BoundedOnNonNotExistStatError(t *testing.T) {
 		t.Fatalf("seed self-referential symlink: %v", err)
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- quarantinePriorRunLogs(d.pwd, d.number, fr) }()
+	if err := mustReturnWithin(t, func() error { return quarantinePriorRunLogs(d.pwd, d.number, fr) }); err == nil {
+		t.Error("quarantinePriorRunLogs: want a non-nil error on a non-NotExist stat failure, got nil")
+	}
+}
 
+// mustReturnWithin runs fn and fails the test if it has not returned within
+// five seconds, the symptom of an unbounded free-suffix probe.
+func mustReturnWithin(t *testing.T, fn func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- fn() }()
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Error("quarantinePriorRunLogs: want a non-nil error on a non-NotExist stat failure, got nil")
-		}
+		return err
 	case <-time.After(5 * time.Second):
-		t.Fatal("quarantinePriorRunLogs: did not return -- free-suffix probe looped unbounded on a non-NotExist stat error")
+		t.Fatal("did not return -- free-suffix probe looped unbounded on a non-NotExist stat error")
+		return nil
 	}
 }
 
@@ -601,6 +656,31 @@ func TestRotateStaleLog_UsesFirstAvailableSuffix(t *testing.T) {
 	}
 	if string(got2) != "attempt 2" {
 		t.Errorf(".2 content: got %q, want %q", got2, "attempt 2")
+	}
+}
+
+// TestRotateStaleLog_BoundedOnNonNotExistStatError verifies rotateStaleLog
+// returns an error instead of spinning when os.Stat(logPath.N) fails with
+// something other than "not found" (issue #5444). A basename one byte under
+// NAME_MAX lets os.Stat(logPath) succeed while every logPath.N gets
+// ENAMETOOLONG, so no candidate is ever a free slot and only the error return
+// ends the probe.
+func TestRotateStaleLog_BoundedOnNonNotExistStatError(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, strings.Repeat("a", 254))
+	if err := os.WriteFile(logPath, []byte("attempt 1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(logPath + ".1"); !errors.Is(err, syscall.ENAMETOOLONG) {
+		t.Skipf("filesystem does not report ENAMETOOLONG for an over-long name: %v", err)
+	}
+
+	if err := mustReturnWithin(t, func() error { return rotateStaleLog(logPath) }); err == nil {
+		t.Error("rotateStaleLog: want a non-nil error on a non-NotExist stat failure, got nil")
+	}
+
+	if got, err := os.ReadFile(logPath); err != nil || string(got) != "attempt 1" {
+		t.Errorf("logPath after failed rotate: got %q, err %v; want untouched %q", got, err, "attempt 1")
 	}
 }
 

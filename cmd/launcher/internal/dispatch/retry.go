@@ -61,24 +61,26 @@ func (d *Dispatch) dispatchWithRetry(logPath string, once func(resumeAfterHold b
 				return Failed(Result{})
 			}
 
-			var qErr quarantineErr
-			if errors.As(err, &qErr) {
-				// Quarantine failed before this attempt dispatched anything,
-				// so logPath may still hold the prior run's content: neither
-				// settledOutcome nor ClassifyTransient may be trusted against
-				// it (issue #2575). Leave prevRedispatched/prevWasHold alone
-				// too, so the retry reruns quarantine and skips the resume.
-				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, qErr)
+			var pErr preDispatchErr
+			if errors.As(err, &pErr) {
+				// The attempt failed before dispatching anything (issues #2575,
+				// #5444), so logPath may still hold earlier content: neither
+				// settledOutcome nor ClassifyTransient may be trusted against it.
 				transientCount++
 				if transientCount > d.cfg.Policy.Max {
-					fmt.Fprintf(d.humanOut(), "    !! #%s: quarantine retry cap exhausted (%d)\n",
+					fmt.Fprintf(d.humanOut(), "    !! #%s: pre-dispatch retry cap exhausted (%d)\n",
 						d.number, d.cfg.Policy.Max)
-					return Failed(Result{})
+					// Result.Err is the "never launched" carrier the caller's
+					// ReportFailureReason prints, so no ?? line here.
+					return Failed(Result{Err: pErr})
 				}
+				fmt.Fprintf(os.Stderr, "    ?? #%s: %v\n", d.number, pErr)
 				backoff := d.cfg.Policy.Backoff(d.clock).Duration(transientCount)
-				fmt.Fprintf(d.humanOut(), "    .. #%s: quarantine failed; retry %d/%d in %s\n",
+				fmt.Fprintf(d.humanOut(), "    .. #%s: pre-dispatch failed; retry %d/%d in %s\n",
 					d.number, transientCount, d.cfg.Policy.Max, backoff)
 				d.sleepOrKilled(backoff)
+				// prevRedispatched/prevWasHold stay as they were, so the retry
+				// repeats the attempt that failed.
 				continue
 			}
 
