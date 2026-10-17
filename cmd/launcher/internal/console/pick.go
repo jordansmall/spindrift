@@ -22,6 +22,15 @@ var (
 // must dispatch as work rather than as an undispatchable third kind.
 func (p Pick) effectiveKind() Kind { return orWork(p.Kind) }
 
+// pickKey mirrors the row identity Queue.newestIndex matches on: Number
+// plus effective kind.
+type pickKey struct {
+	number string
+	kind   Kind
+}
+
+func (p Pick) pickKey() pickKey { return pickKey{p.Number, p.effectiveKind()} }
+
 func orWork(k Kind) Kind {
 	if k == nil {
 		return KindWork
