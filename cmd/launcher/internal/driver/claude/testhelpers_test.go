@@ -27,9 +27,9 @@ func WriteLog(t *testing.T, lines ...string) string {
 	return path
 }
 
-// ClassifyAt exposes classifyAt to external test files in package
-// claude_test, so they can pin the clock instead of leaking the real
-// wall-clock time.Now() into a parsed resetsAt fallback (issue #2443).
+// ClassifyAt is the Driver's ClassifyTransient with the clock pinned, so tests
+// can assert a parsed resetsAt fallback exactly instead of leaking the real
+// wall-clock time.Now() into it (issue #2443).
 func ClassifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
-	return classifyAt(logPath, now)
+	return driverkit.Classify(logPath, func() driverkit.Decoder { return newDecoderAt(now) }, TransientPatterns, TerminalPatterns, ClassifyOptions)
 }

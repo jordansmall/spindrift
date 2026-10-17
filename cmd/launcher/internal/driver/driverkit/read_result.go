@@ -14,7 +14,7 @@ import "strings"
 // KindResult event replaces everything gathered so far with its own Text (no
 // trailing newline added), for a CLI that reports its result as an event.
 // A missing log is "" with no error. It is separate from ResultText, which
-// gathers jq-style extractions line by line for claude.
+// gathers every result event rather than only the last message.
 func LastMessageText(logPath string, newDecoder func() Decoder) (string, error) {
 	var m lastMessage
 	if err := scanEvents(logPath, newDecoder, m.apply); err != nil {
@@ -49,3 +49,21 @@ func (m *lastMessage) apply(ev Event) {
 }
 
 func (m *lastMessage) String() string { return m.b.String() }
+
+// ResultText returns the Text of every KindResult event in the log at logPath,
+// one value per line: the Go twin of the in-box `jq -r 'select(.type ==
+// "result") | .result // empty'`. An empty Text is dropped, as jq's `// empty`
+// drops it; a missing log is "" with no error.
+func ResultText(logPath string, newDecoder func() Decoder) (string, error) {
+	var b strings.Builder
+	err := scanEvents(logPath, newDecoder, func(ev Event) {
+		if ev.Kind == KindResult && ev.Text != "" {
+			b.WriteString(ev.Text)
+			b.WriteByte('\n')
+		}
+	})
+	if err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}

@@ -42,11 +42,11 @@ var weekdayAbbrs = map[string]time.Weekday{
 	"sat": time.Saturday,
 }
 
-// transientExtras is claude's ordered API-error marker list, checked before the
+// TransientPatterns is claude's ordered API-error marker list, checked before the
 // shared driverkit.BaseTransientPatterns network suffix. The patterns are
 // specific so they do not match ordinary log content that happens to contain
 // digit sequences (issue numbers, byte counts, port numbers).
-var transientExtras = []driverkit.Pattern{
+var TransientPatterns = []driverkit.Pattern{
 	{Substr: "rate_limit_error", Reason: driverkit.RateLimit},
 	{Substr: "overloaded_error", Reason: driverkit.Overloaded},
 	{Substr: "usage_limit_reached", Reason: driverkit.RateLimit},
@@ -61,10 +61,10 @@ var transientExtras = []driverkit.Pattern{
 	{Substr: "net/http: request canceled", Reason: driverkit.Network},
 }
 
-// terminalExtras holds markers for non-retryable failures worth naming to the
-// operator. These run through the same self-poison guard as transientExtras, so
+// TerminalPatterns holds markers for non-retryable failures worth naming to the
+// operator. These run through the same self-poison guard as TransientPatterns, so
 // a box editing this string in its own content is not blamed (issues #579, #818).
-var terminalExtras = []driverkit.Pattern{
+var TerminalPatterns = []driverkit.Pattern{
 	// A claude-code build predating the --agents flag rejects it outright
 	// (issue #1552). Naming that instead of the generic TaskFailed bucket tells
 	// the operator to bump claude-code (the Consumer's nixpkgs input), or blank
@@ -77,26 +77,16 @@ var terminalExtras = []driverkit.Pattern{
 // matchMarker classifies one log line, preferring a transient API or network
 // marker over a terminal CLI-usage one.
 func matchMarker(line string) (driverkit.Reason, driverkit.Class, bool) {
-	if r, ok := driverkit.MatchTransient(line, transientExtras); ok {
+	if r, ok := driverkit.MatchTransient(line, TransientPatterns); ok {
 		return r, driverkit.Transient, true
 	}
-	if r, ok := driverkit.MatchExtras(line, terminalExtras); ok {
+	if r, ok := driverkit.MatchExtras(line, TerminalPatterns); ok {
 		return r, driverkit.Terminal, true
 	}
 	return "", "", false
 }
 
-// Classify scans the box log at logPath and reports whether the failure is
-// transient (retryable) or terminal. A marker quoted inside agent-authored
-// content is not attributed as the cause (issue #579, see classifyTurn).
-// A rate-limit marker carrying "resetsAt" sets ResetAt so callers can hold
-// until then; a missing log file is terminal/taskFailed.
-func Classify(logPath string) (driverkit.Classification, error) {
-	return classifyAt(logPath, time.Now())
-}
-
-// classifyAt takes an explicit now so tests can pin the clock instead of
-// leaking the real wall clock into the parsed resetsAt fallback (issue #2443).
+// ClassifyOptions are claude's driverkit.Classify options.
 //
 // FirstMatch: within one line a transient marker beats a terminal one, but
 // across lines a terminal marker seen first latches Terminal; safe for the
@@ -104,10 +94,7 @@ func Classify(logPath string) (driverkit.Classification, error) {
 // oversized line in chunks, so a chunk of an oversized agent-content line
 // fails the whole-chunk JSON parse in classifyTurn and is scanned as normal
 // (known gap, issue #579 review).
-func classifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
-	return driverkit.Classify(logPath, func() driverkit.Decoder { return newDecoderAt(now) }, transientExtras, terminalExtras,
-		driverkit.ClassifyOptions{Oversized: logscan.ChunkOversized, FirstMatch: true})
-}
+var ClassifyOptions = driverkit.ClassifyOptions{Oversized: logscan.ChunkOversized, FirstMatch: true}
 
 // agentContentEvent is the minimal stream-json envelope for telling
 // agent-authored content from a terminating API error event.
@@ -248,26 +235,9 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 	return &candidate
 }
 
-// ResultText returns the final-message text of every stream-json result event
-// in the log at logPath, one value per line: the Go twin of the in-box
-// `jq -r 'select(.type == "result") | .result // empty'`. Unlike
-// the decoder's echo check it keeps an is_error result. Non-string results are
-// dropped; they can never carry an outcome line.
-func ResultText(logPath string) (string, error) {
-	decode := NewDecoder()
-	return driverkit.ResultText(logPath, func(line string) (string, bool) {
-		for _, ev := range decode(line) {
-			if ev.Kind == driverkit.KindResult {
-				return ev.Text, true
-			}
-		}
-		return "", false
-	})
-}
-
 // ResultEvent encodes text as one newline-terminated stream-json result event,
-// the inverse of ResultText: a synthetic final result the orchestrator appends
-// to the stream log (issue #4406).
+// the inverse of the Driver's ResultText: a synthetic final result the
+// orchestrator appends to the stream log (issue #4406).
 func ResultEvent(text string) ([]byte, error) {
 	b, err := json.Marshal(struct {
 		Type   string `json:"type"`
