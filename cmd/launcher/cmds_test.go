@@ -228,9 +228,9 @@ func TestCmdDispatch_RunsCleanupOnEveryExit(t *testing.T) {
 
 // The scripted "q" on stdin quits the real Bubble Tea program at once because
 // the fake launchContext's queue starts empty, so this reaches console.Run
-// rather than stopping at bootstrap routing. See tea.go's "q" case, which
-// sends QuitMsg directly unless launch is non-nil and LiveIssues() is
-// non-empty.
+// rather than stopping at bootstrap routing. See keymap_global.go's "q"
+// binding, whose ModeList action calls tea.go's quitOrConfirmMsg: that returns
+// QuitMsg directly unless launch is non-nil and LiveIssues() is non-empty.
 func TestCmdConsole_RunsCleanupOnEveryExit(t *testing.T) {
 	c := baseConfig()
 	fc := forge.NewFake()
