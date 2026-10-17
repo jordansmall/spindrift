@@ -3,8 +3,6 @@
 package dispatchrecord
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +19,7 @@ import (
 	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
+	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 )
@@ -239,34 +238,37 @@ func ParseLog(path string) (rec Record, provisional bool, err error) {
 	return rec, provisional, err
 }
 
+// isStamp reports whether op is a dispatch_start naming a Record, the only op
+// that can open a log as its stamp.
+func isStamp(op *hostop.SpindriftOp) bool {
+	return op != nil && op.Op == hostop.OpDispatchStart && op.Start != nil && op.Start.RecordID != ""
+}
+
 // ReadStamp returns the log's leading dispatch_start stamp, false when the log is
-// missing, empty, or does not open with one. It decodes only the first event,
-// by the same rule parseLog applies.
-func ReadStamp(path string) (hostop.DispatchStart, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return hostop.DispatchStart{}, false
-	}
-	defer f.Close()
-	br := bufio.NewReader(f)
-	for {
-		line, isPrefix, err := br.ReadLine()
-		if err != nil || isPrefix {
-			// A stamp is a short line; an oversized one is Box output.
-			return hostop.DispatchStart{}, false
-		}
+// missing, empty, or does not open with one. It takes the first line that parses
+// as a typed event, a looser rule than the Driver-decoded events parseLog's loop
+// counts, so parseLog checks the stamp the loop accepts still names the Driver
+// ReadStamp chose. It reads through logscan so an oversized line is skipped
+// exactly as the parse loop skips it.
+func ReadStamp(path string) (stamp hostop.DispatchStart, ok bool) {
+	_ = logscan.ForEachLineUntil(path, logscan.SkipOversized, func(line string) bool {
 		var ev hostop.Event
-		if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type == "" {
-			continue
+		if json.Unmarshal([]byte(strings.TrimSpace(line)), &ev) != nil || ev.Type == "" {
+			return true
 		}
-		if op := ev.SpindriftOp; ev.Type == hostop.TypeSpindriftOp && op != nil && op.Op == hostop.OpDispatchStart && op.Start != nil {
-			if op.Start.RecordID == "" {
-				return hostop.DispatchStart{}, false
-			}
-			return *op.Start, true
+		if op := ev.SpindriftOp; ev.Type == hostop.TypeSpindriftOp && isStamp(op) {
+			stamp, ok = *op.Start, true
 		}
-		return hostop.DispatchStart{}, false
-	}
+		return false
+	})
+	return stamp, ok
+}
+
+// namesDriver reports whether name, with the empty name reading as the default
+// Driver, resolves to d.
+func namesDriver(name string, d driver.Driver) bool {
+	sd, err := driver.New(name)
+	return err == nil && sd.Name() == d.Name()
 }
 
 // parseLog is ParseLog plus the log's segment identity: the stamp's Started, or
@@ -281,7 +283,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	}
 	// The stamp names the Driver whose grammar the rest of the log is in; an
 	// unstamped log predates Driver choice and reads as claude.
-	pre, preOK := ReadStamp(path)
+	pre, _ := ReadStamp(path)
 	d, err := driver.New(pre.Driver)
 	if err != nil {
 		return Record{}, false, time.Time{}, fmt.Errorf("dispatch_start: %w", err)
@@ -341,7 +343,7 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		cur := shells[len(shells)-1]
 		switch op.Op {
 		case hostop.OpDispatchStart:
-			if first && op.Start != nil && op.Start.RecordID != "" {
+			if first && isStamp(op) {
 				stamp = op.Start
 			}
 		case hostop.OpPromptHashes:
@@ -383,8 +385,9 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		return Record{}, false, time.Time{}, ErrEmptyLog
 	}
 	// ReadStamp picked the Driver before the loop ran; a stamp only the loop
-	// accepted was read in a grammar chosen without it.
-	if stamp != nil && (!preOK || pre.RecordID != stamp.RecordID) {
+	// accepted is fine when it names that same Driver, else the log was read in
+	// the wrong grammar.
+	if stamp != nil && !namesDriver(stamp.Driver, d) {
 		return Record{}, false, time.Time{}, errors.New("dispatch_start: stamp not first in log, Driver unknown")
 	}
 	if len(tallies) != len(shells) {

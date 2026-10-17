@@ -131,3 +131,19 @@ func TestForEachLine_VisitsEveryLine(t *testing.T) {
 		}
 	}
 }
+
+func TestForEachLineUntil_StopsWhenFnReturnsFalse(t *testing.T) {
+	path := writeLog(t, "one", "two", "three")
+
+	var got []string
+	err := logscan.ForEachLineUntil(path, logscan.SkipOversized, func(line string) bool {
+		got = append(got, line)
+		return line != "two"
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 2 || got[0] != "one" || got[1] != "two" {
+		t.Fatalf("got %v, want [one two]", got)
+	}
+}

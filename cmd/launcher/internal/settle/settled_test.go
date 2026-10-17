@@ -210,3 +210,26 @@ func TestSettled_EchoesStampHostToken(t *testing.T) {
 		})
 	}
 }
+
+// A real stamp carries the whole knob set and can pass 4 KiB; SettledPrior must
+// still read its Record ID from the head of the log.
+func TestSettledPrior_ReadsStampLongerThanAReadBuffer(t *testing.T) {
+	testutil.InstallPipeReporter(t)
+	path := filepath.Join(t.TempDir(), "issue-7.log")
+	stamp := hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpDispatchStart, Start: &hostop.DispatchStart{
+		RecordID: "work:7@x", Kind: "work", DispatchKey: "7",
+		Knobs: map[string]string{"MERGE_GUARD_PATHS": strings.Repeat("a/b ", 1400)},
+	}})
+	if len(stamp) <= 4096 {
+		t.Fatalf("stamp is %d bytes, want over 4096", len(stamp))
+	}
+	if err := os.WriteFile(path, []byte(stamp), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	SettledPrior(dispatchkey.Issue("7"), path, hostop.DispatchSettled{State: "complete", Reason: "merged"})
+
+	if ops := settledOps(t, path); len(ops) != 1 || ops[0].RecordID != "work:7@x" {
+		t.Fatalf("settled ops = %+v, want one under the stamp's Record ID", ops)
+	}
+}
