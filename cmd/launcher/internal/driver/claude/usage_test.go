@@ -1,24 +1,42 @@
-package claude
+package claude_test
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// breakdownByAgent never sums OutputTokens (issue #3213), so both rows carry 0
-// here; only ExtractUsage patches the MainLoopAgent row from the result event.
-func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
+// totals is the Driver's aggregate over path: the Report's Totals, whether it
+// carried an event span, and whether any result event was found.
+func totals(t *testing.T, path string) (usage.Usage, bool, bool, error) {
+	t.Helper()
+	report, err := newDriver(t).ExtractUsage(path)
+	return report.Totals, report.HasEventSpan, report.Found, err
+}
+
+// agentBreakdown returns the per-agent rows the Driver reports for lines plus a
+// trailing result event: the Report carries nothing without one, and the result
+// event's output_tokens (500) lands on the main-loop row only (issue #3213).
+func agentBreakdown(t *testing.T, lines ...string) []usage.AgentUsage {
+	t.Helper()
+	report, err := newDriver(t).ExtractUsage(claude.WriteLog(t, append(lines, resultLine())...))
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	return report.SummedByAgent
+}
+
+// The per-agent rows sum every column but OutputTokens (issue #3213); the
+// Report patches the MainLoopAgent row from the result event, so only the
+// subagent row carries 0 here.
+func TestExtractUsage_AgentBreakdown_MainLoopVsSubagent(t *testing.T) {
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","model":"claude-opus-4-8","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`
 	scoutLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_scout","model":"claude-haiku-4-5","content":[],"usage":{"input_tokens":20,"output_tokens":10,"cache_read_input_tokens":2,"cache_creation_input_tokens":1}}}`
-	path := WriteLog(t, mainLine, scoutLine)
 
-	got, err := breakdownByAgent(path)
-	if err != nil {
-		t.Fatalf("breakdownByAgent: %v", err)
-	}
+	got := agentBreakdown(t, mainLine, scoutLine)
 	if len(got) != 2 {
 		t.Fatalf("len(got) = %d, want 2: %+v", len(got), got)
 	}
@@ -30,8 +48,8 @@ func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
 	if main.APICalls != 1 {
 		t.Errorf("main.APICalls = %d, want 1", main.APICalls)
 	}
-	if main.UncachedInputTokens != 100 || main.OutputTokens != 0 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
-		t.Errorf("main = %+v, want {100 0 10 5}", main)
+	if main.UncachedInputTokens != 100 || main.OutputTokens != 500 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
+		t.Errorf("main = %+v, want {100 500 10 5}", main)
 	}
 
 	scout := got[1]
@@ -46,28 +64,22 @@ func TestBreakdownByAgent_MainLoopVsSubagent(t *testing.T) {
 	}
 }
 
-// A missing log file degrades to (nil, nil), matching breakdownByModelFile's
-// contract for a pass that crashes before producing any usage events.
-func TestBreakdownByAgent_FileNotFound(t *testing.T) {
-	got, err := breakdownByAgent("/nonexistent/x.log")
+// A missing log file degrades to a zero Report, for a pass that crashes before
+// producing any usage events.
+func TestExtractUsage_AgentBreakdown_FileNotFound(t *testing.T) {
+	report, err := newDriver(t).ExtractUsage("/nonexistent/x.log")
 	if err != nil {
-		t.Fatalf("breakdownByAgent: %v", err)
+		t.Fatalf("ExtractUsage: %v", err)
 	}
-	if got != nil {
-		t.Errorf("got = %+v, want nil", got)
+	if report.Found || report.SummedByAgent != nil {
+		t.Errorf("report = %+v, want zero Report", report)
 	}
 }
 
-// A log with no assistant events at all also degrades to (nil, nil), not a
-// zero-valued but non-nil slice.
-func TestBreakdownByAgent_EmptyLog(t *testing.T) {
-	path := WriteLog(t, "some output", "no assistant event here")
-
-	got, err := breakdownByAgent(path)
-	if err != nil {
-		t.Fatalf("breakdownByAgent: %v", err)
-	}
-	if got != nil {
+// A log with no assistant events at all also degrades to a nil SummedByAgent,
+// not a zero-valued but non-nil slice.
+func TestExtractUsage_AgentBreakdown_EmptyLog(t *testing.T) {
+	if got := agentBreakdown(t, "some output", "no assistant event here"); got != nil {
 		t.Errorf("got = %+v, want nil", got)
 	}
 }
@@ -75,7 +87,7 @@ func TestBreakdownByAgent_EmptyLog(t *testing.T) {
 // usage.MainLoopAgent always sorts first even though it is not the costliest
 // agent here, and among subagents the costliest by TotalTokens sorts first, so
 // a single expensive worker stays identifiable.
-func TestBreakdownByAgent_OrderingCostliestSubagentFirst(t *testing.T) {
+func TestExtractUsage_AgentBreakdown_OrderingCostliestSubagentFirst(t *testing.T) {
 	spawnScout := `{"type":"tool_use","id":"toolu_scout","name":"Task","input":{"subagent_type":"scout"}}`
 	spawnWorker := `{"type":"tool_use","id":"toolu_worker","name":"Task","input":{"subagent_type":"worker"}}`
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[` + spawnScout + `,` + spawnWorker + `],"usage":{"input_tokens":1,"output_tokens":1}}}`
@@ -83,12 +95,8 @@ func TestBreakdownByAgent_OrderingCostliestSubagentFirst(t *testing.T) {
 	// 500, the expensive one.
 	scoutLine := `{"type":"assistant","parent_tool_use_id":"toolu_scout","message":{"id":"msg_scout","content":[],"usage":{"input_tokens":5,"output_tokens":5}}}`
 	workerLine := `{"type":"assistant","parent_tool_use_id":"toolu_worker","message":{"id":"msg_worker","content":[],"usage":{"input_tokens":500,"output_tokens":500}}}`
-	path := WriteLog(t, mainLine, scoutLine, workerLine)
 
-	got, err := breakdownByAgent(path)
-	if err != nil {
-		t.Fatalf("breakdownByAgent: %v", err)
-	}
+	got := agentBreakdown(t, mainLine, scoutLine, workerLine)
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
 	}
@@ -102,18 +110,14 @@ func TestBreakdownByAgent_OrderingCostliestSubagentFirst(t *testing.T) {
 
 // Two lines sharing a message.id (claude-code's one-line-per-content-block
 // re-emit) count once, in APICalls and every summed token field, not once per
-// line. OutputTokens is not among those fields (issue #3213).
-func TestBreakdownByAgent_DedupByMessageID(t *testing.T) {
+// line. OutputTokens comes from the result event, not those lines (issue #3213).
+func TestExtractUsage_AgentBreakdown_DedupByMessageID(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 1"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`,
 		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 2"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}}`,
 	}
-	path := WriteLog(t, lines...)
 
-	got, err := breakdownByAgent(path)
-	if err != nil {
-		t.Fatalf("breakdownByAgent: %v", err)
-	}
+	got := agentBreakdown(t, lines...)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -121,16 +125,16 @@ func TestBreakdownByAgent_DedupByMessageID(t *testing.T) {
 	if main.APICalls != 1 {
 		t.Errorf("main.APICalls = %d, want 1 (deduped by message.id)", main.APICalls)
 	}
-	if main.UncachedInputTokens != 100 || main.OutputTokens != 0 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
-		t.Errorf("main = %+v, want {100 0 10 5} (deduped, not doubled)", main)
+	if main.UncachedInputTokens != 100 || main.OutputTokens != 500 || main.CacheReadInputTokens != 10 || main.CacheCreationInputTokens != 5 {
+		t.Errorf("main = %+v, want {100 500 10 5} (deduped, not doubled)", main)
 	}
 }
 
-func TestSumInLog_FullResultEvent(t *testing.T) {
+func TestExtractUsage_Totals_FullResultEvent(t *testing.T) {
 	line := `{"type":"result","num_turns":7,"total_cost_usd":0.1234,"duration_ms":5000,"duration_api_ms":3000,"usage":{"input_tokens":800,"output_tokens":200,"cache_read_input_tokens":150,"cache_creation_input_tokens":50}}`
-	path := WriteLog(t, "some output", line)
+	path := claude.WriteLog(t, "some output", line)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -163,12 +167,12 @@ func TestSumInLog_FullResultEvent(t *testing.T) {
 	}
 }
 
-func TestSumInLog_SumsAcrossMultipleResultEvents(t *testing.T) {
+func TestExtractUsage_Totals_SumsAcrossMultipleResultEvents(t *testing.T) {
 	first := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":100,"usage":{"input_tokens":10,"output_tokens":5}}`
 	last := `{"type":"result","num_turns":9,"total_cost_usd":0.99,"duration_ms":9000,"usage":{"input_tokens":900,"output_tokens":90}}`
-	path := WriteLog(t, first, "some other output", last)
+	path := claude.WriteLog(t, first, "some other output", last)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -180,12 +184,12 @@ func TestSumInLog_SumsAcrossMultipleResultEvents(t *testing.T) {
 	}
 }
 
-func TestSumInLog_AdditiveFieldsSumAcrossResultEvents(t *testing.T) {
+func TestExtractUsage_Totals_AdditiveFieldsSumAcrossResultEvents(t *testing.T) {
 	first := `{"type":"result","num_turns":2,"total_cost_usd":0.5,"duration_ms":1000,"duration_api_ms":500,"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":5,"cache_creation_input_tokens":3}}`
 	second := `{"type":"result","num_turns":3,"total_cost_usd":0.25,"duration_ms":2000,"duration_api_ms":700,"usage":{"input_tokens":200,"output_tokens":30,"cache_read_input_tokens":6,"cache_creation_input_tokens":4}}`
-	path := WriteLog(t, first, second)
+	path := claude.WriteLog(t, first, second)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -225,13 +229,13 @@ func TestSumInLog_AdditiveFieldsSumAcrossResultEvents(t *testing.T) {
 // When a multi-session log's timestamped lines all land on the same instant
 // the span is 0, but the run's wall time is not, so it floors to the longest
 // individual session's own duration_ms rather than a collapsed 0ms.
-func TestSumInLog_IdenticalTimestampsDoesNotCollapseMultiSessionDuration(t *testing.T) {
+func TestExtractUsage_Totals_IdenticalTimestampsDoesNotCollapseMultiSessionDuration(t *testing.T) {
 	sameInstant := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":500000,"usage":{"input_tokens":20,"output_tokens":10}}`
-	path := WriteLog(t, sameInstant, resultOne, resultTwo)
+	path := claude.WriteLog(t, sameInstant, resultOne, resultTwo)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -246,14 +250,14 @@ func TestSumInLog_IdenticalTimestampsDoesNotCollapseMultiSessionDuration(t *test
 // A timestamp span far narrower than any individual session's own duration_ms
 // (bracketing timestamps that don't cover a session's full wall time) must not
 // report a wall time shorter than the longest session actually ran.
-func TestSumInLog_SpanFlooredToLongestSessionDuration(t *testing.T) {
+func TestExtractUsage_Totals_SpanFlooredToLongestSessionDuration(t *testing.T) {
 	start := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	end := `{"type":"assistant","timestamp":"2026-08-11T19:00:01.000Z"}`
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
-	path := WriteLog(t, start, resultOne, end, resultTwo)
+	path := claude.WriteLog(t, start, resultOne, end, resultTwo)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,7 +269,7 @@ func TestSumInLog_SpanFlooredToLongestSessionDuration(t *testing.T) {
 	}
 }
 
-func TestSumInLog_DurationMsFromTimestampSpanWhenPresent(t *testing.T) {
+func TestExtractUsage_Totals_DurationMsFromTimestampSpanWhenPresent(t *testing.T) {
 	// The two rules disagree on these values: summing the per-session
 	// duration_ms gives 20 minutes, the timestamp span gives 45, so the test
 	// discriminates between them.
@@ -274,9 +278,9 @@ func TestSumInLog_DurationMsFromTimestampSpanWhenPresent(t *testing.T) {
 	userMid := `{"type":"user","timestamp":"2026-08-11T19:20:00.000Z"}`
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
-	path := WriteLog(t, assistantStart, resultOne, userMid, resultTwo, assistantEnd)
+	path := claude.WriteLog(t, assistantStart, resultOne, userMid, resultTwo, assistantEnd)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -294,13 +298,13 @@ func TestSumInLog_DurationMsFromTimestampSpanWhenPresent(t *testing.T) {
 // but the span between them is not the session's wall time: a real process has
 // startup, network and render time they don't bracket. A single-session log
 // reports the result event's own duration_ms unchanged (AC-4).
-func TestSumInLog_SingleSessionDurationMsUnaffectedByTimestamps(t *testing.T) {
+func TestExtractUsage_Totals_SingleSessionDurationMsUnaffectedByTimestamps(t *testing.T) {
 	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:00:05.000Z"}`
 	result := `{"type":"result","num_turns":4,"total_cost_usd":0.1,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
-	path := WriteLog(t, assistantStart, assistantEnd, result)
+	path := claude.WriteLog(t, assistantStart, assistantEnd, result)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -315,12 +319,12 @@ func TestSumInLog_SingleSessionDurationMsUnaffectedByTimestamps(t *testing.T) {
 // A single-session log with exactly one timestamped line (a plausible
 // single-turn session) must not take earliest == latest as the span and report
 // 0s wall time.
-func TestSumInLog_SingleTimestampLineDoesNotCollapseDuration(t *testing.T) {
+func TestExtractUsage_Totals_SingleTimestampLineDoesNotCollapseDuration(t *testing.T) {
 	assistantOnly := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.02,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
-	path := WriteLog(t, assistantOnly, result)
+	path := claude.WriteLog(t, assistantOnly, result)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -335,15 +339,15 @@ func TestSumInLog_SingleTimestampLineDoesNotCollapseDuration(t *testing.T) {
 // A bare line carrying only a top-level "timestamp" and no "type" is not a
 // driver session event (it can be content dumped into a tool_result), so it
 // must not widen the earliest/latest span used for multi-session wall time.
-func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
+func TestExtractUsage_Totals_StrayTimestampLineIgnoredInSpan(t *testing.T) {
 	stray := `{"timestamp":"1970-01-01T00:00:00.000Z"}`
 	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
-	path := WriteLog(t, stray, assistantStart, resultOne, assistantEnd, resultTwo)
+	path := claude.WriteLog(t, stray, assistantStart, resultOne, assistantEnd, resultTwo)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -360,15 +364,15 @@ func TestSumInLog_StrayTimestampLineIgnoredInSpan(t *testing.T) {
 // top-level "type" (unlike the stray-line case above), must still not widen the
 // span, because the decoder's topLevelTimestamp only ever reads the
 // top-level "timestamp" key, never one buried inside message.content.
-func TestSumInLog_NestedTimestampInToolResultIgnoredInSpan(t *testing.T) {
+func TestExtractUsage_Totals_NestedTimestampInToolResultIgnoredInSpan(t *testing.T) {
 	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	resultOne := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	toolResultDump := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"log line: {\"timestamp\":\"1970-01-01T00:00:00.000Z\"}"}]}}`
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
 	resultTwo := `{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":600000,"usage":{"input_tokens":20,"output_tokens":10}}`
-	path := WriteLog(t, assistantStart, resultOne, toolResultDump, assistantEnd, resultTwo)
+	path := claude.WriteLog(t, assistantStart, resultOne, toolResultDump, assistantEnd, resultTwo)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -381,11 +385,11 @@ func TestSumInLog_NestedTimestampInToolResultIgnoredInSpan(t *testing.T) {
 	}
 }
 
-func TestSumInLog_NoCacheFields(t *testing.T) {
+func TestExtractUsage_Totals_NoCacheFields(t *testing.T) {
 	line := `{"type":"result","num_turns":3,"total_cost_usd":0.05,"duration_ms":2000,"usage":{"input_tokens":100,"output_tokens":40}}`
-	path := WriteLog(t, line)
+	path := claude.WriteLog(t, line)
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -400,9 +404,9 @@ func TestSumInLog_NoCacheFields(t *testing.T) {
 	}
 }
 
-func TestSumInLog_NotFound(t *testing.T) {
-	path := WriteLog(t, "some output", "no result event here")
-	_, _, found, err := sumInLog(path)
+func TestExtractUsage_Totals_NotFound(t *testing.T) {
+	path := claude.WriteLog(t, "some output", "no result event here")
+	_, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -411,8 +415,8 @@ func TestSumInLog_NotFound(t *testing.T) {
 	}
 }
 
-func TestSumInLog_FileNotFound(t *testing.T) {
-	_, _, found, err := sumInLog("/nonexistent/path/test.log")
+func TestExtractUsage_Totals_FileNotFound(t *testing.T) {
+	_, _, found, err := totals(t, "/nonexistent/path/test.log")
 	if err != nil {
 		t.Fatalf("unexpected error for missing file: %v", err)
 	}
@@ -421,9 +425,9 @@ func TestSumInLog_FileNotFound(t *testing.T) {
 	}
 }
 
-func TestSumInLog_MalformedJSON(t *testing.T) {
-	path := WriteLog(t, `{"type":"result","num_turns":INVALID}`)
-	_, _, found, err := sumInLog(path)
+func TestExtractUsage_Totals_MalformedJSON(t *testing.T) {
+	path := claude.WriteLog(t, `{"type":"result","num_turns":INVALID}`)
+	_, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error for malformed JSON: %v", err)
 	}
@@ -432,7 +436,7 @@ func TestSumInLog_MalformedJSON(t *testing.T) {
 	}
 }
 
-func TestSumInLog_OversizedLine(t *testing.T) {
+func TestExtractUsage_Totals_OversizedLine(t *testing.T) {
 	const fiveMiB = 5 * 1024 * 1024
 	path := filepath.Join(t.TempDir(), "big.log")
 	f, err := os.Create(path)
@@ -448,7 +452,7 @@ func TestSumInLog_OversizedLine(t *testing.T) {
 	f.WriteString(`{"type":"result","num_turns":2,"total_cost_usd":0.02,"duration_ms":200,"usage":{"input_tokens":20,"output_tokens":10}}` + "\n")
 	f.Close()
 
-	u, _, found, err := sumInLog(path)
+	u, _, found, err := totals(t, path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -464,12 +468,12 @@ func TestSumInLog_OversizedLine(t *testing.T) {
 // the flag every downstream consumer (pass_usage payload, heartbeat caveat)
 // keys off.
 func TestExtractUsage_OutputIsMainLoopOnly(t *testing.T) {
-	path := WriteLog(t,
+	path := claude.WriteLog(t,
 		`{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`,
 		`{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`,
 	)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -478,17 +482,17 @@ func TestExtractUsage_OutputIsMainLoopOnly(t *testing.T) {
 	}
 }
 
-func TestSumInLog_MistypedTotalsResultIsSkipped(t *testing.T) {
+func TestExtractUsage_Totals_MistypedTotalsResultIsSkipped(t *testing.T) {
 	bad := `{"type":"result","result":"x","num_turns":"3","total_cost_usd":9,"duration_ms":999,"usage":{"input_tokens":50}}`
 	good := `{"type":"result","num_turns":2,"total_cost_usd":0.5,"duration_ms":100,"usage":{"input_tokens":7}}`
-	u, _, found, err := sumInLog(WriteLog(t, bad, good))
+	u, _, found, err := totals(t, claude.WriteLog(t, bad, good))
 	if err != nil || !found {
 		t.Fatalf("found=%v err=%v", found, err)
 	}
 	if u.NumTurns != 2 || u.InputTokens != 7 || u.TotalCostUSD != 0.5 || u.DurationMs != 100 {
 		t.Errorf("totals = %+v, want only the well-typed result", u)
 	}
-	if _, _, found, _ := sumInLog(WriteLog(t, bad)); found {
+	if _, _, found, _ := totals(t, claude.WriteLog(t, bad)); found {
 		t.Error("a log with only a mistyped-totals result must be found=false")
 	}
 }

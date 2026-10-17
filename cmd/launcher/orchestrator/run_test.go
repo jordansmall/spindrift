@@ -87,10 +87,10 @@ func streamJSONFinalResult(text string) string {
 }
 
 // streamJSONResultLine appends a stream-json "result" event, the shape
-// ExtractUsage's sumInLog scans for, so a fixture can control passReport's
-// contribution for that pass (issue #2694). RenderTranscript's type switch has
-// no "result" case, so scanPassLog and scanReviewLog never see this line; only
-// ExtractUsage reads it.
+// driverkit.SumTotals scans for, so a fixture can control passReport's
+// contribution for that pass (issue #2694). The transcript reader switches on
+// decoded event kinds, so scanPassLog and scanReviewLog never see this line;
+// ExtractUsage and Driver.ResultText read it.
 func streamJSONResultLine(inputTokens, outputTokens int, costUSD float64) string {
 	return fmt.Sprintf(`{"type":"result","total_cost_usd":%g,"usage":{"input_tokens":%d,"output_tokens":%d}}`+"\n", costUSD, inputTokens, outputTokens)
 }

@@ -1,16 +1,12 @@
-package claude
+package claude_test
 
 import (
 	"path/filepath"
 	"strings"
 	"testing"
-)
 
-// spindriftOutcomeLine is the exact SPINDRIFT_OUTCOME line embedded in
-// testdata/outcome-fixture.jsonl -- shared verbatim with the opencode
-// Driver's own outcome_fixture_test.go so both drivers' fixtures are
-// verified against the identical literal (issue #2261 slice 1).
-const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture"
+	"spindrift.dev/launcher/internal/driver/driverkit"
+)
 
 // TestOutcomeFixtureRenderTranscript verifies that RenderTranscript on the
 // canonical outcome fixture surfaces the SPINDRIFT_OUTCOME line, so the
@@ -19,7 +15,7 @@ const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	got, err := RenderTranscript(path)
+	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript(%s): %v", path, err)
 	}
@@ -33,7 +29,7 @@ func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 func TestOutcomeFixtureExtractUsage(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}

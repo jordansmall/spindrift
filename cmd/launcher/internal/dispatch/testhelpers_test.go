@@ -91,11 +91,11 @@ func (d fakeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Write
 }
 
 func (d fakeDriver) ExtractUsage(logPath string) (usage.Report, error) {
-	return driverclaude.ExtractUsage(logPath)
+	return claudeDriver().ExtractUsage(logPath)
 }
 
 func (d fakeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
-	return driverclaude.RenderTranscriptWithRole(logPath, opts.TopLevelRole)
+	return claudeDriver().RenderTranscript(logPath, opts)
 }
 
 // ResolveExit trusts the passed exitCode unchanged, matching claudeDriver
@@ -105,7 +105,7 @@ func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 }
 
 func (d fakeDriver) ResultText(logPath string) (string, error) {
-	return driverkit.ResultText(logPath, driverclaude.NewDecoder)
+	return claudeDriver().ResultText(logPath)
 }
 
 func (d fakeDriver) ResultEvent(text string) ([]byte, error) {
@@ -126,3 +126,13 @@ func (d Disposition) ok() bool { return d.kind == dispositionSucceeded }
 
 // skipped reports whether d is the Skipped disposition. Test-only.
 func (d Disposition) skipped() bool { return d.kind == dispositionSkipped }
+
+// claudeDriver is the registered claude Driver, whose usage and transcript
+// readers fakeDriver reuses.
+func claudeDriver() driver.Driver {
+	d, err := driver.New("claude")
+	if err != nil {
+		panic(err)
+	}
+	return d
+}

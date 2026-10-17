@@ -1,24 +1,33 @@
-package claude
+package claude_test
 
 import (
 	"path/filepath"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// TestBreakdownByModel_Fixture pins the per-call SUM rule: each assistant event
+// modelBreakdownAt returns the per-model rows of the Driver's Report for the log
+// at path; the Report carries none unless the log has a result event.
+func modelBreakdownAt(t *testing.T, path string) []usage.ModelUsage {
+	t.Helper()
+	report, err := newDriver(t).ExtractUsage(path)
+	if err != nil {
+		t.Fatalf("ExtractUsage: %v", err)
+	}
+	return report.SummedByModel
+}
+
+// TestExtractUsage_ModelBreakdown_Fixture pins the per-call SUM rule: each assistant event
 // carries one call's usage, never a running total, so the breakdown sums over
 // DISTINCT message.ids across roles and turns. On #2078 the result header
 // snapshot came in ~9x below the per-role sum, which is what falsified the
 // cumulative reading. #2080 confirmed the fixture's shape.
-func TestBreakdownByModel_Fixture(t *testing.T) {
+func TestExtractUsage_ModelBreakdown_Fixture(t *testing.T) {
 	path := filepath.Join("testdata", "run-usage-sample.jsonl")
 
-	got, err := breakdownByModel(path)
-	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
-	}
+	got := modelBreakdownAt(t, path)
 
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
@@ -92,16 +101,13 @@ func TestBreakdownByModel_Fixture(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_UnknownModel confirms an assistant message with no
+// TestExtractUsage_ModelBreakdown_UnknownModel confirms an assistant message with no
 // model field buckets under "unknown" rather than being dropped or panicking.
-func TestBreakdownByModel_UnknownModel(t *testing.T) {
+func TestExtractUsage_ModelBreakdown_UnknownModel(t *testing.T) {
 	line := `{"type":"assistant","message":{"content":[],"usage":{"input_tokens":5,"output_tokens":2}}}`
-	path := WriteLog(t, line)
+	path := claude.WriteLog(t, line, resultLine())
 
-	got, err := breakdownByModel(path)
-	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
-	}
+	got := modelBreakdownAt(t, path)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -113,18 +119,15 @@ func TestBreakdownByModel_UnknownModel(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_CacheCreationCollapsed confirms a pre-TTL-split
+// TestExtractUsage_ModelBreakdown_CacheCreationCollapsed confirms a pre-TTL-split
 // stream-json log, where the nested cache_creation object is absent but the
 // flat cache_creation_input_tokens total is set, attributes that collapsed
 // total to the 5-minute bucket rather than dropping it.
-func TestBreakdownByModel_CacheCreationCollapsed(t *testing.T) {
+func TestExtractUsage_ModelBreakdown_CacheCreationCollapsed(t *testing.T) {
 	line := `{"type":"assistant","message":{"model":"claude-opus-4","content":[],"usage":{"input_tokens":5,"output_tokens":2,"cache_creation_input_tokens":123}}}`
-	path := WriteLog(t, line)
+	path := claude.WriteLog(t, line, resultLine())
 
-	got, err := breakdownByModel(path)
-	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
-	}
+	got := modelBreakdownAt(t, path)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -136,23 +139,20 @@ func TestBreakdownByModel_CacheCreationCollapsed(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_DedupByMessageID pins the rule that claude-code
+// TestExtractUsage_ModelBreakdown_DedupByMessageID pins the rule that claude-code
 // re-emitting a multi-block assistant message once per content block, each line
 // carrying the same message.id and identical usage, counts once. The fixture
 // repeats "msg_a" and adds a distinct "msg_b", so the wanted totals are the
 // deduped sum, not the inflated sum over all three lines.
-func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
+func TestExtractUsage_ModelBreakdown_DedupByMessageID(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 1"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":100}}}}`,
 		`{"type":"assistant","message":{"id":"msg_a","model":"claude-opus-4-8","content":[{"type":"text","text":"block 2"}],"usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":300,"cache_creation":{"ephemeral_5m_input_tokens":200,"ephemeral_1h_input_tokens":100}}}}`,
 		`{"type":"assistant","message":{"id":"msg_b","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":40,"output_tokens":20,"cache_read_input_tokens":2000,"cache_creation_input_tokens":100,"cache_creation":{"ephemeral_5m_input_tokens":60,"ephemeral_1h_input_tokens":40}}}}`,
 	}
-	path := WriteLog(t, lines...)
+	path := claude.WriteLog(t, append(lines, resultLine())...)
 
-	got, err := breakdownByModel(path)
-	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
-	}
+	got := modelBreakdownAt(t, path)
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1: %+v", len(got), got)
 	}
@@ -178,23 +178,20 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_TwoIdsSameFamily confirms two distinct model ids in
+// TestExtractUsage_ModelBreakdown_TwoIdsSameFamily confirms two distinct model ids in
 // the same ModelFamily (opus) yield two distinct rows, each labeled with its
 // exact id rather than being collapsed into one "opus" row. ModelFamily is
 // used for ordering only, so within the opus family the two rows are
 // ordered by raw id ("claude-opus-4-7" sorts before "claude-opus-4-8").
-func TestBreakdownByModel_TwoIdsSameFamily(t *testing.T) {
+func TestExtractUsage_ModelBreakdown_TwoIdsSameFamily(t *testing.T) {
 	lines := []string{
 		`{"type":"assistant","message":{"id":"msg_1","model":"claude-opus-4-8","content":[],"usage":{"input_tokens":100,"output_tokens":50}}}`,
 		`{"type":"assistant","message":{"id":"msg_2","model":"claude-opus-4-7","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`,
 		`{"type":"assistant","message":{"id":"msg_3","model":"claude-sonnet-5","content":[],"usage":{"input_tokens":1,"output_tokens":1}}}`,
 	}
-	path := WriteLog(t, lines...)
+	path := claude.WriteLog(t, append(lines, resultLine())...)
 
-	got, err := breakdownByModel(path)
-	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
-	}
+	got := modelBreakdownAt(t, path)
 	if len(got) != 3 {
 		t.Fatalf("len(got) = %d, want 3: %+v", len(got), got)
 	}
@@ -207,13 +204,10 @@ func TestBreakdownByModel_TwoIdsSameFamily(t *testing.T) {
 	}
 }
 
-// TestBreakdownByModel_FileNotFound confirms a missing log file degrades to
-// (nil, nil), matching lastInLog's contract.
-func TestBreakdownByModel_FileNotFound(t *testing.T) {
-	got, err := breakdownByModel("/nonexistent/x.log")
-	if err != nil {
-		t.Fatalf("breakdownByModel: %v", err)
-	}
+// TestExtractUsage_ModelBreakdown_FileNotFound confirms a missing log file degrades to
+// a nil breakdown, matching the zero Report of a pass with no usage events.
+func TestExtractUsage_ModelBreakdown_FileNotFound(t *testing.T) {
+	got := modelBreakdownAt(t, "/nonexistent/x.log")
 	if got != nil {
 		t.Errorf("got = %+v, want nil", got)
 	}

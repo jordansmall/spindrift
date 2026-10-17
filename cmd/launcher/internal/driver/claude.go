@@ -19,16 +19,50 @@ func (claudeDriver) ClassifyTransient(logPath string) (Classification, error) {
 	return driverkit.Classify(logPath, claude.NewDecoder, claude.TransientPatterns, claude.TerminalPatterns, claude.ClassifyOptions)
 }
 
+// NewHeartbeatWriter attributes top-level messages to opts.TopLevelRole, for a
+// pass the orchestrator owns as something other than implementation (issue
+// #2092); an empty role keeps the claude.ImplementorRole default.
 func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
-	return claude.NewWithTopLevelRole(raw, issue, out, opts.TopLevelRole).OnModel(opts.OnModel)
+	role := opts.TopLevelRole
+	if role == "" {
+		role = claude.ImplementorRole
+	}
+	return driverkit.NewHeartbeatWriter(raw, issue, out, claude.NewDecoder, role).Track(claude.HeartbeatTracking).OnModel(opts.OnModel)
+}
+
+// claudeUsageByModel and claudeUsageByAgent indirect so tests can simulate an
+// I/O error without a real filesystem race against the usage aggregation scan.
+//
+// The per-model sum runs over DISTINCT message.id (claude-code re-emits a
+// multi-block message once per block with identical usage) and ignores the
+// result event's own usage header, which covers one call only (issue #2078).
+// Every agent row's OutputTokens stays 0 for ExtractUsage to patch from the
+// result events.
+var claudeUsageByModel = func(p string) ([]usage.ModelUsage, error) {
+	models, err := driverkit.UsageByModel(p, claude.NewDecoder)
+	if err != nil {
+		return nil, err
+	}
+	claude.SortModelUsage(models)
+	return models, nil
+}
+
+var claudeUsageByAgent = func(p string) ([]usage.AgentUsage, error) {
+	return driverkit.UsageByAgent(p, claude.NewDecoder, driverkit.SessionTotals)
 }
 
 func (claudeDriver) ExtractUsage(logPath string) (usage.Report, error) {
-	return claude.ExtractUsage(logPath)
+	return driverkit.ExtractUsage(logPath, claude.NewDecoder, driverkit.SessionTotals, claudeUsageByModel, claudeUsageByAgent)
 }
 
+// RenderTranscript ends a non-empty transcript with a newline, which the other
+// Drivers' transcripts do not.
 func (claudeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
-	return claude.RenderTranscriptWithRole(logPath, opts.TopLevelRole)
+	out, err := driverkit.RenderTranscript(logPath, claude.NewDecoder, opts.TopLevelRole)
+	if err != nil || out == "" {
+		return "", err
+	}
+	return out + "\n", nil
 }
 
 // ResolveExit returns the caller's exitCode unchanged: claude's stream-json

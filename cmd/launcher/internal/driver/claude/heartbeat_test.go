@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,18 +17,26 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-func newWriter(issue string, status *bytes.Buffer) *claude.Writer {
-	return claude.New(&bytes.Buffer{}, issue, status)
+// newHeartbeat is the claude Driver's heartbeat writer over raw, reporting to out.
+func newHeartbeat(t *testing.T, raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
+	t.Helper()
+	return newDriver(t).NewHeartbeatWriter(raw, issue, out, opts)
 }
 
-func newWriterRaw(raw *bytes.Buffer, issue string, status *bytes.Buffer) *claude.Writer {
-	return claude.New(raw, issue, status)
+func newWriter(t *testing.T, issue string, status *bytes.Buffer) io.Writer {
+	t.Helper()
+	return newHeartbeat(t, &bytes.Buffer{}, issue, status, driverkit.RenderOptions{})
+}
+
+func newWriterRaw(t *testing.T, raw *bytes.Buffer, issue string, status *bytes.Buffer) io.Writer {
+	t.Helper()
+	return newHeartbeat(t, raw, issue, status, driverkit.RenderOptions{})
 }
 
 func TestWriterPassesRawBytesUnchanged(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
-	w := newWriterRaw(&raw, "42", &status)
+	w := newWriterRaw(t, &raw, "42", &status)
 
 	input := `{"type":"system","session_id":"s1"}` + "\n"
 	if _, err := fmt.Fprint(w, input); err != nil {
@@ -43,7 +52,7 @@ func TestWriterPassesRawBytesUnchanged(t *testing.T) {
 func TestWriterPassesMultiChunkRaw(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
-	w := newWriterRaw(&raw, "1", &status)
+	w := newWriterRaw(t, &raw, "1", &status)
 
 	p1 := `{"type":"system"`
 	p2 := `}` + "\n"
@@ -58,7 +67,7 @@ func TestWriterPassesMultiChunkRaw(t *testing.T) {
 
 func TestWriterEmitsHeartbeatOnToolChange(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("42", &status)
+	w := newWriter(t, "42", &status)
 
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
 	resultEv := `{"type":"result","num_turns":1}` + "\n"
@@ -76,7 +85,7 @@ func TestWriterEmitsHeartbeatOnToolChange(t *testing.T) {
 
 func TestWriterToolCountsShowKind(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("7", &status)
+	w := newWriter(t, "7", &status)
 
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go","new_string":"x"}}]}}` + "\n"
 	resultEv := `{"type":"result","num_turns":1}` + "\n"
@@ -94,7 +103,7 @@ func TestWriterToolCountsShowKind(t *testing.T) {
 
 func TestWriterToolCountSurvivesNonStringThinkingKey(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("7", &status)
+	w := newWriter(t, "7", &status)
 
 	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"},"thinking":0}]}}`+"\n")
 	fmt.Fprint(w, `{"type":"result","num_turns":1}`+"\n")
@@ -106,7 +115,7 @@ func TestWriterToolCountSurvivesNonStringThinkingKey(t *testing.T) {
 
 func TestWriterEmitsOnResultEvent(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("9", &status)
+	w := newWriter(t, "9", &status)
 
 	event := `{"type":"result","num_turns":7,"total_cost_usd":0.01,"duration_ms":5000}` + "\n"
 	fmt.Fprint(w, event)
@@ -122,7 +131,7 @@ func TestWriterEmitsOnResultEvent(t *testing.T) {
 
 // New takes three arguments: the time-based throttle fallback was removed.
 func TestNewNoThrottleArg(t *testing.T) {
-	w := claude.New(&bytes.Buffer{}, "1", &bytes.Buffer{})
+	w := newHeartbeat(t, &bytes.Buffer{}, "1", &bytes.Buffer{}, driverkit.RenderOptions{})
 	if w == nil {
 		t.Fatal("New returned nil")
 	}
@@ -130,7 +139,7 @@ func TestNewNoThrottleArg(t *testing.T) {
 
 func TestWriterBareResultEmitsNothing(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("42", &status)
+	w := newWriter(t, "42", &status)
 
 	event := `{"type":"result"}` + "\n"
 	fmt.Fprint(w, event)
@@ -142,7 +151,7 @@ func TestWriterBareResultEmitsNothing(t *testing.T) {
 
 func TestWriterResultWithoutTurnsFlushesCountsOnly(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("42", &status)
+	w := newWriter(t, "42", &status)
 
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	resultEv := `{"type":"result"}` + "\n"
@@ -165,7 +174,7 @@ func TestWriterResultWithMistypedOtherTotalsStillPrintsTurns(t *testing.T) {
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	for _, field := range []string{`"total_cost_usd":"x"`, `"duration_ms":"x"`, `"usage":"x"`} {
 		var status bytes.Buffer
-		w := newWriter("42", &status)
+		w := newWriter(t, "42", &status)
 		fmt.Fprint(w, toolEv)
 		fmt.Fprint(w, `{"type":"result","num_turns":3,`+field+`}`+"\n")
 
@@ -178,7 +187,7 @@ func TestWriterResultWithMistypedOtherTotalsStillPrintsTurns(t *testing.T) {
 
 func TestWriterResultWithMistypedTurnsPrintsNothing(t *testing.T) {
 	var status bytes.Buffer
-	w := newWriter("42", &status)
+	w := newWriter(t, "42", &status)
 	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}`+"\n")
 	fmt.Fprint(w, `{"type":"result","num_turns":"3"}`+"\n")
 
@@ -190,7 +199,7 @@ func TestWriterResultWithMistypedTurnsPrintsNothing(t *testing.T) {
 func TestWriterTolerateMalformedJSON(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
-	w := newWriterRaw(&raw, "3", &status)
+	w := newWriterRaw(t, &raw, "3", &status)
 
 	lines := "not json at all\n{broken: json}\n\x00\x01\x02\n"
 	fmt.Fprint(w, lines)
@@ -202,7 +211,7 @@ func TestWriterTolerateMalformedJSON(t *testing.T) {
 
 func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "5", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "5", &status, driverkit.RenderOptions{})
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}` + "\n"
@@ -224,7 +233,7 @@ func TestWriterThrottlesSameToolRepeat(t *testing.T) {
 
 func TestWriterEmitsOnNewTool(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "11", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "11", &status, driverkit.RenderOptions{})
 
 	ev1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	ev2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"b.go"}}]}}` + "\n"
@@ -245,7 +254,7 @@ func TestWriterEmitsOnNewTool(t *testing.T) {
 
 func TestWriterNarrationIncludesPhase(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "42", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "42", &status, driverkit.RenderOptions{})
 
 	// The phase tag comes from the most recent tool, so a tool event must come first.
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
@@ -269,7 +278,7 @@ func TestWriterNarrationIncludesPhase(t *testing.T) {
 func narrationLine(t *testing.T, issue, text string) string {
 	t.Helper()
 	var status bytes.Buffer
-	w := newWriter(issue, &status)
+	w := newWriter(t, issue, &status)
 	b, err := json.Marshal(text)
 	if err != nil {
 		t.Fatal(err)
@@ -331,7 +340,7 @@ func TestWriterNarrationCapIsRuneSafe(t *testing.T) {
 func TestWriterSubagentNarrationDropped(t *testing.T) {
 	var raw bytes.Buffer
 	var status bytes.Buffer
-	w := claude.New(&raw, "55", &status)
+	w := newHeartbeat(t, &raw, "55", &status, driverkit.RenderOptions{})
 
 	event := `{"type":"assistant","parent_tool_use_id":"tu_abc","message":{"content":[{"type":"text","text":"subagent says hello"}]}}` + "\n"
 	fmt.Fprint(w, event)
@@ -346,7 +355,7 @@ func TestWriterSubagentNarrationDropped(t *testing.T) {
 
 func TestWriterNarrationBeforeTool(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "42", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "42", &status, driverkit.RenderOptions{})
 
 	// A narration starts the group and the next narration flushes its counts.
 	narEv1 := `{"type":"assistant","message":{"content":[{"type":"text","text":"I will edit the file."}]}}` + "\n"
@@ -374,7 +383,7 @@ func TestWriterNarrationBeforeTool(t *testing.T) {
 func TestWriterNarrationEmptySkipped(t *testing.T) {
 	for _, txt := range []string{"", "   ", "\t\n"} {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "8", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "8", &status, driverkit.RenderOptions{})
 		// JSON-encode the text value to handle whitespace safely.
 		import_txt := fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"text","text":%q}]}}`, txt)
 		fmt.Fprintln(w, import_txt)
@@ -422,7 +431,7 @@ func TestFormatHeartbeatSanitizesRole(t *testing.T) {
 
 func TestWriterHeartbeatIncludesPhase(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "42", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "42", &status, driverkit.RenderOptions{})
 
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"main.go"}}]}}` + "\n"
 	resultEv := `{"type":"result","num_turns":1}` + "\n"
@@ -437,7 +446,7 @@ func TestWriterHeartbeatIncludesPhase(t *testing.T) {
 
 func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "11", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "11", &status, driverkit.RenderOptions{})
 
 	ev1 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	ev2 := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit","input":{"file_path":"b.go"}}]}}` + "\n"
@@ -458,7 +467,7 @@ func TestWriterPhaseTransitionEmitsLine(t *testing.T) {
 
 func TestWriterNarrationText(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "8", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "8", &status, driverkit.RenderOptions{})
 
 	event := `{"type":"assistant","message":{"content":[{"type":"text","text":"hello"}]}}` + "\n"
 	fmt.Fprint(w, event)
@@ -474,7 +483,7 @@ func TestWriterNarrationText(t *testing.T) {
 
 func TestWriterNarrationSurvivesNonStringThinkingKey(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "8", &status)
+	w := newWriter(t, "8", &status)
 
 	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"text","text":"hello","thinking":0}]}}`+"\n")
 
@@ -520,7 +529,7 @@ func TestFormatCountLineSanitizesRole(t *testing.T) {
 
 func TestWriterCountsResetOnNarration(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "99", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "99", &status, driverkit.RenderOptions{})
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"First window."}]}}` + "\n"
@@ -555,7 +564,7 @@ func TestWriterCountsResetOnNarration(t *testing.T) {
 
 func TestWriterCountsDistinctKinds(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "42", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "42", &status, driverkit.RenderOptions{})
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	grepEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","input":{"query":"foo"}}]}}` + "\n"
@@ -598,7 +607,7 @@ func TestWriterSwitchHeader(t *testing.T) {
 
 	t.Run("implementor_only_single_header", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "284", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "284", &status, driverkit.RenderOptions{})
 		fmt.Fprint(w, implNar("Now I have a clear understanding."))
 
 		out := status.String()
@@ -616,7 +625,7 @@ func TestWriterSwitchHeader(t *testing.T) {
 
 	t.Run("implementor_scout_implementor_sequence", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "284", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "284", &status, driverkit.RenderOptions{})
 
 		fmt.Fprint(w, implTool("Read", "r0"))
 		fmt.Fprint(w, implTask("tu_s1", "scout"))
@@ -639,7 +648,7 @@ func TestWriterSwitchHeader(t *testing.T) {
 
 	t.Run("same_role_reinvoked_no_duplicate_header", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "1", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "1", &status, driverkit.RenderOptions{})
 
 		// The implementor narration between the two scout stints flushes the
 		// first stint's counts, so both stints produce a header.
@@ -658,7 +667,7 @@ func TestWriterSwitchHeader(t *testing.T) {
 
 	t.Run("unknown_parent_fallback_subagent", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "5", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "5", &status, driverkit.RenderOptions{})
 
 		unknown := `{"type":"assistant","parent_tool_use_id":"unknown_id","message":{"content":[{"type":"tool_use","name":"Read","id":"rx","input":{}}]}}` + "\n"
 		fmt.Fprint(w, unknown)
@@ -673,7 +682,7 @@ func TestWriterSwitchHeader(t *testing.T) {
 
 	t.Run("suppressed_empty_headers", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "9", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "9", &status, driverkit.RenderOptions{})
 
 		// The scout sends only narration, which the Writer drops, so the stint
 		// produces no counts and must get no header of its own.
@@ -696,7 +705,7 @@ func TestWriterSwitchHeader(t *testing.T) {
 // generic "subagent" label (#2078).
 func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "284", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "284", &status, driverkit.RenderOptions{})
 
 	implTool := func(name, id string) string {
 		return `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"` + name + `","id":"` + id + `","input":{}}]}}` + "\n"
@@ -731,7 +740,7 @@ func TestWriterSwitchHeader_AgentToolName(t *testing.T) {
 // header, not the generic "subagent" fallback (issue #2079).
 func TestWriterSwitchHeader_NestedSubagent(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "2079", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "2079", &status, driverkit.RenderOptions{})
 
 	implAgent := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Agent","id":"toolu_A","input":{"subagent_type":"researcher"}}]}}` + "\n"
 	// This one event carries both parent_tool_use_id "toolu_A", making A the
@@ -762,7 +771,7 @@ func TestWriterSwitchHeader_NestedSubagent(t *testing.T) {
 // which was never set (#732).
 func TestWriterResultLineNamesActingRole(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "9", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "9", &status, driverkit.RenderOptions{})
 
 	implTask := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Task","id":"tu_s1","input":{"subagent_type":"scout"}}]}}` + "\n"
 	subRead := `{"type":"assistant","parent_tool_use_id":"tu_s1","message":{"content":[{"type":"tool_use","name":"Read","id":"r1","input":{}}]}}` + "\n"
@@ -825,7 +834,7 @@ func TestWriterModelHeader(t *testing.T) {
 
 	t.Run("model_in_header", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "1", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "1", &status, driverkit.RenderOptions{})
 		fmt.Fprint(w, implNarWithModel("Planning.", "claude-opus-4-8"))
 		out := status.String()
 		if !strings.Contains(out, rule+" implementor \xc2\xb7 opus ") {
@@ -835,7 +844,7 @@ func TestWriterModelHeader(t *testing.T) {
 
 	t.Run("missing_model_role_only", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "2", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "2", &status, driverkit.RenderOptions{})
 		fmt.Fprint(w, implNarWithModel("Planning.", ""))
 		out := status.String()
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -853,7 +862,7 @@ func TestWriterModelHeader(t *testing.T) {
 
 	t.Run("same_role_model_switch_new_header", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "3", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "3", &status, driverkit.RenderOptions{})
 		fmt.Fprint(w, implToolWithModel("Read", "r1", "claude-sonnet-4-6"))
 		fmt.Fprint(w, implNarWithModel("Now switching.", "claude-opus-4-8"))
 		out := status.String()
@@ -872,7 +881,7 @@ func TestWriterModelHeader(t *testing.T) {
 
 	t.Run("no_header_spam_same_role_model", func(t *testing.T) {
 		var status bytes.Buffer
-		w := claude.New(&bytes.Buffer{}, "4", &status)
+		w := newHeartbeat(t, &bytes.Buffer{}, "4", &status, driverkit.RenderOptions{})
 		fmt.Fprint(w, implNarWithModel("First.", "claude-sonnet-4-6"))
 		fmt.Fprint(w, implNarWithModel("Second.", "claude-sonnet-4-6"))
 		out := status.String()
@@ -910,7 +919,7 @@ func TestFormatRoleHeaderSanitizesRole(t *testing.T) {
 
 func TestWriterCountLineOnNarration(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "228", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "228", &status, driverkit.RenderOptions{})
 
 	readEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Exploring."}]}}` + "\n"
@@ -933,7 +942,7 @@ func TestWriterCountLineOnNarration(t *testing.T) {
 // into a status row, interleaved with ordinary narration (issue #2027).
 func TestWriterEmitsSpindriftOpVerdict(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "7", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "7", &status, driverkit.RenderOptions{})
 
 	opEv := `{"type":"spindrift_op","spindrift_op":{"op":"verdict","verdict":"BLOCK"}}` + "\n"
 	fmt.Fprint(w, opEv)
@@ -961,7 +970,7 @@ func TestEncodeSpindriftOpFeedsWriter(t *testing.T) {
 	}
 
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "3", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "3", &status, driverkit.RenderOptions{})
 	fmt.Fprint(w, line)
 
 	if !strings.Contains(status.String(), "pass 3 started") {
@@ -974,7 +983,7 @@ func TestEncodeSpindriftOpFeedsWriter(t *testing.T) {
 // line (issue #2027 AC).
 func TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines(t *testing.T) {
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "9", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "9", &status, driverkit.RenderOptions{})
 
 	fmt.Fprint(w, `{"type":"system","session_id":"s1"}`+"\n")
 	fmt.Fprint(w, "not json at all\n")
@@ -984,13 +993,13 @@ func TestWriterIgnoresUnrecognizedEventTypesAndNonJSONLines(t *testing.T) {
 	}
 }
 
-// A Writer built via NewWithTopLevelRole attributes a top-level assistant
+// A heartbeat built with a TopLevelRole attributes a top-level assistant
 // event, one with no parent_tool_use_id, to the given topLevelRole: both the
 // switch header and the buffered count line bucket under it (issue #2092).
 func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
-	w := claude.NewWithTopLevelRole(&bytes.Buffer{}, "2092", &status, "reviewer")
+	w := newHeartbeat(t, &bytes.Buffer{}, "2092", &status, driverkit.RenderOptions{TopLevelRole: "reviewer"})
 
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
@@ -1017,7 +1026,7 @@ func TestWriterTopLevelRoleAppliesToTopLevelMessage(t *testing.T) {
 func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "2382", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "2382", &status, driverkit.RenderOptions{})
 
 	passStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
 	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
@@ -1049,7 +1058,7 @@ func TestWriterPassStartSwitchesActiveTopLevelRole(t *testing.T) {
 func TestWriterPassStartSwitchesBackToImplementorOnFix(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "2382", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "2382", &status, driverkit.RenderOptions{})
 
 	reviewStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
 	reviewNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
@@ -1080,7 +1089,7 @@ func TestWriterPassStartSwitchesBackToImplementorOnFix(t *testing.T) {
 func TestWriterPassStartSwitchesBackToImplementorOnLand(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "2654", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "2654", &status, driverkit.RenderOptions{})
 
 	reviewStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n"
 	reviewNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Reviewing the change."}]}}` + "\n"
@@ -1112,7 +1121,7 @@ func TestWriterPassStartSwitchesBackToImplementorOnLand(t *testing.T) {
 func TestWriterPassStartSwitchesToReviewerOnDeltaReviewAfterLand(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "4425", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "4425", &status, driverkit.RenderOptions{})
 
 	landStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":3,"role":"land"}}` + "\n"
 	landNar := `{"type":"assistant","message":{"content":[{"type":"text","text":"Landing the change."}]}}` + "\n"
@@ -1147,7 +1156,7 @@ func TestWriterPassStartSwitchesToReviewerOnDeltaReviewAfterLand(t *testing.T) {
 func TestWriterPassStartEmptyRoleDoesNotChangeActiveRole(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
 	var status bytes.Buffer
-	w := claude.New(&bytes.Buffer{}, "2382", &status)
+	w := newHeartbeat(t, &bytes.Buffer{}, "2382", &status, driverkit.RenderOptions{})
 
 	passStart := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1}}` + "\n"
 	narEv := `{"type":"assistant","message":{"content":[{"type":"text","text":"Implementing the change."}]}}` + "\n"
@@ -1266,9 +1275,9 @@ func TestEncodeSpindriftOpSignalRoundTrip(t *testing.T) {
 func TestWriterOnModelFiresOnPairChangeOnly(t *testing.T) {
 	type call struct{ model, role string }
 	var got []call
-	w := claude.New(&bytes.Buffer{}, "4744", &bytes.Buffer{}).OnModel(func(model, role string) {
+	w := newHeartbeat(t, &bytes.Buffer{}, "4744", &bytes.Buffer{}, driverkit.RenderOptions{OnModel: func(model, role string) {
 		got = append(got, call{model, role})
-	})
+	}})
 
 	top := func(model, text string) string {
 		return `{"type":"assistant","message":{"model":"` + model + `","content":[{"type":"text","text":"` + text + `"}]}}` + "\n"
@@ -1307,15 +1316,15 @@ func TestWriterOnModelFiresOnPairChangeOnly(t *testing.T) {
 func TestWriterObjectErrorAssistantLineKeepsHeartbeat(t *testing.T) {
 	var status bytes.Buffer
 	var models []string
-	w := claude.New(&bytes.Buffer{}, "4744", &status).OnModel(func(model, _ string) {
+	w := newHeartbeat(t, &bytes.Buffer{}, "4744", &status, driverkit.RenderOptions{OnModel: func(model, _ string) {
 		models = append(models, model)
-	})
+	}})
 
 	fmt.Fprint(w, `{"type":"assistant","error":{"x":1},"message":{"model":"claude-opus-4","content":[{"type":"text","text":"reading it"},{"type":"tool_use","name":"Read","id":"r","input":{"file_path":"a.go"}}]}}`+"\n")
 	fmt.Fprint(w, `{"type":"result","num_turns":1}`+"\n")
 
 	out := status.String()
-	for _, want := range []string{"#4744", claude.ImplementorRole, "reading it", "1 read"} {
+	for _, want := range []string{"#4744", driverkit.ImplementorRole, "reading it", "1 read"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q: %q", want, out)
 		}
