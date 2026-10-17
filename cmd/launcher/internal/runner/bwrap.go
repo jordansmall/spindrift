@@ -1175,6 +1175,10 @@ func (a *bwrapAdapter) beginProvisioning(name string) (handOff func(proc *os.Pro
 	return handOff, release
 }
 
+// RemoveHostTree removes path directly: bwrap maps the Box uid to the invoking
+// user, so nothing the Box wrote is out of the user's reach.
+func (a *bwrapAdapter) RemoveHostTree(path string) error { return os.RemoveAll(path) }
+
 // Kill sends SIGKILL to name's tracked live process, if Run has one under that
 // name. A miss (already exited, or never launched) is not an error: Terminate's
 // reap step is best-effort by design.
@@ -1702,6 +1706,9 @@ func (a *bwrapBuildAdapter) realize(label, drv string) error {
 
 // IsReady is a no-op for the build adapter.
 func (a *bwrapBuildAdapter) IsReady() error { return nil }
+
+// RemoveHostTree removes path directly; the build adapter runs no Box.
+func (a *bwrapBuildAdapter) RemoveHostTree(path string) error { return os.RemoveAll(path) }
 
 // Run is not supported by the build adapter.
 func (a *bwrapBuildAdapter) Run(_ Box) error {

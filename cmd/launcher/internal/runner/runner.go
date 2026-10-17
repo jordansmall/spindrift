@@ -156,6 +156,12 @@ type Runner interface {
 	// not (ADR 0024, issue #649). A sandbox already gone is not an error.
 	Kill(name string) error
 
+	// RemoveHostTree removes a host directory tree a Box wrote into through a
+	// writable mount, including entries owned by a remapped Box uid that the
+	// invoking user cannot remove itself (issue #5387). A path already gone is
+	// not an error.
+	RemoveHostTree(path string) error
+
 	// IsRunning reports whether a sandbox exists here that another launcher
 	// invocation may own: it is not terminal, and — under OCI — either
 	// "running" or still young enough that a sibling launcher could be

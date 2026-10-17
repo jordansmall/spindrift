@@ -3095,3 +3095,61 @@ func TestEnsureReady_RealNixError_SurfacesStderrWithoutContainerRun(t *testing.T
 		t.Errorf("CLI callCount = %d, want 2 (two inspects; no container run)", got)
 	}
 }
+
+func TestOCIRemoveHostTree(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can remove a read-only tree itself")
+	}
+	cases := []struct {
+		name       string
+		cli        string
+		stuck      bool
+		wantErr    bool
+		wantCalled bool
+		wantGone   bool
+	}{
+		{"podman falls back to unshare", "podman", true, false, true, true},
+		{"docker returns the RemoveAll error", "docker", true, true, false, false},
+		{"removable tree never reaches the cli", "podman", false, false, false, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "tree")
+			sub := filepath.Join(root, "sub")
+			if err := os.MkdirAll(sub, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(sub, "f"), []byte("x"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.stuck {
+				if err := os.Chmod(sub, 0o500); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+			}
+
+			binDir := t.TempDir()
+			log := filepath.Join(binDir, "calls.log")
+			script := "#!/bin/sh\necho \"$@\" >> " + log + "\nfor a; do last=$a; done\nchmod -R u+w \"$last\" && rm -rf \"$last\"\n"
+			if err := os.WriteFile(filepath.Join(binDir, tc.cli), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+			err := (&ociAdapter{cli: tc.cli}).RemoveHostTree(root)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("RemoveHostTree err = %v, wantErr %v", err, tc.wantErr)
+			}
+			got, _ := os.ReadFile(log)
+			if want := "unshare rm -rf -- " + root + "\n"; tc.wantCalled && string(got) != want {
+				t.Errorf("cli log = %q, want %q", got, want)
+			} else if !tc.wantCalled && len(got) != 0 {
+				t.Errorf("cli was invoked: %q", got)
+			}
+			if _, statErr := os.Stat(root); os.IsNotExist(statErr) != tc.wantGone {
+				t.Errorf("tree gone = %v, want %v", os.IsNotExist(statErr), tc.wantGone)
+			}
+		})
+	}
+}

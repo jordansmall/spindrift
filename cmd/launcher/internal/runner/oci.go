@@ -952,6 +952,28 @@ func (a *ociAdapter) reap(name string) {
 	}
 }
 
+// removeHostTreeTimeout bounds the `podman unshare rm -rf` fallback so a stuck
+// removal cannot hang Dispatch.Close or Factory.Cleanup.
+const removeHostTreeTimeout = 2 * time.Minute
+
+// RemoveHostTree removes path, falling back to `podman unshare rm -rf` when
+// the plain removal fails. Rootless podman remaps the Box's uid to a host
+// subuid, so subdirs the Box created are not removable by the invoking user;
+// unshare runs rm as root of the user's own namespace, which owns them.
+// Docker has no equivalent, so its RemoveAll error is returned unchanged.
+func (a *ociAdapter) RemoveHostTree(path string) error {
+	err := os.RemoveAll(path)
+	if err == nil || a.cli != "podman" {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), removeHostTreeTimeout)
+	defer cancel()
+	if out, uerr := exec.CommandContext(ctx, a.cli, "unshare", "rm", "-rf", "--", path).CombinedOutput(); uerr != nil {
+		return fmt.Errorf("%w; podman unshare rm: %v: %s", err, uerr, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // Kill force-stops and removes name once confirmed to exist; `rm -f` stops a
 // running container first, so Kill does not need the running/exited
 // distinction reap's reapable check draws. Unlike reap, Kill is
