@@ -145,7 +145,8 @@ in
     let
       paths = (import ../credential-paths.nix) ++ [ ".local/share/opencode/auth.json" ];
       # The hook's classes negate [:alnum:] plus the excluded chars. Keep the
-      # always-excluded `* ? \` in step with sweepChars in nix/checks/drivers.nix.
+      # always-excluded `* ? \` in step with sweepChars in
+      # nix/checks/drivers/opencode.nix.
       boundaryChars =
         excluded:
         lib.subtractLists (

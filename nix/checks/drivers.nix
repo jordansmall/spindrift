@@ -1,5 +1,7 @@
 # Eval-level pins for lib/drivers/default.nix (issue #624): the registry's
-# required-attribute shape assertion.
+# generic shape and argv-shape checks, and the parity checks over every entry.
+# Each Driver's own checks live in nix/checks/drivers/<name>.nix, which this
+# file unions in (issue #5502).
 args@{
   pkgs,
   ...

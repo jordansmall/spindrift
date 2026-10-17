@@ -205,7 +205,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   building on [ADR 0005](docs/adr/0005-nix-computes-generated-bash-executes.md)).
   Keep it that way — reach for nix-generated config or Go over more shell.
 - **`nix/`** — `checks/` (the flake-check suite; `checks/default.nix`
-  defines `checks`, `checks-inbox`, and `checks-docs`), `fixtures.nix` (the
+  defines `checks`, `checks-inbox`, and `checks-docs`). A Driver author puts
+  their Driver's checks in `checks/drivers/<name>.nix`, named after its row
+  in `lib/drivers/default.nix`, and `checks/drivers.nix` unions it in and
+  runs the parity checks over every row — a row with no file fails
+  evaluation (issue #5502). Also here: `fixtures.nix` (the
   harness variants the checks build), `regen.nix` (`nix run .#regen`, the
   schema-artifact regenerator), and `regen-goldens.nix` (`nix run
   .#regen-goldens`, which reruns the Go golden test

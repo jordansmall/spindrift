@@ -702,9 +702,9 @@ func TestBoxSeamPRIntentNudgeExhausted(t *testing.T) {
 // execs box, so the golden's env delta is these plus what box itself sets
 // (BRANCH, PWD and the Bash-timeout vars) and nothing else. The values are
 // hardcoded here, so the Go golden's env section only proves box adds and
-// removes nothing; the real exports are pinned by nix/checks/drivers.nix (the
-// claude Driver's envCommon) and tests/entrypoint-shim.bats (the shim's env
-// reaches box).
+// removes nothing; the real exports are pinned by nix/checks/drivers/claude.nix
+// (the claude Driver's envCommon) and tests/entrypoint-shim.bats (the shim's
+// env reaches box).
 func entrypointExports() map[string]string {
 	return map[string]string{"CLAUDE_CODE_DISABLE_BACKGROUND_TASKS": "1"}
 }
