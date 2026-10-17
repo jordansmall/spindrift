@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"io"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -56,7 +57,11 @@ func NewFactory(cfg Config, pwd string, r runner.Runner, drv driver.Driver, cloc
 	if cfg.DriverSessionCacheDir == "" {
 		return &Factory{cfg: cfg, pwd: pwd, runner: r, driver: drv, clock: clock, cache: nil}, nil
 	}
-	c, err := newCache()
+	remove := os.RemoveAll
+	if r != nil {
+		remove = r.RemoveHostTree
+	}
+	c, err := newCache(remove)
 	return &Factory{cfg: cfg, pwd: pwd, runner: r, driver: drv, clock: clock, cache: c}, err
 }
 

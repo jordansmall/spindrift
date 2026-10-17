@@ -15,7 +15,7 @@ func TestCache_DirForIsWorldWritableDespiteUmask(t *testing.T) {
 	old := syscall.Umask(0o077)
 	defer syscall.Umask(old)
 
-	c, err := newCache()
+	c, err := newCache(os.RemoveAll)
 	if err != nil {
 		t.Fatalf("newCache: %v", err)
 	}
