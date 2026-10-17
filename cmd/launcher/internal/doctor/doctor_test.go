@@ -1065,7 +1065,7 @@ func TestRun_NewAdvisoryTier_OneTableEntryIsEnough(t *testing.T) {
 	advisoryTiers = append(append([]labelTier{}, saved...), labelTier{
 		noun:  "hypothetical",
 		ref:   "(ADR 9999)",
-		names: func() []string { return []string{"agent-hypothetical"} },
+		names: func(Config) []string { return []string{"agent-hypothetical"} },
 	})
 
 	if !slices.Contains(AdvisoryLabelNames(), "agent-hypothetical") {
@@ -1094,6 +1094,113 @@ func TestRun_NewAdvisoryTier_OneTableEntryIsEnough(t *testing.T) {
 }
 
 var workLabelsOnly = []string{"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"}
+
+func newWorkLabelsFake() *forge.Fake {
+	f := forge.NewFake()
+	f.ProbeRepo = "owner/repo"
+	f.Labels = workLabelsOnly
+	return f
+}
+
+// A configured RESEARCH_VERDICTS set replaces the default recommend/reject/
+// unclear labels in the research tier, both as advisory rows and when named
+// in RequiredLabels.
+func TestRun_ResearchTier_UsesConfiguredVerdictLabels(t *testing.T) {
+	custom := forge.NewVerdictLabels(
+		forge.VerdictLabel{Verdict: "go", Label: "research-go"},
+		forge.VerdictLabel{Verdict: "nogo", Label: "research-nogo"},
+	)
+	for _, required := range []bool{false, true} {
+		f := newWorkLabelsFake()
+
+		cfg := defaultDoctorConfig()
+		cfg.ResearchVerdicts = custom
+		if required {
+			cfg.RequiredLabels = ResearchLabelNamesFor(custom)
+		}
+		var buf bytes.Buffer
+		err := Run(f, f, cfg, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+		if required != errors.Is(err, ErrRequiredLabelsMissing) {
+			t.Fatalf("required=%v: err = %v", required, err)
+		}
+		out := buf.String()
+		for _, label := range []string{"research-go", "research-nogo"} {
+			if !strings.Contains(out, "label \""+label+"\" missing") {
+				t.Errorf("required=%v: output missing a report for %q, got:\n%s", required, label, out)
+			}
+		}
+		for _, label := range []string{"agent-research-recommend", "agent-research-reject", "agent-research-unclear"} {
+			if strings.Contains(out, "\""+label+"\"") {
+				t.Errorf("required=%v: output reports default verdict label %q, got:\n%s", required, label, out)
+			}
+		}
+	}
+}
+
+// Verdict labels are operator-chosen, so a set may repeat a label or reuse a
+// fixed research name; each name must still be reported and created once
+// (issue #5461), or a second CreateLabel fails "already exists".
+func TestRun_ResearchTier_DuplicateVerdictLabelsCheckedOnce(t *testing.T) {
+	custom := forge.NewVerdictLabels(
+		forge.VerdictLabel{Verdict: "reject", Label: "research-no"},
+		forge.VerdictLabel{Verdict: "dup", Label: "research-no"},
+		forge.VerdictLabel{Verdict: "fail", Label: "agent-research-failed"},
+	)
+	newCfg := func(required bool) Config {
+		cfg := defaultDoctorConfig()
+		cfg.ResearchVerdicts = custom
+		if required {
+			cfg.RequiredLabels = ResearchLabelNamesFor(custom)
+		}
+		return cfg
+	}
+
+	for _, required := range []bool{true, false} {
+		name := "interactive create advisory"
+		if required {
+			name = "interactive create required"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newWorkLabelsFake()
+			var buf bytes.Buffer
+			err := Run(f, f, newCfg(required), NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("y\n")), true, nil)
+			if err != nil {
+				t.Fatalf("Run: %v\n%s", err, buf.String())
+			}
+			counts := map[string]int{}
+			for _, call := range f.CreateLabelCalls {
+				counts[call.Name]++
+			}
+			for name, n := range counts {
+				if n != 1 {
+					t.Errorf("label %q created %d times, want once", name, n)
+				}
+			}
+			for _, name := range []string{"research-no", "agent-research-failed"} {
+				if counts[name] != 1 {
+					t.Errorf("label %q not created", name)
+				}
+			}
+			for _, name := range []string{"agent-research-recommend", "agent-research-reject", "agent-research-unclear"} {
+				if counts[name] != 0 {
+					t.Errorf("default verdict label %q created", name)
+				}
+			}
+		})
+	}
+
+	t.Run("non-interactive report", func(t *testing.T) {
+		f := newWorkLabelsFake()
+		var buf bytes.Buffer
+		err := Run(f, f, newCfg(false), NewReporter(&buf, true), bufio.NewScanner(strings.NewReader("")), false, nil)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if n := strings.Count(buf.String(), "label \"research-no\" missing"); n != 1 {
+			t.Errorf("research-no reported missing %d times, want once, got:\n%s", n, buf.String())
+		}
+	})
+}
 
 // Required labels' absence fails a non-interactive run naming them; the same
 // labels stay advisory when no caller names them (issue #4400).

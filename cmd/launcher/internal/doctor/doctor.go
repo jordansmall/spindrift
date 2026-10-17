@@ -57,12 +57,22 @@ func LabelMetaFor(name string) (LabelMeta, bool) {
 	return meta, ok
 }
 
-// ResearchLabelNames returns the seven fixed research-tier label names (ADR 0022).
-// All but "agent-research-finding" (ADR 0041) come from forge rather than local
-// literals; that one has no forge declaration to source it from.
+// ResearchLabelNames returns the research-tier label names for the default
+// verdict vocabulary: the dispatch trio, recommend/reject/unclear, and
+// "agent-research-finding" (ADR 0022, ADR 0041).
 func ResearchLabelNames() []string {
+	return ResearchLabelNamesFor(forge.VerdictLabels{})
+}
+
+// ResearchLabelNamesFor is ResearchLabelNames for the operator's configured
+// RESEARCH_VERDICTS set; an empty set means the compiled defaults. All but
+// "agent-research-finding" (ADR 0041) come from forge rather than local
+// literals; that one has no forge declaration to source it from.
+func ResearchLabelNamesFor(vl forge.VerdictLabels) []string {
+	if vl.Empty() {
+		vl = forge.ResearchVerdictLabels()
+	}
 	dl := forge.ResearchDispatchLabels()
-	vl := forge.ResearchVerdictLabels()
 	names := []string{dl.Dispatchable, dl.InProgress, dl.Failed}
 	for _, e := range vl.Entries() {
 		names = append(names, e.Label)
@@ -107,7 +117,7 @@ func ButlerLabelNames() []string {
 type labelTier struct {
 	noun  string
 	ref   string // ADR citation after the noun in report lines; may be empty
-	names func() []string
+	names func(Config) []string
 }
 
 // tierResult carries its tier alongside the missing names so consumers never
@@ -123,18 +133,18 @@ type tierResult struct {
 // `return []string{"..."}` literal here; names sourced elsewhere (as priority's
 // come from forge) escape that extraction silently.
 var advisoryTiers = []labelTier{
-	{noun: "research", ref: "(ADR 0022 / ADR 0041)", names: ResearchLabelNames},
-	{noun: "priority", ref: "(ADR 0040)", names: PriorityLabelNames},
-	{noun: "ambiguous-spec", ref: "", names: AmbiguousLabelNames},
-	{noun: "butler", ref: "(ADR 0056)", names: ButlerLabelNames},
+	{noun: "research", ref: "(ADR 0022 / ADR 0041)", names: func(c Config) []string { return ResearchLabelNamesFor(c.ResearchVerdicts) }},
+	{noun: "priority", ref: "(ADR 0040)", names: func(Config) []string { return PriorityLabelNames() }},
+	{noun: "ambiguous-spec", ref: "", names: func(Config) []string { return AmbiguousLabelNames() }},
+	{noun: "butler", ref: "(ADR 0056)", names: func(Config) []string { return ButlerLabelNames() }},
 }
 
 // AdvisoryLabelNames returns every advisory-tier label name in advisoryTiers
-// order.
+// order. The zero Config it passes means the default research verdict set.
 func AdvisoryLabelNames() []string {
 	var names []string
 	for _, t := range advisoryTiers {
-		names = append(names, t.names()...)
+		names = append(names, t.names(Config{})...)
 	}
 	return names
 }
@@ -197,6 +207,11 @@ type Config struct {
 	// doctor names only what the work kind itself needs, leaving the rest
 	// advisory so CI stays green on deployments not using them.
 	RequiredLabels []string
+
+	// ResearchVerdicts is the configured RESEARCH_VERDICTS vocabulary whose
+	// labels the research tier checks; the zero value means the compiled
+	// defaults (RESEARCH_VERDICTS unset).
+	ResearchVerdicts forge.VerdictLabels
 
 	// TokenHint and SlugHint name the env vars Run points an operator at in its
 	// auth-failure and repo-not-found remediation text. The caller resolves them
@@ -393,12 +408,25 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 		for _, l := range existing {
 			present[l] = true
 		}
-		requiredNames := []string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}
-		requiredNames = append(requiredNames, without(c.RequiredLabels, requiredNames)...)
+		// Each name is checked once across all tiers: verdict labels are
+		// operator-chosen and may repeat or reuse a fixed name (issue #5461).
+		// The required list is claimed first so a shared name stays Required.
+		var checked []string
+		claimUnchecked := func(names []string) []string {
+			var out []string
+			for _, name := range names {
+				if !slices.Contains(checked, name) {
+					out = append(out, name)
+					checked = append(checked, name)
+				}
+			}
+			return out
+		}
+		requiredNames := claimUnchecked(append([]string{c.Label, c.InProgressLabel, c.FailedLabel, c.CompleteLabel}, c.RequiredLabels...))
 		requiredMissing = checkLabelSet(requiredNames, present, Required)
 		tierResults = make([]tierResult, len(advisoryTiers))
 		for i, t := range advisoryTiers {
-			tierResults[i] = tierResult{tier: t, missing: checkLabelSet(without(t.names(), requiredNames), present, Advisory)}
+			tierResults[i] = tierResult{tier: t, missing: checkLabelSet(claimUnchecked(t.names(c)), present, Advisory)}
 		}
 		return requiredMissing, tierResults, nil
 	}
@@ -459,7 +487,8 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	// metaFor resolves the four work-tier labels by role because an operator can
 	// rename them: a TriageLabelMeta[name] lookup keyed on the default name would
 	// miss a renamed label and fall back to gray (#2528 AC2). Every other label
-	// has a fixed name, so LabelMetaFor stays correct for them.
+	// has a fixed name except a configured research verdict label, which misses
+	// LabelMetaFor and is created gray with no description.
 	metaFor := func(name string) LabelMeta {
 		switch name {
 		case c.Label:
@@ -523,15 +552,4 @@ func Run(it forge.IssueTracker, cf forge.CodeForge, c Config, rep *Reporter, std
 	}
 	rep.Success("%s", allLabelsPresentMessage())
 	return nil
-}
-
-// without returns the names not present in exclude, in order.
-func without(names, exclude []string) []string {
-	var out []string
-	for _, name := range names {
-		if !slices.Contains(exclude, name) {
-			out = append(out, name)
-		}
-	}
-	return out
 }
