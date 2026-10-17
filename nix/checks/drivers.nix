@@ -959,10 +959,9 @@ in
     pkgs.runCommand "drivers-assert-shape-succeeds-with-session-cache-dir-relative" { } "touch $out";
 
   # Pins opencode's sessionCacheDirRelative (issue #5349) and that OPENCODE_DB
-  # sits inside it. The Go half's sessionStore in
-  # cmd/launcher/internal/driver/opencode/session.go must name the same
-  # directory. Claude's ".claude/projects" value is pinned by
-  # drivers-render-preamble-session-cache-dir.
+  # sits inside it. The Go resume lookup reads OPENCODE_DB itself, so this pin
+  # is the whole tie to the Go side. Claude's ".claude/projects" value is
+  # pinned by drivers-render-preamble-session-cache-dir.
   drivers-session-cache-dir-relative-opencode =
     let
       opencodeEntry = driverRegistry.entries.opencode;

@@ -28,8 +28,8 @@ let
 
   # opencode's SQLite session store lives here instead of beside auth.json: the
   # launcher mounts a writable per-issue host directory over this path, which
-  # would shadow auth.json were it ~/.local/share/opencode itself. Must match
-  # sessionStore in cmd/launcher/internal/driver/opencode/session.go.
+  # would shadow auth.json were it ~/.local/share/opencode itself. The launcher's
+  # resume lookup reads OPENCODE_DB (envCommon below), so no Go copy exists.
   sessionCacheDirRelative = ".local/share/opencode/spindrift-session";
 
   # opencode treats an unset permission key as allow, so an entry's tools list
