@@ -166,3 +166,12 @@ trustworthy.
 Dispatch Record ingestion reads Pass logs only through the stamped Driver
 (issue #5186). The corpus goldens remain the permanent gate. Status moves to
 accepted.
+
+## Amendment (issue #5501): per-model ordering moves to the shared reader
+
+The per-model usage reader now orders rows itself, by the Driver's
+model-family hook (the one the heartbeat takes) and then by exact id, and
+the transcript renderer ends every non-empty transcript with a newline.
+The `claude` package therefore keeps two of the three quirks named above:
+its classify options and its heartbeat tracking, whose family hook now
+also carries the rank the usage order reads.
