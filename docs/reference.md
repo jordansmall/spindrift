@@ -4875,7 +4875,12 @@ and the record saves, queue mode never picks the issue again for that bundle,
 even if `MAX_RECOVER_ATTEMPTS` is later raised. If the comment fails to post, a
 later queue pass retries it; lowering `MAX_RECOVER_ATTEMPTS` below a record's
 count posts it on the next pass. If the record cannot be saved, the run
-exits 1. A hand-run `spindrift recover <n>` ignores the record; when the
+exits 1. A relay rejected for lack of the Workflows permission (the change
+touches `.github/workflows/*`; [off by default](#github-token-permissions))
+is permanent: that first failure posts the give-up comment at once,
+whatever `MAX_RECOVER_ATTEMPTS` is, naming the cause and the remedy (land the
+change by hand, or grant Workflows permission temporarily and run `spindrift
+recover <n>`). A hand-run `spindrift recover <n>` ignores the record; when the
 relay or draft PR creation fails it prints `status=failed note=<cause>`
 rather than `no open PR`; that includes an outbox with no bundle on a
 relay-capable forge, which surfaces as a relay failure.
@@ -5408,7 +5413,9 @@ deliberate, not oversights — write them down so you can honour them:
    CI to auto-pass status checks or exfiltrate Actions secrets. Grant it only
    when an issue explicitly edits `.github/workflows/*`, and treat that grant
    as escalated trust. See the [token permission table](#github-token-permissions)
-   above.
+   above. Without it, a push touching `.github/workflows/*` is refused; a
+   read-only Box's relay failure parks the issue with the remedy, and
+   queue-mode recover gives up at once (see [Read-only Box](#read-only-box-box_forge_and_issue_accessread-only)).
 
 ---
 
