@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -87,7 +88,7 @@ func TestOpencodeDriverExtractUsage(t *testing.T) {
 }
 
 // ExtractUsage still returns the aggregate totals it already summed from
-// step_finish events when opencodeUsageByModel fails with a real I/O error,
+// step_finish events when usageByModel fails with a real I/O error,
 // rather than discarding them (issue #674, mirroring claude's ExtractUsage).
 func TestExtractUsage_UsageByModelError(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":0,"cache":{"write":0,"read":0}}}}`
@@ -96,11 +97,11 @@ func TestExtractUsage_UsageByModelError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	orig := opencodeUsageByModel
-	opencodeUsageByModel = func(string) ([]usage.ModelUsage, error) {
+	orig := usageByModel
+	usageByModel = func(string, func() driverkit.Decoder, driverkit.ModelFamily) ([]usage.ModelUsage, error) {
 		return nil, errors.New("simulated I/O error")
 	}
-	defer func() { opencodeUsageByModel = orig }()
+	defer func() { usageByModel = orig }()
 
 	d, err := New("opencode")
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
@@ -50,16 +51,16 @@ func extractClaudeUsage(t *testing.T, path string) usage.Report {
 	return report
 }
 
-// A claudeUsageByModel I/O error degrades only the per-model section; the
+// A usageByModel I/O error degrades only the per-model section; the
 // aggregate totals already parsed survive (issue #674).
 func TestClaudeDriverExtractUsage_UsageByModelError(t *testing.T) {
 	path := writeClaudeResultLog(t)
 
-	orig := claudeUsageByModel
-	claudeUsageByModel = func(string) ([]usage.ModelUsage, error) {
+	orig := usageByModel
+	usageByModel = func(string, func() driverkit.Decoder, driverkit.ModelFamily) ([]usage.ModelUsage, error) {
 		return nil, errors.New("simulated I/O error")
 	}
-	defer func() { claudeUsageByModel = orig }()
+	defer func() { usageByModel = orig }()
 
 	report := extractClaudeUsage(t, path)
 	if report.SummedByModel != nil {
@@ -67,17 +68,17 @@ func TestClaudeDriverExtractUsage_UsageByModelError(t *testing.T) {
 	}
 }
 
-// A claudeUsageByAgent I/O error degrades only the per-agent section; the
+// A usageByAgent I/O error degrades only the per-agent section; the
 // aggregate totals and SummedByModel survive. Same contract as
 // TestClaudeDriverExtractUsage_UsageByModelError, issue #674.
 func TestClaudeDriverExtractUsage_UsageByAgentError(t *testing.T) {
 	path := writeClaudeResultLog(t)
 
-	orig := claudeUsageByAgent
-	claudeUsageByAgent = func(string) ([]usage.AgentUsage, error) {
+	orig := usageByAgent
+	usageByAgent = func(string, func() driverkit.Decoder, driverkit.TotalsSource) ([]usage.AgentUsage, error) {
 		return nil, errors.New("simulated I/O error")
 	}
-	defer func() { claudeUsageByAgent = orig }()
+	defer func() { usageByAgent = orig }()
 
 	report := extractClaudeUsage(t, path)
 	if report.SummedByAgent != nil {

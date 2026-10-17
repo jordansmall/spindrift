@@ -74,17 +74,17 @@ type Driver interface {
 	SessionFlags(mode, repoSlug, issue, home string) string
 }
 
-// registry is populated by each driver subpackage's init().
+// registry is populated by each Driver's init().
 var registry = map[string]Driver{}
 
-// register adds a Driver strategy to the registry. It panics on a duplicate
-// name, which is a programming error rather than a runtime condition.
-func register(d Driver) {
-	name := d.Name()
-	if _, exists := registry[name]; exists {
-		panic("driver: duplicate registration for " + name)
+// register adds the Driver that runs s to the registry, keyed on s.Name. It
+// panics on a duplicate name, which is a programming error rather than a
+// runtime condition.
+func register(s driverkit.Strategy) {
+	if _, exists := registry[s.Name]; exists {
+		panic("driver: duplicate registration for " + s.Name)
 	}
-	registry[name] = d
+	registry[s.Name] = strategyDriver{s}
 }
 
 // New returns the registered Driver strategy for name. An empty name defaults
