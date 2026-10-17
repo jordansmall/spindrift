@@ -1333,3 +1333,67 @@ func TestWriterObjectErrorAssistantLineKeepsHeartbeat(t *testing.T) {
 		t.Errorf("OnModel models = %v, want [claude-opus-4]", models)
 	}
 }
+
+// An assistant line whose content is a string, or that holds a block failing
+// to unmarshal, still yields its model and valid blocks (issue #5454); the
+// result must not depend on how the log is split across Writes.
+func TestWriterLenientAssistantContentKeepsHeartbeat(t *testing.T) {
+	type call struct{ model, role string }
+	const rule = "\xe2\x94\x80\xe2\x94\x80" // ──
+	for _, tc := range []struct {
+		name, line, exact string
+		want, absent      []string
+	}{
+		{
+			name: "string_content",
+			line: `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-1","content":"hello there"}}`,
+			// No role header and no narration: only the result line.
+			exact: "#5454 \xc2\xb7 1 turn\n",
+		},
+		{
+			name: "malformed_block",
+			line: `{"type":"assistant","message":{"id":"m1","model":"claude-opus-4-1","content":[{"type":"text","text":5},{"type":"text","text":"I will read the file"},{"type":"tool_use","id":"t1","name":"Read","input":{"file_path":"/x"}}]}}`,
+			want: []string{
+				"#5454 " + rule + " " + driverkit.ImplementorRole + " \xc2\xb7 opus ",
+				"#5454 \xc2\xb7 I will read the file\n",
+				"#5454 [explore] \xc2\xb7 1 read\n",
+			},
+			absent: []string{"#5454 \xc2\xb7 5\n"},
+		},
+	} {
+		log := tc.line + "\n" + `{"type":"result","num_turns":1}` + "\n"
+		for _, size := range []int{1, 7, len(log)} {
+			t.Run(fmt.Sprintf("%s/chunk_%d", tc.name, size), func(t *testing.T) {
+				var status bytes.Buffer
+				var got []call
+				w := newHeartbeat(t, &bytes.Buffer{}, "5454", &status, driverkit.RenderOptions{OnModel: func(model, role string) {
+					got = append(got, call{model, role})
+				}})
+				for rest := log; rest != ""; {
+					n := min(size, len(rest))
+					if _, err := io.WriteString(w, rest[:n]); err != nil {
+						t.Fatal(err)
+					}
+					rest = rest[n:]
+				}
+				out := status.String()
+				if tc.exact != "" && out != tc.exact {
+					t.Errorf("output = %q, want %q", out, tc.exact)
+				}
+				for _, want := range tc.want {
+					if !strings.Contains(out, want) {
+						t.Errorf("output missing %q: %q", want, out)
+					}
+				}
+				for _, absent := range tc.absent {
+					if strings.Contains(out, absent) {
+						t.Errorf("output must not contain %q: %q", absent, out)
+					}
+				}
+				if want := []call{{"claude-opus-4-1", driverkit.ImplementorRole}}; !reflect.DeepEqual(got, want) {
+					t.Errorf("OnModel calls = %v, want %v", got, want)
+				}
+			})
+		}
+	}
+}
