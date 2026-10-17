@@ -1434,6 +1434,14 @@ and the guard plugin described after this list (issue #5346):
   the reverted mechanism, this hook never touches the Driver's permission
   mode or bash sandbox, so it structurally cannot reproduce either #1926
   failure mode.
+- **Guard hooks fail closed (issue #5400).** Claude Code runs the tool anyway
+  when a `PreToolUse` hook exits anything but 0 or 2, so each registered
+  `PreToolUse` command wraps its hook in an inline `sh` check: a hook that
+  cannot run (missing file, bad interpreter, missing or broken `jq`) or
+  exits any other code blocks the call with exit 2 and a stderr message
+  naming the hook. A hook's own allow, deny JSON, and exit 2 pass through
+  unchanged. The wrap covers `bash-output-tee.sh`, so a failure there (for
+  example `/tmp` full or read-only) now blocks the Bash call too.
 - **Credential-read deny hook.** A second `PreToolUse` hook,
   `agent/credential-deny.sh`, is baked in and registered in the image's
   `~/.claude/settings.json` alongside `reject-background-bash.sh` (issue
