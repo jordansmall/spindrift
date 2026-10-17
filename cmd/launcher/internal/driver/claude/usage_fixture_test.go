@@ -1,4 +1,4 @@
-package claude
+package claude_test
 
 import (
 	"bufio"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"spindrift.dev/launcher/internal/driver/claude"
 )
 
 // TestExtractUsage_MultiSessionFixture pins ExtractUsage's aggregation over a
@@ -16,11 +18,11 @@ import (
 // uniform block replayed nine times: with identical sessions, a bug that counts
 // one session nine times would still hit every total.
 // The wall-time target is the turn-scoped span AC#3 asks for, not the issue's
-// wider raw span, which sumInLog excludes.
+// wider raw span, which ExtractUsage excludes.
 func TestExtractUsage_MultiSessionFixture(t *testing.T) {
 	path := filepath.Join("testdata", "multi-session-2058.jsonl")
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}
@@ -87,7 +89,7 @@ func TestExtractUsage_OutputTokenPlaceholderFixture(t *testing.T) {
 			naiveSum, resultOutputTokens)
 	}
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}
@@ -158,7 +160,7 @@ func forEachLine(t *testing.T, path string, fn func(line []byte)) {
 	}
 }
 
-// resultEventOutputTokens parses path independently of sumInLog and returns the
+// resultEventOutputTokens parses path independently of ExtractUsage and returns the
 // output_tokens summed across its result events, the log's own ground-truth
 // figure for main-loop output.
 func resultEventOutputTokens(t *testing.T, path string) int {
@@ -180,7 +182,7 @@ func resultEventOutputTokens(t *testing.T, path string) int {
 }
 
 // naivePerMessageOutputSum parses path independently of
-// breakdownByAgent/sumInLog and sums output_tokens across every assistant
+// ExtractUsage and sums output_tokens across every assistant
 // line's message.usage, deduplicated by message.id the way the production scan
 // does (the first non-empty id wins). This is the naive, wrong-for-issue-#3213
 // figure the assertions compare against the result event's ground truth.
@@ -189,7 +191,7 @@ func naivePerMessageOutputSum(t *testing.T, path string) int {
 	seenIDs := make(map[string]bool)
 	sum := 0
 	forEachLine(t, path, func(line []byte) {
-		var ev Event
+		var ev claude.Event
 		if err := json.Unmarshal(line, &ev); err != nil || ev.Type != "assistant" || ev.Message == nil {
 			return
 		}

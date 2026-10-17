@@ -7,8 +7,8 @@ import (
 
 // boxLog is the line-atomic shared sink for the Box's raw output log. Two
 // producers write that one file concurrently: the driver's stream-json copy
-// (claude.Writer forwards every pipe chunk to raw verbatim) and the Signal
-// socket handler's spindrift_op mirror. A bare mutex is not enough -- a pipe
+// (the claude heartbeat writer forwards every pipe chunk to raw verbatim) and
+// the Signal socket handler's spindrift_op mirror. A bare mutex is not enough -- a pipe
 // chunk can end mid-line, so a mirror line serialised between two chunks
 // still splices itself into the middle of a stream-json line. If that line is
 // the one carrying SPINDRIFT_OUTCOME, outcome.Resolve no longer finds a
@@ -31,7 +31,7 @@ func newBoxLog(w io.Writer) *boxLog {
 }
 
 // stream returns the view for the driver's verbatim stream-json copy, to be
-// passed as raw to claude.NewHeartbeatWriter.
+// passed as raw to the Driver's NewHeartbeatWriter.
 func (l *boxLog) stream() io.Writer { return boxLogStream{l: l} }
 
 // mirror returns the view for the Signal socket handler's log writer. Each

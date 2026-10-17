@@ -11,8 +11,10 @@ import (
 	"spindrift.dev/launcher/internal/outcome"
 )
 
-// spindriftOutcomeLine mirrors the literal in the internal
-// outcome_fixture_test.go: the line embedded in testdata/outcome-fixture.jsonl.
+// spindriftOutcomeLine is the exact SPINDRIFT_OUTCOME line embedded in
+// testdata/outcome-fixture.jsonl, shared verbatim with the opencode Driver's own
+// outcome_fixture_test.go so both drivers' fixtures are verified against the
+// identical literal (issue #2261 slice 1).
 const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 status=ready note=fixture"
 
 // TestOutcomeFixtureResultText pins ResultText against the Driver's canonical

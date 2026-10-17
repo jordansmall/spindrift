@@ -1,103 +1,25 @@
-package claude
+package claude_test
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/claude"
 	"spindrift.dev/launcher/internal/driver/driverkit"
-	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// A breakdownByModel I/O error degrades only the per-model section; the
-// aggregate totals sumInLog already parsed survive (issue #674).
-func TestExtractUsage_BreakdownByModelError(t *testing.T) {
-	line := `{"type":"result","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":100,"output_tokens":50}}`
-	path := filepath.Join(t.TempDir(), "test.log")
-	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	orig := breakdownByModel
-	breakdownByModel = func(string) ([]usage.ModelUsage, error) {
-		return nil, errors.New("simulated I/O error")
-	}
-	defer func() { breakdownByModel = orig }()
-
-	var report usage.Report
-	var err error
-	stderr := testutil.CaptureStderr(t, func() {
-		report, err = ExtractUsage(path)
-	})
-	if !strings.Contains(stderr, path) || !strings.Contains(stderr, "simulated I/O error") {
-		t.Errorf("stderr = %q, want it to mention the log path and the error", stderr)
-	}
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !report.Found {
-		t.Fatal("expected Found=true")
-	}
-	if report.Totals.InputTokens != 100 || report.Totals.OutputTokens != 50 {
-		t.Errorf("Usage: got %+v, want InputTokens=100 OutputTokens=50", report.Totals)
-	}
-	if report.SummedByModel != nil {
-		t.Errorf("Models: got %+v, want nil", report.SummedByModel)
-	}
-}
-
-// A breakdownByAgent I/O error degrades only the per-agent section; the
-// aggregate totals and SummedByModel survive. Same contract as
-// TestExtractUsage_BreakdownByModelError, issue #674.
-func TestExtractUsage_BreakdownByAgentError(t *testing.T) {
-	line := `{"type":"result","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":100,"output_tokens":50}}`
-	path := filepath.Join(t.TempDir(), "test.log")
-	if err := os.WriteFile(path, []byte(line+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	orig := breakdownByAgent
-	breakdownByAgent = func(string) ([]usage.AgentUsage, error) {
-		return nil, errors.New("simulated I/O error")
-	}
-	defer func() { breakdownByAgent = orig }()
-
-	var report usage.Report
-	var err error
-	stderr := testutil.CaptureStderr(t, func() {
-		report, err = ExtractUsage(path)
-	})
-	if !strings.Contains(stderr, path) || !strings.Contains(stderr, "simulated I/O error") {
-		t.Errorf("stderr = %q, want it to mention the log path and the error", stderr)
-	}
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !report.Found {
-		t.Fatal("expected Found=true")
-	}
-	if report.Totals.InputTokens != 100 || report.Totals.OutputTokens != 50 {
-		t.Errorf("Usage: got %+v, want InputTokens=100 OutputTokens=50", report.Totals)
-	}
-	if report.SummedByAgent != nil {
-		t.Errorf("SummedByAgent: got %+v, want nil", report.SummedByAgent)
-	}
-}
-
 // Issue #2575: timestamped assistant and user lines expose the earliest and
 // latest timestamps, so a caller can derive a wall-time span across several
-// logs the way sumInLog already does across sessions within one log.
+// logs the way ExtractUsage already does across sessions within one log.
 func TestExtractUsage_EventSpanFromTimestampedLines(t *testing.T) {
 	assistantStart := `{"type":"assistant","timestamp":"2026-08-11T19:00:00.000Z"}`
 	userMid := `{"type":"user","timestamp":"2026-08-11T19:20:00.000Z"}`
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":600000,"usage":{"input_tokens":10,"output_tokens":5}}`
 	assistantEnd := `{"type":"assistant","timestamp":"2026-08-11T19:45:00.000Z"}`
-	path := WriteLog(t, assistantStart, userMid, result, assistantEnd)
+	path := claude.WriteLog(t, assistantStart, userMid, result, assistantEnd)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,9 +41,9 @@ func TestExtractUsage_EventSpanFromTimestampedLines(t *testing.T) {
 
 func TestExtractUsage_NoEventSpanWithoutTimestamps(t *testing.T) {
 	line := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":300000,"usage":{"input_tokens":10,"output_tokens":5}}`
-	path := WriteLog(t, line)
+	path := claude.WriteLog(t, line)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -142,9 +64,9 @@ func TestExtractUsage_NoEventSpanWithoutTimestamps(t *testing.T) {
 func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":5}}`
-	path := WriteLog(t, mainLine, result)
+	path := claude.WriteLog(t, mainLine, result)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -165,9 +87,9 @@ func TestExtractUsage_SummedByAgentPopulated(t *testing.T) {
 func TestExtractUsage_MainLoopOutputFromResultEvent(t *testing.T) {
 	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":1}}}`
 	result := `{"type":"result","num_turns":1,"total_cost_usd":0.01,"duration_ms":1000,"usage":{"input_tokens":10,"output_tokens":500}}`
-	path := WriteLog(t, mainLine, result)
+	path := claude.WriteLog(t, mainLine, result)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -179,15 +101,33 @@ func TestExtractUsage_MainLoopOutputFromResultEvent(t *testing.T) {
 	}
 }
 
+// Under SessionTotals the raw per-agent reader leaves every row's OutputTokens
+// at 0, for ExtractUsage to patch the main loop from the result event.
+func TestUsageByAgent_SessionTotalsLeavesMainLoopOutputZero(t *testing.T) {
+	mainLine := `{"type":"assistant","message":{"id":"msg_main","content":[],"usage":{"input_tokens":10,"output_tokens":5}}}`
+	path := claude.WriteLog(t, mainLine)
+
+	rows, err := driverkit.UsageByAgent(path, claude.NewDecoder, driverkit.SessionTotals)
+	if err != nil {
+		t.Fatalf("UsageByAgent: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Agent != usage.MainLoopAgent {
+		t.Fatalf("rows = %+v, want one main-loop row", rows)
+	}
+	if rows[0].OutputTokens != 0 {
+		t.Errorf("main-loop OutputTokens = %d, want 0 (ExtractUsage patches it)", rows[0].OutputTokens)
+	}
+}
+
 // Issue #3213: only the main loop gets a result event, so no ground-truth
 // output figure exists for a subagent. A subagent row's OutputTokens stays 0
 // even when its assistant messages carry non-zero placeholder output_tokens.
 func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 	spawnLine, result := scoutSpawnAndResultLines()
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
-	path := WriteLog(t, spawnLine, subLine, result)
+	path := claude.WriteLog(t, spawnLine, subLine, result)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -205,9 +145,9 @@ func TestExtractUsage_SubagentOutputZeroed(t *testing.T) {
 func TestExtractUsage_OtherColumnsUnchangedBySubagentOutputFix(t *testing.T) {
 	spawnLine, result := scoutSpawnAndResultLines()
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99,"cache_read_input_tokens":7,"cache_creation_input_tokens":3}}}`
-	path := WriteLog(t, spawnLine, subLine, result)
+	path := claude.WriteLog(t, spawnLine, subLine, result)
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -234,9 +174,9 @@ func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) 
 	oversizedSpawn := `{"type":"assistant","message":{"id":"msg_spawn","content":[{"type":"tool_use","id":"toolu_1","name":"Task","input":{"subagent_type":"scout"}},{"type":"text","text":"` +
 		strings.Repeat("x", 5*1024*1024) + `"}],"usage":{"input_tokens":10,"output_tokens":1}}}`
 	subLine := `{"type":"assistant","parent_tool_use_id":"toolu_1","message":{"id":"msg_sub","content":[],"usage":{"input_tokens":20,"output_tokens":99}}}`
-	path := WriteLog(t, oversizedSpawn, subLine, resultLine())
+	path := claude.WriteLog(t, oversizedSpawn, subLine, resultLine())
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -265,9 +205,9 @@ func TestExtractUsage_MainRowSynthesizedWhenMainLoopLineOversized(t *testing.T) 
 // a nil SummedByAgent, so FormatSpindriftOp grows no per-agent tail for a pass
 // that has no per-agent data.
 func TestExtractUsage_NoMainRowSynthesizedForEmptyBreakdown(t *testing.T) {
-	path := WriteLog(t, resultLine())
+	path := claude.WriteLog(t, resultLine())
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -309,9 +249,9 @@ func agentRows(t *testing.T, rows []usage.AgentUsage, subagent string) (main, su
 }
 
 func TestExtractUsage_NoResultEventReturnsZeroReport(t *testing.T) {
-	path := WriteLog(t, "some output", "no result event here")
+	path := claude.WriteLog(t, "some output", "no result event here")
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

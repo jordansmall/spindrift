@@ -3110,7 +3110,7 @@ Box already gives it, so the criterion took its brief-note arm:
 `worker-prompt.md` carries a short reminder that the full log is on disk
 and should be grepped for whatever the tail cut off, never read whole —
 the one half of the interceptor's contract a worker still has to act on.
-(`transcript_render.go`'s `resultTextMaxLen` bounds the host-side rendered
+(`driverkit/read_transcript.go`'s `resultTextMaxLen` bounds the host-side rendered
 transcript line rather than what the agent replays, so it is not what makes
 this safe.)
 

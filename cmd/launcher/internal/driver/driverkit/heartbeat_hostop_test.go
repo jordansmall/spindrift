@@ -223,7 +223,7 @@ func TestFormatSpindriftOpPassUsagePlainOutWhenNotMainLoopOnly(t *testing.T) {
 }
 
 // The per-agent tail renders in the payload's given order, which
-// breakdownByAgentFile sets as main loop first then costliest subagent first,
+// UsageByAgent sets as main loop first then costliest subagent first,
 // rather than re-sorting it.
 func TestFormatSpindriftOpPassUsageAgentTail(t *testing.T) {
 	got := FormatSpindriftOp("42", hostop.SpindriftOp{

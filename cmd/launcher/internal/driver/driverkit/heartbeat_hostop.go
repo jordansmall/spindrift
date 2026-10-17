@@ -58,7 +58,7 @@ func FormatSpindriftOp(issue string, op hostop.SpindriftOp) string {
 			u.APICalls, u.UncachedInputTokens, u.OutputTokens, out, u.CacheReadInputTokens, u.CacheCreationInputTokens)
 		if len(u.Agents) > 0 {
 			// Render in the payload's given order (main loop first, then
-			// costliest subagent per breakdownByAgentFile); do not re-sort.
+			// costliest subagent per UsageByAgent); do not re-sort.
 			parts := make([]string, len(u.Agents))
 			for i, a := range u.Agents {
 				parts[i] = fmt.Sprintf("%s %d", SanitizeLine(a.Agent), a.TotalTokens())
