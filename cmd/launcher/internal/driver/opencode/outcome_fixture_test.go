@@ -1,4 +1,4 @@
-package opencode
+package opencode_test
 
 import (
 	"fmt"
@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/opencode"
 	"spindrift.dev/launcher/internal/outcome"
 )
 
@@ -21,7 +23,7 @@ const spindriftOutcomeLine = "SPINDRIFT_OUTCOME issue=42 landing=agent/issue-42 
 func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	got, err := RenderTranscript(path, "")
+	got, err := newDriver(t).RenderTranscript(path, driverkit.RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript(%s): %v", path, err)
 	}
@@ -35,7 +37,7 @@ func TestOutcomeFixtureRenderTranscript(t *testing.T) {
 func TestOutcomeFixtureExtractUsage(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	report, err := ExtractUsage(path)
+	report, err := newDriver(t).ExtractUsage(path)
 	if err != nil {
 		t.Fatalf("ExtractUsage(%s): %v", path, err)
 	}
@@ -49,7 +51,7 @@ func TestOutcomeFixtureExtractUsage(t *testing.T) {
 func TestOutcomeFixtureResultText(t *testing.T) {
 	path := filepath.Join("testdata", "outcome-fixture.jsonl")
 
-	text, err := ResultText(path)
+	text, err := newDriver(t).ResultText(path)
 	if err != nil {
 		t.Fatalf("ResultText(%s): %v", path, err)
 	}
@@ -69,14 +71,14 @@ func TestOutcomeFixtureResultText(t *testing.T) {
 func TestResultText_Envelope(t *testing.T) {
 	line := func(s string) string { return fmt.Sprintf(`{"type":"text","part":{"text":"%s"}}`, s) }
 	t.Run("missing log is empty", func(t *testing.T) {
-		got, err := ResultText(filepath.Join(t.TempDir(), "absent.log"))
+		got, err := newDriver(t).ResultText(filepath.Join(t.TempDir(), "absent.log"))
 		if err != nil || got != "" {
 			t.Errorf("ResultText(missing) = %q, %v; want \"\", nil", got, err)
 		}
 	})
 	t.Run("skips non-JSON and drops empty values", func(t *testing.T) {
-		path := WriteLog(t, "not json at all", line(""), line("one"), `{"type":"other","result":"x"}`, line("two"))
-		got, err := ResultText(path)
+		path := opencode.WriteLog(t, "not json at all", line(""), line("one"), `{"type":"other","result":"x"}`, line("two"))
+		got, err := newDriver(t).ResultText(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,8 +89,8 @@ func TestResultText_Envelope(t *testing.T) {
 	t.Run("null and non-string values are dropped", func(t *testing.T) {
 		null := strings.NewReplacer(`"%s"`, "null").Replace(`{"type":"text","part":{"text":"%s"}}`)
 		num := strings.NewReplacer(`"%s"`, "7").Replace(`{"type":"text","part":{"text":"%s"}}`)
-		path := WriteLog(t, null, num, line("kept"))
-		got, err := ResultText(path)
+		path := opencode.WriteLog(t, null, num, line("kept"))
+		got, err := newDriver(t).ResultText(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +129,7 @@ func TestResultText_LastMessageOnly(t *testing.T) {
 		}, valid + "\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := ResultText(WriteLog(t, tc.lines...))
+			got, err := newDriver(t).ResultText(opencode.WriteLog(t, tc.lines...))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -140,14 +142,14 @@ func TestResultText_LastMessageOnly(t *testing.T) {
 		})
 	}
 	t.Run("exit resolution applies no outcome rule", func(t *testing.T) {
-		path := WriteLog(t, text("msg_1", "no outcome line here"))
-		if rc, err := ResolveExit(path, 0); err != nil || rc != 0 {
+		path := opencode.WriteLog(t, text("msg_1", "no outcome line here"))
+		if rc, err := newDriver(t).ResolveExit(path, 0); err != nil || rc != 0 {
 			t.Errorf("ResolveExit = %d, %v, want 0", rc, err)
 		}
 	})
 	t.Run("parts of the last message join across interleaved events", func(t *testing.T) {
-		path := WriteLog(t, text("msg_1", "first"), text("msg_2", "a"), ev("step_finish", "msg_2"), text("msg_2", "b"))
-		got, err := ResultText(path)
+		path := opencode.WriteLog(t, text("msg_1", "first"), text("msg_2", "a"), ev("step_finish", "msg_2"), text("msg_2", "b"))
+		got, err := newDriver(t).ResultText(path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,12 +158,12 @@ func TestResultText_LastMessageOnly(t *testing.T) {
 		}
 	})
 	t.Run("synthetic ResultEvent stays the final message", func(t *testing.T) {
-		syn, err := ResultEvent("BLOCK: nope")
+		syn, err := newDriver(t).ResultEvent("BLOCK: nope")
 		if err != nil {
 			t.Fatal(err)
 		}
-		path := WriteLog(t, text("msg_1", "first"), strings.TrimSuffix(string(syn), "\n"))
-		got, err := ResultText(path)
+		path := opencode.WriteLog(t, text("msg_1", "first"), strings.TrimSuffix(string(syn), "\n"))
+		got, err := newDriver(t).ResultText(path)
 		if err != nil {
 			t.Fatal(err)
 		}
