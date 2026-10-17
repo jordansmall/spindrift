@@ -79,6 +79,23 @@ func TestDecodeAssistantContent(t *testing.T) {
 	}
 }
 
+func TestDecodeNonStringThinkingKeyKeepsBlock(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	evs := d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"hi","thinking":0},{"type":"tool_use","id":"t1","name":"Bash","input":{},"thinking":{"a":1}}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage)
+	if evs[2].Text != "hi" || evs[3].ToolName != "Bash" {
+		t.Errorf("content = %+v", evs)
+	}
+}
+
+func TestDecodeThinkingBlockDropsNonStringPayload(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"assistant","message":{"id":"m2","content":[{"type":"thinking","thinking":0},{"type":"thinking"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindReasoning, driverkit.KindUsage)
+	if evs[2].Text != "" {
+		t.Errorf("reasoning text = %q, want empty", evs[2].Text)
+	}
+}
+
 func TestDecodeUserStringContentStillSignalsProgress(t *testing.T) {
 	evs := newDecoderAt(decodeNow)(`{"type":"user","message":{"role":"user","content":"rate_limit_error quoted in the prompt"}}`)
 	wantKinds(t, evs, driverkit.KindStart)
