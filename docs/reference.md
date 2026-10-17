@@ -1246,14 +1246,19 @@ What stays per Driver, beyond the decoder: extra transient and terminal
 an oversized line, and `FirstMatch`, which latches the first unrecovered
 marker instead of the last), the usage `TotalsSource`, the top-level role
 default for the transcript and heartbeat, and `ResolveExit`, `ResultEvent` and
-`SessionFlags`. `PerCallTotals` sums every `usage` event, for a CLI that
-reports one tally per call (`opencode`). `SessionTotals` sums the `result`
-events instead, for a CLI whose per-session summary is the ground truth for
-output tokens, cost, turns and durations (`claude`); `usage` events then feed
-only the per-model and per-role breakdowns. The Driver registrations in
-`cmd/launcher/internal/driver/opencode.go` and `claude.go` call the shared
-readers directly, each with its own decoder and inputs; read them as the
-worked examples. The `claude` package's decoder is the worked
+`SessionFlags`. A Driver may also opt its heartbeat into phase, tool-kind
+count and model-family labels with `driverkit.HeartbeatTracking` (`claude`
+fills it, `opencode` leaves it off). Each hook is optional: without `Kind`
+the heartbeat counts no tool calls, so it prints no count lines and never
+runs `Phase`, leaving the phase empty; without `Family` a switch header
+shows the exact model id. `PerCallTotals` sums every `usage` event, for a
+CLI that reports one tally per call (`opencode`). `SessionTotals` sums the
+`result` events instead, for a CLI whose per-session summary is the ground
+truth for output tokens, cost, turns and durations (`claude`); `usage`
+events then feed only the per-model and per-role breakdowns. The Driver
+registrations in `cmd/launcher/internal/driver/opencode.go` and `claude.go`
+call the shared readers directly, each with its own decoder and inputs; read
+them as the worked examples. The `claude` package's decoder is the worked
 example of a stateful one: it keeps a task-id to role map, the top-level role
 a `pass_start` line sets, and a latch that recognises a `result` line echoing
 a marker the agent already quoted.
@@ -1263,14 +1268,14 @@ a marker the agent already quoted.
 | `start` | none; `claude` emits one per assistant or user turn as its progress marker | usage (anchors the run's span), classifier (progress) |
 | `text` | `Text`, and `Synthetic` for a turn the CLI wrote itself | result, transcript, heartbeat; classifier (progress, unless `Synthetic`) |
 | `reasoning` | `Text` | classifier (progress) only, never narration or result |
-| `tool_call` | `ToolID`, `ToolName`, `ToolInput`, `ToolTarget` | transcript; classifier (progress) |
+| `tool_call` | `ToolID`, `ToolName`, `ToolInput`, `ToolTarget` | transcript; heartbeat (first call per message, counted and phased only with a `HeartbeatTracking` `Kind` hook); classifier (progress) |
 | `tool_result` | `ToolID`, `ToolName`, `ToolTarget`, `ToolOutput`, `IsError`, `Subagent` | transcript; classifier (progress) |
 | `usage` | `Tokens`, `Model`, `Effort` | usage (not progress) |
 | `model` | `Model` | heartbeat (model change) |
 | `effort` | `Effort` | none yet |
 | `error` | `Text`, `ResetAt` | classifier (transient markers) |
 | `unparsed` | `Text` | classifier (terminal markers only) |
-| `result` | `Text`, session totals (`Tokens`, `DurationMs`, `DurationAPIMs`, `NumTurns`) | result (replaces text so far); usage, summed under `SessionTotals` |
+| `result` | `Text`, session totals (`Tokens`, `DurationMs`, `DurationAPIMs`, `NumTurns`) | result (replaces text so far); usage, summed under `SessionTotals`; heartbeat (flushes counts and, once a turn count is known, prints the turn line; a result with no decodable turn count is dropped) |
 | `host_op` | `HostOp` | heartbeat (rendered by `FormatSpindriftOp`); the host's own `spindrift_op` lines, in every Driver's stream |
 
 The progress kinds are `driverkit.IsProgress`; opencode's `ResolveExit`
@@ -1291,8 +1296,8 @@ line itself.
 
 Canonical events never leave the driver packages. The `Driver` interface is
 the one seam: no caller outside them decodes a line or sees an `Event`.
-Both `opencode` and `claude` are built on this layer. The one reader still on
-its own parse is `claude`'s heartbeat, which a later ticket ports.
+Both `opencode` and `claude` are built on this layer, and every reader,
+`claude`'s heartbeat included, runs on it.
 
 ###### opencode's strict and lenient fields
 
