@@ -1250,10 +1250,10 @@ default for the transcript and heartbeat, and `ResolveExit`, `ResultEvent` and
 reports one tally per call (`opencode`). `SessionTotals` sums the `result`
 events instead, for a CLI whose per-session summary is the ground truth for
 output tokens, cost, turns and durations (`claude`); `usage` events then feed
-only the per-model and per-role breakdowns. The `opencode` package's thin
-`Classify`, `ResultText`, `RenderTranscript`, `ExtractUsage` and heartbeat
-functions each delegate to a shared reader with its own decoder and inputs;
-read them as the worked example. The `claude` package's decoder is the worked
+only the per-model and per-role breakdowns. The Driver registrations in
+`cmd/launcher/internal/driver/opencode.go` and `claude.go` call the shared
+readers directly, each with its own decoder and inputs; read them as the
+worked examples. The `claude` package's decoder is the worked
 example of a stateful one: it keeps a task-id to role map, the top-level role
 a `pass_start` line sets, and a latch that recognises a `result` line echoing
 a marker the agent already quoted.
