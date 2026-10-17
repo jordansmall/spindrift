@@ -158,6 +158,19 @@ let
   # model's context. This covers every call, not just the overflow case
   # BASH_MAX_OUTPUT_LENGTH already handles (issue #1987).
 
+  # guardHook: Claude runs the tool on any hook exit but 0 or 2, so an unrunnable
+  # hook (126/127) fails open (#5399, #5400). Guard hooks exit only 0 or 2, so
+  # any other code blocks. jq is exercised first because a hook without a
+  # working jq exits 0 and allows. bash-output-tee.sh failures blocking is
+  # deliberate (it unsets credential vars). Inline sh: a wrapper could be missing.
+  guardHook =
+    script:
+    "jq -n true >/dev/null 2>&1 || "
+    + "{ echo \"spindrift guard hook ${script} cannot run (no working jq), refusing the call\" >&2; exit 2; }; "
+    + "/home/agent/.claude/hooks/${script}; rc=$?; "
+    + "case \"$rc\" in 0|2) exit \"$rc\";; 126|127) why=\"cannot run\";; *) why=failed;; esac; "
+    + "echo \"spindrift guard hook ${script} $why (exit $rc), refusing the call\" >&2; exit 2";
+
   # Rendered with builtins.toJSON rather than a hand-built string so the
   # settings.json is always valid JSON (ADR 0007 tier-1).
   boxSettings = builtins.toJSON {
@@ -168,7 +181,7 @@ let
           hooks = [
             {
               type = "command";
-              command = "/home/agent/.claude/hooks/reject-background-bash.sh";
+              command = guardHook "reject-background-bash.sh";
             }
           ];
         }
@@ -177,7 +190,7 @@ let
           hooks = [
             {
               type = "command";
-              command = "/home/agent/.claude/hooks/credential-deny.sh";
+              command = guardHook "credential-deny.sh";
             }
           ];
         }
@@ -186,7 +199,7 @@ let
           hooks = [
             {
               type = "command";
-              command = "/home/agent/.claude/hooks/credential-deny.sh";
+              command = guardHook "credential-deny.sh";
             }
           ];
         }
@@ -195,7 +208,7 @@ let
           hooks = [
             {
               type = "command";
-              command = "/home/agent/.claude/hooks/env-credential-scrub.sh";
+              command = guardHook "env-credential-scrub.sh";
             }
           ];
         }
@@ -204,7 +217,7 @@ let
           hooks = [
             {
               type = "command";
-              command = "/home/agent/.claude/hooks/bash-output-tee.sh";
+              command = guardHook "bash-output-tee.sh";
             }
           ];
         }
