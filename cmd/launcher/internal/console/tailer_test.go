@@ -57,6 +57,32 @@ func TestTailer_ReadAppended_AdvancesOffsetByBytesRead(t *testing.T) {
 	}
 }
 
+// An opencode dispatch's tailer feeds the live Console view, so it shows the
+// host's spindrift_op lines as the claude tailer does.
+func TestTailer_ReadAppended_OpencodeShowsHostOpLines(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "issue-9.log")
+	log := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
+	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	drv, err := driver.New("opencode")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+
+	tl := &tailer{path: path}
+	data, ok := tl.readAppended(drv, "9")
+
+	if !ok {
+		t.Fatal("readAppended() ok = false, want true")
+	}
+	if want := "pass 1 (implement) started"; !strings.Contains(data, want) {
+		t.Errorf("readAppended() data = %q, want it to contain %q", data, want)
+	}
+}
+
 // The path is a directory because that is how this test reaches a read
 // failure past a successful Open: a directory opens fine but cannot be read
 // as a file. The offset must survive such a hiccup for a later call to use.

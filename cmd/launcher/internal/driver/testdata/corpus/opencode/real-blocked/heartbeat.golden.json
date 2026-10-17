@@ -1,6 +1,12 @@
 {
   "lines": [
-    "#42 · SPINDRIFT_OUTCOME issue=word-rules landing=agent/issue-word-rules status=blocked note=The acceptance criteria contrad..."
+    "#42 ○ dispatch_start",
+    "#42 ○ prompt_hashes",
+    "#42 ○ pass 1 (implement) started",
+    "#42 · SPINDRIFT_OUTCOME issue=word-rules landing=agent/issue-word-rules status=blocked note=The acceptance criteria contrad...",
+    "#42 ○ pass 1 (implement) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ stop: outcome reached",
+    "#42 ○ dispatch_settled"
   ],
   "onModel": []
 }

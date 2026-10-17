@@ -1,8 +1,22 @@
 {
   "lines": [
+    "#42 ○ dispatch_start",
+    "#42 ○ prompt_hashes",
+    "#42 ○ pass 1 (implement) started",
     "#42 · Committed b8617ed on `agent/issue-encoding`: `--encoding NAME` is implemented in `tally/__main__.",
+    "#42 ○ pass 1 (implement) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ pass 1 ended with no outcome (exit 0)",
+    "#42 ○ continue: no cap fired, entering review pass",
+    "#42 ○ pass 2 (review) started",
     "#42 · VERDICT: BLOCK",
-    "#42 · Review fixes are folded into the branch's single `feat` commit, but the review pass still has to re-check it."
+    "#42 ○ pass 2 (review) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ verdict: BLOCK",
+    "#42 ○ continue: blocked, running another fix pass",
+    "#42 ○ pass 3 (fix) started",
+    "#42 · Review fixes are folded into the branch's single `feat` commit, but the review pass still has to re-check it.",
+    "#42 ○ pass 3 (fix) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ stop: outcome reached",
+    "#42 ○ dispatch_settled"
   ],
   "onModel": []
 }

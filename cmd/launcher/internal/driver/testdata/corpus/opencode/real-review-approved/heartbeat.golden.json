@@ -1,10 +1,26 @@
 {
   "lines": [
+    "#42 ○ dispatch_start",
+    "#42 ○ prompt_hashes",
+    "#42 ○ pass 1 (implement) started",
     "#42 · Branch exists; check it.",
     "#42 · Committed `1fb0bbd` on `agent/issue-top-words`: `--top N` prints the N most frequent words after the per-file lines.",
+    "#42 ○ pass 1 (implement) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ pass 1 ended with no outcome (exit 0)",
+    "#42 ○ continue: no cap fired, entering review pass",
+    "#42 ○ pass 2 (review) started",
     "#42 · VERDICT: APPROVE",
+    "#42 ○ pass 2 (review) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ verdict: APPROVE",
+    "#42 ○ continue: approved, running the land pass",
+    "#42 ○ pass 3 (land) started",
     "#42 · Non-blocking findings are usability extras outside the spec; dropping them.",
-    "#42 · SPINDRIFT_OUTCOME issue=top-words landing=agent/issue-top-words status=ready note=--top N implemented with tests; the..."
+    "#42 · SPINDRIFT_OUTCOME issue=top-words landing=agent/issue-top-words status=ready note=--top N implemented with tests; the...",
+    "#42 ○ pass 3 (land) usage: 0 calls, 0 in, 0 out, 0 cache read, 0 cache write",
+    "#42 ○ post-approval land delta: none — landing did not alter the reviewed tree",
+    "#42 ○ stop: outcome reached",
+    "#42 ○ delta review skip: land delta is zero; landing did not alter the reviewed tree",
+    "#42 ○ dispatch_settled"
   ],
   "onModel": []
 }

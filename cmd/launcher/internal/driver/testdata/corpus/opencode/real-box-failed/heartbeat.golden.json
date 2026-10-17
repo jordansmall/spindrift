@@ -1,4 +1,7 @@
 {
-  "lines": [],
+  "lines": [
+    "#42 ○ dispatch_start",
+    "#42 ○ dispatch_settled"
+  ],
   "onModel": []
 }

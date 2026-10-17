@@ -8,7 +8,8 @@ import (
 
 // HeartbeatWriter decodes the Pass log stream it is written and emits a
 // per-issue heartbeat line to out for each KindText event with non-empty
-// prose, sanitized and bounded by TrimNarration. Every byte is forwarded to
+// prose, sanitized and bounded by TrimNarration, and for each KindHostOp event
+// carrying a payload, rendered by FormatSpindriftOp. Every byte is forwarded to
 // raw unchanged; the heartbeat is a side effect.
 type HeartbeatWriter struct {
 	raw          io.Writer
@@ -86,6 +87,10 @@ func (w *HeartbeatWriter) parseLine(line string) {
 		case KindText:
 			if text := TrimNarration(ev.Text); text != "" {
 				fmt.Fprintf(w.out, "#%s \xc2\xb7 %s\n", w.issue, text)
+			}
+		case KindHostOp:
+			if ev.HostOp != nil {
+				fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.HostOp))
 			}
 		}
 	}

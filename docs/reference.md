@@ -1248,7 +1248,7 @@ its own decoder and inputs; read them as the worked example.
 | `error` | `Text`, `ResetAt` | classifier (transient markers) |
 | `unparsed` | `Text` | classifier (terminal markers only) |
 | `result` | `Text`, session totals | result (replaces text so far) |
-| `host_op` | `HostOp` | none yet; the host's own `spindrift_op` lines, in every Driver's stream |
+| `host_op` | `HostOp` | heartbeat (rendered by `FormatSpindriftOp`); the host's own `spindrift_op` lines, in every Driver's stream |
 
 `driverkit/event.go` holds the field-level contract, including what each
 reader does with an event. A few conventions matter to a decoder author.
