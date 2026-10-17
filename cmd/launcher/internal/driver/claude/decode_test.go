@@ -201,7 +201,15 @@ func TestDecodeMistypedResultFieldContributesNoTotals(t *testing.T) {
 	// its text, carries no totals, and the usage reader skips it.
 	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"done","num_turns":"3","total_cost_usd":0.25,"usage":{"input_tokens":1}}`)
 	wantKinds(t, evs, driverkit.KindResult, driverkit.KindError)
-	want := driverkit.Event{Kind: driverkit.KindResult, Text: "done", NoTotals: true}
+	want := driverkit.Event{Kind: driverkit.KindResult, Text: "done", NoTotals: true, NoTurns: true}
+	if !reflect.DeepEqual(evs[0], want) {
+		t.Errorf("result = %+v, want %+v", evs[0], want)
+	}
+}
+
+func TestDecodeTurnsDecodeIndependentlyOfOtherTotals(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"result","result":"done","num_turns":3,"total_cost_usd":"x"}`)
+	want := driverkit.Event{Kind: driverkit.KindResult, Text: "done", NumTurns: 3, NoTotals: true}
 	if !reflect.DeepEqual(evs[0], want) {
 		t.Errorf("result = %+v, want %+v", evs[0], want)
 	}

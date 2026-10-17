@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/landdelta"
 	"spindrift.dev/launcher/internal/usage"
@@ -145,6 +146,32 @@ func TestWriterResultWithoutTurnsFlushesCountsOnly(t *testing.T) {
 		if strings.HasSuffix(line, "]") || line == "#42" {
 			t.Errorf("bare heartbeat line emitted: %q", line)
 		}
+	}
+}
+
+func TestWriterResultWithMistypedOtherTotalsStillPrintsTurns(t *testing.T) {
+	toolEv := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}` + "\n"
+	for _, field := range []string{`"total_cost_usd":"x"`, `"duration_ms":"x"`, `"usage":"x"`} {
+		var status bytes.Buffer
+		w := newWriter("42", &status)
+		fmt.Fprint(w, toolEv)
+		fmt.Fprint(w, `{"type":"result","num_turns":3,`+field+`}`+"\n")
+
+		out := status.String()
+		if !strings.Contains(out, "1 read") || !strings.Contains(out, "3 turns") {
+			t.Errorf("%s: want count line and turn line, got %q", field, out)
+		}
+	}
+}
+
+func TestWriterResultWithMistypedTurnsPrintsNothing(t *testing.T) {
+	var status bytes.Buffer
+	w := newWriter("42", &status)
+	fmt.Fprint(w, `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"a.go"}}]}}`+"\n")
+	fmt.Fprint(w, `{"type":"result","num_turns":"3"}`+"\n")
+
+	if out := status.String(); strings.Contains(out, "read") || strings.Contains(out, "turns") {
+		t.Errorf("mistyped num_turns must drop the result line, got %q", out)
 	}
 }
 
@@ -361,7 +388,7 @@ func TestFormatHeartbeatShape(t *testing.T) {
 		{"9", 3, "", "scout", "plan", []string{"#9", "scout", "[plan]", "3 turn"}},
 	}
 	for _, tc := range cases {
-		got := claude.FormatHeartbeat(tc.issue, tc.turns, tc.lastTool, tc.role, tc.phase)
+		got := driverkit.FormatHeartbeat(tc.issue, tc.turns, tc.lastTool, tc.role, tc.phase)
 		for _, sub := range tc.wantSubs {
 			if !strings.Contains(got, sub) {
 				t.Errorf("FormatHeartbeat(%q,%d,%q,%q,%q) = %q, missing %q",
@@ -374,7 +401,7 @@ func TestFormatHeartbeatShape(t *testing.T) {
 // A control character, newline, or CSI/OSC escape in role must not break the
 // single-line heartbeat row.
 func TestFormatHeartbeatSanitizesRole(t *testing.T) {
-	got := claude.FormatHeartbeat("42", 3, "Edit", "scout\x1b[2J\nfake-row", "edit")
+	got := driverkit.FormatHeartbeat("42", 3, "Edit", "scout\x1b[2J\nfake-row", "edit")
 	want := "#42 scoutfake-row [edit] \xc2\xb7 3 turns \xc2\xb7 Edit"
 	if got != want {
 		t.Errorf("FormatHeartbeat role not sanitized, got %q, want %q", got, want)
@@ -448,7 +475,7 @@ func TestFormatCountLineShape(t *testing.T) {
 		{"9", "scout", "explore", map[string]int{"read": 1}, []string{"#9", "scout", "[explore]", "1 read"}},
 	}
 	for _, tc := range cases {
-		got := claude.FormatCountLine(tc.issue, tc.role, tc.phase, tc.counts)
+		got := driverkit.FormatCountLine(tc.issue, tc.role, tc.phase, tc.counts)
 		for _, sub := range tc.wantSubs {
 			if !strings.Contains(got, sub) {
 				t.Errorf("FormatCountLine(%q,%q,%q,%v) = %q, missing %q",
@@ -461,7 +488,7 @@ func TestFormatCountLineShape(t *testing.T) {
 // A control character, newline, or CSI/OSC escape in role must not break the
 // single-line count row.
 func TestFormatCountLineSanitizesRole(t *testing.T) {
-	got := claude.FormatCountLine("42", "scout\x1b]0;pwn\x07\nfake-row", "explore", map[string]int{"read": 1})
+	got := driverkit.FormatCountLine("42", "scout\x1b]0;pwn\x07\nfake-row", "explore", map[string]int{"read": 1})
 	want := "#42 scoutfake-row [explore] \xc2\xb7 1 read"
 	if got != want {
 		t.Errorf("FormatCountLine role not sanitized, got %q, want %q", got, want)
@@ -834,11 +861,11 @@ func TestWriterModelHeader(t *testing.T) {
 
 func TestFormatRoleHeaderModel(t *testing.T) {
 	const rule = "\xe2\x94\x80\xe2\x94\x80"
-	h := claude.FormatRoleHeader("42", "scout", "haiku")
+	h := driverkit.FormatRoleHeader("42", "scout", "haiku")
 	if !strings.Contains(h, rule+" scout \xc2\xb7 haiku ") {
 		t.Errorf("header missing 'scout · haiku': %q", h)
 	}
-	hNoModel := claude.FormatRoleHeader("42", "scout", "")
+	hNoModel := driverkit.FormatRoleHeader("42", "scout", "")
 	if strings.Contains(hNoModel, "\xc2\xb7") {
 		t.Errorf("header with empty model must not contain '·': %q", hNoModel)
 	}
@@ -851,7 +878,7 @@ func TestFormatRoleHeaderModel(t *testing.T) {
 // single-line header row. The trailing rule pads out from the sanitized role
 // length, not the raw one, which is why the want string has 15 rule runes.
 func TestFormatRoleHeaderSanitizesRole(t *testing.T) {
-	got := claude.FormatRoleHeader("42", "scout\x1b[2J\nfake-row", "")
+	got := driverkit.FormatRoleHeader("42", "scout\x1b[2J\nfake-row", "")
 	want := "#42 \xe2\x94\x80\xe2\x94\x80 scoutfake-row " + strings.Repeat("\xe2\x94\x80", 15)
 	if got != want {
 		t.Errorf("FormatRoleHeader role not sanitized, got %q, want %q", got, want)
