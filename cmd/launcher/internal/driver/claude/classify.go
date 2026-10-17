@@ -112,8 +112,8 @@ func classifyAt(logPath string, now time.Time) (driverkit.Classification, error)
 // agentContentEvent is the minimal stream-json envelope for telling
 // agent-authored content from a terminating API error event.
 type agentContentEvent struct {
-	Type    string `json:"type"`
-	Error   string `json:"error"`
+	Type    string          `json:"type"`
+	Error   json.RawMessage `json:"error"`
 	Message struct {
 		Model string `json:"model"`
 	} `json:"message"`
@@ -135,10 +135,19 @@ func classifyTurn(chunk string) (content, synthetic bool) {
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
 		return false, false
 	}
-	if ev.Type == "assistant" && ev.Message.Model == syntheticModelSentinel && ev.Error != "" {
+	if ev.Type == "assistant" && ev.Message.Model == syntheticModelSentinel && errorPresent(ev.Error) {
 		return false, true
 	}
 	return ev.Type == "assistant" || ev.Type == "user", false
+}
+
+// errorPresent reports whether a top-level "error" value is set. The CLI's
+// value is normally a string, but any other JSON type must not fail the
+// envelope parse (issue #5453). A missing field, null, or the JSON empty
+// string count as unset; any other value is present.
+func errorPresent(raw json.RawMessage) bool {
+	s := string(raw)
+	return s != "" && s != "null" && s != `""`
 }
 
 // isAgentContentEvent reports whether chunk is a stream-json line carrying
