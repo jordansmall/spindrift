@@ -12,7 +12,10 @@ import (
 // log at path, or (nil, nil) when the log is absent. Each event is one call's
 // own usage, not a running total, so these sum; a Driver whose CLI re-emits
 // lines sharing a MessageID gets the first occurrence only (an empty
-// MessageID is never deduplicated). A usage event naming no model lands under
+// MessageID is never deduplicated), so the sum runs over DISTINCT message.id:
+// claude-code re-emits a multi-block message once per block with identical
+// usage. The result event's own usage header covers one call only and is
+// ignored (issue #2078). A usage event naming no model lands under
 // usage.UnknownModel. Rows stay keyed by exact model id. They are ordered by
 // family rank (ascending) then exact id when family is non-nil, by id alone
 // when it is nil: family is the Driver's heartbeat hook, which supplies the

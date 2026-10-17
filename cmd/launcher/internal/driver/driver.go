@@ -84,8 +84,10 @@ func register(s driverkit.Strategy) {
 	if _, exists := registry[s.Name]; exists {
 		panic("driver: duplicate registration for " + s.Name)
 	}
-	registry[s.Name] = strategyDriver{s}
+	registry[s.Name] = driverkit.New(s)
 }
+
+var _ Driver = driverkit.Driver{}
 
 // New returns the registered Driver strategy for name. An empty name defaults
 // to "claude", matching the nix side's default.

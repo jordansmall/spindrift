@@ -1,4 +1,4 @@
-package driver
+package driverkit
 
 import (
 	"bytes"
@@ -10,11 +10,11 @@ import (
 	"strings"
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/testutil"
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// fakeDecoder reads tab-separated lines: kind, then that kind's fields.
+// tabDecoder reads tab-separated lines: kind, then that kind's fields.
 //
 //	text	id	body
 //	model	id
@@ -25,8 +25,8 @@ import (
 //	err	text
 //
 // Any other line is KindUnparsed.
-func fakeDecoder() driverkit.Decoder {
-	return func(line string) []driverkit.Event {
+func tabDecoder() Decoder {
+	return func(line string) []Event {
 		f := strings.Split(line, "\t")
 		num := func(i int) int {
 			n, _ := strconv.Atoi(f[i])
@@ -34,31 +34,31 @@ func fakeDecoder() driverkit.Decoder {
 		}
 		switch {
 		case f[0] == "text" && len(f) == 3:
-			return []driverkit.Event{{Kind: driverkit.KindText, MessageID: f[1], Text: f[2]}}
+			return []Event{{Kind: KindText, MessageID: f[1], Text: f[2]}}
 		case f[0] == "model" && len(f) == 2:
-			return []driverkit.Event{{Kind: driverkit.KindModel, Model: f[1]}}
+			return []Event{{Kind: KindModel, Model: f[1]}}
 		case f[0] == "usage" && len(f) == 5:
-			return []driverkit.Event{{Kind: driverkit.KindUsage, MessageID: f[1], Model: f[2],
-				Tokens: driverkit.Tokens{Input: num(3), Output: num(4)}}}
+			return []Event{{Kind: KindUsage, MessageID: f[1], Model: f[2],
+				Tokens: Tokens{Input: num(3), Output: num(4)}}}
 		case f[0] == "result" && len(f) == 3:
-			return []driverkit.Event{{Kind: driverkit.KindResult, Text: f[1], NumTurns: 1,
-				Tokens: driverkit.Tokens{Output: num(2)}}}
+			return []Event{{Kind: KindResult, Text: f[1], NumTurns: 1,
+				Tokens: Tokens{Output: num(2)}}}
 		case f[0] == "tool" && len(f) == 4:
-			return []driverkit.Event{{Kind: driverkit.KindToolCall, ToolID: f[1], ToolName: f[2], ToolTarget: f[3],
+			return []Event{{Kind: KindToolCall, ToolID: f[1], ToolName: f[2], ToolTarget: f[3],
 				ToolInput: json.RawMessage(`{"content":"x"}`)}}
 		case f[0] == "toolres" && len(f) == 3:
-			return []driverkit.Event{{Kind: driverkit.KindToolResult, ToolID: f[1], ToolOutput: f[2]}}
+			return []Event{{Kind: KindToolResult, ToolID: f[1], ToolOutput: f[2]}}
 		case f[0] == "err" && len(f) == 2:
-			return []driverkit.Event{{Kind: driverkit.KindError, Text: f[1]}}
+			return []Event{{Kind: KindError, Text: f[1]}}
 		}
-		return []driverkit.Event{{Kind: driverkit.KindUnparsed, Text: line}}
+		return []Event{{Kind: KindUnparsed, Text: line}}
 	}
 }
 
-func fakeStrategy() driverkit.Strategy {
-	return driverkit.Strategy{
+func fakeStrategy() Strategy {
+	return Strategy{
 		Name:        "fake",
-		NewDecoder:  fakeDecoder,
+		NewDecoder:  tabDecoder,
 		ResultEvent: func(text string) ([]byte, error) { return []byte("result\t" + text + "\t0\n"), nil },
 		SessionFlags: func(mode, repoSlug, issue, home string) string {
 			return strings.Join([]string{mode, repoSlug, issue, home}, "|")
@@ -76,16 +76,16 @@ func writeFakeLog(t *testing.T, lines ...string) string {
 }
 
 func TestStrategyDriverName(t *testing.T) {
-	if got := (strategyDriver{fakeStrategy()}).Name(); got != "fake" {
+	if got := New(fakeStrategy()).Name(); got != "fake" {
 		t.Errorf("Name() = %q, want fake", got)
 	}
 }
 
 func TestStrategyDriverClassifyTransient(t *testing.T) {
 	s := fakeStrategy()
-	s.TransientPatterns = []driverkit.Pattern{{Substr: "slow down", Reason: driverkit.RateLimit}}
-	s.TerminalPatterns = []driverkit.Pattern{{Substr: "bad flag", Reason: driverkit.UnsupportedFlag}}
-	d := strategyDriver{s}
+	s.TransientPatterns = []Pattern{{Substr: "slow down", Reason: RateLimit}}
+	s.TerminalPatterns = []Pattern{{Substr: "bad flag", Reason: UnsupportedFlag}}
+	d := New(s)
 
 	cases := []struct {
 		name string
@@ -112,15 +112,15 @@ func TestStrategyDriverClassifyTransient(t *testing.T) {
 
 func TestStrategyDriverClassifyHonoursClassifyOptions(t *testing.T) {
 	s := fakeStrategy()
-	s.TransientPatterns = []driverkit.Pattern{{Substr: "slow down", Reason: driverkit.RateLimit}, {Substr: "overloaded", Reason: driverkit.Overloaded}}
+	s.TransientPatterns = []Pattern{{Substr: "slow down", Reason: RateLimit}, {Substr: "overloaded", Reason: Overloaded}}
 	log := writeFakeLog(t, "err\tslow down", "err\toverloaded")
 
-	got, err := strategyDriver{s}.ClassifyTransient(log)
+	got, err := New(s).ClassifyTransient(log)
 	if err != nil || got.Reason != Overloaded {
 		t.Fatalf("default: got %+v, %v; want the last marker (overloaded)", got, err)
 	}
-	s.Classify = driverkit.ClassifyOptions{FirstMatch: true}
-	got, err = strategyDriver{s}.ClassifyTransient(log)
+	s.Classify = ClassifyOptions{FirstMatch: true}
+	got, err = New(s).ClassifyTransient(log)
 	if err != nil || got.Reason != RateLimit {
 		t.Fatalf("FirstMatch: got %+v, %v; want the first marker (rateLimit)", got, err)
 	}
@@ -129,7 +129,7 @@ func TestStrategyDriverClassifyHonoursClassifyOptions(t *testing.T) {
 func TestStrategyDriverHeartbeatWriter(t *testing.T) {
 	var raw, out bytes.Buffer
 	var models []string
-	w := strategyDriver{fakeStrategy()}.NewHeartbeatWriter(&raw, "77", &out, driverkit.RenderOptions{
+	w := New(fakeStrategy()).NewHeartbeatWriter(&raw, "77", &out, RenderOptions{
 		OnModel: func(model, role string) { models = append(models, model+"/"+role) },
 	})
 
@@ -166,7 +166,7 @@ func TestStrategyDriverHeartbeatTopLevelRole(t *testing.T) {
 			s := fakeStrategy()
 			s.DefaultTopLevelRole = tc.defaultRole
 			var got []string
-			w := strategyDriver{s}.NewHeartbeatWriter(&bytes.Buffer{}, "1", &bytes.Buffer{}, driverkit.RenderOptions{
+			w := New(s).NewHeartbeatWriter(&bytes.Buffer{}, "1", &bytes.Buffer{}, RenderOptions{
 				TopLevelRole: tc.callerRole,
 				OnModel:      func(model, role string) { got = append(got, model+"/"+role) },
 			})
@@ -183,9 +183,9 @@ func TestStrategyDriverHeartbeatTopLevelRole(t *testing.T) {
 func TestStrategyDriverHeartbeatAppliesTracking(t *testing.T) {
 	s := fakeStrategy()
 	s.DefaultTopLevelRole = "implementor"
-	s.Heartbeat = driverkit.HeartbeatTracking{Kind: func(string) string { return "edit" }}
+	s.Heartbeat = HeartbeatTracking{Kind: func(string) string { return "edit" }}
 	var out bytes.Buffer
-	w := strategyDriver{s}.NewHeartbeatWriter(&bytes.Buffer{}, "1", &out, driverkit.RenderOptions{})
+	w := New(s).NewHeartbeatWriter(&bytes.Buffer{}, "1", &out, RenderOptions{})
 	if _, err := w.Write([]byte("model\tm1\ntool\tt1\tEdit\ta.go\nresult\tdone\t0\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -203,8 +203,8 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 
 	t.Run("SessionTotals take the result event", func(t *testing.T) {
 		s := fakeStrategy()
-		s.Totals = driverkit.SessionTotals
-		report, err := strategyDriver{s}.ExtractUsage(log)
+		s.Totals = SessionTotals
+		report, err := New(s).ExtractUsage(log)
 		if err != nil {
 			t.Fatalf("ExtractUsage: %v", err)
 		}
@@ -217,7 +217,7 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 	})
 
 	t.Run("PerCallTotals sum the usage events", func(t *testing.T) {
-		report, err := strategyDriver{fakeStrategy()}.ExtractUsage(log)
+		report, err := New(fakeStrategy()).ExtractUsage(log)
 		if err != nil {
 			t.Fatalf("ExtractUsage: %v", err)
 		}
@@ -234,7 +234,7 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 			}
 			return "a", 1
 		}
-		report, err := strategyDriver{s}.ExtractUsage(log)
+		report, err := New(s).ExtractUsage(log)
 		if err != nil {
 			t.Fatalf("ExtractUsage: %v", err)
 		}
@@ -243,42 +243,68 @@ func TestStrategyDriverExtractUsage(t *testing.T) {
 		}
 	})
 
-	t.Run("usageByModel failure degrades only the model section", func(t *testing.T) {
-		orig := usageByModel
-		t.Cleanup(func() { usageByModel = orig })
-		usageByModel = func(string, func() driverkit.Decoder, driverkit.ModelFamily) ([]usage.ModelUsage, error) {
-			return nil, errors.New("simulated I/O error")
+	// SessionTotals matters for the agent section: withMainLoopOutput must not
+	// invent a main-loop row when the agent rows are absent (issue #674).
+	for _, totals := range []struct {
+		name string
+		src  TotalsSource
+	}{{"PerCallTotals", PerCallTotals}, {"SessionTotals", SessionTotals}} {
+		for _, seam := range []struct {
+			name string
+			stub func()
+			// kept reports that only the stubbed seam's section degraded.
+			kept func(usage.Report) bool
+			want string
+		}{
+			{
+				"usageByModel failure degrades only the model section",
+				func() {
+					usageByModel = func(string, func() Decoder, ModelFamily) ([]usage.ModelUsage, error) {
+						return nil, errors.New("simulated I/O error")
+					}
+				},
+				func(r usage.Report) bool { return r.SummedByModel == nil && r.SummedByAgent != nil },
+				"totals and agents kept, models nil",
+			},
+			{
+				"usageByAgent failure degrades only the agent section",
+				func() {
+					usageByAgent = func(string, func() Decoder, TotalsSource) ([]usage.AgentUsage, error) {
+						return nil, errors.New("simulated I/O error")
+					}
+				},
+				func(r usage.Report) bool { return r.SummedByAgent == nil && r.SummedByModel != nil },
+				"totals and models kept, agents nil",
+			},
+		} {
+			t.Run(seam.name+"/"+totals.name, func(t *testing.T) {
+				origModel, origAgent := usageByModel, usageByAgent
+				t.Cleanup(func() { usageByModel, usageByAgent = origModel, origAgent })
+				seam.stub()
+				s := fakeStrategy()
+				s.Totals = totals.src
+				var report usage.Report
+				var err error
+				stderr := testutil.CaptureStderr(t, func() { report, err = New(s).ExtractUsage(log) })
+				if !strings.Contains(stderr, log) || !strings.Contains(stderr, "simulated I/O error") {
+					t.Errorf("stderr = %q, want it to mention the log path and the error", stderr)
+				}
+				if err != nil {
+					t.Fatalf("ExtractUsage: %v", err)
+				}
+				if !report.Found || !seam.kept(report) {
+					t.Errorf("report = %+v, want %s", report, seam.want)
+				}
+			})
 		}
-		report, err := strategyDriver{fakeStrategy()}.ExtractUsage(log)
-		if err != nil {
-			t.Fatalf("ExtractUsage: %v", err)
-		}
-		if !report.Found || report.SummedByModel != nil || report.SummedByAgent == nil {
-			t.Errorf("report = %+v, want totals and agents kept, models nil", report)
-		}
-	})
-
-	t.Run("usageByAgent failure degrades only the agent section", func(t *testing.T) {
-		orig := usageByAgent
-		t.Cleanup(func() { usageByAgent = orig })
-		usageByAgent = func(string, func() driverkit.Decoder, driverkit.TotalsSource) ([]usage.AgentUsage, error) {
-			return nil, errors.New("simulated I/O error")
-		}
-		report, err := strategyDriver{fakeStrategy()}.ExtractUsage(log)
-		if err != nil {
-			t.Fatalf("ExtractUsage: %v", err)
-		}
-		if !report.Found || report.SummedByAgent != nil || report.SummedByModel == nil {
-			t.Errorf("report = %+v, want totals and models kept, agents nil", report)
-		}
-	})
+	}
 }
 
 func TestStrategyDriverRenderTranscript(t *testing.T) {
 	log := writeFakeLog(t, "text\tm1\thello", "tool\tt1\tBash\tls", "toolres\tt1\tok")
-	d := strategyDriver{fakeStrategy()}
+	d := New(fakeStrategy())
 
-	got, err := d.RenderTranscript(log, driverkit.RenderOptions{TopLevelRole: "reviewer"})
+	got, err := d.RenderTranscript(log, RenderOptions{TopLevelRole: "reviewer"})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
@@ -286,11 +312,11 @@ func TestStrategyDriverRenderTranscript(t *testing.T) {
 		t.Errorf("transcript = %q, want the caller's role on every line", got)
 	}
 
-	got, err = d.RenderTranscript(log, driverkit.RenderOptions{})
+	got, err = d.RenderTranscript(log, RenderOptions{})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
-	if !strings.Contains(got, "["+driverkit.ImplementorRole+"] hello") {
+	if !strings.Contains(got, "["+ImplementorRole+"] hello") {
 		t.Errorf("transcript = %q, want the implementor default for an empty role", got)
 	}
 }
@@ -300,7 +326,7 @@ func TestStrategyDriverRenderTranscript(t *testing.T) {
 func TestStrategyDriverRenderTranscriptIgnoresDefaultTopLevelRole(t *testing.T) {
 	s := fakeStrategy()
 	s.DefaultTopLevelRole = "heartbeat-only"
-	got, err := strategyDriver{s}.RenderTranscript(writeFakeLog(t, "text\tm1\thello"), driverkit.RenderOptions{TopLevelRole: "reviewer"})
+	got, err := New(s).RenderTranscript(writeFakeLog(t, "text\tm1\thello"), RenderOptions{TopLevelRole: "reviewer"})
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
@@ -314,7 +340,7 @@ func TestStrategyDriverResolveExit(t *testing.T) {
 
 	t.Run("nil hook keeps the exit code", func(t *testing.T) {
 		for _, code := range []int{0, 1, 137} {
-			got, err := strategyDriver{fakeStrategy()}.ResolveExit(log, code)
+			got, err := New(fakeStrategy()).ResolveExit(log, code)
 			if err != nil || got != code {
 				t.Errorf("ResolveExit(%d) = %d, %v; want unchanged", code, got, err)
 			}
@@ -328,7 +354,7 @@ func TestStrategyDriverResolveExit(t *testing.T) {
 			gotPath = logPath
 			return exitCode + 1, nil
 		}
-		got, err := strategyDriver{s}.ResolveExit(log, 0)
+		got, err := New(s).ResolveExit(log, 0)
 		if err != nil || got != 1 || gotPath != log {
 			t.Errorf("ResolveExit = %d, %v (path %q); want 1 via the hook on %q", got, err, gotPath, log)
 		}
@@ -338,7 +364,7 @@ func TestStrategyDriverResolveExit(t *testing.T) {
 		s := fakeStrategy()
 		want := errors.New("boom")
 		s.ResolveExit = func(string, int) (int, error) { return 0, want }
-		if _, err := (strategyDriver{s}).ResolveExit(log, 0); !errors.Is(err, want) {
+		if _, err := New(s).ResolveExit(log, 0); !errors.Is(err, want) {
 			t.Errorf("err = %v, want %v", err, want)
 		}
 	})
@@ -355,17 +381,17 @@ func TestStrategyDriverResultText(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		reader driverkit.ResultReader
+		reader ResultReader
 		want   string
 	}{
-		{"zero value reads result events", driverkit.ResultEvents, "the result\n"},
-		{"LastMessage reads the final assistant message", driverkit.LastMessage, "late prose\n"},
+		{"zero value reads result events", ResultEvents, "the result\n"},
+		{"LastMessage reads the final assistant message", LastMessage, "late prose\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s := fakeStrategy()
 			s.Result = tc.reader
-			got, err := strategyDriver{s}.ResultText(log)
+			got, err := New(s).ResultText(log)
 			if err != nil || got != tc.want {
 				t.Errorf("ResultText = %q, %v; want %q", got, err, tc.want)
 			}
@@ -373,7 +399,7 @@ func TestStrategyDriverResultText(t *testing.T) {
 	}
 
 	t.Run("missing log is empty", func(t *testing.T) {
-		got, err := strategyDriver{fakeStrategy()}.ResultText(filepath.Join(t.TempDir(), "absent.log"))
+		got, err := New(fakeStrategy()).ResultText(filepath.Join(t.TempDir(), "absent.log"))
 		if err != nil || got != "" {
 			t.Errorf("ResultText = %q, %v; want empty, nil", got, err)
 		}
@@ -381,7 +407,7 @@ func TestStrategyDriverResultText(t *testing.T) {
 }
 
 func TestStrategyDriverResultEventRoundTrip(t *testing.T) {
-	d := strategyDriver{fakeStrategy()}
+	d := New(fakeStrategy())
 	ev, err := d.ResultEvent("all done")
 	if err != nil {
 		t.Fatalf("ResultEvent: %v", err)
@@ -398,7 +424,7 @@ func TestStrategyDriverResultEventRoundTrip(t *testing.T) {
 
 func TestStrategyDriverReadPasses(t *testing.T) {
 	s := fakeStrategy()
-	s.Totals = driverkit.SessionTotals
+	s.Totals = SessionTotals
 	s.WriteTool = "Write"
 	log := writeFakeLog(t,
 		"usage\tm1\tmodel-a\t10\t1",
@@ -408,7 +434,7 @@ func TestStrategyDriverReadPasses(t *testing.T) {
 	)
 
 	var seen int
-	tallies, err := strategyDriver{s}.ReadPasses(log, "out.txt", func(driverkit.PassLine) { seen++ })
+	tallies, err := New(s).ReadPasses(log, "out.txt", func(PassLine) { seen++ })
 	if err != nil {
 		t.Fatalf("ReadPasses: %v", err)
 	}
@@ -427,14 +453,14 @@ func TestStrategyDriverReadPasses(t *testing.T) {
 	}
 
 	s.WriteTool = ""
-	tallies, err = strategyDriver{s}.ReadPasses(log, "out.txt", nil)
+	tallies, err = New(s).ReadPasses(log, "out.txt", nil)
 	if err != nil || tallies[0].Wrote {
 		t.Errorf("empty WriteTool: tallies %+v, err %v; want no write tracked", tallies, err)
 	}
 }
 
 func TestStrategyDriverSessionFlags(t *testing.T) {
-	got := strategyDriver{fakeStrategy()}.SessionFlags("initial", "o/r", "12", "/home/agent")
+	got := New(fakeStrategy()).SessionFlags("initial", "o/r", "12", "/home/agent")
 	if want := "initial|o/r|12|/home/agent"; got != want {
 		t.Errorf("SessionFlags = %q, want %q", got, want)
 	}
