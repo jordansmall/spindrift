@@ -1933,7 +1933,9 @@ only for a secret this run actually needs — e.g. `JIRA_TOKEN` only when
 an operator who doesn't use those features never gets an unwanted vault
 lookup for them. The active Driver's credential is likewise the only one
 fetched; a credential outside the Driver's set is never looked up, so a
-vault missing it is never an error:
+vault missing it is never an error. This list mirrors the `credentials` rules
+on each Driver row in `lib/drivers/<name>.nix`, and a launcher test fails when
+it drifts from them:
 
 - `claude` (also an empty or default `DRIVER`): `CLAUDE_CODE_OAUTH_TOKEN`
   and `ANTHROPIC_API_KEY`, fetched as a unit —
@@ -2063,14 +2065,14 @@ serves its own drifting catalog (`claude-sonnet-4`, `claude-opus-4`,
 over time, so obtain a currently-served `<model>` from Copilot's live
 catalog — `opencode models`, filtered to the `github-copilot` provider —
 rather than copying a literal id that will rot. The launcher's
-`validate()` requires `OPENCODE_AUTH_CONTENT` only when `DRIVER=opencode`
-*and* the top-level `MODEL` carries the `github-copilot/` prefix; it does
-**not** inspect the
-per-tier `*_MODEL` knobs, so a config that points only a subagent tier (e.g.
-`REVIEW_MODEL=github-copilot/…`) at the Provider while leaving `MODEL` on a
-non-Copilot model passes validation yet still needs `OPENCODE_AUTH_CONTENT`
-set to run un-broken — set the credential whenever *any* selected tier
-resolves to `github-copilot`. Under the opencode Driver, the claude
+`validate()` (and `doctor`'s `driver-credentials` row, the same check)
+requires `OPENCODE_AUTH_CONTENT` only when `DRIVER=opencode` *and* some
+model tier (`MODEL`, `REVIEW_MODEL`, `WORKER_MODEL`, `SCOUT_MODEL`,
+`FILER_MODEL`) carries the `github-copilot/` prefix, so a config that
+points only a subagent tier (e.g. `REVIEW_MODEL=github-copilot/…`) at the
+Provider is still caught. A tier baked into the image is invisible to the
+launcher, so set the credential whenever *any* selected tier resolves to
+`github-copilot`. Under the opencode Driver, the claude
 credentials (`CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`) are not
 required at all — the claude Driver and the opencode Driver's
 `github-copilot` Provider each own their own credential, and validation
