@@ -162,6 +162,11 @@ func TestDecode(t *testing.T) {
 			[]driverkit.Event{{Kind: driverkit.KindUnparsed, Text: `{"type":"error","timestamp":"soon","error":"boom"}`}},
 		},
 		{
+			"text with a non-int timestamp is unparsed whole",
+			`{"type":"text","timestamp":"soon","part":{"text":"hi"}}`,
+			[]driverkit.Event{{Kind: driverkit.KindUnparsed, Text: `{"type":"text","timestamp":"soon","part":{"text":"hi"}}`}},
+		},
+		{
 			"tool_use with a malformed state is still a bare call",
 			`{"type":"tool_use","part":{"callID":"c3","tool":"bash","messageID":"msg_1","state":7}}`,
 			[]driverkit.Event{{Kind: driverkit.KindToolCall, MessageID: "msg_1", ToolID: "c3", ToolName: "bash"}},
