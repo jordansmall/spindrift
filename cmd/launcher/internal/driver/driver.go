@@ -62,6 +62,12 @@ type Driver interface {
 	// (issue #4406).
 	ResultEvent(text string) ([]byte, error)
 
+	// ReadPasses reads the Pass log at logPath one pass at a time for Dispatch
+	// Record ingestion (ADR 0061, 0065): one PassTally per pass_start-delimited
+	// segment, and visit, when non-nil, sees every non-blank line. trackWrite
+	// names a file whose last successful write a tally reports.
+	ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error)
+
 	// SessionFlags renders the CLI's session flags for mode. "initial" pins the
 	// session, "resume" resumes it only when its session store under home
 	// holds it, and any other mode renders nothing.

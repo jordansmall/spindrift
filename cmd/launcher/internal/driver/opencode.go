@@ -65,6 +65,10 @@ func (opencodeDriver) ResultEvent(text string) ([]byte, error) {
 	return opencode.ResultEvent(text)
 }
 
+func (opencodeDriver) ReadPasses(logPath, trackWrite string, visit func(driverkit.PassLine)) ([]driverkit.PassTally, error) {
+	return driverkit.ReadPasses(logPath, driverkit.PassOptions{NewDecoder: opencode.NewDecoder, Totals: driverkit.PerCallTotals, WriteTool: opencode.WriteTool}, trackWrite, visit)
+}
+
 func (opencodeDriver) SessionFlags(mode, repoSlug, issue, home string) string {
 	return opencode.SessionFlags(mode, repoSlug, issue, home)
 }
