@@ -267,10 +267,21 @@ func viewBody(m Model, l layout) string {
 		b.WriteString(renderBody(m, budget, compact))
 	}
 	if m.Err != nil {
-		fmt.Fprintf(&b, "refresh failed: %s\n", m.Err)
+		// JoinHorizontal (docked) ends without a newline, renderBody with one;
+		// the error line must start its own row. Nothing is added without an
+		// error, so the error-free render keeps its row count.
+		if b.Len() > 0 && !strings.HasSuffix(b.String(), "\n") {
+			b.WriteString("\n")
+		}
+		// The prefix is part of the clip: bodyBudget reserves exactly one row.
+		b.WriteString(clipBannerErr(SanitizeControlSequences(refreshErrPrefix+m.Err.Error()), m.Width))
+		b.WriteString("\n")
 	}
 	return b.String()
 }
+
+// refreshErrPrefix leads the refresh-error row viewBody renders.
+const refreshErrPrefix = "refresh failed: "
 
 // numberColWidth, stateColWidth, and ageColWidth are the work table's fixed
 // column widths: each column's vocabulary is bounded, so a fixed width aligns
@@ -733,8 +744,8 @@ func clipLabels(labels []string, width int) string {
 const bannerErrWidth = 200
 
 // clipBannerErr collapses an error's embedded newlines to single spaces and
-// clips the result to width, so a header error banner stays one row however
-// verbose the underlying error was (issue #1131).
+// clips the result to width, so an error banner or the body's refresh-error
+// line stays one row however verbose the underlying error was (issue #1131).
 func clipBannerErr(s string, width int) string {
 	return clip(strings.Join(strings.Fields(s), " "), width, false)
 }
