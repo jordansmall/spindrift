@@ -258,17 +258,7 @@ let
       mkdir -p $out/home/agent/${driver.driverEntry.sessionCacheDirRelative}
     ''}
     mkdir -p $out/home/agent/.claude/hooks
-    cp ${../agent/reject-background-bash.sh} $out/home/agent/.claude/hooks/reject-background-bash.sh
-    chmod +x $out/home/agent/.claude/hooks/reject-background-bash.sh
-    cp ${../agent/credential-deny.sh} $out/home/agent/.claude/hooks/credential-deny.sh
-    chmod +x $out/home/agent/.claude/hooks/credential-deny.sh
-    cp ${../agent/env-credential-scrub.sh} $out/home/agent/.claude/hooks/env-credential-scrub.sh
-    chmod +x $out/home/agent/.claude/hooks/env-credential-scrub.sh
-    cp ${../agent/credential-vars} $out/home/agent/.claude/hooks/credential-vars
-    cp ${../agent/bash-output-tee.sh} $out/home/agent/.claude/hooks/bash-output-tee.sh
-    chmod +x $out/home/agent/.claude/hooks/bash-output-tee.sh
-    cp ${../agent/bash-output-summary.sh} $out/home/agent/.claude/hooks/bash-output-summary.sh
-    chmod +x $out/home/agent/.claude/hooks/bash-output-summary.sh
+    cp ${import ./agent-hooks.nix p}/* $out/home/agent/.claude/hooks/
     cp ${p.writeText "settings.json" boxSettings} $out/home/agent/.claude/settings.json
     ${lib.optionalString ((harnessSkills ++ agents.skills) != [ ]) ''
       mkdir -p $out/agent/skills
