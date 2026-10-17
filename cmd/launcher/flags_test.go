@@ -2144,6 +2144,8 @@ func TestParseIssuePositionals_NoBoolsJustID(t *testing.T) {
 	}
 }
 
+// Pins `spindrift recover --yes 42`, where "--yes" was once mistaken for the
+// issue ID (issue #3054).
 func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"--yes", "42"})
 	if !parsed.yes {
@@ -2154,8 +2156,6 @@ func TestParseIssuePositionals_BoolBeforeID(t *testing.T) {
 	}
 }
 
-// ID before the bool is the exact `spindrift recover --yes 42` shape, where
-// "--yes" was once mistaken for the issue ID (issue #3054).
 func TestParseIssuePositionals_IDBeforeBool(t *testing.T) {
 	parsed := parseIssuePositionals([]string{"42", "--yes"})
 	if !parsed.yes {
