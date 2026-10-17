@@ -95,31 +95,91 @@ type logPart struct {
 	State  json.RawMessage `json:"state"`
 }
 
+// subagentSpawnTool is the opencode tool whose call runs a subagent.
+const subagentSpawnTool = "task"
+
+// toolTargetField names, per opencode tool, the input field that best
+// identifies what the call acted on.
+var toolTargetField = map[string]string{
+	"bash":            "command",
+	"read":            "filePath",
+	"edit":            "filePath",
+	"write":           "filePath",
+	"glob":            "pattern",
+	"grep":            "pattern",
+	"webfetch":        "url",
+	"websearch":       "query",
+	subagentSpawnTool: "subagent_type",
+}
+
+// toolTarget returns the string value of the tool's identifying input field,
+// "" for an unknown tool, a missing field or a non-string one.
+func toolTarget(tool string, input json.RawMessage) string {
+	field, ok := toolTargetField[tool]
+	if !ok {
+		return ""
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(input, &fields) != nil {
+		return ""
+	}
+	var target string
+	_ = json.Unmarshal(fields[field], &target)
+	return target
+}
+
 func decodeToolUse(part logPart, ts int64) []driverkit.Event {
 	var state struct {
 		Status string          `json:"status"`
 		Input  json.RawMessage `json:"input"`
+		Output json.RawMessage `json:"output"`
+		Error  json.RawMessage `json:"error"`
 	}
 	_ = json.Unmarshal(part.State, &state)
 	var callID, tool string
 	_ = json.Unmarshal(part.CallID, &callID)
 	_ = json.Unmarshal(part.Tool, &tool)
 	call := driverkit.Event{
-		Kind:      driverkit.KindToolCall,
-		Timestamp: ts,
-		MessageID: part.MessageID,
-		ToolID:    callID,
-		ToolName:  tool,
-		ToolInput: state.Input,
+		Kind:       driverkit.KindToolCall,
+		Timestamp:  ts,
+		MessageID:  part.MessageID,
+		ToolID:     callID,
+		ToolName:   tool,
+		ToolInput:  state.Input,
+		ToolTarget: toolTarget(tool, state.Input),
 	}
 	switch state.Status {
 	case "completed", "error":
 		result := call
 		result.Kind = driverkit.KindToolResult
 		result.IsError = state.Status == "error"
+		raw := state.Output
+		if result.IsError {
+			raw = state.Error
+		}
+		result.ToolOutput = outputText(raw)
+		if tool == subagentSpawnTool {
+			result.Subagent = call.ToolTarget
+			if result.Subagent == "" {
+				result.Subagent = driverkit.DefaultRole
+			}
+		}
 		return []driverkit.Event{call, result}
 	}
 	return []driverkit.Event{call}
+}
+
+// outputText decodes a tool's output or error, falling back to the raw JSON
+// when it is not a string, as the claude Driver's transcript does.
+func outputText(raw json.RawMessage) string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return s
+	}
+	return string(raw)
 }
 
 // decodeStepFinish maps one step_finish to its usage tally and, when the line

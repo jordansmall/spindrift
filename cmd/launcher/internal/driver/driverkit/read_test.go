@@ -185,7 +185,7 @@ func TestRenderTranscript(t *testing.T) {
 		Event{Kind: KindText, Text: "   "},
 		Event{Kind: KindReasoning, Text: "hidden"},
 		Event{Kind: KindText, Role: "sub", Text: "from sub"},
-		Event{Kind: KindToolCall})
+		Event{Kind: KindUsage})
 	got, err := RenderTranscript(path, nd, "")
 	want := "[implementor] top line\nsecond\n[sub] from sub"
 	if err != nil || got != want {
@@ -198,9 +198,37 @@ func TestRenderTranscript(t *testing.T) {
 	if got, err := RenderTranscript(missingLog(t), fakeDecoder(nil), ""); got != "" || err != nil {
 		t.Errorf("missing log: %q, %v", got, err)
 	}
-	empty, nd := evLines(t, Event{Kind: KindToolCall})
+	empty, nd := evLines(t, Event{Kind: KindUsage})
 	if got, _ := RenderTranscript(empty, nd, ""); got != "" {
 		t.Errorf("no text: %q", got)
+	}
+}
+
+func TestRenderTranscript_ToolEvents(t *testing.T) {
+	long := strings.Repeat("é", 250)
+	path, nd := evLines(t,
+		Event{Kind: KindToolCall, ToolName: "Bash", ToolTarget: "ls"},
+		Event{Kind: KindToolResult, ToolName: "Bash", ToolTarget: "ls", ToolOutput: "  a\nb \n"},
+		Event{Kind: KindToolCall, Role: "sub", ToolName: "Task"},
+		Event{Kind: KindToolResult, ToolName: "Bash", IsError: true, ToolOutput: "boom"},
+		Event{Kind: KindToolResult, ToolName: "Bash", ToolOutput: " \n"},
+		Event{Kind: KindToolResult, ToolName: "Bash", ToolOutput: long},
+		Event{Kind: KindToolResult, ToolName: "Task", Subagent: "reviewer", ToolOutput: "VERDICT: BLOCK"},
+		Event{Kind: KindToolResult, ToolName: "Task", Subagent: "reviewer", IsError: true, ToolOutput: "x"},
+	)
+	got, err := RenderTranscript(path, nd, "")
+	want := strings.Join([]string{
+		"[implementor] Bash(ls)",
+		"[implementor]   -> a b",
+		"[sub] Task()",
+		"[implementor]   -> error: boom",
+		"[implementor]   -> (empty result)",
+		"[implementor]   -> " + strings.Repeat("é", 197) + "...",
+		"[implementor]   -> [reviewer] VERDICT: BLOCK",
+		"[implementor]   -> [reviewer] error: x",
+	}, "\n")
+	if err != nil || got != want {
+		t.Errorf("got %q, %v; want %q", got, err, want)
 	}
 }
 

@@ -33,13 +33,17 @@ const (
 	KindReasoning Kind = "reasoning"
 
 	// KindToolCall is the agent invoking a tool. Fills ToolID, ToolName,
-	// ToolInput, MessageID, Timestamp, Role. Counts as agent progress.
+	// ToolInput, ToolTarget, MessageID, Timestamp, Role. The transcript
+	// renderer shows it; it counts as agent progress.
 	KindToolCall Kind = "tool_call"
 
 	// KindToolResult is a tool's output coming back. Fills ToolID, ToolName,
-	// IsError (the tool failed), MessageID, Timestamp, Role; Text stays empty.
+	// ToolTarget, ToolOutput, IsError (the tool failed), Subagent (a spawn
+	// tool's report), MessageID, Timestamp, Role; Text stays empty. The
+	// transcript renderer shows it.
 	// A CLI that reports call and result in one record emits both kinds from
-	// that record, call first, and the result then repeats the call's ToolInput.
+	// that record, call first, and the result then repeats the call's ToolInput
+	// and ToolTarget.
 	// Counts as agent progress.
 	KindToolResult Kind = "tool_result"
 
@@ -118,6 +122,21 @@ type Event struct {
 	ToolName  string
 	ToolInput json.RawMessage
 	IsError   bool
+
+	// ToolTarget is the input field that best identifies what a tool call
+	// acted on (command, file path, pattern, url, query, subagent type), "" when
+	// unknown. The decoder picks it, because which field that is belongs to the
+	// CLI's grammar.
+	ToolTarget string
+
+	// ToolOutput is a KindToolResult's output text as the CLI reported it, or
+	// the error message when IsError.
+	ToolOutput string
+
+	// Subagent is the role of the subagent whose completed report a
+	// KindToolResult carries (a task or spawn tool), "" for an ordinary tool.
+	// Distinct from Role, which stays the loop the event is attributed to.
+	Subagent string
 
 	// Tokens is the tally for KindUsage, and the session totals a KindResult
 	// may carry.

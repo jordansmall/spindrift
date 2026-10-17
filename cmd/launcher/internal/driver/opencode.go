@@ -32,8 +32,9 @@ func (opencodeDriver) ExtractUsage(logPath string) (usage.Report, error) {
 	return opencode.ExtractUsage(logPath)
 }
 
-// RenderTranscript attributes every text event to opts.TopLevelRole (opencode's
-// log has no sub-agent attribution, so there is no other role).
+// RenderTranscript attributes every event without a role to opts.TopLevelRole
+// (opencode's log has no sub-agent attribution); a task tool's result carries
+// the subagent it ran as a "[subagent] " tag instead.
 func (opencodeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
 	return opencode.RenderTranscript(logPath, opts.TopLevelRole)
 }
