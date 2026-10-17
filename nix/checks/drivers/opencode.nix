@@ -13,6 +13,7 @@ let
     assertMsg
     hasInfix
     filter
+    concatStringsSep
     splitString
     escapeShellArg
     all
@@ -52,9 +53,8 @@ in
   # greps the pinned source for the env read and the default it overrides.
   drivers-opencode-src-reads-bash-timeout-env =
     let
-      opencodeEntry = entry;
-      src = (opencodeEntry.package pkgs).src;
-      envVarName = builtins.head opencodeEntry.bashTimeoutEnv;
+      src = (entry.package pkgs).src;
+      envVarName = builtins.head entry.bashTimeoutEnv;
       # Joined to the field name, so an env read into some other field fails.
       envRead = ''bashDefaultTimeoutMs: positiveInteger("${envVarName}")'';
       defaultFallback = "flags.bashDefaultTimeoutMs ?? 2 * 60 * 1000";
@@ -77,14 +77,13 @@ in
   # Issue #262 slice 5 (AC4): opencode has no --agents JSON flag, so it
   # composes subagents from on-disk agents/*.md files under $HOME. Rendering
   # scout must produce frontmatter carrying `mode: "subagent"`, the model
-  # JSON-encoded (issue #2152 slice C), and the same description claude.nix
+  # JSON-encoded (issue #2152 slice C), and the same description lib/drivers/claude.nix
   # uses, so both Drivers frame subagents identically. Fixture descriptions
   # here are synthetic on purpose: see roster-fixtures-carry-no-live-descriptions
   # in nix/checks/roster.nix.
   drivers-opencode-agent-files-scout-frontmatter =
     let
-      opencodeEntry = entry;
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "scout";
@@ -247,8 +246,7 @@ in
   # opencode reads provider-native passthrough keys directly on the agent.
   drivers-opencode-agent-files-effort-present =
     let
-      opencodeEntry = entry;
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "scout";
@@ -273,8 +271,7 @@ in
   # (mirrors drivers-claude-agents-json-effort-absent).
   drivers-opencode-agent-files-effort-absent =
     let
-      opencodeEntry = entry;
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "scout";
@@ -310,9 +307,8 @@ in
   # the `effort` frontmatter scalar instead of `model`.
   drivers-opencode-agent-files-escapes-effort =
     let
-      opencodeEntry = entry;
       payload = "evil\"\ninjected: true";
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "escapee";
@@ -340,8 +336,7 @@ in
   # YAML scalar.
   drivers-opencode-agent-files-description-colon-frontmatter =
     let
-      opencodeEntry = entry;
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "auditor";
@@ -367,8 +362,7 @@ in
   # rewrites files the template never bakes.
   drivers-render-preamble-opencode-agent-files-dir =
     let
-      opencodeEntry = entry;
-      out = driverRegistry.renderPreamble opencodeEntry;
+      out = driverRegistry.renderPreamble entry;
     in
     assert assertMsg (hasInfix "DRIVER_AGENT_FILES_DIR=/home/agent/.config/opencode/agents" out)
       "renderPreamble must bake DRIVER_AGENT_FILES_DIR from the opencode Driver entry's agentFilesDirRelative under /home/agent, got: ${out}";
@@ -394,21 +388,17 @@ in
   # is the whole tie to the Go side. Claude's ".claude/projects" value is
   # pinned by drivers-render-preamble-session-cache-dir.
   drivers-session-cache-dir-relative-opencode =
-    let
-      opencodeEntry = entry;
-    in
     assert assertMsg
-      ((opencodeEntry.sessionCacheDirRelative or null) == ".local/share/opencode/spindrift-session")
+      ((entry.sessionCacheDirRelative or null) == ".local/share/opencode/spindrift-session")
       "opencode Driver entry's sessionCacheDirRelative must be .local/share/opencode/spindrift-session, got: ${
-        builtins.toJSON (opencodeEntry.sessionCacheDirRelative or null)
+        builtins.toJSON (entry.sessionCacheDirRelative or null)
       }";
     assert assertMsg
       (
-        (opencodeEntry.envCommon.OPENCODE_DB or null)
-        == "/home/agent/${opencodeEntry.sessionCacheDirRelative}/opencode.db"
+        (entry.envCommon.OPENCODE_DB or null) == "/home/agent/${entry.sessionCacheDirRelative}/opencode.db"
       )
       "opencode Driver entry's OPENCODE_DB must sit inside its sessionCacheDirRelative, got: ${
-        builtins.toJSON (opencodeEntry.envCommon or null)
+        builtins.toJSON (entry.envCommon or null)
       }";
     pkgs.runCommand "drivers-session-cache-dir-relative-opencode" { } "touch $out";
 
@@ -418,9 +408,8 @@ in
   # frontmatter key.
   drivers-opencode-agent-files-escapes-model =
     let
-      opencodeEntry = entry;
       payload = "evil\"\ninjected: true";
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "escapee";
@@ -445,9 +434,8 @@ in
   # the `mode` frontmatter scalar instead of `model`.
   drivers-opencode-agent-files-escapes-mode =
     let
-      opencodeEntry = entry;
       payload = "evil\"\ninjected: true";
-      rendered = opencodeEntry.agentFilesTemplate {
+      rendered = entry.agentFilesTemplate {
         roster = [
           {
             name = "escapee";
@@ -473,9 +461,8 @@ in
   # reasoningEffort frontmatter scalar instead of claude's --agents JSON.
   drivers-opencode-agent-files-default-roster-effort =
     let
-      opencodeEntry = entry;
       roster = defaultRosterFixture;
-      rendered = opencodeEntry.agentFilesTemplate { inherit roster; };
+      rendered = entry.agentFilesTemplate { inherit roster; };
       scoutFile = rendered.".config/opencode/agents/scout.md" or "";
       reviewerFile = rendered.".config/opencode/agents/reviewer.md" or "";
       filerFile = rendered.".config/opencode/agents/filer.md" or "";
@@ -500,8 +487,7 @@ in
   # permutation excluding "agents".
   drivers-opencode-argv-shape-pinned =
     let
-      opencodeEntry = entry;
-      shape = opencodeEntry.argvShape;
+      shape = entry.argvShape;
     in
     assert assertMsg (
       shape.promptStyle == "positional"
@@ -640,9 +626,6 @@ in
       && bashRules != { }
       && all (v: v == "deny") (builtins.attrValues (readRules // bashRules))
     ) "every opencode.json permission rule must be a literal \"deny\"";
-    assert assertMsg (
-      !(driverRegistry.entries.claude ? configFiles)
-    ) "the claude Driver must not carry configFiles";
     assert expect readRules true [
       ".env"
       "sub/.env.local"
@@ -690,4 +673,92 @@ in
       done
       touch $out
     '';
+
+  drivers-opencode-declare-bash-timeout-env =
+    assert assertMsg
+      ((entry.bashTimeoutEnv or null) == [ "OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS" ])
+      "opencode Driver's bashTimeoutEnv must name OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS, got: ${
+        builtins.toJSON (entry.bashTimeoutEnv or null)
+      }";
+    assert assertMsg
+      (hasInfix "DRIVER_BASH_TIMEOUT_ENV=OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS\n" (
+        driverRegistry.renderPreamble entry
+      ))
+      "renderPreamble must bake opencode's DRIVER_BASH_TIMEOUT_ENV";
+    pkgs.runCommand "drivers-opencode-declare-bash-timeout-env" { } "touch $out";
+
+  # AC#4: one roster carrying a custom agent outside the
+  # scout/reviewer/filer/worker set must render from the same list, since the
+  # roster, not per-Driver hardcoding, is the single source of agent identity.
+  drivers-opencode-roster-custom-agent =
+    let
+      roster = [
+        {
+          name = "auditor";
+          model = "audit-model";
+          mode = "subagent";
+          description = "Audit stuff";
+          tools = [ "Read" ];
+        }
+      ];
+      opencodeRendered = entry.agentFilesTemplate { inherit roster; };
+      opencodeAuditorFile = opencodeRendered.".config/opencode/agents/auditor.md" or "";
+    in
+    assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
+      "opencode agentFilesTemplate must render a custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
+    assert assertMsg (hasInfix ''model: "audit-model"'' opencodeAuditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the roster model JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
+    assert assertMsg (hasInfix ''mode: "subagent"'' opencodeAuditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the roster mode JSON-encoded (issue #2152 slice C), got: ${opencodeAuditorFile}";
+    pkgs.runCommand "drivers-opencode-roster-custom-agent" { } "touch $out";
+
+  # Issue #2152 slice C: an empty roster (`roster = []`) is a deliberate
+  # agent-less image, so opencode's agentFilesTemplate returns no agent file,
+  # only the guard plugin (issue #5346), which is not roster-derived.
+  drivers-opencode-render-empty-roster =
+    let
+      opencodeRendered = entry.agentFilesTemplate { roster = [ ]; };
+    in
+    assert assertMsg
+      (builtins.attrNames opencodeRendered == [ ".config/opencode/plugins/spindrift-guards.js" ])
+      "opencode agentFilesTemplate must return only the guard plugin for an empty roster, got keys: ${builtins.toJSON (builtins.attrNames opencodeRendered)}";
+    pkgs.runCommand "drivers-opencode-render-empty-roster" { } "touch $out";
+
+  # Issue #2152 slice C: one multi-agent roster (a built-in scout plus a
+  # custom "auditor"). opencode's auditor.md frontmatter carries the
+  # JSON-encoded model, mode, and description.
+  drivers-opencode-render-custom-roster =
+    let
+      roster = [
+        {
+          name = "scout";
+          model = "solo-scout-model";
+          mode = "subagent";
+          description = "fixture scout description";
+          tools = [ "Read" ];
+          promptFile = "scout-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "auditor";
+          model = "audit-model";
+          mode = "subagent";
+          description = "Audit stuff";
+          tools = [ "Read" ];
+          promptFile = "auditor-prompt.md";
+          prompt = null;
+        }
+      ];
+      opencodeRendered = entry.agentFilesTemplate { inherit roster; };
+      auditorFile = opencodeRendered.".config/opencode/agents/auditor.md" or "";
+    in
+    assert assertMsg (opencodeRendered ? ".config/opencode/agents/auditor.md")
+      "opencode agentFilesTemplate must render the custom roster entry (auditor.md), got keys: ${concatStringsSep ", " (builtins.attrNames opencodeRendered)}";
+    assert assertMsg (hasInfix ''model: "audit-model"'' auditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded model, got: ${auditorFile}";
+    assert assertMsg (hasInfix ''mode: "subagent"'' auditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded mode, got: ${auditorFile}";
+    assert assertMsg (hasInfix ''description: "Audit stuff"'' auditorFile)
+      "opencode agentFilesTemplate's auditor.md must carry the JSON-encoded description, got: ${auditorFile}";
+    pkgs.runCommand "drivers-opencode-render-custom-roster" { } "touch $out";
 }

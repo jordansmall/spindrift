@@ -29,7 +29,6 @@ in
   # shared verbatim across the main, conflict-resolve, and fix passes (AC4).
   drivers-claude-blocks-loop-background-affordances =
     let
-      claudeEntry = entry;
       disallowed = [
         "ScheduleWakeup"
         "CronCreate"
@@ -43,7 +42,7 @@ in
       # value is the single word right after the flag.
       # Match tokens exactly rather than by substring, so a typo'd sibling
       # like "ScheduleWakeupX" can't slip a false pass by.
-      words = splitString " " claudeEntry.flagsCommon;
+      words = splitString " " entry.flagsCommon;
       indexedWords = imap0 (i: w: { inherit i w; }) words;
       flagMatches = filter (iw: iw.w == "--disallowedTools") indexedWords;
       flagIndex = if flagMatches == [ ] then null else (builtins.head flagMatches).i;
@@ -53,9 +52,9 @@ in
     in
     assert assertMsg (
       flagIndex != null
-    ) "claude Driver's flagsCommon must include --disallowedTools, got: ${claudeEntry.flagsCommon}";
+    ) "claude Driver's flagsCommon must include --disallowedTools, got: ${entry.flagsCommon}";
     assert assertMsg (missing == [ ])
-      "claude Driver's flagsCommon --disallowedTools must deny ${concatStringsSep ", " missing}, got: ${claudeEntry.flagsCommon}";
+      "claude Driver's flagsCommon --disallowedTools must deny ${concatStringsSep ", " missing}, got: ${entry.flagsCommon}";
     pkgs.runCommand "drivers-claude-blocks-loop-background-affordances" { } "touch $out";
 
   # A Box has no operator to approve a tool call, so claude runs headless with
@@ -84,13 +83,9 @@ in
   # CLAUDE_CODE_DISABLE_BACKGROUND_TASKS by omitting run_in_background from
   # every one of those schemas, closing them all at once.
   drivers-claude-disables-background-tasks =
-    let
-      claudeEntry = entry;
-    in
-    assert assertMsg
-      ((claudeEntry.envCommon or { }).CLAUDE_CODE_DISABLE_BACKGROUND_TASKS or null == "1")
+    assert assertMsg ((entry.envCommon or { }).CLAUDE_CODE_DISABLE_BACKGROUND_TASKS or null == "1")
       "claude Driver's envCommon must set CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1, got: ${
-        builtins.toJSON (claudeEntry.envCommon or { })
+        builtins.toJSON (entry.envCommon or { })
       }";
     pkgs.runCommand "drivers-claude-disables-background-tasks" { } "touch $out";
 
@@ -101,7 +96,6 @@ in
   # schemas. Drift fails here instead of leaving envCommon's export inert.
   drivers-claude-cli-knows-disable-background-tasks-env =
     let
-      claudeEntry = entry;
       # claude-code carries an unfree license, so the plain `pkgs` above
       # refuses to evaluate it. This is the only check here that needs the
       # real package rather than its registry data, so it builds its own
@@ -110,15 +104,15 @@ in
         inherit system;
         config.allowUnfree = true;
       };
-      claudePackage = claudeEntry.package unfreePkgs;
+      claudePackage = entry.package unfreePkgs;
       # Named explicitly rather than derived from envCommon's keys: envCommon
       # may grow a second entry, and attrNames' alphabetical head would then
       # silently pin the wrong var.
       envVarName = "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS";
     in
     assert assertMsg (
-      (claudeEntry.envCommon or { }) ? ${envVarName}
-    ) "envVarName must name a key claudeEntry.envCommon actually sets, got: ${envVarName}";
+      (entry.envCommon or { }) ? ${envVarName}
+    ) "envVarName must name a key entry.envCommon actually sets, got: ${envVarName}";
     pkgs.runCommand "drivers-claude-cli-knows-disable-background-tasks-env"
       { nativeBuildInputs = [ pkgs.gnugrep ]; }
       ''
@@ -140,8 +134,7 @@ in
   # agentFilesTemplate emits mode.
   drivers-claude-agents-json-roster =
     let
-      claudeEntry = entry;
-      rendered = claudeEntry.agentsJsonTemplate {
+      rendered = entry.agentsJsonTemplate {
         roster = [
           {
             name = "scout";
@@ -193,8 +186,7 @@ in
   # rendered --agents JSON verbatim, with no normalization or validation.
   drivers-claude-agents-json-effort-present =
     let
-      claudeEntry = entry;
-      rendered = claudeEntry.agentsJsonTemplate {
+      rendered = entry.agentsJsonTemplate {
         roster = [
           {
             name = "scout";
@@ -223,8 +215,7 @@ in
   # renders byte-stable with the pre-#2242 shape.
   drivers-claude-agents-json-effort-absent =
     let
-      claudeEntry = entry;
-      rendered = claudeEntry.agentsJsonTemplate {
+      rendered = entry.agentsJsonTemplate {
         roster = [
           {
             name = "scout";
@@ -266,8 +257,7 @@ in
   # launcher, a separate consumer.
   drivers-render-preamble-session-cache-dir =
     let
-      claudeEntry = entry;
-      out = driverRegistry.renderPreamble claudeEntry;
+      out = driverRegistry.renderPreamble entry;
     in
     assert assertMsg (hasInfix "DRIVER_SESSION_CACHE_DIR=/home/agent/.claude/projects" out)
       "renderPreamble must bake DRIVER_SESSION_CACHE_DIR from the claude Driver entry's sessionCacheDirRelative under /home/agent, got: ${out}";
@@ -280,9 +270,8 @@ in
   # JSON structure or mangle the payload.
   drivers-claude-agents-json-escapes-every-scalar =
     let
-      claudeEntry = entry;
       payload = "x\"y\nz";
-      rendered = claudeEntry.agentsJsonTemplate {
+      rendered = entry.agentsJsonTemplate {
         roster = [
           {
             name = "escapee";
@@ -316,9 +305,8 @@ in
   # plumbing exists; review-axis's effort is pinned in nix/checks/image.nix.
   drivers-claude-agents-json-default-roster-effort =
     let
-      claudeEntry = entry;
       roster = defaultRosterFixture;
-      rendered = claudeEntry.agentsJsonTemplate { inherit roster; };
+      rendered = entry.agentsJsonTemplate { inherit roster; };
       parsed = builtins.fromJSON rendered;
     in
     assert assertMsg (parsed.scout.effort or "" == rosterHelper.rosterDefaults.scout.effort)
@@ -344,8 +332,7 @@ in
   # against lib/drivers/claude.nix's declared values.
   drivers-claude-argv-shape-pinned =
     let
-      claudeEntry = entry;
-      shape = claudeEntry.argvShape;
+      shape = entry.argvShape;
     in
     assert assertMsg (
       shape.promptStyle == "flag"
@@ -414,4 +401,92 @@ in
       done
       touch $out
     '';
+
+  drivers-claude-declare-bash-timeout-env =
+    assert assertMsg
+      (
+        (entry.bashTimeoutEnv or null) == [
+          "BASH_DEFAULT_TIMEOUT_MS"
+          "BASH_MAX_TIMEOUT_MS"
+        ]
+      )
+      "claude Driver's bashTimeoutEnv must name BASH_DEFAULT_TIMEOUT_MS and BASH_MAX_TIMEOUT_MS, got: ${
+        builtins.toJSON (entry.bashTimeoutEnv or null)
+      }";
+    pkgs.runCommand "drivers-claude-declare-bash-timeout-env" { } "touch $out";
+
+  # AC#4: one roster carrying a custom agent outside the
+  # scout/reviewer/filer/worker set must render from the same list, since the
+  # roster, not per-Driver hardcoding, is the single source of agent identity.
+  drivers-claude-roster-custom-agent =
+    let
+      roster = [
+        {
+          name = "auditor";
+          model = "audit-model";
+          mode = "subagent";
+          description = "Audit stuff";
+          tools = [ "Read" ];
+        }
+      ];
+      claudeRendered = builtins.fromJSON (entry.agentsJsonTemplate { inherit roster; });
+    in
+    assert assertMsg (claudeRendered ? auditor)
+      "claude agentsJsonTemplate must render a custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
+    assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
+      "claude agentsJsonTemplate's auditor entry must carry the roster model verbatim, got: ${
+        builtins.toJSON (claudeRendered.auditor or { })
+      }";
+    pkgs.runCommand "drivers-claude-roster-custom-agent" { } "touch $out";
+
+  # Issue #2152 slice C: an empty roster (`roster = []`) is a deliberate
+  # agent-less image, so claude's agentsJsonTemplate returns "".
+  drivers-claude-render-empty-roster =
+    let
+      claudeRendered = entry.agentsJsonTemplate { roster = [ ]; };
+    in
+    assert assertMsg (
+      claudeRendered == ""
+    ) "claude agentsJsonTemplate must return \"\" for an empty roster, got: ${claudeRendered}";
+    pkgs.runCommand "drivers-claude-render-empty-roster" { } "touch $out";
+
+  # Issue #2152 slice C: one multi-agent roster (a built-in scout plus a
+  # custom "auditor"). claude's --agents JSON carries the custom agent's model.
+  drivers-claude-render-custom-roster =
+    let
+      roster = [
+        {
+          name = "scout";
+          model = "solo-scout-model";
+          mode = "subagent";
+          description = "fixture scout description";
+          tools = [ "Read" ];
+          promptFile = "scout-prompt.md";
+          prompt = null;
+        }
+        {
+          name = "auditor";
+          model = "audit-model";
+          mode = "subagent";
+          description = "Audit stuff";
+          tools = [ "Read" ];
+          promptFile = "auditor-prompt.md";
+          prompt = null;
+        }
+      ];
+      claudeRendered = builtins.fromJSON (entry.agentsJsonTemplate { inherit roster; });
+    in
+    assert assertMsg (claudeRendered ? auditor)
+      "claude agentsJsonTemplate must render the custom roster entry (auditor), got keys: ${concatStringsSep ", " (builtins.attrNames claudeRendered)}";
+    assert assertMsg (claudeRendered.auditor.model or "" == "audit-model")
+      "claude agentsJsonTemplate's auditor entry must carry the roster model, got: ${
+        builtins.toJSON (claudeRendered.auditor or { })
+      }";
+    pkgs.runCommand "drivers-claude-render-custom-roster" { } "touch $out";
+
+  # The credential-deny rules live in opencode's configFiles; claude enforces
+  # the same policy through its hook, so its row carries none.
+  drivers-claude-carries-no-config-files =
+    assert assertMsg (!(entry ? configFiles)) "the claude Driver must not carry configFiles";
+    pkgs.runCommand "drivers-claude-carries-no-config-files" { } "touch $out";
 }
