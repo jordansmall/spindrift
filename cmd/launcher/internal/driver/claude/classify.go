@@ -98,13 +98,11 @@ func Classify(logPath string) (driverkit.Classification, error) {
 // classifyAt takes an explicit now so tests can pin the clock instead of
 // leaking the real wall clock into the parsed resetsAt fallback (issue #2443).
 //
-// FirstMatch: claude reports one failure across lines (a marker line, then a
-// bare resetsAt line), so the first unrecovered marker latches. Within one
-// line a transient marker beats a terminal one, but across lines a terminal
-// marker seen first latches Terminal; safe for the --agents case, which
-// aborts before any API call. ChunkOversized scans an oversized line in
-// chunks, so a chunk of an oversized agent-content line fails the
-// whole-chunk JSON parse in classifyTurn and is scanned as normal
+// FirstMatch: within one line a transient marker beats a terminal one, but
+// across lines a terminal marker seen first latches Terminal; safe for the
+// --agents case, which aborts before any API call. ChunkOversized scans an
+// oversized line in chunks, so a chunk of an oversized agent-content line
+// fails the whole-chunk JSON parse in classifyTurn and is scanned as normal
 // (known gap, issue #579 review).
 func classifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
 	return driverkit.Classify(logPath, func() driverkit.Decoder { return newDecoderAt(now) }, transientExtras, terminalExtras,
@@ -247,15 +245,14 @@ func parseResetsAtText(content string, now time.Time) *time.Time {
 // the decoder's echo check it keeps an is_error result. Non-string results are
 // dropped; they can never carry an outcome line.
 func ResultText(logPath string) (string, error) {
+	decode := NewDecoder()
 	return driverkit.ResultText(logPath, func(line string) (string, bool) {
-		var ev struct {
-			Type   string `json:"type"`
-			Result string `json:"result"`
+		for _, ev := range decode(line) {
+			if ev.Kind == driverkit.KindResult {
+				return ev.Text, true
+			}
 		}
-		if err := json.Unmarshal([]byte(line), &ev); err != nil || ev.Type != "result" {
-			return "", false
-		}
-		return ev.Result, true
+		return "", false
 	})
 }
 

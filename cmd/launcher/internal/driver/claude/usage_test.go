@@ -477,3 +477,18 @@ func TestExtractUsage_OutputIsMainLoopOnly(t *testing.T) {
 		t.Errorf("report.OutputIsMainLoopOnly = false, want true: %+v", report)
 	}
 }
+
+func TestSumInLog_MistypedTotalsResultIsSkipped(t *testing.T) {
+	bad := `{"type":"result","result":"x","num_turns":"3","total_cost_usd":9,"duration_ms":999,"usage":{"input_tokens":50}}`
+	good := `{"type":"result","num_turns":2,"total_cost_usd":0.5,"duration_ms":100,"usage":{"input_tokens":7}}`
+	u, _, found, err := sumInLog(WriteLog(t, bad, good))
+	if err != nil || !found {
+		t.Fatalf("found=%v err=%v", found, err)
+	}
+	if u.NumTurns != 2 || u.InputTokens != 7 || u.TotalCostUSD != 0.5 || u.DurationMs != 100 {
+		t.Errorf("totals = %+v, want only the well-typed result", u)
+	}
+	if _, _, found, _ := sumInLog(WriteLog(t, bad)); found {
+		t.Error("a log with only a mistyped-totals result must be found=false")
+	}
+}
