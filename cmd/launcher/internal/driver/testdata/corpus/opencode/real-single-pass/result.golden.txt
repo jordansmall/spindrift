@@ -1,5 +1,3 @@
-Branch exists already; check it.
-Already on it, no commits. Test first.
 The change is committed on `agent/issue-stdin` and ready for review. The full test suite passes (`python -m unittest discover -s tests -t .`, 4 tests). I also ran `printf 'a b\n' | python -m tally`, which printed `1 2 4` with no path column.
 
 The branch already existed with no commits ahead of `main`, so I used it as is. I skipped the scout step because the change touches a single small module.
