@@ -5,6 +5,7 @@
   ...
 }:
 let
+  bashHooks = import ../../lib/bash-hooks.nix;
   inherit (fixtures) batsHarness multiDriverBatsHarness;
 
   # Issue #2648 slice 1. `batsShards` is threaded in via `common`
@@ -164,11 +165,7 @@ in
         shellcheck --shell=bash \
           ${../../agent/entrypoint.sh} \
           ${../../agent/format-transcript.sh} \
-          ${../../agent/reject-background-bash.sh} \
-          ${../../agent/credential-deny.sh} \
-          ${../../agent/env-credential-scrub.sh} \
-          ${../../agent/bash-output-tee.sh} \
-          ${../../agent/bash-output-summary.sh} \
+          ${pkgs.lib.concatMapStringsSep " " (s: "${../../agent + "/${s}"}") bashHooks.scripts} \
           ${../../ab-orchestrator.sh} \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \

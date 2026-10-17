@@ -3,22 +3,19 @@
 # bash (issue #5399). credential-vars stays beside the scripts: the scrub
 # hook finds it via dirname of its own path.
 p:
+let
+  bashHooks = import ./bash-hooks.nix;
+in
 p.runCommand "agent-hooks" { } ''
   mkdir -p $out
-  for f in ${
-    p.lib.concatMapStringsSep " " (f: "${f}") [
-      ../agent/reject-background-bash.sh
-      ../agent/credential-deny.sh
-      ../agent/env-credential-scrub.sh
-      ../agent/bash-output-tee.sh
-      ../agent/bash-output-summary.sh
-    ]
-  }; do
+  for f in ${p.lib.concatMapStringsSep " " (s: "${../agent + "/${s}"}") bashHooks.scripts}; do
     hook=$out/$(stripHash $f)
     cp $f $hook
     chmod +x $hook
     substituteInPlace $hook \
       --replace-fail '#!/usr/bin/env bash' '#!${p.bash}/bin/bash'
   done
-  cp ${../agent/credential-vars} $out/credential-vars
+  ${p.lib.concatMapStrings (f: ''
+    cp ${../agent + "/${f}"} $out/${f}
+  '') bashHooks.dataFiles}
 ''
