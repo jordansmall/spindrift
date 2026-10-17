@@ -1,0 +1,16 @@
+{
+  "lines": [
+    "#42 · Committed; stopping for review pass.",
+    "#42 · I added `--format table|csv|tsv` in one commit (`df49701`) on `agent/issue-output-format`.",
+    "#42 · VERDICT: BLOCK",
+    "#42 · Committed 071dfac, but as a separate commit rather than folded into df49701 as the COMMIT rules require.",
+    "#42 · VERDICT: BLOCK",
+    "#42 · My test's `--help` file doesn't exist; fix the test.",
+    "#42 · Committed the fixes for all three blocking findings; the run stopped there, before the land pass.",
+    "#42 · VERDICT: APPROVE",
+    "#42 · Cheap fixes: drop `\\r` rejection (spec), then verify.",
+    "#42 · SPINDRIFT_OUTCOME issue=output-format landing=agent/issue-output-format status=ready note=--format table|csv|tsv impl...",
+    "#42 · VERDICT: APPROVE"
+  ],
+  "onModel": []
+}
