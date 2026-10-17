@@ -13,9 +13,11 @@ import (
 // own usage, not a running total, so these sum; a Driver whose CLI re-emits
 // lines sharing a MessageID gets the first occurrence only (an empty
 // MessageID is never deduplicated). A usage event naming no model lands under
-// usage.UnknownModel. Models are sorted by id; there is no family-rank pass
-// because the ids need not be a ranked model family.
-func UsageByModel(path string, newDecoder func() Decoder) ([]usage.ModelUsage, error) {
+// usage.UnknownModel. Rows stay keyed by exact model id. They are ordered by
+// family rank (ascending) then exact id when family is non-nil, by id alone
+// when it is nil: family is the Driver's heartbeat hook, which supplies the
+// rank, so a Driver whose ids are not a ranked model family passes nil.
+func UsageByModel(path string, newDecoder func() Decoder, family ModelFamily) ([]usage.ModelUsage, error) {
 	buckets := make(map[string]*usage.ModelUsage)
 	seenIDs := make(map[string]bool)
 	err := scanEvents(path, newDecoder, func(ev Event) {
@@ -47,7 +49,20 @@ func UsageByModel(path string, newDecoder func() Decoder) ([]usage.ModelUsage, e
 	for model := range buckets {
 		models = append(models, model)
 	}
-	sort.Strings(models)
+	if family == nil {
+		sort.Strings(models)
+	} else {
+		ranks := make(map[string]int, len(models))
+		for _, model := range models {
+			_, ranks[model] = family(model)
+		}
+		sort.Slice(models, func(i, j int) bool {
+			if ri, rj := ranks[models[i]], ranks[models[j]]; ri != rj {
+				return ri < rj
+			}
+			return models[i] < models[j]
+		})
+	}
 	var result []usage.ModelUsage
 	for _, model := range models {
 		result = append(result, *buckets[model])

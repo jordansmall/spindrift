@@ -853,20 +853,22 @@ func TestModelFamily(t *testing.T) {
 	tests := []struct {
 		id   string
 		want string
+		rank int
 	}{
-		{"claude-haiku-4-5-20251001", "haiku"},
-		{"claude-sonnet-4-6", "sonnet"},
-		{"claude-opus-4-8", "opus"},
-		{"claude-opus-4-8-20250514", "opus"},
-		{"claude-fable-5", "claude-fable-5"},
-		{"gpt-4o", "gpt-4o"},
-		{"", ""},
+		{"claude-opus-4-8", "opus", 0},
+		{"claude-opus-4-8-20250514", "opus", 0},
+		{"claude-haiku-4-5-20251001", "haiku", 1},
+		{"claude-sonnet-4-6", "sonnet", 2},
+		{"claude-fable-5", "claude-fable-5", 3},
+		{"gpt-4o", "gpt-4o", 3},
+		{"unknown", "unknown", 3},
+		{"", "", 3},
 	}
 	for _, tc := range tests {
 		t.Run(tc.id, func(t *testing.T) {
-			got := claude.ModelFamily(tc.id)
-			if got != tc.want {
-				t.Errorf("ModelFamily(%q) = %q, want %q", tc.id, got, tc.want)
+			got, rank := claude.ModelFamily(tc.id)
+			if got != tc.want || rank != tc.rank {
+				t.Errorf("ModelFamily(%q) = (%q, %d), want (%q, %d)", tc.id, got, rank, tc.want, tc.rank)
 			}
 		})
 	}

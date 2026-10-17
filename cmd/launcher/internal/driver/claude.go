@@ -39,12 +39,7 @@ func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Write
 // Every agent row's OutputTokens stays 0 for ExtractUsage to patch from the
 // result events.
 var claudeUsageByModel = func(p string) ([]usage.ModelUsage, error) {
-	models, err := driverkit.UsageByModel(p, claude.NewDecoder)
-	if err != nil {
-		return nil, err
-	}
-	claude.SortModelUsage(models)
-	return models, nil
+	return driverkit.UsageByModel(p, claude.NewDecoder, claude.HeartbeatTracking.Family)
 }
 
 var claudeUsageByAgent = func(p string) ([]usage.AgentUsage, error) {

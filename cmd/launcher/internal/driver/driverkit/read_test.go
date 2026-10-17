@@ -362,7 +362,7 @@ func TestUsageByModel(t *testing.T) {
 		usageEv("m2", "alpha", 5, Tokens{Output: 9}),
 		Event{Kind: KindModel, Model: "ignored"},
 	)
-	got, err := UsageByModel(path, nd)
+	got, err := UsageByModel(path, nd, nil)
 	want := []usage.ModelUsage{
 		{Model: "alpha", OutputTokens: 9},
 		{Model: usage.UnknownModel, UncachedInputTokens: 5, CacheWrite1hTokens: 6},
@@ -371,8 +371,39 @@ func TestUsageByModel(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v, %v; want %+v", got, err, want)
 	}
-	if got, err := UsageByModel(missingLog(t), fakeDecoder(nil)); got != nil || err != nil {
+	if got, err := UsageByModel(missingLog(t), fakeDecoder(nil), nil); got != nil || err != nil {
 		t.Errorf("missing log: %v, %v", got, err)
+	}
+}
+
+// TestUsageByModelFamilyOrder pins that a Driver's family hook orders the rows
+// by rank, ties by exact id, and that rows stay keyed by exact id.
+func TestUsageByModelFamilyOrder(t *testing.T) {
+	path, nd := evLines(t,
+		usageEv("a", "b-2", 1, Tokens{Input: 1}),
+		usageEv("b", "a-9", 2, Tokens{Input: 1}),
+		usageEv("c", "z-1", 3, Tokens{Input: 1}),
+		usageEv("d", "a-1", 4, Tokens{Input: 1}),
+		usageEv("e", "", 5, Tokens{Input: 1}),
+	)
+	rankOf := map[string]int{"z-1": 0, "b-2": 1, "a-1": 1, "a-9": 1}
+	family := func(m string) (string, int) {
+		if r, ok := rankOf[m]; ok {
+			return "fam", r
+		}
+		return m, 3
+	}
+	got, err := UsageByModel(path, nd, family)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for _, m := range got {
+		order = append(order, m.Model)
+	}
+	want := []string{"z-1", "a-1", "a-9", "b-2", usage.UnknownModel}
+	if !reflect.DeepEqual(order, want) {
+		t.Errorf("order = %v, want %v", order, want)
 	}
 }
 
@@ -459,7 +490,7 @@ func TestHeartbeatWriterCallbackRunsOutsideLock(t *testing.T) {
 }
 
 func byModelOf(nd func() Decoder) func(string) ([]usage.ModelUsage, error) {
-	return func(path string) ([]usage.ModelUsage, error) { return UsageByModel(path, nd) }
+	return func(path string) ([]usage.ModelUsage, error) { return UsageByModel(path, nd, nil) }
 }
 
 func TestHeartbeatWriterRendersHostOp(t *testing.T) {
@@ -501,7 +532,7 @@ func TestHeartbeatWriterTrackingGroupsByLineNotBlockOrder(t *testing.T) {
 	w := NewHeartbeatWriter(io.Discard, "7", &out, fakeDecoder(table), "top").Track(HeartbeatTracking{
 		Phase:  func(tool string, _ json.RawMessage) string { return strings.ToLower(tool) },
 		Kind:   func(tool string) string { return "k" + tool },
-		Family: func(m string) string { return strings.TrimSuffix(m, "-1") },
+		Family: func(m string) (string, int) { return strings.TrimSuffix(m, "-1"), 0 },
 	})
 	if _, err := w.Write([]byte("a\nb\nsub\nbad\nend\n")); err != nil {
 		t.Fatal(err)
