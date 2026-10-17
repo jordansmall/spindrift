@@ -67,17 +67,18 @@ credential](docs/reference.md#opencode-driver-github-copilot-provider-credential
 _Avoid_: model host, vendor, backend.
 
 **driver-exec**:
-The in-box, nix-built Go unit that runs one Driver invocation: it takes the
-prompt/agents/session file paths, the Driver's bin and flags, and a
-`--devshell` switch; spawns the Driver (via `nix develop --command` when
-asked), tees the stream to the Box log, filters heartbeats in-process
-(absorbing the former standalone heartbeat-filter binary), and returns the
-Driver's exit code. Owns process mechanics — invocation data and outcome
-extraction stay with the Driver's nix half (ADR 0009). Replaced
-the old entrypoint's temp-file/eval marshalling across the devShell process
-boundary (issue #626). The settle phases (outcome backstop, marker gate,
-read-only guards, dispatch-kind posture, bundle-out) run in-process in the box
-binary, so driver-exec carries no verb for them.
+The in-box, nix-built Go unit that runs one Driver invocation. It reads the
+Driver's inputs — its bin and flags, the agents file, the default prompt path,
+and the devShell switch (set by the `assemble-prompt` verb's `--devshell`) —
+from the handoff file `assemble-prompt` writes. It spawns the Driver (via `nix
+develop --command` when asked), tees the stream to the Box log, filters
+heartbeats in-process (absorbing the former standalone heartbeat-filter
+binary), and returns the Driver's exit code. Owns process mechanics —
+invocation data and outcome extraction stay with the Driver's nix half (ADR
+0009). Replaced the old entrypoint's temp-file/eval marshalling across the
+devShell process boundary (issue #626). The settle phases (outcome backstop,
+marker gate, read-only guards, dispatch-kind posture, bundle-out) run
+in-process in the box binary, so driver-exec carries no verb for them.
 _Avoid_: runner (that is the Box isolation seam), wrapper, shim.
 
 **box (binary)**:
