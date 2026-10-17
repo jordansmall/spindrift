@@ -88,6 +88,11 @@ rec {
     else
       rows;
 
+  # Bash the hooks source from beside themselves: baked verbatim (no shebang
+  # to pin), never a settings.json entry, and named without .sh so the
+  # `*.sh` hook globs in the image and opencode checks skip them.
+  helpers = [ "credential-vars-parse" ];
+
   # Non-script files baked beside the hooks (read by both Drivers).
   dataFiles = [ "credential-vars" ];
 }

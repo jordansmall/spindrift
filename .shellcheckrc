@@ -1,0 +1,2 @@
+# Follow sourced siblings (agent/credential-vars-parse, issue #5373).
+external-sources=true

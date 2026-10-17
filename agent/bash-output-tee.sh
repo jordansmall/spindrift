@@ -5,11 +5,6 @@
 # BASH_MAX_OUTPUT_LENGTH overflow case (issue #1987).
 set -euo pipefail
 
-# env-credential-scrub.sh (issue #1927) unsets the credential-vars list when it
-# rewrites the same call, but Claude Code does not document how two hooks' updatedInput compose,
-# so this hook repeats the unset instead of trusting that one to survive.
-CREDENTIAL_VARS_FILE="${CREDENTIAL_VARS_FILE:-$(dirname "${BASH_SOURCE[0]}")/credential-vars}"
-
 input="$(cat)"
 
 # Malformed stdin makes jq return empty, which reads as a non-matching call
@@ -25,8 +20,15 @@ if [ -z "$tool_input" ] || [ -z "$command" ]; then
   exit 0
 fi
 
+# env-credential-scrub.sh (issue #1927) unsets the credential-vars list when it
+# rewrites the same call, but Claude Code does not document how two hooks' updatedInput compose,
+# so this hook repeats the unset instead of trusting that one to survive.
 # Exit 2 blocks the call, so a lost list never lets it run unscrubbed.
-CREDENTIAL_VARS="$(grep -vE '^[[:space:]]*(#|$)' "$CREDENTIAL_VARS_FILE" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)"
+# shellcheck source-path=SCRIPTDIR source=credential-vars-parse
+if ! source "$(dirname "${BASH_SOURCE[0]}")/credential-vars-parse" 2>/dev/null; then
+  echo "bash-output-tee.sh: cannot source credential-vars-parse from beside this hook" >&2
+  exit 2
+fi
 if [ -z "$CREDENTIAL_VARS" ]; then
   echo "bash-output-tee.sh: credential variable list $CREDENTIAL_VARS_FILE is missing or empty" >&2
   exit 2

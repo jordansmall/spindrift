@@ -92,3 +92,23 @@ setup() {
     run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
   [ "$status" -eq 2 ]
 }
+
+@test "unsets every name in an overridden credential list file, skipping comments" {
+  printf '# header\nFOO_SECRET\n\nBAR_SECRET\n' >"$BATS_TEST_TMPDIR/vars"
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/vars" \
+    run bash "$BASH_OUTPUT_TEE_SCRIPT" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
+  [ "$status" -eq 0 ]
+  rewritten="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
+  [[ "$rewritten" == *"unset FOO_SECRET BAR_SECRET"* ]]
+}
+
+# Fail closed: the parse helper is sourced from beside the hook, so a hook
+# copied away from it must refuse the call rather than run unscrubbed.
+@test "blocks a Bash call when the parse helper is missing beside the hook" {
+  cp "$BASH_OUTPUT_TEE_SCRIPT" "$BATS_TEST_TMPDIR/bash-output-tee.sh"
+  printf 'FOO_SECRET\n' >"$BATS_TEST_TMPDIR/vars"
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/vars" \
+    run bash "$BATS_TEST_TMPDIR/bash-output-tee.sh" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hi"}}'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"cannot source credential-vars-parse"* ]]
+}
