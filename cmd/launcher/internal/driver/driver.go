@@ -8,7 +8,6 @@ package driver
 import (
 	"fmt"
 	"io"
-	"slices"
 	"sort"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
@@ -102,11 +101,16 @@ func New(name string) (Driver, error) {
 }
 
 // ProviderNamespacedModels reports whether the named Driver takes
-// provider-namespaced model ids. It is the Go mirror of the Nix fact
-// lib/mkHarness.nix's rosterWithoutBareWorker reads (issue #5338); unknown
-// and empty names are false rather than an error.
+// provider-namespaced model ids, read from its generated Descriptor. It is the
+// Go mirror of the Nix fact lib/mkHarness.nix's rosterWithoutBareWorker reads
+// (issue #5338); unknown and empty names are false rather than an error.
 func ProviderNamespacedModels(name string) bool {
-	return slices.Contains(nixProviderNamespacedDrivers, name)
+	for _, d := range descriptors {
+		if d.Name == name {
+			return d.ProviderNamespacedModels
+		}
+	}
+	return false
 }
 
 // Names returns the sorted registered Driver names. The nix/Go parity test

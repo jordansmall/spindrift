@@ -2,7 +2,9 @@
 # lives here (issue #624) so per-Driver files like ./claude.nix stay pure data.
 # The Go launcher keeps a matching host-side registry keyed by the same names;
 # cmd/launcher/internal/driver/parity_test.go asserts the two never drift on
-# names only, because each half validates its own entries independently.
+# names, because each half validates its own entries independently. The
+# Go-read facts beyond the name reach Go through the generated Descriptors,
+# which the driver-descriptors-gen drift check keeps in step with these rows.
 { lib }:
 let
   # sessionCacheDirRelative is deliberately absent: a Driver with no resumable

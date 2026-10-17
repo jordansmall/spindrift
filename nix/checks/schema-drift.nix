@@ -551,43 +551,26 @@ let
     a // b;
 in
 checkedMerge {
-  # Regenerate with `nix run .#regen` when lib/drivers/default.nix changes
-  # (issue #436).
-  driver-names-gen =
+  # Regenerate with `nix run .#regen` when lib/drivers/*.nix changes (issues
+  # #436, #5338, #5503). The raw renderer output is gofmt-normalized here the
+  # same way regen normalizes it.
+  driver-descriptors-gen =
     let
       driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
-      generated = pkgs.writeText "drivernames_gen.go.generated" (
-        renderers.renderDriverNamesGo driverRegistry.entries
+      raw = pkgs.writeText "descriptor_gen.go.raw" (
+        renderers.renderDriverDescriptorsGo driverRegistry.entries
       );
     in
-    pkgs.runCommand "driver-names-gen"
+    pkgs.runCommand "driver-descriptors-gen"
       {
-        inherit generated;
-        committed = ../../cmd/launcher/internal/driver/drivernames_gen.go;
+        nativeBuildInputs = [ pkgs.go ];
+        inherit raw;
+        committed = ../../cmd/launcher/internal/driver/descriptor_gen.go;
       }
       ''
-        diff "$generated" "$committed" \
-          || { echo "cmd/launcher/internal/driver/drivernames_gen.go is out of sync with lib/drivers/default.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
-        touch $out
-      '';
-
-  # Regenerate with `nix run .#regen` when lib/drivers/default.nix changes
-  # (issue #5338).
-  provider-namespaced-drivers-gen =
-    let
-      driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
-      generated = pkgs.writeText "providernamespaced_gen.go.generated" (
-        renderers.renderProviderNamespacedDriversGo driverRegistry.entries
-      );
-    in
-    pkgs.runCommand "provider-namespaced-drivers-gen"
-      {
-        inherit generated;
-        committed = ../../cmd/launcher/internal/driver/providernamespaced_gen.go;
-      }
-      ''
-        diff "$generated" "$committed" \
-          || { echo "cmd/launcher/internal/driver/providernamespaced_gen.go is out of sync with lib/drivers/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
+        gofmt "$raw" > generated.go
+        diff generated.go "$committed" \
+          || { echo "cmd/launcher/internal/driver/descriptor_gen.go is out of sync with lib/drivers/*.nix — regenerate it with \`nix run .#regen\`" >&2; exit 1; }
         touch $out
       '';
 
