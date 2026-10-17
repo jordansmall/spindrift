@@ -1015,6 +1015,7 @@ checkedMerge {
         "TERM"
         "NO_COLOR"
         "GH_HOST" # gh CLI host override
+        "OPENCODE_DB" # lib/drivers/opencode.nix envCommon, read by the opencode resume lookup (issue #5378)
         # Go ecosystem proxy settings forwarded as-is.
         "GOPRIVATE"
         "GONOPROXY"
