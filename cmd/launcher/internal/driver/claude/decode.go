@@ -2,6 +2,8 @@ package claude
 
 import (
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -153,6 +155,14 @@ func (d *decoder) decodeLine(line string) []driverkit.Event {
 		result.Tokens = driverkit.Tokens{}
 		result.DurationMs, result.DurationAPIMs = 0, 0
 		result.NoTotals, result.NoTurns = true, true
+	}
+	// Decoded apart from the totals: a mistyped modelUsage must not mark the
+	// result NoTotals.
+	var mu struct {
+		ModelUsage map[string]json.RawMessage `json:"modelUsage"`
+	}
+	if json.Unmarshal([]byte(line), &mu) == nil {
+		result.Models = slices.Sorted(maps.Keys(mu.ModelUsage))
 	}
 	out := []driverkit.Event{result}
 	// An is_error result is a genuine failure, never an echo of preceding content.

@@ -79,9 +79,9 @@ const (
 
 	// KindResult is the CLI's final result text, for a CLI that reports one as
 	// its own event. Fills Text, and may carry session totals in Tokens,
-	// DurationMs, DurationAPIMs and NumTurns. The result reader lets it
-	// replace the text gathered so far. A CLI whose result is its last
-	// message's prose emits no KindResult.
+	// DurationMs, DurationAPIMs and NumTurns, and name the session's Models.
+	// The result reader lets it replace the text gathered so far. A CLI whose
+	// result is its last message's prose emits no KindResult.
 	KindResult Kind = "result"
 
 	// KindHostOp is spindrift's own host-written spindrift_op line, which
@@ -180,6 +180,11 @@ type Event struct {
 	DurationMs    int64
 	DurationAPIMs int64
 	NumTurns      int
+
+	// Models is the sorted model ids the CLI's session summary names,
+	// meaningful on KindResult only. It is not a KindModel (which moves the
+	// heartbeat) nor a KindUsage.Model (which includes synthetic turns).
+	Models []string
 
 	// NoTotals marks a KindResult whose session totals failed to decode: it
 	// still carries Text, but the usage reader skips it entirely.
