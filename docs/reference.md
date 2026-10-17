@@ -1251,7 +1251,10 @@ count and model-family labels with `driverkit.HeartbeatTracking` (`claude`
 fills it, `opencode` leaves it off). Each hook is optional: without `Kind`
 the heartbeat counts no tool calls, so it prints no count lines and never
 runs `Phase`, leaving the phase empty; without `Family` a switch header
-shows the exact model id. `PerCallTotals` sums every `usage` event, for a
+shows the exact model id. Two rules are shared rather than per Driver: a
+non-empty transcript ends with a newline, and per-model usage rows sort by
+the rank `Family` returns, then by exact model id (by id alone without
+`Family`). `PerCallTotals` sums every `usage` event, for a
 CLI that reports one tally per call (`opencode`). `SessionTotals` sums the
 `result` events instead, for a CLI whose per-session summary is the ground
 truth for output tokens, cost, turns and durations (`claude`); `usage`
