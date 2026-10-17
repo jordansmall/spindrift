@@ -1,7 +1,8 @@
 # The baked claude/opencode Bash hooks directory. The Box has no
 # /usr/bin/env, so each hook's `#!/usr/bin/env bash` is pinned to the store
-# bash (issue #5399). credential-vars stays beside the scripts: the scrub
-# hook finds it via dirname of its own path.
+# bash (issue #5399). Helpers and data files stay beside the scripts: the
+# hooks source credential-vars-parse from their own dirname, and it finds
+# credential-vars from its own.
 p:
 let
   bashHooks = import ./bash-hooks.nix;
@@ -17,5 +18,5 @@ p.runCommand "agent-hooks" { } ''
   done
   ${p.lib.concatMapStrings (f: ''
     cp ${../agent + "/${f}"} $out/${f}
-  '') bashHooks.dataFiles}
+  '') (bashHooks.helpers ++ bashHooks.dataFiles)}
 ''

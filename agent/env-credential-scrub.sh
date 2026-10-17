@@ -21,10 +21,6 @@
 # env block only clears for a process that forked after the unset.
 set -euo pipefail
 
-# Baked beside the hook in the image; CREDENTIAL_VARS_FILE overrides it where the
-# hook runs from a lone store path (the bats suite).
-CREDENTIAL_VARS_FILE="${CREDENTIAL_VARS_FILE:-$(dirname "${BASH_SOURCE[0]}")/credential-vars}"
-
 # This matches a plain substring rather than enumerating pid forms: the hook
 # only ever sees static, unexpanded command text, and matching specific forms
 # while allowing the rest is the gap that let `cat /proc/$$/environ` slip past
@@ -68,7 +64,10 @@ fi
 
 # Fail closed with a deny: a non-zero exit is only a non-blocking hook error
 # under Claude Code and would let the call run with its credentials intact.
-CREDENTIAL_VARS="$(grep -vE '^[[:space:]]*(#|$)' "$CREDENTIAL_VARS_FILE" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)"
+# shellcheck source-path=SCRIPTDIR source=credential-vars-parse
+if ! source "$(dirname "${BASH_SOURCE[0]}")/credential-vars-parse" 2>/dev/null; then
+  deny "cannot source credential-vars-parse from beside this hook, so it cannot scrub the Bash call's environment; refusing to run it unscrubbed."
+fi
 if [ -z "$CREDENTIAL_VARS" ]; then
   deny "The credential variable list at $CREDENTIAL_VARS_FILE is missing or names no variables, so this hook cannot scrub the Bash call's environment; refusing to run it unscrubbed."
 fi

@@ -167,3 +167,14 @@ setup() {
   new_command="$(echo "$output" | jq -r '.hookSpecificOutput.updatedInput.command')"
   [ "$new_command" = "unset FOO_SECRET BAR_SECRET; echo hello" ]
 }
+
+# The parse helper is sourced from beside the hook; a hook copied away from it
+# must still deny rather than error out (a non-zero exit lets the call run).
+@test "denies a Bash call when the parse helper is missing beside the hook" {
+  cp "$ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT" "$BATS_TEST_TMPDIR/env-credential-scrub.sh"
+  printf 'FOO_SECRET\n' >"$BATS_TEST_TMPDIR/vars"
+  CREDENTIAL_VARS_FILE="$BATS_TEST_TMPDIR/vars" \
+    run bash "$BATS_TEST_TMPDIR/env-credential-scrub.sh" <<<'{"tool_name":"Bash","tool_input":{"command":"echo hello"}}'
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e '.hookSpecificOutput.permissionDecision == "deny"' >/dev/null
+}

@@ -6,6 +6,7 @@
 }:
 let
   bashHooks = import ../../lib/bash-hooks.nix;
+  agentHooks = import ../../lib/agent-hooks.nix pkgs;
   inherit (fixtures) batsHarness multiDriverBatsHarness;
 
   # Issue #2648 slice 1. `batsShards` is threaded in via `common`
@@ -59,14 +60,13 @@ let
     # same reasoning.
     CREDENTIAL_DENY_HOOK_SCRIPT = ../../agent/credential-deny.sh;
     # Baked at /home/agent/.claude/hooks/env-credential-scrub.sh
-    # (issue #1927), same reasoning.
-    ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = ../../agent/env-credential-scrub.sh;
-    # The scrub hooks find credential-vars beside themselves in the image
-    # (issue #5346); a lone store path has no sibling.
-    CREDENTIAL_VARS_FILE = ../../agent/credential-vars;
+    # (issue #1927). The scrub and tee hooks source credential-vars-parse from
+    # beside themselves (issue #5373), so they run from the baked hooks dir,
+    # not a lone store path.
+    ENV_CREDENTIAL_SCRUB_HOOK_SCRIPT = "${agentHooks}/env-credential-scrub.sh";
     # Baked at /home/agent/.claude/hooks/bash-output-{tee,summary}.sh
-    # (issue #1988), same reasoning.
-    BASH_OUTPUT_TEE_SCRIPT = ../../agent/bash-output-tee.sh;
+    # (issue #1988); the tee hook runs from the baked dir like the scrub hook.
+    BASH_OUTPUT_TEE_SCRIPT = "${agentHooks}/bash-output-tee.sh";
     BASH_OUTPUT_SUMMARY_SCRIPT = ../../agent/bash-output-summary.sh;
     # Issue #2057. tests/ is copied into the sandbox but its parent
     # ab-orchestrator.sh is not, so tests/ab-orchestrator.bats resolves the
@@ -162,10 +162,13 @@ in
         # The launcher scripts are body fragments (they reference the
         # nix-rendered preamble), so they are shellcheck'd by
         # writeShellApplication at build time, not standalone here.
-        shellcheck --shell=bash \
+        # -x follows the hooks' `source credential-vars-parse` (issue #5373),
+        # which needs the hooks and the helper to share one store directory.
+        shellcheck --shell=bash -x \
           ${../../agent/entrypoint.sh} \
           ${../../agent/format-transcript.sh} \
-          ${pkgs.lib.concatMapStringsSep " " (s: "${../../agent + "/${s}"}") bashHooks.scripts} \
+          ${pkgs.lib.concatMapStringsSep " " (s: "${../../agent}/${s}") bashHooks.scripts} \
+          ${pkgs.lib.concatMapStringsSep " " (s: "${../../agent}/${s}") bashHooks.helpers} \
           ${../../ab-orchestrator.sh} \
           ${../../.github/actions/forgejo-label-swap/label-swap.sh} \
           ${../../.github/actions/forgejo-issue-close/close-issue.sh} \
