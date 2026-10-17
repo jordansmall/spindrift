@@ -1094,10 +1094,11 @@ Driver entry declares:
 - `name`, `package`, `bin`, `flagsCommon`, `agentsJsonTemplate` — the
   fields ADR 0009 already documents. Session flags are not a registry
   field: implement `SessionFlags` on the Driver's Go strategy
-  (`cmd/launcher/internal/driver`). That package
-  (`cmd/launcher/internal/driver/<name>`) also ships a canonical
-  `testdata/outcome-fixture.jsonl` pinned by an `outcome_fixture_test.go`, as
-  claude and opencode do.
+  (`cmd/launcher/internal/driver`), along with the decoder its Pass-log
+  readers share (see [Host-side event layer](#host-side-event-layer)).
+  That package (`cmd/launcher/internal/driver/<name>`) also ships a
+  canonical `testdata/outcome-fixture.jsonl` pinned by an
+  `outcome_fixture_test.go`, as claude and opencode do.
 - `skillsDirRelative` — where the agent CLI scans for skill files, relative
   to `$HOME`. Required; the harness bakes skill files to the fixed,
   Driver-independent `/agent/skills` path instead (see the `skills` row
@@ -1213,6 +1214,54 @@ A runtime `SPINDRIFT_PROMPT_DIR` override is covered too: `box`
 appends the same canonical contract to a rendered issue prompt that omits it,
 idempotently, so a runtime-mounted custom prompt can't ship an agent that
 never emits the outcome line either.
+
+##### Host-side event layer
+
+A Driver's Go strategy does not hand-roll its Pass-log readers. It supplies a
+decoder, and the shared readers in `cmd/launcher/internal/driver/driverkit`
+turn the decoded stream into the classification, usage report, result text,
+transcript and heartbeat ([ADR
+0065](adr/0065-drivers-decode-pass-logs-into-canonical-events.md)). The
+decoder is a `driverkit.Decoder`: one raw Pass-log line in, zero or more
+canonical `driverkit.Event`s out. A line the grammar does not know yields
+none; a line outside it yields one `unparsed` event. A decoder may keep
+minimal state across lines (say, correlating a tool id to a role), so each
+reader takes a `func() Decoder` factory and gets a fresh decoder per scan.
+
+What stays per Driver, beyond the decoder: extra transient and terminal
+`Pattern`s for the classifier, the top-level role default for the transcript
+and heartbeat, and `ResolveExit`, `ResultEvent` and `SessionFlags`. The
+`opencode` package's thin `Classify`, `ResultText`, `RenderTranscript`,
+`ExtractUsage` and heartbeat functions each delegate to a shared reader with
+its own decoder and inputs; read them as the worked example.
+
+| Kind | Fills (besides `Role`, `MessageID`, `Timestamp` where the line has them) | Read by |
+|------|------|------|
+| `start` | none | usage (anchors the run's span), classifier (progress) |
+| `text` | `Text` | result, transcript, heartbeat; classifier (progress) |
+| `reasoning` | `Text` | classifier (progress) only, never narration or result |
+| `tool_call` | `ToolID`, `ToolName`, `ToolInput` | classifier (progress) |
+| `tool_result` | `ToolID`, `ToolName`, `IsError` | classifier (progress) |
+| `usage` | `Tokens`, `Model`, `Effort` | usage (not progress) |
+| `model` | `Model` | heartbeat (model change) |
+| `effort` | `Effort` | none yet |
+| `error` | `Text`, `ResetAt` | classifier (transient markers) |
+| `unparsed` | `Text` | classifier (terminal markers only) |
+| `result` | `Text`, session totals | result (replaces text so far) |
+| `host_op` | `HostOp` | none yet; the host's own `spindrift_op` lines, in every Driver's stream |
+
+`driverkit/event.go` holds the field-level contract, including what each
+reader does with an event. A few conventions matter to a decoder author.
+Decode a CLI's thinking output to `reasoning`, never `text`, or it surfaces in
+the verdict scan and heartbeat. Emit one `usage` event per model call, not a
+running total. `Role` is `""` for the top-level loop; a reader resolves it to
+the top-level role it is given (the usage report uses `usage.MainLoopAgent`),
+so a CLI with no subagent attribution leaves it empty throughout.
+
+Canonical events never leave the driver packages. The `Driver` interface is
+the one seam: no caller outside them decodes a line or sees an `Event`.
+`opencode` is built on this layer; `claude` still runs its own readers until
+it is ported.
 
 ##### Driver Pass-log corpus
 
