@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
-	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
 )
 
@@ -87,15 +86,9 @@ func matchMarker(line string) (driverkit.Reason, driverkit.Class, bool) {
 	return "", "", false
 }
 
-type scanResult struct {
-	cl       driverkit.Classification
-	found    bool
-	resetsAt *time.Time
-}
-
 // Classify scans the box log at logPath and reports whether the failure is
 // transient (retryable) or terminal. A marker quoted inside agent-authored
-// content is not attributed as the cause (issue #579, see isAgentContentEvent).
+// content is not attributed as the cause (issue #579, see classifyTurn).
 // A rate-limit marker carrying "resetsAt" sets ResetAt so callers can hold
 // until then; a missing log file is terminal/taskFailed.
 func Classify(logPath string) (driverkit.Classification, error) {
@@ -104,86 +97,18 @@ func Classify(logPath string) (driverkit.Classification, error) {
 
 // classifyAt takes an explicit now so tests can pin the clock instead of
 // leaking the real wall clock into the parsed resetsAt fallback (issue #2443).
+//
+// FirstMatch: claude reports one failure across lines (a marker line, then a
+// bare resetsAt line), so the first unrecovered marker latches. Within one
+// line a transient marker beats a terminal one, but across lines a terminal
+// marker seen first latches Terminal; safe for the --agents case, which
+// aborts before any API call. ChunkOversized scans an oversized line in
+// chunks, so a chunk of an oversized agent-content line fails the
+// whole-chunk JSON parse in classifyTurn and is scanned as normal
+// (known gap, issue #579 review).
 func classifyAt(logPath string, now time.Time) (driverkit.Classification, error) {
-	sr, err := scanLog(logPath, now)
-	if err != nil {
-		return driverkit.Classification{}, err
-	}
-
-	if !sr.found {
-		return driverkit.Classification{Class: driverkit.Terminal, Reason: driverkit.TaskFailed}, nil
-	}
-
-	cl := sr.cl
-	if cl.Reason == driverkit.RateLimit {
-		cl.ResetAt = sr.resetsAt
-	}
-	return cl, nil
-}
-
-// scanLog returns the reason and resetsAt of the last unrecovered candidate:
-// agent-authored content seen after a match drops it, because the run continued
-// past it. Oversized lines (> 4 MiB) are scanned in chunks, so a chunk of an
-// oversized agent-content line fails the whole-chunk JSON parse in
-// isAgentContentEvent and is scanned as normal (known gap, issue #579 review).
-func scanLog(logPath string, now time.Time) (scanResult, error) {
-	var resetsAt *time.Time
-	var echoReason driverkit.Reason
-	var echoPending bool
-	extract := func(chunk string) driverkit.ScanDecision {
-		if isHostOp(chunk) {
-			// Host-written; knob values and the settle note are operator or Box
-			// text: scanning them could turn a terminal failure into retries.
-			return driverkit.ScanDecision{Skip: true}
-		}
-		if isAgentContentEvent(chunk) {
-			// The agent's own content can quote rate-limit markers verbatim,
-			// and the run continued past any candidate found so far, so drop
-			// it and look for a later, genuine cause (issue #579).
-			resetsAt = nil
-			// Remember whether this content quoted a marker, so a later
-			// type:"result" line echoing the same marker is recognized as that
-			// echo rather than a fresh signal (issue #818). The pending echo
-			// must survive any number of intervening non-content lines, such as
-			// type:"system" heartbeats (issue #1197).
-			echoReason, _, echoPending = matchMarker(chunk)
-			return driverkit.ScanDecision{Reset: true, Skip: true}
-		}
-		if echoPending {
-			if resultText, ok := resultEventText(chunk); ok {
-				echoPending = false
-				if reason, _, matched := matchMarker(resultText); matched && reason == echoReason {
-					return driverkit.ScanDecision{Skip: true}
-				}
-			}
-		}
-		// ClassifyScan latches the first unrecovered match: within one chunk a
-		// transient marker beats a terminal one, but across chunks a terminal
-		// marker seen first latches Terminal. Safe for the --agents case, which
-		// aborts before any API call, so no transient marker precedes it.
-		if resetsAt == nil {
-			if t := extractResetsAt(chunk, now); t != nil {
-				resetsAt = t
-			}
-		}
-		return driverkit.ScanDecision{Text: chunk}
-	}
-
-	cl, found, err := driverkit.ClassifyScan(logPath, logscan.ChunkOversized, extract, transientExtras, terminalExtras)
-	if err != nil {
-		return scanResult{}, err
-	}
-	return scanResult{cl: cl, found: found, resetsAt: resetsAt}, nil
-}
-
-// isHostOp reports whether chunk is the host's dispatch_start stamp or
-// dispatch_settled record.
-func isHostOp(chunk string) bool {
-	var ev Event
-	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
-		return false
-	}
-	return ev.Type == hostop.TypeSpindriftOp && ev.SpindriftOp != nil && (ev.SpindriftOp.Op == hostop.OpDispatchStart || ev.SpindriftOp.Op == hostop.OpDispatchSettled)
+	return driverkit.Classify(logPath, func() driverkit.Decoder { return newDecoderAt(now) }, transientExtras, terminalExtras,
+		driverkit.ClassifyOptions{Oversized: logscan.ChunkOversized, FirstMatch: true})
 }
 
 // agentContentEvent is the minimal stream-json envelope for telling
@@ -199,24 +124,33 @@ type agentContentEvent struct {
 // syntheticModelSentinel is the claude CLI's message.model value on its
 // synthetic terminator event for a mid-stream API error (issue #815). No
 // official doc records this literal (issue #1203), so it is a runtime contract
-// with the CLI: if a future version changes it, isAgentContentEvent's guard
+// with the CLI: if a future version changes it, classifyTurn's guard
 // silently stops matching (issue #820).
 const syntheticModelSentinel = "<synthetic>"
 
-// isAgentContentEvent reports whether chunk is a stream-json line carrying
-// agent-authored content: an assistant message, or a user message (the Claude
-// API returns tool results as a user-role turn). Markers inside either are the
-// agent's own work product, so they must not be scanned. Non-JSON lines, other
-// types, and the CLI's synthetic terminator (issue #815) fall through.
-func isAgentContentEvent(chunk string) bool {
+// classifyTurn splits an assistant or user stream-json line into agent
+// content (an assistant message, or a user message: the Claude API returns
+// tool results as a user-role turn) and the CLI's synthetic terminator
+// (issue #815). Non-JSON lines and other types are neither.
+func classifyTurn(chunk string) (content, synthetic bool) {
 	var ev agentContentEvent
 	if err := json.Unmarshal([]byte(chunk), &ev); err != nil {
-		return false
+		return false, false
 	}
 	if ev.Type == "assistant" && ev.Message.Model == syntheticModelSentinel && ev.Error != "" {
-		return false
+		return false, true
 	}
-	return ev.Type == "assistant" || ev.Type == "user"
+	return ev.Type == "assistant" || ev.Type == "user", false
+}
+
+// isAgentContentEvent reports whether chunk is a stream-json line carrying
+// agent-authored content. Markers inside it are the agent's own work product,
+// so they must not be scanned. Non-JSON lines, other types, and the CLI's
+// synthetic terminator (issue #815) fall through. It is the test seam over
+// classifyTurn, which decoder.decodeLine calls on the live path.
+func isAgentContentEvent(chunk string) bool {
+	content, _ := classifyTurn(chunk)
+	return content
 }
 
 // resultEventEnvelope is the minimal envelope for a stream-json type:"result"

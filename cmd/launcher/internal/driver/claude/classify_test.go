@@ -161,7 +161,7 @@ var classifyTests = []struct {
 		// The #579 guard resets sr when the genuine turn is scanned, but that
 		// reset is immaterial: the terminator carries its own top-level
 		// "error":"server_error", which matchTransient re-matches on the next
-		// line. Pins that against a future isAgentContentEvent or scanLog
+		// line. Pins that against a future classifyTurn or decoder
 		// change that widens the reset window (issue #815).
 		name: "Transient_GenuineAssistantContent_ThenSyntheticServerErrorTerminator",
 		lines: []string{
