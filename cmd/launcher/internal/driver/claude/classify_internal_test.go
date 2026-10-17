@@ -20,6 +20,37 @@ func TestIsAgentContentEvent_SyntheticSentinel(t *testing.T) {
 	}
 }
 
+// TestClassifyTurn_NonStringError pins how the top-level "error" field is read
+// when it is not a string (issue #5453): an object counts as present, while
+// null and "" are absent.
+func TestClassifyTurn_NonStringError(t *testing.T) {
+	line := func(model, errField string) string {
+		return `{"type":"assistant","message":{"model":"` + model + `"},"error":` + errField + `}`
+	}
+	tests := []struct {
+		name                   string
+		line                   string
+		wantContent, wantSynth bool
+	}{
+		{"sentinel with object error", line(syntheticModelSentinel, `{"x":1}`), false, true},
+		{"sentinel with empty object error", line(syntheticModelSentinel, `{}`), false, true},
+		{"sentinel with empty array error", line(syntheticModelSentinel, `[]`), false, true},
+		{"sentinel with false error", line(syntheticModelSentinel, `false`), false, true},
+		{"sentinel with zero error", line(syntheticModelSentinel, `0`), false, true},
+		{"sentinel with null error", line(syntheticModelSentinel, `null`), true, false},
+		{"sentinel with empty error", line(syntheticModelSentinel, `""`), true, false},
+		{"genuine model with object error", line("claude-sonnet-4-6", `{"x":1}`), true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, synth := classifyTurn(tt.line)
+			if content != tt.wantContent || synth != tt.wantSynth {
+				t.Errorf("classifyTurn = (%v, %v), want (%v, %v)", content, synth, tt.wantContent, tt.wantSynth)
+			}
+		})
+	}
+}
+
 // TestParseResetsAtText pins parseResetsAtText's handling of the human-readable
 // "resets ..." markers (issue #2443). Cases that set no now of their own share a
 // fixed 2026-08-12 10:00 UTC, a Wednesday, so the weekday rolls are deterministic.

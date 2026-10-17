@@ -110,6 +110,17 @@ func TestDecodeSyntheticAssistantIsErrorNotProgress(t *testing.T) {
 	}
 }
 
+// A non-string error on the sentinel takes the same terminator path as a
+// string one (issue #5453).
+func TestDecodeSyntheticAssistantObjectErrorIsErrorNotProgress(t *testing.T) {
+	line := `{"type":"assistant","error":{"x":1},"message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: 429"}]}}`
+	evs := newDecoderAt(decodeNow)(line)
+	wantKinds(t, evs, driverkit.KindError, driverkit.KindModel, driverkit.KindText, driverkit.KindUsage)
+	if evs[0].Text != line || !evs[1].Synthetic || !evs[2].Synthetic {
+		t.Errorf("events = %+v", evs)
+	}
+}
+
 func TestDecodeMistypedAssistantEnvelopeYieldsNoContentOrUsage(t *testing.T) {
 	evs := newDecoderAt(decodeNow)(`{"type":"assistant","message":{"id":"m1","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":"5","output_tokens":7}}}`)
 	wantKinds(t, evs, driverkit.KindStart)
@@ -346,6 +357,13 @@ func TestDecodeModelEventSyntheticSentinel(t *testing.T) {
 	if evs[1].Kind != driverkit.KindModel {
 		t.Fatalf("events = %+v", evs)
 	}
+}
+
+// A non-string "error" must not fail the envelope parse and demote the line to
+// a bare KindError (issue #5453).
+func TestDecodeObjectErrorAssistantLineIsContent(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"assistant","error":{"x":1},"message":{"model":"claude-x","content":[{"type":"text","text":"hi"},{"type":"tool_use","id":"t1","name":"Read","input":{}}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage)
 }
 
 func TestDecodeToolResultBlockInSubagent(t *testing.T) {

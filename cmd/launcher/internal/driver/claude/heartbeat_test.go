@@ -1301,3 +1301,26 @@ func TestWriterOnModelFiresOnPairChangeOnly(t *testing.T) {
 		t.Errorf("OnModel calls = %v, want %v", got, want)
 	}
 }
+
+// A non-string top-level "error" must not demote an assistant line to a bare
+// KindError: the header, narration, tool count and OnModel still fire (issue #5453).
+func TestWriterObjectErrorAssistantLineKeepsHeartbeat(t *testing.T) {
+	var status bytes.Buffer
+	var models []string
+	w := claude.New(&bytes.Buffer{}, "4744", &status).OnModel(func(model, _ string) {
+		models = append(models, model)
+	})
+
+	fmt.Fprint(w, `{"type":"assistant","error":{"x":1},"message":{"model":"claude-opus-4","content":[{"type":"text","text":"reading it"},{"type":"tool_use","name":"Read","id":"r","input":{"file_path":"a.go"}}]}}`+"\n")
+	fmt.Fprint(w, `{"type":"result","num_turns":1}`+"\n")
+
+	out := status.String()
+	for _, want := range []string{"#4744", claude.ImplementorRole, "reading it", "1 read"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q: %q", want, out)
+		}
+	}
+	if !reflect.DeepEqual(models, []string{"claude-opus-4"}) {
+		t.Errorf("OnModel models = %v, want [claude-opus-4]", models)
+	}
+}
