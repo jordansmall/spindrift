@@ -1,0 +1,12 @@
+{
+  "lines": [
+    "#42 · Running the tests, then asking the reviewer to check the diff.",
+    "#42 · The reviewer blocked the change; stopping."
+  ],
+  "onModel": [
+    {
+      "model": "claude-sonnet-4",
+      "role": ""
+    }
+  ]
+}

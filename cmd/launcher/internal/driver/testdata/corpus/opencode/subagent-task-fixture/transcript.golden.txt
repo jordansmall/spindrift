@@ -1,0 +1,6 @@
+[implementor] Running the tests, then asking the reviewer to check the diff.
+[implementor] bash(go test ./...)
+[implementor]   -> ok  	fixture	0.010s
+[implementor] task(reviewer)
+[implementor]   -> [reviewer] VERDICT: BLOCK ## Blocking - fixture finding
+[implementor] The reviewer blocked the change; stopping.

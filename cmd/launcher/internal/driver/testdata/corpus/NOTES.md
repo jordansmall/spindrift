@@ -6,7 +6,9 @@ removes emails, host home paths and the commit author name, and blanks tool
 output, file bodies, heredoc bodies in commands, thinking text and subagent
 task text. The rest are the synthetic seed fixtures (issue #5180). Goldens
 for the real cases were generated from the pre-canonical readers, before any
-Driver switched to the shared readers (issue #4944).
+Driver switched to the shared readers (issue #4944). The opencode transcript
+goldens, and the `BlockLine` in its verdict goldens, were regenerated when the
+opencode Transcript began rendering tool calls and results (issue #5357).
 
 ## claude
 
@@ -31,7 +33,9 @@ Missing:
 
 The dogfood Daemon has only ever run the `claude` Driver, so the real
 `opencode` logs come from a scratch Consumer on GitHub Copilot models, with a
-local issue tracker and a local Code Forge, working a toy Python project.
+local issue tracker and a local Code Forge, working a toy Python project. The
+real cases carry `bash` and `read` tool calls, so they cover the tool-call and
+tool-result lines.
 
 | Case | Covers | Source log |
 | --- | --- | --- |
@@ -53,6 +57,10 @@ line. Each log holds the whole run, so its other passes' lines carry
 The last four cases were captured after #5331, #5332 and #5348 landed.
 `real-driver-crash` comes from the #5349 session cache regression (#5387).
 
+`subagent-task-fixture` is synthetic. It covers a `task` call to the reviewer
+subagent whose result renders tagged `[reviewer]`, the form the legacy-loop
+verdict scan reads.
+
 Missing:
 
 - A resumed session. No pass in the captured runs needed a corrective
@@ -60,7 +68,10 @@ Missing:
 - A worker subagent and a Filer finding. Both were enabled, but no pass
   called a subagent. Every review left non-blocking findings, but each land
   pass fixed the cheap ones and dropped the rest without filing, or a fix
-  pass reached the outcome and no land pass ran.
+  pass reached the outcome and no land pass ran. With no subagent call, no
+  real log has a `task` tool call yet, so the synthetic
+  `subagent-task-fixture` stands in; a real one would still not show the
+  verdict, because the scrubber blanks tool output.
 - A Box killed mid-pass and a transient failure. None happened in the
   captured runs; the synthetic cases cover a rate-limit reset and a
   recovered error (#5353).
