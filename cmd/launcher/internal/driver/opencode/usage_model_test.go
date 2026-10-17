@@ -10,7 +10,7 @@ import (
 // of one message's part, mirroring claude-code's multi-content-block re-emit,
 // so the breakdown counts that message once. The wanted totals are the deduped
 // sum (msg_a once plus msg_b once), not the inflated sum over all three lines.
-func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
+func TestExtractUsageByModel_DedupByMessageID(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":10,"cache":{"write":20,"read":200}}}}`,
 		`{"type":"step_finish","part":{"messageID":"msg_a","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":10,"cache":{"write":20,"read":200}}}}`,
@@ -50,7 +50,7 @@ func TestBreakdownByModel_DedupByMessageID(t *testing.T) {
 
 // A step_finish with no modelID buckets under "unknown" rather than being
 // dropped or panicking.
-func TestBreakdownByModel_UnknownModel(t *testing.T) {
+func TestExtractUsageByModel_UnknownModel(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","tokens":{"input":5,"output":2}}}`
 	path := opencode.WriteLog(t, line)
 
@@ -71,8 +71,8 @@ func TestBreakdownByModel_UnknownModel(t *testing.T) {
 }
 
 // An empty messageID has nothing to dedup against, so both lines count. The
-// non-empty case is TestBreakdownByModel_DedupByMessageID.
-func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
+// non-empty case is TestExtractUsageByModel_DedupByMessageID.
+func TestExtractUsageByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
 		`{"type":"step_finish","part":{"messageID":"","modelID":"gpt-5","tokens":{"input":10,"output":5}}}`,
@@ -103,7 +103,7 @@ func TestBreakdownByModel_EmptyMessageIDAlwaysCounted(t *testing.T) {
 // opencode reports no TTL split, unlike claude-code's ephemeral_5m/1h
 // cache_creation, so tokens.cache.write all lands in CacheWrite5mTokens and
 // CacheWrite1hTokens stays 0.
-func TestBreakdownByModel_CacheWriteTo5m(t *testing.T) {
+func TestExtractUsageByModel_CacheWriteTo5m(t *testing.T) {
 	line := `{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":1,"output":1,"cache":{"write":77,"read":0}}}}`
 	path := opencode.WriteLog(t, line)
 
@@ -125,7 +125,7 @@ func TestBreakdownByModel_CacheWriteTo5m(t *testing.T) {
 
 // Rows come back ordered by ascending raw model id. opencode models are not
 // claude families, so there is no family-rank pass, unlike claude's breakdown.
-func TestBreakdownByModel_TwoModels(t *testing.T) {
+func TestExtractUsageByModel_TwoModels(t *testing.T) {
 	lines := []string{
 		`{"type":"step_finish","part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":100,"output":50}}}`,
 		`{"type":"step_finish","part":{"messageID":"msg_2","modelID":"claude-sonnet-4","tokens":{"input":10,"output":5}}}`,
@@ -151,7 +151,7 @@ func TestBreakdownByModel_TwoModels(t *testing.T) {
 
 // A missing log file degrades to no error and a nil breakdown, matching
 // ExtractUsage's own missing-log contract.
-func TestBreakdownByModel_FileNotFound(t *testing.T) {
+func TestExtractUsageByModel_FileNotFound(t *testing.T) {
 	report, err := newDriver(t).ExtractUsage("/nonexistent/x.log")
 	if err != nil {
 		t.Fatalf("ExtractUsage: %v", err)

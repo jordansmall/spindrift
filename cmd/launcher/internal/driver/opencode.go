@@ -8,35 +8,42 @@ import (
 	"spindrift.dev/launcher/internal/usage"
 )
 
-// opencodeDriver adapts the driver/opencode subpackage, which owns the opencode
-// CLI's event decoder and transient-error taxonomy; its readers run the shared
-// driverkit readers over that decoder. That subpackage cannot import this one
-// without a cycle, so it returns a driverkit.Classification, which this
-// package's Classification aliases.
+// opencodeDriver runs the shared driverkit readers over the driver/opencode
+// subpackage's decoder, patterns, exit resolution, result encoder and session
+// flags.
 type opencodeDriver struct{}
 
 func (opencodeDriver) Name() string { return "opencode" }
 
 func (opencodeDriver) ClassifyTransient(logPath string) (Classification, error) {
-	return opencode.Classify(logPath)
+	return driverkit.Classify(logPath, opencode.NewDecoder, opencode.TransientPatterns, opencode.TerminalPatterns)
 }
 
 // NewHeartbeatWriter ignores opts.TopLevelRole (opencode's heartbeat carries no
 // role attribution, issue #2092) but forwards opts.OnModel, reporting the model
 // with no role.
 func (opencodeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
-	return opencode.New(raw, issue, out).OnModel(opts.OnModel)
+	return driverkit.NewHeartbeatWriter(raw, issue, out, opencode.NewDecoder, "").OnModel(opts.OnModel)
 }
 
+// opencodeUsageByModel indirects so tests can simulate an I/O error without a
+// real filesystem race against the usage aggregation scan.
+var opencodeUsageByModel = func(p string) ([]usage.ModelUsage, error) {
+	return driverkit.UsageByModel(p, opencode.NewDecoder)
+}
+
+// ExtractUsage sums the step_finish tallies in the log. The decoder attributes
+// no subagent roles, so SummedByAgent is the one usage.MainLoopAgent row; its
+// APICalls is what `spindrift stats --by role` reads for an opencode pass.
 func (opencodeDriver) ExtractUsage(logPath string) (usage.Report, error) {
-	return opencode.ExtractUsage(logPath)
+	return driverkit.ExtractUsage(logPath, opencode.NewDecoder, opencodeUsageByModel)
 }
 
 // RenderTranscript attributes every event without a role to opts.TopLevelRole
 // (opencode's log has no sub-agent attribution); a task tool's result carries
 // the subagent it ran as a "[subagent] " tag instead.
 func (opencodeDriver) RenderTranscript(logPath string, opts driverkit.RenderOptions) (string, error) {
-	return opencode.RenderTranscript(logPath, opts.TopLevelRole)
+	return driverkit.RenderTranscript(logPath, opencode.NewDecoder, opts.TopLevelRole)
 }
 
 // ResolveExit keeps a non-zero exitCode and surfaces a mid-run error event the
@@ -45,8 +52,10 @@ func (opencodeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 	return opencode.ResolveExit(logPath, exitCode)
 }
 
+// ResultText is the last assistant message only, as claude's result is: an
+// outcome-looking line in mid-pass prose must not end the run (issue #5354).
 func (opencodeDriver) ResultText(logPath string) (string, error) {
-	return opencode.ResultText(logPath)
+	return driverkit.LastMessageText(logPath, opencode.NewDecoder)
 }
 
 func (opencodeDriver) ResultEvent(text string) ([]byte, error) {
