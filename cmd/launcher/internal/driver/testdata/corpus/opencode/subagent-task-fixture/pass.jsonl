@@ -1,0 +1,6 @@
+{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}
+{"type":"text","part":{"messageID":"msg_1","text":"Running the tests, then asking the reviewer to check the diff."}}
+{"type":"tool_use","timestamp":1100,"part":{"type":"tool","tool":"bash","callID":"toolu_1","messageID":"msg_1","state":{"status":"completed","input":{"command":"go test ./..."},"output":"ok  \tfixture\t0.010s\n","title":"go test ./..."}}}
+{"type":"tool_use","timestamp":1200,"part":{"type":"tool","tool":"task","callID":"toolu_2","messageID":"msg_1","state":{"status":"completed","input":{"description":"review the diff","prompt":"Review the diff against main.","subagent_type":"reviewer"},"output":"VERDICT: BLOCK\n## Blocking\n- fixture finding\n","title":"review the diff"}}}
+{"type":"text","part":{"messageID":"msg_1","text":"The reviewer blocked the change; stopping."}}
+{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"claude-sonnet-4","tokens":{"input":60,"output":30,"reasoning":0,"cache":{"write":0,"read":0}},"cost":0.002}}

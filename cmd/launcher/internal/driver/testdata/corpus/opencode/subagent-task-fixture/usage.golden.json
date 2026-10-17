@@ -1,0 +1,37 @@
+{
+  "EarliestEventMs": 1000,
+  "Found": true,
+  "HasEventSpan": true,
+  "LatestEventMs": 1500,
+  "OutputIsMainLoopOnly": false,
+  "SummedByAgent": [
+    {
+      "APICalls": 1,
+      "Agent": "main",
+      "CacheCreationInputTokens": 0,
+      "CacheReadInputTokens": 0,
+      "OutputTokens": 30,
+      "UncachedInputTokens": 60
+    }
+  ],
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 0,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 0,
+      "Model": "claude-sonnet-4",
+      "OutputTokens": 30,
+      "UncachedInputTokens": 60
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "duration_api_ms": 0,
+    "duration_ms": 500,
+    "input_tokens": 60,
+    "num_turns": 1,
+    "output_tokens": 30,
+    "total_cost_usd": 0.002
+  }
+}
