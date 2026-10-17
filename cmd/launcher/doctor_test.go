@@ -705,6 +705,11 @@ func TestRequiredLabels(t *testing.T) {
 		{"butler, patches on", doctorOptions{butler: true}, mk("github", "read-write", "", 2, patchCaps), []string{"agent-butler-finding", "agent-butler-patch"}},
 		{"butler, patches on but no patch forge", doctorOptions{butler: true}, mk("github", "read-write", "", 2, forge.Capabilities{}), []string{"agent-butler-finding"}},
 		{"research", doctorOptions{research: true}, mk("github", "read-write", "", 0, patchCaps), doctor.ResearchLabelNames()},
+		{"research, custom verdicts", doctorOptions{research: true}, func() readContext {
+			rc := mk("github", "read-write", "", 0, patchCaps)
+			rc.config.researchVerdicts = `[{"verdict":"go","label":"research-go"},{"verdict":"nogo","label":"research-nogo"}]`
+			return rc
+		}(), []string{"agent-research", "agent-research-in-progress", "agent-research-failed", "research-go", "research-nogo", "agent-research-finding"}},
 		{"butler patches on and read-only", doctorOptions{butler: true}, mk("github", "read-only", "claude", 1, patchCaps), []string{"agent-butler-finding", "agent-butler-patch", "agent-review-finding"}},
 		{"forgejo keeps butler label", doctorOptions{butler: true}, mk("forgejo", "read-write", "", 0, patchCaps), []string{"agent-butler-finding"}},
 		{"local, butler with tuning and research and read-only", doctorOptions{butler: true, research: true}, mk("local", "read-only", "claude", 2, patchCaps, "tuning"), nil},
