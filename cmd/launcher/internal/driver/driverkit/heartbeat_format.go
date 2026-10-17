@@ -50,8 +50,16 @@ func FormatHeartbeat(issue string, turns int, lastTool, role, phase string) stri
 
 // FormatCountLine returns a count summary line for accumulated tool calls,
 // e.g. "#42 scout [explore] · 1 read". It names any role other than the
-// implementor first so the line is never mistaken for implementor output.
+// implementor first so the line is never mistaken for implementor output. It
+// uses the neutral default vocabulary (every kind sorted, plural by "s"), so a
+// driver's own count lines go through its HeartbeatTracking.FormatCountLine.
 func FormatCountLine(issue, role, phase string, counts map[string]int) string {
+	return HeartbeatTracking{}.FormatCountLine(issue, role, phase, counts)
+}
+
+// FormatCountLine returns a count summary line for accumulated tool calls,
+// naming t's KindOrder kinds first and pluralizing through t's KindPlurals.
+func (t HeartbeatTracking) FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "#%s", issue)
 	if role != "" && role != ImplementorRole {
@@ -60,20 +68,20 @@ func FormatCountLine(issue, role, phase string, counts map[string]int) string {
 	if phase != "" {
 		fmt.Fprintf(&sb, " [%s]", phase)
 	}
-	fmt.Fprintf(&sb, " \xc2\xb7 %s", formatCounts(counts))
+	fmt.Fprintf(&sb, " \xc2\xb7 %s", t.formatCounts(counts))
 	return sb.String()
 }
 
 // formatCounts returns a comma-separated count string, e.g. "3 reads, 2 greps".
-// Kinds are emitted in a fixed display order so output is deterministic.
-func formatCounts(counts map[string]int) string {
-	order := []string{"read", "edit", "grep", "search", "bash", "subagent"}
-	seen := make(map[string]bool, len(order))
+// KindOrder kinds come first in that order, the rest sorted, so output is
+// deterministic.
+func (t HeartbeatTracking) formatCounts(counts map[string]int) string {
+	seen := make(map[string]bool, len(t.KindOrder))
 	var parts []string
-	for _, kind := range order {
+	for _, kind := range t.KindOrder {
 		if n := counts[kind]; n > 0 {
 			seen[kind] = true
-			parts = append(parts, fmt.Sprintf("%d %s", n, pluralKind(kind, n)))
+			parts = append(parts, fmt.Sprintf("%d %s", n, t.pluralKind(kind, n)))
 		}
 	}
 	var extra []string
@@ -85,19 +93,17 @@ func formatCounts(counts map[string]int) string {
 	sort.Strings(extra)
 	for _, kind := range extra {
 		n := counts[kind]
-		parts = append(parts, fmt.Sprintf("%d %s", n, pluralKind(kind, n)))
+		parts = append(parts, fmt.Sprintf("%d %s", n, t.pluralKind(kind, n)))
 	}
 	return strings.Join(parts, ", ")
 }
 
-func pluralKind(kind string, n int) string {
+func (t HeartbeatTracking) pluralKind(kind string, n int) string {
 	if n == 1 {
 		return kind
 	}
-	switch kind {
-	case "search":
-		return "searches"
-	default:
-		return kind + "s"
+	if p, ok := t.KindPlurals[kind]; ok {
+		return p
 	}
+	return kind + "s"
 }
