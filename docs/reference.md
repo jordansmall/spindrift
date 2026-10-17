@@ -6973,17 +6973,17 @@ socket verdict would leave the `--add-host` mode to guess.
 A stored verdict is keyed on the container runtime (`RUNTIME` /
 `perSystem.spindrift.infra.runtime`), the image reference, and
 `NETWORK_MODE`, and a live value that disagrees with any of the three is a
-miss, not a stale hit. The image reference belongs in the key for a subtle
-reason: an image too old to carry the `probe-registry-socket` verb reads
-back from the probe as socket-incapable — indistinguishable, from the
-probe's own exit code, from a genuinely socket-incapable host — and caching
-that misread would let a stale image masquerade as a permanent host
-limitation long after a rebuild would have fixed it (issue #3120). That
-protection only covers the reference, though, not the image's actual
-content: the nix pipeline's `imageName:imageHash` tag changes on every
-rebuild and so self-invalidates, but a mutable tag — the bare-launcher
-`spindrift:latest` default, or an `IMAGE` override pinned to a moving tag —
-does not, so a rebuild under one of those is another case the `rm
+miss, not a stale hit. The image reference is keyed as the conservative
+choice: the verdict is measured by the image's own `driver-exec` running as
+the image's own user, so a different image is a different measuring
+instrument, and re-probing once when the image changes is a one-time cost
+per image. (An image too old to carry the verb is the version-mismatch
+hard error above, never a cached verdict.) The key covers only the
+reference, though, not the image's
+actual content: the nix pipeline's `imageName:imageHash` tag changes on
+every rebuild and so self-invalidates, but a mutable tag — the
+bare-launcher `spindrift:latest` default, or an `IMAGE` override pinned to
+a moving tag — does not, so a rebuild under one of those is a case the `rm
 .spindrift/registry-probe-cache.json` escape hatch below covers.
 `NETWORK_MODE` is keyed too: the socket-incapable path hard-errors rather
 than falling back to TCP under a network mode that denies the host-loopback
