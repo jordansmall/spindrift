@@ -3,16 +3,13 @@ package opencode_test
 import (
 	"testing"
 
-	"spindrift.dev/launcher/internal/driver"
+	"spindrift.dev/launcher/internal/driver/driverkit"
+	"spindrift.dev/launcher/internal/driver/opencode"
 )
 
-// newDriver returns the registered opencode Driver, the seam the reader tests
-// in this package exercise.
-func newDriver(t *testing.T) driver.Driver {
+// newDriver builds the opencode Driver from the package's own Strategy, the seam
+// the reader tests in this package exercise.
+func newDriver(t *testing.T) driverkit.Driver {
 	t.Helper()
-	d, err := driver.New("opencode")
-	if err != nil {
-		t.Fatal(err)
-	}
-	return d
+	return driverkit.New(opencode.Strategy)
 }
