@@ -797,13 +797,13 @@ func renderHeaderWith(m Model, style styleFunc) string {
 		// styling reset after it, or TestView_RebuildErr_Truncated breaks.
 		fmt.Fprintf(&b, "%s %s\n",
 			style(RoleFailed, glyphWarning+" rebuild failed:"),
-			clipBannerErr(m.RebuildStatus.Err, bannerErrWidth))
+			clipBannerErr(SanitizeControlSequences(m.RebuildStatus.Err), bannerErrWidth))
 	}
 	if m.OrphanRecoveryErr != "" {
 		// Same split as RebuildErr above, same reason.
 		fmt.Fprintf(&b, "%s %s\n",
 			style(RoleFailed, glyphWarning+" orphan adopt failed:"),
-			clipBannerErr(m.OrphanRecoveryErr, bannerErrWidth))
+			clipBannerErr(SanitizeControlSequences(m.OrphanRecoveryErr), bannerErrWidth))
 	}
 	if m.RebuildStatus.BranchSwitchNotice != "" {
 		b.WriteString(style(RoleDim, fmt.Sprintf("%s notice: %s", glyphNotice, m.RebuildStatus.BranchSwitchNotice)))

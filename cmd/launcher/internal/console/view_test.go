@@ -552,6 +552,37 @@ func TestView_RebuildErr_Surfaced(t *testing.T) {
 	}
 }
 
+// bannerControlSequencePayload embeds an OSC title-set and a CSI clear-screen in
+// an otherwise readable header error.
+const bannerControlSequencePayload = "before\x1b]0;pwn\x07\x1b[2Jafter"
+
+// assertBannerSanitized checks that View strips the payload's control sequences
+// while keeping its readable text. Callers set NO_COLOR so the header's own
+// styling emits no ESC, which is what makes the blanket "\x1b" check meaningful.
+func assertBannerSanitized(t *testing.T, m Model) {
+	t.Helper()
+	out := View(m)
+	for _, bad := range []string{"\x1b", "\a", "]0;pwn", "[2J"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("View() = %q, must not contain %q", out, bad)
+		}
+	}
+	if !strings.Contains(out, "beforeafter") {
+		t.Errorf("View() = %q, want the surrounding readable text kept", out)
+	}
+}
+
+// The rebuild error is untrusted text: control sequences must not reach the
+// terminal, though the model keeps the raw text and sanitizes only at render.
+func TestView_RebuildErr_SanitizesControlSequences(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	m := Update(NewModel(), StaleStatusMsg{RebuildStatus: RebuildStatus{Stale: true, Err: bannerControlSequencePayload}})
+	if m.RebuildStatus.Err != bannerControlSequencePayload {
+		t.Errorf("RebuildStatus.Err = %q, want the raw text %q kept", m.RebuildStatus.Err, bannerControlSequencePayload)
+	}
+	assertBannerSanitized(t, m)
+}
+
 // ADR 0031: the rebuild-failed alert carries the plain-Unicode warning glyph and
 // styles by role, keeping its existing content.
 func TestView_Header_RebuildFailedAlert_StyledWithGlyph(t *testing.T) {
@@ -628,6 +659,17 @@ func TestView_OrphanRecoveryErr_Surfaced(t *testing.T) {
 	if !strings.Contains(out, "failed to adopt orphan #42: boom") {
 		t.Errorf("View() = %q, want the orphan recovery failure surfaced", out)
 	}
+}
+
+// The orphan recovery error is untrusted text: control sequences must not reach
+// the terminal, though the model keeps the raw text and sanitizes only at render.
+func TestView_OrphanRecoveryErr_SanitizesControlSequences(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	m := Update(NewModel(), OrphanRecoveryMsg{Err: bannerControlSequencePayload})
+	if m.OrphanRecoveryErr != bannerControlSequencePayload {
+		t.Errorf("OrphanRecoveryErr = %q, want the raw text %q kept", m.OrphanRecoveryErr, bannerControlSequencePayload)
+	}
+	assertBannerSanitized(t, m)
 }
 
 // ADR 0031: the orphan-adopt-failed alert carries the plain-Unicode warning glyph
