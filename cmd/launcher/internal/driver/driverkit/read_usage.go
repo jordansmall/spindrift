@@ -55,29 +55,47 @@ func UsageByModel(path string, newDecoder func() Decoder) ([]usage.ModelUsage, e
 	return result, nil
 }
 
-// ExtractUsage sums the tallies of every KindUsage event in the log at logPath
-// into one usage.Report. Each event is an independent per-call tally, not a
-// cumulative snapshot, so a plain sum is correct, and every event counts as
-// one turn with no MessageID deduplication (only the per-model breakdown
-// dedups). DurationApiMs stays zero. The first KindStart's Timestamp anchors
-// the event span; without one the span and DurationMs are left unset rather
-// than reporting a raw epoch figure. Found is false when the log has no usage
-// event or is absent. SummedByAgent groups the same events by Event.Role (empty
-// is the top-level main loop, labelled usage.MainLoopAgent) and, like the
-// per-model breakdown, counts a non-empty MessageID once; OutputIsMainLoopOnly
-// stays false because every event carries its own real output.
-//
-// byModel supplies the per-model breakdown, normally UsageByModel over the
-// same decoder; a Driver passes its own so a test can fail it. Its error
-// degrades only that section to nil with a stderr WARNING naming the path,
-// not the totals already summed (issue #674).
-func ExtractUsage(logPath string, newDecoder func() Decoder, byModel func(path string) ([]usage.ModelUsage, error)) (usage.Report, error) {
+// TotalsSource names where a Driver's run totals come from.
+type TotalsSource int
+
+const (
+	// PerCallTotals sums every KindUsage event: the CLI reports one tally per
+	// call and no session summary (opencode).
+	PerCallTotals TotalsSource = iota
+
+	// SessionTotals sums the KindResult events: the CLI reports a summary per
+	// session, which is the only ground truth for output tokens, cost, turns
+	// and durations (claude). Per-call KindUsage events then feed the
+	// breakdowns only.
+	SessionTotals
+)
+
+// EventSpan is the earliest and latest event Timestamp of a scan. Have is
+// false when the scan saw none to anchor it.
+type EventSpan struct {
+	Earliest, Latest int64
+	Have             bool
+}
+
+// SumTotals returns the run totals of the log at path from src, the event
+// span, and whether the log carries any totals at all; a missing log, or one
+// with none, reports found=false and no error.
+func SumTotals(path string, newDecoder func() Decoder, src TotalsSource) (usage.Usage, EventSpan, bool, error) {
+	if src == SessionTotals {
+		return sumSession(path, newDecoder)
+	}
+	return sumPerCall(path, newDecoder)
+}
+
+// sumPerCall counts every KindUsage as one turn with no MessageID
+// deduplication (only the breakdowns dedup), leaves DurationApiMs zero, and
+// spans the first KindStart to the last KindUsage; without a KindStart the
+// span and DurationMs stay unset rather than reporting a raw epoch figure.
+func sumPerCall(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, error) {
 	var u usage.Usage
 	var firstStart, lastUsage int64
 	haveStart := false
-	agents := make(map[string]*usage.AgentUsage)
-	seenIDs := make(map[string]bool)
-	err := scanEvents(logPath, newDecoder, func(ev Event) {
+	err := scanEvents(path, newDecoder, func(ev Event) {
 		switch ev.Kind {
 		case KindStart:
 			if !haveStart {
@@ -85,56 +103,172 @@ func ExtractUsage(logPath string, newDecoder func() Decoder, byModel func(path s
 				haveStart = true
 			}
 		case KindUsage:
-			u.InputTokens += ev.Tokens.Input
-			u.OutputTokens += ev.Tokens.Output
-			u.CacheReadInputTokens += ev.Tokens.CacheRead
-			u.CacheCreationInputTokens += ev.Tokens.CacheWrite5m + ev.Tokens.CacheWrite1h
-			u.TotalCostUSD += ev.Tokens.CostUSD
+			addTokens(&u, ev.Tokens)
 			u.NumTurns++
 			lastUsage = ev.Timestamp
-			if !firstSighting(seenIDs, ev.MessageID) {
-				return
-			}
-			// usage.MainLoopAgent is the per-agent breakdown's own label for the
-			// top-level row, not the Transcript's ImplementorRole default; a pass's
-			// role comes from its pass_start spindrift_op.
-			name := ev.Role
-			if name == "" {
-				name = usage.MainLoopAgent
-			}
-			a, ok := agents[name]
-			if !ok {
-				a = &usage.AgentUsage{Agent: name}
-				agents[name] = a
-			}
-			a.APICalls++
-			a.UncachedInputTokens += ev.Tokens.Input
-			a.OutputTokens += ev.Tokens.Output
-			a.CacheReadInputTokens += ev.Tokens.CacheRead
-			a.CacheCreationInputTokens += ev.Tokens.CacheWrite5m + ev.Tokens.CacheWrite1h
 		}
 	})
+	if err != nil || u.NumTurns == 0 {
+		return usage.Usage{}, EventSpan{}, false, err
+	}
+	var span EventSpan
+	if haveStart {
+		u.DurationMs = lastUsage - firstStart
+		span = EventSpan{Earliest: firstStart, Latest: lastUsage, Have: true}
+	}
+	return u, span, true, nil
+}
+
+// sumSession reports found only for a log with a KindResult that has totals.
+// Wall time is not additive across sessions: they can overlap (issue #2058) or
+// idle between runs, so with several results DurationMs is the span of every
+// non-zero event Timestamp, floored by the longest session's own DurationMs
+// (the floor also covers a log with no timestamps, or a span narrower than a
+// session that provably ran longer). One result reports its own DurationMs.
+func sumSession(path string, newDecoder func() Decoder) (usage.Usage, EventSpan, bool, error) {
+	var u usage.Usage
+	var span EventSpan
+	var maxDurationMs int64
+	results := 0
+	err := scanEvents(path, newDecoder, func(ev Event) {
+		if ev.Timestamp != 0 {
+			if !span.Have || ev.Timestamp < span.Earliest {
+				span.Earliest = ev.Timestamp
+			}
+			if !span.Have || ev.Timestamp > span.Latest {
+				span.Latest = ev.Timestamp
+			}
+			span.Have = true
+		}
+		if ev.Kind == KindResult && !ev.NoTotals {
+			results++
+			addTokens(&u, ev.Tokens)
+			u.DurationApiMs += ev.DurationAPIMs
+			u.NumTurns += ev.NumTurns
+			maxDurationMs = max(maxDurationMs, ev.DurationMs)
+		}
+	})
+	if err != nil || results == 0 {
+		return usage.Usage{}, EventSpan{}, false, err
+	}
+	u.DurationMs = maxDurationMs
+	if results > 1 && span.Latest > span.Earliest {
+		u.DurationMs = max(span.Latest-span.Earliest, maxDurationMs)
+	}
+	return u, span, true, nil
+}
+
+func addTokens(u *usage.Usage, t Tokens) {
+	u.InputTokens += t.Input
+	u.OutputTokens += t.Output
+	u.CacheReadInputTokens += t.CacheRead
+	u.CacheCreationInputTokens += t.CacheWrite5m + t.CacheWrite1h
+	u.TotalCostUSD += t.CostUSD
+}
+
+// UsageByAgent returns per-agent breakdowns from the KindUsage events in the
+// log at path, or (nil, nil) when the log is absent. A non-empty MessageID
+// counts once. The main loop is labelled usage.MainLoopAgent, the breakdown's
+// own name for it, not the Transcript's ImplementorRole default. An InSubagent
+// event's row is its Role; any other event is the main loop whatever pass Role
+// it carries. Under PerCallTotals OutputTokens are summed; under SessionTotals
+// they stay 0 on every row for ExtractUsage to patch from the session totals.
+func UsageByAgent(path string, newDecoder func() Decoder, src TotalsSource) ([]usage.AgentUsage, error) {
+	agents := make(map[string]*usage.AgentUsage)
+	seenIDs := make(map[string]bool)
+	err := scanEvents(path, newDecoder, func(ev Event) {
+		if ev.Kind != KindUsage || !firstSighting(seenIDs, ev.MessageID) {
+			return
+		}
+		name := usage.MainLoopAgent
+		if ev.InSubagent && ev.Role != "" {
+			name = ev.Role
+		}
+		a, ok := agents[name]
+		if !ok {
+			a = &usage.AgentUsage{Agent: name}
+			agents[name] = a
+		}
+		a.APICalls++
+		a.UncachedInputTokens += ev.Tokens.Input
+		if src == PerCallTotals {
+			a.OutputTokens += ev.Tokens.Output
+		}
+		a.CacheReadInputTokens += ev.Tokens.CacheRead
+		a.CacheCreationInputTokens += ev.Tokens.CacheWrite5m + ev.Tokens.CacheWrite1h
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sortedAgents(agents), nil
+}
+
+// ExtractUsage returns the totals of the log at logPath (see SumTotals) with
+// its per-model and per-agent breakdowns as one usage.Report; Found is false
+// when the log has no totals or is absent. EarliestEventMs, LatestEventMs and
+// HasEventSpan carry the SumTotals span.
+//
+// byModel and byAgent supply the breakdowns, normally UsageByModel and
+// UsageByAgent over the same decoder; a Driver passes its own so a test can
+// fail one or reorder it. An error degrades only that section to nil with a
+// stderr WARNING naming the path, not the totals already summed (issue #674).
+//
+// Under SessionTotals the result events are the only ground truth for output
+// tokens, so the main-loop row takes them and Report.OutputIsMainLoopOnly is
+// set. SkipOversized drops lines over 4 MiB, so a run whose main-loop lines
+// were all oversized arrives with subagent rows only: the row is then
+// synthesized, prepended to keep main-loop first. A nil agents slice stays
+// nil, with no row added.
+func ExtractUsage(
+	logPath string,
+	newDecoder func() Decoder,
+	src TotalsSource,
+	byModel func(path string) ([]usage.ModelUsage, error),
+	byAgent func(path string) ([]usage.AgentUsage, error),
+) (usage.Report, error) {
+	u, span, found, err := SumTotals(logPath, newDecoder, src)
 	if err != nil {
 		return usage.Report{}, err
 	}
-	if u.NumTurns == 0 {
-		return usage.Report{Found: false}, nil
-	}
-	if haveStart {
-		u.DurationMs = lastUsage - firstStart
+	if !found {
+		return usage.Report{}, nil
 	}
 	models, err := byModel(logPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "WARNING: breakdown by model failed for %s: %v\n", logPath, err)
 		models = nil
 	}
-	report := usage.Report{Totals: u, Found: true, SummedByModel: models, SummedByAgent: sortedAgents(agents)}
-	if haveStart {
-		report.EarliestEventMs = firstStart
-		report.LatestEventMs = lastUsage
+	agents, err := byAgent(logPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARNING: breakdown by agent failed for %s: %v\n", logPath, err)
+		agents = nil
+	}
+	if src == SessionTotals {
+		agents = withMainLoopOutput(agents, u.OutputTokens)
+	}
+	report := usage.Report{
+		Totals: u, Found: true, SummedByModel: models, SummedByAgent: agents,
+		OutputIsMainLoopOnly: src == SessionTotals,
+	}
+	if span.Have {
+		report.EarliestEventMs = span.Earliest
+		report.LatestEventMs = span.Latest
 		report.HasEventSpan = true
 	}
 	return report, nil
+}
+
+func withMainLoopOutput(agents []usage.AgentUsage, output int) []usage.AgentUsage {
+	for i := range agents {
+		if agents[i].Agent == usage.MainLoopAgent {
+			agents[i].OutputTokens = output
+			return agents
+		}
+	}
+	if len(agents) == 0 {
+		return agents
+	}
+	return append([]usage.AgentUsage{{Agent: usage.MainLoopAgent, OutputTokens: output}}, agents...)
 }
 
 // sortedAgents orders usage.MainLoopAgent first, then the rest by descending

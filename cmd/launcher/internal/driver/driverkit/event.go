@@ -107,12 +107,18 @@ func IsProgress(k Kind) bool {
 type Event struct {
 	Kind Kind
 
-	// Role is "" for the top-level (main) loop, or the subagent role the
-	// decoder attributed the event to. A Driver whose CLI has no subagent
-	// attribution always leaves it "". The vocabulary carries no parent tool-use
-	// id, so a Driver whose grammar attributes role by one (claude's ResolveRole)
-	// resolves Role in its stateful decoder.
+	// Role is the role the decoder attributed: a subagent's, or for a
+	// top-level event the pass role in force (empty = the reader's default). A
+	// Driver whose CLI has no role attribution always leaves it "". The
+	// vocabulary carries no parent tool-use id, so a Driver whose grammar
+	// attributes role by one (claude's ResolveRole) resolves Role in its
+	// stateful decoder.
 	Role string
+
+	// InSubagent marks an event attributed to a subagent, so Role names it.
+	// Per-role usage keys on it: a non-InSubagent event is the main loop whatever
+	// pass Role it carries.
+	InSubagent bool
 
 	// Synthetic marks a turn the CLI wrote itself rather than the model: it is
 	// not agent progress, so the classifier does not let a Synthetic content
@@ -174,6 +180,10 @@ type Event struct {
 	DurationMs    int64
 	DurationAPIMs int64
 	NumTurns      int
+
+	// NoTotals marks a KindResult whose session totals failed to decode: it
+	// still carries Text, but the usage reader skips it entirely.
+	NoTotals bool
 }
 
 // Tokens is one model call's token tally. A field the CLI does not report is
