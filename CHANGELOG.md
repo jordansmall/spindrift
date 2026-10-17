@@ -1,5 +1,89 @@
 # Changelog
 
+## [0.27.1](https://github.com/jordansmall/spindrift/compare/v0.27.0...v0.27.1) (2026-10-17)
+
+
+### Features
+
+* **driverkit:** declare a Driver as a Strategy value ([81fdc36](https://github.com/jordansmall/spindrift/commit/81fdc360273d650ffde1276caee0dcaf50fd8d31)), closes [#5504](https://github.com/jordansmall/spindrift/issues/5504)
+* **driverkit:** end every non-empty transcript with a newline ([071888c](https://github.com/jordansmall/spindrift/commit/071888c22d032969d4682b9545279ac20e581641)), closes [#5501](https://github.com/jordansmall/spindrift/issues/5501)
+
+
+### Bug Fixes
+
+* **heartbeat:** pluralize the bash bucket as "bashes" ([907a2f4](https://github.com/jordansmall/spindrift/commit/907a2f4e24dda29fe094a32ec0936b67f472d8de)), closes [#5467](https://github.com/jordansmall/spindrift/issues/5467)
+* **opencode:** read the resume store path from OPENCODE_DB ([96a2c86](https://github.com/jordansmall/spindrift/commit/96a2c8684e1ea756bccbe1b7d8d644d557c41ef6)), closes [#5378](https://github.com/jordansmall/spindrift/issues/5378)
+
+
+### Documentation
+
+* **adr:** decide driver strategies as literals ([6343c53](https://github.com/jordansmall/spindrift/commit/6343c53598df23e3d2ed335fdb7ad0b7bfdc89df))
+* **adr:** note when ADR 0043's bwrap hot-swap drains instead ([013807d](https://github.com/jordansmall/spindrift/commit/013807d5b5f21f3451ca00849070501e686fb3f1)), closes [#5432](https://github.com/jordansmall/spindrift/issues/5432)
+* **bindregistry:** stop blaming Apply for bit-clear rewritten content ([95eeda2](https://github.com/jordansmall/spindrift/commit/95eeda2d75082e104f20d5dd700ddde8db87229f)), closes [#5447](https://github.com/jordansmall/spindrift/issues/5447)
+* **bundleout:** widen package doc to cover read-only relays ([417d817](https://github.com/jordansmall/spindrift/commit/417d8175180d71cafc9626781cddbfa1e4675fcf)), closes [#5448](https://github.com/jordansmall/spindrift/issues/5448)
+* **claude:** record lenient assistant content decoding ([0b82ae0](https://github.com/jordansmall/spindrift/commit/0b82ae08abcd43f72ce7a58265f6cb358e124783)), closes [#5454](https://github.com/jordansmall/spindrift/issues/5454)
+* **console:** name freshnessChecker as a writer of Launcher.stale ([f28d5b6](https://github.com/jordansmall/spindrift/commit/f28d5b6914fc1e93ae5abdfb7c7eecba8fbe46ba)), closes [#5463](https://github.com/jordansmall/spindrift/issues/5463)
+* **console:** name live pieces in the runContinuousQueue doc ([0b88f80](https://github.com/jordansmall/spindrift/commit/0b88f80f327e8485d2c1b1d1fea281b93ffff3d5)), closes [#5466](https://github.com/jordansmall/spindrift/issues/5466)
+* **console:** name the Limiter's Resized signal in "+" comments ([9752dd8](https://github.com/jordansmall/spindrift/commit/9752dd80f81674ebbed8505b6a5a9320e6f2799d)), closes [#5464](https://github.com/jordansmall/spindrift/issues/5464)
+* **console:** point sidebar h/left comment at listBindings ([f47a06f](https://github.com/jordansmall/spindrift/commit/f47a06f52e793351ff8f7e4aeeecee6c909eb609)), closes [#5465](https://github.com/jordansmall/spindrift/issues/5465)
+* **context:** add strategy and descriptor terms ([54e84ff](https://github.com/jordansmall/spindrift/commit/54e84ff24132f4852da00a5d599b9e19ebc881de)), closes [#5498](https://github.com/jordansmall/spindrift/issues/5498)
+* **drivers:** drop the stale Go sessionStore coupling notes ([e270c6a](https://github.com/jordansmall/spindrift/commit/e270c6a09662c8141b9d5c3d3c38bea77ef5b1f3)), closes [#5378](https://github.com/jordansmall/spindrift/issues/5378)
+* point Driver authors at their drivers-&lt;name&gt;-go-test check ([a51145f](https://github.com/jordansmall/spindrift/commit/a51145f3faff709e93be1146d5078f2e00d47ecb)), closes [#5508](https://github.com/jordansmall/spindrift/issues/5508)
+* record the shared transcript and per-model rules ([61288bc](https://github.com/jordansmall/spindrift/commit/61288bc7905431045b2ba978dc3a15ae5d041a33)), closes [#5501](https://github.com/jordansmall/spindrift/issues/5501)
+* record what the pi seam re-checked against pi 1.1.0 ([f01e6e2](https://github.com/jordansmall/spindrift/commit/f01e6e2d2763e4bf28581434583233979a52fe22)), closes [#5478](https://github.com/jordansmall/spindrift/issues/5478)
+* **reference:** list the Strategy fields as the Driver contract ([9601d90](https://github.com/jordansmall/spindrift/commit/9601d903d3c038a13afd270e90bd1b3f6c3e650f)), closes [#5504](https://github.com/jordansmall/spindrift/issues/5504)
+* **reference:** name the conformance kit and per-Driver corpus ([6d87fc7](https://github.com/jordansmall/spindrift/commit/6d87fc7e5c7352a2d46450949b19c94e907fd672)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **reference:** name the Driver Descriptor as a reader of the flag ([fe33ff6](https://github.com/jordansmall/spindrift/commit/fe33ff605d9f84d0f8291562d5f94ececaea29bd)), closes [#5503](https://github.com/jordansmall/spindrift/issues/5503)
+* **reference:** note the hooks share credential-vars-parse ([62a14ad](https://github.com/jordansmall/spindrift/commit/62a14ad1891ed574f9ff227d8a55ac462ec1f21d)), closes [#5373](https://github.com/jordansmall/spindrift/issues/5373)
+* **reference:** put claude's heartbeat on the decoder layer ([b9e7f8e](https://github.com/jordansmall/spindrift/commit/b9e7f8edc1fd18d80133fd4f5b35ed46f49f73da)), closes [#5462](https://github.com/jordansmall/spindrift/issues/5462)
+* **schema:** name CODE_FORGE=forgejo as a FORGEJO_* reader ([7dd522e](https://github.com/jordansmall/spindrift/commit/7dd522e31ba242f4f33a44de281da9c27004fa19)), closes [#5449](https://github.com/jordansmall/spindrift/issues/5449)
+* tell Driver authors where their Nix check file goes ([f6b8d6e](https://github.com/jordansmall/spindrift/commit/f6b8d6ec7705f4c1597024efe8bb3f8d4d30746c)), closes [#5502](https://github.com/jordansmall/spindrift/issues/5502)
+
+
+### Code Refactoring
+
+* **checks:** move Driver-only checks into per-Driver files ([f09d59e](https://github.com/jordansmall/spindrift/commit/f09d59eb99842062eaa383f3166a74f6208d74b8)), closes [#5502](https://github.com/jordansmall/spindrift/issues/5502)
+* **checks:** run Driver parity checks over every registry entry ([69d65bf](https://github.com/jordansmall/spindrift/commit/69d65bfcca90d568fd65b1455812ecc6d81f6bd2)), closes [#5502](https://github.com/jordansmall/spindrift/issues/5502)
+* **driver:** give each Driver package its own Strategy value ([1ef39bc](https://github.com/jordansmall/spindrift/commit/1ef39bc8e54a45f5e068e710ce69f30d6de99dc7)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **driverkit:** move the Strategy-backed Driver into driverkit ([51795fc](https://github.com/jordansmall/spindrift/commit/51795fcb8b3181219c6763f6e8a9080489ad39b7)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **driverkit:** order per-model usage rows by the family hook ([5b64e9f](https://github.com/jordansmall/spindrift/commit/5b64e9f896e5c75ff9fc7423644df1b903babb0b)), closes [#5501](https://github.com/jordansmall/spindrift/issues/5501)
+* **driverkit:** take count-line kind order and plurals from the driver ([555e197](https://github.com/jordansmall/spindrift/commit/555e197db15a88af59b5693db877136fe6585364)), closes [#5456](https://github.com/jordansmall/spindrift/issues/5456)
+* **driver:** register claude and opencode as Strategy literals ([7aafc3a](https://github.com/jordansmall/spindrift/commit/7aafc3ae12760f138eae534bf399ad02f4d647bb)), closes [#5504](https://github.com/jordansmall/spindrift/issues/5504)
+* **driver:** render one Descriptor per Driver from the Nix rows ([40e53f2](https://github.com/jordansmall/spindrift/commit/40e53f2b4f15c1df25d37a0020b62b307f4d5a1a)), closes [#5503](https://github.com/jordansmall/spindrift/issues/5503)
+* **hooks:** share one credential-vars parser between two hooks ([ef1a4e7](https://github.com/jordansmall/spindrift/commit/ef1a4e7ccbb9c67d14000ea760a3f7731faa3b7c)), closes [#5373](https://github.com/jordansmall/spindrift/issues/5373)
+* **seamtest:** share the nix-build resolver with other seams ([5fc6693](https://github.com/jordansmall/spindrift/commit/5fc6693df1ccbff0acc28fed9222de7b03cbad40)), closes [#5478](https://github.com/jordansmall/spindrift/issues/5478)
+
+
+### Tests
+
+* **bindregistry:** rename bit-clear convergence tests off crash story ([611c065](https://github.com/jordansmall/spindrift/commit/611c065b00d3a09ef6f6ffd6232ce6c6441acb53)), closes [#5447](https://github.com/jordansmall/spindrift/issues/5447)
+* **checks:** pin what a new Driver registry row yields ([5516a41](https://github.com/jordansmall/spindrift/commit/5516a41ee9eac3fb999b9d2c357bad307c0c954e)), closes [#5502](https://github.com/jordansmall/spindrift/issues/5502)
+* **claude:** pin lenient assistant content in the heartbeat ([e38d888](https://github.com/jordansmall/spindrift/commit/e38d88894dff1d47f3edacfd1303befc25d7df32)), closes [#5454](https://github.com/jordansmall/spindrift/issues/5454)
+* **claude:** pin the heartbeat count lines byte for byte ([fa7f448](https://github.com/jordansmall/spindrift/commit/fa7f44837f15774c7249a03a4813d5ab5a1cd0e5)), closes [#5456](https://github.com/jordansmall/spindrift/issues/5456)
+* **driver:** drop newDriver's unused testing.T ([a310d88](https://github.com/jordansmall/spindrift/commit/a310d8866aa54d54ee85f4304f498c594a9176d2)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **driver:** guard each Driver's test closure against the others ([6cab17e](https://github.com/jordansmall/spindrift/commit/6cab17e2a416100567b3102f1de15da92d09c335)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **driverkit:** add a conformance kit that replays a Driver's corpus ([bf073e8](https://github.com/jordansmall/spindrift/commit/bf073e8412b9a740810ff0398d99befede6b48ee)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **driver:** run each Driver's corpus from its own package ([9a55e43](https://github.com/jordansmall/spindrift/commit/9a55e436c62fafa1c776c5aa63c389ee5d0b8687)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+* **hooks:** cover the tee hook's empty credential list ([155570a](https://github.com/jordansmall/spindrift/commit/155570af80a96e2cf598023f9fb004c5ff8dd021)), closes [#5373](https://github.com/jordansmall/spindrift/issues/5373)
+* **nix:** fail when opencode's session schema drifts from the fixture ([16bfe63](https://github.com/jordansmall/spindrift/commit/16bfe630c779f2e4a5df5c12c0987d1793e8aa86)), closes [#5379](https://github.com/jordansmall/spindrift/issues/5379)
+* **opencode:** seed the session store from the real opencode schema ([0c72295](https://github.com/jordansmall/spindrift/commit/0c72295cdb381efe4087675b1b6acd88d741dd8f)), closes [#5379](https://github.com/jordansmall/spindrift/issues/5379)
+* **piseam:** drive pi through tool calls, a retry and an outcome line ([90076c5](https://github.com/jordansmall/spindrift/commit/90076c59642f4de053a4513de78cec8b26f058c7)), closes [#5478](https://github.com/jordansmall/spindrift/issues/5478)
+* **piseam:** pin pi's effort, session, trust, auth and error behaviour ([0f47070](https://github.com/jordansmall/spindrift/commit/0f47070c403100665e7c1f1e8c360def709ae2a1)), closes [#5478](https://github.com/jordansmall/spindrift/issues/5478)
+* **piseam:** run the locked pi against a stub Provider ([555f970](https://github.com/jordansmall/spindrift/commit/555f970902dc17b97a2bde58485286cd9d0e13aa)), closes [#5478](https://github.com/jordansmall/spindrift/issues/5478)
+* **piseam:** run the subagent extension against the stub ([4774f3a](https://github.com/jordansmall/spindrift/commit/4774f3a75c4a0291475ae5dd5b804a78d6b9574b)), closes [#5478](https://github.com/jordansmall/spindrift/issues/5478)
+
+
+### Build System
+
+* **nix:** give each Driver its own go test derivation ([438aa07](https://github.com/jordansmall/spindrift/commit/438aa07816795de5b4a74774385439c10ccefde2)), closes [#5508](https://github.com/jordansmall/spindrift/issues/5508)
+* **nix:** keep Driver tests out of launcher-go-test ([1bd35f3](https://github.com/jordansmall/spindrift/commit/1bd35f3343630bf79421e0274725ffca999b5281)), closes [#5508](https://github.com/jordansmall/spindrift/issues/5508)
+* **nix:** regenerate every Driver's corpus goldens ([08de936](https://github.com/jordansmall/spindrift/commit/08de936dc1d982365ff574648a1d35854dd486e0)), closes [#5506](https://github.com/jordansmall/spindrift/issues/5506)
+
+
+### Miscellaneous Chores
+
+* **ab-orchestrator:** drop the no-op AB_WORKER_ON knob ([e9226f9](https://github.com/jordansmall/spindrift/commit/e9226f98b5ee3a6c0722ba75d7b44984839f6b7e)), closes [#5359](https://github.com/jordansmall/spindrift/issues/5359)
+
 ## [0.27.0](https://github.com/jordansmall/spindrift/compare/v0.26.0...v0.27.0) (2026-10-17)
 
 
