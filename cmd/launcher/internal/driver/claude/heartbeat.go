@@ -187,7 +187,7 @@ func (w *Writer) parseLine(line string) {
 		return
 	case hostop.TypeSpindriftOp:
 		if ev.SpindriftOp != nil {
-			fmt.Fprintln(w.out, FormatSpindriftOp(w.issue, *ev.SpindriftOp))
+			fmt.Fprintln(w.out, driverkit.FormatSpindriftOp(w.issue, *ev.SpindriftOp))
 			w.activeTopLevelRole = nextActiveTopLevelRole(w.activeTopLevelRole, ev.SpindriftOp)
 		}
 		return
