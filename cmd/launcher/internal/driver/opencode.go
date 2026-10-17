@@ -9,9 +9,10 @@ import (
 )
 
 // opencodeDriver adapts the driver/opencode subpackage, which owns the opencode
-// CLI's NDJSON transcript shape and transient-error taxonomy. That subpackage
-// cannot import this one without a cycle, so it returns a
-// driverkit.Classification, which this package's Classification aliases.
+// CLI's event decoder and transient-error taxonomy; its readers run the shared
+// driverkit readers over that decoder. That subpackage cannot import this one
+// without a cycle, so it returns a driverkit.Classification, which this
+// package's Classification aliases.
 type opencodeDriver struct{}
 
 func (opencodeDriver) Name() string { return "opencode" }

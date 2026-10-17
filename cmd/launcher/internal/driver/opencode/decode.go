@@ -1,8 +1,13 @@
 package opencode
 
 import (
+	"bytes"
 	"encoding/json"
+	"math"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
@@ -140,4 +145,59 @@ func decodeStepFinish(part logPart, ts int64) []driverkit.Event {
 		events = append(events, driverkit.Event{Kind: driverkit.KindModel, Timestamp: ts, MessageID: id, Model: model})
 	}
 	return events
+}
+
+// resetFrom derives the rate-limit reset time from the response headers of a
+// NamedError payload, in the order opencode's own session/retry.ts reads them:
+// retry-after-ms, then retry-after as seconds, then retry-after as an HTTP date.
+// A relative delay is anchored to the event timestamp rather than a wall clock,
+// so the result is deterministic; a relative delay with no timestamp yields nil.
+func resetFrom(raw json.RawMessage, timestampMs int64) *time.Time {
+	var payload struct {
+		Data struct {
+			ResponseHeaders map[string]string `json:"responseHeaders"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return nil
+	}
+	headers := map[string]string{}
+	for k, v := range payload.Data.ResponseHeaders {
+		headers[strings.ToLower(k)] = strings.TrimSpace(v)
+	}
+	relative := func(value string, unit time.Duration) *time.Time {
+		// MaxInt32 keeps n*unit inside time.Duration's int64 range for either unit.
+		n, err := strconv.ParseFloat(value, 64)
+		if err != nil || !(n >= 0 && n <= math.MaxInt32) || timestampMs <= 0 {
+			return nil
+		}
+		t := time.UnixMilli(timestampMs).Add(time.Duration(n * float64(unit))).UTC()
+		return &t
+	}
+	if t := relative(headers["retry-after-ms"], time.Millisecond); t != nil {
+		return t
+	}
+	if t := relative(headers["retry-after"], time.Second); t != nil {
+		return t
+	}
+	if t, err := http.ParseTime(headers["retry-after"]); err == nil {
+		t = t.UTC()
+		return &t
+	}
+	return nil
+}
+
+// errorText returns the string payload unquoted, or any other payload in
+// compact JSON so a marker like `"statusCode":429` has no stray whitespace. A
+// missing or invalid payload yields "", which matches no marker.
+func errorText(raw json.RawMessage) string {
+	var str string
+	if json.Unmarshal(raw, &str) == nil {
+		return str
+	}
+	var buf bytes.Buffer
+	if json.Compact(&buf, raw) != nil {
+		return ""
+	}
+	return buf.String()
 }

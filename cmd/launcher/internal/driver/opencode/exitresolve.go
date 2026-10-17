@@ -23,7 +23,16 @@ func ResolveExit(logPath string, exitCode int) (int, error) {
 		if s == "" {
 			return
 		}
-		var ev textEvent
+		// Mirrors Decode's "error" case. Decodes only type and part.text on
+		// purpose, so a malformed field elsewhere on an error line still fails
+		// the run. part.text stays only for parity with the legacy decode: an
+		// error line whose part.text is not a string is dropped, not counted.
+		var ev struct {
+			Type string `json:"type"`
+			Part struct {
+				Text string `json:"text"`
+			} `json:"part"`
+		}
 		if json.Unmarshal([]byte(s), &ev) == nil && ev.Type == "error" {
 			sawError = true
 		}
