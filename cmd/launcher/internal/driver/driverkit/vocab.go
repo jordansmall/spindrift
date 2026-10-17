@@ -3,6 +3,10 @@
 // log-scan degrade contract, the role constants, and heartbeat-text
 // sanitizing and trimming. Declaring them here keeps every Driver strategy
 // from hand-mirroring its own copy.
+//
+// It also holds the canonical event vocabulary (Event, Kind, Decoder; ADR
+// 0065): each Driver decodes its Pass log lines into these events, and the
+// shared readers consume only them, so a reader never learns a CLI's grammar.
 package driverkit
 
 import "time"
