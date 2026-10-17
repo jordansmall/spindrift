@@ -195,3 +195,145 @@ func TestHandoffDecodeAcceptsPreviousVersion(t *testing.T) {
 		t.Errorf("decoded %+v, want the v1 document as written", h)
 	}
 }
+
+// A gate carried across a handoff keeps the backoff step its predecessor
+// earned: the successor holds no jam baseline, so its first probe takes one
+// rather than lifting the gate (and resetting the step) on a flat count. An
+// exit from a child the successor inherited can land before that probe, and
+// must not take a zero baseline in its place.
+func TestScheduleRestoreRetakesJamBaseline(t *testing.T) {
+	recoverProbe := DemandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"7"}}
+	cases := []struct {
+		name        string
+		fresh       func() Schedule
+		kind        Kind
+		predecessor func(*testing.T, Schedule) (Schedule, time.Time)
+		exit        ChildDone // an inherited child's exit
+		flat        DemandProbed
+		rise        DemandProbed
+	}{
+		{
+			name:  "jammed work",
+			fresh: func() Schedule { return probedSchedule([]Kind{schedWork}, 0) },
+			kind:  schedWork,
+			predecessor: func(t *testing.T, s Schedule) (Schedule, time.Time) {
+				s = schedObserve(t, s, schedT0,
+					DemandProbed{Kind: schedWork, Ready: 3},
+					ChildDone{Kind: schedWork, Result: ChildJammed},
+					ChildDone{Kind: schedWork, Result: ChildJammed})
+				return s, schedT0
+			},
+			exit: ChildDone{Kind: schedWork, Result: ChildJammed},
+			flat: DemandProbed{Kind: schedWork, Ready: 3},
+			rise: DemandProbed{Kind: schedWork, Ready: 4},
+		},
+		{
+			name:  "upper-bound recover",
+			fresh: upperBoundSchedule,
+			kind:  schedRecover,
+			predecessor: func(t *testing.T, s Schedule) (Schedule, time.Time) {
+				now := schedT0
+				s = schedObserve(t, s, now, recoverProbe, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+				now = s.View(schedRecover, now).Until
+				s = schedObserve(t, s, now, recoverProbe, ChildDone{Kind: schedRecover, Result: ChildEmpty})
+				return s, now
+			},
+			exit: ChildDone{Kind: schedRecover, Result: ChildEmpty},
+			flat: recoverProbe,
+			rise: DemandProbed{Kind: schedRecover, Ready: 1, IDs: []string{"8"}},
+		},
+	}
+	step := func(s Schedule, kind Kind) time.Duration {
+		for _, hk := range s.snapshot() {
+			if hk.Kind == kind {
+				return hk.BackoffCur
+			}
+		}
+		return 0
+	}
+	for _, c := range cases {
+		for _, inherited := range []bool{false, true} {
+			name := c.name
+			if inherited {
+				name += "/inherited child exits first"
+			}
+			t.Run(name, func(t *testing.T) {
+				s, at := c.predecessor(t, c.fresh())
+				pred := s.View(c.kind, at)
+				if !pred.Gated || pred.Until.IsZero() {
+					t.Fatalf("predecessor view = %+v, want a gated kind", pred)
+				}
+				carriedStep := step(s, c.kind)
+				if carriedStep <= schedFloor {
+					t.Fatalf("predecessor step = %v, want it escalated past %v", carriedStep, schedFloor)
+				}
+				succ := c.fresh().restore(s.snapshot())
+				mid := at.Add(pred.Until.Sub(at) / 2)
+				if v := succ.View(c.kind, mid); !v.JamBaselinePending {
+					t.Fatalf("successor view = %+v, want the baseline pending", v)
+				}
+				if got := step(succ, c.kind); got != carriedStep {
+					t.Fatalf("carried step = %v, want %v", got, carriedStep)
+				}
+
+				want := carriedStep
+				if inherited {
+					succ = schedObserve(t, succ, mid, c.exit)
+					want = step(succ, c.kind)
+					if want < carriedStep {
+						t.Fatalf("inherited exit dropped the step to %v, want at least %v", want, carriedStep)
+					}
+					if v := succ.View(c.kind, mid); !v.Gated || !v.JamBaselinePending {
+						t.Fatalf("after the inherited exit view = %+v, want gated with the baseline pending", v)
+					}
+				}
+
+				succ = schedObserve(t, succ, mid, c.flat)
+				fv := succ.View(c.kind, mid)
+				if !fv.Gated || fv.JamBaselinePending {
+					t.Fatalf("after a flat probe view = %+v, want gated with the baseline settled", fv)
+				}
+				if !inherited && fv.Until != pred.Until {
+					t.Fatalf("flat probe moved the gate to %v, want %v", fv.Until, pred.Until)
+				}
+				if got := step(succ, c.kind); got != want {
+					t.Fatalf("flat probe moved the step to %v, want %v", got, want)
+				}
+
+				succ = schedObserve(t, succ, mid, c.rise)
+				if v := succ.View(c.kind, mid); v.Gated {
+					t.Fatalf("after a rise view = %+v, want the gate lifted", v)
+				}
+			})
+		}
+	}
+}
+
+// Only a probed kind carrying a jammed or upper-bound gate holds its baseline
+// pending; anything else has no jam baseline for the successor to retake.
+func TestScheduleRestoreLeavesUnjammedBaselineSettled(t *testing.T) {
+	cases := []struct {
+		name  string
+		fresh func() Schedule
+		hk    HandoffKind
+	}{
+		{
+			name:  "work kind with a non-jammed gate",
+			fresh: func() Schedule { return probedSchedule([]Kind{schedWork}, 0) },
+			hk:    HandoffKind{Kind: schedWork, Until: schedT0.Add(time.Minute), Jammed: false},
+		},
+		{
+			name:  "upper-bound kind with no gate",
+			fresh: upperBoundSchedule,
+			hk:    HandoffKind{Kind: schedRecover, LimitedUntil: schedT0.Add(time.Minute)},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			succ := c.fresh().restore([]HandoffKind{c.hk})
+			if v := succ.View(c.hk.Kind, schedT0); v.JamBaselinePending {
+				t.Fatalf("restored view = %+v, want the baseline settled", v)
+			}
+		})
+	}
+}
