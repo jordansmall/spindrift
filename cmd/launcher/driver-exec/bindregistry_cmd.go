@@ -96,9 +96,11 @@ func runBindRegistryWithDeps(args []string, stdout io.Writer, probe bindregistry
 		bindregistry.WarnStaleLockfiles(stdout, *lockfileScanWorkDir)
 	}
 
-	// Resolved only when a mode that needs a live Forwarder will run, so a
-	// revert-only or lockfile-scan-only call never touches
-	// REGISTRY_PROXY_MANIFEST or the probe/spawn deps at all (issue #3141).
+	// Resolved only when a mode that needs a live Forwarder will run (issue
+	// #3141). A revert-only call never touches REGISTRY_PROXY_MANIFEST or
+	// the probe/spawn deps. A lockfile-scan-only call never resolves the
+	// gate or touches those deps; WarnStaleLockfiles reads the manifest
+	// only to decide whether the scan runs.
 	var gate bindregistry.Gate
 	if *intreeAction == "apply" || *bindingsEnvOutput != "" {
 		gate = bindregistry.ResolveGate(stdout, bindregistry.GateDeps{
