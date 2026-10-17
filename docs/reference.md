@@ -8683,10 +8683,12 @@ moment that channel closes — the same `HaltOperatorStop` class, reason
 already renders as — cancelling a context shared by every slot, so a
 sibling asleep in its idle wait or blocked in a fetch stops promptly. Every
 running child's own `forwardSignals` goroutine
-(`cmd/launcher/daemon/runner.go`), started once per child by `StartChild`,
-sends it a `SIGTERM` at that same close — the drain request, the same
-gesture as the launcher's own relay. It never kills a child that is
-already running its Boxes: the child chooses to
+(`cmd/launcher/daemon/runner.go`), started by `hostChildHandle.Wait` for the
+duration of each Wait (a resumed or inherited child's Wait starts it afresh,
+and a Wait resumed after an abandon remembers which signals the handle
+already sent, so never resends one), sends it a `SIGTERM` at that same close —
+the drain request, the same gesture as the launcher's own relay. It never
+kills a child that is already running its Boxes: the child chooses to
 drain, and a pool halt is the same courtesy at pool scale — any child
 already running is always waited out and always gets its `child_finish`
 before the process exits, never abandoned mid-run. The daemon implements no
@@ -8702,7 +8704,7 @@ forwards explicitly reaches it.
 A child that starts after Stop has already closed is still signalled,
 promptly rather than by any replay: `forwardSignals`'s select on an
 already-closed channel fires at once, so a child born mid-shutdown is
-signalled the instant it starts, rather than racing a shared counter the
+signalled as soon as its Wait begins, rather than racing a shared counter the
 way the daemon's old children-map replay once did (issue #3626). A
 signal a child receives from anywhere other than the daemon — systemd's
 own `KillMode=control-group`, an operator signalling the child directly —
