@@ -80,8 +80,8 @@ type run struct {
 // runPi writes a per-test agent dir pointing a custom Provider at the stub,
 // runs pi once in JSON mode and parses the stream. A nonzero exit is returned
 // in run.err rather than failing the test; JSON-mode failed turns exit zero,
-// so callers read the events too.
-func runPi(t *testing.T, s *stub, prompt string) run {
+// so callers read the events too. seedWork prepares the work dir first.
+func runPi(t *testing.T, s *stub, prompt string, seedWork ...func(work string)) run {
 	t.Helper()
 	bin := piPath(t)
 	home, agentDir, work := t.TempDir(), t.TempDir(), t.TempDir()
@@ -93,6 +93,9 @@ func runPi(t *testing.T, s *stub, prompt string) run {
 			"models":  []map[string]any{{"id": stubModel}},
 		}},
 	})
+	for _, seed := range seedWork {
+		seed(work)
+	}
 	// Retries are wall-clock; the default 2s base delay would stall retry tests.
 	writeJSON(t, filepath.Join(agentDir, "settings.json"), map[string]any{
 		"retry": map[string]any{"maxRetries": 3, "baseDelayMs": 10},
