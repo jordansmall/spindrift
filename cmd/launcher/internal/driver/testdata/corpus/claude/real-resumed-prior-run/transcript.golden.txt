@@ -1,11 +1,9 @@
 [implementor] Skill()
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(git log --oneline -3 && grep -n "replayed cached TCP verdict\|backstop for a cached verdict\|cached TCP\|cached verdict" docs/reference.md; grep -rn "replayed cached" docs/adr/0044* | head)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(sed -n 4624,4645p docs/reference.md; echo ---; sed -n 78,92p cmd/launcher/internal/runner/registryprobecache.go; echo ---; grep -n "3775" cmd/launcher/signalsockettransport_doctor_checks.go cmd/launcher/internal/dispatch/signal_socket.go cmd/launcher/internal/dispatch/box.go; grep -n "is a miss\|cache.*miss" docs/reference.md | head)
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
-[REDACTED:inline-code]
-SPINDRIFT_SIGNAL_EOF)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF' [REDACTED:inline-code] SPINDRIFT_SIGNAL_EOF)
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=4994 landing=none status=recommend note=Still accurate on main: docs/reference.md:4628-4630 and 4641-4642 name a cached TCP verdict reaching the backstop, but registryprobecache.go:86-90 refuses that replay (#3775); docs-only fix, line numbers refreshed

@@ -1,33 +1,24 @@
 [implementor] Bash(git log -n 10 --oneline && git fetch origin -q && git rev-parse HEAD origin/main && sed -n 1,30p cmd/launcher/internal/waves/session_test.go && git show origin/main:cmd/launcher/internal/waves/session_test.go | sed -n 8,14p && sed -n 1,12p cmd/launcher/internal/waves/session.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Not resolved on origin/main (HEAD == origin/main, stale comment present). Delegating the one-slice edit.
 [implementor] Agent(worker)
 [worker] Edit(/work/cmd/launcher/internal/waves/session_test.go)
-[worker]   -> [REDACTED:tool-output]
+[worker]   -> \[REDACTED:tool-output]
 [worker] Bash(cd /work/cmd/launcher && gofmt -l internal/waves/; go test ./internal/waves/ > $TMPDIR/w.log 2>&1; echo exit=$?; tail -n 5 $TMPDIR/w.log)
-[worker]   -> [REDACTED:tool-output]
-[implementor]   -> [worker] [REDACTED:tool-output]
+[worker]   -> \[REDACTED:tool-output]
+[implementor]   -> [worker] \[REDACTED:tool-output]
 [implementor] Bash(git diff > /tmp/d.diff; git diff --stat; cat /tmp/d.diff; gofmt -l cmd/launcher/internal/waves/; (cd cmd/launcher && go vet ./internal/waves/ >"$TMPDIR/v.log" 2>&1; echo vet=$?))
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Diff good; gofmt clean, vet ok, waves tests pass. Running full gate.
 [implementor] Bash(nix build .#checks-inbox -L >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"; grep -nE 'error|FAIL' "$TMPDIR/checks.log" | head -20 || true; tail -n 5 "$TMPDIR/checks.log")
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] checks-inbox exit=0. Committing.
 [implementor] Skill()
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(git add cmd/launcher/internal/waves/session_test.go && git commit -q -F - <<'EOF'
-[REDACTED:inline-code]
-EOF
-git log -n 1 --oneline; git fetch origin -q; git merge-base HEAD origin/main; git rebase origin/main 2>&1 | tail -1)
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(cat > /tmp/pass-summary.md <<'EOF'
-[REDACTED:inline-code]
-EOF
-: > /tmp/dispositions.md
-cat > /tmp/decisions.md <<'EOF'
-[REDACTED:inline-code]
-EOF)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(git add cmd/launcher/internal/waves/session_test.go && git commit -q -F - <<'EOF' [REDACTED:inline-code] EOF git log -n 1 --oneline; git fetch origin -q; git merge-base HEAD origin/main; git rebase origin/main 2>&1 | tail -1)
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(cat > /tmp/pass-summary.md <<'EOF' [REDACTED:inline-code] EOF : > /tmp/dispositions.md cat > /tmp/decisions.md <<'EOF' [REDACTED:inline-code] EOF)
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] I fixed the stale comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` and committed it as e8680316 on `agent/issue-4940`. Gofmt, vet, the waves tests and the full `checks-inbox` gate all passed.
 
 - **The change:** the comment at `cmd/launcher/internal/waves/session_test.go:10-13` no longer says headless call sites pass a nil Session. It now says a nil Session, or a nil `Session.Limiter` (what headless callers pass), falls back to a fixed limiter built from `cfg.MaxParallel`. The test's name and body are unchanged.
@@ -36,40 +27,40 @@ EOF)
 
 I stopped after the commit because no review has run on this branch yet. There's no PR request and no `SPINDRIFT_OUTCOME` line yet; those come in the land pass after the review approves. Run-state notes for the next pass are in `/tmp/pass-summary.md` and `/tmp/decisions.md`. `/tmp/dispositions.md` is empty because there were no review findings to address.
 [reviewer] Bash(git fetch origin >/dev/null 2>&1; git diff origin/main...HEAD --stat; git log origin/main..HEAD --format='%H%n%B---'; git diff origin/main...HEAD > /tmp/review-diff.patch; cat /tmp/review-diff.patch)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Skill()
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Agent(review-axis)
 [review-axis] Bash(git diff origin/main...HEAD; git log -1 --format='%B' HEAD; ls skills/ 2>/dev/null | grep -iE 'comment|commit'; ls ~/.claude/skills 2>/dev/null | grep -iE 'comment|commit')
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Read(/work/cmd/launcher/internal/waves/continuous.go)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Read(/work/cmd/launcher/internal/waves/session.go)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [reviewer] Agent(review-axis)
 [review-axis] Bash(git diff origin/main...HEAD --stat && git diff origin/main...HEAD)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher && gofmt -l internal/waves/ && go test ./internal/waves/ >/tmp/wt.log 2>&1; echo exit=$?; tail -5 /tmp/wt.log)
 [review-axis] Bash(f=skills/code-comments/SKILL.md; [ -f $f ] || f=~/.claude/skills/code-comments/SKILL.md; wc -l $f; grep -niE 'issue|#[0-9]|histor|pre-|used to|stale|test|dash|—|why|what' $f | head -40; c=skills/commit/SKILL.md; [ -f $c ] || c=~/.claude/skills/commit/SKILL.md; grep -niE 'wrap|72|50|subject|imperative|scope|Closes' $c | head -20)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(git log -1 --format='%B' HEAD | awk '{print length": "$0}' | sort -rn | head -3; sed -n 15,50p ~/.claude/skills/commit/SKILL.md; git log --oneline origin/main -200 | grep -iE 'comment' | head -8)
-[review-axis]   -> [REDACTED:tool-output]
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher && grep -n -i -B2 -A10 'limiter' internal/waves/continuous.go | sed -n '1,80p'; grep -n -i 'limiter\|type Session' internal/waves/session.go; grep -n 'waves.Session{' main.go selective.go)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher && grep -rn 'waves.Session{' --include=*.go . | grep -v _test.go)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher/internal/waves && sed -n 14,40p session_test.go; grep -n '^func Test' session_test.go; grep -rln 'Session{Terminated' *_test.go | head)
-[review-axis]   -> [REDACTED:tool-output]
-[reviewer]   -> [review-axis] [REDACTED:tool-output]
-[reviewer]   -> [review-axis] [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
+[reviewer]   -> [review-axis] \[REDACTED:tool-output]
+[reviewer]   -> [review-axis] \[REDACTED:tool-output]
 [reviewer] Bash(git log origin/main --oneline -400 | grep -iE 'comment' | head -20; ls release-please-config.json .release-please* 2>/dev/null; grep -rn '"type"' release-please-config.json 2>/dev/null | head; grep -rniE 'fix\(|commit type|conventional' CONTRIBUTING.md docs/*.md 2>/dev/null | head)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Bash(sed -n 295,330p CONTRIBUTING.md; git log origin/main --oneline -2000 | grep -E '^[0-9a-f]+ fix\([^)]*\): .*(comment|stale|doc)' | head)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Both review axes are back. I'm checking the release-please config to see whether the commit's `fix` type would put a changelog entry in the release notes.
 [reviewer] Bash(cat .release-please-config.json | head -40; git log origin/main --oneline -30 | head -30)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] VERDICT: BLOCK
 
 ## Blocking
@@ -80,33 +71,22 @@ I stopped after the commit because no review has run on this branch yet. There's
 - cmd/launcher/internal/waves/session_test.go:11-13 — The comment now describes the non-nil Session with a nil Limiter path as "the same fallback", but the test only calls `RunContinuous(c, nil, …)`. A reader could assume this test pins the headless path too. The statement is true from continuous.go:197-206, and the issue says a second case is optional, so this is a suggestion only.
 - cmd/launcher/internal/waves/continuous.go:203 — "Headless (CONTINUOUS_DISPATCH) and every nil-Session call site" is still accurate, because headless callers reach this branch through a nil Limiter. But it is a third copy of the same caller inventory and can go stale the same way. It is out of scope for this issue, so it's a possible follow-up.
 [implementor] Bash(cat /tmp/pass-summary.md; git log --oneline origin/main..HEAD; git show HEAD --stat; git show HEAD -- cmd/launcher/internal/waves/session_test.go | head -40; grep -c '^## Round' /tmp/orchestrator-findings-log-1477766052.md)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(sed -n 1,30p cmd/launcher/internal/waves/session.go; sed -n 195,208p cmd/launcher/internal/waves/continuous.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(cat .release-please-config.json | grep -nA2 -E '"(test|docs)"')
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Edit(/work/cmd/launcher/internal/waves/session_test.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(cd /work/cmd/launcher && gofmt -l ./internal/waves/; go vet ./internal/waves/ >"$TMPDIR/t.log" 2>&1 && go test ./internal/waves/ -run 'TestRunContinuous_NilSession' >>"$TMPDIR/t.log" 2>&1; echo "exit=$?"; tail -n 5 "$TMPDIR/t.log")
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Skill()
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Retyping commit to `test(waves)` and amending in the comment fix.
-[implementor] Bash(cd /work && git add cmd/launcher/internal/waves/session_test.go && git commit -q --amend -F - <<'EOF'
-[REDACTED:inline-code]
-EOF
-git fetch -q origin; git merge-base HEAD origin/main; git rebase origin/main 2>&1 | tail -1; git log --oneline origin/main..HEAD)
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(cat >/tmp/pass-summary.md <<'EOF'
-[REDACTED:inline-code]
-EOF
-cat >/tmp/dispositions.md <<'EOF'
-[REDACTED:inline-code]
-EOF
-cat >/tmp/decisions.md <<'EOF'
-[REDACTED:inline-code]
-EOF)
-[implementor]   -> [REDACTED:tool-output]
+[implementor] Bash(cd /work && git add cmd/launcher/internal/waves/session_test.go && git commit -q --amend -F - <<'EOF' [REDACTED:inline-code] EOF git fetch -q origin; git merge-base HEAD origin/main; git rebase origin/main 2>&1 | tail -1; git log --oneline origin/main..HEAD)
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(cat >/tmp/pass-summary.md <<'EOF' [REDACTED:inline-code] EOF cat >/tmp/dispositions.md <<'EOF' [REDACTED:inline-code] EOF cat >/tmp/decisions.md <<'EOF' [REDACTED:inline-code] EOF)
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] I fixed the blocking review finding: the commit is now typed `test(waves)` instead of `fix(waves)`. Release notes will list it under "Tests" rather than "Bug Fixes", which matches the earlier `test(outcome)` commit for stale test comments. The branch is still one commit (`2170066e`) and was already up to date with `origin/main` (e5fccdca), so the rebase changed nothing.
 
 I also folded two of the reviewer's non-blocking points into the same commit. The comment on `TestRunContinuous_NilSession_FallsBackToFixedLimiter` in `cmd/launcher/internal/waves/session_test.go` now:
@@ -119,33 +99,33 @@ Checks: `gofmt` is clean, and `go vet` plus the targeted `go test` on `./interna
 
 Nothing is pushed, no PR intent is sent and there's no outcome line yet; the next review pass runs before landing.
 [reviewer] Bash(git fetch origin -q; git diff origin/main...HEAD --stat; git log origin/main..HEAD --format='%h %s%n%b'; git diff origin/main...HEAD > /tmp/review-diff.patch; cat /tmp/review-diff.patch; git diff e86803168da7f6e2ea865070e90df53affa11056..HEAD --stat)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Bash(sed -n 1,40p cmd/launcher/internal/waves/session.go; sed -n 190,210p cmd/launcher/internal/waves/continuous.go; sed -n 1,40p cmd/launcher/internal/waves/session_test.go; git status --short)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Skill()
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Bash(ls CONTRIBUTING.md CODING_STANDARDS.md docs/agents 2>&1 | head; grep -n -i -A3 'comment' CONTRIBUTING.md | head -40)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Agent(review-axis)
 [review-axis] Bash(cat /tmp/review-diff.patch; cd /work && git log origin/main..HEAD --format='%H%n%B'; ls skills/code-comments 2>/dev/null)
 [review-axis]   -> error: [REDACTED:tool-output]
 [review-axis] Bash(grep -n -A12 'Limiter' cmd/launcher/internal/waves/session.go | head -50; echo ----; grep -n -B3 -A10 'Limiter' cmd/launcher/internal/waves/continuous.go | head -60; echo ----; grep -rn 'waves.Session{' --include=*.go cmd | head; ls skills | grep -i comment)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [reviewer] Agent(review-axis)
 [review-axis] Bash(grep -n -i -E '^#|test\b|`test`|comment' CONTRIBUTING.md | head -40; grep -n -B2 -A3 '"test"\|"type"' .release-please-config.json | head -40)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(git diff origin/main...HEAD --stat; cat /tmp/review-diff.patch 2>/dev/null || git diff origin/main...HEAD)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher && gofmt -l internal/waves/; echo gofmt=$?; go test ./internal/waves/ -run TestRunContinuous_NilSession >/tmp/t.log 2>&1; echo test=$?)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(sed -n 299,309p CONTRIBUTING.md; ls skills | head -50)
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher && grep -n "Limiter" internal/waves/session.go internal/waves/continuous.go | head -40; grep -rn "waves.Session{\|&waves.Session\|waves.NewSession\|Session:" main.go selective.go 2>/dev/null | head; ls *.go | head -50 | tr '\n' ' ')
-[review-axis]   -> [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
 [review-axis] Bash(cd /work/cmd/launcher && sed -n 1,20p internal/waves/session.go; sed -n 194,207p internal/waves/continuous.go; git -C /work diff origin/main...HEAD -- cmd/launcher/internal/waves/session_test.go | grep -c '^[+-]func\|^[+-]\s')
-[review-axis]   -> [REDACTED:tool-output]
-[reviewer]   -> [review-axis] [REDACTED:tool-output]
-[reviewer]   -> [review-axis] [REDACTED:tool-output]
+[review-axis]   -> \[REDACTED:tool-output]
+[reviewer]   -> [review-axis] \[REDACTED:tool-output]
+[reviewer]   -> [review-axis] \[REDACTED:tool-output]
 [reviewer] VERDICT: APPROVE
 
 ## Blocking
@@ -162,35 +142,22 @@ Nothing is pushed, no PR intent is sent and there's no outcome line yet; the nex
 - Standards: the commit follows Conventional Commits with a hard-wrapped body, `Closes #4940`, and the attribution trailer. The comment length fits the size of the change, and none of the Fowler baseline smells apply to a prose-only edit. Both `/code-review` axis subagents (Standards and Spec) came back with no blocking findings.
 - Full-diff re-skim: I checked the `git diff origin/main...HEAD --stat` output from end to end. It is one file, and that is the whole hunk I reviewed.
 [implementor] Bash(git fetch origin >/dev/null 2>&1; git merge-base HEAD origin/main; git log --oneline origin/main..HEAD; git rebase origin/main 2>&1 | tail -2; cat /tmp/pass-summary.md; echo ----; cat /tmp/orchestrator-findings-log-1477766052.md; echo ----; cat /tmp/orchestrator-dispositions-log-857723572.md; echo ----; sed -n 1,25p cmd/launcher/internal/waves/session_test.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Rebase: up to date. Non-blocking round-2 finding: cheap, in-scope → fix inline (reword to "headless RunContinuous callers").
-[implementor] Bash(python3 - <<'EOF'
-[REDACTED:inline-code]
-EOF
-gofmt -l cmd/launcher/internal/waves/; cd cmd/launcher && go vet ./internal/waves/ >"$TMPDIR/v.log" 2>&1; echo vet=$?; go test ./internal/waves/ >"$TMPDIR/t.log" 2>&1; echo test=$?; tail -3 "$TMPDIR/t.log")
-[implementor]   -> [REDACTED:tool-output]
+[implementor] Bash(python3 - <<'EOF' [REDACTED:inline-code] EOF gofmt -l cmd/launcher/internal/waves/; cd cmd/launcher && go vet ./internal/waves/ >"$TMPDIR/v.log" 2>&1; echo vet=$?; go test ./internal/waves/ >"$TMPDIR/t.log" 2>&1; echo test=$?; tail -3 "$TMPDIR/t.log")
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] No python; use Edit.
 [implementor] Edit(/work/cmd/launcher/internal/waves/session_test.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Skill()
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(cd /work && gofmt -l cmd/launcher/internal/waves/; (cd cmd/launcher && go test ./internal/waves/ -run TestRunContinuous_NilSession >"$TMPDIR/t.log" 2>&1; echo test=$?); git commit -q -a --amend --no-edit && git log --oneline -1 && nix build .#checks-inbox -L >"$TMPDIR/checks.log" 2>&1; echo "exit=$?"; grep -nE 'error|FAIL' "$TMPDIR/checks.log" | head -20 || tail -n 20 "$TMPDIR/checks.log")
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Gate green (exit=0). Amended → 068f4c72. Nothing survives triage to file.
 [implementor] Bash(git fetch origin >/dev/null 2>&1; git rebase origin/main 2>&1 | tail -1; echo CODE_FORGE=$CODE_FORGE; git log -1 --format=%B)
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(driver-exec signal pr-intent -title 'test(waves): stop calling headless Session nil' <<'SPINDRIFT_SIGNAL_EOF'
-[REDACTED:inline-code]
-SPINDRIFT_SIGNAL_EOF)
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(cat >/tmp/pass-summary.md <<'EOF'
-[REDACTED:inline-code]
-EOF
-cat >/tmp/dispositions.md <<'EOF'
-[REDACTED:inline-code]
-EOF
-cat >/tmp/decisions.md <<'EOF'
-[REDACTED:inline-code]
-EOF)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(driver-exec signal pr-intent -title 'test(waves): stop calling headless Session nil' <<'SPINDRIFT_SIGNAL_EOF' [REDACTED:inline-code] SPINDRIFT_SIGNAL_EOF)
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(cat >/tmp/pass-summary.md <<'EOF' [REDACTED:inline-code] EOF cat >/tmp/dispositions.md <<'EOF' [REDACTED:inline-code] EOF cat >/tmp/decisions.md <<'EOF' [REDACTED:inline-code] EOF)
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=4940 landing=agent/issue-4940 status=ready note=Reworded the session_test.go comment so it no longer says headless callers pass a nil Session; it now says a nil Session or a nil Session.Limiter (what headless RunContinuous callers pass) falls back to a fixed limiter from cfg.MaxParallel. The round-2 wording nit is folded into commit 068f4c72, checks-inbox is green, and no findings were left to file.
