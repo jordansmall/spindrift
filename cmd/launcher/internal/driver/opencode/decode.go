@@ -23,6 +23,7 @@ func NewDecoder() driverkit.Decoder { return Decode }
 // bad token count) still counts as an error, where Decode would drop the whole
 // line to KindUnparsed. part.text stays only for parity with the legacy decode:
 // an error line whose part.text is not a string is dropped, not counted.
+// ResolveExit runs Decode only on the remaining lines, to find progress.
 func isErrorEvent(line string) bool {
 	var ev struct {
 		Type string `json:"type"`
