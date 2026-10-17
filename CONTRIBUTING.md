@@ -89,6 +89,19 @@ variable, and `tests/helper.bash` reads the contracts, preambles and fragment
 registry from that directory, so bats and Go test one set of bytes. See [Seam
 tests](docs/reference.md#seam-tests) for the fixture list and its drift guard.
 
+The `piseam` package (issue #5478) runs the locked `pi` binary against a stub
+OpenAI-compatible Provider. It takes `pi` from `SPINDRIFT_PI_BIN`, else builds
+`nixpkgs#pi-coding-agent` from the flake's locked inputs, and skips when
+neither is available. `launcher-go-seam-test` sets the variable in the check
+gate. To capture raw pi Pass logs from the locked version, point
+`SPINDRIFT_PI_CAPTURE_DIR` at a directory; each pi run then writes its JSON
+event stream there, named as [Seam tests](docs/reference.md#seam-tests)
+describes:
+
+```sh
+SPINDRIFT_PI_CAPTURE_DIR=$(mktemp -d) go test -tags integration ./internal/piseam/
+```
+
 The dogfood Box also bakes the upstream [`caveman`
 skill](https://github.com/juliusbrussee/caveman) (issue #486), advertised
 in-box as `/caveman`. It compresses agent narration ~65% in output tokens

@@ -351,7 +351,8 @@ reasoning live on issue #269.
 `pi` (nixpkgs `pi-coding-agent`, binary `pi`) becomes a third Driver beside
 `claude` and `opencode`. It is selected through ADR 0064's Driver map and
 parsed by an ADR 0065 decoder. Its choices, each checked against the locked
-package (0.99.2):
+package (0.99.2; re-checked against 1.1.0 by issue #5478, see the note after
+this list):
 
 - **Invocation.** `--print --mode json --no-approve`, `--model` for the
   model, `--thinking` as the effort flag, positional prompt. Effort values
@@ -401,6 +402,44 @@ package (0.99.2):
   disables only the worker. Filer presence follows the roster under every
   Driver, since `opencode` renders the Filer as an on-disk agent file, so
   the capability gates the worker alone.)
+
+*Amended by issue #5478:* the `piseam` seam tests re-checked these choices
+against the locked 1.1.0 package, running it against a stub Provider. The
+invocation, `--session-id` open-or-create, the `CLAUDE.md`/`AGENTS.md` reads
+and the `read{path}` and `bash{command}` tool names all held. `--no-approve`
+trust held too: a project `.pi/settings.json` effort, `.pi/APPEND_SYSTEM.md`,
+`.pi/skills/` and a `.pi/extensions/` file that writes a marker on load are
+all ignored, and all take effect under `--approve`. Agent-directory skills
+load without trust. pi reads `auth.json` from the agent directory, and a
+set `PI_CODING_AGENT_DIR` wins over `~/.pi/agent`. A custom Provider with no
+`apiKey` takes its key from that file, so `PI_AUTH_CONTENT` can be written
+there; pi does not check the file's mode. Sessions persist under the same
+directory, as `sessions/<one dir per working directory>/<id>.jsonl`, so a
+Driver's session cache is the agent directory's `sessions/`. Three facts
+changed or were imprecise, and the last bullet records one the amendment
+did not cover.
+
+- The subagent extension is not a package feature in 1.1.0 but a bundled
+  example, `examples/extensions/subagent` under the package's
+  `lib/node_modules/pi-monorepo`. It loads from
+  `<agent-dir>/extensions/subagent`. The mechanism is otherwise as described:
+  children inherit the agent directory through the environment and are spawned
+  through `process.execPath`.
+- A `:<level>` suffix on the model does set the effort, but an unknown level is
+  not rejected. pi warns and sends `<model>:<bogus>` as the model id, so the
+  evaluation should check that the level is valid, not only that a model is
+  present. `--thinking` beats the suffix on the same invocation; the
+  extension's source passes `--thinking` only to agents without a model, so
+  the two never meet (the seam runs only a child whose agent file names one).
+- Usage by role reads `details.results[].agent` and
+  `details.results[].messages[]`, whose assistant messages carry `usage`.
+  `results[].model` keeps the suffix verbatim, and partial
+  `tool_execution_update` events carry the same details, the child's messages
+  included, before the tool's `tool_execution_end`.
+- A failed turn exits 0 with `stopReason: "error"` in the stream, and the
+  stream always ends with `agent_settled`. Only invocation errors, such as an
+  unknown provider or a bad session id, exit nonzero with a stderr message and
+  empty stdout. That is the input to the Driver's `ResolveExit`.
 
 Full findings and the testing plan live on issue #4945.
 
