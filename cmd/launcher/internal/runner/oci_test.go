@@ -1404,9 +1404,9 @@ func TestRegistryProxyTransport_RuntimeChangeInvalidatesCache(t *testing.T) {
 }
 
 // A cached verdict probed under one image reference is never replayed for a
-// different one sharing the same pwd: per #3120, an old image's missing
-// probe-registry-socket verb reads as socket-incapable, so the image ref must
-// invalidate a stale verdict too.
+// different one sharing the same pwd: the image's own driver-exec, run as its
+// own user, measures the verdict, so a new image is re-probed rather than
+// trusting the old reading.
 func TestRegistryProxyTransport_ImageChangeInvalidatesCache(t *testing.T) {
 	script, dir := newFakeCLI(t, fakeCall{exit: registryprobe.ExitCapable})
 	pwd := t.TempDir()
