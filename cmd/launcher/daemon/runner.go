@@ -752,7 +752,7 @@ func (r *hostRunner) StartChild(ctx context.Context, req daemon.ChildRequest) (d
 	cmd.Env = childCmd.Env
 	// A terminal Ctrl-C delivers SIGINT to the whole foreground process
 	// group (daemon, nix run, launcher). The daemon catches SIGINT and
-	// SIGTERM alike (stopsignal.Notify) and forwardSignals below relays a
+	// SIGTERM alike (stopsignal.Notify) and Wait's forwardSignals relays a
 	// SIGTERM of its own, so without this one Ctrl-C would reach the child
 	// twice: the group SIGINT plus the forwarded SIGTERM, distinct signal
 	// numbers that can't coalesce (see forwardSignals). The child's
@@ -1206,10 +1206,10 @@ func (m *markerLineWriter) line() string {
 }
 
 // forwardSignals starts one goroutine that watches stop and abort for the
-// life of a single child and relays each onto p: SIGTERM when stop closes,
+// life of a single Wait call and relays each onto p: SIGTERM when stop closes,
 // SIGINT when abort closes. It replaces the old shared children
-// map/counter/replay with per-child state that needs no lock: a child
-// started after stop (and/or abort) is already closed observes the close
+// map/counter/replay with per-child state that needs no lock: a Wait that
+// begins after stop (and/or abort) is already closed observes the close
 // immediately — a select on a closed channel fires at once — which is
 // exactly the old replay loop's job, now structural rather than counted.
 // nil stop/abort (a ChildRequest carrying no latch, e.g. a one-off doctor
@@ -1231,7 +1231,7 @@ func (m *markerLineWriter) line() string {
 // The returned stop func tears the goroutine down without sending anything
 // once the child has already exited on its own (the handle's Wait defers it);
 // without it the goroutine would sit on stop/abort for the life of the
-// daemon process instead of the life of its one child. It blocks until the
+// daemon process instead of the life of one Wait call. It blocks until the
 // goroutine is actually gone: closing done alone only *asks* it to stop, and
 // a goroutine still unscheduled when Wait returns would then reach its
 // select with stop closed too and pick that case at random, signalling a
