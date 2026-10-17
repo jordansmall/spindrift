@@ -337,14 +337,14 @@ let
       perSegment = map labelsFromSegment (builtins.tail (splitString marker src));
     in
     if elem null perSegment then [ ] else concatMap (l: l) perSegment;
-  # doctor.go's ResearchLabelNames() literal (ADR 0041). The marker is unique in
+  # doctor.go's ResearchLabelNamesFor() literal (ADR 0041). The marker is unique in
   # that file: its other append(names, ...) calls have no quote after the comma.
   extractResearchLabelNamesLiteral = labelLiteralAfterMarker ''append(names, "'';
   # doctor.go's AmbiguousLabelNames() literal (issue #2817). A separate
   # extractor because the two Go shapes differ and so need distinct markers.
   # This marker matches every `return []string{"..."}` span in doctor.go —
   # AmbiguousLabelNames() and ButlerLabelNames() (ADR 0056) both share the
-  # shape — so it cannot cross-match ResearchLabelNames()'s different
+  # shape — so it cannot cross-match ResearchLabelNamesFor()'s different
   # `append(names, "...")` shape. Every literal in each span is extracted
   # (ButlerLabelNames() lists three); all are registered (labels.ambiguous,
   # labels.butlerFinding, labels.butlerPatch, labels.tuningFinding). A
@@ -717,7 +717,7 @@ mapAttrs (
   };
 
   # Proves assertHarnessWritesInRegistry catches doctor.go's hand-written
-  # ResearchLabelNames() literal drifting from lib/labels.nix's researchFinding
+  # ResearchLabelNamesFor() literal drifting from lib/labels.nix's researchFinding
   # row (issue #2749, ADR 0041). Without doctor.go as a surface, a rename on
   # either side went undetected and metaFor() fell through to the gray
   # no-description default instead of erroring. The converse is the check below.
@@ -743,9 +743,9 @@ mapAttrs (
       });
     in
     assert assertMsg (extractedLabels == [ "agent-unregistered-label" ])
-      "label-registry-covers-harness-writes-research-finding-drift-regression: expected extractResearchLabelNamesLiteral to find [ \"agent-unregistered-label\" ] on the doctored ResearchLabelNames() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
+      "label-registry-covers-harness-writes-research-finding-drift-regression: expected extractResearchLabelNamesLiteral to find [ \"agent-unregistered-label\" ] on the doctored ResearchLabelNamesFor() literal (not [ ]), but got: ${concatStringsSep ", " extractedLabels}";
     assert assertMsg (!result.success)
-      "label-registry-covers-harness-writes-research-finding-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ResearchLabelNames()'s agent-research-finding literal renamed to agent-unregistered-label, but it evaluated successfully";
+      "label-registry-covers-harness-writes-research-finding-drift-regression: expected assertHarnessWritesInRegistry to reject a synthetic doctor.go with ResearchLabelNamesFor()'s agent-research-finding literal renamed to agent-unregistered-label, but it evaluated successfully";
     pkgs.runCommand "label-registry-covers-harness-writes-research-finding-drift-regression" { }
       "touch $out";
 
