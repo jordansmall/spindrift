@@ -16,7 +16,7 @@ type opencodeDriver struct{}
 func (opencodeDriver) Name() string { return "opencode" }
 
 func (opencodeDriver) ClassifyTransient(logPath string) (Classification, error) {
-	return driverkit.Classify(logPath, opencode.NewDecoder, opencode.TransientPatterns, opencode.TerminalPatterns)
+	return driverkit.Classify(logPath, opencode.NewDecoder, opencode.TransientPatterns, opencode.TerminalPatterns, driverkit.ClassifyOptions{})
 }
 
 // NewHeartbeatWriter ignores opts.TopLevelRole (opencode's heartbeat carries no
