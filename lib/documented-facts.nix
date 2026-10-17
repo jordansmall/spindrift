@@ -27,6 +27,7 @@ let
   buildConstants = import ./build-constants.nix;
   rosterDefaults = (import ./roster-schema-defaults.nix { inherit lib; }).rosterDefaults;
   rosterNames = map (e: e.name) ((import ./roster.nix { inherit lib; }).defaultRoster { });
+  bashHooks = import ./bash-hooks.nix;
   inherit (import ./documented-fact-shape.nix) assertMarkerShape;
 in
 map assertMarkerShape [
@@ -195,5 +196,23 @@ map assertMarkerShape [
     endMarker = "\t// END GENERATED SKILL-BAKED GATES";
     generated = renderers.renderBakedSkillGatesGo bakedSkills;
     postSplice = "gofmt";
+  }
+  {
+    name = "opencode-guards-hooks-gen";
+    docPath = "agent/opencode-guards.js";
+    blockName = "OPENCODE HOOKS";
+    sourceDesc = "lib/bash-hooks.nix";
+    beginMarker = "// BEGIN GENERATED OPENCODE HOOKS -- nix run .#regen -- DO NOT EDIT\n";
+    endMarker = "// END GENERATED OPENCODE HOOKS";
+    generated = renderers.renderOpencodeHooksJs bashHooks.opencodeHooks;
+  }
+  {
+    name = "opencode-guards-hook-order-doc";
+    docPath = "docs/reference.md";
+    blockName = "OPENCODE HOOK ORDER";
+    sourceDesc = "lib/bash-hooks.nix";
+    beginMarker = "<!-- BEGIN GENERATED OPENCODE HOOK ORDER -- nix run .#regen -- DO NOT EDIT -->\n";
+    endMarker = "<!-- END GENERATED OPENCODE HOOK ORDER -->";
+    generated = renderers.renderOpencodeHookOrderDoc bashHooks.opencodeHooks;
   }
 ]
