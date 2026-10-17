@@ -4,7 +4,16 @@
   "HasEventSpan": true,
   "LatestEventMs": 1792195536273,
   "OutputIsMainLoopOnly": false,
-  "SummedByAgent": null,
+  "SummedByAgent": [
+    {
+      "APICalls": 13,
+      "Agent": "main",
+      "CacheCreationInputTokens": 38599,
+      "CacheReadInputTokens": 248793,
+      "OutputTokens": 6171,
+      "UncachedInputTokens": 32
+    }
+  ],
   "SummedByModel": [
     {
       "CacheReadInputTokens": 248793,

@@ -165,6 +165,39 @@ func TestAgentUsagePayloadSumsAgentRows(t *testing.T) {
 	}
 }
 
+// TestAgentUsagePayloadOpencodeCarriesAPICalls pins issue #5182 story 12: an
+// opencode pass's pass_usage payload carries a role-neutral main row with the
+// pass's distinct API calls, which is what Records' APICalls (and so
+// `spindrift stats --by role`) read. Opencode's per-call output is real, so
+// the payload never flags OutputIsMainLoopOnly.
+func TestAgentUsagePayloadOpencodeCarriesAPICalls(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "stream.log")
+	content := `{"type":"step_start","timestamp":1000,"part":{"messageID":"msg_1"}}
+{"type":"step_finish","timestamp":1500,"part":{"messageID":"msg_1","modelID":"gpt-5","tokens":{"input":100,"output":50,"reasoning":10,"cache":{"write":20,"read":200}},"cost":0.01}}
+{"type":"step_start","timestamp":2000,"part":{"messageID":"msg_2"}}
+{"type":"step_finish","timestamp":2500,"part":{"messageID":"msg_2","modelID":"gpt-5","tokens":{"input":200,"output":100,"reasoning":0,"cache":{"write":30,"read":300}},"cost":0.02}}
+`
+	if err := os.WriteFile(logPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got := agentUsagePayload(passReport(logPath, "opencode"))
+
+	want := hostop.PassUsage{
+		APICalls:                 2,
+		UncachedInputTokens:      300,
+		OutputTokens:             160,
+		CacheReadInputTokens:     500,
+		CacheCreationInputTokens: 50,
+		Agents: []usage.AgentUsage{
+			{Agent: usage.MainLoopAgent, APICalls: 2, UncachedInputTokens: 300, OutputTokens: 160, CacheReadInputTokens: 500, CacheCreationInputTokens: 50},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("agentUsagePayload(passReport(...)) = %+v, want %+v", got, want)
+	}
+}
+
 // blockThenApproveFakeDriverBody scripts a fake driver-exec to BLOCK its first
 // pass and APPROVE with an outcome after, keyed off callLog's line count so the
 // script works however many times it is reused. Each branch truncates
