@@ -1,27 +1,22 @@
 [implementor] Skill()
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(cat -n cmd/launcher/internal/driver/opencode/classify.go && sed -n 1,80p cmd/launcher/internal/driverkit/patterns.go)
 [implementor]   -> error: [REDACTED:tool-output]
 [implementor] Bash(ls cmd/launcher/internal/driver/opencode/ cmd/launcher/internal/driver/opencode/testdata; grep -rn "timestamp" cmd/launcher/internal/driver/opencode/testdata | head -5; grep -rn "MatchTransient" --include=*.go cmd | grep -v _test | head)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(cat -n cmd/launcher/internal/driver/driverkit/patterns.go; sed -n 1,90p cmd/launcher/internal/driver/driverkit/classify.go; cat -n cmd/launcher/internal/driver/opencode/classify_test.go | head -150; grep -rn '"error"' cmd/launcher/internal/driver/opencode/testdata | head)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(ls cmd/launcher/internal/driver/; grep -rn '"429"\|"529"\|"500"\|"503"' --include=*.go cmd/launcher/internal | grep -v _test; sed -n 1,100p cmd/launcher/internal/driver/claude/classify.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Skill()
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Code read. Now running throwaway repro test.
-[implementor] Bash(cd /work/cmd/launcher && cat > internal/driver/opencode/zz_repro_test.go <<'EOF'
-[REDACTED:inline-code]
-EOF
-go test ./internal/driver/opencode/ -run ZZRepro -v >"$TMPDIR/repro.log" 2>&1; echo "exit=$?"; grep -E 'zz_repro|ok|FAIL' "$TMPDIR/repro.log"; rm internal/driver/opencode/zz_repro_test.go)
-[implementor]   -> [REDACTED:tool-output]
+[implementor] Bash(cd /work/cmd/launcher && cat > internal/driver/opencode/zz_repro_test.go <<'EOF' [REDACTED:inline-code] EOF go test ./internal/driver/opencode/ -run ZZRepro -v >"$TMPDIR/repro.log" 2>&1; echo "exit=$?"; grep -E 'zz_repro|ok|FAIL' "$TMPDIR/repro.log"; rm internal/driver/opencode/zz_repro_test.go)
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(cd /work && grep -n "Transient" cmd/launcher/internal/dispatch/retry.go | head; git log --oneline -S'{Substr: "429"' -- cmd/launcher/internal/driver/opencode | tail -3; gh issue list -R jordansmall/spindrift --state all --search "opencode 429 in:title,body" --limit 10 2>&1 | head; gh issue view 2149 -R jordansmall/spindrift --json title,state 2>&1)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] Bash(grep -rn '529' --include=*.sh --include=*.bash --include=*.nix --include=*.md . 2>/dev/null | grep -iv 'adr/\|CHANGELOG' | grep -i 'opencode\|overload' | head; sed -n 38,50p cmd/launcher/internal/dispatch/retry.go)
-[implementor]   -> [REDACTED:tool-output]
-[implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF'
-[REDACTED:inline-code]
-SPINDRIFT_SIGNAL_EOF)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
+[implementor] Bash(driver-exec signal comment <<'SPINDRIFT_SIGNAL_EOF' [REDACTED:inline-code] SPINDRIFT_SIGNAL_EOF)
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=4423 landing=none status=recommend note=Reproduced on main: bare 429/529 substrings matched against the whole error line flip a context-overflow error and a 429-bearing timestamp to Transient; anchor the markers and match only the error payload.

@@ -13,7 +13,9 @@ const resultTextMaxLen = 200
 // line of a text event is prefixed because the
 // orchestrator's verdict scan counts only "[role]"-prefixed lines and slices the
 // review findings from the lines that follow; embedded newlines stay verbatim
-// so continuation lines remain bare. The role is the event's own, or
+// so continuation lines remain bare. Tool targets, results and subagent tags
+// are flattened to one line instead, so tool-controlled text cannot start a
+// line of its own. The role is the event's own, or
 // topLevelRole (defaulting to ImplementorRole) for an event with none. Text is
 // trimmed so a leading newline cannot push a VERDICT: line off the prefixed
 // first line. Returns ("", nil) when logPath does not exist, as the claude
@@ -34,11 +36,11 @@ func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole st
 				lines = append(lines, "["+role+"] "+text)
 			}
 		case KindToolCall:
-			lines = append(lines, "["+role+"] "+ev.ToolName+"("+ev.ToolTarget+")")
+			lines = append(lines, "["+role+"] "+ev.ToolName+"("+flattenToolText(ev.ToolTarget)+")")
 		case KindToolResult:
 			summary := SummarizeToolOutput(ev.ToolOutput, ev.IsError)
 			if ev.Subagent != "" {
-				summary = "[" + ev.Subagent + "] " + summary
+				summary = "[" + flattenToolText(ev.Subagent) + "] " + summary
 			}
 			lines = append(lines, "["+role+"]   -> "+summary)
 		}
@@ -49,11 +51,24 @@ func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole st
 	return strings.Join(lines, "\n"), nil
 }
 
+var lineBreaks = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")
+
+// flattenToolText replaces every line break in tool-controlled text with a
+// space, so it cannot begin a physical transcript line of its own.
+func flattenToolText(s string) string {
+	return lineBreaks.Replace(s)
+}
+
 // SummarizeToolOutput flattens a tool result's output to one line for a
 // transcript's "->" line. Every Driver's transcript calls it, so their result
-// lines cannot drift apart.
+// lines cannot drift apart. A leading "[" is escaped as "\[" so tool output
+// cannot pass for a "[role]" tag after "-> " (an error result starts "error: "
+// already); the genuine subagent tag is prepended by the caller afterwards.
 func SummarizeToolOutput(output string, isError bool) string {
-	text := strings.TrimSpace(strings.ReplaceAll(output, "\n", " "))
+	text := strings.TrimSpace(flattenToolText(output))
+	if !isError && strings.HasPrefix(text, "[") {
+		text = `\` + text
+	}
 	if len(text) > resultTextMaxLen {
 		if runes := []rune(text); len(runes) > resultTextMaxLen {
 			text = string(runes[:resultTextMaxLen-3]) + "..."

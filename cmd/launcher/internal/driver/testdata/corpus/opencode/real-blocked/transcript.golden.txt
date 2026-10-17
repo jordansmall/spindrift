@@ -1,7 +1,7 @@
 [implementor] bash(cd /work && git log -n 10 --oneline && git status --short | head && git checkout -b agent/issue-word-rules && ls && git fetch origin 2>&1 | tail -1)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] bash(cd /work && git branch -a; git checkout agent/issue-word-rules; git log --oneline -3; ls -a; ls /tmp/brief.md)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] bash(cd /work && ls tally tests; cat tally/*.py | head -150; cat tests/*.py | head -80)
-[implementor]   -> [REDACTED:tool-output]
+[implementor]   -> \[REDACTED:tool-output]
 [implementor] SPINDRIFT_OUTCOME issue=word-rules landing=agent/issue-word-rules status=blocked note=The acceptance criteria contradict each other, so I wrote no code. Criterion 1 says words split on whitespace only, exactly as `wc -w`, so the count never changes for any input `wc -w` agrees with. Criteria 2 and 4 say punctuation separates words: `don't-stop` is three words and `a--b` is two. `wc -w` counts both of those as one word, so they are inputs it already agrees with that must change. Criterion 3 (a run of punctuation like `--` or `...` is not a word) also conflicts with `wc -w`, which counts it as a word. Please say which rule governs. If it is punctuation-splitting, drop or narrow criterion 1, for example to "inputs without punctuation". If it is `wc -w` parity, drop criteria 2 to 4. The current `tally/core.py` count already uses `text.split()`, which matches `wc -w`.

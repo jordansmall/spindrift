@@ -1,24 +1,12 @@
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; git checkout -b agent/issue-top-words main 2>&1 | tail -1; git log -n 10 --oneline; ls; cat tally/*.py; ls tests; cat /tmp/brief.md 2>/dev/null | head -5)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Branch exists; check it.
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; git checkout agent/issue-top-words 2>&1|tail -1; git status --short; git log --oneline main..HEAD; cat tests/test_core.py | head -20)
-[reviewer]   -> [REDACTED:tool-output]
-[reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT
-cat >> tally/core.py <<'E'
-[REDACTED:inline-code]
-E
-sed -i 's/^from dataclasses import dataclass/import string\nfrom dataclasses import dataclass/' tally/core.py
-cat > tally/__main__.py <<'E'
-[REDACTED:inline-code]
-E
-cat > tests/test_top.py <<'E'
-[REDACTED:inline-code]
-E
-python -m unittest discover -s tests -t . 2>&1 | tail -4
-git add -A; git commit -qm "feat: add --top N most frequent words flag"; git log --oneline -1)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
+[reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT cat >> tally/core.py <<'E' [REDACTED:inline-code] E sed -i 's/^from dataclasses import dataclass/import string\nfrom dataclasses import dataclass/' tally/core.py cat > tally/__main__.py <<'E' [REDACTED:inline-code] E cat > tests/test_top.py <<'E' [REDACTED:inline-code] E python -m unittest discover -s tests -t . 2>&1 | tail -4 git add -A; git commit -qm "feat: add --top N most frequent words flag"; git log --oneline -1)
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; echo "implemented --top; awaiting review" > /tmp/pass-summary.md; : > /tmp/dispositions.md; echo "tokens() in core.py; --top parsed only as first arg -- minimal" > /tmp/decisions.md)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Committed `1fb0bbd` on `agent/issue-top-words`: `--top N` prints the N most frequent words after the per-file lines. The full test suite passes (8 tests), including new tests for each acceptance rule in `tests/test_top.py`. I stopped after the commit, so review has not run.
 
 - **Flag position:** `--top` is only recognised as the first argument, so `python -m tally FILE --top 3` is not handled.
@@ -26,19 +14,19 @@ git add -A; git commit -qm "feat: add --top N most frequent words flag"; git log
 
 The change is in `tally/__main__.py` and `tally/core.py`.
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; git fetch origin; git diff origin/main...HEAD --stat; git diff origin/main...HEAD > /tmp/review-diff.patch; git log origin/main..HEAD --oneline; wc -l /tmp/review-diff.patch)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] read(/tmp/review-diff.patch)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] read(/work/tally/core.py)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] read(/work/tally/__main__.py)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] read(/tmp/review-diff.patch)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; ls tests; git log origin/main --oneline | head -5; ls; python -m unittest discover -s tests -t . 2>&1 | tail -5)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; grep -rniE "convention|standard|commit|test" README.md | head -20; git log -1 --format=%B HEAD; cat tests/test_core.py | head -30; printf 'x\n' > /tmp/opencode/a.txt; python -m tally /tmp/opencode/a.txt --top 2; echo rc=$?; python -m tally --top; echo rc=$?)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] VERDICT: APPROVE
 
 ## Blocking
@@ -59,11 +47,8 @@ The change is in `tally/__main__.py` and `tally/core.py`.
 - STANDARDS: the commit is a single Conventional Commits `feat:`. The new test file follows the unittest style in tests/test_core.py. The README test command passes.
 - Trace: `main`'s signature is unchanged and its only caller is `__main__`. New name `tokens`: the only other match in the tree is the core.py definition, so no collision. New error paths both return 2 with the usage message, the same as the existing no-argument path.
 [reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; cd /work && git status --short | head; git log origin/main..HEAD --oneline; cat /tmp/orchestrator-findings-log-3777891682.md | grep -n "^## Round"; cat tally/__main__.py; echo $CODE_FORGE)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] Non-blocking findings are usability extras outside the spec; dropping them. Already rebased check.
-[reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; cd /work && git fetch origin -q; git rebase origin/main 2>&1|tail -1; python -m unittest discover -s tests -t . 2>&1|tail -3
-echo "non-blocking findings -> won't-fix: out of spec scope, trivial" > /tmp/dispositions.md
-echo "--top first-arg only -> chose minimal parse -- spec shows only that form" > /tmp/decisions.md
-echo "land pass: gate green, nothing changed" > /tmp/pass-summary.md)
-[reviewer]   -> [REDACTED:tool-output]
+[reviewer] bash(unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENCODE_AUTH_CONTENT; cd /work && git fetch origin -q; git rebase origin/main 2>&1|tail -1; python -m unittest discover -s tests -t . 2>&1|tail -3 echo "non-blocking findings -> won't-fix: out of spec scope, trivial" > /tmp/dispositions.md echo "--top first-arg only -> chose minimal parse -- spec shows only that form" > /tmp/decisions.md echo "land pass: gate green, nothing changed" > /tmp/pass-summary.md)
+[reviewer]   -> \[REDACTED:tool-output]
 [reviewer] SPINDRIFT_OUTCOME issue=top-words landing=agent/issue-top-words status=ready note=--top N implemented with tests; the full unittest gate passes (8 tests). The reviewer's non-blocking findings (--top only as first arg, --top=N form) were dropped as outside the spec.
