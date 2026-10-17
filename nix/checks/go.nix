@@ -186,7 +186,8 @@ in
 
   # Seam tests (issue #4280): the integration-tagged packages run against the
   # rendered fixtures the bats harness produces, handed over via
-  # SPINDRIFT_SEAM_FIXTURES_DIR since nix isn't callable in the sandbox. The
+  # SPINDRIFT_SEAM_FIXTURES_DIR since nix isn't callable in the sandbox; the
+  # locked pi reaches the piseam tests the same way, via SPINDRIFT_PI_BIN. The
   # other integration tests self-skip without nix/bwrap/podman/docker. The
   # package list is derived from the tree, so a new tagged file is picked up.
   launcher-go-seam-test =
@@ -197,6 +198,7 @@ in
           pkgs.git
         ];
         SPINDRIFT_SEAM_FIXTURES_DIR = fixtures.seamFixtures;
+        SPINDRIFT_PI_BIN = "${pkgs.pi-coding-agent}/bin/pi";
       }
       ''
         mkdir -p src/cmd
