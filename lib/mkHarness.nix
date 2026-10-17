@@ -743,6 +743,14 @@ let
     )
   );
 
+  # internal/driver's non-test Go files, minus the conformance kit: it imports
+  # internal/golden and internal/passmachine, which no in-box fileset carries,
+  # and `go mod vendor` loads every package in the tree, not just subPackages.
+  # Nothing in-box imports it (Driver packages call it from _test.go only).
+  driverTreeFiles = lib.fileset.difference (lib.fileset.fileFilter (
+    f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
+  ) ../cmd/launcher/internal/driver) ../cmd/launcher/internal/driver/driverkit/conformance;
+
   # In-box Driver runner (issue #626): runs one Driver invocation, direct or
   # inside the Project devShell, tees the stream to a log path, and filters
   # heartbeats in-process, so there is one in-box Go unit rather than two.
@@ -765,9 +773,7 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/driver-exec)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/driver)
+        driverTreeFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
@@ -903,9 +909,7 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/boxclone)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/driver)
+        driverTreeFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/landdelta)
@@ -991,9 +995,7 @@ let
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/orchestrator)
-        (lib.fileset.fileFilter (
-          f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
-        ) ../cmd/launcher/internal/driver)
+        driverTreeFiles
         (lib.fileset.fileFilter (
           f: f.hasExt "go" && !lib.hasSuffix "_test.go" f.name
         ) ../cmd/launcher/internal/driver/claude)
