@@ -1239,3 +1239,43 @@ func TestTuningFindingLabel_IsInButlerLabelNames(t *testing.T) {
 		t.Fatalf("ButlerLabelNames() = %v, missing %q", ButlerLabelNames(), TuningFindingLabel)
 	}
 }
+
+// A tracker with no label registry (local, jira) can neither list nor create a
+// label ahead of time, so Run skips the label section whole — the work-tier
+// labels included — instead of requiring labels it could never see (issue
+// #5460).
+func TestRun_NoLabelRegistry_SkipsLabelSection(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		interactive bool
+		stdin       string
+	}{
+		{"non-interactive", false, ""},
+		{"interactive", true, "y\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
+			f.Labels = []string{"ready-for-agent"}
+			c := defaultDoctorConfig()
+			c.IssueTracker = "jira"
+			c.NoLabelRegistry = true
+
+			var buf bytes.Buffer
+			err := Run(f, f, c, NewReporter(&buf, true), bufio.NewScanner(strings.NewReader(tc.stdin)), tc.interactive, nil)
+			if err != nil {
+				t.Fatalf("want nil, got %v", err)
+			}
+			out := buf.String()
+			if !strings.Contains(out, "label check skipped") {
+				t.Errorf("want the skip row, got:\n%s", out)
+			}
+			if strings.Contains(out, "MISSING") || strings.Contains(out, "[y/N]") {
+				t.Errorf("want no missing-label row or create prompt, got:\n%s", out)
+			}
+			if len(f.CreateLabelCalls) != 0 {
+				t.Errorf("want no CreateLabel calls, got %v", f.CreateLabelCalls)
+			}
+		})
+	}
+}

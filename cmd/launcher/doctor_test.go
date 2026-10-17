@@ -724,6 +724,39 @@ func TestRequiredLabels(t *testing.T) {
 	}
 }
 
+// Issue #5460: a tracker with no label registry never fails doctor on missing
+// labels, however empty the fake's list.
+func TestDoctorReport_NoLabelRegistryTracker_SkipsLabelCheck(t *testing.T) {
+	for _, tracker := range []string{"jira", "local"} {
+		t.Run(tracker, func(t *testing.T) {
+			f := forge.NewFake()
+			f.ProbeRepo = "owner/repo"
+
+			c := minimalValidConfig()
+			c.issueTracker = tracker
+			if tracker == "jira" {
+				c.jiraBaseURL, c.jiraProjectKey, c.jiraToken = "https://example.atlassian.net", "PROJ", "tok"
+			}
+			c.label, c.inProgressLabel, c.failedLabel, c.completeLabel =
+				"ready-for-agent", "agent-in-progress", "agent-failed", "agent-complete"
+
+			// Quiet is what the daemon preflight runs; the skip row is a
+			// Success row, so only verbose prints it.
+			for _, verbose := range []bool{false, true} {
+				var stdout, stderr bytes.Buffer
+				got := doctorReport(doctorReadContext(c, f), &stdout, &stderr, strings.NewReader(""), doctorOptions{interactive: false, verbose: verbose})
+
+				if got != 0 {
+					t.Errorf("verbose=%v: want exit 0, got %d; stderr=%q", verbose, got, stderr.String())
+				}
+				if skipped := strings.Contains(stdout.String(), "label check skipped"); skipped != verbose {
+					t.Errorf("verbose=%v: skip row printed = %v, want %v; stdout=%q", verbose, skipped, verbose, stdout.String())
+				}
+			}
+		})
+	}
+}
+
 // doctor requires the catalog's label while settle holds merges on the
 // doctor constant, so the two must name the same label.
 func TestTuningFindingLabel_MatchesChoreCatalog(t *testing.T) {
