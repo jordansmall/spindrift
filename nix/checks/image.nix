@@ -95,6 +95,91 @@ in
     touch $out
   '';
 
+  # The Box has no /usr/bin/env, so a hook kept at `#!/usr/bin/env bash` never
+  # started; Claude Code treats a non-2 exit as non-blocking, so every guard
+  # failed open silently (issue #5399). Resolve each baked hook's shebang in the
+  # image's own layers, then run it directly (no shell, as the opencode plugin
+  # spawns it) and via a shell command string (as Claude Code runs it) with PATH
+  # set to only the image's toolchain, asserting the guards' real output.
+  hooks-run-in-image =
+    let
+      hooksDir = "${nonRustHarness.internals.agentFiles}/home/agent/.claude/hooks";
+      boxPath = "${nonRustHarness.internals.agentEnv}/bin";
+    in
+    pkgs.runCommand "hooks-run-in-image" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      mkdir img && tar -xf ${nonRustHarness.image} -C img
+      for layer in $(jq -r '.[0].Layers[]' img/manifest.json); do
+        tar -tf "img/$layer"
+      done | sed -e 's|^\./||' -e 's|^/||' >image-files
+
+      for hook in ${hooksDir}/*.sh; do
+        shebang=$(head -1 "$hook")
+        interp=''${shebang#'#!'}
+        case "$interp" in
+          /nix/store/*) : ;;
+          *) echo "$hook: shebang does not resolve inside the image: $shebang" >&2
+             exit 1 ;;
+        esac
+        grep -qxF "''${interp#/}" image-files \
+          || { echo "$hook: interpreter $interp is absent from the image layers" >&2; exit 1; }
+      done
+
+      export BASH_OUTPUT_TEE_DIR="$TMPDIR/tee-logs"
+      probe=output-longer-than-the-tail
+      # Smaller than the probe: the summary hook only speaks once the log outgrows the tail.
+      export BASH_OUTPUT_SUMMARY_TAIL_BYTES=$(( ''${#probe} - 1 ))
+      # run_hook <mode> <hook> <stdin-json>: the hook's stdout; a nonzero exit
+      # fails the check, since a hook that cannot start never prints JSON.
+      run_hook() {
+        local mode="$1" hook="${hooksDir}/$2" res
+        local -a run=(env -i PATH=${boxPath} HOME=/home/agent
+          BASH_OUTPUT_TEE_DIR="$BASH_OUTPUT_TEE_DIR"
+          BASH_OUTPUT_SUMMARY_TAIL_BYTES="$BASH_OUTPUT_SUMMARY_TAIL_BYTES")
+        local -a argv
+        case "$mode" in
+          direct) argv=("$hook") ;;
+          shell) argv=(sh -c "$hook") ;;
+          *) echo "run_hook: unknown mode $mode" >&2; exit 1 ;;
+        esac
+        res=$("''${run[@]}" "''${argv[@]}" <<<"$3") || { echo "$mode $2: nonzero exit" >&2; exit 1; }
+        printf '%s' "$res"
+      }
+      assert_jq() {
+        jq -e "$2" <<<"$1" >/dev/null \
+          || { echo "assertion failed: $2 on: $1" >&2; exit 1; }
+      }
+
+      for mode in direct shell; do
+        res=$(run_hook $mode reject-background-bash.sh \
+          '{"tool_name":"Bash","tool_input":{"command":"go test ./...","run_in_background":true}}')
+        assert_jq "$res" '.hookSpecificOutput.permissionDecision == "deny"'
+
+        res=$(run_hook $mode credential-deny.sh \
+          '{"tool_name":"Read","tool_input":{"file_path":"/home/agent/.claude/.credentials.json"}}')
+        assert_jq "$res" '.hookSpecificOutput.permissionDecision == "deny"'
+
+        res=$(run_hook $mode env-credential-scrub.sh \
+          '{"tool_name":"Bash","tool_input":{"command":"echo hello"}}')
+        assert_jq "$res" '.hookSpecificOutput.updatedInput.command | startswith("unset ")'
+        assert_jq "$res" '.hookSpecificOutput.updatedInput.command | contains("ANTHROPIC_API_KEY")'
+        assert_jq "$res" '.hookSpecificOutput.updatedInput.command | endswith("echo hello")'
+
+        payload=$(jq -n --arg cmd "echo $probe" '{tool_name:"Bash",tool_input:{command:$cmd}}')
+        res=$(run_hook $mode bash-output-tee.sh "$payload")
+        assert_jq "$res" '.hookSpecificOutput.updatedInput.command | contains("tee")'
+        rewritten=$(jq -r '.hookSpecificOutput.updatedInput.command' <<<"$res")
+        [ "$(sh -c "$rewritten")" = "$probe" ] \
+          || { echo "tee rewrite did not run the command" >&2; exit 1; }
+
+        # The summary hook only speaks once the tee'd log outgrows the tail.
+        payload=$(jq -n --arg cmd "$rewritten" --arg out "$probe"$'\n' \
+          '{tool_name:"Bash",tool_input:{command:$cmd},tool_response:$out}')
+        res=$(run_hook $mode bash-output-summary.sh "$payload")
+        assert_jq "$res" '.hookSpecificOutput.updatedToolOutput | contains("exit code: 0")'
+      done
+      touch $out
+    '';
+
   # AGENTS_JSON_TEMPLATE is baked into the entrypoint by nix (ADR 0007). Each
   # subagent is composed independently by its own model knob (issue #392), so
   # the template carries whichever of scout/reviewer has a model configured,
