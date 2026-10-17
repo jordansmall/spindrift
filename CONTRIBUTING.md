@@ -174,9 +174,11 @@ and in the in-box `box` program; the only bash left is the generated shim that
   `cmd/launcher/internal/doctor/labelmeta_gen.go` by `renderers.nix`'s
   `renderLabelRegistryGo`, drift-guarded by `nix/checks/schema-drift.nix`'s
   `label-registry-gen` check), `cli-flags.nix` (the non-schema CLI flag table
-  the parser, completions and man page all consume), and `renderers.nix` (the schema → artifact
+  the parser, completions and man page all consume), `renderers.nix` (the schema → artifact
   render functions shared by the `nix/checks/schema-drift.nix` drift guards and
-  `nix run .#regen`). No language-specific tooling belongs here — the core
+  `nix run .#regen`), and `agent-hooks.nix` (the baked claude/opencode Bash
+  hook scripts, shebangs pinned to the store bash; shared by the image and the
+  opencode-guards fixture). No language-specific tooling belongs here — the core
   is language-agnostic ([ADR 0003](docs/adr/0003-language-agnostic-core.md)).
 - **`cmd/launcher/`** — the Go host-side launcher (its own module). Public
   behavior lives at the top level; `internal/` holds the seams — `forge`,
