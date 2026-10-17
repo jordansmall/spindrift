@@ -2,7 +2,6 @@ package launcherchecks
 
 import (
 	"errors"
-	"slices"
 	"strings"
 	"testing"
 
@@ -34,8 +33,8 @@ func minimalValidConfig() Config {
 		GitUserEmail: "test@example.com",
 		GHToken:      "gh-token",
 
-		Driver:           "claude",
-		ClaudeOAuthToken: "claude-token",
+		Driver:      "claude",
+		Credentials: map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": "claude-token"},
 
 		Runtime: "bwrap",
 
@@ -292,8 +291,7 @@ func TestRequiredKnobChecks_DriverCredentials_Claude(t *testing.T) {
 	for _, driver := range []string{"claude", ""} {
 		c := minimalValidConfig()
 		c.Driver = driver
-		c.ClaudeOAuthToken = ""
-		c.AnthropicAPIKey = ""
+		c.Credentials = nil
 		ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials")
 		_, err := ch.Probe()
 		if err == nil || err.Error() != wantErr {
@@ -303,8 +301,7 @@ func TestRequiredKnobChecks_DriverCredentials_Claude(t *testing.T) {
 
 	c := minimalValidConfig()
 	c.Driver = "claude"
-	c.ClaudeOAuthToken = ""
-	c.AnthropicAPIKey = "sk-ant-x"
+	c.Credentials = map[string]string{"ANTHROPIC_API_KEY": "sk-ant-x"}
 	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("driver-credentials Probe() unexpected error with AnthropicAPIKey set: %v", err)
@@ -314,8 +311,8 @@ func TestRequiredKnobChecks_DriverCredentials_Claude(t *testing.T) {
 func TestRequiredKnobChecks_DriverCredentials_OpencodeCopilot(t *testing.T) {
 	c := minimalValidConfig()
 	c.Driver = "opencode"
-	c.Model = "github-copilot/gpt-4"
-	c.OpencodeAuthContent = ""
+	c.Models = []string{"github-copilot/gpt-4"}
+	c.Credentials = nil
 	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials")
 	_, err := ch.Probe()
 	want := "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver"
@@ -323,7 +320,7 @@ func TestRequiredKnobChecks_DriverCredentials_OpencodeCopilot(t *testing.T) {
 		t.Errorf("driver-credentials Probe() = %v, want %q", err, want)
 	}
 
-	c.OpencodeAuthContent = "auth-blob"
+	c.Credentials = map[string]string{"OPENCODE_AUTH_CONTENT": "auth-blob"}
 	ch = checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("driver-credentials Probe() unexpected error with OpencodeAuthContent set: %v", err)
@@ -333,11 +330,25 @@ func TestRequiredKnobChecks_DriverCredentials_OpencodeCopilot(t *testing.T) {
 func TestRequiredKnobChecks_DriverCredentials_OpencodeNonCopilotPasses(t *testing.T) {
 	c := minimalValidConfig()
 	c.Driver = "opencode"
-	c.Model = "anthropic/claude-3"
-	c.OpencodeAuthContent = ""
+	c.Models = []string{"anthropic/claude-3"}
+	c.Credentials = nil
 	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials")
 	if _, err := ch.Probe(); err != nil {
 		t.Errorf("driver-credentials Probe() unexpected error for non-copilot opencode Model: %v", err)
+	}
+}
+
+// The probe reads every model tier, not only the leading one: a copilot model
+// in a later tier needs the credential even when the first model does not.
+func TestRequiredKnobChecks_DriverCredentials_OpencodeCopilotInLaterTier(t *testing.T) {
+	c := minimalValidConfig()
+	c.Driver = "opencode"
+	c.Models = []string{"anthropic/claude-3", "", "github-copilot/gpt-4"}
+	c.Credentials = nil
+	ch := checkByName(t, RequiredKnobChecks(c, minimalDeps()), "driver-credentials")
+	_, err := ch.Probe()
+	if err == nil || !strings.Contains(err.Error(), "OPENCODE_AUTH_CONTENT") {
+		t.Errorf("driver-credentials Probe() = %v, want the opencode remedy", err)
 	}
 }
 
@@ -516,33 +527,5 @@ func TestSignalsFromRegistry(t *testing.T) {
 	}
 	if got := SignalsFromRegistry("github", "github"); got.InBoxUnreachableTracker {
 		t.Errorf("SignalsFromRegistry(github, github).InBoxUnreachableTracker = true, want false")
-	}
-}
-
-func TestDriverCredentials(t *testing.T) {
-	claude := []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}
-	opencode := []string{"OPENCODE_AUTH_CONTENT"}
-	tests := []struct {
-		driver       string
-		models       []string
-		want         []string
-		wantRequired bool
-	}{
-		{"", []string{"claude-sonnet-5"}, claude, true},
-		{"claude", []string{"github-copilot/gpt-5"}, claude, true},
-		{"claude", nil, claude, true},
-		{"opencode", []string{"github-copilot/gpt-5"}, opencode, true},
-		{"opencode", []string{"anthropic/claude-sonnet-5"}, opencode, false},
-		{"opencode", []string{""}, opencode, false},
-		{"opencode", nil, opencode, false},
-		{"opencode", []string{"claude-sonnet-5"}, opencode, false},
-		{"opencode", []string{"anthropic/claude-sonnet-5", "", "github-copilot/gpt-5"}, opencode, true},
-		{"typo", []string{"github-copilot/gpt-5"}, nil, false},
-	}
-	for _, tc := range tests {
-		got, required := DriverCredentials(tc.driver, tc.models...)
-		if !slices.Equal(got, tc.want) || required != tc.wantRequired {
-			t.Errorf("DriverCredentials(%q, %q) = %v, %v, want %v, %v", tc.driver, tc.models, got, required, tc.want, tc.wantRequired)
-		}
 	}
 }

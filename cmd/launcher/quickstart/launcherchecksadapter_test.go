@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -27,17 +28,19 @@ func TestQuickstartCheckConfig_MapsFields(t *testing.T) {
 	c := quickstartCheckConfig(a, "github")
 
 	want := launcherchecks.Config{
-		RepoSlug:         a.repoSlug,
-		GitUserName:      a.gitUserName,
-		GitUserEmail:     a.gitUserEmail,
-		GHToken:          a.token,
-		ClaudeOAuthToken: a.claudeOAuthToken,
-		AnthropicAPIKey:  a.anthropicAPIKey,
-		Runtime:          a.runtime,
-		IssueTracker:     a.tracker.issueTracker,
-		CodeForge:        "github",
+		RepoSlug:     a.repoSlug,
+		GitUserName:  a.gitUserName,
+		GitUserEmail: a.gitUserEmail,
+		GHToken:      a.token,
+		Credentials: map[string]string{
+			"CLAUDE_CODE_OAUTH_TOKEN": a.claudeOAuthToken,
+			"ANTHROPIC_API_KEY":       a.anthropicAPIKey,
+		},
+		Runtime:      a.runtime,
+		IssueTracker: a.tracker.issueTracker,
+		CodeForge:    "github",
 	}
-	if c != want {
+	if !reflect.DeepEqual(c, want) {
 		t.Errorf("quickstartCheckConfig(a, \"github\") = %+v, want %+v", c, want)
 	}
 }

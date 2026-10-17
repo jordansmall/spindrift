@@ -25,17 +25,19 @@ func quickstartCheckConfig(a answers, codeForge string) launcherchecks.Config {
 		// on a github forge) would pass here and fail `spindrift doctor`.
 		GHToken: ghToken,
 
-		ClaudeOAuthToken: a.claudeOAuthToken,
-		AnthropicAPIKey:  a.anthropicAPIKey,
+		Credentials: map[string]string{
+			"CLAUDE_CODE_OAUTH_TOKEN": a.claudeOAuthToken,
+			"ANTHROPIC_API_KEY":       a.anthropicAPIKey,
+		},
 
 		Runtime: a.runtime,
 
 		IssueTracker: a.tracker.issueTracker,
 		CodeForge:    codeForge,
 
-		// Driver, Model, OpencodeAuthContent, ResearchDispatch, and
+		// Driver, Models, ResearchDispatch, and
 		// SelfContained stay zero because the wizard never prompts for them. A
-		// zero Driver lands on the driver-credentials row's claude arm, the
+		// zero Driver resolves to the claude Driver rule, the
 		// credential the wizard did prompt for above.
 	}
 }
