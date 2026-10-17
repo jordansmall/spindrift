@@ -81,7 +81,8 @@ func finishQueueSettle(c config, it forge.IssueTracker, pwd, num string, rec rec
 // (nil): an issue was tried, so the run exits 0, unless the record cannot be
 // saved or the park itself fails (the issue would sit on agent-in-progress,
 // which queue mode never revisits); either or both are returned, after the park
-// is attempted. Only the attempt that reaches c.maxRecoverAttempts comments,
+// is attempted. Only the attempt that reaches c.maxRecoverAttempts, or fails for
+// a Workflows-permission refusal a retry cannot fix (issue #5411), comments,
 // once, saying auto-recover gave up (issue #4655); earlier failures stay
 // silent and are retried after a backoff. The comment names the last attempt's
 // cause (settleErr, kept in the record for a later pass; a nil settleErr keeps
@@ -96,7 +97,11 @@ func parkQueueFailure(c config, it forge.IssueTracker, num string, rec recoverre
 	fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", num, note)
 	rec.Count++
 	rec.Last = now
-	if rec.Count >= c.maxRecoverAttempts {
+	workflowDenied := errors.Is(settleErr, forge.ErrWorkflowPermissionDenied)
+	if settleErr != nil {
+		rec.WorkflowPermissionDenied = workflowDenied
+	}
+	if rec.Count >= c.maxRecoverAttempts || workflowDenied {
 		giveUpRecover(&rec, it, num, stderr)
 	}
 	// Without the record the next pass would retry with no backoff and no bound.

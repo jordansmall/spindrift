@@ -35,6 +35,10 @@ type Record struct {
 	// LastError is the last failed attempt's cause, so a give-up posted on a
 	// later pass with no settle can still name it.
 	LastError string `json:"last_error,omitempty"`
+	// WorkflowPermissionDenied records that the last failure was a Workflows
+	// permission refusal, so a give-up posted on a later pass with no settle
+	// still carries the remedy rather than the generic attempts body.
+	WorkflowPermissionDenied bool `json:"workflow_permission_denied,omitempty"`
 	// Set only by Load, and where Save writes: a literal Record{} cannot be
 	// saved.
 	path string

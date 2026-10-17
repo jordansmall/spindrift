@@ -1656,7 +1656,11 @@ func recoverIssue(stopCh, abortCh <-chan struct{}, queue bool, c config, it forg
 			return nil
 		}
 		if settleErr != nil {
-			fmt.Fprintf(stdout, "    #%s  status=failed  note=%v\n", issueNum, settleErr)
+			note := settleErr.Error()
+			if errors.Is(settleErr, forge.ErrWorkflowPermissionDenied) {
+				note += "; " + forge.WorkflowPermissionRemedy(issueNum)
+			}
+			fmt.Fprintf(stdout, "    #%s  status=failed  note=%s\n", issueNum, note)
 			return recoverFailed(it, caps, issueNum, fmt.Errorf("issue %s: %w", issueNum, settleErr), stdout, stderr)
 		}
 		fmt.Fprintf(stdout, "    #%s  status=skipped  note=no open PR on %s\n", issueNum, branch)
