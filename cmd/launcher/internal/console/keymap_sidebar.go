@@ -21,7 +21,7 @@ var sidebarBindings = []Binding{
 	},
 	{
 		// This returns focus to the list in the docked layout. ModeList has its
-		// own "h"/"left" no-op in handleListKey instead.
+		// own "h"/"left" no-op in the listBindings entry in keymap_list.go.
 		Keys: []string{"h", "left"}, Modes: []Mode{ModeSidebar},
 		Footer: "[h] list",
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
