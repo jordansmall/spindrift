@@ -45,8 +45,8 @@ claude the `result` event's `.result`, opencode each `text` event's `.part.text`
 *Amended by issue #5348:* opencode no longer synthesizes its exit code from
 "valid outcome line present AND no `error` event". Its `ResolveExit` keeps a
 non-zero process exit as-is and turns a clean exit into `1` only when the
-stream carries an `error` event. A missing outcome line is left to the Box's
-outcome nudge and backstop, the same recovery claude gets.
+stream carries an unrecovered `error` event. A missing outcome line is left to
+the Box's outcome nudge and backstop, the same recovery claude gets.
 
 *Amended by issue #5354:* opencode's `ResultText` now selects only the last
 assistant message's text parts (any event with a new `part.messageID`
@@ -56,6 +56,11 @@ longer counts. This supersedes the earlier amendment's
 "opencode each `text` event's `.part.text`". With exit synthesis gone (#5348),
 `ExtractOutcomeLine`'s leading-token rule is the only outcome-line rule over
 result text.
+
+*Amended by issue #5391:* an `error` event followed by agent progress
+(`driverkit.IsProgress`, the same rule `Classify` applies) was recovered from
+and no longer turns a clean exit into `1`, so a run that retried past a 429
+still reaches the Box's nudges.
 
 **Provider** is a new axis distinct from Driver: the model backend a Driver talks to (Anthropic, GitHub Copilot, OpenAI). "Add GitHub Copilot" is *not* a new Driver — it is the opencode Driver pointed at the `github-copilot` provider, with `MODEL` provider-namespaced (`github-copilot/…`). Credentials go two ways, mirroring the baked-default/runtime-override pattern already used for prompts: the primary path is a **nix-generated `opencode.json` with `{env:VAR}` placeholders** (documented for apiKey providers; keeps the "secrets are env, never host files" model), with a **materialized/mounted `auth.json`** fallback for Copilot's OAuth device-flow, whose headless credential path is undocumented and must be resolved by an empirical spike before the auth design is finalized.
 

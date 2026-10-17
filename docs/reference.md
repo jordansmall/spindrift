@@ -1250,6 +1250,9 @@ its own decoder and inputs; read them as the worked example.
 | `result` | `Text`, session totals | result (replaces text so far) |
 | `host_op` | `HostOp` | heartbeat (rendered by `FormatSpindriftOp`); the host's own `spindrift_op` lines, in every Driver's stream |
 
+The progress kinds are `driverkit.IsProgress`; opencode's `ResolveExit`
+reads the same set to tell a recovered `error` from an unrecovered one.
+
 `driverkit/event.go` holds the field-level contract, including what each
 reader does with an event. A few conventions matter to a decoder author.
 Decode a CLI's thinking output to `reasoning`, never `text`, or it surfaces in
