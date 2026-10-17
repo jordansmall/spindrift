@@ -57,10 +57,15 @@ the Driver's Nix row, as the backend Descriptor is from its backend's row
 (ADR 0066). _Avoid_: driver config, driver metadata.
 
 **Credential rule**:
-One way a Driver can be authenticated: the environment variables that satisfy
-it, the model-id prefix under which it applies (none means always), the
-remedy to show when it is unmet, and the command that obtains it. A Driver
-Descriptor carries a list of them. _Avoid_: credential arm, auth switch.
+One way a Driver can be authenticated: one entry in a Driver row's
+`credentials` list (`lib/drivers/<name>.nix`), rendered into the launcher's
+Driver Descriptor. It names the env vars that satisfy it (any one will do), an
+optional `modelPrefix` that gates it to runs where some model tier starts with
+that prefix (none means always), a remedy line, and an optional setup command.
+The one source for doctor's `driver-credentials` check, the `--secret-cmd`
+fallback, and the Quickstart wizard's token step; the reference guide's
+per-Driver credential list is checked against it. _Avoid_: credential arm,
+auth switch, auth config, secret spec.
 
 **Conformance kit**:
 The shared test runner a Driver's own package calls to prove its Strategy
