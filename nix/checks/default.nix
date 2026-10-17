@@ -28,7 +28,8 @@ let
 
   # Every check module that reconstructs a launcher tree (go.nix,
   # baked-skills.nix) shares this one vendor tree instead of deriving its own
-  # (issue #784).
+  # (issue #784); go.nix's per-Driver checks re-derive it over a source without
+  # the Driver directories, under the same vendorHash.
   launcherGoModules =
     (pkgs.buildGoModule {
       pname = "spindrift-launcher-modules";

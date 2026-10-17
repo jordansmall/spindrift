@@ -9,15 +9,20 @@
 }:
 let
   inherit (fixtures) consumerFormatter;
-  nixSrc = pkgs.lib.fileset.toSource {
+  fs = pkgs.lib.fileset;
+  driverRegistry = import ../../lib/drivers/default.nix { inherit (pkgs) lib; };
+  driverNames = builtins.attrNames driverRegistry.entries;
+  driverDir = name: ../../cmd/launcher/internal/driver + "/${name}";
+  driverGoTestAttr = name: "drivers-${name}-go-test";
+  nixSrc = fs.toSource {
     root = ../..;
-    fileset = pkgs.lib.fileset.fileFilter (f: f.hasExt "nix") ../..;
+    fileset = fs.fileFilter (f: f.hasExt "nix") ../..;
   };
   # Vendored modules, go env and the bwrap LookPath stub shared by the go test
   # checks. Expects the caller to have copied cmd/launcher to src/cmd/launcher.
   # Ends with src/cmd/launcher as the working directory.
-  goTestPrologue = ''
-    cp -r ${launcherGoModules} src/cmd/launcher/vendor
+  goTestPrologueWith = vendor: ''
+    cp -r ${vendor} src/cmd/launcher/vendor
     ${goCheckEnv}
     mkdir -p "$TMPDIR/fakebin"
     cat > "$TMPDIR/fakebin/bwrap" <<'EOF'
@@ -29,6 +34,85 @@ let
     export PATH="$TMPDIR/fakebin:$PATH"
     cd src/cmd/launcher
   '';
+  goTestPrologue = goTestPrologueWith launcherGoModules;
+  # Packages a Driver's tests reach (go list -deps -test over every Driver's
+  # package). Hand-listed so one Driver's edits never rebuild another's check;
+  # a Driver whose tests import a new internal package must add it here, and a
+  # stale list fails the build loudly. Never the registry root internal/driver
+  # or another Driver's directory (internal/driver/closure_test.go).
+  driverGoTestShared = map (p: ../../cmd/launcher/internal + "/${p}") [
+    "dispatchkind"
+    "driver/corpus"
+    "driver/driverkit"
+    "golden"
+    "hostop"
+    "landdelta"
+    "logscan"
+    "outcome"
+    "passmachine"
+    "usage"
+  ];
+  # One go test derivation per Driver (ADR 0066 decision 5), keyed by registry
+  # name so a new row yields one with no hand-pinned attr. `files` is the
+  # cmd/launcher fileset every source is cut from; the independence check
+  # perturbs it.
+  #
+  # The vendor tree is re-derived from a source without any Driver directory,
+  # so editing one Driver never changes another's drvPath (a plain
+  # launcherGoModules would, its src being the whole tree). Fixed-output with
+  # the same vendorHash, so its outPath equals launcherGoModules' and nothing
+  # is fetched twice. `go mod vendor -e` tolerates the packages that import the
+  # absent Driver directories. Gotcha: a Driver importing a third-party module
+  # no other package uses changes the vendored set, and the narrowed derivation
+  # then mismatches launcherVendorHash.
+  driverGoTestsFor =
+    {
+      files,
+      entries,
+    }:
+    let
+      allDriverDirs = fs.unions (map driverDir driverNames);
+      vendor = launcherGoModules.overrideAttrs (_: {
+        src = fs.toSource {
+          root = ../../cmd/launcher;
+          fileset = fs.difference files allDriverDirs;
+        };
+        preBuild = "goModVendorFlags=(-e)";
+      });
+    in
+    pkgs.lib.listToAttrs (
+      map (name: {
+        name = driverGoTestAttr name;
+        value =
+          let
+            src = fs.toSource {
+              root = ../../cmd/launcher;
+              fileset = fs.intersection files (
+                fs.unions (
+                  [
+                    ../../cmd/launcher/go.mod
+                    ../../cmd/launcher/go.sum
+                    (driverDir name)
+                  ]
+                  ++ driverGoTestShared
+                )
+              );
+            };
+          in
+          pkgs.runCommand (driverGoTestAttr name) { nativeBuildInputs = [ pkgs.go ]; } ''
+            mkdir -p src/cmd
+            cp -r ${src} src/cmd/launcher
+            chmod -R +w src
+            ${goTestPrologueWith vendor}
+            go test ./internal/driver/${name}/...
+            touch $out
+          '';
+      }) (builtins.attrNames entries)
+    );
+  driverGoTests = driverGoTestsFor {
+    files = ../../cmd/launcher;
+    inherit (driverRegistry) entries;
+  };
   # The Dashboard is a separate dependency-free module (ADR 0060), so the
   # vendored-launcher GOFLAGS=-mod=vendor from goCheckEnv is reset: it has no
   # vendor/ tree. Ends with src as the working directory.
@@ -40,7 +124,8 @@ let
     cd src
   '';
 in
-{
+driverGoTests
+// {
   launcher-go-fmt = pkgs.runCommand "launcher-go-fmt" { nativeBuildInputs = [ pkgs.go ]; } ''
     unformatted=$(gofmt -l ${../../cmd/launcher})
     if [ -n "$unformatted" ]; then
@@ -183,6 +268,51 @@ in
         go test ./...
         touch $out
       '';
+
+  # A registry row yields its per-Driver go test derivation with no other edit
+  # (issue #5508). Only attr names are forced: building the stub's derivation
+  # would fail on its missing package directory.
+  drivers-go-test-stub-row-yields-derivation =
+    let
+      names = builtins.attrNames (driverGoTestsFor {
+        files = ../../cmd/launcher;
+        entries = driverRegistry.entries // {
+          stub = { };
+        };
+      });
+    in
+    assert pkgs.lib.assertMsg (builtins.elem "drivers-stub-go-test" names)
+      "a stub registry row must yield drivers-stub-go-test, got: ${pkgs.lib.concatStringsSep ", " names}";
+    pkgs.runCommand "drivers-go-test-stub-row-yields-derivation" { } "touch $out";
+
+  # Editing one Driver leaves every other Driver's go test derivation path
+  # unchanged (issue #5508): a vendor tree or source shared across Drivers
+  # would move them all. Each registry Driver in turn has one file removed; the
+  # sensitivity assert keeps the check from passing vacuously.
+  drivers-go-test-independent =
+    let
+      inherit (pkgs.lib) assertMsg concatStringsSep filterAttrs;
+      drv = set: n: set.${driverGoTestAttr n}.drvPath;
+      independent =
+        p:
+        let
+          file = builtins.head (
+            builtins.attrNames (filterAttrs (_: t: t == "regular") (builtins.readDir (driverDir p)))
+          );
+          after = driverGoTestsFor {
+            files = fs.difference ../../cmd/launcher (driverDir p + "/${file}");
+            inherit (driverRegistry) entries;
+          };
+          moved = builtins.filter (n: n != p && drv driverGoTests n != drv after n) driverNames;
+        in
+        assertMsg (drv driverGoTests p != drv after p)
+          "removing ${file} from the ${p} Driver did not change its own go test derivation; the perturbation is inert"
+        && assertMsg (
+          moved == [ ]
+        ) "editing the ${p} Driver changed the go test derivation of: ${concatStringsSep ", " moved}";
+    in
+    assert builtins.all independent driverNames;
+    pkgs.runCommand "drivers-go-test-independent" { } "touch $out";
 
   # Seam tests (issue #4280): the integration-tagged packages run against the
   # rendered fixtures the bats harness produces, handed over via
