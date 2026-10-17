@@ -64,12 +64,12 @@ func TestDecodeHostOpIsNeverAnError(t *testing.T) {
 func TestDecodeAssistantContent(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	evs := d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"thinking","thinking":"hm"},{"type":"text","text":" hi "},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"ls"}}]}}`)
-	wantKinds(t, evs, driverkit.KindStart, driverkit.KindReasoning, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage)
-	if evs[1].Text != "hm" || evs[2].Text != " hi " || evs[2].MessageID != "m1" {
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindReasoning, driverkit.KindText, driverkit.KindToolCall, driverkit.KindUsage)
+	if evs[2].Text != "hm" || evs[3].Text != " hi " || evs[3].MessageID != "m1" {
 		t.Errorf("content = %+v", evs)
 	}
-	if evs[3].ToolID != "t1" || evs[3].ToolName != "Bash" || string(evs[3].ToolInput) != `{"command":"ls"}` {
-		t.Errorf("tool call = %+v", evs[3])
+	if evs[4].ToolID != "t1" || evs[4].ToolName != "Bash" || string(evs[4].ToolInput) != `{"command":"ls"}` {
+		t.Errorf("tool call = %+v", evs[4])
 	}
 
 	evs = d(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"x"}]}}`)
@@ -87,8 +87,8 @@ func TestDecodeUserStringContentStillSignalsProgress(t *testing.T) {
 func TestDecodeSyntheticAssistantIsErrorNotProgress(t *testing.T) {
 	line := `{"type":"assistant","error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"API Error: 429"}]}}`
 	evs := newDecoderAt(decodeNow)(line)
-	wantKinds(t, evs, driverkit.KindError, driverkit.KindText, driverkit.KindUsage)
-	if evs[0].Text != line || !evs[1].Synthetic {
+	wantKinds(t, evs, driverkit.KindError, driverkit.KindModel, driverkit.KindText, driverkit.KindUsage)
+	if evs[0].Text != line || !evs[1].Synthetic || !evs[2].Synthetic {
 		t.Errorf("events = %+v", evs)
 	}
 }
@@ -148,12 +148,12 @@ func TestDecodeRoleAttribution(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	d(hostop.EncodeSpindriftOp(hostop.SpindriftOp{Op: hostop.OpPassStart, Role: "review"}))
 	evs := d(`{"type":"assistant","message":{"id":"m","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
-	if evs[1].Role != ReviewerRole {
-		t.Errorf("top-level role = %q, want %q", evs[1].Role, ReviewerRole)
+	if evs[2].Role != ReviewerRole {
+		t.Errorf("top-level role = %q, want %q", evs[2].Role, ReviewerRole)
 	}
 	evs = d(`{"type":"assistant","parent_tool_use_id":"task1","message":{"id":"m2","content":[{"type":"text","text":"x"}]}}`)
-	if evs[1].Role != "scout" {
-		t.Errorf("subagent role = %q, want scout", evs[1].Role)
+	if evs[2].Role != "scout" {
+		t.Errorf("subagent role = %q, want scout", evs[2].Role)
 	}
 }
 
@@ -168,10 +168,10 @@ func TestDecodeAssistantUsage(t *testing.T) {
 	d(`{"type":"assistant","message":{"id":"s","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
 
 	split := d(`{"type":"assistant","message":{"id":"m1","model":"claude-opus-4","content":"x","usage":{"input_tokens":1,"output_tokens":2,"cache_read_input_tokens":3,"cache_creation_input_tokens":99,"cache_creation":{"ephemeral_5m_input_tokens":4,"ephemeral_1h_input_tokens":5}}}}`)
-	wantKinds(t, split, driverkit.KindStart, driverkit.KindUsage)
+	wantKinds(t, split, driverkit.KindStart, driverkit.KindModel, driverkit.KindUsage)
 	want := driverkit.Event{Kind: driverkit.KindUsage, MessageID: "m1", Model: "claude-opus-4", Tokens: driverkit.Tokens{Input: 1, Output: 2, CacheRead: 3, CacheWrite5m: 4, CacheWrite1h: 5}}
-	if !reflect.DeepEqual(split[1], want) {
-		t.Errorf("usage = %+v, want %+v", split[1], want)
+	if !reflect.DeepEqual(split[2], want) {
+		t.Errorf("usage = %+v, want %+v", split[2], want)
 	}
 
 	flat := d(`{"type":"assistant","parent_tool_use_id":"task1","message":{"id":"m2","usage":{"cache_creation_input_tokens":7}}}`)
@@ -182,7 +182,7 @@ func TestDecodeAssistantUsage(t *testing.T) {
 
 	// Re-emitted lines still decode in full: only the reader dedups.
 	again := d(`{"type":"assistant","message":{"id":"m1","content":[]}}`)
-	wantKinds(t, again, driverkit.KindStart, driverkit.KindUsage)
+	wantKinds(t, again, driverkit.KindStart, driverkit.KindModel, driverkit.KindUsage)
 }
 
 func TestDecodeResultCarriesSessionTotals(t *testing.T) {
@@ -238,8 +238,8 @@ func TestDecodeTimestampIsTopLevelOnly(t *testing.T) {
 func TestDecodeToolFields(t *testing.T) {
 	d := newDecoderAt(decodeNow)
 	evs := d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"reviewer"}},{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"ls"}}]}}`)
-	if evs[1].ToolTarget != "reviewer" || evs[2].ToolTarget != "ls" {
-		t.Errorf("tool targets = %q, %q", evs[1].ToolTarget, evs[2].ToolTarget)
+	if evs[2].ToolTarget != "reviewer" || evs[3].ToolTarget != "ls" {
+		t.Errorf("tool targets = %q, %q", evs[2].ToolTarget, evs[3].ToolTarget)
 	}
 	evs = d(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"done"},{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":[{"type":"text","text":"boom"}]}]}}`)
 	if evs[1].ToolOutput != "done" || evs[1].Subagent != "reviewer" || evs[1].IsError {
@@ -255,7 +255,7 @@ func TestDecodeToolBlocksOnlyInTheirOwnTurnType(t *testing.T) {
 	evs := d(`{"type":"user","message":{"content":[{"type":"tool_use","id":"t1","name":"Task","input":{"subagent_type":"reviewer"}}]}}`)
 	wantKinds(t, evs, driverkit.KindStart)
 	evs = d(`{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]}}`)
-	wantKinds(t, evs, driverkit.KindStart, driverkit.KindUsage)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindUsage)
 	// The user-turn spawn recorded no role, so a later result is not a subagent report.
 	evs = d(`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"x"}]}}`)
 	wantKinds(t, evs, driverkit.KindStart, driverkit.KindToolResult)
@@ -284,5 +284,51 @@ func TestDecodeMistypedTotalsKeepTextAndEchoLatch(t *testing.T) {
 	wantKinds(t, evs, driverkit.KindResult, driverkit.KindError)
 	if evs[0].NumTurns != 3 || evs[0].NoTotals {
 		t.Errorf("result = %+v", evs[0])
+	}
+}
+
+func TestDecodeAssistantEmitsModelEventBeforeBlocks(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	d(`{"type":"assistant","message":{"id":"s","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
+
+	evs := d(`{"type":"assistant","message":{"id":"m1","model":"claude-opus-4","content":[{"type":"text","text":"hi"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindUsage)
+	want := driverkit.Event{Kind: driverkit.KindModel, MessageID: "m1", Model: "claude-opus-4"}
+	if !reflect.DeepEqual(evs[1], want) {
+		t.Errorf("model = %+v, want %+v", evs[1], want)
+	}
+
+	evs = d(`{"type":"assistant","parent_tool_use_id":"task1","message":{"id":"m2","model":"claude-haiku","content":[{"type":"text","text":"x"},{"type":"thinking","thinking":"y"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindText, driverkit.KindReasoning, driverkit.KindUsage)
+	for _, ev := range evs[1:] {
+		if !ev.InSubagent || ev.Role != "scout" {
+			t.Errorf("%s: InSubagent=%v Role=%q, want subagent scout", ev.Kind, ev.InSubagent, ev.Role)
+		}
+	}
+
+	if evs = d(`{"type":"assistant","message":{"id":"m3","content":[]}}`); evs[1].Kind != driverkit.KindModel || evs[1].Model != "" {
+		t.Errorf("modelless assistant line = %+v", evs)
+	}
+}
+
+func TestDecodeModelEventSyntheticSentinel(t *testing.T) {
+	evs := newDecoderAt(decodeNow)(`{"type":"assistant","message":{"model":"<synthetic>","content":[]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindModel, driverkit.KindUsage)
+	if !evs[1].Synthetic {
+		t.Errorf("sentinel model event not Synthetic: %+v", evs[1])
+	}
+	evs = newDecoderAt(decodeNow)(`{"type":"assistant","error":"rate_limit","message":{"model":"claude-x","content":[]}}`)
+	if evs[1].Kind != driverkit.KindModel {
+		t.Fatalf("events = %+v", evs)
+	}
+}
+
+func TestDecodeToolResultBlockInSubagent(t *testing.T) {
+	d := newDecoderAt(decodeNow)
+	d(`{"type":"assistant","message":{"id":"s","content":[{"type":"tool_use","id":"task1","name":"Task","input":{"subagent_type":"scout"}}]}}`)
+	evs := d(`{"type":"user","parent_tool_use_id":"task1","message":{"content":[{"type":"tool_result","tool_use_id":"t9","content":"x"}]}}`)
+	wantKinds(t, evs, driverkit.KindStart, driverkit.KindToolResult)
+	if !evs[1].InSubagent {
+		t.Errorf("tool_result = %+v", evs[1])
 	}
 }
