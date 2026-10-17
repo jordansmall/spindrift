@@ -115,6 +115,7 @@ func (x *queueRecoverFixture) seedRecord(t *testing.T, num string, seed recoverr
 	}
 	rec := recoverrecord.Load(x.dir, num, bundle)
 	rec.Count, rec.Last, rec.GaveUp, rec.LastError = seed.Count, seed.Last, seed.GaveUp, seed.LastError
+	rec.WorkflowPermissionDenied = seed.WorkflowPermissionDenied
 	if err := rec.Save(); err != nil {
 		t.Fatal(err)
 	}
@@ -921,7 +922,7 @@ func TestRecoverQueueOne_GivesUpAfterBoundWithOneComment(t *testing.T) {
 			t.Fatalf("after run %d: comments = %v, want %d", run, x.fc.CommentCalls, want)
 		}
 	}
-	body := fmt.Sprint(x.fc.CommentCalls[0])
+	body := x.fc.CommentCalls[0].Body
 	for _, sub := range []string{"Auto-recover gave up", "3 attempts", "spindrift recover 42", "relay bundle failed", "relay: boom"} {
 		if !strings.Contains(body, sub) {
 			t.Errorf("comment %q missing %q", body, sub)
@@ -942,6 +943,68 @@ func TestRecoverQueueOne_GivesUpAfterBoundWithOneComment(t *testing.T) {
 	}
 }
 
+// Issue #5411: retrying a Workflows-permission refusal cannot succeed, so the
+// first such failure gives up with the cause and remedy instead of burning the
+// remaining attempts.
+func TestRecoverQueueOne_WorkflowPermissionDeniedGivesUpOnFirstAttempt(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = fmt.Errorf("git push: %w", forge.ErrWorkflowPermissionDenied)
+
+	if code, _ := x.run(t); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+
+	if len(x.fc.CommentCalls) != 1 {
+		t.Fatalf("comments = %v, want exactly one", x.fc.CommentCalls)
+	}
+	body := x.fc.CommentCalls[0].Body
+	for _, sub := range []string{"Auto-recover gave up", "Workflows permission", "by hand", "spindrift recover 42"} {
+		if !strings.Contains(body, sub) {
+			t.Errorf("comment %q missing %q", body, sub)
+		}
+	}
+	if strings.Contains(body, "attempts") {
+		t.Errorf("comment %q should not claim exhausted attempts", body)
+	}
+	id, err := recoverrecord.BundleID(x.dir, "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec := recoverrecord.Load(x.dir, "42", id); rec.Count != 1 || !rec.GaveUp || !rec.WorkflowPermissionDenied {
+		t.Errorf("record = %+v, want Count=1 GaveUp=true WorkflowPermissionDenied=true", rec)
+	}
+	transitions := len(x.fc.TransitionStateCalls)
+
+	code, _ := x.run(t)
+
+	if code != 2 {
+		t.Errorf("second run exit = %d, want 2", code)
+	}
+	if len(x.fc.CommentCalls) != 1 || len(x.fc.TransitionStateCalls) != transitions {
+		t.Errorf("second run wrote the tracker: comments=%v transitions=%v", x.fc.CommentCalls, x.fc.TransitionStateCalls[transitions:])
+	}
+}
+
+// A hand-run recover refused for Workflows permission prints the remedy beside
+// the cause rather than leaving the operator to retry blindly.
+func TestRecoverIssue_HandRunWorkflowPermissionNoteCarriesRemedy(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.fc.RelayBundleErr = fmt.Errorf("git push: %w", forge.ErrWorkflowPermissionDenied)
+	stopCh, abortCh := make(chan struct{}), make(chan struct{})
+	var out strings.Builder
+
+	err := recoverIssue(stopCh, abortCh, false, x.c, x.tracker, x.cf, capsFor(x.tracker, x.cf), x.dir, testFactory(t, x.dir, nil), newWorkSettle(x.c, x.tracker, testWired(x.tracker), x.cf), "42", &out, io.Discard)
+
+	if err == nil {
+		t.Fatal("recoverIssue succeeded, want a failure")
+	}
+	if !strings.Contains(out.String(), "status=failed") || !strings.Contains(out.String(), "Workflows permission") {
+		t.Errorf("output %q, want status=failed with the remedy", out.String())
+	}
+}
+
 // The give-up comment names the draft PR failure, not just the relay stage.
 func TestRecoverQueueOne_GiveUpCommentNamesDraftPRFailure(t *testing.T) {
 	x := newQueueRecoverFixture(t)
@@ -957,7 +1020,7 @@ func TestRecoverQueueOne_GiveUpCommentNamesDraftPRFailure(t *testing.T) {
 	if len(x.fc.CommentCalls) != 1 {
 		t.Fatalf("comments = %v, want exactly one", x.fc.CommentCalls)
 	}
-	body := fmt.Sprint(x.fc.CommentCalls[0])
+	body := x.fc.CommentCalls[0].Body
 	for _, sub := range []string{"draft PR create failed", "pr: boom"} {
 		if !strings.Contains(body, sub) {
 			t.Errorf("comment %q missing %q", body, sub)
@@ -1045,6 +1108,26 @@ func TestRecoverQueueOne_RecordPastBoundGetsOneComment(t *testing.T) {
 	}
 	if body := fmt.Sprint(x.fc.CommentCalls); !strings.Contains(body, "kept failing") || strings.Contains(body, "failed with") {
 		t.Errorf("comment %q, want the generic wording for a record with no cause", body)
+	}
+}
+
+// A Workflows-permission give-up whose comment failed to post is retried on the
+// Exhausted path with no settle error; the stored flag keeps the remedy body.
+func TestRecoverQueueOne_RecordPastBoundKeepsWorkflowRemedy(t *testing.T) {
+	x := newQueueRecoverFixture(t)
+	x.addFailed(t, "42", "ready")
+	x.seedRecord(t, "42", recoverrecord.Record{Count: 5, Last: time.Now().Add(-time.Hour), WorkflowPermissionDenied: true})
+
+	if code, _ := x.run(t); code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+
+	if len(x.fc.CommentCalls) != 1 {
+		t.Fatalf("comments = %v, want exactly one", x.fc.CommentCalls)
+	}
+	body := x.fc.CommentCalls[0].Body
+	if !strings.Contains(body, "Workflows permission") || strings.Contains(body, "attempts") {
+		t.Errorf("comment %q, want the remedy body, not the attempts body", body)
 	}
 }
 

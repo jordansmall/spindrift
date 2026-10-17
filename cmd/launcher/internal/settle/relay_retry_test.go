@@ -438,6 +438,45 @@ func TestSettle_GithubReadOnly_ReadyRelayExhaustsRetriesParksFailedWithBundlePre
 	}
 }
 
+// Pins issue #5411: a Workflows-permission refusal parks with the cause and
+// both remedies, not the generic "retry relaying" advice a retry cannot honour.
+func TestSettle_GithubReadOnly_ReadyWorkflowPermissionDeniedParkCommentNamesRemedy(t *testing.T) {
+	const issNum = "5411"
+	fc := forge.NewFake(testDispatchLabels)
+	fc.BranchPrefix = "agent/issue-"
+	branch := fc.AgentBranch(issNum)
+	fc.SetIssue(forge.Issue{Number: issNum, Labels: []string{"agent-in-progress"}})
+	fc.RelayBundleErr = fmt.Errorf("git push: %w", forge.ErrWorkflowPermissionDenied)
+
+	result := dispatch.Result{
+		Resolved: outcome.Resolved{
+			Found:   true,
+			Outcome: outcome.Outcome{Issue: issNum, Landing: branch, Status: "ready"},
+		},
+		PRIntent:      "feat: add widget\n\nAdds a widget.",
+		PRIntentFound: true,
+	}
+	c := baseConfig()
+	c.ReadOnly = true
+	c.Policy = retry.Policy{Max: 2, Unit: time.Second}
+	_, c.Clock = recordingClock()
+	c.OutboxDir = func(string) string { return t.TempDir() }
+	c.BaseBranch = "main"
+	s := newTestSettle(c, fc.AsNoLandingRecorder(), fc.AsGithubReadOnly())
+
+	captureStdout(t, func() { s.Settle(dispatch.NewFake(), issNum, 0, result) })
+
+	body := fc.CommentCalls[0].Body // the empty-bodied comment after it is the state transition's
+	for _, sub := range []string{"bundle relay failed", "preserved in the outbox", "Workflows permission", "by hand", "spindrift recover " + issNum} {
+		if !strings.Contains(body, sub) {
+			t.Errorf("comment %q missing %q", body, sub)
+		}
+	}
+	if strings.Contains(body, "to retry relaying") {
+		t.Errorf("comment %q offers a plain retry that cannot land the change", body)
+	}
+}
+
 // A Box that wrote no bundle has nothing preserved to recover, so a missing
 // bundle under status=ready keeps the merge-blocked, agent-in-progress outcome.
 func TestSettle_GithubReadOnly_ReadyBundleNotFoundStaysBlockedInProgress(t *testing.T) {

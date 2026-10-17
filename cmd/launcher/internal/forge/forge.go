@@ -5,6 +5,7 @@ package forge
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -32,6 +33,14 @@ var ErrTransientPushFailure = errors.New("transient push failure")
 // Workflows permission. Permanent: no retry can succeed, so it never wraps
 // ErrTransientPushFailure.
 var ErrWorkflowPermissionDenied = errors.New("workflow permission denied")
+
+// WorkflowPermissionRemedy is the cause and remedy for a push refused because
+// it touches `.github/workflows/` without Workflows permission. It is the one
+// source of that prose for the first-settle park comment, the auto-recover
+// give-up, and the hand-run recover note, so they never drift.
+func WorkflowPermissionRemedy(num string) string {
+	return fmt.Sprintf("the change creates or updates a file under `.github/workflows/`, and the push credential lacks Workflows permission, which is off by default on purpose. Retrying cannot land it: land the change by hand, or grant Workflows permission temporarily and run `spindrift recover %s`.", num)
+}
 
 // ErrMergeTransient is returned by Merge when the merge call fails for a
 // transient transport or server reason rather than a genuine rejection
