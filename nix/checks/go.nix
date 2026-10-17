@@ -265,7 +265,10 @@ driverGoTests
         cp -r ${../../lib} src/lib
         chmod -R +w src
         ${goTestPrologue}
-        go test ./...
+        module=$(go list -m)
+        listed=$(go list ./...)
+        # Driver packages run in their own drivers-<name>-go-test derivations.
+        go test $(printf '%s\n' "$listed" | grep -vE "^$module/internal/driver/(${pkgs.lib.concatStringsSep "|" driverNames})(/|\$)")
         touch $out
       '';
 
