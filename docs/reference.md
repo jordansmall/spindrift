@@ -3684,6 +3684,17 @@ contracts and preambles from it, so both suites test one set of bytes.
 contract fixture: that policy was inlined into the prompts (#3505), so no
 rendered file exists to read.
 
+The `piseam` package (issue #5478) is a second kind of seam: it runs the
+locked `pi` binary against a stub OpenAI-compatible Provider and asserts the
+facts the pi Driver depends on (invocation flags, effort suffix, session
+resume, trust, the subagent extension, exit and retry behaviour). `pi` comes
+from `SPINDRIFT_PI_BIN`, which `launcher-go-seam-test` sets, else from `nix
+build` of the flake's locked `nixpkgs#pi-coding-agent`; with neither the tests
+skip. Setting `SPINDRIFT_PI_CAPTURE_DIR=<dir>` makes each run write pi's raw
+JSON event stream to `<dir>/<TestName>.jsonl` (subtest slashes become `_`; a
+later run in the same test is `<TestName>.<n>.jsonl`),
+which is how Pass logs are captured from the locked version.
+
 #### Merge guard
 
 Between CI going green and the merge itself, the launcher checks the PR's
