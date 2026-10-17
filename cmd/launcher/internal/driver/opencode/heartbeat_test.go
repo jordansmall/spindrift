@@ -9,7 +9,6 @@ import (
 	"unicode/utf8"
 
 	"spindrift.dev/launcher/internal/driver/driverkit"
-	"spindrift.dev/launcher/internal/driver/opencode"
 )
 
 // TestWriter_ForwardsRawBytesUnchanged verifies that every byte written to
@@ -18,7 +17,7 @@ import (
 // contract.
 func TestWriter_ForwardsRawBytesUnchanged(t *testing.T) {
 	var raw, out bytes.Buffer
-	w := opencode.New(&raw, "42", &out)
+	w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
 
 	ndjson := `{"type":"text","part":{"text":"Investigating."}}` + "\n" +
 		`{"type":"error","error":"boom"}` + "\n"
@@ -40,7 +39,7 @@ func TestWriter_ForwardsRawBytesUnchanged(t *testing.T) {
 // number.
 func TestWriter_EmitsHeartbeatOnTextEvent(t *testing.T) {
 	var raw, out bytes.Buffer
-	w := opencode.New(&raw, "42", &out)
+	w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
 
 	if _, err := w.Write([]byte(`{"type":"text","part":{"text":"Investigating the issue."}}` + "\n")); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -54,7 +53,7 @@ func TestWriter_EmitsHeartbeatOnTextEvent(t *testing.T) {
 // doesn't panic the parser, only skips heartbeat emission for that line.
 func TestWriter_NoPanicOnMalformedLine(t *testing.T) {
 	var raw, out bytes.Buffer
-	w := opencode.New(&raw, "42", &out)
+	w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
 
 	if _, err := w.Write([]byte("not json\n\n")); err != nil {
 		t.Fatalf("Write: %v", err)
@@ -91,7 +90,7 @@ func TestWriter_SanitizesAndBoundsHeartbeat(t *testing.T) {
 			in := append(ev, '\n')
 
 			var raw, out bytes.Buffer
-			w := opencode.New(&raw, "42", &out)
+			w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
 			if _, err := w.Write(in); err != nil {
 				t.Fatalf("Write: %v", err)
 			}
@@ -135,9 +134,9 @@ func TestWriter_OnModelFiresOnChangeOnly(t *testing.T) {
 
 	var got []call
 	var raw, out bytes.Buffer
-	w := opencode.New(&raw, "42", &out).OnModel(func(model, role string) {
+	w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{OnModel: func(model, role string) {
 		got = append(got, call{model, role})
-	})
+	}})
 	if _, err := w.Write([]byte(stream)); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -148,7 +147,7 @@ func TestWriter_OnModelFiresOnChangeOnly(t *testing.T) {
 	}
 
 	var plainRaw, plainOut bytes.Buffer
-	if _, err := opencode.New(&plainRaw, "42", &plainOut).Write([]byte(stream)); err != nil {
+	if _, err := newDriver(t).NewHeartbeatWriter(&plainRaw, "42", &plainOut, driverkit.RenderOptions{}).Write([]byte(stream)); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 	if raw.String() != stream {
@@ -161,7 +160,7 @@ func TestWriter_OnModelFiresOnChangeOnly(t *testing.T) {
 
 func TestWriter_NilOnModelDoesNotPanic(t *testing.T) {
 	var raw, out bytes.Buffer
-	w := opencode.New(&raw, "42", &out).OnModel(nil)
+	w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{})
 	if _, err := w.Write([]byte(`{"type":"step_finish","part":{"modelID":"A"}}` + "\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -173,9 +172,9 @@ func TestWriter_RendersHostOpLine(t *testing.T) {
 	type call struct{ model, role string }
 	var got []call
 	var raw, out bytes.Buffer
-	w := opencode.New(&raw, "42", &out).OnModel(func(model, role string) {
+	w := newDriver(t).NewHeartbeatWriter(&raw, "42", &out, driverkit.RenderOptions{OnModel: func(model, role string) {
 		got = append(got, call{model, role})
-	})
+	}})
 	stream := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n" +
 		`{"type":"step_finish","part":{"messageID":"m","modelID":"A"}}` + "\n"
 	if _, err := w.Write([]byte(stream)); err != nil {
