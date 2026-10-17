@@ -399,7 +399,7 @@ in
     env = "FORGEJO_BASE_URL";
     group = "issues";
     default = "https://codeberg.org";
-    doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo";
+    doc = "Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
     flakeOption = true;
     legacySettingsExempt = true;
     nixSubPath = "forgejo.baseURL";
@@ -681,7 +681,7 @@ in
     env = "FORGEJO_TOKEN";
     secret = true;
     hostConfig = true;
-    doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo";
+    doc = "Forgejo/Gitea API token (Bearer/token scheme); required when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo";
     boxEnv = true;
   };
   boxForgejoToken = {

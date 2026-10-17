@@ -48,7 +48,7 @@ See [`docs/reference.md`](reference.md) for the full option surface and runtime 
 
 | attr path | env var | default | description |
 |---|---|---|---|
-| `perSystem.spindrift.issues.forgejo.baseURL` | `FORGEJO_BASE_URL` | `https://codeberg.org` | Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo |
+| `perSystem.spindrift.issues.forgejo.baseURL` | `FORGEJO_BASE_URL` | `https://codeberg.org` | Forgejo/Gitea instance base URL, defaulting to Codeberg; used when ISSUE_TRACKER=forgejo or CODE_FORGE=forgejo |
 | `perSystem.spindrift.issues.jira.baseURL` | `JIRA_BASE_URL` | — | Jira site base URL (e.g. https://yourcompany.atlassian.net); required when ISSUE_TRACKER=jira |
 | `perSystem.spindrift.issues.jira.email` | `JIRA_EMAIL` | — | Jira Cloud account email, paired with JIRA_TOKEN for Basic auth; setting it also selects Jira Cloud's search APIs; leave empty for Bearer-token auth (Jira Server/Data Center PATs, which keep the v2 /search) |
 | `perSystem.spindrift.issues.jira.includeComments` | `JIRA_INCLUDE_COMMENTS` | `false` | DEPRECATED no-op: Jira comments always reach the prompt (the last 10, attributed, through the adapter's comment lister) whether or not this is set. Kept so existing configs still evaluate; will be removed |
