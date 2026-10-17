@@ -26,12 +26,16 @@ func newCache() (*cache, error) {
 // so a resumed session cannot cross into another issue's trust domain. A nil
 // receiver and a creation failure both return "", which the Dispatch treats as
 // no mount: a fix box degrades to the cold-context flow rather than erroring.
+//
+// The dir must be Box-writable (issue #5387): under rootless podman the host
+// user maps to root in the Box, not uid 1000. The 0700 MkdirTemp root still
+// keeps other host users out.
 func (c *cache) dirFor(num string) string {
 	if c == nil {
 		return ""
 	}
 	dir := filepath.Join(c.root, num)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := mkdirBoxWritable(dir); err != nil {
 		return ""
 	}
 	return dir
