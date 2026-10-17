@@ -59,7 +59,7 @@ func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
 	// Only the first attempt's failure is transient; a later classification
 	// is terminal so the retry loop ends after the one rotated attempt.
 	classified := false
-	drv := fakeDriver{ClassifyFn: func(string) (driver.Classification, error) {
+	drv := fakeDriver{DriverName: "opencode", ClassifyFn: func(string) (driver.Classification, error) {
 		if !classified {
 			classified = true
 			return driver.Classification{Class: driver.Transient, Reason: driver.Overloaded}, nil
@@ -125,7 +125,7 @@ func TestDispatchStamp_EveryPassLogCarriesOneRecordID(t *testing.T) {
 	if r.Kind != "work" || r.DispatchKey != "1" {
 		t.Errorf("kind/key = %q/%q, want work/1", r.Kind, r.DispatchKey)
 	}
-	if r.Revision != "abc123" || r.Driver != "fake" || r.DriverVersion != "9.9.9" ||
+	if r.Revision != "abc123" || r.Driver != "opencode" || r.DriverVersion != "9.9.9" ||
 		!reflect.DeepEqual(r.RoleModels, cfg.Stamp.RoleModels) || !reflect.DeepEqual(r.Knobs, cfg.Stamp.Knobs) {
 		t.Errorf("stamp facts lost: %+v", r)
 	}

@@ -13,16 +13,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
 	"spindrift.dev/launcher/internal/dispatchkey"
 	"spindrift.dev/launcher/internal/dispatchkind"
-	"spindrift.dev/launcher/internal/driver/claude"
+	"spindrift.dev/launcher/internal/driver"
 	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
-	"spindrift.dev/launcher/internal/logscan"
 	"spindrift.dev/launcher/internal/outcome"
 	"spindrift.dev/launcher/internal/passmachine"
 )
@@ -162,48 +160,62 @@ func ChainKey(name string) (key string, satellite, ok bool) {
 	return "", false, false
 }
 
-// logLine is the union of the stream-json fields this package reads. The
-// embedded Event supplies type, message, and the synthetic spindrift_op.
-type logLine struct {
-	claude.Event
-	Timestamp     string  `json:"timestamp"`
-	Result        string  `json:"result"`
-	TotalCostUSD  float64 `json:"total_cost_usd"`
-	DurationMs    int64   `json:"duration_ms"`
-	DurationApiMs int64   `json:"duration_api_ms"`
-	Usage         struct {
-		InputTokens              int `json:"input_tokens"`
-		OutputTokens             int `json:"output_tokens"`
-		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-	} `json:"usage"`
-	ModelUsage map[string]json.RawMessage `json:"modelUsage"`
-}
-
-type passAcc struct {
-	Pass
-	models   map[string]bool
-	seenIDs  map[string]bool
+// passShell is what the host ops say about one pass-log segment; mergePasses
+// fills in the rest from the Driver's tally.
+type passShell struct {
+	ordinal  int
+	role     string
+	verdict  string
 	opCalls  int
-	results  int
 	explicit bool
 }
 
-func newPass(ordinal int, role string, explicit bool) *passAcc {
-	return &passAcc{Pass: Pass{Ordinal: ordinal, Role: role}, models: map[string]bool{}, seenIDs: map[string]bool{}, explicit: explicit}
-}
-
-func (p *passAcc) finish() Pass {
-	out := p.Pass
-	out.Models = make([]string, 0, len(p.models))
-	for m := range p.models {
-		out.Models = append(out.Models, m)
+// mergePasses joins each segment's shell with its tally into Passes and
+// returns the status of the last parseable SPINDRIFT_OUTCOME in any result.
+// tallies holds one entry per shell: both split the log at every pass_start.
+func mergePasses(shells []*passShell, tallies []driverkit.PassTally, log string) (passes []Pass, boxStatus string) {
+	passes = []Pass{}
+	for i, sh := range shells {
+		t := tallies[i]
+		for _, text := range t.Results {
+			if line := outcome.ExtractOutcomeLine(outcome.StripResultText(text)); line != "" {
+				if o, err := outcome.Parse(line); err == nil {
+					boxStatus = o.Status
+				}
+			}
+		}
+		// A stray implicit pass is real only if it produced a result; an
+		// explicit one stays even when the run died before its first turn.
+		if !sh.explicit && len(t.Results) == 0 {
+			continue
+		}
+		// Strictly increasing: an implicit pass 1 before a pass_start that also
+		// says pass 1 must not collide in the store.
+		ordinal := sh.ordinal
+		if n := len(passes); n > 0 && ordinal <= passes[n-1].Ordinal {
+			ordinal = passes[n-1].Ordinal + 1
+		}
+		p := Pass{
+			Ordinal: ordinal, Role: sh.role, Models: t.Models, Verdict: sh.verdict, Log: log,
+			USD: t.Usage.TotalCostUSD, InputTokens: t.Usage.InputTokens, OutputTokens: t.Usage.OutputTokens,
+			CacheReadInputTokens: t.Usage.CacheReadInputTokens, CacheCreationInputTokens: t.Usage.CacheCreationInputTokens,
+			APICalls: t.APICalls, Turns: t.Usage.NumTurns, DurationMs: t.Usage.DurationMs, APIDurationMs: t.Usage.DurationApiMs,
+		}
+		if p.Models == nil {
+			p.Models = []string{}
+		}
+		if sh.opCalls > 0 {
+			p.APICalls = sh.opCalls
+		}
+		if passmachine.Role(sh.role).IsReview() && len(t.Results) > 0 {
+			p.VerdictText = t.Results[len(t.Results)-1]
+		}
+		if sh.role == string(passmachine.RoleFix) && t.Wrote {
+			p.Dispositions = t.Written
+		}
+		passes = append(passes, p)
 	}
-	sort.Strings(out.Models)
-	if p.opCalls > 0 {
-		out.APICalls = p.opCalls
-	}
-	return out
+	return passes, boxStatus
 }
 
 // RecordID is the identity of a Dispatch Record: its kind, key, and claim time
@@ -243,7 +255,7 @@ func ReadStamp(path string) (hostop.DispatchStart, bool) {
 			// A stamp is a short line; an oversized one is Box output.
 			return hostop.DispatchStart{}, false
 		}
-		var ev logLine
+		var ev hostop.Event
 		if json.Unmarshal(bytes.TrimSpace(line), &ev) != nil || ev.Type == "" {
 			continue
 		}
@@ -267,10 +279,16 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	if err != nil {
 		return Record{}, false, time.Time{}, err
 	}
+	// The stamp names the Driver whose grammar the rest of the log is in; an
+	// unstamped log predates Driver choice and reads as claude.
+	pre, preOK := ReadStamp(path)
+	d, err := driver.New(pre.Driver)
+	if err != nil {
+		return Record{}, false, time.Time{}, fmt.Errorf("dispatch_start: %w", err)
+	}
 
 	var (
-		passes    = []Pass{}
-		cur       = newPass(1, "", false)
+		shells    = []*passShell{{ordinal: 1}}
 		firstRole string
 		sawStart  bool
 		firstTS   time.Time
@@ -282,178 +300,79 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 		// the op need not follow the stamp it must match.
 		hashes  = map[string]map[string]string{}
 		settled *hostop.DispatchSettled
-		// boxStatus is the status of the last SPINDRIFT_OUTCOME line in any result.
-		boxStatus string
 		// status is the last plain-text SPINDRIFT_OUTCOME line's status.
 		status string
 		// announced is the kind named by the Box's first plain-text announce
 		// line ("==> claude <verb> ..."); empty when the log has none.
 		announced string
-		// pendingDispositions holds a fix pass's Write to the dispositions file,
-		// by tool_use ID, until its tool_result shows the Write took effect.
-		pendingDispositions = map[string]string{}
 	)
-	closeCur := func() {
-		// A stray implicit pass is real only if it produced a result; an
-		// explicit one stays even when the run died before its first turn.
-		if cur.explicit || cur.results > 0 {
-			passes = append(passes, cur.finish())
-		}
-	}
 
-	err = driverkit.ScanLog(path, logscan.SkipOversized, func(line string) {
-		s := strings.TrimSpace(line)
-		if s == "" {
-			return
-		}
+	tallies, err := d.ReadPasses(path, passmachine.DispositionsPath, func(l driverkit.PassLine) {
 		sawLine = true
 		// The agent's outcome line and the Box's announce line are plain text,
-		// not stream-json events, so they must be read before the JSON
-		// prefilter below drops them.
-		if r, ok := outcome.SelfReportFromLogLine(s); ok {
+		// not events, so they must be read before the event check below.
+		if r, ok := outcome.SelfReportFromLogLine(l.Text); ok {
 			status = r.Status
 			return
 		}
-		if k := announcedKind(s); k != "" {
+		if k := announcedKind(l.Text); k != "" {
 			if announced == "" {
 				announced = k
 			}
 			return
 		}
-		if !strings.Contains(s, `"timestamp"`) && !strings.Contains(s, `"type":"result"`) &&
-			!strings.Contains(s, `"type":"assistant"`) && !strings.Contains(s, `"`+hostop.TypeSpindriftOp+`"`) &&
-			!strings.Contains(s, `"tool_result"`) {
-			return
-		}
-		var ev logLine
-		if json.Unmarshal([]byte(s), &ev) != nil || ev.Type == "" {
+		if !l.Event {
 			return
 		}
 		first := !sawEvent
 		sawEvent = true
+		op := l.HostOp
 		// The host appends only dispatch_settled ops after the Box exits, so
 		// anything else after a settled op means the Box printed it.
-		if ev.Type != hostop.TypeSpindriftOp || ev.SpindriftOp == nil || ev.SpindriftOp.Op != hostop.OpDispatchSettled {
+		if op == nil || op.Op != hostop.OpDispatchSettled {
 			settled = nil
 		}
-		if ev.Timestamp != "" && !haveTS {
-			if t, perr := time.Parse(time.RFC3339Nano, ev.Timestamp); perr == nil {
-				firstTS, haveTS = t, true
-			}
+		if l.Timestamp != 0 && !haveTS {
+			firstTS, haveTS = time.UnixMilli(l.Timestamp), true
 		}
-		switch ev.Type {
-		case hostop.TypeSpindriftOp:
-			op := ev.SpindriftOp
-			if op == nil {
-				return
+		if op == nil {
+			return
+		}
+		cur := shells[len(shells)-1]
+		switch op.Op {
+		case hostop.OpDispatchStart:
+			if first && op.Start != nil && op.Start.RecordID != "" {
+				stamp = op.Start
 			}
-			switch op.Op {
-			case hostop.OpDispatchStart:
-				if first && op.Start != nil && op.Start.RecordID != "" {
-					stamp = op.Start
+		case hostop.OpPromptHashes:
+			if h := op.PromptHashes; h != nil {
+				if hashes[h.RecordID] == nil {
+					hashes[h.RecordID] = map[string]string{}
 				}
-			case hostop.OpPromptHashes:
-				if h := op.PromptHashes; h != nil {
-					if hashes[h.RecordID] == nil {
-						hashes[h.RecordID] = map[string]string{}
-					}
-					maps.Copy(hashes[h.RecordID], h.Roles)
-				}
-			case hostop.OpDispatchSettled:
-				// An op naming another Record is not this log's to claim, and
-				// must not displace one that is. The Box shares this log and
-				// knows the Record ID, so a tokened stamp also demands the host
-				// token, which the Box never learns: it cannot read its pass log
-				// (runner mounts never bind .spindrift/logs). A legacy token-less
-				// stamp falls back to the ordering rule above alone.
-				if op.Settled != nil && stamp != nil && op.Settled.RecordID == stamp.RecordID &&
-					(stamp.HostToken == "" || op.Settled.HostToken == stamp.HostToken) {
-					settled = op.Settled
-				}
-			case hostop.OpPassStart:
-				if !sawStart {
-					firstRole = op.Role
-				}
-				sawStart = true
-				closeCur()
-				clear(pendingDispositions)
-				// Strictly increasing: an implicit pass 1 before a pass_start
-				// that also says pass 1 must not collide in the store.
-				last := 0
-				if len(passes) > 0 {
-					last = passes[len(passes)-1].Ordinal
-				}
-				ordinal := op.Pass
-				if ordinal <= last {
-					ordinal = last + 1
-				}
-				cur = newPass(ordinal, op.Role, true)
-			case hostop.OpVerdict:
-				cur.Verdict = op.Verdict
-			case hostop.OpPassUsage:
-				if op.Usage != nil {
-					cur.opCalls = op.Usage.APICalls
-				}
+				maps.Copy(hashes[h.RecordID], h.Roles)
 			}
-		case "assistant":
-			if ev.Message == nil {
-				return
+		case hostop.OpDispatchSettled:
+			// An op naming another Record is not this log's to claim, and
+			// must not displace one that is. The Box shares this log and
+			// knows the Record ID, so a tokened stamp also demands the host
+			// token, which the Box never learns: it cannot read its pass log
+			// (runner mounts never bind .spindrift/logs). A legacy token-less
+			// stamp falls back to the ordering rule above alone.
+			if op.Settled != nil && stamp != nil && op.Settled.RecordID == stamp.RecordID &&
+				(stamp.HostToken == "" || op.Settled.HostToken == stamp.HostToken) {
+				settled = op.Settled
 			}
-			// Stream-json repeats one message ID across events that each
-			// carry different blocks, so scan blocks before deduping.
-			if cur.Role == string(passmachine.RoleFix) {
-				for _, b := range ev.Message.Content {
-					if b.Type != "tool_use" || b.Name != "Write" {
-						continue
-					}
-					var in struct {
-						FilePath string `json:"file_path"`
-						Content  string `json:"content"`
-					}
-					if json.Unmarshal(b.Input, &in) == nil && in.FilePath == passmachine.DispositionsPath {
-						pendingDispositions[b.ID] = in.Content
-					}
-				}
+		case hostop.OpPassStart:
+			if !sawStart {
+				firstRole = op.Role
 			}
-			if id := ev.Message.ID; id != "" {
-				if cur.seenIDs[id] {
-					return
-				}
-				cur.seenIDs[id] = true
-			}
-			cur.APICalls++
-		case "user":
-			if ev.Message == nil {
-				return
-			}
-			for _, b := range ev.Message.Content {
-				if content, ok := pendingDispositions[b.ToolUseID]; ok && b.Type == "tool_result" {
-					delete(pendingDispositions, b.ToolUseID)
-					if !b.IsError {
-						cur.Dispositions = content
-					}
-				}
-			}
-		case "result":
-			cur.results++
-			if line := outcome.ExtractOutcomeLine(outcome.StripResultText(ev.Result)); line != "" {
-				if o, perr := outcome.Parse(line); perr == nil {
-					boxStatus = o.Status
-				}
-			}
-			if passmachine.Role(cur.Role).IsReview() {
-				cur.VerdictText = ev.Result
-			}
-			cur.USD += ev.TotalCostUSD
-			cur.InputTokens += ev.Usage.InputTokens
-			cur.OutputTokens += ev.Usage.OutputTokens
-			cur.CacheReadInputTokens += ev.Usage.CacheReadInputTokens
-			cur.CacheCreationInputTokens += ev.Usage.CacheCreationInputTokens
-			cur.Turns += ev.NumTurns
-			cur.DurationMs += ev.DurationMs
-			cur.APIDurationMs += ev.DurationApiMs
-			for m := range ev.ModelUsage {
-				cur.models[m] = true
+			sawStart = true
+			shells = append(shells, &passShell{ordinal: op.Pass, role: op.Role, explicit: true})
+		case hostop.OpVerdict:
+			cur.verdict = op.Verdict
+		case hostop.OpPassUsage:
+			if op.Usage != nil {
+				cur.opCalls = op.Usage.APICalls
 			}
 		}
 	})
@@ -463,10 +382,15 @@ func parseLog(path string) (rec Record, provisional bool, segment time.Time, err
 	if !sawLine {
 		return Record{}, false, time.Time{}, ErrEmptyLog
 	}
-	closeCur()
-	for i := range passes {
-		passes[i].Log = base
+	// ReadStamp picked the Driver before the loop ran; a stamp only the loop
+	// accepted was read in a grammar chosen without it.
+	if stamp != nil && (!preOK || pre.RecordID != stamp.RecordID) {
+		return Record{}, false, time.Time{}, errors.New("dispatch_start: stamp not first in log, Driver unknown")
 	}
+	if len(tallies) != len(shells) {
+		return Record{}, false, time.Time{}, fmt.Errorf("pass log split into %d tallies for %d pass segments", len(tallies), len(shells))
+	}
+	passes, boxStatus := mergePasses(shells, tallies, base)
 
 	if stamp != nil {
 		claim := stamp.ClaimTime.UTC()
