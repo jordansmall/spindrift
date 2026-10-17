@@ -1490,7 +1490,16 @@ and the guard plugin described after this list (issue #5346):
   exits any other code blocks the call with exit 2 and a stderr message
   naming the hook. A hook's own allow, deny JSON, and exit 2 pass through
   unchanged. The wrap covers `bash-output-tee.sh`, so a failure there (for
-  example `/tmp` full or read-only) now blocks the Bash call too.
+  example `/tmp` full or read-only) now blocks the Bash call too. A hook
+  that hangs would also fail open, since Claude Code treats its own hook
+  timeout as a non-blocking error, so the wrapper runs each hook under
+  coreutils `timeout -k 2 10` (issue #5413): after 10 seconds the hook is
+  sent TERM, then KILL 2 seconds later, and the call is refused as `timed
+  out` (or `failed` for a killed hook), matching the opencode plugin's
+  10-second bound. A missing `timeout` binary exits 127 and refuses as
+  `cannot run`. Each `PreToolUse` entry also sets Claude's own hook
+  `timeout` to 30 seconds, above the wrapper's 12-second worst case, so a
+  lower Claude default never cuts the wrapper off first.
 - **Credential-read deny hook.** A second `PreToolUse` hook,
   `agent/credential-deny.sh`, is baked in and registered in the image's
   `~/.claude/settings.json` alongside `reject-background-bash.sh` (issue
