@@ -423,3 +423,26 @@ func TestActivityFeed_UnreadableLog_ReturnsEmpty(t *testing.T) {
 		t.Errorf("ActivityFeed() = %v, want nil for an unreadable log", got)
 	}
 }
+
+// An opencode dispatch's pass log carries the host's spindrift_op lines; the
+// feed shows them as the claude feed does.
+func TestActivityFeed_OpencodeShowsHostOpLines(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".spindrift", "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":1,"role":"implement"}}` + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".spindrift", "logs", "issue-9.log"), []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	drv, err := driver.New("opencode")
+	if err != nil {
+		t.Fatalf("driver.New: %v", err)
+	}
+	for _, line := range ActivityFeed(drv, dir, "9") {
+		if strings.Contains(line.Text, "pass 1 (implement) started") {
+			return
+		}
+	}
+	t.Error("ActivityFeed() has no pass-start host-op line")
+}

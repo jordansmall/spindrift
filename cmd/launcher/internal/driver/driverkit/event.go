@@ -78,7 +78,7 @@ const (
 
 	// KindHostOp is spindrift's own host-written spindrift_op line, which
 	// rides the Pass log in every Driver's stream. Fills HostOp and
-	// Timestamp.
+	// Timestamp. The heartbeat writer renders it via FormatSpindriftOp.
 	KindHostOp Kind = "host_op"
 )
 

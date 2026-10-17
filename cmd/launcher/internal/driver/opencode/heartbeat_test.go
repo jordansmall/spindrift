@@ -166,3 +166,25 @@ func TestWriter_NilOnModelDoesNotPanic(t *testing.T) {
 		t.Fatalf("Write: %v", err)
 	}
 }
+
+// Host-op lines ride every Driver's stream; the heartbeat renders them as
+// claude's does, and a pass_start does not change the role OnModel reports.
+func TestWriter_RendersHostOpLine(t *testing.T) {
+	type call struct{ model, role string }
+	var got []call
+	var raw, out bytes.Buffer
+	w := opencode.New(&raw, "42", &out).OnModel(func(model, role string) {
+		got = append(got, call{model, role})
+	})
+	stream := `{"type":"spindrift_op","spindrift_op":{"op":"pass_start","pass":2,"role":"review"}}` + "\n" +
+		`{"type":"step_finish","part":{"messageID":"m","modelID":"A"}}` + "\n"
+	if _, err := w.Write([]byte(stream)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if want := "#42 ○ pass 2 (review) started\n"; out.String() != want {
+		t.Errorf("out = %q, want %q", out.String(), want)
+	}
+	if want := []call{{"A", ""}}; !slices.Equal(got, want) {
+		t.Errorf("OnModel calls = %v, want %v", got, want)
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/usage"
 )
 
@@ -411,4 +412,26 @@ func TestHeartbeatWriterCallbackRunsOutsideLock(t *testing.T) {
 
 func byModelOf(nd func() Decoder) func(string) ([]usage.ModelUsage, error) {
 	return func(path string) ([]usage.ModelUsage, error) { return UsageByModel(path, nd) }
+}
+
+func TestHeartbeatWriterRendersHostOp(t *testing.T) {
+	op := hostop.SpindriftOp{Op: hostop.OpPassStart, Pass: 2, Role: "review"}
+	table := map[string][]Event{
+		"op":  {{Kind: KindHostOp, HostOp: &op}},
+		"nil": {{Kind: KindHostOp}},
+	}
+	var raw, out bytes.Buffer
+	w := NewHeartbeatWriter(&raw, "7", &out, fakeDecoder(table), "")
+	if _, err := w.Write([]byte("nil\n")); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("nil HostOp wrote %q, want nothing", out.String())
+	}
+	if _, err := w.Write([]byte("op\n")); err != nil {
+		t.Fatal(err)
+	}
+	if want := FormatSpindriftOp("7", op) + "\n"; out.String() != want {
+		t.Errorf("out = %q, want %q", out.String(), want)
+	}
 }
