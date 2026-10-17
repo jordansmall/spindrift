@@ -5,13 +5,19 @@ package driver
 var descriptors = []Descriptor{
 	{
 		Name: "claude",
+		Credentials: []CredentialRule{
+			{Env: []string{"CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"}, Remedy: "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY", SetupCommand: []string{"claude", "setup-token"}},
+		},
 	},
 	{
 		Name:                     "opencode",
 		ProviderNamespacedModels: true,
+		Credentials: []CredentialRule{
+			{Env: []string{"OPENCODE_AUTH_CONTENT"}, ModelPrefix: "github-copilot/", Remedy: "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver"},
+		},
 	},
 }
 
 // descriptorRowFields lists the Descriptor fields the nix table renders, for
 // the struct-sync test; it is not read at runtime.
-var descriptorRowFields = []string{"Name", "ProviderNamespacedModels"}
+var descriptorRowFields = []string{"Name", "ProviderNamespacedModels", "Credentials"}

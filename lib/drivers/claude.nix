@@ -11,6 +11,21 @@
 
   bin = "claude";
 
+  # OAuth first as the documented primary, API key as the fallback.
+  credentials = [
+    {
+      env = [
+        "CLAUDE_CODE_OAUTH_TOKEN"
+        "ANTHROPIC_API_KEY"
+      ];
+      remedy = "set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token') or ANTHROPIC_API_KEY";
+      setupCommand = [
+        "claude"
+        "setup-token"
+      ];
+    }
+  ];
+
   # Space-separated so driver-exec can word-split these (strings.Fields).
   # --disallowedTools removes the tools that promise a later re-invocation the
   # headless runner never makes (issue #1609; #1542 lost a run when the Driver

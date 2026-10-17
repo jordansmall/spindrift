@@ -11,6 +11,8 @@ let
   # session state omits it (see lib/preambles.nix's renderDriverMountPreamble).
   # When present, assertShape checks its shape: a non-empty relative path with
   # no empty, "." or ".." segment (so no leading/trailing/doubled slash either).
+  # credentials is a list of rules (possibly empty), shape-checked by
+  # credentialRuleErrors.
   # configFiles (home-relative path -> content, baked by lib/image.nix) is
   # optional and unvalidated.
   requiredAttrs = [
@@ -22,7 +24,41 @@ let
     "agentsJsonTemplate"
     "agentFilesTemplate"
     "argvShape"
+    "credentials"
   ];
+
+  # A credential rule is plain data (ADR 0066 decision 7) so it can travel in
+  # the launcher input document (ADR 0020). Unknown keys are refused so a
+  # misspelt optional key cannot silently vanish.
+  credentialRuleKeys = [
+    "env"
+    "modelPrefix"
+    "remedy"
+    "setupCommand"
+  ];
+  isNonEmptyStringList =
+    v: builtins.isList v && v != [ ] && lib.all (s: builtins.isString s && s != "") v;
+  credentialRuleErrors =
+    rule:
+    if !builtins.isAttrs rule then
+      [ "must be an attribute set" ]
+    else
+      let
+        unknownKeys = lib.filter (k: !(lib.elem k credentialRuleKeys)) (builtins.attrNames rule);
+      in
+      lib.optional (
+        !(rule ? env && isNonEmptyStringList rule.env)
+      ) "env must be a non-empty list of non-empty strings"
+      ++ lib.optional (
+        !(rule ? remedy && builtins.isString rule.remedy && rule.remedy != "")
+      ) "remedy must be a non-empty string"
+      ++ lib.optional (
+        rule ? modelPrefix && !(builtins.isString rule.modelPrefix && rule.modelPrefix != "")
+      ) "modelPrefix must be a non-empty string when present (omit it for a rule that always applies)"
+      ++ lib.optional (
+        rule ? setupCommand && !isNonEmptyStringList rule.setupCommand
+      ) "setupCommand must be a non-empty list of non-empty strings when present"
+      ++ lib.optional (unknownKeys != [ ]) "unknown key(s): ${lib.concatStringsSep ", " unknownKeys}";
 
   # Names both the Driver and every missing attribute, so an incomplete entry
   # dies at build time rather than in a live Box.
@@ -48,6 +84,18 @@ let
             ]
           ) (lib.splitString "/" entry.sessionCacheDirRelative))
         );
+      credentialsErrors =
+        if !builtins.isList entry.credentials then
+          [ "Driver '${driverName}' credentials must be a list of rules" ]
+        else
+          lib.concatLists (
+            lib.imap0 (
+              i: rule:
+              map (e: "Driver '${driverName}' has an invalid credentials[${toString i}]: ${e}") (
+                credentialRuleErrors rule
+              )
+            ) entry.credentials
+          );
       errors =
         lib.optional (
           missing != [ ]
@@ -57,7 +105,8 @@ let
             lib.generators.toPretty { } entry.sessionCacheDirRelative
           else
             "a ${builtins.typeOf entry.sessionCacheDirRelative}"
-        }";
+        }"
+        ++ lib.optionals (!(lib.elem "credentials" missing)) credentialsErrors;
     in
     if errors != [ ] then throw (lib.concatStringsSep "; " errors) else entry;
 

@@ -59,6 +59,18 @@ in
 
   bin = "opencode";
 
+  # The github-copilot Provider is OAuth-only (ADR 0009 amendment, #260) and
+  # reads the credential from OPENCODE_AUTH_CONTENT. Other opencode Providers
+  # carry their own apiKey via the {env:} config leg, so the rule applies only
+  # when some model is Copilot.
+  credentials = [
+    {
+      env = [ "OPENCODE_AUTH_CONTENT" ];
+      modelPrefix = "github-copilot/";
+      remedy = "set OPENCODE_AUTH_CONTENT for the github-copilot Provider (run 'opencode auth login -p github-copilot' on a host, then export the auth slice) under the opencode Driver";
+    }
+  ];
+
   # opencode model ids are `<provider>/<model>`; lib/mkHarness.nix drops a
   # worker whose model lacks the "/" rather than bake an id opencode would
   # reject (issue #5331), and fails eval on any other bare roster or default
