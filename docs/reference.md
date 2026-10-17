@@ -886,7 +886,9 @@ and evicts that directory — it never reads, copies, parses, or chmods its
 contents. The one mode it sets is on the per-issue directory itself, forced
 to `0777` regardless of umask so the Box's uid-1000 user can write it under
 rootless uid remapping; the cache root stays `0700`, private to the invoking
-user.
+user. Eviction removes the Box-created entries through the runner, which
+under rootless podman falls back to `podman unshare rm -rf` because those
+entries are owned by a remapped subuid.
 The persisted session never leaves the host (it is not pushed
 to the remote or attached to the PR). The cache is keyed strictly
 `<cache>/<issue>`, so a session can only ever be resumed within its own

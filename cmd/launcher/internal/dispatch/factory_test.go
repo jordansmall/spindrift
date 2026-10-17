@@ -1,6 +1,8 @@
 package dispatch
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -376,5 +378,34 @@ func TestFactory_NewChore_ZeroClaimTimeMintsAtRun(t *testing.T) {
 	d := f.NewChore(Chore{Name: "tuning", Branch: "main"})
 	if got := d.RecordID(); got != "" {
 		t.Fatalf("RecordID before Run = %q, want empty", got)
+	}
+}
+
+// The cache removes through the runner so Box-owned (subuid) entries under
+// rootless podman are evicted (issue #5387); os.RemoveAll alone would leak them.
+func TestFactory_CacheRemovesThroughRunner(t *testing.T) {
+	fr := runner.NewFake()
+	cfg := Config{DriverSessionCacheDir: "/home/agent/.claude/projects"}
+	f, err := NewFactory(cfg, tempLogDir(t), fr, fakeDriver{}, RealClock())
+	if err != nil {
+		t.Fatalf("NewFactory: %v", err)
+	}
+	root := f.cache.root
+
+	d := f.New("55", "T")
+	if f.cache.dirFor("55") == "" {
+		t.Fatal("dirFor returned empty")
+	}
+	d.Close()
+	if want := filepath.Join(root, "55"); len(fr.RemoveHostTreeCalls) != 1 || fr.RemoveHostTreeCalls[0] != want {
+		t.Fatalf("after Close RemoveHostTreeCalls = %v, want [%s]", fr.RemoveHostTreeCalls, want)
+	}
+
+	f.Cleanup()
+	if n := len(fr.RemoveHostTreeCalls); n != 2 || fr.RemoveHostTreeCalls[1] != root {
+		t.Fatalf("after Cleanup RemoveHostTreeCalls = %v, want root %s last", fr.RemoveHostTreeCalls, root)
+	}
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Errorf("cache root still present: %v", err)
 	}
 }

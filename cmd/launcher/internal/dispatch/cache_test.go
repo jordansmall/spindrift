@@ -7,7 +7,7 @@ import (
 )
 
 func TestCache_DirForCreatesPerIssueDir(t *testing.T) {
-	c, err := newCache()
+	c, err := newCache(os.RemoveAll)
 	if err != nil {
 		t.Fatalf("newCache: %v", err)
 	}
@@ -27,7 +27,7 @@ func TestCache_DirForCreatesPerIssueDir(t *testing.T) {
 }
 
 func TestCache_EvictRemovesOnlyThatIssue(t *testing.T) {
-	c, err := newCache()
+	c, err := newCache(os.RemoveAll)
 	if err != nil {
 		t.Fatalf("newCache: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestCache_EvictRemovesOnlyThatIssue(t *testing.T) {
 }
 
 func TestCache_CleanupRemovesWholeRoot(t *testing.T) {
-	c, err := newCache()
+	c, err := newCache(os.RemoveAll)
 	if err != nil {
 		t.Fatalf("newCache: %v", err)
 	}
@@ -71,4 +71,27 @@ func TestCache_NilReceiverIsNoop(t *testing.T) {
 	}
 	c.evict("1") // must not panic
 	c.cleanup()  // must not panic
+}
+
+// Issue #5387: Box-created entries may be owned by a remapped subuid under
+// rootless podman, so a plain os.RemoveAll cannot delete them; both removals
+// must go through the injected remover.
+func TestCache_RemovalGoesThroughInjectedRemover(t *testing.T) {
+	var got []string
+	c, err := newCache(func(p string) error {
+		got = append(got, p)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("newCache: %v", err)
+	}
+	defer os.RemoveAll(c.root)
+
+	c.evict("42")
+	c.cleanup()
+
+	want := []string{filepath.Join(c.root, "42"), c.root}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("remover calls = %v, want %v", got, want)
+	}
 }
