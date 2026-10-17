@@ -59,12 +59,16 @@ func (v *Viewport) SetHeight(h int) {
 }
 
 // MoveCursor adds delta to v's cursor, clamped into [0, total-1], then moves
-// offset just far enough to keep the cursor on screen (issue #1036).
+// offset just far enough to keep the cursor on screen (issue #1036). An
+// unbounded window (height <= 0) only ever pulls offset back (issue #5394).
 func (v *Viewport) MoveCursor(delta, total int) {
 	v.total = total
 	v.cursor = clampIndex(v.cursor+delta, total)
 	for v.cursor < v.offset {
 		v.offset--
+	}
+	if v.height <= 0 {
+		return // unbounded window: the cursor is always visible
 	}
 	for v.offset < total-1 {
 		if v.cursor < v.offset+windowedCount(total-v.offset, v.height) {

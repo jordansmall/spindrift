@@ -59,13 +59,32 @@ func TestViewport_Scroll_ClampsIntoBounds(t *testing.T) {
 	}
 }
 
-// Cursor-follow must never leave offset == total. At height 0 no window can
-// exclude the cursor, so offset stops at total-1 (issue #1054).
+// At height <= 0 the window is unbounded, so the cursor is always visible and
+// offset never advances: it stays <= cursor, hence below total (issues #1054,
+// #5394). Only the pull-back toward a cursor above offset still applies.
 func TestViewport_MoveCursor_NonPositiveHeight_ClampsOffsetBelowTotal(t *testing.T) {
-	var v Viewport
-	v.MoveCursor(4, 5)
-	if got := v.Window(5).Start; got != 4 {
-		t.Errorf("offset after MoveCursor(4, 5) with height 0 = %d, want 4 (total-1)", got)
+	tests := []struct {
+		name       string
+		v          Viewport
+		delta      int
+		total      int
+		wantCursor int
+		wantOffset int
+	}{
+		{"zero viewport, cursor to last row", Viewport{}, 4, 5, 4, 0},
+		{"zero viewport, cursor stays at top", Viewport{}, 0, 5, 0, 0},
+		{"zero height, mid-list cursor", Viewport{cursor: 2}, 0, 5, 2, 0},
+		{"negative height", Viewport{height: -1}, 3, 5, 3, 0},
+		{"zero height, pull-back to cursor above offset", Viewport{cursor: 3, offset: 4}, -2, 5, 1, 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			v := tc.v
+			v.MoveCursor(tc.delta, tc.total)
+			if v.cursor != tc.wantCursor || v.offset != tc.wantOffset {
+				t.Errorf("cursor, offset = %d, %d, want %d, %d", v.cursor, v.offset, tc.wantCursor, tc.wantOffset)
+			}
+		})
 	}
 }
 
