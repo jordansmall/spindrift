@@ -113,3 +113,11 @@ boundary is now the decoder, not the five readers.
   into a switch, so each differential stays exact.
 - While a Driver is mid-migration the interface carries two implementations.
   The window closes when its old readers are deleted.
+
+## Amendment (issue #5182): opencode's old readers are deleted in the switch
+
+The migration plan above asks for an old-versus-new differential test while
+both paths exist, and for the old readers to go in a later slice. For
+`opencode`, issue #5182 deleted them in the switch commit instead. The
+committed corpus goldens, unchanged by the switch, stand in as the
+differential: the new path must reproduce them byte for byte.
