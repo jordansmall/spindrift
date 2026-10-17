@@ -1,12 +1,10 @@
 #!/usr/bin/env bats
-# The harness passes a different dispatch-time --worker-model per arm (issue
-# #2057 slice 1); that flag is a no-op under nix run .#, see the script header.
 # Model IDs here are arbitrary sample data, not the default model: leave them
 # literal when the default model is bumped (issue #5141). The priced
 # --breakdown test's haiku ID must keep the "claude-haiku" prefix its
 # AB_PRICES keys on.
 
-@test "dry-run: off arm omits worker model, on arm sets it, the rest of the command is shared" {
+@test "dry-run: both arms dispatch the same command, differing only in --branch-prefix" {
   run env -i \
     PATH="$PATH" \
     AB_DRY_RUN=1 AB_CONFIRM=1 \
@@ -16,9 +14,12 @@
     AB_OUTDIR="$BATS_TEST_TMPDIR/ab-out" \
     bash "${AB_ORCHESTRATOR_SH:-$BATS_TEST_DIRNAME/../ab-orchestrator.sh}" 123
   [ "$status" -eq 0 ]
-  echo "$output" | grep -- "--worker-model ''"
-  # The on arm uses AB_WORKER_ON, which defaults to AB_MODEL.
-  echo "$output" | grep -- "--worker-model claude-sonnet-5"
+  [[ "$output" != *--worker-model* ]]
+  [ "$(grep -c 'DRY-RUN:' <<<"$output")" -eq 2 ]
+  local off on
+  off="$(echo "$output" | grep 'DRY-RUN:' | grep -- 'ab-off/issue-')"
+  on="$(echo "$output" | grep 'DRY-RUN:' | grep -- 'ab-on/issue-')"
+  [ "${off/--branch-prefix ab-off\//--branch-prefix ARM/}" = "${on/--branch-prefix ab-on\//--branch-prefix ARM/}" ]
 }
 
 @test "--breakdown attributes tokens per role+model with injected pricing" {
