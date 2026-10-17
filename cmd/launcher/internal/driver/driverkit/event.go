@@ -51,7 +51,7 @@ const (
 	// (when known), MessageID, Timestamp, Role. The usage reader sums every usage
 	// event for the run totals (so a decoder emits one per call, not a running
 	// total) and dedups the per-model breakdown by non-empty MessageID. It is
-	// not agent progress: it can close the step whose error was just emitted.
+	// not agent progress; see IsProgress.
 	KindUsage Kind = "usage"
 
 	// KindModel reports a model id observed. Fills Model, MessageID,
@@ -85,6 +85,18 @@ const (
 	// Timestamp. The heartbeat writer renders it via FormatSpindriftOp.
 	KindHostOp Kind = "host_op"
 )
+
+// IsProgress reports whether k shows the agent working past an earlier error:
+// an error followed by such an event was recovered from. KindUsage is
+// deliberately not progress: it can close the step whose error was just
+// emitted.
+func IsProgress(k Kind) bool {
+	switch k {
+	case KindStart, KindText, KindReasoning, KindToolCall, KindToolResult:
+		return true
+	}
+	return false
+}
 
 // Event is one canonical fact a decoder derived from a Pass log line. Only the
 // fields named in its Kind's doc are meaningful; the rest are zero.
