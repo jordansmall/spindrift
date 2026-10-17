@@ -1,0 +1,10 @@
+{
+  "lines": [
+    "#42 · Branch exists; check it.",
+    "#42 · Committed `1fb0bbd` on `agent/issue-top-words`: `--top N` prints the N most frequent words after the per-file lines.",
+    "#42 · VERDICT: APPROVE",
+    "#42 · Non-blocking findings are usability extras outside the spec; dropping them.",
+    "#42 · SPINDRIFT_OUTCOME issue=top-words landing=agent/issue-top-words status=ready note=--top N implemented with tests; the..."
+  ],
+  "onModel": []
+}

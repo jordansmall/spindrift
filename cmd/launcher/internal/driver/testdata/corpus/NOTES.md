@@ -40,21 +40,27 @@ local issue tracker and a local Code Forge, working a toy Python project.
 | `real-single-pass` | a merged run whose implement pass reached the outcome itself | `issue-stdin.log` |
 | `real-review-block-ignored` | a review pass that printed `VERDICT: BLOCK`, captured before #5332, so the host read it as no verdict and the land pass merged it | `issue-missing-file.log` |
 | `real-blocked` | an implement pass that stopped with `status=blocked` on a contradictory spec | `issue-word-rules.log` |
+| `real-review-approved` | an approving review the host read as a verdict, then a land pass | `issue-top-words.log` |
+| `real-fix-pass` | a blocking review, then a fix pass that reached the outcome | `issue-encoding.log` |
+| `real-fix-rounds-delta-review` | two blocking reviews and fix passes, an approving review, a land pass, then a delta review of the land pass's edits | `issue-output-format.log` |
+| `real-driver-crash` | `opencode` failing to open its database on every pass, so no pass emitted a Driver event or an outcome and the run settled box-failed | `issue-encoding.log.prior-run.1` |
 
-`real-review-block-ignored` renders under the reviewer role so its verdict
-golden pins the real `BLOCK` line. The log holds the whole run, so its
-implement and land lines carry `[reviewer]` too.
+`real-review-block-ignored`, `real-review-approved` and `real-fix-pass`
+render under the reviewer role so their verdict goldens pin the real verdict
+line. Each log holds the whole run, so its other passes' lines carry
+`[reviewer]` too.
+
+The last four cases were captured after #5331, #5332 and #5348 landed.
+`real-driver-crash` comes from the #5349 session cache regression (#5387).
 
 Missing:
 
-- A fix pass. Until #5332 the `opencode` Transcript dropped the
-  `[reviewer]` prefix, so the host never saw a review verdict and never ran
-  one. Every log here predates that fix; capture one from a fresh dispatch.
-- A resumed session. Until #5349 the `opencode` Driver did not resume
-  sessions; capture a corrective resume from a fresh dispatch.
-- A worker subagent. Until #5331 the `opencode` Box never enabled one.
+- A resumed session. No pass in the captured runs needed a corrective
+  resume.
+- A worker subagent and a Filer finding. Both were enabled, but no pass
+  called a subagent. Every review left non-blocking findings, but each land
+  pass fixed the cheap ones and dropped the rest without filing, or a fix
+  pass reached the outcome and no land pass ran.
 - A Box killed mid-pass and a transient failure. None happened in the
   captured runs; the synthetic cases cover a rate-limit reset and a
   recovered error (#5353).
-- A whole run with no outcome. Five of the seven runs ended their implement
-  pass without one, but the land pass recovered every time.

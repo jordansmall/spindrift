@@ -1,0 +1,8 @@
+{
+  "lines": [
+    "#42 · Committed b8617ed on `agent/issue-encoding`: `--encoding NAME` is implemented in `tally/__main__.",
+    "#42 · VERDICT: BLOCK",
+    "#42 · Review fixes are folded into the branch's single `feat` commit, but the review pass still has to re-check it."
+  ],
+  "onModel": []
+}

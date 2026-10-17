@@ -1,0 +1,28 @@
+{
+  "EarliestEventMs": 1792195464954,
+  "Found": true,
+  "HasEventSpan": true,
+  "LatestEventMs": 1792195536273,
+  "OutputIsMainLoopOnly": false,
+  "SummedByAgent": null,
+  "SummedByModel": [
+    {
+      "CacheReadInputTokens": 248793,
+      "CacheWrite1hTokens": 0,
+      "CacheWrite5mTokens": 38599,
+      "Model": "unknown",
+      "OutputTokens": 6171,
+      "UncachedInputTokens": 32
+    }
+  ],
+  "Totals": {
+    "cache_creation_input_tokens": 38599,
+    "cache_read_input_tokens": 248793,
+    "duration_api_ms": 0,
+    "duration_ms": 71319,
+    "input_tokens": 32,
+    "num_turns": 13,
+    "output_tokens": 6171,
+    "total_cost_usd": 0.2756432
+  }
+}
