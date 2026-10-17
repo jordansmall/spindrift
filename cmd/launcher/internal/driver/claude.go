@@ -16,7 +16,7 @@ type claudeDriver struct{}
 func (claudeDriver) Name() string { return "claude" }
 
 func (claudeDriver) ClassifyTransient(logPath string) (Classification, error) {
-	return claude.Classify(logPath)
+	return driverkit.Classify(logPath, claude.NewDecoder, claude.TransientPatterns, claude.TerminalPatterns, claude.ClassifyOptions)
 }
 
 func (claudeDriver) NewHeartbeatWriter(raw io.Writer, issue string, out io.Writer, opts driverkit.RenderOptions) io.Writer {
@@ -38,7 +38,7 @@ func (claudeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 }
 
 func (claudeDriver) ResultText(logPath string) (string, error) {
-	return claude.ResultText(logPath)
+	return driverkit.ResultText(logPath, claude.NewDecoder)
 }
 
 func (claudeDriver) ResultEvent(text string) ([]byte, error) {

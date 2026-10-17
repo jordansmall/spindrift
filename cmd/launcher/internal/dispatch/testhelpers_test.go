@@ -105,7 +105,7 @@ func (d fakeDriver) ResolveExit(logPath string, exitCode int) (int, error) {
 }
 
 func (d fakeDriver) ResultText(logPath string) (string, error) {
-	return driverclaude.ResultText(logPath)
+	return driverkit.ResultText(logPath, driverclaude.NewDecoder)
 }
 
 func (d fakeDriver) ResultEvent(text string) ([]byte, error) {

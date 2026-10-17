@@ -156,16 +156,15 @@ func TestParseResetsAtText(t *testing.T) {
 }
 
 // Pinning now makes the ResetAt of a dateless plain-text OAuth marker exactly
-// assertable (issue #2443). This test takes the unexported classifyAt;
-// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers all three markers
-// through the exported claude.ClassifyAt.
+// assertable (issue #2443). This test pins the plain-text marker;
+// TestClassify_OAuthPlainTextResetsAt_ExactEpoch covers all three markers.
 func TestClassifyAt_PinnedClock_PlainTextResetsAt(t *testing.T) {
 	now := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 	logPath := WriteLog(t, `You've hit your session limit · resets 6:30pm (UTC)`)
 
-	c, err := classifyAt(logPath, now)
+	c, err := ClassifyAt(logPath, now)
 	if err != nil {
-		t.Fatalf("classifyAt() error: %v", err)
+		t.Fatalf("ClassifyAt() error: %v", err)
 	}
 
 	want := time.Date(2026, 8, 12, 18, 30, 0, 0, time.UTC)
