@@ -184,11 +184,12 @@ func TestNewGatedContext_FailingRegistryGate_SurfacesGateError(t *testing.T) {
 	}
 }
 
-// newGatedContext must keep bootstrap.go's interleaved gate order (capability,
-// network-mode, bwrap-pasta, bwrap-overlay, gh-token, forgejo-token), not
-// gateRegistry's order followed by the bwrap gates. Both bwrap-pasta and the
-// token gate are primed to fail, so bwrap-pasta's error winning proves the walk
-// stops before the token gate's live network call.
+// newGatedContext must keep its interleaved gate order (capability,
+// network-mode, signal-carrier-network-mode, bwrap-pasta, bwrap-overlay,
+// gh-token, forgejo-token), not gateRegistry's order followed by the bwrap
+// gates. Both bwrap-pasta and the token gate are primed to fail, so
+// bwrap-pasta's error winning proves the walk stops before the token gate's
+// live network call.
 func TestNewGatedContext_BwrapPastaGateRunsBeforeTokenGates(t *testing.T) {
 	// A PATH holding only a fake "true" satisfies RUNTIME's required-knob check
 	// while leaving pasta absent, so runner.ValidatePasta() fails whatever this
@@ -274,7 +275,7 @@ func TestNewGatedContext_BwrapOverlayGateRunsBeforeTokenGates(t *testing.T) {
 	}
 }
 
-// The other half of bootstrap.go's order: capability and network-mode run
+// The other half of newGatedContext's order: capability and network-mode run
 // before the bwrap gates. Both the capability gate and bwrap-pasta are primed
 // to fail, so the capability gate's error winning proves the walk stops at the
 // earlier registry gate.
