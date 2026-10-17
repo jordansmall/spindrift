@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"spindrift.dev/launcher/internal/driver/driverkit"
 	"spindrift.dev/launcher/internal/hostop"
 	"spindrift.dev/launcher/internal/logscan"
 )
@@ -61,7 +62,7 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 				if block.Type != "tool_result" {
 					continue
 				}
-				summary := summarizeResult(block)
+				summary := driverkit.SummarizeToolOutput(resultText(block.Content), block.IsError)
 				// Key on block.ToolUseID, not the event's own
 				// parent_tool_use_id used for role above: a subagent's final
 				// report answers its own spawn ID, which taskRole records.
@@ -83,26 +84,6 @@ func RenderTranscriptWithRole(logPath, topLevelRole string) (string, error) {
 		return "", nil
 	}
 	return strings.Join(lines, "\n") + "\n", nil
-}
-
-// resultTextMaxLen keeps one noisy tool call (a huge file read, a long
-// command's stdout) from dominating the transcript.
-const resultTextMaxLen = 200
-
-func summarizeResult(block ContentBlock) string {
-	text := strings.TrimSpace(strings.ReplaceAll(resultText(block.Content), "\n", " "))
-	if len(text) > resultTextMaxLen {
-		if runes := []rune(text); len(runes) > resultTextMaxLen {
-			text = string(runes[:resultTextMaxLen-3]) + "..."
-		}
-	}
-	if text == "" {
-		text = "(empty result)"
-	}
-	if block.IsError {
-		return "error: " + text
-	}
-	return text
 }
 
 // resultText decodes a tool_result block's content field, which the Claude API

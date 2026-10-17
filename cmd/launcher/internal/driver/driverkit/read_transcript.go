@@ -2,36 +2,68 @@ package driverkit
 
 import "strings"
 
-// RenderTranscript returns each non-empty KindText event of the Pass log at
-// logPath, joined by "\n" in log order. The first physical line of each event
-// is prefixed "[role] ", because the orchestrator's verdict scan counts only
-// "[role]"-prefixed lines and slices the review findings from the lines that
-// follow; embedded newlines stay verbatim so continuation lines remain bare.
-// The role is the event's own, or topLevelRole (defaulting to
-// ImplementorRole) for an event with none. Text is trimmed so a leading
-// newline cannot push a VERDICT: line off the prefixed first line. Returns
-// ("", nil) when logPath does not exist, as the claude Driver does.
+// resultTextMaxLen keeps one noisy tool call (a huge file read, a long
+// command's stdout) from dominating the transcript.
+const resultTextMaxLen = 200
+
+// RenderTranscript returns the Pass log at logPath as "[role]"-prefixed lines,
+// joined by "\n" in log order, in the claude Driver's transcript form: a tool
+// call renders "[role] Name(target)" and its result "[role]   -> summary",
+// tagged "[subagent] " when it carries a subagent's report. The first physical
+// line of a text event is prefixed because the
+// orchestrator's verdict scan counts only "[role]"-prefixed lines and slices the
+// review findings from the lines that follow; embedded newlines stay verbatim
+// so continuation lines remain bare. The role is the event's own, or
+// topLevelRole (defaulting to ImplementorRole) for an event with none. Text is
+// trimmed so a leading newline cannot push a VERDICT: line off the prefixed
+// first line. Returns ("", nil) when logPath does not exist, as the claude
+// Driver does.
 func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole string) (string, error) {
 	if topLevelRole == "" {
 		topLevelRole = ImplementorRole
 	}
-	var texts []string
+	var lines []string
 	err := scanEvents(logPath, newDecoder, func(ev Event) {
-		if ev.Kind != KindText {
-			return
-		}
-		text := strings.TrimSpace(ev.Text)
-		if text == "" {
-			return
-		}
 		role := ev.Role
 		if role == "" {
 			role = topLevelRole
 		}
-		texts = append(texts, "["+role+"] "+text)
+		switch ev.Kind {
+		case KindText:
+			if text := strings.TrimSpace(ev.Text); text != "" {
+				lines = append(lines, "["+role+"] "+text)
+			}
+		case KindToolCall:
+			lines = append(lines, "["+role+"] "+ev.ToolName+"("+ev.ToolTarget+")")
+		case KindToolResult:
+			summary := SummarizeToolOutput(ev.ToolOutput, ev.IsError)
+			if ev.Subagent != "" {
+				summary = "[" + ev.Subagent + "] " + summary
+			}
+			lines = append(lines, "["+role+"]   -> "+summary)
+		}
 	})
 	if err != nil {
 		return "", err
 	}
-	return strings.Join(texts, "\n"), nil
+	return strings.Join(lines, "\n"), nil
+}
+
+// SummarizeToolOutput flattens a tool result's output to one line for a
+// transcript's "->" line. Every Driver's transcript calls it, so their result
+// lines cannot drift apart.
+func SummarizeToolOutput(output string, isError bool) string {
+	text := strings.TrimSpace(strings.ReplaceAll(output, "\n", " "))
+	if len(text) > resultTextMaxLen {
+		if runes := []rune(text); len(runes) > resultTextMaxLen {
+			text = string(runes[:resultTextMaxLen-3]) + "..."
+		}
+	}
+	if text == "" {
+		text = "(empty result)"
+	}
+	if isError {
+		return "error: " + text
+	}
+	return text
 }

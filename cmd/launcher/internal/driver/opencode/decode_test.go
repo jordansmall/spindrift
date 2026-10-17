@@ -57,6 +57,7 @@ func TestDecode(t *testing.T) {
 			[]driverkit.Event{{
 				Kind: driverkit.KindToolCall, Timestamp: 9, MessageID: "msg_1",
 				ToolID: "c1", ToolName: "bash", ToolInput: json.RawMessage(`{"command":"ls"}`),
+				ToolTarget: "ls",
 			}},
 		},
 		{
@@ -66,11 +67,51 @@ func TestDecode(t *testing.T) {
 				{
 					Kind: driverkit.KindToolCall, Timestamp: 9, MessageID: "msg_1",
 					ToolID: "c1", ToolName: "bash", ToolInput: json.RawMessage(`{"command":"ls"}`),
+					ToolTarget: "ls",
 				},
 				{
 					Kind: driverkit.KindToolResult, Timestamp: 9, MessageID: "msg_1",
 					ToolID: "c1", ToolName: "bash", ToolInput: json.RawMessage(`{"command":"ls"}`),
+					ToolTarget: "ls", ToolOutput: "x",
 				},
+			},
+		},
+		{
+			"tool_use error carries state.error as the output",
+			`{"type":"tool_use","part":{"callID":"c4","tool":"read","state":{"status":"error","input":{"filePath":"/tmp/x"},"error":"file not found"}}}`,
+			[]driverkit.Event{
+				{Kind: driverkit.KindToolCall, ToolID: "c4", ToolName: "read", ToolInput: json.RawMessage(`{"filePath":"/tmp/x"}`), ToolTarget: "/tmp/x"},
+				{
+					Kind: driverkit.KindToolResult, ToolID: "c4", ToolName: "read", ToolInput: json.RawMessage(`{"filePath":"/tmp/x"}`),
+					ToolTarget: "/tmp/x", ToolOutput: "file not found", IsError: true,
+				},
+			},
+		},
+		{
+			"task tool result names the subagent",
+			`{"type":"tool_use","part":{"callID":"c5","tool":"task","state":{"status":"completed","input":{"description":"d","prompt":"p","subagent_type":"reviewer"},"output":"VERDICT: BLOCK"}}}`,
+			[]driverkit.Event{
+				{Kind: driverkit.KindToolCall, ToolID: "c5", ToolName: "task", ToolInput: json.RawMessage(`{"description":"d","prompt":"p","subagent_type":"reviewer"}`), ToolTarget: "reviewer"},
+				{
+					Kind: driverkit.KindToolResult, ToolID: "c5", ToolName: "task", ToolInput: json.RawMessage(`{"description":"d","prompt":"p","subagent_type":"reviewer"}`),
+					ToolTarget: "reviewer", ToolOutput: "VERDICT: BLOCK", Subagent: "reviewer",
+				},
+			},
+		},
+		{
+			"tool_use with a non-string output keeps the raw JSON as output",
+			`{"type":"tool_use","part":{"callID":"c6","tool":"glob","state":{"status":"completed","input":{"pattern":"*.go"},"output":7}}}`,
+			[]driverkit.Event{
+				{Kind: driverkit.KindToolCall, ToolID: "c6", ToolName: "glob", ToolInput: json.RawMessage(`{"pattern":"*.go"}`), ToolTarget: "*.go"},
+				{Kind: driverkit.KindToolResult, ToolID: "c6", ToolName: "glob", ToolInput: json.RawMessage(`{"pattern":"*.go"}`), ToolTarget: "*.go", ToolOutput: "7"},
+			},
+		},
+		{
+			"task tool without a subagent_type tags the default role",
+			`{"type":"tool_use","part":{"callID":"c7","tool":"task","state":{"status":"completed","input":{"prompt":"p"},"output":"done"}}}`,
+			[]driverkit.Event{
+				{Kind: driverkit.KindToolCall, ToolID: "c7", ToolName: "task", ToolInput: json.RawMessage(`{"prompt":"p"}`)},
+				{Kind: driverkit.KindToolResult, ToolID: "c7", ToolName: "task", ToolInput: json.RawMessage(`{"prompt":"p"}`), ToolOutput: "done", Subagent: driverkit.DefaultRole},
 			},
 		},
 		{

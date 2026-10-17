@@ -1,5 +1,22 @@
+[implementor] bash(cd /work && git checkout -b agent/issue-stdin main 2>&1; git log -n 10 --oneline; git ls-files; cat tally/*.py; ls tests; cat /tmp/brief.md 2>/dev/null | head -5)
+[implementor]   -> [REDACTED:tool-output]
 [implementor] Branch exists already; check it.
+[implementor] bash(cd /work && git branch -a; git status -s | head; git log --oneline main..agent/issue-stdin; git checkout agent/issue-stdin 2>&1 | tail -1)
+[implementor]   -> [REDACTED:tool-output]
 [implementor] Already on it, no commits. Test first.
+[implementor] bash(cd /work && cat > tests/test_main.py <<'E'
+[REDACTED:inline-code]
+E
+python -m unittest discover -s tests -t . 2>&1 | tail -4
+python - <<'E'
+[REDACTED:inline-code]
+E
+python -m unittest discover -s tests -t . 2>&1 | tail -4
+printf 'a b\n' | python -m tally
+git add -A; git commit -qm "feat: read stdin when no file or '-' is given" -m "Mirrors wc: no path column is printed for standard input."; git log --oneline -1)
+[implementor]   -> [REDACTED:tool-output]
+[implementor] bash(cd /work && echo "added stdin support in tally/__main__.py, tests/test_main.py; committed c1e3b93" >/tmp/pass-summary.md; : >/tmp/dispositions.md; echo "tally/__main__.py -> chose argv or ['-'] loop, rejected separate branch -- single code path" >/tmp/decisions.md)
+[implementor]   -> [REDACTED:tool-output]
 [implementor] The change is committed on `agent/issue-stdin` and ready for review. The full test suite passes (`python -m unittest discover -s tests -t .`, 4 tests). I also ran `printf 'a b\n' | python -m tally`, which printed `1 2 4` with no path column.
 
 The branch already existed with no commits ahead of `main`, so I used it as is. I skipped the scout step because the change touches a single small module.

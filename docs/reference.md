@@ -1240,8 +1240,8 @@ its own decoder and inputs; read them as the worked example.
 | `start` | none | usage (anchors the run's span), classifier (progress) |
 | `text` | `Text` | result, transcript, heartbeat; classifier (progress) |
 | `reasoning` | `Text` | classifier (progress) only, never narration or result |
-| `tool_call` | `ToolID`, `ToolName`, `ToolInput` | classifier (progress) |
-| `tool_result` | `ToolID`, `ToolName`, `IsError` | classifier (progress) |
+| `tool_call` | `ToolID`, `ToolName`, `ToolInput`, `ToolTarget` | transcript; classifier (progress) |
+| `tool_result` | `ToolID`, `ToolName`, `ToolTarget`, `ToolOutput`, `IsError`, `Subagent` | transcript; classifier (progress) |
 | `usage` | `Tokens`, `Model`, `Effort` | usage (not progress) |
 | `model` | `Model` | heartbeat (model change) |
 | `effort` | `Effort` | none yet |

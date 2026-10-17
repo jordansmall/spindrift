@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"spindrift.dev/launcher/internal/driver/opencode"
+	"spindrift.dev/launcher/internal/passmachine"
 )
 
 // TestRenderTranscript_SurfacesTextEvents verifies that RenderTranscript
@@ -59,5 +60,23 @@ func TestRenderTranscript_AttributesRole(t *testing.T) {
 	want := "[reviewer] VERDICT: BLOCK\n- finding one\n- finding two"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// TestRenderTranscript_ReviewerSubagentVerdictReachesLegacyScan pins the
+// end-to-end path: an opencode task call to the reviewer subagent renders as a
+// "[role]   -> [reviewer] " result line, which the legacy loop's verdict scan
+// (it has no top-level reviewer pass) reads as the subagent's verdict.
+func TestRenderTranscript_ReviewerSubagentVerdictReachesLegacyScan(t *testing.T) {
+	logPath := opencode.WriteLog(t,
+		`{"type":"tool_use","part":{"callID":"c1","tool":"task","state":{"status":"completed","input":{"description":"review","prompt":"p","subagent_type":"reviewer"},"output":"VERDICT: BLOCK\n- fix it"}}}`,
+	)
+
+	got, err := opencode.RenderTranscript(logPath, "")
+	if err != nil {
+		t.Fatalf("RenderTranscript: %v", err)
+	}
+	if res := passmachine.Scan(got, passmachine.KindLegacy); res.Verdict != passmachine.VerdictBlock {
+		t.Errorf("Scan(%q) verdict = %v, want VerdictBlock", got, res.Verdict)
 	}
 }
