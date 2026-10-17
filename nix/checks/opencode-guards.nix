@@ -18,15 +18,8 @@
         ];
       }
       ''
-        hooks=$TMPDIR/hooks
-        mkdir -p $hooks $TMPDIR/garbage $TMPDIR/silent
-        cp ${../../agent/reject-background-bash.sh} $hooks/reject-background-bash.sh
-        cp ${../../agent/env-credential-scrub.sh} $hooks/env-credential-scrub.sh
-        cp ${../../agent/bash-output-tee.sh} $hooks/bash-output-tee.sh
-        cp ${../../agent/bash-output-summary.sh} $hooks/bash-output-summary.sh
-        cp ${../../agent/credential-vars} $hooks/credential-vars
-        chmod +x $hooks/*.sh
-        patchShebangs $hooks
+        hooks=${import ../../lib/agent-hooks.nix pkgs}
+        mkdir -p $TMPDIR/garbage $TMPDIR/silent
         for f in $hooks/*.sh; do
           s=$(basename "$f")
           printf '#!%s\necho not-json\n' "$(command -v bash)" > $TMPDIR/garbage/$s
@@ -37,6 +30,7 @@
 
         # The real hooks, except a tee that exits 0 printing nothing.
         cp -r $hooks $TMPDIR/silent-tee
+        chmod -R u+w $TMPDIR/silent-tee
         cp -f $TMPDIR/silent/bash-output-tee.sh $TMPDIR/silent-tee/bash-output-tee.sh
 
         stage() {
