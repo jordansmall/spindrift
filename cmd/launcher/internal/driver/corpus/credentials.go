@@ -172,7 +172,10 @@ func redact(data []byte, ss []span) []byte {
 // never the secret.
 func Scan(root string) ([]string, error) {
 	var out []string
-	err := filepath.WalkDir(root, func(path string, e fs.DirEntry, err error) error {
+	// The trailing separator makes WalkDir follow a root that is itself a
+	// symlink, as regen-goldens links each Driver's corpus into its scratch
+	// tree; paths still report under root as given.
+	err := filepath.WalkDir(root+string(filepath.Separator), func(path string, e fs.DirEntry, err error) error {
 		if err != nil || e.IsDir() {
 			return err
 		}

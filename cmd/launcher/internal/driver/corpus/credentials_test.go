@@ -356,3 +356,28 @@ func TestScrubHidesOverlongGoogleKey(t *testing.T) {
 	in := "AI" + "za" + strings.Repeat("g", 40)
 	assertNothingSurvives(t, in, strings.Repeat("g", 8))
 }
+
+// regen-goldens links each Driver's corpus into its scratch tree, so a root
+// that is itself a symlink must still be walked, and reported under the root
+// as given.
+func TestScanFollowsSymlinkedRoot(t *testing.T) {
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "real", "case")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "pass.jsonl"), []byte(plantedTokens()["github-token"]+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(filepath.Join(dir, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Scan(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{filepath.Join(link, "case", "pass.jsonl") + ":1: unscrubbed github-token"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("Scan = %q, want %q", got, want)
+	}
+}
