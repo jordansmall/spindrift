@@ -9,7 +9,8 @@ const resultTextMaxLen = 200
 // RenderTranscript returns the Pass log at logPath as "[role]"-prefixed lines,
 // joined by "\n" in log order, in the claude Driver's transcript form: a tool
 // call renders "[role] Name(target)" and its result "[role]   -> summary",
-// tagged "[subagent] " when it carries a subagent's report. The first physical
+// tagged "[subagent] " when it carries a subagent's report. Every Driver's
+// non-empty transcript ends with one more "\n". The first physical
 // line of a text event is prefixed because the
 // orchestrator's verdict scan counts only "[role]"-prefixed lines and slices the
 // review findings from the lines that follow; embedded newlines stay verbatim
@@ -48,7 +49,10 @@ func RenderTranscript(logPath string, newDecoder func() Decoder, topLevelRole st
 	if err != nil {
 		return "", err
 	}
-	return strings.Join(lines, "\n"), nil
+	if len(lines) == 0 {
+		return "", nil
+	}
+	return strings.Join(lines, "\n") + "\n", nil
 }
 
 var lineBreaks = strings.NewReplacer("\r\n", " ", "\n", " ", "\r", " ")

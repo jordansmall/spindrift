@@ -26,7 +26,7 @@ func TestRenderTranscript_SurfacesTextEvents(t *testing.T) {
 	}
 	want := "[implementor] Investigating the issue.\n" +
 		"[implementor] VERDICT: APPROVE\n" +
-		"[implementor] SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done"
+		"[implementor] SPINDRIFT_OUTCOME issue=42 landing=https://example/pr/1 status=ready note=done\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
@@ -58,7 +58,7 @@ func TestRenderTranscript_AttributesRole(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
-	want := "[reviewer] VERDICT: BLOCK\n- finding one\n- finding two"
+	want := "[reviewer] VERDICT: BLOCK\n- finding one\n- finding two\n"
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}

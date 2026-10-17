@@ -191,7 +191,7 @@ func TestOpencodeDriverRenderTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderTranscript: %v", err)
 	}
-	want := "[implementor] Investigating the issue.\n[implementor] Filed a fix."
+	want := "[implementor] Investigating the issue.\n[implementor] Filed a fix.\n"
 	if got != want {
 		t.Errorf("RenderTranscript = %q, want %q", got, want)
 	}
