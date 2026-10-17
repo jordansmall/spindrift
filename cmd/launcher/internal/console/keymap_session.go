@@ -28,9 +28,9 @@ var sessionBindings = []Binding{
 		Action: func(t teaModel, msg tea.KeyMsg, mode Mode) (teaModel, tea.Cmd) {
 			if t.launch != nil {
 				t.launch.Resize(1)
-				// Resize's Grown signal only reaches a drain that is already
-				// running, so a session with no active drain would miss the
-				// raise. tryLaunch covers that case and is a no-op when a
+				// The Limiter's Resized signal only reaches a drain that is
+				// already running, so a session with no active drain would miss
+				// the raise. tryLaunch covers that case and is a no-op when a
 				// drain is running or nothing is queued or held (#754).
 				t.launch.tryLaunch(t.tracker, t.pwd)
 			}

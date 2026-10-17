@@ -4019,7 +4019,7 @@ func TestTea_PickAllReadyKey_QueuesEveryDispatchableIssue(t *testing.T) {
 
 // TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain verifies "+"
 // launches a held or queued pick immediately even when no drain is active to
-// catch the Limiter's Grown signal (ADR 0023). A session that never called
+// catch the Limiter's Resized signal (ADR 0023). A session that never called
 // tryLaunch must not leave a queued pick stranded until one finally does
 // (issue #785 review).
 func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
@@ -4027,8 +4027,8 @@ func TestTea_ResizeKey_Raise_LaunchesQueuedPickWithNoActiveDrain(t *testing.T) {
 	f.SetIssue(forge.Issue{Number: "42", Title: "fix the thing", Labels: []string{"ready-for-agent"}})
 	launch := newTestLauncher(t, f)
 	launch.queue.Add(Pick{Number: "42", Title: "fix the thing", State: PickQueued})
-	// No tryLaunch call yet, so no drain is active to observe Resize's Grown
-	// signal.
+	// No tryLaunch call yet, so no drain is active to observe the Limiter's
+	// Resized signal.
 
 	tm := newTeaModel(f, t.TempDir(), launch)
 	// tryLaunch runs synchronously inside the "+" case, not via the returned
