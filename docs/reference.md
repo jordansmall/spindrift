@@ -71,6 +71,10 @@ The checks `spindrift doctor` runs, grouped by what it probes.
 
 **Labels**
 
+On a tracker with no label registry (`local`, `jira`) doctor skips this whole
+group and offers to create nothing; `--verbose` shows one `label check skipped`
+row.
+
 - The four triage labels, required. Also required when the run needs them:
   `agent-review-finding` on a read-only work deployment with a Filer, and the
   butler or research labels under `--butler`/`--research`.
@@ -262,9 +266,11 @@ provisioned Filer also requires `agent-review-finding` with no flag, since the
 host files the findings the Box relays and its label must exist. An
 `ISSUE_TRACKER` with no label registry (`local`, `jira`) adds none of these
 extra Required labels: it cannot list or create one ahead of time, so the
-label appears on first filing instead (issue #4400). `agent-butler-patch` is
-likewise Required only when the patch rung is on: the tracker and `CODE_FORGE`
-must be a matching `github`/`forgejo` pair that can actually land patches.
+label appears on first filing instead (issue #4400). Doctor skips the label
+check there entirely — the four triage labels included — and offers to create
+none (issue #5460). `agent-butler-patch` is likewise Required only when the
+patch rung is on: the tracker and `CODE_FORGE` must be a matching
+`github`/`forgejo` pair that can actually land patches.
 
 Every runtime knob is also a `--flag`. Precedence is **flag > flake `settings`
 > baked default** (ADR 0020): nix renders the resolved `settings` values (plus
@@ -4617,7 +4623,7 @@ landing: "https://github.com/owner/repo/pull/123"
   ascending issue-number order.
 - **Dependencies** come from a `## Blocked by` section: one issue slug per
   bullet, no `#N` refs (local issues aren't numbered).
-- `spindrift doctor`'s label-presence check always passes for the local
+- `spindrift doctor` skips its label-presence check for the local
   adapter — there is no separate label registry to check; the five dispatch
   markers above (the four configurable ones plus `agent-ambiguous-spec`)
   always exist as values the `state` field can take. `agent-recoverable` is
