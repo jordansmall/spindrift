@@ -1099,7 +1099,7 @@ Driver entry declares:
 
 - `name`, `package`, `bin`, `flagsCommon`, `agentsJsonTemplate` — the
   fields ADR 0009 already documents. Session flags are not a registry
-  field: implement `SessionFlags` on the Driver's Go strategy
+  field: declare `SessionFlags` in the Driver's `driverkit.Strategy`
   (`cmd/launcher/internal/driver`), along with the decoder its Pass-log
   readers share (see [Host-side event layer](#host-side-event-layer)).
   That package (`cmd/launcher/internal/driver/<name>`) also ships a
@@ -1243,30 +1243,52 @@ matches it against its terminal markers. Which fields are strict is each
 decoder's choice; opencode's cases close this section. Change the Go doc and
 this section together.
 
-What stays per Driver, beyond the decoder: extra transient and terminal
-`Pattern`s for the classifier, a `driverkit.ClassifyOptions` (the policy for
-an oversized line, and `FirstMatch`, which latches the first unrecovered
-marker instead of the last), the usage `TotalsSource`, the top-level role
-default for the transcript and heartbeat, and `ResolveExit`, `ResultEvent` and
-`SessionFlags`. A Driver may also opt its heartbeat into phase, tool-kind
-count and model-family labels with `driverkit.HeartbeatTracking` (`claude`
-fills it, `opencode` leaves it off). Each hook is optional: without `Kind`
-the heartbeat counts no tool calls, so it prints no count lines and never
-runs `Phase`, leaving the phase empty; without `Family` a switch header
-shows the exact model id. Two rules are shared rather than per Driver: a
-non-empty transcript ends with a newline, and per-model usage rows sort by
-the rank `Family` returns, then by exact model id (by id alone without
-`Family`). `PerCallTotals` sums every `usage` event, for a
-CLI that reports one tally per call (`opencode`). `SessionTotals` sums the
-`result` events instead, for a CLI whose per-session summary is the ground
-truth for output tokens, cost, turns and durations (`claude`); `usage`
-events then feed only the per-model and per-role breakdowns. The Driver
-registrations in `cmd/launcher/internal/driver/opencode.go` and `claude.go`
-call the shared readers directly, each with its own decoder and inputs; read
-them as the worked examples. The `claude` package's decoder is the worked
-example of a stateful one: it keeps a task-id to role map, the top-level role
-a `pass_start` line sets, and a latch that recognises a `result` line echoing
-a marker the agent already quoted.
+A Driver's host-side half is one `driverkit.Strategy` literal, registered with
+a single `register` call in `cmd/launcher/internal/driver`; one shared
+implementation there satisfies the `Driver` interface from it, so an author
+writes a literal and never calls a reader. The fields are the contract:
+
+- `Name` — the Driver identifier; it must match a key in the Nix
+  `lib/drivers/` registry.
+- `NewDecoder` — builds the CLI's decoder, fresh per scan.
+- `TransientPatterns`, `TerminalPatterns` — extra `Pattern`s for the
+  classifier, for this CLI's own failure text.
+- `Classify` — a `driverkit.ClassifyOptions`: the policy for an oversized
+  line, and `FirstMatch`, which latches the first unrecovered marker instead
+  of the last.
+- `Totals` — the usage `TotalsSource`. `PerCallTotals` sums every `usage`
+  event, for a CLI that reports one tally per call (`opencode`).
+  `SessionTotals` sums the `result` events instead, for a CLI whose
+  per-session summary is the ground truth for output tokens, cost, turns and
+  durations (`claude`); `usage` events then feed only the per-model and
+  per-role breakdowns.
+- `WriteTool` — the CLI's file-write tool name; empty tracks no writes.
+- `Heartbeat` — a `driverkit.HeartbeatTracking` opting the heartbeat into
+  phase, tool-kind count and model-family labels (`claude` fills it,
+  `opencode` leaves it off). Each hook is optional: without `Kind` the
+  heartbeat counts no tool calls, so it prints no count lines and never runs
+  `Phase`, leaving the phase empty; without `Family` a switch header shows
+  the exact model id. `Family` also orders the per-model usage rows.
+- `DefaultTopLevelRole` — the heartbeat's role for top-level messages when
+  the caller gives none. Empty means the heartbeat attributes no role and
+  ignores the caller's too. The transcript always takes the caller's role,
+  defaulting to implementor.
+- `Result` — how the final message is read: `ResultEvents` (the default)
+  reads every `result` event, for a CLI that reports its result as its own
+  event; `LastMessage` reads the last assistant message, for a CLI whose
+  result is its final message's prose.
+- `ResolveExit` — turns the CLI's exit code into the authoritative one; nil
+  keeps the exit code unchanged.
+- `ResultEvent` — encodes text as one newline-terminated NDJSON event in the
+  CLI's grammar, such that `Result` reads it back.
+- `SessionFlags` — renders the CLI's session flags for a mode.
+
+Two rules are shared rather than per Driver: a non-empty transcript ends
+with a newline, and per-model usage rows sort by the rank `Family` returns,
+then by exact model id (by id alone without `Family`). The `claude`
+package's decoder is the worked example of a stateful one: it keeps a
+task-id to role map, the top-level role a `pass_start` line sets, and a latch
+that recognises a `result` line echoing a marker the agent already quoted.
 
 | Kind | Fills (besides `Role`, `MessageID`, `Timestamp` where the line has them) | Read by |
 |------|------|------|
